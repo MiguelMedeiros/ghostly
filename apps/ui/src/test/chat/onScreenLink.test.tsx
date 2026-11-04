@@ -15,7 +15,7 @@ import { renderApp } from "../render";
  * go of theirs, it must not stay unmarked, or its slot can go to another chat (ghostly#3332's review).
  */
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 vi.mock("../../components/Sidebar", () => ({
   Sidebar: () => {
     const navigate = useNavigate();

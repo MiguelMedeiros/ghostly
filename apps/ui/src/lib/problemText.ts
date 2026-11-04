@@ -29,9 +29,9 @@ const WRAPPERS = [
   /Publish (?:failed|held back) on every relay(?: not left alone)?:\s*/g, /(?:[A-Z][A-Za-z]*)?Error:\s*/g, /Retrying(?: in \d+ s)?\.?/g,
 ];
 /** A relay error at all: the link's discovery, its connection details, the relays' budget and breaker (packages/core). */
-const RELAY = /Could not (?:publish|read) discovery:|Could not publish connection details:|Publish (?:failed|held back) on every relay|No Pkarr relay reachable|Discovery request budget|DiscoveryBudgetError|is left alone after failing|Discovery relay is (?:cooling down|throttling)/;
+const RELAY = /Could not (?:publish|read) discovery:|Could not publish connection details:|Publish (?:failed|held back) on every relay|No Pkarr relay reachable|Discovery request budget|DiscoveryBudgetError|is left alone after failing|did not answer a moment ago|Discovery relay is (?:cooling down|throttling)/;
 /** A reason that is a wait: this client's budget, a relay's rate limit, a relay the breaker leaves alone for a while. */
-const SOFT = /budget reached|held back|is left alone after failing|cooling down|throttling|retry shortly|^\s*(?:asked again in \d+ s)?\s*$/i;
+const SOFT = /budget reached|held back|is left alone after failing|cooling down|did not answer a moment ago|throttling|retry shortly|^\s*(?:asked again in \d+ s)?\s*$/i;
 
 /** A relay error read: null when it is none. A mix of waits and a relay failing now is a failure (relay.ts). */
 export function relayCause(text: string): RelayCause | null {

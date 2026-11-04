@@ -2,6 +2,7 @@ import { act, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { AccountBar } from "../../components/AccountBar";
 import { currentProfile, renameProfile } from "../../lib/profiles";
+import { shownInName } from "../labelInName";
 import { renderApp } from "../render";
 
 /** The place's label (its text also holds the picture's initial). */
@@ -18,6 +19,19 @@ describe("the account bar's Profile place", () => {
     expect(label()).toHaveTextContent(/^Personal$/);
     expect(screen.getByTestId("account-profile")).toHaveAttribute("title", "Profile: Personal");
     expect(screen.getByTestId("account-profile")).toHaveAccessibleName(/^Profile: Personal, /);
+  });
+
+  it("is named with what it shows: the picture's initial is drawn, not text beside the name", () => {
+    renderApp(<AccountBar />);
+    const place = screen.getByTestId("account-profile");
+    expect(place).toHaveAccessibleName(shownInName(place));
+  });
+
+  it.each([["ja", /, (オンライン|オフライン)$/], ["ar", /, (متصل|غير متصل)$/]] as const)("says Online or Offline in the app's language (%s)", (language, state) => {
+    renderApp(<AccountBar />, { language });
+    const name = screen.getByTestId("account-profile").getAttribute("aria-label");
+    expect(name).toMatch(state);
+    expect(name).not.toMatch(/Online|Offline/);
   });
 
   it("follows a rename at once", () => {

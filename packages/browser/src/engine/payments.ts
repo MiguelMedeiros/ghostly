@@ -6,6 +6,7 @@ import { paymentAlias, paymentWireId } from "../shared/paymentIds";
 import { networkLabel } from "./paymentAdapters/modeGate";
 import type { ArkWallet } from "./paymentAdapters/arkWallet";
 import type { BarkWallet } from "./paymentAdapters/barkWallet";
+import type { BarkAdapter, BarkReceipts } from "./paymentAdapters/bark";
 import type { FedimintWallet } from "./paymentAdapters/fedimintWallet";
 import {
   ENDPOINT,
@@ -25,6 +26,7 @@ import {
 import { STORES, store, wrap, committed } from "../shared/idb";
 import { digestHex } from "./messageDetails";
 import { isWorthlessMint, mintNetwork } from "../shared/mints";
+import { refusedRow } from "../shared/refusals";
 import type { PaymentView, PendingMelt, PendingSwap, StoredMessage, StoredPayment, StoredQuote } from "../shared/types";
 import { SwapUnsettledError, assertAmount, type CashuWallet } from "./wallet";
 
@@ -45,6 +47,8 @@ const OPEN_REQUESTS = 50;
  * settled, so nothing is said until it does (`onLightningResolved`). Kept until a minute after the invoice expires,
  * when the payee's wallet lets go of a held invoice anyway.
  */
+/** On-chain requests answered to asks, in an hour, across every chat (`onPaymentAsk`): each hands out an address. */
+export const ASKED_ONCHAIN_PER_HOUR = 10;
 interface InvoiceClaim { linkId: string; invoice: string; pending?: boolean; expiresAt: number }
 const INVOICE_CLAIMS_KEY = "invoicePaidClaims";
 const sameClaim = (a: InvoiceClaim, b: InvoiceClaim) => a.linkId === b.linkId && a.invoice.toLowerCase() === b.invoice.toLowerCase();
@@ -113,10 +117,17 @@ export interface DeskLightning {
   /** True once paid, false while pending. Throws only when the sats did not go out. */
   pay(quote: { quote: string; mint?: string }, note: string, paymentId: string): Promise<boolean>;
   /**
-   * Asks the source (and the mints) about our open invoices now: a contact said it paid one from another wallet.
-   * `paid`: the invoice it says it paid, so one a test mint holds for a payer's word (StoredQuote `held`) is let go.
+   * Asks the source (and the mints) about this invoice of ours now, and no other: a contact said it paid its request.
+   * `named`: the contact named this invoice, so one a test mint holds for a payer's word (StoredQuote `held`) is let go.
    */
-  check?(paid?: string): Promise<void>;
+  check?(invoice: string, named: boolean): Promise<void>;
+  /**
+   * What the source wrote down of the Lightning payments of a contact's request (written before the source is asked to
+   * spend, so one cut off by a restart is there): "pending" while one has not ended (settled and reported later,
+   * `onLightningResolved`), "paid" once one went through, undefined when none left the wallet. Absent: the source keeps
+   * no such record (the mints alone: a finished melt leaves none), and a request left pending stays so.
+   */
+  interrupted?(paymentId: string): Promise<"pending" | "paid" | undefined>;
 }
 export const mintLightning = (wallet: CashuWallet, network?: WalletNetwork): DeskLightning => ({
   createInvoice: (amount, paymentId) => wallet.receiveLightning(amount, paymentId, network),
@@ -157,8 +168,20 @@ export interface DeskSpark {
   sync(): Promise<void>;
 }
 
-/** Paying in ecash failed before any token existed, so nothing reached the contact and Lightning is safe to try. */
-class NoEcashError extends Error {}
+/**
+ * Paying in ecash failed before any token existed, so nothing reached the contact and Lightning is safe to try. The
+ * wallet's `engineCode` and `values` stay on it: a host reads why by them (the CLI's `refused`, the app's words).
+ */
+class NoEcashError extends Error {
+  declare readonly engineCode?: unknown;
+  declare readonly values?: unknown;
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    const { engineCode, values } = (cause ?? {}) as { engineCode?: unknown; values?: unknown };
+    if (engineCode !== undefined) Object.assign(this, { engineCode });
+    if (values !== undefined) Object.assign(this, { values });
+  }
+}
 
 const arkSats=(network:string)=>network==="bitcoin"?"sats":"test sats";
 /** The English line kept with a payment message (the CLI and older apps show it): test sats say so. */
@@ -175,10 +198,81 @@ const allows = (link: PaymentLink, method: AskMethod) => method === "arkade" ? l
 /** Federation ecash is counted in msats; a chat counts whole sats. */
 const fedimintSats = (msats: number) => Math.floor(msats / 1000);
 /**
- * Which notes these are, whatever the spelling: the Fedimint client drops whitespace anywhere and reads URL-safe or
- * standard base64, so the digest is of the bytes. Text that is no base64 is digested without its whitespace.
+ * The bytes of notes as the Fedimint client reads them (OOBNotes::from_str), whitespace already dropped: base32hex
+ * after a `fedimint` prefix in any case (least significant bits first, a short last group dropped), else URL-safe
+ * or standard base64. Undefined: no such text.
+ */
+function oobNotesBytes(text: string): Uint8Array | undefined {
+  const lower = text.toLowerCase();
+  if (lower.startsWith("fedimint")) {
+    const out: number[] = [];
+    let buffer = 0, bits = 0;
+    for (const ch of lower.slice(8)) {
+      const value = "0123456789abcdefghijklmnopqrstuv".indexOf(ch);
+      if (value < 0) { out.length = 0; bits = -1; break; }
+      buffer |= value << bits; bits += 5;
+      while (bits >= 8) { out.push(buffer & 0xff); buffer >>>= 8; bits -= 8; }
+    }
+    if (bits >= 0) return Uint8Array.from(out);
+  }
+  try { return fromBase64Url(text.replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_")); } catch { return undefined; }
+}
+/** A BigSize number (Fedimint's consensus integer) at `at`, and where what follows it starts. */
+function bigSize(bytes: Uint8Array, at: number): [number, number] {
+  const first = bytes[at];
+  const width = first === 0xfd ? 2 : first === 0xfe ? 4 : first === 0xff ? 8 : 0;
+  if (first === undefined || at + 1 + width > bytes.length) throw new Error("short");
+  let value = width ? 0 : first;
+  for (let i = 1; i <= width; i++) value = value * 256 + bytes[at + i]!;
+  return [value, at + 1 + width];
+}
+/**
+ * The signatures of the notes the federation redeems, sorted, each once: OOBNotes are a list of parts (tag, length,
+ * bytes) and the client takes the first Notes part (tag 0: tiers of amount, count, then 48-byte signature and 32-byte
+ * key per note). Undefined: the bytes are no OOBNotes.
+ */
+function oobNoteSignatures(bytes: Uint8Array): string[] | undefined {
+  try {
+    let [parts, at] = bigSize(bytes, 0);
+    let signatures: string[] | undefined;
+    for (; parts > 0; parts--) {
+      const [tag, sized] = bigSize(bytes, at);
+      const [length, start] = bigSize(bytes, sized);
+      const end = start + length;
+      if (end > bytes.length) return undefined;
+      if (tag === 0 && !signatures) {
+        const found = new Set<string>();
+        const part = bytes.subarray(0, end);
+        let [tiers, i] = bigSize(part, start);
+        for (; tiers > 0; tiers--) {
+          let count: number;
+          [, i] = bigSize(part, i);
+          [count, i] = bigSize(part, i);
+          if (i + count * 80 > end) return undefined;
+          for (; count > 0; count--, i += 80) found.add(hexOf(bytes.subarray(i, i + 48)));
+        }
+        if (i !== end || !found.size) return undefined;
+        signatures = [...found].sort();
+      }
+      at = end;
+    }
+    return at === bytes.length ? signatures : undefined;
+  } catch { return undefined; }
+}
+const hexOf = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+/**
+ * Which notes these are, whatever the encoding: the digest of the signatures of the notes the federation redeems, so
+ * reordered or repeated parts, an unknown part, notes reordered in a tier and base32 or base64 spellings all give the
+ * same one. Text that is no OOBNotes is digested as `fedimintBytesDigest` does.
  */
 export function fedimintNotesDigest(notes: string): string {
+  const text = notes.replace(/\s+/g, "");
+  const bytes = oobNotesBytes(text);
+  const signatures = bytes && oobNoteSignatures(bytes);
+  return signatures ? digestHex(`fedimint-notes:${signatures.join(",")}`) : fedimintBytesDigest(notes);
+}
+/** What earlier versions wrote down for notes: the digest of their base64 bytes, or of the text without its whitespace. */
+function fedimintBytesDigest(notes: string): string {
   const text = notes.replace(/\s+/g, "");
   try { return digestHex(toBase64Url(fromBase64Url(text.replace(/=+$/, "")))); } catch { return digestHex(text); }
 }
@@ -202,11 +296,31 @@ class PaymentBook extends Map<string, StoredPayment> {
     return this.shown ??= Object.fromEntries([...this].map(([id, { token: _token, ...view }]) => [id, view]));
   }
 }
+/** How many looks at the wallet's invoices a chat's "I paid your invoice" frames make every 3 s (`receiveInvoicePaid`). */
+export const INVOICE_LOOKS_PER_CHAT = 5;
+/**
+ * How often a contact's "I paid it from another wallet" makes an on-chain, Ark, Bark or Spark wallet look
+ * (`receiveCheck`): no more often than the wallet's own refresh, which runs the same look.
+ */
+export const RAIL_LOOK_MS = 10_000;
+/**
+ * Whether `at` was less than `ms` ago, for the desk's paces. A time later than now (the device clock went back) is long
+ * ago: otherwise a pace stays shut for as long as the clock went back.
+ */
+const within = (now: number, at: number | undefined, ms: number): boolean => at !== undefined && at <= now && now - at < ms;
+/**
+ * How long a receipt of ours (an on-chain, Ark, Bark, Spark or USDT payment already made) the payee has not confirmed
+ * goes again at every reconnect (`receiptOwed`): a week. After that, once per run of the app.
+ */
+export const RECEIPT_FRESH_MS = 7 * 86_400_000;
+
 export class PaymentDesk {
   private readonly payments = new PaymentBook();
   private readonly paying = new Map<string, Promise<void>>();
   private readonly receiving = new Map<string, Promise<void>>();
   private readonly reclaims = new Map<string, Promise<Reclaimed | undefined>>();
+  /** Receipts older than `RECEIPT_FRESH_MS` said again in this run of the app, by payment id (`receiptOwed`). */
+  private readonly receiptsSaid = new Set<string>();
   private checkingArk=false;
   private checkingUsdt=false;
   private checkingBark=false;
@@ -265,6 +379,7 @@ export class PaymentDesk {
   async start(): Promise<void> {
     const stored = await wrap<StoredPayment[]>((await store(STORES.payments, "readonly")).getAll());
     for (const payment of stored) this.payments.set(payment.id, payment);
+    for (const payment of stored) if (payment.kind === "request" && payment.direction === "in" && payment.lightningPending) await this.settleInterrupted(payment);
     const claims = await wrap<InvoiceClaim[] | undefined>((await store(STORES.settings, "readonly")).get(INVOICE_CLAIMS_KEY));
     this.claims = [...(claims ?? []).filter((c) => !this.claims.some((d) => sameClaim(c, d))), ...this.claims];
   }
@@ -713,10 +828,15 @@ export class PaymentDesk {
     const link = this.host.getLink(linkId);
     if (!link) return;
     const now = Date.now();
-    if (now - (this.lastAskFrom.get(linkId) ?? 0) < 3_000) return;
+    if (within(now, this.lastAskFrom.get(linkId), 3_000)) return;
     this.lastAskFrom.set(linkId, now);
     const open = [...this.payments.values()].filter((p) => p.linkId === linkId && p.kind === "request" && p.direction === "out" && p.state === "pending" && p.ask).length;
     if (open >= 5 || !/^[1-9]\d{0,15}$/.test(ask.amount.value)) return;
+    // An on-chain answer hands out an address of the wallet, which its sync reads from then on: at most
+    // ASKED_ONCHAIN_PER_HOUR in an hour across every chat and community member, whoever asks. Forty members asking
+    // five times each handed out 200 (agents#1633). The person's own Request is not counted, nor bounded.
+    if (ask.method === "bitcoin" && [...this.payments.values()].filter((p) => p.kind === "request" && p.direction === "out" && p.ask
+      && p.target?.method === "bitcoin" && now - p.createdAt < 3_600_000).length >= ASKED_ONCHAIN_PER_HOUR) return;
     if (ask.amount.asset !== (ask.method === "usdt" ? "usdtbase" : UNIT)) return;
     if (!allows(link, ask.method)) return;
     // Asked on a network this chat has off for that way of paying: no answer, as for a way that is off.
@@ -930,7 +1050,10 @@ export class PaymentDesk {
       // per token: the same token sent again under new ids is the same refusal.
       const sats = parseSats(payment.amount.value, payment.amount.asset);
       const spent = error instanceof EngineError && error.engineCode === "ecashAlreadySpent";
-      try { await this.host.storeMessage({ linkId, id: spent ? `peer_spent_${digestHex(token).slice(0, 32)}` : `peer_${payment.timestamp}_refused`, text: `Could not receive ${sats === null ? "a payment" : `${sats.toLocaleString()} sats`}: ${reason}`, sender: "peer", timestamp: payment.timestamp, via: "datalink" }); } catch { /* the refusal already went to the contact */ }
+      // The mint's network says whether these were test sats; ecash that could not be read says nothing of it.
+      const network = inspected?.kind === "token" ? mintNetwork(inspected.mint) : undefined;
+      const line = refusedRow({ amount: sats ?? undefined, network, reason });
+      try { await this.host.storeMessage({ linkId, id: spent ? `peer_spent_${digestHex(token).slice(0, 32)}` : `peer_${payment.timestamp}_refused`, ...line, sender: "peer", timestamp: payment.timestamp, via: "datalink" }); } catch { /* the refusal already went to the contact */ }
     }
   }
 
@@ -988,7 +1111,8 @@ export class PaymentDesk {
     const reason = "The mint did not confirm the ecash";
     link?.sendPaymentResult({ id: record.id, ok: false, error: reason });
     // The chat line a refusal on the spot writes, under the same id: a redeem that ends without the ecash is never silent.
-    try { await this.host.storeMessage({ linkId: record.linkId, id: `peer_${record.createdAt}_refused`, text: `Could not receive ${record.amount.toLocaleString()} sats: ${reason}`, sender: "peer", timestamp: record.createdAt, via: "datalink" }); } catch { /* the refusal already went to the contact */ }
+    const line = refusedRow({ amount: record.amount, network: record.mint ? mintNetwork(record.mint) : undefined, reason });
+    try { await this.host.storeMessage({ linkId: record.linkId, id: `peer_${record.createdAt}_refused`, ...line, sender: "peer", timestamp: record.createdAt, via: "datalink" }); } catch { /* the refusal already went to the contact */ }
   }
 
   async onPaymentResult(linkId: string, result: PaymentResult): Promise<void> {
@@ -1022,15 +1146,20 @@ export class PaymentDesk {
       void Promise.resolve(this.host.onReviewedPaymentResult?.(payment.id)).catch(() => {});
       return;
     }
+    // Only the payee can declare a request paid, and only about a request it sent us. It says so once its own wallet
+    // saw the money (its source, its chain, its Ark server), however the request was paid. Heard even when our copy
+    // is paid already (our own payment confirmed first): our receipts for it are then not said again (`receiptOwed`).
+    if (result.ok && payment?.kind === "request" && payment.direction === "in" && payment.linkId === linkId) {
+      const settles = payment.state === "pending";
+      if (settles || !payment.payeeConfirmed) await this.save({ ...payment, ...(settles && { state: "settled" as const, lightningPending: undefined }), payeeConfirmed: true });
+      return;
+    }
     if (!payment || payment.linkId !== linkId || payment.state !== "pending") return;
 
     if (payment.kind === "request") {
-      // Only the payee can declare a request paid, and only about a request it sent us. It says so once its
-      // own wallet saw the money (its source, its chain, its Ark server), however the request was paid.
-      if (payment.direction === "in" && result.ok) await this.save({ ...payment, state: "settled", lightningPending: undefined });
       // Or closed, said so in as many words (`closed`, never a bare refusal): the wallet it was paid through is gone, so
       // paying it now would lose the money. A Lightning payment already in flight is left to settle; its own answer decides.
-      else if (payment.direction === "in" && result.closed && !payment.lightningPending) await this.save({ ...payment, state: "failed", closed: true, error: result.error?.slice(0, 200) || "your contact closed it" });
+      if (payment.direction === "in" && result.closed && !payment.lightningPending) await this.save({ ...payment, state: "failed", closed: true, error: result.error?.slice(0, 200) || "your contact closed it" });
       return;
     }
     // A payment with a target reconciles through its own adapter, never on the contact's word.
@@ -1073,6 +1202,8 @@ export class PaymentDesk {
   private readonly lastCheckFrom = new Map<string, number>();
   /** `receiveInvoicePaid`'s last look, by `<link id>:<invoice>`: only the last 3 seconds' are kept. */
   private readonly lastInvoiceCheck = new Map<string, number>();
+  /** The looks `receiveInvoicePaid` made for each chat in the last 3 s (at most `INVOICE_LOOKS_PER_CHAT`). */
+  private readonly invoiceLooks = new Map<string, number[]>();
 
   /**
    * "I paid it from another wallet": the contact's app is asked to look at its wallet now. Nothing here
@@ -1088,7 +1219,7 @@ export class PaymentDesk {
       : request.invoice ? [ENDPOINT.bolt11, request.invoice] : undefined;
     if (!endpoint) throw new Error("This request cannot be paid from another wallet");
     const now = Date.now();
-    if (now - (this.lastCheck.get(request.id) ?? 0) < 5_000) return;
+    if (within(now, this.lastCheck.get(request.id), 5_000)) return;
     this.lastCheck.set(request.id, now);
     const link = this.requireLink(params.linkId);
     await this.sendTo(link, { id: newId(), timestamp: now, requestId: request.id, amount: { value: String(request.amount), asset: UNIT }, endpoint });
@@ -1097,22 +1228,26 @@ export class PaymentDesk {
   /**
    * The contact says it paid one of our requests from another wallet: our wallet is asked now, and it alone
    * decides. A request already paid is said so again (the first answer may have been lost). Bounded: one
-   * look every 3 seconds per request.
+   * look every 3 seconds per Lightning request, and one every `RAIL_LOOK_MS` per other rail: 300 frames a minute
+   * about 5 Bark requests made 100 Bark server syncs and 500 history reads.
    */
   private async receiveCheck(linkId: string, payment: Payment): Promise<void> {
     const link = this.host.getLink(linkId);
-    if (link && !payment.requestId && payment.endpoint[0] === ENDPOINT.bolt11) return this.receiveInvoicePaid(linkId, link, payment.endpoint[1]);
+    if (link && !payment.requestId && payment.endpoint[0] === ENDPOINT.bolt11) return this.receiveInvoicePaid(linkId, payment.endpoint[1]);
     const request = payment.requestId ? this.payments.get(payment.requestId) : undefined;
     if (!link || !request || request.kind !== "request" || request.direction !== "out" || !this.owns(request, linkId)) return;
     const rail = request.target ? request.target.method : request.invoice ? "lightning" : undefined;
     if (!rail || rail === "usdt" || rail === "cashu" || rail === "fedimint" || payment.endpoint[0] !== (rail === "lightning" ? ENDPOINT.bolt11 : ENDPOINT_OF[rail])) return;
     if (request.state === "settled") { link.sendPaymentResult({ id: request.id, ok: true }); return; }
     const now = Date.now();
-    if (now - (this.lastCheckFrom.get(request.id) ?? 0) < 3_000) return;
-    this.lastCheckFrom.set(request.id, now);
+    // A Lightning look is at this request's invoice; any other looks at every open request of its rail, so one
+    // look per rail, whatever the request or chat, and no sooner than the wallet's own refresh.
+    const [key, every] = rail === "lightning" ? [request.id, 3_000] : [rail, RAIL_LOOK_MS];
+    if (within(now, this.lastCheckFrom.get(key), every)) return;
+    this.lastCheckFrom.set(key, now);
     try {
-      // The invoice it says it paid, when it is this request's: the only one a contact can speak for.
-      if (rail === "lightning") await this.lightning[paymentNetwork(request)].check?.(payment.endpoint[1].trim().toLowerCase() === request.invoice?.toLowerCase() ? request.invoice : undefined);
+      // This request's invoice alone is asked about; it is let go only when the contact named it, the one it can speak for.
+      if (rail === "lightning") { if (request.invoice) await this.lightning[paymentNetwork(request)].check?.(request.invoice, payment.endpoint[1].trim().toLowerCase() === request.invoice.toLowerCase()); }
       else if (rail === "bitcoin") await this.reconcileBitcoinReceipts();
       else if (rail === "bark") await this.reconcileBarkReceipts();
       else if (rail === "spark") await this.reconcileSparkReceipts();
@@ -1124,16 +1259,24 @@ export class PaymentDesk {
    * The contact says it paid an invoice of ours it found in the chat, with no request: a Receive-screen invoice is
    * held on a test mint until then (StoredQuote `held`), and that one alone is let go. A request's invoice is spoken
    * for by its own contact only (`receiveCheck`). Bounded: one look every 3 seconds per invoice of a chat, so two
-   * invoices paid one right after the other are both let go.
+   * invoices paid one right after the other are both let go, and `INVOICE_LOOKS_PER_CHAT` looks every 3 seconds per
+   * chat: the invoice is the contact's text, and a frame per text made each one a read of every invoice of the wallet
+   * (2,000 frames, 2,000 reads), each also walking every key of the last 3 s (agents#1586). Taken whatever the chat's
+   * Lightning choice: a group's card tells the writer through their 1:1 chat, and the word lets go of our own invoice only.
    */
-  private async receiveInvoicePaid(linkId: string, link: PaymentLink, invoice: string): Promise<void> {
-    if (!link.allowsPayment("lightning")) return;
+  private async receiveInvoicePaid(linkId: string, invoice: string): Promise<void> {
     const now = Date.now();
     const wanted = invoice.trim().toLowerCase();
     const key = `${linkId}:${wanted}`;
-    if (now - (this.lastInvoiceCheck.get(key) ?? 0) < 3_000) return;
-    for (const [seen, at] of this.lastInvoiceCheck) if (now - at >= 3_000) this.lastInvoiceCheck.delete(seen);
+    if (within(now, this.lastInvoiceCheck.get(key), 3_000)) return;
+    const looks = (this.invoiceLooks.get(linkId) ?? []).filter((at) => within(now, at, 3_000));
+    if (looks.length >= INVOICE_LOOKS_PER_CHAT) { this.invoiceLooks.set(linkId, looks); return; }
+    this.invoiceLooks.set(linkId, [...looks, now]);
+    // Oldest first (each key is set again only once it went, at the end): the ones gone are at the front.
+    for (const [seen, at] of this.lastInvoiceCheck) { if (within(now, at, 3_000)) break; this.lastInvoiceCheck.delete(seen); }
+    this.lastInvoiceCheck.delete(key);
     this.lastInvoiceCheck.set(key, now);
+    for (const [chat, times] of this.invoiceLooks) if (chat !== linkId && times.every((at) => !within(now, at, 3_000))) this.invoiceLooks.delete(chat);
     try {
       const quote = (await this.wallet.quotes()).find((q) => q.held && !q.paymentId && q.invoice.toLowerCase() === wanted);
       if (quote) await this.wallet.vouch(quote.invoice);
@@ -1151,6 +1294,21 @@ export class PaymentDesk {
       this.sayPaid(this.host.getLink(request.linkId), request);
     }
     else await this.save({ ...request, error: "The Lightning payment did not go through" });
+  }
+
+  /**
+   * A contact's request marked as being paid over Lightning when the app was closed: the mark is written before the
+   * source is asked, and only that run's answer cleared it. What the source and the mints wrote down decides: nothing
+   * left the wallet and it can be paid again (and the group is not told it was sent), or it went through.
+   */
+  private async settleInterrupted(request: StoredPayment): Promise<void> {
+    const lightning = this.lightning[paymentNetwork(request)];
+    if (!lightning.interrupted || this.paying.has(`${request.linkId}:${request.id}`)) return;
+    try {
+      if (request.invoice && await this.wallet.meltInFlight?.(request.invoice)) return;
+      const outcome = await lightning.interrupted(request.id);
+      if (outcome !== "pending") await this.onLightningResolved({ paymentId: request.id }, outcome === "paid");
+    } catch { /* not readable right now: it stays pending until the next start */ }
   }
 
   onQuotePaid(quote: StoredQuote): Promise<void> { return this.onLightningPaid(quote); }
@@ -1193,15 +1351,20 @@ export class PaymentDesk {
     if(!this.host.getLink(linkId)?.supportsUsdtPayments||request?.target?.method!=='usdt'||request.linkId!==linkId||request.direction!=='out'||request.kind!=='request'||payment.amount.asset!==request.unit||payment.amount.value!==String(request.amount))return;
     const existing=this.payments.get(payment.id);
     if(existing && (existing.direction!=='in'||existing.linkId!==linkId||existing.requestId!==request.id))return;
+    // A receipt already recorded, sent again (under a new time): its first frame said it; a paid one is answered again.
+    if(existing){if(request.state==='settled')this.host.getLink(linkId)?.sendPaymentResult({id:request.id,ok:true});return;}
     let txid:string;try{txid=JSON.parse(payment.endpoint[1]).txid;}catch{return;}
-    if(typeof txid!=='string'||!/^0x[a-fA-F0-9]{64}$/.test(txid)||existing?.state==='settled')return;
+    if(typeof txid!=='string'||!/^0x[a-fA-F0-9]{64}$/.test(txid))return;
     if(this.repeatedReceipt(this.host.getLink(linkId),request,payment.id))return;
     // One transaction pays one request, however its hash is spelled.
     txid=txid.toLowerCase();
     if([...this.payments.values()].some(p=>p.txid?.toLowerCase()===txid&&(p.linkId!==linkId||(p.kind==='request'?p.id!==request.id:p.requestId!==request.id))))return;
+    const paid=request.state==='settled';
     await this.save({id:payment.id,linkId,kind:'payment',direction:'in',amount:request.amount,unit:request.unit,state:'pending',createdAt:payment.timestamp,target:request.target,requestId:request.id,txid});
     await this.host.storeMessage({linkId,id:`peer_${payment.timestamp}`,text:`${formatPaymentAmount(request.amount,request.target.decimals)} ${request.target.asset} — checking chain`,sender:'peer',timestamp:payment.timestamp,via:'datalink',paymentId:payment.id});
     await this.reconcileUsdtReceipts();
+    // Paid already (its wallet saw the money before the receipt came): said at once, so the payer stops saying it.
+    if(paid)this.host.getLink(linkId)?.sendPaymentResult({id:request.id,ok:true});
   }
   async reconcileUsdtReceipts() {
     if(this.checkingUsdt||!this.usdt)return;
@@ -1256,14 +1419,19 @@ export class PaymentDesk {
     if(!link?.supportsArkPayments || !request?.target || request.linkId!==linkId || request.direction!=="out" || request.kind!=="request")return;
     const existing=this.payments.get(payment.id);
     if(existing && (existing.linkId!==linkId || existing.direction!=="in" || existing.requestId!==request.id))return;
+    // A receipt already recorded, sent again (under a new time): its first frame said it; a paid one is answered again.
+    if(existing){if(request.state==="settled")link.sendPaymentResult({id:request.id,ok:true});return;}
     if(parseSats(payment.amount.value,payment.amount.asset)!==request.amount)return;
     let txid:string;try {txid=JSON.parse(payment.endpoint[1]).txid;}catch{return;}
     if([...this.payments.values()].some(p=>p.txid===txid && (p.linkId!==linkId || (p.kind==="request" ? p.id!==request.id : p.requestId!==request.id))))return;
-    if(typeof txid!=="string" || !/^[a-f0-9]{64}$/.test(txid) || existing?.state==="settled")return;
+    if(typeof txid!=="string" || !/^[a-f0-9]{64}$/.test(txid))return;
     if(this.repeatedReceipt(link,request,payment.id))return;
+    const paid=request.state==="settled";
     await this.save({id:payment.id,linkId,kind:"payment",direction:"in",amount:request.amount,unit:UNIT,state:"pending",createdAt:payment.timestamp,target:request.target,requestId:request.id,txid});
     await this.host.storeMessage({linkId,id:`peer_${payment.timestamp}`,text:`${request.amount} ${arkSats(request.target.network)} on Ark — checking provider`,sender:"peer",timestamp:payment.timestamp,via:"datalink",paymentId:payment.id});
     await this.reconcileArkReceipts();
+    // Paid already (its wallet saw the money before the receipt came): said at once, so the payer stops saying it.
+    if(paid)link.sendPaymentResult({id:request.id,ok:true});
   }
   /**
    * An Ark request is paid when a virtual output of at least the amount reached the address made for it,
@@ -1312,11 +1480,16 @@ export class PaymentDesk {
     if(!link?.supportsBarkPayments || request?.target?.method!=="bark" || request.linkId!==linkId || request.direction!=="out" || request.kind!=="request")return;
     const existing=this.payments.get(payment.id);
     if(existing && (existing.linkId!==linkId || existing.direction!=="in" || existing.requestId!==request.id))return;
-    if(existing || parseSats(payment.amount.value,payment.amount.asset)!==request.amount)return;
+    // A receipt already recorded, sent again: a paid one is answered again, so the payer stops saying it (`receiptOwed`).
+    if(existing){if(request.state==="settled")link.sendPaymentResult({id:request.id,ok:true});return;}
+    if(parseSats(payment.amount.value,payment.amount.asset)!==request.amount)return;
     if(this.repeatedReceipt(link,request,payment.id))return;
-    await this.save({id:payment.id,linkId,kind:"payment",direction:"in",amount:request.amount,unit:UNIT,state:request.state==="settled"?"settled":"pending",createdAt:payment.timestamp,target:request.target,requestId:request.id,txid:request.txid});
-    await this.host.storeMessage({linkId,id:`peer_${payment.timestamp}`,text:`${request.amount} ${arkSats(request.target.network)} on Bark${request.state==="settled"?"":" — checking wallet"}`,sender:"peer",timestamp:payment.timestamp,via:"datalink",paymentId:payment.id});
+    const settled=request.state==="settled";
+    await this.save({id:payment.id,linkId,kind:"payment",direction:"in",amount:request.amount,unit:UNIT,state:settled?"settled":"pending",createdAt:payment.timestamp,target:request.target,requestId:request.id,txid:request.txid});
+    await this.host.storeMessage({linkId,id:`peer_${payment.timestamp}`,text:`${request.amount} ${arkSats(request.target.network)} on Bark${settled?"":" — checking wallet"}`,sender:"peer",timestamp:payment.timestamp,via:"datalink",paymentId:payment.id});
     await this.reconcileBarkReceipts();
+    // Paid already (its wallet saw the money before the receipt came): said at once, so the payer stops saying it.
+    if(settled)link.sendPaymentResult({id:request.id,ok:true});
   }
   /**
    * A Bark request is paid when this wallet received, on the address made for it, at least the amount asked,
@@ -1328,13 +1501,19 @@ export class PaymentDesk {
     try {
       const open=[...this.payments.values()].filter(r=>r.kind==="request" && r.direction==="out" && r.state==="pending" && r.target?.method==="bark");
       const bark=this.bark;
-      for(const wallet of new Set(open.map(r=>bark[walletNetworkOf(r.target!.network)])))await wallet.adapter?.sync().catch(()=>{});
+      // Each wallet's history is read once for all its open requests, after one sync.
+      const receipts=new Map<BarkAdapter,BarkReceipts|undefined>();
+      for(const wallet of new Set(open.map(r=>bark[walletNetworkOf(r.target!.network)]))) {
+        if(!wallet.adapter)continue;
+        await wallet.adapter.sync().catch(()=>{});
+        receipts.set(wallet.adapter,await wallet.adapter.receipts().catch(()=>undefined));
+      }
       for(const request of open) {
         if(request.kind!=="request" || request.direction!=="out" || request.state!=="pending" || request.target?.method!=="bark")continue;
         const adapter=this.bark[walletNetworkOf(request.target.network)].adapter;
         if(!adapter || request.target.provider!==adapter.config.provider || request.target.network!==adapter.config.network)continue;
         const claimed=new Set([...this.payments.values()].filter(p=>p.target?.method==="bark" && p.kind==="request" && p.txid).map(p=>p.txid!));
-        const txid=await adapter.received(request.target.address,request.amount,request.createdAt,claimed).catch(()=>undefined);
+        const txid=receipts.get(adapter)?.(request.target.address,request.amount,request.createdAt,claimed);
         if(!txid)continue;
         await this.settleRequest(request,{txid});
         for(const payment of this.payments.values())if(payment.kind==="payment" && payment.direction==="in" && payment.requestId===request.id && payment.state==="pending")await this.save({...payment,state:"settled",txid});
@@ -1368,7 +1547,9 @@ export class PaymentDesk {
     if(!link?.supportsBitcoinPayments || request?.target?.method!=="bitcoin" || request.linkId!==linkId || request.direction!=="out" || request.kind!=="request")return;
     const existing=this.payments.get(payment.id);
     if(existing && (existing.linkId!==linkId || existing.direction!=="in" || existing.requestId!==request.id))return;
-    if(existing || parseSats(payment.amount.value,payment.amount.asset)!==request.amount)return;
+    // A receipt already recorded, sent again: a paid one is answered again, so the payer stops saying it (`receiptOwed`).
+    if(existing){if(request.state==="settled")link.sendPaymentResult({id:request.id,ok:true});return;}
+    if(parseSats(payment.amount.value,payment.amount.asset)!==request.amount)return;
     let hint:unknown;try {hint=JSON.parse(payment.endpoint[1]).txid;}catch{return;}
     if(typeof hint!=="string" || !/^[0-9a-f]{64}$/.test(hint))return;
     if(this.repeatedReceipt(link,request,payment.id))return;
@@ -1376,6 +1557,8 @@ export class PaymentDesk {
     await this.save({id:payment.id,linkId,kind:"payment",direction:"in",amount:request.amount,unit:UNIT,state:settled?"settled":"pending",createdAt:payment.timestamp,target:request.target,requestId:request.id,txid:settled?request.txid:hint});
     await this.host.storeMessage({linkId,id:`peer_${payment.timestamp}`,text:`${request.amount} ${arkSats(request.target.network)} on-chain${settled?"":" — waiting for a confirmation"}`,sender:"peer",timestamp:payment.timestamp,via:"datalink",paymentId:payment.id});
     await this.reconcileBitcoinReceipts();
+    // Paid already (its wallet saw the money before the receipt came): said at once, so the payer stops saying it.
+    if(settled)link.sendPaymentResult({id:request.id,ok:true});
   }
   /**
    * An on-chain request is paid when this wallet's source has a confirmed transaction paying the address made
@@ -1445,9 +1628,11 @@ export class PaymentDesk {
       if (now.state !== "pending") link?.sendPaymentResult({ id: payment.id, ok: now.state === "settled", credited: now.state === "settled" ? String(now.amount) : undefined, error: now.error });
       return;
     }
-    const refuse = async (reason: string) => {
+    // The amount the contact said they sent; the network once the notes' federation is known.
+    const refuse = async (reason: string, network?: WalletNetwork) => {
       link?.sendPaymentResult({ id: payment.id, ok: false, error: reason });
-      try { await this.host.storeMessage({ linkId, id: `peer_${payment.timestamp}_refused`, text: `Could not receive Fedimint ecash: ${reason}`, sender: "peer", timestamp: payment.timestamp, via: "datalink" }); } catch { /* the refusal already went to the contact */ }
+      const line = refusedRow({ amount: parseSats(payment.amount.value, payment.amount.asset) ?? undefined, network, method: "fedimint", reason });
+      try { await this.host.storeMessage({ linkId, id: `peer_${payment.timestamp}_refused`, ...line, sender: "peer", timestamp: payment.timestamp, via: "datalink" }); } catch { /* the refusal already went to the contact */ }
     };
     if (!link?.allowsPayment("fedimint")) { await refuse("Fedimint is off in this chat"); return; }
     if (!this.fedimint) { await refuse("This app has no Fedimint wallet"); return; }
@@ -1460,12 +1645,13 @@ export class PaymentDesk {
     const amount = fedimintSats(found.amountMsats);
     if (amount < 1) { await refuse("These notes are worth less than a sat"); return; }
     const network = this.fedimintOf(found.federation)?.federation(found.federation)?.network;
-    if (network && !this.accepts(linkId, "fedimint", walletNetworkOf(network))) { await refuse(`${networkLabel(walletNetworkOf(network))} Fedimint is off in this chat`); return; }
+    if (network && !this.accepts(linkId, "fedimint", walletNetworkOf(network))) { await refuse(`${networkLabel(walletNetworkOf(network))} Fedimint is off in this chat`, walletNetworkOf(network)); return; }
     // The same notes under another id: answered from what is known, with no new line and no new redeem.
-    // Digested as the federation reads them (see fedimintNotesDigest); `spelled` finds what 1.3.2 wrote down.
+    // Digested as the federation reads them (see fedimintNotesDigest); `bytes` and `spelled` find what earlier versions wrote down.
     const digest = fedimintNotesDigest(notes);
+    const bytes = fedimintBytesDigest(notes);
     const spelled = digestHex(notes.trim());
-    const before = [...this.payments.values()].find((p) => (p.notesDigest === digest || p.notesDigest === spelled) && p.direction === "in" && p.kind === "payment");
+    const before = [...this.payments.values()].find((p) => (p.notesDigest === digest || p.notesDigest === bytes || p.notesDigest === spelled) && p.direction === "in" && p.kind === "payment");
     if (before) { link.sendPaymentResult({ id: payment.id, ok: false, error: before.state === "failed" ? before.error ?? "These notes were already redeemed" : "These notes were already received" }); return; }
     // The federation's network, read as the chat line reads it (unknown is test sats): every reader of the record says the same.
     await this.save({ id: payment.id, linkId, kind: "payment", direction: "in", amount, unit: UNIT, memo: payment.memo, state: "pending", createdAt: payment.timestamp, requestId: payment.requestId, federation: found.federation, token: notes, notesDigest: digest, network: fedimintNetwork(network) });
@@ -1502,7 +1688,8 @@ export class PaymentDesk {
     if (state === "failed") {
       await this.save({ ...this.current(payment), state: "failed", token: undefined, error: "These notes were already redeemed" });
       link?.sendPaymentResult({ id, ok: false, error: "These notes were already redeemed" });
-      try { await this.host.storeMessage({ linkId: payment.linkId, id: `peer_${payment.createdAt}_refused`, text: "Could not receive Fedimint ecash: These notes were already redeemed", sender: "peer", timestamp: payment.createdAt, via: "datalink" }); } catch { /* the contact was told */ }
+      const line = refusedRow({ amount: payment.amount, network: payment.network, method: "fedimint", reason: "These notes were already redeemed" });
+      try { await this.host.storeMessage({ linkId: payment.linkId, id: `peer_${payment.createdAt}_refused`, ...line, sender: "peer", timestamp: payment.createdAt, via: "datalink" }); } catch { /* the contact was told */ }
       return;
     }
     // Written once the federation took the notes (as Cashu's once the mint took the ecash); the same id on a retry.
@@ -1552,12 +1739,16 @@ export class PaymentDesk {
     if(!link?.supportsSparkPayments || request?.target?.method!=="spark" || request.linkId!==linkId || request.direction!=="out" || request.kind!=="request")return;
     const existing=this.payments.get(payment.id);
     if(existing && (existing.linkId!==linkId || existing.direction!=="in" || existing.requestId!==request.id))return;
-    if(existing || parseSats(payment.amount.value,payment.amount.asset)!==request.amount)return;
+    // A receipt already recorded, sent again: a paid one is answered again, so the payer stops saying it (`receiptOwed`).
+    if(existing){if(request.state==="settled")link.sendPaymentResult({id:request.id,ok:true});return;}
+    if(parseSats(payment.amount.value,payment.amount.asset)!==request.amount)return;
     if(this.repeatedReceipt(link,request,payment.id))return;
     const settled=request.state==="settled";
     await this.save({id:payment.id,linkId,kind:"payment",direction:"in",amount:request.amount,unit:UNIT,state:settled?"settled":"pending",createdAt:payment.timestamp,target:request.target,requestId:request.id,txid:request.txid});
     await this.host.storeMessage({linkId,id:`peer_${payment.timestamp}`,text:`${request.amount} ${arkSats(request.target.network)} on Spark${settled?"":" — checking wallet"}`,sender:"peer",timestamp:payment.timestamp,via:"datalink",paymentId:payment.id});
     await this.reconcileSparkReceipts();
+    // Paid already (its wallet saw the money before the receipt came): said at once, so the payer stops saying it.
+    if(settled)link.sendPaymentResult({id:request.id,ok:true});
   }
   /**
    * A Spark request is paid when this wallet completed a receive on the invoice made for it, of at least the amount
@@ -1618,7 +1809,7 @@ export class PaymentDesk {
       paidFrom = created.mint;
       this.payments.set(id, record(created.token, created.mint));
     } catch (error) {
-      throw new NoEcashError(error instanceof Error ? error.message : String(error));
+      throw new NoEcashError(error);
     }
     this.host.onChange();
     await this.host.storeMessage({
@@ -1701,13 +1892,13 @@ export class PaymentDesk {
       if(payment.target?.method==='usdt') {
         if(!link.supportsUsdtPayments)continue;
         if(payment.kind==='request'&&payment.state==='pending'&&payment.target.expiresAt>Date.now())await link.sendPaymentRequest({id:payment.id,timestamp:payment.createdAt,amount:{value:String(payment.amount),asset:payment.unit},memo:payment.memo,endpoints:[[ENDPOINT.usdt,JSON.stringify(payment.target)]],ask:payment.ask});
-        else if(payment.kind==='payment'&&payment.txid&&payment.state!=='failed')await this.sendTo(link, {id:payment.id,timestamp:payment.createdAt,requestId:payment.requestId,amount:{value:String(payment.amount),asset:payment.unit},endpoint:[ENDPOINT.usdt,JSON.stringify({txid:payment.txid})]});
+        else if(payment.kind==='payment'&&payment.txid&&payment.state!=='failed'&&this.receiptOwed(payment))await this.sendTo(link, {id:payment.id,timestamp:payment.createdAt,requestId:payment.requestId,amount:{value:String(payment.amount),asset:payment.unit},endpoint:[ENDPOINT.usdt,JSON.stringify({txid:payment.txid})]});
         continue;
       }
       if (payment.target?.method === "bark") {
         if(!link.supportsBarkPayments)continue;
         if(payment.kind==="request" && payment.state==="pending" && payment.target.expiresAt>Date.now())await link.sendPaymentRequest({id:payment.id,timestamp:payment.createdAt,amount:{value:String(payment.amount),asset:UNIT},memo:payment.memo,endpoints:[[ENDPOINT.bark,JSON.stringify(payment.target)]],ask:payment.ask});
-        else if(payment.kind==="payment" && payment.state==="settled")await this.sendTo(link, {id:payment.id,timestamp:payment.createdAt,requestId:payment.requestId,amount:{value:String(payment.amount),asset:UNIT},endpoint:[ENDPOINT.bark,JSON.stringify({txid:payment.txid})]});
+        else if(payment.kind==="payment" && payment.state==="settled" && this.receiptOwed(payment))await this.sendTo(link, {id:payment.id,timestamp:payment.createdAt,requestId:payment.requestId,amount:{value:String(payment.amount),asset:UNIT},endpoint:[ENDPOINT.bark,JSON.stringify({txid:payment.txid})]});
         continue;
       }
       if (payment.target?.method === "fedimint" || payment.federations) {
@@ -1720,21 +1911,25 @@ export class PaymentDesk {
       if (payment.target?.method === "spark") {
         if(!link.supportsSparkPayments)continue;
         if(payment.kind==="request" && payment.state==="pending" && payment.target.expiresAt>Date.now())await link.sendPaymentRequest({id:payment.id,timestamp:payment.createdAt,amount:{value:String(payment.amount),asset:UNIT},memo:payment.memo,endpoints:[[ENDPOINT.spark,JSON.stringify(payment.target)]],ask:payment.ask});
-        else if(payment.kind==="payment" && payment.state==="settled")await this.sendTo(link, {id:payment.id,timestamp:payment.createdAt,requestId:payment.requestId,amount:{value:String(payment.amount),asset:UNIT},endpoint:[ENDPOINT.spark,JSON.stringify({id:payment.txid})]});
+        else if(payment.kind==="payment" && payment.state==="settled" && this.receiptOwed(payment))await this.sendTo(link, {id:payment.id,timestamp:payment.createdAt,requestId:payment.requestId,amount:{value:String(payment.amount),asset:UNIT},endpoint:[ENDPOINT.spark,JSON.stringify({id:payment.txid})]});
         continue;
       }
       if (payment.target?.method === "bitcoin") {
         if(!link.supportsBitcoinPayments)continue;
         if(payment.kind==="request" && payment.state==="pending" && payment.target.expiresAt>Date.now())await link.sendPaymentRequest({id:payment.id,timestamp:payment.createdAt,amount:{value:String(payment.amount),asset:UNIT},memo:payment.memo,endpoints:[[ENDPOINT.bitcoin,JSON.stringify(payment.target)]],ask:payment.ask});
-        else if(payment.kind==="payment" && payment.txid && payment.state!=="failed")await this.sendTo(link, {id:payment.id,timestamp:payment.createdAt,requestId:payment.requestId,amount:{value:String(payment.amount),asset:UNIT},endpoint:[ENDPOINT.bitcoin,JSON.stringify({txid:payment.txid})]});
+        else if(payment.kind==="payment" && payment.txid && payment.state!=="failed" && this.receiptOwed(payment))await this.sendTo(link, {id:payment.id,timestamp:payment.createdAt,requestId:payment.requestId,amount:{value:String(payment.amount),asset:UNIT},endpoint:[ENDPOINT.bitcoin,JSON.stringify({txid:payment.txid})]});
         continue;
       }
       if (payment.target?.method === "arkade") {
         if(!link.supportsArkPayments)continue;
         if(payment.kind==="request" && payment.state==="pending" && payment.target.expiresAt>Date.now())await link.sendPaymentRequest({id:payment.id,timestamp:payment.createdAt,amount:{value:String(payment.amount),asset:UNIT},memo:payment.memo,endpoints:[[ENDPOINT.arkade,JSON.stringify(payment.target)]],ask:payment.ask});
-        else if(payment.kind==="payment" && payment.txid && payment.state==="settled")await this.sendTo(link, {id:payment.id,timestamp:payment.createdAt,requestId:payment.requestId,amount:{value:String(payment.amount),asset:UNIT},endpoint:[ENDPOINT.arkade,JSON.stringify({txid:payment.txid})]});
+        else if(payment.kind==="payment" && payment.txid && payment.state==="settled" && this.receiptOwed(payment))await this.sendTo(link, {id:payment.id,timestamp:payment.createdAt,requestId:payment.requestId,amount:{value:String(payment.amount),asset:UNIT},endpoint:[ENDPOINT.arkade,JSON.stringify({txid:payment.txid})]});
         continue;
       }
+      // A request of ours our wallet saw paid is said so again while fresh (as a receipt is, `receiptOwed`): the answer
+      // `settleRequest` sent is dropped with the chat down, and a request paid over Lightning has no token or receipt the
+      // payer says again, so its copy would stay open with a Pay button that pays it twice.
+      if (payment.kind === "request" && payment.state === "settled" && payment.invoice && !payment.group && Date.now() - payment.createdAt < RECEIPT_FRESH_MS) { link.sendPaymentResult({ id: payment.id, ok: true }); continue; }
       if(payment.state !== "pending")continue;
       if (payment.kind === "payment" && payment.token) await this.sendTo(link, {
         id: payment.id, timestamp: payment.createdAt, requestId: payment.requestId,
@@ -1745,6 +1940,23 @@ export class PaymentDesk {
         endpoints: [...(payment.invoice ? [[ENDPOINT.bolt11, payment.invoice] as [string, string]] : []), ...(payment.mints?.length ? [[ENDPOINT.cashu, cashuRequestPayload(payment.mints)] as [string, string]] : [])],
       });
     }
+  }
+
+  /**
+   * Whether a receipt of ours (an on-chain, Ark, Bark, Spark or USDT payment already made) is said again on this
+   * reconnect. Never once the payee said the request it answers is paid (`payeeConfirmed`): its own wallet saw the
+   * money, and the receipt is only a hint. Otherwise at every reconnect while it is under `RECEIPT_FRESH_MS` old, so a
+   * frame lost with a link that went down goes again, and once per run of the app after that: a payee that was away
+   * when we paid still gets it the first time its chat opens, and a long history of payments made before the payee's
+   * app answered them no longer goes out at every reconnect and transport switch. Call it last: it counts a send.
+   */
+  private receiptOwed(payment: StoredPayment): boolean {
+    const request = payment.requestId ? this.payments.get(payment.requestId) : undefined;
+    if (request?.payeeConfirmed && request.kind === "request" && request.direction === "in" && request.linkId === payment.linkId) return false;
+    if (Date.now() - payment.createdAt < RECEIPT_FRESH_MS) return true;
+    if (this.receiptsSaid.has(payment.id)) return false;
+    this.receiptsSaid.add(payment.id);
+    return true;
   }
 
   private requireLink(linkId: string): PaymentLink {

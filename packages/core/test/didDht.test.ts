@@ -1,13 +1,13 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { fromBase64Url, toZ32 } from "../src/bytes";
+import { fromBase64Url, toBase64Url, toZ32 } from "../src/bytes";
 import { decodeTxtPacket, encodeTxtPacket, type NsRecord, type TxtRecord } from "../src/dns";
 import {
   DID_DHT_TTL, DidDhtError, decodeDidDhtPacket, didDhtDocument, didDhtFromPublicKey, didDhtKey, didDhtRecords, encodeDidDhtDeactivated, encodeDidDhtPacket,
   jwkThumbprint, openDidDhtPayload, resolveDidDht, signDidDhtPacket, type DidDhtDocument, type DidDhtFetch,
 } from "../src/didDht";
 import { createIdentity } from "../src/identity";
-import { MAX_DNS_PACKET_BYTES, PacketTooLargeError } from "../src/pkarr";
+import { MAX_DNS_PACKET_BYTES, openRelayPayload, PacketTooLargeError } from "../src/pkarr";
 
 // covers: did.dht.document
 
@@ -165,6 +165,8 @@ describe("strict parsing", () => {
     ["k0 of another type", [root("v=0;vm=k0"), { name: "_k0._did.", value: k0.replace("t=0", "t=3") }]],
     ["an unknown key type", [root("v=0;vm=k0,k1"), { name: "_k0._did.", value: k0 }, { name: "_k1._did.", value: "t=9;k=AAAA" }]],
     ["padded base64", [root("v=0;vm=k0"), { name: "_k0._did.", value: `${k0}=` }]],
+    // 4n+1 characters: the alphabet is right, but no byte string has that length.
+    ["a key of an impossible base64url length", [root("v=0;vm=k0,k1"), { name: "_k0._did.", value: k0 }, { name: "_k1._did.", value: "t=0;k=AAAAA" }]],
     ["a property twice", [root("v=0;v=0;vm=k0"), { name: "_k0._did.", value: k0 }]],
     ["a property without a value separator", [root("v=0;vm=k0;auth"), { name: "_k0._did.", value: k0 }]],
     ["two root records", [root("v=0;vm=k0"), root("v=0;vm=k0"), { name: "_k0._did.", value: k0 }]],
@@ -184,6 +186,32 @@ describe("strict parsing", () => {
 
   it("refuses bytes that are not a DNS packet", () => {
     expect(() => decodeDidDhtPacket(did, new Uint8Array([1, 2, 3]))).toThrow(/malformed/);
+  });
+});
+
+describe("did:dht and small-order Ed25519 keys", () => {
+  // The neutral point: no secret key goes with it, and R = the neutral point, S = 0 verifies any text under ZIP-215.
+  const neutral = Uint8Array.from({ length: 32 }, (_, i) => (i === 0 ? 1 : 0));
+  const constant = Uint8Array.from({ length: 64 }, (_, i) => (i === 0 ? 1 : 0));
+
+  it("refuses one as the DID's key", async () => {
+    const did = didDhtFromPublicKey(neutral);
+    expect(() => didDhtKey(did)).toThrow(DidDhtError);
+    await expect(resolveDidDht(did, { fetch: async () => { throw new Error("not asked"); } })).rejects.toMatchObject({ code: "invalid-did" });
+  });
+
+  it("refuses one as another key of the document", () => {
+    const expected = vector<DidDhtDocument>("vector-2-did-document");
+    const records = vector<VectorRecord[]>("vector-2-dns-records").map((r) => r.name === "_k1._did."
+      ? { ...r, rdata: [`id=sig;t=0;k=${toBase64Url(neutral)}`] } : r);
+    expect(() => decodeDidDhtPacket(expected.id, packetOf(records))).toThrow(/small order/);
+  });
+
+  it("does not open a relay payload signed with the constant signature", () => {
+    const payload = new Uint8Array(64 + 8 + 12);
+    payload.set(constant);
+    payload[64 + 7] = 1;
+    expect(() => openRelayPayload(toZ32(neutral), payload)).toThrow("Invalid signature");
   });
 });
 
@@ -228,6 +256,17 @@ describe("resolveDidDht", () => {
       .resolves.toMatchObject({ relay: "https://b.test" });
     await expect(resolveDidDht(did, { ...relays({ "https://a.test": forged }), relays: ["https://a.test"] }))
       .rejects.toThrow("The did:dht record is not signed by the DID's key");
+  });
+
+  it("moves past a relay serving a signed packet with a key that does not decode", async () => {
+    const records = [{ name: "_k1._did.", value: "t=0;k=AAAAA", ttl: DID_DHT_TTL }, ...didDhtRecords(document).map((r) =>
+      "value" in r && r.name.startsWith("_did.") ? { ...r, value: r.value.replace("vm=k0", "vm=k0,k1") } : r)];
+    const broken = signDidDhtPacket(identity, encodeTxtPacket(records, { authoritative: true }), seq + 1);
+    const { fetch, asked } = relays({ "https://a.test": broken, "https://b.test": payload });
+    await expect(resolveDidDht(did, { fetch, relays: ["https://a.test", "https://b.test"] })).resolves.toMatchObject({ relay: "https://b.test" });
+    expect(asked).toHaveLength(2);
+    await expect(resolveDidDht(did, { ...relays({ "https://a.test": broken }), relays: ["https://a.test"] }))
+      .rejects.toMatchObject({ code: "malformed", message: "The did:dht document is malformed: the key k1 is not unpadded base64url" });
   });
 
   it("tells not found from unreachable", async () => {

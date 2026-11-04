@@ -55,3 +55,10 @@ describe("Unpin on the pinned message's bar, from the keyboard", () => {
     expect(document.activeElement).toBe(document.body);
   });
 });
+
+describe("the pinned message's bar on a phone", () => {
+  it("has a 44 px ⓘ and ✕, and the desktop keeps its 32 px", () => {
+    renderApp(<Chat />);
+    for (const id of ["pinned-info", "pinned-unpin"]) expect(screen.getByTestId(id)).toHaveClass("w-8", "h-8", "max-md:w-11", "max-md:h-11");
+  });
+});

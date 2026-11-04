@@ -81,6 +81,18 @@ export function provesGreeting(secret: Buffer, dir: string, message: unknown, no
   return holdsProfile(dir, pid);
 }
 
+/**
+ * Whether a daemon of this release holds the profile: its secret is there (an older release's never writes one, and a
+ * daemon removes its own when it stops) and the lock's holder is alive and this user's. One whose greeting is late is
+ * busy (its event loop held by one long task), not something else on its socket: the client waits for it.
+ */
+export function daemonOfThisRelease(dir: string): boolean {
+  if (!readDaemonSecret(dir)) return false;
+  let pid: number;
+  try { pid = Number(readFileSync(lockPath(dir), "utf8").trim()); } catch { return false; }
+  return Number.isSafeInteger(pid) && pid > 0 && holdsProfile(dir, pid);
+}
+
 function holdsProfile(dir: string, pid: number): boolean {
   try {
     if (readFileSync(lockPath(dir), "utf8").trim() !== String(pid)) return false;

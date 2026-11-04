@@ -1,0 +1,10 @@
+{
+  "auto": "Según sus mensajes",
+  "byHand": "{{language}} (elegido por ti)",
+  "change": "Cambiar",
+  "detected": "{{language}} (detectado)",
+  "note": "Los mensajes cortos se leen en este idioma, y lo que envías se puede traducir a él.",
+  "several": "Varios idiomas",
+  "title": "Idioma de este chat",
+  "unknown": "Aún no se sabe"
+}

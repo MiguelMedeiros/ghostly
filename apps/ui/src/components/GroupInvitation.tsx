@@ -4,6 +4,9 @@ import type { GroupView } from "@ghostly/browser/shared/types";
 import { useI18n } from "../contexts/I18nContext";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import type { Translate } from "../locales/translate";
+import { knownErrorParts, rawError } from "../lib/errorText";
+import type { Problem } from "../lib/problemText";
+import { Notice } from "./ui/Notice";
 
 /** How long the reason an answer did not go stays under Accept and Decline. */
 export const REFUSAL_SHOWN_MS = 8000;
@@ -17,8 +20,25 @@ export function invitationLine(invitation: Invitation, t: Translate): string {
     : invitation.contact ? t("sidebar.group.invitedBy", { contact: invitation.contact, members }) : t("sidebar.group.invitedByUnknown", { members });
 }
 
-/** Whether Accept and Decline are offered: not answered yet, or accepted with no answer from the inviter's app. Not once taken back. */
-export const answerable = (invitation: Invitation | undefined) => !!invitation && !invitation.takenBack && (!invitation.accepted || !!invitation.unanswered);
+/**
+ * What an invitation's row says it waits for: a contact's invitation in one line, or where a join through a link is. A
+ * link replaced since it was shared waits on nothing: the row says so, as the group's page does. A full group too.
+ */
+export function invitationStatus(group: GroupView, t: Translate): string {
+  const invitation = group.invitation!;
+  return invitation.viaLink ? (invitation.unanswered ? t("sidebar.group.linkUnanswered") : invitation.stage === "replaced" ? t("group.join.replaced")
+    : invitation.stage === "full" ? t("group.join.full") : invitation.admin ? t("group.chat.joining") : group.profile === "community" ? (invitation.stage === "answered" ? t("sidebar.group.letting") : t("sidebar.group.waitingIn")) : invitation.stage === "answered" ? t("sidebar.group.adminAnswered") : t("sidebar.group.waitingAdmin"))
+    : invitationLine(invitation, t);
+}
+
+/** Whether the invitation's row offers a button: Accept and Decline, Delete once taken back, or Try again on a link nobody answered. */
+export const invitationWaitsForMe = (invitation: Invitation) => answerable(invitation) || !!invitation.takenBack || (!!invitation.viaLink && !!invitation.unanswered);
+
+/**
+ * Whether Accept and Decline are offered: not answered yet, or accepted with no answer from the inviter's app. Not once
+ * taken back, nor for a join through a link (a link nobody answered offers Try again, `LinkTryAgain`).
+ */
+export const answerable = (invitation: Invitation | undefined) => !!invitation && !invitation.takenBack && !invitation.viaLink && (!invitation.accepted || !!invitation.unanswered);
 
 /** Who took the invitation back, and what to do: the words of a taken-back invitation's page. */
 function takenBackWords(group: GroupView, t: Translate): { title: string; next: string } {
@@ -62,9 +82,10 @@ export function focusPastRow(next: HTMLElement | null, pressed: Element | null, 
 export function useInvitationAnswer(group: GroupView, onDeclined?: () => void, returnFocus?: RefObject<HTMLElement | null>) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
-  const [refused, setRefused] = useState<string | null>(null);
+  const [refused, setRefused] = useState<Problem | null>(null);
+  // One with words behind its ⓘ stays until the next press: they went from under a reader's eyes.
   useEffect(() => {
-    if (!refused) return;
+    if (!refused || refused.detail) return;
     const timer = setTimeout(() => setRefused(null), REFUSAL_SHOWN_MS);
     return () => clearTimeout(timer);
   }, [refused]);
@@ -86,18 +107,36 @@ export function useInvitationAnswer(group: GroupView, onDeclined?: () => void, r
         (returnFocus ? returnFocus.current : rowOpen(group.id))?.focus();
       }
     } catch (error) {
-      const away = /not connected/i.test(error instanceof Error ? error.message : String(error));
-      const contact = group.invitation?.contact;
-      setRefused(!away ? t("sidebar.group.answerFailed") : contact ? t("sidebar.group.inviterAway", { contact }) : t("sidebar.group.inviterAwayUnknown"));
+      setRefused(refusal(error, group.invitation?.contact, t));
     } finally { setBusy(false); }
   };
   return { busy, refused, answer };
 }
 
+/**
+ * Why an answer did not go: the inviter's chat not live yet, by the inviter's name; a refusal the app knows (this app
+ * offline, or in limited mode) in its own words, as every other group action says it; anything else as a failure, its
+ * English behind the ⓘ. Offline and limited mode blamed the inviter, or said only "Try again" for an answer that never goes.
+ */
+function refusal(error: unknown, contact: string | undefined, t: Translate): Problem {
+  const raw = rawError(error);
+  if (/not connected/i.test(raw)) return { tone: "error", title: contact ? t("sidebar.group.inviterAway", { contact }) : t("sidebar.group.inviterAwayUnknown") };
+  const known = knownErrorParts(raw, t);
+  return known ? { tone: "error", ...known } : { tone: "error", title: t("sidebar.group.answerFailed"), ...(raw && { detail: raw }) };
+}
+
+/** The refusal under Accept and Decline. Its ⓘ is a button of its own: pressing it does not open a chat list's row. */
+export function InvitationRefusal({ refused, className }: { refused: Problem; className?: string }) {
+  return <div onClick={e => e.stopPropagation()} className={className}><Notice problem={refused} testId="group-answer-refused" /></div>;
+}
+
+/** A chat list row's answer buttons: small on a desktop; a thumb's height on a phone, where the list is the home screen. */
+const ROW_BUTTON = "px-3 py-1 text-xs max-md:min-h-11 max-md:px-4";
+
 /** Accept and Decline, small (a chat list row) or a thumb's height (the invitation's own page). */
 export function InvitationButtons({ busy, answer, large = false }: Pick<ReturnType<typeof useInvitationAnswer>, "busy" | "answer"> & { large?: boolean }) {
   const { t } = useI18n();
-  const size = large ? "min-h-11 px-5 text-sm" : "px-3 py-1 text-xs";
+  const size = large ? "min-h-11 px-5 text-sm" : ROW_BUTTON;
   return <>
     <button disabled={busy} data-testid="group-accept" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }}
       className={`rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 ${size}`}>{t("chat.file.accept")}</button>
@@ -106,11 +145,18 @@ export function InvitationButtons({ busy, answer, large = false }: Pick<ReturnTy
   </>;
 }
 
+/** A group link nobody answered for an hour: its row's action, Try again, knocks again (`acceptGroupInvitation`). */
+export function LinkTryAgain({ busy, answer }: Pick<ReturnType<typeof useInvitationAnswer>, "busy" | "answer">) {
+  const { t } = useI18n();
+  return <button disabled={busy} data-testid="group-link-retry" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }}
+    className={`rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 ${ROW_BUTTON}`}>{t("group.join.tryAgain")}</button>;
+}
+
 /** A taken-back invitation's only action: Delete (it says nothing to whoever took it back). */
 export function TakenBackDelete({ busy, answer, large = false }: Pick<ReturnType<typeof useInvitationAnswer>, "busy" | "answer"> & { large?: boolean }) {
   const { t } = useI18n();
   return <button disabled={busy} data-testid="group-taken-back-delete" onClick={e => { e.stopPropagation(); void answer("declineGroupInvitation"); }}
-    className={`rounded-lg text-text-secondary hover:bg-surface-hover disabled:opacity-40 ${large ? "min-h-11 px-5 text-sm" : "px-3 py-1 text-xs"}`}>{t("common.delete")}</button>;
+    className={`rounded-lg text-text-secondary hover:bg-surface-hover disabled:opacity-40 ${large ? "min-h-11 px-5 text-sm" : ROW_BUTTON}`}>{t("common.delete")}</button>;
 }
 
 /**
@@ -129,7 +175,7 @@ export function GroupInvitationCard({ group, compact = false, returnFocus }: { g
   // Taken back by who sent it: who did, and what to do, where the invitation was.
   const taken = invitation.takenBack ? takenBackWords(group, t) : undefined;
   const line = taken ? <span data-testid="group-taken-back"><span className="block font-medium text-text-primary">{taken.title}</span>{taken.next}</span> : invitationLine(invitation, t);
-  const why = refused && <p role="status" data-testid="group-answer-refused" className="text-xs text-danger">{refused}</p>;
+  const why = refused && <InvitationRefusal refused={refused} />;
   if (compact) return <div data-testid="group-invitation" className="border-b border-border bg-surface-alt px-4 py-2 text-xs text-text-secondary">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <p className="min-w-0">{line}</p>

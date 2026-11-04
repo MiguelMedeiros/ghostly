@@ -9,7 +9,9 @@
 .new-wallet-network:disabled{opacity:.45;cursor:not-allowed}
 .new-wallet-network[data-network=testnet]{--net:#e0a800;--net-ink:var(--color-test-money-ink)}
 .new-wallet-network[data-network=mainnet]{--net:var(--color-accent)}
-.new-wallet-network .network-tag{color:var(--net-ink,var(--net))}
+/* It may wrap here: half a 320 px phone's sheet is narrower than "Dinheiro de teste" on one line. The tighter corners
+   keep two lines clear of the border. */
+.new-wallet-network .network-tag{color:var(--net-ink,var(--net));white-space:normal;border-radius:8px}
 .new-wallet-network[aria-checked=true]{border-color:var(--net);background:color-mix(in srgb,var(--net) 9%,transparent);box-shadow:inset 0 0 0 1px var(--net)}
 .new-wallet-network-dot{flex:none;width:16px;height:16px;margin-top:2px;border:2px solid var(--color-text-muted);border-radius:999px;transition:border-color .2s,box-shadow .2s}
 .new-wallet-network[aria-checked=true] .new-wallet-network-dot{border-color:var(--net);box-shadow:inset 0 0 0 3px var(--color-panel-header),inset 0 0 0 8px var(--net)}

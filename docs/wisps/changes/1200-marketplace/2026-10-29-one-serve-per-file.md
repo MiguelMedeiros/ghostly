@@ -1,0 +1,1 @@
+Serving: a file the app serves already answers the same `serveId`, and `files.unserve` ends it once called as many times as the file was served. Each serve was a serve of its own until unserve or close, so an app that served again on each play held one more serve with every call for as long as the chat stayed up.

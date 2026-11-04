@@ -5,10 +5,10 @@
 //   node tools/scripts/ci-changes.mjs --draft=false --all     # no file list: every path gate on
 //   node tools/scripts/ci-changes.mjs --draft=false --tree=T  # a push to dev: see testedAs; else as --all
 //
-// writes one `<gate>=true|false` line per gate (`rust=`, `website=`, `website_e2e=`, `app=`, `packages=`, `full=`,
-// `affected=`, `tested=`) to $GITHUB_OUTPUT (and prints them), with a notice for each job it skips. A path gate may
-// only leave a job out when that job cannot read any of the changed files: tools/scripts/test/ci-changes.test.ts holds
-// the website's list to what the site's scripts actually read.
+// writes one `<gate>=true|false` line per gate (`lint=`, `rust=`, `website=`, `website_e2e=`, `app=`, `packages=`,
+// `full=`, `affected=`, `tested=`) to $GITHUB_OUTPUT (and prints them), with a notice for each job it skips. A path
+// gate may only leave a job out when that job cannot read any of the changed files: tools/scripts/test/ci-changes.test.ts
+// holds the website's list to what the site's scripts, tests and browser checks actually read.
 //
 // A draft gets the fast tier: lint and types, the unit tests the change can reach (test-affected.mjs), the site's checks
 // when the site changed, and the Rust job when Rust changed. Everything else waits for the pull request to leave
@@ -19,10 +19,31 @@ import { appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 /**
- * The Rust job (Tauri Backend). Only a draft skips it without one of these: `ready_for_review` runs
- * everything again. ci.yml is not among them: a draft that changes the workflow gets the fast tier too.
+ * Everything the Rust job (Tauri Backend) reads: a directory ends in `/`. The crates, and the files their tests name by
+ * include_str! or CARGO_MANIFEST_DIR (tools/scripts/test/ci-changes.test.ts holds this list to those paths). The job
+ * builds no frontend, so the crates read no other app code.
  */
-export const RUST = /^(apps\/desktop\/|native\/transports\/|Cargo\.(toml|lock)$)/;
+export const RUST_INPUTS = [
+  "apps/desktop/",
+  "native/transports/",
+  "Cargo.toml",
+  "Cargo.lock",
+  // app_sandbox.rs: the mini-app frame's copies of the web app's frame and core's bridge.
+  "apps/web/public/app-frame.html",
+  "packages/core/src/miniApp.ts",
+  // turn_record.rs: the vectors the TypeScript suite checks too.
+  "packages/core/test/vectors/turn-record.json",
+  // translate.rs: the runtime's package, protocol and built archive.
+  "native/translation/",
+  // viewer.rs: a test keeps its connection policy the same as `service open`'s.
+  "packages/cli/src/services.ts",
+];
+
+/**
+ * The Rust job's own definition. Only a ready pull request runs it for these: a draft that changes the workflow gets
+ * the fast tier.
+ */
+export const RUST_JOB = [".github/workflows/ci.yml", "tools/scripts/ci-changes.mjs"];
 
 /**
  * Everything the Website jobs (checks and browser checks) read: a directory ends in `/`. The site builds from
@@ -68,6 +89,12 @@ export const WEBSITE_INPUTS = [
   "packages/core/src/canonicalJson.ts",
   "packages/core/src/bytes.ts",
   "packages/core/src/image.ts",
+  // privacy-hosts.test.mjs checks the privacy page's resolver list against the app's DoH resolvers.
+  "packages/browser/src/proofs/domain.ts",
+  // The launch checklist (e2e/launch-checklist.spec.ts) checks the repository's social preview's size.
+  "docs/assets/social-preview.png",
+  // shots-version.test.mjs checks lib/release.ts's version against the app's.
+  "package.json",
   // The jobs themselves.
   ".github/workflows/ci.yml",
 ];
@@ -92,6 +119,7 @@ export const PACKAGES_READ_FROM_SITE = [
   // guides and pages that point to the voice agent.
   "docs/AI-AGENTS.md",
   "apps/website/content/agents.ts",
+  "apps/website/content/agentsThreat.ts",
   "docs/CLI.md",
   "apps/website/content/cli.ts",
   "apps/website/scripts/llms.mjs",
@@ -179,6 +207,41 @@ export async function supersededBy({ sha, api, settle = () => new Promise((r) =>
   return ask();
 }
 
+/**
+ * The run that leaving draft started behind this one, or null. A run whose event saw a draft (its payload) while the
+ * pull request is ready now left draft after that event: "open as draft, `gh pr ready` seconds later", or a draft run
+ * still going when its owner marks it ready. Leaving draft's run does not cancel the one in progress (ci.yml's
+ * concurrency): it waits behind it in the pull request's group and plans everything. So this run plans the fast tier,
+ * and its green "CI Success (draft)" lets the pull request board the merge train while the full run is still to come
+ * (the train cancels that one). It counts only when CI has a run on this head for this pull request that is newer
+ * than this one and not finished, and none older: a run created before this one (leaving draft's, when GitHub created
+ * the push's run later) was cancelled by this one, which then plans everything as before. Asked again once after
+ * `settle`, for a run whose plan starts before leaving draft's run exists.
+ * @param {{ sha: string, run: number, pull: number, repo: string, api: (path: string) => Promise<any>, settle?: () => Promise<void> }} pr
+ *   `run` is this run's id, `pull` the pull request's number
+ * @returns {Promise<string | null>} the newer run's address
+ */
+export async function draftBehind({ sha, run, pull, repo, api, settle = () => new Promise((r) => setTimeout(r, SETTLE_MS)) }) {
+  const ask = async () => {
+    const { workflow_runs: runs } = await api(`actions/workflows/ci.yml/runs?event=pull_request&head_sha=${sha}&per_page=100`);
+    const others = runs.filter(
+      (r) =>
+        r.id !== run &&
+        r.head_sha === sha &&
+        r.path === ".github/workflows/ci.yml" &&
+        r.head_repository?.full_name === repo &&
+        r.pull_requests?.some((p) => p.number === pull),
+    );
+    if (others.some((r) => r.id < run)) return { done: true, url: null };
+    const behind = others.find((r) => r.id > run && r.status !== "completed");
+    return { done: Boolean(behind), url: behind?.html_url ?? null };
+  };
+  const first = await ask();
+  if (first.done) return first.url;
+  await settle();
+  return (await ask()).url;
+}
+
 // A writer's base change, and GitHub's own when the old base branch was deleted (it tried: failed counts too).
 const BASE_CHANGES = new Set(["base_ref_changed", "automatic_base_change_succeeded", "automatic_base_change_failed"]);
 
@@ -202,15 +265,16 @@ async function retargeted(api, pulls) {
  *   run already tested; superseded: one a newer push's run covers (supersededBy), planned as tested
  */
 export function plan(files, { draft, tested = false, superseded = false }) {
-  // Only Tauri Backend runs: only a push to dev saves the Cargo cache that pull requests restore.
+  // Only Tauri Backend runs: only a push to dev saves the Cargo cache that pull requests restore. It looks the cache up
+  // first and builds only when this Cargo.lock and toolchain have none yet.
   if (tested || superseded) {
     tested = true;
     const why = [
       superseded
-        ? "dev already moved past this commit, and the newer head's run tests a tree that holds it: only Tauri Backend runs, to keep the Cargo cache saved"
-        : "This tree already passed CI Success: only Tauri Backend runs, to keep the Cargo cache saved",
+        ? "dev already moved past this commit, and the newer head's run tests a tree that holds it: only Tauri Backend runs, and only to save a Cargo cache this Cargo.lock lacks"
+        : "This tree already passed CI Success: only Tauri Backend runs, and only to save a Cargo cache this Cargo.lock lacks",
     ];
-    return { rust: true, website: false, website_e2e: false, app: false, packages: false, full: false, affected: false, tested, why };
+    return { lint: false, rust: true, website: false, website_e2e: false, app: false, packages: false, full: false, affected: false, tested, why };
   }
   const why = [];
   const all = files === null;
@@ -222,13 +286,13 @@ export function plan(files, { draft, tested = false, superseded = false }) {
   if (!desktop) why.push("Only apps/website/ and docs/ changed: the Desktop jobs on macOS skipped");
   const shards = any((f) => !NOT_APP.test(f) || covers(PACKAGES_READ_FROM_SITE, f));
   if (!shards) why.push("Nothing the packages' tests read changed: the packages shards skipped");
+  // No file list runs Tauri Backend unless it is a draft.
+  const rust = all ? !draft : files.some((f) => covers(RUST_INPUTS, f) || (!draft && covers(RUST_JOB, f)));
+  if (!all && !rust) why.push("Nothing the Rust job reads changed: Tauri Backend skipped");
   // Then the tier: a draft keeps only the fast jobs.
-  const rust = !draft || (!all && files.some((f) => RUST.test(f)));
-  if (draft) {
-    why.push("Draft: the fast tier only (lint and types, the affected unit tests). Leaving draft runs everything");
-    if (!rust) why.push("Draft without Rust changes: Tauri Backend skipped");
-  }
+  if (draft) why.push("Draft: the fast tier only (lint and types, the affected unit tests). Leaving draft runs everything");
   return {
+    lint: true,
     rust,
     website: site,
     website_e2e: site && !draft,
@@ -244,16 +308,28 @@ export function plan(files, { draft, tested = false, superseded = false }) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const draft = process.argv.includes("--draft=true");
   const tree = process.argv.find((a) => a.startsWith("--tree="))?.slice("--tree=".length);
+  const base = `${process.env.GITHUB_API_URL ?? "https://api.github.com"}/repos/${process.env.GITHUB_REPOSITORY}/`;
+  const api = async (path) => {
+    const res = await fetch(base + path, { headers: { authorization: `Bearer ${process.env.GH_TOKEN}`, accept: "application/vnd.github+json" } });
+    if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
+    return res.json();
+  };
+  // A pull request that left draft after this run's event: exits 0 when leaving draft's run waits behind this one (see
+  // draftBehind), else 1. Any doubt is a 1: the run plans everything, as before.
+  if (process.argv.includes("--draft-behind")) {
+    const { PR_HEAD_SHA: sha, GITHUB_RUN_ID: run, PR_NUMBER: pull, GITHUB_REPOSITORY: repo } = process.env;
+    const behind = await draftBehind({ sha, run: Number(run), pull: Number(pull), repo, api }).catch((e) => {
+      console.log(`::notice::Could not read whether leaving draft's run waits behind this one (${e.message}): everything runs`);
+      return null;
+    });
+    if (behind) console.log(`::notice::This pull request left draft after this run's event, and ${behind} waits behind this run and runs everything: this one runs the fast tier`);
+    else console.log("This pull request left draft after this run's event, and no run of leaving draft waits behind this one: everything runs");
+    process.exit(behind ? 0 : 1);
+  }
   let files = null;
   let tested = false;
   let superseded = false;
   if (tree) {
-    const base = `${process.env.GITHUB_API_URL ?? "https://api.github.com"}/repos/${process.env.GITHUB_REPOSITORY}/`;
-    const api = async (path) => {
-      const res = await fetch(base + path, { headers: { authorization: `Bearer ${process.env.GH_TOKEN}`, accept: "application/vnd.github+json" } });
-      if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
-      return res.json();
-    };
     // Any doubt (the API failed, no run found) runs everything, as before.
     const run = await testedAs({ sha: process.env.GITHUB_SHA, tree, repo: process.env.GITHUB_REPOSITORY, api }).catch((e) => {
       console.log(`::notice::Could not look for a green run of this tree (${e.message}): everything runs`);

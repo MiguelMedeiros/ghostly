@@ -1,7 +1,7 @@
 import { STORES, store, transact, wrap } from "../shared/idb";
 import { boundedIdentityFetch } from "../proofs/verify";
 import type { IdentityFetch } from "../proofs/contract";
-import { PUBLIC_PROFILE_READERS, type PublicProfileData, type PublicProfileReader } from "../profiles/readers";
+import { fixedHostsFetch, PUBLIC_PROFILE_READERS, type PublicProfileData, type PublicProfileReader } from "../profiles/readers";
 import type { PublicProfileView } from "../shared/types";
 
 /** An identity with a current, verified proof: the person's own, or one a contact shared and this app verified. */
@@ -17,6 +17,10 @@ export interface PublicProfileHost {
   eligible(): ProfileSubject[];
   /** The Nostr relays in the person's settings. */
   nostrRelays(): readonly string[];
+  /** Settings → Hide my IP from contacts: a contact's profile is then read only from hosts this app names (`fixedHostsFetch`). */
+  relayOnly?(): boolean;
+  /** The person's own identities with a current proof: read from wherever they live, whatever the setting. */
+  own?(): ProfileSubject[];
   /** Tests: the network and the clock. */
   fetch?: IdentityFetch;
   makeSocket?: (url: string) => WebSocket;
@@ -54,6 +58,15 @@ const PRUNE_MS = 10 * 60_000;
 const keyOf = (s: ProfileSubject) => `${s.provider}\n${s.subject}`;
 
 /**
+ * The fetch an identity's public data is read with: a contact's, while Hide my IP from contacts is on, reaches only
+ * hosts this app names, so a server the contact chose (their AT Protocol server) never learns this device's IP address.
+ */
+export function profileFetch(host: { relayOnly?(): boolean; own?(): ProfileSubject[] }, s: ProfileSubject, fetch: IdentityFetch): IdentityFetch {
+  if (!host.relayOnly?.() || host.own?.().some(o => o.provider === s.provider && o.subject === s.subject)) return fetch;
+  return fixedHostsFetch(fetch);
+}
+
+/**
  * The public profiles of verified identities, engine side: asked for one identity at a time, when its card is on
  * screen (the UI's `loadPublicProfile`), only for an identity with a current verified proof and only with the
  * setting on and the network on. Kept in IndexedDB for offline use, asked again after a day (misses after five
@@ -66,6 +79,8 @@ export class PublicProfiles {
   private timer: ReturnType<typeof setInterval> | undefined;
   /** Before the chats are loaded every contact's identity would look ineligible: nothing is pruned until then. */
   private started = false;
+  /** The engine stopped ("Clear all data" empties the stores next): an answer still on its way writes nothing. */
+  private stopped = false;
   private readonly fetch: IdentityFetch;
 
   constructor(private host: PublicProfileHost) {
@@ -83,14 +98,17 @@ export class PublicProfiles {
   /** Starts the periodic clean-up; call once the chats are loaded, so `eligible` sees them. */
   start(): void {
     this.started = true;
+    this.stopped = false;
     void this.prune().catch(() => {});
     this.timer ??= setInterval(() => { void this.prune().catch(() => {}); }, PRUNE_MS);
   }
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
+    this.stopped = true;
   }
   private async save(): Promise<void> {
+    if (this.stopped) return;
     await transact([STORES.settings], stores => { stores[STORES.settings].put(this.cache, KEY); });
   }
 
@@ -138,7 +156,7 @@ export class PublicProfiles {
     const checkedAt = this.now;
     try {
       const data = await reader.read(s.subject, {
-        fetch: this.fetch, signal: AbortSignal.timeout(20_000), relays: this.host.nostrRelays(),
+        fetch: profileFetch(this.host, s, this.fetch), signal: AbortSignal.timeout(20_000), relays: this.host.nostrRelays(),
         makeSocket: this.host.makeSocket, avatarFetch: this.host.avatarFetch,
       });
       // The proof may have gone, or the setting been turned off, while the host answered.

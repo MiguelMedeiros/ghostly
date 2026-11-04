@@ -11,13 +11,14 @@ import { renderApp } from "../render";
 
 // covers: app.composer.paste-files
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const onSend = vi.fn<(text: string) => Promise<string | null>>();
 const toBehind = vi.fn<(file: File) => Promise<string | null>>();
 const toShown = vi.fn<(file: File) => Promise<string | null>>();
 
-const png = () => new File([new Uint8Array([137, 80, 78, 71])], "image.png", { type: "image/png" });
+/** A 1x1 PNG the sender's metadata strip reads as a picture (it refuses bytes that are not one). */
+const png = () => new File([Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 73, 69, 78, 68, 0, 0, 0, 0])], "image.png", { type: "image/png" });
 /** What a clipboard hands the page: jsdom-likes have no DataTransfer to build one with. */
 const clipboard = (file: File) => ({ files: [file], types: ["Files"], items: [{ kind: "file", type: file.type, getAsFile: () => file }], getData: () => "", dropEffect: "none" });
 const sheets = () => screen.queryAllByTestId("attachment-sheet");

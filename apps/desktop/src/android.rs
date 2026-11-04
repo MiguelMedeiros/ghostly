@@ -164,9 +164,25 @@ pub async fn share_done(paths: Vec<PathBuf>) -> Result<(), String> {
         .map(drop)
 }
 
+#[derive(Deserialize)]
+struct Held {
+    held: bool,
+}
+
+/// Holds the transfer service (`on`) while files move, so they go on with the app out of sight, or stops it: whether
+/// it runs now.
+pub fn keep_awake(on: bool) -> Result<bool, String> {
+    Ok(call::<Held>("keepAwake", json!({ "on": on }))?.held)
+}
+
 /// The system bars around the page take its background colour, and light or dark icons to go on it.
 pub fn system_bars(color: u32, dark: bool) -> Result<(), String> {
     call::<Value>("systemBars", json!({ "color": color, "dark": dark })).map(drop)
+}
+
+/// The app switcher keeps no picture of the app (`on`, the app lock is on), or takes one again.
+pub fn hide_from_switcher(on: bool) -> Result<(), String> {
+    call::<Value>("hideFromSwitcher", json!({ "on": on })).map(drop)
 }
 
 pub use crate::android_share::{Incoming, Shared};
@@ -186,6 +202,26 @@ fn received(kind: &str, value: String) {
     let Some(app) = APP.get() else {
         return;
     };
+    let recheck = crate::android_network::recheck(kind, &value);
+    if recheck.pkarr {
+        app.state::<crate::commands::AppState>()
+            .pkarr
+            .network_changed();
+    }
+    if recheck.iroh {
+        // Android denies Iroh's netwatch the routing table, so it may not see a new network itself: every endpoint is told.
+        let transports = app
+            .state::<crate::paired_transport::TransportState>()
+            .inner()
+            .clone();
+        let why = value.clone();
+        tauri::async_runtime::spawn(async move {
+            let count = transports.network_changed().await;
+            crate::diagnostics::log(&format!(
+                "network: changed ({why}), {count} Iroh endpoints told"
+            ));
+        });
+    }
     match kind {
         "oidc" => {
             let state = app.state::<crate::oidc::OidcState>();
@@ -214,23 +250,7 @@ fn received(kind: &str, value: String) {
             }
             Err(error) => crate::diagnostics::log(&format!("share: unreadable ({error})")),
         },
-        "network" => {
-            // Android denies Iroh's netwatch the routing table, so it may not see a new network itself: every
-            // endpoint is told, and Pkarr asks its relays again.
-            let transports = app
-                .state::<crate::paired_transport::TransportState>()
-                .inner()
-                .clone();
-            app.state::<crate::commands::AppState>()
-                .pkarr
-                .network_changed();
-            tauri::async_runtime::spawn(async move {
-                let count = transports.network_changed().await;
-                crate::diagnostics::log(&format!(
-                    "network: changed ({value}), {count} Iroh endpoints told"
-                ));
-            });
-        }
+        // A new network, or the activity back in front: looked at above (`android_network::recheck`).
         _ => {}
     }
 }

@@ -96,7 +96,8 @@ describe("a card's Source", () => {
     set.answer();
     await screen.findByTestId("lightning-source-saved");
     expect(screen.queryByTestId("provider-save")).not.toBeInTheDocument();
-    expect(select).toHaveFocus();
+    // SourcePicker moves the focus in an effect, which may run after the saved line is in the page.
+    await waitFor(() => expect(select).toHaveFocus());
   });
 
   /** The card as BitcoinWalletPanel holds it: Remove clears the source, and the engine's view follows (`late`: once it has answered). */
@@ -120,7 +121,7 @@ describe("a card's Source", () => {
     const { user } = renderApp(<Removable list={[]} />);
     await press(user, screen.getByTestId("onchain-source-clear"));
     await waitFor(() => expect(screen.queryByTestId("onchain-source-clear")).not.toBeInTheDocument());
-    expect(screen.getByTestId("onchain-source-status")).toHaveFocus();
+    await waitFor(() => expect(screen.getByTestId("onchain-source-status")).toHaveFocus());
   });
 });
 

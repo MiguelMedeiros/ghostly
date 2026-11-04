@@ -16,10 +16,10 @@ import { InfoLine } from "../devices/DeviceDialog";
  * Copy and a QR code, whether it is published, and a switch per identity that lists it in the document for
  * everyone to see. Every switch starts off; chats never need any of this.
  */
-export function PublicDid({ state }: { state: EngineState }) {
+export function PublicDid({ state }: { state: Pick<EngineState, "did" | "identityProofs"> & { settings: Pick<EngineState["settings"], "online"> } }) {
   const { t } = useI18n();
   const did = state.did;
-  const { copied, copy } = useCopyKey(did?.id ?? "");
+  const { copied, failed, copy } = useCopyKey(did?.id ?? "");
   const [qr, setQr] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -42,11 +42,12 @@ export function PublicDid({ state }: { state: EngineState }) {
         <StatusPill ok={!!did.published && did.upToDate && !did.error} testId="did-published">{did.published && did.upToDate && !did.error ? t("identities.did.live") : t("identities.did.notLive")}</StatusPill></span>}
         hint={t("identities.did.hint")} />
       <Block>
-        <code className="block break-all select-all bg-surface-alt rounded-lg p-2 text-[11px] text-text-primary" data-testid="did-id">{did.id}</code>
+        <code dir="ltr" className="block text-left break-all select-all bg-surface-alt rounded-lg p-2 text-[11px] text-text-primary" data-testid="did-id">{did.id}</code>
         <div className="flex flex-wrap items-center gap-3">
           <Button data-testid="did-copy" onClick={copy}>{copied ? t("identities.ghostly.copied") : t("identities.did.copy")}</Button>
           <Button data-testid="did-qr-toggle" aria-expanded={qr} onClick={() => setQr(v => !v)}>{qr ? t("identities.did.hideQr") : t("identities.did.showQr")}</Button>
         </div>
+        {failed && <Notice tone="error" testId="did-copy-error">{t("identities.add.copyError")}</Notice>}
         {qr && <div data-testid="did-qr" className="bg-white p-3 rounded-xl w-fit max-w-full [&_svg]:max-w-full [&_svg]:h-auto">
           <QRCodeSVG value={did.id} size={200} marginSize={2} title={t("identities.did.qrTitle")} bgColor="#ffffff" fgColor="#0b0f1a" level="M" />
         </div>}

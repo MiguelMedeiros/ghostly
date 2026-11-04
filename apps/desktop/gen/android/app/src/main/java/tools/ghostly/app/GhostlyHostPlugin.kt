@@ -1,6 +1,7 @@
 package tools.ghostly.app
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -16,8 +17,10 @@ import android.net.LinkProperties
 import android.net.Network
 import android.net.Uri
 import android.os.Build
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.provider.Settings
+import android.view.WindowManager
 import android.webkit.WebView
 import androidx.activity.result.ActivityResult
 import androidx.core.app.NotificationCompat
@@ -71,6 +74,16 @@ class TagArgs {
 @InvokeArg
 class KeepArgs {
   var keep: List<String> = emptyList()
+}
+
+@InvokeArg
+class AwakeArgs {
+  var on: Boolean = false
+}
+
+@InvokeArg
+class HideArgs {
+  var on: Boolean = false
 }
 
 @InvokeArg
@@ -218,15 +231,18 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
    * (android.ts `withinPasteTotal`, keep the two alike); one that would go past it is left out, by its size before
    * copying, or by its bytes when the app gives no size (nor kept), and only named in `leftOut`, for the page to say
    * so; one that cannot be read (no stream, a revoked permission, a broken stream) is named in `unread`, and one the
-   * device has no room for (a full disk, SharedCopies.noRoom) in `noRoom`. A share with
+   * device has no room for (a full disk, SharedCopies.noRoom) in `noRoom`. Streams past [MAX_SHARED_FILES] are never
+   * copied, only named in `pastLimit` (with the share's first ones). A share with
    * nothing else is still nothing for the turns: its names go with the share it lets go, or alone.
    */
   private fun shared(intent: Intent) {
     val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() ?: ""
     val title = intent.getStringExtra(Intent.EXTRA_SUBJECT) ?: intent.getStringExtra(Intent.EXTRA_TITLE) ?: ""
     val authorities = ownAuthorities()
-    val streams =
-      streamsOf(intent).filter { SharedStream.takes(it.scheme, it.authority, authorities) }.take(MAX_SHARED_FILES)
+    val all = streamsOf(intent).filter { SharedStream.takes(it.scheme, it.authority, authorities) }
+    val streams = all.take(MAX_SHARED_FILES)
+    // Past the most one share brings: never copied, only named in `pastLimit`, for the page to say so.
+    val past = all.drop(MAX_SHARED_FILES)
     // Nothing to copy either: it does not overtake a share still copying.
     if (SharedCopies.nothingIn(title, text, streams.size)) return
     val resolver = activity.contentResolver
@@ -255,7 +271,7 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
               leftOut.put(name)
               continue
             }
-            folder.mkdirs()
+            SharedCopies.makeFolder(folder)
             val file = File(folder, name)
             val input = resolver.openInputStream(uri) ?: throw IOException("No stream for $uri")
             val copied = input.use { from -> file.outputStream().use { copyAtMost(from, it, left, going) } }
@@ -274,6 +290,15 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
             if (going()) (if (SharedCopies.noRoom(e)) noRoom else unread).put(name)
           }
         }
+        val pastLimit = JSONArray()
+        for ((offset, uri) in past.withIndex()) {
+          if (!going()) break
+          try {
+            pastLimit.put(SharedName.of(displayName(uri), MAX_SHARED_FILES + offset))
+          } catch (e: Exception) {
+            // A name that cannot be read is left unsaid, as its file would be.
+          }
+        }
         // No file to read (none copied whole): nothing names the folder to the page, so it goes now.
         if (files.length() == 0) own.deleteRecursively()
         val share =
@@ -281,7 +306,7 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
           else Handover(
             own,
             JSONObject().put("title", title).put("text", text).put("files", files)
-              .put("leftOut", leftOut).put("unread", unread).put("noRoom", noRoom).toString(),
+              .put("leftOut", leftOut).put("unread", unread).put("noRoom", noRoom).put("pastLimit", pastLimit).toString(),
           )
         // Decided on the main thread, where shares arrive, so none comes between the turn and the handing over. With
         // nothing in it, an older share that waited for this one may go now; with something, this one goes, waits for
@@ -291,10 +316,11 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
           // Nothing but files too large or not read, and no newer share with something: the page names them all the
           // same, with the older share this one let go (Rust keeps one share: two in a row would lose the first), or alone.
           val json =
-            if (share != null || (leftOut.length() == 0 && unread.length() == 0 && noRoom.length() == 0) || !going()) handed?.json
+            if (share != null || !going() ||
+              listOf(leftOut, unread, noRoom, pastLimit).all { it.length() == 0 }) handed?.json
             else {
               val notice = handed?.let { JSONObject(it.json) } ?: JSONObject().put("title", "").put("text", "").put("files", JSONArray())
-              for ((key, more) in listOf("leftOut" to leftOut, "unread" to unread, "noRoom" to noRoom)) {
+              for ((key, more) in listOf("leftOut" to leftOut, "unread" to unread, "noRoom" to noRoom, "pastLimit" to pastLimit)) {
                 val names = notice.optJSONArray(key) ?: JSONArray()
                 for (i in 0 until more.length()) names.put(more.getString(i))
                 notice.put(key, names)
@@ -553,14 +579,27 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       return
     }
     thread(name = "ghostly-save") {
-      try {
-        val out = activity.contentResolver.openOutputStream(target, "wt") ?: throw IllegalStateException("No output")
-        out.use { to -> File(args.path).inputStream().use { it.copyTo(to) } }
-        invoke.resolve(JSObject().put("saved", true))
-      } catch (e: Exception) {
-        invoke.reject("The file could not be saved there")
-      }
+      val resolver = activity.contentResolver
+      val saved = SaveCopy.copy(
+        File(args.path),
+        { resolver.openOutputStream(target, "wt") },
+        { DocumentsContract.deleteDocument(resolver, target) },
+      )
+      if (saved) invoke.resolve(JSObject().put("saved", true)) else invoke.reject("The file could not be saved there")
     }
+  }
+
+  // ---- Files moving out of sight ----
+
+  /**
+   * While a file moves (`on`, Rust's `keep_awake` with files as a reason), the transfer service (TransferService.kt)
+   * keeps the app running out of sight; it stops with the last file. `held`: whether it runs now.
+   */
+  @Command
+  fun keepAwake(invoke: Invoke) {
+    val on = invoke.parseArgs(AwakeArgs::class.java).on
+    val held = if (on) TransferService.start(activity) else false.also { TransferService.stop(activity) }
+    invoke.resolve(JSObject().put("held", held))
   }
 
   // ---- System bars ----
@@ -583,6 +622,30 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       val controller = WindowCompat.getInsetsController(window, window.decorView)
       controller.isAppearanceLightStatusBars = !args.dark
       controller.isAppearanceLightNavigationBars = !args.dark
+      invoke.resolve()
+    }
+  }
+
+  // ---- The app switcher ----
+
+  /**
+   * While the app lock is on (`on`), the app switcher keeps no picture of the app (SwitcherPicture): Android takes it
+   * before the page hears the app is going, so the lock's cover would come too late for it. The activity's cover goes
+   * over the app's live window there too (MainActivity.lockOn). Off again with the lock.
+   */
+  // SwitcherPicture takes setRecentsScreenshotEnabled only on Android 13 and up.
+  @SuppressLint("NewApi")
+  @Command
+  fun hideFromSwitcher(invoke: Invoke) {
+    val on = invoke.parseArgs(HideArgs::class.java).on
+    activity.runOnUiThread {
+      when (SwitcherPicture.way(Build.VERSION.SDK_INT)) {
+        SwitcherPicture.Way.NO_RECENTS_PICTURE -> activity.setRecentsScreenshotEnabled(!on)
+        SwitcherPicture.Way.SECURE_WINDOW ->
+          if (on) activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+          else activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+      }
+      (activity as? MainActivity)?.lockOn = on
       invoke.resolve()
     }
   }

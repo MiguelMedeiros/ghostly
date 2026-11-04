@@ -68,8 +68,15 @@ class TooSlow extends Error { constructor() { super("The Esplora server is too s
 /** A reservation outlives an app restart, but not forever: a review saved and then lost cannot lock coins. */
 const RESERVATION_MS = 24 * 3600_000;
 
+/**
+ * How long an address handed out (a chat request, the Receive screen) is kept for whoever was shown it, before an
+ * unpaid one may be shown again (`receiveAddress`): a request's target expires in 15 minutes.
+ */
+export const ADDRESS_HOLD_MS = 60 * 60_000;
+
 interface Reservation { txid: string; outpoints: string[]; at: number }
-interface StoredBdk { changeset: string; reserved: Reservation[]; scanned: boolean }
+/** `shown`: when each external address was last handed out, by index (`receiveAddress`). */
+interface StoredBdk { changeset: string; reserved: Reservation[]; scanned: boolean; shown?: Record<string, number> }
 
 export interface BdkStore {
   load(key: string): Promise<StoredBdk | undefined>;
@@ -224,7 +231,11 @@ export class BdkOnchain implements OnchainProvider {
     this.changeset = stored ? bdk.ChangeSet.from_json(stored.changeset) : undefined;
     this.reserved = (stored?.reserved ?? []).filter((r) => Date.now() - r.at < RESERVATION_MS);
     this.scanned = stored?.scanned ?? false;
+    this.shown = new Map(Object.entries(stored?.shown ?? {}).map(([index, at]) => [Number(index), at]));
+    this.openedAt = Date.now();
   }
+  private readonly shown: Map<number, number>;
+  private readonly openedAt: number;
   private scanned: boolean;
 
   /**
@@ -296,11 +307,30 @@ export class BdkOnchain implements OnchainProvider {
     })().catch((error) => { throw Object.assign(new Error(`Could not sync from Esplora: ${message(error)}`), { cause: error }); }).finally(() => { this.syncing = undefined; });
   }
 
+  /**
+   * Where to be paid: a new address, unless STOP_GAP - 1 handed out already wait unpaid. Then the unpaid one shown
+   * longest ago, once that is ADDRESS_HOLD_MS: a restore's full scan stops after STOP_GAP unused addresses in a row, so
+   * a payment past more unpaid requests than that was never found from the phrase (agents#1634), and every address
+   * revealed is read at every sync. Only where each of those is still held for someone is a new one revealed anyway.
+   */
   async receiveAddress(): Promise<string> {
-    // Always a new one: an address shown once (to a contact, in a request) is not shown to someone else.
-    const address = this.wallet.reveal_next_address("external").address.toString();
+    let unused = this.wallet.list_unused_addresses("external");
+    // About to show one again: first what the chain says was paid meanwhile (one paid is no longer unused).
+    if (unused.length >= STOP_GAP - 1) {
+      try { await this.sync(); unused = this.wallet.list_unused_addresses("external"); } catch { /* as last read */ }
+    }
+    const now = Date.now();
+    const shownAt = (index: number) => this.shown.get(index) ?? this.openedAt;
+    const again = unused.length < STOP_GAP - 1 ? undefined : unused
+      .filter((info) => now - shownAt(info.index) >= ADDRESS_HOLD_MS)
+      .sort((a, b) => shownAt(a.index) - shownAt(b.index) || a.index - b.index)[0];
+    const info = again ?? this.wallet.reveal_next_address("external");
+    this.shown.set(info.index, now);
+    // Only what is still unused needs its time: an address paid is never handed out again.
+    const open = new Set(unused.map((u) => u.index));
+    for (const index of this.shown.keys()) if (index !== info.index && !open.has(index)) this.shown.delete(index);
     this.persist();
-    return address;
+    return info.address.toString();
   }
 
   async balance(): Promise<OnchainBalance> {
@@ -469,7 +499,7 @@ export class BdkOnchain implements OnchainProvider {
     const staged = this.wallet.take_staged();
     if (staged) { if (this.changeset) this.changeset.merge(staged); else this.changeset = staged; }
     if (!this.changeset) return;
-    const value: StoredBdk = { changeset: this.changeset.to_json(), reserved: this.reserved, scanned: this.scanned };
+    const value: StoredBdk = { changeset: this.changeset.to_json(), reserved: this.reserved, scanned: this.scanned, shown: Object.fromEntries(this.shown) };
     this.writes = this.writes.then(() => this.store.save(this.key, value)).catch(() => {});
   }
 

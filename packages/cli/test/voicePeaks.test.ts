@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -128,22 +128,39 @@ describe("a voice note's waveform, measured from its file", () => {
     }
   });
 
+  /** The header of an 8 kHz, 8-bit mono WAV with `length` bytes of samples. */
+  function head8k(length: number): Buffer {
+    const head = Buffer.alloc(44);
+    head.write("RIFF", 0); head.writeUInt32LE(36 + length, 4); head.write("WAVE", 8);
+    head.write("fmt ", 12); head.writeUInt32LE(16, 16); head.writeUInt16LE(1, 20); head.writeUInt16LE(1, 22);
+    head.writeUInt32LE(8_000, 24); head.writeUInt32LE(8_000, 28); head.writeUInt16LE(1, 32); head.writeUInt16LE(8, 34);
+    head.write("data", 36); head.writeUInt32LE(length, 40);
+    return head;
+  }
+
   it("stops reading a sound longer than a voice note a little past the limit, and the send refuses its length", async () => {
     // 20 minutes of 8 kHz, 8-bit mono: a small file, longer than any voice note.
-    const rate = 8_000, seconds = 20 * 60;
-    const data = Buffer.alloc(rate * seconds, 128);
+    const data = Buffer.alloc(8_000 * 20 * 60, 128);
     for (let i = 0; i < data.length; i += 97) data[i] = 200;
-    const head = Buffer.alloc(44);
-    head.write("RIFF", 0); head.writeUInt32LE(36 + data.length, 4); head.write("WAVE", 8);
-    head.write("fmt ", 12); head.writeUInt32LE(16, 16); head.writeUInt16LE(1, 20); head.writeUInt16LE(1, 22);
-    head.writeUInt32LE(rate, 24); head.writeUInt32LE(rate, 28); head.writeUInt16LE(1, 32); head.writeUInt16LE(8, 34);
-    head.write("data", 36); head.writeUInt32LE(data.length, 40);
     const path = join(dir, "long.wav");
-    writeFileSync(path, Buffer.concat([head, data]));
+    writeFileSync(path, Buffer.concat([head8k(data.length), data]));
     const voice = await measured(path);
     expect(voice.duration).toBeGreaterThan(VOICE_LIMITS.maxDurationMs + 5_000);
     expect(voice.duration).toBeLessThanOrEqual(VOICE_LIMITS.maxDurationMs + 6_000);
     expect(parseVoiceMeta(voice, "audio/wav")).toBeUndefined();
+  });
+
+  // The whole file was read into the daemon's memory before its kind was known: +190 MiB for a 15-minute WAV, and
+  // one past 256 MiB was refused as too large to decode (agents#1577). A WAV is read in pieces, as far as the meter goes.
+  it("reads a WAV from the file in pieces, however large the file", async () => {
+    const size = 300 * 1024 * 1024;
+    const path = join(dir, "huge.wav");
+    // All but the header a hole in the file: nothing on the disk.
+    writeFileSync(path, head8k(size - 44));
+    truncateSync(path, size);
+    const voice = await measured(path);
+    expect(voice.duration).toBeGreaterThan(VOICE_LIMITS.maxDurationMs + 5_000);
+    expect(voice.duration).toBeLessThanOrEqual(VOICE_LIMITS.maxDurationMs + 6_000);
   });
 
   it.skipIf(!hasFfmpeg)("an MP3 and a sound through ffmpeg stop past the limit too", async () => {
@@ -161,7 +178,8 @@ describe("a voice note's waveform, measured from its file", () => {
     const path = join(dir, "noise.m4a");
     writeFileSync(path, Buffer.from("not a sound at all"));
     await expect(decodeWithFfmpeg(path, "ghostly-no-such-ffmpeg")).rejects.toThrow(/install ffmpeg/);
+    // ffmpeg reads it and finds no sound; without ffmpeg it could only not be measured.
     const result = await measureVoice(path);
-    expect(result).toEqual({ problem: expect.any(String) });
+    expect(result).toEqual({ problem: expect.any(String), ...(hasFfmpeg ? { notSound: true } : {}) });
   });
 });

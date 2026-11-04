@@ -26,6 +26,8 @@
   "shareNoRoomNext": "Libera spazio, poi condividilo di nuovo.",
   "shareNone": "Non è stato condiviso nulla, o è già stato ritirato.",
   "shareOneFile": "1 file",
+  "sharePastLimit": "Sono arrivati solo i primi {{count}} file. Lasciati fuori: {{names}}",
+  "sharePastLimitNext": "Condividi di nuovo il resto, oppure apri una chat e inviali con + → Documento.",
   "shareTitle": "Condividi in…",
   "shareTooLarge": "Troppo grande da condividere qui: {{names}}",
   "shareTooLargeNext": "Apri una chat e invialo con + → Documento.",
@@ -43,6 +45,7 @@
   "wakeHint": "Le app dei tuoi contatti possono svegliare questa con un push. Nulla del messaggio ci finisce dentro.",
   "wakeInfo": "Passa dal servizio push del tuo browser (Google, Apple o Mozilla), che sa quando. I tuoi contatti conoscono il tuo indirizzo push; Nuovo indirizzo ne crea un altro.",
   "wakeMoveHere": "{{device}} vuole spostare qui questo profilo. Apri Ghostly.",
+  "wakeNoPushService": "Questo browser non ha un servizio push, quindi Ghostly non può essere svegliato mentre è chiuso. Su GrapheneOS, installa Google Play in sandbox o usa un altro browser.",
   "wakeNotice": "Nuovo messaggio",
   "wakeOnHint": "Attivo. Un messaggio inviato con Ghostly chiuso mostra \"Nuovo messaggio\".",
   "wakeRotate": "Nuovo indirizzo",
@@ -51,5 +54,6 @@
   "wakeStandbyCallUnnamed": "Chiamata per te. Apri Ghostly sul tuo dispositivo attivo.",
   "wakeStandbyUnnamed": "Nuovo messaggio. Apri Ghostly sul tuo dispositivo attivo.",
   "wakeTakeover": "{{device}} vuole subentrare. Apri Ghostly.",
+  "wakeTryAgain": "Riprova",
   "wakeUnavailable": "Questo browser non può svegliare Ghostly mentre è chiuso."
 }

@@ -17,7 +17,7 @@ import { renderApp } from "../render";
  * The mirror that writes the engine's rows into the chat's session is off in these tests (test/setup.ts): the rows
  * are added as it adds them (`addMessages`); packages/browser/test/platformSync.test.ts covers the mirror itself.
  */
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const PEER = "peer".padEnd(52, "p");
 const MINUTE = 60_000;

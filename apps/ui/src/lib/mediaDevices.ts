@@ -93,7 +93,25 @@ export function setDeviceSource(next: DeviceSource | null): void {
 
 export const deviceSource = (): DeviceSource | null => source;
 
-export const hasMediaDevices = () => !!source || (typeof navigator !== "undefined" && typeof navigator.mediaDevices?.enumerateDevices === "function");
+/**
+ * A camera's picture for the page (a photo, a QR scan): the device source's where there is one, as WebKitGTK refuses
+ * the page a camera (apps/desktop/src/microphone.rs), else the page's own. Rejects where there is neither.
+ */
+export function captureCamera(constraints: MediaStreamConstraints): Promise<MediaStream> {
+  if (source) return source.getUserMedia(constraints);
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return Promise.reject(new Error("unsupported"));
+  return navigator.mediaDevices.getUserMedia(constraints);
+}
+
+/** Whether there is a camera to capture from (see `captureCamera`). Browsers list theirs before any permission. */
+export async function cameraListed(): Promise<boolean> {
+  if (source) return (await source.list()).videoinput.length > 0;
+  const devices = typeof navigator !== "undefined" ? navigator.mediaDevices : undefined;
+  if (!devices?.getUserMedia || !devices.enumerateDevices) return false;
+  return (await devices.enumerateDevices()).some((d) => d.kind === "videoinput");
+}
+
+export const hasMediaDevices =() => !!source || (typeof navigator !== "undefined" && typeof navigator.mediaDevices?.enumerateDevices === "function");
 
 /** Whether this engine can send sound to a chosen speaker (Chromium does; Safari and older WebKit may not). */
 export const canPickSpeaker = () => !!source || (typeof HTMLMediaElement !== "undefined" && typeof (HTMLMediaElement.prototype as { setSinkId?: unknown }).setSinkId === "function");

@@ -40,6 +40,15 @@ async function refused(user: Parameters<typeof press>[0], button: HTMLElement, p
 }
 
 describe("the Fedimint panel", () => {
+  it("a phone's keyboard is told not to change a typed invite or notes", () => {
+    renderApp(<FedimintWalletPanel wallet={{} as WalletPlatform} state={joined()} />);
+    for (const field of [screen.getByLabelText("Federation invite code"), screen.getByTestId("fedimint-notes-in")]) {
+      expect(field).toHaveAttribute("autocapitalize", "none");
+      expect(field).toHaveAttribute("autocorrect", "off");
+      expect(field).toHaveAttribute("spellcheck", "false");
+    }
+  });
+
   it("Look at this federation is busy where pressed and keeps the keys after a refusal; Join takes them, Cancel gives them back", async () => {
     let previewed = later<FederationInfo>();
     const wallet = { fedimintPreview: () => previewed.promise } as Partial<WalletPlatform> as WalletPlatform;

@@ -138,6 +138,54 @@ fn start(pipeline: &gst::Pipeline, what: &str) -> Result<(), String> {
     })
 }
 
+/// How long a device just started has to give its first buffer before it counts as working all the same.
+const FIRST_BUFFER: Duration = Duration::from_secs(2);
+
+/// [`start`] for a device that captures: it has started once its first buffer reaches a sink. GStreamer says yes
+/// to `set_state` and only then opens a live source and agrees on a format, so a camera that cannot ("not-
+/// negotiated") or a device that fails right away says so on the bus a moment later: that start failed too. One
+/// that has given nothing by FIRST_BUFFER and said nothing is taken as started.
+fn start_capturing(pipeline: &gst::Pipeline, what: &str) -> Result<(), String> {
+    let bus = pipeline.bus().ok_or("No bus")?;
+    let flowing = || gst::message::Application::new(gst::Structure::new_empty("ghostly-flowing"));
+    let mut sinks = pipeline.iterate_sinks();
+    while let Ok(Some(sink)) = sinks.next() {
+        let Some(pad) = sink.static_pad("sink") else {
+            continue;
+        };
+        let to = sink.clone();
+        pad.add_probe(gst::PadProbeType::BUFFER, move |_, _| {
+            let _ = to.post_message(flowing());
+            gst::PadProbeReturn::Remove
+        });
+    }
+    start(pipeline, what)?;
+    let deadline = Instant::now() + FIRST_BUFFER;
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let Some(message) = bus.timed_pop_filtered(
+            gst::ClockTime::from_nseconds(left.as_nanos() as u64),
+            &[gst::MessageType::Error, gst::MessageType::Application],
+        ) else {
+            return Ok(());
+        };
+        match message.view() {
+            gst::MessageView::Error(error) => {
+                let _ = pipeline.set_state(gst::State::Null);
+                return Err(format!("{what}: {}", error.error()));
+            }
+            gst::MessageView::Application(said)
+                if said
+                    .structure()
+                    .is_some_and(|s| s.name() == "ghostly-flowing") =>
+            {
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
+}
+
 fn launch(description: &str) -> Result<gst::Pipeline, String> {
     gst::init().map_err(|e| e.to_string())?;
     gst::parse::launch(description)
@@ -184,11 +232,27 @@ const SAID_AT_MOST: u64 = 8;
 
 /// Logs a playing pipeline's errors and warnings. Nothing else reads its bus once it plays, so a decoder that
 /// cannot negotiate or a camera that fails a moment later stopped without a word. Everything stays on the bus
-/// (`start` reads the error that kept a pipeline from starting). `heard` gets what a `level` in it reads
-/// ([`loudness`]); those messages leave the bus, or it would fill with twelve a second.
+/// (`start` and `start_capturing` read the error that kept a pipeline from starting). `heard` gets what a `level`
+/// in it reads ([`loudness`]); those messages leave the bus, or it would fill with twelve a second.
 fn watch(pipeline: &gst::Pipeline, what: &'static str, heard: Option<Heard>) {
+    watch_device(pipeline, what, heard, None);
+}
+
+/// Called once, on a pipeline's first error: its device stopped (unplugged, a bus error after it ran).
+type Failed = Arc<dyn Fn() + Send + Sync>;
+
+/// [`watch`] for a camera's or a microphone's pipeline: `failed` hears its first error, so the page can end the
+/// track and go on with the default (`useCallDevices`). An error while it starts is the start's ([`start_with`]
+/// tries the default): `failed` is for the caller to ignore until the pipeline is the one in use.
+fn watch_device(
+    pipeline: &gst::Pipeline,
+    what: &'static str,
+    heard: Option<Heard>,
+    failed: Option<Failed>,
+) {
     let Some(bus) = pipeline.bus() else { return };
     let said = AtomicU64::new(0);
+    let told = AtomicBool::new(false);
     bus.set_sync_handler(move |_, message| {
         if let Some(heard) = &heard {
             if let Some(level) = loudness(message) {
@@ -201,6 +265,11 @@ fn watch(pipeline: &gst::Pipeline, what: &'static str, heard: Option<Heard>) {
             gst::MessageView::Warning(w) => ("warning", w.error().to_string(), w.debug()),
             _ => return gst::BusSyncReply::Pass,
         };
+        if level == "error" && !told.swap(true, Ordering::Relaxed) {
+            if let Some(failed) = &failed {
+                failed();
+            }
+        }
         if said.fetch_add(1, Ordering::Relaxed) < SAID_AT_MOST {
             let from = message
                 .src()
@@ -233,7 +302,8 @@ fn with_device(description: &str, kind: Kind, name: &str) -> Result<gst::Pipelin
 }
 
 /// Plays `description` with the `kind` named `wanted` where `{device}` is, or with `default` when there is no
-/// such device or it will not start (said in the log; the page sees it in what is used). `ready` sets the
+/// such device or it will not start, a camera or microphone failing in its first moments included
+/// ([`start_capturing`]; said in the log; the page sees it in what is used). `ready` sets the
 /// pipeline up before it plays. Returns it and the name of the device it uses, None for the default.
 fn start_with(
     what: &str,
@@ -246,7 +316,12 @@ fn start_with(
     if let Some(name) = wanted {
         let chosen = with_device(description, kind, name).and_then(|pipeline| {
             ready(&pipeline)?;
-            start(&pipeline, what)?;
+            // A speaker's sound comes with the peer's: nothing flows to wait for.
+            if kind == Kind::Speaker {
+                start(&pipeline, what)?;
+            } else {
+                start_capturing(&pipeline, what)?;
+            }
             Ok(pipeline)
         });
         match chosen {
@@ -287,7 +362,9 @@ impl Camera {
             .filter(|_| fake)
             .and_then(|name| FAKE_CAMERAS.iter().find(|(n, _)| *n == name));
         let target: Arc<Mutex<Option<gst_app::AppSrc>>> = Arc::default();
-        let ready = |pipeline: &gst::Pipeline| Camera::wire(pipeline, &target, &preview);
+        // Set once the camera has started: a failure before is the start's.
+        let started = Arc::new(AtomicBool::new(false));
+        let ready = |pipeline: &gst::Pipeline| Camera::wire(pipeline, &target, &preview, &started);
         let (pipeline, device) = match pretend {
             Some((name, pattern)) => {
                 let (pipeline, _) = start_with(
@@ -324,6 +401,7 @@ impl Camera {
                 (pipeline, if wanted.is_some() { device } else { None })
             }
         };
+        started.store(true, Ordering::Relaxed);
         Ok(Camera {
             pipeline,
             target,
@@ -331,13 +409,25 @@ impl Camera {
         })
     }
 
-    /// The camera's frames to `target`'s call, and to `preview`.
+    /// The camera's frames to `target`'s call, and to `preview`; once `started`, its failure to `preview` too, as
+    /// `{"ended":"camera"}`.
     fn wire(
         pipeline: &gst::Pipeline,
         target: &Arc<Mutex<Option<gst_app::AppSrc>>>,
         preview: &Sink,
+        started: &Arc<AtomicBool>,
     ) -> Result<(), String> {
-        watch(pipeline, "the camera", None);
+        let (page, started) = (preview.clone(), started.clone());
+        let failed: Failed = Arc::new(move || {
+            if started.load(Ordering::Relaxed) {
+                page(
+                    serde_json::json!({ "ended": "camera" })
+                        .to_string()
+                        .into_bytes(),
+                );
+            }
+        });
+        watch_device(pipeline, "the camera", None, Some(failed));
         let to = target.clone();
         element::<gst_app::AppSink>(pipeline, "out")?.set_callbacks(
             gst_app::AppSinkCallbacks::builder()
@@ -590,6 +680,17 @@ impl Shared {
             let levels = serde_json::json!({ "levels": { side: hundredths as f64 / 100.0 } });
             (shared.events)(levels.to_string().into_bytes());
         })
+    }
+
+    /// Tells the page a device the call uses stopped mid-call: `{"ended":"microphone"}`.
+    fn ended(&self, device: &str) {
+        if !self.closed.load(Ordering::Relaxed) {
+            (self.events)(
+                serde_json::json!({ "ended": device })
+                    .to_string()
+                    .into_bytes(),
+            );
+        }
     }
 
     /// Media arrived, so the call is up, whatever ICE has managed to say.
@@ -1182,6 +1283,8 @@ struct Voice {
     muted: AtomicBool,
     /// Where each microphone's loudness goes.
     heard: Heard,
+    /// Where the current microphone's failure goes (`Shared::ended`).
+    failed: Failed,
 }
 
 impl Voice {
@@ -1197,7 +1300,14 @@ impl Voice {
             wanted,
             default,
             |p| {
-                watch(p, "the microphone", Some(self.heard.clone()));
+                // Only while it is the one sent: one failing as it starts, or replaced since, is not the call's.
+                let (current, failed) = (self.current.clone(), self.failed.clone());
+                let failed: Failed = Arc::new(move || {
+                    if current.load(Ordering::Relaxed) == mine {
+                        failed();
+                    }
+                });
+                watch_device(p, "the microphone", Some(self.heard.clone()), Some(failed));
                 element::<gst::Element>(p, "mic")?.set_property("mute", muted);
                 let current = self.current.clone();
                 feed(
@@ -1226,7 +1336,10 @@ pub struct Call {
     send: gst::Pipeline,
     video_in: gst_app::AppSrc,
     voice: Voice,
+    /// Held while another microphone opens.
     microphone: Mutex<Microphone>,
+    /// The volume of the microphone sent, apart: mute never waits for a microphone opening.
+    volume: Mutex<gst::Element>,
     ssrcs: (u32, u32),
     /// The profile has a TURN server: gathering waits for a relay candidate.
     uses_turn: bool,
@@ -1243,7 +1356,8 @@ impl Call {
     /// The pipelines playing and the peer connection ready to offer or answer. `fake`: a test tone and nothing
     /// played by default ([`fake_media`]; a device chosen by name is used all the same). `servers`: the profile's
     /// own ICE servers ([`ice::usable`] ones), after the built-in STUN server. `events` hears the ICE state and
-    /// each side's loudness (JSON, [`Shared::hears`]), and each picture that arrives (JPEG).
+    /// each side's loudness (JSON, [`Shared::hears`]), a microphone that stopped mid-call ([`Shared::ended`]), and
+    /// each picture that arrives (JPEG).
     pub async fn new(
         opus_pt: u8,
         vp8_pt: u8,
@@ -1329,6 +1443,10 @@ impl Call {
             current: Arc::default(),
             muted: AtomicBool::new(false),
             heard: shared.hears("mic"),
+            failed: {
+                let shared = shared.clone();
+                Arc::new(move || shared.ended("microphone"))
+            },
         };
         let (counted, open) = (shared.clone(), shared.clone());
         let pictures = writer(
@@ -1375,6 +1493,7 @@ impl Call {
             video_in: element(&send, "video")?,
             send,
             voice,
+            volume: Mutex::new(microphone.volume.clone()),
             microphone: Mutex::new(microphone),
             ssrcs,
             uses_turn,
@@ -1390,13 +1509,23 @@ impl Call {
             return Err("The call was closed".into());
         }
         let next = self.voice.open(wanted)?;
-        let previous = std::mem::replace(&mut *microphone, next);
-        stop(previous.pipeline);
+        self.switch_to(&mut microphone, next);
         crate::diagnostics::log(&format!(
             "native call: microphone {}",
             microphone.device.as_deref().unwrap_or("(default)")
         ));
         Ok(microphone.device.clone())
+    }
+
+    /// Makes `next`, just opened, the microphone muted or not: mute may have been pressed while it opened.
+    fn switch_to(&self, microphone: &mut Microphone, next: Microphone) {
+        {
+            let mut volume = self.volume.lock().unwrap();
+            *volume = next.volume.clone();
+            volume.set_property("mute", self.voice.muted.load(Ordering::Relaxed));
+        }
+        let previous = std::mem::replace(microphone, next);
+        stop(previous.pipeline);
     }
 
     /// Plays the peer's sound on the speaker named `wanted` (None: the default), from now on. Blocking.
@@ -1555,13 +1684,11 @@ impl Call {
         }
     }
 
+    /// Not blocking: the window's thread calls it, while another microphone may be opening.
     pub fn set_muted(&self, muted: bool) {
+        let volume = self.volume.lock().unwrap();
         self.voice.muted.store(muted, Ordering::Relaxed);
-        self.microphone
-            .lock()
-            .unwrap()
-            .volume
-            .set_property("mute", muted);
+        volume.set_property("mute", muted);
     }
 
     pub fn video_input(&self) -> gst_app::AppSrc {
@@ -1779,6 +1906,54 @@ mod tests {
             "the tone lasted {:?}",
             started.elapsed()
         );
+    }
+
+    /// A device that opens and then cannot agree on a format (an IPU6 camera through a bare `v4l2src`) or fails a
+    /// moment later: GStreamer says so on the bus, after `set_state` said yes. That start failed, so the default
+    /// is tried; a device whose pictures come starts at once.
+    #[test]
+    fn a_device_that_fails_once_playing_did_not_start() {
+        if let Some(missing) = missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        let not_negotiated = launch(
+            "videotestsrc is-live=true ! capsfilter name=device \
+             ! appsink name=out caps=video/x-raw,format=I420 sync=false async=false",
+        )
+        .unwrap();
+        // Set after linking, as a device's own formats are found only once it opens.
+        element::<gst::Element>(&not_negotiated, "device")
+            .unwrap()
+            .set_property(
+                "caps",
+                gst::Caps::builder("video/x-raw")
+                    .field("format", "RGB")
+                    .build(),
+            );
+        let failed = start_capturing(&not_negotiated, "The camera");
+        assert!(
+            failed
+                .as_ref()
+                .is_err_and(|e| e.starts_with("The camera: ")),
+            "{failed:?}"
+        );
+        assert_eq!(not_negotiated.current_state(), gst::State::Null);
+
+        let working = launch(
+            "videotestsrc is-live=true ! video/x-raw,format=I420 ! queue name=device \
+             ! appsink name=out sync=false async=false",
+        )
+        .unwrap();
+        let started = Instant::now();
+        assert_eq!(start_capturing(&working, "The camera"), Ok(()));
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_eq!(working.current_state(), gst::State::Playing);
+        stop(working);
     }
 
     /// A peer's pictures faster than the page is shown them (a browser sends 30 a second): the ones left out are
@@ -2238,6 +2413,160 @@ mod tests {
         assert_eq!(b.stats().video_received, 0, "{}", stats());
         a.close().await;
         b.close().await;
+    }
+
+    /// Mute pressed while another microphone opens: it does not wait for the open (the window's thread calls it,
+    /// and the window froze until GStreamer had opened the device), and the microphone switched in is muted all
+    /// the same, though it opened before the press.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn mute_does_not_wait_for_a_microphone_opening() {
+        if let Some(missing) = missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        let a = Arc::new(
+            Call::new(
+                OPUS_PT,
+                VP8_PT,
+                true,
+                Devices::default(),
+                &[],
+                Arc::new(|_| {}),
+            )
+            .await
+            .unwrap(),
+        );
+        let muted = {
+            // As `set_microphone` has it while GStreamer opens the device: the lock held, the new one opened
+            // unmuted.
+            let mut opening = a.microphone.lock().unwrap();
+            let next = a.voice.open(None).unwrap();
+            let (pressed, done) = std::sync::mpsc::channel();
+            let pressing = a.clone();
+            std::thread::spawn(move || {
+                pressing.set_muted(true);
+                let _ = pressed.send(());
+            });
+            if done.recv_timeout(Duration::from_secs(5)).is_err() {
+                drop(opening);
+                panic!("mute waited for the microphone opening");
+            }
+            a.switch_to(&mut opening, next);
+            opening.volume.property::<bool>("mute")
+        };
+        assert!(muted, "the microphone switched in is sent unmuted");
+        assert!(a.stats().muted);
+        a.close().await;
+    }
+
+    /// The device of a playing pipeline fails, as one unplugged or with a bus error does: its source posts an
+    /// error, twice.
+    fn fail(pipeline: &gst::Pipeline) {
+        let source = pipeline.iterate_sources().next().unwrap().unwrap();
+        for _ in 0..2 {
+            let error =
+                gst::message::Error::builder(gst::ResourceError::Read, "The device went away")
+                    .src(&source)
+                    .build();
+            source.post_message(error).unwrap();
+        }
+    }
+
+    /// What a page was told apart from pictures and levels (`{"ended":"camera"}`), in order.
+    #[derive(Clone, Default)]
+    struct Told(Arc<Mutex<Vec<serde_json::Value>>>);
+
+    impl Told {
+        fn heard(&self, bytes: &[u8]) {
+            if let Ok(said) = serde_json::from_slice::<serde_json::Value>(bytes) {
+                if said.get("ended").is_some() {
+                    self.0.lock().unwrap().push(said);
+                }
+            }
+        }
+
+        fn said(&self) -> Vec<serde_json::Value> {
+            self.0.lock().unwrap().clone()
+        }
+    }
+
+    /// A camera that fails once it gives pictures (unplugged, a bus error after it ran) tells the page, once, on its
+    /// frames' channel: the page ends its track and goes on with the default.
+    #[test]
+    fn a_camera_that_fails_mid_call_tells_the_page() {
+        if let Some(missing) = missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        let (told, pictures) = (Told::default(), Arc::new(AtomicU64::new(0)));
+        let (into, seen) = (told.clone(), pictures.clone());
+        let camera = Camera::open(
+            true,
+            Some("Test bars"),
+            Arc::new(move |bytes: Vec<u8>| {
+                if bytes.starts_with(&[0xff, 0xd8]) {
+                    seen.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    into.heard(&bytes);
+                }
+            }),
+        )
+        .unwrap();
+        let end = Instant::now() + Duration::from_secs(10);
+        while pictures.load(Ordering::Relaxed) < 3 {
+            assert!(Instant::now() < end, "no pictures");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert_eq!(told.said(), Vec::<serde_json::Value>::new());
+        fail(&camera.pipeline);
+        assert_eq!(told.said(), [serde_json::json!({ "ended": "camera" })]);
+        drop(camera);
+    }
+
+    /// The microphone a call sends fails mid-call: the call's page is told, once. The one it switches to is a
+    /// microphone of its own, told in turn when it fails.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_microphone_that_fails_mid_call_tells_the_page() {
+        if let Some(missing) = missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        let (told, levels) = (Told::default(), Levels::default());
+        let (into, heard) = (told.clone(), levels.clone());
+        let a = Call::new(
+            OPUS_PT,
+            VP8_PT,
+            true,
+            Devices::default(),
+            &[],
+            Arc::new(move |bytes: Vec<u8>| {
+                into.heard(&bytes);
+                heard.heard(&bytes);
+            }),
+        )
+        .await
+        .unwrap();
+        until(
+            "the microphone runs",
+            10,
+            || levels.of("mic") > 0.0,
+            || levels.said(),
+        )
+        .await;
+        let ended = serde_json::json!({ "ended": "microphone" });
+        fail(&a.microphone.lock().unwrap().pipeline);
+        assert_eq!(told.said(), std::slice::from_ref(&ended));
+
+        let used = tokio::task::block_in_place(|| a.set_microphone(None));
+        assert_eq!(used, Ok(None));
+        assert_eq!(
+            told.said(),
+            std::slice::from_ref(&ended),
+            "the new one has not failed"
+        );
+        fail(&a.microphone.lock().unwrap().pipeline);
+        assert_eq!(told.said(), [ended.clone(), ended]);
+        a.close().await;
     }
 
     #[test]

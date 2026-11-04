@@ -1,0 +1,1 @@
+When every listener is taken: where Iroh is the browser build and none of its Iroh relays is n0's, an app holds 64 Iroh listeners and its 1:1 chats 32 of them, instead of sixteen and eight ([902](../../902-group-mesh.md#transports)). How a chat in use takes one is unchanged.

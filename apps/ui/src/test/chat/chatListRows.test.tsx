@@ -154,8 +154,10 @@ describe("the chat list's rows (compact, the default)", () => {
     expect(isSessionPinned("g")).toBe(true);
 
     const row = rowOf("Gus");
-    const mark = await within(row).findByRole("img", { name: "Pinned" });
-    expect(mark).toHaveAttribute("data-testid", "chat-row-pinned");
+    const mark = await within(row).findByTestId("chat-row-pinned");
+    // Said by the row's button, not a second time by the mark.
+    expect(mark).toHaveAttribute("aria-hidden", "true");
+    expect(within(row).getByTestId("chat-row-open")).toHaveAccessibleName("Gus, pinned");
     // Muted, the size of the delivery ticks, on the name's line just before the time — not under it.
     const status = within(row).getByTestId("chat-row-status");
     expect(status).toContainElement(mark);
@@ -204,7 +206,8 @@ describe("the chat list's rows (compact, the default)", () => {
     function Where() { return <p data-testid="where">{useLocation().pathname}</p>; }
     const { user } = renderApp(<UpdateProvider><Sidebar /><Routes><Route path="*" element={<Where />} /></Routes></UpdateProvider>);
     const open = within(rowOf("Nell")).getByTestId("chat-row-open");
-    expect(open).toHaveAccessibleName("Nell");
+    // The name first, then what the row's badge shows (it is hidden from a screen reader).
+    expect(open).toHaveAccessibleName("Nell, 1 unread message");
     expect(open).toHaveAccessibleDescription("lunch?");
     expect(open).not.toHaveAttribute("aria-current");
     // A contact with no name is told apart by its key, as the tooltip does.
@@ -213,7 +216,7 @@ describe("the chat list's rows (compact, the default)", () => {
     await user.keyboard("{Enter}");
     expect(screen.getByTestId("where")).toHaveTextContent("/chat/n");
     const group = within(screen.getByTestId("group-row")).getByTestId("group-row-open");
-    expect(group).toHaveAccessibleName("Climbing");
+    expect(group).toHaveAccessibleName("Climbing, unread messages");
     group.focus();
     await user.keyboard(" ");
     expect(screen.getByTestId("where")).toHaveTextContent("/group/g1");
@@ -246,7 +249,7 @@ describe("the chat list's rows (compact, the default)", () => {
     localStorage.setItem("ghostly_pin_m", "1");
     renderApp(<UpdateProvider><Sidebar /></UpdateProvider>, { language: "pt" });
     const row = rowOf("Mia");
-    expect(within(row).getByTestId("chat-row-pinned")).toHaveAccessibleName("Fixada");
+    expect(within(row).getByTestId("chat-row-open")).toHaveAccessibleName("Mia, fixada");
     expect(within(row).getByTestId("chat-row-pin")).toHaveAccessibleName("Desafixar conversa");
   });
 

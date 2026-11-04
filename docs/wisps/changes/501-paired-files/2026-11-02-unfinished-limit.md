@@ -1,0 +1,1 @@
+A Ghostly receiver keeps at most 256 unfinished files per contact, whatever their state and size: past that a new offer, or an ended one offered again, is refused with `too-many`. A taken file waiting its turn of which no byte arrived in seven days since it was taken (or accepted, or resumed) ends as `expired`, and is taken again when offered again. No new frame.

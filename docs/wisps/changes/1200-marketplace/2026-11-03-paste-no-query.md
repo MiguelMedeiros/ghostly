@@ -1,0 +1,1 @@
+Paste a URL: a pasted link to `raw.githubusercontent.com` or `cdn.jsdelivr.net` with a query or a fragment is refused before any request, for an app and for a store, so the link an app is installed from never brings a private repository's read token onto a card.

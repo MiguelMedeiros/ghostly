@@ -25,6 +25,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
+  # GitHub's ubuntu-24.04 runners refuse the unprivileged user namespaces Chromium's sandbox needs ("Chromium sandboxing
+  # failed!"): the e2e and site checks launch it without here, as before; our own machines keep it on (e2e/support/chromiumSandbox.ts).
+  E2E_CHROMIUM_SANDBOX: "0"
   # As android-native.yml: the runner image's NDK, named, and a smaller debug library.
   NDK_VERSION: 27.3.13750724
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
@@ -162,7 +165,7 @@ jobs:
           arch: x86_64
           target: google_apis
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
+          emulator-options: -no-window -gpu swangle -noaudio -no-boot-anim -camera-back none -camera-front none
           script: mkdir -p test-results/android-run; (adb logcat -v time > test-results/android-run/logcat.txt 2>&1 &); npx playwright test -c e2e/android/playwright.config.ts --workers 1; status=$?; timeout 60 adb exec-out screencap -p > test-results/android-run/device.png; exit $status
 
       - name: Upload the results

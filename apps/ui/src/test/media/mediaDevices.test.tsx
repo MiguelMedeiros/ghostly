@@ -5,7 +5,8 @@ import { useWebRTC } from "@ghostly/react";
 import { FakePeerConnection, device, installWebRTCFakes, remote, type FakeMediaDevices, type FakeTrack } from "../../../../../packages/react/test/fakes";
 import { CallOverlay } from "../../components/CallOverlay";
 import { MediaSettings } from "../../components/MediaSettings";
-import { CameraCapture } from "../../components/composer/CameraCapture";
+import { CameraCapture, useHasCamera } from "../../components/composer/CameraCapture";
+import { qrCamera } from "../../lib/qrReader";
 import { useCallDevices } from "../../hooks/useCallDevices";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
 import { chooseDevice, followSpeaker, groupDevices, isMediaDenied, loadDeviceChoices, mediaDeniedText, preferredDevice, resolveDevice, setDeviceSource, type DeviceList, type DeviceSource } from "../../lib/mediaDevices";
@@ -575,6 +576,25 @@ describe("a headset plugged in and out during a call", () => {
     await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
     expect(devices.userMedia).toHaveLength(2);
   });
+
+  it("a device chosen in the call that cannot be opened: the call keeps its own, says so, and the choice stays as it was", async () => {
+    chooseDevice("audioinput", { id: "mic-builtin", label: "MacBook Pro Microphone" });
+    const { hook, audio } = await callWithDevices();
+    const before = audio.track;
+    // Another app holds the headset's microphone.
+    act(() => hook.result.current.devices!.choose("audioinput", "mic-headset"));
+    await waitFor(() => expect(devices.userMedia).toHaveLength(2));
+    act(() => devices.userMedia[1].deny(new DOMException("Could not start audio source", "NotReadableError")));
+
+    await waitFor(() => expect(hook.result.current.devices?.notice).toEqual({ kind: "audioinput", type: "failed", name: "AirPods" }));
+    expect(audio.track).toBe(before);
+    expect(hook.result.current.webrtc.callState).toBe("connected");
+    expect(hook.result.current.devices?.current.audioinput).toBe("mic-builtin");
+    expect(loadDeviceChoices().audioinput).toEqual({ id: "mic-builtin", label: "MacBook Pro Microphone" });
+    // Putting the choice back is not taken for one made in Settings.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(devices.userMedia).toHaveLength(2);
+  });
 });
 
 describe("a device chosen in Settings during a call", () => {
@@ -687,6 +707,12 @@ describe("the call window's device menu", () => {
     expect(switchBack).toHaveBeenCalledOnce();
   });
 
+  it("tells about a device chosen in the call that could not be opened", () => {
+    overlayWith(view({ notice: { kind: "videoinput", type: "failed", name: "Logitech C920" } }));
+    expect(screen.getByTestId("call-device-notice")).toHaveTextContent("Could not use Logitech C920. The call keeps the one it had.");
+    expect(screen.queryByTestId("call-device-switch-back")).toBeNull();
+  });
+
   it("speaks the app's language", async () => {
     const { user } = renderApp(
       <CallOverlay callState="connected" localStream={null} remoteStream={null} isMuted={false} isVideoOff={false} canSendVideo canShareScreen
@@ -729,5 +755,47 @@ describe("the composer's camera", () => {
     chooseDevice("videoinput", { id: "cam-usb", label: "Logitech C920" });
     renderApp(<CameraCapture onSend={vi.fn()} onClose={vi.fn()} />);
     expect(devices.userMedia[0].constraints).toEqual({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, deviceId: { ideal: "cam-usb" } }, audio: false });
+  });
+
+  describe("where the page's camera is refused and calls capture outside the page (Linux Desktop)", () => {
+    const stream = { getTracks: () => [] } as unknown as MediaStream;
+    function source(videoinput: { id: string; label: string }[]) {
+      const next: DeviceSource = {
+        list: async () => ({ audioinput: [], videoinput, audiooutput: [], defaults: {}, named: true }),
+        watch: () => () => {},
+        getUserMedia: vi.fn(async () => stream),
+        playCallOn: vi.fn(),
+      };
+      setDeviceSource(next);
+      return next;
+    }
+    afterEach(() => setDeviceSource(null));
+
+    it("takes the photo with the camera Settings previews", async () => {
+      const native = source([{ id: "Built-in Front Camera", label: "Built-in Front Camera" }]);
+      chooseDevice("videoinput", { id: "Built-in Front Camera", label: "Built-in Front Camera" });
+      renderApp(<CameraCapture onSend={vi.fn()} onClose={vi.fn()} />);
+      await waitFor(() => expect(native.getUserMedia).toHaveBeenCalledWith({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, deviceId: { ideal: "Built-in Front Camera" } }, audio: false }));
+      expect(devices.getUserMedia, "the page's own camera, always refused there, is not asked").not.toHaveBeenCalled();
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+
+    it("scans a QR with it", async () => {
+      const native = source([{ id: "Built-in Front Camera", label: "Built-in Front Camera" }]);
+      await expect(qrCamera()).resolves.toBe(stream);
+      expect(native.getUserMedia).toHaveBeenCalledWith({ video: { facingMode: { ideal: "environment" } }, audio: false });
+      expect(devices.getUserMedia).not.toHaveBeenCalled();
+    });
+
+    it("offers the Camera row by the cameras it lists, not the page's", async () => {
+      source([]);
+      const none = renderHook(() => useHasCamera());
+      await act(async () => {});
+      expect(none.result.current, "the page lists a camera, the source none").toBe(false);
+      source([{ id: "Built-in Front Camera", label: "Built-in Front Camera" }]);
+      const one = renderHook(() => useHasCamera());
+      await waitFor(() => expect(one.result.current).toBe(true));
+      expect(devices.enumerateDevices).not.toHaveBeenCalled();
+    });
   });
 });

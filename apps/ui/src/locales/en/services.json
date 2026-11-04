@@ -1,6 +1,7 @@
 {
   "fromContacts": "From your contacts",
   "fromContactsEmpty": "Apps your contacts share show up here.",
+  "ghostlyOnline": "Ghostly online",
   "goOffline": "Go offline: nothing you share stays reachable",
   "goOnline": "Go online",
   "letReach": "Let {{contact}} reach {{app}}",
@@ -9,6 +10,7 @@
   "noContacts": "No contacts yet.",
   "nobodyYet": "Nobody can open it until you pick who.",
   "nothingShared": "Nothing shared yet.",
+  "offDisconnectsChats": "Turning this off disconnects every chat",
   "offline": "Offline",
   "online": "Online",
   "open": "Open {{app}}",
@@ -18,6 +20,7 @@
   "remove": "Remove",
   "removeNamed": "Remove {{app}}",
   "requestCount": "· {{count}} requests",
+  "requestCount_one": "· {{count}} request",
   "share": "Share",
   "shareLocal": "Share a local service",
   "shareNamed": "Share {{app}}",
@@ -29,11 +32,18 @@
     "stopped": "Stopped"
   },
   "window": {
+    "busy": "{{app}} has too many pages loading at once on your contact's machine. Try again in a moment.",
+    "callOn": "A call is on. End it to open {{app}}.",
     "elsewhere": "{{app}} tried to send you somewhere else, outside what your contact shares.",
     "failed": "The request failed.",
+    "label": "{{app}}, shared by {{contact}}",
     "notAnswering": "{{app}} is not answering on your contact's machine. Ask them to check that it is running.",
+    "offline": "Your contact is offline, so {{app}} cannot open now. It opens again here when they are back.",
+    "owner": "{{contact}}'s app, running on their machine. Not Ghostly: never type your recovery words or passwords here.",
+    "retry": "Try again",
     "tooSlow": "{{app}} did not answer in time on your contact's machine. Try again in a moment.",
-    "unreachable": "This service is not reachable. Services exist while their ghost is online."
+    "unreachable": "This service is not reachable. Services exist while their ghost is online.",
+    "unshared": "{{app}} is no longer shared with you."
   },
   "yourApps": "Your apps"
 }

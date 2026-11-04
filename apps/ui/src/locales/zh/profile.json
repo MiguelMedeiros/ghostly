@@ -108,6 +108,7 @@
     "backupFirst": "先下载一份备份",
     "backupPassphrase": "备份密码短语",
     "cashuSats": "Cashu 中 {{amount}} sats",
+    "cashuSats_one": "Cashu 中 {{amount}} sat",
     "confirmLabel": "输入资料名称以确认",
     "confirmPlaceholder": "输入 {{name}}",
     "deleting": "正在删除…",
@@ -129,6 +130,7 @@
   "name": "名称",
   "nameInChats": "聊天中的名字",
   "nameLabel": "资料名称",
+  "nameSaved": "名称已保存",
   "nameStep": {
     "placeholder": "你的名字",
     "save": "继续",
@@ -144,5 +146,6 @@
   "restoredTag": "已恢复",
   "restoredTagHint": "从备份恢复",
   "sats": "{{amount}} sats",
+  "sats_one": "{{amount}} sat",
   "switch": "切换"
 }

@@ -8,10 +8,17 @@ package tools.ghostly.app
  * Kotlin, so a JVM unit test reads it.
  */
 object SharedStream {
-  /** Whether a stream with this scheme and authority may be read; `own` are the authorities of the app's providers. */
+  /**
+   * Whether a stream with this scheme and authority may be read; `own` are the authorities of the app's providers.
+   * Android reads what comes before the last `@` of an authority as the user the provider runs for (a share from a
+   * work profile comes so) and finds the provider by the rest (ContentProvider.getAuthorityWithoutUserId), so the
+   * rest is what is compared: `0@<the app's provider>` is the app's own provider.
+   */
   fun takes(scheme: String?, authority: String?, own: Collection<String>): Boolean {
     if (scheme != "content" || authority.isNullOrEmpty()) return false
-    return own.none { it.equals(authority, ignoreCase = true) }
+    val provider = authority.substringAfterLast('@')
+    if (provider.isEmpty()) return false
+    return own.none { it.equals(provider, ignoreCase = true) }
   }
 
   /**

@@ -51,8 +51,8 @@ export class CatchUpAnswers<F> {
 
   /**
    * The first two slices go now, the rest without holding the group's other frames back. A newer answer to the same
-   * member goes after what is left of the last, without the frames still queued there (the same objects: a store's)
-   * nor those still on their way (`onTheirWay`); it took their place before, and left out what the member's `have`
+   * member goes after what is left of the last, without the frames still queued there (the same objects: a store's, or
+   * the same `key`) nor those still on their way (`onTheirWay`); it took their place before, and left out what the member's `have`
    * said it held: a live frame of an author raises it above that author's frames still queued, which were lost for
    * good. A frame the edge did not take ends the answer (the member asks again when its edge opens).
    */
@@ -62,7 +62,13 @@ export class CatchUpAnswers<F> {
     const sent = this.onTheirWay.get(to), key = this.hooks.key;
     if (sent?.size && key) frames = frames.filter(frame => { const k = key(frame); return k === undefined || !sent.has(k); });
     const going = this.going.get(to);
-    if (going) { const queued = new Set(going); going.push(...frames.filter(frame => !queued.has(frame))); return; }
+    if (going) {
+      // By `key` too: a community's commits and secrets are new objects in each answer.
+      const queued = new Set(going), queuedKeys = new Set(key ? going.map(key) : []);
+      const isQueued = (frame: F) => { const k = key?.(frame); return queued.has(frame) || (k !== undefined && queuedKeys.has(k)); };
+      going.push(...frames.filter(frame => !isQueued(frame)));
+      return;
+    }
     const rest = [...frames], told: Promise<CatchUpHandled>[] = [];
     const ask = () => handled(to).catch(() => false as const);
     // Late, from an app that answers pings: still handling, so it is asked again until it has (a pause there let a

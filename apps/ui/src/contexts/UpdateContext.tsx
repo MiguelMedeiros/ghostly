@@ -170,7 +170,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
         error,
         lastCheckedAt,
         dismissed: !!update && identify(update) === dismissedVersion,
-        downloadUrl: updatePlatform?.downloadUrl ?? "",
+        downloadUrl: update?.downloadUrl ?? updatePlatform?.downloadUrl ?? "",
         check,
         install,
         dismiss,

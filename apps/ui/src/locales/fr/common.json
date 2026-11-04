@@ -13,12 +13,19 @@
     "turnBack": "Cartes"
   },
   "delete": "Supprimer",
+  "deleteChatCallOn": "Un appel est en cours dans cette conversation. Raccrochez d’abord, puis supprimez-la.",
   "deleteChatLocal": "La conversation et son historique seront supprimés de cet appareil, pas chez votre contact.",
   "deleteChatTitle": "Supprimer la conversation ?",
   "error": "Erreur",
   "goHome": "Aller à l’accueil",
   "loading": "Chargement...",
   "moreInfo": "Plus d'infos",
+  "needsYou": {
+    "mark": "à regarder",
+    "show": "Voir",
+    "title": "En attente"
+  },
+  "notCopied": "Non copié",
   "save": "Enregistrer",
   "size": {
     "b": "{{n}} o",

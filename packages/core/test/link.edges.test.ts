@@ -14,6 +14,7 @@ import {
   PRESENCE_WINDOW,
   presenceSeenAt,
   RELAY_POLL_INTERVALS,
+  SIGNAL_OUT_READS,
   STALLED_LOOK_MS,
   WATCH_PEER_MS,
   DEPARTED_READ_MS,
@@ -557,7 +558,7 @@ describe("LinkSession presence and signals", () => {
     await expect(a.s.setRtcSignal(null, true)).rejects.toThrow("relay down");
   });
 
-  it("marks as signaling the publish of a new offer or answer and the fast reads for the answer to its offer, nothing else", async () => {
+  it("marks as signaling the publish of a new offer or answer, the fast reads for the answer to its offer and the first ones after its answer, nothing else", async () => {
     const { a } = pair({ getServices: () => [] });
     a.s.start();
     await settle();
@@ -580,6 +581,20 @@ describe("LinkSession presence and signals", () => {
     a.s.pollNow();
     await settle();
     expect(lastRead()).toMatchObject({ urgent: true });
+    expect(lastRead()).not.toHaveProperty("signal");
+    // An answer: its first fast reads are signaling (the offerer may have given up the offer it answered and made another).
+    await a.s.setRtcSignal('{"t":"a"}');
+    expect(lastPublish()).toEqual({ signal: true });
+    // (The first read is the one a new signal makes at once.)
+    await settle();
+    expect(lastRead()).toMatchObject({ urgent: true, signal: true });
+    for (let i = 1; i < SIGNAL_OUT_READS; i++) {
+      a.s.pollNow();
+      await settle();
+      expect(lastRead()).toMatchObject({ urgent: true, signal: true });
+    }
+    a.s.pollNow();
+    await settle();
     expect(lastRead()).not.toHaveProperty("signal");
     await a.s.stop(false);
   });
@@ -899,6 +914,38 @@ describe("LinkSession poll pacing", () => {
     expect(a.s.peerPresence.online).toBe(true);
     // Answered: from then on a read is the contact's like any other.
     a.s.pollNow();
+    await settle();
+    expect(last()?.resume).toBeUndefined();
+    await a.s.stop(false);
+    await b.s.stop(false);
+  });
+
+  // agents#1740: the edge to a member a hub just let in polled as plain fast reads, which the hub's admissions in a row
+  // had spent: 22-39 s before the newcomer could send, receive or leave.
+  it("an awaited peer's reads go as a resume's (the relays' floor) until its packet is read", async () => {
+    const { a, b } = pair({}, { getServices: () => [] });
+    a.s.start();
+    await settle();
+    const last = () => (a.transport.resolve.mock.calls.at(-1) as unknown[] | undefined)?.[1] as { resume?: boolean } | undefined;
+    expect(last()?.resume).toBeUndefined();
+    a.s.expectPeer(true);
+    await settle();
+    expect(last()?.resume).toBe(true);
+    // Not there yet: still awaited.
+    a.s.pollNow();
+    await settle();
+    expect(last()?.resume).toBe(true);
+    // Its packet read: a read like any other.
+    b.s.start();
+    await settle();
+    a.s.pollNow();
+    await settle();
+    expect(a.s.peerPresence.online).toBe(true);
+    a.s.pollNow();
+    await settle();
+    expect(last()?.resume).toBeUndefined();
+    // A plain expectPeer (an entry session, a chat) never says so.
+    a.s.expectPeer();
     await settle();
     expect(last()?.resume).toBeUndefined();
     await a.s.stop(false);

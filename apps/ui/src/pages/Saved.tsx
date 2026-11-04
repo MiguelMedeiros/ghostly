@@ -13,6 +13,7 @@ import { useSameValue } from "../hooks/useSameValue";
 import { setSaved, useSavedMessages, useSavedRead } from "../hooks/useSavedMessages";
 import { filePreview, formatListTime, previewText } from "../lib/chatList";
 import { appCardLine } from "../lib/statusCards";
+import { useInstalledApps } from "../lib/apps/installed";
 import { authorName, groupPath } from "../lib/groups";
 import { sameValue } from "../lib/sameValue";
 
@@ -38,6 +39,8 @@ export function Saved() {
   const read = useSavedRead();
   const targets = useChatTargets();
   const groups = useSyncExternalStore(subscribeEngine, engineGroups);
+  // An app card names an app installed here as its bubble does (appCardLine): the list read, and the rows made again.
+  const installed = useInstalledApps(saved.some((s) => s.message.card?.kind === "app"));
 
   // The engine sends its chats and groups anew on every state (up to 20 a second while a file moves): the rows stay the
   // same ones while what they show does, and a row is drawn again only when its own content changes (`SavedItem`).
@@ -47,7 +50,7 @@ export function Saved() {
     return saved.flatMap((s): SavedRow[] => {
       const { message } = s, target = byTarget.get(message.linkId);
       // A voice message, a video or an app card in this app's language, as the chat list says it: the history keeps it in English.
-      const text = appCardLine(message.card, t) ?? filePreview(message.file, t) ?? (previewText(message.text, t) || message.file?.name || t("saved.noText"));
+      const text = appCardLine(message.card, t, installed) ?? filePreview(message.file, t) ?? (previewText(message.text, t) || message.file?.name || t("saved.noText"));
       if (message.linkId.startsWith("group:")) {
         // A group this device cannot write in is not a target of a forward, and still has its saved messages.
         const group = byGroup.get(message.linkId);
@@ -58,7 +61,7 @@ export function Saved() {
       if (!target) return [];
       return [{ saved: s, chat: target.name, path: target.path, author: message.sender === "me" ? t("saved.you") : target.name, text }];
     });
-  }, [saved, targets, groups, t]));
+  }, [saved, targets, groups, installed, t]));
 
   // An unsave takes its row, and the button with the focus, away: the focus goes to the row now in its place (the one
   // before it at the end), or to the empty list, not to the page.
@@ -105,15 +108,19 @@ const SavedItem = memo(function SavedItem({ row, index, now, onOpen, onUnsave }:
   const { t, language } = useI18n();
   const { message } = row.saved;
   const time = formatListTime(message.timestamp, now, language, t);
+  const byOther = row.author !== row.chat;
+  // Named by what it shows, in its order (Label in Name); the spaces between its pieces keep their words apart
+  // for that too, and take no room in the flex rows.
+  const name = byOther ? t("saved.rowNameBy", { chat: row.chat, author: row.author, time, text: row.text }) : t("saved.rowName", { chat: row.chat, time, text: row.text });
   return (
     <li data-testid="saved-row" data-message-id={message.id} className="flex items-stretch">
-      <button type="button" data-testid="saved-open" onClick={() => onOpen(row)} aria-label={t("saved.open", { chat: row.chat, text: row.text })}
+      <button type="button" data-testid="saved-open" onClick={() => onOpen(row)} aria-label={name}
         className="flex min-w-0 flex-1 cursor-pointer flex-col gap-0.5 px-4 py-2.5 text-start hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent max-md:min-h-14">
         <span className="flex min-w-0 items-baseline gap-2 text-xs text-text-muted">
-          <bdi data-testid="saved-chat" className="min-w-0 truncate font-medium text-text-secondary">{row.chat}</bdi>
-          {row.author !== row.chat && <bdi data-testid="saved-author" className="min-w-0 truncate">{row.author}</bdi>}
+          <bdi data-testid="saved-chat" className="min-w-0 truncate font-medium text-text-secondary">{row.chat}</bdi>{" "}
+          {byOther && <><bdi data-testid="saved-author" className="min-w-0 truncate">{row.author}</bdi>{" "}</>}
           <span className="ms-auto shrink-0 tabular-nums">{time}</span>
-        </span>
+        </span>{" "}
         <bdi data-testid="saved-text" className="line-clamp-2 text-sm text-text-primary">{row.text}</bdi>
       </button>
       <button type="button" data-testid="saved-unsave" onClick={() => onUnsave(row, index)} aria-label={t("saved.unsave")} title={t("saved.unsave")}
