@@ -726,7 +726,7 @@ export function removalEpoch(chain: readonly GroupCommit[], key: string): number
 function authorOf(frame: GroupEdgeFrame): string | undefined {
   switch (frame.t) {
     case "group-msg": case "group-edit": return frame.s;
-    case "group-bye": return frame.k;
+    case "group-bye": case "group-name": return frame.k;
     case "group-commit": return frame.commit.by;
     case "group-meta": return frame.by;
     default: return undefined;
