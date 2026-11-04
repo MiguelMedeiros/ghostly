@@ -245,7 +245,7 @@ const NATIVE_SLOTS = 8;
  * relays took sixteen started one after another, as the queue here starts them (six of sixteen started at once were
  * refused). 1:1 chats hold eight of them at most, as before: the rest is room for group links. HyperDHT keeps eight
  * there too: a page's listeners share one WebSocket to its relay, which drops a client past sixteen listens (device
- * links listen there as well), and each of the CLI's is a whole DHT node.
+ * links listen there as well).
  */
 const IROH_WEB_SLOTS = 16;
 /**
