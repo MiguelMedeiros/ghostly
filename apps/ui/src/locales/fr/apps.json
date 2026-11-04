@@ -5,8 +5,13 @@
     "checking": "Vérification…",
     "hint": "Un dépôt GitHub, un fichier raw.githubusercontent.com ou jsDelivr à un commit.",
     "label": "Lien de l'app ou de la boutique",
+    "storeEquivocation": "Ce lien contient une autre copie de cette boutique sous le même numéro : la boutique a signé deux listes différentes. Ghostly a gardé la vôtre.",
+    "storeHeld": "Vous avez déjà cette boutique : elle est sur votre page Apps.",
+    "storeNewer": "Vous avez déjà cette boutique. Ce lien en contient une copie plus récente.",
+    "storeOlder": "C'est une copie plus ancienne d'une boutique que vous avez déjà. La vôtre est plus récente et reste telle quelle.",
     "storeReads": "Ghostly la lit depuis {{host}}, qui apprend votre adresse IP.",
-    "title": "Ajouter une app ou une boutique"
+    "title": "Ajouter une app ou une boutique",
+    "updateStore": "Mettre à jour la boutique"
   },
   "app": {
     "export": "Exporter les données",
@@ -31,7 +36,9 @@
     "hint": "Fournie avec Ghostly",
     "openNamed": "Ouvrir {{title}}",
     "remove": "Retirer",
-    "removeNamed": "Retirer {{title}}"
+    "removeNamed": "Retirer {{title}}",
+    "removeText": "Elle ne vous sera plus proposée. Pour la retrouver, installez-la depuis une boutique.",
+    "removeTitle": "Retirer {{title}} ?"
   },
   "card": {
     "ask": "Demandez un lien à {{name}}",
@@ -175,12 +182,14 @@
     "back": "Retour à la discussion",
     "beside": "Afficher la discussion",
     "full": "Pleine largeur",
+    "openAgain": "Rouvrir",
     "resume": "Revenir à {{title}}",
     "resumeSharing": "partage un fichier",
     "sharingWith": "partage un fichier avec {{name}}",
     "stoppedFailed": "{{title}} a cessé de fonctionner et a été fermée. Si cela se reproduit, prévenez son auteur.",
     "stoppedRemoved": "{{title}} a été arrêtée : {{store}} a retiré cette version",
     "stoppedRevoked": "{{title}} a été arrêtée : son auteur a révoqué cette version",
+    "stoppedUnresponsive": "{{title}} ne répondait plus et a été fermée, pour que vos discussions continuent de fonctionner. Rouvrez-la ou, si cela se reproduit, prévenez son auteur.",
     "with": "{{title}} avec {{name}}",
     "withName": "avec {{name}}",
     "withSharing": "{{title}} · partage un fichier avec {{name}}"

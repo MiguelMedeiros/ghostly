@@ -67,6 +67,16 @@
     "unreadCount": "{{name}}, {{count}} mensajes sin leer",
     "unreadOne": "{{name}}, 1 mensaje sin leer"
   },
+  "row": {
+    "mention": "te mencionaron",
+    "muted": "notificaciones silenciadas",
+    "pinned": "fijado",
+    "separator": ", ",
+    "unread": "{{count}} mensajes sin leer",
+    "unreadSome": "mensajes sin leer",
+    "unread_one": "{{count}} mensaje sin leer",
+    "unread_other": "{{count}} mensajes sin leer"
+  },
   "searchLabel": "Buscar chats",
   "searchPlaceholder": "Buscar chats...",
   "settings": "Ajustes",

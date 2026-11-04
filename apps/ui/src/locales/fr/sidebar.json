@@ -67,6 +67,16 @@
     "unreadCount": "{{name}}, {{count}} messages non lus",
     "unreadOne": "{{name}}, 1 message non lu"
   },
+  "row": {
+    "mention": "vous avez été mentionné",
+    "muted": "notifications coupées",
+    "pinned": "épinglée",
+    "separator": ", ",
+    "unread": "{{count}} messages non lus",
+    "unreadSome": "messages non lus",
+    "unread_one": "{{count}} message non lu",
+    "unread_other": "{{count}} messages non lus"
+  },
   "searchLabel": "Rechercher des discussions",
   "searchPlaceholder": "Rechercher...",
   "settings": "Réglages",

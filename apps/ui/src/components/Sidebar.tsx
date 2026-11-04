@@ -14,7 +14,7 @@ import type { GroupView } from "@ghostly/browser/shared/types";
 import { formatListTime } from "../lib/chatList";
 import { foldText, searchText } from "../lib/chatSearch";
 import type { Translate } from "../locales/translate";
-import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { NewGroupDialog } from "./NewGroupDialog";
 import { groupPath, groupReadAt, groupRouteId, invitationRow } from "../lib/groups";
@@ -60,9 +60,11 @@ import { RAIL_WIDTH, RailAction, RailChat, RailGroup, RailToggle } from "./ChatR
 import { useRailShortcut } from "../hooks/useRailShortcut";
 import { useOpenRowInView } from "../hooks/useOpenRowInView";
 import { useComposition } from "../hooks/useComposition";
+import { useEngineValue } from "../lib/engineState";
 
-const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
-const engineSnapshot = () => engine.state;
+const NO_GROUPS: NonNullable<typeof engine.state>["groups"] = [];
+/** What the list reads of the engine's state itself, for `useEngineValue`: its groups, and whether they came yet. */
+const listOfState = (state: typeof engine.state) => ({ groups: state?.groups ?? NO_GROUPS, groupsLoaded: !!state?.groupsLoaded });
 
 /** New chat's mark (a bubble with a plus) and Join's (an arrow into a bubble): the list's header, and the rail's top. */
 const NEW_CHAT_PATH = "M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8";
@@ -153,16 +155,18 @@ export function Sidebar() {
   const [newMenuOpen, setNewMenuOpen] = useState<boolean | "shortcut">(false);
   const newMenuRef = useRef<HTMLDivElement>(null), newMoreRef = useRef<HTMLButtonElement>(null);
   const closeNewMenu = () => setNewMenuOpen(false);
-  const engineState = useSyncExternalStore(subscribeEngine, engineSnapshot);
+  // Its groups only, compared by content: the engine sends its whole state anew on every change (up to 20 a second while
+  // a file moves), and the whole of it drew the list and every row in it on each.
+  const engineState = useEngineValue(listOfState);
   // A bot's usage card (WISP 405 § Usage) per contact: the meter on its row.
   const usageByPeer = useUsageByPeer();
   // Each contact's running tasks (WISP 405 § Showing a card): the working mark on its row.
   const workingByPeer = useWorkingByPeer();
-  const groups = engineState?.groups ?? [];
+  const groups = engineState.groups;
   // The chats are in the page's storage at once, the groups come with the engine's state after every chat's history
   // is read: drawn alone, the chats were pushed down under the groups a second later, and a click aimed at a chat
   // opened a group. The list waits for the groups, and draws everything at once.
-  const listReady = !!engineState?.groupsLoaded;
+  const listReady = engineState.groupsLoaded;
   const activeGroupId = groupRouteId(location.pathname);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   // A chat a call is on or rings in is not deleted under it: the dialog says to end the call first.

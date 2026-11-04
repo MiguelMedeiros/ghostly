@@ -38,7 +38,7 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
   const id = useId();
   const others = otherProfiles();
   const unfinished = gate.state === "standby" && !!gate.unfinished;
-  const takeover = useTakeoverInfo(gate.state);
+  const takeover = useTakeoverInfo(gate.state, gate.activeDevice);
   // A copy restored from a backup where the profile is active elsewhere (WISP 06 § A backup restored where a device set
   // exists): it starts nothing until the person takes over or removes it.
   const restored = gate.state === "standby" && takeover?.copy === "restored";
@@ -193,17 +193,18 @@ function useTurnReadOnReturn(on: boolean): void {
 type TakeoverInfo = { offered: boolean; device?: string; copy?: "frozen" | "restored"; password?: boolean; ownSet?: true };
 
 /**
- * Whether this device offers a forced takeover, and how (`deviceTakeoverInfo`): read once the screen shows. On a
- * `moving` device it is a device set of its own, for when the device that removed another is gone for good.
+ * Whether this device offers a forced takeover, and how (`deviceTakeoverInfo`): read once the screen shows, and again
+ * when the active device's name changes (a rename there): the name the dialog asks for is the one the engine checks. On
+ * a `moving` device it is a device set of its own, for when the device that removed another is gone for good.
  */
-function useTakeoverInfo(state: DeviceGateView["state"]): TakeoverInfo | null {
+function useTakeoverInfo(state: DeviceGateView["state"], activeDevice: string | undefined): TakeoverInfo | null {
   const [info, setInfo] = useState<TakeoverInfo | null>(null);
   useEffect(() => {
     if (state !== "standby" && state !== "superseded" && state !== "moving") { setInfo(null); return; }
     let live = true;
     void engine.call("deviceTakeoverInfo").then((next) => { if (live) setInfo(next); }, () => { if (live) setInfo(null); });
     return () => { live = false; };
-  }, [state]);
+  }, [state, activeDevice]);
   return info;
 }
 

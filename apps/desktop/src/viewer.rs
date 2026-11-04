@@ -251,7 +251,14 @@ pub fn open<R: tauri::Runtime>(
         .map_err(|e| format!("URL: {}", e))?;
     let (link_site, link_service) = (site.clone(), service.clone());
     let opened_outside = Mutex::new(OpenedOutside::default());
-    WebviewWindowBuilder::new(app, &label, WebviewUrl::CustomProtocol(url))
+    #[allow(unused_mut)]
+    let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::CustomProtocol(url));
+    // On Windows the app keeps its storage in a WebView2 profile of its own, gone whole once it is forgotten.
+    #[cfg(windows)]
+    if let Some(folder) = crate::forget_origins::app_folder(app, &format!("{service}.{site}")) {
+        builder = builder.data_directory(folder);
+    }
+    builder
         .title(format!("{} — Ghostly", title))
         // The window itself never leaves its origin: a plain link to another site, a script or a frame that
         // goes there is refused, with no click to tell them apart.

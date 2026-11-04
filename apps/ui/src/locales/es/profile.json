@@ -130,6 +130,7 @@
   "name": "Nombre",
   "nameInChats": "Nombre en los chats",
   "nameLabel": "Nombre del perfil",
+  "nameSaved": "Nombre guardado",
   "nameStep": {
     "placeholder": "Tu nombre",
     "save": "Continuar",

@@ -5,8 +5,13 @@
     "checking": "Checking…",
     "hint": "A GitHub repository, a raw.githubusercontent.com file, or jsDelivr at a commit.",
     "label": "App or store link",
+    "storeEquivocation": "This link holds a different copy of this store under the same number: the store signed two different lists. Ghostly kept yours.",
+    "storeHeld": "You have this store already: it is on your Apps page.",
+    "storeNewer": "You have this store already. This link holds a newer copy of it.",
+    "storeOlder": "This is an older copy of a store you have. Yours is newer and stays as it is.",
     "storeReads": "Ghostly reads it from {{host}}, which learns your IP address.",
-    "title": "Add an app or a store"
+    "title": "Add an app or a store",
+    "updateStore": "Update store"
   },
   "app": {
     "export": "Export data",
@@ -31,7 +36,9 @@
     "hint": "Comes with Ghostly",
     "openNamed": "Open {{title}}",
     "remove": "Remove",
-    "removeNamed": "Remove {{title}}"
+    "removeNamed": "Remove {{title}}",
+    "removeText": "It will not be offered again. To get it back, install it from a store.",
+    "removeTitle": "Remove {{title}}?"
   },
   "card": {
     "ask": "Ask {{name}} for a link to it",
@@ -175,12 +182,14 @@
     "back": "Back to the chat",
     "beside": "Show the chat",
     "full": "Full width",
+    "openAgain": "Open again",
     "resume": "Back to {{title}}",
     "resumeSharing": "sharing a file",
     "sharingWith": "sharing a file with {{name}}",
     "stoppedFailed": "{{title}} stopped working and was closed. If it keeps happening, tell its maker.",
     "stoppedRemoved": "{{title}} was stopped: {{store}} removed this version",
     "stoppedRevoked": "{{title}} was stopped: its maker revoked this version",
+    "stoppedUnresponsive": "{{title}} stopped responding and was closed, so your chats keep working. Open it again, or tell its maker if it keeps happening.",
     "with": "{{title}} with {{name}}",
     "withName": "with {{name}}",
     "withSharing": "{{title}} · sharing a file with {{name}}"

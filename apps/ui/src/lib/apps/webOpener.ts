@@ -21,6 +21,8 @@ export interface WebOpenerOptions {
   closeLabel: () => string;
   /** "Chess was stopped: its maker revoked this version", in the person's language (an app opened alone). */
   stoppedLabel?: (title: string, takedown: AppTakedown) => string;
+  /** "Open again", in the person's language: under an app opened alone that the watchdog stopped. */
+  openAgainLabel?: () => string;
   /** The person's name in a chat, for an app granted `name`: what the contact was told, or none (`nameInChat`). */
   nameIn: (linkId: string) => string | undefined;
   onStop?: (ref: string, reason: AppStopReason) => void;
@@ -35,13 +37,13 @@ export interface WebOpenerOptions {
 function warnStop(title: string, reason: AppStopReason): AppTakedown | null {
   if (reason === "closed" || reason === "stopped") return null;
   console.warn(`[apps] ${title} stopped: ${reason}`);
-  return { why: "failed" };
+  return reason === "unresponsive" ? { why: "unresponsive" } : { why: "failed" };
 }
 
-export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, nameIn, onStop, linkedFiles }: WebOpenerOptions): AppOpener {
+export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, openAgainLabel, nameIn, onStop, linkedFiles }: WebOpenerOptions): AppOpener {
   /** The layer of each app open alone, by app and chat: the same one opened again is shown as it is. */
   const alone = new Map<string, HTMLElement>();
-  return async (ref, linkId, options) => {
+  const open: AppOpener = async (ref, linkId, options) => {
     const engine = apps();
     if (!engine) throw new Error("Apps cannot run in this app");
     const host: AppsPlatform = linkedFiles ? { ...engine, linkedFiles } : engine;
@@ -151,6 +153,19 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
         why.className = "m-0 p-6 text-center text-sm text-text-secondary";
         why.textContent = stoppedLabel(entry.title, stopped);
         box.replaceWith(why);
+        // Stopped by the watchdog: it may run fine once started again, and the person decides.
+        if (stopped.why === "unresponsive" && openAgainLabel) {
+          const again = document.createElement("button");
+          again.type = "button";
+          again.setAttribute("data-testid", "mini-app-open-again");
+          again.className = "mx-auto min-h-11 rounded px-4 py-1 text-sm font-medium text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
+          again.textContent = openAgainLabel();
+          again.addEventListener("click", () => {
+            dismiss();
+            open(ref, linkId, options).catch((error: unknown) => console.warn(`[apps] ${entry.title} did not open again`, error));
+          });
+          why.after(again);
+        }
         // The focus was in the app's frame, gone with it: Close has it, so Escape still closes.
         if (overlay.isConnected && !overlay.contains(document.activeElement)) close.focus({ preventScroll: true });
       },
@@ -159,4 +174,5 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
     close.addEventListener("click", end);
     overlay.addEventListener("keydown", (e) => { if (e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); end(); } });
   };
+  return open;
 }

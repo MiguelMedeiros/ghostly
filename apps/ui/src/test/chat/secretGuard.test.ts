@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { entropyToMnemonic } from "@scure/bip39";
 import { wordlist as french } from "@scure/bip39/wordlists/french.js";
 import { wordlist as italian } from "@scure/bip39/wordlists/italian.js";
@@ -415,6 +415,19 @@ describe("how long it takes", () => {
     ["seed words with a soft hyphen in each", "zo\u00ado ".repeat(MAX / 5)],
   ])("a 16 KiB message of %s is read in well under a frame", (_, text) => {
     expect(time(text)).toBeLessThan(50);
+  });
+
+  it("folds a text once for the other languages' lists, not once per list", () => {
+    // The composer reads its draft at every keystroke: 13 folds of a 16 KiB Portuguese draft took ~16 ms of each key.
+    const text = "amanhã eu vou levar o bolo para a festa da escola, você pode buscar as crianças às cinco?";
+    findSecret(text); // the lists are read into their indices the first time
+    const normalize = vi.spyOn(String.prototype, "normalize");
+    try {
+      findSecret(text);
+      expect(normalize).toHaveBeenCalledTimes(1);
+    } finally {
+      normalize.mockRestore();
+    }
   });
 });
 

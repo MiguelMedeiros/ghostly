@@ -199,6 +199,7 @@
     "noContact": "まだ相手がいません",
     "offline": "オフライン",
     "onDht": "DHT 上 · 直接接続を再試行中",
+    "onDhtPlain": "DHT 上",
     "publicationUnavailable": "公開できません",
     "switching": "切り替え中 · {{transport}}",
     "waitingContact": "相手を待っています"

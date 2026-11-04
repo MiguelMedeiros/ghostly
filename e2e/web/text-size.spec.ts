@@ -79,6 +79,31 @@ async function expectCardLinesApart(page: Page): Promise<void> {
   }
 }
 
+/** WCAG 1.4.12's text spacing, as the bookmarklets people use apply it (a reload drops it: apply it again). */
+async function textSpacing(page: Page): Promise<void> {
+  await page.addStyleTag({ content: "*{line-height:1.5 !important;letter-spacing:.12em !important;word-spacing:.16em !important}p{margin-bottom:2em !important}" });
+}
+
+test("with WCAG text spacing the identity card's lines show whole, at 1280, 640 and 320 px, in English, Portuguese and Arabic", { tag: ["@feature:app.accessibility", "@feature:proofs.page"] }, async ({ peer }) => {
+  const { page } = await peer("text-spacing-card", { viewport: { width: 1280, height: 800 } });
+  await page.getByTestId("account-identities").click();
+  for (const language of ["en", "pt", "ar"]) {
+    await useLanguage(page, language);
+    for (const width of [1280, 640, 320]) {
+      await page.setViewportSize({ width, height: width === 320 ? 640 : 800 });
+      await expect(page.getByTestId("identities-page").locator(".id-card-face").first()).toBeVisible();
+      await textSpacing(page);
+      // The fields (what the card is, what contacts see, where it is shared): none cut, none drawn under the next.
+      const cut = await page.getByTestId("identities-page").locator(".id-card-face").first().evaluate((face) =>
+        [...face.querySelectorAll<HTMLElement>(".id-card-field")].filter((line) => line.getBoundingClientRect().width > 1)
+          .filter((line) => line.scrollWidth > line.clientWidth || line.scrollHeight > line.clientHeight)
+          .map((line) => `${line.textContent}: ${line.scrollWidth}/${line.clientWidth} wide, ${line.scrollHeight}/${line.clientHeight} tall`));
+      expect(cut, `${language} at ${width} px`).toEqual([]);
+      await expectCardLinesApart(page);
+    }
+  }
+});
+
 test("a desktop at a doubled text size: the account bar's names, the wordmark and the identity card grow with it", { tag: ["@feature:app.accessibility", "@feature:proofs.page"] }, async ({ peer }) => {
   const { page } = await peer("text-size-desktop", { viewport: { width: 1280, height: 800 } });
   await page.getByTestId("account-identities").click();

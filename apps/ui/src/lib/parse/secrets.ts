@@ -120,7 +120,14 @@ const base58check = createBase58check(sha256);
 export function findSecret(text: string): SecretFinding | null {
   const visible = text.replace(INVISIBLE, "");
   const readings = visible === text ? [text] : [text, visible];
-  if (readings.some((reading) => seeds.some((seed) => hasMnemonic(reading, seed)))) return { kind: "mnemonic" };
+  if (readings.some((reading) => {
+    // A text's words are read once per way of reading them, not once per list: the other languages' 13 lists share one.
+    const words = new Map<SeedWords["words"], string[] | null>();
+    return seeds.some((seed) => {
+      if (!words.has(seed.words)) words.set(seed.words, seed.words(reading));
+      return hasMnemonic(words.get(seed.words)!, seed);
+    });
+  })) return { kind: "mnemonic" };
   if (readings.some((reading) => NSEC.test(reading))) return { kind: "nsec" };
   if (readings.some((reading) => EXTENDED_PRIVATE.test(reading) || hasWif(reading))) return { kind: "bitcoin-key" };
   if (readings.some(hasHexSecret)) return { kind: "hex-key" };
@@ -139,8 +146,7 @@ export function findSecret(text: string): SecretFinding | null {
  * every one passes Monero's: a window of a single word never counts, and a window mostly of one word ("abandon …
  * about") counts only when that word does not go on past it on either side.
  */
-function hasMnemonic(text: string, seed: SeedWords): boolean {
-  const tokens = seed.words(text);
+function hasMnemonic(tokens: string[] | null, seed: SeedWords): boolean {
   const shortest = Math.min(...seed.lengths);
   if (!tokens || tokens.length < shortest) return false;
   const index = seed.index();

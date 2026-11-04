@@ -33,7 +33,9 @@ function pair() {
     /** Chats deleted on that side: gone from its list, with their ledger. */
     deleted: {} as Partial<Record<Me, boolean>>,
     /** Settings → Hide my IP from contacts, on that side. */
-    relayOnly: {} as Partial<Record<Me, boolean>> };
+    relayOnly: {} as Partial<Record<Me, boolean>>,
+    /** No Pkarr relay answers: a lookup throws. */
+    relaysDown: false };
   const pkarr = new Map<string, { label: string; value: string }[]>();
   const resolved: string[] = [];
   const engines = {} as Record<Me, IdentityProofs>;
@@ -51,7 +53,7 @@ function pair() {
       linkIds: () => state.deleted[me] ? ["plain"] : ["chat", "plain"], online: () => state.online, emit: vi.fn(),
       relayOnly: () => !!state.relayOnly[me],
       publish: async (seed, records) => { pkarr.set(identityFromSeed(seed).pubKeyZ32, records); },
-      resolve: async key => { resolved.push(key); return pkarr.get(key) ?? null; },
+      resolve: async key => { resolved.push(key); if (state.relaysDown) throw new Error("No relay answered"); return pkarr.get(key) ?? null; },
     };
   };
   const make = (me: Me) => new IdentityProofs(host(me), () => state.providers[me]);
@@ -120,6 +122,28 @@ describe("adding a proof: drafts and limits", () => {
     await expect(completing).rejects.toThrow(/started too long ago/);
     expect(engines.a.views()).toEqual([]);
     expect(await stored("identityProofs")).toBeUndefined();
+  });
+
+  /**
+   * A daemon's `identity add` (or another window's Add) still checking when "Clear all data" comes: the check went on,
+   * and its save wrote every proof the cleared profile had, with its sealed key, back under `identityProofs`.
+   */
+  it("a proof whose check ends after Clear all data saves nothing into the cleared profile", async () => {
+    const { engines, state, make } = await shared();
+    let checked!: () => void;
+    const gate = new Promise<void>(resolve => { checked = resolve; });
+    state.providers.a = [{ ...fakeKey, verify: async (statement, evidence, ctx) => { await gate; return fakeKey.verify(statement, evidence, ctx); } }];
+    const { draftId, binding } = engines.a.begin({ provider: "fake-key", subject: fakeKeySubject() });
+    const completing = engines.a.complete({ draftId, evidence: fakeKeySign(identityStatement(binding)) }).then(() => "saved", () => "refused");
+    await engines.a.revokeAll();
+    await clearProfileStores();
+    checked();
+    const outcome = await completing;
+    expect((await stored<{ binding: unknown }[]>("identityProofs"))?.length, "the cleared profile has no proofs").toBeUndefined();
+    expect(outcome).toBe("refused");
+    const next = make("a");
+    await next.load();
+    expect(next.views()).toEqual([]);
   });
 
   it("a profile holds at most 32 proofs", async () => {
@@ -292,6 +316,77 @@ describe("removing a proof and its revocation", () => {
     third.stop();
   });
 
+  /** Offline at the 60 s lookup and online right after: the next lookup came 12 h later. */
+  it("a revocation lookup missed offline runs when the network comes back, not 12 h later", async () => {
+    const { state, resolved, make } = await shared();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    state.connected = false; state.online = false;
+    const b = make("b");
+    await b.load(); b.start();
+    resolved.length = 0;
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(resolved).toEqual([]);
+    state.online = true;
+    b.networkBack();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(resolved).toHaveLength(1);
+    expect(await stored("identityRevocationsCheckedAt")).toBeTypeOf("number");
+    b.stop();
+  });
+
+  /**
+   * No relay answered the lookup, yet its time was saved: once the owner removed the proof and the relays were back, the
+   * contact's restarted app looked nothing up for 12 h and showed the proof verified.
+   */
+  it("a revocation lookup no relay answered is not noted as done: tried again soon, and at the next start", async () => {
+    const { engines, state, resolved, make, id } = await shared();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    state.connected = false; state.relaysDown = true;
+    const b = make("b");
+    await b.load(); b.start();
+    resolved.length = 0;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(resolved).toHaveLength(1);
+    expect(await stored("identityRevocationsCheckedAt"), "a failed lookup is not a lookup made").toBeUndefined();
+    // Tried again within minutes, backing off while the relays stay down.
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(resolved).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(resolved).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(resolved).toHaveLength(3);
+    b.stop();
+
+    // The owner removes the proof meanwhile; the relays are back, and the contact's app restarts.
+    await engines.a.remove({ id });
+    state.relaysDown = false;
+    const again = make("b");
+    await again.load(); again.start();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.waitFor(() => expect(again.linkView("chat", true)!.received[0].status).toBe("revoked"));
+    expect(await stored("identityRevocationsCheckedAt")).toBeTypeOf("number");
+    again.stop();
+  });
+
+  /** Removed while offline mid-run: the revocation went out only at the next hourly republish, up to an hour after the network came back. */
+  it("a revocation that could not be published offline is published when the network comes back", async () => {
+    const { state, pkarr, make, id, binding } = await shared();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    state.connected = false;
+    const a = make("a");
+    await a.load(); a.start();
+    await vi.advanceTimersByTimeAsync(10_000);
+    state.online = false;
+    await a.remove({ id });
+    expect(pkarr.get(binding.key)).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(60_000);
+    state.online = true;
+    a.networkBack();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(pkarr.get(binding.key)?.[0]).toMatchObject({ label: "_ghostly-revoked", value: expect.stringContaining(id) });
+    a.stop();
+  });
+
   it("a revocation lookup still on its way when the profile's data is cleared does not note its time in the cleared profile", async () => {
     const { engines, pkarr, resolved } = await shared();
     let release: (() => void) | undefined;
@@ -325,6 +420,32 @@ describe("removing a proof and its revocation", () => {
     engines.b.stop();
   });
 
+  it("a proof removed while the contact is still checking it: the contact keeps it withdrawn, not verified, then finds it revoked", async () => {
+    const { engines, state, resolved, pkarr } = pair();
+    await clearStorage();
+    await engines.a.load(); await engines.b.load();
+    let checking!: () => void, release!: () => void;
+    const entered = new Promise<void>(resolve => { checking = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    state.providers.b = [{ ...fakeKey, verify: async (statement, evidence, ctx) => { checking(); await gate; return fakeKey.verify(statement, evidence, ctx); } }];
+    const { id } = await prove(engines.a);
+    await engines.a.share({ linkId: "chat", id });
+    await entered;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    resolved.length = 0;
+    await engines.a.remove({ id });
+    // The relays do not return the owner's revocation yet when the check looks it up.
+    const published = [...pkarr];
+    pkarr.clear();
+    release();
+    await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received.map(r => r.status)).toEqual(["withdrawn"]));
+    for (const [key, records] of published) pkarr.set(key, records);
+    await vi.advanceTimersByTimeAsync(20_000);
+    await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received[0].status).toBe("revoked"));
+    expect(resolved.length, "its revocation looked up after the withdraw").toBeGreaterThan(0);
+    engines.b.stop();
+  });
+
   it("a proof only withdrawn from this chat (still in the owner's profile) stays withdrawn, after a few lookups that back off", async () => {
     const { engines, resolved, id } = await shared();
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -340,6 +461,22 @@ describe("removing a proof and its revocation", () => {
     expect(engines.b.linkView("chat", true)!.received[0].status).toBe("withdrawn");
     engines.b.stop();
   });
+
+  it("a chat whose connection drops while its withdrawal is written does not stop the removal: the contact is told on reconnect", async () => {
+    const { engines, ledgers, state, pkarr, id, binding } = await shared();
+    // The chat's link closes right after A's ledger write, before the withdraw frame is sent.
+    let a = ledgers.a;
+    Object.defineProperty(ledgers, "a", { get: () => a, set: (next: IdentityLedger) => { a = next; state.connected = false; } });
+    await engines.a.remove({ id });
+    expect(engines.a.views()).toEqual([]);
+    expect(ledgers.a.shared.find(s => s.id === id)?.status).toBe("withdrawal-pending");
+    expect(await stored<{ id: string }[]>("identityRevocations")).toEqual([expect.objectContaining({ id, key: binding.key })]);
+    await vi.waitFor(() => expect(pkarr.get(binding.key)?.[0]).toMatchObject({ label: "_ghostly-revoked", value: expect.stringContaining(id) }));
+    engines.a.closed("chat");
+    state.connected = true;
+    engines.a.ready("chat");
+    await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === id)?.status).toBe("withdrawn"));
+  });
 });
 
 describe("per chat", () => {
@@ -354,6 +491,24 @@ describe("per chat", () => {
     await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === id)?.status).toBe("withdrawn"));
     expect(engines.b.linkView("chat", true)!.received[0].status).toBe("withdrawn");
     expect(engines.a.views()[0].sharedWith).toBe(0);
+  });
+
+  it("two proofs of the same identity shared in one chat: the profile counts only the one the contact keeps, and removing it leaves both sides with none", async () => {
+    const { engines, ledgers, id: older } = await shared();
+    const { id: newer } = await prove(engines.a);
+    expect(engines.a.views().map(v => v.subject)).toEqual([fakeKeySubject(), fakeKeySubject()]);
+    await engines.a.share({ linkId: "chat", id: newer });
+    await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === newer)?.status).toBe("accepted"));
+    expect(engines.b.linkView("chat", true)!.received.map(r => r.id)).toEqual([newer]);
+    const sharedWith = () => Object.fromEntries(engines.a.views().map(v => [v.id, v.sharedWith]));
+    expect(sharedWith()).toEqual({ [older]: 0, [newer]: 1 });
+    await engines.a.remove({ id: newer });
+    await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received.map(r => `${r.id}:${r.status}`)).toEqual([`${newer}:withdrawn`]));
+    expect(sharedWith()).toEqual({ [older]: 0 });
+    // Shared again by hand, the older one is what the contact holds.
+    await engines.a.share({ linkId: "chat", id: older });
+    await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received.find(r => r.id === older)?.status).toBe("verified"));
+    expect(sharedWith()).toEqual({ [older]: 1 });
   });
 
   it("a recheck is refused offline, and a proof that no longer verifies shows unconfirmed with the reason", async () => {

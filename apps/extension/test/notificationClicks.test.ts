@@ -149,6 +149,36 @@ describe("a new peer: the chats of the one before are not this one's", () => {
     expect(world.notices.has(message) || world.notices.has(group)).toBe(false);
   });
 
+  it("a switch to a profile takes its own \"New messages in\" notifications away; another profile's stay", async () => {
+    expect(await ensure()).toEqual({ ok: true });
+    const page = await openPage();
+    const message = await notify(page.lib, "message:link-a:m1", "chat-a");
+    // Two looks at Work while Personal ran, one at a third profile.
+    const work = [await notify(page.lib, "peek-work-1", "profile:work000000"), await notify(page.lib, "peek-work-2", "profile:work000000")];
+    const other = await notify(page.lib, "peek-other-1", "profile:other00000");
+    await closePage(page.tabId, true);
+
+    useProfile(world, "work000000", ["other00000"]);
+    expect(await ensure()).toEqual({ ok: true });
+    await settle();
+    // Work is the one in use now: nothing new is waiting in it, and a click on one would only show the app.
+    expect(work.filter((id) => world.notices.has(id))).toEqual([]);
+    expect([...world.notices.keys()]).toEqual([other]);
+    expect(noticeKeys()).toEqual([`notice:${other}`]);
+    expect(world.notices.has(message)).toBe(false);
+
+    // Back to the first profile (id ""): its own notices go the same way, Work's new one stays.
+    const back = await openPage();
+    const personal = await notify(back.lib, "peek-default-1", "profile:");
+    const workAgain = await notify(back.lib, "peek-work-3", "profile:work000000");
+    await closePage(back.tabId, true);
+    useProfile(world, "", ["work000000", "other00000"]);
+    expect(await ensure()).toEqual({ ok: true });
+    await settle();
+    expect([...world.notices.keys()].sort()).toEqual([other, workAgain].sort());
+    expect(world.notices.has(personal)).toBe(false);
+  });
+
   it("Clear all data: the cleared chats' notifications go with them", async () => {
     const page = await openPage();
     const id = await notify(page.lib, "message:link-a:m1", "chat-a");

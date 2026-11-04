@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useEngineState } from "../lib/engineState";
+import { chatKeys, useEngineValue } from "../lib/engineState";
 import { usageByChat, type UsageEntry } from "../lib/usage";
 import { useCardIndex } from "./useTaskBoard";
 
@@ -11,18 +11,20 @@ import { useCardIndex } from "./useTaskBoard";
 /** The usage card that stands for each 1:1 chat, by the contact's key; empty while the profile has none. */
 export function useUsageByPeer(): ReadonlyMap<string, UsageEntry> {
   const index = useCardIndex();
-  const state = useEngineState();
-  // From the index alone: every engine state brings the chats as a new list, and the index holds every card there is.
+  // Each chat's id and contact key, and nothing else of the engine's state: every engine state brings the chats as a new
+  // list, which drew every chat using this (an open one, and each kept loaded off screen) on every state.
+  const keys = useEngineValue(chatKeys);
+  // From the index alone: the index holds every card there is.
   const byChat = useMemo(() => usageByChat(index), [index]);
   return useMemo(() => {
     const byPeer = new Map<string, UsageEntry>();
     if (!byChat.size) return byPeer;
-    for (const link of state?.links ?? []) {
-      const entry = byChat.get(link.id);
-      if (entry && link.peerPubKeyZ32) byPeer.set(link.peerPubKeyZ32, entry);
+    for (const [id, peerKey] of keys) {
+      const entry = byChat.get(id);
+      if (entry && peerKey) byPeer.set(peerKey, entry);
     }
     return byPeer;
-  }, [byChat, state?.links]);
+  }, [byChat, keys]);
 }
 
 /** One contact's usage card, or none. */

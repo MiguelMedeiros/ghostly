@@ -581,6 +581,68 @@ describe("routines", () => {
     expect(COMMANDS["routine send"]!.options!.next.description).toMatch(/2026-09-30 01:00.*no zone: local time/);
   });
 
+  it("refuse a day the month does not have as a usage error, where it was the next month's first days", () => {
+    const next = (value: string) => (params("routine update", ["g1", "nightly", "--next", value]).card as { nextRunAt: number }).nextRunAt;
+    const refused = (value: string, month: string, days: number) => expect(() => next(value), value).toThrow(expect.objectContaining({ code: "usage", message: `--next takes a day the month has (${month} has ${days}), not ${JSON.stringify(value)}` }));
+    // Before, each was May 1, March 3, July 1, December 1, March 1 and May 1.
+    refused("2026-04-31", "2026-04", 30);
+    refused("2026-02-31 01:00", "2026-02", 28);
+    refused("2026-06-31T10:00:00Z", "2026-06", 30);
+    refused("Nov 31 2026", "2026-11", 30);
+    refused("Feb 29 2026", "2026-02", 28);
+    refused("31 Apr 2026", "2026-04", 30);
+    refused("2026/4/31", "2026-04", 30);
+    // The days a month has, a leap day and a date whose zone moves it to the next day stay as they were.
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.UTC(2027, 5, 1) });
+    expect(next("2028-02-29T00:00:00Z")).toBe(Date.UTC(2028, 1, 29));
+    vi.useRealTimers();
+    expect(next("2026-04-30T23:00-05:00")).toBe(Date.UTC(2026, 4, 1, 4));
+    expect(next("Dec 31 2026 12:00Z")).toBe(Date.UTC(2026, 11, 31, 12));
+  });
+
+  it("refuse a day the month does not have in the other forms a JavaScript date reads: month first in numbers, a month's name between dashes, slashes or dots", () => {
+    const next = (value: string) => (params("routine update", ["g1", "nightly", "--next", value]).card as { nextRunAt: number }).nextRunAt;
+    const refused = (value: string, month: string, days: number) => expect(() => next(value), value).toThrow(expect.objectContaining({ code: "usage", message: `--next takes a day the month has (${month} has ${days}), not ${JSON.stringify(value)}` }));
+    // Before, each was the next month's first day.
+    refused("4/31/2026", "2026-04", 30);
+    refused("04/31/2026 10:00", "2026-04", 30);
+    refused("2/29/2027", "2027-02", 28);
+    refused("4/31/26", "2026-04", 30);
+    refused("4-31-2026", "2026-04", 30);
+    refused("4.31.2026", "2026-04", 30);
+    refused("31-Apr-2026", "2026-04", 30);
+    refused("31/Apr/2026", "2026-04", 30);
+    refused("Apr-31-2026", "2026-04", 30);
+    refused("Apr.31.2026", "2026-04", 30);
+    refused("2026-Apr-31", "2026-04", 30);
+    refused("31 Apr, 2026", "2026-04", 30);
+    // Days the month has stay as they were, a leap day included, as local time.
+    expect(next("12/31/2026")).toBe(new Date(2026, 11, 31).getTime());
+    expect(next("Apr-30-2026")).toBe(new Date(2026, 3, 30).getTime());
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.UTC(2027, 5, 1) });
+    expect(next("2/29/28 10:00")).toBe(new Date(2028, 1, 29, 10).getTime());
+    expect(next("29-Feb-2028")).toBe(new Date(2028, 1, 29).getTime());
+    vi.useRealTimers();
+  });
+
+  it("refuse a --next more than a year ahead as a usage error (exit 2) that names the flag and the last time it takes", () => {
+    const zone = process.env.TZ;
+    try {
+      process.env.TZ = "UTC";
+      vi.useFakeTimers({ toFake: ["Date"], now: Date.UTC(2026, 10, 4, 11, 30, 20) });
+      const send = (next: string) => params("routine send", ["g1", "--name", "r", "--schedule", "every day", "--next", next]);
+      // Before, bad_request (exit 1): "Status card: nextRunAt is a time in milliseconds, within a year".
+      expect(() => send("2028-02-29 09:00")).toThrow(expect.objectContaining({ code: "usage", message: "--next takes a time within a year from now (until 2027-11-05 11:30), not \"2028-02-29 09:00\"" }));
+      expect(() => params("routine update", ["g1", "nightly", "--next", String(Date.UTC(2027, 10, 6))])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/^--next takes a time within a year from now/) }));
+      // The last time it takes, and a time past, stay taken; the card checks a --json value itself.
+      expect((send("2027-11-05 11:30").card as { nextRunAt: number }).nextRunAt).toBe(Date.UTC(2027, 10, 5, 11, 30));
+      expect((send("2001-01-01").card as { nextRunAt: number }).nextRunAt).toBe(Date.UTC(2001, 0, 1));
+      expect((params("routine send", ["g1", "--json", `{"name":"r","schedule":"d","nextRunAt":${Date.UTC(2028, 0, 1)}}`]).card as { nextRunAt: number }).nextRunAt).toBe(Date.UTC(2028, 0, 1));
+    } finally {
+      if (zone === undefined) delete process.env.TZ; else process.env.TZ = zone;
+    }
+  });
+
   it("refuse a wrong state or a text too long or blank as a usage error (exit 2) that names the flag, not the card's field", () => {
     const usage = (name: string, argv: string[], message: RegExp) => expect(() => params(name, argv)).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(message) }));
     const send = (...flags: string[]) => ["g1", "--name", "Nightly", "--schedule", "every day", ...flags];

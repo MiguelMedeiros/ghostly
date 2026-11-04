@@ -261,6 +261,16 @@
     "text": "It can no longer take this profile.",
     "title": "Remove {{device}}?"
   },
+  "rename": {
+    "button": "Rename",
+    "fail": {
+      "name": "This name can't be used. Try another one."
+    },
+    "label": "Device name",
+    "save": "Save",
+    "saving": "Saving…",
+    "title": "Rename {{device}}"
+  },
   "restore": {
     "activeHint": "Starting this backup here would make a second copy.",
     "activeOn": "This profile is active on {{device}}",

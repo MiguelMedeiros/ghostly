@@ -35,6 +35,7 @@ export * from "./voice";
 export * from "./video";
 export * from "./image";
 export * from "./pictureMetadata";
+export * from "./videoMetadata";
 export * from "./linkPreview";
 export * from "./messageTime";
 export * from "./payments";

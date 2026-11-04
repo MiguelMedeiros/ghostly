@@ -261,6 +261,16 @@
     "text": "Il ne pourra plus prendre ce profil.",
     "title": "Retirer {{device}} ?"
   },
+  "rename": {
+    "button": "Renommer",
+    "fail": {
+      "name": "Ce nom ne peut pas être utilisé. Essayez-en un autre."
+    },
+    "label": "Nom de l’appareil",
+    "save": "Enregistrer",
+    "saving": "Enregistrement…",
+    "title": "Renommer {{device}}"
+  },
   "restore": {
     "activeHint": "Démarrer cette sauvegarde ici créerait une deuxième copie.",
     "activeOn": "Ce profil est actif sur {{device}}",

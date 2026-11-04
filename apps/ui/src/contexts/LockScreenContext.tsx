@@ -13,7 +13,7 @@ import { useSettings } from "./SettingsContext";
 import { hashPassword, needsRehash, verifyPassword } from "../lib/settings";
 import { activeProfileId } from "../lib/profiles";
 import { takeUnlockHandover } from "../lib/lockHandover";
-import { stopRunningApps } from "../lib/apps/open";
+import { onAppInput, stopRunningApps } from "../lib/apps/open";
 import { closeServiceWindows } from "../lib/serviceWindows";
 import { pauseForLock } from "../lib/nowPlaying";
 
@@ -277,6 +277,8 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
     events.forEach((event) => {
       window.addEventListener(event, handleActivity, { passive: true });
     });
+    // Taps and keys in an app the person is in: its frame or window keeps them from this page.
+    const stopAppInput = onAppInput(handleActivity);
     const returns = ["focus", "pageshow"];
     returns.forEach((event) => window.addEventListener(event, handleReturn));
     document.addEventListener("visibilitychange", handleVisibility);
@@ -289,6 +291,7 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
       events.forEach((event) => {
         window.removeEventListener(event, handleActivity);
       });
+      stopAppInput();
       returns.forEach((event) => window.removeEventListener(event, handleReturn));
       document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("pagehide", coverNow);

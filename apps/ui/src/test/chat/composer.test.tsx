@@ -559,6 +559,24 @@ describe("the emoji/GIF panel", () => {
     expect(field()).toHaveFocus();
   });
 
+  it("opened from the keyboard, takes the focus on its search, the arrows reach the grid, and Escape gives it back to the button", async () => {
+    const { user } = composer();
+    smiley().focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByPlaceholderText("Search emoji")).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(within(screen.getByTestId("emoji-section-people")).getByRole("button", { name: "😀" })).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("expression-panel")).not.toBeInTheDocument();
+    expect(smiley()).toHaveFocus();
+    // With Space too; opened by a click, the focus stays where it was.
+    await user.keyboard(" ");
+    expect(screen.getByPlaceholderText("Search emoji")).toHaveFocus();
+    await user.keyboard("{Escape}");
+    await user.click(smiley());
+    expect(smiley()).toHaveFocus();
+  });
+
   it("the + and the panel take turns", async () => {
     const { user } = composer();
     await user.click(smiley());

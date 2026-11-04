@@ -578,6 +578,19 @@ describe("a new text while others of mine are on their way", () => {
     await c.box.stop();
   });
 
+  it("reads the rows on their way in one go, however many, where the store can", async () => {
+    const c = long(1_000), batches: number[] = [];
+    Object.assign(c.box["store"], { getMany: async (ids: string[]) => { batches.push(ids.length); return ids.map(id => { const found = c.rows.find(m => m.id === id); return found && { ...found }; }); } });
+    for (let n = 1001; n <= 1040; n++) await c.box.transmit(c.add(row(n, "sending")));
+    const { reads, gets } = c.counts;
+    await c.box.transmit(c.add(row(1041, "sending")));
+    expect([c.counts.reads - reads, c.counts.gets - gets]).toEqual([0, 0]);
+    // The forty awaiting their receipts and the new one.
+    expect(batches[batches.length - 1]).toBe(41);
+    expect(c.sent).toEqual(Array.from({ length: 41 }, (_, i) => `m${1001 + i}`));
+    await c.box.stop();
+  });
+
   it("reads the chat's history where the store cannot read one message", async () => {
     const c = long(10, { get: false });
     await c.box.transmit(c.add(row(11, "sending")));

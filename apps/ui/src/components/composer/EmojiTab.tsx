@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { ReloadButton } from "../ui/ReloadButton";
+import { SearchStatus } from "../ui/SearchStatus";
 import { emojiCategories, emojiFailedAgain, emojiLoaded, emojiOf, loadEmoji, recentEmoji, rememberEmoji, searchEmoji, setSkinTone, skinTone, withSkin } from "../../lib/emoji";
 import { radioGroupKeys } from "../../lib/radioGroup";
 import { EMOJI_CATEGORY_ICONS } from "./icons";
@@ -145,6 +146,7 @@ function LoadedEmojiTab({ onPick, autoFocus }: EmojiTabProps) {
         {shown.map((section, i) => <EmojiSection key={section.id} section={section} first={i === 0} />)}
         {results && !results.cells.length && <p className="expression-empty">{t("composer.noEmoji")}</p>}
       </div>
+      <SearchStatus testId="emoji-found" text={!results ? "" : results.cells.length ? t("composer.emojiFound", { count: results.cells.length }) : t("composer.noEmoji")} />
     </div>
   );
 }

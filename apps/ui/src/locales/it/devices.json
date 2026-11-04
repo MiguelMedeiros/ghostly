@@ -261,6 +261,16 @@
     "text": "Non potrà più prendere questo profilo.",
     "title": "Rimuovere {{device}}?"
   },
+  "rename": {
+    "button": "Rinomina",
+    "fail": {
+      "name": "Questo nome non si può usare. Provane un altro."
+    },
+    "label": "Nome del dispositivo",
+    "save": "Salva",
+    "saving": "Salvataggio…",
+    "title": "Rinomina {{device}}"
+  },
   "restore": {
     "activeHint": "Avviare questo backup qui creerebbe una seconda copia.",
     "activeOn": "Questo profilo è attivo su {{device}}",

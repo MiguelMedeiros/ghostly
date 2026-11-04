@@ -59,6 +59,9 @@ export const BROWSER_ARGS = [
   "--autoplay-policy=no-user-gesture-required",
 ];
 
+/** Chromium with its sandbox on (Playwright turns it off otherwise); E2E_CHROMIUM_SANDBOX=0 where the machine has none. */
+export const CHROMIUM_SANDBOX = process.env.E2E_CHROMIUM_SANDBOX !== "0";
+
 /** A browser profile on disk: a person whose storage outlives one browser, reopened later on a phone with `open(..., { profile })`. */
 export const newProfile = () => mkdtempSync(join(tmpdir(), "ghostly-capture-"));
 
@@ -76,7 +79,7 @@ export async function open(browser: Browser, relay: LocalRelay, baseURL: string,
   } as const;
   // A profile directory keeps everything the app stores (IndexedDB, OPFS, localStorage) between browsers.
   const context = profile
-    ? await chromium.launchPersistentContext(profile, { ...options, headless: true, args: BROWSER_ARGS })
+    ? await chromium.launchPersistentContext(profile, { ...options, headless: true, chromiumSandbox: CHROMIUM_SANDBOX, args: BROWSER_ARGS })
     : await browser.newContext(options);
   await relay.attach(context);
   await attachMint(context);
@@ -257,7 +260,7 @@ export async function openExtension(relay: LocalRelay, name: string): Promise<Pe
   delete manifest.optional_host_permissions;
   writeFileSync(join(dir, "manifest.json"), JSON.stringify(manifest, null, 2));
   const context = await chromium.launchPersistentContext(join(work, "profile"), {
-    channel: "chromium", headless: true, colorScheme: "dark", deviceScaleFactor: 2, locale: "en-US", timezoneId: EVENING,
+    channel: "chromium", chromiumSandbox: CHROMIUM_SANDBOX, headless: true, colorScheme: "dark", deviceScaleFactor: 2, locale: "en-US", timezoneId: EVENING,
     viewport: DESKTOP,
     args: [`--disable-extensions-except=${dir}`, `--load-extension=${dir}`, ...BROWSER_ARGS],
   });

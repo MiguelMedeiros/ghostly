@@ -54,8 +54,10 @@ describe("saved", () => {
       { savedAt: 30, message: row("group:g1", "k:0:1", { member: "hermes" }) },
       { savedAt: 20, message: row("chat-one", "peer_y") },
     ];
-    const list = await callApi(fake(undefined, saved).ctx, "saved.list", {}) as { chat?: string; group?: string; savedAt: number; message: { id: string; text: string; nick?: string } }[];
-    expect(list.map((s) => [s.chat ?? s.group, s.savedAt, s.message.id, s.message.text, s.message.nick])).toEqual([
+    const answer = await callApi(fake(undefined, saved).ctx, "saved.list", {}) as { saved: { chat?: string; group?: string; savedAt: number; message: { id: string; text: string; nick?: string } }[] };
+    // An object with the list under `saved`, as every other list command answers, so a later field can be added.
+    expect(Object.keys(answer)).toEqual(["saved"]);
+    expect(answer.saved.map((s) => [s.chat ?? s.group, s.savedAt, s.message.id, s.message.text, s.message.nick])).toEqual([
       ["g1", 30, "k:0:1", "text of k:0:1", "Hermes"],
       ["chat-one", 20, "peer_y", "text of peer_y", "Alice"],
     ]);
@@ -69,7 +71,7 @@ describe("saved", () => {
       { savedAt: 20, message: row("chat-one", "me_z", quoting("peer_kept", "kept")) },
     ];
     const { ctx, node } = fake(undefined, saved, [...saved.map((s) => s.message), row("chat-one", "peer_kept")]);
-    const list = await callApi(ctx, "saved.list", {}) as { message: { id: string; replyTo?: Record<string, unknown> } }[];
+    const { saved: list } = await callApi(ctx, "saved.list", {}) as { saved: { message: { id: string; replyTo?: Record<string, unknown> } }[] };
     const quote = (id: string) => list.find((s) => s.message.id === id)?.message.replyTo;
     expect(quote("me_y")).toEqual({ id: "me_x", snippet: "", from: "me", found: false, deleted: true });
     expect(quote("mine:1:1")).toMatchObject({ snippet: "", found: false, deleted: true });

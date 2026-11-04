@@ -5,8 +5,13 @@
     "checking": "Verificando…",
     "hint": "Um repositório do GitHub, um arquivo do raw.githubusercontent.com ou jsDelivr em um commit.",
     "label": "Link do app ou da loja",
+    "storeEquivocation": "Este link tem outra cópia desta loja com o mesmo número: a loja assinou duas listas diferentes. O Ghostly manteve a sua.",
+    "storeHeld": "Você já tem esta loja: ela está na sua página de Apps.",
+    "storeNewer": "Você já tem esta loja. Este link tem uma cópia mais recente dela.",
+    "storeOlder": "Esta é uma cópia mais antiga de uma loja que você já tem. A sua é mais recente e fica como está.",
     "storeReads": "O Ghostly a lê de {{host}}, que fica sabendo do seu endereço IP.",
-    "title": "Adicionar um app ou uma loja"
+    "title": "Adicionar um app ou uma loja",
+    "updateStore": "Atualizar loja"
   },
   "app": {
     "export": "Exportar dados",
@@ -31,7 +36,9 @@
     "hint": "Vem com o Ghostly",
     "openNamed": "Abrir {{title}}",
     "remove": "Remover",
-    "removeNamed": "Remover {{title}}"
+    "removeNamed": "Remover {{title}}",
+    "removeText": "Ele não será oferecido de novo. Para tê-lo de volta, instale-o de uma loja.",
+    "removeTitle": "Remover {{title}}?"
   },
   "card": {
     "ask": "Peça a {{name}} um link para ele",
@@ -175,12 +182,14 @@
     "back": "Voltar à conversa",
     "beside": "Mostrar a conversa",
     "full": "Largura total",
+    "openAgain": "Abrir de novo",
     "resume": "Voltar para {{title}}",
     "resumeSharing": "compartilhando um arquivo",
     "sharingWith": "compartilhando um arquivo com {{name}}",
     "stoppedFailed": "{{title}} parou de funcionar e foi fechado. Se continuar acontecendo, avise o autor.",
     "stoppedRemoved": "{{title}} foi parado: {{store}} removeu esta versão",
     "stoppedRevoked": "{{title}} foi parado: o autor revogou esta versão",
+    "stoppedUnresponsive": "{{title}} parou de responder e foi fechado, para suas conversas continuarem funcionando. Abra de novo ou, se continuar acontecendo, avise o autor.",
     "with": "{{title}} com {{name}}",
     "withName": "com {{name}}",
     "withSharing": "{{title}} · compartilhando um arquivo com {{name}}"
