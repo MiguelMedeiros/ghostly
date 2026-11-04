@@ -134,6 +134,14 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   useEffect(() => {
     if (focusKey) list.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(focusKey)}"]`)?.scrollIntoView?.({ block: "nearest" });
   }, [focusKey]);
+  // The link turned off or on elsewhere (the admin, another of my devices) swaps the link panel, or takes it away from a
+  // community's member, with what had the focus: the list, next in the dialog, has it rather than the page.
+  const linkOn = !!live.entryLink, wasOn = useRef(linkOn);
+  useEffect(() => {
+    if (wasOn.current === linkOn) return;
+    wasOn.current = linkOn;
+    if (focusLost() || document.activeElement === dialog.current) list.current?.focus();
+  }, [linkOn]);
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`} data-testid="group-members-dialog"
     className="m-auto w-[calc(100%_-_2rem)] max-w-md max-h-[90dvh] overflow-y-auto rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <div className="flex items-start justify-between gap-3">
