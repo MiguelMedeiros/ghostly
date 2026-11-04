@@ -219,6 +219,19 @@ describe("a test mint's invoice waits for the payer's word", () => {
     expect(wallet.vouch).toHaveBeenCalledOnce();
   });
 
+  // A group's card tells the writer through their 1:1 chat, whatever that chat's Lightning choice: the word only
+  // lets go of an invoice the wallet itself holds, so it is taken there too.
+  it("the payee lets go of its held invoice even when its chat with the payer has Lightning off", async () => {
+    const invoice = fakeInvoice(25, new Uint8Array(32).fill(6));
+    const quotes: StoredQuote[] = [{ quote: "q", mint: "https://testnut.cashu.space", amount: 25, invoice, createdAt: 0, expiresAt: null, held: true }];
+    const wallet = { quotes: vi.fn(async () => quotes), vouch: vi.fn(async () => true) };
+    const { desk: payee, link } = setup([], { wallet: wallet as unknown as Partial<CashuWallet> });
+    link.allowsPayment = (method: string) => method === "cashu";
+    await payee.start();
+    await payee.onPayment("l", { id: "c1", timestamp: 1, amount: { value: "25", asset: "sat" }, endpoint: [ENDPOINT.bolt11, invoice] });
+    expect(wallet.vouch).toHaveBeenCalledExactlyOnceWith(invoice);
+  });
+
   it("the payee lets go of two invoices the same contact says it paid one right after the other", async () => {
     const a = fakeInvoice(25, new Uint8Array(32).fill(1)), b = fakeInvoice(40, new Uint8Array(32).fill(2));
     const quotes: StoredQuote[] = [
