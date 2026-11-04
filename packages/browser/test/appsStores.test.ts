@@ -344,6 +344,30 @@ describe("stores", () => {
     expect(net.requests).not.toContain(COPY_URL);
   });
 
+  it("a store updated from a newer copy at another URL, while its own URL is behind, is read there too: not a failed read", async () => {
+    const PINNED_STORE = `https://cdn.jsdelivr.net/gh/ghostly/store@${"0".repeat(40)}/ghostly-store.json`;
+    const store = apps(net);
+    await net.putStore(await storeFiles({ sequence: 5 }), PINNED_STORE);
+    await store.addStore({ url: PINNED_STORE });
+    // Its live URL holds a newer index: the person presses Update store there. The store keeps its own URL.
+    await net.putStore(await storeFiles({ sequence: 6 }));
+    expect(await store.previewStore({ url: STORE_URL })).toMatchObject({ sequence: 6, held: { sequence: 5 } });
+    expect(await store.addStore({ url: STORE_URL })).toMatchObject({ url: PINNED_STORE, sequence: 6 });
+    // Its own URL, fixed at a commit, still serves 5: the copy it was updated from holds the index.
+    const [read] = await store.refreshStores();
+    expect(read).toMatchObject({ url: PINNED_STORE, sequence: 6 });
+    expect(read!.problem, "a URL behind the copy the person took is not a failed read").toBeUndefined();
+    // Later indexes published there arrive.
+    const v1 = await bundle();
+    await net.putStore(await storeFiles({ sequence: 7, apps: [listing(v1)] }));
+    const [later] = await store.refreshStores();
+    expect(later).toMatchObject({ url: PINNED_STORE, sequence: 7, apps: [{ ref: v1.ref }] });
+    expect(later!.problem).toBeUndefined();
+    // An older index there is still refused, and marked: neither URL holds the index held.
+    await net.putStore(await storeFiles({ sequence: 6 }));
+    expect(await store.refreshStores()).toMatchObject([{ sequence: 7, apps: [{ ref: v1.ref }], problem: "rollback" }]);
+  });
+
   it("a store's preview says whether the person has it already, and the held index's sequence; a removed one is new again", async () => {
     const COPY_URL = "https://raw.githubusercontent.com/someone/store/HEAD/ghostly-store.json";
     const store = apps(net, { defaults: [{ url: STORE_URL, key: keyOf(STORE_KEY) }] });
