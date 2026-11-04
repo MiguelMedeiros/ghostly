@@ -117,10 +117,10 @@ export interface DeskLightning {
   /** True once paid, false while pending. Throws only when the sats did not go out. */
   pay(quote: { quote: string; mint?: string }, note: string, paymentId: string): Promise<boolean>;
   /**
-   * Asks the source (and the mints) about our open invoices now: a contact said it paid one from another wallet.
-   * `paid`: the invoice it says it paid, so one a test mint holds for a payer's word (StoredQuote `held`) is let go.
+   * Asks the source (and the mints) about this invoice of ours now, and no other: a contact said it paid its request.
+   * `named`: the contact named this invoice, so one a test mint holds for a payer's word (StoredQuote `held`) is let go.
    */
-  check?(paid?: string): Promise<void>;
+  check?(invoice: string, named: boolean): Promise<void>;
   /**
    * What the source wrote down of the Lightning payments of a contact's request (written before the source is asked to
    * spend, so one cut off by a restart is there): "pending" while one has not ended (settled and reported later,
@@ -1246,8 +1246,8 @@ export class PaymentDesk {
     if (within(now, this.lastCheckFrom.get(key), every)) return;
     this.lastCheckFrom.set(key, now);
     try {
-      // The invoice it says it paid, when it is this request's: the only one a contact can speak for.
-      if (rail === "lightning") await this.lightning[paymentNetwork(request)].check?.(payment.endpoint[1].trim().toLowerCase() === request.invoice?.toLowerCase() ? request.invoice : undefined);
+      // This request's invoice alone is asked about; it is let go only when the contact named it, the one it can speak for.
+      if (rail === "lightning") { if (request.invoice) await this.lightning[paymentNetwork(request)].check?.(request.invoice, payment.endpoint[1].trim().toLowerCase() === request.invoice.toLowerCase()); }
       else if (rail === "bitcoin") await this.reconcileBitcoinReceipts();
       else if (rail === "bark") await this.reconcileBarkReceipts();
       else if (rail === "spark") await this.reconcileSparkReceipts();

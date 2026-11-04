@@ -215,12 +215,12 @@ describe("a test mint's invoice waits for the payer's word", () => {
     const { desk, lightning } = setup([outgoing({ invoice: INVOICE, network: "testnet" })]);
     await desk.start();
     await desk.onPayment("l", check([ENDPOINT.bolt11, INVOICE.toUpperCase()]));
-    expect(lightning.check).toHaveBeenLastCalledWith(INVOICE);
+    expect(lightning.check).toHaveBeenLastCalledWith(INVOICE, true);
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(Date.now() + 10_000);
-    // Another invoice is not this request's: the contact cannot speak for it, the wallet only looks.
+    // Another invoice is not this request's: the contact cannot speak for it, the wallet only looks at the request's own.
     await desk.onPayment("l", check([ENDPOINT.bolt11, "lnbc1someoneelse"]));
-    expect(lightning.check).toHaveBeenLastCalledWith(undefined);
+    expect(lightning.check).toHaveBeenLastCalledWith(INVOICE, false);
     vi.useRealTimers();
   });
 
