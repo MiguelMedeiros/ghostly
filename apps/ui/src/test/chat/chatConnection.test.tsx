@@ -48,6 +48,11 @@ describe("ChatConnection: what the header says", () => {
     ["DHT-only delivery", { deliveryMode: "dht", dataLink: "idle" }, {}, { label: "DHT only · chosen by you", kind: "dht", dot: null, pulse: false }],
     ["on the DHT while live is retried", { textDelivery: "dht", pairing: ready() }, {}, { label: "On DHT · retrying live", kind: "dht", dot: "bg-text-muted", pulse: true }],
     ["DHT only, chosen by the contact", { textDelivery: "dht", pairing: ready(), dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } }, {}, { label: "DHT only · chosen by your contact", kind: "dht", dot: null, pulse: false }],
+    // Held messages take the place of the DHT for text (WISP 404): the label said "Connecting…" for as long as the contact was away.
+    ["DHT only, chosen by the contact, with messages held", { textDelivery: "hold", dataLink: "idle", peerParticipationKey: "saved", pairing: { status: "connecting", peerKey: "peer" } as Pairing,
+      dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } }, {}, { label: "DHT only · chosen by your contact", kind: "dht", dot: null, pulse: false }],
+    ["messages held for a contact who is away", { textDelivery: "hold", dataLink: "connecting", peerOnline: false, peerParticipationKey: "saved", pairing: { status: "connecting", peerKey: "peer" } as Pairing }, {},
+      { label: "Away · messages are held", kind: "waiting", dot: "bg-text-muted", pulse: false }],
     ["a switch to HyperDHT", { pairing: ready({ transitionTarget: "hyperdht/1" }) }, {}, { label: "Switching · HyperDHT", kind: "waiting", dot: "bg-text-muted", pulse: true }],
     // A chosen transport not reached yet (WISP 100): waited for, never a connection issue.
     ["waiting on the DHT for a HyperDHT chosen with Fallback off", { textDelivery: "dht", dataLink: "idle", pairing: { status: "negotiating", transport: "iroh/1" } as Pairing,
