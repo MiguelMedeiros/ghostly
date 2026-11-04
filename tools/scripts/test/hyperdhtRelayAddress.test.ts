@@ -31,6 +31,18 @@ describe("the HyperDHT relay's count of a client's address (infra/services/hyper
     expect(addressKey("198.51.100.7")).toBe("198.51.100.7");
   });
 
+  it("counts an IPv4-mapped address as its IPv4 address however it is written", () => {
+    expect(addressKey("::ffff:c000:201")).toBe("192.0.2.1");
+    expect(addressKey("::ffff:c000:202")).toBe("192.0.2.2");
+    expect(addressKey("0:0:0:0:0:ffff:192.0.2.1")).toBe("192.0.2.1");
+    expect(addressKey("0000:0000:0000:0000:0000:FFFF:C000:0201")).toBe("192.0.2.1");
+    expect(addressKey("::FFFF:192.0.2.1")).toBe("192.0.2.1");
+    expect(addressKey("::ffff:192.0.2.1%eth0")).toBe("192.0.2.1");
+    expect(addressKey("[::ffff:c000:201]:443")).toBe("192.0.2.1");
+    expect(addressKey("::ffff:0:c000:201")).toBe("0:0:0:0::/64");
+    expect(addressKey("1::2:3:4:5:1.2.3.4")).toBe("1:0:2:3::/64");
+  });
+
   it("counts an address a proxy wrote with its port, or in brackets, as the address alone", () => {
     expect(addressKey("203.0.113.7:51234")).toBe("203.0.113.7");
     expect(addressKey("203.0.113.7:51235")).toBe("203.0.113.7");
@@ -76,6 +88,26 @@ describe("the HyperDHT relay's count of a client's address (infra/services/hyper
       for (let n = 1; n <= 4; n++) statuses.push(await open(`2001:db8:1:2::${n.toString(16)}`));
       expect(statuses).toEqual([101, 101, 101, 429]);
       expect(await open("2001:db8:1:3::1")).toBe(101);
+    } finally {
+      for (const ws of sockets) ws.terminate();
+      await relay.close();
+    }
+  }, 30_000);
+
+  it("counts IPv4 clients apart when the proxy writes their IPv4-mapped address in hex", async () => {
+    const relay = await startRelay({ testnet: 3, proxies: 1, limits: { clientsPerAddress: 2 } });
+    const sockets: WebSocket[] = [];
+    const open = (from: string) => new Promise<number>((resolve) => {
+      const ws = new WebSocket(relay.url, { headers: { "x-forwarded-for": from } });
+      sockets.push(ws);
+      ws.once("open", () => resolve(101));
+      ws.once("unexpected-response", (_request, response) => resolve(response.statusCode ?? 0));
+      ws.once("error", () => resolve(0));
+    });
+    try {
+      const statuses = [];
+      for (let n = 1; n <= 4; n++) statuses.push(await open(`::ffff:c000:20${n}`));
+      expect(statuses).toEqual([101, 101, 101, 101]);
     } finally {
       for (const ws of sockets) ws.terminate();
       await relay.close();
