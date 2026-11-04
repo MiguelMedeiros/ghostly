@@ -5,6 +5,7 @@ import type { BrowserHost } from "@ghostly/browser/host";
 import { OIDC_PROVIDERS } from "@ghostly/browser/proofs/oidc/providers";
 import { IDENTITY_PROVIDERS } from "@ghostly/browser/proofs/registry";
 import { AddIdentityDialog } from "../../components/identities/AddIdentityDialog";
+import en from "../../locales/en";
 import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
 import { proofView } from "./views";
@@ -149,6 +150,22 @@ describe("AddIdentityDialog", () => {
       expect(screen.getByText(provider("bitcoin").privacy, { exact: false })).toBeInTheDocument();
       await user.click(screen.getByRole("button", { name: "Back" }));
       expect(screen.getByRole("list", { name: "Kinds of identity" })).toBeInTheDocument();
+    });
+
+    it("says a built-in provider's words in the app's language, on its card, its details and its form", async () => {
+      // The words a language has for the SSH key provider (identities.providers.ssh); the ones it lacks stay English.
+      const area = en.identities as Record<string, unknown>;
+      area.providers = { ssh: { label: "SSH-Schlüssel", summary: "Einmal mit ssh-keygen signieren", description: "Beweist, dass du einen SSH-Schlüssel hältst.", subject: { help: "Dein öffentlicher Schlüssel." } } };
+      try {
+        const { user } = dialog();
+        const card = screen.getByTestId("add-identity-card-ssh");
+        expect(card).toHaveTextContent("SSH-Schlüssel");
+        expect(within(card).getByTestId("add-identity-summary")).toHaveTextContent("Einmal mit ssh-keygen signieren");
+        await user.click(screen.getByTestId("add-identity-ssh"));
+        expect(screen.getByTestId("add-identity-about")).toHaveTextContent("Beweist, dass du einen SSH-Schlüssel hältst.");
+        expect(screen.getByText("Dein öffentlicher Schlüssel.")).toBeInTheDocument();
+        expect(screen.getByText(provider("ssh").privacy, { exact: false })).toBeInTheDocument();
+      } finally { delete area.providers; }
     });
 
     it("offers the validity periods up to the provider's maximum, starting on its default", async () => {

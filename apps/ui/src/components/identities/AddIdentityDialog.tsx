@@ -15,6 +15,7 @@ import { applicableSigners, useSubjectPreview } from "./useSubjectPreview";
 import { externalLinkProps } from "../../lib/externalLink";
 import { useI18n } from "../../contexts/I18nContext";
 import { problemText, type Problem } from "../../lib/problemText";
+import { localProvider } from "../../lib/providerWords";
 
 const VALIDITY = [7, 30, 90, 180, 365];
 
@@ -31,7 +32,9 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
   const providers = addableProviders();
   const platform = identityPlatform();
   // Always the picker first, even with one provider: the flow is the same whatever is registered.
-  const [provider, setProvider] = useState<IdentityProofProvider | null>(null);
+  const [chosen, setProvider] = useState<IdentityProofProvider | null>(null);
+  // Its words in the app's language, again when the language changes while the dialog is open.
+  const provider = chosen && localProvider(chosen, t);
   /** The card whose details are open in the picker (reading, not adding). */
   const [about, setAbout] = useState<string | null>(null);
   const [advanced, setAdvanced] = useState(false);
@@ -122,7 +125,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
   });
 
   const needsSubject = signer && signer.kind !== "in-app";
-  const card = (p: IdentityProofProvider) => <ProviderCard key={p.id} provider={p} open={about === p.id} onAbout={() => setAbout(about === p.id ? null : p.id)} onChoose={() => choose(p)} />;
+  const card = (p: IdentityProofProvider) => <ProviderCard key={p.id} provider={localProvider(p, t)} open={about === p.id} onAbout={() => setAbout(about === p.id ? null : p.id)} onChoose={() => choose(p)} />;
   const basic = providers.filter(p => !p.advanced), more = providers.filter(p => p.advanced);
   const signerChoice = <>
     {signers.length > 1 && (
@@ -150,7 +153,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
           providers.length ? (
             <div className="space-y-3">
               {basic.length > 0 && <div role="list" aria-label={t("identities.add.kinds")}><FieldGrid min="22rem" max={2}>{basic.map(card)}</FieldGrid></div>}
-              {more.length > 0 && <AdvancedProviders open={advanced || !basic.length} onToggle={() => setAdvanced(!advanced)} labels={more.map(p => p.label)}>
+              {more.length > 0 && <AdvancedProviders open={advanced || !basic.length} onToggle={() => setAdvanced(!advanced)} labels={more.map(p => localProvider(p, t).label)}>
                 <FieldGrid min="22rem" max={2}>{more.map(card)}</FieldGrid>
               </AdvancedProviders>}
             </div>
