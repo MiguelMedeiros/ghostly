@@ -416,6 +416,15 @@ describe("GroupChat: joining through a link", () => {
     expect(screen.getByTestId("group-joining")).not.toHaveTextContent("It happens once the admin's app is open");
   });
 
+  it("with others knocking, two minutes on: says the group lets people in a few at a time, not that the link may be dead", async () => {
+    const view = staged("knocked");
+    openGroup({ ...view, createdAt: Date.now() - 2 * 60_000 + 400, invitation: { ...view.invitation!, othersKnocked: true } });
+    const hint = await screen.findByTestId("group-joining-stale", {}, { timeout: 3_000 });
+    expect(hint).toHaveTextContent("Still waiting: the group lets people in a few at a time.");
+    expect(screen.getByTestId("group-joining")).not.toHaveTextContent("link was replaced");
+    expect(screen.getByTestId("group-joining-live")).toHaveTextContent("Still waiting: the group lets people in a few at a time.");
+  });
+
   it("says the link was replaced or turned off, with no steps left to wait on", () => {
     openGroup({ ...staged("replaced"), profile: "community" });
     expect(screen.getByTestId("group-joining")).toHaveTextContent("This link was replaced or turned off");
