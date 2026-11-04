@@ -22,7 +22,7 @@ import { LinkPreviewDraftCard } from "./composer/LinkPreviewDraft";
 import { EditBar, ReplyBar } from "./chat/ReplyQuote";
 import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
 import { AttachmentSheet } from "./composer/AttachmentSheet";
-import { dragHasFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteNamesFiles, pasteShowsNothing, platformPastedFiles } from "../lib/pastedFiles";
+import { dragCarriesFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteNamesFiles, pasteShowsNothing, platformDroppedFiles, platformPastedFiles } from "../lib/pastedFiles";
 import { onShareChange, peekShareFor, shareFiles, shareText, takeShareFor, type IncomingShare } from "../lib/incomingShare";
 import { fitFieldHeight, useFieldFitsView } from "./composer/fieldHeight";
 import { useKeptOnScreen } from "./composer/keptOnScreen";
@@ -188,6 +188,8 @@ export function MessageInput({
   const sharedIdentity = useRef(false);
   const [showMenu, setShowMenu] = useState(false);
   const [showPanel, setShowPanel] = useState(false);
+  /** The panel was opened from the keyboard: it takes the focus, and Escape gives it back to its button. */
+  const [panelByKey, setPanelByKey] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const plusRef = useRef<HTMLButtonElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
@@ -213,6 +215,8 @@ export function MessageInput({
   /** A paste the platform is reading: one at a time, and said on screen (the sheet opens only once every byte is here). */
   const [reading, setReading] = useState(false);
   const readingRef = useRef(false);
+  /** Drops the platform is reading (another app's files, on Linux), said on screen as a paste is. */
+  const [dropsReading, setDropsReading] = useState(0);
   const [dragging, setDragging] = useState<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -234,6 +238,8 @@ export function MessageInput({
   const draftIdRef = useRef(draftId); draftIdRef.current = draftId;
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  // The secret guard's seed words in the app's other languages (`seedLists.ts`), fetched as the composer opens.
+  useEffect(() => { void import("../lib/parse/seedLists").catch(() => {}); }, []);
   const composition = useComposition();
   const [canRecord] = useState(canRecordVoice);
   /** A voice message being recorded: the mic stays (and its recording with it) even if an edit or a reply fills the field. */
@@ -705,6 +711,22 @@ export function MessageInput({
     shareFiles(share).then((files) => offerRef.current(files), (error: unknown) => showToast(problemLine(error, t)));
   };
   const offerSharedRef = useRef(offerShared); offerSharedRef.current = offerShared;
+  /**
+   * A drop's files the platform read (another app's, on Linux), as a paste's are: what could not be read is said, and so
+   * is a read that ends where files cannot go any more (an edit began meanwhile).
+   */
+  const offerHeld = (held: Promise<File[]>) => {
+    // Up to 256 MB read in steps: the line says so until the sheet, or the reason there is none, takes its place.
+    setDropsReading((was) => was + 1);
+    const ended = () => setDropsReading((was) => was - 1);
+    held.then((files) => {
+      ended();
+      if (!files.length) showToast(t("errors.files.dropUnreadable"));
+      else if (!offerRef.current(files)) showToast(t("errors.files.dropLate"));
+    },
+      (error: unknown) => { ended(); showToast(problemLine(error, t)); });
+  };
+  const offerHeldRef = useRef(offerHeld); offerHeldRef.current = offerHeld;
 
   /**
    * A paste's files to the sheet. True when the paste was taken; false leaves it to the field: no files, or a rich
@@ -812,16 +834,18 @@ export function MessageInput({
     if (!hearsFiles || !zone) return;
     let depth = 0;
     const enter = (e: DragEvent) => {
-      if (!dragHasFiles(e.dataTransfer)) return;
+      if (!dragCarriesFiles(e.dataTransfer)) return;
       e.preventDefault();
       depth += 1;
       // The veil invites a drop: only where one can be sent. Elsewhere the drop is taken, and answered with the reason.
       if (canAttach) setDragging(zone);
     };
     const over = (e: DragEvent) => {
-      if (!dragHasFiles(e.dataTransfer)) return;
+      if (!dragCarriesFiles(e.dataTransfer)) return;
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      // The platform may say a drag carries files after the page heard it enter (another app's, on Linux).
+      if (!depth) { depth = 1; if (canAttach) setDragging(zone); }
     };
     const done = () => { depth = 0; setDragging(null); };
     const leave = (e: DragEvent) => {
@@ -832,9 +856,12 @@ export function MessageInput({
     };
     const drop = (e: DragEvent) => {
       done();
-      if (!dragHasFiles(e.dataTransfer)) return;
+      if (!dragCarriesFiles(e.dataTransfer)) return;
+      // Never the files' addresses in the draft, nor the page leaving for them.
       e.preventDefault();
-      offerRef.current(droppedFiles(e.dataTransfer));
+      const held = platformDroppedFiles(e.dataTransfer);
+      if (held) offerHeldRef.current(held);
+      else offerRef.current(droppedFiles(e.dataTransfer));
     };
     zone.addEventListener("dragenter", enter);
     zone.addEventListener("dragover", over);
@@ -928,10 +955,10 @@ export function MessageInput({
       </button>
     </div>
   );
-  const readingLine = reading && !locked && (
+  const readingLine = (reading || dropsReading > 0) && !locked && (
     <p role="status" data-testid="paste-reading" className="m-0 flex items-center gap-2 text-[13px] text-text-secondary animate-fade-in">
       <span aria-hidden="true" className="inline-block size-4 shrink-0 animate-spin rounded-full border-2 border-accent border-e-transparent motion-reduce:animate-none" />
-      {t("composer.pasteReading")}
+      {t(reading ? "composer.pasteReading" : "composer.dropReading")}
     </p>
   );
   const shown = preparing[0];
@@ -968,7 +995,7 @@ export function MessageInput({
   // above the composer cut at the top of the screen rather than off it (composer/fieldHeight.ts, composer/keptOnScreen.ts).
   useFieldFitsView(textareaRef);
   const aboveShown = (toastBox || readingLine || preparingLine) && !sheetOpen;
-  useKeptOnScreen(aboveRef, aboveShown ? `${toast ?? ""}|${reading}|${shown?.name ?? ""}|${shownProgress !== undefined}` : null);
+  useKeptOnScreen(aboveRef, aboveShown ? `${toast ?? ""}|${reading}|${dropsReading}|${shown?.name ?? ""}|${shownProgress !== undefined}` : null);
 
   return (
     <div ref={composerRef} data-composer className="@container/composer bg-panel-header px-3 max-md:px-2 py-2 composer-safe shrink-0 relative">
@@ -997,7 +1024,7 @@ export function MessageInput({
             data-testid="composer-expressions"
             aria-expanded={showPanel}
             aria-haspopup="dialog"
-            onClick={() => { const open = !showPanel; closeAll(); setShowPanel(open); }}
+            onClick={(e) => { const open = !showPanel; closeAll(); setShowPanel(open); setPanelByKey(e.detail === 0); }}
             disabled={disabled}
             className={`composer-icon-button ${showPanel ? "composer-icon-button-on" : ""}`}
             aria-label={t("composer.expressions")}
@@ -1109,10 +1136,12 @@ export function MessageInput({
           dismissRef={fieldRef}
           onEmoji={handleEmojiSelect}
           onGif={handleGifSelect}
+          focusOnOpen={panelByKey}
           onClose={() => {
             setShowPanel(false);
             const at = document.activeElement;
-            if (!phone && (!at || at === document.body || at.closest("[data-testid='expression-panel']"))) textareaRef.current?.focus();
+            if (phone || (at && at !== document.body && !at.closest("[data-testid='expression-panel']"))) return;
+            if (panelByKey) panelButtonRef.current?.focus(); else textareaRef.current?.focus();
           }}
         />
       )}

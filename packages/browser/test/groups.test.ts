@@ -757,6 +757,24 @@ describe("group engine: admission over a contact chat, edges from the roster", (
         expect(sent.every(f => (f as { t: string }).t === "group-commit" && !("secret" in (f as object)))).toBe(true);
       });
 
+      it("that missed a member's leave reads that the member left, not that the admin removed them", async () => {
+        const { world, alice, bob, carol, groupId, key, edge } = await trio();
+        const bobKey = key(bob);
+        edge("alice", bob, false); edge("carol", bob, false);
+        world.chats.delete("chat-ab");
+        // Carol leaves on her own while Bob is away, then the admin removes Bob.
+        await carol.leave(groupId); await world.settle();
+        expect(world.events("alice")).toContain("left");
+        await alice.remove(groupId, bobKey); await world.settle();
+        edge("alice", bob, true);
+        await world.meet(); await world.settle();
+        expect(bob.views()[0]).toMatchObject({ status: "removed" });
+        // The commits between come over the admin's kept edge, each with the mark that says the member left.
+        const lines = (await bob.messages(groupId)).filter(m => m.event === "left" || m.event === "gone");
+        expect(lines.map(m => [m.event, m.member, m.by])).toEqual([["left", key(carol), undefined]]);
+        expect(lines[0].text).toMatch(/ left$/);
+      });
+
       it("is still told after the admin's app restarts, and is given up after a week", async () => {
         const { world, alice, bob, carol, groupId, key, edge, known } = await trio();
         const bobKey = key(bob), carolKey = key(carol);

@@ -96,4 +96,21 @@ describe("file actions on an ended 1:1 transfer", () => {
     const { ctx } = world({ [IN]: ended("in", "Cancelled by the sender") });
     await expect(callApi(ctx, "file.save", { file: IN, path: join(dir, "big.bin") })).rejects.toMatchObject({ code: "refused", message: "It ended: Cancelled by the sender" });
   });
+
+  it("pause of a file being checked is refused: the engine would do nothing and it ends done", async () => {
+    for (const [id, direction] of [[OUT, "out"], [IN, "in"]] as const) {
+      const { ctx, node } = world({ [id]: { state: "transferring", stage: "verifying", transferred: 10, size: 10, direction } as FileTransferView });
+      await expect(callApi(ctx, "file.action", { file: id, action: "pause" })).rejects.toMatchObject({ code: "refused", message: "Too late to pause: it is being checked" });
+      expect(node.fileAction).not.toHaveBeenCalled();
+    }
+  });
+
+  it("pause of a sent file that arrived whole, offered again, is refused: paused, it could be cancelled", async () => {
+    const whole = { state: "transferring", transferred: 12_582_912, size: 12_582_912, direction: "out" } as const;
+    for (const view of [whole, { ...whole, stage: "waiting" }] as FileTransferView[]) {
+      const { ctx, node } = world({ [OUT]: view });
+      await expect(callApi(ctx, "file.action", { file: OUT, action: "pause" })).rejects.toMatchObject({ code: "refused", message: "Too late to pause: it arrived whole, and the contact keeps it" });
+      expect(node.fileAction).not.toHaveBeenCalled();
+    }
+  });
 });

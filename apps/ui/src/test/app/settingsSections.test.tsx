@@ -272,6 +272,22 @@ describe("Settings on a wide screen", () => {
     expect(screen.getByTestId("delete-all-chats")).toHaveFocus();
   });
 
+  it("Delete all chats' Confirm says the chats are gone, and hands the focus to the next control, not to the page", async () => {
+    windowIs(false);
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: "a".repeat(52), encKeyB64: "a2V5", messages: [], createdAt: 1_700_000_000_000 });
+    const { user } = renderSettings("/settings/storage");
+
+    const remove = await screen.findByTestId("delete-all-chats");
+    await vi.waitFor(() => expect(remove).toBeEnabled());
+    remove.focus();
+    await user.keyboard("{Enter}");
+    await user.keyboard("{Enter}");
+    // The result, not the button's words again.
+    expect(await screen.findByTestId("settings-notice")).toHaveTextContent("All chats deleted");
+    expect(screen.getByTestId("delete-all-chats")).toBeDisabled();
+    expect(screen.getByTestId("clear-all-data")).toHaveFocus();
+  });
+
   it("an old address shows the whole page too", async () => {
     windowIs(false);
     renderSettings("/settings/advanced");

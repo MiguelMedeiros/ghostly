@@ -35,6 +35,12 @@ export interface HoldHost {
   fetch?: typeof fetch;
   /** Plain HTTP to this machine is a storage address too: the e2e suite's local server. Off in every shipped app. */
   loopbackStorage?: () => boolean;
+  /**
+   * "Hide my IP from contacts": null when it is off. On, the only storage places a pickup may reach (this person's own
+   * bucket, `holdStoragePlace`); any other address, which the contact chose, is not read, and what it holds waits there.
+   * Not a host: under path-style addresses a contact's bucket at the same provider has this person's host.
+   */
+  hiddenIpPlaces?: () => string[] | null;
   now?: () => number;
   /** How long an item is held, when a test shortens it; never longer than the profile's seven days. */
   ttlMs?: () => number | undefined;
@@ -64,6 +70,25 @@ const REPUBLISH_MS = 60 * 60_000;
 export const HOLD_FETCH_MS = 20_000;
 const HOLD_FETCH_BYTES_PER_S = 64 * 1024;
 export const holdFetchTimeoutMs = (max: number): number => HOLD_FETCH_MS + Math.ceil(max / HOLD_FETCH_BYTES_PER_S) * 1000;
+/** Why a pickup waits: its storage would see this device's address, which the person hides from contacts. */
+const HOLD_HIDDEN_IP = "Hide my IP from contacts is on: what your contact held for you waits on their storage until you turn it off.";
+/** Thrown where an address is about to be read, so a pickup stops there and starts again once it may. */
+class HiddenIpError extends Error { constructor() { super(HOLD_HIDDEN_IP); } }
+
+/**
+ * Where a person's own S3 storage is, as `S3Store` addresses it (path-style): its endpoint's origin and path, then its
+ * bucket, ending in "/" so a bucket whose name starts with this one's ("bob", "bobby") is not under it.
+ */
+export function holdStoragePlace(s3: { endpoint: string; bucket: string }): string {
+  const url = new URL(`${s3.endpoint.trim().replace(/\/+$/, "")}/${s3.bucket.trim()}/`);
+  return `${url.origin}${url.pathname}`;
+}
+
+/** Whether an address is under a place: the same origin, and its (normalised) path inside the place's. */
+function underPlace(url: string, place: string): boolean {
+  const parsed = new URL(url);
+  return `${parsed.origin}${parsed.pathname}`.startsWith(place);
+}
 const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
 /**
@@ -507,7 +532,10 @@ export class HoldEngine {
       await this.publishPointer(linkId, true).catch(() => {});
       this.host.changed();
     } else if (pointer.ack !== hold.peerAck) hold = await this.save(linkId, { ...hold, peerAck: pointer.ack });
-    if (pointer.top <= hold.inSeq) { this.expecting.delete(linkId); return; }
+    // Said again below if it still holds: a pickup that may go now, or nothing left to pick up, takes the line away.
+    const wasHidden = this.errors.get(linkId) === HOLD_HIDDEN_IP;
+    if (wasHidden) this.errors.delete(linkId);
+    if (pointer.top <= hold.inSeq) { this.expecting.delete(linkId); if (wasHidden) this.host.changed(); return; }
     if (!pointer.manifestUrl || pointer.expires <= now) { this.errors.set(linkId, "The contact holds items for you, but their address expired. They are handed out again when the contact is next online."); this.host.changed(); return; }
     let entries: ReturnType<typeof readManifest>, mailbox: string, manifestRev: number;
     try {
@@ -519,6 +547,7 @@ export class HoldEngine {
       entries = readManifest(manifest.header.meta, this.host.loopbackStorage?.()).filter(([seq]) => seq > this.state(linkId).inSeq).sort((a, b) => a[0] - b[0]);
     } catch (error) {
       if (error instanceof HoldRefusedError) { await this.save(linkId, { ...this.state(linkId), refused: this.state(linkId).refused + 1 }); this.errors.set(linkId, `Refused what the contact's storage offered: ${error.message}`); }
+      else if (error instanceof HiddenIpError) this.errors.set(linkId, HOLD_HIDDEN_IP);
       else this.errors.set(linkId, `Could not pick up held items: ${error instanceof Error ? error.message : String(error)}`);
       this.host.changed();
       return;
@@ -595,8 +624,8 @@ export class HoldEngine {
           this.errors.set(linkId, `Refused a held item from the contact: ${error.message}`);
           changed = true;
         } else {
-          // A network or storage problem: the next poll starts here again.
-          this.errors.set(linkId, `Could not pick up held items: ${error instanceof Error ? error.message : String(error)}`);
+          // A network or storage problem, or an address this device may not read now: the next poll starts here again.
+          this.errors.set(linkId, error instanceof HiddenIpError ? HOLD_HIDDEN_IP : `Could not pick up held items: ${error instanceof Error ? error.message : String(error)}`);
           stop = true;
         }
       }
@@ -632,6 +661,8 @@ export class HoldEngine {
     // The contact named this address: checked where it is used as well as where it was read, and no redirect is
     // followed (one would lead anywhere, this machine and its network included; a presigned address has none).
     if (!isHoldUrl(url, this.host.loopbackStorage?.())) throw new Error("The storage address is not one this app reads");
+    const places = this.host.hiddenIpPlaces?.();
+    if (places && !places.some((place) => underPlace(url, place))) throw new HiddenIpError();
     const doFetch = this.host.fetch ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
     const response = await doFetch(url, { cache: "no-store", credentials: "omit", redirect: "error", signal });
     if (!response.ok) throw new Error(`The storage answered ${response.status}`);

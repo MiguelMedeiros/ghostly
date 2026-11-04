@@ -10,7 +10,7 @@ import type { HoldState, StoredLink } from "../src/shared/types";
  * A bucket in memory that hands out presigned addresses the way S3 does, and a relay in memory: two
  * engines, Alice holding for Bob and Bob picking up, with nothing but these between them.
  */
-function bucket() {
+function bucket(bucketName = "bucket") {
   const objects = new Map<string, Uint8Array>();
   const store: HoldStore & { objects: typeof objects; tamper(name: string): void } = {
     objects,
@@ -20,13 +20,13 @@ function bucket() {
     async list() { return []; },
     async listFolder(space, mailbox): Promise<StoredBackup[]> { return [...objects.keys()].filter((k) => k.startsWith(`${space}/hold/${mailbox}/`)).map((name) => ({ name, created: 0 })); },
     async remove(name) { objects.delete(name); },
-    presign: (name, seconds) => presignS3({ method: "GET", url: new URL(`https://s3.test/bucket/${name}`), expiresSeconds: seconds }, { region: "us-east-1", accessKeyId: "k", secretAccessKey: "s" }),
+    presign: (name, seconds) => presignS3({ method: "GET", url: new URL(`https://s3.test/${bucketName}/${name}`), expiresSeconds: seconds }, { region: "us-east-1", accessKeyId: "k", secretAccessKey: "s" }),
     tamper(name) { const bytes = objects.get(name)!; bytes[bytes.length - 2] ^= 0x01; },
   };
   const fetcher = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input));
     if (url.host !== "s3.test" || !url.searchParams.get("X-Amz-Signature")) return new Response("forbidden", { status: 403 });
-    const bytes = objects.get(decodeURIComponent(url.pathname.replace(/^\/bucket\//, "")));
+    const bytes = objects.get(decodeURIComponent(url.pathname.replace(`/${bucketName}/`, "")));
     return bytes ? new Response(bytes.slice() as BodyInit, { headers: { "content-length": String(bytes.length) } }) : new Response("nope", { status: 404 });
   }) as unknown as typeof fetch;
   return { store, fetcher };
@@ -59,11 +59,11 @@ interface Side {
   refuseFiles?: string;
 }
 
-function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: () => number; aliceNow?: () => number; loopbackStorage?: boolean; fetch?: (inner: typeof fetch) => typeof fetch; ratchet?: { alice: boolean; bob: boolean } } = {}) {
+function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: () => number; aliceNow?: () => number; loopbackStorage?: boolean; fetch?: (inner: typeof fetch) => typeof fetch; ratchet?: { alice: boolean; bob: boolean }; bobHidesIp?: () => string[] | null; buckets?: { alice: string; bob: string } } = {}) {
   const link = createLink();
   const alice = createIdentity(), bob = createIdentity();
   const transport = relay();
-  const buckets = { alice: bucket(), bob: bucket() };
+  const buckets = { alice: bucket(options.buckets?.alice), bob: bucket(options.buckets?.bob) };
   const make = (mine: StoredLink, storageOn: boolean, own: typeof buckets.alice, other: typeof buckets.alice, now = options.now): Side => {
     const side: Partial<Side> = { stored: mine, messages: new Map(), received: [], delivery: new Map(), files: new Map(), requests: new Map(), replies: new Map(), open: false };
     const host: HoldHost = {
@@ -84,6 +84,7 @@ function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: ()
       // Bob reads Alice's bucket and Alice reads Bob's: each fetches from wherever the manifest points.
       fetch: options.fetch ? options.fetch(other.fetcher) : other.fetcher,
       ...(options.loopbackStorage && { loopbackStorage: () => true }),
+      ...(options.bobHidesIp && mine.id === "link-b" && { hiddenIpPlaces: options.bobHidesIp }),
       now,
     };
     // The chat's ratchet (WISP 4xx), on a side whose app has it; the other side's record says whether it does too.
@@ -524,6 +525,59 @@ describe("store-and-forward engine", () => {
     await vi.waitFor(() => expect(b.received.map((r) => r.text)).toEqual(["held"]));
     expect(asked.every((url) => url.startsWith("http://127.0.0.1:9000/"))).toBe(true);
   });
+
+  it("with Hide my IP on, nothing is fetched from the contact's storage: the items wait, said once, and come when it goes off", async () => {
+    const asked: string[] = [];
+    let hidden: string[] | null = ["https://mine.example/bucket/"];
+    const { a, b, buckets } = setup({ bobHidesIp: () => hidden, fetch: (inner) => (async (input: RequestInfo | URL, init?: RequestInit) => {
+      asked.push(String(input));
+      const url = new URL(String(input));
+      return inner(`https://s3.test${url.pathname}${url.search}`, init);
+    }) as typeof fetch });
+    engines.push(a.engine, b.engine);
+    const presign = buckets.alice.store.presign;
+    buckets.alice.store.presign = async (name, seconds) => (await presign(name, seconds)).replace("https://s3.test/", "https://contact.example/");
+    a.messages.set("me_1", { text: "held", timestamp: 1000 });
+    await a.engine.hold("link-a", { kind: "text", id: "wire-id-0001", messageId: "me_1", bytes: 4, timestamp: 1000 });
+    b.engine.start();
+    await vi.waitFor(() => expect(b.engine.view("link-b")?.error).toBe("Hide my IP from contacts is on: what your contact held for you waits on their storage until you turn it off."));
+    expect(asked).toEqual([]);
+    expect(b.received).toEqual([]);
+    expect(b.stored.hold!).toMatchObject({ inSeq: 0, refused: 0 });
+    // Off: picked up at the next look, and the line goes.
+    hidden = null;
+    b.engine.wake("link-b");
+    await vi.waitFor(() => expect(b.received.map((r) => r.text)).toEqual(["held"]));
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.every((url) => url.startsWith("https://contact.example/"))).toBe(true);
+    expect(b.engine.view("link-b")?.error).toBeUndefined();
+  });
+
+  it("with Hide my IP on, a pickup from this person's own bucket still goes", async () => {
+    const { a, b } = setup({ bobHidesIp: () => ["https://s3.test/bucket/"] });
+    engines.push(a.engine, b.engine);
+    a.messages.set("me_1", { text: "held", timestamp: 1000 });
+    await a.engine.hold("link-a", { kind: "text", id: "wire-id-0001", messageId: "me_1", bytes: 4, timestamp: 1000 });
+    b.engine.start();
+    await vi.waitFor(() => expect(b.received.map((r) => r.text)).toEqual(["held"]));
+  });
+
+  // Path-style addresses: two people at one provider share its host, and only the bucket (the first path segment) says
+  // whose storage it is. A bucket whose name starts with this person's is someone else's too.
+  for (const contactBucket of ["alice", "bobby"]) {
+    it(`with Hide my IP on, nothing is fetched from the contact's bucket "${contactBucket}" on this person's own storage host`, async () => {
+      const asked: string[] = [];
+      const { a, b } = setup({ buckets: { alice: contactBucket, bob: "bob" }, bobHidesIp: () => ["https://s3.test/bob/"],
+        fetch: (inner) => (async (input: RequestInfo | URL, init?: RequestInit) => { asked.push(String(input)); return inner(input, init); }) as typeof fetch });
+      engines.push(a.engine, b.engine);
+      a.messages.set("me_1", { text: "held", timestamp: 1000 });
+      await a.engine.hold("link-a", { kind: "text", id: "wire-id-0001", messageId: "me_1", bytes: 4, timestamp: 1000 });
+      b.engine.start();
+      await vi.waitFor(() => expect(b.engine.view("link-b")?.error).toBe("Hide my IP from contacts is on: what your contact held for you waits on their storage until you turn it off."));
+      expect(asked).toEqual([]);
+      expect(b.received).toEqual([]);
+    });
+  }
 
   it("a storage request that never answers is given up after its timeout, and the next poll picks everything up", async () => {
     // "never": no answer at all. "stalled": the answer starts, then its body stops. Neither honours the abort signal.

@@ -3,7 +3,7 @@ import type { LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import type { Parsed } from "./args";
 import { bool, chatOrGroup, messageOf, node, num, oneOf, str, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
-import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
+import { findSecret } from "./secretGuard";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 
 /*

@@ -369,6 +369,11 @@ export class NativePeerConnection extends EventTarget {
   private described = false;
   /** The speaker the call was told to play on (`playOn`; null: the default), before Rust had it too. */
   private speaker: string | null | undefined;
+  /**
+   * The microphone track Rust sends, once it said so: a microphone failing mid-call is this one, not one picked that
+   * Rust is still opening (it sends the old one until the new one plays).
+   */
+  private sending: MediaStreamTrack | null = null;
   private closed = false;
   private muted = false;
   private offer: string | null = null;
@@ -437,9 +442,9 @@ export class NativePeerConnection extends EventTarget {
     };
   }
 
-  /** Rust started the call: which microphone it is. */
-  private using(microphone: string | null): void {
-    const track = this.audio.sender.track;
+  /** Rust sends `track` now (it started the call with it, or switched to it): which microphone it is. */
+  private using(track: MediaStreamTrack | null, microphone: string | null): void {
+    this.sending = track;
     if (track) usedOf.set(track, microphone);
   }
 
@@ -451,11 +456,12 @@ export class NativePeerConnection extends EventTarget {
     this.described = true;
     if (this.closed) return;
     const now = this.devices();
+    const track = this.audio.sender.track;
     // Each as its own command would have done it: one that fails leaves the call as Rust started it.
     if (now.camera !== sent.camera) await invoke("native_call_camera", { id: this.id, camera: now.camera }).catch(() => {});
     if (now.speaker !== sent.speaker) await invoke("native_call_speaker", { id: this.id, device: now.speaker }).catch(() => {});
     if (now.microphone !== sent.microphone) {
-      await invoke<string | null>("native_call_microphone", { id: this.id, device: now.microphone }).then((used) => this.using(used), () => {});
+      await invoke<string | null>("native_call_microphone", { id: this.id, device: now.microphone }).then((used) => this.using(track, used), () => {});
     }
   }
 
@@ -495,8 +501,9 @@ export class NativePeerConnection extends EventTarget {
     }
     this.started = true;
     const sent = this.devices();
+    const track = this.audio.sender.track;
     const { sdp, microphone } = await this.hold(() => invoke<Described>("native_call_offer", { id: this.id, ...sent }));
-    this.using(microphone);
+    this.using(track, microphone);
     if (this.muted) await this.mute(true);
     await this.catchUp(sent);
     return { type: "offer", sdp };
@@ -513,8 +520,9 @@ export class NativePeerConnection extends EventTarget {
     }
     this.started = true;
     const sent = this.devices();
+    const track = this.audio.sender.track;
     const { sdp, microphone } = await this.hold(() => invoke<Described>("native_call_answer", { id: this.id, offer, ...sent }));
-    this.using(microphone);
+    this.using(track, microphone);
     if (this.muted) await this.mute(true);
     await this.catchUp(sent);
     this.negotiated(offer);
@@ -579,7 +587,7 @@ export class NativePeerConnection extends EventTarget {
     this.audio.sender.track = track;
     if (!this.described || this.closed) return;
     const used = await invoke<string | null>("native_call_microphone", { id: this.id, device: wantedOf.get(track) ?? null });
-    usedOf.set(track, used);
+    this.using(track, used);
   }
 
   /** Plays the call on the speaker named `device` (null: the default). */
@@ -607,8 +615,7 @@ export class NativePeerConnection extends EventTarget {
       return;
     }
     if (endedOf(bytes, "microphone")) {
-      const track = this.audio.sender.track;
-      if (track) lost(track);
+      if (this.sending) lost(this.sending);
       return;
     }
     let said: { ice?: unknown; levels?: unknown };

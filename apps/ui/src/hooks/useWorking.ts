@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useEngineState } from "../lib/engineState";
+import { chatKeys, useEngineValue } from "../lib/engineState";
 import { workingByChat, type WorkingEntry } from "../lib/working";
 import { useCardIndex } from "./useTaskBoard";
 
@@ -11,18 +11,19 @@ import { useCardIndex } from "./useTaskBoard";
 /** The running tasks of each 1:1 chat, by the contact's key; empty while no contact has one. */
 export function useWorkingByPeer(): ReadonlyMap<string, WorkingEntry> {
   const index = useCardIndex();
-  const state = useEngineState();
-  // From the index alone: every engine state brings the chats as a new list, and the index holds every card there is.
+  // Each chat's id and contact key only, as the usage meter reads them (`useUsageByPeer`).
+  const keys = useEngineValue(chatKeys);
+  // From the index alone: the index holds every card there is.
   const byChat = useMemo(() => workingByChat(index), [index]);
   return useMemo(() => {
     const byPeer = new Map<string, WorkingEntry>();
     if (!byChat.size) return byPeer;
-    for (const link of state?.links ?? []) {
-      const entry = byChat.get(link.id);
-      if (entry && link.peerPubKeyZ32) byPeer.set(link.peerPubKeyZ32, entry);
+    for (const [id, peerKey] of keys) {
+      const entry = byChat.get(id);
+      if (entry && peerKey) byPeer.set(peerKey, entry);
     }
     return byPeer;
-  }, [byChat, state?.links]);
+  }, [byChat, keys]);
 }
 
 /** One contact's running tasks, or none. */

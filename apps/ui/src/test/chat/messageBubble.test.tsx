@@ -454,7 +454,7 @@ describe("MessageBubble: system lines", () => {
     expect(screen.getByText(shown)).toBeInTheDocument();
   });
 
-  it.each([["ja", "(1 分 5 秒)"], ["zh", "(1 分 5 秒)"], ["ar", "(1 دقيقة 5 ثانية)"], ["pt", "(1 min 5 s)"]] as const)("says a call's length in %s", (language, shown) => {
+  it.each([["ja", "(1 分 5 秒)"], ["zh", "(1 分 5 秒)"], ["ar", "(1 د 5 ث)"], ["pt", "(1 min 5 s)"]] as const)("says a call's length in %s", (language, shown) => {
     renderApp(<MessageBubble message={message({ sender: "system", text: "Audio call ended", callEvent: { type: "call_ended", duration: 65_000 } })} peerPubKey="peer" />, { language });
     expect(screen.getByText(shown)).toBeInTheDocument();
   });

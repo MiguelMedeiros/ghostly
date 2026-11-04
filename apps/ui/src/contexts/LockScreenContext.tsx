@@ -8,11 +8,12 @@ import {
   type ReactNode,
 } from "react";
 import { flushSync } from "react-dom";
+import { getBrowserHost, type BrowserHost } from "@ghostly/browser/host";
 import { useSettings } from "./SettingsContext";
 import { hashPassword, needsRehash, verifyPassword } from "../lib/settings";
 import { activeProfileId } from "../lib/profiles";
 import { takeUnlockHandover } from "../lib/lockHandover";
-import { stopRunningApps } from "../lib/apps/open";
+import { onAppInput, stopRunningApps } from "../lib/apps/open";
 import { closeServiceWindows } from "../lib/serviceWindows";
 import { pauseForLock } from "../lib/nowPlaying";
 
@@ -65,6 +66,8 @@ const FREE_ATTEMPTS = 3;
 const MAX_DELAY_MS = 5 * 60_000;
 /** The longest wait between two looks at the clock while unlocked (see `checkIdle`). */
 const LOCK_CHECK_MS = 30_000;
+/** The channel the app's pages of one origin hear Lock Now on (`lock`). */
+const LOCK_CHANNEL = "ghostly-lock";
 
 /**
  * Away as the system's app switcher sees it: hidden, or on a phone no longer the focused window (Android's recents
@@ -131,11 +134,41 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
     pauseForLock();
   }, [isLocked]);
 
-  const lock = useCallback(() => {
+  // Android's app switcher takes its picture of the app before the page hears it is going, so the cover below comes
+  // too late for it: while the lock is on, the app keeps out of that picture altogether (the host, where it can).
+  useEffect(() => {
+    let host: BrowserHost;
+    try { host = getBrowserHost(); } catch { return; }
+    void host.hideFromSwitcher?.(lockActive).catch(() => {});
+  }, [lockActive]);
+
+  const lockHere = useCallback(() => {
     if (settings.lockScreen.enabled && settings.lockScreen.passwordHash) {
       setIsLocked(true);
     }
   }, [settings.lockScreen.enabled, settings.lockScreen.passwordHash]);
+
+  // The extension runs the app in several tabs at once: Lock Now in one locks them all, or the next tab would show
+  // the chats to whoever clicks it. Only locking spreads; each tab is unlocked with the password on its own. The time
+  // away is each tab's own (a tab left behind locks without locking the one in use).
+  const lockChannel = useRef<BroadcastChannel | null>(null);
+  useEffect(() => {
+    if (typeof BroadcastChannel === "undefined") return;
+    const channel = new BroadcastChannel(LOCK_CHANNEL);
+    channel.onmessage = (event: MessageEvent<unknown>) => {
+      if (event.data === "lock") lockHere();
+    };
+    lockChannel.current = channel;
+    return () => {
+      channel.close();
+      lockChannel.current = null;
+    };
+  }, [lockHere]);
+
+  const lock = useCallback(() => {
+    lockHere();
+    lockChannel.current?.postMessage("lock");
+  }, [lockHere]);
 
   const unlock = useCallback(
     async (password: string): Promise<boolean> => {
@@ -195,11 +228,11 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
     if (lastActivityRef.current > now) lastActivityRef.current = now;
     const left = lastActivityRef.current + timeoutMs - now;
     if (!(left > 0)) {
-      lock();
+      lockHere();
       return;
     }
     timerRef.current = setTimeout(() => checkIdleRef.current(), Math.min(left, LOCK_CHECK_MS));
-  }, [settings.lockScreen.enabled, settings.lockScreen.passwordHash, timeoutMs, isLocked, lock]);
+  }, [settings.lockScreen.enabled, settings.lockScreen.passwordHash, timeoutMs, isLocked, lockHere]);
   checkIdleRef.current = checkIdle;
 
   const resetTimer = useCallback(() => {
@@ -244,6 +277,8 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
     events.forEach((event) => {
       window.addEventListener(event, handleActivity, { passive: true });
     });
+    // Taps and keys in an app the person is in: its frame or window keeps them from this page.
+    const stopAppInput = onAppInput(handleActivity);
     const returns = ["focus", "pageshow"];
     returns.forEach((event) => window.addEventListener(event, handleReturn));
     document.addEventListener("visibilitychange", handleVisibility);
@@ -256,6 +291,7 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
       events.forEach((event) => {
         window.removeEventListener(event, handleActivity);
       });
+      stopAppInput();
       returns.forEach((event) => window.removeEventListener(event, handleReturn));
       document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("pagehide", coverNow);

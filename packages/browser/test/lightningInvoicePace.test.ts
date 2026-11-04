@@ -94,7 +94,25 @@ describe("the invoice of a chat request that was closed (agents#2447)", () => {
     const created = await lightning.createInvoice(100, { paymentId: "request-1" });
     closed.add("request-1");
     provider.markPaid(created.paymentHash);
-    await lightning.reconcile();
+    expect(await lightning.check(created.invoice)).toBe(true);
     expect(events.received).toHaveBeenCalledOnce();
+  });
+});
+
+describe("a payer's \"I paid\" for one invoice of a card with 100 open", () => {
+  it("asks the source about that invoice alone, then at the fast pace a while; the others keep theirs", async () => {
+    const { lightning, provider, status, events } = await card();
+    const created = [];
+    for (let i = 0; i < 100; i++) created.push(await lightning.createInvoice(100 + i));
+    await advance(30 * 60_000);
+    status.mockClear();
+    expect(await lightning.check(created[42].invoice)).toBe(true);
+    if (process.env.INVOICE_PACE) console.log(`one "I paid", 100 open card invoices: ${status.mock.calls.length} lookups`);
+    expect(status.mock.calls.map(([asked]) => asked.paymentHash)).toEqual([created[42].paymentHash]);
+    expect(await lightning.check("lnbc1notours")).toBe(false);
+    expect(status).toHaveBeenCalledOnce();
+    provider.markPaid(created[42].paymentHash);
+    await advance(5_000);
+    expect(events.received, "fast while the payment settles").toHaveBeenCalledOnce();
   });
 });

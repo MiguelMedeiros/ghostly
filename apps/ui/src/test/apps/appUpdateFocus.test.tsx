@@ -38,3 +38,15 @@ describe("an installed app's waiting update, by keyboard", () => {
     expect(document.activeElement).not.toBe(document.body);
   });
 });
+
+describe("an installed app's missing files, by keyboard", () => {
+  it("gives the focus to Open once Fetch files brings them back and goes, never to the page", async () => {
+    let list: InstalledAppView[] = [{ ...app, run: { status: "needs-files" } }];
+    fakeEngine.on("appList", () => list).on("appFetchFiles", () => { list = [app]; return app.run; });
+    const { user } = renderApp(<Shown />);
+    (await screen.findByTestId("app-fetch-files")).focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.queryByTestId("app-fetch-files")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("app-open")).toHaveFocus());
+  });
+});

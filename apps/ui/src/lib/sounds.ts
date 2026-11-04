@@ -197,6 +197,14 @@ function load(name: SoundName): Promise<AudioBuffer> | undefined {
 /** The sounds the first gesture fetches ahead: a chat's own, which may come right after it. */
 const WARMED: readonly SoundName[] = ["message", "sent"];
 
+/**
+ * Fetches and decodes a sound that is about to be needed, so it starts the moment it is played: the first play of a
+ * sound waits for both (10 to 40 ms, and over 100 ms on a loaded machine). Nothing before a gesture has started audio.
+ */
+export function warmSound(name: SoundName): void {
+  void load(name)?.catch(()=>{});
+}
+
 /** Autoplay unlock is attempted only on an actual user gesture. */
 export function installAudioGestures(): () => void {
   if (listening) return () => {};
@@ -316,8 +324,10 @@ export function startRinging(kind: "ring" | "ringback"): () => void {
       return new Promise<void>((resolve) => { letGo = resolve; });
     }).catch(() => { if (!done) { mine = true; loop(); } });
   };
-  // From the first ring on: a page that takes over mid-way starts its own, not one cut short by the next.
-  const loop = () => { clearInterval(timer); tick(); timer = setInterval(tick, RING_EVERY_MS); };
+  // From the first ring on: a page that takes over mid-way starts its own, not one cut short by the next. The timer is
+  // set before the tick: a lock granted inside `request()` (Node's) loops again from it, and that loop's timer is the one
+  // the end clears, not one overwritten here and left ringing.
+  const loop = () => { clearInterval(timer); timer = setInterval(tick, RING_EVERY_MS); tick(); };
   loop();
   return ()=>{if(done)return;done=true;ringing--;clearInterval(timer);stop();letGo();idleLater();};
 }

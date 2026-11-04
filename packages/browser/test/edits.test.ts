@@ -8,6 +8,7 @@ import type { GroupEditsHost } from "../src/engine/groupEdits";
 import type { Removal } from "../src/engine/removals";
 import { EDIT_HISTORY_KEEP, EDIT_HISTORY_MAX_BYTES, canEdit, takesPeerEdit, withEdit } from "../src/shared/edits";
 import type { StoredLink, StoredMessage } from "../src/shared/types";
+import { refusedRow } from "../src/shared/refusals";
 import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
 // covers: chat.edit.wire
 
@@ -380,7 +381,9 @@ describe("the contact's edits", () => {
     for (const id of ids) expect(await t.contact.sendEdit({ id, e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
     await vi.waitFor(() => expect(t.contactReceipts.map(([id]) => id)).toEqual(ids));
     const store = (t.node as unknown as { storeMessage(m: object): Promise<unknown> }).storeMessage.bind(t.node);
-    for (const [i, id] of ids.entries()) await store({ linkId: t.id, id: `peer_${id}`, text: `line ${i}`, sender: "peer", timestamp: 1_790_000_000_000 + i, via: "datalink", ...(i === 0 && { paymentId: "p1" }) });
+    for (const [i, id] of ids.entries()) await store({ linkId: t.id, id: `peer_${id}`, text: `line ${i}`, sender: "peer", timestamp: 1_790_000_000_000 + i, via: "datalink",
+      // A payment line has its payment's id; a refusal line, the values the payment desk writes with it (`refusedRow`).
+      ...(i === 0 ? { paymentId: "p1" } : { notice: { type: "paymentRefused", reason: "refused" } }) });
     expect((await t.messages()).filter(m => m.text.startsWith("line ")).map(m => m.text)).toEqual(["line 0", "line 1", "line 2"]);
     expect(t.node.deletedIdsOf(t.id).filter(id => ids.some(w => id === `peer_${w}`))).toEqual([]);
   });
@@ -389,7 +392,7 @@ describe("the contact's edits", () => {
     const t = await setup();
     const ids = ["1790000000001_refused", `spent_${"ab".repeat(16)}`];
     const store = (t.node as unknown as { storeMessage(m: object): Promise<unknown> }).storeMessage.bind(t.node);
-    for (const [i, id] of ids.entries()) await store({ linkId: t.id, id: `peer_${id}`, text: `Could not receive ${i + 1} sats: refused`, sender: "peer", timestamp: 1_790_000_000_001 + i, via: "datalink" });
+    for (const [i, id] of ids.entries()) await store({ linkId: t.id, id: `peer_${id}`, sender: "peer", timestamp: 1_790_000_000_001 + i, via: "datalink", ...refusedRow({ amount: i + 1, reason: "refused" }) });
     expect(await t.contact.sendMessage("a text", Date.now(), WIRE("T"))).toBeNull();
     await t.peerRow("a text");
     for (const id of [...ids, WIRE("T")]) expect(await t.contact.sendEdit({ id, e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
@@ -504,6 +507,34 @@ describe("the contact's edits", () => {
     await t.restart();
     expect(t.view().pin).toEqual({ id: "", by: "peer", at: expect.any(Number) });
   });
+
+  // The pin was shown unpinned only while its id was among the newest 500 removed, and the id among the newest 500
+  // deleted: 500 later deletions brought the pin back, and a copy of the message that came again was stored again.
+  it("the pin of a message deleted for everyone stays gone after 500 later deletions, and a copy that comes again is not stored", async () => {
+    const t = await setup({ pinSupport: true });
+    expect(await t.contact.sendMessage("pin me", Date.now(), WIRE("P"))).toBeNull();
+    await t.peerRow("pin me");
+    expect(t.contact.sendPin({ id: WIRE("P"), n: nextPinNumber() })).toBeNull();
+    await vi.waitFor(() => expect(t.view().pin?.id).toBe(WIRE("P")));
+    expect(await t.contact.sendEdit({ id: WIRE("P"), e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+    await vi.waitFor(() => expect(t.contactReceipts).toEqual([[WIRE("P"), 1]]));
+    expect(t.view().pin?.id).toBe("");
+    // 500 of mine deleted for everyone after it, as `removeMessage` forgets each.
+    const forget = (t.node as unknown as { forgetMessage(linkId: string, id: string, removed: StoredMessage): Promise<void> }).forgetMessage.bind(t.node);
+    for (let i = 0; i < 500; i++) {
+      const wireId = `m${i}`.padStart(22, "0");
+      await forget(t.id, `me_${wireId}`, { linkId: t.id, id: `me_${wireId}`, wireId, text: `n${i}`, sender: "me", timestamp: Date.now(), via: "datalink", delivery: "delivered" });
+    }
+    expect(t.view().pin).toEqual({ id: "", by: "peer", at: expect.any(Number) });
+    // A copy of it that comes again (a republish, a hold) stays deleted.
+    expect(await t.contact.sendMessage("pin me", Date.now(), WIRE("P"))).toBeNull();
+    expect(await t.contact.sendMessage("after it", Date.now(), WIRE("Q"))).toBeNull();
+    await t.peerRow("after it");
+    expect((await t.messages()).map(m => m.id)).not.toContain(`peer_${WIRE("P")}`);
+    await vi.waitFor(async () => expect((await db.getLinks()).find(l => l.id === t.id)?.deletedIds).toContain(`me_${"m499".padStart(22, "0")}`));
+    await t.restart();
+    expect(t.view().pin).toEqual({ id: "", by: "peer", at: expect.any(Number) });
+  }, 30_000);
 
   it("a pin that comes after its message was deleted for everyone shows as unpinned: the contact's removal or mine", async () => {
     const t = await setup({ pinSupport: true });

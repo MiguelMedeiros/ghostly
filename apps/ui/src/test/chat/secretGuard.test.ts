@@ -1,5 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { entropyToMnemonic } from "@scure/bip39";
+import { wordlist as french } from "@scure/bip39/wordlists/french.js";
+import { wordlist as italian } from "@scure/bip39/wordlists/italian.js";
+import { wordlist as japanese } from "@scure/bip39/wordlists/japanese.js";
+import { wordlist as portuguese } from "@scure/bip39/wordlists/portuguese.js";
+import { wordlist as simplifiedChinese } from "@scure/bip39/wordlists/simplified-chinese.js";
+import { wordlist as spanish } from "@scure/bip39/wordlists/spanish.js";
+import { wordlist as traditionalChinese } from "@scure/bip39/wordlists/traditional-chinese.js";
 import { decodeCashu, findSecret } from "../../lib/parse/secrets";
+// The lists the composer loads as it opens.
+import "../../lib/parse/seedLists";
 
 // covers: app.composer.secret-guard
 
@@ -25,6 +35,8 @@ const WIF = { compressed: "KwFfNUhSDaASSAwtG7ssQM1uVX8RgX5GHWnnLfhfiQDigjioWXHH"
 const XPRV = "xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi";
 const XPUB = "xpub661MyMwAqRbcFtXgS5sYJABqqG9YLmC4Q1Rdap9gSE8NqtwybGhePY2gZ29ESFjqJoCu1Rupje8YtGqsefD265TMg7usUDFdp6W1EGMcet8";
 const HEX = "01".repeat(32);
+/** What a Japanese seed's words are separated by. */
+const IDEOGRAPHIC_SPACE = String.fromCharCode(0x3000);
 
 /** A cashuA (NUT-00 v3) token: base64url JSON. */
 const cashuA = (amounts: number[], unit?: string) => "cashuA" + btoa(JSON.stringify({
@@ -60,6 +72,138 @@ describe("what the guard asks about", () => {
     expect(findSecret(typo)).toEqual({ kind: "mnemonic" });
   });
 
+  /**
+   * BIP39's lists in the app's other languages, as a wallet set to one of them shows its seed (Japanese with ideographic
+   * spaces). Entropy 0x7f repeated, as the English vectors above.
+   */
+  const LISTS: [string, string[]][] = [
+    ["Portuguese", portuguese], ["Spanish", spanish], ["French", french], ["Italian", italian], ["Japanese", japanese],
+    ["Chinese (simplified)", simplifiedChinese], ["Chinese (traditional)", traditionalChinese],
+  ];
+  const seedIn = (list: string[], bytes: number) => entropyToMnemonic(new Uint8Array(bytes).fill(0x7f), list);
+
+  it.each(LISTS)("a BIP39 seed in %s, of every length", (_, list) => {
+    for (const bytes of [16, 20, 24, 28, 32]) {
+      const seed = seedIn(list, bytes);
+      expect(findSecret(seed)).toEqual({ kind: "mnemonic" });
+      expect(findSecret(`seed: ${seed}`)).toEqual({ kind: "mnemonic" });
+      expect(findSecret(seed.split(/\s/).map((w, i) => `${i + 1}. ${w}`).join("\n"))).toEqual({ kind: "mnemonic" });
+    }
+  });
+
+  it.each(LISTS)("a BIP39 seed in %s, written in capitals, without accents or in composed letters", (_, list) => {
+    const seed = seedIn(list, 16);
+    for (const text of [seed.toUpperCase(), seed.normalize("NFD").replace(/\p{M}/gu, ""), seed.normalize("NFC")]) {
+      expect(findSecret(text)).toEqual({ kind: "mnemonic" });
+    }
+  });
+
+  it("a Japanese seed with ordinary spaces, or a message of only its words with one mistyped", () => {
+    const seed = seedIn(japanese, 16);
+    expect(findSecret(seed.replace(/\s/g, " "))).toEqual({ kind: "mnemonic" });
+    const words = seed.split(IDEOGRAPHIC_SPACE);
+    expect(findSecret([...words.slice(0, -1), words[0]].join(IDEOGRAPHIC_SPACE))).toEqual({ kind: "mnemonic" });
+  });
+
+  /**
+   * A Polyseed, the 16-word seed Feather and Cake Wallet show for a Monero wallet: BIP39's English words with a checksum
+   * of its own. Before, only a BIP39 checksum over 12 or 15 of its words caught one, by chance: about 3 in 10.
+   */
+  it.each([
+    // 22 bytes of 0x11 and of 0x77, read as 16 words of 11 bits.
+    ["baby mass dust captain baby mass dust captain baby mass dust captain baby mass dust captain"],
+    ["jazz roof tape upon jazz roof tape upon jazz roof tape upon jazz roof tape upon"],
+  ])("a message that is only a 16-word Monero Polyseed: %s", (seed) => {
+    expect(findSecret(seed)).toEqual({ kind: "mnemonic" });
+    expect(findSecret(seed.split(" ").map((w, i) => `${i + 1}. ${w}`).join("\n"))).toEqual({ kind: "mnemonic" });
+    // Not inside other text: no checksum of BIP39's holds for it.
+    expect(findSecret(`${seed} zoo`)).toBeNull();
+    // One word sixteen times is still no seed.
+    expect(findSecret("abandon ".repeat(16).trim())).toBeNull();
+  });
+
+  /**
+   * Monero's classic seed, the one Monero GUI and monero-wallet-cli show: 25 words of Monero's own list, the last a
+   * checksum word. These are the test wallets of Monero's functional tests (tests/functional_tests/transfer.py).
+   */
+  const MONERO_SEEDS = [
+    "velvet lymph giddy number token physics poetry unquoted nibs useful sabotage limits benches lifestyle eden nitrogen anvil fewest avoid batch vials washing fences goat unquoted",
+    "peeled mixture ionic radar utopia puddle buying illness nuns gadget river spout cavernous bounced paradise drunk looking cottage jump tequila melting went winter adjust spout",
+    "dilute gutter certain antics pamphlet macro enjoy left slid guarded bogeys upload nineteen bomb jubilee enhanced irritate turnip eggs swung jukebox loudly reduce sedan slid",
+  ];
+  /** MyMonero's 13 words: the first 12 of the seed above and the checksum word electrum-words gives them. */
+  const MYMONERO_SEED = "velvet lymph giddy number token physics poetry unquoted nibs useful sabotage limits useful";
+
+  it.each(MONERO_SEEDS.map((seed) => [seed]))("a 25-word Monero seed: %s", (seed) => {
+    expect(findSecret(seed)).toEqual({ kind: "mnemonic" });
+    expect(findSecret(`my monero seed: ${seed}`)).toEqual({ kind: "mnemonic" });
+    expect(findSecret(seed.toUpperCase().split(" ").map((w, i) => `${i + 1}. ${w}`).join("\n"))).toEqual({ kind: "mnemonic" });
+  });
+
+  it("a 13-word MyMonero seed, alone or after a label", () => {
+    expect(findSecret(MYMONERO_SEED)).toEqual({ kind: "mnemonic" });
+    expect(findSecret(`zoo ${MYMONERO_SEED} zoo`)).toEqual({ kind: "mnemonic" });
+  });
+
+  it("Monero's documented example seed, five of whose words are also BIP39's", () => {
+    const seed = "sequence atlas unveil summon pebbles tuesday beer rudely snake rockets different fuselage woven tagged bested dented vegan hover rapid fawns obvious muppet randomly seasons randomly";
+    expect(findSecret(seed)).toEqual({ kind: "mnemonic" });
+    expect(findSecret(`my monero seed: ${seed} (keep it safe)`)).toEqual({ kind: "mnemonic" });
+  });
+
+  /**
+   * Monero's lists in the app's other languages, as Monero GUI and monero-wallet-cli show a seed in them. Each is 32
+   * bytes (i * 37 + 11) and MyMonero's 16 (i * 53 + 7) as electrum-words.cpp writes them, with its checksum over
+   * the list's own prefix of each word (4 letters, Japanese 3, Chinese 1); never a key.
+   */
+  const MONERO_LISTS: [string, string, string][] = [
+    ["Spanish",
+      "lado pijama edición curar puré riqueza niño perfil grave engaño gimnasio miga pronto pegar lonja choque bicho guitarra arpa parte oferta cinco rendir grasa niño",
+      "agua causa perico opinar mensaje breve mozo digno llegar fijo arco causa agua"],
+    ["Portuguese",
+      "motriz teosofico fucsia eventualidade utilizar zefiro ragu tanzaniano jingle generoso jambo paciente unheiro sugestoes oblongo ducto caquizeiro jururu baforada software roer echarpe vulva jihad unheiro",
+      "airoso dioxido taoista rumoroso otite cisto pizzaria fiasco nublar iansa avizinhar dioxido pizzaria"],
+    ["French",
+      "occasion suite fuir facette trotter zeste religion soutenir magot gicler lors pour tour solo peigne dieu carie masque barbe sinus ronce distance visuel magie solo",
+      "aise cure souvent rumeur pompier chemin quitter flan partir ivre balle cure souvent"],
+    ["Italian",
+      "noleggio svuotare famiglia donna uragano zoccolo riunione stoffa lanterna filmato invito privacy tulipano spugna patogeno condotto brontolo levitare auspicio sparire scimmia corleone virtuoso lampone levitare",
+      "alfabeto circuito storia segreto porzione cammello recitare epilogo panorama gioiello atropina circuito circuito"],
+    ["Japanese",
+      "せんさい にわとり げんそう くふう のれん ひさしぶり つまらない にしき しふく こうない しちりん たれんと のがす なめらか たいうん ききて えんとつ しゃけん うがい なおす てほどき ぎしき はんきょう しはん にしき",
+      "あんがい かゆい にせもの てんてき たぼう おこる ちたい けつえき そよかぜ さうな いわかん かゆい ちたい"],
+    ["Chinese (simplified)",
+      "苗 苯 兵 首 妻 祝 亿 丽 械 船 唱 捕 灌 拍 户 布 区 贵 比 枝 峰 难 愤 血 愤",
+      "种 传 跨 童 纤 七 坦 远 纳 盐 正 传 种"],
+  ];
+
+  it.each(MONERO_LISTS)("a 25-word or 13-word Monero seed in %s", (_, seed, short) => {
+    for (const text of [seed, `my monero seed: ${seed} (keep it safe)`, seed.toUpperCase().split(" ").map((w, i) => `${i + 1}. ${w}`).join("\n"),
+      seed.normalize("NFD").replace(/\p{M}/gu, ""), `seed: ${short}`]) {
+      expect(findSecret(text)).toEqual({ kind: "mnemonic" });
+    }
+  });
+
+  it("Monero's own Portuguese test seed, each of whose words starts as an English one does", () => {
+    // tests/unit_tests/mnemonics.cpp: only Portuguese's 4-letter prefixes make "gnostico" its checksum word.
+    const seed = "cinzento luxuriante leonardo gnostico digressao cupula fifa broxar iniquo louvor ovario dorsal ideologo besuntar decurso rosto susto lemure unheiro pagodeiro nitroglicerina eclusa mazurca bigorna gnostico";
+    expect(findSecret(`seed: ${seed}`)).toEqual({ kind: "mnemonic" });
+  });
+
+  it("an ordinary 25-word sentence, or one whose last word repeats an earlier one, is not a Monero seed", () => {
+    expect(findSecret("we should meet at the cafe near the old bridge after work on friday so we can talk about the trip and the plan today")).toBeNull();
+    expect(findSecret("tuesday dinner was lovely thanks again for cooking the pasta and the salad we should do it soon maybe at home next week on tuesday")).toBeNull();
+  });
+
+  it("a message that is only 25 Monero seed words, even with the checksum word mistyped", () => {
+    const typo = MONERO_SEEDS[0].replace(/unquoted$/, "fences");
+    expect(findSecret(`${typo} zoo`)).toBeNull(); // checksum fails and the run is not the whole message
+    expect(findSecret(typo)).toEqual({ kind: "mnemonic" });
+    // One word 25 or 13 times always passes Monero's checksum, and is still no seed.
+    expect(findSecret("abbey ".repeat(25).trim())).toBeNull();
+    expect(findSecret(`seed: ${"abbey ".repeat(13).trim()}`)).toBeNull();
+  });
+
   it.each([
     ["an nsec", NSEC],
     ["an nsec in a sentence", `here is my key ${NSEC} ok`],
@@ -80,6 +224,13 @@ describe("what the guard asks about", () => {
     ["… is the secret", `${HEX} is the secret`],
     ["a 128-hex seed", `seed ${"ab".repeat(64)}`],
     ["the Ark wallet's private key", `ark wallet private key\n${HEX}`],
+    // A Monero wallet's keys as Cake Wallet, MyMonero and monero-wallet-cli label them: the spend key is the whole
+    // wallet, the view key every payment it receives.
+    ["Private spend key: …", `Private spend key: ${HEX}`],
+    ["Private view key: …", `Private view key:\n${HEX}`],
+    ["private_spend_key: …", `private_spend_key: ${HEX}`],
+    ["Spend key (private): …", `Spend key (private): ${HEX}`],
+    ["View key (private): …", `View key (private): ${HEX}`],
   ])("64-hex next to a word that says what it is: %s", (_, text) => expect(findSecret(text)).toEqual({ kind: "hex-key" }));
 
   it("a cashuA token, with its amount decoded here", () => {
@@ -182,6 +333,11 @@ describe("what it lets through", () => {
     "commit 207bf023" + "a".repeat(32) + " fixes it",
     "The block hash 000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f is the genesis block",
     "0x" + "de".repeat(32),
+    // A Monero wallet's public keys are written with the same words.
+    "Spend key (public): " + "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "Public view key: " + "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "spend key " + "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "Monero tx id 4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b",
     NPUB,
     `my npub is ${NPUB}`,
     XPUB,
@@ -215,6 +371,17 @@ describe("what it lets through", () => {
     expect(findSecret(`zoo ${ABANDON} zoo`)).toEqual({ kind: "mnemonic" });
   });
 
+  it.each([
+    ["Portuguese", "amanhã eu vou levar o bolo para a festa da escola, você pode buscar as crianças às cinco?"],
+    ["Spanish", "mañana voy a llevar el pastel a la fiesta de la escuela, ¿puedes recoger a los niños a las cinco?"],
+    ["French", "demain je vais apporter le gâteau à la fête de l'école, tu peux aller chercher les enfants à cinq heures ?"],
+    ["Italian", "domani porto la torta alla festa della scuola, puoi andare a prendere i bambini alle cinque?"],
+    ["Japanese", "明日は学校のお祭りにケーキを持っていくので、五時に子供たちを迎えに行ってくれる？"],
+    ["Chinese", "明天我要把蛋糕带到学校的聚会上，你能五点去接孩子们吗？"],
+  ])("ordinary %s is not a seed", (_, text) => {
+    expect(findSecret(text)).toBeNull();
+  });
+
   it("a run of seed words whose checksum fails, inside other text", () => {
     // A 12-word checksum is 4 bits: a random run of seed words passes one time in 16. Prose never makes such runs
     // ("the", "a", "is", "to", "and", "of" are not on the list); a list of seed words that fails is let through.
@@ -236,6 +403,9 @@ describe("how long it takes", () => {
     // Every window fails its checksum, so the whole budget of checksums is spent.
     ["one seed word over and over", "zoo ".repeat(MAX / 4)],
     ["seed words only", `${MNEMONICS[4].replace("title", "zoo")} `.repeat(200).slice(0, MAX)],
+    ["Spanish seed words only", `${spanish.slice(0, 23).join(" ")} `.repeat(200).slice(0, MAX)],
+    ["Japanese seed words only", `${japanese.slice(0, 23).join(IDEOGRAPHIC_SPACE)}${IDEOGRAPHIC_SPACE}`.repeat(200).slice(0, MAX)],
+    ["Monero's Chinese seed words only", "苗 苯 兵 首 妻 祝 亿 丽 械 船 唱 捕 灌 拍 户 布 区 贵 比 枝 峰 难 愤 血 ".repeat(400).slice(0, MAX)],
     ["hex", "ab".repeat(MAX / 2)],
     ["hex words with context", `secret ${HEX} `.repeat(200).slice(0, MAX)],
     ["base58", "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2 ".repeat(500).slice(0, MAX)],
@@ -245,6 +415,19 @@ describe("how long it takes", () => {
     ["seed words with a soft hyphen in each", "zo\u00ado ".repeat(MAX / 5)],
   ])("a 16 KiB message of %s is read in well under a frame", (_, text) => {
     expect(time(text)).toBeLessThan(50);
+  });
+
+  it("folds a text once for the other languages' lists, not once per list", () => {
+    // The composer reads its draft at every keystroke: 13 folds of a 16 KiB Portuguese draft took ~16 ms of each key.
+    const text = "amanhã eu vou levar o bolo para a festa da escola, você pode buscar as crianças às cinco?";
+    findSecret(text); // the lists are read into their indices the first time
+    const normalize = vi.spyOn(String.prototype, "normalize");
+    try {
+      findSecret(text);
+      expect(normalize).toHaveBeenCalledTimes(1);
+    } finally {
+      normalize.mockRestore();
+    }
   });
 });
 

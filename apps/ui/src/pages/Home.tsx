@@ -41,9 +41,9 @@ export function Home() {
             <circle cx="15" cy="9" r="1.5" fill="#111b21"/>
           </svg>
         </div>
-        <h2 className="text-text-primary text-2xl font-light">
+        <h1 className="text-text-primary text-2xl font-light">
           {t("app.name")}
-        </h2>
+        </h1>
         <p className="text-text-muted text-sm leading-tight">
           {t("home.description")}
         </p>
@@ -75,7 +75,7 @@ export function Home() {
         <button
           onClick={handleCreate}
           disabled={isCreating}
-          className="inline-flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-chat-bg disabled:opacity-50"
+          className="inline-flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-chat-bg disabled:opacity-50 forced-colors:border forced-colors:border-[color:ButtonText]"
         >
           {isCreating ? (
             <>

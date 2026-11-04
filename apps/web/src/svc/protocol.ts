@@ -18,11 +18,13 @@ export const BRIDGE_SCRIPT = `${BRIDGE_DIR}bridge.js`;
 export const WORKER_SCRIPT = "/ghostly-services-sw.js";
 
 /**
- * What the view's frame and the bridge's frame of the contact's app allow. No `fullscreen`: in full screen the app
- * would cover the view's bar, the one thing that says it is the contact's app and not Ghostly (as a mini-app's frame,
- * WISP 1200).
+ * What the view's frame and the bridge's frame of the contact's app allow: nothing. No `fullscreen`: in full screen the
+ * app would cover the view's bar, the one thing that says it is the contact's app and not Ghostly (as a mini-app's
+ * frame, WISP 1200). No `clipboard-write`: once tapped, the contact's code could replace what the person copied (an
+ * address, an invoice) every second with no further tap. A copy button in it still copies on its tap
+ * (`document.execCommand("copy")`).
  */
-export const SERVICE_FRAME_ALLOW = "clipboard-write";
+export const SERVICE_FRAME_ALLOW = "";
 
 /** A request body above this is refused before it leaves the device: the data link carries 8 MiB at most (LIMITS). */
 export const MAX_REQUEST_BYTES = 8 * 1024 * 1024;

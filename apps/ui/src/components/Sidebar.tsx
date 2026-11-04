@@ -1,5 +1,6 @@
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { DeleteChatDialog } from "./DeleteChatDialog";
+import { chatOnCall, useChatOnCall } from "../lib/chatsOnCall";
 import { useUsageByPeer } from "../hooks/useUsage";
 import { useWorkingByPeer } from "../hooks/useWorking";
 import { useChatsFound } from "../hooks/useChatsFound";
@@ -11,8 +12,9 @@ import { FolderIcon } from "./chat/ChatFolderMenu";
 import { groupChat, mentionsNotify, mutedUntil } from "../lib/chatMute";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { formatListTime } from "../lib/chatList";
-import { foldText } from "../lib/chatSearch";
-import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
+import { foldText, searchText } from "../lib/chatSearch";
+import type { Translate } from "../locales/translate";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { NewGroupDialog } from "./NewGroupDialog";
 import { groupPath, groupReadAt, groupRouteId, invitationRow } from "../lib/groups";
@@ -57,9 +59,11 @@ import { openJoinProfile } from "../lib/devices";
 import { RAIL_WIDTH, RailAction, RailChat, RailGroup, RailToggle } from "./ChatRail";
 import { useRailShortcut } from "../hooks/useRailShortcut";
 import { useOpenRowInView } from "../hooks/useOpenRowInView";
+import { useEngineValue } from "../lib/engineState";
 
-const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
-const engineSnapshot = () => engine.state;
+const NO_GROUPS: NonNullable<typeof engine.state>["groups"] = [];
+/** What the list reads of the engine's state itself, for `useEngineValue`: its groups, and whether they came yet. */
+const listOfState = (state: typeof engine.state) => ({ groups: state?.groups ?? NO_GROUPS, groupsLoaded: !!state?.groupsLoaded });
 
 /** New chat's mark (a bubble with a plus) and Join's (an arrow into a bubble): the list's header, and the rail's top. */
 const NEW_CHAT_PATH = "M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8";
@@ -80,16 +84,17 @@ const found = (text: string | undefined, q: string) => !!text && foldText(text).
 /**
  * A chat's message texts folded for search, once per list of messages: the page's one cache keeps that list while the
  * chat is unchanged (`listShownSessions`). Folded at every draw, a search over 100k messages took ~100 ms of each
- * engine state, which draws the list again with nothing in a message changed.
+ * engine state, which draws the list again with nothing in a message changed. Each message reads as the search inside
+ * the chat reads it (`searchText`): "hello world" finds "*hello* world" in both, a file by its name, no payment lines.
  */
-const foldedTexts = new WeakMap<ChatSession["messages"], string[]>();
-function messagesFound(messages: ChatSession["messages"], q: string): boolean {
-  let texts = foldedTexts.get(messages);
-  if (!texts) {
-    texts = messages.flatMap((m) => (m.text ? [foldText(m.text)] : []));
-    foldedTexts.set(messages, texts);
+const foldedTexts = new WeakMap<ChatSession["messages"], { t: Translate; texts: string[] }>();
+function messagesFound(messages: ChatSession["messages"], q: string, t: Translate): boolean {
+  let folded = foldedTexts.get(messages);
+  if (folded?.t !== t) {
+    folded = { t, texts: messages.flatMap((m) => { const text = searchText(m, t); return text ? [foldText(text)] : []; }) };
+    foldedTexts.set(messages, folded);
   }
-  return texts.some((text) => text.includes(q));
+  return folded.texts.some((text) => text.includes(q));
 }
 
 /** The groups whose name has the search in it; all of them with no search. (Outside the component: the React Compiler keeps its memoization then.) */
@@ -149,18 +154,22 @@ export function Sidebar() {
   const [newMenuOpen, setNewMenuOpen] = useState<boolean | "shortcut">(false);
   const newMenuRef = useRef<HTMLDivElement>(null), newMoreRef = useRef<HTMLButtonElement>(null);
   const closeNewMenu = () => setNewMenuOpen(false);
-  const engineState = useSyncExternalStore(subscribeEngine, engineSnapshot);
+  // Its groups only, compared by content: the engine sends its whole state anew on every change (up to 20 a second while
+  // a file moves), and the whole of it drew the list and every row in it on each.
+  const engineState = useEngineValue(listOfState);
   // A bot's usage card (WISP 405 § Usage) per contact: the meter on its row.
   const usageByPeer = useUsageByPeer();
   // Each contact's running tasks (WISP 405 § Showing a card): the working mark on its row.
   const workingByPeer = useWorkingByPeer();
-  const groups = engineState?.groups ?? [];
+  const groups = engineState.groups;
   // The chats are in the page's storage at once, the groups come with the engine's state after every chat's history
   // is read: drawn alone, the chats were pushed down under the groups a second later, and a click aimed at a chat
   // opened a group. The list waits for the groups, and draws everything at once.
-  const listReady = !!engineState?.groupsLoaded;
+  const listReady = engineState.groupsLoaded;
   const activeGroupId = groupRouteId(location.pathname);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  // A chat a call is on or rings in is not deleted under it: the dialog says to end the call first.
+  const deleteOnCall = useChatOnCall(confirmDeleteId);
 
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_WIDTH);
   const isResizingRef = useRef(false);
@@ -278,7 +287,7 @@ export function Sidebar() {
     if (found(s.nick, query)) return true;
     if (found(faceOf(s.peerPubKeyB64)?.name, query)) return true;
     if (found(s.peerPubKeyB64, query)) return true;
-    return messagesFound(s.messages, query) || foundInEngine.has(s.id);
+    return messagesFound(s.messages, query, t) || foundInEngine.has(s.id);
   });
   const shownGroups = groupsFound(groups, search);
   // The person's folders, first in the list and in their order; a search shows what it finds as one list, with no folders.
@@ -425,6 +434,9 @@ export function Sidebar() {
       style={isMobile ? undefined : collapsed ? { width: RAIL_WIDTH } : { width: sidebarWidth, minWidth: MIN_WIDTH, maxWidth: `min(${MAX_WIDTH}px, 100vw - ${MIN_PAGE_WIDTH}px)` }}
     >
       <PinMoveNote text={moveNote} />
+      {/* For a screen reader's heading keys: the list is a phone's whole screen, its h1; beside the open chat, whose
+          name is the window's h1, an h2. */}
+      {isMobile ? <h1 className="sr-only">{t("sidebar.chats")}</h1> : <h2 className="sr-only">{t("sidebar.chats")}</h2>}
       {collapsed ? <>
         <div className="h-14 header-safe shrink-0 flex items-center justify-center bg-panel-header">
           <RailToggle ref={toggleRef} collapsed onToggle={toggleCollapsed} />
@@ -452,7 +464,7 @@ export function Sidebar() {
         <div className="grid shrink-0 grid-cols-2 items-stretch gap-1 whitespace-nowrap" data-testid="sidebar-chat-actions">
           {/* New: one click is a chat, as always; the arrow beside it also offers a group. */}
           <div ref={newMenuRef} role="group" aria-label={t("sidebar.new")} data-testid="sidebar-new" className="sidebar-new-split relative flex min-w-0">
-            <button onClick={newChat} data-testid="sidebar-new-chat" aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><ActionIcon d={NEW_CHAT_PATH} /><span className="sidebar-action-label">{t("sidebar.new")}</span></button>
+            <button onClick={newChat} data-testid="sidebar-new-chat" aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><ActionIcon d={NEW_CHAT_PATH} /><span className="sidebar-action-label">{t("sidebar.newChatShort")}</span></button>
             <button ref={newMoreRef} onClick={() => setNewMenuOpen(open => !open)} aria-haspopup="true" aria-expanded={!!newMenuOpen} aria-controls="sidebar-new-menu" aria-label={t("sidebar.newMenu.label")} title={t("sidebar.newMenu.label")} data-testid="sidebar-new-more"
               className="inline-flex min-h-10 w-6 shrink-0 items-center justify-center rounded-e-lg border-s border-panel-header/25 bg-accent text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header">
               <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${newMenuOpen ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6"/></svg>
@@ -578,7 +590,8 @@ export function Sidebar() {
       {confirmDeleteId && <DeleteChatDialog
         name={(() => { const target=sessions.find(s=>s.id===confirmDeleteId); return `${target?.label || target?.nick || t("common.unnamedContact", { key: contactTag(target?.peerPubKeyB64 ?? confirmDeleteId) })} · ${publicKeyLabel(target?.peerPubKeyB64 ?? confirmDeleteId)}`; })()}
         onClose={() => setConfirmDeleteId(null)}
-        onConfirm={() => { const id=confirmDeleteId; deleteSession(id); setChatFolder(id, undefined); stopPlayingFrom(chatPath(id), activeSessionId===id); setConfirmDeleteId(null); refreshSessions(); window.dispatchEvent(new Event("session-updated")); if(activeSessionId===id) nav.home(); }} />}
+        callOn={deleteOnCall}
+        onConfirm={() => { const id=confirmDeleteId; if (chatOnCall(id)) return; deleteSession(id); setChatFolder(id, undefined); stopPlayingFrom(chatPath(id), activeSessionId===id); setConfirmDeleteId(null); refreshSessions(); window.dispatchEvent(new Event("session-updated")); if(activeSessionId===id) nav.home(); }} />}
       {!isMobile && <AccountBar rail={collapsed} />}
 
       {/* Resize Handle */}

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Groups, type EntryTimings, type GroupStore, type GroupsHost } from "../src/engine/groups";
-import { GroupSession, commitUntaggedHash, confirmationTag, createIdentity, encodeCommunityLink, epochKeys, fromBase64Url, identityFromSeedB64, signCommit, type GhostRecord, type GroupState } from "@ghostly/core";
+import { Groups, KNOCK_REFRESH_MS, type EntryTimings, type GroupStore, type GroupsHost } from "../src/engine/groups";
+import { GroupSession, commitUntaggedHash, confirmationTag, createIdentity, decodeGroupEntryLink, encodeCommunityLink, epochKeys, fromBase64Url, identityFromSeedB64, knockIdentity, readKnocks, signCommit, type GhostRecord, type GroupState } from "@ghostly/core";
 import type { StoredGroup, StoredMessage } from "../src/shared/types";
 
 // Counts the derivations of a public key from a seed (the group link's entry key is derived once, not at every state).
@@ -45,6 +45,12 @@ class World {
   readonly resolves = new Map<string, number>();
   /** Pkarr reads, in order: who read which key, and when. */
   readonly reads: { name: string; key: string; at: number }[] = [];
+  /**
+   * `<reader>:<key>`: reads its relays' budget holds back until then. They reach no relay and answer the record the
+   * reader last read, as `PkarrRelays.resolve` does, and `readHeldBackFor` says so.
+   */
+  readonly holds = new Map<string, number>();
+  private readonly lastRead = new Map<string, GhostRecord[] | null>();
   readonly chats = new Map<string, [string, string]>();
   /** Contact chats whose other app announces groups up to version 2 only (rosters of eight). */
   readonly oldChats = new Set<string>();
@@ -92,7 +98,14 @@ class World {
       },
       entries: groupId => new Map([...peer.entries.entries()].filter(([, e]) => e.g === groupId).map(([id, e]) => [e.peer, id])),
       publish: async (identity, records) => { this.publishes++; this.pkarr.set(identity.pubKeyZ32, records); },
-      resolve: async key => { this.resolves.set(name, (this.resolves.get(name) ?? 0) + 1); this.reads.push({ name, key, at: Date.now() }); return this.pkarr.get(key) ?? null; },
+      resolve: async key => {
+        if (Date.now() < (this.holds.get(`${name}:${key}`) ?? 0)) return this.lastRead.get(`${name}:${key}`) ?? null;
+        this.resolves.set(name, (this.resolves.get(name) ?? 0) + 1); this.reads.push({ name, key, at: Date.now() });
+        const records = this.pkarr.get(key) ?? null;
+        this.lastRead.set(`${name}:${key}`, records);
+        return records;
+      },
+      readHeldBackFor: key => { const left = (this.holds.get(`${name}:${key}`) ?? 0) - Date.now(); return left > 0 ? left : undefined; },
       edgeNick: () => undefined,
       storeMessage: async message => { if (!peer.messages.some(m => m.id === message.id)) peer.messages.push(message); },
       emit: () => {},
@@ -1247,6 +1260,101 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     }
   });
 
+  it("a knock read the relays' budget held back is no reading: the link is read again as soon as the hold ends", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t0 = Date.now();
+    const world = new World();
+    const alice = world.add("alice", { ...timings, pollMs: 5_000, warmPollMs: 2_000, warmMs: 60_000 });
+    const groupId = await alice.create("Ghosts", "mesh");
+    const code = await alice.enableLink(groupId);
+    const knockKey = knockIdentity(decodeGroupEntryLink(code)!).pubKeyZ32;
+    await alice.tick(t0);
+    // The admissions just before spent the admin's relay minute: its reads of the link are held back for 10.5 s.
+    world.holds.set(`alice:${knockKey}`, t0 + 10_500);
+    vi.setSystemTime(t0 + 1_000);
+    await world.add("dan").joinByLink(code); await flush();
+    let seen: number | undefined;
+    for (let at = t0 + 1_000; at <= t0 + 30_000 && seen === undefined; at += 1_000) {
+      vi.setSystemTime(at); await alice.tick(at); await world.settle();
+      if (world.peers.get("alice")!.entries.size) seen = at;
+    }
+    // At the first tick past the hold, not the warm pace's turn after the last held read (t0 + 12 s).
+    expect(seen).toBe(t0 + 11_000);
+  });
+
+  it("a quiet link whose read was held back keeps its place among the admin's links: it is read first once the hold ends", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t0 = Date.now();
+    const world = new World();
+    const alice = world.add("alice", { ...timings, pollMs: 5_000, warmPollMs: 2_000, warmMs: 60_000 });
+    const codes: string[] = [];
+    for (const name of ["One", "Two", "Three"]) codes.push(await alice.enableLink(await alice.create(name, "mesh")));
+    const key = knockIdentity(decodeGroupEntryLink(codes[0])!).pubKeyZ32;
+    const readOf = (since: number) => world.reads.find(r => r.name === "alice" && r.key === key && r.at >= since);
+    // Past the warm minute: the three links share the 5 s pace, each read every 15 s.
+    let at = t0 + 120_000;
+    for (; !readOf(t0 + 120_000); at += 1_000) { vi.setSystemTime(at); await alice.tick(at); }
+    const read = readOf(t0 + 120_000)!.at, holdEnd = read + 20_000;
+    // Its next turn (15 s on) falls in a hold of the relays' budget; someone knocks meanwhile.
+    world.holds.set(`alice:${key}`, holdEnd);
+    vi.setSystemTime(read + 1_000);
+    await world.add("dan").joinByLink(codes[0]); await flush();
+    let seen: number | undefined;
+    for (at = read + 1_000; at <= read + 60_000 && seen === undefined; at += 1_000) {
+      vi.setSystemTime(at); await alice.tick(at); await world.settle();
+      if (world.peers.get("alice")!.entries.size) seen = at;
+    }
+    // The held read took no turn: the link is the next one read, at the hold's end, not two turns (10 s) later.
+    expect(world.reads.find(r => r.name === "alice" && r.at >= holdEnd)?.key).toBe(key);
+    expect(seen).toBe(holdEnd);
+  });
+
+  it("a joiner whose link's record holds others' fresh knocks is told the admin's app may be busy with them, until they age", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t0 = Date.now();
+    const world = new World();
+    const alice = world.add("alice", timings);
+    const code = await alice.enableLink(await alice.create("Ghosts", "mesh"));
+    const dan = world.add("dan", timings), erin = world.add("erin", timings);
+    await dan.joinByLink(code); await flush();
+    // Alone in the record: the admin's app is the one to open.
+    expect(view(dan).invitation).toMatchObject({ stage: "knocked" });
+    expect(view(dan).invitation?.othersKnocked).toBeUndefined();
+    vi.setSystemTime(t0 + 1_000);
+    await erin.joinByLink(code); await flush();
+    expect(view(erin).invitation?.othersKnocked).toBe(true);
+    // Dan's next knock reads Erin's.
+    vi.setSystemTime(t0 + 3_000); await dan.tick(t0 + 3_000);
+    expect(view(dan).invitation?.othersKnocked).toBe(true);
+    // Erin's knock not written again (she got in, or left) for longer than a waiting joiner lets it age: no one else waits.
+    const later = t0 + 1_000 + KNOCK_REFRESH_MS + timings.knockMs;
+    vi.setSystemTime(later); await dan.tick(later);
+    expect(view(dan).invitation?.othersKnocked).toBeUndefined();
+  });
+
+  it("a joiner let in takes its knock out of the link's record: the next one is not told others knocked", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const world = new World();
+    const alice = world.add("alice", timings);
+    const groupId = await alice.create("Ghosts", "mesh");
+    const code = await alice.enableLink(groupId);
+    const link = decodeGroupEntryLink(code)!, knockKey = knockIdentity(link).pubKeyZ32;
+    const erin = world.add("erin", timings);
+    await erin.joinByLink(code); await flush();
+    for (let i = 0; i < 6 && view(erin, groupId)?.status !== "active"; i++) {
+      vi.setSystemTime(Date.now() + 2_000);
+      await alice.tick(Date.now()); await erin.tick(Date.now()); await world.settle(); await world.meetEntries(); await world.meet();
+    }
+    expect(view(erin, groupId).status).toBe("active");
+    await world.settle();
+    expect(readKnocks(link, world.pkarr.get(knockKey) ?? [])).toEqual([]);
+    // Dan opens the link a moment after: nobody is waiting, so the admin's app is the one to open.
+    const dan = world.add("dan", timings);
+    await dan.joinByLink(code); await flush();
+    expect(view(dan, groupId).invitation).toMatchObject({ stage: "knocked" });
+    expect(view(dan, groupId).invitation?.othersKnocked).toBeUndefined();
+  });
+
   it("a link just handed out is looked at fast for a minute, as a community's door, not for ten", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const t0 = Date.now();
@@ -1517,5 +1625,12 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     await alice.tick();
     expect(world.peers.get("alice")!.store.groups.get(groupId)!.entry).toBeUndefined();
     await expect(alice.enableLink(groupId)).rejects.toThrow(/Only the admin/);
+  });
+
+  it("a member who is not the admin is refused turning the link off, as in a community, and the admin's link stays on", async () => {
+    const { alice, others: [bob], groupId } = await groupOf(["bob"]);
+    const link = await alice.enableLink(groupId);
+    await expect(bob.disableLink(groupId)).rejects.toThrow("Only the admin can replace or turn off the group's link");
+    expect(await alice.enableLink(groupId)).toBe(link);
   });
 });

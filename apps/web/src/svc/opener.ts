@@ -236,8 +236,9 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   frame.title = options.words.label;
   // Its own origin keeps it from the app's storage. The sandbox keeps it and every frame in it from navigating the
   // app's tab away, and from opening a window: one would be a tab of its own on its origin, outliving the view. No
-  // `allow-modals`: the browser's own alert or prompt over the view would be a Ghostly-looking dialog the app draws.
-  frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms allow-downloads");
+  // `allow-modals`: the browser's own alert or prompt over the view would be a Ghostly-looking dialog the app draws. No
+  // `allow-downloads`: the contact's code saves no file on this device by itself, under a name it picks, as on Desktop.
+  frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms");
   frame.setAttribute("allow", SERVICE_FRAME_ALLOW);
   frame.setAttribute("referrerpolicy", "no-referrer");
   frame.style.cssText = "flex:1;width:100%;border:0;background:#fff";

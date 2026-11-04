@@ -2,6 +2,7 @@ import type { BrowserContext, CDPSession, Page } from "@playwright/test";
 import { p256 } from "@noble/curves/nist.js";
 import { toBase64Url } from "@ghostly/core";
 import { expect, test } from "../support/fixtures";
+import { CHROMIUM_SANDBOX } from "../support/chromiumSandbox";
 
 /**
  * Push and the phone (WISP 06 § Push and the phone), in the real push worker: it reads the device state itself, from
@@ -15,6 +16,7 @@ const deployed = !!process.env.E2E_WEB_URL;
 test.use({
   channel: "chromium",
   launchOptions: {
+    chromiumSandbox: CHROMIUM_SANDBOX,
     args: [
       // The project's own arguments, and `NativeNotifications` off, as in wake-push.spec.ts: Chromium then keeps a
       // notification in its own list, which this spec reads, whatever the machine's notification service does with it.

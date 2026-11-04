@@ -14,8 +14,13 @@ import { createServer } from 'node:http'
 
 /** Push services a relay posts to by default: Google (Chrome, Android, Edge on Android), Apple, Mozilla, Microsoft. */
 export const PUSH_HOSTS = [/^fcm\.googleapis\.com$/, /(^|\.)push\.apple\.com$/, /(^|\.)push\.services\.mozilla\.com$/, /(^|\.)notify\.windows\.com$/]
-/** Only these headers go through: what Web Push needs, nothing the sender could use to reach anything else. */
-const HEADERS = ['authorization', 'ttl', 'urgency', 'topic', 'content-encoding', 'content-type']
+/** Only these headers go through (by their name in lower case): what Web Push needs, nothing the sender could use to reach anything else. */
+const HEADERS = { authorization: 'Authorization', ttl: 'TTL', urgency: 'Urgency', topic: 'Topic', 'content-encoding': 'Content-Encoding', 'content-type': 'Content-Type' }
+/**
+ * A header value `fetch` sends: bytes, with no NUL, line break, other control or DEL. Anything else it throws on before
+ * connecting, which the relay would take for a push service that did not answer.
+ */
+const FIELD_VALUE = /^[\t\x20-\x7e\x80-\xff]*$/
 
 /**
  * `tracked`: addresses whose counts are kept at most. Past it, the ones idle for a minute go first, then the oldest:
@@ -46,7 +51,10 @@ export function readRelayRequest (text, { hosts = PUSH_HOSTS, bodyBytes = DEFAUL
     // A header named twice (in two spellings) is refused: the check below reads one, the push service would get both.
     if (seen.has(lower)) return { error: `${name} twice` }
     seen.add(lower)
-    if (HEADERS.includes(lower) && typeof value === 'string' && value.length < 2048 && !/[\r\n]/.test(value)) forwarded[name] = value
+    if (!Object.hasOwn(HEADERS, lower) || typeof value !== 'string' || value.length >= 2048) continue
+    // Named in the answer, so a sender sees what in its own request is wrong; the log gets one of six fixed names.
+    if (!FIELD_VALUE.test(value)) return { error: `Bad ${HEADERS[lower]} value` }
+    forwarded[name] = value
   }
   const authorization = Object.entries(forwarded).find(([name]) => name.toLowerCase() === 'authorization')?.[1]
   if (!authorization || !VAPID.test(authorization)) return { error: 'No VAPID authorization' }
@@ -65,6 +73,13 @@ export function failure (error) {
 }
 
 /**
+ * Whether `fetch` threw on the request itself: a `TypeError` without a cause (an invalid header value, a character
+ * above U+00FF) or with undici's invalid-argument code (a control character). A network failure is a `TypeError`
+ * `fetch failed` with its cause.
+ */
+const refusedByFetch = error => error instanceof TypeError && (!('cause' in error) || error.cause?.code === 'UND_ERR_INVALID_ARG')
+
+/**
  * The address a request counts against. Behind `proxies` reverse proxies (a tunnel, nginx), the socket's address is the
  * last proxy's, so the client's is the entry that many from the end of `X-Forwarded-For` (the ones before it are the
  * client's to write). With none configured, the header is ignored.
@@ -79,9 +94,11 @@ export function clientAddress (req, proxies = 0) {
 
 /**
  * What a limit counts: an IPv4 address as it is (an IPv4-mapped IPv6 one too), an IPv6 address by its /64, the block
- * one subscriber usually holds whole.
+ * one subscriber usually holds whole. A port some proxies write with it (`203.0.113.7:51234`, `[2001:db8::1]:51234`)
+ * and IPv6 brackets are dropped first: each connection has a new port, so keyed with it the limit never applies.
  */
 export function rateKey (address) {
+  address = /^\[([^\]]+)\](?::\d+)?$/.exec(address)?.[1] ?? /^(\d+\.\d+\.\d+\.\d+):\d+$/.exec(address)?.[1] ?? address
   const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address)
   if (mapped) return mapped[1]
   if (!address.includes(':')) return address
@@ -190,6 +207,8 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
         log('forwarded', response.status)
         answer(200, { status: response.status })
       } catch (error) {
+        // `fetch` refusing what it was handed, before any connection, is a refusal of the request, not a failed forward.
+        if (refusedByFetch(error)) return refuse('Not a request fetch can send', 400, { error: 'Not a request fetch can send' })
         stats.failed++
         log('failed', failure(error))
         answer(502, { error: 'The push service did not answer' })

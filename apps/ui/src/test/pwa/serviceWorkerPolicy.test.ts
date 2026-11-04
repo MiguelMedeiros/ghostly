@@ -168,10 +168,15 @@ describe("what the build precaches", () => {
   it("and after a deploy, the languages a page fetched into the previous build's cache, whatever the browser's", () => {
     const held = ["/", "/assets/index-old.js", "/assets/fr-old.js"];
     expect(installList(PRECACHE, LANGUAGES, ["en-US"], held)).toEqual([...PRECACHE, "/assets/fr-abc.js"]);
-    // A cache with every language is a build's that precached them all: it says nothing of the person's.
-    const everyLanguage = [...held, "/assets/ja-old.js", "/assets/pt-old.js"];
-    expect(installList(PRECACHE, LANGUAGES, ["en-US"], everyLanguage)).toEqual(PRECACHE);
-    expect(installList(PRECACHE, LANGUAGES, ["pt"], everyLanguage)).toEqual([...PRECACHE, "/assets/pt-abc.js"]);
+  });
+
+  it("a cache with every language (a build's that precached them all) gives every language: the person's may be any of them", () => {
+    // An English browser, the app in Portuguese, updating from a build that precached every language: Portuguese is
+    // in the new cache, so the first start after the update opens in it offline too.
+    const everyLanguage = ["/", "/assets/index-old.js", "/assets/fr-old.js", "/assets/ja-old.js", "/assets/pt-old.js"];
+    const every = [...PRECACHE, "/assets/fr-abc.js", "/assets/ja-abc.js", "/assets/ja-extra-abc.js", "/assets/pt-abc.js"];
+    expect(installList(PRECACHE, LANGUAGES, ["en-US"], everyLanguage)).toEqual(every);
+    expect(installList(PRECACHE, LANGUAGES, ["pt"], everyLanguage)).toEqual([...PRECACHE, "/assets/pt-abc.js", "/assets/fr-abc.js", "/assets/ja-abc.js", "/assets/ja-extra-abc.js"]);
   });
 });
 

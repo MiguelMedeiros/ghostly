@@ -1,7 +1,8 @@
+import { execFile } from "node:child_process";
 import { openAsBlob } from "node:fs";
-import { access, constants, copyFile, link, open, rename, rm, stat, type FileHandle } from "node:fs/promises";
+import { access, constants, copyFile, link, open, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
-import { GROUP_FILE_LIMITS, LIMITS, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, claimedTime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, voiceDownloadName, type VoiceMeta } from "@ghostly/core";
+import { GROUP_FILE_LIMITS, LIMITS, NO_PICTURE_METADATA, NO_VIDEO_METADATA, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, claimedTime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, voiceDownloadName, withoutPictureMetadata, withoutVideoMetadata, type VoiceMeta } from "@ghostly/core";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { removeStored, waitingGroupFile } from "@ghostly/browser/shared/storedFiles";
@@ -154,12 +155,28 @@ async function voiceOf(params: Params, path: string, mime: string, size: number)
 }
 
 /**
+ * The file at `path` as it is sent, as the apps send it (platform/services.ts `sendable`): a picture or an MP4 or
+ * QuickTime video without its metadata (where it was taken or recorded, the device, the time), before its size is read
+ * and its digest computed. One whose metadata cannot be removed is refused, never sent as it was. A voice note goes as it is.
+ */
+async function sendable(path: string, mime: string, voice: VoiceMeta | undefined): Promise<Blob> {
+  const source = await openAsBlob(path, { type: mime });
+  if (voice) return source;
+  try {
+    return await withoutPictureMetadata(source, mime) ?? await withoutVideoMetadata(source, mime) ?? source;
+  } catch (error) {
+    if (error instanceof Error && (error.message === NO_PICTURE_METADATA || error.message === NO_VIDEO_METADATA)) throw new CliError("refused", error.message);
+    throw error;
+  }
+}
+
+/**
  * A file announced in a group (WISP 503): its bytes staged under a group file id with their digest, as a chat's are, then
  * the announcement. This device is its first holder and serves the members who ask.
  */
-async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, path: string, size: number) {
-  if (size > GROUP_FILE_LIMITS.maxBytes) throw new CliError("refused", `Too large for a group (at most ${GROUP_FILE_LIMITS.maxBytes} bytes)`);
-  if (!size) throw new CliError("refused", "An empty file cannot go to a group");
+async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, path: string, picked: number) {
+  if (picked > GROUP_FILE_LIMITS.maxBytes) throw new CliError("refused", `Too large for a group (at most ${GROUP_FILE_LIMITS.maxBytes} bytes)`);
+  if (!picked) throw new CliError("refused", "An empty file cannot go to a group");
   const mime = mimeOf(path, str(params, "mime"));
   const replyTo = str(params, "reply");
   if (replyTo) {
@@ -169,8 +186,9 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
   // before a byte is copied in: a retry loop writes nothing. The announcement checks again.
   const check = await node(ctx).groupFileCheck({ groupId: group.id });
   if (check.error) throw check.refused ? new CliError("refused", check.error) : groupSendRefused(check.error);
-  const { voice, warning } = await voiceOf(params, path, mime, size);
-  const source = await openAsBlob(path, { type: mime });
+  const { voice, warning } = await voiceOf(params, path, mime, picked);
+  const source = await sendable(path, mime, voice);
+  const size = source.size;
   const image = voice ? undefined : await readImageMeta(source, mime);
   const fileId = groupFileId(group.id, "out");
   const file: MessageFile = { id: fileId, name: sanitizeFileName(str(params, "name") ?? basename(path)), size, mime, ...(voice ? { voice } : {}), ...(image ? { image } : {}) };
@@ -230,6 +248,23 @@ async function place(partial: string, target: string, force: boolean): Promise<v
   }
 }
 
+/**
+ * Marks a saved copy of a contact's file as downloaded, as a browser and Ghostly Desktop (`file_store.rs`
+ * `mark_downloaded`) do, so the system checks it when it is opened: Gatekeeper's "downloaded from the internet" on
+ * macOS, SmartScreen and Office's Protected View on Windows. Node has no extended attributes, so macOS's own `xattr`
+ * writes `com.apple.quarantine`; on Windows it is the file's `Zone.Identifier` stream. Best effort: a file system that
+ * cannot hold the mark still gets the file.
+ */
+async function markDownloaded(path: string): Promise<void> {
+  if (process.platform === "darwin") {
+    // Flags 0x0001 (downloaded) and 0x0080, as browsers write them; then time and agent.
+    const value = `0081;${Math.floor(Date.now() / 1000).toString(16).padStart(8, "0")};Ghostly;`;
+    await new Promise<void>((done) => execFile("/usr/bin/xattr", ["-w", "com.apple.quarantine", value, path], { timeout: 10_000 }, () => done()));
+  } else if (process.platform === "win32") {
+    await writeFile(`${path}:Zone.Identifier`, "[ZoneTransfer]\r\nZoneId=3\r\n").catch(() => {});
+  }
+}
+
 const ACTIONS = ["accept", "decline", "pause", "resume", "cancel", "resend", "request"] as const;
 
 export const FILE_METHODS: Record<string, Method> = {
@@ -241,6 +276,11 @@ export const FILE_METHODS: Record<string, Method> = {
     if (!info.isFile()) throw new CliError("bad_request", `${path} is not a file`);
     // A file this user may not read: refused with its path (errors.ts), not the engine's "The blob could not be read" later.
     await access(path, constants.R_OK);
+    // A one-shot leaves once its command is done, and the transfer with it: in a chat it stays until the contact has the
+    // whole file, as `send` stays until its message went out. Before, it left in under a second with nothing sent, and
+    // the contact saw the file only with a later command that stayed online long enough. A group's file: none.
+    const wait = oneOf(params, "wait", "group" in target ? ["none"] as const : ["none", "sent"] as const, !("group" in target) && ctx.mode === "one-shot" ? "sent" : "none");
+    const seconds = num(params, "timeout", 300, { min: 1, max: 86_400 });
     if ("group" in target) return sendToGroup(ctx, params, target.group, path, info.size);
     const { link } = target;
     if (link.profile && link.dataLink === "open" && !link.capabilities?.files) throw new CliError("unavailable", "The contact's app takes no files");
@@ -253,11 +293,11 @@ export const FILE_METHODS: Record<string, Method> = {
       if (!await findMessage(ctx, link.id, (m) => m.id === replyTo || replyRef(m) === replyTo)) throw new CliError("not_found", "That message is not in this chat, or cannot be replied to");
     }
     const { voice, warning } = await voiceOf(params, path, mime, info.size);
-    const source = await openAsBlob(path, { type: mime });
+    const source = await sendable(path, mime, voice);
     // A picture goes with its size, read from its first bytes as the apps read it (PNG, JPEG, GIF, WebP).
     const image = voice ? undefined : await readImageMeta(source, mime);
     const wireId = toBase64Url(randomBytes(12));
-    const file: MessageFile = { id: `${link.id}-out-${wireId}`, name: sanitizeFileName(str(params, "name") ?? basename(path)), size: info.size, mime, ...(voice ? { voice } : {}), ...(image ? { image } : {}) };
+    const file: MessageFile = { id: `${link.id}-out-${wireId}`, name: sanitizeFileName(str(params, "name") ?? basename(path)), size: source.size, mime, ...(voice ? { voice } : {}), ...(image ? { image } : {}) };
     const timestamp = sentAt();
     const bytes = await fileBytes();
     const digest = await bytes.stage(file.id, source);
@@ -277,6 +317,7 @@ export const FILE_METHODS: Record<string, Method> = {
     }
     // The message's id, as a group's file and `send` answer it: what `message delete`, `react`, `pin` and `--reply` take.
     // The engine names a sent file's row after its time (node.ts `sendFile`), the one given here.
+    if (wait === "sent") await FILE_METHODS["file.wait"](ctx, { chat: link.id, file: file.id, timeout: seconds });
     return { chat: link.id, messageId: `me_${timestamp}`, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}) };
   },
 
@@ -329,12 +370,14 @@ export const FILE_METHODS: Record<string, Method> = {
       await refuseAllHere();
       // One that ended (cancelled, declined, failed): the engine takes the action and does nothing, as for one all here.
       const transfer = state(ctx).transfers[fileId] ?? (await fileStore.get(fileId).catch(() => undefined))?.transfer;
+      // Being checked (sent: the contact checks it; received: its digest here): the engine takes no pause and it ends done.
+      if (action === "pause" && transfer?.stage === "verifying") throw new CliError("refused", "Too late to pause: it is being checked");
       if (transfer?.state === "failed") throw new CliError("refused", `It ended: ${transfer.error ?? "failed"}${outgoing && transfer.retry ? " (file resend sends it again)" : ""}`);
-      // Sent whole (the engine's `sentWhole`): the engine takes no cancel and it ends done, so it is refused, not echoed.
-      if (outgoing && action === "cancel" && transfer?.state === "transferring" && (transfer.stage === "verifying"
-        || (transfer.size > 0 && transfer.transferred >= transfer.size && transfer.stage !== "asking" && transfer.stage !== "queued" && transfer.stage !== "paused"))) {
-        throw new CliError("refused", "Too late to cancel: it arrived whole, and the contact keeps it");
-      }
+      // Sent whole (the engine's `sentWhole`): the engine takes no cancel or pause and it ends done, so it is refused, not echoed.
+      const whole = outgoing && transfer?.state === "transferring" && (transfer.stage === "verifying"
+        || (transfer.size > 0 && transfer.transferred >= transfer.size && transfer.stage !== "asking" && transfer.stage !== "queued" && transfer.stage !== "paused"));
+      if (whole && action === "cancel") throw new CliError("refused", "Too late to cancel: it arrived whole, and the contact keeps it");
+      if (whole && action === "pause") throw new CliError("refused", "Too late to pause: it arrived whole, and the contact keeps it");
     }
     await node(ctx).fileAction({ linkId, fileId, action });
     return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };
@@ -446,6 +489,8 @@ export const FILE_METHODS: Record<string, Method> = {
         if (free && refused?.code === "confirm" && n <= 1000) { target = `${stem} (${n})${ext}`; continue; }
         throw refused ?? error;
       }
+      // A contact chose its bytes and its name (`.command`, `.lnk`): marked as downloaded. One sent from here needs none.
+      if (stored.direction !== "out") await markDownloaded(target);
     } finally {
       await out?.close();
       await rm(partial, { force: true });

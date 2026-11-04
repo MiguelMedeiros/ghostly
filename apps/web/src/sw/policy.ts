@@ -153,7 +153,8 @@ const stem = (path: string) => path.replace(/-[^/]*$/, "");
  * What the install fetches: the precache, and the files of the languages this browser reads in. That is the first of
  * its languages the app speaks (`browserLanguage`, a new profile's language), and any language the previous build's
  * cache held (`held`, its paths): a page reading in it fetched it, so it opens in it offline after a deploy too. A cache
- * holding every language says nothing of the kind: it is a build's that precached them all.
+ * holding every language is a build's that precached them all: the person's is one of them, maybe not the browser's, so
+ * every language is taken (about 1.8 MB, for those updating from such a build).
  */
 export function installList(precache: readonly string[], languages: Readonly<Record<string, readonly string[]>>, browser: readonly string[], held: readonly string[] = []): string[] {
   const wanted = new Set<string>();
@@ -165,7 +166,7 @@ export function installList(precache: readonly string[], languages: Readonly<Rec
   }
   const heldStems = new Set(held.map(stem));
   const read = Object.keys(languages).filter((language) => languages[language]!.some((file) => heldStems.has(stem(file))));
-  if (read.length < Object.keys(languages).length) for (const language of read) wanted.add(language);
+  for (const language of read) wanted.add(language);
   return [...new Set([...precache, ...[...wanted].flatMap((language) => languages[language] ?? [])])];
 }
 

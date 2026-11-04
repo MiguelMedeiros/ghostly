@@ -17,7 +17,9 @@ export function timeLeft(seconds: number, tr: Translate = englishT): string {
 /** A size as a status line shows it: a no-break space keeps "26.0" and "MB" on one line when the line wraps. */
 export const statusSize = (bytes: number): string => formatFileSize(bytes).replace(" ", "\u00a0");
 
-const percent = (transfer: FileTransferState) => Math.floor((transfer.transferred / Math.max(1, transfer.size)) * 100);
+/** How far a transfer got, in whole percent (0-100), as its status line and its progress bar say it. */
+export const filePercent = (transfer: FileTransferState): number => Math.min(100, Math.floor((transfer.transferred / Math.max(1, transfer.size)) * 100));
+const percent = filePercent;
 
 /**
  * A group's file (WISP 503), by its local id (`group-<group>-in-…`, `group-<group>-out-…`). Each member's app fetches it
@@ -40,7 +42,8 @@ export function canRetryFile(file: ChatFile, transfer: FileTransferState | null,
 
 /**
  * Whether a file sent from here arrived whole, its contact checking it or about to: too late to cancel (a cancel then
- * left the contact with the file while this side said it was cancelled). Its Cancel goes; the engine refuses it too.
+ * left the contact with the file while this side said it was cancelled). Its Cancel goes, and its Pause (paused, it
+ * could be cancelled); the engine refuses both too.
  * Not while the contact decides again, its turn there (`queued`), or paused.
  */
 export const sentWhole = (transfer: FileTransferState): boolean =>
@@ -55,11 +58,13 @@ export const fileNeverSent = (transfer: FileTransferState | null): boolean =>
   transfer?.state === "failed" && transfer.direction === "out" && transfer.retry === false;
 
 /**
- * Why a group's file waits, behind its ⓘ: what comes next while nobody this device is connected to has it. Null for
- * any other file or state.
+ * Why a group's file waits, behind its ⓘ: what comes next while nobody this device is connected to has it, or only its
+ * sender, out of reach in a group on hubs. Null for any other file or state.
  */
 export function groupFileHint(file: Pick<ChatFile, "id">, transfer: FileTransferState | null, tr: Translate = englishT): string | null {
-  return isGroupFile(file) && transfer?.state === "transferring" && transfer.stage === "waiting" && transfer.wait === "nobody" ? tr("chat.file.nobodyHasHint") : null;
+  if (!isGroupFile(file) || transfer?.state !== "transferring" || transfer.stage !== "waiting") return null;
+  if (transfer.wait === "nobody") return tr("chat.file.nobodyHasHint");
+  return transfer.wait === "author" ? tr("chat.file.senderOnlyHint") : null;
 }
 
 /**
@@ -116,6 +121,7 @@ export function fileStatus(file: ChatFile, transfer: FileTransferState | null, n
     if (transfer.stage === "asking") return tr("chat.file.notDownloaded", { size });
     if (transfer.stage === "queued") return tr("chat.file.askingMember");
     if (transfer.stage === "waiting" && transfer.wait === "nobody") return tr("chat.file.nobodyHas");
+    if (transfer.stage === "waiting" && transfer.wait === "author") return tr("chat.file.senderOnly");
   }
   switch (transfer.stage) {
     case "preparing": return tr("chat.file.preparing", { progress: of });

@@ -8,7 +8,7 @@ import { updateFailure } from "../lib/updateFailure";
 import { canInstall, isAppleMobile, isMacSafari, startInstall, useInstallState } from "../lib/installPrompt";
 import { browserPrompts, reconsiderPersist, requestPersist, useStorageProtection } from "../lib/storagePersistence";
 import { storageBreakdown, useDesktopStorage } from "../lib/desktopStorage";
-import { pushPlatform, pushUnavailable, setWake, useWakeOn } from "../lib/wakePush";
+import { isNoPushService, noPushService, pushPlatform, pushUnavailable, setWake, useNoPushService, useWakeOn, wakeIsOn } from "../lib/wakePush";
 import { noticePlace, noticeSettings, notificationPermission, openNoticeSettings, requestNotifications, type NoticePermission } from "../lib/notifications";
 import { getVersion } from "@tauri-apps/api/app";
 import { NetworkSettings } from "../components/NetworkSettings";
@@ -27,8 +27,9 @@ import { currentProfile, listProfiles } from "../lib/profiles";
 import { openProfileSwitcher, useProfileGlances } from "../hooks/useProfileSwitcher";
 import { NeedsYouDot, NeedsYouList } from "../components/NeedsYou";
 import type { NeedsYou } from "../lib/needsYou";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
-import { Button, Switch } from "../components/wallet/ui";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
+import { Button, Switch, chosenInForcedColors } from "../components/wallet/ui";
 import { setLoadPublicProfiles, useLoadPublicProfiles } from "../hooks/usePublicProfileRequest";
 import { setSendTyping, useSendTyping } from "../hooks/useTyping";
 import { Select } from "../components/ui/Select";
@@ -42,7 +43,7 @@ import { playSound } from "../lib/sounds";
 import { clearAllData } from "../lib/clearData";
 import { useAppsAvailable } from "../lib/apps/flag";
 import { lockPasswordMin, useDeviceSet } from "../lib/devices";
-import { useEngineState } from "../lib/engineState";
+import { useEngineValue } from "../lib/engineState";
 import { engine } from "@ghostly/browser/platform/engine";
 import {
   hashPassword,
@@ -59,6 +60,7 @@ import {
   type Language,
 } from "../lib/settings";
 import { deleteAllSessions, listSessions } from "../lib/storage";
+import { anyChatOnCall, useAnyChatOnCall } from "../lib/chatsOnCall";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { peekEnabled, peekNotifies } from "../lib/profilePeek";
 import { externalLinkProps, isDesktopApp } from "../lib/externalLink";
@@ -118,15 +120,23 @@ export function Settings() {
   const wakeOn = useWakeOn();
   const [wakeBusy, setWakeBusy] = useState(false);
   const [wakeError, setWakeError] = useState("");
+  // A browser with no push service (Chromium without Google Play services: GrapheneOS's Vanadium): found once and kept
+  // for the browser (lib/wakePush.ts `noPushService`), so the switch reads as unavailable with why, until Try again.
+  const wakeNoPush = useNoPushService() && !wakeOn;
+  const wakeHintId = useId();
   const changeWake = async (on: boolean) => {
     setWakeBusy(true);
     setWakeError("");
-    try { await setWake(on); } catch (e) { setWakeError(problemLine(e, t)); } finally { setWakeBusy(false); }
+    try { await setWake(on); } catch (e) {
+      // No push service: kept for the browser, the row says so itself for as long as it is and wake-ups are off (a line
+      // of this page's when the browser's storage refused to keep it, or a refused New token left them on).
+      if (on && isNoPushService(e)) { if (!noPushService() || wakeIsOn()) setWakeError(t("pwa.wakeNoPushService")); } else setWakeError(problemLine(e, t));
+    } finally { setWakeBusy(false); }
   };
   const isMobile = useIsMobile();
   const profile = currentProfile();
   const myAvatar = useMyAvatar();
-  const canSwitch = !!useServicesPlatform()?.features.profiles;
+  const canSwitch = usePlatformValue(() => !!servicesPlatform?.features.profiles);
   const glances = useProfileGlances();
   const peekOn = peekEnabled(settings, isDesktopApp());
   const loadPublicProfiles = useLoadPublicProfiles();
@@ -235,6 +245,17 @@ export function Settings() {
     focusPasswordForm.current = false;
     first.focus();
   }, [showPasswordForm, section, isMobile]); // eslint-disable-line react-hooks/exhaustive-deps -- the refs are read when it is drawn
+  // The form closed (set, changed, removed, Cancel) with the focus in it: the focus goes back to what opened it, not to
+  // the page. Change password once it stays (a change), else the Lock Screen switch (a password set, removed, given up).
+  const lockSwitch = useRef<HTMLButtonElement>(null);
+  const passwordEdit = useRef<HTMLButtonElement>(null);
+  const focusPasswordOpener = useRef<"lock" | "edit" | null>(null);
+  const closePasswordFormTo = (opener: "lock" | "edit") => { focusPasswordOpener.current = opener; setShowPasswordForm(false); };
+  useLayoutEffect(() => {
+    const opener = focusPasswordOpener.current;
+    focusPasswordOpener.current = null;
+    if (opener && focusLost()) (opener === "edit" ? passwordEdit : lockSwitch).current?.focus();
+  }, [showPasswordForm]);
   const [storageInfo, setStorageInfo] = useState({ used: 0, keys: 0 });
   // Whether the browser may clear this device's storage (lib/storagePersistence). Nothing on Desktop: no browser evicts it.
   const { protection, estimate } = useStorageProtection();
@@ -247,11 +268,14 @@ export function Settings() {
   const appsOn = useAppsAvailable();
   const [confirmDeleteChats, setConfirmDeleteChats] = useState(false);
   const [chatCount, setChatCount] = useState(0);
+  // No chat is deleted under its call (lib/chatsOnCall.ts): while one is on or rings, Delete all chats says to end it first.
+  const chatsOnCall = useAnyChatOnCall();
   // Clear and Delete all chats swap their button for a confirm and back: the focus goes to what took the pressed button's place, not to the page.
-  const dataButtons = { clear: useRef<HTMLButtonElement>(null), clearCancel: useRef<HTMLButtonElement>(null), deleteChats: useRef<HTMLButtonElement>(null) };
+  const dataButtons = { clear: useRef<HTMLButtonElement>(null), clearCancel: useRef<HTMLButtonElement>(null), deleteChats: useRef<HTMLButtonElement>(null), deleteChatsCancel: useRef<HTMLButtonElement>(null) };
   const focusDataButton = useRef<keyof typeof dataButtons | null>(null);
   const confirmData = (which: "clear" | "deleteChats", open: boolean) => {
-    focusDataButton.current = !open ? which : which === "clear" ? "clearCancel" : null;
+    // A confirm that is off cannot keep the focus: its Cancel takes it.
+    focusDataButton.current = !open ? which : which === "clear" ? "clearCancel" : chatsOnCall ? "deleteChatsCancel" : null;
     if (which === "clear") setConfirmClearData(open);
     else setConfirmDeleteChats(open);
   };
@@ -293,9 +317,10 @@ export function Settings() {
     return engine.call("deviceSet").then((view) => view.state !== "single", () => true);
   };
   // The push address contacts hold is another device's (WISP 06 § Push and the phone): this one is not woken by it.
-  const engineState = useEngineState();
-  const wakeAway = engineState?.wakeOwner === "away" && !!engineState.settings.wake;
-  const wakeAwayDevice = wakeAway ? devices?.devices.find((device) => device.key === engineState?.settings.wake?.device)?.name : undefined;
+  // Read alone, so a state that changes nothing here (a file's progress, up to 20 a second) does not draw the page again.
+  const wakeAwayKey = useEngineValue((state) => state?.wakeOwner === "away" && state.settings.wake ? state.settings.wake.device ?? "" : null);
+  const wakeAway = wakeAwayKey !== null;
+  const wakeAwayDevice = wakeAway ? devices?.devices.find((device) => device.key === wakeAwayKey)?.name : undefined;
 
   useEffect(() => {
     setStorageInfo(getStorageUsage());
@@ -375,7 +400,7 @@ export function Settings() {
       setNewPassword("");
       setConfirmPassword("");
       setCurrentPassword("");
-      setShowPasswordForm(false);
+      closePasswordFormTo(hasPassword ? "edit" : "lock");
       // The lock changed, and a pull would still need a proof that could not be made: said, not hidden.
       if (verifierFailed) notice.show(t("devices.handoff.verifierFailed"));
       else notice.show(hasPassword ? t("settings.passwordChanged") : t("settings.passwordSet"), { tone: "success" });
@@ -405,7 +430,7 @@ export function Settings() {
 
       setLockEnabled(false);
       setCurrentPassword("");
-      setShowPasswordForm(false);
+      closePasswordFormTo("lock");
       notice.show(t("settings.passwordRemoved"), { tone: "success" });
     } finally {
       setPasswordBusy(false);
@@ -418,7 +443,7 @@ export function Settings() {
   const systemSettings = noticeSettings();
   const deniedHint = { macos: "settings.noticesDeniedMac", windows: "settings.noticesDeniedWindows", android: "settings.noticesDeniedSystem", system: "settings.noticesDeniedSystem",
     extension: "settings.noticesDeniedExtension", web: "settings.noticesDenied" } as const;
-  const closePasswordForm = () => { setShowPasswordForm(false); setCurrentPassword(""); setNewPassword(""); setConfirmPassword(""); setPasswordError(null); };
+  const closePasswordForm = () => { closePasswordFormTo(hasPassword ? "edit" : "lock"); setCurrentPassword(""); setNewPassword(""); setConfirmPassword(""); setPasswordError(null); };
   /** One of the password fields, wired to its error: `aria-invalid`, `aria-describedby`, and the line under it. */
   const passwordField = (which: PasswordField, label: string, value: string, change: (value: string) => void) => {
     const error = passwordError?.field === which ? passwordError.text : null;
@@ -440,12 +465,15 @@ export function Settings() {
     );
   };
   const deleteChats = () => {
+    if (anyChatOnCall()) return;
     deleteAllSessions();
+    // Confirm goes and Delete comes back off (no chat left): the focus goes on to the next row's button.
+    focusDataButton.current = confirmClearData ? "clearCancel" : "clear";
     setConfirmDeleteChats(false);
     setChatCount(0);
     setStorageInfo(getStorageUsage());
     window.dispatchEvent(new Event("session-updated"));
-    notice.show(t("sidebar.deleteAllChats"), { tone: "success" });
+    notice.show(t("settings.chatsDeleted"), { tone: "success" });
   };
   const clearData = async () => {
     setConfirmClearData(false);
@@ -502,7 +530,7 @@ export function Settings() {
           <div className="bg-surface rounded-xl divide-y divide-border">
             {/* A phone has no account bar, and Profile no tab of its own (the bar is full): this is the way there. */}
             <LinkRow testId="settings-profile-link" leading={<ProfileBadge entry={profile} size={36} avatar={myAvatar} />}
-              label={profile.name} hint={t("settings.profileLinkHint")} onClick={() => nav.open("/profile")} />
+              label={<span dir="auto" className="inline-block max-w-full truncate align-top">{profile.name}</span>} hint={t("settings.profileLinkHint")} onClick={() => nav.open("/profile")} />
             {/* The account switcher, where a phone's tab bar holds it (holding Settings opens it too). */}
             {canSwitch && (
               <LinkRow testId="settings-profile-switch" label={<span className="inline-flex items-center gap-2">{t("profileSwitcher.title")}{others && <NeedsYouDot />}</span>}
@@ -553,7 +581,7 @@ export function Settings() {
           <div role="group" aria-label={t("settings.colorScheme")} className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1">
             {COLOR_SCHEME_OPTIONS.map((option) => (
               <button key={option.value} onClick={() => handleColorSchemeChange(option.value)} aria-pressed={settings.colorScheme === option.value}
-                className={`flex items-center gap-1 px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.colorScheme === option.value ? "bg-accent text-on-accent" : "text-text-secondary hover:text-text-primary"}`}>
+                className={`flex items-center gap-1 px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.colorScheme === option.value ? `bg-accent text-on-accent ${chosenInForcedColors}` : "text-text-secondary hover:text-text-primary"}`}>
                 {option.value === "light" && (
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                     <circle cx="12" cy="12" r="5" strokeWidth="2" />
@@ -579,7 +607,7 @@ export function Settings() {
           <div role="group" aria-label={t("settings.chatListDensity")} data-testid="chat-list-density" className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1">
             {(["compact", "comfortable"] as const).map((density) => (
               <button key={density} onClick={() => updateChatListDensity(density)} aria-pressed={settings.chatListDensity === density} data-density={density}
-                className={`px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.chatListDensity === density ? "bg-accent text-on-accent" : "text-text-secondary hover:text-text-primary"}`}>
+                className={`px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.chatListDensity === density ? `bg-accent text-on-accent ${chosenInForcedColors}` : "text-text-secondary hover:text-text-primary"}`}>
                 {t(`settings.chatListDensities.${density}` as const)}
               </button>
             ))}
@@ -631,9 +659,10 @@ export function Settings() {
         </Row>
         {canWake && (
           <Row label={t("pwa.wake")} testId="settings-wake-row" info={t("pwa.wakeInfo")}
-            hint={<span role="status" data-testid="settings-wake-hint">{wakeError || (wakeAway ? (wakeAwayDevice ? t("pwa.wakeAway", { device: wakeAwayDevice }) : t("pwa.wakeAwayUnnamed")) : t(wakeOn ? "pwa.wakeOnHint" : "pwa.wakeHint"))}</span>}>
+            hint={<span role="status" id={wakeHintId} data-testid="settings-wake-hint">{wakeError || (wakeNoPush ? t("pwa.wakeNoPushService") : wakeAway ? (wakeAwayDevice ? t("pwa.wakeAway", { device: wakeAwayDevice }) : t("pwa.wakeAwayUnnamed")) : t(wakeOn ? "pwa.wakeOnHint" : "pwa.wakeHint"))}</span>}>
             {wakeOn && <Button data-testid="settings-wake-rotate" disabled={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeRotate")}</Button>}
-            <Switch testId="settings-wake" label={t("pwa.wake")} checked={wakeOn} disabled={wakeBusy} onChange={(on) => void changeWake(on)} />
+            {wakeNoPush && <Button data-testid="settings-wake-retry" disabled={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeTryAgain")}</Button>}
+            <Switch testId="settings-wake" label={t("pwa.wake")} checked={wakeOn} disabled={wakeBusy} unavailable={wakeNoPush} describedBy={wakeNoPush ? wakeHintId : undefined} onChange={(on) => void changeWake(on)} />
           </Row>
         )}
         {!canWake && pushUnavailable() && (
@@ -666,7 +695,7 @@ export function Settings() {
               {t("settings.lockNow")}
             </Button>
           )}
-          <Switch testId="settings-lock" label={t("settings.lockScreen")} checked={lockOn} onChange={() => void handleLockToggle()} />
+          <Switch ref={lockSwitch} testId="settings-lock" label={t("settings.lockScreen")} checked={lockOn} onChange={() => void handleLockToggle()} />
         </Row>
         {hasPassword && (
           <Row label={t("settings.timeout")}>
@@ -676,20 +705,21 @@ export function Settings() {
         )}
         {hasPassword && (
           <Row label={t("settings.password")}>
-            <Button data-testid="settings-password-edit" aria-expanded={showPasswordForm} onClick={() => (showPasswordForm ? closePasswordForm() : openPasswordForm())}>
+            <Button ref={passwordEdit} data-testid="settings-password-edit" aria-expanded={showPasswordForm} onClick={() => (showPasswordForm ? closePasswordForm() : openPasswordForm())}>
               {showPasswordForm ? t("common.close") : t("settings.passwordEdit")}
             </Button>
           </Row>
         )}
         {showPasswordForm && (
-          <Block testId="settings-password-form">
+          // A form: Enter in any of its fields sets or changes the password, with the button's checks (Remove stays a click).
+          <Block testId="settings-password-form" onSubmit={() => { if (!passwordBusy) void handleSetPassword(); }}>
             {hasPassword && passwordField("current", t("settings.currentPassword"), currentPassword, setCurrentPassword)}
             <FieldGrid>
               {passwordField("new", t("settings.newPassword"), newPassword, setNewPassword)}
               {passwordField("confirm", t("settings.confirmPassword"), confirmPassword, setConfirmPassword)}
             </FieldGrid>
             <ButtonGroup>
-              <Button variant="primary" disabled={passwordBusy} onClick={() => void handleSetPassword()}>
+              <Button type="submit" variant="primary" disabled={passwordBusy}>
                 {hasPassword ? t("settings.changePassword") : t("settings.setPassword")}
               </Button>
               {hasPassword && <Button variant="danger" disabled={passwordBusy} onClick={() => void handleRemovePassword()}>{t("settings.removePassword")}</Button>}
@@ -727,12 +757,12 @@ export function Settings() {
             )}
           </Row>
         )}
-        <ForkRows forks={devices?.forks} />
+        <ForkRows forks={devices?.forks} keptAt={devices?.forkKeptAt} />
         <GroupDownloadsRow />
-        <Row label={t("sidebar.deleteAllChats")} hint={confirmDeleteChats ? t("settings.deleteAllChatsConfirm", { count: chatCount }) : t("settings.deleteAllChatsHint")}>
+        <Row label={t("sidebar.deleteAllChats")} hint={!confirmDeleteChats ? t("settings.deleteAllChatsHint") : chatsOnCall ? t("settings.deleteAllChatsCallOn") : t("settings.deleteAllChatsConfirm", { count: chatCount })}>
           {confirmDeleteChats ? <>
-            <Button variant="danger" data-testid="delete-all-chats-confirm" onClick={deleteChats}>{t("common.confirm")}</Button>
-            <Button onClick={() => confirmData("deleteChats", false)}>{t("common.cancel")}</Button>
+            <Button variant="danger" data-testid="delete-all-chats-confirm" disabled={chatsOnCall} onClick={deleteChats}>{t("common.confirm")}</Button>
+            <Button ref={dataButtons.deleteChatsCancel} onClick={() => confirmData("deleteChats", false)}>{t("common.cancel")}</Button>
           </> : (
             <Button ref={dataButtons.deleteChats} variant="danger" data-testid="delete-all-chats" disabled={chatCount === 0} onClick={() => confirmData("deleteChats", true)}>{t("common.delete")}</Button>
           )}

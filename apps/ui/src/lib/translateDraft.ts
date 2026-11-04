@@ -11,12 +11,15 @@ import { detectableText, DETECT_CHARS, MIN_LETTERS, MIN_PROBABILITY, type Detect
 /** What the draft is made of, in order: words to translate, and what stays as typed between them. */
 export type DraftPart = { kind: "words"; text: string } | { kind: "kept"; text: string };
 
-/** Code blocks, inline code, links and payment URIs, Cashu tokens, Lightning invoices, and any long run with a digit (a key, an address). */
+/**
+ * Code blocks, inline code, links and payment URIs (each one the chat shows as a card: a translated amount or path is
+ * another payment), Cashu tokens, Lightning invoices, and any long run with a digit (a key, an address).
+ */
 const KEPT = new RegExp([
   "```[\\s\\S]*?(?:```|$)",
   "`[^`\\n]+`",
   "\\b(?:https?:\\/\\/|www\\.)\\S+",
-  "\\b(?:lightning|bitcoin|cashu|nostr|ghostly|mailto|lnurl):\\S+",
+  "\\b(?:lightning|bitcoin|ethereum|monero|cashu|nostr|ghostly|mailto|lnurl):\\S+",
   "\\bcashu[AB][A-Za-z0-9_+/=-]+",
   "\\b(?:lnbc|lntb|lntbs|lnbcrt|lnurl)[0-9a-z]{10,}",
   "(?=[A-Za-z0-9_+/=:.-]*\\d)[A-Za-z0-9_+/=:.-]{20,}",

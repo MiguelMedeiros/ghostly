@@ -525,6 +525,12 @@ export interface EngineApi {
    * start with `remove-<reason>:`.
    */
   deviceRemove(params: { key: string }): import("../devices/links").DeviceSetView;
+  /**
+   * Rename (WISP 06 § User experience), on the active device: the device with this signing key gets this name in the
+   * set's next record, which every device reads. The name is trimmed; one the record would change (empty, over 16 bytes,
+   * a control, invisible or direction-changing character) is refused. Errors start with `rename-<reason>:`.
+   */
+  deviceRename(params: { key: string; name: string }): import("../devices/links").DeviceSetView;
   /** "New device secret": the set moves to a new device-set secret with nobody removed. */
   deviceNewSecret(): import("../devices/links").DeviceSetView;
   /** The offer of a new device secret after a takeover, answered without making one. */

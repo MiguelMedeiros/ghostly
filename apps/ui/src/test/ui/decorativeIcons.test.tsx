@@ -15,7 +15,7 @@ import { renderApp } from "../render";
 
 // covers: app.accessibility
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 /*
  * A drawing with no name and no aria-hidden stays in the accessibility tree as an unnamed image: VoiceOver and TalkBack
@@ -60,7 +60,7 @@ describe("decorative drawings are hidden from screen readers", () => {
 
   it("the ghost of the home screen", () => {
     const { container } = renderApp(<Home />);
-    expect(exposed(container.querySelector("h2")!.parentElement!)).toEqual([]);
+    expect(exposed(container.querySelector("h1")!.parentElement!)).toEqual([]);
   });
 
   it("the star on a chat made here keeps its meaning in words, its drawing hidden", async () => {

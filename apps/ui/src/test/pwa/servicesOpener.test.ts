@@ -304,8 +304,14 @@ describe("a contact's app shown over the app", () => {
   it("keeps the view's bar on screen, and draws no dialog of the browser's over it: no full screen, no alert or prompt", async () => {
     await open("one");
     const frame = document.querySelector("[data-testid=service-view-frame]")!;
-    expect(frame.getAttribute("allow")!.split(";").map((feature) => feature.trim())).toEqual(["clipboard-write"]);
+    expect(frame.getAttribute("allow")).toBe("");
     expect(frame.getAttribute("sandbox")!.split(" ")).not.toContain("allow-modals");
+  });
+
+  it("saves no file by itself: the contact's app starts no download on this device, as on Desktop", async () => {
+    await open("one");
+    const sandbox = document.querySelector("[data-testid=service-view-frame]")!.getAttribute("sandbox")!.split(" ");
+    expect(sandbox.filter((flag) => flag.startsWith("allow-downloads"))).toEqual([]);
   });
 
   it("closes when the profile locks (the lock screen's closeServiceWindows), as Desktop's windows do", async () => {
@@ -314,6 +320,12 @@ describe("a contact's app shown over the app", () => {
     expect(document.getElementById(SERVICE_VIEW_ID)).not.toBeNull();
     closeServiceWindows();
     expect(document.getElementById(SERVICE_VIEW_ID)).toBeNull();
+  });
+
+  it("writes nothing to the clipboard by itself: no `clipboard-write`, a copy button in the app still copies on a tap", async () => {
+    await open("one");
+    const allow = document.querySelector("[data-testid=service-view-frame]")!.getAttribute("allow") ?? "";
+    expect(allow.split(";").map((feature) => feature.trim())).not.toContain("clipboard-write");
   });
 
   it("holds the keyboard while open: the app under it is out of reach, and closing gives the focus back to Open", async () => {

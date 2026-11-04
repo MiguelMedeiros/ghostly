@@ -30,6 +30,8 @@ export interface GroupEditsHost {
   changed(chat: string, id: string): Promise<void> | void;
   /** My key in an active group, who is in it now, whether it is a community, and whether I am its admin. */
   membership(groupId: string): { me: string; members: ReadonlySet<string>; community: boolean; admin?: boolean } | undefined;
+  /** Why I am not in the group any more, as it shows it ("You were removed from this group"); undefined when it says none. */
+  notMember?(groupId: string): string | undefined;
   /**
    * A member deleted its message for everyone (WISP 400 § Delete for everyone): it goes from this device with its file,
    * and its id is kept so a copy that comes again stays gone. Also for a message not here yet.
@@ -119,7 +121,7 @@ export class GroupEdits {
   async edit(groupId: string, messageId: string, raw: string, added: readonly GroupMention[] = [], card?: StatusCard): Promise<GroupEditResult> {
     const refuse = (error: string) => ({ error, refused: true });
     const membership = this.host.membership(groupId);
-    if (!membership) return refuse("You are not in this group");
+    if (!membership) return refuse(this.notMember(groupId));
     if (typeof messageId !== "string" || typeof raw !== "string") return refuse("No message to edit");
     const chat = chatOf(groupId);
     const message = await this.find(chat, messageId);
@@ -154,7 +156,7 @@ export class GroupEdits {
    */
   async removeMine(groupId: string, messageId: string): Promise<GroupEditResult> {
     const refuse = (error: string) => ({ error, refused: true });
-    if (!this.host.membership(groupId)) return refuse("You are not in this group");
+    if (!this.host.membership(groupId)) return refuse(this.notMember(groupId));
     const chat = chatOf(groupId);
     const message = typeof messageId === "string" ? await this.find(chat, messageId) : undefined;
     if (!message || message.removed || message.sender !== "me" || !GROUP_MESSAGE_ID.test(message.id)) return refuse("Only your own messages can be deleted for everyone");
@@ -163,6 +165,11 @@ export class GroupEdits {
     if (this.host.message) this.told(groupId).set(messageId, ++this.tick);
     await this.flush(groupId).catch(() => {});
     return { error: null, messageId };
+  }
+
+  /** What an edit or a removal in a group I am not in is refused with: the group's reason, as a message or a reaction is. */
+  private notMember(groupId: string): string {
+    return this.host.notMember?.(groupId) ?? "You are not in this group";
   }
 
   /** Says my pending edits in a group, oldest first, at the pace allowed; what waits goes when the window has room. */

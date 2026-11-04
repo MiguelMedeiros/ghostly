@@ -61,7 +61,7 @@ function runLine(run: AppRunStatus, t: Translate): string | null {
 }
 
 function Line({ children, tone = "muted", testId }: { children: ReactNode; tone?: "muted" | "danger" | "warning"; testId?: string }) {
-  const color = { muted: "text-text-secondary", danger: "text-danger", warning: "text-test-money-ink" }[tone];
+  const color = { muted: "text-text-secondary", danger: "text-danger-ink", warning: "text-test-money-ink" }[tone];
   return <p data-testid={testId} className={`text-xs whitespace-pre-line ${color}`}>{children}</p>;
 }
 
@@ -314,6 +314,15 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
     const active = document.activeElement;
     if (was && !waits && (!active || active === document.body)) box.current?.focus({ preventScroll: true });
   }, [waits]);
+  // Fetch files goes once the files are back, and the focus it had with it: Open takes its place and the focus, or the
+  // screen when the app still cannot run.
+  const open = useRef<HTMLButtonElement>(null), lacks = app.run.status === "needs-files", lacked = useRef(lacks);
+  useEffect(() => {
+    const was = lacked.current;
+    lacked.current = lacks;
+    const active = document.activeElement;
+    if (was && !lacks && (!active || active === document.body)) (open.current ?? box.current)?.focus({ preventScroll: true });
+  }, [lacks]);
   const focusBack = useFocusBack(busy);
   const act = async (work: () => Promise<unknown>, close = false, which: string | null = null) => {
     focusBack();
@@ -360,7 +369,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
         {app.run.status === "needs-files" && <Button data-testid="app-fetch-files" disabled={busy} loading={pending === "files"} onClick={() => void act(() => engine.call("appFetchFiles", { ref: app.ref }), false, "files")}>{t("apps.app.fetchFiles")}</Button>}
         {app.run.status === "removed" && <Button data-testid="app-run-anyway" onClick={() => { onOpen(app, { runAnyway: true }); onClose(); }}>{t("apps.app.runAnyway")}</Button>}
         {!canRun && app.run.status !== "needs-files" && <Button data-testid="app-keep-stopped" onClick={onClose}>{t("apps.app.keepStopped")}</Button>}
-        {canRun && <Button variant="primary" data-testid="app-open" onClick={() => { onOpen(app); onClose(); }}>{t("apps.page.open")}</Button>}
+        {canRun && <Button ref={open} variant="primary" data-testid="app-open" onClick={() => { onOpen(app); onClose(); }}>{t("apps.page.open")}</Button>}
       </div>
     </Shell>
   );

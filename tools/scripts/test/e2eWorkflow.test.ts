@@ -25,9 +25,18 @@ describe("e2e.yml runs the web and extension suites in shards", () => {
   });
 
   it("every test step on its own shard of the same total, the release's and the deployed web app's", () => {
-    const runs = [...e2e.matchAll(/^ {8}run: (.*(?:test:e2e|playwright test).*)$/gm)].map((m) => m[1]);
+    const runs = [...e2e.matchAll(/^ {8}run: (.*(?:test:e2e|playwright test|e2e\/shard\.mjs).*)$/gm)].map((m) => m[1]);
     expect(runs).toHaveLength(2);
-    for (const run of runs) expect(run).toContain(`--shard \${{ matrix.shard }}/${total}`);
+    // Split by recorded time (e2e/shard.mjs), not by Playwright's --shard: equal counts in file order gave shard 2
+    // every devices, dht and group story, 25 to 34 minutes against 15 to 22 for the others (2026-11-02).
+    for (const run of runs) {
+      expect(run).toContain(`node e2e/shard.mjs \${{ matrix.shard }} ${total}`);
+      expect(run).not.toContain("--shard");
+    }
+  });
+
+  it("the release's step builds the extension first, as npm run test:e2e did", () => {
+    expect(e2e).toMatch(/^ {8}run: npm run build:extension && node e2e\/shard\.mjs /m);
   });
 
   it("with a shorter timeout than the 90 minutes the whole suite needed on one runner", () => {
@@ -47,5 +56,11 @@ describe("e2e.yml runs the web and extension suites in shards", () => {
     expect(report).toMatch(/^ {10}pattern: e2e-blob-\*\n {10}path: all-blob-reports\n {10}merge-multiple: true$/m);
     expect(report).toContain("npx playwright merge-reports -c e2e/playwright.config.ts all-blob-reports");
     expect(report).toMatch(/^ {10}name: playwright-report\n {10}path: playwright-report$/m);
+  });
+
+  it("and keeps every test's time as JSON, which e2e/shard.mjs --record reads", () => {
+    const report = job("report");
+    expect(report).toMatch(/^ {10}PLAYWRIGHT_JSON_OUTPUT_NAME: e2e-results\.json\n {8}run: npx playwright merge-reports --reporter json all-blob-reports$/m);
+    expect(report).toMatch(/^ {10}name: e2e-results\n {10}path: e2e-results\.json$/m);
   });
 });

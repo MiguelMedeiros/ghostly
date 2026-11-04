@@ -47,7 +47,7 @@ describe("install", () => {
     net.put(BUNDLE_URL, v1.bytes);
     const store = apps(net);
     const preview = await store.preview({ url: "https://github.com/ana/chess" });
-    expect(net.requests).toEqual([BUNDLE_URL]);
+    expect(net.requests).toEqual([BUNDLE_URL, new URL("ghostly-revoke.json", BUNDLE_URL).href]);
     expect(preview).toMatchObject({ digest: v1.digest, ref: v1.ref, install: "new", asks: ["chat"], run: { status: "ok" }, unknownPublisher: true, listedBy: [] });
     expect(await appRows()).toEqual([]);
     expect(await bundleIds()).toEqual([]);
@@ -276,6 +276,50 @@ describe("updates", () => {
     spy.mockRestore();
     expect(await store.list(), "not back on the new version, with its data gone").toEqual([]);
     expect(await bundleIds()).toEqual([]);
+  });
+
+  it("an app uninstalled while Install of another version of it stores the files stays uninstalled", async () => {
+    const { store, v1 } = await installed();
+    const v2 = await bundle({ sequence: 2 });
+    net.put(PINNED_URL, v2.bytes);
+    await store.preview({ url: PINNED_URL });
+    // Install pressed (a link, a card in a chat); Uninstall (another tab, the Apps page) lands while it writes the files.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let writing!: () => void;
+    const started = new Promise<void>((resolve) => { writing = resolve; });
+    const engine = store as unknown as { writeBundle: (...args: unknown[]) => Promise<unknown> };
+    const write = engine.writeBundle.bind(store);
+    const spy = vi.spyOn(engine, "writeBundle").mockImplementation(async (...args: unknown[]) => { const kind = await write(...args); writing(); await held; return kind; });
+    const install = store.install({ digest: v2.digest, grant: ["chat"] });
+    await started;
+    await store.uninstall({ ref: v1.ref });
+    release();
+    await expect(install).rejects.toThrow(/^not-installed/);
+    spy.mockRestore();
+    expect(await store.list(), "not back on the new version, with its data gone").toEqual([]);
+    expect(await bundleIds()).toEqual([]);
+  });
+
+  it("an uninstall at any point of an Install of another version never brings the app back", async () => {
+    for (let offset = 0; offset < 40; offset++) {
+      await emptyProfile();
+      const { store, v1 } = await installed();
+      const v2 = await bundle({ sequence: 2 });
+      net.put(PINNED_URL, v2.bytes);
+      await store.preview({ url: PINNED_URL });
+      const install = store.install({ digest: v2.digest, grant: ["chat"] }).then(() => "ok", (e: Error) => e.message.split(":")[0]);
+      for (let i = 0; i < offset; i++) await new Promise((resolve) => setImmediate(resolve));
+      await store.uninstall({ ref: v1.ref }).catch(() => {});
+      const outcome = await install;
+      const left = await store.list();
+      // The install either finished before the uninstall (then removed with it) or stopped: never the app back, empty.
+      expect(left, `offset ${offset}: install ${outcome}`).toEqual([]);
+      if (outcome === "ok") continue;
+      // Stopped: the files it wrote go with it.
+      expect(outcome, `offset ${offset}`).toBe("not-installed");
+      expect(await bundleIds(), `offset ${offset}`).toEqual([]);
+    }
   });
 
   it("an app uninstalled while an update that adds a permission downloads leaves no files behind", async () => {
@@ -725,6 +769,85 @@ describe("an app installed from a store updates only to the version that store l
     expect(await pinnedTo()).toBeUndefined();
   });
 
+  /** `removeStore` waits once it has read the installed apps, until `release` is called; `started` once it is reached. */
+  function holdRemoveStore(store: object) {
+    const engine = store as unknown as { installed: () => Promise<unknown> };
+    const real = engine.installed.bind(store);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let reached!: () => void;
+    const started = new Promise<void>((resolve) => { reached = resolve; });
+    vi.spyOn(engine, "installed").mockImplementationOnce(async () => { const read = await real(); reached(); await held; return read; });
+    return { started, release };
+  }
+  /** The update check waits before it writes the bundle `digest`, until `release` is called; `started` once it is reached. */
+  function holdWrite(store: object, digest: string) {
+    const engine = store as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+    const real = engine.writeBundle!.bind(store);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let reached!: () => void;
+    const started = new Promise<void>((resolve) => { reached = resolve; });
+    vi.spyOn(engine, "writeBundle").mockImplementation(async (...args: unknown[]) => {
+      if (args.includes(digest)) { reached(); await held; }
+      return real(...args);
+    });
+    return { started, release };
+  }
+
+  it("an app uninstalled while its store is removed stays uninstalled", async () => {
+    const { store, v1 } = await fromStore();
+    const { started, release } = holdRemoveStore(store);
+    const removing = store.removeStore({ key: keyOf(STORE_KEY) });
+    await started;
+    await store.uninstall({ ref: v1.ref });
+    release();
+    await removing;
+    expect(await appRows(), "not written back as an app with no files").toEqual([]);
+    expect(await store.list()).toEqual([]);
+    expect(await bundleIds()).toEqual([]);
+  });
+
+  it("an update the check installs while the store is removed stays, with its files, pinned to no store", async () => {
+    const { store, v1 } = await fromStore();
+    const v2 = await bundle({ sequence: 2, sources: [HEAD] });
+    const pinned2 = `https://cdn.jsdelivr.net/gh/ana/chess@${"b".repeat(40)}/app.ghostlyapp`;
+    net.put(pinned2, v2.bytes);
+    await net.putStore(await storeFiles({ sequence: 2, apps: [listing(v2, [pinned2])] }));
+    // The check read the stores and fetched 2; the removal read the apps (v1) before the check wrote 2: it does not
+    // write v1 back over it.
+    const write = holdWrite(store, v2.digest);
+    const check = store.checkUpdates();
+    await write.started;
+    const remove = holdRemoveStore(store);
+    const removing = store.removeStore({ key: keyOf(STORE_KEY) });
+    await remove.started;
+    write.release();
+    expect((await check)[0]!.outcome).toBe("updated");
+    remove.release();
+    await removing;
+    expect((await store.list())[0]).toMatchObject({ ref: v1.ref, sequence: 2, digest: v2.digest, run: { status: "ok" } });
+    expect(await bundleIds()).toEqual([`app-${v2.digest}`]);
+    expect(await pinnedTo()).toBeUndefined();
+  });
+
+  it("an update the check writes after its store was removed is not pinned to that store", async () => {
+    const { store, v1 } = await fromStore();
+    const v2 = await bundle({ sequence: 2, sources: [HEAD] });
+    const pinned2 = `https://cdn.jsdelivr.net/gh/ana/chess@${"b".repeat(40)}/app.ghostlyapp`;
+    net.put(pinned2, v2.bytes);
+    await net.putStore(await storeFiles({ sequence: 2, apps: [listing(v2, [pinned2])] }));
+    // The check read the stores and fetched 2; the person removes the store before it writes 2.
+    const { started, release } = holdWrite(store, v2.digest);
+    const check = store.checkUpdates();
+    await started;
+    await store.removeStore({ key: keyOf(STORE_KEY) });
+    release();
+    expect((await check)[0]!.outcome).toBe("updated");
+    expect((await store.list())[0]).toMatchObject({ ref: v1.ref, sequence: 2, digest: v2.digest, run: { status: "ok" } });
+    expect(await pinnedTo(), "the removed store pins nothing").toBeUndefined();
+  });
+
   it("a waiting update the store no longer lists is not installed; the version it lists now is taken instead", async () => {
     const { store, v1 } = await fromStore();
     const v3 = await bundle({ sequence: 3, permissions: ["chat", "name"], sources: [HEAD] });
@@ -807,7 +930,9 @@ describe("an app installed from a store updates only to the version that store l
     await store.addStore({ url: STORE_URL });
     expect(await store.preview({ store: keyOf(STORE_KEY), ref: v1.ref })).toMatchObject({ digest: v1.digest, from: PINNED_URL });
     net.files.delete(PINNED_URL);
-    await expect(store.preview({ store: keyOf(STORE_KEY), ref: v1.ref })).rejects.toThrow(/^status|^unlisted/);
+    // The listed version just checked is taken again; one not read yet (another engine) finds none.
+    expect(await store.preview({ store: keyOf(STORE_KEY), ref: v1.ref })).toMatchObject({ digest: v1.digest, from: PINNED_URL });
+    await expect(apps(net).preview({ store: keyOf(STORE_KEY), ref: v1.ref })).rejects.toThrow(/^status|^unlisted/);
     await net.putStore(await storeFiles({ sequence: 2, apps: [listing(v1, [HEAD])] }));
     await store.refreshStores();
     await expect(store.preview({ store: keyOf(STORE_KEY), ref: v1.ref })).rejects.toThrow(/^unlisted/);

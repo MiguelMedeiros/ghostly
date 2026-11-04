@@ -23,6 +23,11 @@ export const DEFAULT_LIMITS = Object.freeze({
   burstBytes: 4 * 1024 * 1024,
   /** Keys one client may listen on at once. */
   listens: 16,
+  /**
+   * Listens one client may start per minute, refused ones too. Each is an announcement on the DHT and its close an
+   * unannouncement. A browser starts at most eight on start and eight again when it reconnects (measured, 30 chats).
+   */
+  listensPerMinute: 60,
   /** Dials one client may start per minute. */
   connectsPerMinute: 60,
   /** HyperDHT streams one client may hold open at once: its dials and the connections its servers get. */
@@ -39,6 +44,13 @@ export const DEFAULT_LIMITS = Object.freeze({
   handshakes: 64,
   /** Bytes the relay may hold for one client that the client has not read yet (a chat's files have at most 2 MiB out). */
   queuedBytes: 8 * 1024 * 1024,
+  /**
+   * Bytes the relay may hold over all clients that they have not read yet; past it, the client holding the most is
+   * dropped. `clients` times `queuedBytes` is far more than the 512 MiB docker-compose.yml gives the process, and each
+   * byte counted costs about three in the process while clients come and go (every ~1.4 KiB message is a Buffer of its
+   * own, with its objects): at 96 MiB, 256 clients that stop reading keep it near 400 MiB.
+   */
+  queuedTotalBytes: 96 * 1024 * 1024,
 })
 
 /**
@@ -49,18 +61,23 @@ export const DEFAULT_LIMITS = Object.freeze({
 /**
  * The browser signs its announcements, so a relay waiting for a signature from a browser that has gone
  * would wait forever (the server it closes on that browser's behalf never finishes unannouncing, and holds
- * on). A signature comes within `SIGN_MS` or while the browser is there, or not at all.
+ * on). A signature comes within `SIGN_MS` or while the browser is there, or not at all. `onLeave(fail)` calls `fail`
+ * when the browser leaves (at once if it has) and returns what forgets it: a wait on the client's `gone` itself stayed
+ * there for every signature after it came, until the browser left.
  */
 const SIGN_MS = 10_000
-const fixSign = (sign, gone) => sign && ((target, token, id, ann, keyPair) => {
+const fixSign = (sign, onLeave) => sign && ((target, token, id, ann, keyPair) => {
   let timer
+  let forget = () => {}
   return Promise.race([
     sign(target, token, id, { peer: ann.peer.relayAddresses }, keyPair),
-    gone.then(() => { throw new Error('The browser left') }),
-    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('No signature')), SIGN_MS) }),
-  ]).finally(() => clearTimeout(timer))
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('No signature')), SIGN_MS)
+      forget = onLeave(() => reject(new Error('The browser left')))
+    }),
+  ]).finally(() => { clearTimeout(timer); forget() })
 })
-const fixOptions = (options = {}, gone) => ({ ...options, signAnnounce: fixSign(options.signAnnounce, gone), signUnannounce: fixSign(options.signUnannounce, gone) })
+const fixOptions = (options = {}, onLeave) => ({ ...options, signAnnounce: fixSign(options.signAnnounce, onLeave), signUnannounce: fixSign(options.signUnannounce, onLeave) })
 
 /**
  * The DHT one client's relay session sees: listen and dial within its budget, nothing else. Topic lookups
@@ -70,10 +87,13 @@ const fixOptions = (options = {}, gone) => ({ ...options, signAnnounce: fixSign(
  * Every client shares the relay's one HyperDHT node, which refuses a second listen on a key it already listens
  * on (`KEYPAIR_ALREADY_USED`, whoever asked first). dht-relay 0.4.3 does not catch that rejection, so it would end
  * the process and every client with it. A listen the node refuses closes that server only: the client that holds
- * the key, and the asking client's other listens, go on.
+ * the key, and the asking client's other listens, go on. The asking client is told: dht-relay has no message for a
+ * refusal and its client drops a `closed` for a server that has had no `listening`, so the server says `listening` at
+ * no address (0.0.0.0:0, the browser's sign of a refusal), then `closed`.
  */
 function clientDht(dht, limits, drop, gone, log) {
   let listening = 0
+  let listens = []
   let dials = []
   let idle = null
   // Once the client has gone, its servers still close one by one: none of them may arm the idle timer again.
@@ -94,21 +114,35 @@ function clientDht(dht, limits, drop, gone, log) {
     stream.once('close', () => streams.delete(stream))
     return stream
   }
+  // The signatures waiting on this client (fixSign): each fails when it leaves.
+  const signing = new Set()
+  const onLeave = fail => {
+    if (left) { fail(); return () => {} }
+    signing.add(fail)
+    return () => signing.delete(fail)
+  }
   void gone.then(() => {
     clearTimeout(idle)
     left = true
     for (const stream of streams) stream.destroy()
     streams.clear()
+    for (const fail of signing) fail()
+    signing.clear()
   })
   return new Proxy(dht, {
     get(target, prop) {
       if (prop === 'createServer') return (options, onconnection) => {
+        const now = Date.now()
+        listens = listens.filter(at => now - at < 60_000)
+        if (listens.push(now) > limits.listensPerMinute) { drop('listen rate'); throw new Error('Listen rate reached') }
         if (++listening > limits.listens) { drop('listen limit'); throw new Error('Listen limit reached') }
         watchIdle()
         const server = target.createServer({ ...options, createHandshake: untracked(options?.createHandshake) }, onconnection)
         const listen = server.listen.bind(server)
-        server.listen = (keyPair, listenOptions) => listen(keyPair, fixOptions(listenOptions, gone)).catch(error => {
+        server.listen = (keyPair, listenOptions) => listen(keyPair, fixOptions(listenOptions, onLeave)).catch(error => {
           log('refused listen', error?.code ?? 'error')
+          server.address = () => ({ publicKey: keyPair?.publicKey, host: '0.0.0.0', port: 0 })
+          server.emit('listening')
           void server.close().catch(() => {})
         })
         server.once('close', () => { listening--; watchIdle() })
@@ -197,11 +231,25 @@ class Signatures extends Map {
     for (const id of [...this.keys()]) this.delete(id)
   }
 }
+/**
+ * Each server dht-relay 0.4.3 runs for a client waits for the client's stream to close (to close itself) and never
+ * stops waiting once it has closed: every server the client had ever opened stayed in memory, 3 to 6 KiB each, until
+ * the client left. A server now stops waiting when it closes.
+ */
+class Servers extends Map {
+  set(alias, proxy) {
+    proxy._server.once('close', () => proxy._protocol._stream.off('close', proxy._onStreamClose))
+    return super.set(alias, proxy)
+  }
+}
 function bound(node, limits, gone) {
   node._limits = limits
   const signatures = new Signatures()
   for (const [id, signature] of node._signatures) signatures.set(id, signature)
   node._signatures = signatures
+  const servers = new Servers()
+  for (const [alias, proxy] of node._servers) servers.set(alias, proxy)
+  node._servers = servers
   void gone.then(() => { signatures.clear(); node._handshakes.clear() })
 }
 
@@ -242,9 +290,12 @@ export function addressOf(request, { proxies = 0, cloudflare = false } = {}) {
 
 /**
  * What `clientsPerAddress` counts: an IPv4 address as it is (an IPv4-mapped IPv6 one too), an IPv6 address by its
- * /64, the block one subscriber usually holds whole. The push relay's `rateKey`; the two services ship separately.
+ * /64, the block one subscriber usually holds whole. A port some proxies write with it (`203.0.113.7:51234`,
+ * `[2001:db8::1]:51234`) and IPv6 brackets are dropped first: each connection has a new port, so keyed with it the
+ * limit never applies. The push relay's `rateKey`; the two services ship separately.
  */
 export function addressKey(address) {
+  address = /^\[([^\]]+)\](?::\d+)?$/.exec(address)?.[1] ?? /^(\d+\.\d+\.\d+\.\d+):\d+$/.exec(address)?.[1] ?? address
   const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address)
   if (mapped) return mapped[1]
   if (!address.includes(':')) return address
@@ -254,6 +305,31 @@ export function addressKey(address) {
   const groups = tail === undefined ? before : [...before, ...Array(Math.max(0, 8 - before.length - after.length)).fill('0'), ...after]
   const prefix = groups.slice(0, 4).map(group => parseInt(group, 16))
   return prefix.length === 4 && prefix.every(n => n >= 0 && n <= 0xffff) ? `${prefix.map(n => n.toString(16)).join(':')}::/64` : address
+}
+
+/**
+ * The relay's lines about refusals and drops (`refused address`, `refused listen KEYPAIR_ALREADY_USED`, `dropped idle`):
+ * the first `most` of each kind in a minute, then, once a minute while it goes on, one line with how many were left out
+ * (`refused address (812 more this minute, not logged)`). A client repeating what it is refused for would otherwise write
+ * a line per attempt, thousands a second, and rotate the whole log away. The push relay's refusalLog, with a few lines.
+ */
+export function refusalLines (log, { most = 5 } = {}) {
+  // Kind → lines written and lines left out since the last flush. Present: the kind has had a line in this minute.
+  const kinds = new Map()
+  return {
+    line: (...words) => {
+      const kind = words.join(' ')
+      const seen = kinds.get(kind) ?? { shown: 0, more: 0 }
+      kinds.set(kind, seen)
+      if (seen.shown < most) { seen.shown++; log(...words) } else seen.more++
+    },
+    flush: () => {
+      for (const [kind, seen] of kinds) {
+        // A kind still going on keeps its lines spent: one line a minute from it while it lasts.
+        if (seen.more) { log(kind, `(${seen.more} more this minute, not logged)`); seen.more = 0; seen.shown = most } else kinds.delete(kind)
+      }
+    },
+  }
 }
 
 /**
@@ -267,6 +343,11 @@ export function addressKey(address) {
  */
 export async function startRelay(options = {}) {
   const limits = { ...DEFAULT_LIMITS, ...options.limits }
+  // Each message waiting for a client is a small Buffer, and Node cuts small Buffers out of shared slabs (8 KiB, 64 KiB
+  // from Node 26): one waiting message keeps its whole slab, with the other clients' messages in it, so dropping a
+  // client freed almost nothing and `queuedTotalBytes` bounded only a part of what the process held. Unpooled, a
+  // dropped client's messages are freed with it.
+  Buffer.poolSize = 0
   const log = options.log ?? (() => {})
   let testnet = null
   let bootstrap = options.bootstrap ?? []
@@ -293,9 +374,37 @@ export async function startRelay(options = {}) {
   const nodes = new Set()
   const perAddress = new Map()
   const stats = { accepted: 0, refused: 0, dropped: 0 }
+  // What each client had waiting unread when the relay last wrote to it, and their sum. A count grows only on a write
+  // and shrinks as the client reads, so the sum is never below what the relay holds: past `queuedTotalBytes` every
+  // client is counted again, and while the sum is still past it the client holding the most is dropped.
+  const queued = new Map()
+  let queuedTotal = 0
+  const recount = ws => {
+    const entry = queued.get(ws)
+    if (!entry) return
+    queuedTotal += ws.bufferedAmount - entry.bytes
+    entry.bytes = ws.bufferedAmount
+  }
+  const unqueue = ws => {
+    queuedTotal -= queued.get(ws)?.bytes ?? 0
+    queued.delete(ws)
+  }
+  const holdQueued = ws => {
+    recount(ws)
+    if (queuedTotal <= limits.queuedTotalBytes) return
+    for (const client of queued.keys()) recount(client)
+    while (queuedTotal > limits.queuedTotalBytes) {
+      let most = null
+      for (const [client, entry] of queued) if (!most || entry.bytes > most[1].bytes) most = [client, entry]
+      most[1].drop('queue total')
+    }
+  }
   // Compared as a browser writes them: `https://app.example/` in the settings still lets https://app.example in.
   const origins = new Set((options.origins ?? []).map(origin => originOf(origin) ?? origin))
   const refusedOrigin = originRefusals(log)
+  const refusals = refusalLines(log)
+  const flushing = setInterval(refusals.flush, 60_000)
+  flushing.unref?.()
   // Once per start each: a proxy in front the relay was not told about makes every client count as that proxy.
   const hinted = new Set()
   const hint = (header, setting) => {
@@ -330,7 +439,7 @@ export async function startRelay(options = {}) {
     const refuse = (status, why) => {
       stats.refused++
       // The origin is logged by refusedOrigin, once per value: a crawler would otherwise write a line per attempt.
-      if (why) log('refused', why)
+      if (why) refusals.line('refused', why)
       socket.on('error', () => {})
       socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`)
     }
@@ -347,9 +456,11 @@ export async function startRelay(options = {}) {
     let dropped = false
     const drop = why => {
       if (dropped) return
-      dropped = true; stats.dropped++; log('dropped', why)
+      dropped = true; stats.dropped++; refusals.line('dropped', why)
+      unqueue(ws)
       ws.terminate()
     }
+    queued.set(ws, { bytes: 0, drop })
     // A token bucket on what the client sends: past it, the relay stops reading its socket for a while.
     let tokens = limits.burstBytes
     let last = Date.now()
@@ -379,6 +490,7 @@ export async function startRelay(options = {}) {
     ws.once('close', () => {
       // A client that has closed is no longer dropped, counted or logged.
       dropped = true
+      unqueue(ws)
       clearInterval(ping)
       leave()
       clients.delete(ws)
@@ -391,13 +503,15 @@ export async function startRelay(options = {}) {
     stream.on('error', () => drop('stream error'))
     // dht-relay 0.4.3 hands the WebSocket every chunk a HyperDHT stream brings, however slowly the client reads, and
     // a UDX stream has no receive window to slow its far end: a client that reads slowly or not at all would have the
-    // relay hold everything its far peers send. Past `queuedBytes` waiting for it, it is dropped.
+    // relay hold everything its far peers send. Past `queuedBytes` waiting for it, it is dropped, and past
+    // `queuedTotalBytes` over all clients, the one holding the most.
     stream._write = (data, cb) => {
       ws.send(data)
       if (ws.bufferedAmount > limits.queuedBytes) drop('queue')
+      else holdQueued(ws)
       cb(null)
     }
-    void relay(clientDht(dht, limits, drop, gone, log), stream).then(node => {
+    void relay(clientDht(dht, limits, drop, gone, refusals.line), stream).then(node => {
       guardProtocol(node._protocol, drop)
       bound(node, limits, gone)
       nodes.add(node)
@@ -439,6 +553,9 @@ export async function startRelay(options = {}) {
         clearTimeout(timer)
       }
       for (const ws of clients) ws.terminate()
+      // What the last minute left out is said before the relay stops.
+      clearInterval(flushing)
+      refusals.flush()
       await new Promise(resolve => { wss.close(); server.close(() => resolve()); server.closeAllConnections() })
       if (!options.dht) await dht.destroy()
       if (testnet) await testnet.destroy()

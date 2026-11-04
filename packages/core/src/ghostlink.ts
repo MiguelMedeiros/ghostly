@@ -1797,6 +1797,15 @@ export class GhostLink {
     });
   }
 
+  /**
+   * `connect` for what only needs the link (a request, a file, a payment step): on a live session it does nothing, where
+   * `connect` is a retry that says this side's transport policy again, and the contact reads 10 a minute
+   * (POLICY_RECEIVE_LIMIT). A shared app's every file, each file sent and each payment step used to spend one.
+   */
+  private open(): Promise<void> {
+    return this.paired?.state.status === "ready" && !this.streamBlocked ? Promise.resolve() : this.connect();
+  }
+
   /** Closes what a switch replaced once the contact has had time to move too. */
   private retire(old: FrameChannel, also: () => void, rtc = false): void {
     if (this.retiring.has(old)) return;
@@ -2128,6 +2137,7 @@ export class GhostLink {
     // A way to dial it changed (the Desktop's Iroh homed on a relay a few seconds after it bound): the open session
     // hears it, and the owner republishes the capability record, which is all a contact with no session has.
     endpoint.onDescriptor = () => { this.advertiseTransports(); this.options.events?.onTransportsChanged?.(); };
+    endpoint.onRelayBack = () => { if (this.endpoints.get(endpoint.transport) === endpoint) void this.knockAgain(endpoint.transport); };
     // A changed available offer needs a new authenticated session before native
     // transports are usable. Until then descriptors can be saved but not selected.
     this.advertiseTransports();
@@ -2285,6 +2295,7 @@ export class GhostLink {
     if (!this.transportOffer().includes(transport)) return;
     const epoch = this.connectionEpoch;
     this.dialing = true;
+    const knocking = this.knocking = { transport, epoch, again: false };
     traceLink(this.myPubKeyZ32, "knock", { transport });
     try {
       const { channel, binding } = await endpoint.connect(descriptor);
@@ -2293,9 +2304,40 @@ export class GhostLink {
     } catch (error) {
       traceLink(this.myPubKeyZ32, "knock-failed", { transport, error: error instanceof Error ? error.message : String(error) });
     } finally {
+      if (this.knocking === knocking) this.knocking = null;
       if (epoch === this.connectionEpoch) { this.dialing = false; this.settleCrossed(); }
     }
     if (!this.channel) this.maybeAutoConnect(this.presence);
+  }
+  /**
+   * This side's listener on `transport` is up again after it was let go while the contact was away (the engine's
+   * `releaseGoneListeners`), and the contact is back: it is dialled once now, whichever side's turn it is, as after a
+   * restart. The contact's own dials found no listener here meanwhile, and wait out their backoff (half a minute).
+   */
+  knockOnReturn(transport: NativeTransport): void { void this.knock(transport); }
+  /** The knock under way (`knock`): its transport, its attempt, and whether it was knocked again (`knockAgain`). */
+  private knocking: { transport: NativeTransport; epoch: number; again: boolean } | null = null;
+  /**
+   * The endpoint of a knock still under way is back on its relay (`NativeEndpoint.onRelayBack`): it is knocked again, once,
+   * beside the first, and the first live wins. An Android phone back from Doze knocked at once through an Iroh whose relay
+   * was gone; Iroh found it again only seconds later (its reconnect backoff, up to 16 s), and what the knock sent meanwhile
+   * went nowhere: QUIC sends it again seconds on, and the dial is given 20 s. Live again 4.4 s and 9.8 s after the
+   * return (away 5 and 15 minutes), and once not over Iroh at all (the emulator with a CLI bot, 2026-11-01).
+   */
+  private async knockAgain(transport: NativeTransport): Promise<void> {
+    const knocking = this.knocking;
+    if (!knocking || knocking.transport !== transport || knocking.again || knocking.epoch !== this.connectionEpoch) return;
+    const endpoint = this.endpoints.get(transport), descriptor = this.peerDescriptors[transport];
+    if (!endpoint || !descriptor || this.channel || this.stopped || this.streamBlocked || this.keyStopped) return;
+    knocking.again = true;
+    traceLink(this.myPubKeyZ32, "knock-again", { transport });
+    try {
+      const { channel, binding } = await endpoint.connect(descriptor);
+      if (this.stopped || knocking.epoch !== this.connectionEpoch || this.channel) { channel.close(); return; }
+      this.attach(channel, binding);
+    } catch (error) {
+      traceLink(this.myPubKeyZ32, "knock-again-failed", { transport, error: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   canReleaseEndpoint(transport: PairedTransport): boolean {
@@ -2982,7 +3024,7 @@ export class GhostLink {
   /** Issues an HTTP request to a service the peer advertises. */
   async request(serviceId: string, request: ClientRequest): Promise<ClientResponse> {
     if (this.options.params.profile) {
-      await this.connect();
+      await this.open();
       if (!this.supportsServices) throw new GhostlyHttpError("unavailable", this.isDataLinkOpen
         ? "Your contact's app cannot share services in this chat, or needs an updated Ghostly" : "Shared services need a live connection");
       if (!this.pairedHttp) throw new GhostlyHttpError("closed", "Data link is closed");
@@ -3049,7 +3091,7 @@ export class GhostLink {
 
   /** Sends a file over the data link, opening it first if needed. Files never travel through Pkarr. */
   async sendFile(file: FileInfo, source: AsyncIterable<Uint8Array>): Promise<void> {
-    await this.connect();
+    await this.open();
     if (this.options.params.profile) {
       if (!this.supportsFiles || !this.pairedFiles) throw new Error("This contact does not support files. Both peers need an updated Ghostly.");
       return this.pairedFiles.send(file, source);
@@ -3895,7 +3937,7 @@ export class GhostLink {
     if (!PAYMENT_METHODS.some(m => this.paymentEnabled(m))) throw new Error("Payments are turned off in this chat.");
     // Said at once: before, the dial below waited out its 90 s for an app that had said it was going.
     if (this.contactAway) throw engineError("contactAway");
-    await this.connect();
+    await this.open();
     if (this.supportsPayments) return;
     // As the app's chat says it: networks that name no wallet are a contact that offers no way until it makes one.
     const networks = this.peerNetworks;
