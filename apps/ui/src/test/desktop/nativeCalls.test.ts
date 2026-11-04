@@ -42,7 +42,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 const { NativePeerConnection, SCREEN_UNAVAILABLE, askedDevice, bytesOf, connectionStateOf, deviceList, deviceName, isJpeg, nativeCallMedia, nativeCallOptions, nativeDevices, ownIceServers } = await import("../../desktop/nativeCalls");
-const { callRtcConfig } = await import("@ghostly/core");
+const { callRtcConfig, keepsToRelays } = await import("@ghostly/core");
 const { chooseDevice } = await import("../../lib/mediaDevices");
 const { callLevels } = await import("../../lib/voiceLevels");
 
@@ -314,9 +314,18 @@ describe("the RTCPeerConnection stand-in", () => {
   it("hands Rust the profile's own ICE servers (a TURN server), not the apps' built-in STUN ones", () => {
     const turn = { urls: "turn:turn.example.org:3478", username: "ghost", credential: "test-credential" };
     const pc = new NativePeerConnection(callRtcConfig([turn]));
-    expect(tauri.invoke).toHaveBeenCalledWith("native_call_open", { id: pc.id, events: expect.anything(), iceServers: [{ urls: ["turn:turn.example.org:3478"], username: "ghost", credential: "test-credential" }] });
+    expect(tauri.invoke).toHaveBeenCalledWith("native_call_open", { id: pc.id, events: expect.anything(), iceServers: [{ urls: ["turn:turn.example.org:3478"], username: "ghost", credential: "test-credential" }], relayOnly: false });
     expect(ownIceServers(callRtcConfig())).toEqual([]);
     expect(ownIceServers({})).toEqual([]);
+  });
+
+  it("with Hide my IP from contacts on, keeps the call to the relay: Rust is told, and the call hook may place it", () => {
+    const turn = { urls: ["stun:stun.example.org", "turn:turn.example.org:3478"], username: "ghost", credential: "test-credential" };
+    const pc = new NativePeerConnection(callRtcConfig([turn], { relayOnly: true }));
+    expect(tauri.invoke).toHaveBeenCalledWith("native_call_open", { id: pc.id, events: expect.anything(), iceServers: [{ urls: ["turn:turn.example.org:3478"], username: "ghost", credential: "test-credential" }], relayOnly: true });
+    // What the call hook checks before the microphone (`assertKeepsToRelays`), and when the switch goes on mid-call.
+    expect(nativeCallMedia().keepsToRelays).toBe(true);
+    expect(keepsToRelays(pc as unknown as RTCPeerConnection)).toBe(true);
   });
 
   it("restarts ICE through Rust on the call it started: a restart offer, and the peer's answer to it", async () => {
