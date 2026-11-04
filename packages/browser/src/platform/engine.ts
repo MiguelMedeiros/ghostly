@@ -16,6 +16,12 @@ type Result<M extends EngineMethod> = Awaited<ReturnType<EngineApi[M]>>;
 export const MESSAGE_CHANGES_TICK_MS = 50;
 
 /**
+ * The longest a page waits between two tries to connect again after the peer went away: each try that fails doubles the
+ * wait, from half a second up to this, until one succeeds (a tab in the background calls nothing that would reconnect it).
+ */
+export const RECONNECT_MAX_MS = 30_000;
+
+/**
  * What changed in a chat's list since `from`, the list its listeners last heard: the rows added or changed, as they are
  * now, and the ids deleted. A listener that kept what it made of `from` has only these to look at.
  */
@@ -53,6 +59,11 @@ class EngineClient {
    * shows the standby screen and nothing of the profile. State listeners hear of it.
    */
   deviceGate: DeviceGateView | null = null;
+  /**
+   * Set while the peer went away and a try to connect again failed: the page waits for the next one, and nothing it
+   * shows is current until one succeeds. Cleared once connected again. State listeners hear of it.
+   */
+  reconnecting = false;
 
   private connection: EngineConnection | null = null;
   private connecting: Promise<void> | null = null;
@@ -229,14 +240,29 @@ class EngineClient {
           this.held.clear();
           for (const pending of this.pending.values()) pending.reject(new Error("Lost the Ghostly peer"));
           this.pending.clear();
-          setTimeout(() => void this.connect().catch(() => {}), 500);
+          this.reconnect(500);
         },
       )
       .then((connection) => {
         this.connection = connection;
+        this.setReconnecting(false);
       })
       .finally(() => (this.connecting = null));
     return this.connecting;
+  }
+
+  /** Connects again after `delay`, and again after twice as long while the tries fail. */
+  private reconnect(delay: number): void {
+    setTimeout(() => void this.connect().catch(() => {
+      this.setReconnecting(true);
+      this.reconnect(Math.min(delay * 2, RECONNECT_MAX_MS));
+    }), delay);
+  }
+
+  private setReconnecting(reconnecting: boolean): void {
+    if (this.reconnecting === reconnecting) return;
+    this.reconnecting = reconnecting;
+    for (const listener of this.stateListeners) listener();
   }
 
   private handle(message: EngineEvent | RpcResponse): void {

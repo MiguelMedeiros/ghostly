@@ -18,6 +18,8 @@
   "notNow": "Plus tard",
   "offline": "Hors ligne",
   "offlineHint": "Vos discussions sont là. Rien ne part avant votre retour en ligne.",
+  "reconnecting": "Reconnexion…",
+  "reconnectingHint": "Cet onglet a perdu Ghostly et réessaie. Les nouveaux messages s'afficheront ici dès son retour.",
   "shareFiles": "{{count}} fichiers",
   "shareFrom": "Vient d'une autre app ou d'un site web. Rien ne part avant que vous l'envoyiez.",
   "shareHint": "Choisissez une discussion. Vous vérifiez et envoyez là-bas.",

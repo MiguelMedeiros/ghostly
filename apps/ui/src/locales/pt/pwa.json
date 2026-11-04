@@ -18,6 +18,8 @@
   "notNow": "Agora não",
   "offline": "Offline",
   "offlineHint": "Suas conversas estão aqui. Nada sai até você voltar a ficar online.",
+  "reconnecting": "Reconectando…",
+  "reconnectingHint": "Esta aba perdeu o Ghostly e continua tentando. As mensagens novas aparecem aqui quando ele voltar.",
   "shareFiles": "{{count}} arquivos",
   "shareFrom": "Veio de outro app ou site. Nada é enviado até você enviar.",
   "shareHint": "Escolha uma conversa. Você confere e envia lá.",

@@ -18,6 +18,8 @@
   "notNow": "ليس الآن",
   "offline": "غير متصل",
   "offlineHint": "محادثاتك هنا. لن يُرسل شيء حتى تعود إلى الاتصال.",
+  "reconnecting": "جارٍ إعادة الاتصال…",
+  "reconnectingHint": "فقدت علامة التبويب هذه الاتصال بـ Ghostly وتواصل المحاولة. ستظهر الرسائل الجديدة هنا عند عودته.",
   "shareFiles": "{{count}} ملفات",
   "shareFiles_many": "{{count}} ملفًا",
   "shareFiles_one": "ملف واحد",
