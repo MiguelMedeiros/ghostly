@@ -75,6 +75,49 @@ export function pushUnavailable(): boolean {
   try { return !!platform && !platform.supported(); } catch { return !!platform; }
 }
 
+/** Where this browser keeps that it has no push service: for the browser, every profile alike (`noPushService`). */
+export const NO_PUSH_SERVICE_KEY = "ghostly-no-push-service";
+
+/**
+ * Whether a subscription the browser refused says it has no push service at all, rather than a refusal of
+ * notifications (NotAllowedError, said on its own). Chromium without Google Play services (GrapheneOS's Vanadium)
+ * rejects with "AbortError: Registration failed - push service not available", a Firefox with push turned off with
+ * an AbortError too, and a browser that has none may say NotSupportedError.
+ */
+export function isNoPushService(error: unknown): boolean {
+  const { name, message } = (error ?? {}) as { name?: unknown; message?: unknown };
+  if (name === "NotAllowedError") return false;
+  return name === "AbortError" || name === "NotSupportedError" || (typeof message === "string" && /push service not available/i.test(message));
+}
+
+const noPushListeners = new Set<() => void>();
+/**
+ * Whether this browser was found to have no push service (a subscription refused as `isNoPushService` says): the
+ * switch then reads as unavailable, with why and a Try again (sandboxed Google Play may be installed since), instead
+ * of failing at every try. Kept until a try makes a subscription or is refused for another reason. In the browser's
+ * storage, not a page's state: a page drawn again, another tab or the app reopened says it too.
+ */
+export function noPushService(): boolean {
+  try { return localStorage.getItem(NO_PUSH_SERVICE_KEY) === "1"; } catch { return false; }
+}
+function rememberNoPushService(none: boolean): void {
+  try {
+    if (none) localStorage.setItem(NO_PUSH_SERVICE_KEY, "1");
+    else localStorage.removeItem(NO_PUSH_SERVICE_KEY);
+  } catch { /* storage refused: the next try finds out again */ }
+  for (const listener of noPushListeners) listener();
+}
+const subscribeNoPush = (listener: () => void) => {
+  noPushListeners.add(listener);
+  const fromOtherTab = (event: StorageEvent) => { if (event.key === NO_PUSH_SERVICE_KEY || event.key === null) listener(); };
+  window.addEventListener("storage", fromOtherTab);
+  return () => { noPushListeners.delete(listener); window.removeEventListener("storage", fromOtherTab); };
+};
+/** `noPushService`, kept up to date. */
+export function useNoPushService(): boolean {
+  return useSyncExternalStore(subscribeNoPush, noPushService);
+}
+
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
 const engineSnapshot = () => engine.state;
 
@@ -88,7 +131,10 @@ export function useWakeOn(): boolean {
   return !!state?.settings.wake && state.wakeOwner !== "away";
 }
 
-/** Turns wake-ups on (a new subscription and key pair, so a new token for every chat) or off. Throws a sentence to show. */
+/**
+ * Turns wake-ups on (a new subscription and key pair, so a new token for every chat) or off. Throws a sentence to show;
+ * a browser with no push service is kept as such (`noPushService`) before it throws.
+ */
 export async function setWake(on: boolean): Promise<void> {
   const push = pushPlatform();
   if (!push) throw new Error("This browser cannot wake Ghostly while it is closed.");
@@ -100,7 +146,16 @@ export async function setWake(on: boolean): Promise<void> {
     return;
   }
   const vapid = generateVapidKeys();
-  const keys = await push.subscribe(profile, vapid);
+  let keys: PushKeys;
+  try {
+    keys = await push.subscribe(profile, vapid);
+  } catch (error) {
+    // Kept as the last try found it: a refusal of another kind (notifications turned off) says nothing of the service.
+    const none = isNoPushService(error);
+    if (none !== noPushService()) rememberNoPushService(none);
+    throw error;
+  }
+  if (noPushService()) rememberNoPushService(false);
   await engine.call("setWakeSubscription", { subscription: { ...keys, vapid } });
 }
 

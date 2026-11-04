@@ -8,7 +8,7 @@ import { updateFailure } from "../lib/updateFailure";
 import { canInstall, isAppleMobile, isMacSafari, startInstall, useInstallState } from "../lib/installPrompt";
 import { browserPrompts, reconsiderPersist, requestPersist, useStorageProtection } from "../lib/storagePersistence";
 import { storageBreakdown, useDesktopStorage } from "../lib/desktopStorage";
-import { pushPlatform, pushUnavailable, setWake, useWakeOn } from "../lib/wakePush";
+import { isNoPushService, noPushService, pushPlatform, pushUnavailable, setWake, useNoPushService, useWakeOn } from "../lib/wakePush";
 import { noticePlace, noticeSettings, notificationPermission, openNoticeSettings, requestNotifications, type NoticePermission } from "../lib/notifications";
 import { getVersion } from "@tauri-apps/api/app";
 import { NetworkSettings } from "../components/NetworkSettings";
@@ -119,10 +119,18 @@ export function Settings() {
   const wakeOn = useWakeOn();
   const [wakeBusy, setWakeBusy] = useState(false);
   const [wakeError, setWakeError] = useState("");
+  // A browser with no push service (Chromium without Google Play services: GrapheneOS's Vanadium): found once and kept
+  // for the browser (lib/wakePush.ts `noPushService`), so the switch reads as unavailable with why, until Try again.
+  const wakeNoPush = useNoPushService() && !wakeOn;
+  const wakeHintId = useId();
   const changeWake = async (on: boolean) => {
     setWakeBusy(true);
     setWakeError("");
-    try { await setWake(on); } catch (e) { setWakeError(problemLine(e, t)); } finally { setWakeBusy(false); }
+    try { await setWake(on); } catch (e) {
+      // No push service: kept for the browser, the row says so itself for as long as it is (a line of this page's only
+      // when the browser's storage refused to keep it).
+      if (on && isNoPushService(e)) { if (!noPushService()) setWakeError(t("pwa.wakeNoPushService")); } else setWakeError(problemLine(e, t));
+    } finally { setWakeBusy(false); }
   };
   const isMobile = useIsMobile();
   const profile = currentProfile();
@@ -638,9 +646,10 @@ export function Settings() {
         </Row>
         {canWake && (
           <Row label={t("pwa.wake")} testId="settings-wake-row" info={t("pwa.wakeInfo")}
-            hint={<span role="status" data-testid="settings-wake-hint">{wakeError || (wakeAway ? (wakeAwayDevice ? t("pwa.wakeAway", { device: wakeAwayDevice }) : t("pwa.wakeAwayUnnamed")) : t(wakeOn ? "pwa.wakeOnHint" : "pwa.wakeHint"))}</span>}>
+            hint={<span role="status" id={wakeHintId} data-testid="settings-wake-hint">{wakeError || (wakeNoPush ? t("pwa.wakeNoPushService") : wakeAway ? (wakeAwayDevice ? t("pwa.wakeAway", { device: wakeAwayDevice }) : t("pwa.wakeAwayUnnamed")) : t(wakeOn ? "pwa.wakeOnHint" : "pwa.wakeHint"))}</span>}>
             {wakeOn && <Button data-testid="settings-wake-rotate" disabled={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeRotate")}</Button>}
-            <Switch testId="settings-wake" label={t("pwa.wake")} checked={wakeOn} disabled={wakeBusy} onChange={(on) => void changeWake(on)} />
+            {wakeNoPush && <Button data-testid="settings-wake-retry" disabled={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeTryAgain")}</Button>}
+            <Switch testId="settings-wake" label={t("pwa.wake")} checked={wakeOn} disabled={wakeBusy} unavailable={wakeNoPush} describedBy={wakeNoPush ? wakeHintId : undefined} onChange={(on) => void changeWake(on)} />
           </Row>
         )}
         {!canWake && pushUnavailable() && (
