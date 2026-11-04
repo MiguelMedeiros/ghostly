@@ -5,14 +5,17 @@ import { RELEASES_URL } from "../../ui/src/lib/settings";
 import { builtInAppOption } from "../../ui/src/lib/apps/builtIns";
 import { popupWindow } from "@ghostly/browser/proofs/oidc/popup";
 import { atprotoPopupWindow } from "@ghostly/browser/proofs/atproto/popup";
-import { DHT_POLL_INTERVALS, RelayTransport } from "@ghostly/core";
+import { DHT_POLL_INTERVALS, GhostlyHttpError, RelayTransport } from "@ghostly/core";
 import type { NodeOptions } from "@ghostly/browser/engine/node";
 import { defaultWalletsAllowed } from "@ghostly/browser/platform/walletSetupSwitch";
 import { engine } from "@ghostly/browser/platform/engine";
+import { testSwitch } from "@ghostly/browser/shared/features";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { closeServiceView, parseServicesHost } from "./svc/protocol";
-import { setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
+import { hostErrorText, serviceFraming, setServiceViewCloser, setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
 import { loadSettings } from "../../ui/src/lib/settings";
+import { activeProfileId } from "../../ui/src/lib/profiles";
+import { chatNamesForPeer } from "../../ui/src/lib/storage";
 import { translatorFor } from "../../ui/src/locales";
 
 /**
@@ -20,31 +23,30 @@ import { translatorFor } from "../../ui/src/locales";
  * desktop app does: its poll intervals (it reaches the DHT directly, so it looks more often than a
  * browser may ask a relay), and no request budget of its own toward the relays (the desktop's Rust client
  * keeps that; here the "relays" are the test's, in the same process, or a front on that Rust client).
- * The pairing timing test is what sets it. Read once, when the peer is made.
+ * The pairing timing test is what sets it. A test build only (`testSwitch`). Read once, when the peer is made.
  */
 function testPace(): Pick<NodeOptions, "pollIntervals" | "transport"> {
-  try {
-    return localStorage.getItem("ghostly-test-pace") === "desktop"
-      ? { pollIntervals: DHT_POLL_INTERVALS, transport: new RelayTransport({ requestsPerMinute: Infinity }) } : {};
-  } catch { return {}; }
+  return testSwitch("ghostly-test-pace") === "desktop"
+    ? { pollIntervals: DHT_POLL_INTERVALS, transport: new RelayTransport({ requestsPerMinute: Infinity }) } : {};
 }
 
 /**
  * Tests only: `localStorage["ghostly-test-iroh"] = "off"` keeps Iroh out of this page's peer, so the suite stays
  * offline (Iroh would reach its public relays) and a browser is WebRTC only, as specs written before Iroh expect.
- * The fixtures set it unless a spec asks for Iroh (and then points it at the test relay). Read once.
+ * The fixtures set it unless a spec asks for Iroh (and then points it at the test relay). A test build only: against a
+ * deployed one (`E2E_WEB_URL`) the fixtures point Iroh at a closed port instead, as for the extension. Read once.
  */
 function testIroh(): boolean {
-  try { return localStorage.getItem("ghostly-test-iroh") !== "off"; } catch { return true; }
+  return testSwitch("ghostly-test-iroh") !== "off";
 }
 
 /**
  * Tests only: `localStorage["ghostly-test-reactions"] = "off"` makes this page's peer an app from before reactions
  * (WISP 401 § Reactions): it never says `react/1`, so the compatibility spec can check what an older contact sees.
- * Read once.
+ * A test build only. Read once.
  */
 function testReactions(): Pick<NodeOptions, "reactions"> {
-  try { return localStorage.getItem("ghostly-test-reactions") === "off" ? { reactions: false } : {}; } catch { return {}; }
+  return testSwitch("ghostly-test-reactions") === "off" ? { reactions: false } : {};
 }
 
 /**
@@ -75,6 +77,8 @@ let peer: EngineServer | null = null;
 // A contact's app closes when the profile locks, as Desktop's windows do: this page answers its requests.
 // A reload ends it with the page.
 setServiceWindowsCloser(closeServiceView);
+// Drawn over the whole app, it makes way for a call that rings or starts: the call's windows are under it.
+setServiceViewCloser(closeServiceView);
 
 /**
  * Ghostly on the web: the peer runs in this page and lives as long as the tab.
@@ -134,11 +138,27 @@ export const webHost = createInPageHost({
     const t = translatorFor(loadSettings().language);
     const title = engine.linkByPeer(peerPubKeyZ32)?.peerServices?.find((s) => s.id === serviceId)?.name ?? serviceId;
     // Loaded when first used: nothing of it is in the app's start.
-    const { openServiceView } = await import("./svc/opener");
+    const [{ openServiceView, serviceLabel }, { noteOpened }] = await Promise.all([import("./svc/opener"), import("./svc/forget")]);
+    // Noted first: what the app keeps on its origin goes with the chat, its data or its profile (`forgetServices`).
+    noteOpened({ profile: activeProfileId(), tag, label: await serviceLabel(tag, peerPubKeyZ32, serviceId) });
+    // The contact is offline once their app no longer says what it shares (the chat's strip drops the app then): a
+    // request is answered as unreachable at once, rather than waiting on a connection that is not coming.
+    const offline = () => { const link = engine.linkByPeer(peerPubKeyZ32); return !link || link.peerServices === null; };
     await openServiceView({
       host: servicesHost, tag, peer: peerPubKeyZ32, service: serviceId, title,
-      send: (request) => node.request(peerPubKeyZ32, serviceId, request),
-      words: { unreachable: t("services.window.unreachable"), failed: t("services.window.failed"), close: t("common.close") },
+      send: (request) => offline() ? Promise.reject(new GhostlyHttpError("offline", "Your contact is offline")) : node.request(peerPubKeyZ32, serviceId, request),
+      presence: { offline, watch: (changed) => engine.subscribe(changed) },
+      words: {
+        unreachable: t("services.window.unreachable"), failed: t("services.window.failed"), close: t("common.close"), callOn: t("services.window.callOn", { app: title }),
+        tooSlow: t("services.window.tooSlow", { app: title }), offline: t("services.window.offline", { app: title }), retry: t("services.window.retry"),
+        ...serviceFraming(title, chatNamesForPeer(peerPubKeyZ32), peerPubKeyZ32, t),
+        hostError: (headers) => hostErrorText(headers, title, t),
+      },
     });
+  },
+  forgetServices: async (which) => {
+    if (!servicesHost) return;
+    const { forgetServices } = await import("./svc/forget");
+    await forgetServices(servicesHost, which);
   },
 });

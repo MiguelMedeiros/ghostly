@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
 import { TEST_COINS, chat, expect, getTestCoins, openProfilePage, openWallet, say, test, useTestnet } from "../support/fixtures";
 import { pair } from "../support/paired";
+import { CHROMIUM_SANDBOX } from "../support/chromiumSandbox";
 
 // WISP 05 § Light backups: everything of a profile but the bytes of its larger files. A 20 MB file and a voice
 // message arrive in a chat; the light backup keeps the voice message and leaves the 20 MB file out.
@@ -14,6 +15,7 @@ const SAMPLE = fileURLToPath(new URL("../support/voice-sample.wav", import.meta.
 
 test.use({
   launchOptions: {
+    chromiumSandbox: CHROMIUM_SANDBOX,
     args: [
       "--disable-features=WebRtcHideLocalIpsWithMdns",
       "--use-fake-device-for-media-stream",

@@ -4,6 +4,7 @@ import {
   claimedTime,
   fileMessageText,
   randomBytes,
+  sentWhole,
   toBase64Url,
   transferEnded,
   transferStalled,
@@ -129,17 +130,24 @@ export class FileDesk {
       openTarget: (record) => this.openTarget(linkId, record),
       openSource: (record) => this.openSource(linkId, record),
       changed: (record, transferred, progress) => this.changed(linkId, record, transferred, progress),
+      // A change of state is written at once (`changed`): the chat's writes so far hold it.
+      kept: () => made.saving,
       room: async () => (await fileBytes()).room(),
       ...(this.deps.sendData && { sendData: (id: string, offset: number, data: Uint8Array) => this.deps.sendData!(linkId, id, offset, data) }),
       writable: () => this.deps.writable?.(linkId),
+      batchConfirms: true,
     });
     this.chats.set(linkId, made);
     chat = made;
     return chat;
   }
 
-  /** At start: the chat's unfinished and finished files/3 transfers, as they were kept. */
-  restore(linkId: string, files: StoredFile[]): void {
+  /**
+   * At start: the chat's unfinished and finished files/3 transfers, as they were kept. One that ended before this run is
+   * reported ended already (a session opening walks them all), unless it finished and `unsettled` names it: a sent file
+   * whose message never got its receipt, which its next session gives.
+   */
+  restore(linkId: string, files: StoredFile[], unsettled: ReadonlySet<string> = new Set()): void {
     const records: FileTransferRecord[] = [];
     const chat = this.chat(linkId);
     for (const file of files) {
@@ -153,6 +161,7 @@ export class FileDesk {
       records.push(file.wire3);
       if (file.wire3.direction === "in") chat.local.set(file.wire3.id, file.id);
       if (!transferEnded(file.wire3)) this.restored.add(file.id);
+      else if (file.wire3.state !== "done" || !unsettled.has(file.id)) this.ended.add(file.id);
       // Finished: no transfer (a file with none reads as finished; its record says done). A view for each would go into
       // every state the engine builds, so each state would cost more with every file the chat ever had.
       if (file.wire3.state === "done") continue;
@@ -292,7 +301,8 @@ export class FileDesk {
       case "decline": if (!out) chat.files.decline(wireId); break;
       case "pause": chat.files.pause(direction, wireId); break;
       case "resume": chat.files.resume(direction, wireId); break;
-      case "cancel": chat.files.cancel(direction, wireId); break;
+      // Arrived whole: too late to cancel, it ends done on both sides (the bubble shows no Cancel then).
+      case "cancel": if (!sentWhole(record)) chat.files.cancel(direction, wireId); break;
       case "retry": if (out) chat.files.retry(wireId); break;
       case "resend": case "request": {
         if ((action === "resend") !== out) throw new Error(out ? "A file you sent is sent again, not asked for" : "A file you receive is asked for again, not sent");

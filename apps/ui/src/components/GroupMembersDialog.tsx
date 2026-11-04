@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { COMMUNITY_LIMITS, GROUP_LIMITS, MAX_GROUP_MEMBERS, MAX_GROUP_PICTURE_LENGTH, MESH_HUBS, groupName } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
-import { useBackdropDismiss } from "../hooks/useDismiss";
+import { useBackdropDismiss, useBackCloses } from "../hooks/useDismiss";
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { edgeDot, edgeLabel, groupStatusText, memberName, memberPhoto } from "../lib/groups";
 import { useGroupNameField } from "../hooks/useGroupNameField";
@@ -42,6 +42,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   const state = useSyncExternalStore(subscribe, snapshot);
   const dialog = useRef<HTMLDialogElement>(null);
   const backdrop = useBackdropDismiss(onClose);
+  useBackCloses(onClose);
   const faces = useContactFaces();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<Problem | null>(null);
@@ -122,6 +123,8 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   // each edge says its own state, and a member without one has no connection.
   const linked = live.members.some(m => m.edge?.state === "open");
   const viaHubs = (m: GroupMemberView) => live.profile === "community" && !m.me && linked && m.edge?.state !== "open";
+  // Left, removed, or a fork that went on without me: my app reaches none of them again, so no row says it will, nor dots as if live.
+  const out = live.status === "left" || live.status === "removed" || live.status === "forked";
   const photoOf = (m: GroupMemberView) => memberPhoto(live, m, state?.links, faces, state?.settings.avatar);
   // What each row says of its member's edge, as of this draw ("3 min ago" in the interface's language).
   const now = Date.now(), since = agoIn(language);
@@ -131,6 +134,14 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   useEffect(() => {
     if (focusKey) list.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(focusKey)}"]`)?.scrollIntoView?.({ block: "nearest" });
   }, [focusKey]);
+  // The link turned off or on elsewhere (the admin, another of my devices) swaps the link panel, or takes it away from a
+  // community's member, with what had the focus: the list, next in the dialog, has it rather than the page.
+  const linkOn = !!live.entryLink, wasOn = useRef(linkOn);
+  useEffect(() => {
+    if (wasOn.current === linkOn) return;
+    wasOn.current = linkOn;
+    if (focusLost() || document.activeElement === dialog.current) list.current?.focus();
+  }, [linkOn]);
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`} data-testid="group-members-dialog"
     className="m-auto w-[calc(100%_-_2rem)] max-w-md max-h-[90dvh] overflow-y-auto rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <div className="flex items-start justify-between gap-3">
@@ -140,43 +151,49 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
         </AvatarOpener>
         <div className="min-w-0">
           {/* The group's and each person's name read in their own direction: a Latin name in Arabic is cut at its end. As
-              wide as the name, the title stays beside the picture whichever way the name runs. */}
-          {naming === null ? <h2 id={`${id}-title`} dir="auto" data-testid="group-members-name" className="w-fit max-w-full truncate text-base font-semibold">{live.name}</h2>
-            : <form className="flex items-center gap-2" onSubmit={e => { e.preventDefault(); void rename(); }}>
+              wide as the name, the title stays beside the picture whichever way the name runs. A long name wraps rather
+              than ends in "…": on a phone this panel is the group's only info screen, and a member has no Rename field. */}
+          {naming === null ? <h2 id={`${id}-title`} dir="auto" data-testid="group-members-name" className="w-fit max-w-full break-words text-base font-semibold">{live.name}</h2>
+            : <form className="flex items-center gap-2 max-md:gap-3" onSubmit={e => { e.preventDefault(); void rename(); }}>
               <h2 id={`${id}-title`} className="sr-only">{live.name}</h2>
               {/* While the engine renames, the field is read-only and Save does nothing: disabled, they would drop the focus to the page. */}
-              <input autoFocus data-testid="group-rename-input" aria-label={t("group.rename.label")} ref={namingField.ref} value={naming} readOnly={busy !== null}
+              <input autoFocus data-testid="group-rename-input" aria-label={t("group.rename.label")} aria-describedby={`${id}-rename-hint`} ref={namingField.ref} value={naming} readOnly={busy !== null}
                 onChange={namingField.onChange} onCompositionStart={namingField.onCompositionStart} onCompositionEnd={namingField.onCompositionEnd} onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); endNaming(); } }}
-                className="min-w-0 flex-1 rounded-md border border-border bg-surface-alt px-2 py-1 text-sm focus:border-accent focus:outline-none read-only:opacity-60" />
+                className="min-w-0 flex-1 rounded-md border border-border bg-surface-alt px-2 py-1 text-sm focus:border-accent focus:outline-none read-only:opacity-60 max-md:min-h-11" />
               <button type="submit" data-testid="group-rename-save" disabled={!groupName(naming)} aria-disabled={busy !== null || undefined}
-                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 aria-disabled:opacity-40">{t("group.rename.save")}</button>
-              <button type="button" data-testid="group-rename-cancel" onClick={endNaming} className="text-xs text-text-muted hover:text-text-primary">{t("group.rename.cancel")}</button>
+                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 aria-disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.rename.save")}</button>
+              <button type="button" data-testid="group-rename-cancel" onClick={endNaming} className="rounded text-xs text-text-muted hover:text-text-primary max-md:min-h-11 max-md:px-3">{t("group.rename.cancel")}</button>
             </form>}
+          {/* Who sees the new name, in words while the field is open: it was a tooltip on Rename, which a phone never shows. */}
+          {naming !== null && <p id={`${id}-rename-hint`} data-testid="group-rename-hint" className="mt-1 text-xs text-text-muted">{t("group.rename.hint")}</p>}
           <p className="text-xs text-text-muted">{live.members.length === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count: live.members.length })}{live.epoch !== undefined && <> · {t("group.members.epoch", { epoch: live.epoch })}</>}{live.status && live.status !== "active" && <> · {groupStatusText(live.status, t)}</>}</p>
-          {/* Only the admin changes the name and the picture: cropped square and redrawn small here, before anything leaves the app. */}
+          {/* Only the admin changes the name and the picture: cropped square and redrawn small here, before anything leaves the app.
+              A line of small text on a desktop, they are a thumb's height on a phone, as the rest of the dialog is. */}
           {live.isAdmin && live.status === "active" && <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
-            {naming === null && <button ref={renameButton} type="button" data-testid="group-rename" aria-disabled={busy !== null || undefined} title={t("group.rename.hint")} onClick={() => { if (busy === null) setNaming(live.name); }}
-              className="text-xs font-medium text-accent hover:underline aria-disabled:opacity-40">{t("group.rename.action")}</button>}
-            <label className={`cursor-pointer rounded text-xs font-medium text-accent hover:underline has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent ${busy !== null ? "pointer-events-none opacity-40" : ""}`}>
+            {naming === null && <button ref={renameButton} type="button" data-testid="group-rename" aria-disabled={busy !== null || undefined} onClick={() => { if (busy === null) setNaming(live.name); }}
+              className="text-xs font-medium text-accent hover:underline aria-disabled:opacity-40 max-md:min-h-11">{t("group.rename.action")}</button>}
+            <label data-testid="group-picture-pick" className={`inline-flex cursor-pointer items-center rounded text-xs font-medium text-accent hover:underline has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent max-md:min-h-11 ${busy !== null ? "pointer-events-none opacity-40" : ""}`}>
               {live.picture ? t("group.members.changePicture") : t("group.members.addPicture")}
               <input ref={pictureInput} data-testid="group-picture-input" type="file" accept="image/*" className="sr-only" disabled={busy !== null && busy !== "picture"}
                 onChange={e => { const file = e.target.files?.[0]; e.target.value = ""; if (file && busy === null) void run("picture", async () => engine.call("setGroupPicture", { groupId: live.id, picture: await avatarFromFile(file, MAX_GROUP_PICTURE_LENGTH) })); }} />
             </label>
             {live.picture && <button type="button" data-testid="group-picture-remove" aria-disabled={busy !== null || undefined} onClick={removePicture}
-              className="text-xs text-text-muted hover:text-danger aria-disabled:opacity-40">{t("group.members.removePicture")}</button>}
+              className="text-xs text-text-muted hover:text-danger aria-disabled:opacity-40 max-md:min-h-11">{t("group.members.removePicture")}</button>}
           </div>}
         </div>
       </div>
-      <button onClick={onClose} aria-label={t("common.close")} className="rounded-full p-1.5 text-text-muted hover:bg-surface-hover hover:text-text-primary">
+      <button onClick={onClose} aria-label={t("common.close")} className="grid shrink-0 place-items-center rounded-full p-1.5 text-text-muted max-md:h-11 max-md:w-11 hover:bg-surface-hover hover:text-text-primary">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
       </button>
     </div>
     {live.status === "active" && (live.isAdmin || (live.profile === "community" && live.entryLink)) && <GroupLinkPanel group={live} />}
     <ul ref={list} tabIndex={-1} className="mt-3 max-h-56 space-y-1 overflow-y-auto rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent" data-testid="group-member-list">
-      {live.members.map(m => <MemberRow key={m.key} member={m} focused={m.key === focusKey} viaHub={viaHubs(m)} photo={photoOf(m)} myNick={m.me ? state?.settings.nick : undefined}
-        peerKey={m.me ? undefined : contactKey(m.key)} status={m.me ? "" : viaHubs(m) ? t("group.member.viaHub") : edgeLabel(m, now, t, since)}
+      {live.members.map(m => <MemberRow key={m.key} member={m} focused={m.key === focusKey} out={out} viaHub={viaHubs(m)} photo={photoOf(m)} myNick={m.me ? state?.settings.nick : undefined}
+        peerKey={m.me ? undefined : contactKey(m.key)} status={m.me || out ? "" : viaHubs(m) ? t("group.member.viaHub") : edgeLabel(m, now, t, since)}
         tools={!live.isAdmin || m.me ? "" : hubChoice ? "hubs" : "admin"} busy={busy !== null} onHub={setHub} onPromote={setPromoting} onRemove={setRemoving} />)}
     </ul>
+    {/* What being a hub means, once under the list: it was a tooltip on each badge, which a phone never shows. */}
+    {live.members.some(m => m.hub) && <p data-testid="group-hubs-why" className="mt-1 text-xs text-text-muted">{t("group.hubs.note")}</p>}
     {live.isAdmin && live.status === "active" && live.profile !== "community" && <div className="mt-4">
       <h3 className="text-xs font-bold uppercase tracking-wider text-accent">{t("group.members.invite")}</h3>
       {/* Unanswered invitations hold a seat (until they are answered, a week at most), so a full group says how many of its 32 are only invited. */}
@@ -190,12 +207,14 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
           return <li key={link.id} tabIndex={-1} data-testid="group-invite-contact" data-link={link.id} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent">
             <span dir="auto" className="min-w-0 truncate text-sm">{contactName(link)}</span>
             {pending ? <span className="text-xs text-text-muted">{t("group.members.invited")}</span>
-              : !link.groups ? <span className="text-xs text-text-muted" title={t("group.members.needsBothHint")}>{link.dataLink === "open" ? t("group.members.needsUpdate") : t("group.members.notConnected")}</span>
+              : !link.groups ? <span className="text-xs text-text-muted">{link.dataLink === "open" ? t("group.members.needsUpdate") : t("group.members.notConnected")}</span>
               : <button disabled={!can} aria-disabled={busy !== null || undefined} onClick={() => invite(link.id)} data-testid="group-invite"
-                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 aria-disabled:opacity-40">{t("group.members.inviteAction")}</button>}
+                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 aria-disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.members.inviteAction")}</button>}
           </li>;
         })}
       </ul>
+      {/* Why a contact has no Invite, in words: it was a tooltip, which a phone never shows. */}
+      {contacts.some(link => !link.groups && !invited.has(link.id)) && <p data-testid="group-invite-why" className="mt-1 text-xs text-text-muted">{t("group.members.needsBothHint")}</p>}
     </div>}
     {error && <Notice problem={error} className="mt-3 text-sm" />}
     {removing && <RemoveMemberDialog name={memberName(removing, t)} linkOn={!!live.entryLink} returnFocus={list} onClose={() => setRemoving(null)}
@@ -212,6 +231,8 @@ interface MemberRowProps {
   member: GroupMemberView;
   /** The member the chat opened the list for. */
   focused: boolean;
+  /** I am out of the group: no edge to them, now or to come, and no dot. */
+  out: boolean;
   /** Reached through the hubs (a community): no edge of mine to speak of. */
   viaHub: boolean;
   photo?: string;
@@ -240,31 +261,32 @@ function sameRow(a: MemberRowProps, b: MemberRowProps): boolean {
  * One member of the list. Drawn again only when what it shows changed: a community has up to 256 of them, and the
  * engine sends a state up to 20 times a second, most of which change no member.
  */
-const MemberRow = memo(function MemberRow({ member: m, focused, viaHub, photo, myNick, peerKey, status, tools, busy, onHub, onPromote, onRemove }: MemberRowProps) {
+const MemberRow = memo(function MemberRow({ member: m, focused, out, viaHub, photo, myNick, peerKey, status, tools, busy, onHub, onPromote, onRemove }: MemberRowProps) {
   const { t } = useI18n();
   const hubLabels = { auto: t("group.hubs.auto"), pin: t("group.hubs.pin"), exclude: t("group.hubs.exclude") };
   return <li data-testid="group-member" data-key={m.key} data-role={m.role} data-focused={focused || undefined}
     className={`flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-2 py-1.5 hover:bg-surface-hover ${focused ? "bg-surface-hover ring-1 ring-accent/60" : ""}`}>
     {/* A community member my app holds no edge with is reached through the hubs: not "not reachable", and nothing says whether their app is open. */}
-    {viaHub ? <span role="img" aria-label={t("group.member.viaHub")} className="h-2 w-2 shrink-0 rounded-full bg-text-muted/50" />
+    {out ? null : viaHub ? <span role="img" aria-label={t("group.member.viaHub")} className="h-2 w-2 shrink-0 rounded-full bg-text-muted/50" />
       : <span role="img" aria-label={m.online ? t("group.members.reachable") : t("group.members.notReachable")} className={`h-2 w-2 shrink-0 rounded-full ${m.edge || m.me ? edgeDot(m) : m.online ? "bg-accent" : "bg-text-muted"}`} />}
     <MemberAvatar src={photo} name={myNick || memberName(m, t)} />
     {/* The name keeps room for about 16 characters: the badges and an admin's buttons go under it when the row is narrower (a phone, a long word in another language). */}
     <span className="contact-row min-w-[8.5rem] flex-1">
       <span className="flex min-w-0 items-center gap-1.5 text-sm"><span dir="auto" data-testid="group-member-name" className="min-w-0 truncate">{memberName(m, t)}</span>{!m.me && <ContactMarks peerKey={peerKey} testId="group-member-marks" />}{/* An unnamed member's name is its key already ("Member 3r69cg...d51a"): the key again was cut to one character on a phone. */}
         {(m.me || m.nick) && <span data-testid="group-member-key" className="min-w-0 shrink-[100] truncate font-mono text-[10px] text-text-muted">{publicKeyLabel(m.key)}</span>}</span>
-      {!m.me && <span className="block truncate text-[11px] text-text-muted" data-testid="group-member-status">{status}</span>}
+      {status && <span className="block truncate text-[11px] text-text-muted" data-testid="group-member-status">{status}</span>}
+      {/* A whole phrase under the status: "2 missing" beside a name read as two members missing, its meaning only in a tooltip. */}
+      {m.missing > 0 && <span className="block text-[11px] text-warn-ink" data-testid="group-member-missing">{t(m.missing === 1 ? "group.members.missingOne" : "group.members.missing", { count: m.missing })}</span>}
     </span>
     {m.role === "admin" && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-accent">{t("group.members.admin")}</span>}
-    {m.hub && <span data-testid="group-member-hub" title={t("group.hubs.badgeHint")} className="rounded-full bg-surface-alt px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-text-secondary">{t("group.hubs.badge")}</span>}
-    {m.missing > 0 && <span title={t("group.members.missingHint")} className="text-[10px] text-warn-ink">{t("group.members.missing", { count: m.missing })}</span>}
-    {tools && <span data-testid="group-member-actions" className="ms-auto flex shrink-0 items-center gap-1">
+    {m.hub && <span data-testid="group-member-hub" className="rounded-full bg-surface-alt px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-text-secondary">{t("group.hubs.badge")}</span>}
+    {tools && <span data-testid="group-member-actions" className="ms-auto flex shrink-0 items-center gap-1 max-md:gap-2">
       {tools === "hubs" && <Select size="sm" fit aria-label={t("group.hubs.choice")} data-testid="group-member-hub-role" disabled={busy}
         value={m.hubRole ?? "auto"} options={HUB_ROLES.map(value => ({ value, label: hubLabels[value] }))} onChange={role => onHub(m.key, role)} />}
       <button disabled={busy} onClick={() => onPromote(m)} data-testid="group-make-admin"
-        className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-alt hover:text-text-primary disabled:opacity-40">{t("group.members.makeAdmin")}</button>
+        className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-alt hover:text-text-primary disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.members.makeAdmin")}</button>
       <button disabled={busy} onClick={() => onRemove(m)} data-testid="group-remove-member"
-        className="rounded px-2 py-1 text-xs text-danger-ink hover:bg-danger/10 disabled:opacity-40">{t("group.members.remove")}</button>
+        className="rounded px-2 py-1 text-xs text-danger-ink hover:bg-danger/10 disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.members.remove")}</button>
     </span>}
   </li>;
 }, sameRow);

@@ -1,14 +1,18 @@
 import { useState } from "react";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
 import { useI18n } from "../contexts/I18nContext";
 import { problemLine } from "../lib/problemText";
+import { Notice } from "./ui/Notice";
 
 /**
  * The chat's apps strip: what this contact lets you open, and how many of your apps you let them
  * open, with the way to change it. `showLink`: also the state of an older chat's data link.
  */
 export function PeerServices({ peerPubKey, showLink = true, onManage }: { peerPubKey: string; showLink?: boolean; onManage: () => void }) {
-  const platform = useServicesPlatform();
+  const platform = servicesPlatform;
+  // Drawn again when this contact or the apps shared change, not on every engine state.
+  usePlatformValue(() => [platform?.getPeer(peerPubKey), platform?.getSharedServices()]);
   const { t } = useI18n();
   const [error, setError] = useState("");
   const peer = platform?.getPeer(peerPubKey);
@@ -36,17 +40,19 @@ export function PeerServices({ peerPubKey, showLink = true, onManage }: { peerPu
             if (!platform.features.openServices) { setError(t("chat.services.openNeedsApp")); return; }
             platform.openService(peerPubKey, service.id).catch((e) => setError(problemLine(e, t)));
           }}
-          className="flex items-center gap-1.5 px-3 py-1 bg-accent text-on-accent rounded-full text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer shrink-0"
+          // At most the strip's width, the name cut with an ellipsis: a 48-character name went 25 px past the strip's
+          // edge on a 320 px phone, its start cut off in Arabic (agents#1629). The whole name is in the title.
+          className="flex items-center gap-1.5 px-3 py-1 bg-accent text-on-accent rounded-full text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer max-w-full min-w-0"
           title={t("chat.services.openTheirs", { service: service.name ?? service.id })}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>
-          {service.name ?? service.id}
+          <svg className="shrink-0" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>
+          <span data-testid="open-service-name" className="truncate" dir="auto">{service.name ?? service.id}</span>
         </button>
       ))}
       <button data-testid="grant-services" onClick={onManage} className="ms-auto flex items-center gap-1.5 text-[11px] text-text-muted hover:text-text-primary transition-colors cursor-pointer shrink-0"
         title={t("chat.services.manageHint")}>
         {granted.length === 1 ? t("chat.services.sharingOne") : granted.length > 0 ? t("chat.services.sharingMany", { count: granted.length }) : t("chat.services.shareOne")} · {t("chat.services.manage")}
       </button>
-      {error && <span className="text-danger text-xs shrink-0 w-full">{error}</span>}
+      {error && <Notice tone="error" className="text-xs shrink-0 w-full">{error}</Notice>}
     </div>
   );
 }

@@ -6,7 +6,7 @@ import { BackupReader, BackupWriter, FRAME_BYTES, readBackupHeader, type BackupS
 import { LIGHT_FILE_BYTES, LIGHT_VOICE_BYTES, keptInLight, type LightMark } from "@ghostly/browser/backup/light";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { bool, str, type Method } from "./apiKit";
-import { CliError } from "./errors";
+import { CliError, localFileError } from "./errors";
 import { RESTORED_MARK, profileExists, profilePaths, type ProfilePaths } from "./profiles";
 
 /**
@@ -92,7 +92,7 @@ export const BACKUP_METHODS: Record<string, Method> = {
       out = await openFile(partial);
       const handle = out;
       let writer: BackupWriter;
-      try { writer = await BackupWriter.start({ write: async (chunk) => { await handle.write(chunk); } }, unsealed ? null : passphrase!); } catch (error) { throw new CliError("bad_request", error instanceof Error ? error.message : String(error)); }
+      try { writer = await BackupWriter.start({ write: async (chunk) => { await handle.write(chunk); } }, unsealed ? null : passphrase!); } catch (error) { throw localFileError(error, path) ?? new CliError("bad_request", error instanceof Error ? error.message : String(error)); }
       const put = (record: BackupRecord) => writer.json(JSON.stringify(record));
       await put({ t: "profile", format: FORMAT, createdAt: Date.now(), files: files.length, bytes, ...(light && { light: { maxFileBytes: LIGHT_FILE_BYTES, maxVoiceBytes: LIGHT_VOICE_BYTES, files: leftOut.length, bytes: leftOutBytes, ids: leftOut.map((file) => basename(file.name)) } }) });
       await put({ t: "file", kind: "store", size: storeSize });
@@ -109,6 +109,10 @@ export const BACKUP_METHODS: Record<string, Method> = {
       // Its name only now, and never over a file that appeared meanwhile.
       try { await link(partial, path); } catch (error) { throw (error as NodeJS.ErrnoException).code === "EEXIST" ? new CliError("refused", `${path} exists: choose another name`) : error; }
       return { path, bytes: written, files: files.length, protection: unsealed ? "none" : "passphrase", ...(light && { light: true, leftOut: leftOut.length, leftOutBytes }) };
+    } catch (error) {
+      // A write into the backup that found its disk full names the backup, not Node's bare "write".
+      if ((error as NodeJS.ErrnoException)?.code === "ENOSPC" || (error as NodeJS.ErrnoException)?.code === "EDQUOT") throw localFileError(error, path) ?? error;
+      throw error;
     } finally {
       await out?.close().catch(() => {});
       await rm(partial, { force: true });

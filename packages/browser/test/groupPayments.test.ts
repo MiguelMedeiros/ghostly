@@ -329,3 +329,20 @@ describe("GroupPayments: every member hears it, the parties say it", () => {
     expect(noteOf("C", "req-00001")).toBeUndefined();
   });
 });
+
+describe("GroupPayments: a pass grows with the payments kept, not with their square", () => {
+  it("finds each request's payments once per pass, whatever the number of group requests", async () => {
+    const { peers } = world({ A, B, C });
+    const a = peers.get("A")!;
+    // 200 requests in the group, and 1,000 payments of 1:1 chats, each counting how often its request is looked at.
+    let reads = 0;
+    const counted = (p: PaymentView): PaymentView => { const { requestId, ...rest } = p; return Object.defineProperty(rest, "requestId", { get: () => { reads++; return requestId; }, enumerable: true }) as PaymentView; };
+    for (let i = 0; i < 200; i++) a.payments.push(counted(pay({ id: `req-${String(i).padStart(5, "0")}`, linkId: i % 2 ? "AB" : "AC", direction: i % 4 < 2 ? "out" : "in" })));
+    for (let i = 0; i < 1000; i++) a.payments.push(counted(pay({ id: `pay-${String(i).padStart(5, "0")}`, linkId: `L${i % 20}`, kind: "payment", requestId: `elsewhere-${i}` })));
+    await a.engine.sync();
+    reads = 0;
+    await a.engine.sync();
+    // Each record's request once (and a few for the notes said): searching every record per request read it 100,000 times.
+    expect(reads).toBeLessThan(3 * a.payments.length);
+  });
+});

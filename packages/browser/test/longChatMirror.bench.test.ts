@@ -17,6 +17,10 @@ const fake = vi.hoisted(() => ({
     stateListeners: [] as (() => void)[],
     messageListeners: [] as ((linkId: string, messages: StoredMessage[]) => void)[],
     connect: async () => {},
+    // No change tick here: every list comes whole.
+    changing: () => false,
+    whole: () => true,
+    askWhole() {},
     subscribe(listener: () => void) { fake.engine.stateListeners.push(listener); return () => {}; },
     onMessages(listener: (linkId: string, messages: StoredMessage[]) => void) { fake.engine.messageListeners.push(listener); return () => {}; },
     linkByPeer(peer: string) { return fake.engine.state?.links.find((l) => l.peerPubKeyZ32 === peer); },

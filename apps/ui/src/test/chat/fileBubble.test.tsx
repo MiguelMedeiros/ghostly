@@ -41,6 +41,7 @@ describe("what a file's status line says", () => {
     ["paused here", t({ stage: "paused", pausedBy: "me" }), "Paused · 62% of 4.2 GB"],
     ["paused by the contact", t({ stage: "paused", pausedBy: "peer" }), "Paused by Ana · 62% of 4.2 GB"],
     ["checking", t({ stage: "verifying" }), "Checking the file… 4.2 GB"],
+    ["sent, arrived, the contact checks it", t({ stage: "verifying", direction: "out", transferred: f.size }), "Arrived, Ana is checking it… 4.2 GB"],
     ["copying before the offer", t({ stage: "preparing" }), "Preparing… 62% of 4.2 GB"],
     ["declined", { state: "failed", transferred: 0, size: f.size, error: "Declined by your contact" } as FileTransferState, "Declined"],
     ["cancelled", { state: "failed", transferred: 0, size: f.size, error: "Cancelled by the sender" } as FileTransferState, "Cancelled"],
@@ -50,14 +51,22 @@ describe("what a file's status line says", () => {
     ["stuck, no connection: the connection is the reason", t({ stalled: true, stage: "waiting" }), "Waiting for connection · 62% done"],
     ["a group's file, its holders busy", t({ stage: "waiting", direction: "in", wait: "busy" }), "Busy, trying again soon · 62% done"],
     ["a group's file, its holders busy, nothing here yet", t({ stage: "waiting", direction: "in", wait: "busy", transferred: 0 }), "Busy, trying again soon · 4.2 GB"],
+    // agents#1672: its holders served all they can today; "trying again soon" was wrong for up to a day.
+    ["a group's file whose holders served their day", t({ stage: "waiting", direction: "in", wait: "day", transferred: 0 }), "Shared all they can today, comes from another member or tomorrow · 4.2 GB"],
     ["a group's file that came damaged", t({ stage: "waiting", direction: "in", wait: "damaged", stalled: true, transferred: 0 }), "Arrived damaged · 4.2 GB"],
     ["a group's file nobody in reach has", t({ stage: "waiting", direction: "in", wait: "nobody", transferred: 0 }), "Waiting for connection · 4.2 GB"],
   ])("%s", (_, transfer, text) => {
-    expect(fileStatus(f, transfer, "Ana", false)).toBe(text);
+    expect(fileStatus(f, transfer, "Ana", false).replace(/\u00a0/g, " ")).toBe(text);
+  });
+  it("a wrapped line never parts a size from its unit: \"26.0\" and \"MB\" stay on one line", () => {
+    const zip = file({ size: 26 * 1024 ** 2 });
+    expect(fileStatus(zip, t({ stage: "asking", direction: "out", transferred: 0, size: zip.size }), undefined, false)).toBe("Waiting for your contact to accept · 26.0\u00a0MB");
+    expect(fileStatus(f, t({ rate: 12 * 1024 ** 2 }), "Ana", false)).toBe("62% of 4.2\u00a0GB · 12.0\u00a0MB/s · 2 min left");
+    expect(fileStatus(zip, null, "Ana", false)).toBe("26.0\u00a0MB");
   });
   it("a contact with no name is \"your contact\", in lower case mid-sentence", () => {
-    expect(fileStatus(f, t({ stage: "paused", pausedBy: "peer" }), undefined, false)).toBe("Paused by your contact · 62% of 4.2 GB");
-    expect(fileStatus(f, t({ stage: "asking", direction: "out", transferred: 0 }), undefined, false)).toBe("Waiting for your contact to accept · 4.2 GB");
+    expect(fileStatus(f, t({ stage: "paused", pausedBy: "peer" }), undefined, false)).toBe("Paused by your contact · 62% of 4.2\u00a0GB");
+    expect(fileStatus(f, t({ stage: "asking", direction: "out", transferred: 0 }), undefined, false)).toBe("Waiting for your contact to accept · 4.2\u00a0GB");
     expect(fileStatus(f, t({ stage: "queued", direction: "out" }), undefined, false)).toBe("Queued by your contact · 62% done");
   });
   it("time left reads in minutes and hours", () => {
@@ -146,6 +155,26 @@ describe("FileBubble: files/3", () => {
     fireEvent.click(screen.getByTestId("file-cancel"));
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("cancel"));
     view.unmount();
+  });
+
+  it("a file sent from here that arrived whole has no Cancel: too late, the contact keeps it; one arriving here still has", () => {
+    const whole = { state: "transferring", direction: "out", transferred: 4.2 * GB, size: 4.2 * GB } as const;
+    const view = show({ ...whole, stage: "verifying" }, { id: "chat1-out-late" });
+    expect(screen.getByTestId("file-status")).toHaveTextContent("Arrived, Ana is checking it… 4.2 GB");
+    expect(screen.queryByTestId("file-cancel")).toBeNull();
+    // Offered again after a quiet spell, or waiting for a connection, every byte still there. No Pause either: paused,
+    // it could be cancelled.
+    act(() => fakeEngine.update({ transfers: { "chat1-out-late": whole } }));
+    expect(screen.queryByTestId("file-cancel")).toBeNull();
+    expect(screen.queryByTestId("file-pause")).toBeNull();
+    act(() => fakeEngine.update({ transfers: { "chat1-out-late": { ...whole, stage: "waiting" } } }));
+    expect(screen.queryByTestId("file-cancel")).toBeNull();
+    // The contact asks about it again: it can be cancelled.
+    act(() => fakeEngine.update({ transfers: { "chat1-out-late": { ...whole, stage: "asking" } } }));
+    expect(screen.getByTestId("file-cancel")).toBeInTheDocument();
+    view.unmount();
+    show({ state: "transferring", stage: "verifying", direction: "in", transferred: 4.2 * GB, size: 4.2 * GB });
+    expect(screen.getByTestId("file-cancel")).toBeInTheDocument();
   });
 
   it("a stuck file sent from here offers Send again, a stuck one arriving here Ask again; a moving one neither", async () => {
@@ -442,5 +471,39 @@ describe("FileBubble: files/3", () => {
       expect(screen.queryByTestId("file-save")).toBeNull();
       expect(saveFile).not.toHaveBeenCalled();
     } finally { delete (servicesPlatform as { saveFile?: unknown; fileHeld?: unknown }).saveFile; delete (servicesPlatform as { fileHeld?: unknown }).fileHeld; }
+  });
+});
+
+describe("a moving file's progress bar", () => {
+  it("draws its progress with a transform and no transition, so a new reading lays nothing out", () => {
+    show({ state: "transferring", direction: "in", transferred: 0.25 * 4.2 * GB, size: 4.2 * GB });
+    const bar = screen.getByTestId("file-progress").firstElementChild as HTMLElement;
+    expect(bar.style.transform).toBe("scaleX(0.25)");
+    expect(bar.style.width).toBe("");
+    // Readings come about 4 times a second: a transition would be running nearly all the time.
+    expect(bar.className).not.toMatch(/transition/);
+    // It grows from the start edge, on either side.
+    expect(bar.className).toMatch(/\borigin-left\b/);
+    expect(bar.className).toMatch(/\brtl:origin-right\b/);
+  });
+
+  // agents#2509: the bar was a bare div; a screen reader found no progress in the bubble but its status text.
+  it("is a progress bar to a screen reader, named by its file, with its value as the status says it", () => {
+    show({ state: "transferring", direction: "in", transferred: 0.62 * 4.2 * GB, size: 4.2 * GB, rate: 12 * 1024 ** 2 });
+    const bar = screen.getByRole("progressbar", { name: "movie.mkv" });
+    expect(bar).toHaveAttribute("aria-valuemin", "0");
+    expect(bar).toHaveAttribute("aria-valuemax", "100");
+    expect(bar).toHaveAttribute("aria-valuenow", "62");
+    expect(bar.getAttribute("aria-valuetext")?.replace(/\u00a0/g, " ")).toBe("62% of 4.2 GB");
+    // Not live: it is read when the person goes to it, never on each reading.
+    expect(bar).not.toHaveAttribute("aria-live");
+  });
+
+  it("says its value in the app's language", () => {
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: { [file().id]: { state: "transferring", direction: "in", transferred: 0.5 * 4.2 * GB, size: 4.2 * GB, stage: "paused", pausedBy: "peer" } } });
+    renderApp(<FileBubble file={file()} peerName="Ana" />, { language: "pt" });
+    const bar = screen.getByRole("progressbar", { name: "movie.mkv" });
+    expect(bar).toHaveAttribute("aria-valuenow", "50");
+    expect(bar.getAttribute("aria-valuetext")?.replace(/\u00a0/g, " ")).toMatch(/^50% de 4[.,]2 GB$/);
   });
 });

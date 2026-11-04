@@ -28,3 +28,10 @@ it("takes a server in WebRTC's form (urls a list) as the addresses comma-separat
   for (const server of [{}, { url: "stun:a.example.org" }, { urls: 5 }, { urls: ["stun:a.example.org", 5] }])
     expect(iceServerProblem(iceServerSetting(server as unknown as IceServerSetting)), JSON.stringify(server)).toBe("Each ICE server needs urls: one address, or several comma-separated (turn:host:port)");
 });
+
+it("says a username or credential that is not a text is one, instead of failing on it", () => {
+  // Was a TypeError: "server.credential?.trim is not a function", as `ghostly settings set iceServers` printed it.
+  for (const server of [{ username: "u", credential: 5 }, { username: 5, credential: "c" }, { username: ["u"], credential: "c" }, { username: "u", credential: { c: 1 } }])
+    expect(iceServerProblem({ urls: "turn:turn.example.org:3478", ...server } as unknown as IceServerSetting), JSON.stringify(server)).toBe("A TURN server's username and credential are texts");
+  expect(iceServerProblem({ urls: "stun:stun.example.org:3478", username: 5 } as unknown as IceServerSetting)).toBe("A TURN server's username and credential are texts");
+});

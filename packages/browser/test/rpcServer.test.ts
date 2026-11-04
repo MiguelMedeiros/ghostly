@@ -42,7 +42,7 @@ vi.mock("../src/engine/node", () => ({
 }));
 
 const { EngineServer } = await import("../src/engine/server");
-const { createInPageHost, becomeThePeer } = await import("../src/inPageHost");
+const { createInPageHost, becomeThePeer, untilAskedFor } = await import("../src/inPageHost");
 
 type Posted = EngineEvent | RpcResponse;
 const sink = () => { const posted: Posted[] = []; return { posted, post: (m: Posted) => void posted.push(m) }; };
@@ -312,6 +312,41 @@ describe("one peer per storage area", () => {
       await Promise.resolve();
     } finally {
       vi.unstubAllGlobals();
+    }
+  });
+
+  it("a page that holds the lock but must reload first hears when another page asks for it, or gives up waiting", async () => {
+    vi.useFakeTimers();
+    let pending: { name: string }[] = [];
+    vi.stubGlobal("navigator", { locks: { query: async () => ({ held: [{ name: "ghostly-peer" }], pending }) } });
+    try {
+      let heard = false;
+      const hearing = untilAskedFor("ghostly-peer").then(() => { heard = true; });
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(heard).toBe(false);
+      // Another profile's page asking for its own lock is not this one's turn.
+      pending = [{ name: "ghostly-peer-p2" }];
+      await vi.advanceTimersByTimeAsync(500);
+      expect(heard).toBe(false);
+      pending = [{ name: "ghostly-peer" }];
+      await vi.advanceTimersByTimeAsync(100);
+      await hearing;
+
+      // Nobody asks (the tab that pressed Reload was closed): it reloads anyway after a while.
+      pending = [];
+      let gaveUp = false;
+      const waiting = untilAskedFor("ghostly-peer", { timeoutMs: 5000 }).then(() => { gaveUp = true; });
+      await vi.advanceTimersByTimeAsync(4900);
+      expect(gaveUp).toBe(false);
+      await vi.advanceTimersByTimeAsync(200);
+      await waiting;
+
+      // A browser that cannot list the locks: no wait at all.
+      vi.stubGlobal("navigator", { locks: { request: vi.fn() } });
+      await untilAskedFor("ghostly-peer");
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
     }
   });
 

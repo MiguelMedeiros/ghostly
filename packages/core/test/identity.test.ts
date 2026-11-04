@@ -1,6 +1,6 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { IDENTITY_MEMO_SIZE, identityFromSeed, identityFromSeedB64 } from "../src/identity";
+import { IDENTITY_MEMO_SIZE, identityFromSeed, identityFromSeedB64, sign, verify } from "../src/identity";
 import { toBase64Url } from "../src/bytes";
 
 // noble's ed25519 is frozen: a spy cannot go on it, so the module hands out a counting getPublicKey.
@@ -67,5 +67,18 @@ describe("identityFromSeed", () => {
 
   it("refuses a seed that is not 32 bytes", () => {
     expect(() => identityFromSeed(new Uint8Array(31))).toThrow("Seed must be exactly 32 bytes");
+  });
+});
+
+describe("verify", () => {
+  it("checks a signature, and refuses a key of small order and its constant signature of any message", () => {
+    const seed = seedOf(9);
+    const message = new TextEncoder().encode("any statement");
+    expect(verify(sign(message, seed), message, keyOf(seed))).toBe(true);
+    // The neutral point: no secret key goes with it, and R = the neutral point, S = 0 verifies anything under ZIP-215.
+    const neutral = Uint8Array.from({ length: 32 }, (_, i) => (i === 0 ? 1 : 0));
+    const constant = Uint8Array.from({ length: 64 }, (_, i) => (i === 0 ? 1 : 0));
+    expect(ed25519.verify(constant, message, neutral)).toBe(true);
+    expect(verify(constant, message, neutral)).toBe(false);
   });
 });

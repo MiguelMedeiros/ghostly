@@ -2,17 +2,23 @@ import { connect, type Socket } from "node:net";
 import { createInterface } from "node:readline";
 import { CliError, type ErrorCode } from "./errors";
 import type { GhostlyEvent } from "./events";
-import { HELLO, newNonce, provesDaemon, provesGreeting, readDaemonSecret } from "./daemonProof";
+import { daemonOfThisRelease, HELLO, newNonce, provesDaemon, provesGreeting, readDaemonSecret } from "./daemonProof";
 import { ownSocket } from "./privateFolder";
 
 /** The id of the hello on every connection: a string, so it is never one of the calls' numbers. */
 const HELLO_ID = "hello";
 
 /**
- * How long a client waits for the daemon's greeting before it refuses what answers: a daemon greets as it accepts the
- * connection, and one of an older release (before the greeting) never does. `daemon stop` waits less (`connectDaemon`).
+ * How long a client waits for the daemon's greeting before it asks who holds the profile: a daemon greets as it
+ * accepts the connection, and one of an older release (before the greeting) never does. A daemon of this release
+ * holding the profile (`daemonOfThisRelease`) is busy and is waited for, under each call's own deadline; anything
+ * else is refused then. It used to refuse every late greeting, after 10 s: a daemon busy that long on one task (an
+ * outbox backlog, 14 to 29 s) had every command and `listen` refused as an older release's, to be restarted.
  */
-export const GREETING_MS = 10_000;
+export const GREETING_MS = 2_000;
+
+/** The longest request line the daemon reads (WISP 1100 § Framing): it cuts the connection on a longer one. */
+export const MAX_LINE = 16 * 1024 * 1024;
 
 /** What a client needs of a profile to reach its daemon: the socket, and the folder the daemon's secret is in. */
 export interface DaemonAddress { socket: string; dir: string }
@@ -54,7 +60,8 @@ export class DaemonClient {
     this.ready = new Promise<void>((resolve, reject) => { this.settle = { resolve, reject }; });
     this.ready.catch(() => {});
     const nonce = newNonce();
-    const waitedTooLong = setTimeout(() => { if (!this.greeted && !this.refusal) this.refuse(); }, greetingMs);
+    // Nothing is written until the greeting either way: a busy daemon only keeps the calls waiting.
+    const waitedTooLong = setTimeout(() => { if (!this.greeted && !this.refusal && !daemonOfThisRelease(this.address.dir)) this.refuse(); }, greetingMs);
     waitedTooLong.unref?.();
     const lines = createInterface({ input: socket, crlfDelay: Infinity });
     // readline passes on its input's errors: a daemon that went away with this client's lines unread (ECONNRESET) ended
@@ -62,7 +69,8 @@ export class DaemonClient {
     lines.on("error", () => {});
     lines.on("line", (line) => {
       let message: { id?: number | string; result?: unknown; error?: { code: ErrorCode; message: string; details?: Record<string, unknown> }; event?: GhostlyEvent };
-      try { message = JSON.parse(line); } catch { return; }
+      // A first line that is not even JSON is no greeting: refused as one that does not prove itself.
+      try { message = JSON.parse(line); } catch { if (!this.greeted && !this.refusal) this.refuse(); return; }
       if (this.refusal) return;
       if (!this.greeted) {
         clearTimeout(waitedTooLong);
@@ -111,10 +119,16 @@ export class DaemonClient {
    * `timeoutMs`: give up (code `timeout`, exit 4) when the daemon has not answered by then; without it the call waits
    * for as long as the connection holds. A call that timed out closes the connection: its answer, if one ever comes,
    * is of no use, and the process leaves once nothing else keeps it (not every caller reaches `exit`).
+   *
+   * A call whose line is longer than `MAX_LINE` is refused here, never written: the daemon cut the connection on it,
+   * and the command answered "The daemon went away" (`unavailable`, read as try later) while the daemon ran on.
    */
   call(method: string, params: unknown = {}, { timeoutMs }: { timeoutMs?: number } = {}): Promise<unknown> {
     if (this.socket.destroyed) return Promise.reject(this.refusal ?? new CliError("unavailable", "The daemon went away"));
     const id = this.nextId++;
+    const line = JSON.stringify({ id, method, params }) + "\n";
+    const bytes = Buffer.byteLength(line);
+    if (bytes > MAX_LINE) return Promise.reject(new CliError("bad_request", `${method} came to ${(bytes / 1024 / 1024).toFixed(1)} MiB as JSON, more than a daemon reads in one request (16 MiB): nothing was sent (a long text goes as a file: ghostly file send <chat|group> <path>)`));
     return new Promise((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       if (timeoutMs !== undefined) {
@@ -132,7 +146,7 @@ export class DaemonClient {
       this.pending.set(id, settle);
       // Written once the daemon proved itself, in the order the calls were made; a refusal ends each instead.
       this.ready.then(
-        () => { if (this.pending.has(id) && !this.socket.destroyed) this.socket.write(JSON.stringify({ id, method, params }) + "\n"); },
+        () => { if (this.pending.has(id) && !this.socket.destroyed) this.socket.write(line); },
         (error: CliError) => { if (this.pending.delete(id)) settle.reject(error); },
       );
     });

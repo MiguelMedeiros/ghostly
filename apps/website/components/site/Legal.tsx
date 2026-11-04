@@ -59,7 +59,7 @@ export function Term({ children }: { children: React.ReactNode }) {
 }
 
 export function Code({ children }: { children: React.ReactNode }) {
-  return <code className="text-cyan-400 text-sm">{children}</code>;
+  return <code className="text-cyan-400 text-sm wrap-anywhere">{children}</code>;
 }
 
 export function A({ href, children }: { href: string; children: React.ReactNode }) {

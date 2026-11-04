@@ -13,7 +13,7 @@ import { renderApp } from "../render";
 
 // covers: profiles.picture.viewer
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const PHOTO = "data:image/jpeg;base64,/9j/alice", GROUP_PICTURE = "data:image/jpeg;base64,/9j/group";
 const viewer = () => screen.queryByTestId("avatar-viewer");

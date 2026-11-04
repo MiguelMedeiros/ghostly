@@ -25,7 +25,7 @@ import { decodeToWav } from "../../lib/voiceDecode";
 import { followSpeaker } from "../../lib/mediaDevices";
 import { claimMediaSession, mediaSessionPosition, mediaSessionState, releaseMediaSession, type MediaSessionPlayer } from "../../lib/mediaSession";
 import { ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
-import { Waveform } from "./Waveform";
+import { PROGRESS_STEP_MS, Waveform } from "./Waveform";
 import "./voice.css";
 import { problemLine, saveProblemLine } from "../../lib/problemText";
 import { downloadFile, downloadName } from "../../lib/fileDownload";
@@ -34,8 +34,6 @@ type PlayState = "idle" | "loading" | "playing" | "paused";
 
 const FORMATS: Record<string, string> = { "audio/webm": "WebM", "audio/ogg": "Ogg", "audio/mp4": "M4A", "audio/x-m4a": "M4A", "audio/mpeg": "MP3", "audio/aac": "AAC", "audio/wav": "WAV" };
 const formatOf = (mime: string) => FORMATS[mime.split(";")[0]!.trim().toLowerCase()] ?? (mime || "unknown");
-/** How often the waveform moves while it plays: as often as the time label does. The knob's glide (voice.css) lasts as long. */
-const PROGRESS_STEP_MS = 250;
 
 /** What went wrong, for whoever debugs the next failure: the console in dev builds, `data-error` always. */
 function describeFailure(what: string, error: unknown): string {

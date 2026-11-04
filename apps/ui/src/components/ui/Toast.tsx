@@ -1,7 +1,8 @@
-import { useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, type FocusEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
 import type { ToastMessage } from "../../hooks/useToast";
+import { touchOnly } from "../../lib/touchOnly";
 
 /**
  * The floating card: over the content at the bottom centre on a desktop, above the tab bar on a phone (and above the
@@ -20,10 +21,11 @@ import type { ToastMessage } from "../../hooks/useToast";
 export function Toast({ toast, onDismiss, place = "screen", testId = "toast" }: { toast: ToastMessage | null; onDismiss(): void; place?: "screen" | "page" | "dialog"; testId?: string }) {
   const { t } = useI18n();
   const region = useClearOfField(toast);
+  const held = useHeldTime(toast, onDismiss);
   const card: ReactNode = (
     <div ref={region} role="status" aria-live="polite" aria-atomic="true" className={place === "page" ? "toast-place toast-place-page" : "toast-place"} data-testid={`${testId}-region`}>
       {toast && (
-        <div key={toast.id} data-testid={testId} data-tone={toast.tone}
+        <div key={toast.id} {...held} data-testid={testId} data-tone={toast.tone}
           className="toast-card pointer-events-auto flex items-start gap-2.5 w-full max-w-sm rounded-xl border border-border bg-sidebar-bg px-4 py-3 shadow-2xl animate-fade-in">
           <span aria-hidden="true" className={`mt-0.5 shrink-0 ${toast.tone === "error" ? "text-danger" : "text-success"}`}>
             {toast.tone === "error" ? (
@@ -49,6 +51,54 @@ export function Toast({ toast, onDismiss, place = "screen", testId = "toast" }: 
     </div>
   );
   return place === "screen" ? createPortal(card, document.body) : card;
+}
+
+/**
+ * The card's time (`toast.ms`), as the composer's card runs it: it waits while the card is pointed at or has the focus
+ * and runs again in full once it is left, so it stays until it has been read. A card that goes with the focus on its ×
+ * (by itself or closed) hands the focus back to what had it when the card came (the field, the button that was pressed),
+ * or to its dialog, not to the page. On a touch screen a field would bring the keyboard up: there the focus falls.
+ */
+function useHeldTime(toast: ToastMessage | null, onDismiss: () => void) {
+  const dismiss = useRef(onDismiss);
+  dismiss.current = onDismiss;
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const held = useRef({ pointer: false, focus: false });
+  const opener = useRef<HTMLElement | null>(null);
+  const run = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    if (!toast || held.current.pointer || held.current.focus) return;
+    timer.current = setTimeout(() => { timer.current = null; dismiss.current(); }, toast.ms);
+  }, [toast]);
+  // Its cleanup also stops a time the leaving card's blur started.
+  useEffect(() => {
+    held.current = { pointer: false, focus: false };
+    run();
+    return () => { if (timer.current) clearTimeout(timer.current); timer.current = null; };
+  }, [run]);
+  useLayoutEffect(() => {
+    const at = document.activeElement;
+    if (toast && at instanceof HTMLElement && at !== document.body && !at.closest(".toast-card")) opener.current = at;
+  }, [toast]);
+  // The ref's cleanup runs while the card and its focused × are still there.
+  const ref = useCallback((card: HTMLDivElement) => () => {
+    if (!card.contains(document.activeElement)) return;
+    const back = opener.current;
+    const to = back?.isConnected && !back.matches(":disabled") ? back : card.closest("dialog");
+    if (to && !(touchOnly() && to.matches("input, textarea, select, [contenteditable=true]"))) to.focus({ preventScroll: true });
+  }, []);
+  return {
+    ref,
+    onPointerEnter: () => { held.current.pointer = true; run(); },
+    onPointerLeave: () => { held.current.pointer = false; run(); },
+    onFocus: () => { held.current.focus = true; run(); },
+    onBlur: (e: FocusEvent<HTMLDivElement>) => {
+      if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return;
+      held.current.focus = false;
+      run();
+    },
+  };
 }
 
 /**

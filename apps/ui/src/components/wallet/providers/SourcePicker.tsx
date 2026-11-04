@@ -6,9 +6,16 @@ import { useRun } from "../run";
 import { Select } from "../../ui/Select";
 import { PROVIDER_FORMS, type ProviderFormProps } from "./forms";
 import { changeableFields, sourceStatus } from "./sourceStatus";
+import { fieldText, providerText } from "./providerText";
 import { useI18n } from "../../../contexts/I18nContext";
 import { focusLost } from "../../../lib/focus";
+import { exactText } from "../../../lib/exactText";
 
+
+/*
+ * A provider's description and its fields' labels, help and suggestions are its module's English in every language:
+ * each in a <bdi>, or in Arabic "Macaroon (hex)" reads "(Macaroon (hex" and a help line's period lands at its start.
+ */
 
 /** A field's suggested values that fit the other fields (`when`), as buttons that fill it in. */
 function Suggestions({ field, values, onPick }: { field: ProviderField; values: Record<string, string | undefined>; onPick: (value: string) => void }) {
@@ -18,7 +25,7 @@ function Suggestions({ field, values, onPick }: { field: ProviderField; values: 
     <span className="flex flex-wrap gap-1.5" data-testid={`field-suggestions-${field.name}`}>
       {fitting.map((s) => (
         <button key={s.value} type="button" title={s.value} data-value={s.value} onClick={() => onPick(s.value)}
-          className={`text-[11px] px-2 py-0.5 rounded-full border ${values[field.name] === s.value ? "border-accent text-accent" : "border-border text-text-secondary hover:text-text-primary"}`}>{s.label}</button>
+          className={`text-[11px] px-2 py-0.5 rounded-full border ${values[field.name] === s.value ? "border-accent text-accent" : "border-border text-text-secondary hover:text-text-primary"}`}><bdi>{s.label}</bdi></button>
       ))}
     </span>
   );
@@ -37,12 +44,12 @@ function ServerForm({ kind, fields, config, busy, saving, onSubmit, onCancel }: 
       {fields.map((field, i) => (
         <div key={field.name} className="space-y-1">
           <label className="block space-y-1">
-            <span className="text-xs text-text-secondary">{field.label}{field.optional && <span className="text-text-muted"> {t("wallet.source.optional")}</span>}</span>
+            <span className="text-xs text-text-secondary"><bdi>{field.label}</bdi>{field.optional && <span className="text-text-muted"> {t("wallet.source.optional")}</span>}</span>
             {/* Opened from the card's own button, further up: focusing it brings the form into view. */}
-            <input aria-label={field.label} autoFocus={i === 0} className={`${input} font-mono text-xs`} type={field.kind === "url" ? "url" : "text"} spellCheck={false} placeholder={field.placeholder} value={values[field.name]} onChange={(e) => set(field.name, e.target.value)} />
+            <input aria-label={field.label} autoFocus={i === 0} className={`${input} font-mono text-xs`} type={field.kind === "url" ? "url" : "text"} {...exactText} placeholder={field.placeholder} value={values[field.name]} onChange={(e) => set(field.name, e.target.value)} />
           </label>
           <Suggestions field={field} values={{ ...config, ...values }} onPick={(value) => set(field.name, value)} />
-          {field.help && <span className="block text-[11px] text-text-muted">{field.help}</span>}
+          {field.help && <span className="block text-[11px] text-text-muted"><bdi>{field.help}</bdi></span>}
         </div>
       ))}
       <div className="flex flex-wrap gap-2">
@@ -66,18 +73,18 @@ export function ProviderConfigForm({ descriptor, mode, busy, saving = false, onS
         // The suggestions are buttons: beside the label, not inside it (a label holds one control).
         <div key={field.name} className="space-y-1">
           <label className="block space-y-1">
-            <span className="text-xs text-text-secondary">{field.label}{field.optional && <span className="text-text-muted"> {t("wallet.source.optional")}</span>}</span>
+            <span className="text-xs text-text-secondary"><bdi>{field.label}</bdi>{field.optional && <span className="text-text-muted"> {t("wallet.source.optional")}</span>}</span>
             {field.kind === "select" ? (
               <Select aria-label={field.label} value={values[field.name]} onChange={(v) => set(field.name, v)} options={field.options ?? []} />
             ) : field.kind === "textarea" ? (
               <textarea aria-label={field.label} className={`${input} font-mono text-xs resize-none`} rows={3} placeholder={field.placeholder} value={values[field.name]} onChange={(e) => set(field.name, e.target.value)} />
             ) : (
               <input aria-label={field.label} className={`${input} ${field.kind === "text" ? "" : "font-mono text-xs"}`} type={field.kind === "secret" ? "password" : field.kind === "url" ? "url" : "text"}
-                autoComplete={field.kind === "secret" ? "new-password" : "off"} spellCheck={false} placeholder={field.placeholder} value={values[field.name]} onChange={(e) => set(field.name, e.target.value)} />
+                autoComplete={field.kind === "secret" ? "new-password" : "off"} {...exactText} placeholder={field.placeholder} value={values[field.name]} onChange={(e) => set(field.name, e.target.value)} />
             )}
           </label>
           {field.kind !== "secret" && <Suggestions field={field} values={values} onPick={(value) => set(field.name, value)} />}
-          {field.help && <span className="block text-[11px] text-text-muted">{field.help}</span>}
+          {field.help && <span className="block text-[11px] text-text-muted"><bdi>{field.help}</bdi></span>}
         </div>
       ))}
       <Button type="submit" variant="primary" className="w-full" disabled={busy} loading={saving} data-testid="provider-save">{saving ?t("wallet.source.connecting") : t("wallet.source.use", { name: descriptor.label })}</Button>
@@ -125,10 +132,12 @@ export function SourcePicker({ kind, view, onSet, onClear, onRetry, onReconfigur
     handOff.current = false;
   });
   const offered = view.offered;
-  const descriptor: ProviderDescriptorView | undefined = offered.find((d) => d.id === chosen);
+  // Its description and fields in the app's language (a plugin provider's stay its own English).
+  const found: ProviderDescriptorView | undefined = offered.find((d) => d.id === chosen);
+  const descriptor = found && providerText(t, found);
   const Form = descriptor ? PROVIDER_FORMS[descriptor.id] ?? ProviderConfigForm : null;
   const current = offered.find((d) => d.id === view.providerId);
-  const serverFields = onReconfigure ? changeableFields(view) : [];
+  const serverFields = onReconfigure ? changeableFields(view).map((f) => fieldText(t, view.providerId!, f)) : [];
   const failing = view.status === "error" || (view.status === "connecting" && !!view.failures);
   const submit = (values: Record<string, string>) => void run(async () => { setSaved(""); await onSet!(descriptor!.id, values); setChosen(""); handOff.current = true; setSaved(t(kind === "onchain" ? "wallet.source.savedOnchain" : "wallet.source.savedLightning", { name: descriptor!.label })); }, "set");
   const reconfigure = (values: Record<string, string>) => void run(async () => { setSaved(""); await onReconfigure!(values); setServerOpen(false); setSaved(view.label ? t("wallet.source.reconfigured", { name: view.label }) : t("wallet.source.reconfiguredUnnamed")); }, "server");
@@ -168,7 +177,7 @@ export function SourcePicker({ kind, view, onSet, onClear, onRetry, onReconfigur
         )}
         {descriptor && Form && (
           <div className="space-y-3" data-testid={`${kind}-source-config`}>
-            <p className="text-xs text-text-muted">{descriptor.description}</p>
+            <p className="text-xs text-text-muted"><bdi>{descriptor.description}</bdi></p>
             <Form key={descriptor.id} descriptor={descriptor} mode={view.mode} busy={busy} saving={running === "set"} onSubmit={submit} />
           </div>
         )}
