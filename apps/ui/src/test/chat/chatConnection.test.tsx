@@ -92,6 +92,41 @@ describe("ChatConnection: what the header says", () => {
     expect(screen.getByRole("radio", { name: "Automatic" })).toBeEnabled();
   });
 
+  // The contact chose DHT only: its app closes the live link, and this side learns the choice from its DHT envelope, one
+  // read of the mailbox later (about 10 s). Meanwhile the header said "retrying live", with a breathing dot.
+  describe("just after a live link closed", () => {
+    const onDht: Partial<LinkView> = { textDelivery: "dht", dataLink: "idle", peerParticipationKey: "saved", pairing: { status: "ready", peerKey: "peer" } as Pairing };
+    const down = (at: number, more: Partial<NonNullable<LinkView["transportHistory"]>[number]> = {}): Partial<LinkView> =>
+      ({ transportHistory: [{ at: at - 60_000, kind: "live", transport: "webrtc/1", started: true }, { at, kind: "down", from: "webrtc/1", text: "dht", ...more }] });
+
+    it("says it is on the DHT, with no retry, for the first seconds, and retrying live after", () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        banner({ ...onDht, ...down(Date.now() - 2_000) });
+        expect(header()).toMatchObject({ kind: "dht", name: "On DHT", popover: "On DHT", dot: null, pulse: false });
+        expect(screen.getByTestId("connection-options")).not.toHaveAttribute("data-busy");
+        act(() => { vi.advanceTimersByTime(13_000); });
+        expect(header()).toMatchObject({ kind: "dht", name: "On DHT · retrying live", dot: "bg-text-muted", pulse: true });
+      } finally { vi.useRealTimers(); }
+    });
+
+    it("is DHT only, chosen by the contact, as soon as its envelope says so", () => {
+      const view = banner({ ...onDht, ...down(Date.now() - 2_000) });
+      act(() => view.engine.update({ links: [linkView({ availableTransports: all, ...onDht, ...down(Date.now() - 3_000),
+        dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } })] }));
+      expect(header()).toMatchObject({ kind: "dht", name: "DHT only · chosen by your contact", dot: null, pulse: false });
+    });
+
+    it.each<[string, Partial<LinkView>]>([
+      ["it closed long ago", down(Date.now() - 20_000)],
+      ["the stretch is from before this app started", down(Date.now() - 1_000, { restart: true })],
+      ["no live link closed", {}],
+    ])("says retrying live when %s", (_, history) => {
+      banner({ ...onDht, ...history });
+      expect(header()).toMatchObject({ kind: "dht", name: "On DHT · retrying live", dot: "bg-text-muted", pulse: true });
+    });
+  });
+
   it("is back to what the connection says once the device is online again", () => {
     const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
     banner({ pairing: ready() });
