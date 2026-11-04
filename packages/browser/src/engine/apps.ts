@@ -753,14 +753,18 @@ export class Apps {
    * Writes an app's record back only while it is still the record `was` (`sameRecord`), read and written in one
    * transaction: an app uninstalled (or installed again) while the update check was reading is not put back, nor is the
    * version it read over an update the person accepted meanwhile. `was` undefined: only while the app has no record.
+   * A store removed since the caller read the stores pins nothing: it is judged at the write, as `removeStore` unpins
+   * only the records written before it.
    */
   private async putAppIfUnchanged(app: InstalledApp, was: InstalledApp | undefined): Promise<boolean> {
+    const stores = await this.records();
     const tx = (await openDb()).transaction(STORES.apps, "readwrite");
     let put = false;
     const read = tx.objectStore(STORES.apps).get(app.ref);
     read.onsuccess = () => {
       if (!sameRecord(read.result as InstalledApp | undefined, was)) return;
-      tx.objectStore(STORES.apps).put(app);
+      const { store: pin, ...unpinned } = app;
+      tx.objectStore(STORES.apps).put(pin !== undefined && stores.get(pin)?.removed ? unpinned : app);
       put = true;
     };
     try { await done(tx); } finally { this.held.delete(app.ref); }
@@ -1179,11 +1183,22 @@ export class Apps {
     // The person no longer takes this store's curation: an app installed from it updates from its sources and the other
     // stores again (WISP 1200 § Updates and rollback), so its security fixes still arrive. A newer version waiting stays:
     // a valid newer version is one under that rule too.
-    for (const app of await this.installed()) {
-      if (app.store !== key) continue;
-      const { store: _s, ...unpinned } = app;
-      await this.putApp(unpinned);
-    }
+    for (const app of await this.installed()) if (app.store === key) await this.unpinApp(app.ref, key);
+  }
+  /**
+   * Unpins an app from a store removed, read and written in one transaction: the record as it is now, not one read
+   * before (an uninstall, or the update check's write, meanwhile is not undone). Gone, or pinned elsewhere: nothing.
+   */
+  private async unpinApp(ref: string, key: string): Promise<void> {
+    const tx = (await openDb()).transaction(STORES.apps, "readwrite");
+    const read = tx.objectStore(STORES.apps).get(ref);
+    read.onsuccess = () => {
+      const now = read.result as InstalledApp | undefined;
+      if (now?.store !== key) return;
+      const { store: _s, ...unpinned } = now;
+      tx.objectStore(STORES.apps).put(unpinned);
+    };
+    try { await done(tx); } finally { this.held.delete(ref); }
   }
 
   /** Reads one store again, or every store (the person opened the Apps page, or the update check). */

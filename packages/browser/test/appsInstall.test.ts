@@ -725,6 +725,85 @@ describe("an app installed from a store updates only to the version that store l
     expect(await pinnedTo()).toBeUndefined();
   });
 
+  /** `removeStore` waits once it has read the installed apps, until `release` is called; `started` once it is reached. */
+  function holdRemoveStore(store: object) {
+    const engine = store as unknown as { installed: () => Promise<unknown> };
+    const real = engine.installed.bind(store);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let reached!: () => void;
+    const started = new Promise<void>((resolve) => { reached = resolve; });
+    vi.spyOn(engine, "installed").mockImplementationOnce(async () => { const read = await real(); reached(); await held; return read; });
+    return { started, release };
+  }
+  /** The update check waits before it writes the bundle `digest`, until `release` is called; `started` once it is reached. */
+  function holdWrite(store: object, digest: string) {
+    const engine = store as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+    const real = engine.writeBundle!.bind(store);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let reached!: () => void;
+    const started = new Promise<void>((resolve) => { reached = resolve; });
+    vi.spyOn(engine, "writeBundle").mockImplementation(async (...args: unknown[]) => {
+      if (args.includes(digest)) { reached(); await held; }
+      return real(...args);
+    });
+    return { started, release };
+  }
+
+  it("an app uninstalled while its store is removed stays uninstalled", async () => {
+    const { store, v1 } = await fromStore();
+    const { started, release } = holdRemoveStore(store);
+    const removing = store.removeStore({ key: keyOf(STORE_KEY) });
+    await started;
+    await store.uninstall({ ref: v1.ref });
+    release();
+    await removing;
+    expect(await appRows(), "not written back as an app with no files").toEqual([]);
+    expect(await store.list()).toEqual([]);
+    expect(await bundleIds()).toEqual([]);
+  });
+
+  it("an update the check installs while the store is removed stays, with its files, pinned to no store", async () => {
+    const { store, v1 } = await fromStore();
+    const v2 = await bundle({ sequence: 2, sources: [HEAD] });
+    const pinned2 = `https://cdn.jsdelivr.net/gh/ana/chess@${"b".repeat(40)}/app.ghostlyapp`;
+    net.put(pinned2, v2.bytes);
+    await net.putStore(await storeFiles({ sequence: 2, apps: [listing(v2, [pinned2])] }));
+    // The check read the stores and fetched 2; the removal read the apps (v1) before the check wrote 2: it does not
+    // write v1 back over it.
+    const write = holdWrite(store, v2.digest);
+    const check = store.checkUpdates();
+    await write.started;
+    const remove = holdRemoveStore(store);
+    const removing = store.removeStore({ key: keyOf(STORE_KEY) });
+    await remove.started;
+    write.release();
+    expect((await check)[0]!.outcome).toBe("updated");
+    remove.release();
+    await removing;
+    expect((await store.list())[0]).toMatchObject({ ref: v1.ref, sequence: 2, digest: v2.digest, run: { status: "ok" } });
+    expect(await bundleIds()).toEqual([`app-${v2.digest}`]);
+    expect(await pinnedTo()).toBeUndefined();
+  });
+
+  it("an update the check writes after its store was removed is not pinned to that store", async () => {
+    const { store, v1 } = await fromStore();
+    const v2 = await bundle({ sequence: 2, sources: [HEAD] });
+    const pinned2 = `https://cdn.jsdelivr.net/gh/ana/chess@${"b".repeat(40)}/app.ghostlyapp`;
+    net.put(pinned2, v2.bytes);
+    await net.putStore(await storeFiles({ sequence: 2, apps: [listing(v2, [pinned2])] }));
+    // The check read the stores and fetched 2; the person removes the store before it writes 2.
+    const { started, release } = holdWrite(store, v2.digest);
+    const check = store.checkUpdates();
+    await started;
+    await store.removeStore({ key: keyOf(STORE_KEY) });
+    release();
+    expect((await check)[0]!.outcome).toBe("updated");
+    expect((await store.list())[0]).toMatchObject({ ref: v1.ref, sequence: 2, digest: v2.digest, run: { status: "ok" } });
+    expect(await pinnedTo(), "the removed store pins nothing").toBeUndefined();
+  });
+
   it("a waiting update the store no longer lists is not installed; the version it lists now is taken instead", async () => {
     const { store, v1 } = await fromStore();
     const v3 = await bundle({ sequence: 3, permissions: ["chat", "name"], sources: [HEAD] });
