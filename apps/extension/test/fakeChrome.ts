@@ -89,6 +89,8 @@ export interface FakeWorld {
   onCreateDocument: () => Promise<void>;
   /** Makes the next `debugger.attach` fail, as it does when DevTools is already attached. */
   failDebuggerAttach: string | null;
+  /** Makes every `browsingData.remove` fail with this message. */
+  failBrowsingData: string | null;
   manifest: chrome.runtime.Manifest;
   permissionsGranted: boolean;
   webAuthFlow: (url: string) => Promise<string | undefined>;
@@ -135,6 +137,7 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
     offscreenDocument: false,
     onCreateDocument: async () => {},
     failDebuggerAttach: null as string | null,
+    failBrowsingData: null as string | null,
     manifest,
     permissionsGranted: true,
     webAuthFlow: async (url: string) => `${url}#answer`,
@@ -293,6 +296,15 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
         return {};
       },
     },
+    /** Present only with the manifest's `browsingData` permission, as in Chrome. */
+    browsingData: manifest.permissions?.includes("browsingData")
+      ? {
+          async remove(options: chrome.browsingData.RemovalOptions, dataToRemove: chrome.browsingData.DataTypeSet) {
+            record("browsingData.remove", options, dataToRemove);
+            if (world.failBrowsingData) throw new Error(world.failBrowsingData);
+          },
+        }
+      : undefined,
     notifications: undefined as unknown,
     permissions: {
       onAdded: event<(permissions: chrome.permissions.Permissions) => void>(),

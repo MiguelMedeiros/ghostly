@@ -272,7 +272,7 @@ export async function deleteProfile(id: string, password?: string): Promise<void
   retryUnsaved();
   // Its push subscription (WISP 401 § Wake-up push) ends with it: its worker goes, and contacts who kept it get 410.
   await pushPlatform()?.unsubscribe(id).catch(() => {});
-  // What the contacts' apps it opened kept on their own origins (the web app's).
+  // What the contacts' apps it opened kept on their own origins.
   await forgetServicesOf({ profile: id });
   // Each fork of it goes as "Discard this copy" takes it, with its linked files: no screen lists it once the record
   // is gone. Never a database a profile on the list runs on.

@@ -1,8 +1,9 @@
 /**
  * The contacts' apps this device opened, by profile and chat, so what each kept on its origin goes when the chat is
  * deleted, the profile's data is cleared or the profile is deleted. The origin is named from the chat's key: a later
- * chat never opens it again, so nothing else would clear it. The web (apps/web/src/svc/forget.ts) and Desktop
- * (desktop/host.ts) each note theirs in the shape that names their origin, and clear it their own way.
+ * chat never opens it again, so nothing else would clear it. The web (apps/web/src/svc/forget.ts), Desktop
+ * (desktop/host.ts) and the extension (apps/extension/src/host.ts) each note theirs in the shape that names their
+ * origin, and clear it their own way.
  */
 
 /** Not under any profile's prefix (`ghostly_`): the list outlives one profile's Clear all data, and holds every profile's. */

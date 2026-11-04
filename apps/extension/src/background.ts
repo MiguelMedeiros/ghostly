@@ -229,6 +229,13 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     );
     return true;
   }
+  if (message.type === "forget-service") {
+    void forgetViewer(message.peerPubKeyZ32, message.serviceId, message.tag).then(
+      () => sendResponse({ ok: true }),
+      (error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
+    );
+    return true;
+  }
   if (message.type === "close-services") {
     void closeViewers().then(() => sendResponse({ ok: true }), () => sendResponse({ ok: true }));
     return true;
@@ -308,13 +315,15 @@ chrome.tabs.onRemoved.addListener((tabId) => void forget(tabId));
 
 /**
  * Closes every viewer tab, as Desktop closes a contact's app windows (`close_service_windows`): on a profile switch,
- * a new peer, or the lock screen. Its binding goes first, so nothing it still asks for is served.
+ * a new peer, or the lock screen. Its binding goes first, so nothing it still asks for is served. `which`: only the tabs
+ * of the viewers it picks.
  */
-async function closeViewers(): Promise<void> {
+async function closeViewers(which: (binding: ViewerBinding) => boolean = () => true): Promise<void> {
   const tabs = await chrome.tabs.query({});
   await Promise.all(
     tabs.map(async ({ id }) => {
-      if (id === undefined || !(await bindingOf(id))) return;
+      const binding = id === undefined ? null : await bindingOf(id);
+      if (id === undefined || !binding || !which(binding)) return;
       await forget(id);
       await chrome.debugger.detach({ tabId: id }).catch(() => {});
       await chrome.tabs.remove(id).catch(() => {});
@@ -350,6 +359,22 @@ async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string,
     throw error;
   }
   await chrome.tabs.update(tab.id, { url });
+}
+
+/**
+ * Clears what a contact's app kept on its viewer origin, as the web and Desktop clear theirs (`forgetServices`): a tab
+ * still showing it closes first, or the app would write it again. Cookies go for the chat's whole site
+ * (`<tag>.invalid`), Chrome's unit for them: only ever cleared with the chat or the profile, which take all of it.
+ */
+async function forgetViewer(peerPubKeyZ32: string, serviceId: string, tag: string): Promise<void> {
+  const url = viewerUrl(peerPubKeyZ32, serviceId, tag);
+  const parsed = parseViewerUrl(url);
+  if (!parsed || parsed.serviceId !== serviceId || parsed.peerPubKeyZ32 !== peerPubKeyZ32 || parsed.tag !== tag) throw new Error("Invalid service");
+  await closeViewers((binding) => binding.peerPubKeyZ32 === peerPubKeyZ32 && binding.serviceId === serviceId && binding.tag === tag);
+  await chrome.browsingData.remove(
+    { origins: [new URL(url).origin] },
+    { cookies: true, localStorage: true, indexedDB: true, cacheStorage: true, serviceWorkers: true, fileSystems: true, cache: true },
+  );
 }
 
 function errorPage(page: ViewerPage, text: string): string {

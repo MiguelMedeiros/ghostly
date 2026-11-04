@@ -22,7 +22,8 @@
   "permissions": [
     "offscreen",
     "storage",
-    "debugger"
+    "debugger",
+    "browsingData"
   ],
   "optional_permissions": ["notifications", "identity"],
   "optional_host_permissions": [

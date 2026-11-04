@@ -8,6 +8,20 @@ import { languageTag, textDirection } from "../../ui/src/lib/documentLanguage";
 import { translatorFor } from "../../ui/src/locales";
 import { markEngineRestart, pageProfileIsCurrent, startAsProfileInUse } from "./profile";
 import { setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
+import { activeProfileId } from "../../ui/src/lib/profiles";
+import { openedServices, type Opened } from "../../ui/src/lib/openedServices";
+import { parseViewerUrl, viewerUrl } from "./shared/viewer";
+
+/** A contact's app this device opened in a viewer tab, by what names its origin (`https://<service>.<peer>.<tag>.invalid`). */
+interface OpenedViewer extends Opened { service: string; peer: string }
+const openedViewers = openedServices<OpenedViewer>(
+  (o) => {
+    if (typeof o.service !== "string" || typeof o.peer !== "string") return false;
+    const parsed = parseViewerUrl(viewerUrl(o.peer, o.service, o.tag as string));
+    return parsed?.serviceId === o.service && parsed.peerPubKeyZ32 === o.peer && parsed.tag === o.tag;
+  },
+  (a, b) => a.service === b.service && a.peer === b.peer && a.tag === b.tag,
+);
 
 // A contact's app tabs close when the profile locks, as Desktop's windows do: the worker serves them, page or not.
 setServiceWindowsCloser(() => void chrome.runtime.sendMessage({ target: "background", type: "close-services" } satisfies RuntimeMessage).catch(() => {}));
@@ -66,6 +80,8 @@ export const extensionHost: BrowserHost = {
       startAsProfileInUse();
       throw new Error("Switching profiles…");
     }
+    // Noted first: what the app keeps on its origin goes with the chat, its data or its profile (`forgetServices`).
+    openedViewers.note({ profile: activeProfileId(), tag, service: serviceId, peer: peerPubKeyZ32 });
     const reply = await chrome.runtime.sendMessage({
       target: "background",
       type: "open-service",
@@ -76,4 +92,11 @@ export const extensionHost: BrowserHost = {
     } satisfies RuntimeMessage);
     if (!reply?.ok) throw new Error(reply?.error ?? "Could not open the service");
   },
+
+  // The worker closes their tabs and has Chrome clear each origin; one it did not clear stays listed, for the next clear.
+  forgetServices: (which) =>
+    openedViewers.forget(which, async ({ peer, service, tag }) => {
+      const reply = await chrome.runtime.sendMessage({ target: "background", type: "forget-service", peerPubKeyZ32: peer, serviceId: service, tag } satisfies RuntimeMessage);
+      return reply?.ok === true;
+    }),
 };
