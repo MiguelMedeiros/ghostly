@@ -1090,11 +1090,12 @@ export class CommunitySession {
   /**
    * Whether a hand-over (`h`, a `role`) went to a member whose leave of that admission I know on a branch that does not
    * hold the hand-over: signed on a view from before the leave, it would leave the role with someone gone for good (a
-   * leave never names the admin).
+   * leave never names the admin). Not when that member signed a commit after the hand-over: it took the role while still
+   * in, so its leave came later, and a branch from before the hand-over must not undo what it and later admins did.
    */
   private handedToLeaver(h: string): boolean {
     const role = this.known.get(h)!, at = this.mainIndex.get(h), fork = this.branch(h)?.fork;
-    if (fork === undefined) return false;
+    if (fork === undefined || this.signedAfter(h, role.s)) return false;
     // The main branch past a side hand-over's fork, and the side: commits before it are its own history.
     const others = [...(at === undefined ? this.state.chain.slice(fork + 1) : []), ...this.state.side];
     return others.some(c => {
@@ -1103,6 +1104,18 @@ export class CommunitySession {
       const b = this.branch(communityCommitHash(c));
       if (!b || (at !== undefined ? b.fork >= at : b.path.includes(h))) return false;
       return leaveStands(c, this.ancestry(role.p));
+    });
+  }
+
+  /** Whether `key` signed a commit I know that comes after `h` (on the main branch past it, or on a side branch through it). */
+  private signedAfter(h: string, key: string | undefined): boolean {
+    const at = this.mainIndex.get(h);
+    if (!key) return false;
+    if (at !== undefined && this.state.chain.slice(at + 1).some(c => c.by === key)) return true;
+    return this.state.side.some(c => {
+      if (c.by !== key) return false;
+      const b = this.branch(communityCommitHash(c));
+      return !!b && (at !== undefined ? b.fork >= at : b.path.includes(h));
     });
   }
 

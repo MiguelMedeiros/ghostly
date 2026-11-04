@@ -138,8 +138,9 @@ export interface GroupSyncFrame { t: "group-sync"; g: string; e: number; h: stri
  * A member's name, signed by its member key (WISP 902 § Messages, "The name record"): `v` its version, the member's
  * clock when it took the name (a newer one wins), `nm` the name as its app shares it, `sig` over
  * `["ghostly-group/1 name", g, k, v, nm]`. Any member keeps the latest of each and seals it again to hand it over.
+ * `nf`, in my own record only and never sent: the counter floor (`seqFloor`) it was signed under.
  */
-export interface GroupNameRecord { v: number; nm: string; sig: string }
+export interface GroupNameRecord { v: number; nm: string; sig: string; nf?: number }
 /**
  * Member `k`'s name record, `{ nm, sig }` as JSON sealed under epoch `e`'s message key with
  * `["ghostly-group/1 name", g, e, k, v]` as associated data. `v` in the clear: one no newer than the one held goes
@@ -1218,14 +1219,18 @@ export class GroupSession {
     return sha256Hex(utf8Encode(held.join(","))).slice(0, 16);
   }
 
-  /** My name record, signed again when the name my app shares changed since; none while it shares none. */
+  /**
+   * My name record, signed again when the name my app shares changed since, and once after my counters were raised (WISP
+   * 06 § Raised counters): a copy from older state holds the record from before any rename the device it replaces made
+   * since, which every other member holds newer. None while my app shares no name.
+   */
   private ownName(): GroupNameRecord | undefined {
     const nm = sanitizeNick(this.hooks.nick?.());
     if (this.state.status !== "active" || nm === undefined) return undefined;
-    const held = this.state.names?.[this.myKey];
-    if (held?.nm === nm) return held;
+    const held = this.state.names?.[this.myKey], floor = this.seqFloor();
+    if (held?.nm === nm && (held.nf ?? 0) >= floor) return held;
     const v = Math.max(this.clock(), (held?.v ?? 0) + 1);
-    const record = { v, nm, sig: toBase64Url(sign(nameSigned(this.id, this.myKey, v, nm), this.identity.seed)) };
+    const record = { v, nm, sig: toBase64Url(sign(nameSigned(this.id, this.myKey, v, nm), this.identity.seed)), ...(floor ? { nf: floor } : {}) };
     (this.state.names ??= {})[this.myKey] = record;
     this.persistSoon();
     return record;
@@ -1281,15 +1286,17 @@ export class GroupSession {
     if (frame.v <= (this.state.names?.[frame.k]?.v ?? 0)) return;
     const secret = this.secret(frame.e);
     if (!secret) return;
-    let taken = this.namesTaken.get(frame.k);
-    if (!taken) this.namesTaken.set(frame.k, taken = new RateWindow(GROUP_LIMITS.namesPerMember, GROUP_LIMITS.syncWindowMs, () => this.clock()));
-    if (!taken.take()) return;
     const plain = decryptText(epochKeys(secret, this.id, frame.e).message, nameAad(frame), frame.nn, frame.c);
     if (plain === null) return;
     let body: { nm?: unknown; sig?: unknown };
     try { body = JSON.parse(plain) as typeof body; } catch { return; }
     if (!body || typeof body !== "object" || typeof body.nm !== "string" || sanitizeNick(body.nm) !== body.nm || !isSignature(body.sig)) return;
     try { if (!verify(fromBase64Url(body.sig), nameSigned(this.id, frame.k, frame.v, body.nm), publicKeyFromZ32(frame.k))) return; } catch { return; }
+    // Counted once the member's signature holds: any member can seal a record of another, and one that fails would
+    // otherwise take that member's places and keep its own records out.
+    let taken = this.namesTaken.get(frame.k);
+    if (!taken) this.namesTaken.set(frame.k, taken = new RateWindow(GROUP_LIMITS.namesPerMember, GROUP_LIMITS.syncWindowMs, () => this.clock()));
+    if (!taken.take()) return;
     (this.state.names ??= {})[frame.k] = { v: frame.v, nm: body.nm, sig: body.sig };
     if (frame.v > (this.nickAt.get(frame.k) ?? 0)) {
       this.nickAt.set(frame.k, frame.v);
