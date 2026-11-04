@@ -582,10 +582,11 @@ export class TurnKeeper {
         const tombstoned = state === "moving" && read.result === "tombstone" && read.record && read.payload
           ? { tombstone: toBase64Url(read.payload), ...(storedActiveListed(held.record, read.record) ? {} : { reenroll: true as const }) } : {};
         // A takeover that won: the device that stopped still holds `D`, so "New device secret" is offered (`rotate.ts`).
-        const stopped = won && held.record.handoff?.peer ? held.record.deviceSet.find((slot) => slot?.key === held.record.handoff!.peer)?.name : undefined;
+        // Kept by its key: names change, and two devices may have the same one.
+        const stopped = won && held.record.handoff?.peer ? held.record.deviceSet.find((slot) => slot?.key === held.record.handoff!.peer) : undefined;
         held.record = await this.store.move(this.options.profile, state, {
           ...(takeover ? { handoff: undefined } : {}), ...(held.record.settle ? { settle: undefined } : {}), ...copy, ...replacedBy, ...tombstoned,
-          ...(won ? { takeovers, raise: pendingRaise("takeover", takeovers, this.now()), secretOffer: { why: "takeover" as const, at: this.now(), ...(stopped ? { device: stopped } : {}) } } : {}),
+          ...(won ? { takeovers, raise: pendingRaise("takeover", takeovers, this.now()), secretOffer: { why: "takeover" as const, at: this.now(), ...(stopped ? { key: stopped.key, device: stopped.name } : {}) } } : {}),
         });
         if (!action.then) return { kind: "gated", state, reload: action.reload, ...(action.notice ? { notice: action.notice } : {}), read };
         return this.carryOut(held, turnRow(state as DeviceState, true), action.then, read);
