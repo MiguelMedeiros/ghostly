@@ -1,5 +1,5 @@
 import { useI18n } from "../../contexts/I18nContext";
-import { categoryLabel, chatsByPeer, contactName, currentStatus, dateTime, providerLabel, receivedStatus, shortSubject, useEngineState } from "../../lib/identities";
+import { categoryLabel, chatsByPeer, contactName, currentStatus, dateTime, providerLabel, receivedStatus, shortSubject, useEngineValue } from "../../lib/identities";
 import { contactTag } from "../../lib/publicKeyLabel";
 import { chatPath } from "../../lib/url";
 import { Button, Row, Section } from "../wallet/ui";
@@ -14,10 +14,10 @@ const ORDER: Record<string, number> = { revoked: 0, unconfirmed: 0, verified: 1 
  * app checked it. The details and Check again stay in that chat's Identities; this is the overview.
  */
 export function ContactIdentitiesSection() {
-  const state = useEngineState();
+  // Only the chats a contact shared identities in, and those: the page stays open, and drew this again on every state.
+  const links = useEngineValue(state => (state?.links ?? []).flatMap(link => (link.identities?.received.length ? [{ peerPubKeyZ32: link.peerPubKeyZ32, identities: { received: link.identities.received } }] : [])));
   const nav = useAppNavigation();
   const { t } = useI18n();
-  const links = (state?.links ?? []).filter(link => link.identities?.received.length);
   const chats = links.length ? chatsByPeer() : new Map();
   const received = links.flatMap(link => {
     const chat = chats.get(link.peerPubKeyZ32);
