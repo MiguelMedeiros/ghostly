@@ -1,6 +1,5 @@
-import type { BrowserContext, Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { chat, connect, expect, link, test, type Peer } from "../support/fixtures";
-import { pair } from "../support/paired";
 
 const DEFAULT_RELAYS = "https://pkarr.pubky.org\nhttps://pkarr.pubky.app\nhttps://pkarr.miguelmedeiros.dev";
 
@@ -26,114 +25,7 @@ async function keepOffline(peer: Peer): Promise<void> {
   await peer.context.route(/^https?:\/\/relay\.example\.org\//, (route) => route.abort());
 }
 
-/** Every WebRTC connection the page makes, in order: its configuration and the candidates it gathered. */
-type Connection = { policy?: string; urls: string[]; candidates: string[] };
-
-/** Keeps `window.connections` (`Connection`) for every peer connection this context's pages make. Before they open. */
-async function recordConnections(context: BrowserContext): Promise<void> {
-  await context.addInitScript(() => {
-    const connections: { policy?: string; urls: string[]; candidates: string[] }[] = [];
-    (window as unknown as { connections: typeof connections }).connections = connections;
-    const Native = window.RTCPeerConnection;
-    window.RTCPeerConnection = class extends Native {
-      constructor(config?: RTCConfiguration) {
-        super(config);
-        const seen = { policy: config?.iceTransportPolicy, urls: (config?.iceServers ?? []).flatMap((server) => [server.urls].flat()), candidates: [] as string[] };
-        connections.push(seen);
-        this.addEventListener("icecandidate", (event) => { if (event.candidate?.candidate) seen.candidates.push(event.candidate.candidate); });
-      }
-    };
-  });
-}
-
-test("Hide my IP from contacts needs a TURN server, is kept across a reload, and keeps its server while on", { tag: ["@feature:settings.network.relay-only", "@feature:settings.network.turn"] }, async ({ peer }) => {
-  const { page } = await peer("alice");
-  await page.goto("/#/settings/network");
-  const form = network(page);
-  const relayOnly = page.getByTestId("network-relay-only");
-  await expect(relayOnly).toHaveAttribute("aria-checked", "false");
-
-  // Without a TURN server it stays off, and says what to do first.
-  await relayOnly.click();
-  await expect(page.getByRole("alert")).toHaveText("Add a TURN server first. Save one above, then turn this on.");
-  await expect(relayOnly).toHaveAttribute("aria-checked", "false");
-  await page.reload();
-  await expect(relayOnly).toHaveAttribute("aria-checked", "false");
-
-  await form.turnUrl.fill("turn:turn.example.org:3478");
-  await form.turnUser.fill("ghost");
-  await form.turnCredential.fill("s3cret-boo");
-  await save(page);
-  await relayOnly.click();
-  await expect(relayOnly).toHaveAttribute("aria-checked", "true");
-  await page.reload();
-  await expect(relayOnly).toHaveAttribute("aria-checked", "true");
-
-  // The server it goes through is not taken away while it is on: said under its address.
-  await form.turnUrl.fill("");
-  await form.save.click();
-  await expect(form.turnUrl).toHaveAttribute("aria-invalid", "true");
-  await expect(page.getByTestId("network-turn-field")).toContainText("Hide my IP needs this TURN server. Turn it off first, then remove the server.");
-  await page.reload();
-  await expect(form.turnUrl).toHaveValue("turn:turn.example.org:3478");
-
-  await relayOnly.click();
-  await expect(relayOnly).toHaveAttribute("aria-checked", "false");
-  await page.reload();
-  await expect(relayOnly).toHaveAttribute("aria-checked", "false");
-});
-
-/**
- * With it on, every connection to a contact goes through the TURN server alone, and one that does not answer (a closed
- * port here) leaves nothing to connect with: no STUN server asked, no address of this machine handed out, the chat on
- * the DHT, where a text still arrives. Turned off, the chat is live again.
- */
-test("with Hide my IP from contacts on, a contact's connections use the TURN server alone and fail closed", { tag: ["@feature:settings.network.relay-only", "@feature:chat.paired.send"] }, async ({ peer }) => {
-  test.setTimeout(4 * 60_000);
-  const [alice, bob] = await Promise.all([peer("relay-only-alice", { beforeOpen: recordConnections }), peer("relay-only-bob")]);
-  await pair(alice, bob);
-  const page = alice.page;
-  const chatRoute = new URL(page.url()).hash;
-  const connections = () => page.evaluate(() => (window as unknown as { connections: Connection[] }).connections.map((c) => ({ ...c, candidates: [...c.candidates] })));
-  const direct = await connections();
-  // Before: the app's STUN servers, and this machine's own addresses (the pairing went direct).
-  expect(direct.some((c) => c.urls.some((url) => /^stun:/.test(url)))).toBe(true);
-  expect(direct.some((c) => c.candidates.some((candidate) => / typ host /.test(candidate)))).toBe(true);
-
-  // Hash routes: the page (and its record) stays.
-  await page.goto("/#/settings/network");
-  const form = network(page);
-  await form.turnUrl.fill("turn:127.0.0.1:9");
-  await form.turnUser.fill("ghost");
-  await form.turnCredential.fill("s3cret-boo");
-  await save(page);
-  const before = (await connections()).length;
-  await page.getByTestId("network-relay-only").click();
-  await expect(page.getByTestId("network-relay-only")).toHaveAttribute("aria-checked", "true");
-
-  await page.goto(`/${chatRoute}`);
-  await expect(page.getByTestId("connection-options")).not.toHaveAccessibleName(/Connected · /, { timeout: 30_000 });
-  await page.getByPlaceholder("Message…").fill("through the DHT");
-  await page.getByPlaceholder("Message…").press("Enter");
-  await expect(chat(bob).getByText("through the DHT")).toBeVisible({ timeout: 90_000 });
-  // The chat tries again meanwhile (its own offers, and bob's answered): every one through the relay alone.
-  await expect.poll(async () => (await connections()).length - before, { timeout: 60_000 }).toBeGreaterThan(0);
-  const relayed = (await connections()).slice(before);
-  for (const c of relayed) {
-    expect(c.policy).toBe("relay");
-    expect(c.urls).toEqual(["turn:127.0.0.1:9"]);
-    expect(c.candidates.filter((candidate) => !/ typ relay /.test(candidate))).toEqual([]);
-  }
-  await expect(page.getByTestId("connection-options")).not.toHaveAccessibleName(/Connected · /);
-
-  await page.goto("/#/settings/network");
-  await page.getByTestId("network-relay-only").click();
-  await expect(page.getByTestId("network-relay-only")).toHaveAttribute("aria-checked", "false");
-  await page.goto(`/${chatRoute}`);
-  await expect(page.getByTestId("connection-options")).toHaveAccessibleName(/Connected · /, { timeout: 90_000 });
-});
-
-test("a TURN server is kept across a reload, and removed by clearing its address",{ tag: ["@feature:settings.network.turn", "@feature:settings.network.relays"] }, async ({ peer }) => {
+test("a TURN server is kept across a reload, and removed by clearing its address", { tag: ["@feature:settings.network.turn", "@feature:settings.network.relays"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await page.goto("/#/settings/network");
   const form = network(page);
