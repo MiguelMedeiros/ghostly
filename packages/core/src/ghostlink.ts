@@ -3015,7 +3015,9 @@ export class GhostLink {
   /** Issues an HTTP request to a service the peer advertises. */
   async request(serviceId: string, request: ClientRequest): Promise<ClientResponse> {
     if (this.options.params.profile) {
-      await this.connect();
+      // Opened only when it is not: on a live session `connect` is a retry, which says this side's transport policy
+      // again. A shared app's page and each of its files did, and the contact reads 10 a minute (POLICY_RECEIVE_LIMIT).
+      if (this.paired?.state.status !== "ready") await this.connect();
       if (!this.supportsServices) throw new GhostlyHttpError("unavailable", this.isDataLinkOpen
         ? "Your contact's app cannot share services in this chat, or needs an updated Ghostly" : "Shared services need a live connection");
       if (!this.pairedHttp) throw new GhostlyHttpError("closed", "Data link is closed");
