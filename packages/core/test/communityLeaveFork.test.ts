@@ -111,6 +111,145 @@ describe("a committed leave undone by a stale admin commit is said again", { tim
     });
   }
 
+  it("the admin's stale hand-over to the member who left loses the fork: the admin stays someone who is in", async () => {
+    const { net, alice, carol, dave } = await staleAdminAfterLeave((alice, _carol, net) => alice.session.transferAdmin(net.members.get("Bob")!.session.myKey));
+    for (const m of [alice, carol, dave]) {
+      expect(names(net, m), m.name).toEqual(["Alice", "Carol", "Dave"]);
+      expect(net.byKey(m.session.admin!)?.name, m.name).toBe("Alice");
+      expect(m.session.state.pendingLeaves, m.name).toEqual([]);
+    }
+    expect(alice.session.isAdmin).toBe(true);
+    // The group goes on: the admin's next change is followed by everyone.
+    await alice.session.rotate(); await net.settle();
+    expect(new Set([alice, carol, dave].map(m => m.session.topHash)).size).toBe(1);
+  });
+
+  it("a member who hears the hand-over first moves to the leave's branch once it hears that", async () => {
+    const net = new Net();
+    const alice = net.create("Alice");
+    const bob = await net.admit(alice, "Bob");
+    const carol = await net.admit(alice, "Carol");
+    const eve = await net.admit(alice, "Eve");
+    await net.settle();
+    // Alice and Eve are away together: Bob leaves and Carol commits it.
+    alice.online = false; eve.online = false;
+    await bob.session.leave(); await net.settle();
+    bob.online = false;
+    expect(await carol.session.commitPendingLeaves()).toBe(1);
+    await net.settle();
+    // Alice hands the role to Bob on her stale view; Eve hears it first.
+    carol.online = false; alice.online = true; eve.online = true;
+    await alice.session.transferAdmin(bob.session.myKey); await net.settle();
+    expect(net.byKey(eve.session.admin!)?.name).toBe("Bob");
+    carol.online = true;
+    for (const m of [alice, eve]) m.session.catchUp(carol.session.myKey);
+    carol.session.catchUp(alice.session.myKey);
+    await net.settle();
+    for (const m of [alice, carol, eve]) {
+      expect(names(net, m), m.name).toEqual(["Alice", "Carol", "Eve"]);
+      expect(net.byKey(m.session.admin!)?.name, m.name).toBe("Alice");
+    }
+    expect(new Set([alice, carol, eve].map(m => m.session.topHash)).size).toBe(1);
+  });
+
+  it("the stale hand-over heard after the admin's next change is not taken for a second history", async () => {
+    const net = new Net();
+    const alice = net.create("Alice");
+    const bob = await net.admit(alice, "Bob");
+    const carol = await net.admit(alice, "Carol");
+    const eve = await net.admit(alice, "Eve");
+    await net.settle();
+    alice.online = false; eve.online = false;
+    await bob.session.leave(); await net.settle();
+    bob.online = false;
+    expect(await carol.session.commitPendingLeaves()).toBe(1);
+    await net.settle();
+    await alice.session.transferAdmin(bob.session.myKey);
+    alice.online = true;
+    alice.session.catchUp(carol.session.myKey); carol.session.catchUp(alice.session.myKey);
+    await net.settle();
+    await alice.session.rotate(); await net.settle();
+    // Eve, away all along, hears the leave and the rotation first, then the hand-over.
+    eve.online = true;
+    eve.session.catchUp(carol.session.myKey); await net.settle();
+    const role = alice.session.state.side.find(c => c.k === "role")!;
+    expect(role).toBeDefined();
+    await eve.session.handle(alice.session.myKey, { t: "group-commit", v: 2, g: eve.session.id, commit: clone(role) });
+    await net.settle();
+    for (const m of [alice, carol, eve]) {
+      expect(m.session.status, m.name).toBe("active");
+      expect(net.byKey(m.session.admin!)?.name, m.name).toBe("Alice");
+      expect(names(net, m), m.name).toEqual(["Alice", "Carol", "Eve"]);
+    }
+    expect(new Set([alice, carol, eve].map(m => m.session.topHash)).size).toBe(1);
+  });
+
+  it("a longer branch without the leave does not bring the hand-over back", async () => {
+    const net = new Net();
+    const alice = net.create("Alice");
+    const bob = await net.admit(alice, "Bob");
+    const carol = await net.admit(alice, "Carol");
+    const dave = await net.admit(alice, "Dave");
+    await net.settle();
+    // Three views at once: Carol commits Bob's leave, Dave lets two people in, Alice hands the role to Bob.
+    alice.online = false; dave.online = false;
+    await bob.session.leave(); await net.settle();
+    bob.online = false;
+    expect(await carol.session.commitPendingLeaves()).toBe(1);
+    carol.online = false; dave.online = true;
+    for (const _ of [1, 2]) await dave.session.admit(createIdentity().pubKeyZ32);
+    dave.online = false;
+    await alice.session.transferAdmin(bob.session.myKey);
+    for (const m of [alice, carol, dave]) m.online = true;
+    for (const [x, y] of [[alice, carol], [alice, dave], [carol, dave], [carol, alice], [dave, alice], [dave, carol]] as const) x.session.catchUp(y.session.myKey);
+    await net.settle();
+    for (const m of [alice, carol, dave]) m.session.catchUp(carol.session.myKey);
+    await net.settle();
+    // Whatever order each heard them in, they agree, and the admin is Alice.
+    expect(new Set([alice, carol, dave].map(m => m.session.topHash)).size).toBe(1);
+    for (const m of [alice, carol, dave]) expect(net.byKey(m.session.admin!)?.name, m.name).toBe("Alice");
+  });
+
+  it("a mixed group: an app from before keeps the hand-over until it updates, then comes over", async () => {
+    // Dave's app has no such rule: the branch with an admin change wins there, as before.
+    const old = (m: Member) => { (m.session as unknown as { handedToLeaver: () => boolean }).handedToLeaver = () => false; };
+    const net = new Net();
+    const alice = net.create("Alice");
+    const bob = await net.admit(alice, "Bob");
+    const carol = await net.admit(alice, "Carol");
+    const dave = await net.admit(alice, "Dave");
+    old(dave);
+    await net.settle();
+    alice.online = false;
+    await bob.session.leave(); await net.settle();
+    bob.online = false;
+    expect(await carol.session.commitPendingLeaves()).toBe(1);
+    await net.settle();
+    await alice.session.transferAdmin(bob.session.myKey);
+    alice.online = true;
+    for (const m of [alice, carol, dave]) m.session.catchUp(alice === m ? carol.session.myKey : alice.session.myKey);
+    carol.session.catchUp(alice.session.myKey);
+    await net.settle();
+    for (const m of [alice, carol]) expect(net.byKey(m.session.admin!)?.name, m.name).toBe("Alice");
+    // The older app follows the hand-over: Bob, gone, is its admin.
+    expect(net.byKey(dave.session.admin!)?.name).toBe("Bob");
+    expect(names(net, dave)).toEqual(["Alice", "Bob", "Carol", "Dave"]);
+    // The admin's next change: the older app takes it for a stale branch and stays where it is.
+    await alice.session.rotate(); await net.settle();
+    expect(net.byKey(dave.session.admin!)?.name).toBe("Bob");
+    expect(dave.session.topHash).not.toBe(alice.session.topHash);
+    // Updated (its saved state opened by an app with the rule), it comes over and catches up.
+    net.members.delete("Dave");
+    const updated = { name: "Dave", session: null as unknown as CommunitySession, online: true };
+    net.members.set("Dave", updated);
+    updated.session = new CommunitySession(clone(dave.session.state), (net as unknown as { hooks(n: string): CommunitySessionHooks }).hooks("Dave"));
+    await net.settle();
+    updated.session.catchUp(alice.session.myKey); await net.settle();
+    expect(updated.session.status).toBe("active");
+    expect(net.byKey(updated.session.admin!)?.name).toBe("Alice");
+    expect(updated.session.topHash).toBe(alice.session.topHash);
+  });
+
   it("a leave the winning branch holds too is not asked again", async () => {
     const { net, alice, carol, dave } = await staleAdminAfterLeave(async (alice, carol, net) => {
       // Alice is back first and syncs, then rotates: no fork, the leave stays.
