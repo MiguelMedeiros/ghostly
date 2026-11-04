@@ -8,7 +8,7 @@ import type { LinkView } from "@ghostly/browser/shared/types";
 import { useEffect, useId, useRef, useState, type FocusEvent } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { dots, focus, transportName, type ConnectionKind } from "../lib/connection";
-import { connectionSummary, lasting, liveAttemptText, transportWaitText } from "../lib/transportEvents";
+import { connectionSummary, lasting, liveAttemptText, namedReason, transportWaitText } from "../lib/transportEvents";
 import { clockTime, formatAt } from "../lib/time";
 import { ConnectionIcon } from "./ConnectionIcon";
 import { PairingDetail } from "./pairing/PairingDetail";
@@ -327,7 +327,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
             <DiscoveryHealth status={discovery} />
             {!dht && Object.entries(link?.transportErrors ?? {}).map(([transport, reason]) => {
               const said = problemText(reason, t, "connect");
-              return <Notice key={transport} testId="connection-transport-error" className="" title={t("connection.line.withReason", { text: name(transport as PairedTransport), reason: said.title })} next={said.next} details={said.detail} />;
+              return <Notice key={transport} testId="connection-transport-error" className="" title={namedReason(name(transport as PairedTransport), said.title, t)} next={said.next} details={said.detail} />;
             })}
             {(pinned || pair?.keyMismatch) && <div data-testid="pair-trust">
               {pair?.keyMismatch ? <p role="alert" className="text-danger">{t("connection.panel.keyMismatch")}</p> : <>
