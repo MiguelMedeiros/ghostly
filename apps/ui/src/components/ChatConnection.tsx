@@ -5,7 +5,7 @@ import { useFocusBack } from "../hooks/useFocusBack";
 import { Link } from "react-router-dom";
 import type { PairedTransport } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
-import { useEffect, useId, useRef, useState, useSyncExternalStore, type FocusEvent } from "react";
+import { useEffect, useId, useRef, useState, type FocusEvent } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { dots, focus, transportName, type ConnectionKind } from "../lib/connection";
 import { connectionSummary, lasting, liveAttemptText, transportWaitText } from "../lib/transportEvents";
@@ -28,9 +28,8 @@ import { problemText, problemLine } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { useWindowAway } from "../lib/windowAway";
 import { useOnline } from "../hooks/useOnline";
+import { useEngineValue } from "../lib/engineState";
 
-const subscribe = (listener: () => void) => engine.subscribe(listener);
-const snapshot = () => engine.state;
 const name = transportName;
 /**
  * How long after a live link closed the chat on the DHT is not said to be "retrying live". A contact choosing DHT only
@@ -92,8 +91,15 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   /** A call is on in this chat (placed, ringing in or connected), until it ends. */
   callOn?: boolean;
 }) {
-  const state = useSyncExternalStore(subscribe, snapshot);
-  const link = paired ? state?.links.find(l => l.peerPubKeyZ32 === peerKey) : undefined, pair = link?.pairing;
+  // What it shows of the engine's state, compared by content: the whole state drew the chat's header on every change.
+  const { link, ghostlyOnline, directBlocked, clockOffMs, discovery } = useEngineValue((state) => ({
+    link: paired ? state?.links.find(l => l.peerPubKeyZ32 === peerKey) : undefined,
+    ghostlyOnline: state?.settings.online ?? true,
+    directBlocked: state?.transport?.directBlocked,
+    clockOffMs: state?.transport?.clockOffMs,
+    discovery: state?.transport?.discovery,
+  }));
+  const pair = link?.pairing;
   const [menuOpen, setMenuOpen] = useState(false);
   const nav = useAppNavigation();
   const [error, setError] = useState("");
@@ -104,7 +110,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   const root = useRef<HTMLDetailsElement>(null), trigger = useRef<HTMLElement>(null);
   // Offline either way: Ghostly's own switch, or a device with no network. The banner says the second; what the relays
   // answer meanwhile (nothing reachable, cooling down) is that and nothing more, so it is no connection issue.
-  const id = useId(), ghostlyOnline = state?.settings.online ?? true, deviceOnline = useOnline(), online = ghostlyOnline && deviceOnline;
+  const id = useId(), deviceOnline = useOnline(), online = ghostlyOnline && deviceOnline;
   const dht = link?.deliveryMode === "dht", textDht = link?.textDelivery === "dht", ready = online && pair?.status === "ready" && link?.dataLink === "open" && !!pair.transport;
   // Messages held for the contact (WISP 404): they take the DHT's place for text while nothing is live.
   const holding = !ready && link?.textDelivery === "hold";
@@ -268,8 +274,8 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
           onClick={() => { close(); pairing.onShow?.(); }}>{t("pairing.showProgress")}</button>}
       </div>}
       {problem && <Notice problem={problem} testId="connection-failure" className="mt-1.5 px-1" />}
-      {paired && online && !dht && state?.transport?.directBlocked && <DirectBlockedHint />}
-      {online && state?.transport?.clockOffMs !== undefined && <ClockOffHint ms={state.transport.clockOffMs} />}
+      {paired && online && !dht && directBlocked && <DirectBlockedHint />}
+      {online && clockOffMs !== undefined && <ClockOffHint ms={clockOffMs} />}
       {paired && <fieldset disabled={busy || !ghostlyOnline || !link} className="mt-2">
         <legend className="sr-only">{t("connection.panel.legend")}</legend>
         {link && <TransportOptions link={link} disabled={busy || !ghostlyOnline} dhtBlocked={callOn ? t("connection.option.dhtCallOn") : undefined}
@@ -318,7 +324,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
               {summary.since !== undefined && <><dt>{t("connection.panel.liveSince")}</dt><dd className="text-text-primary">{clock(summary.since)} ({lasting(Date.now() - summary.since, t)})</dd></>}
               <dt>{t("connection.detail.why")}</dt><dd className="min-w-0 break-words text-text-primary">{summary.why}</dd>
             </dl>}
-            <DiscoveryHealth status={state?.transport?.discovery} />
+            <DiscoveryHealth status={discovery} />
             {!dht && Object.entries(link?.transportErrors ?? {}).map(([transport, reason]) => {
               const said = problemText(reason, t, "connect");
               return <Notice key={transport} testId="connection-transport-error" className="" title={t("connection.line.withReason", { text: name(transport as PairedTransport), reason: said.title })} next={said.next} details={said.detail} />;

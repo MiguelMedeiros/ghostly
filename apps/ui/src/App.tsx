@@ -10,7 +10,7 @@ import { chatRouteSession } from "./lib/url";
 import { offerSession } from "./lib/lockedRing";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useIsMobile } from "./hooks/useIsMobile";
-import { useServicesPlatform } from "./hooks/useServicesPlatform";
+import { servicesPlatform } from "./lib/platform";
 import { useSettings } from "./contexts/SettingsContext";
 import { newSpace } from "@ghostly/browser/backup/storage";
 import { useViewportHeight } from "./hooks/useViewportHeight";
@@ -65,7 +65,9 @@ function useThemeColor() {
  */
 function useHoldStorageSync() {
   const { settings, updateBackupStorage } = useSettings();
-  const platform = useServicesPlatform();
+  // The platform object only (it never changes): following its state drew the app's shell, and every chat it holds, on
+  // every engine state.
+  const platform = servicesPlatform;
   const s3 = settings.backupS3 ? JSON.stringify(settings.backupS3) : null;
   const space = settings.backupSpace;
   useEffect(() => {
