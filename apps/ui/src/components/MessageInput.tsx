@@ -709,9 +709,15 @@ export function MessageInput({
     shareFiles(share).then((files) => offerRef.current(files), (error: unknown) => showToast(problemLine(error, t)));
   };
   const offerSharedRef = useRef(offerShared); offerSharedRef.current = offerShared;
-  /** A drop's files the platform read (another app's, on Linux), as a paste's are: what could not be read is said. */
+  /**
+   * A drop's files the platform read (another app's, on Linux), as a paste's are: what could not be read is said, and so
+   * is a read that ends where files cannot go any more (an edit began meanwhile).
+   */
   const offerHeld = (held: Promise<File[]>) => {
-    held.then((files) => { if (!files.length) showToast(t("errors.files.dropUnreadable")); else offerRef.current(files); },
+    held.then((files) => {
+      if (!files.length) showToast(t("errors.files.dropUnreadable"));
+      else if (!offerRef.current(files)) showToast(t("errors.files.dropLate"));
+    },
       (error: unknown) => showToast(problemLine(error, t)));
   };
   const offerHeldRef = useRef(offerHeld); offerHeldRef.current = offerHeld;
