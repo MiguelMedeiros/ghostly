@@ -85,7 +85,10 @@ export interface StoredLink {
   peerAvatar?: string;
   /** Present on the side that created the link, until the peer shows up. */
   inviteCode?: string;
-  /** Messages deleted on this device, by id, so a republished one is not stored again. */
+  /**
+   * Messages deleted on this device, by id, so a republished one is not stored again: 500 at most, my deletions never
+   * pushing out the contact's ids nor theirs mine (`withDeletedId`).
+   */
   deletedIds?: string[];
   /**
    * 1:1 chats: the contact has had a row here in the words of the chat's joined line (a contact request's note aside),
@@ -97,7 +100,8 @@ export interface StoredLink {
   removals?: Removal[];
   /**
    * The ids both sides know (`replyRef`) of the messages deleted for everyone, mine or the contact's, here or not, the
-   * newest 500: a pin naming one shows as unpinned, the pin kept as it came (WISP 400 § Delete for everyone).
+   * newest 500: a pin naming one shows as unpinned, the pin kept as it came and marked (`StoredPin.removed`), so no
+   * later trimming brings it back (WISP 400 § Delete for everyone).
    */
   removedRefs?: string[];
   /**
@@ -1057,9 +1061,10 @@ export interface MessagePage { messages: StoredMessage[]; more: boolean }
 /**
  * A chat's pin as kept (WISP 400 § Pinned message): the message's id both sides know (`id`, "" unpinned), the pinner's
  * number (the highest wins), who pinned (`me`, `peer`, or a member's key) and when it came here. `messageId`: the row
- * here, when it was here then. A private group's keeps the pinner's signature (`k`, `sig`), to pass it on.
+ * here, when it was here then. A private group's keeps the pinner's signature (`k`, `sig`), to pass it on. `removed`: a
+ * 1:1 chat's, its message deleted for everyone: shown as unpinned for good, the pin kept as it came.
  */
-export interface StoredPin extends WirePin { by: string; at: number; messageId?: string; k?: string; sig?: string }
+export interface StoredPin extends WirePin { by: string; at: number; messageId?: string; k?: string; sig?: string; removed?: true }
 
 /** A chat's pin, as the pages and the CLI see it. `id`: the id both sides know the message by ("" once unpinned); `messageId`: the row here. */
 export interface PinView { id: string; by: string; at: number; messageId?: string }
