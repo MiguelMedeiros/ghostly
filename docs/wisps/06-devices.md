@@ -412,6 +412,8 @@ A hostile holder of `D` can close each new address only if it also holds the new
 - The active device itself, with a release from itself to itself, when `rev` runs out or when a packet with no valid record stands at or above the last sequence of its turn. It stays active throughout; this is the one release that is not preceded by writing `standby`, and the one raise that changes nothing about who is active.
 - A device that forces a takeover, with no release. The record says so, and every other device shows it. Its turn is one above the highest turn it knows, **counting any release it signed itself**: a device that released turn `N + 1` and then takes over uses `N + 2`, so the taker's held release can never outrank it.
 
+The record that raises the turn lists the set of the newest record of the set the device knows. The read it acts on may return a record above the one it stored (a device added or renamed since it last read: a later `rev` of the releaser's turn is no rival to a taker); when that record lists this device in its own slot, its slots are the ones written and stored, with any device the stored set lists in a slot that record leaves empty (within one `D` a slot is never emptied). Written from its stored set alone, the record would drop the device added, which keeps `D` and is listed nowhere, so nobody could remove it, and undo the rename.
+
 A handoff and a takeover each need the person to press a button, and each ends with the [settle wait](#settle-how-a-raised-turn-becomes-active). Nothing else raises the turn; the release to itself moves the number, never the active device, and only a packet signed with the turn key can make it necessary (a sequence a relay merely reports cannot).
 
 ### When a device checks

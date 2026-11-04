@@ -157,6 +157,24 @@ export function deviceSetOf(record: TurnRecord): (DeviceSlot | null)[] {
   return record.slots.map((slot) => slot && { key: toBase64Url(slot.key), name: slot.name });
 }
 
+/**
+ * The slots of the first record of a turn this device raises (WISP 06 § Who may raise the turn): those of the newest
+ * record of the set it knows. The read the raise acts on may return a record above the one it stored (a device added or
+ * renamed since its last read); when that record still lists this device in its own slot, its slots are written, with
+ * any device of the stored set in a slot that record leaves empty (within one `D` a slot is never emptied). Undefined:
+ * the stored set is the newest. Written as stored, the set would drop the device added, which keeps `D` and is listed
+ * nowhere, and undo the rename.
+ */
+export function newestSlots(held: Pick<Held, "record" | "ownSlot" | "ownKey" | "storedRecord">, read: Pick<TurnRead, "result" | "record">): (DeviceSlot | null)[] | undefined {
+  const news = read.record;
+  if (!news || news.tombstone || read.result === "clone") return undefined;
+  if (held.storedRecord && news.sequence <= held.storedRecord.sequence) return undefined;
+  const listed = news.slots[held.ownSlot];
+  if (!listed || !bytesEqual(listed.key, held.ownKey)) return undefined;
+  const set = deviceSetOf(news);
+  return set.map((slot, i) => slot ?? (held.record.deviceSet[i] && !set.some((s) => s?.key === held.record.deviceSet[i]!.key) ? held.record.deviceSet[i] : null));
+}
+
 interface Held {
   record: DeviceRecord; keys: TurnKeys; ownSlot: number; ownKey: Uint8Array; stored: Uint8Array | null; storedRecord: TurnRecord | null;
   /** This device wrote the packet it stored. */
@@ -400,7 +418,9 @@ export class TurnKeeper {
       // settles can offer a new device secret against it by name.
       const stopping = held.record.activeSlot !== undefined && held.record.activeSlot !== held.ownSlot ? held.record.deviceSet[held.record.activeSlot]?.key : undefined;
       held.record = await this.store.move(this.options.profile, "taking", { handoff: { role: "taking", step: `${TAKEOVER}${prior}`, ...(stopping ? { peer: stopping } : {}) } });
-      try { await this.writeWith(held, read.conditions, { turn, ...(options.slots ? { slots: options.slots } : {}) }, true); } catch (error) {
+      // The set of the newest record it knows, not only the one it stored: a device added since its last read stays listed.
+      const slots = options.slots ?? newestSlots(held, read);
+      try { await this.writeWith(held, read.conditions, { turn, ...(slots ? { slots } : {}) }, true); } catch (error) {
         // Nothing was put: the device is what it was.
         if (!held.wroteNow) held.record = await this.store.move(this.options.profile, prior, { handoff: undefined, settle: undefined });
         // No record can be written above what it saw: it stays what it was, and the host is told.
@@ -446,7 +466,9 @@ export class TurnKeeper {
       }
       // Something other than the releaser's record it already holds: the table says what (yield, a tombstone, wait).
       if (!fresh) return this.settle(held, read, true);
-      try { await this.writeWith(held, read.conditions, { turn, release }, true); } catch (error) {
+      // A later rev of the releaser's turn lists the set as it is now (a device added, a rename): written from it.
+      const slots = newestSlots(held, read);
+      try { await this.writeWith(held, read.conditions, { turn, release, ...(slots ? { slots } : {}) }, true); } catch (error) {
         if (error instanceof TurnClosedError) return this.exhausted(held, "taking", read);
         if (error instanceof TurnStaleReadError) return { kind: "wait", read };
         throw error;
