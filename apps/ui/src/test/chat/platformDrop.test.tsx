@@ -82,6 +82,25 @@ describe("files dragged in from another app that the webview names by address on
     expect(field().value).toBe("");
   });
 
+  it("while the platform reads a drop's files (up to 256 MB, in steps), the composer says so; the sheet replaces the line", async () => {
+    let release!: () => void;
+    const slow = held("film.mp4", "bytes");
+    slow.read = vi.fn(async (offset: number, length: number) => {
+      await new Promise<void>((done) => { release = done; });
+      return new TextEncoder().encode("bytes").slice(offset, offset + length);
+    });
+    read.mockResolvedValueOnce([slow]);
+    composer();
+    act(() => over(true));
+    expect(fireEvent.drop(screen.getByTestId("messages"), named())).toBe(false);
+    expect(await screen.findByRole("status")).toHaveTextContent("Reading what you dropped…");
+    expect(screen.queryByTestId("attachment-sheet")).toBeNull();
+    await waitFor(() => expect(slow.read).toHaveBeenCalled());
+    act(() => release());
+    expect(await screen.findByTestId("attachment-sheet")).toBeInTheDocument();
+    expect(screen.queryByTestId("paste-reading")).toBeNull();
+  });
+
   it("a drop with no file to send (a folder) says so; the next drag is a link again once the drop is over", async () => {
     read.mockResolvedValueOnce([]);
     composer();

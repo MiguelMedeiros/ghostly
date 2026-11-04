@@ -1,3 +1,4 @@
+import type { IceServerSetting } from "@ghostly/browser/shared/types";
 import { Link } from "react-router-dom";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useI18n } from "../contexts/I18nContext";
@@ -12,9 +13,12 @@ export const CALLS_BLOCKED_GUIDE = `${APP_WEBSITE}/blob/main/docs/CALLS-BLOCKED.
  * UDP, or lets only TCP 443 out, does that, on either side; chats still go through the relays, calls need a TURN
  * server. The note says so, and points to where one is set (Settings, Network) and to the guide. It never says a VPN
  * was found: the app only sees that the call found no path. It stays until closed or the next call starts.
+ * With a TURN server already set (`iceServers`, the profile's), the call failed through it too: the note says to check
+ * it (its address, its credential, which a restored backup leaves out) or that the contact may need one, not to add one.
  */
-export function CallNoPathNotice({ onClose }: { onClose: () => void }) {
+export function CallNoPathNotice({ iceServers, onClose }: { iceServers?: readonly IceServerSetting[]; onClose: () => void }) {
   const { t } = useI18n();
+  const turnSet = (iceServers ?? []).some((server) => server.urls.split(/[\s,]+/).some((url) => /^turns?:/i.test(url)));
   const nav = useAppNavigation();
   const link = "rounded text-accent underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
   return (
@@ -22,7 +26,7 @@ export function CallNoPathNotice({ onClose }: { onClose: () => void }) {
       className="top-notice flex items-start gap-3 rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl">
       <div className="min-w-0">
         <span className="block font-medium">{t("calls.noPath")}</span>
-        <span className="block text-text-secondary">{t("calls.noPathNext")}</span>
+        <span className="block text-text-secondary">{t(turnSet ? "calls.noPathTurnSet" : "calls.noPathNext")}</span>
         <span className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
           <Link data-testid="call-no-path-settings" className={link} to="/settings/network"
             onClick={(e) => { e.preventDefault(); onClose(); nav.open("/settings/network"); }}>{t("calls.noPathSettings")}</Link>

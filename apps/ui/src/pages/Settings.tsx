@@ -27,7 +27,8 @@ import { currentProfile, listProfiles } from "../lib/profiles";
 import { openProfileSwitcher, useProfileGlances } from "../hooks/useProfileSwitcher";
 import { NeedsYouDot, NeedsYouList } from "../components/NeedsYou";
 import type { NeedsYou } from "../lib/needsYou";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
 import { Button, Switch, chosenInForcedColors } from "../components/wallet/ui";
 import { setLoadPublicProfiles, useLoadPublicProfiles } from "../hooks/usePublicProfileRequest";
 import { setSendTyping, useSendTyping } from "../hooks/useTyping";
@@ -42,7 +43,7 @@ import { playSound } from "../lib/sounds";
 import { clearAllData } from "../lib/clearData";
 import { useAppsAvailable } from "../lib/apps/flag";
 import { lockPasswordMin, useDeviceSet } from "../lib/devices";
-import { useEngineState } from "../lib/engineState";
+import { useEngineValue } from "../lib/engineState";
 import { engine } from "@ghostly/browser/platform/engine";
 import {
   hashPassword,
@@ -135,7 +136,7 @@ export function Settings() {
   const isMobile = useIsMobile();
   const profile = currentProfile();
   const myAvatar = useMyAvatar();
-  const canSwitch = !!useServicesPlatform()?.features.profiles;
+  const canSwitch = usePlatformValue(() => !!servicesPlatform?.features.profiles);
   const glances = useProfileGlances();
   const peekOn = peekEnabled(settings, isDesktopApp());
   const loadPublicProfiles = useLoadPublicProfiles();
@@ -316,9 +317,10 @@ export function Settings() {
     return engine.call("deviceSet").then((view) => view.state !== "single", () => true);
   };
   // The push address contacts hold is another device's (WISP 06 § Push and the phone): this one is not woken by it.
-  const engineState = useEngineState();
-  const wakeAway = engineState?.wakeOwner === "away" && !!engineState.settings.wake;
-  const wakeAwayDevice = wakeAway ? devices?.devices.find((device) => device.key === engineState?.settings.wake?.device)?.name : undefined;
+  // Read alone, so a state that changes nothing here (a file's progress, up to 20 a second) does not draw the page again.
+  const wakeAwayKey = useEngineValue((state) => state?.wakeOwner === "away" && state.settings.wake ? state.settings.wake.device ?? "" : null);
+  const wakeAway = wakeAwayKey !== null;
+  const wakeAwayDevice = wakeAway ? devices?.devices.find((device) => device.key === wakeAwayKey)?.name : undefined;
 
   useEffect(() => {
     setStorageInfo(getStorageUsage());
