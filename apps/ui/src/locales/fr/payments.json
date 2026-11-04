@@ -184,6 +184,9 @@
     "maxFee": "Frais maximum acceptés ({{unit}})",
     "maxFeeAria": "Frais maximum en {{unit}}",
     "millisats": "{{amount}} millisats",
+    "moneroInfo": "Ghostly n'a pas de portefeuille Monero. Payer ouvre ce lien dans le portefeuille Monero de cet appareil, où vous le vérifiez et l'envoyez.",
+    "moneroLabel": "Monero",
+    "moneroPayTitle": "Ouvre votre portefeuille Monero sur cet appareil",
     "networkNotStated": "Réseau non précisé",
     "noWallet": {
       "mainnet": "Vous n'avez aucun portefeuille {{wallet}} Mainnet pour payer cet argent réel.",

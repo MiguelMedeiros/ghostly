@@ -78,7 +78,9 @@ export function verifierStands(record: DeviceRecord, latest: TurnRecord | null):
   return !stated || bytesEqual(stated, turnVerifierMark(record.verifier));
 }
 
-const sameName = (a: string, b: string) => a.normalize("NFC").trim().toLocaleLowerCase() === b.normalize("NFC").trim().toLocaleLowerCase();
+/** A name as it is seen and typed: nobody types a joiner, a variation selector or a filler, which draw nothing. */
+const typedName = (name: string) => name.normalize("NFC").replace(/\p{Default_Ignorable_Code_Point}/gu, "").trim().toLocaleLowerCase();
+const sameName = (a: string, b: string) => typedName(a) === typedName(b);
 
 /** One try at a time on this device, whoever asks: tries sent at once would all be checked against the same count. */
 let tries: Promise<unknown> = Promise.resolve();

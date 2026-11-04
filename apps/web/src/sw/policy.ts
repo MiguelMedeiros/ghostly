@@ -8,6 +8,8 @@
  * which never reaches a worker at all; the shell is the same file for every address.
  */
 
+import { sanitizeFileName } from "../../../../packages/core/src/files";
+
 /** Where the operating system posts what is shared into the installed app (manifest `share_target`). */
 export const SHARE_TARGET_PATH = "/share-target";
 
@@ -86,8 +88,91 @@ export function desktopOnlyFiles(bundle: Iterable<{ type: string; fileName: stri
 }
 
 /**
+ * What only an online flow loads, by module id: a Pubky approval (it waits on a relay for a remote signer) and the
+ * homeserver reads, a Keet proof (signed for, or checked from, a contact on a live channel), a device handoff's PAKE
+ * (both devices online), and the USDT and Ark wallets' adapters and SDK (nothing without their RPC or Ark server; their
+ * wasm is not precached either). 2.4 MiB of the build: cached the first time one is used, not at install.
+ */
+const ONLINE_ONLY_MODULES = [
+  "/node_modules/@synonymdev/pubky/", "/node_modules/keet-identity-key/", "/node_modules/@serenity-kit/opaque/", "/node_modules/@arkade-os/sdk/",
+  "/paymentAdapters/usdt.ts", "/paymentAdapters/arkade.ts",
+];
+
+/** A language's dictionary, a chunk of its own (`loadLocale`). English is in the entry. */
+const LANGUAGE_MODULE = /\/apps\/ui\/src\/locales\/([a-z]{2})\/index\.ts$/;
+
+/** The language every build carries in its entry, so it has no files of its own to precache. */
+export const ENTRY_LANGUAGE = "en";
+
+export interface BundleFile {
+  type: string;
+  fileName: string;
+  isEntry?: boolean;
+  facadeModuleId?: string | null;
+  imports?: readonly string[];
+  dynamicImports?: readonly string[];
+}
+
+/**
+ * The build's chunks the install leaves to their first use: those only reached through a dynamic import of an
+ * online-only module (`onlineOnly`) or of a language (`languages`, by language: the install takes the person's own,
+ * `installList`). Walked from the entries along every import but those: a chunk any other path reaches is kept.
+ */
+export function optionalFiles(bundle: Iterable<BundleFile>): { onlineOnly: string[]; languages: Record<string, string[]> } {
+  const chunks = new Map([...bundle].filter((file) => file.type === "chunk").map((file) => [file.fileName, file]));
+  const facade = (file: BundleFile) => file.facadeModuleId?.replace(/\\/g, "/") ?? "";
+  const languageOf = (file: BundleFile) => LANGUAGE_MODULE.exec(facade(file))?.[1];
+  const door = (file: BundleFile) => languageOf(file) !== undefined || ONLINE_ONLY_MODULES.some((id) => facade(file).includes(id));
+  const walk = (from: readonly string[], seen: Set<string>, stopAtDoors: boolean) => {
+    const queue = [...from];
+    while (queue.length) {
+      const file = chunks.get(queue.pop()!);
+      if (!file || seen.has(file.fileName)) continue;
+      seen.add(file.fileName);
+      queue.push(...(file.imports ?? []));
+      queue.push(...(file.dynamicImports ?? []).filter((name) => !stopAtDoors || !chunks.has(name) || !door(chunks.get(name)!)));
+    }
+    return seen;
+  };
+  const kept = walk([...chunks.values()].filter((file) => file.isEntry).map((file) => file.fileName), new Set(), true);
+  const languages: Record<string, string[]> = {};
+  for (const file of chunks.values()) {
+    const language = languageOf(file);
+    if (language === undefined || kept.has(file.fileName)) continue;
+    languages[language] = [...walk([file.fileName], new Set(), false)].filter((name) => !kept.has(name)).sort();
+  }
+  const ofLanguages = new Set(Object.values(languages).flat());
+  const onlineOnly = [...chunks.keys()].filter((name) => !kept.has(name) && !ofLanguages.has(name)).sort();
+  return { onlineOnly, languages };
+}
+
+/** A hashed file's name without its digest (`/assets/fr-Ab12Cd34.js` → `/assets/fr`): the same file of another build. */
+const stem = (path: string) => path.replace(/-[^/]*$/, "");
+
+/**
+ * What the install fetches: the precache, and the files of the languages this browser reads in. That is the first of
+ * its languages the app speaks (`browserLanguage`, a new profile's language), and any language the previous build's
+ * cache held (`held`, its paths): a page reading in it fetched it, so it opens in it offline after a deploy too. A cache
+ * holding every language is a build's that precached them all: the person's is one of them, maybe not the browser's, so
+ * every language is taken (about 1.8 MB, for those updating from such a build).
+ */
+export function installList(precache: readonly string[], languages: Readonly<Record<string, readonly string[]>>, browser: readonly string[], held: readonly string[] = []): string[] {
+  const wanted = new Set<string>();
+  for (const tag of browser) {
+    const base = tag?.toLowerCase().split("-")[0] ?? "";
+    if (base !== ENTRY_LANGUAGE && !Object.prototype.hasOwnProperty.call(languages, base)) continue;
+    wanted.add(base);
+    break;
+  }
+  const heldStems = new Set(held.map(stem));
+  const read = Object.keys(languages).filter((language) => languages[language]!.some((file) => heldStems.has(stem(file))));
+  for (const language of read) wanted.add(language);
+  return [...new Set([...precache, ...[...wanted].flatMap((language) => languages[language] ?? [])])];
+}
+
+/**
  * What the build precaches: the app's page, its hashed files except the WebAssembly (wallets load theirs when
- * one is used, and they are most of the build's weight) and the Desktop-only chunks (`leaveOut`), and the static
+ * one is used, and they are most of the build's weight), the Desktop-only chunks and the optional ones (`leaveOut`), and the static
  * files beside it. Never the update check, the sign-in callback or the worker itself, nor the language detector's
  * worker: a build emits it as an asset, whether it translates or not.
  */
@@ -100,6 +185,19 @@ export function precacheList(files: readonly string[], leaveOut: readonly string
     .filter((path) => !path.startsWith("/assets/translateDetector.worker-"))
     .filter((path) => path !== "/index.html");
   return ["/", ...new Set(paths)].sort((a, b) => (a === "/" ? -1 : b === "/" ? 1 : a.localeCompare(b)));
+}
+
+/**
+ * What the worker is built with, from the public folder's files and the bundle: the precache, and each language's files
+ * (but English's, in the entry), which the install takes for the person's language only (`installList`).
+ */
+export function serviceWorkerFiles(publicFiles: readonly string[], bundle: readonly (BundleFile & { moduleIds?: readonly string[] })[]): { precache: string[]; languages: Record<string, string[]> } {
+  const { onlineOnly, languages } = optionalFiles(bundle);
+  const leaveOut = [...desktopOnlyFiles(bundle), ...onlineOnly, ...Object.values(languages).flat()];
+  return {
+    precache: precacheList([...publicFiles, ...bundle.map((file) => file.fileName)], leaveOut),
+    languages: Object.fromEntries(Object.entries(languages).map(([language, files]) => [language, files.map((file) => "/" + file.replace(/^\/+/, ""))])),
+  };
 }
 
 /**
@@ -174,10 +272,23 @@ export async function readShareBody(request: { body: ReadableStream<Uint8Array> 
   return new Blob(chunks as BlobPart[]);
 }
 
+/** Most names of the files past `MAX_SHARED_FILES` a share keeps; the rest are counted (`+N`). */
+export const MAX_PAST_LIMIT_NAMES = 8;
+
 /**
- * What a share target POST carries, bounded: files that are files, `max` bytes of them in all. Files past the count
- * cap are only named (`pastLimit`). Texts come whole: the body they came in is already bounded (`readShareBody`), and
- * a text too long for one message goes as a text file from the composer.
+ * A posted file's name as the picker and the composer show it: the one a chat would give it (`sanitizeFileName`,
+ * at most 200 characters, no invisible or direction marks). A website picks it, of any length; no file system keeps a
+ * name past a few hundred bytes, so only its start is read.
+ */
+function shareFileName(name: string): string {
+  return sanitizeFileName(name.slice(0, 1024));
+}
+
+/**
+ * What a share target POST carries, bounded: files that are files with clean names, `max` bytes of them in all. Files
+ * past the count cap are only named (`pastLimit`): the first `MAX_PAST_LIMIT_NAMES`, then how many more (`+N`). Texts
+ * come whole: the body they came in is already bounded (`readShareBody`), and a text too long for one message goes as
+ * a text file from the composer.
  */
 export function readShare(form: FormData, max = MAX_SHARE_BYTES): SharedItem {
   const text = (name: string) => {
@@ -187,16 +298,21 @@ export function readShare(form: FormData, max = MAX_SHARE_BYTES): SharedItem {
   let room = max;
   const files: File[] = [];
   const pastLimit: string[] = [];
+  let pastNamed = 0;
   for (const value of form.getAll("files")) {
     if (typeof value === "string" || !(value.size >= 0)) continue;
     if (files.length >= MAX_SHARED_FILES) {
-      pastLimit.push(value.name);
+      pastNamed += 1;
+      if (pastNamed <= MAX_PAST_LIMIT_NAMES) pastLimit.push(shareFileName(value.name));
       continue;
     }
     if (value.size > room) break;
     room -= value.size;
-    files.push(value);
+    const name = shareFileName(value.name);
+    // The same bytes under the clean name: a File is a view of its Blob, nothing is copied.
+    files.push(name === value.name ? value : new File([value], name, { type: value.type, lastModified: value.lastModified }));
   }
+  if (pastNamed > MAX_PAST_LIMIT_NAMES) pastLimit.push(`+${pastNamed - MAX_PAST_LIMIT_NAMES}`);
   return { title: text("title"), text: text("text"), url: text("url"), files, ...(pastLimit.length > 0 && { pastLimit }) };
 }
 

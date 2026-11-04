@@ -95,11 +95,11 @@ export const SECURITY = [
     body: "What a person writes arrives under untrusted, on stdin, never in a command's arguments. A webhook can only point at this machine.",
     cmd: "ghostly listen --turns --from owner --exec ./on-turn.sh",
   },
-  // packages/browser/src/shared/buttons.ts (only the chat's contact presses), packages/cli/src/events.ts (by).
+  // packages/browser/src/shared/buttons.ts (only the chat's contact presses; once counts per member), packages/cli/src/events.ts (by).
   {
     id: "approve",
     title: "It asks, you approve",
-    body: "Have your agent ask before a merge, a deploy or anything you want to check, and wait for your tap. Only the person in the chat can press, and the event says who did. --once takes one answer.",
+    body: "Have your agent ask before a merge, a deploy or anything you want to check, and wait for your tap. In its chat with you, only you can press. In a group any member can, so check the event's by, which says who did. --once takes one answer from each person.",
     cmd: 'ghostly send owner --button go:Deploy --button stop:Stop --style go=primary --once "Deploy to staging?"',
   },
   // packages/cli/src/runtime/engine.ts (automaticWallets: false); packages/cli/src/wallets.ts (Testnet, --confirm-real).

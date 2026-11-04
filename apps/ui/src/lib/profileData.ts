@@ -1,6 +1,6 @@
 import { identityFromSeedB64 } from "@ghostly/core";
 import { databaseExists } from "@ghostly/browser/backup/database";
-import { forgetServicesOf } from "@ghostly/browser/host";
+import { forgetServicesOf, releaseUnusedLocalAccessOf } from "@ghostly/browser/host";
 import { runsEngine } from "@ghostly/browser/devices/state";
 import { deviceStateOf, forgetDevice, readDeviceRecord } from "@ghostly/browser/devices/store";
 import { handoffProfileHost } from "@ghostly/browser/devices/handoffHost";
@@ -287,4 +287,6 @@ export async function deleteProfile(id: string, password?: string): Promise<void
   // What another profile's peek saw of it (its contacts' keys, link and message ids), and its notice.
   clearPeek(id);
   unregisterProfile(id);
+  // The local hosts it shared apps at (the extension's host permissions), unless a profile still on the list shares one there.
+  await releaseUnusedLocalAccessOf();
 }

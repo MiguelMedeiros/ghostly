@@ -10,7 +10,7 @@ import { chatRouteSession } from "./lib/url";
 import { offerSession } from "./lib/lockedRing";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useIsMobile } from "./hooks/useIsMobile";
-import { useServicesPlatform } from "./hooks/useServicesPlatform";
+import { servicesPlatform } from "./lib/platform";
 import { useSettings } from "./contexts/SettingsContext";
 import { newSpace } from "@ghostly/browser/backup/storage";
 import { useViewportHeight } from "./hooks/useViewportHeight";
@@ -25,6 +25,7 @@ import { useGoneGroups } from "./hooks/useGoneGroups";
 import { deviceWakeWords, useWakeTableSync } from "./lib/wakePush";
 import { useComputerAwake, useFilesMoving } from "./lib/keepAwake";
 import { useCallOnSync } from "./hooks/useCallOnSync";
+import { setChatOnCall } from "./lib/chatsOnCall";
 import { useI18n } from "./contexts/I18nContext";
 import { useAppSessions } from "./lib/apps/running";
 import { useGroupDownloadsSync } from "./lib/groupDownloads";
@@ -64,7 +65,9 @@ function useThemeColor() {
  */
 function useHoldStorageSync() {
   const { settings, updateBackupStorage } = useSettings();
-  const platform = useServicesPlatform();
+  // The platform object only (it never changes): following its state drew the app's shell, and every chat it holds, on
+  // every engine state.
+  const platform = servicesPlatform;
   const s3 = settings.backupS3 ? JSON.stringify(settings.backupS3) : null;
   const space = settings.backupSpace;
   useEffect(() => {
@@ -139,6 +142,8 @@ function useLoadedChats() {
   }), []);
 
   const onCallChange = useCallback((sessionId: string, onCall: boolean) => {
+    // Said to the pages that delete chats, too: none is deleted under its call (lib/chatsOnCall.ts).
+    setChatOnCall(sessionId, onCall);
     setCallSessions((current) =>
       onCall ? (current.includes(sessionId) ? current : [...current, sessionId]) : current.includes(sessionId) ? current.filter((id) => id !== sessionId) : current);
     if (onCall) setRingSessions((current) => (current.includes(sessionId) ? current.filter((id) => id !== sessionId) : current));

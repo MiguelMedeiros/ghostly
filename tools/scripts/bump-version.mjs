@@ -18,6 +18,9 @@
  * later stops while the flag is still false and Apps entries held for 1.2 would go out. The flag is on from the 1.2
  * cut (docs/RELEASING.md), so a 1.1.x patch is cut from `main`.
  *
+ * It also refuses a bump past a release tag the tree is still before (dev at 1.7.3 while v1.7.4 is out, to 1.8.0):
+ * that patch was merged into `main` only, and its entries would go out again. Merge `main` in first.
+ *
  *   node tools/scripts/bump-version.mjs --check [<version>]   only the flag check, for the package.json version by
  *                                                             default (the release workflow runs it on the tag)
  *
@@ -100,11 +103,37 @@ export function guardProblems(root, next, guards = RELEASE_GUARDS, fragments = [
   return problems;
 }
 
+/**
+ * The release tags (vX.Y.Z) after `previous` and before `next`. A patch cut on a release branch and merged into main
+ * only leaves dev at the version before it, with its entries still in the folder: a bump there would announce them
+ * again and leave that release out of the changelog. A tag of an older line (v1.6.2 under a 1.7.x tree) is not one.
+ */
+export function skippedReleases(previous, next, tags) {
+  return tags.filter((tag) => /^v\d+\.\d+\.\d+$/.test(tag) && versionBefore(previous, tag.slice(1)) && versionBefore(tag.slice(1), next));
+}
+
+/** The repository's v* tags, or none where git cannot list them (a copy that is not a checkout). */
+function releaseTags(root) {
+  try {
+    return execFileSync("git", ["-C", root, "tag", "--list", "v*"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 function bump(root, next) {
   const previous = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
 
   // Everything that can refuse the bump runs before the first file changes, so a refusal leaves no half-bumped tree:
-  // the flags, the entries, and the new changelog.
+  // a release this tree has not merged, the flags, the entries, and the new changelog.
+  const skipped = skippedReleases(previous, next, releaseTags(root));
+  if (skipped.length) {
+    console.error(
+      `✗ ${skipped.join(", ")} ${skipped.length > 1 ? "are" : "is"} released, and this tree is still at ${previous}: merge main into it first ` +
+        `(docs/RELEASING.md), or ${next} announces those entries again and the changelog has no ${skipped.map((t) => t.slice(1)).join(", ")}.`,
+    );
+    process.exit(1);
+  }
   const fragments = readFragments(root);
   const guarded = guardProblems(root, next, RELEASE_GUARDS, fragments);
   if (guarded.length) {

@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../contexts/I18nContext";
-import { useBackdropDismiss } from "../hooks/useDismiss";
+import { useBackdropDismiss, useBackCloses } from "../hooks/useDismiss";
 import { useIsMobile } from "../hooks/useIsMobile";
 import {
   canInstall, closeInstallSteps, dismissInstallHint, startInstall, useInstallHint, useInstallState, useInstallStepsOpen,
@@ -49,12 +49,28 @@ export function InstallMenuItem({ className, onClose }: { className: string; onC
 }
 
 /**
+ * Where the focus goes once the hint, or the steps sheet its Install opened, goes from under the focused button: New
+ * chat in the list's header above it, where the page shows it. Never away from something that took the focus in the
+ * meantime (the steps sheet's Got it).
+ */
+function focusAfterHint() {
+  const active = document.activeElement;
+  if (active && active !== document.body) return;
+  for (const next of document.querySelectorAll<HTMLElement>("[data-testid='sidebar-new-chat']")) {
+    if (next.closest("[hidden], [inert]") || !(next.checkVisibility?.() ?? true)) continue;
+    next.focus();
+    if (document.activeElement === next) return;
+  }
+}
+
+/**
  * Above the chat list, once: Install Ghostly, or Not now, which puts it away for good in this browser (Install stays
  * in the account menu and Settings). Never on a first screen with nothing in it (`installHintShown`).
  */
 export function InstallHint({ hasChats }: { hasChats: boolean }) {
   const { t } = useI18n();
   if (!useInstallHint(hasChats)) return null;
+  const then = (put: () => void) => () => { put(); requestAnimationFrame(focusAfterHint); };
   return (
     // The buttons go under the text when the list is too narrow for both (a 280px sidebar, a long language).
     <div role="region" aria-label={t("pwa.installLabel")} data-testid="install-hint" className="shrink-0 border-b border-border bg-accent/10 px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
@@ -66,11 +82,11 @@ export function InstallHint({ hasChats }: { hasChats: boolean }) {
         </div>
       </div>
       <div className="ms-auto shrink-0 flex items-center gap-1">
-        <button type="button" data-testid="install-hint-later" onClick={dismissInstallHint}
+        <button type="button" data-testid="install-hint-later" onClick={then(dismissInstallHint)}
           className="min-h-9 px-2 rounded-lg text-xs whitespace-nowrap text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
           {t("pwa.notNow")}
         </button>
-        <button type="button" data-testid="install-hint-install" onClick={startInstall}
+        <button type="button" data-testid="install-hint-install" onClick={then(startInstall)}
           className="min-h-9 px-3 bg-accent hover:bg-accent-hover text-on-accent rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar-bg">
           {t("pwa.install")}
         </button>
@@ -96,12 +112,18 @@ function StepsDialog({ kind }: { kind: "ios" | "dock" }) {
   const phone = useIsMobile();
   const dialog = useRef<HTMLDialogElement>(null), done = useRef<HTMLButtonElement>(null);
   const backdrop = useBackdropDismiss(closeInstallSteps);
+  useBackCloses(closeInstallSteps);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const element = dialog.current!;
     element.showModal();
     done.current?.focus();
-    return () => { element.close(); if (previous?.isConnected) previous.focus(); };
+    // Opened from the hint, the button before it is gone with the hint.
+    return () => {
+      element.close();
+      if (previous?.isConnected && previous !== document.body) previous.focus();
+      else requestAnimationFrame(focusAfterHint);
+    };
   }, []);
 
   // The Share glyph where the words name it ("{{icon}}" in every language).

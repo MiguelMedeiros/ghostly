@@ -9,6 +9,7 @@ import { Button, Notice, input } from "./ui";
 import { NETWORK_NAME, WALLET_NAME, failedBecause, shortReason } from "./names";
 import { ProviderConfigForm } from "./providers/SourcePicker";
 import { PROVIDER_FORMS } from "./providers/forms";
+import { providerText } from "./providers/providerText";
 import { rawError } from "../../lib/errorText";
 import "./new-wallet.css";
 import { problemText, type Problem } from "../../lib/problemText";
@@ -130,7 +131,8 @@ export function NewWalletDialog({ wallet, offers, setupFailed = [], initialNetwo
   const switchNetwork = (next: WalletNetwork) => { if (busy || next === network) return; setNetwork(next); setChosen(null); setPhase(null); setApiKey(""); };
 
   const chosenOffer = chosen ? offer(chosen) : undefined;
-  const descriptor = chosenOffer?.providers?.find((p) => p.id === providerId);
+  const found = chosenOffer?.providers?.find((p) => p.id === providerId);
+  const descriptor = found && providerText(t, found);
   const Form = descriptor ? PROVIDER_FORMS[descriptor.id] ?? ProviderConfigForm : undefined;
   const error = phase?.state === "error" ? phase : null;
 
@@ -199,7 +201,8 @@ export function NewWalletDialog({ wallet, offers, setupFailed = [], initialNetwo
                   <Select aria-label={t("wallet.source.title")} data-testid="new-wallet-provider-select" value={providerId} disabled={busy} onChange={(id) => { setProviderId(id); setPhase(null); }}
                     options={(chosenOffer.providers ?? []).map((p) => ({ value: p.id, label: p.label }))} />
                 )}
-                {descriptor?.description && <p className="text-xs text-text-secondary">{descriptor.description}</p>}
+                {/* The provider's English line, in its own direction (as in SourcePicker). */}
+                {descriptor?.description && <p className="text-xs text-text-secondary"><bdi>{descriptor.description}</bdi></p>}
                 {descriptor && Form && <Form key={`${network}-${descriptor.id}`} descriptor={descriptor} mode={network} busy={busy} onSubmit={(values) => void create(chosen, { providerId: descriptor.id, values })} />}
               </div>
             )}

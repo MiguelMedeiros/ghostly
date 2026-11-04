@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { chat, expect, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
+import { CHROMIUM_SANDBOX } from "../support/chromiumSandbox";
 
 /**
  * Link previews (WISP 401 § Link previews), between two people on the web: the sender's app reads a page's Open
@@ -20,6 +21,7 @@ const PICTURE = readFileSync(fileURLToPath(new URL("../../apps/desktop/icons/Squ
 
 test.use({
   launchOptions: {
+    chromiumSandbox: CHROMIUM_SANDBOX,
     args: [
       "--disable-features=WebRtcHideLocalIpsWithMdns",
       "--use-fake-device-for-media-stream",

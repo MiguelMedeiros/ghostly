@@ -4,9 +4,11 @@ import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
  * A button taken out of the page while it has the focus (Download, once the file is asked for) leaves the focus on
  * the page itself, and the next Tab starts from the top. The focus goes to `ref`'s element instead, so Tab goes on
  * from there. Only when the focus was on something inside it that is gone, and is on nothing now. The element is a
- * stop of its own only while it holds that focus, unless it already was one.
+ * stop of its own only while it holds that focus, unless it already was one. `next`: what is left inside to take it
+ * first (a row's ⋮ once its Move to goes), when it is still in the page; `false` when another part of the screen
+ * places the focus for what took the button out this time.
  */
-export function useFocusKept(ref: RefObject<HTMLElement | null>): void {
+export function useFocusKept(ref: RefObject<HTMLElement | null>, next?: () => HTMLElement | null | false): void {
   /** What has the focus inside the element. */
   const held = useRef<HTMLElement | null>(null);
   useEffect(() => {
@@ -30,6 +32,9 @@ export function useFocusKept(ref: RefObject<HTMLElement | null>): void {
     held.current = null;
     const active = document.activeElement;
     if (active && active !== document.body) return;
+    const left = next?.();
+    if (left === false) return;
+    if (left?.isConnected) { left.focus({ preventScroll: true }); return; }
     if (!root.hasAttribute("tabindex")) {
       root.tabIndex = -1;
       root.addEventListener("blur", () => root.removeAttribute("tabindex"), { once: true });

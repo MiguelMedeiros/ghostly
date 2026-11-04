@@ -14,7 +14,7 @@ import { installFakeAudio, installFakeMedia, removeFakeMedia } from "../voice/fa
 
 // covers: groups.files.compose, groups.files.bubbles, groups.files
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const ME = "me".padEnd(52, "y"), ALICE = "alice".padEnd(52, "y"), BOB = "bob".padEnd(52, "y");
 const member = (patch: Partial<GroupMemberView>): GroupMemberView => ({ key: ME, role: "member", me: false, online: true, missing: 0, ...patch });
@@ -183,6 +183,14 @@ describe("a group's file bubbles", () => {
     expect(within(bubble).getByTestId("file-status")).toHaveTextContent("Nobody you are connected to has this file yet");
     await user.click(within(bubble).getByTestId("file-why"));
     expect(within(bubble).getByTestId("file-why-text")).toHaveTextContent("It comes by itself when a member who has it is online.");
+  });
+
+  it("only its sender has it, out of reach in a group on hubs: said, and why and what to do behind the ⓘ", async () => {
+    const { user } = openGroup({ [REPORT.id]: { state: "transferring", stage: "waiting", transferred: 0, size: REPORT.size, direction: "in", wait: "author", note: "Nobody you are connected to has this file yet, and its sender is not one of them" } });
+    const bubble = await vi.waitFor(() => within(row(`${ALICE}:1:1`)).getByTestId("file-bubble"));
+    expect(within(bubble).getByTestId("file-status")).toHaveTextContent("Not with your connections yet");
+    await user.click(within(bubble).getByTestId("file-why"));
+    expect(within(bubble).getByTestId("file-why-text")).toHaveTextContent("In a group this large, your app connects through a few members, not to the sender. It comes by itself once one of them downloads it, or ask the sender to send it to you in a chat.");
   });
 
   it("a Download that cannot start: a short title in the bubble's ⓘ, with the next step", async () => {

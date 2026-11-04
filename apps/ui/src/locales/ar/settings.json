@@ -7,6 +7,7 @@
     "compact": "مضغوطة"
   },
   "chatListDensity": "قائمة المحادثات",
+  "chatsDeleted": "تم حذف جميع المحادثات",
   "clear": "مسح",
   "clearAllData": "مسح جميع البيانات",
   "clearAllDataConfirm": "هذا يمحو نهائيًا:",
@@ -55,7 +56,9 @@
   "dataCleared": "تم مسح جميع البيانات",
   "defaultNickname": "الاسم في المحادثات",
   "defaultNicknameHint": "يُستخدم عند بدء محادثة جديدة",
+  "deleteAllChatsCallOn": "هناك مكالمة جارية في إحدى المحادثات. أنهِها أولاً، ثم احذف جميع المحادثات.",
   "deleteAllChatsConfirm": "حذف جميع المحادثات ({{count}})؟",
+  "deleteAllChatsConfirm_one": "حذف المحادثة الوحيدة؟",
   "deleteAllChatsHint": "تُحذف الرسائل والملفات. تبقى الإعدادات والمحافظ.",
   "groupDownloads": {
     "always": "دائمًا",

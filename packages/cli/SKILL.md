@@ -199,7 +199,7 @@ ghostly file save <file id> --dir ./inbox --wait     # a file or voice note a tu
 ghostly typing alice --kind thinking --status "Transcribing your audio" --for 120
 ghostly file send alice ./answer.ogg --voice --reply <message id>   # a voice note: length and waveform from the file
 ghostly file send alice ./note.m4a --voice 4200      # or its length given in ms (AAC needs ffmpeg for the waveform)
-ghostly file send alice ./report.pdf                 # a file
+ghostly file send alice ./report.pdf                 # a file (no daemon: stays until alice has all of it)
 ghostly file wait <file id> --timeout 120            # exit 0 when done, 1 when it failed, 4 on timeout
 ghostly file accept <file id>                        # a file over 25 MiB waits for this (file.offered event)
 ```
@@ -272,7 +272,8 @@ ghostly routine update owner nightly --state paused                             
 ```
 
 `--schedule` is words people read (80 characters) and `--cron` is only shown. `--run ok|failed|skipped[:summary]`
-records a run as the last one (the card keeps 10); `--next` takes a date or milliseconds, up to a year ahead.
+records a run as the last one (the card keeps 10); `--next` takes a date or milliseconds, up to a year ahead: `2026-10-01` and
+`2026-10-01 01:00` are local time (a date alone is local midnight), `2026-10-01T01:00:00Z` or `+02:00` keep their zone.
 
 ### 11. Safety
 
@@ -378,7 +379,8 @@ ghostly service add docs http://127.0.0.1:8080     # a web app on this machine
 ghostly service share <service id> alice           # alice may open it; nobody else
 ```
 
-A call's audio is raw PCM on its own Unix socket, 48 kHz by default; see `examples/call-echo.mjs`. To answer calls by
+A call's audio is raw PCM on its own Unix socket, 48 kHz by default, after the call's `audio.token` and a line feed
+(required on Windows); see `examples/call-echo.mjs`. To answer calls by
 voice, clone [ghostly-voice-agent](https://github.com/MiguelMedeiros/ghostly-voice-agent) rather than writing one: it listens, transcribes, asks Claude
 and speaks the reply (ElevenLabs), and its `AGENTS.md` walks an agent through the setup. Making an identity proof
 needs a person who holds the key: leave that to the owner.
@@ -386,7 +388,7 @@ needs a person who holds the key: leave that to the owner.
 ## Rules the CLI enforces
 
 - Output is JSON. A failure is `{"error":{"code","message"}}` with exit 1 (failed), 2 (usage), 3 (not found),
-  4 (timed out) or 5 (needs `--force`, `--yes` or `--confirm-real`).
+  4 (timed out), 5 (needs `--force`, `--yes` or `--confirm-real`) or 130 (stopped with Ctrl-C, `interrupted`).
 - `send` (and `ghostly engine sendMessage` and the other sends through `engine`) refuses text that looks like a recovery
   phrase, a private key or a Cashu token unless `--force`.
 - Spending real money (Mainnet) needs `--confirm-real`.
@@ -397,7 +399,7 @@ needs a person who holds the key: leave that to the owner.
 
 Every call of the app's engine is reachable: `ghostly engine --list --verbose` (each call with what it takes), then `ghostly engine <method> '<json params>'`.
 A call that deletes chats or groups (`clearProfileData`, `removeLink`, `leaveGroup`, `forgetGroup`, `deviceRemove`)
-needs `--yes`; `clearProfileData` stops a running daemon after it answers.
+needs `--yes`; `clearProfileData` stops a running daemon after it answers, and is refused (`busy`) while a call is on: hang it up first.
 Not on the CLI yet: Bark wallets, OpenID Connect proofs, and video in calls (voice only). More:
 [AI agents on Ghostly](https://ghostly.tools/developers/agents), the
 [CLI guide](https://github.com/MiguelMedeiros/ghostly/blob/main/docs/CLI.md), the

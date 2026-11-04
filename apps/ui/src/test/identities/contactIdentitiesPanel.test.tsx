@@ -137,6 +137,15 @@ describe("ContactIdentitiesPanel", () => {
       expect(status).not.toHaveTextContent(/No Ghostly|Algo deu errado/);
     });
 
+    it("says a check none of the resolvers answered in Arabic, without the English resolver line", async () => {
+      const { user, engine } = renderApp(<ContactIdentitiesPanel peerKey="peer" name="Bob" onClose={vi.fn()} />, { language: "ar" });
+      document.documentElement.dataset.reduceMotion = "true";
+      act(() => engine.update(withReceived([receivedView({ id: "r1", provider: "domain", status: "unconfirmed", error: "Quad9 could not be reached", verified: { subject: "example.org", source: "DNS" } })])));
+      const status = within(await turnOver(user, 0)).getByTestId("chat-identity-received-status");
+      expect(status).toHaveTextContent(/فشل التحقق/);
+      expect(status).not.toHaveTextContent(/could not be reached|Quad9/);
+    });
+
     it("says who vouches for an attested identity and that a key proof is the holder's own", async () => {
       const { user } = open(withReceived([
         receivedView({ id: "r1", provider: "domain" }),

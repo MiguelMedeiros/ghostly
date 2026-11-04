@@ -135,6 +135,10 @@ const RULES: readonly Rule[] = [
   exact("Connect to an updated peer to send files", "errors.files.updatedPeerToSend"),
   exact("Connect to an updated peer first", "errors.files.updatedPeerFirst"),
   exact("That recording cannot be sent as a voice message", "errors.files.notVoice"),
+  // A picture whose metadata could not be removed, refused before it is sent (packages/core pictureMetadata.ts).
+  exact("This picture cannot be sent: Ghostly could not remove the details saved in it, like where it was taken", "errors.files.pictureMetadata", "errors.files.pictureMetadataNext"),
+  // A video whose metadata could not be removed, refused before it is sent (packages/core videoMetadata.ts).
+  exact("This video cannot be sent: Ghostly could not remove the details saved in it, like where it was recorded", "errors.files.videoMetadata", "errors.files.videoMetadataNext"),
   exact("This file cannot be retried", "errors.files.cannotRetry"),
   exact("This file is no longer here", "errors.files.gone"),
   { match: /^Not enough space on your contact's device for this file \((?<free>.+) free\)\.$/, key: "errors.files.noRoom", next: "errors.files.noRoomNext" },
@@ -150,6 +154,11 @@ const RULES: readonly Rule[] = [
   exact("The file arrived damaged and was deleted. Ask for it again.", "errors.files.refused.damaged", "errors.files.askAgain"),
   exact("The offer expired", "errors.files.offerExpired", "errors.files.askAgain"),
   exact("Cancelled by the sender", "chat.file.cancelled", "errors.files.askAgain"),
+  // A 1:1 file declined or cancelled, by the contact (chatFiles.ts `refusalText`) or here: the status says what, the ⓘ who.
+  exact("Declined by your contact", "chat.file.declined", "errors.files.declinedThere"),
+  exact("Cancelled by your contact", "chat.file.cancelled", "errors.files.cancelledThere"),
+  exact("You declined it", "chat.file.declined", "errors.files.declinedHere"),
+  exact("You cancelled it", "chat.file.cancelled", "errors.files.cancelledHere"),
   // A file said on the DHT floor that ended here before it came (packages/browser engine/fileDesk.ts): why this device
   // refused its offer, or its week ran out. Its sender still has it, and its next offer takes the bubble over.
   exact("No room on this device for this file", "errors.files.noRoomHere", "errors.files.floor.noRoomNext"),
@@ -170,6 +179,9 @@ const RULES: readonly Rule[] = [
   exact("The clipboard's picture is damaged", "errors.files.pasteDamaged", "errors.files.pasteDamagedNext"),
   exact("Clipboard unavailable", "errors.files.clipboardUnavailable", "errors.files.clipboardUnavailableNext"),
   exact("That paste is gone. Paste it again.", "errors.files.pasteGone", "errors.files.pasteGoneNext"),
+  // Another app's drop the platform held (Linux Desktop), refused as a paste would be (lib/pastedFiles.ts).
+  exact("That is too large to drop. Send it with + → Document.", "errors.files.dropTooLarge"),
+  exact("That drop is gone. Drop it again.", "errors.files.dropGone", "errors.files.dropGoneNext"),
   { match: /^Could not read the pasted file: [\s\S]+$/, key: "errors.files.pasteFileUnreadable", next: "errors.files.pasteFileUnreadableNext", detail: true },
   // A file being sent whose copy could not be read (packages/core chatFiles.ts): picked with + or dropped, not pasted.
   { match: /^Could not read the file: [\s\S]+$/, key: "errors.files.unreadable", next: "errors.files.unreadableNext", detail: true },
@@ -240,11 +252,12 @@ const RULES: readonly Rule[] = [
   exact("Your contact's app cannot show a screen in this call", "calls.share.contactCannot"),
   exact("Screen sharing is not available on Linux yet", "calls.share.notOnLinux"),
   exact("All native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.", "errors.transport.slotsFull", "errors.transport.slotsFullNext"),
-  // Its listener, which did not start or stopped (packages/browser/src/platform: hyperdhtRelay.ts, irohWeb.ts).
-  exact("Could not reach the HyperDHT relay", "errors.transport.hyperdhtUnreachable"),
-  exact("The HyperDHT relay did not answer", "errors.transport.hyperdhtSilent"),
-  exact("The HyperDHT relay closed the connection", "errors.transport.hyperdhtClosed"),
-  exact("The HyperDHT relay did not let this chat listen", "errors.transport.hyperdhtRefused"),
+  // Its listener, which did not start or stopped (packages/browser/src/platform: hyperdhtRelay.ts, irohWeb.ts). A
+  // browser sees no status on a refused WebSocket, so a relay that leaves this app's origin out reads "unreachable" too.
+  exact("Could not reach the HyperDHT relay", "errors.transport.hyperdhtUnreachable", "errors.transport.hyperdhtUnreachableNext"),
+  exact("The HyperDHT relay did not answer", "errors.transport.hyperdhtSilent", "errors.transport.hyperdhtCheckNext"),
+  exact("The HyperDHT relay closed the connection", "errors.transport.hyperdhtClosed", "errors.transport.hyperdhtCheckNext"),
+  exact("The HyperDHT relay did not let this chat listen", "errors.transport.hyperdhtRefused", "errors.transport.hyperdhtRefusedNext"),
   exact("Iroh endpoint is stopped", "errors.transport.irohStopped"),
   // "The codes match" refused: the connection changed or closed after the code was shown (packages/core pairedSession.ts,
   // ghostlink.ts `confirmPair`).
@@ -465,6 +478,7 @@ const RULES: readonly Rule[] = [
   exact("Go online to join a group", "errors.group.offline", "errors.group.offlineNext"),
   exact("Only the admin can change the members of this group", "errors.group.adminMembers"),
   exact("Only the admin can renew the group's secret", "errors.group.adminRotate"),
+  exact("Only the admin can hand the admin role over", "errors.group.adminHandOver"),
   exact("Only the admin can do that", "errors.group.adminOnly"),
   exact("Make someone else the admin before leaving", "errors.group.adminFirst"),
   exact("This member has left the group. Make someone else the admin.", "errors.group.heirLeft", "errors.group.heirLeftNext"),
@@ -502,7 +516,11 @@ const RULES: readonly Rule[] = [
   exact("Your contact's app refused this item: it could not be verified as yours, or was too large for it. Retry to hold it again.", "errors.hold.contactRefused", "errors.hold.contactRefusedNext"),
   { match: /^Could not read the contact's pointer: [\s\S]+$/, key: "errors.hold.readFailed", next: "errors.hold.retryingNext", detail: true },
   exact("The contact holds items for you, but their address expired. They are handed out again when the contact is next online.", "errors.hold.addressExpired", "errors.hold.addressExpiredNext"),
+  exact("Hide my IP from contacts is on: what your contact held for you waits on their storage until you turn it off.", "errors.hold.hiddenIp", "errors.hold.hiddenIpNext"),
   { match: /^Refused what the contact's storage offered: [\s\S]+$/, key: "errors.hold.refusedOffer", detail: true },
+  // Sealed in the ratchet session the device this profile was on before shares with the contact (WISP 4xx § Held items): it
+  // waits for the contact's app to seal it again, not for anything this device retries. Before the general pick-up rule.
+  exact("Could not pick up held items: the contact's app sealed them for the device this profile was on before. They come once it seals them again for this one.", "errors.hold.sealedBefore", "errors.hold.sealedBeforeNext"),
   { match: /^Could not pick up held items: [\s\S]+$/, key: "errors.hold.pickUpFailed", next: "errors.hold.retryingNext", detail: true },
   { match: /^Refused a held item from the contact: [\s\S]+$/, key: "errors.hold.refusedItem", detail: true },
   { match: /^Picked up, but could not acknowledge: [\s\S]+$/, key: "errors.hold.ackFailed", detail: true },
@@ -573,6 +591,19 @@ const RULES: readonly Rule[] = [
   { match: /^https:\/\/\S+ was not found$/, key: "errors.proof.fileNotFound", detail: true },
   { match: /^https:\/\/\S+ was not found: it was deleted, or not uploaded yet$/, key: "errors.proof.fileNotFound", next: "errors.proof.fileNotFoundNext", detail: true },
   { match: /^https:\/\/\S+ names no Ghostly proof$/, key: "errors.proof.fileNoProof", detail: true },
+  // A domain proof's record or file that names something else, and the resolver or host that could not be asked
+  // (packages/browser/src/proofs/domain.ts). A resolver line is thrown only once none answered, and a lookup that ran
+  // out of time names the last one tried: the line says that none answered, its name goes behind the ⓘ.
+  { match: /^The TXT record at \S+ is for another proof of this key$/, key: "errors.proof.dnsOtherProof", next: "errors.proof.dnsValueNext", detail: true },
+  { match: /^The TXT record at \S+ names another Ghostly key: this proof was replaced or removed$/, key: "errors.proof.dnsOtherKey", next: "errors.proof.dnsValueNext", detail: true },
+  { match: /^https:\/\/\S+ is for another proof of this key$/, key: "errors.proof.fileOtherProof", next: "errors.proof.fileValueNext", detail: true },
+  { match: /^https:\/\/\S+ names another Ghostly key: this proof was replaced or removed$/, key: "errors.proof.fileOtherKey", next: "errors.proof.fileValueNext", detail: true },
+  { match: /^https:\/\/\S+ is not a valid (?<kind>Ghostly|NIP-05) file$/, key: "errors.proof.fileInvalid", next: "errors.proof.fileInvalidNext", detail: true },
+  { match: /^(?<domain>\S+) could not be reached\. The file must be served at exactly this address, without a redirect, with the header Access-Control-Allow-Origin: \*$/, key: "errors.proof.hostUnreachable", next: "errors.proof.hostUnreachableNext", detail: true },
+  { match: /^(?:Quad9|Cloudflare|Google) could not be reached$/, key: "errors.proof.resolverUnreachable", next: "errors.proof.resolverNext", detail: true },
+  { match: /^(?:Quad9|Cloudflare|Google) refused the lookup$/, key: "errors.proof.resolverRefused", next: "errors.proof.resolverNext", detail: true },
+  { match: /^(?<domain>\S+) has no address$/, key: "errors.proof.noAddress", next: "errors.proof.noAddressNext", detail: true },
+  { match: /^(?<domain>\S+) points to a private network address, so it was not contacted$/, key: "errors.proof.privateAddress", next: "errors.proof.privateAddressNext", detail: true },
   { match: /^[^:]+: (?<login>\S+) does not list the key that signed \([^)]*\)$/, key: "errors.proof.keyNotListed", detail: true },
   // What the Add dialog's field refuses before anything is signed (a domain, a Bitcoin address and signature, a DID:
   // packages/core domainProofs.ts, bip322.ts, did.ts and proofs/providers/bitcoin.ts). The names they quote stay as values.
@@ -606,10 +637,20 @@ const RULES: readonly Rule[] = [
   // "Hide my IP from contacts" without the TURN server it needs (packages/browser/src/engine/node.ts, updateSettings).
   { match: /^Add a TURN server first$/, key: "errors.relayOnly.needsTurn", next: "errors.relayOnly.needsTurnNext" },
   { match: /^Hide my IP from contacts needs a TURN server\. Turn it off first$/, key: "errors.relayOnly.keepsTurn", next: "errors.relayOnly.keepsTurnNext" },
-  // An Iroh, push or Nostr relay refused (packages/browser/src/platform/irohWeb.ts, shared/pushRelay.ts, nostr/relay.ts):
-  // the address typed stays in the line, which has no ⓘ.
+  // An Iroh, push, Pkarr or Nostr relay refused (packages/browser/src/platform/irohWeb.ts, shared/pushRelay.ts,
+  // packages/core/src/relay.ts, nostr/relay.ts): the address typed stays in the line, which has no ⓘ. A Pkarr relay
+  // list's line may hold spaces ("relay .example.org").
   { match: /^Use an https:\/\/ relay address: (?<address>\S+)$/, key: "errors.relays.useHttps" },
-  { match: /^Not a relay address: (?<address>\S+)$/, key: "errors.relays.notAddress" },
+  { match: /^Not a relay address: (?<address>.+)$/, key: "errors.relays.notAddress" },
+  // The rest of what Settings, Network refuses before or on Save (packages/browser/src/shared: hyperdhtRelay.ts,
+  // pushRelay.ts, ice.ts; engine/node.ts updateSettings). The field it is about is marked there, so no line names it.
+  { match: /^Enter a relay address \((?<example>(?:https|wss):\/\/)…\)$/, key: "errors.relays.enterAddress" },
+  exact("Use a wss:// relay address", "errors.relays.useWss"),
+  exact("Leave the user and password out of the address", "errors.relays.noLogin"),
+  exact("Use at most five Iroh relays", "errors.relays.irohAtMost"),
+  exact("Enter the TURN server address", "errors.turn.enterAddress"),
+  { match: /^“(?<address>\S+)” is not a TURN or STUN address \(turn:host:port\)$/, key: "errors.turn.notAddress" },
+  exact("A TURN server needs its username and credential", "errors.turn.needsLogin"),
   // A read that no Nostr relay answered: offline, or the relays blocked (engine/nostrSocial.ts, profiles/activity.ts, readers.ts).
   exact("No relay answered", "errors.relays.noneAnswered", "errors.relays.noneAnsweredNext"),
   exact("Choose a picture", "errors.picture.choose"),

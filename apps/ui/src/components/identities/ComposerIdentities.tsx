@@ -4,7 +4,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { IdentityProofView, LinkView } from "@ghostly/browser/shared/types";
 import { useOutsideDismiss } from "../../hooks/useDismiss";
 import { useCopyKey } from "../../hooks/useCopyKey";
-import { addableProviders, daysLeft, date, expiringSoon, providerLabel, sharedStatus, useEngineState, useEngineValue, useNewProof } from "../../lib/identities";
+import { addableProviders, daysLeft, date, expiringSoon, providerLabel, sharedStatus, useEngineValue, useNewProof } from "../../lib/identities";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { ComposerSheet, ComposerSheetHead, ForwardArrow } from "../ComposerSheet";
 import { Deck } from "../deck/Deck";
@@ -90,6 +90,19 @@ export function ComposerIdentityPicker({ peerKey, contact, initial, onClose, onS
     )} />;
 }
 
+/** What the picker reads of the engine's state: the profile's proofs and Ghostly card, and this chat's link. */
+function pickerView(state: NonNullable<typeof engine.state>, peerKey: string) {
+  const link = state.links.find(l => l.peerPubKeyZ32 === peerKey);
+  return {
+    identityProofs: state.identityProofs ?? [],
+    me: { nick: state.settings.nick, avatar: state.settings.avatar, shareProfile: state.settings.shareProfile !== false },
+    link: link && {
+      id: link.id, myPubKeyZ32: link.myPubKeyZ32, identities: link.identities,
+      connected: link.dataLink === "open" && link.pairing?.status === "ready",
+    },
+  };
+}
+
 /**
  * The identity picker itself: in the composer's sheet (ComposerIdentityPicker). `frame` wraps it, wearing the chosen
  * card's colour; `head` shows the sheet's title over the cards. With
@@ -105,9 +118,11 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
   onShared?: () => void;
   frame: (place: { side: "cards" | "back"; tone: string }, children: ReactNode) => ReactNode; head?: boolean; focusOnOpen?: boolean;
 }) {
-  const state = useEngineState();
+  // Only what the picker shows of the engine's state: it stays open over the chat while a file moves (up to 20 states
+  // a second), and drew itself again on each.
+  const state = useEngineValue(s => s && pickerView(s, peerKey));
   const { t } = useI18n();
-  const link = state?.links.find(l => l.peerPubKeyZ32 === peerKey);
+  const link = state?.link;
   const ids = link?.identities;
   const mine = state?.identityProofs ?? [];
   const [chosen, setChosen] = useState<string | undefined>(initial);
@@ -144,7 +159,7 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
   }, [done, turnBack]);
   useEffect(() => { if (side === "cards") setDone(null); }, [side]);
   const now = Math.floor(Date.now() / 1000);
-  const connected = link?.dataLink === "open" && link.pairing?.status === "ready";
+  const connected = !!link?.connected;
   const unsupported = connected && !ids?.support;
   const providers = addableProviders().map(p => p.id);
   const canAdd = providers.length > 0;
@@ -159,7 +174,7 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
 
   const ghostly: Ghostly | undefined = state && link ? {
     id: GHOSTLY, ghostly: true, on: true,
-    card: ghostlyCard(t, { nick: state.settings.nick, avatar: state.settings.avatar, shareProfile: state.settings.shareProfile !== false }, { chat: { key: link.myPubKeyZ32, contact } }),
+    card: ghostlyCard(t, state.me, { chat: { key: link.myPubKeyZ32, contact } }),
   } : undefined;
   const proofs = mine.map((proof): Proof => {
     const shared = ids?.shared.find(s => s.id === proof.id);
@@ -254,7 +269,7 @@ function GhostlyBack({ t, card, contact, others, busy, turning, done, error, act
   turning: boolean; done: "shared" | "stopped" | "only" | null; error: string;
   actionRef: RefObject<HTMLButtonElement | null>; onShareOnly: () => void; onCards: () => void;
 }) {
-  const { copied, copy } = useCopyKey(card.subject);
+  const { copied, failed, copy } = useCopyKey(card.subject);
   const working = busy === GHOSTLY;
   const state = others === 0 ? t("identities.ghostly.onlyThis", { contact }) : others === 1 ? t("identities.ghostly.alsoSeesOne", { contact }) : t("identities.ghostly.alsoSees", { contact, count: others });
   return (
@@ -272,7 +287,7 @@ function GhostlyBack({ t, card, contact, others, busy, turning, done, error, act
             <span className="id-card-back-meta">{card.category} · {card.validity}</span>
           </span>
         </div>
-        <code className="block break-all select-all rounded-lg bg-black/30 p-2 text-[11px] leading-4 text-white/85" data-testid="composer-identity-key">{card.subject}</code>
+        <code dir="ltr" className="block text-left break-all select-all rounded-lg bg-black/30 p-2 text-[11px] leading-4 text-white/85" data-testid="composer-identity-key">{card.subject}</code>
         {/* Once done, the line saying so stands for it: the engine's state catches up a moment later. */}
         {!done && <p className="id-card-back-state"><span data-testid="composer-identity-status">{state}</span></p>}
         {done ? <p role="status" className="id-card-back-done" data-testid="composer-identity-done">
@@ -288,6 +303,7 @@ function GhostlyBack({ t, card, contact, others, busy, turning, done, error, act
             {copied ? t("identities.ghostly.copied") : t("identities.ghostly.copyKey")}
           </button>
         </div>}
+        {failed && <p role="alert" className="id-card-back-note" data-testid="composer-identity-copy-error">{t("identities.add.copyError")}</p>}
         {error && <p role="alert" className="m-0 text-xs text-danger" data-testid="composer-identities-error">{error}</p>}
       </div>
       <span className="id-card-mrz id-card-back-mrz" aria-hidden="true">{card.mrz ?? machineLine(card.label, card.subject)}</span>

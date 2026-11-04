@@ -4,7 +4,7 @@
  * from this page, where the peer runs. Closing it ends the app, its requests and its cookies.
  */
 import { GhostlyHttpError, viewerResponseHeaders, type ClientRequest, type ClientResponse } from "@ghostly/core";
-import { BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServicesHost } from "./protocol";
+import { BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServicesHost } from "./protocol";
 import { callWindowOn } from "../../../ui/src/lib/serviceWindows";
 
 /** How a request reaches the contact: the engine's `request` for that contact and service. */
@@ -14,9 +14,10 @@ export type ServiceSend = (request: ClientRequest) => Promise<ClientResponse>;
  * What the opener says when there is no answer: the profile's language, from the app. `hostError`: what it says for
  * an answer the contact's machine gave in place of their app (`hostErrorText`), null for the app's own. `tooSlow`: no
  * answer before the services worker would give up with words of its own. `offline` and `retry`: the view's notice
- * while the contact is offline.
+ * while the contact is offline. `label` and `owner`: whose app it is and that it is not Ghostly (`serviceFraming`), the
+ * view's name and the line under the app's name.
  */
-export interface OpenerWords { unreachable: string; failed: string; close: string; callOn: string; tooSlow: string; offline: string; retry: string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
+export interface OpenerWords { unreachable: string; failed: string; close: string; callOn: string; tooSlow: string; offline: string; retry: string; label: string; owner: string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
 
 /**
  * Whether the contact is offline now (`offline`), and a way to hear when that may have changed (`watch`, which returns
@@ -201,7 +202,9 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   const view = document.createElement("div");
   view.id = VIEW_ID;
   view.setAttribute("role", "dialog");
-  view.setAttribute("aria-label", options.title);
+  view.setAttribute("aria-modal", "true");
+  // Never the contact's name for it alone: they choose it freely ("Ghostly", "Security check").
+  view.setAttribute("aria-label", options.words.label);
   // Clear of a phone's notch and home indicator, its edges in the view's background: inside the frame the app cannot
   // keep clear of them itself (`env(safe-area-inset-*)` is 0 there). The bar takes the top.
   view.style.cssText = "position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;padding:0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);background:var(--color-app-bg,#111)";
@@ -218,14 +221,25 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   // The contact's name for it, in its own direction: a Latin name in the Arabic app is cut at its end, not its start.
   name.dir = "auto";
   name.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
-  bar.append(close, name);
+  // Under it, always on screen (a phone has no hover): whose app this is, and that it is not Ghostly, in Ghostly's
+  // words. The page under the bar is all the contact's, and the address and the tab's title stay Ghostly's.
+  const owner = document.createElement("span");
+  owner.dataset.testid = "service-view-owner";
+  owner.textContent = options.words.owner;
+  owner.style.cssText = "font-weight:400;font-size:12px;line-height:1.3;color:var(--color-text-secondary,#aaa)";
+  const named = document.createElement("div");
+  named.style.cssText = "display:flex;flex-direction:column;min-width:0";
+  named.append(name, owner);
+  bar.append(close, named);
   const frame = document.createElement("iframe");
   frame.dataset.testid = "service-view-frame";
-  frame.title = options.title;
+  frame.title = options.words.label;
   // Its own origin keeps it from the app's storage. The sandbox keeps it and every frame in it from navigating the
-  // app's tab away, and from opening a window: one would be a tab of its own on its origin, outliving the view.
-  frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms allow-modals allow-downloads");
-  frame.setAttribute("allow", "fullscreen; clipboard-write");
+  // app's tab away, and from opening a window: one would be a tab of its own on its origin, outliving the view. No
+  // `allow-modals`: the browser's own alert or prompt over the view would be a Ghostly-looking dialog the app draws. No
+  // `allow-downloads`: the contact's code saves no file on this device by itself, under a name it picks, as on Desktop.
+  frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms");
+  frame.setAttribute("allow", SERVICE_FRAME_ALLOW);
   frame.setAttribute("referrerpolicy", "no-referrer");
   frame.style.cssText = "flex:1;width:100%;border:0;background:#fff";
   // While the contact is offline: said here, in the app's look and the person's language and direction (the view is

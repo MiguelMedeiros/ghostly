@@ -6,7 +6,7 @@ import { useFocusKept } from "../../hooks/useFocusKept";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { languageTag } from "../../lib/documentLanguage";
 import { downloadFile } from "../../lib/fileDownload";
-import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, stalledAction } from "../../lib/fileStatus";
+import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, sentWhole, stalledAction } from "../../lib/fileStatus";
 import type { FileAction } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { openStoredMedia, type StoredMedia } from "../../lib/storedMedia";
@@ -241,7 +241,9 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   const offered = controls && transfer.direction === "in" && transfer.stage === "asking";
   const noRoom = offered && typeof transfer.room === "number" && transfer.room < file.size;
   const pausedHere = moving && transfer.stage === "paused" && transfer.pausedBy !== "peer";
-  const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking";
+  // Sent whole: too late to pause or cancel, the contact keeps it.
+  const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking" && !sentWhole(transfer);
+  const canCancel = controls && !sentWhole(transfer);
   const canRetry = canRetryFile(file, transfer, platform);
   const stuck = platform?.fileAction ? stalledAction(transfer, t) : null;
   const failed = transfer?.state === "failed";
@@ -341,11 +343,11 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
           )}
         </div>
       )}
-      {controls && !offered && !group && (
+      {controls && !offered && !group && (canPause || pausedHere || canCancel) && (
         <div className="flex gap-1.5 mt-1 px-1">
           {canPause && <button type="button" className={pill} data-testid="audio-pause-transfer" onClick={() => act("pause")}>{t("chat.file.pause")}</button>}
           {pausedHere && <button type="button" className={pill} data-testid="audio-resume-transfer" onClick={() => act("resume")}>{t("chat.file.resume")}</button>}
-          <button type="button" className={pill} data-testid="audio-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>
+          {canCancel && <button type="button" className={pill} data-testid="audio-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>}
         </div>
       )}
       {(reason || hint) && why && <WhyText id={whyId} testId="audio-why-text" english={reason?.english}>{reason?.text ?? hint}</WhyText>}

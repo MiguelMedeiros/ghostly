@@ -1,6 +1,7 @@
 package tools.ghostly.app
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -16,8 +17,10 @@ import android.net.LinkProperties
 import android.net.Network
 import android.net.Uri
 import android.os.Build
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.provider.Settings
+import android.view.WindowManager
 import android.webkit.WebView
 import androidx.activity.result.ActivityResult
 import androidx.core.app.NotificationCompat
@@ -75,6 +78,11 @@ class KeepArgs {
 
 @InvokeArg
 class AwakeArgs {
+  var on: Boolean = false
+}
+
+@InvokeArg
+class HideArgs {
   var on: Boolean = false
 }
 
@@ -571,13 +579,13 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       return
     }
     thread(name = "ghostly-save") {
-      try {
-        val out = activity.contentResolver.openOutputStream(target, "wt") ?: throw IllegalStateException("No output")
-        out.use { to -> File(args.path).inputStream().use { it.copyTo(to) } }
-        invoke.resolve(JSObject().put("saved", true))
-      } catch (e: Exception) {
-        invoke.reject("The file could not be saved there")
-      }
+      val resolver = activity.contentResolver
+      val saved = SaveCopy.copy(
+        File(args.path),
+        { resolver.openOutputStream(target, "wt") },
+        { DocumentsContract.deleteDocument(resolver, target) },
+      )
+      if (saved) invoke.resolve(JSObject().put("saved", true)) else invoke.reject("The file could not be saved there")
     }
   }
 
@@ -614,6 +622,30 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       val controller = WindowCompat.getInsetsController(window, window.decorView)
       controller.isAppearanceLightStatusBars = !args.dark
       controller.isAppearanceLightNavigationBars = !args.dark
+      invoke.resolve()
+    }
+  }
+
+  // ---- The app switcher ----
+
+  /**
+   * While the app lock is on (`on`), the app switcher keeps no picture of the app (SwitcherPicture): Android takes it
+   * before the page hears the app is going, so the lock's cover would come too late for it. The activity's cover goes
+   * over the app's live window there too (MainActivity.lockOn). Off again with the lock.
+   */
+  // SwitcherPicture takes setRecentsScreenshotEnabled only on Android 13 and up.
+  @SuppressLint("NewApi")
+  @Command
+  fun hideFromSwitcher(invoke: Invoke) {
+    val on = invoke.parseArgs(HideArgs::class.java).on
+    activity.runOnUiThread {
+      when (SwitcherPicture.way(Build.VERSION.SDK_INT)) {
+        SwitcherPicture.Way.NO_RECENTS_PICTURE -> activity.setRecentsScreenshotEnabled(!on)
+        SwitcherPicture.Way.SECURE_WINDOW ->
+          if (on) activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+          else activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+      }
+      (activity as? MainActivity)?.lockOn = on
       invoke.resolve()
     }
   }

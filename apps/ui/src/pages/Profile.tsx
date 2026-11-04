@@ -3,25 +3,28 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { InputGroup, LinkRow, Page } from "../components/layout";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
-import { listSessions } from "../lib/storage";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
+import { knownChatKeys } from "../lib/storage";
 import { type ColorScheme } from "../lib/settings";
 import { ColorSwatches } from "../components/ColorSwatches";
-import { baseProfileName, clearRestoredMark, createProfile, currentProfile, listProfiles, renameProfile, switchProfile, type ProfileEntry } from "../lib/profiles";
+import { baseProfileName, clearRestoredMark, createProfile, currentProfile, fitsProfileName, listProfiles, renameProfile, switchProfile, type ProfileEntry } from "../lib/profiles";
 import { askNameIn } from "../lib/nameStep";
 import { Block, Button, Notice, Row, Section, Segmented, Switch, input } from "../components/wallet/ui";
 import { ProfileBackups } from "../components/ProfileBackups";
 import { DevicesSection } from "../components/devices/DevicesSection";
-import { useEngineState } from "../lib/engineState";
+import { useEngineValue } from "../lib/engineState";
 import { useIdentityAttention } from "../lib/identities";
 import { DeleteProfileDialog } from "../components/DeleteProfileDialog";
 import { ProfileBadge } from "../components/ProfileBadge";
 import { setMyAvatar, setShareProfile, useMyAvatar, useShareProfile } from "../hooks/useAvatars";
 import { avatarFromFile } from "../lib/avatarImage";
 import { useAppNavigation } from "../hooks/useAppNavigation";
+import { useStoredSessions } from "../hooks/useStoredSessions";
 import { formatAmount } from "../lib/amount";
 import { useComposition } from "../hooks/useComposition";
 import { useOwnNameField } from "../hooks/useOwnNameField";
+import { useFittedNameField } from "../hooks/useGroupNameField";
 import { openJoinAnother } from "../lib/devices";
 import { problemText, type Problem } from "../lib/problemText";
 
@@ -36,6 +39,16 @@ function useProfiles() {
   return { current: currentProfile(), all: listProfiles() };
 }
 
+/** The chats, counted by their keys as `listSessions` counts them: no chat's stored copy, messages and all, is parsed per draw. */
+const chatCount = () => knownChatKeys().length;
+
+/** Whether profiles can be switched here, the wallets' balance (undefined with none) and how many services are shared. */
+const platformCounts = () => ({
+  canSwitch: !!servicesPlatform?.features.profiles,
+  balance: servicesPlatform?.wallet?.getState()?.balance,
+  services: servicesPlatform?.features.shareLocalServices ? servicesPlatform.getSharedServices().length : 0,
+});
+
 /**
  * The active local profile (WISP 04), as a page beside the chat list: its name and look, what belongs to
  * it, its backups, and the other profiles on this device.
@@ -45,16 +58,22 @@ export function Profile() {
   const { t, language } = useI18n();
   const { settings, updateColorScheme, randomizeNickname } = useSettings();
   const nickname = useOwnNameField();
-  const platform = useServicesPlatform();
+  // What the page shows of the platform, drawn again when that changes, not on every engine state.
+  const { canSwitch, balance, services } = usePlatformValue(platformCounts);
   const { current, all } = useProfiles();
   const myAvatar = useMyAvatar();
   const shareProfile = useShareProfile();
-  const identities = useEngineState()?.identityProofs.length ?? 0;
+  // The count only: on the whole state, the page drew again on every engine state (up to 20 a second while a file moves).
+  const identities = useEngineValue(state => state?.identityProofs.length ?? 0);
   const identityAttention = useIdentityAttention();
   // The field edits the name only: a restored profile's word for it is the tag beside the field, never text in it.
   const plain = baseProfileName(current.id) ?? current.name;
   const [name, setName] = useState(plain);
+  // A rename is said once, in the status line beside the field; typing again takes it away.
+  const [nameSaved, setNameSaved] = useState(false);
   const nameComposition = useComposition();
+  // Both name fields keep what the name takes, between whole characters (`fitsProfileName`).
+  const nameField = useFittedNameField(name, (next) => { setName(next); setNameSaved(false); }, fitsProfileName);
   // "Add a profile" in the account switcher lands here with the form open.
   const location = useLocation();
   const navigate = useNavigate();
@@ -63,6 +82,7 @@ export function Profile() {
   // The wallet's backup reminder (Cashu has no phrase) lands here with the profile's Back up open.
   const wantsBackup = !!asked?.backupProfile;
   const [creating, setCreating] = useState(wantsNew), [newName, setNewName] = useState("");
+  const newNameField = useFittedNameField(newName, setNewName, fitsProfileName);
   useEffect(() => { if (wantsNew) { setCreating(true); document.querySelector("[data-testid='profile-list']")?.scrollIntoView({ block: "nearest" }); } }, [wantsNew]);
   const [deleting, setDeleting] = useState<ProfileEntry | null>(null);
   // A backup restored to replace the profile it was made from lands here, the copy running: the original's removal
@@ -79,12 +99,9 @@ export function Profile() {
   const [error, setError] = useState<Problem | null>(null);
   useEffect(() => setName(plain), [plain]);
 
-  const canSwitch = !!platform?.features.profiles;
-  const wallet = platform?.wallet?.getState();
-  const services = platform?.features.shareLocalServices ? platform.getSharedServices() : [];
-  const chats = listSessions().length;
+  const chats = useStoredSessions(chatCount, Object.is);
   const attempt = (work: () => void) => { try { work(); setError(null); } catch (e) { setError(problemText(e, t)); } };
-  const saveName = () => { if (name.trim() && name.trim() !== plain) attempt(() => renameProfile(current.id, name)); };
+  const saveName = () => { if (name.trim() && name.trim() !== plain) attempt(() => { renameProfile(current.id, name); setNameSaved(true); }); };
   const schemes: { value: ColorScheme; label: string }[] = [{ value: "light", label: t("settings.colorSchemes.light") }, { value: "dark", label: t("settings.colorSchemes.dark") }, { value: "system", label: t("settings.colorSchemes.system") }];
 
   return (
@@ -99,7 +116,10 @@ export function Profile() {
           <input data-testid="profile-avatar-input" type="file" accept="image/*" aria-label={myAvatar ? t("profile.changePicture") : t("profile.addPicture")} className="sr-only"
             onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void avatarFromFile(file).then(setMyAvatar).then(() => setError(null), (err: unknown) => setError(problemText(err, t))); }} />
         </label>
-        <input data-testid="profile-name" aria-label={t("profile.nameLabel")} value={name} maxLength={32} onChange={(e) => setName(e.target.value)} onBlur={saveName} {...nameComposition.inputProps} onKeyDown={(e) => !nameComposition.composing(e) && e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+        {/* Enter saves in place: blurring it dropped the keyboard's focus to the page. */}
+        {/* Left empty, it shows the saved name again, which an empty name does not replace (as the nickname field does). */}
+        <input data-testid="profile-name" aria-label={t("profile.nameLabel")} value={name} {...nameField} onBlur={() => { if (name.trim()) saveName(); else setName(plain); }}
+          onCompositionEnd={(e) => { nameComposition.inputProps.onCompositionEnd(e); nameField.onCompositionEnd(e); }} onKeyDown={(e) => { if (!nameComposition.composing(e) && e.key === "Enter") saveName(); }}
           className="min-w-0 flex-[1_1_8rem] bg-transparent text-xl font-semibold text-text-primary rounded-lg px-2 -mx-2 py-1 border border-transparent hover:border-border focus:border-accent focus:outline-none" />
         {current.restored && (
           <span data-testid="profile-restored-tag" title={t("profile.restoredTagHint")} className="inline-flex items-center gap-0.5 shrink-0 whitespace-nowrap rounded-full border border-border bg-surface-alt ps-2.5 pe-0.5 text-xs text-text-muted">
@@ -111,6 +131,8 @@ export function Profile() {
           </span>
         )}
         {myAvatar && <button type="button" data-testid="profile-avatar-remove" onClick={() => void setMyAvatar(null)} className="min-h-10 text-xs text-text-muted hover:text-danger cursor-pointer shrink-0 whitespace-nowrap">{t("profile.removePicture")}</button>}
+        {/* There before it fills, so a screen reader says it; a refused name shows the Notice below instead. */}
+        <span role="status" data-testid="profile-name-saved" className="text-accent text-sm shrink-0">{nameSaved ? t("profile.nameSaved") : ""}</span>
       </div>
       {error && <Notice problem={error} />}
 
@@ -133,8 +155,8 @@ export function Profile() {
         <LinkRow testId="profile-identities-link" label={<span className="inline-flex items-center gap-2">{t("tabs.identities")}{identityAttention && <><span className="nav-dot-inline" aria-hidden="true" /><span className="sr-only">, {t("identities.attention")}</span></>}</span>}
           value={identities ? identities : undefined} onClick={() => nav.open("/identities")} />
         <LinkRow label={t("tabs.chats")} value={chats === 1 ? t("profile.chatOne") : t("profile.chatCount", { count: chats })} onClick={nav.home} />
-        <LinkRow label={t("tabs.wallets")} value={wallet ? t("profile.sats", { amount: formatAmount(wallet.balance, language) }) : undefined} onClick={() => nav.open("/wallet")} />
-        <LinkRow label={t("tabs.services")} value={services.length ? services.length : undefined} onClick={() => nav.open("/services")} />
+        <LinkRow label={t("tabs.wallets")} value={balance !== undefined ? t("profile.sats", { amount: formatAmount(balance, language) }) : undefined} onClick={() => nav.open("/wallet")} />
+        <LinkRow label={t("tabs.services")} value={services ? services : undefined} onClick={() => nav.open("/services")} />
         <LinkRow label={t("settings.title")} onClick={() => nav.open("/settings")} />
       </Section>
 
@@ -146,7 +168,8 @@ export function Profile() {
         {all.map((entry) => (
           <div key={entry.id || "default"} className="flex items-center gap-3 px-4 py-2.5 min-h-14" data-testid="profile-row">
             <ProfileBadge entry={entry} size={30} avatar={entry.id === current.id ? myAvatar : undefined} />
-            <p className="flex-1 min-w-0 text-sm text-text-primary truncate">{entry.name}</p>
+            {/* In its own direction, on the box that cuts it, as wide as the name: see ProfileSwitcher. */}
+            <p className="flex-1 min-w-0 flex"><span dir="auto" className="min-w-0 text-sm text-text-primary truncate">{entry.name}</span></p>
             {entry.id === current.id ? <span className="text-xs text-accent shrink-0">{t("profile.inUse")}</span> : <>
               <Button data-testid="profile-switch" disabled={!canSwitch} onClick={() => attempt(() => switchProfile(entry.id))}>{t("profile.switch")}</Button>
               {entry.id && (
@@ -160,7 +183,7 @@ export function Profile() {
         {!canSwitch ? <Block><Notice>{t("profile.oneOnly")}</Notice></Block> : creating ? (
           <Block>
             <InputGroup as="form" onSubmit={(e) => { e.preventDefault(); attempt(() => { const entry = createProfile(newName); askNameIn(entry.id); switchProfile(entry.id, { route: "/profile" }); }); }}>
-              <input data-testid="profile-new-name" autoFocus className={input} placeholder={t("profile.name")} maxLength={32} value={newName} onChange={(e) => setNewName(e.target.value)} />
+              <input data-testid="profile-new-name" autoFocus className={input} placeholder={t("profile.name")} value={newName} {...newNameField} />
               <Button type="submit" variant="primary" data-testid="profile-create" disabled={!newName.trim()}>{t("profile.create")}</Button>
               <Button onClick={() => { setCreating(false); setNewName(""); }}>{t("common.cancel")}</Button>
             </InputGroup>
