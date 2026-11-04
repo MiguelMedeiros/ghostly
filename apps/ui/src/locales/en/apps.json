@@ -5,6 +5,7 @@
     "checking": "Checking…",
     "hint": "A GitHub repository, a raw.githubusercontent.com file, or jsDelivr at a commit.",
     "label": "App or store link",
+    "storeEquivocation": "This link holds a different copy of this store under the same number: the store signed two different lists. Ghostly kept yours.",
     "storeHeld": "You have this store already: it is on your Apps page.",
     "storeNewer": "You have this store already. This link holds a newer copy of it.",
     "storeOlder": "This is an older copy of a store you have. Yours is newer and stays as it is.",

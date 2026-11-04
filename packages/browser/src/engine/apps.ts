@@ -244,9 +244,10 @@ export interface AppStoreSummary {
 
 /**
  * What `previewStore` read, before the person adds it. `held`: the person has this store already (by its key, not
- * removed), with the `sequence` of the index held (absent when none was read yet). Add then takes only a newer index.
+ * removed), with the `sequence` of the index held (absent when none was read yet), and `equivocation` when this index
+ * is another one signed under that sequence (the preview marks the held store with it). Add then takes only a newer index.
  */
-export interface AppStorePreview { url: string; key: string; fingerprint: string; name: string; description?: string; kind: AppStoreKind; sequence: number; expires: number; expired: boolean; apps: number; held?: { sequence?: number } }
+export interface AppStorePreview { url: string; key: string; fingerprint: string; name: string; description?: string; kind: AppStoreKind; sequence: number; expires: number; expired: boolean; apps: number; held?: { sequence?: number; equivocation?: true } }
 
 /** Where to fetch an app from: a pasted URL, a store's listing, or a chat card's pointer. */
 export type AppSource =
@@ -1110,7 +1111,10 @@ export class Apps {
     this.previewed = previewed;
   }
 
-  /** Reads a store at a URL for the person to see before adding it. Nothing is stored: the checked index waits in memory for `addStore`. */
+  /**
+   * Reads a store at a URL for the person to see before adding it. Nothing is added: the checked index waits in memory
+   * for `addStore`. Only another index under the held one's sequence is kept, on the held store (its proof).
+   */
   async previewStore({ url }: { url: string }): Promise<AppStorePreview> {
     const at = this.storeUrl(url);
     this.keepPreviewed(null);
@@ -1119,10 +1123,15 @@ export class Apps {
     const { index, digest } = read.store;
     this.keepPreviewed({ url: at, index, digest, at: this.now() });
     const held = await this.storeRecord(index.key);
+    // Another index signed under the held one's sequence is the store showing people different lists (WISP 1200 §
+    // Stores): kept on the held store, as a read of it would, wherever the copy was found.
+    const other = !!held && !held.removed && !!held.index
+      && appStoreDecision({ key: held.key, sequence: held.index.sequence, digest: held.digest ?? "" }, { key: index.key, sequence: index.sequence, digest }) === "equivocation";
+    if (other && held.equivocation?.digest !== digest) await this.putStore(this.withIndex(held, index, digest));
     return {
       url: at, key: index.key, fingerprint: appFingerprint(index.key), name: index.name, kind: index.kind, sequence: index.sequence,
       expires: index.expires, expired: read.store.expired, apps: index.apps.length, ...(index.description !== undefined && { description: index.description }),
-      ...(held && !held.removed && { held: held.index ? { sequence: held.index.sequence } : {} }),
+      ...(held && !held.removed && { held: held.index ? { sequence: held.index.sequence, ...(other && { equivocation: true as const }) } : {} }),
     };
   }
 
