@@ -87,8 +87,8 @@ export interface MiniAppApi {
     forget(id: string): Promise<void>;
     /**
      * Lets the same app on the contact's side read one kept file (the `chat` permission too, in a chat open on both
-     * sides): answers a serve id for the app to tell its contact in its own `chat.send`. It lasts until `unserve`, this
-     * side or the contact closes the app, or the session ends.
+     * sides): answers a serve id for the app to tell its contact in its own `chat.send`. It lasts until `unserve`, or
+     * until this side or the contact closes the app; a reconnect the app is kept open across keeps it.
      */
     serve(id: string): Promise<string>;
     /** Ends one serve. A serve id that is no longer served is no error. */

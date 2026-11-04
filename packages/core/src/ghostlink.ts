@@ -3498,8 +3498,8 @@ export class GhostLink {
     return this.supportsAppRanges && this.apps.peerOpen.has(app) ? null : "peer-closed";
   }
   /**
-   * Lets the contact's `app` read `file` (what this side's app calls it) for as long as both have the app open on this
-   * session: the serve id to tell it, or why not.
+   * Lets the contact's `app` read `file` (what this side's app calls it) for as long as both have the app open, across
+   * a session change the apps are held across: the serve id to tell it, or why not.
    */
   serveAppFile(app: string, file: string): { serve: string } | { error: "not-open" | "offline" | "peer-closed" } {
     const error = this.appRangesRefusal(app);
@@ -3507,7 +3507,7 @@ export class GhostLink {
   }
   /** Ends a serve; false when it was not served (any more). */
   unserveAppFile(serve: string): boolean { return this.appRanges.unserve(serve); }
-  /** The serve ids `app` has given out on this session. */
+  /** The serve ids `app` has given out and not ended. */
   appServes(app: string): string[] { return this.appRanges.servesOf(app); }
   /**
    * Reads `length` bytes at `offset` of what the contact's `app` serves as `serve`: the bytes (fewer at the end of the
@@ -3585,13 +3585,16 @@ export class GhostLink {
    * hears only that open, not a close first; one not said again by then is closed with `offline`.
    */
   private appsSuspended(): void {
-    // Serve ids and requests last one session, even where the apps are held across it.
-    this.appRanges.reset();
+    // Requests last one session; serve ids are held with the apps, and end when an app closes (WISP 1200).
+    this.appRanges.suspend();
     this.apps.sessionSuspended();
     if (!this.apps.holding || this.appsGrace) return;
     this.appsGrace = setTimeout(() => {
       this.appsGrace = null;
-      for (const event of this.apps.heldExpired()) this.options.events?.onAppFrame?.(event);
+      for (const event of this.apps.heldExpired()) {
+        if ("o" in event && event.o === "close") this.appRanges.closeApp(event.app, "offline");
+        this.options.events?.onAppFrame?.(event);
+      }
     }, this.options.appResumeGraceMs ?? APP_RESUME_GRACE_MS);
   }
   /** Whether files/3 was agreed on the session open now; kept to say when that changes. */
@@ -4244,7 +4247,7 @@ export class GhostLink {
             return;
           }
           if (APP_RANGE_FRAMES.has(String(frame?.t))) {
-            // Only once both said app-ranges/1; every request is checked against this session's serves (WISP 1200).
+            // Only once both said app-ranges/1; every request is checked against the serves not ended (WISP 1200).
             if (this.supportsAppRanges) this.receiveAppRange(frame);
             return;
           }
