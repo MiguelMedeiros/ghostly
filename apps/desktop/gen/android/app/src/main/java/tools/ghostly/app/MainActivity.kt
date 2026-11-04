@@ -167,6 +167,9 @@ class MainActivity : TauriActivity() {
     if (!show && cover == null) return
     val view = cover ?: View(this).also {
       it.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+      // It takes the touches it gets, as the page's own cover does: in split screen the app's half shows it while the
+      // other app has the focus, and a tap there only brings the app back, not on whatever the page has under it.
+      it.isClickable = true
       // Above the WebView (and the update screen): the content view's last child.
       addContentView(it, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
       cover = it
