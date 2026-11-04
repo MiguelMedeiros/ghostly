@@ -224,16 +224,25 @@ function stripMoov(b: Uint8Array): { video: boolean; fragmented: boolean; metada
   return { video, fragmented, metadata, zeroed };
 }
 
+/** A video as it is read: its size, and `length` of its bytes from `offset` (fewer only at its end). */
+export interface VideoSource {
+  size: number;
+  read(offset: number, length: number): Promise<Uint8Array>;
+}
+
+/** A part of a video replaced as it is sent, `start` to `end` of the file: by `bytes`, or by zeros. */
+export interface VideoPatch { start: number; end: number; bytes?: Uint8Array }
+
 /** A box's header in the file at `at`, read from it. */
-async function headerAt(source: Blob, at: number): Promise<Box> {
-  const head = new Uint8Array(await source.slice(at, at + 16).arrayBuffer());
+async function headerAt(source: VideoSource, at: number): Promise<Box> {
+  const head = await source.read(at, 16);
   return header(head, 0, source.size, at);
 }
 
 /** A box read whole, within the limit. */
-async function whole(source: Blob, box: Box): Promise<Uint8Array> {
+async function whole(source: VideoSource, box: Box): Promise<Uint8Array> {
   check(box.end - box.start <= VIDEO_METADATA_LIMITS.maxBoxBytes);
-  const bytes = new Uint8Array(await source.slice(box.start, box.end).arrayBuffer());
+  const bytes = await source.read(box.start, box.end - box.start);
   check(bytes.length === box.end - box.start);
   return bytes;
 }
@@ -249,7 +258,27 @@ function isVideoContainer(head: Uint8Array, mime: string): boolean {
  * Throws `NO_VIDEO_METADATA` for a video whose metadata cannot be removed; an error reading `source` as it is.
  */
 export async function withoutVideoMetadata(source: Blob, mime: string): Promise<Blob | undefined> {
-  const head = new Uint8Array(await source.slice(0, VIDEO_METADATA_LIMITS.headBytes).arrayBuffer());
+  const patches = await videoMetadataPatches({ size: source.size, read: async (offset, length) => new Uint8Array(await source.slice(offset, offset + length).arrayBuffer()) }, mime);
+  if (!patches) return undefined;
+  const parts: BlobPart[] = [];
+  let at = 0;
+  for (const patch of patches) {
+    if (patch.start > at) parts.push(source.slice(at, patch.start));
+    if (patch.bytes) parts.push(patch.bytes as BlobPart);
+    else for (let left = patch.end - patch.start; left > 0; left -= ZEROS.length) parts.push(ZEROS.subarray(0, Math.min(left, ZEROS.length)) as BlobPart);
+    at = patch.end;
+  }
+  if (at < source.size) parts.push(source.slice(at));
+  return new Blob(parts, { type: mime });
+}
+
+/**
+ * What `withoutVideoMetadata` changes in a video read from `source` (one not held in a Blob: a file kept in storage):
+ * the parts replaced, in order and apart, the rest of its bytes going as they are; undefined when it goes as it is.
+ * Throws `NO_VIDEO_METADATA` as it does.
+ */
+export async function videoMetadataPatches(source: VideoSource, mime: string): Promise<VideoPatch[] | undefined> {
+  const head = await source.read(0, VIDEO_METADATA_LIMITS.headBytes);
   const typed = STRIPPED_TYPES.has(mime.split(";")[0]!.trim().toLowerCase());
   if (!isVideoContainer(head, mime)) {
     if (typed && !isStrippedPicture(head, mime)) throw new Error(NO_VIDEO_METADATA);
@@ -257,7 +286,7 @@ export async function withoutVideoMetadata(source: Blob, mime: string): Promise<
   }
 
   /** What replaces the file's bytes, by where it starts: a box rewritten, or zeros (no `bytes`). */
-  const patches: { start: number; end: number; bytes?: Uint8Array }[] = [];
+  const patches: VideoPatch[] = [];
 
   // The top-level boxes, by their headers alone.
   const top: Box[] = [];
@@ -290,7 +319,7 @@ export async function withoutVideoMetadata(source: Blob, mime: string): Promise<
       patches.push({ start: box.start, end: box.end, bytes: moof });
     } else if (TOP_EMPTIED.has(box.type)) {
       // Its header made `free`, its body zeros.
-      const head = new Uint8Array(await source.slice(box.start, box.body).arrayBuffer());
+      const head = await source.read(box.start, box.body - box.start);
       empty(head, { type: box.type, start: 0, body: head.length, end: head.length });
       patches.push({ start: box.start, end: box.body, bytes: head }, { start: box.body, end: box.end });
     }
@@ -307,15 +336,10 @@ export async function withoutVideoMetadata(source: Blob, mime: string): Promise<
   }
   for (const [start, end] of merged) patches.push({ start, end });
 
-  const parts: BlobPart[] = [];
   let at = 0;
   for (const patch of patches.sort((a, b) => a.start - b.start)) {
     check(patch.start >= at);
-    if (patch.start > at) parts.push(source.slice(at, patch.start));
-    if (patch.bytes) parts.push(patch.bytes as BlobPart);
-    else for (let left = patch.end - patch.start; left > 0; left -= ZEROS.length) parts.push(ZEROS.subarray(0, Math.min(left, ZEROS.length)) as BlobPart);
     at = patch.end;
   }
-  if (at < source.size) parts.push(source.slice(at));
-  return new Blob(parts, { type: mime });
+  return patches;
 }
