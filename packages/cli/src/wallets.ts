@@ -312,6 +312,11 @@ const WALLETS: Record<string, Method> = {
     let invoice = text.replace(/^lightning:/i, "");
     let n: WalletNetwork;
     let note: string | undefined;
+    // The chat the invoice was found in: on Testnet its contact is told it was paid, as a chat card's Pay tells it. A test
+    // mint says every invoice is paid, so one from `wallet receive` is credited only on its payer's word.
+    if (params.chat !== undefined && !isInvoice(text)) throw new CliError("usage", "--chat names the chat an invoice came from: an address's or LNURL's invoice is its server's");
+    const chat = params.chat === undefined ? undefined : chatOf(ctx, params);
+    if (chat) inviteTaken(chat);
     if (isInvoice(text)) {
       // Which wallet pays is named, never guessed from the invoice: test mints issue `lnbc` invoices too, and a
       // guess must never be what makes real money move. Testnet unless `network` says mainnet.
@@ -330,7 +335,7 @@ const WALLETS: Record<string, Method> = {
     const quote =await node(ctx).walletQuoteInvoice({ invoice, network: n, ...(card ? { card } : {}) });
     const maxFee = params.maxFee === undefined ? null : num(params, "maxFee", 0);
     if (maxFee !== null && quote.feeReserve > maxFee) throw new CliError("refused", `The fee may reach ${quote.feeReserve} sats, more than the ${maxFee} allowed`);
-    const paid = await node(ctx).walletPayQuote({ quote: quote.quote, mint: quote.mint, ...(note ? { note } : {}), ...real(params) });
+    const paid = await node(ctx).walletPayQuote({ quote: quote.quote, mint: quote.mint, ...(note ? { note } : {}), ...real(params), ...(chat ? { linkId: chat.id, invoice } : {}) });
     return { network: n, amount: quote.amount, feeReserve: quote.feeReserve, source: (quote as { source?: string }).source ?? quote.mint, paid: paid.paid };
   },
 
