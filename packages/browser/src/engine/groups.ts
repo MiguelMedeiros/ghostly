@@ -1833,6 +1833,17 @@ export class Groups {
   }
 
   /**
+   * Let in: my knock leaves the link's record. Left there until it aged out, the next joiner read it as someone still
+   * waiting, and was told the admin's app may be busy letting them in. Once, in the background; if it fails, it ages out.
+   */
+  private async unknock(link: GroupEntryLink, seedB64: string): Promise<void> {
+    const me = identityFromSeedB64(seedB64).pubKeyZ32, identity = knockIdentity(link);
+    const knocks = readKnocks(link, (await this.host.resolve(identity.pubKeyZ32, true)) ?? []);
+    if (!knocks.some(k => k.key === me)) return;
+    await this.host.publish(identity, knockRecords(link, knocks.filter(k => k.key !== me)), true);
+  }
+
+  /**
    * Reads the link's knocks, and counts the read only if the relays answered it. One their budget held back answered
    * the record as last read: taken for a reading, the knock that came meanwhile waited for the next turn, and a burst's
    * tenth joiner waited ~40 s with the admin's app open. The link keeps its place and is read once the hold ends.
@@ -2084,6 +2095,7 @@ export class Groups {
         await this.event(g, "joined", group.invitation.genesis ? "You joined again" : `You joined. ${GROUP_READ_NOTE}`, Date.now(), joined.state.chain.length - 1);
         if (viaLink) traceJoin(g, "welcome.received");
         if (viaLink) {
+          if (this.lastKnock.has(g)) void this.unknock({ g, host: group.invitation.entry! }, group.invitation.seedB64).catch(() => {});
           this.lastKnock.delete(g); this.knocked.delete(g); this.othersKnocked.delete(g); this.knockingSince.delete(g);
           // The entry session reaches the admin, which reaches every member: while it is kept (above), the edges about
           // to open signal through it too (WISP 902 § Signaling through members).
