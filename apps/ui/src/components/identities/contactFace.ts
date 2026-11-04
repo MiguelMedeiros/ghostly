@@ -207,7 +207,7 @@ export function useChosenProfile(peerKey: string | undefined): void {
  * nicknames). Members who are not contacts are unchanged.
  */
 export function withContactFaces<G extends { members: { key: string; me: boolean; nick?: string }[]; memberLinks: Record<string, string> }>(
-  group: G, links: LinkView[] | undefined, faceOf: (peerKey: string | undefined) => ContactFace | undefined, nicknameOf: (peerKey: string) => string | undefined,
+  group: G, links: readonly Pick<LinkView, "id" | "peerPubKeyZ32">[] | undefined, faceOf: (peerKey: string | undefined) => ContactFace | undefined, nicknameOf: (peerKey: string) => string | undefined,
 ): G {
   let changed = false;
   const members = group.members.map(m => {
