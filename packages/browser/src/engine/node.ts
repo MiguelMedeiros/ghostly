@@ -2441,6 +2441,7 @@ export class GhostlyNode implements EngineImplementation {
       this.startGroupEntries();
       this.prepareSpare(STARTUP_QUIET_MS);
       void this.did.publishNow().catch(() => {});
+      this.identities.networkBack();
     }
     this.emitState();
     if (failure) throw failure;
@@ -6848,6 +6849,7 @@ export class GhostlyNode implements EngineImplementation {
       this.startGroupEntries();
       this.prepareSpare(STARTUP_QUIET_MS);
       void this.did.publishNow().catch(() => {});
+      this.identities.networkBack();
       // As at a start online: the links to the other devices, on the good read just made.
       if (!this.options.singleDevice && knownDeviceGate()?.state === "active") void this.startDeviceSet({ justRead: true }).catch(() => {});
     } else if (wasOnline && this.networkOn && relayOnlyChanged) await this.restartLinksForRelayOnly();

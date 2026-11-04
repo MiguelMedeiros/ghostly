@@ -33,7 +33,9 @@ function pair() {
     /** Chats deleted on that side: gone from its list, with their ledger. */
     deleted: {} as Partial<Record<Me, boolean>>,
     /** Settings → Hide my IP from contacts, on that side. */
-    relayOnly: {} as Partial<Record<Me, boolean>> };
+    relayOnly: {} as Partial<Record<Me, boolean>>,
+    /** No Pkarr relay answers: a lookup throws. */
+    relaysDown: false };
   const pkarr = new Map<string, { label: string; value: string }[]>();
   const resolved: string[] = [];
   const engines = {} as Record<Me, IdentityProofs>;
@@ -51,7 +53,7 @@ function pair() {
       linkIds: () => state.deleted[me] ? ["plain"] : ["chat", "plain"], online: () => state.online, emit: vi.fn(),
       relayOnly: () => !!state.relayOnly[me],
       publish: async (seed, records) => { pkarr.set(identityFromSeed(seed).pubKeyZ32, records); },
-      resolve: async key => { resolved.push(key); return pkarr.get(key) ?? null; },
+      resolve: async key => { resolved.push(key); if (state.relaysDown) throw new Error("No relay answered"); return pkarr.get(key) ?? null; },
     };
   };
   const make = (me: Me) => new IdentityProofs(host(me), () => state.providers[me]);
@@ -312,6 +314,77 @@ describe("removing a proof and its revocation", () => {
     await vi.advanceTimersByTimeAsync(60_000);
     await vi.waitFor(() => expect(resolved).toHaveLength(3));
     third.stop();
+  });
+
+  /** Offline at the 60 s lookup and online right after: the next lookup came 12 h later. */
+  it("a revocation lookup missed offline runs when the network comes back, not 12 h later", async () => {
+    const { state, resolved, make } = await shared();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    state.connected = false; state.online = false;
+    const b = make("b");
+    await b.load(); b.start();
+    resolved.length = 0;
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(resolved).toEqual([]);
+    state.online = true;
+    b.networkBack();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(resolved).toHaveLength(1);
+    expect(await stored("identityRevocationsCheckedAt")).toBeTypeOf("number");
+    b.stop();
+  });
+
+  /**
+   * No relay answered the lookup, yet its time was saved: once the owner removed the proof and the relays were back, the
+   * contact's restarted app looked nothing up for 12 h and showed the proof verified.
+   */
+  it("a revocation lookup no relay answered is not noted as done: tried again soon, and at the next start", async () => {
+    const { engines, state, resolved, make, id } = await shared();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    state.connected = false; state.relaysDown = true;
+    const b = make("b");
+    await b.load(); b.start();
+    resolved.length = 0;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(resolved).toHaveLength(1);
+    expect(await stored("identityRevocationsCheckedAt"), "a failed lookup is not a lookup made").toBeUndefined();
+    // Tried again within minutes, backing off while the relays stay down.
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(resolved).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(resolved).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(resolved).toHaveLength(3);
+    b.stop();
+
+    // The owner removes the proof meanwhile; the relays are back, and the contact's app restarts.
+    await engines.a.remove({ id });
+    state.relaysDown = false;
+    const again = make("b");
+    await again.load(); again.start();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.waitFor(() => expect(again.linkView("chat", true)!.received[0].status).toBe("revoked"));
+    expect(await stored("identityRevocationsCheckedAt")).toBeTypeOf("number");
+    again.stop();
+  });
+
+  /** Removed while offline mid-run: the revocation went out only at the next hourly republish, up to an hour after the network came back. */
+  it("a revocation that could not be published offline is published when the network comes back", async () => {
+    const { state, pkarr, make, id, binding } = await shared();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    state.connected = false;
+    const a = make("a");
+    await a.load(); a.start();
+    await vi.advanceTimersByTimeAsync(10_000);
+    state.online = false;
+    await a.remove({ id });
+    expect(pkarr.get(binding.key)).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(60_000);
+    state.online = true;
+    a.networkBack();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(pkarr.get(binding.key)?.[0]).toMatchObject({ label: "_ghostly-revoked", value: expect.stringContaining(id) });
+    a.stop();
   });
 
   it("a revocation lookup still on its way when the profile's data is cleared does not note its time in the cleared profile", async () => {
