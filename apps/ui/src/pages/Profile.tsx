@@ -117,7 +117,8 @@ export function Profile() {
             onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void avatarFromFile(file).then(setMyAvatar).then(() => setError(null), (err: unknown) => setError(problemText(err, t))); }} />
         </label>
         {/* Enter saves in place: blurring it dropped the keyboard's focus to the page. */}
-        <input data-testid="profile-name" aria-label={t("profile.nameLabel")} value={name} {...nameField} onBlur={saveName}
+        {/* Left empty, it shows the saved name again, which an empty name does not replace (as the nickname field does). */}
+        <input data-testid="profile-name" aria-label={t("profile.nameLabel")} value={name} {...nameField} onBlur={() => { if (name.trim()) saveName(); else setName(plain); }}
           onCompositionEnd={(e) => { nameComposition.inputProps.onCompositionEnd(e); nameField.onCompositionEnd(e); }} onKeyDown={(e) => { if (!nameComposition.composing(e) && e.key === "Enter") saveName(); }}
           className="min-w-0 flex-[1_1_8rem] bg-transparent text-xl font-semibold text-text-primary rounded-lg px-2 -mx-2 py-1 border border-transparent hover:border-border focus:border-accent focus:outline-none" />
         {current.restored && (
