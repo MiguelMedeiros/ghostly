@@ -37,9 +37,12 @@ describe("a row sealed and opened", () => {
   });
 
   it("a melt's proof secrets and blank outputs are sealed as one field each", async () => {
-    const melt = { quote: "q1", mint: "m", request: "lnbc1", amount: 1, secrets: ["s1", "s2"], outlay: 2, outputs: [{ secret: "o1" }], createdAt: 1 } satisfies PendingMelt;
+    // Spaces and "#!" are outside base64url: the random nonce and ciphertext can never spell these by chance.
+    const melt = { quote: "q1", mint: "m", request: "lnbc1", amount: 1, secrets: ["melt proof secret #1!", "melt proof secret #2!"], outlay: 2, outputs: [{ secret: "melt blank output #1!" }], createdAt: 1 } satisfies PendingMelt;
     const sealed = await sealRow(STORES.melts, melt);
-    expect(JSON.stringify(sealed)).not.toMatch(/s1|o1/);
+    expect(isSealedField(sealed.secrets)).toBe(true);
+    expect(isSealedField(sealed.outputs)).toBe(true);
+    for (const plain of [...melt.secrets, melt.outputs[0].secret]) expect(JSON.stringify(sealed)).not.toContain(plain);
     expect(sealed.request, "the invoice is not a secret").toBe("lnbc1");
     expect(await openRow(STORES.melts, sealed)).toEqual(melt);
   });
