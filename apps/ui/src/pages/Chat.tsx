@@ -809,7 +809,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       )}
       {/* Our call found no path to the contact (a VPN or firewall that blocks UDP, on either side): where a TURN server
           is set, and the guide. */}
-      {webrtc.noPath && !webrtc.mediaProblem && <CallNoPathNotice onClose={webrtc.dismissNoPath} />}
+      {webrtc.noPath && !webrtc.mediaProblem && <CallNoPathNotice iceServers={engine.state?.settings.iceServers} onClose={webrtc.dismissNoPath} />}
       {/* The system paused our microphone in a call (an iPhone's Home Screen app while the screen is locked): the
           contact hears nothing until Ghostly is back on screen, and the call is still on. */}
       {webrtc.micPaused && !webrtc.mediaProblem && (

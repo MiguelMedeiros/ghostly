@@ -40,6 +40,7 @@
   "noPathGuide": "Cómo solucionarlo",
   "noPathNext": "Una VPN o un firewall, tuyo o de tu contacto, puede bloquear las llamadas. Un servidor TURN las deja pasar.",
   "noPathSettings": "Ajustes de red",
+  "noPathTurnSet": "Tampoco pasó por tu servidor TURN. Revisa su dirección (TURN sobre TLS en el 443) y la credencial, o puede que tu contacto también necesite uno.",
   "onAnother": "Estás en otra llamada",
   "outgoing": "Llamando...",
   "reconnecting": "Reconectando...",
