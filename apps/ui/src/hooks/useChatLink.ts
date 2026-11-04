@@ -1,12 +1,7 @@
-import { useSyncExternalStore } from "react";
 import type { LinkView } from "@ghostly/browser/shared/types";
-import { engine } from "@ghostly/browser/platform/engine";
+import { useEngineValue } from "../lib/engineState";
 
-const subscribe = (listener: () => void) => engine.subscribe(listener);
-const snapshot = () => engine.state;
-
-/** The chat's link as the engine shows it, by the contact's key. */
+/** The chat's link as the engine shows it, by the contact's key: drawn again only when that link changes. */
 export function useChatLink(peerKey: string): LinkView | undefined {
-  const state = useSyncExternalStore(subscribe, snapshot);
-  return state?.links.find(l => l.peerPubKeyZ32 === peerKey);
+  return useEngineValue((state) => state?.links.find(l => l.peerPubKeyZ32 === peerKey));
 }
