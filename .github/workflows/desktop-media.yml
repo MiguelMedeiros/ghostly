@@ -35,6 +35,11 @@ concurrency:
   group: desktop-media-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  # GitHub's ubuntu-24.04 runners refuse the unprivileged user namespaces Chromium's sandbox needs ("Chromium sandboxing
+  # failed!"): the e2e and site checks launch it without here, as before; our own machines keep it on (e2e/support/chromiumSandbox.ts).
+  E2E_CHROMIUM_SANDBOX: "0"
+
 jobs:
   # A draft gets CI's fast tier only (ci.yml, `changes`): this builds once the pull request leaves draft
   # (ready_for_review) and on every push after. The draft state is read from the API, not the event: a push and

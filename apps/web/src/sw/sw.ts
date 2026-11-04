@@ -19,7 +19,7 @@ import { readPushDeviceView } from "./deviceState";
 import { deviceNoticeWords } from "./deviceWords";
 import { takeWakeSlot } from "./wakeLimit";
 import { readWake } from "../../../../packages/core/src/pairedWake";
-import { MAX_HELD_SHARES, SHARE_HOLD_MS, type FromWorker, type ToWorker } from "./messages";
+import { MAX_HELD_SHARES, OPEN_ASK_MS, SHARE_HOLD_MS, type FromWorker, type ToWorker, type WindowSays } from "./messages";
 
 declare const __SW_BUILD__: string;
 declare const __SW_PRECACHE__: string[];
@@ -29,7 +29,7 @@ declare const __SW_LANGUAGES__: Record<string, string[]>;
 // The few worker APIs used here, typed locally: the web app's tsconfig has the DOM library, not WebWorker's.
 interface ExtendableEvent extends Event { waitUntil(promise: Promise<unknown>): void }
 interface FetchEvent extends ExtendableEvent { request: Request; respondWith(response: Promise<Response> | Response): void }
-interface WindowClient { id: string; url: string; focused?: boolean; visibilityState?: string; postMessage(message: FromWorker): void; focus?(): Promise<WindowClient> }
+interface WindowClient { id: string; url: string; focused?: boolean; visibilityState?: string; postMessage(message: FromWorker, transfer?: Transferable[]): void; focus?(): Promise<WindowClient> }
 interface PushEvent extends ExtendableEvent { data: { text(): string } | null }
 interface Shown { data: unknown; close(): void }
 interface NotificationEvent extends ExtendableEvent { notification: Shown }
@@ -287,13 +287,35 @@ worker.addEventListener("push", (event) => {
   })());
 });
 
-/** A tap on a wake-up: the app's window comes forward on that chat, or a new one opens there. */
+/** What a window of the app says it runs; null when it does not answer in time (a page of an older build, or frozen). */
+function askWindow(client: WindowClient): Promise<WindowSays | null> {
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    const done = (said: WindowSays | null) => { clearTimeout(timer); channel.port1.close(); resolve(said); };
+    const timer = setTimeout(() => done(null), OPEN_ASK_MS);
+    channel.port1.onmessage = ({ data }: MessageEvent<Partial<WindowSays> | null>) =>
+      done(typeof data?.profile === "string" && typeof data.peer === "boolean" ? { profile: data.profile, peer: data.peer } : null);
+    try { client.postMessage({ type: "open-ask" }, [channel.port2]); } catch { done(null); }
+  });
+}
+
+/**
+ * A tap on a wake-up: the window that runs the notice's profile and holds its peer comes forward on that chat, the one
+ * in front first. Never a tab waiting behind another (it opens nothing), and never another profile's window (it would
+ * switch away from the profile it runs). No such window: a new one opens there. Windows that do not say what they run
+ * (pages of the build before this one) get it as they did, the first one.
+ */
 async function openFrom(notification: Shown): Promise<void> {
   notification.close();
   const data = notification.data as { path?: unknown; profile?: unknown } | null;
   if (typeof data?.path !== "string" || typeof data.profile !== "string") return;
   const message: FromWorker = { type: "open-chat", path: data.path, profile: data.profile };
-  const [open] = await appWindows();
+  const windows = await appWindows();
+  const said = await Promise.all(windows.map(askWindow));
+  const ours = windows.filter((_, i) => said[i]?.peer && said[i].profile === data.profile);
+  const open = said.some(Boolean)
+    ? ours.find((client) => client.focused || client.visibilityState === "visible") ?? ours[0]
+    : windows[0];
   if (open) {
     await open.focus?.().catch(() => undefined);
     open.postMessage(message);

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applyUpdate, askForShare, buildGone, followNewVersion, forwardShare, listenForShares, onBuildGone, openedForShare, prepareUpdate } from "../../../../web/src/pwa/serviceWorker";
+import { applyUpdate, askForShare, buildGone, followNewVersion, forwardShare, listenForShares, listenForTaps, onBuildGone, openedForShare, prepareUpdate } from "../../../../web/src/pwa/serviceWorker";
 import { carryIncomingShare, dropIncomingShare, incomingShare, resetIncomingShare } from "../../lib/incomingShare";
 import { activeProfileId } from "../../lib/profiles";
 
@@ -267,6 +267,12 @@ describe("a share, on the page's side", () => {
     expect(incomingShare()).toMatchObject({ text: "one", dropped: 2 });
   });
 
+  it("a wake-up's chat is not this listener's: a tab hears taps before it takes shares (listenForTaps)", () => {
+    listenForShares();
+    container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "open-chat", path: "/chat/abc", profile: activeProfileId() } }));
+    expect(window.location.hash).toBe("");
+  });
+
   it("a build-gone message tells the app to look for the update now, and the page remembers it", () => {
     listenForShares();
     let told = 0;
@@ -281,5 +287,35 @@ describe("a share, on the page's side", () => {
     stop();
     container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "build-gone" } }));
     expect(told).toBe(1);
+  });
+});
+
+describe("a wake-up notification tapped, on the page's side", () => {
+  /** The push worker's `open-ask`, and what this page answers on the port sent with it. */
+  const ask = () => {
+    const port = { postMessage: vi.fn() };
+    container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "open-ask" }, ports: [port] }));
+    return port.postMessage.mock.calls;
+  };
+
+  it("every tab says which profile it runs and whether it holds the peer, from the moment it loads", () => {
+    let peer = false;
+    listenForTaps(() => peer);
+    expect(container.started).toBe(true);
+    expect(ask()).toEqual([[{ profile: activeProfileId(), peer: false }]]);
+    peer = true;
+    expect(ask()).toEqual([[{ profile: activeProfileId(), peer: true }]]);
+  });
+
+  it("the tab that runs the profile opens the chat", () => {
+    listenForTaps(() => true);
+    container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "open-chat", path: "/chat/abc", profile: activeProfileId() } }));
+    expect(window.location.hash).toBe("#/chat/abc");
+  });
+
+  it("a tab waiting behind another keeps the chat for when it takes over, instead of dropping it", () => {
+    listenForTaps(() => false);
+    container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "open-chat", path: "/chat/abc", profile: activeProfileId() } }));
+    expect(window.location.hash).toBe("#/chat/abc");
   });
 });

@@ -268,6 +268,7 @@
     },
     "label": "Nombre del dispositivo",
     "save": "Guardar",
+    "saving": "Guardando…",
     "title": "Cambiar nombre de {{device}}"
   },
   "restore": {

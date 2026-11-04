@@ -4,8 +4,10 @@ import { Settings } from "../../pages/Settings";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { NO_PUSH_SERVICE_KEY, isNoPushService, setPushPlatform, setWake, type PushPlatform } from "../../lib/wakePush";
+import { generateVapidKeys } from "@ghostly/core";
+import type { WakeSubscription } from "@ghostly/browser/shared/types";
 import type { Language } from "../../lib/settings";
-import { fakeEngine } from "../fakeEngine";
+import { engineState, fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
 
 // covers: push.wake.notify
@@ -103,6 +105,65 @@ describe("a browser with no push service", () => {
     expect(wakeSwitch()).not.toHaveAttribute("aria-disabled");
     expect(screen.queryByTestId("settings-wake-retry")).toBeNull();
     expect(localStorage.getItem(NO_PUSH_SERVICE_KEY)).toBeNull();
+  });
+});
+
+/*
+ * New token while wake-ups are on: the web platform ends the old subscription before it makes the new one (a browser
+ * refuses a second key while one is held), so a refused new one leaves contacts holding an endpoint that is gone.
+ */
+describe("New token refused", () => {
+  const settingsWith = (wake?: WakeSubscription) => ({ online: true, nick: "Ghost", relays: [], iceServers: [], mints: [], mintsInitialized: true, ...(wake && { wake }) });
+  const wakeOn = { ...keys, vapid: generateVapidKeys() };
+  beforeEach(() => {
+    fakeEngine.setState(engineState({ settings: settingsWith(wakeOn) }));
+    fakeEngine.on("setWakeSubscription", ({ subscription }) => fakeEngine.setState(engineState({ settings: settingsWith(subscription ?? undefined) })));
+  });
+
+  it("for no push service, after the old subscription ended: wake-ups are off, and the row says why", async () => {
+    const fake = platform(async () => { throw noService(); });
+    const { user } = settings();
+    await user.click(await screen.findByTestId("settings-wake-rotate"));
+    await waitFor(() => expect(fake.subscribe).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(wakeSwitch()).toHaveAttribute("aria-checked", "false"));
+    expect(fakeEngine.callsTo("setWakeSubscription")).toEqual([{ subscription: null }]);
+    expect(hint()).toHaveTextContent("This browser has no push service");
+    expect(wakeSwitch()).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByTestId("settings-wake-retry")).toBeEnabled();
+  });
+
+  it("for another reason, after the old subscription ended: wake-ups are off, with the refusal's line", async () => {
+    const fake = platform(async () => { throw new Error("Registration failed - storage error"); });
+    const { user } = settings();
+    await user.click(await screen.findByTestId("settings-wake-rotate"));
+    await waitFor(() => expect(fake.subscribe).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(wakeSwitch()).toHaveAttribute("aria-checked", "false"));
+    expect(fakeEngine.callsTo("setWakeSubscription")).toEqual([{ subscription: null }]);
+    expect(hint()).toHaveTextContent("storage error");
+    expect(wakeSwitch()).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("before the old subscription was touched (notifications refused): wake-ups stay on, with the refusal's line", async () => {
+    const fake = platform(async () => { throw denied(); });
+    fake.current.mockImplementation(async () => keys as never);
+    const { user } = settings();
+    await user.click(await screen.findByTestId("settings-wake-rotate"));
+    await waitFor(() => expect(fake.subscribe).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(hint()).toHaveTextContent("permission denied"));
+    expect(wakeSwitch()).toHaveAttribute("aria-checked", "true");
+    expect(fakeEngine.callsTo("setWakeSubscription")).toEqual([]);
+  });
+
+  it("for no push service with the old subscription still there: wake-ups stay on, and the line says why", async () => {
+    const fake = platform(async () => { throw noService(); });
+    fake.current.mockImplementation(async () => keys as never);
+    const { user } = settings();
+    await user.click(await screen.findByTestId("settings-wake-rotate"));
+    await waitFor(() => expect(fake.subscribe).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByTestId("settings-wake-rotate")).toBeEnabled());
+    expect(hint()).toHaveTextContent("This browser has no push service");
+    expect(wakeSwitch()).toHaveAttribute("aria-checked", "true");
+    expect(fakeEngine.callsTo("setWakeSubscription")).toEqual([]);
   });
 });
 

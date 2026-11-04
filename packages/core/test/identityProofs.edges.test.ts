@@ -377,6 +377,28 @@ describe("verifying a presentation", () => {
     expect(w.ledgers.bob.received.map(r => [r.id, r.status])).toEqual([[id, "revoked"]]);
   });
 
+  it("stores a proof withdrawn while its presentation was being checked as withdrawn, not verified", async () => {
+    const w = world();
+    const id = w.addProof();
+    const frame = await present(w, id);
+    // The owner's withdraw comes on a new session while the old one's check is still out.
+    w.verify.mockImplementationOnce(async () => {
+      await w.peers.bob.receive({ t: "idp-withdraw", id });
+      return { subject: SUBJECT, source: "Test" };
+    });
+    await w.peers.bob.receive(frame);
+    expect(w.sent("idp-withdrawn").map(f => f.frame)).toEqual([{ t: "idp-withdrawn", id }]);
+    expect(w.ledgers.bob.received.map(r => [r.id, r.status])).toEqual([[id, "withdrawn"]]);
+    // No late result: it would settle a new share of the same proof.
+    expect(w.sent("idp-result")).toEqual([]);
+    expect(w.ledgers.bob.timeline?.filter(e => e.side === "theirs").map(e => [e.kind, e.state ?? e.reason])).toEqual([["shared", "verified"], ["stopped", "withdrawn"]]);
+    expect(w.ledgers.bob.challenges).toEqual([]);
+    // A second withdraw writes nothing more.
+    const ledger = w.ledgers.bob;
+    await w.peers.bob.receive({ t: "idp-withdraw", id });
+    expect(w.ledgers.bob).toBe(ledger);
+  });
+
   it("refuses evidence the provider rejects, and a presentation signed for another nonce", async () => {
     const w = world();
     const id = w.addProof({ evidence: { for: "someone else" } });

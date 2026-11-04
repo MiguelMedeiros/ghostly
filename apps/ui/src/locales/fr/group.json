@@ -180,6 +180,7 @@
     "note": "Quiconque ouvre ce lien rejoint le groupe, sans être votre contact ni dire qui il est. Il entre tant que votre app est ouverte, jusqu'à {{count}} membres.",
     "noteCommunity": "Quiconque ouvre ce lien rejoint le groupe, sans être le contact de personne ni dire qui il est. L'app de n'importe quel membre le fait entrer, donc cela marche en votre absence ; jusqu'à {{count}} membres. Retirer quelqu'un ne l'empêche pas de rouvrir le lien : l'admin en crée un nouveau pour cela.",
     "off": "Le lien est désactivé : personne ne peut rejoindre avec, et le lien partagé avant ne fonctionnera plus. L'activer crée un nouveau lien à partager.",
+    "offMember": "L'admin a désactivé le lien : personne ne peut rejoindre avec, et le lien partagé avant ne fonctionnera plus. Seul l'admin peut en créer un nouveau.",
     "qrTitle": "QR code du lien du groupe",
     "reset": "Nouveau lien",
     "resetBody": "Le lien partagé jusqu'ici cesse de fonctionner pour de bon : ceux qui l'ont et n'ont pas encore rejoint ne peuvent plus entrer avec. Les membres restent dans le groupe.",

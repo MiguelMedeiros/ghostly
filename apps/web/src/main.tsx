@@ -28,7 +28,7 @@ import { profileDatabase } from "../../ui/src/lib/profileData";
 import { activeProfileId } from "../../ui/src/lib/profiles";
 import { nameInChat } from "../../ui/src/lib/apps/nameInChat";
 import { currentPush, pushSupported, subscribePush, syncWakeTable, syncWakeText, unsubscribePush } from "./pwa/push";
-import { SHARE_FORWARD_AFTER_MS, askForShare, followNewVersion, forwardShare, listenForShares, openedForShare, registerServiceWorker } from "./pwa/serviceWorker";
+import { SHARE_FORWARD_AFTER_MS, askForShare, followNewVersion, forwardShare, listenForShares, listenForTaps, openedForShare, registerServiceWorker } from "./pwa/serviceWorker";
 
 // A build for the e2e suite runs mini-apps through the real runner and broker before the app has a screen for them.
 if (import.meta.env.VITE_APPS_TEST === "1") void import("../../ui/src/lib/apps/testHook").then((hook) => hook.installAppsTestHook());
@@ -40,6 +40,10 @@ const root = createRoot(document.getElementById("root")!);
 // is registered in every tab, including one that waits for another below.
 watchInstallPrompt();
 registerServiceWorker();
+/** Whether this tab holds its profile's peer: until then it waits behind another tab, or is still starting. */
+let isPeer = false;
+// A wake-up notification tapped: heard in every tab, so the push worker can tell one that waits from the one to open it in.
+listenForTaps(() => isPeer);
 // Another tab took a new version: this one reloads into it rather than run the build whose files its worker deleted.
 const mayStart = followNewVersion();
 // Wake-up push (WISP 401 § Wake-up push): this app can be woken while closed; Settings shows the switch.
@@ -77,7 +81,6 @@ const missing = await missingEssentials();
 if (missing.length) await cannotRun(missing);
 
 const peerLock = profile ? `ghostly-peer-${profile}` : "ghostly-peer";
-let isPeer = false;
 let stopLink = () => {};
 await becomeThePeer(peerLock, () => {
   const draw = (state: OtherTabState) => root.render(<OtherTab state={state} t={profileTranslator()} />);

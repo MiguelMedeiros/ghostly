@@ -5,6 +5,7 @@ import type { Translate } from "../locales/translate";
 import type { ChatMessage } from "../lib/types";
 import { revealMessage } from "./useRowWindow";
 import { useIsLocked } from "../contexts/LockScreenContext";
+import { modalOpen } from "./useAppCommands";
 
 /** How long typing rests before the chat is searched: a long chat is searched once per pause, not once per key. */
 export const SEARCH_DEBOUNCE_MS = 150;
@@ -67,6 +68,8 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
     if (!active || locked) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.key.toLowerCase() !== "f" || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+      // A dialog over the chat keeps its keys and its focus, as the app's other shortcuts leave it.
+      if (modalOpen()) return;
       e.preventDefault();
       show();
     };

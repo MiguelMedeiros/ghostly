@@ -91,6 +91,8 @@ export interface FakeWorld {
   failDebuggerAttach: string | null;
   manifest: chrome.runtime.Manifest;
   permissionsGranted: boolean;
+  /** The host patterns Chrome holds for the extension now: a granted `permissions.request` adds, `permissions.remove` takes away. */
+  hostAccess: Set<string>;
   webAuthFlow: (url: string) => Promise<string | undefined>;
   updateCheck: { status: string; version?: string };
   /** Every `event` object, so a restart can drop one context's listeners. */
@@ -137,6 +139,7 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
     failDebuggerAttach: null as string | null,
     manifest,
     permissionsGranted: true,
+    hostAccess: new Set<string>(),
     webAuthFlow: async (url: string) => `${url}#answer`,
     updateCheck: { status: "no_update" } as { status: string; version?: string },
     events: [] as FakeEvent[],
@@ -301,7 +304,17 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
       },
       async request(request: chrome.permissions.Permissions) {
         record("permissions.request", request);
+        if (world.permissionsGranted) for (const origin of request.origins ?? []) world.hostAccess.add(origin);
         return world.permissionsGranted;
+      },
+      async remove(request: chrome.permissions.Permissions) {
+        record("permissions.remove", request);
+        const held = (request.origins ?? []).every((origin) => world.hostAccess.has(origin));
+        for (const origin of request.origins ?? []) world.hostAccess.delete(origin);
+        return held;
+      },
+      async getAll() {
+        return { permissions: chromeApi.notifications === undefined ? [] : ["notifications"], origins: [...world.hostAccess] };
       },
     },
     identity: {

@@ -63,6 +63,11 @@ export const APP_CHECK_TIMINGS = {
 } as const;
 /** Apps the update check reads at once (their publishers' files, their sources' peeks): all on the same two hosts. */
 const APP_CHECK_PARALLEL = 6;
+/**
+ * Stores a refresh reads at once: each read is two requests (its index and `.sig`), and a store behind the copy the
+ * person took reads that copy beside them, so about as many requests as the update check's apps.
+ */
+const STORE_READ_PARALLEL = 4;
 
 /** Revocations are checked this long at a time before the page's thread is let go. */
 const REVOCATIONS_SLICE_MS = 10;
@@ -249,9 +254,10 @@ export interface AppStoreSummary {
 
 /**
  * What `previewStore` read, before the person adds it. `held`: the person has this store already (by its key, not
- * removed), with the `sequence` of the index held (absent when none was read yet). Add then takes only a newer index.
+ * removed), with the `sequence` of the index held (absent when none was read yet), and `equivocation` when this index
+ * is another one signed under that sequence (the preview marks the held store with it). Add then takes only a newer index.
  */
-export interface AppStorePreview { url: string; key: string; fingerprint: string; name: string; description?: string; kind: AppStoreKind; sequence: number; expires: number; expired: boolean; apps: number; held?: { sequence?: number } }
+export interface AppStorePreview { url: string; key: string; fingerprint: string; name: string; description?: string; kind: AppStoreKind; sequence: number; expires: number; expired: boolean; apps: number; held?: { sequence?: number; equivocation?: true } }
 
 /** Where to fetch an app from: a pasted URL, a store's listing, or a chat card's pointer. */
 export type AppSource =
@@ -318,6 +324,24 @@ export interface AppsHost {
  * publisher's, read beside it when it was fetched (Install refuses a version they stop, and the record starts with them).
  */
 interface Staged { bundle: AppBundle; bytes: Uint8Array; from: string; store?: string; revocations: SignedAppRevocation[]; at: number }
+
+/**
+ * `run` on every item, at most `limit` at a time (the next one starts when one ends): one promise per item, in the
+ * items' order, whatever order they end in.
+ */
+function pooled<T, R>(items: readonly T[], limit: number, run: (item: T) => Promise<R>): Promise<R>[] {
+  const ends: { resolve: (value: R) => void; reject: (error: unknown) => void }[] = [];
+  const out = items.map((_, i) => new Promise<R>((resolve, reject) => { ends[i] = { resolve, reject }; }));
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      try { ends[i]!.resolve(await run(items[i]!)); } catch (error) { ends[i]!.reject(error); }
+    }
+  };
+  for (let w = 0; w < Math.min(limit, items.length); w++) void worker();
+  return out;
+}
 
 /**
  * A listing's URLs this client reads, in order, a jsDelivr copy first: one this client reads names a full commit, so it
@@ -559,6 +583,11 @@ export class Apps {
    * index listing the same is not peeked again at every check.
    */
   private readonly listingMisses = new Map<string, string>();
+  /**
+   * The index a store's own URL served at its last read when it was not taken (behind the copy the person took, at a
+   * commit): by store key, with that URL. The same bytes there again are not checked whole at every refresh.
+   */
+  private readonly behindReads = new Map<string, { url: string; index: AppStoreIndex; digest: string }>();
   /** `ghostly-revoke.json` files checked, by the SHA-256 of their bytes: their revocations, or null when refused, and the bytes the held list counts for. */
   private readonly revocationFiles = new Map<string, { revocations: SignedAppRevocation[] | null; bytes: number }>();
   /** Revocations read in a store's index and verified, by `appRevocationId`: at most `STORE_REVOCATIONS_KEPT`. */
@@ -1008,21 +1037,29 @@ export class Apps {
 
   /**
    * Reads the index at `url`. With the index held for this store, bytes equal to it (by digest) are the held index: its
-   * signature and every revocation in it were checked when it was read, so only its expiry is taken again. Any other
+   * signature and every revocation in it were checked when it was read, so only its expiry is taken again; the same for
+   * `behind`, the index this URL served at its last read when it was not taken (`behindReads`). Any other
    * index is read with a pause every few ms (the engine shares the page's thread, and an index holds up to 4096
    * listings and 4096 revocations, each of these a signature check), and a revocation checked in an earlier read, of
    * this store or another, a preview included, is not checked again.
    */
-  private async readStoreAt(url: string, heldKey?: string, held?: Pick<AddedAppStore, "index" | "digest">): Promise<AppStoreRead> {
-    // Read side by side; the first of the two that fails stops the other, whose bytes nobody would use.
+  private async readStoreAt(url: string, heldKey?: string, held?: Pick<AddedAppStore, "index" | "digest">, behind?: { index: AppStoreIndex; digest: string }, unneeded?: AbortSignal): Promise<AppStoreRead> {
+    // Read side by side; the first of the two that fails stops the other, whose bytes nobody would use. `unneeded`
+    // stops both (a copy read beside a store's own URL, which turned out to hold the index).
     const stop = new AbortController();
+    if (unneeded?.aborted) stop.abort();
+    unneeded?.addEventListener("abort", () => { stop.abort(); }, { once: true });
     const read = (at: string, maxBytes: number) => this.host.fetch(at, { maxBytes, revalidate: true, signal: stop.signal }).catch((error: unknown) => { stop.abort(); throw error; });
     const [indexBytes, sigBytes] = await Promise.all([
       read(url, APP_FETCH_LIMITS.storeIndexBytes),
       read(besideUrl(url, "ghostly-store.sig"), APP_FETCH_LIMITS.sigBytes),
     ]);
-    if (held?.index && held.digest !== undefined && toBase64Url(await sha256Paced(indexBytes)) === held.digest) {
-      return { ok: true, store: { index: held.index, digest: held.digest, expired: held.index.expires < this.nowS() } };
+    // The index held, or the one this URL served last time it was behind (`behindReads`): checked whole then.
+    const known = held?.index && held.digest !== undefined ? [{ index: held.index, digest: held.digest }, ...(behind ? [behind] : [])] : [];
+    if (known.length) {
+      const digest = toBase64Url(await sha256Paced(indexBytes));
+      const same = known.find((k) => k.digest === digest);
+      if (same) return { ok: true, store: { index: same.index, digest, expired: same.index.expires < this.nowS() } };
     }
     const steps = readAppStoreSteps(indexBytes, sigBytes, this.nowS(), heldKey, this.checkedRevocations);
     const pause = pacer(REVOCATIONS_SLICE_MS);
@@ -1115,7 +1152,10 @@ export class Apps {
     this.previewed = previewed;
   }
 
-  /** Reads a store at a URL for the person to see before adding it. Nothing is stored: the checked index waits in memory for `addStore`. */
+  /**
+   * Reads a store at a URL for the person to see before adding it. Nothing is added: the checked index waits in memory
+   * for `addStore`. Only another index under the held one's sequence is kept, on the held store (its proof).
+   */
   async previewStore({ url }: { url: string }): Promise<AppStorePreview> {
     const at = this.storeUrl(url);
     this.keepPreviewed(null);
@@ -1124,10 +1164,15 @@ export class Apps {
     const { index, digest } = read.store;
     this.keepPreviewed({ url: at, index, digest, at: this.now() });
     const held = await this.storeRecord(index.key);
+    // Another index signed under the held one's sequence is the store showing people different lists (WISP 1200 §
+    // Stores): kept on the held store, as a read of it would, wherever the copy was found.
+    const other = !!held && !held.removed && !!held.index
+      && appStoreDecision({ key: held.key, sequence: held.index.sequence, digest: held.digest ?? "" }, { key: index.key, sequence: index.sequence, digest }) === "equivocation";
+    if (other && held.equivocation?.digest !== digest) await this.putStore(this.withIndex(held, index, digest));
     return {
       url: at, key: index.key, fingerprint: appFingerprint(index.key), name: index.name, kind: index.kind, sequence: index.sequence,
       expires: index.expires, expired: read.store.expired, apps: index.apps.length, ...(index.description !== undefined && { description: index.description }),
-      ...(held && !held.removed && { held: held.index ? { sequence: held.index.sequence } : {} }),
+      ...(held && !held.removed && { held: held.index ? { sequence: held.index.sequence, ...(other && { equivocation: true as const }) } : {} }),
     };
   }
 
@@ -1180,7 +1225,12 @@ export class Apps {
       case "new": case "update": { const { equivocation: _e, ...clean } = rest; return { ...clean, index, digest, fetchedAt: this.now() }; }
       case "same": return { ...rest, fetchedAt: this.now() };
       case "rollback": return { ...rest, problem: "rollback" };
-      case "equivocation": return { ...rest, equivocation: { sequence: index.sequence, digest, at: this.now() }, problem: "equivocation" };
+      case "equivocation": {
+        // The same other index read again keeps its mark, and when it was first seen: the record is not written again.
+        const was = rest.equivocation;
+        const equivocation = was?.sequence === index.sequence && was.digest === digest ? was : { sequence: index.sequence, digest, at: this.now() };
+        return { ...rest, equivocation, problem: "equivocation" };
+      }
       default: return { ...rest, problem: "store-key" };
     }
   }
@@ -1188,6 +1238,7 @@ export class Apps {
   async removeStore({ key }: { key: string }): Promise<void> {
     const held = await this.storeRecord(key);
     if (!held) return;
+    this.behindReads.delete(key);
     // Its index's revocations stay with the apps they stop (an index held from before they were kept at each read).
     await this.keepStoreRevocations(held);
     const seen = held.index ?{ sequence: held.index.sequence, digest: held.digest ?? "" } : held.seen;
@@ -1217,17 +1268,12 @@ export class Apps {
   async refreshStores({ key }: { key?: string } = {}): Promise<AppStoreSummary[]> {
     const stores = (await this.stores()).filter((s) => key === undefined || s.key === key);
     if (key !== undefined && !stores.length) fail("no-store", "No such store");
+    // Read a few at a time (each waits on its host), then taken one by one in the stores' order, as each read ends:
+    // the same writes, in the same order, as when each store was read only after the one before.
+    const reads = pooled(stores, STORE_READ_PARALLEL, (s) => this.readStore(s));
     const out: AppStoreSummary[] = [];
-    for (const s of stores) {
-      let read: AppStoreRead | { ok: false; reason: string };
-      try {
-        read = await this.readStoreAt(s.url, s.key, s);
-      } catch (error) {
-        read = { ok: false, reason: error instanceof AppFetchError ? error.code : "network" };
-      }
-      // Its own URL behind the copy of its index the person took (or not answering): that copy's URL is read too.
-      const behind = !read.ok || !!this.withIndex(s, read.store.index, read.store.digest).problem;
-      const copy = s.copyUrl !== undefined && behind ? await this.readStoreAt(s.copyUrl, s.key, s).catch((): null => null) : null;
+    for (const [i, s] of stores.entries()) {
+      const { read, copy } = await reads[i]!;
       // Removed meanwhile: not put back.
       const now = await this.storeRecord(s.key);
       if (!now || now.removed) continue;
@@ -1247,6 +1293,32 @@ export class Apps {
       out.push(this.summary(next));
     }
     return out;
+  }
+
+  /**
+   * One store's reads for `refreshStores`; never throws. Its own URL, and the copy its index was taken from (`copyUrl`)
+   * when the own URL is behind it (or not answering). That copy is read beside the own URL when that URL was behind at
+   * its last read (`behindReads`: one at a commit stays so), and stopped when it turns out not to be; otherwise only
+   * once the own URL showed it.
+   */
+  private async readStore(s: AddedAppStore): Promise<{ read: AppStoreRead | { ok: false; reason: string }; copy: AppStoreRead | null }> {
+    const last = this.behindReads.get(s.key);
+    const lastBehind = last?.url === s.url ? last : undefined;
+    const unneeded = new AbortController();
+    const readCopy = (at: string) => this.readStoreAt(at, s.key, s, undefined, unneeded.signal).catch((): null => null);
+    const early = s.copyUrl !== undefined && lastBehind ? readCopy(s.copyUrl) : null;
+    let read: AppStoreRead | { ok: false; reason: string };
+    try {
+      read = await this.readStoreAt(s.url, s.key, s, lastBehind);
+    } catch (error) {
+      read = { ok: false, reason: error instanceof AppFetchError ? error.code : "network" };
+    }
+    // Its own URL behind the copy of its index the person took (or not answering): that copy's read is used.
+    const behind = !read.ok || !!this.withIndex(s, read.store.index, read.store.digest).problem;
+    if (read.ok && behind) this.behindReads.set(s.key, { url: s.url, index: read.store.index, digest: read.store.digest });
+    else this.behindReads.delete(s.key);
+    if (!behind) unneeded.abort();
+    return { read, copy: behind && s.copyUrl !== undefined ? await (early ?? readCopy(s.copyUrl)) : null };
   }
 
   // ---------- install ----------
@@ -1295,10 +1367,13 @@ export class Apps {
     } else fail("bad-source", "No app to fetch");
     if (!urls.length) fail("host", "This listing has no URL Ghostly reads from");
 
+    // The install screen opened again on the version it showed (a listing, a card naming its digest): the bundle read and
+    // checked from that URL within `STAGED.ms` is taken as it is, and only its revocations are read again.
+    const kept = expect?.digest !== undefined ? this.staged.get(expect.digest) : undefined;
     let last: unknown = null;
     for (const url of urls) {
       try {
-        const { bundle, bytes } = await this.fetchBundle(url);
+        const { bundle, bytes } = kept && kept.from === url && this.now() - kept.at <= STAGED.ms ? kept : await this.fetchBundle(url);
         const version = versionOf(bundle.manifest, bundle.digest);
         if (expect) {
           if (version.ref !== expect.ref) fail("other-app", "The URL holds another app");
@@ -1365,9 +1440,14 @@ export class Apps {
     let wrote: FileBytesKind | undefined;
     try {
       // Written only over the record read (as the update check and Accept do): one changed while the files were written
-      // (the check installed a newer version, an update accepted, another tab) is read and judged again.
+      // (the check installed a newer version, an update accepted, another tab) is read and judged again. One gone meanwhile
+      // was uninstalled (another tab, the Apps page while a card's Install was busy): it is not put back as new, with its
+      // data gone, as Accept does.
+      let read = false;
       for (;;) {
         const [installed, stores] = await Promise.all([this.app(version.ref), this.stores()]);
+        if (read && !installed) fail("not-installed", "This app is not installed");
+        read = installed !== undefined;
         const run = this.runStatus(version, this.storeViews(stores), [...(installed?.revocations ?? []), ...revocations]);
         if (run.status === "revoked") fail("revoked", "Its publisher revoked this version");
         if (run.status === "removed") fail("removed", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
@@ -1502,11 +1582,10 @@ export class Apps {
     await this.refreshStores();
     const stores = await this.stores();
     // A few apps at a time: each waits on its publisher's files (and its sources' peeks), so one after the other a
-    // check took the app count times the round trip. The results stay in the installed order.
-    const out: (AppCheckResult | null)[] = [];
-    let next = 0;
-    const worker = async () => { while (next < apps.length) { const i = next++; out[i] = await this.checkApp(apps[i]!, stores); } };
-    await Promise.all(Array.from({ length: Math.min(APP_CHECK_PARALLEL, apps.length) }, worker));
+    // check took the app count times the round trip. The results stay in the installed order. An app whose check fails
+    // (a bundle write refused on a full disk) is left out, as one uninstalled meanwhile is: a throw would end the check
+    // while the other workers still run, and the next check would start beside them.
+    const out = await Promise.all(pooled(apps, APP_CHECK_PARALLEL, (app) => this.checkApp(app, stores).catch(() => null)));
     return out.filter((r) => r !== null);
   }
 
