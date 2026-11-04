@@ -224,6 +224,10 @@ describe("chats", () => {
     const { ctx, node } = fake([msg("me_1", 5, { sender: "me", delivery: "sending" })]);
     await expect(callApi(ctx, "chat.send", { chat: "Alice", text: "cashuAeyJ0b2tlbiI6W3sicHJvb2ZzIjpbXX1dfQ" })).rejects.toMatchObject({ code: "confirm" });
     await expect(callApi(ctx, "chat.send", { chat: "Alice", text: "legal winner thank year wave sausage worth useful legal winner thank yellow" })).rejects.toMatchObject({ code: "confirm" });
+    // BIP39's Portuguese list, entropy 0x7f repeated: the app's other languages' lists are the guard's too.
+    await expect(callApi(ctx, "chat.send", { chat: "Alice", text: "imitador vinheta sogro xerife veleiro pomar volumoso tratador imitador vinheta sogro xingar" })).rejects.toMatchObject({ code: "confirm" });
+    // Monero's own Portuguese test seed (tests/unit_tests/mnemonics.cpp): Monero's lists in them too.
+    await expect(callApi(ctx, "chat.send", { chat: "Alice", text: "cinzento luxuriante leonardo gnostico digressao cupula fifa broxar iniquo louvor ovario dorsal ideologo besuntar decurso rosto susto lemure unheiro pagodeiro nitroglicerina eclusa mazurca bigorna gnostico" })).rejects.toMatchObject({ code: "confirm" });
     expect(node.sendMessage).not.toHaveBeenCalled();
     expect(await callApi(ctx, "chat.send", { chat: "Alice", text: "hi" })).toEqual({ chat: "chat-one", messageId: "me_1", delivery: "sending" });
     await callApi(ctx, "chat.send", { chat: "Alice", text: "legal winner thank year wave sausage worth useful legal winner thank yellow", force: true });
@@ -547,7 +551,9 @@ describe("chat wait", () => {
       hub: { onEvent: () => () => {}, onState: (l: (s: EngineState) => void) => { listeners.add(l); return () => listeners.delete(l); }, lastSeq: 0, replay: () => [] },
       mode: "daemon", version: "test",
     } as unknown as ApiContext;
-    return { ctx, set: (next: LinkView) => { links = [next]; for (const l of listeners) l(stateOf()); } };
+    // As the daemon's hub does (EventHub.setState): a listener that throws is its own business.
+    const hand = () => { for (const l of listeners) { try { l(stateOf()); } catch { /* its own */ } } };
+    return { ctx, set: (next: LinkView) => { links = [next]; hand(); }, remove: () => { links = []; hand(); } };
   }
   /** Live when the app last ran (its history ends on a live stretch, WISP 100), and no session in this run yet. */
   const remembered = (fields: Partial<LinkView> = {}) => link("chat-one", {
@@ -602,6 +608,19 @@ describe("chat wait", () => {
     expect(await callApi(ctx, "chat.wait", { chat: "Alice", until: "paired", timeout: 1 })).toMatchObject({ live: false });
     set(remembered(session));
     expect(await callApi(ctx, "chat.wait", { chat: "Alice", until: "paired", timeout: 1 })).toMatchObject({ live: true });
+  });
+
+  it("a chat removed while it is waited for answers not_found at once, not a timeout at the end", async () => {
+    // The check's not_found was thrown inside the hub's state listener, which swallows it: the wait went on to its
+    // --timeout (up to a day) and answered "Timed out … to be live", exit 4.
+    const { ctx, remove } = moving(remembered());
+    const from = Date.now();
+    const waiting = callApi(ctx, "chat.wait", { chat: "Alice", until: "live", timeout: 5 });
+    waiting.catch(() => {});
+    await new Promise((r) => setTimeout(r, 20));
+    remove();
+    await expect(waiting).rejects.toMatchObject({ code: "not_found", message: "Chat chat-one was removed" });
+    expect(Date.now() - from).toBeLessThan(1000);
   });
 });
 

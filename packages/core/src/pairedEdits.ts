@@ -137,7 +137,10 @@ export function dhtEditId(id: string, e: number): string {
   return toBase64Url(sha256(utf8Encode(`ghostly-edit/1:${id}:${e}`)).slice(0, 16));
 }
 
-/** A sliding window of `limit` events per `windowMs`: the sender's pace and the receiver's limit. */
+/**
+ * A sliding window of `limit` events per `windowMs`: the sender's pace and the receiver's limit. A time later than now
+ * (the device clock went back) is long gone, or the window would stay full for as long as the clock went back.
+ */
 export class RateWindow {
   private recent: number[] = [];
 
@@ -146,7 +149,7 @@ export class RateWindow {
   /** Counts one now; false (and not counted) when the window is full. */
   take(): boolean {
     const now = this.now();
-    this.recent = this.recent.filter(at => now - at < this.windowMs);
+    this.recent = this.recent.filter(at => at <= now && now - at < this.windowMs);
     if (this.recent.length >= this.limit) return false;
     this.recent.push(now);
     return true;
@@ -155,7 +158,7 @@ export class RateWindow {
   /** Milliseconds until the window has room again; 0 when it has room now. */
   wait(): number {
     const now = this.now();
-    this.recent = this.recent.filter(at => now - at < this.windowMs);
+    this.recent = this.recent.filter(at => at <= now && now - at < this.windowMs);
     return this.recent.length < this.limit ? 0 : this.recent[0] + this.windowMs - now;
   }
 

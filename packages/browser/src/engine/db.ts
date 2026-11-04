@@ -2,6 +2,7 @@ import { emptyIdentityLedger, emptyProofLedger, type IdentityLedger, type ProofL
 import { APP_STORAGE_CHAT_INDEX, CARD_INDEX, FILE_INDEX, STORES, fileStore, store, wrap, committed, openDb } from "../shared/idb";
 import { removeFileBytes } from "../shared/fileBytes";
 import type { MessagePage, Settings, StoredGroup, StoredLink, StoredMessage, StoredService } from "../shared/types";
+import { openRow, openRows, RowSeals, sealRow } from "./sealedRows";
 
 /**
  * The newest `count` rows of an index range, newest first: one descending read where IndexedDB has it (the options
@@ -28,6 +29,23 @@ function newestMessages(index: IDBIndex, query: IDBKeyRange, count: number): Pro
 /** A write that waits for no disk sync of its own (in a browser, the engine's default already; on Node, the CLI's store). */
 const RELAXED: IDBTransactionOptions = { durability: "relaxed" };
 
+const CHANGED = Symbol("changed");
+
+/**
+ * A chat's pinned key, for the transaction that checks and changes it, and the seals of the keys that change writes.
+ * Sealed (the data key is set), it is opened before the transaction, and holds inside it only while the row still has
+ * the sealed value that was opened: `CHANGED` otherwise.
+ */
+async function pinnedKey(linkId: string, key: string) {
+  const seals = new RowSeals();
+  if (!seals.on) return { seals, pinned: (link?: StoredLink) => link?.pairedPeerKey };
+  const seen = await wrap<StoredLink | undefined>((await store(STORES.links, "readonly")).get(linkId));
+  const opened = await openRow(STORES.links, seen);
+  await seals.prepare(STORES.links, [{ id: linkId, pairedPeerKey: key, peerTrust: { verifiedKey: key } }, { id: linkId, peerTrust: { verifiedKey: opened?.pairedPeerKey } }]);
+  const then = JSON.stringify(seen?.pairedPeerKey);
+  return { seals, pinned: (link?: StoredLink): string | undefined | typeof CHANGED => (JSON.stringify(link?.pairedPeerKey) === then ? opened?.pairedPeerKey : CHANGED) };
+}
+
 /**
  * Durable local state of the browser peer. Identity seeds live here the same
  * way Desktop keeps them in its WebView storage: local to this profile, never
@@ -35,11 +53,12 @@ const RELAXED: IDBTransactionOptions = { durability: "relaxed" };
  */
 export const db = {
   async getLinks(): Promise<StoredLink[]> {
-    return wrap((await store(STORES.links, "readonly")).getAll());
+    return openRows(STORES.links, await wrap((await store(STORES.links, "readonly")).getAll()));
   },
   async putLink(link: StoredLink): Promise<void> {
+    const row = await sealRow(STORES.links, link);
     const tx = (await openDb()).transaction(STORES.links, "readwrite");
-    tx.objectStore(STORES.links).put(link);
+    tx.objectStore(STORES.links).put(row);
     await new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve();
       tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("Link storage failed"));
@@ -47,10 +66,12 @@ export const db = {
   },
   /** `relaxed`: for what a power cut may cost (a round trip, a note made again later), no disk sync of its own. */
   async patchLink(linkId: string, patch: Partial<StoredLink>, relaxed = false): Promise<void> {
+    // Sealed before the transaction opens: one that waits for WebCrypto commits. What the patch leaves stays as stored.
+    const sealed = await sealRow(STORES.links, { ...patch, id: linkId });
     const tx = (await openDb()).transaction(STORES.links, "readwrite", relaxed ? RELAXED : undefined);
     const links = tx.objectStore(STORES.links);
     const request = links.get(linkId);
-    request.onsuccess = () => { if (!request.result) { tx.abort(); return; } links.put({ ...request.result, ...patch, id: linkId }); };
+    request.onsuccess = () => { if (!request.result) { tx.abort(); return; } links.put({ ...request.result, ...sealed }); };
     await new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve();
       tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("Link unavailable"));
@@ -98,13 +119,15 @@ export const db = {
     return result!;
   },
   async pinPeer(linkId: string, key: string, signedSignals = false): Promise<void> {
+    const { seals, pinned } = await pinnedKey(linkId, key);
     const tx = (await openDb()).transaction(STORES.links, "readwrite");
     const links = tx.objectStore(STORES.links);
     const request = links.get(linkId);
     request.onsuccess = () => {
       const link = request.result as StoredLink | undefined;
-      if (!link?.participationSeed || (link.pairedPeerKey && link.pairedPeerKey !== key)) { tx.abort(); return; }
-      links.put({ ...link, peerTrust: link.peerTrust ?? { version: 1, verifiedKey: link.pairedPeerKey }, pairedPeerKey: key, requireSignedSignals: link.requireSignedSignals || signedSignals, inviteCode: undefined });
+      const before = pinned(link);
+      if (!link?.participationSeed || before === CHANGED || (before && before !== key)) { tx.abort(); return; }
+      links.put(seals.row(STORES.links, { ...link, peerTrust: link.peerTrust ?? { version: 1, verifiedKey: before }, pairedPeerKey: key, requireSignedSignals: link.requireSignedSignals || signedSignals, inviteCode: undefined }));
     };
     await new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve();
@@ -112,13 +135,14 @@ export const db = {
     });
   },
   async verifyPeer(linkId: string, key: string): Promise<void> {
+    const { seals, pinned } = await pinnedKey(linkId, key);
     const tx = (await openDb()).transaction(STORES.links, "readwrite");
     const links = tx.objectStore(STORES.links);
     const request = links.get(linkId);
     request.onsuccess = () => {
       const link = request.result as StoredLink | undefined;
-      if (!link?.pairedPeerKey || link.pairedPeerKey !== key) { tx.abort(); return; }
-      links.put({ ...link, peerTrust: { version: 1, verifiedKey: key, verifiedAt: Date.now() } });
+      if (!link?.pairedPeerKey || pinned(link) !== key) { tx.abort(); return; }
+      links.put(seals.row(STORES.links, { ...link, peerTrust: { version: 1, verifiedKey: key, verifiedAt: Date.now() } }));
     };
     await new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve();
@@ -327,10 +351,11 @@ export const db = {
   },
 
   async getGroups(): Promise<StoredGroup[]> {
-    return wrap((await store(STORES.groups, "readonly")).getAll());
+    return openRows(STORES.groups, await wrap((await store(STORES.groups, "readonly")).getAll()));
   },
   async putGroup(group: StoredGroup): Promise<void> {
-    await committed((await store(STORES.groups, "readwrite")).put(group));
+    const row = await sealRow(STORES.groups, group);
+    await committed((await store(STORES.groups, "readwrite")).put(row));
   },
   /** The group and its history. */
   async deleteGroup(groupId: string): Promise<void> {

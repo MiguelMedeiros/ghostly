@@ -1,4 +1,6 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, posix, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { PACKAGES_READ_FROM_SITE, RUST_INPUTS, TESTED_PAGES, WEBSITE_INPUTS, covers, draftBehind, plan, supersededBy, testedAs } from "../ci-changes.mjs";
@@ -39,6 +41,62 @@ describe("the website gate", () => {
     expect(folders).toContain("docs/wisps");
     for (const file of files) expect(covers(WEBSITE_INPUTS, file), file).toBe(true);
     for (const folder of folders) expect(covers(WEBSITE_INPUTS, `${folder}/any.md`), `${folder}/`).toBe(true);
+  });
+
+  it("covers every repository file and folder the site's code opens from a folder: its tests, browser checks and build", () => {
+    // `resolve(__dirname, "../../../docs/…")` in a browser check, `join(root, "package.json")` in a test: a path joined
+    // to the file's own folder, or to a folder the file declares from it (`const root = fileURLToPath(new URL("../../../",
+    // import.meta.url))`, `const root = join(website, "../..")`). Its leading literals name the file or folder.
+    const site = "apps/website";
+    const code: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(join(root, dir), { withFileTypes: true })) {
+        const path = `${dir}/${entry.name}`;
+        if (["node_modules", ".next", "public", "test-results"].includes(entry.name) || path === `${site}/scripts/capture`) continue;
+        if (entry.isDirectory()) walk(path);
+        else if (/\.(ts|tsx|mts|js|mjs)$/.test(entry.name)) code.push(path);
+      }
+    };
+    walk(site);
+    const named: { file: string; path: string }[] = [];
+    const here = "dirname(fileURLToPath(import.meta.url))";
+    for (const file of code) {
+      const source = readFileSync(join(root, file), "utf8");
+      const folders = new Map([["__dirname", posix.dirname(file)], ["import.meta.dirname", posix.dirname(file)], [here, posix.dirname(file)]]);
+      /** The repository path an expression names, when it is a declared folder or one joined from it by literals. */
+      const at = (expr: string): string | undefined => {
+        const url = /^fileURLToPath\(new URL\("([^"]*)", import\.meta\.url\)\)$/.exec(expr);
+        if (url) return posix.join(posix.dirname(file), url[1]);
+        const joined = /^(?:join|resolve)\((.+?)((?:,\s*["'`][^"'`$]*["'`])+)\)$/.exec(expr);
+        const from = joined ? folders.get(joined[1].trim()) : folders.get(expr);
+        return joined && from !== undefined ? posix.join(from, ...[...joined[2].matchAll(/["'`]([^"'`]*)["'`]/g)].map((m) => m[1])) : from;
+      };
+      for (const m of source.matchAll(/^(?:export )?const (\w+) = (.+);$/gm)) {
+        const path = at(m[2]);
+        if (path !== undefined) folders.set(m[1], path);
+      }
+      for (const m of source.matchAll(/\b(?:join|resolve)\(\s*([\w.]+|dirname\(fileURLToPath\(import\.meta\.url\)\))((?:\s*,\s*["'`][^"'`$]*["'`])+)/g)) {
+        const from = folders.get(m[1]);
+        if (from !== undefined) named.push({ file, path: posix.join(from, ...[...m[2].matchAll(/["'`]([^"'`]*)["'`]/g)].map((l) => l[1])).replace(/\/$/, "") });
+      }
+    }
+    // Not the site itself, nor the root or apps/ it starts from. The deck's and the store readers' folders are read file
+    // by file (above).
+    const byFile = ["apps/ui/src/components", "packages/core/src"];
+    const outside = named.filter(({ path }) => path !== "." && !path.startsWith("../") && !`${site}/`.startsWith(`${path}/`) && !path.startsWith(`${site}/`) && !byFile.includes(path));
+    expect(outside).toEqual(
+      expect.arrayContaining([
+        { file: `${site}/e2e/launch-checklist.spec.ts`, path: "docs/assets/social-preview.png" },
+        { file: `${site}/e2e/agents-page.spec.ts`, path: "docs/AI-AGENTS.md" },
+        { file: `${site}/e2e/single-source.spec.ts`, path: "docs/wisps" },
+        { file: `${site}/scripts/shots-version.test.mjs`, path: "package.json" },
+      ]),
+    );
+    const uncovered = outside.filter(({ path }) => {
+      const kind = (() => { try { return statSync(join(root, path)).isDirectory() ? "folder" : "file"; } catch { return null; } })();
+      return !covers(WEBSITE_INPUTS, kind === "file" ? path : `${path}/any`);
+    });
+    expect(uncovered).toEqual([]);
   });
 });
 
@@ -126,6 +184,12 @@ describe("plan", () => {
   it("a site change runs the website and skips the Desktop jobs", () => {
     expect(plan(["apps/website/app/page.tsx", "apps/website/e2e/bubbles.spec.ts"], ready)).toMatchObject({ website: true, app: false });
     expect(plan(["docs/wisps/101-webrtc.md"], ready)).toMatchObject({ website: true, app: false });
+  });
+
+  it("a file outside the site that its checks read runs them: the social preview, the root version", () => {
+    // launch-checklist.spec.ts checks the preview's size; shots-version.test.mjs the root package.json's version.
+    expect(plan(["docs/assets/social-preview.png"], ready)).toMatchObject({ website: true, website_e2e: true });
+    expect(plan(["package.json"], ready)).toMatchObject({ website: true, website_e2e: true, app: true, packages: true });
   });
 
   it("a document the site does not publish runs neither", () => {
@@ -513,5 +577,60 @@ describe("a draft run whose pull request left draft after its event", () => {
       const { api, settle } = fake([self, other]);
       expect(await draftBehind({ sha, run: own, pull: 7, repo, api, settle })).toBe(null);
     }
+  });
+});
+
+// A green "CI Success (draft)" lets a ready pull request board the merge train, which then cancels its full run: the
+// notice must not send a ready one to `gh pr ready`, nor name that full run as where the required check comes from.
+describe("the notice of a green fast tier", () => {
+  const ci = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
+  const job = (id: string) => ci.match(new RegExp(`^  ${id}:\n[\\s\\S]*?(?=^  [\\w-]+:\n|(?![\\s\\S]))`, "m"))?.[0] ?? "";
+  /** A step's `run: |` script, unindented. */
+  const script = (jobId: string, step: string) => {
+    const body = job(jobId).split(`      - name: ${step}\n`)[1]?.split(/^ {8}run: \|\n/m)[1] ?? "";
+    return body.split(/\n(?! {10}| *\n)/)[0].replace(/^ {10}/gm, "");
+  };
+  const bash = (text: string, env: Record<string, string>, path?: string) =>
+    spawnSync("bash", ["-c", text], { encoding: "utf8", env: { PATH: path ?? process.env.PATH ?? "", ...env } });
+
+  /** `changes`' outputs when the API says the pull request is ready, with leaving draft's run behind or not. */
+  const planned = (payloadDraft: string, apiDraft: string, behind: boolean) => {
+    const dir = mkdtempSync(join(tmpdir(), "ci-notice-"));
+    writeFileSync(join(dir, "gh"), `#!/bin/sh\necho ${apiDraft}\n`, { mode: 0o755 });
+    writeFileSync(join(dir, "node"), `#!/bin/sh\ncase "$*" in *--draft-behind*) exit ${behind ? 0 : 1};; esac\n`, { mode: 0o755 });
+    const output = join(dir, "output");
+    writeFileSync(output, "");
+    const run = bash(script("changes", "Which jobs this change needs"), { EVENT: "pull_request", PAYLOAD_DRAFT: payloadDraft, CHANGED: "0", GITHUB_OUTPUT: output }, `${dir}:${process.env.PATH}`);
+    expect(run.status, run.stderr).toBe(0);
+    return Object.fromEntries(readFileSync(output, "utf8").trim().split("\n").map((l) => l.split("=")));
+  };
+
+  const gate = (draft: string, leftDraft: string) => {
+    // The fast tier: lint and the affected tests passed, every other job skipped as its gate said.
+    const skipped = ["FRONTEND_TESTS", "FRONTEND_BUILD", "PACKAGES_TESTS", "CLI_ARM64", "TAURI", "WEBSITE", "WEBSITE_E2E", "DESKTOP_MEDIA", "DESKTOP_MACOS"].map((j) => [j, "skipped"]);
+    const off = ["RUST", "WEBSITE_GATE", "WEBSITE_E2E_GATE", "APP", "PACKAGES"].map((g) => [g, "false"]);
+    const ok = { ...Object.fromEntries([...skipped, ...off]), CHANGES: "success", FRONTEND_CHECKS: "success", AFFECTED: "success", LINT: "true", AFFECTED_GATE: "true" };
+    const run = bash(script("ci-success", "Check all jobs passed"), { ...ok, DRAFT: draft, LEFT_DRAFT: leftDraft, FULL: "false", TESTED: "false" });
+    expect(run.status, run.stdout).toBe(0);
+    return run.stdout.split("\n").filter((l) => l.startsWith("::notice::"));
+  };
+
+  it("tells a draft that the train may board it on this run once it is ready, and cancel the full run", () => {
+    expect(planned("true", "true", false)).toEqual({ draft: "true" });
+    expect(gate("true", "")).toEqual([
+      "::notice::Draft: the fast tier passed. Once you mark it ready (gh pr ready), the merge train may board it on this run and cancel the full run; the batch's run is the check that counts.",
+    ]);
+  });
+
+  it("tells one that left draft after this run started that the full run waits behind it, and does not ask for gh pr ready", () => {
+    expect(planned("true", "false", true)).toEqual({ draft: "true", left_draft: "true" });
+    expect(planned("true", "false", false)).toEqual({ draft: "false" });
+    expect(job("changes")).toContain("left_draft: ${{ steps.plan.outputs.left_draft }}");
+    expect(job("ci-success")).toContain("LEFT_DRAFT: ${{ needs.changes.outputs.left_draft }}");
+    const notices = gate("true", "true");
+    expect(notices).toEqual([
+      "::notice::Left draft after this run started: the fast tier passed, and the full run waits behind this one. The merge train may board it on this run and cancel that full run; the batch's run is the check that counts.",
+    ]);
+    expect(notices.join()).not.toContain("gh pr ready");
   });
 });

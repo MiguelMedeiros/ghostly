@@ -102,6 +102,9 @@ describe("Sidebar: groups in the chat list", () => {
     ["a link the admin answered", invitation({ accepted: true, viaLink: true }), "Joining…"],
     ["a community's link, knocked", { ...invitation({ accepted: true, viaLink: true, admin: "", stage: "knocked" }), profile: "community" as const }, "Waiting to be let in…"],
     ["a community's link a member answers", { ...invitation({ accepted: true, viaLink: true, admin: "", stage: "answered" }), profile: "community" as const }, "A member is letting you in…"],
+    ["a full community", { ...invitation({ accepted: true, viaLink: true, admin: "", stage: "full", full: { n: 256, max: 256 } }), profile: "community" as const }, "This group is full"],
+    // As the page says it: nothing more is waited on, only the current link gets in.
+    ["a community's link replaced while it was let in", { ...invitation({ accepted: true, viaLink: true, admin: "", stage: "replaced" }), profile: "community" as const }, "This link was replaced or turned off"],
   ])("says it is joining for %s, with nothing to answer", (_, group, status) => {
     sidebar([group]);
     expect(row()).toHaveTextContent(status);

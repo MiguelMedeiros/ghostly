@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { A, Code, ISSUES_URL, LegalPage, Section, Term } from "@/components/site/Legal";
 import { SECURITY_URL } from "@/content/shell";
 import { appsReleased } from "@/lib/appsGate";
+import { LAST_UPDATED, LAST_UPDATED_APPS } from "./updated";
 
 const DESCRIPTION =
   "No accounts, no server holding your data, and no cookies or analytics on this site. What stays on your device, what travels the network, and who sees it.";
@@ -25,10 +26,6 @@ export const metadata: Metadata = {
     creator: "@_miguelmedeiros",
   },
 };
-
-const LAST_UPDATED = "September 29, 2026";
-/** The date of the lines about Apps, which show only once the released Ghostly has them. */
-const LAST_UPDATED_APPS = "October 8, 2026";
 
 // Rendered for each visit, so the lines about Apps follow the release gate (lib/appsGate.ts) as the /apps pages do.
 export const revalidate = 0;
@@ -125,8 +122,10 @@ export default async function PrivacyPage() {
             <Term>What the apps ask our sites.</Term> A web app tab asks app.ghostly.tools for{" "}
             <Code>/version.json</Code> when it opens, every four hours and when it comes back to the foreground, to
             offer a new version. A browser extension installed outside the Chrome Web Store asks ghostly.tools for{" "}
-            <Code>/latest.json</Code>. The desktop app asks GitHub for new releases. Settings, Updates turns these
-            checks off.
+            <Code>/latest.json</Code>. The desktop app asks GitHub for new releases. The Android app asks ghostly.tools
+            for <Code>/latest.json</Code> when it opens, every four hours and when it comes back to the foreground, and
+            when you tap Download, the new version&apos;s APK comes from GitHub. Settings, Updates turns these checks
+            off.
           </li>
         </ul>
       </Section>
@@ -196,7 +195,8 @@ export default async function PrivacyPage() {
           </li>
           <li>
             <Term>Iroh relays.</Term> In the browser and the extension, Iroh connects through n0&apos;s public relays
-            (<Code>relay.n0.iroh.link</Code>) when WebRTC cannot connect. A relay sees your IP address, when you
+            (<Code>relay.n0.iroh.link</Code>) and Ghostly&apos;s own relay at <Code>iroh.miguelmedeiros.dev</Code> when
+            WebRTC cannot connect. Ghostly Desktop uses the same relays. A relay sees your IP address, when you
             connect and how much you send, never the content. You can set your own relays in Settings.
           </li>
           <li>
@@ -215,8 +215,9 @@ export default async function PrivacyPage() {
           <li>
             <Term>Identities and public profiles.</Term> Checking an identity someone shared, or showing its public
             profile, asks the service behind it, such as Nostr relays, Pubky&apos;s servers, Bluesky&apos;s public API,
-            GitHub or GitLab, keys.openpgp.org, or a DNS-over-HTTPS resolver (Quad9 by default) for a domain. They see your IP address and which
-            identity is looked up. Public profiles can be turned off in Settings, Security. Some proofs you make are
+            GitHub or GitLab, keys.openpgp.org, or a DNS-over-HTTPS resolver for a domain: Quad9 by default, then
+            Cloudflare and then Google when it gives no answer (the Mac app and Safari cannot read Quad9, so they ask
+            Cloudflare). They see your IP address and which identity is looked up. Public profiles can be turned off in Settings, Security. Some proofs you make are
             public by nature, such as a DNS record, a file on your website or a post on your Bluesky account: you
             publish them, and anyone can read them.
           </li>

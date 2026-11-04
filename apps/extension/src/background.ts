@@ -2,7 +2,7 @@ import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders } 
 import type { EngineStatus, HttpRequestReply, RuntimeMessage, ViewerPage } from "./messages";
 import { fromOwnPage } from "./shared/sender";
 import { parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
-import { rememberPendingUpdate } from "./updates";
+import { rememberPendingUpdate, takePagesToReopen } from "./updates";
 import servicesEn from "../../ui/src/locales/en/services.json";
 
 /**
@@ -33,20 +33,30 @@ async function startEngine(): Promise<void> {
   if (status.profile === status.active) return;
   // A page made another profile the one in use. The running peer stops and its document closes before
   // the next one opens: never two peers, and never one peer over two profiles' data.
-  await replaceEngine();
+  await replaceEngine(status.activeId);
 }
 
-async function replaceEngine(): Promise<void> {
-  await chrome.runtime.sendMessage({ target: "engine", type: "stop" } satisfies RuntimeMessage).catch(() => {});
-  await chrome.offscreen.closeDocument().catch(() => {});
-  await createEngineDocument();
-  await waitForEngine();
+/** `next`: the id of the profile the new peer runs as, when a switch is what replaces it. */
+async function replaceEngine(next?: string): Promise<void> {
+  // A page that switched again while the next peer started (another tab's) waits on this start, and must get the
+  // profile it named, not the one before: that peer goes too. A few times at most, should the registry keep moving.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    // A contact's app open as the profile before is no page of the next one's: its tab closes before that peer answers.
+    await closeViewers();
+    await clearNotices(next);
+    await chrome.runtime.sendMessage({ target: "engine", type: "stop" } satisfies RuntimeMessage).catch(() => {});
+    await chrome.offscreen.closeDocument().catch(() => {});
+    await createEngineDocument();
+    const status = await waitForEngine();
+    if (status.profile === status.active) return;
+    next = status.activeId;
+  }
 }
 
 /** A new peer in place of the running one, which stopped for good ("Clear all data"); after any start in progress. */
 function restartEngine(): Promise<void> {
   const previous = starting ?? Promise.resolve();
-  const next = previous.catch(() => {}).then(replaceEngine);
+  const next = previous.catch(() => {}).then(() => replaceEngine());
   const tracked: Promise<void> = next.finally(() => { if (starting === tracked) starting = null; });
   // The caller hears of a failure through `next`; this copy may have nobody else waiting on it.
   tracked.catch(() => {});
@@ -84,13 +94,19 @@ async function waitForEngine(): Promise<EngineStatus> {
 chrome.runtime.onStartup.addListener(() => void ensureEngine());
 /**
  * A first install also opens the app in a tab: without it nothing showed, and a new user had to find the toolbar
- * button. The tab opens even when the peer does not start, so the page can say why. An update opens nothing.
+ * button. The tab opens even when the peer does not start, so the page can say why. An update opens again the pages
+ * "Update and restart" closed; one that came by itself opens nothing, as the person is somewhere else.
  */
 chrome.runtime.onInstalled.addListener((details) => {
   const started = ensureEngine();
-  if (details?.reason === "install") void started.catch(() => {}).then(showApp).catch(() => {});
+  if (details?.reason === "install") void started.catch(() => {}).then(() => showApp()).catch(() => {});
+  else if (details?.reason === "update") void started.catch(() => {}).then(reopenAfterUpdate).catch(() => {});
   else void started.catch(() => {});
 });
+
+async function reopenAfterUpdate(): Promise<void> {
+  for (const url of await takePagesToReopen()) await chrome.tabs.create({ url });
+}
 
 /**
  * Chrome has a newer version but will not swap it in while Ghostly is running,
@@ -106,17 +122,68 @@ chrome.action.onClicked.addListener(async () => {
   await showApp();
 });
 
-/** Brings the app's tab forward, or opens one. */
-async function showApp(): Promise<void> {
+/** Brings the app's tab forward, or opens one; on `route` (`/chat/…`) when given. */
+async function showApp(route?: string): Promise<void> {
   const url = chrome.runtime.getURL("app.html");
   const existing = await openAppTab(url);
   if (existing) {
-    await chrome.tabs.update(existing.tabId, { active: true });
+    // Only the fragment changes: the page stays, and its router goes there.
+    await chrome.tabs.update(existing.tabId, route ? { active: true, url: `${url}#${route}` } : { active: true });
     if (existing.windowId >= 0) await chrome.windows.update(existing.windowId, { focused: true });
   } else {
-    await chrome.tabs.create({ url });
+    await chrome.tabs.create({ url: route ? `${url}#${route}` : url });
   }
 }
+
+// -- notifications -------------------------------------------------------------
+
+/**
+ * A click on one of Ghostly's notifications. Chrome keeps one in the system's list after the page that showed it
+ * closed or reloaded, and that page was the only one to know its chat (apps/ui/src/lib/notifications.ts): the page
+ * still open opens its own, and for any other the worker shows the app, on the chat the page kept for it in session
+ * storage (`notice:<id>`). Either way it leaves the list.
+ */
+async function openNotification(id: string): Promise<void> {
+  void chrome.notifications.clear(id).catch(() => {});
+  const key = `notice:${id}`;
+  const chat: unknown = (await chrome.storage.session.get(key))[key];
+  await chrome.storage.session.remove(key);
+  const owned = await chrome.runtime.sendMessage({ target: "app", type: "notification-open", id } satisfies RuntimeMessage).catch(() => false);
+  if (owned === true) return;
+  await ensureEngine().catch(() => {});
+  await showApp(typeof chat === "string" ? chatRoute(chat) : undefined);
+}
+
+/** The app's address for a notification's chat, as the page opens it (AttentionFeedback); none for another profile's. */
+function chatRoute(chat: string): string | undefined {
+  if (chat.startsWith("profile:")) return undefined;
+  return chat.startsWith("group:") ? `/group/${encodeURIComponent(chat.slice(6))}` : `/chat/${encodeURIComponent(chat)}`;
+}
+
+/**
+ * A new peer (another profile, or the one after Clear all data): a notification the pages kept a chat for would open a
+ * chat this one does not have ("This chat is gone"), so it leaves the system's list, as Desktop's and Android's do
+ * (`sweepLeftOver`). Another profile's notice (`profile:<id>`) stays: that profile did not stop. One about `next`, the
+ * profile now in use, goes too: its "New messages in" is read once it is open, as the pages' `clearPeek` does where a
+ * notice can be taken back by its chat (useProfilePeek.ts).
+ */
+async function clearNotices(next?: string): Promise<void> {
+  const kept = await chrome.storage.session.get(null).catch(() => ({}) as Record<string, unknown>);
+  const gone = (chat: string) => !chat.startsWith("profile:") || (typeof next === "string" && chat === `profile:${next}`);
+  const keys = Object.keys(kept).filter((key) => key.startsWith("notice:") && gone(String(kept[key])));
+  if (!keys.length) return;
+  await chrome.storage.session.remove(keys).catch(() => {});
+  await Promise.all(keys.map((key) => chrome.notifications?.clear(key.slice("notice:".length)).catch(() => false)));
+}
+
+/** `chrome.notifications` exists only once the optional permission is granted, maybe while the worker runs. */
+function listenToNotifications(): void {
+  const clicks = chrome.notifications?.onClicked;
+  if (clicks && !clicks.hasListener(onNotificationClicked)) clicks.addListener(onNotificationClicked);
+}
+const onNotificationClicked = (id: string) => void openNotification(id).catch(() => {});
+listenToNotifications();
+chrome.permissions.onAdded.addListener(listenToNotifications);
 
 /**
  * A tab that shows the app already, on any of its pages (`app.html#/chat/…`). Asked of the extension's own contexts:
@@ -147,7 +214,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
   }
   if (message.type === "open-payment-link") {
     // Only a payment link, and only the characters one is made of: nothing else leaves the extension this way.
-    const uri = typeof message.uri === "string" && /^(lightning|bitcoin):[A-Za-z0-9?=&%.:_-]{1,4096}$/.test(message.uri) ? message.uri : null;
+    const uri = typeof message.uri === "string" && /^(lightning|bitcoin|monero):[A-Za-z0-9?=&%.:_-]{1,4096}$/.test(message.uri) ? message.uri : null;
     if (!uri) { sendResponse({ ok: false, error: "Not a payment link" }); return false; }
     void chrome.tabs.create({ url: uri }).then(
       () => sendResponse({ ok: true }),
@@ -160,6 +227,10 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
       () => sendResponse({ ok: true }),
       (error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
     );
+    return true;
+  }
+  if (message.type === "close-services") {
+    void closeViewers().then(() => sendResponse({ ok: true }), () => sendResponse({ ok: true }));
     return true;
   }
   return false;
@@ -235,6 +306,22 @@ const forget = (tabId: number) => chrome.storage.session.remove(bindingKey(tabId
 
 chrome.tabs.onRemoved.addListener((tabId) => void forget(tabId));
 
+/**
+ * Closes every viewer tab, as Desktop closes a contact's app windows (`close_service_windows`): on a profile switch,
+ * a new peer, or the lock screen. Its binding goes first, so nothing it still asks for is served.
+ */
+async function closeViewers(): Promise<void> {
+  const tabs = await chrome.tabs.query({});
+  await Promise.all(
+    tabs.map(async ({ id }) => {
+      if (id === undefined || !(await bindingOf(id))) return;
+      await forget(id);
+      await chrome.debugger.detach({ tabId: id }).catch(() => {});
+      await chrome.tabs.remove(id).catch(() => {});
+    }),
+  );
+}
+
 /** Sends one allowed command to a viewer tab; refuses any other command, and any tab without a binding. */
 export async function devtools(tabId: number, method: string, params?: Record<string, unknown>): Promise<void> {
   if (!VIEWER_COMMANDS.has(method)) throw new Error(`DevTools command not allowed: ${method}`);
@@ -309,6 +396,8 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
   let reply: HttpRequestReply;
   try {
     await ensureEngine();
+    // The peer may be another profile's now, or a new one: that closed this tab (`closeViewers`) and nothing goes to it.
+    if (!(await bindingOf(tabId))) return;
     reply = await chrome.runtime.sendMessage(message);
     if (!reply) reply = { ok: false, code: "error", message: "The Ghostly peer did not answer" };
   } catch (error) {

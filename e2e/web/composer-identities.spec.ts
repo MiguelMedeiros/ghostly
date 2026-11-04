@@ -95,7 +95,9 @@ test("an identity is added, shared and withdrawn from the chat's composer, and b
   await expect(faceOf(mine).getByTestId("identity-proof-subject")).toContainText("npub1");
   await expect(mine).toHaveAttribute("data-state", "verified", { timeout: 60_000 });
   await expect(faceOf(mine)).toHaveAttribute("data-status", "verified");
-  await expect(cardOf(mine)).toHaveAccessibleName(/^You shared Nostr · npub1.* · Verified$/);
+  // Named by the words its face shows, in their order (Label in Name); who shared it describes it.
+  await expect(cardOf(mine)).toHaveAccessibleName(/^Ghostly · Identity\s*Verified\s*Nostr.*npub1/);
+  await expect(cardOf(mine)).toHaveAccessibleDescription("You shared this identity");
   // At rest it is still; under the mouse it lifts, and it settles back once the mouse leaves.
   await alice.page.mouse.move(2, 2);
   await expect.poll(() => moved(mine)).toBe("none");
@@ -111,7 +113,8 @@ test("an identity is added, shared and withdrawn from the chat's composer, and b
   await expect(faceOf(theirs)).toContainText("Nostr");
   await expect(faceOf(theirs).getByTestId("identity-proof-subject")).toContainText("npub1");
   await expect(faceOf(theirs)).toHaveAttribute("data-status", "verified");
-  await expect(cardOf(theirs)).toHaveAccessibleName(/ shared Nostr · npub1.* · Verified$/);
+  await expect(cardOf(theirs)).toHaveAccessibleName(/^Ghostly · Identity\s*Verified\s*Nostr.*npub1/);
+  await expect(cardOf(theirs)).toHaveAccessibleDescription(/ shared this identity$/);
   // The keys reach it too: focused, it comes up as under a mouse.
   await cardOf(theirs).focus();
   await bob.page.keyboard.press("Shift+Tab");

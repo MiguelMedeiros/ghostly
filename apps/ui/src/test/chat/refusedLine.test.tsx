@@ -42,17 +42,15 @@ describe("a payment this app refused, in the chat", () => {
     expect(document.querySelector('[data-sender="peer"]')).toBeNull();
   });
 
-  it("reads a line stored in English before, still under the contact's name, as the app's line in Portuguese", () => {
-    renderApp(<MessageBubble message={older} />, { language: "pt" });
-    const line = screen.getByTestId("refused-line");
-    expect(line).toHaveTextContent(said("pt", "sats"));
-    expect(line.closest("[data-message-row]")).toHaveAttribute("data-sender", "system");
-  });
-
-  it("leaves a contact's own message that says the same words as their message", () => {
-    renderApp(<MessageBubble message={{ ...older, id: "peer_9" }} />, { language: "pt" });
-    expect(screen.queryByTestId("refused-line")).toBeNull();
-    expect(screen.getByText(older.text)).toBeInTheDocument();
+  it("leaves a contact's own message that says the same words as their message, under whichever id", () => {
+    // A row the chat holds as the contact's is theirs: the mirror makes an older line of the app's its line from the
+    // engine's row (platform/sync.ts), which tells the two apart; the words and the id alone do not.
+    for (const id of ["peer_9", "peer_17900000000000_refused"]) {
+      const { unmount } = renderApp(<MessageBubble message={{ ...older, id }} />, { language: "pt" });
+      expect(screen.queryByTestId("refused-line")).toBeNull();
+      expect(screen.getByText(older.text).closest("[data-message-row]")).toHaveAttribute("data-sender", "peer");
+      unmount();
+    }
   });
 
   it("says Fedimint's in its words, and a refusal before any amount was read", () => {
@@ -72,5 +70,16 @@ describe("a payment this app refused, in the chat", () => {
     const row = screen.getAllByTestId("chat-row").find(r => within(r).getByTestId("chat-row-name").textContent === "Cleo")!;
     expect(row).toHaveTextContent(said("ja", "testSats"));
     expect(row.textContent).not.toContain("Could not receive");
+  });
+
+  it("leaves the chat list's last line the contact's when their row says those words", () => {
+    const key = "q".repeat(52);
+    const session: ChatSession = { id: "d", profile: "paired-chat/1", mySeedB64: "seed-d", peerPubKeyB64: key, encKeyB64: "enc", nick: "Dora", nickSource: "profile",
+      messages: [{ ...older, id: "peer_17900000000000_refused" }], createdAt: 0 };
+    saveSession(session);
+    renderApp(<UpdateProvider><Sidebar /></UpdateProvider>, { language: "ja" });
+    const row = screen.getAllByTestId("chat-row").find(r => within(r).getByTestId("chat-row-name").textContent === "Dora")!;
+    expect(row).toHaveTextContent(older.text);
+    expect(row.textContent).not.toContain(said("ja", "sats"));
   });
 });

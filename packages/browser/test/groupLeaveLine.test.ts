@@ -35,7 +35,9 @@ describe("the line a member's leaving or removal leaves", { timeout: 300_000 }, 
       await bob.groups.leave(id);
       await world.until(() => !world.view(carol, id)?.members.some(m => m.key === bobKey), 2 * 60_000);
       await world.run(5_000);
-      for (const p of [alice, carol]) expect(lines(p, id, bobKey)).toEqual([`left: Member ${bobKey.slice(0, 8)} left`]);
+      // No edge here says a name: a private group's members know each other's from their name records (WISP 902 § Messages).
+      const bobName = mode === "mesh" ? "bob" : `Member ${bobKey.slice(0, 8)}`;
+      for (const p of [alice, carol]) expect(lines(p, id, bobKey)).toEqual([`left: ${bobName} left`]);
       await alice.groups.remove(id, daveKey);
       await world.until(() => !world.view(carol, id)?.members.some(m => m.key === daveKey), 2 * 60_000);
       await world.run(5_000);
@@ -44,9 +46,9 @@ describe("the line a member's leaving or removal leaves", { timeout: 300_000 }, 
         return;
       }
       // A private group's line names the admin who removed them, as a rename or a picture change does; theirs in their words.
-      const aliceKey = world.view(alice, id)!.myKey!, dave8 = daveKey.slice(0, 8);
-      expect(lines(alice, id, daveKey)).toEqual([`gone: You removed Member ${dave8}`]);
-      expect(lines(carol, id, daveKey)).toEqual([`gone: Member ${aliceKey.slice(0, 8)} removed Member ${dave8}`]);
+      const aliceKey = world.view(alice, id)!.myKey!;
+      expect(lines(alice, id, daveKey)).toEqual(["gone: You removed dave"]);
+      expect(lines(carol, id, daveKey)).toEqual(["gone: alice removed dave"]);
       for (const p of [alice, carol]) expect(p.messages.find(m => m.event === "gone" && m.member === daveKey)?.by).toBe(aliceKey);
     });
   }

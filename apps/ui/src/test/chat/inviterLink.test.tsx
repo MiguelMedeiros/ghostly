@@ -7,7 +7,7 @@ import { renderApp } from "../render";
 
 // covers: chat.paired.pairing-progress, invite.code
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 describe("a chat made here, opened before the engine has its link", () => {
   it("asks the engine for the link with its invite code, whoever asks first: the engine learns who invited from it", async () => {

@@ -31,6 +31,36 @@ describe("the HyperDHT relay's count of a client's address (infra/services/hyper
     expect(addressKey("198.51.100.7")).toBe("198.51.100.7");
   });
 
+  it("counts an address a proxy wrote with its port, or in brackets, as the address alone", () => {
+    expect(addressKey("203.0.113.7:51234")).toBe("203.0.113.7");
+    expect(addressKey("203.0.113.7:51235")).toBe("203.0.113.7");
+    expect(addressKey("[2001:db8:1:2::1]:443")).toBe("2001:db8:1:2::/64");
+    expect(addressKey("[2001:db8:1:2::1]")).toBe("2001:db8:1:2::/64");
+    expect(addressKey("[::ffff:198.51.100.7]:51234")).toBe("198.51.100.7");
+    expect(addressKey(addressOf(req({ "cf-connecting-ip": "198.51.100.1:443" }), { cloudflare: true }))).toBe("198.51.100.1");
+  });
+
+  it("refuses a client past clientsPerAddress behind a proxy that writes its port, though each connection has a new one", async () => {
+    const relay = await startRelay({ testnet: 3, proxies: 1, limits: { clientsPerAddress: 3 } });
+    const sockets: WebSocket[] = [];
+    const open = (from: string) => new Promise<number>((resolve) => {
+      const ws = new WebSocket(relay.url, { headers: { "x-forwarded-for": from } });
+      sockets.push(ws);
+      ws.once("open", () => resolve(101));
+      ws.once("unexpected-response", (_request, response) => resolve(response.statusCode ?? 0));
+      ws.once("error", () => resolve(0));
+    });
+    try {
+      const statuses = [];
+      for (let n = 1; n <= 4; n++) statuses.push(await open(`203.0.113.7:5000${n}`));
+      expect(statuses).toEqual([101, 101, 101, 429]);
+      expect(await open("[2001:db8:1:2::1]:443")).toBe(101);
+    } finally {
+      for (const ws of sockets) ws.terminate();
+      await relay.close();
+    }
+  }, 30_000);
+
   it("refuses a client past clientsPerAddress when each one comes from a new address in the same IPv6 /64", async () => {
     const relay = await startRelay({ testnet: 3, proxies: 1, limits: { clientsPerAddress: 3 } });
     const sockets: WebSocket[] = [];

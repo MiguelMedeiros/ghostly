@@ -13,6 +13,7 @@
     "turnBack": "Cartões"
   },
   "delete": "Excluir",
+  "deleteChatCallOn": "Há uma chamada nesta conversa. Encerre-a primeiro e depois exclua a conversa.",
   "deleteChatLocal": "Isso exclui a conversa e o histórico deste dispositivo. A cópia do seu contato não é excluída.",
   "deleteChatTitle": "Excluir conversa?",
   "error": "Erro",

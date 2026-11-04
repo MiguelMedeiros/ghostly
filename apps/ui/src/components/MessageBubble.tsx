@@ -34,8 +34,7 @@ import { useTransfer } from "../hooks/useServicesPlatform";
 import { holdRow } from "../hooks/useRowWindow";
 import type { ChatFile, ChatMessage } from "../lib/types";
 import { callEventText } from "../lib/callLines";
-import { paymentRefusal } from "@ghostly/browser/shared/refusals";
-import { refusedLine } from "../lib/refusedLine";
+import { refusedLine, shownRefusal } from "../lib/refusedLine";
 import { callLineCount } from "../lib/storage";
 import { formatCallLength } from "../lib/messageDetails";
 import type { QuoteView } from "../lib/replies";
@@ -48,7 +47,8 @@ import { myReaction, reactionChips } from "../lib/reactions";
 import { DeliveryStatus } from "./chat/DeliveryStatus";
 import { forwardedLabel } from "../lib/forward";
 import { PinIcon } from "./PinIcon";
-import { copyText } from "../lib/shareLink";
+import { MessageCopyNote } from "./chat/MessageCopy";
+import { useMessageCopy } from "../hooks/useMessageCopy";
 import { originalMentions, setShowsOriginal, showsOriginal, useSentOriginal, type SentOriginal } from "../lib/sentOriginals";
 import { languageName } from "../lib/documentLanguage";
 import { translateEnabled } from "../lib/translateFlag";
@@ -119,6 +119,11 @@ interface MessageBubbleProps {
   author?: MessageAuthor;
   /** Opens what the chat knows of `author` (the group's members, theirs marked): a tap on their name or picture. */
   onOpenAuthor?: () => void;
+  /**
+   * In a group, the contact who wrote the message (`author`, when they are one): told when an invoice in it is paid from
+   * its card, as a 1:1 chat's contact is. Their choice of ways of paying is not this chat's, so nothing else reads it.
+   */
+  payee?: string;
   /**
    * A bot's buttons under the message (WISP 406 · Message Buttons), as the chat's history has them (`buttonsViews`).
    * Left out, a message with buttons shows them, and none of them answers.
@@ -429,10 +434,13 @@ const emojiCount = (text: string) => {
   return parts.filter((part) => part.trim()).length;
 };
 
-/** Up to 6 emoji and nothing else show big. */
+/**
+ * Up to 6 emoji and nothing else show big. Besides the pictures: a keycap (a digit, # or * with U+20E3) and a tag
+ * sequence's tags (the flags of England, Scotland and Wales), which the emoji panel offers too.
+ */
 function isOnlyEmojis(text: string): boolean {
   const emojiPattern =
-    /^(?:[\p{Emoji_Presentation}\p{Extended_Pictographic}]|\u200d|\uFE0F|\s)+$/u;
+    /^(?:[\p{Emoji_Presentation}\p{Extended_Pictographic}]|[0-9#*]\uFE0F?\u20E3|[\u{E0020}-\u{E007F}]|\u200d|\uFE0F|\s)+$/u;
   return emojiPattern.test(text.trim()) && emojiCount(text) <= 6;
 }
 
@@ -440,7 +448,7 @@ function TailSvg({ side }: { side: "left" | "right" }) {
   if (side === "right") {
     return (
       <span className="absolute top-0 -end-[8px] rtl:-scale-x-100 block w-[8px] h-[13px] overflow-hidden">
-        <svg viewBox="0 0 8 13" width="8" height="13" className="block">
+        <svg viewBox="0 0 8 13" width="8" height="13" className="block" aria-hidden="true" focusable="false">
           <path d="M5 0H0V13C0 13 1.8 8.5 5 4.5C6.4 2.7 8 1 8 1L5 0Z" className="fill-sent-bg" />
         </svg>
       </span>
@@ -448,7 +456,7 @@ function TailSvg({ side }: { side: "left" | "right" }) {
   }
   return (
     <span className="absolute top-0 -start-[8px] rtl:-scale-x-100 block w-[8px] h-[13px] overflow-hidden">
-      <svg viewBox="0 0 8 13" width="8" height="13" className="block">
+      <svg viewBox="0 0 8 13" width="8" height="13" className="block" aria-hidden="true" focusable="false">
         <path d="M3 0H8V13C8 13 6.2 8.5 3 4.5C1.6 2.7 0 1 0 1L3 0Z" className="fill-received-bg" />
       </svg>
     </span>
@@ -844,7 +852,7 @@ export function MessageBubble(props: MessageBubbleProps) {
       peerPubKey={props.peerPubKey} peerNick={props.peerNick} contactName={props.contactName} linkId={props.linkId} quote={props.quote} names={names}
       onDelete={props.onDelete && stable.onDelete} onDeleteForEveryone={props.onDeleteForEveryone && stable.onDeleteForEveryone} onReply={props.onReply && stable.onReply} onEdit={props.onEdit && stable.onEdit}
       onReact={props.onReact && stable.onReact} onForward={props.onForward && stable.onForward} onSelect={props.onSelect && stable.onSelect}
-      onPin={props.onPin && stable.onPin} pinned={props.pinned} onSave={props.onSave && stable.onSave} saved={props.saved} author={props.author} onOpenAuthor={props.onOpenAuthor && stable.onOpenAuthor}
+      onPin={props.onPin && stable.onPin} pinned={props.pinned} onSave={props.onSave && stable.onSave} saved={props.saved} author={props.author} onOpenAuthor={props.onOpenAuthor && stable.onOpenAuthor} payee={props.payee}
       reactionName={stable.reactionName} highlight={props.highlight} buttons={props.buttons} compactPress={props.compactPress}
       selection={selection && { selected: selection.selected, ...(selection.onToggle && { onToggle: stable.onToggle }) }}
     />
@@ -855,7 +863,7 @@ const CALLBACKS = ["onDelete", "onDeleteForEveryone", "onReply", "onEdit", "onRe
 
 /** The same bubble to draw: see `MessageBubble`. */
 function sameBubble(a: BubbleViewProps, b: BubbleViewProps): boolean {
-  return a.peerAck === b.peerAck && a.peerPubKey === b.peerPubKey && a.peerNick === b.peerNick && a.contactName === b.contactName && a.linkId === b.linkId && a.names === b.names && a.highlight === b.highlight && !a.pinned === !b.pinned && !a.saved === !b.saved && !a.compactPress === !b.compactPress
+  return a.peerAck === b.peerAck && a.peerPubKey === b.peerPubKey && a.payee === b.payee && a.peerNick === b.peerNick && a.contactName === b.contactName && a.linkId === b.linkId && a.names === b.names && a.highlight === b.highlight && !a.pinned === !b.pinned && !a.saved === !b.saved && !a.compactPress === !b.compactPress
     && CALLBACKS.every(name => !a[name] === !b[name])
     && !a.selection === !b.selection && a.selection?.selected === b.selection?.selected && !a.selection?.onToggle === !b.selection?.onToggle
     && sameValue(a.quote, b.quote) && sameValue(a.author, b.author) && sameValue(a.buttons, b.buttons) && sameValue(a.message, b.message);
@@ -870,7 +878,7 @@ const SameBubble = memo(function SameBubble(props: BubbleViewProps) {
   );
 }, sameBubble);
 
-function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", contactName, onDelete: deleteIt, onDeleteForEveryone: deleteForEveryoneIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, onPin: pinIt, pinned, onSave: saveIt, saved, selection, names, highlight, author, onOpenAuthor, buttons, compactPress }: BubbleViewProps) {
+function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", contactName, onDelete: deleteIt, onDeleteForEveryone: deleteForEveryoneIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, onPin: pinIt, pinned, onSave: saveIt, saved, selection, names, highlight, author, onOpenAuthor, payee, buttons, compactPress }: BubbleViewProps) {
   // While the chat is choosing messages, a row is a checkbox: nothing else on it answers.
   const choosing = !!selection;
   const onPin = choosing ? undefined : pinIt, onSave = choosing ? undefined : saveIt;
@@ -914,6 +922,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   };
   // What Copy under a long press copies: a message's own words, not a file's name, a payment's or a card's.
   const copyable = message.file || message.paymentId || pressed || showsCard(message.card) ? "" : message.text.trim();
+  const optionsButton = () => rowRef.current?.querySelector<HTMLElement>("[data-testid=message-options]") ?? rowRef.current;
+  const [copyNote, copy, closeCopyNote] = useMessageCopy(optionsButton);
   // The reactions' quick bar: from the React button or the ⋮ (`button`), or a long press (`press`, with Details under it).
   const [bar, setBar] = useState<"button" | "press" | null>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
@@ -1028,7 +1038,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const detailsPanel = details && (
     <MessageDetailsPanel message={message} linkId={linkId ?? (peerPubKey ? engine.linkByPeer(peerPubKey)?.id : undefined)}
       picture={contentType === "image"} onClose={() => setDetails(false)}
-      returnFocus={rowRef.current?.querySelector<HTMLElement>("[data-testid=message-options]") ?? rowRef.current} />
+      returnFocus={optionsButton()} />
   );
   const rowProps = choosing ? {
     ref: rowRef, "data-message-id": message.id, "data-selected": selection.selected || undefined,
@@ -1049,8 +1059,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   );
 
   // A payment of the contact's this app refused: the app's own line, centred as a call's, never a bubble of theirs.
-  // From the row's values, or the English an older version stored under the same id (shared/refusals.ts).
-  const refusedPayment = paymentRefusal(message);
+  // From the values the mirror put on the row (lib/refusedLine.ts `shownRefusal`).
+  const refusedPayment = shownRefusal(message);
   if (refusedPayment) {
     return (
       <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x ${enter}`}>
@@ -1084,6 +1094,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
+            aria-hidden="true"
+            focusable="false"
           >
             <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
             <polyline points="10 17 15 12 10 7" />
@@ -1314,7 +1326,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </div>
         ) : money ? (
           <div className="clearfix">
-            <InvoiceBubble money={money} mine={isMe} peerPubKey={peerPubKey} />
+            <InvoiceBubble money={money} mine={isMe} peerPubKey={peerPubKey} payee={payee} />
             {timestampEl}
           </div>
         ) : contentType === "image" && !isMe && !revealed && !needsNoClick(message.text.trim()) ? (
@@ -1379,6 +1391,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       </div>
       {buttonsView && <MessageButtons view={buttonsView} messageId={message.id} linkId={linkId ?? (peerPubKey ? engine.linkByPeer(peerPubKey)?.id : undefined)} />}
       {refusal}
+      <MessageCopyNote note={copyNote} onClose={closeCopyNote} />
       <ReactionChips chips={chips} onReact={onReact} align={isMe ? "end" : "start"} />
       </div>
       {!isMe && !choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved} onForward={onForward} onSelect={onSelect} align="right" download={download} sender="peer" />}
@@ -1386,8 +1399,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       {!isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
       {onReact && <ReactionBar open={!!bar} onClose={() => setBar(null)} anchorRef={bar === "button" ? reactRef : bubbleRef} current={myReaction(message.reactions)} onReact={onReact}
         align={barAlign} onDetails={bar === "press" ? openDetails : undefined} onSelect={bar === "press" ? onSelect : undefined}
-        onCopy={bar === "press" && copyable ? () => void copyText(copyable).catch(() => {}) : undefined}
-        onCopyOriginal={bar === "press" && copyable && sent ? () => void copyText(sent.original.trim()).catch(() => {}) : undefined} />}
+        onCopy={bar === "press" && copyable ? () => copy(copyable) : undefined}
+        onCopyOriginal={bar === "press" && copyable && sent ? () => copy(sent.original.trim()) : undefined} />}
       {detailsPanel}
     </div>
   );

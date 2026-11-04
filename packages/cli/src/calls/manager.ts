@@ -48,8 +48,11 @@ export interface CallHost {
   callPaceMs?: number;
 }
 
-/** The audio contract of one call, as commands and events report it. */
-export interface AudioInfo { socket: string; rate: CallRate; channels: 1; format: "s16le"; frameMs: typeof FRAME_MS }
+/**
+ * The audio contract of one call, as commands and events report it. `token` is the call's secret, which a program sends
+ * first on the socket (`AudioSocket`): only the daemon's own clients are told it.
+ */
+export interface AudioInfo { socket: string; token: string; rate: CallRate; channels: 1; format: "s16le"; frameMs: typeof FRAME_MS }
 
 /** An outgoing call rings this long, then ends as `unanswered`. */
 export const RING_MS = 60_000;
@@ -706,7 +709,7 @@ export class CallManager {
   }
 
   private audioInfo(call: Call): AudioInfo | null {
-    return call.socket ? { socket: call.socket.path, rate: call.rate, channels: 1, format: "s16le", frameMs: FRAME_MS } : null;
+    return call.socket ? { socket: call.socket.path, token: call.socket.token, rate: call.rate, channels: 1, format: "s16le", frameMs: FRAME_MS } : null;
   }
 
   private view(call: Call): Record<string, unknown> {

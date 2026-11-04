@@ -333,6 +333,48 @@ describe("chat disconnect --hold", () => {
     expect(node.removeLink).toHaveBeenCalledWith({ linkId: "chat-one" });
   });
 
+  // `engine removeLink`, `setChatTransport dht` and `setDeliveryMode dht` are the same switches, refused the same way.
+  it("the raw engine calls that remove the chat or put it on DHT only are refused while a call is on in it", async () => {
+    const { ctx, node, calls } = fake();
+    calls.push({ call: "c1", chat: "chat-one", state: "connected" });
+    const raw = (method: string, params: Record<string, unknown>) => callApi(ctx, "engine.call", { method, params, yes: true });
+    for (const [method, params, then] of [
+      ["removeLink", { linkId: "chat-one" }, "remove the chat"],
+      ["setChatTransport", { linkId: "chat-one", transport: "dht" }, "put the chat on DHT only"],
+      ["setDeliveryMode", { linkId: "chat-one", mode: "dht" }, "put the chat on DHT only"],
+    ] as const) {
+      const refused = await raw(method, params).then(() => undefined, (error: unknown) => error as CliError);
+      expect(refused, method).toMatchObject({ code: "busy", details: { call: "c1" } });
+      expect(refused?.message).toBe(`A call is on in this chat: hang it up first (ghostly call hangup chat-one), then ${then}`);
+    }
+    expect(node.removeLink).not.toHaveBeenCalled();
+    expect(node.setChatTransport).not.toHaveBeenCalled();
+    expect(node.setDeliveryMode).not.toHaveBeenCalled();
+    // Back on the live link, another chat, or no call: they go through.
+    await raw("setDeliveryMode", { linkId: "chat-one", mode: "stream" });
+    expect(node.setDeliveryMode).toHaveBeenCalledWith({ linkId: "chat-one", mode: "stream" });
+    await raw("setChatTransport", { linkId: "chat-two", transport: "dht" });
+    expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-two", transport: "dht" });
+    calls.length = 0;
+    await raw("removeLink", { linkId: "chat-one" });
+    expect(node.removeLink).toHaveBeenCalledWith({ linkId: "chat-one" });
+  });
+
+  // `engine clearProfileData` removes every chat at once: mid-call, the call's hang-up had no chat left to cross either.
+  it("engine clearProfileData is refused while a call is on in any chat, and clears once it is hung up", async () => {
+    const { ctx, node, calls } = fake("one-shot");
+    const clearProfileData = vi.fn(async () => undefined);
+    Object.assign(node, { clearProfileData });
+    calls.push({ call: "c1", chat: "chat-two", state: "connected" });
+    const refused = await callApi(ctx, "engine.call", { method: "clearProfileData", yes: true }).then(() => undefined, (error: unknown) => error as CliError);
+    expect(refused).toMatchObject({ code: "busy", details: { call: "c1" } });
+    expect(refused?.message).toBe("A call is on in a chat: hang it up first (ghostly call hangup chat-two), then clear the profile");
+    expect(clearProfileData).not.toHaveBeenCalled();
+    calls.length = 0;
+    expect(await callApi(ctx, "engine.call", { method: "clearProfileData", yes: true })).toEqual({ cleared: { chats: 2, groups: 0 } });
+    expect(clearProfileData).toHaveBeenCalledOnce();
+  });
+
   // The engine refused it as `engine`, "Both peers must choose a live method first", though this side had: a bot retried.
   it("chat connect on a chat the contact keeps on DHT only is refused, naming the contact's choice", async () => {
     const { ctx, node, setLink } = fake();

@@ -4,10 +4,11 @@
  * stop (`stopRunningApps`): nothing of the profile answers them behind the lock screen.
  */
 import type { Translate, TranslationKey } from "../locales/translate";
+import { contactTag } from "./publicKeyLabel";
 
 let closer: (() => void) | null = null;
 
-/** How to close them: set by the Desktop host; nowhere else has such windows. */
+/** How to close them: set by the Desktop host, the extension's (its viewer tabs) and the web's (its drawn view). */
 export function setServiceWindowsCloser(next: (() => void) | null): void {
   closer = next;
 }
@@ -61,4 +62,16 @@ export function hostErrorText(headers: readonly (readonly [string, string])[], a
   console.warn(`The contact's machine answered for ${app}: ${code}`);
   const key = HOST_ERRORS[code];
   return key ? t(key, { app }) : t("services.window.failed");
+}
+
+/**
+ * What frames a contact's app, in Ghostly's words: whose it is and that it is not Ghostly. The app's name is the
+ * contact's free choice ("Ghostly", "Security check"), so it never stands alone: `label` names the view (the dialog's
+ * name, Desktop's window title) and `owner` is the line always under it. The contact as this side calls them (the
+ * chat's label, else their nickname), isolated so their name cannot turn the sentence's direction.
+ */
+export function serviceFraming(app: string, names: { label?: string; nick?: string } | undefined, peer: string, t: Translate): { label: string; owner: string } {
+  const named = names?.label?.trim() || names?.nick?.trim() || t("common.unnamedContact", { key: contactTag(peer) });
+  const contact = `\u2068${named}\u2069`;
+  return { label: t("services.window.label", { app, contact }), owner: t("services.window.owner", { contact }) };
 }

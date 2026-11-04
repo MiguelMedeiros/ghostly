@@ -142,9 +142,16 @@ test("DHT only chosen by one side: every text of a burst from the other side arr
   const [a, b] = await Promise.all([peer("a"), peer("b")]);
   await link(a, b);
   await connect(a, b);
-  // A chooses DHT only; B stays on Automatic and learns it from A's records.
+  // A chooses DHT only; B stays on Automatic and learns it from A's records. Meanwhile B's chat is on the DHT, plainly:
+  // the live link closed just now, and it said "retrying live" until A's records came.
   await mode(a, true);
-  await expect(b.page.getByTestId("connection-options")).toHaveAccessibleName(/DHT only · chosen by your contact/, { timeout: 60_000 });
+  const said: string[] = [];
+  await expect.poll(async () => {
+    const name = await b.page.getByTestId("connection-options").getAttribute("aria-label") ?? "";
+    said.push(name);
+    return name;
+  }, { timeout: 60_000, intervals: [250] }).toMatch(/DHT only · chosen by your contact/);
+  expect(said.filter(name => /retrying live/.test(name))).toEqual([]);
   // The DHT carries one text at a time: the second and third wait their turn, on both sides.
   for (const n of [1, 2, 3]) { await say(a, `from a ${n}`); await say(b, `from b ${n}`); }
   for (const n of [1, 2, 3]) {

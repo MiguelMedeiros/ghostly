@@ -22,8 +22,10 @@ import { handOut, openTreeFile, rollback, SqlTree, type TreeFile } from "./sqlTr
  *   already, and writing the whole snapshot again for them would add megabytes of disk writes to every command;
  * - a chat's ratchet keys are forgotten as they are used (WISP 4xx), and an append-only journal would keep each one: a
  *   journal that holds a ratchet state is folded once the snapshot is an hour old, at a write, a close or a start;
- * - a chat or a message deleted stays readable in an append-only journal, which has what was written before: a journal
- *   that holds a delete of one is folded once the snapshot is an hour old, at a write, a close or a start;
+ * - a chat, a message or a service deleted stays readable in an append-only journal, which has what was written before,
+ *   and so does a secret a settings row is written again without (an x401 credential, a link's or a wallet's seed, a
+ *   TURN password): a journal that holds such a delete or a settings write is folded once the snapshot is an hour old,
+ *   at a write, a close or a start;
  * - a journal begins by naming the snapshot it follows: one found beside another snapshot is in that snapshot already
  *   (the process died between writing the snapshot and removing the journal), and is not replayed over it;
  * - the engine's messages and file states, and their indexes, are kept in `rows.db` (SQLite: ./sqlTree.ts), not in memory: their
@@ -119,11 +121,17 @@ const RATCHET = "ratchetState";
  * the snapshot); its disk writes do: 4 MB on that profile, so about 100 MB a day at this hour and 600 MB at 10 minutes.
  */
 const RATCHET_FOLD_MS = 60 * 60_000;
-/** The stores whose rows a delete means gone from the disk: the chats (their seed, their ratchet) and their messages. */
-const FORGOTTEN = new Set(["links", "messages"]);
+/** The stores whose rows a delete means gone from the disk: the chats (their seed, their ratchet), their messages, the services. */
+const FORGOTTEN = new Set(["links", "messages", "services"]);
 /**
- * How long what a delete of a chat or a message took may stay in the journal while the store is in use, so a profile
- * folder copied later holds nothing older. The hour is the ratchet's, for the same reason.
+ * The stores whose rows a write means gone from the disk as they were: the settings, where every secret the profile
+ * seals is kept (an x401 credential and its key, a contact link's, a DID's or an identity proof's seed, a wallet's or a
+ * card's) and the TURN password, each removed by writing its row again without it.
+ */
+const REWRITTEN = new Set(["settings"]);
+/**
+ * How long what a delete of a chat or a message (or a settings write) took may stay in the journal while the store is
+ * in use, so a profile folder copied later holds nothing older. The hour is the ratchet's, for the same reason.
  */
 const DELETE_FOLD_MS = 60 * 60_000;
 /**
@@ -205,7 +213,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   let relaxed: ReturnType<typeof setTimeout> | null = null;
   /** The journal holds a chat's ratchet state, and with the next one it holds a key already used. */
   let holdsRatchet = false;
-  /** The journal holds a delete of a chat or a message, and what came before it with it. */
+  /** The journal holds a delete of a chat or a message (or a settings write), and what came before it with it. */
   let holdsDelete = false;
   const pending = new WeakMap<unknown[], Op[]>();
 
@@ -1040,12 +1048,12 @@ function fill(store: RawRecordStore, sorted: RawRecord[]) {
 interface Touched { indexes: Map<string, RawIndex>; was: Set<RawRecord> | null; now: Set<RawRecord> }
 
 /** Where the journal's whole entries end, whether the last thing in it is a close mark, and its last entry's number. */
-/** `deletes`: an entry takes a chat or a message away, one SQLite holds already too (the journal still has the rest). */
+/** `deletes`: an entry takes a chat, a message or a setting away, one SQLite holds already too (the journal still has the rest). */
 interface Replayed { end: number; closed: boolean; seq: number; deletes: boolean }
 
-/** Whether an op takes a chat or a message away: a delete, or a clear of their store. */
+/** Whether an op takes a chat, a message or a service away (a delete, or a clear of their store), or writes a setting over. */
 function deletes(op: Op): boolean {
-  return op.kind !== "put" && FORGOTTEN.has(op.store);
+  return REWRITTEN.has(op.store) || (op.kind !== "put" && FORGOTTEN.has(op.store));
 }
 
 /** The trees' part of a replay: entries up to `applied` are in SQLite already, and a store on trees keeps its indexes. */

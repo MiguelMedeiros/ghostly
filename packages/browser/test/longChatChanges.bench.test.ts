@@ -19,6 +19,10 @@ const fake = vi.hoisted(() => ({
     stateListeners: [] as (() => void)[],
     messageListeners: [] as ((linkId: string, messages: StoredMessage[]) => void)[],
     connect: async () => {},
+    // No change tick here: every list comes whole.
+    changing: () => false,
+    whole: () => true,
+    askWhole() {},
     subscribe(listener: () => void) { fake.engine.stateListeners.push(listener); return () => {}; },
     onMessages(listener: (linkId: string, messages: StoredMessage[]) => void) { fake.engine.messageListeners.push(listener); return () => {}; },
     linkByPeer(peer: string) { return fake.engine.state?.links.find((l) => l.peerPubKeyZ32 === peer); },
@@ -42,7 +46,7 @@ interface Internals {
   storeMessage(message: StoredMessage): Promise<void>;
   receiveEdit(linkId: string, edit: { id: string; e: number; ts: number; m: string }): Promise<boolean>;
   reactions: { receive(chat: string, by: string, reaction: { id: string; e: string; n: number }): Promise<string> };
-  groupEdits: { receive(groupId: string, sender: string, edit: { id: string; e: number; ts: number; m: string }): Promise<string> };
+  groupEdits: { receive(groupId: string, sender: string, edit: { id: string; e: number; ts: number; m: string }): Promise<string>; host: { membership(groupId: string): unknown } };
   links: Map<string, unknown>;
   membership(groupId: string): unknown;
   emitState(): void;
@@ -94,6 +98,8 @@ describe.skipIf(!process.env.GHOSTLY_BENCH && import.meta.env.MODE !== "bench")(
     }, { automaticWallets: false });
     const n = node as unknown as Internals;
     n.membership = () => ({ me: "me", members: new Set(["k1"]) });
+    // A member's edit asks the group's view itself (`GroupEditsHost.membership`).
+    n.groupEdits.host.membership = () => ({ me: "me", members: new Set(["k1"]), community: false, admin: false });
     // Its own state goes nowhere here: the page's state change is timed with the page.
     n.emitState = () => {};
     const page = () => {

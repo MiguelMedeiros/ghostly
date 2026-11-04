@@ -57,8 +57,13 @@
   "fork": {
     "confirm": "¿Descartar esta copia para siempre? Lo que solo está en ella se pierde.",
     "discard": "Descartar",
+    "discardWhich": "Descartar: {{which}}",
     "hint": "Una copia de este perfil de antes de que otro dispositivo tomara el control.",
     "info": "Usar aquí guardó lo que este dispositivo tenía en ese momento. Los mensajes y pagos que solo están en esa copia no están en tu perfil. Descartar la elimina para siempre.",
+    "kept": "Guardada el {{when}}",
+    "older": "Copia anterior",
+    "olderNumbered": "Copia anterior {{n}}",
+    "repeat": "{{which}} ({{n}})",
     "title": "Solo en este dispositivo"
   },
   "handoff": {
@@ -255,6 +260,16 @@
     "removing": "Quitando…",
     "text": "Ya no podrá tomar este perfil.",
     "title": "¿Quitar {{device}}?"
+  },
+  "rename": {
+    "button": "Cambiar nombre",
+    "fail": {
+      "name": "Este nombre no se puede usar. Prueba con otro."
+    },
+    "label": "Nombre del dispositivo",
+    "save": "Guardar",
+    "saving": "Guardando…",
+    "title": "Cambiar nombre de {{device}}"
   },
   "restore": {
     "activeHint": "Iniciar esta copia de seguridad aquí crearía una segunda copia.",

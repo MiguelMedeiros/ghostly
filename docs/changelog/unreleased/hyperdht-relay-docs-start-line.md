@@ -1,4 +1,0 @@
----
-section: Fixed / Self-hosting
----
-- HyperDHT relay (`infra/services/hyperdht-relay`): the start line names its network as `(own testnet of 3 nodes)`, `(bootstrap 1 node)` or `(public HyperDHT)`, where a 3-node testnet read `(bootstrap 1 nodes)`, and a `GHOSTLY_HYPERDHT_TESTNET` with `GHOSTLY_HYPERDHT_BOOTSTRAP` set too stops the start with one line instead of dropping the bootstrap nodes without a word. `docker-compose.yml` takes `GHOSTLY_RELAY_CLOUDFLARE` and `GHOSTLY_RELAY_PROXIES` from the environment, and its README says the compose file is set up for a server behind Cloudflare and which two variables to change anywhere else, lists the handshake limits (`GHOSTLY_RELAY_HANDSHAKE_MS`, `GHOSTLY_RELAY_HANDSHAKES`), points to Settings → Network and names the Node version (22; 18 or later for the push relay).

@@ -65,6 +65,15 @@ it("accepts only wss:// relays, and ws:// to this machine", () => {
   expect(relayUrlProblem("ws://relay.example")).toMatch(/wss/);
   expect(relayUrlProblem("https://relay.example")).toMatch(/wss/);
   expect(relayUrlProblem("not a url")).toMatch(/relay address/);
+  // Only the server's address: the endpoint tells it to every contact as its relay.
+  for (const bad of ["wss://alice:hunter2@relay.example", "wss://alice@relay.example", "wss://relay.example/?token=s3cr3t", "wss://relay.example/?",
+    "wss://relay.example/#s3cr3t", "ws://alice:hunter2@127.0.0.1:49443/", `wss://relay.example/${"a".repeat(256)}`])
+    expect(relayUrlProblem(bad)).toBe(`Not a relay address: ${bad}`);
+});
+
+it("never names a relay with a login or a token in its descriptor, saved before that was refused", async () => {
+  const url = relay.url.replace("ws://", "ws://alice:hunter2@") + "/?token=s3cr3t";
+  await expect(createRelayedHyperEndpoint(seed(), url)).rejects.toThrow("Not a relay address");
 });
 
 it("gives the Desktop's key for the same seed, and says it is relayed", async () => {
@@ -328,6 +337,65 @@ it("refuses a listen on a key already listened on, by another client or the same
   }
 }, 60_000);
 
+/**
+ * A dht-relay server whose node answers every listen as `answer` says: `refused` as the relay answers a listen its
+ * node refuses (`listening` at no address, then `closed`), `closed later` with `listening` at an address and a
+ * `closed` once `close()` is called here.
+ */
+async function answeringRelay(answer: "refused" | "closed later") {
+  const { EventEmitter } = await import("node:events");
+  const { WebSocketServer } = await import("ws");
+  const { relay: serve } = await import("@hyperswarm/dht-relay");
+  const { default: WebSocketStream } = await import("@hyperswarm/dht-relay/ws");
+  const servers: InstanceType<typeof EventEmitter>[] = [];
+  const dht = {
+    createServer() {
+      const server = Object.assign(new EventEmitter(), {
+        port: 0,
+        address: () => ({ host: answer === "refused" ? "0.0.0.0" : "127.0.0.1", port: server.port }),
+        listen() {
+          if (answer === "closed later") server.port = 49737;
+          setImmediate(() => { server.emit("listening"); if (answer === "refused") server.emit("close"); });
+          return Promise.resolve();
+        },
+        close() { server.emit("close"); return Promise.resolve(); },
+      });
+      servers.push(server);
+      return server;
+    },
+  };
+  const wss = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  await new Promise(resolve => wss.once("listening", resolve));
+  wss.on("connection", ws => { void serve(dht, new WebSocketStream(false, ws)); });
+  return {
+    url: `ws://127.0.0.1:${(wss.address() as { port: number }).port}`,
+    closeServers: () => { for (const server of servers) server.emit("close"); },
+    close: () => new Promise<void>(resolve => { for (const ws of wss.clients) ws.terminate(); wss.close(() => resolve()); }),
+  };
+}
+
+it("fails at once when the relay refuses the listen, not after its own timeout, and says the endpoint is gone when the relay closes it later", async () => {
+  const refusing = await answeringRelay("refused");
+  try {
+    const started = Date.now();
+    await expect(createRelayedHyperEndpoint(seed(), refusing.url)).rejects.toThrow("The HyperDHT relay did not let this chat listen");
+    expect(Date.now() - started).toBeLessThan(5_000);
+  } finally {
+    await refusing.close();
+  }
+  const closing = await answeringRelay("closed later");
+  try {
+    const endpoint = await createRelayedHyperEndpoint(seed(), closing.url);
+    const gone = vi.fn();
+    endpoint.onUnavailable = gone;
+    closing.closeServers();
+    await vi.waitFor(() => expect(gone).toHaveBeenCalledTimes(1));
+    await endpoint.close();
+  } finally {
+    await closing.close();
+  }
+}, 30_000);
+
 it("frees the slot of a client that neither listens nor dials, one that stops answering pings, and a request that never ends, but keeps a browser", async () => {
   const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
   const { WebSocket: NodeWebSocket } = await import("ws");
@@ -383,6 +451,60 @@ it("neither drops nor logs a client that listened and then left", async () => {
   expect(reasons.filter(reason => reason.startsWith("dropped"))).toEqual([]);
   expect(own.stats()).toMatchObject({ accepted: 1, dropped: 0 });
   await own.close();
+}, 60_000);
+
+it("refuses an upgrade by origin, address or a full relay to a client that has already reset, and keeps serving", async () => {
+  const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
+  const { WebSocket: NodeWebSocket } = await import("ws");
+  const { connect } = await import("node:net");
+  const allowed = "https://ghostly.test";
+  const own = await startRelay({ testnet: 2, origins: [allowed], proxies: 1, limits: { clients: 2, clientsPerAddress: 1 } });
+  const port = Number(new URL(own.url).port);
+  const uncaught: unknown[] = [];
+  const onUncaught = (error: unknown) => { uncaught.push(error); };
+  process.on("uncaughtException", onUncaught);
+  const held: InstanceType<typeof NodeWebSocket>[] = [];
+  const hold = async (address: string) => {
+    const socket = new NodeWebSocket(own.url, { origin: allowed, headers: { "x-forwarded-for": address } });
+    held.push(socket);
+    await new Promise((resolve, reject) => { socket.once("open", resolve); socket.once("error", reject); });
+  };
+  // A well-formed upgrade the relay refuses, reset by the client as soon as it is written.
+  const resetUpgrade = (headers: string) => new Promise<void>(resolve => {
+    const socket = connect(port, "127.0.0.1", () => {
+      socket.write(`GET / HTTP/1.1\r\nHost: relay\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${Buffer.alloc(16, 1).toString("base64")}\r\nSec-WebSocket-Version: 13\r\n${headers}\r\n`);
+      setTimeout(() => { socket.resetAndDestroy(); resolve(); }, 1);
+    });
+    socket.on("error", () => resolve());
+  });
+  const resets = async (headers: string) => {
+    for (let i = 0; i < 20; i++) {
+      await resetUpgrade(headers);
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+  };
+  try {
+    await resets("Origin: https://elsewhere.test\r\nX-Forwarded-For: 10.0.0.9\r\n");
+    await hold("10.0.0.1");
+    await resets(`Origin: ${allowed}\r\nX-Forwarded-For: 10.0.0.1\r\n`);
+    await hold("10.0.0.2");
+    await resets(`Origin: ${allowed}\r\nX-Forwarded-For: 10.0.0.3\r\n`);
+    await vi.waitFor(() => expect(own.stats().refused).toBe(60));
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(uncaught).toEqual([]);
+    // The clients it holds are still there, and a slot that frees is taken again.
+    expect(own.stats()).toMatchObject({ clients: 2, dropped: 0 });
+    const closed = new Promise(resolve => held[0].once("close", resolve));
+    held[0].close();
+    await closed;
+    await vi.waitFor(() => expect(own.stats().clients).toBe(1));
+    await hold("10.0.0.3");
+    expect(own.stats().clients).toBe(2);
+  } finally {
+    process.off("uncaughtException", onUncaught);
+    for (const socket of held) socket.terminate();
+    await own.close();
+  }
 }, 60_000);
 
 it("closes every HyperDHT stream it holds for a client when the client leaves: dials under one alias, and incoming ones never taken", async () => {
@@ -489,6 +611,170 @@ it("holds at most `streams` HyperDHT streams for a client while it stays: a dial
   await native.destroy();
   await own.close();
 }, 90_000);
+
+it("holds at most `queuedBytes` that a client has not read: one that reads gets a whole fast transfer, one that stops reading is dropped", async () => {
+  const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
+  const { default: DHT } = await import("hyperdht");
+  const { default: RelayedDHT } = await import("@hyperswarm/dht-relay");
+  const { default: WebSocketStream } = await import("@hyperswarm/dht-relay/ws");
+  const net = await import("node:net");
+  type Stream = { destroyed: boolean; write(data: Uint8Array): boolean; once(event: string, f: () => void): void; on(event: string, f: (...args: never[]) => void): void; destroy(): void };
+  const reasons: string[] = [];
+  const own = await startRelay({ testnet: 2, limits: { queuedBytes: 4 * 1024 * 1024 }, log: (what: string, why: string) => { reasons.push(`${what} ${why}`); } });
+  const native = new DHT({ bootstrap: own.bootstrap.map((node: string) => { const [host, port] = node.split(":"); return { host, port: Number(port) }; }), host: "127.0.0.1", firewalled: false });
+  // A native peer that sends 1 MiB, then, once let go, as fast as its own stream lets it, up to `total`.
+  const total = 96 * 1024 * 1024;
+  const chunk = new Uint8Array(64 * 1024).fill(7);
+  const written: number[] = [];
+  const go: (() => void)[] = [];
+  const server = native.createServer();
+  server.on("connection", (stream: Stream) => {
+    stream.on("error", () => {});
+    const at = written.push(0) - 1;
+    let upTo = 1024 * 1024;
+    const pump = () => {
+      while (!stream.destroyed && written[at] < upTo) {
+        written[at] += chunk.byteLength;
+        if (!stream.write(chunk)) return stream.once("drain", pump);
+      }
+    };
+    go[at] = () => { upTo = total; pump(); };
+    pump();
+  });
+  const serverKeys = DHT.keyPair();
+  await server.listen(serverKeys);
+  // The link between a client and the relay: one the test can stop reading from the relay, as a slow or stalled one does.
+  const links: { up: import("node:net").Socket; down: import("node:net").Socket }[] = [];
+  const proxy = net.createServer(down => {
+    const up = net.connect(own.port, "127.0.0.1");
+    for (const socket of [up, down]) socket.on("error", () => {});
+    down.on("data", data => up.write(data));
+    up.on("data", data => down.write(data));
+    up.on("close", () => down.destroy());
+    down.on("close", () => up.destroy());
+    links.push({ up, down });
+  });
+  await new Promise<void>(resolve => proxy.listen(0, "127.0.0.1", resolve));
+  const url = `ws://127.0.0.1:${(proxy.address() as { port: number }).port}`;
+  // A browser-like client (it runs the Noise handshake itself) that dials the native peer.
+  const client = async () => {
+    const socket = new WebSocket(url);
+    await new Promise(resolve => socket.addEventListener("open", resolve));
+    const link = links[links.length - 1];
+    const node = new RelayedDHT(new WebSocketStream(true, socket), { custodial: false }) as unknown as { connect(key: Uint8Array): Stream };
+    const stream = node.connect(serverKeys.publicKey);
+    stream.on("error", () => {});
+    const got = { bytes: 0 };
+    stream.on("data", (data: Uint8Array) => { got.bytes += data.byteLength; });
+    await vi.waitFor(() => expect(got.bytes).toBe(1024 * 1024), { timeout: 20_000 });
+    return { socket, link, got, at: written.length - 1 };
+  };
+
+  try {
+    // Reads as fast as the far peer sends: every byte comes, and the client stays.
+    const reader = await client();
+    go[reader.at]();
+    await vi.waitFor(() => expect(reader.got.bytes).toBe(total), { timeout: 60_000 });
+    expect(own.stats().dropped).toBe(0);
+    reader.socket.close();
+
+    // Stops reading (a slow link, a frozen tab): the relay would hold all the far peer sends; past the bound it drops
+    // the client, long before the far peer is done, and the stream it held closes with it.
+    const stalled = await client();
+    stalled.link.up.pause();
+    go[stalled.at]();
+    await vi.waitFor(() => expect(reasons).toContain("dropped queue"), { timeout: 10_000 });
+    expect(own.stats().dropped).toBe(1);
+    expect(written[stalled.at]).toBeLessThan(total / 2);
+    await new Promise(resolve => setTimeout(resolve, 500));
+    expect(written[stalled.at]).toBeLessThan(total / 2);
+  } finally {
+    for (const { up, down } of links) { up.destroy(); down.destroy(); }
+    proxy.close();
+    await native.destroy();
+    await own.close();
+  }
+}, 120_000);
+
+it("holds at most `queuedTotalBytes` unread over all clients: past it the one holding the most is dropped, and one that reads stays", async () => {
+  const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
+  const { default: DHT } = await import("hyperdht");
+  const { default: RelayedDHT } = await import("@hyperswarm/dht-relay");
+  const { default: WebSocketStream } = await import("@hyperswarm/dht-relay/ws");
+  const net = await import("node:net");
+  type Stream = { destroyed: boolean; write(data: Uint8Array): boolean; once(event: string, f: () => void): void; on(event: string, f: (...args: never[]) => void): void; destroy(): void };
+  const reasons: string[] = [];
+  // Each client alone stays far below its own bound: only the sum over them is past the relay's.
+  const perClient = 64 * 1024 * 1024;
+  const own = await startRelay({ testnet: 2, limits: { queuedBytes: perClient, queuedTotalBytes: 16 * 1024 * 1024 }, log: (what: string, why: string) => { reasons.push(`${what} ${why}`); } });
+  const native = new DHT({ bootstrap: own.bootstrap.map((node: string) => { const [host, port] = node.split(":"); return { host, port: Number(port) }; }), host: "127.0.0.1", firewalled: false });
+  // A native peer that sends 1 MiB, then, once let go, as fast as its own stream lets it, up to `total`.
+  const total = 96 * 1024 * 1024;
+  const chunk = new Uint8Array(64 * 1024).fill(7);
+  const written: number[] = [];
+  const go: (() => void)[] = [];
+  const server = native.createServer();
+  server.on("connection", (stream: Stream) => {
+    stream.on("error", () => {});
+    const at = written.push(0) - 1;
+    let upTo = 1024 * 1024;
+    const pump = () => {
+      while (!stream.destroyed && written[at] < upTo) {
+        written[at] += chunk.byteLength;
+        if (!stream.write(chunk)) return stream.once("drain", pump);
+      }
+    };
+    go[at] = () => { upTo = total; pump(); };
+    pump();
+  });
+  const serverKeys = DHT.keyPair();
+  await server.listen(serverKeys);
+  // The link between a client and the relay: one the test can stop reading from the relay, as a stalled one does.
+  const links: { up: import("node:net").Socket; down: import("node:net").Socket }[] = [];
+  const proxy = net.createServer(down => {
+    const up = net.connect(own.port, "127.0.0.1");
+    for (const socket of [up, down]) socket.on("error", () => {});
+    down.on("data", data => up.write(data));
+    up.on("data", data => down.write(data));
+    up.on("close", () => down.destroy());
+    down.on("close", () => up.destroy());
+    links.push({ up, down });
+  });
+  await new Promise<void>(resolve => proxy.listen(0, "127.0.0.1", resolve));
+  const url = `ws://127.0.0.1:${(proxy.address() as { port: number }).port}`;
+  const client = async () => {
+    const socket = new WebSocket(url);
+    await new Promise(resolve => socket.addEventListener("open", resolve));
+    const link = links[links.length - 1];
+    const node = new RelayedDHT(new WebSocketStream(true, socket), { custodial: false }) as unknown as { connect(key: Uint8Array): Stream };
+    const stream = node.connect(serverKeys.publicKey);
+    stream.on("error", () => {});
+    const got = { bytes: 0 };
+    stream.on("data", (data: Uint8Array) => { got.bytes += data.byteLength; });
+    await vi.waitFor(() => expect(got.bytes).toBe(1024 * 1024), { timeout: 20_000 });
+    return { socket, link, got, at: written.length - 1 };
+  };
+
+  try {
+    const reader = await client();
+    const stalled = [await client(), await client(), await client()];
+    // Three clients stop reading while their far peers send on: each would stay under its own bound for 64 MiB.
+    for (const one of stalled) { one.link.up.pause(); go[one.at](); }
+    // The reader gets a whole fast transfer meanwhile.
+    go[reader.at]();
+    await vi.waitFor(() => expect(reasons.filter(reason => reason === "dropped queue total")).toHaveLength(3), { timeout: 60_000 });
+    expect(reasons).not.toContain("dropped queue");
+    for (const one of stalled) expect(written[one.at]).toBeLessThan(perClient / 2);
+    await vi.waitFor(() => expect(reader.got.bytes).toBe(total), { timeout: 60_000 });
+    expect(own.stats().dropped).toBe(3);
+    expect(own.stats().clients).toBe(1);
+  } finally {
+    for (const { up, down } of links) { up.destroy(); down.destroy(); }
+    proxy.close();
+    await native.destroy();
+    await own.close();
+  }
+}, 150_000);
 
 it("holds a client's handshakes only while they wait on it, and its signatures only until they come", async () => {
   const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");

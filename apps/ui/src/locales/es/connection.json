@@ -199,6 +199,7 @@
     "noContact": "Aún sin contacto",
     "offline": "Sin conexión",
     "onDht": "En la DHT · reintentando conexión directa",
+    "onDhtPlain": "En la DHT",
     "publicationUnavailable": "Publicación no disponible",
     "switching": "Cambiando · {{transport}}",
     "waitingContact": "Esperando al contacto"
@@ -265,6 +266,7 @@
     "dropped": "{{from}} se cayó y el chat volvió por {{transport}}.",
     "failedDefault": "El nuevo transporte no se conectó.",
     "flapping": "La conexión directa se cayó y volvió {{count}} veces entre {{from}} y {{to}}.",
+    "flapping_one": "La conexión directa se cayó y volvió una vez entre {{from}} y {{to}}.",
     "lost": "La conexión directa por {{from}} se cortó. Ghostly se reconecta cuando {{contact}} esté disponible.",
     "lostDht": "La conexión directa por {{from}} se cortó. Los textos cortos van por la DHT hasta que vuelva.",
     "lostDhtOnly": "Solo DHT está activado: los textos cortos van por la DHT, sin conexión directa.",

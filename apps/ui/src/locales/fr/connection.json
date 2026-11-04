@@ -199,6 +199,7 @@
     "noContact": "Pas encore de contact",
     "offline": "Hors ligne",
     "onDht": "Sur la DHT · liaison directe en cours",
+    "onDhtPlain": "Sur la DHT",
     "publicationUnavailable": "Publication indisponible",
     "switching": "Changement · {{transport}}",
     "waitingContact": "En attente du contact"
@@ -265,6 +266,7 @@
     "dropped": "{{from}} a coupé et la discussion est revenue via {{transport}}.",
     "failedDefault": "Le nouveau transport ne s'est pas connecté.",
     "flapping": "La liaison directe a coupé et est revenue {{count}} fois entre {{from}} et {{to}}.",
+    "flapping_one": "La liaison directe a coupé et est revenue {{count}} fois entre {{from}} et {{to}}.",
     "lost": "La liaison directe via {{from}} s'est arrêtée. Ghostly se reconnecte dès que {{contact}} est joignable.",
     "lostDht": "La liaison directe via {{from}} s'est arrêtée. Les textes courts passent par la DHT jusqu'à son retour.",
     "lostDhtOnly": "DHT seule est activée : les textes courts passent par la DHT, sans liaison directe.",
