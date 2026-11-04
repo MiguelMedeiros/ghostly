@@ -159,6 +159,7 @@
     "clipboardUnavailableNext": "Adjúntalo con +.",
     "declinedHere": "Lo rechazaste. Si lo quieres, pide a tu contacto que lo envíe de nuevo.",
     "declinedThere": "Tu contacto lo rechazó.",
+    "dropLate": "No se pudo añadir ahora lo que soltaste. Suéltalo de nuevo cuando termines.",
     "dropUnreadable": "No se pudieron añadir esos archivos. Envíalos con + → Documento.",
     "floor": {
       "noRoomNext": "Libera espacio y pide a tu contacto que lo envíe de nuevo.",
