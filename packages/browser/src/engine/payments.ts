@@ -1208,7 +1208,7 @@ export class PaymentDesk {
    */
   private async receiveCheck(linkId: string, payment: Payment): Promise<void> {
     const link = this.host.getLink(linkId);
-    if (link && !payment.requestId && payment.endpoint[0] === ENDPOINT.bolt11) return this.receiveInvoicePaid(linkId, link, payment.endpoint[1]);
+    if (link && !payment.requestId && payment.endpoint[0] === ENDPOINT.bolt11) return this.receiveInvoicePaid(linkId, payment.endpoint[1]);
     const request = payment.requestId ? this.payments.get(payment.requestId) : undefined;
     if (!link || !request || request.kind !== "request" || request.direction !== "out" || !this.owns(request, linkId)) return;
     const rail = request.target ? request.target.method : request.invoice ? "lightning" : undefined;
@@ -1236,10 +1236,10 @@ export class PaymentDesk {
    * for by its own contact only (`receiveCheck`). Bounded: one look every 3 seconds per invoice of a chat, so two
    * invoices paid one right after the other are both let go, and `INVOICE_LOOKS_PER_CHAT` looks every 3 seconds per
    * chat: the invoice is the contact's text, and a frame per text made each one a read of every invoice of the wallet
-   * (2,000 frames, 2,000 reads), each also walking every key of the last 3 s (agents#1586).
+   * (2,000 frames, 2,000 reads), each also walking every key of the last 3 s (agents#1586). Taken whatever the chat's
+   * Lightning choice: a group's card tells the writer through their 1:1 chat, and the word lets go of our own invoice only.
    */
-  private async receiveInvoicePaid(linkId: string, link: PaymentLink, invoice: string): Promise<void> {
-    if (!link.allowsPayment("lightning")) return;
+  private async receiveInvoicePaid(linkId: string, invoice: string): Promise<void> {
     const now = Date.now();
     const wanted = invoice.trim().toLowerCase();
     const key = `${linkId}:${wanted}`;
