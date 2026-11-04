@@ -149,17 +149,37 @@ describe("chats", () => {
     const teamChat = link("team9qmhjx8j1equ", { label: "mallory" });
     expect(() => findChatOrGroup([teamChat], [team], "team")).toThrow(expect.objectContaining({ code: "bad_request", details: { chat: teamChat.id, groups: [team.id] } }));
     expect(findChatOrGroup([teamChat, link("chatMine", { label: "team" })], [team], "team")).toEqual({ link: expect.objectContaining({ id: "chatMine" }) });
-    // A group's id is its creator's to choose: one group's name and another's prefix is refused, with both ids.
+    // A group's id is its creator's to choose: a prefix never takes a name, among groups this profile is in too; a ref
+    // that fits both is refused, with both ids.
     const theirs = { ...team, id: "team" + "x".repeat(18), name: "Mallory's" } as unknown as GroupView;
     expect(() => findGroup([theirs, team], "team")).toThrow(expect.objectContaining({ code: "bad_request", details: { matches: [theirs.id, team.id] } }));
     expect(findGroup([theirs, team], "teamx").id).toBe(theirs.id);
-    // listen --from bob: the allowlist holds Bob's chat, never the one whose id starts with "bob".
+    // listen --from bob: the allowlist holds Bob's chat, never the one whose id starts with "bob"; --group team is refused.
     const ctx = { runtime: { server: { node: { getState: () => ({ links: [mallory, bob], groups: [team, theirs] }) } } } } as unknown as ApiContext;
+    await expect(allowlist(["bob"], ["team"], (method, params) => callApi(ctx, method, params), async () => null)).rejects.toMatchObject({ code: "bad_request" });
     const list = await allowlist(["bob"], [team.id], (method, params) => callApi(ctx, method, params), async () => null);
     const event = (chat: string) => ({ seq: 1, id: "e", type: "message.received", at: 1, chat, message: { id: "m", text: "hi", timestamp: 1 } }) as GhostlyEvent;
     expect(await list.allows(event(bob.id))).toBe(true);
     expect(await list.allows(event(mallory.id))).toBe(false);
     expect(await list.allows({ seq: 2, id: "g", type: "group.message", at: 1, group: theirs.id } as GhostlyEvent)).toBe(false);
+  });
+
+  it("a group's name (its admin chooses it) never takes another group's id prefix: a ref that fits both is refused", async () => {
+    // Mallory, admin of a group this profile is in and a member of Team, renames her group to the start of Team's id.
+    const team = { ...group, id: "Tm4q9ZkLx2PdR7sVw0Yb3A", name: "Team", status: "active" } as unknown as GroupView;
+    const theirs = { ...group, id: "Qz8uE1hJc5NnFo6Gk2Mt7B", name: "Tm4q9Z", status: "active" } as unknown as GroupView;
+    const both = { code: "bad_request", message: expect.stringMatching(/names more than one group: use its id/), details: { matches: expect.arrayContaining([team.id, theirs.id]) } };
+    expect(() => findGroup([team, theirs], "Tm4q9Z")).toThrow(expect.objectContaining(both));
+    expect(() => findGroup([team, theirs], "tm4q9z")).not.toThrow(/more than one/);
+    expect(() => findChatOrGroup([], [team, theirs], "Tm4q9Z")).toThrow(expect.objectContaining(both));
+    // Each still by its id, by a ref only one fits, and before the rename the prefix is Team.
+    expect(findGroup([team, theirs], team.id).id).toBe(team.id);
+    expect(findGroup([team, theirs], theirs.id).id).toBe(theirs.id);
+    expect(findGroup([team, theirs], "Tm4q9Zk").id).toBe(team.id);
+    expect(findGroup([team, { ...theirs, name: "Book club" } as unknown as GroupView], "Tm4q9Z").id).toBe(team.id);
+    // listen --group Tm4q9Z: refused, never Mallory's group in the allowlist.
+    const ctx = { runtime: { server: { node: { getState: () => ({ links: [], groups: [team, theirs] }) } } } } as unknown as ApiContext;
+    await expect(allowlist([], ["Tm4q9Z"], (method, params) => callApi(ctx, method, params), async () => null)).rejects.toMatchObject(both);
   });
 
   it("listen --from takes a chat only by its id, its contact's key or a label given here, as call auto on --from", async () => {

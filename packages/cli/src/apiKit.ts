@@ -149,10 +149,11 @@ export function namedByThem(ref: string, chat: { chat: string; name: string | nu
 const invitedOnly = (group: GroupView) => group.status === undefined && !!group.invitation;
 
 /**
- * A group by its id, or by its name or a unique prefix of its id. Whoever created a group chose both, so a ref that is
- * one group's name and another's prefix is refused, with both ids (as a chat's). A group this profile is in wins over
- * an invitation with the same name or prefix (the one who invites chooses those); an invitation is still found by its
- * id, and by name or prefix where no group of this profile has it.
+ * A group by its id, by its name, or by a unique prefix of its id. Whoever created a group chose its id and its admin
+ * chooses its name, so neither wins over the other: a ref that is one group's name and another's prefix is refused,
+ * with both ids, as `chatBy` does for chats. A group this profile is in wins over an invitation with the same name or
+ * prefix (the one who invites chooses those); an invitation is still found by its id, and by name or prefix where no
+ * group of this profile has it.
  */
 export function findGroup(groups: readonly GroupView[], ref: string): GroupView {
   if (!ref.trim()) throw new CliError("bad_request", `${JSON.stringify(ref)} names no group`);
