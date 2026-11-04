@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ENDPOINT, ONCHAIN_PROVIDER, type GhostLink, type PaymentTarget } from "@ghostly/core";
-import { INVOICE_LOOKS_PER_CHAT, PaymentDesk, RAIL_LOOK_MS, type DeskBitcoin, type DeskLightning } from "../src/engine/payments";
+import { INVOICE_LOOKS_PER_CHAT, PaymentDesk, RAIL_LOOK_MS, RECEIPT_FRESH_MS, type DeskBitcoin, type DeskLightning } from "../src/engine/payments";
 import type { CashuWallet } from "../src/engine/wallet";
 import type { ArkWallet } from "../src/engine/paymentAdapters/arkWallet";
 import type { StoredPayment, StoredQuote } from "../src/shared/types";
@@ -103,6 +103,27 @@ describe("the payee is asked to look", () => {
     await desk.onPayment("l", check([ENDPOINT.bolt11, INVOICE]));
     expect(lightning.check).not.toHaveBeenCalled();
     expect(sent).toEqual([{ kind: "res", frame: { id: "r1", ok: true } }]);
+  });
+  it("a request our wallet saw paid while the chat was down is said paid again when it is back: the payer's Pay is gone", async () => {
+    const { desk: payee, link } = setup([outgoing({ invoice: INVOICE, createdAt: Date.now() }), outgoing({ id: "old", invoice: INVOICE, state: "settled", createdAt: Date.now() - RECEIPT_FRESH_MS - 1 })]);
+    await payee.start();
+    const { desk: payer } = setup([incoming({ invoice: INVOICE })]);
+    await payer.start();
+    // The chat is down: the answer goes nowhere, as GhostLink drops it.
+    let up = false;
+    link.sendPaymentResult.mockImplementation((frame) => { if (up) void payer.onPaymentResult("l", frame as unknown as { id: string; ok: boolean }); });
+    await payee.onLightningPaid({ paymentId: "r1" });
+    const theirs = () => payer.records().find((p) => p.id === "r1")!;
+    expect(theirs().state).toBe("pending");
+    up = true;
+    await payee.replay("l");
+    await payer.replay("l");
+    await vi.waitFor(() => expect(theirs().state).toBe("settled"));
+    await expect(payer.payRequest({ linkId: "l", paymentId: "r1" })).rejects.toThrow(/no longer open/);
+    // Said at every reconnect while it is fresh; one paid long ago is not said any more.
+    link.sendPaymentResult.mockClear();
+    await payee.replay("l");
+    expect(link.sendPaymentResult.mock.calls).toEqual([[{ id: "r1", ok: true }]]);
   });
   it("looks once every few seconds at most, and ignores a check for another rail or another contact's request", async () => {
     const { desk, lightning, bitcoin } = setup([outgoing({ invoice: INVOICE }), outgoing({ id: "r2", linkId: "other", target: btc() })]);
