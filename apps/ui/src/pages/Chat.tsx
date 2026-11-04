@@ -430,12 +430,15 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
   /**
    * Deletes a message of mine for everyone: the engine sends its removal, and the chat's copy goes once it took it. One
-   * refused (limited mode) rejects, and the bubble says why under it.
+   * refused (limited mode) rejects, and the bubble says why under it. The engine told of the row gone before it answered:
+   * the mirror takes it out now, from what changed only, and the delete here finds it gone (no read or write of a long
+   * chat again). One written here first would have the mirror walk the whole history after it.
    */
   const removeForEveryone = async (messageId: string): Promise<void> => {
     if (!chatLink) return;
     const result = await engine.call("removeMessage", { linkId: chatLink.id, messageId });
     if (result.error) throw new Error(result.error);
+    engine.tellChangesNow();
     deleteMessage(messageId);
   };
 
