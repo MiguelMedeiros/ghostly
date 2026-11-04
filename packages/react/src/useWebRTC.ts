@@ -6,6 +6,7 @@ import {
   parseCallSignal,
   answersOffer,
   callSignalHeardAt,
+  keepsToRelays,
   sdpHasCandidates,
   signalHasVideo,
   traceLink,
@@ -23,6 +24,11 @@ export type Picture = "camera" | "screen";
 
 interface UseWebRTCParams {
   incomingCallSignal: string | null;
+  /**
+   * Goes up each time another page on this engine (an extension tab) answers or declines the call ringing in this chat:
+   * the ring stops here, with no line and no signal of its own, which that page wrote and sent.
+   */
+  callHandledElsewhere?: number;
   publishCallSignal: (signal: string | null) => void;
   setFastPoll: (fast: boolean) => void;
   /**
@@ -116,9 +122,10 @@ export const MEDIA_PROBLEM_SHOWN_MS = 8000;
 /**
  * Why a call could not use the microphone or camera: refused (by the person, the browser or the system), or none to
  * use. Or, with "Hide my IP from contacts" on, why it could not start: `relay`, the TURN server gave no relay
- * candidate (it did not answer); `relayOnly`, this app's call media cannot keep a call to the relay.
+ * candidate (it did not answer); `relayOnly`, this app's call media cannot keep a call to the relay. `relayOnlyNow`:
+ * the setting was turned on during a call whose connection had a direct path, which ended it.
  */
-export type MediaProblem = "denied" | "unavailable" | "relay" | "relayOnly";
+export type MediaProblem = "denied" | "unavailable" | "relay" | "relayOnly" | "relayOnlyNow";
 
 /** What a failed call start means for the person, or null when the failure was not the microphone's, camera's or relay's. */
 export function mediaProblem(error: unknown): MediaProblem | null {
@@ -255,6 +262,7 @@ const exactly = (deviceId: string | null): MediaTrackConstraints | true => (devi
 
 export function useWebRTC({
   incomingCallSignal,
+  callHandledElsewhere,
   publishCallSignal,
   setFastPoll,
   addCallEventMessage,
@@ -310,6 +318,22 @@ export function useWebRTC({
   const showMediaProblem = useCallback((error: unknown) => {
     const problem = mediaProblem(error);
     if (problem) setMediaProblemShown(problem);
+  }, []);
+  /**
+   * Our last call never connected because ICE found no path to the contact: it failed, or did not connect in time, or
+   * found no candidate at all (`showNoPath`), or the contact's side said it could not (`r: "u"`) after the answer. A
+   * VPN or firewall that blocks UDP (or lets only TCP 443 out), on either side, does that; a TURN server on 443 gets a
+   * call through. Shown until dismissed or the next call starts.
+   */
+  const [noPath, setNoPath] = useState(false);
+  const dismissNoPath = useCallback(() => setNoPath(false), []);
+  /**
+   * A call (started, or answered) whose connections found no candidate at all: WebRTC gets nothing out of this network
+   * (a VPN or a browser policy that allows proxied UDP only), on a device whose chat is live. Not "Hide my IP": its
+   * relay has a problem of its own (`MediaProblem`).
+   */
+  const showNoPath = useCallback((error: unknown) => {
+    if (error instanceof CallUnreachableError && !(error instanceof CallRelayError)) setNoPath(true);
   }, []);
   /**
    * With "Hide my IP from contacts" on, a call needs media whose connections keep to the relay: one that would gather
@@ -408,6 +432,7 @@ export function useWebRTC({
   const updateCallState = useCallback((state: CallState) => {
     callStateRef.current = state;
     setCallState(state);
+    if (state === "offering" || state === "incoming") setNoPath(false);
     // One call at a time (WISP 601, "On a call already"): answering a call in another chat hangs this one up, as its
     // person would, so the contact is told and both chats keep the end line.
     setCallOn(callKey, ON_A_CALL.has(state) ? () => { traceCallEnd("answered-another", { state: callStateRef.current }); hangUpRef.current(true, true); } : null);
@@ -600,6 +625,7 @@ export function useWebRTC({
         callConnectedEventFiredRef.current = false;
       } else {
         addCallEventMessage?.("call_failed", callHadVideoRef.current);
+        setNoPath(true);
       }
       cleanupConnection();
       updateCallState("idle");
@@ -707,11 +733,13 @@ export function useWebRTC({
       await waitForIceGathering(pc, ICE_RESTART_GATHER_MS, { fresh: true });
       if (!current()) return;
       const sdp = pc.localDescription?.sdp;
-      // No candidate: no network yet. Nothing to send; the next try, or the browser's "online", finds one.
-      if (sdp && sdpHasCandidates(sdp)) {
+      const params = sdp && sdpHasCandidates(sdp) ? extractParamsFromSdp(sdp, { maxCandidates: maxCandidatesRef.current, relayOnly: relayOnlyRef.current }) : null;
+      // No candidate: no network yet. Nothing to send; the next try, or the browser's "online", finds one. Counted after
+      // the relay filter: a restart offer left with none went out with `c: []` (agents#1601).
+      if (params && (params.c?.length ?? 0) > 0) {
         const ts = Math.max(Date.now(), lastRestartOfferRef.current + 1);
         restartOfferRef.current = lastRestartOfferRef.current = ts;
-        const signal: CallSignal = { t: "r", ts, ...extractParamsFromSdp(sdp, { maxCandidates: maxCandidatesRef.current, relayOnly: relayOnlyRef.current }), ...describeSelf() };
+        const signal: CallSignal = { t: "r", ts, ...params, ...describeSelf() };
         traceLink("call", "call-ice-restart", { candidates: signal.c?.length ?? 0 });
         publishCallSignal(JSON.stringify(signal));
       }
@@ -957,6 +985,7 @@ export function useWebRTC({
         if (cancelled()) return;
         onErrorRef.current?.(error);
         showMediaProblem(error);
+        showNoPath(error);
         // The call ended before it rang anyone (no microphone, or no connection found a way out): the chat says so,
         // after its "call started" line. No offer went out, so the contact has nothing to hear.
         addCallEventMessage?.("call_failed", withVideo);
@@ -977,6 +1006,7 @@ export function useWebRTC({
       addCallEventMessage,
       removeCallEventMessage,
       showMediaProblem,
+      showNoPath,
       assertKeepsToRelays,
       callKey,
       ringOffer,
@@ -1041,14 +1071,14 @@ export function useWebRTC({
       } catch (error) {
         if (cancelled()) return;
         onErrorRef.current?.(error);
-        if (error instanceof CallUnreachableError) { couldNotConnect(true); return; }
+        if (error instanceof CallUnreachableError) { showNoPath(error); couldNotConnect(true); return; }
         cleanupConnection();
         updateCallState("idle");
         publishCallSignal(null);
         setFastPoll(false);
       }
     },
-    [answerOffer, applyRemotePicture, clearRestartGrace, cleanupConnection, updateCallState, publishCallSignal, setFastPoll, couldNotConnect],
+    [answerOffer, applyRemotePicture, clearRestartGrace, cleanupConnection, updateCallState, publishCallSignal, setFastPoll, couldNotConnect, showNoPath],
   );
 
   const acceptCall = useCallback(
@@ -1091,6 +1121,7 @@ export function useWebRTC({
         if (cancelled()) return;
         onErrorRef.current?.(error);
         showMediaProblem(error);
+        showNoPath(error);
         // Whatever stopped the answer (a microphone refused, no connection found), the caller is told at once
         // instead of ringing on until its own ring runs out, and both chats say the call couldn't connect.
         couldNotConnect(true);
@@ -1104,6 +1135,7 @@ export function useWebRTC({
       updateCallState,
       couldNotConnect,
       showMediaProblem,
+      showNoPath,
       assertKeepsToRelays,
       callKey,
     ],
@@ -1261,6 +1293,8 @@ export function useWebRTC({
     // Hung up while the track was swapped: the call's tracks were stopped without this one.
     if (attemptRef.current !== attempt || !localStreamRef.current) { track.stop(); return; }
     const current = localStreamRef.current;
+    // Mute pressed while it was swapped in (the Linux Desktop opens the device meanwhile) went to the old track.
+    track.enabled = current.getAudioTracks()[0]?.enabled ?? track.enabled;
     current.getAudioTracks().forEach((old) => {
       old.onended = null;
       old.stop();
@@ -1270,10 +1304,20 @@ export function useWebRTC({
     setLocalStream(stream);
   }, []);
 
-  /** Shows another camera (null: the default) in place of the one on; with the camera off there is nothing to swap. */
+  /**
+   * Shows another camera (null: the default) in place of the one on; with the camera off there is nothing to swap.
+   * When it cannot be opened and the one on is gone (the only camera unplugged), the camera goes off, as its button
+   * turns it off: the button and the self-view then say what is sent, and turning it on again opens what is there.
+   */
   const switchCamera = useCallback(async (deviceId: string | null) => {
     if (pictureRef.current !== "camera") return;
-    await showPicture("camera", deviceId);
+    try {
+      await showPicture("camera", deviceId);
+    } catch (error) {
+      const showing = localStreamRef.current?.getVideoTracks()[0];
+      if (pictureRef.current === "camera" && showing?.readyState === "ended") await showPicture(null);
+      throw error;
+    }
   }, [showPicture]);
 
   useEffect(() => {
@@ -1375,6 +1419,8 @@ export function useWebRTC({
         // The contact's side could not connect (it found no candidate, or the call did not connect in time): this
         // side's call could not either, and says so the same way.
         addCallEventMessage?.("call_failed", callHadVideoRef.current);
+        // Once answered, it was the path: before, it may have been the contact's microphone, refused at Answer.
+        if (callStateRef.current === "connecting" || callStateRef.current === "answering") setNoPath(true);
         hangUp(false, false);
         return;
       }
@@ -1387,6 +1433,19 @@ export function useWebRTC({
   // An unanswered call does not ring forever (RING_MS). Ours hangs up and says "No answer". Theirs stops ringing here
   // with a missed call and sends nothing: the caller's own ring runs out too, and a hang-up would read as declined.
   hangUpRef.current = hangUp;
+
+  // "Hide my IP from contacts" turned on during a call: its connection was made with this device's own addresses
+  // (STUN, policy "all"), and its ICE restarts would run on it, so a new network address still reached the contact
+  // (agents#1601). The chats' links restart for it (the engine's `restartLinksForRelayOnly`); the call ends, the
+  // contact is told, and the person is told why. Calling again goes through the relay.
+  useEffect(() => {
+    if (!relayOnly) return;
+    const pc = pcRef.current;
+    if (!pc || callStateRef.current === "idle" || keepsToRelays(pc)) return;
+    traceCallEnd("relay-only", { state: callStateRef.current });
+    hangUpRef.current(true, true);
+    setMediaProblemShown("relayOnlyNow");
+  }, [relayOnly]);
   useEffect(() => {
     if (callState !== "offering" && callState !== "incoming") return;
     const ringing = callState;
@@ -1405,6 +1464,23 @@ export function useWebRTC({
     }, RING_MS);
     return () => clearTimeout(timer);
   }, [callState]);
+
+  // Another page answered or declined the call ringing here (`callHandledElsewhere`): it stops ringing here as though it
+  // never had. That page wrote the call's lines into the history both show, and sent its answer; this one sends
+  // nothing, not even the `null` a hang-up clears its signal with, which would take that answer back.
+  const handledSeenRef = useRef(callHandledElsewhere ?? 0);
+  useEffect(() => {
+    const count = callHandledElsewhere ?? 0;
+    if (count === handledSeenRef.current) return;
+    handledSeenRef.current = count;
+    if (callStateRef.current !== "incoming") return;
+    traceCallEnd("handled-elsewhere", { state: "incoming" });
+    cleanupConnection();
+    updateCallState("idle");
+    pendingOfferRef.current = null;
+    callHadVideoRef.current = false;
+    setFastPoll(false);
+  }, [callHandledElsewhere, cleanupConnection, updateCallState, setFastPoll]);
 
   // The app or the tab closes mid-call (Ghostly Desktop's `ghostly-departing`, a page's `pagehide`): it hangs up as
   // its person would, so the contact's call ends now and not when its connection gives up, and this chat keeps the
@@ -1462,6 +1538,7 @@ export function useWebRTC({
     const timer = setTimeout(() => {
       if (callStateRef.current !== "connecting") return;
       onErrorRef.current?.(new CallUnreachableError("The call could not connect"));
+      setNoPath(true);
       couldNotConnect(true);
     }, CONNECT_TIMEOUT_MS);
     return () => clearTimeout(timer);
@@ -1549,6 +1626,9 @@ export function useWebRTC({
     /** Our last call rang out with no answer, for a few seconds. */
     noAnswer,
     mediaProblem: mediaProblemShown,
+    /** Our last call never connected: ICE found no path to the contact (a VPN or firewall may block calls). */
+    noPath,
+    dismissNoPath,
     /**
      * The system paused our microphone while the call is on (an iPhone's Home Screen web app with its screen locked):
      * the contact hears nothing until it comes back. Not the person's own mute (`isMuted`).

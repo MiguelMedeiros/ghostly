@@ -28,12 +28,14 @@ import { isDeviceCode, offerDeviceLink, readDeviceLink, takeDeviceLinkFromAddres
 import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, decodePart, inviteRouteCode, protocolLinkCode, readInvite } from "./lib/url";
 import { onJoinNotice, showJoinNotice, type JoinNoticeKey } from "./lib/joinNotice";
 import { onChatNotStored, reportChatNotStored } from "./lib/chatNotStored";
-import { groupPath } from "./lib/groups";
+import { LINK_GROUPS_WAITING, groupPath, linkGroupId, linkGroupsWaiting } from "./lib/groups";
+import { useEngineValue } from "./lib/engineState";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useAnchorHome, useAppNavigation } from "./hooks/useAppNavigation";
 import { problemText, type Problem } from "./lib/problemText";
 import { Notice } from "./components/ui/Notice";
 import { watchWindowAway } from "./lib/windowAway";
+import { watchAppInSight } from "./lib/appInSight";
 import { guardContextMenu } from "./lib/contextMenu";
 import { isDesktopApp } from "./lib/externalLink";
 import "./index.css";
@@ -74,7 +76,7 @@ function ChatLinkIntake() {
   locked.current = isLocked;
   /** The invite a link brought while locked: the last one, kept in memory only. */
   const [held, setHeld] = useState<SessionKeys | null>(null);
-  const [invalid, setInvalid] = useState<(typeof INVITE_REFUSAL_MESSAGE)[keyof typeof INVITE_REFUSAL_MESSAGE] | "join.invalid" | "join.tooManyLinks" | null>(null);
+  const [invalid, setInvalid] = useState<(typeof INVITE_REFUSAL_MESSAGE)[keyof typeof INVITE_REFUSAL_MESSAGE] | "join.invalid" | "join.tooManyLinks" | "join.chatGone" | null>(null);
 
   const open = useCallback((keys: SessionKeys) => {
     // This profile's own invite opens the chat that owns it, never a second one; one already joined by opens its chat.
@@ -119,9 +121,11 @@ function ChatLinkIntake() {
       return;
     }
     const session = decodePart(rest);
-    if (protocolLinkCode(pathname) === null && !rest.includes("/") && !/^ghostly1/i.test(rest) && session !== null && loadSession(session)) return; // an ordinary chat address
-    // Whatever it was, it leaves the address bar and the history: it may hold a key.
-    setInvalid(INVITE_REFUSAL_MESSAGE[reading.reason]);
+    const chatAddress = protocolLinkCode(pathname) === null && !rest.includes("/") && !/^ghostly1/i.test(rest) && session !== null;
+    if (chatAddress && loadSession(session)) return; // an ordinary chat address
+    // Whatever it was, it leaves the address bar and the history: it may hold a key. The address of a chat no longer
+    // on this device (a bookmark, a link kept from before it was deleted) says so, as a group's does, not "not an invite".
+    setInvalid(chatAddress && reading.reason === "not-ghostly" ? "join.chatGone" : INVITE_REFUSAL_MESSAGE[reading.reason]);
     navigate("/", { replace: true });
   }, [pathname, hash, navigate, open]);
 
@@ -217,32 +221,46 @@ function ChatNotStoredNotice() {
  * A group's link opened in the app (`#/join/group1/…` or `#/join/group2/…`): it leaves the address at once, like an
  * invite; once the app is unlocked the engine joins and the group opens, saying it waits for the admin's app. A refusal
  * is a notice as JoinDialog shows one (a title, what to do, the engine's English behind the ⓘ), there until closed.
+ * A link to a group not here joins only while few groups joined by links wait to be let in (`LINK_GROUPS_WAITING`),
+ * counted once the engine has loaded its groups.
  */
 function GroupLinkIntake() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const nav = useAppNavigation();
   const { hasUnlocked } = useLockScreen();
+  const groupsLoaded = useEngineValue((state) => !!state?.groupsLoaded);
   const [code, setCode] = useState("");
   const [problem, setProblem] = useState<Problem | null>(null);
+  /** The groups this intake is joining, until the engine answers: links that come together count each other. */
+  const joining = useRef(new Set<string>());
   const t = useT();
   useEffect(() => {
     const found = pathname.match(/^\/join\/(.+)$/)?.[1];
     if (!found) return;
     // A `%` that is not an escape: no group's link, said as one the engine could not read.
     const link = decodePart(found);
-    if (link === null) setProblem({ tone: "error", title: t("group.link.broken") });
+    if (link === null) setProblem({ tone: "error", title: t("group.link.broken"), next: t("group.link.brokenNext") });
     else setCode(link);
     navigate("/", { replace: true });
   }, [pathname, navigate, t]);
   useEffect(() => {
-    if (!code || !hasUnlocked) return;
+    if (!code || !hasUnlocked || !groupsLoaded) return;
     setCode("");
+    const groups = engine.state?.groups ?? [];
+    const id = linkGroupId(code);
+    if (id && !groups.some((group) => group.id === id) && !joining.current.has(id)
+      && new Set([...linkGroupsWaiting(groups), ...joining.current]).size >= LINK_GROUPS_WAITING) {
+      setProblem({ tone: "error", title: t("group.link.tooMany"), next: t("group.link.tooManyNext") });
+      return;
+    }
+    if (id) joining.current.add(id);
     engine.call("joinGroupByLink", { link: code })
       .then(({ groupId }) => nav.conversation(groupPath(groupId)))
-      .catch((cause: unknown) => setProblem(cause instanceof Error ? problemText(cause, t) : { tone: "error", title: t("group.link.broken") }));
+      .catch((cause: unknown) => setProblem(cause instanceof Error ? problemText(cause, t) : { tone: "error", title: t("group.link.broken") }))
+      .finally(() => { if (id) joining.current.delete(id); });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `nav` changes with every location
-  }, [code, hasUnlocked]);
+  }, [code, hasUnlocked, groupsLoaded]);
   return problem ? <ClosableTopNotice problem={problem} testId="group-link-invalid" onClose={() => setProblem(null)} /> : null;
 }
 
@@ -251,7 +269,7 @@ function GroupLinkIntake() {
  * this device does not have. Everything else opened directly gets home put under it (`useAnchorHome`).
  */
 function isIntake(pathname: string): boolean {
-  if (pathname.startsWith("/join/") || /^\/?ghostly1/i.test(pathname) || protocolLinkCode(pathname) !== null) return true;
+  if (/^\/join\/./.test(pathname) || /^\/?ghostly1/i.test(pathname) || protocolLinkCode(pathname) !== null) return true;
   // The app icon's shortcuts: the sidebar acts on them and takes them out of the history.
   if (pathname === "/new" || pathname === "/scan") return true;
   const rest = pathname.match(/^\/chat\/(.+)$/)?.[1];
@@ -264,6 +282,15 @@ function HomeAnchor() {
   const { hash } = useLocation();
   useAnchorHome((pathname) => isIntake(pathname) || !!namedDeviceLink(pathname, hash));
   return null;
+}
+
+/**
+ * An address with no page. What the intakes above take out of the history at once draws nothing, as before, with no
+ * "No routes matched" warning; anything else goes home, not to an empty screen that a reload keeps.
+ */
+function NoPage() {
+  const { pathname, hash } = useLocation();
+  return isIntake(pathname) || namedDeviceLink(pathname, hash) ? null : <Navigate to="/" replace />;
 }
 
 /**
@@ -302,6 +329,8 @@ export function Root() {
   useState(takeDeviceLinkFromAddress);
   // The loops rest while the window is hidden or behind others (index.css `:root[data-away]`).
   useEffect(watchWindowAway, []);
+  // Another page of the app in sight (an extension tab in front) keeps this one's notifications back (lib/appInSight.ts).
+  useEffect(watchAppInSight, []);
   // A right-click opens the item's own ⋮ menu where it has one; the desktop app never shows the webview's Back/Reload.
   useEffect(() => guardContextMenu({ suppress: isDesktopApp() }), []);
   // Not the active device for this profile (WISP 06 § The gate): the standby screen, and nothing of the profile. No
@@ -337,10 +366,7 @@ export function Root() {
                   <AttentionFeedback />
                   <NameStep />
                   <Routes>
-                    {/* What the intakes above take out of the history at once (a group's link, an invite code, a
-                        web+ghostly: link): nothing drawn for them, as before, and no "No routes matched" warning. */}
-                    <Route path="/join/*" element={null} />
-                    <Route path="/:intake" element={null} />
+                    <Route path="*" element={<NoPage />} />
                     <Route element={<App />}>
                       <Route path="/" element={<Home />} />
                       <Route path="/chat/*" element={<ChatRoute />} />

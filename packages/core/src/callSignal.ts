@@ -117,6 +117,11 @@ export function decompressSdp(compressed: string): string {
   return atob(compressed);
 }
 
+/**
+ * The apps' STUN servers. No candidate pool: a call's connection is made when the call is placed and its offer follows
+ * at once, so pre-gathered sessions save no time, and each one opens its own sockets, asks every STUN server and takes
+ * its own TURN allocation (a TURN server's per-user quota then refuses the call's own).
+ */
 export const RTC_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
@@ -125,7 +130,6 @@ export const RTC_CONFIG: RTCConfiguration = {
     { urls: "stun:stun3.l.google.com:19302" },
     { urls: "stun:stun4.l.google.com:19302" },
   ],
-  iceCandidatePoolSize: 10,
 };
 
 /** An ICE server as a profile's settings keep it: one or more URLs in `urls` (space or comma separated). */
@@ -157,12 +161,10 @@ export function callRtcConfig(extra: readonly CallIceServer[] = [], { relayOnly 
 
 /**
  * The WebRTC configuration of a chat's data link or a group's edge, from the profile's settings: its ICE servers,
- * and "Hide my IP from contacts" (`relayOnly`), as a call's (`callRtcConfig`). No candidate pool: an app holds one
- * such connection per chat and per group member, and a call only one.
+ * and "Hide my IP from contacts" (`relayOnly`), as a call's (`callRtcConfig`).
  */
 export function contactRtcConfig(settings: { iceServers?: readonly CallIceServer[]; relayOnly?: boolean }): RTCConfiguration {
-  const { iceCandidatePoolSize: _pool, ...config } = callRtcConfig(settings.iceServers ?? [], { relayOnly: settings.relayOnly === true });
-  return config;
+  return callRtcConfig(settings.iceServers ?? [], { relayOnly: settings.relayOnly === true });
 }
 
 /** Whether a connection keeps to relays (`iceTransportPolicy: "relay"`): what it sends a contact is then relay candidates only. */

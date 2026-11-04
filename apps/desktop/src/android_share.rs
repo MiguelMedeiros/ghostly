@@ -5,8 +5,8 @@ use serde::Deserialize;
 use std::sync::Mutex;
 
 /// A share from another app, as the Kotlin side copied it: its text, the files it made of the shared streams, in
-/// the app's cache, and the names of those it did not copy, too large to bring in (`left_out`), not read (`unread`) or
-/// with no room for them on the device (`no_room`).
+/// the app's cache, and the names of those it did not copy, too large to bring in (`left_out`), not read (`unread`),
+/// with no room for them on the device (`no_room`) or past the most one share brings (`past_limit`).
 #[derive(Deserialize, Default, Clone, Debug, PartialEq)]
 pub struct Shared {
     #[serde(default)]
@@ -21,6 +21,8 @@ pub struct Shared {
     pub unread: Vec<String>,
     #[serde(default, rename = "noRoom")]
     pub no_room: Vec<String>,
+    #[serde(default, rename = "pastLimit")]
+    pub past_limit: Vec<String>,
 }
 
 impl Shared {
@@ -38,18 +40,28 @@ pub struct SharedFile {
 
 /// The latest share waiting for the page: one at a time, a newer one replaces it (as the web app's share target). A
 /// newer one that is only a notice joins the waiting share instead, as the page does (`receiveShare` in
-/// `incomingShare.ts`): the waiting share's files would be lost for a notice.
+/// `incomingShare.ts`): the waiting share's files would be lost for a notice. A share with something that replaces a
+/// waiting notice keeps its names (Android may hand an older share still copying over after a newer notice).
 #[derive(Default)]
 pub struct Incoming(Mutex<Option<Shared>>);
 
 impl Incoming {
-    pub fn put(&self, shared: Shared) {
+    pub fn put(&self, mut shared: Shared) {
         let mut held = self.0.lock().unwrap();
         match held.as_mut() {
             Some(waiting) if shared.is_notice() => {
                 waiting.left_out.extend(shared.left_out);
                 waiting.unread.extend(shared.unread);
                 waiting.no_room.extend(shared.no_room);
+                waiting.past_limit.extend(shared.past_limit);
+            }
+            Some(waiting) if waiting.is_notice() => {
+                let waiting = std::mem::take(waiting);
+                shared.left_out.splice(0..0, waiting.left_out);
+                shared.unread.splice(0..0, waiting.unread);
+                shared.no_room.splice(0..0, waiting.no_room);
+                shared.past_limit.splice(0..0, waiting.past_limit);
+                *held = Some(shared);
             }
             _ => *held = Some(shared),
         }
@@ -92,12 +104,44 @@ mod tests {
             no_room: vec!["VID_2.mp4".into()],
             ..Shared::default()
         });
+        incoming.put(Shared {
+            past_limit: vec!["IMG_33.jpg".into()],
+            ..Shared::default()
+        });
         assert_eq!(
             incoming.take(),
             Some(Shared {
                 left_out: vec!["VID_1.mp4".into()],
                 unread: vec!["DOC_1.pdf".into()],
                 no_room: vec!["VID_2.mp4".into()],
+                past_limit: vec!["IMG_33.jpg".into()],
+                ..photo()
+            })
+        );
+        assert_eq!(incoming.take(), None);
+    }
+
+    #[test]
+    fn a_share_with_something_keeps_the_names_of_the_waiting_notice() {
+        // An older share still copying is handed over after a newer one that was only a notice.
+        let incoming = Incoming::default();
+        incoming.put(Shared {
+            past_limit: vec!["IMG_B33.jpg".into()],
+            ..notice(&["VID_B.mp4"], &["DOC_B.pdf"])
+        });
+        incoming.put(Shared {
+            left_out: vec!["VID_A2.mp4".into()],
+            no_room: vec!["VID_A3.mp4".into()],
+            past_limit: vec!["IMG_A33.jpg".into()],
+            ..photo()
+        });
+        assert_eq!(
+            incoming.take(),
+            Some(Shared {
+                left_out: vec!["VID_B.mp4".into(), "VID_A2.mp4".into()],
+                unread: vec!["DOC_B.pdf".into()],
+                no_room: vec!["VID_A3.mp4".into()],
+                past_limit: vec!["IMG_B33.jpg".into(), "IMG_A33.jpg".into()],
                 ..photo()
             })
         );
@@ -109,10 +153,6 @@ mod tests {
         let incoming = Incoming::default();
         incoming.put(notice(&["VID_1.mp4"], &[]));
         assert_eq!(incoming.take(), Some(notice(&["VID_1.mp4"], &[])));
-
-        incoming.put(notice(&["VID_1.mp4"], &[]));
-        incoming.put(photo());
-        assert_eq!(incoming.take(), Some(photo()));
 
         incoming.put(photo());
         let text = Shared {

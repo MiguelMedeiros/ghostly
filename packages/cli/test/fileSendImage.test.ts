@@ -14,13 +14,16 @@ import { openPersistentIndexedDb } from "../src/runtime/storage";
 const link = { id: "chat-pic", label: "Alice", peerPubKeyZ32: "palice", createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", dataLink: "open",
   capabilities: { files: true }, pairing: { status: "ready" } } as unknown as LinkView;
 
-/** The first bytes of a PNG of this size, then some more: nothing past the header is read. */
+/** A PNG of this size: its header, an IDAT and its end. Only the header is read for its size. */
 function png(width: number, height: number): Buffer {
   const head = Buffer.alloc(33);
   head.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
   head.writeUInt32BE(width, 16);
   head.writeUInt32BE(height, 20);
-  return Buffer.concat([head, Buffer.alloc(4096)]);
+  const idat = Buffer.alloc(12 + 4096);
+  idat.writeUInt32BE(4096, 0);
+  idat.write("IDAT", 4, "latin1");
+  return Buffer.concat([head, idat, Buffer.from([0, 0, 0, 0, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82])]);
 }
 
 let dir: string;
@@ -51,10 +54,10 @@ describe("file send of a picture", () => {
   });
 
   it("sends none for a picture whose first bytes do not say, or for anything else", async () => {
-    for (const [name, bytes] of [["broken.jpg", Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 4, 0, 0])], ["notes.txt", png(10, 10)]] as const) {
+    for (const [name, bytes, mime] of [["broken.bmp", Buffer.from("BM", "latin1"), "image/bmp"], ["notes.txt", png(10, 10), undefined]] as const) {
       const path = join(dir, name);
       writeFileSync(path, bytes);
-      const answer = await callApi(ctx, "file.send", { chat: "Alice", path }) as { file: { image?: unknown } };
+      const answer = await callApi(ctx, "file.send", { chat: "Alice", path, ...(mime ? { mime } : {}) }) as { file: { image?: unknown } };
       expect(answer.file.image).toBeUndefined();
       expect(sent[sent.length - 1]!.image).toBeUndefined();
     }

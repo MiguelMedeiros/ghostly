@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
  */
 const root = resolve(import.meta.dirname, "../../..");
 
-type Ctx = { workflow: string; event_name: string; ref: string; run_id: number; event: { pull_request?: { number: number } } };
+type Ctx = { workflow: string; event_name: string; ref: string; run_id: number; event: { action?: string; pull_request?: { number: number } } };
 
 /** The `${{ }}` expressions these use (==, &&, ||, format) behave as in JavaScript for these strings. */
 const evaluate = (text: string, github: Ctx) =>
@@ -26,7 +26,7 @@ describe.each([
   let run = 1000;
   const ctx = (event_name: string, ref: string, event: Ctx["event"] = {}): Ctx => ({ workflow, event_name, ref, run_id: run++, event });
   const push = (branch: string) => ctx("push", `refs/heads/${branch}`);
-  const pr = (number: number) => ctx("pull_request", `refs/pull/${number}/merge`, { pull_request: { number } });
+  const pr = (number: number, action = "synchronize") => ctx("pull_request", `refs/pull/${number}/merge`, { action, pull_request: { number } });
   const group = (c: Ctx) => evaluate(block?.[1] ?? "", c);
   const cancels = (c: Ctx) => evaluate(block?.[2] ?? "", c) === "true";
 
@@ -50,5 +50,12 @@ describe.each([
     expect(group(pr(7))).not.toBe(group(pr(8)));
     expect(group(pr(7))).not.toBe(group(push("dev")));
     expect(cancels(pr(7))).toBe(true);
+    expect(cancels(pr(7, "opened"))).toBe(true);
+  });
+
+  it.runIf(file === "ci.yml")("leaving draft waits behind the run in progress instead of cancelling it: a draft run that ends green lets it board on the fast tier", () => {
+    const ready = pr(7, "ready_for_review");
+    expect(group(ready)).toBe(group(pr(7)));
+    expect(cancels(ready)).toBe(false);
   });
 });

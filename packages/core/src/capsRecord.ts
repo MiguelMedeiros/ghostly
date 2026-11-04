@@ -6,7 +6,7 @@ import { encrypt, tryDecrypt } from "./crypto";
 import { identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign, verify, type Identity } from "./identity";
 import type { LinkParams } from "./invite";
 import type { PairingCredentials } from "./pairedSession";
-import { RELAY_URL, type TransportDescriptors } from "./pairedTransports";
+import { RELAY_URL, RELAY_WITH_SECRETS, relayUrl, type TransportDescriptors } from "./pairedTransports";
 import { measureRecords, MAX_DNS_PACKET_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
 import { sanitizeNick } from "./text";
 import { budgetRetryMs, isDiscoveryBudgetError, type PkarrTransport } from "./transport";
@@ -121,10 +121,10 @@ export function capsDescriptors(descriptors: TransportDescriptors | undefined): 
   const out: CapsDescriptors = {};
   const iroh = descriptors?.["iroh/1"] as { id?: unknown; relay?: unknown } | undefined;
   if (iroh && typeof iroh.id === "string" && HEX64.test(iroh.id))
-    out["iroh/1"] = { id: hexToKey(iroh.id), ...(typeof iroh.relay === "string" && RELAY_URL.test(iroh.relay) ? { relay: iroh.relay } : {}) };
+    out["iroh/1"] = { id: hexToKey(iroh.id), ...(relayUrl(iroh.relay) ? { relay: iroh.relay } : {}) };
   const hyper = descriptors?.["hyperdht/1"] as { publicKey?: unknown; relay?: unknown } | undefined;
   if (hyper && typeof hyper.publicKey === "string" && HEX64.test(hyper.publicKey))
-    out["hyperdht/1"] = { publicKey: hexToKey(hyper.publicKey), ...(typeof hyper.relay === "string" && RELAY_URL.test(hyper.relay) ? { relay: hyper.relay } : {}) };
+    out["hyperdht/1"] = { publicKey: hexToKey(hyper.publicKey), ...(relayUrl(hyper.relay) ? { relay: hyper.relay } : {}) };
   return out;
 }
 
@@ -151,13 +151,16 @@ function parseDescriptors(value: unknown): CapsDescriptors | null {
   const raw = value as Record<string, { id?: unknown; relay?: unknown; publicKey?: unknown } | undefined>;
   const out: CapsDescriptors = {};
   const iroh = raw["iroh/1"], hyper = raw["hyperdht/1"];
+  // A relay with a login, a query or a fragment (an older app's HyperDHT relay, as set): its descriptor is not kept,
+  // and the rest of the record still is.
+  const withSecrets = (relay: unknown) => typeof relay === "string" && RELAY_WITH_SECRETS.test(relay);
   if (iroh !== undefined) {
     if (!iroh || typeof iroh.id !== "string" || !KEY.test(iroh.id) || (iroh.relay !== undefined && (typeof iroh.relay !== "string" || !RELAY_URL.test(iroh.relay)))) return null;
-    out["iroh/1"] = { id: iroh.id, ...(iroh.relay !== undefined ? { relay: iroh.relay as string } : {}) };
+    if (!withSecrets(iroh.relay)) out["iroh/1"] = { id: iroh.id, ...(iroh.relay !== undefined ? { relay: iroh.relay as string } : {}) };
   }
   if (hyper !== undefined) {
     if (!hyper || typeof hyper.publicKey !== "string" || !KEY.test(hyper.publicKey) || (hyper.relay !== undefined && (typeof hyper.relay !== "string" || !RELAY_URL.test(hyper.relay)))) return null;
-    out["hyperdht/1"] = { publicKey: hyper.publicKey, ...(hyper.relay !== undefined ? { relay: hyper.relay as string } : {}) };
+    if (!withSecrets(hyper.relay)) out["hyperdht/1"] = { publicKey: hyper.publicKey, ...(hyper.relay !== undefined ? { relay: hyper.relay as string } : {}) };
   }
   return out;
 }
@@ -419,13 +422,20 @@ export class CapsExchange {
       const soon = changed && !dialable && peerKey === this.state.sealedFor && !!this.state.publishedAt && now - this.state.publishedAt < CAPS_PUBLISH_SPACING_MS;
       if (due && soon) { this.schedule(this.state.publishedAt! + CAPS_PUBLISH_SPACING_MS - now); return; }
       if (due) {
+        const options = changed || unpublished ? undefined : { background: true };
+        // No relay takes it now: refused before it is sealed and saved (`LinkSession.publishOnce`). With 500 contacts
+        // away, about 380 records a minute were sealed, and their rows saved, for none that went.
+        const held = this.options.transport.publishHeld?.(this.keys.identity.pubKeyZ32, options);
+        if (held) { this.schedule(budgetRetryMs(held, 1_000, 60_000)); throw held; }
         const rev = changed ? this.state.rev + 1 : this.state.rev;
         const { records, dropped } = this.keys.seal(content, rev, peerKey, now);
         this.dropped = dropped;
         // The revision is saved before it is published, so a crash never reuses it for other content; until it is
         // out, it has no `publishedAt`, so a publication that fails (or a crash) does not lose it until the hourly one.
-        await this.persist({ rev, digest, sealedFor: peerKey, publishedAt: undefined });
-        try { await this.options.transport.publish(this.keys.identity, records, changed || unpublished ? undefined : { background: true }); }
+        // Saved already as it is (a publication that failed before): not again.
+        const saved = rev === this.state.rev && digest === this.state.digest && peerKey === this.state.sealedFor && this.state.publishedAt === undefined;
+        if (!saved) await this.persist({ rev, digest, sealedFor: peerKey, publishedAt: undefined });
+        try { await this.options.transport.publish(this.keys.identity, records, options); }
         catch (error) {
           // Held back by the relays' request budget: again when the budget frees a request; any other failure, in a minute.
           this.schedule(isDiscoveryBudgetError(error) ? budgetRetryMs(error, 1_000, 60_000) : 60_000);

@@ -183,6 +183,25 @@ describe("messages that arrive late keep their order and land where they arrive"
     expect(said_(client.messages.get(link))).toEqual(order);
   });
 
+  it("a community: what I send right after a member's message goes below it, between two ticks of the engine", async () => {
+    const { node, store, client } = await started();
+    const { groupId } = await node.createGroup({ name: "Plaza", profile: "community" });
+    const link = `group:${groupId}`;
+    const groups = (node as unknown as { groups: { tick(): Promise<void> } }).groups;
+    // The engine ticks every second; a member's message comes 400 ms after a tick, and I answer 300 ms later.
+    await groups.tick();
+    tick(400);
+    await store({ linkId: link, id: "ana:1:q", text: "anyone here?", sender: "peer", member: "ana", timestamp: now - 1_000, via: "datalink" });
+    tick(300);
+    const sent = await node.sendGroupMessage({ groupId, text: "I am" });
+    expect(sent.error).toBeNull();
+    const said = (list: readonly StoredMessage[] | undefined) => texts((list ?? []).filter((m) => !m.event));
+    expect(said(await db.getMessages(link))).toEqual(["anyone here?", "I am"]);
+    expect(said(client.messages.get(link))).toEqual(["anyone here?", "I am"]);
+    // Dated when I sent it.
+    expect((await db.getMessage(link, sent.messageId!))?.timestamp).toBe(now);
+  });
+
   it("a group payment's note from a member takes its place when it comes, and keeps it as the payment moves on", async () => {
     const { node, store } = await started();
     const { groupId } = await node.createGroup({ name: "Plaza", profile: "mesh" });

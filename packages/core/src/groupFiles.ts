@@ -23,6 +23,13 @@ export const GROUP_FILE_LIMITS = {
   serveMoveBytes: 16 * 1024,
   /** How long a served transfer keeps its place while all are taken and another member asks: past it, the place is theirs. */
   servePlaceMs: 5 * 60_000,
+  /**
+   * A served transfer's pace is what it confirmed in the last `servePaceMs` (at most twice that), counted from its offer.
+   * While all places are taken and a member holding none asks or waits, the slowest served that long gives it its place,
+   * if at its pace more is left to go than it has been served and than `servePaceMs`: members on fast links do not wait
+   * for slow ones that asked first. Each member's transfer of a file loses its place so once per holder.
+   */
+  servePaceMs: 10_000,
   /** File announcements a member sends to one group in a minute. */
   announcePerMinute: 8,
   /** File announcements of one member of a group fetched by themselves in `announceWindowMs`; past it, kept for a Download. */
@@ -91,8 +98,12 @@ export const GROUP_VERSION_FILES = 6;
 export const GROUP_WANT_FRAME = "group-want";
 export const GROUP_WANT_NO_FRAME = "group-want-no";
 export const GROUP_HAVE_FRAME = "group-have";
-export type GroupWantRefusal = "gone" | "busy" | "refused";
-const REFUSALS: readonly string[] = ["gone", "busy", "refused"];
+/**
+ * Why a holder does not serve a file (`group-want-no`). `day`: it served its day's bytes already
+ * (`serveBytesPerDay`), so asking it again soon is no use; an app from before reads it as `busy`.
+ */
+export type GroupWantRefusal = "gone" | "busy" | "refused" | "day";
+const REFUSALS: readonly string[] = ["gone", "busy", "refused", "day"];
 
 /** A group message's id, as a private group (`<s>:<e>:<n>`) or a community (`<s>:<e>:<h>:<n>`) names it. */
 const MESSAGE_ID = /^[a-z0-9]{52}:\d{1,15}(:[A-Za-z0-9_-]{1,64})?:\d{1,15}$/;

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-app-title"
+description = "Enables the app_title command without any pre-configured scope."
+commands.allow = ["app_title"]
+
+[[permission]]
+identifier = "deny-app-title"
+description = "Denies the app_title command without any pre-configured scope."
+commands.deny = ["app_title"]

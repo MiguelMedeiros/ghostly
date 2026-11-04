@@ -104,6 +104,7 @@ A light backup is everything above but the bytes of the profile's larger files: 
 - The credential of the profile's TURN server ([101](101-webrtc.md#your-own-turn-server)). Its address and username stay, so the restored profile asks for the credential again. A handoff ([06](06-devices.md)) keeps it.
 - The bytes of a file still arriving, or no longer on the device. Its message and record are kept.
 - In a light backup, the bytes of the files over its cut. Their messages and records are kept.
+- A chat's ratchet state ([4xx · Forward Secrecy](4xx-ratchet.md)): a restored chat starts a new session with its contact on its first item.
 - The local databases of Bark ([204](204-bark.md)), Spark and Fedimint wallets. Their recovery phrases are in the bundle; the wallets rebuild their state from the phrase and their servers.
 
 ### Version 1

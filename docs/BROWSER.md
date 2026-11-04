@@ -24,6 +24,7 @@ npm run build:extension
 | `offscreen` | The peer runs in an offscreen document |
 | `storage` | Settings and state |
 | `debugger` | Only on a tab Ghostly opens to show a contact's app ([Opening a contact's app](#opening-a-contacts-app)) |
+| `alarms` | Once a minute, starts the peer again if its offscreen document went away with no Ghostly tab open |
 | `notifications` (optional) | Asked when you turn notifications on |
 | `identity` (optional) | Asked from the click, for identity proofs that sign in with a provider |
 | `localhost` hosts (optional) | Asked the first time you share a local app |

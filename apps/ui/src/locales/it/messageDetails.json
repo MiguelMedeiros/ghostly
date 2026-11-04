@@ -141,7 +141,7 @@
   "path": {
     "aRelay": "un relay",
     "dht": "Base DHT (Pkarr)",
-    "direct": "{{name}}, diretto",
+    "direct": "{{name}}, senza relay",
     "hold": "Archivio in custodia (hold/1)",
     "legacyDatalink": "WebRTC (chat di compatibilità)",
     "legacyDht": "DHT (chat di compatibilità)",

@@ -15,6 +15,8 @@ export const NEAR_BOTTOM_PX = 100;
 export const FAR_FROM_BOTTOM_PX = 400;
 /** The view this near an edge of the rows in the page (in heights of the view) takes a page more there (`useRowWindow`). */
 export const EDGE_VIEWS = 1.5;
+/** The pill puts the first new message this far below the view's top: under its day's date, stuck there (DaySections). */
+export const NEW_ROW_TOP_PX = 44;
 /** A hand's wheel, touch or key moves the list for this long after it (smooth scrolling, a trackpad's momentum). */
 export const HAND_MS = 1000;
 /** A jump to a message (a quote's, a search's) is on its way for at most this long, unless a hand takes over first. */
@@ -84,7 +86,8 @@ const editable = (target: EventTarget | null) =>
  * position moved since this hook last set or saw it; content growing under the view moves nothing, so there is no timer.
  * One exception: a move that leaves it a little short of the bottom with no wheel, touch, press or scrolling key on the
  * list in the last `HAND_MS` is the browser's, not a hand's (something measured at another size for an instant, like the
- * composer sizing itself to its text), and it goes back to the bottom.
+ * composer sizing itself to its text), and it goes back to the bottom. So does a move of any size with no hand while
+ * rows laid out since the view was put at the bottom (WebKit moves it up by itself as a chat just opened lays out).
  *
  * Give `listRef` to the scrolling element and `columnRef` to the one that grows with the rows. `chat` starts it over: a
  * chat opens where it was left (on the same message, or at its bottom) with nothing counted, and one never opened opens
@@ -117,6 +120,8 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
   hasRows.current = rows.length > 0;
   /** The scroll position as this hook last set or saw it: a scroll event that finds it unchanged is not a hand's. */
   const lastTop = useRef(0);
+  /** The list's scroll height when the view was last put in its place: what was laid out since, if it differs. */
+  const lastHeight = useRef(0);
   /** When a hand last touched the list (wheel, touch, a press on it, a scrolling key), and whether it is still pressed. */
   const handAt = useRef(-Infinity);
   const pressed = useRef(false);
@@ -202,6 +207,7 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
       }
     }
     lastTop.current = el.scrollTop;
+    lastHeight.current = el.scrollHeight;
     setFar(detached() || distance(el) > FAR_FROM_BOTTOM_PX);
   }, []);
 
@@ -221,6 +227,7 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
     if (swapped || reducedMotion() || typeof el.scrollTo !== "function") el.scrollTop = top;
     else el.scrollTo({ top, behavior: "smooth" });
     lastTop.current = el.scrollTop;
+    lastHeight.current = el.scrollHeight;
   }, [clear]);
 
   /** The pill: to the first message not seen yet, or to the bottom when that one is already in reach of it. */
@@ -230,12 +237,13 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
     // Not in the page (the window is elsewhere): the rows around it come in first.
     const row = el && id ? rowById(el, id) ?? (win.current?.reveal(id) ? rowById(el, id) : undefined) : undefined;
     if (!el || !row) { toBottom(); return; }
-    const top = el.scrollTop + row.getBoundingClientRect().top - el.getBoundingClientRect().top - 8;
+    const top = el.scrollTop + row.getBoundingClientRect().top - el.getBoundingClientRect().top - NEW_ROW_TOP_PX;
     if (top >= el.scrollHeight - el.clientHeight - NEAR_BOTTOM_PX) { toBottom(); return; }
     clear();
     if (reducedMotion() || typeof el.scrollTo !== "function") el.scrollTop = top;
     else el.scrollTo({ top, behavior: "smooth" });
     lastTop.current = el.scrollTop;
+    lastHeight.current = el.scrollHeight;
   }, [toBottom, clear]);
 
   // Another chat: it opens where it was left, with nothing counted. The one left is remembered.
@@ -287,6 +295,7 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
       atBottom.current = true;
       el.scrollTop = el.scrollHeight;
       lastTop.current = el.scrollTop;
+      lastHeight.current = el.scrollHeight;
       setFar(false);
       // Set after the scroll it just made, which is not a hand's.
       pending.current = back;
@@ -344,6 +353,7 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
         const landed = !row || Math.abs(row.getBoundingClientRect().top - el.getBoundingClientRect().top - anchor.current!.offset) < 1;
         if (landed || performance.now() > jumping.current) jumping.current = 0;
         lastTop.current = el.scrollTop;
+        lastHeight.current = el.scrollHeight;
         setFar(distance(el) > FAR_FROM_BOTTOM_PX);
         return;
       }
@@ -351,12 +361,17 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
       // Moved a little short of the bottom with no hand on it: the browser pulled it back while something under it was
       // measured one size and drawn another in the same moment (the composer measuring its text grows the list for an
       // instant). Nothing reports that, and the view would stay short of the last message: back to the bottom.
-      if (atBottom.current && !hand && d <= NEAR_BOTTOM_PX) { following.current = false; settle(); return; }
+      // Moved any distance with no hand on it while rows laid out since the view was put at the bottom: the browser's
+      // too. WebKit, laying out a chat just opened (link pictures taking their placeholders' place, the pairing scene
+      // coming in above), moves the view up by itself, hundreds of pixels, and this event comes before the
+      // ResizeObserver's: taken for a hand's, the chat stayed short of its last message.
+      if (atBottom.current && !hand && (d <= NEAR_BOTTOM_PX || el.scrollHeight !== lastHeight.current)) { following.current = false; settle(); return; }
       // The list itself changed size (a phone turned on its side, a window resized): the browser moved it to keep what
       // was on screen, before the resize reaches `settle`. Not a hand's: at the bottom it stays there, scrolled up it
       // stays on its message.
       if (resized && !pressed.current) { settle(); return; }
       lastTop.current = el.scrollTop;
+      lastHeight.current = el.scrollHeight;
       // A hand moved it: where the chat was left no longer matters.
       pending.current = null;
       if (d <= NEAR_BOTTOM_PX) following.current = false;

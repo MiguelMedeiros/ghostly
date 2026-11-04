@@ -112,6 +112,9 @@ export class FakeWallet {
   sendOffline(..._args: unknown[]): { send: unknown[] } { throw new Error("No exact coins"); }
   /** A mint with no input fee. */
   getFeesForProofs(): { toNumber(): number } { return { toNumber: () => 0 }; }
+  getFeesToInclude(): { toNumber(): number } { return { toNumber: () => 0 }; }
+  /** A swap takes in every coin: what the wallet holds is what it can send. */
+  selectProofsToSend(proofs: { amount: number }[]) { return { keep: [], send: proofs.map((p) => ({ ...p, amount: { toNumber: () => p.amount } })) }; }
   async prepareSwapToSend(amount: number, proofs: { secret: string; amount: number }[], config: unknown) {
     const { Amount } = await real();
     prepared.set(spends(proofs), { kind: "send", args: [amount, proofs, config] });

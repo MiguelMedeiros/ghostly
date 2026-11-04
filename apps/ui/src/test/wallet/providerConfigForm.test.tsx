@@ -49,8 +49,9 @@ describe("ProviderConfigForm", () => {
   it("marks optional fields", () => {
     form(descriptor("lnd"));
     // "TLS certificate" is optional, the macaroon is not.
-    expect(screen.getByText("TLS certificate").textContent).toBe("TLS certificate (optional)");
-    expect(screen.getByText("Macaroon (hex)").textContent).toBe("Macaroon (hex)");
+    // The label is the provider's (a <bdi>), the mark the app's, beside it.
+    expect(screen.getByText("TLS certificate").parentElement!.textContent).toBe("TLS certificate (optional)");
+    expect(screen.getByText("Macaroon (hex)").parentElement!.textContent).toBe("Macaroon (hex)");
   });
 
   it("pre-fills a field's default for the mode", async () => {

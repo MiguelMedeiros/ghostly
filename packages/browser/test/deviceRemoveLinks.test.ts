@@ -6,7 +6,7 @@ import { resetDeviceGates } from "../src/devices/gate";
 import { DeviceLinks, deviceSetView, type DeviceLinksOptions } from "../src/devices/links";
 import { moveSet } from "../src/devices/remove";
 import { DEVICE_KEYS_DB, closeDeviceKeysDb, createDeviceSigningKey, type DeviceSigningKey } from "../src/devices/signingKey";
-import type { DeviceRecord, DeviceSlot, StoredDeviceState } from "../src/devices/state";
+import type { DevicePatch, DeviceRecord, DeviceSlot, StoredDeviceState } from "../src/devices/state";
 import { amendDevice, closeDevicesDb, readDeviceRecord, setDeviceMirror } from "../src/devices/store";
 import { dropDevicesDatabase, putDeviceRecord } from "./helpers/deviceRecord";
 import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, fakePeerConnection, useFakeWorld, yieldToLoop } from "../../core/test/support/pairingWorld";
@@ -161,5 +161,34 @@ describe("removing a device over the device links", () => {
     await settled(phone.links.call("deviceSetNoticeSeen", { wrong: true }));
     expect(await record(phone)).toMatchObject({ state: "removed", reenroll: true, setNotice: { seen: true } });
     expect(phone.links.views()).toEqual([]);
+  });
+
+  it("a set-ack whose read landed before a new move does not write that move's earlier set away", async () => {
+    const oldD = newDeviceSetSecret();
+    const desktop = await makeDevice("Desktop"), phone = await makeDevice("Phone"), tablet = await makeDevice("Tablet");
+    const all = [desktop, phone, tablet];
+    await write(desktop, "active", oldD, all);
+    const ports = { read: () => readDeviceRecord(desktop.profile), amend: (patch: DevicePatch) => amendDevice(desktop.profile, patch), signer: desktop.key, network: null };
+    // A first new secret: the phone and the tablet both wait for its frame under the old secret.
+    await settled(moveSet(ports));
+    const firstD = (await record(desktop)).d!;
+    // The tablet's set-ack for it is read, and its write waits while a second new secret is stored.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let hold = true;
+    const links = linksFor(desktop.profile, "Desktop", [], {
+      offline: true,
+      readRecord: async (profile) => { const read = await readDeviceRecord(profile); if (hold) { hold = false; await held; } return read; },
+    });
+    const acked = (links as unknown as { acked(key: string, d?: string): Promise<void> }).acked(tablet.slot.key, toBase64Url(oldD));
+    await settled(moveSet(ports));
+    release();
+    await settled(acked);
+    // The second move's set (the first secret's tombstone and frame) still waits for both; only the tablet's ack of the first is taken.
+    const now = await record(desktop);
+    expect(now.earlierSets.map((set) => [set.d, set.pending.slice().sort()])).toEqual([
+      [toBase64Url(oldD), [phone.slot.key]],
+      [firstD, [phone.slot.key, tablet.slot.key].sort()],
+    ]);
   });
 });

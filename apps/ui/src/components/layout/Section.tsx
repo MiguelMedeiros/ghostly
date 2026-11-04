@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from "react";
+import { useId, useState, type FormEvent, type ReactNode } from "react";
 import { useOptionalI18n } from "../../contexts/I18nContext";
 
 /** A titled group of rows on a card, like the sections of Settings. */
@@ -101,9 +101,17 @@ export function Field({ label, hint, info, htmlFor, trailing, children, testId }
   );
 }
 
-/** A block inside a section that is not a label/control pair: a list, a form, a phrase. */
-export function Block({ children, testId }: { children: ReactNode; testId?: string }) {
-  return <div className="px-4 py-3.5 space-y-3 min-w-0" data-testid={testId}>{children}</div>;
+/**
+ * A block inside a section that is not a label/control pair: a list, a form, a phrase. With `onSubmit` it is a
+ * `<form>` (its own checks, no browser bubbles), so Enter in any of its fields presses its `type="submit"` button.
+ */
+export function Block({ children, testId, onSubmit }: { children: ReactNode; testId?: string; onSubmit?: () => void }) {
+  const className = "px-4 py-3.5 space-y-3 min-w-0";
+  if (onSubmit) {
+    const submit = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); onSubmit(); };
+    return <form noValidate className={className} data-testid={testId} onSubmit={submit}>{children}</form>;
+  }
+  return <div className={className} data-testid={testId}>{children}</div>;
 }
 
 /**
@@ -120,14 +128,14 @@ export function LinkRow({ label, hint, value, leading, onClick, testId }: {
 }) {
   return (
     <button type="button" data-testid={testId} onClick={onClick}
-      className="w-full flex items-center gap-3 px-4 py-3 min-h-12 text-left hover:bg-surface-alt transition-colors cursor-pointer first:rounded-t-xl last:rounded-b-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent">
+      className="w-full flex items-center gap-3 px-4 py-3 min-h-12 text-start hover:bg-surface-alt transition-colors cursor-pointer first:rounded-t-xl last:rounded-b-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent">
       {leading && <span className="shrink-0">{leading}</span>}
       <span className="flex-1 min-w-0">
         <span className="block truncate text-sm text-text-primary">{label}</span>
         {hint && <span className="block text-xs text-text-muted mt-0.5 break-words">{hint}</span>}
       </span>
       {value !== undefined && <span className="shrink-0 whitespace-nowrap text-sm text-text-muted tabular-nums">{value}</span>}
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="shrink-0 text-text-muted" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="shrink-0 text-text-muted rtl:-scale-x-100" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
     </button>
   );
 }

@@ -7,11 +7,13 @@ import {
   useRef,
   type ReactNode,
 } from "react";
+import { flushSync } from "react-dom";
+import { getBrowserHost, type BrowserHost } from "@ghostly/browser/host";
 import { useSettings } from "./SettingsContext";
 import { hashPassword, needsRehash, verifyPassword } from "../lib/settings";
 import { activeProfileId } from "../lib/profiles";
 import { takeUnlockHandover } from "../lib/lockHandover";
-import { stopRunningApps } from "../lib/apps/open";
+import { onAppInput, stopRunningApps } from "../lib/apps/open";
 import { closeServiceWindows } from "../lib/serviceWindows";
 import { pauseForLock } from "../lib/nowPlaying";
 
@@ -19,6 +21,10 @@ interface LockScreenContextValue {
   isLocked: boolean;
   /** False until the password has been entered once since the app started: nothing of the app is rendered before that. */
   hasUnlocked: boolean;
+  /** The app is away (hidden, or on a phone not the focused window) with the lock on: a plain cover hides its content. */
+  covered: boolean;
+  /** Whether the lock stands passed right now: open, and its time away not up even if no timer has said so yet. */
+  passedNow: () => boolean;
   /** While failed attempts are being paced: when the next one is accepted. */
   retryAt: number | null;
   lock: () => void;
@@ -60,6 +66,18 @@ const FREE_ATTEMPTS = 3;
 const MAX_DELAY_MS = 5 * 60_000;
 /** The longest wait between two looks at the clock while unlocked (see `checkIdle`). */
 const LOCK_CHECK_MS = 30_000;
+/** The channel the app's pages of one origin hear Lock Now on (`lock`). */
+const LOCK_CHANNEL = "ghostly-lock";
+
+/**
+ * Away as the system's app switcher sees it: hidden, or on a phone no longer the focused window (Android's recents
+ * take their picture before the page is hidden). Focus moving into a frame of this page is not away.
+ */
+function awayFromSwitcher(): boolean {
+  if (document.visibilityState === "hidden") return true;
+  if (document.hasFocus() || document.activeElement instanceof HTMLIFrameElement) return false;
+  return typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
+}
 
 interface Attempts {
   failures: number;
@@ -95,6 +113,7 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
     const { retryAt } = loadAttempts();
     return retryAt > Date.now() ? retryAt : null;
   });
+  const [covered, setCovered] = useState(false);
   const [ringing, setRinging] = useState<readonly LockedCall[]>([]);
   const offerCall = useCallback((call: LockedCall) => {
     setRinging((current) => [...current.filter((c) => c.id !== call.id), call]);
@@ -115,11 +134,41 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
     pauseForLock();
   }, [isLocked]);
 
-  const lock = useCallback(() => {
+  // Android's app switcher takes its picture of the app before the page hears it is going, so the cover below comes
+  // too late for it: while the lock is on, the app keeps out of that picture altogether (the host, where it can).
+  useEffect(() => {
+    let host: BrowserHost;
+    try { host = getBrowserHost(); } catch { return; }
+    void host.hideFromSwitcher?.(lockActive).catch(() => {});
+  }, [lockActive]);
+
+  const lockHere = useCallback(() => {
     if (settings.lockScreen.enabled && settings.lockScreen.passwordHash) {
       setIsLocked(true);
     }
   }, [settings.lockScreen.enabled, settings.lockScreen.passwordHash]);
+
+  // The extension runs the app in several tabs at once: Lock Now in one locks them all, or the next tab would show
+  // the chats to whoever clicks it. Only locking spreads; each tab is unlocked with the password on its own. The time
+  // away is each tab's own (a tab left behind locks without locking the one in use).
+  const lockChannel = useRef<BroadcastChannel | null>(null);
+  useEffect(() => {
+    if (typeof BroadcastChannel === "undefined") return;
+    const channel = new BroadcastChannel(LOCK_CHANNEL);
+    channel.onmessage = (event: MessageEvent<unknown>) => {
+      if (event.data === "lock") lockHere();
+    };
+    lockChannel.current = channel;
+    return () => {
+      channel.close();
+      lockChannel.current = null;
+    };
+  }, [lockHere]);
+
+  const lock = useCallback(() => {
+    lockHere();
+    lockChannel.current?.postMessage("lock");
+  }, [lockHere]);
 
   const unlock = useCallback(
     async (password: string): Promise<boolean> => {
@@ -145,6 +194,7 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
 
       saveAttempts(null);
       setRetryAt(null);
+      setCovered(false);
       setIsLocked(false);
       setHasUnlocked(true);
       lastActivityRef.current = Date.now();
@@ -158,6 +208,10 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
   );
 
   const timeoutMs = settings.lockScreen.timeoutMinutes * 60 * 1000;
+
+  const lockedNow = useRef(isLocked);
+  lockedNow.current = isLocked;
+  const passedNow = useCallback(() => !lockedNow.current && Date.now() - lastActivityRef.current < timeoutMs, [timeoutMs]);
 
   // The time away is read from the clock, not left to one timer: a timer's clock stands still while the device sleeps
   // (a phone with the screen off, a suspended laptop), so a timer alone would bring the app back unlocked after hours
@@ -174,11 +228,11 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
     if (lastActivityRef.current > now) lastActivityRef.current = now;
     const left = lastActivityRef.current + timeoutMs - now;
     if (!(left > 0)) {
-      lock();
+      lockHere();
       return;
     }
     timerRef.current = setTimeout(() => checkIdleRef.current(), Math.min(left, LOCK_CHECK_MS));
-  }, [settings.lockScreen.enabled, settings.lockScreen.passwordHash, timeoutMs, isLocked, lock]);
+  }, [settings.lockScreen.enabled, settings.lockScreen.passwordHash, timeoutMs, isLocked, lockHere]);
   checkIdleRef.current = checkIdle;
 
   const resetTimer = useCallback(() => {
@@ -190,25 +244,46 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
     if (!settings.lockScreen.enabled || !settings.lockScreen.passwordHash) {
       setIsLocked(false);
       setHasUnlocked(true);
+      setCovered(false);
       return;
     }
+
+    // The system keeps a picture of the last screen for its app switcher, and a hidden page can't draw it again when
+    // the lock comes on: the cover is drawn as the app goes, at once (`flushSync`), before the picture is taken.
+    const coverNow = () => flushSync(() => setCovered(true));
+    const cover = () => {
+      if (awayFromSwitcher()) coverNow();
+    };
+    // It goes only once `checkIdle` has decided, in the same render: to the lock screen, or back to the content.
+    const uncover = () => {
+      if (!awayFromSwitcher()) setCovered(false);
+    };
 
     // The first touch after too long away locks; it does not start the time again with the chats on screen.
     const handleActivity = () => {
       if (isLocked) return;
       if (Date.now() - lastActivityRef.current < timeoutMs) lastActivityRef.current = Date.now();
       checkIdle();
+      uncover();
     };
     // Coming back (the Android app says so through `visibilitychange`, `followAppVisibility`) is not activity.
-    const handleReturn = () => checkIdle();
+    const handleReturn = () => {
+      checkIdle();
+      uncover();
+    };
+    const handleVisibility = () => (document.visibilityState === "hidden" ? coverNow() : handleReturn());
 
     const events = ["mousedown", "keydown", "touchstart", "mousemove"];
     events.forEach((event) => {
       window.addEventListener(event, handleActivity, { passive: true });
     });
+    // Taps and keys in an app the person is in: its frame or window keeps them from this page.
+    const stopAppInput = onAppInput(handleActivity);
     const returns = ["focus", "pageshow"];
     returns.forEach((event) => window.addEventListener(event, handleReturn));
-    document.addEventListener("visibilitychange", handleReturn);
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("pagehide", coverNow);
+    window.addEventListener("blur", cover);
 
     resetTimer();
 
@@ -216,8 +291,11 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
       events.forEach((event) => {
         window.removeEventListener(event, handleActivity);
       });
+      stopAppInput();
       returns.forEach((event) => window.removeEventListener(event, handleReturn));
-      document.removeEventListener("visibilitychange", handleReturn);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("pagehide", coverNow);
+      window.removeEventListener("blur", cover);
       if (timerRef.current) {
         clearTimeout(timerRef.current);
       }
@@ -232,7 +310,7 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
   ]);
 
   return (
-    <LockScreenContext.Provider value={{ isLocked, hasUnlocked, retryAt, lock, unlock, resetTimer, ringing, offerCall }}>
+    <LockScreenContext.Provider value={{ isLocked, hasUnlocked, covered, passedNow, retryAt, lock, unlock, resetTimer, ringing, offerCall }}>
       {children}
     </LockScreenContext.Provider>
   );
@@ -249,6 +327,16 @@ export function useLockScreen(): LockScreenContextValue {
 /** Whether the lock screen is up; false where there is none (a part rendered on its own). */
 export function useIsLocked(): boolean {
   return useContext(LockScreenContext)?.isLocked ?? false;
+}
+
+const NOT_PASSED = () => false;
+
+/**
+ * Asks, when called, whether this page may carry the lock across a reload (`reloadIntoGate`). Read at the moment of the
+ * reload, never from a render before it: a takeover's check takes half a minute. False where there is no lock screen.
+ */
+export function useLockPassedNow(): () => boolean {
+  return useContext(LockScreenContext)?.passedNow ?? NOT_PASSED;
 }
 
 /**

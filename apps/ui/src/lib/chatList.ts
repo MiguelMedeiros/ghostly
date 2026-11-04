@@ -40,7 +40,7 @@ function readPreview(text: string, t: Translate): string {
   const money = findMoney(text);
   if (!money) return plainText(text);
   if (money.type === "cashu") return t("chat.preview.ecash");
-  if (money.type === "onchain" || money.type === "bolt12" || money.type === "ark" || money.type === "usdt") return moreMoneyPreview(money, t);
+  if (money.type === "onchain" || money.type === "bolt12" || money.type === "ark" || money.type === "usdt" || money.type === "monero") return moreMoneyPreview(money, t);
   if (money.type === "lnurl") return `⚡ ${money.destination.kind === "address" ? t("chat.preview.lightningAddress") : "LNURL"} · ${money.destination.text}`;
   return invoicePreview(money.invoice, t);
 }

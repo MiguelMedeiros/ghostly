@@ -2,7 +2,9 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MessageDetailsView } from "@ghostly/browser/shared/types";
 import { LONG_PRESS_MS, MessageBubble } from "../../components/MessageBubble";
-import { buildDetails, formatBytes, formatDuration, pathWords } from "../../lib/messageDetails";
+import { useState } from "react";
+import { ChatOnScreen } from "../../lib/chatOnScreen";
+import { buildDetails, formatBytes, formatCallLength, formatDuration, pathWords } from "../../lib/messageDetails";
 import type { ChatMessage } from "../../lib/types";
 import { servicesPlatform } from "../../lib/platform";
 import { LOCALES as locales } from "../i18n/locales";
@@ -97,6 +99,23 @@ describe("opening and closing", () => {
     await user.click(screen.getByTestId("message-details-backdrop"));
     expect(screen.queryByTestId("message-details")).not.toBeInTheDocument();
     expect(container.querySelector("[data-message-row]")).not.toHaveAttribute("data-details-open");
+    // Nothing focusable opened them: the focus goes to the message's ⋮, not to the page.
+    expect(document.activeElement).toBe(screen.getByTestId("message-options"));
+  });
+
+  it.each([["Escape", "{Escape}"], ["✕", null]])("opened from the message's ⋮ with the keys, %s gives the focus back to that ⋮", async (_, key) => {
+    fakeEngine.on("messageDetails", () => textView());
+    const { user } = bubble();
+    const options = screen.getByTestId("message-options");
+    act(() => options.focus());
+    await user.keyboard("{Enter}");
+    await user.click(within(screen.getByTestId("message-menu")).getByTestId("message-details"));
+    const panel = await screen.findByRole("dialog");
+    expect(panel.contains(document.activeElement)).toBe(true);
+    if (key) await user.keyboard(key);
+    else await user.click(screen.getByTestId("message-details-close"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(options);
   });
 
   it("a Ctrl+double click on a file's buttons is theirs: Accept, Pause and Cancel open no details; on the file's name it does", async () => {
@@ -116,6 +135,29 @@ describe("opening and closing", () => {
     await detailsClick(moving.user, screen.getByTestId("file-pause"));
     await detailsClick(moving.user, screen.getByTestId("file-cancel"));
     expect(screen.queryByTestId("message-details")).not.toBeInTheDocument();
+  });
+
+  // agents#1704: a chat on a call stays loaded, hidden, when a notification opens another: its details stayed over the
+  // other chat, with Tab caught in them.
+  it("close when their chat goes off screen, and nothing of them is left over the page", async () => {
+    fakeEngine.on("messageDetails", () => textView());
+    let show: (on: boolean) => void = () => {};
+    function Loaded() {
+      const [visible, setVisible] = useState(true);
+      show = setVisible;
+      return <ChatOnScreen.Provider value={visible}><div className={visible ? "" : "hidden"}><MessageBubble message={message()} peerPubKey="peer" onDelete={() => {}} /></div></ChatOnScreen.Provider>;
+    }
+    const { user } = renderApp(<Loaded />);
+    await detailsClick(user, screen.getByText("hello"));
+    expect(await screen.findByTestId("message-details")).toBeInTheDocument();
+    act(() => show(false));
+    await waitFor(() => expect(screen.queryByTestId("message-details")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("message-details-backdrop")).not.toBeInTheDocument();
+    // Back on screen, they stay closed until asked again.
+    act(() => show(true));
+    expect(screen.queryByTestId("message-details")).not.toBeInTheDocument();
+    await detailsClick(user, screen.getByText("hello"));
+    expect(await screen.findByTestId("message-details")).toBeInTheDocument();
   });
 
   it("the ⋮ menu has Details beside Delete, and Details opens them", async () => {
@@ -171,6 +213,21 @@ describe("opening and closing", () => {
     expect(rows("identity")).toMatchObject({ "Message id": "me_abc", Kind: "Text", Direction: "Sent by you" });
     expect(rows("delivery")).toMatchObject({ State: "Sent, waiting for the receipt" });
     expect(section("path")).toBeNull();
+  });
+
+  it("each value that copies is at least 24 px tall at every width, not only on a phone", async () => {
+    // They were 17-18 px tall, 2 px apart: a mis-tap or a near miss with a mouse copied the row above or below.
+    fakeEngine.on("messageDetails", () => textView());
+    const { user } = bubble();
+    await detailsClick(user,screen.getByText("hello"));
+    await waitFor(() => expect(screen.getByTestId("message-details")).toHaveAttribute("data-loaded", "yes"));
+    const copies = screen.getAllByTestId("message-details-copy");
+    expect(copies.length).toBeGreaterThan(1);
+    for (const copy of copies) {
+      const classes = copy.className.split(/\s+/);
+      expect(classes).toContain("min-h-6");
+      expect(classes.filter(c => /^[\w-]+:min-h-/.test(c))).toEqual([]);
+    }
   });
 
   it("Tab and Shift+Tab go round the panel's own buttons, never to the chat behind it", async () => {
@@ -425,6 +482,16 @@ describe("the words", () => {
     const clock = (tag: string) => new Intl.DateTimeFormat(tag, { hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3, hourCycle: "h23" } as Intl.DateTimeFormatOptions).format(1_700_000_000_000);
     expect(model.sections[1].rows[0].value).toBe(clock("pt-BR"));
     expect(buildDetails(message(), null, { t: translateWith(locales.ar, "ar") }).sections[1].rows[0].value).toBe(clock("ar"));
+  });
+
+  it("in Arabic, a duration says short units, right for every number (a full noun changes form from 3 to 10)", () => {
+    const ar = translateWith(locales.ar, "ar");
+    expect(formatDuration(42, ar)).toBe("42 م.ث");
+    expect(formatDuration(5_000, ar)).toMatch(/^5[.,٫]00 ث$/);
+    expect(formatDuration(5 * 60_000 + 3_000, ar)).toBe("5 د 3 ث");
+    expect(formatDuration(3 * 3_600_000 + 7 * 60_000, ar)).toBe("3 س 7 د");
+    expect(formatDuration(4 * 86_400_000 + 5 * 3_600_000, ar)).toBe("4 ي 5 س");
+    expect(formatCallLength(8 * 60_000 + 4_000, ar)).toBe("8 د 4 ث");
   });
 
   it("says nothing it does not know", () => {

@@ -111,6 +111,7 @@ export function decodeBolt11(text: string): Bolt11Invoice | null {
   let description: string | undefined;
   let paymentHash: string | undefined;
   let descriptionHash: string | undefined;
+  const seen = new Set<string>();
 
   for (let at = TIMESTAMP_WORDS; at + 3 <= data.length; ) {
     const tag = CHARSET[data[at]];
@@ -118,6 +119,12 @@ export function decodeBolt11(text: string): Bolt11Invoice | null {
     const field = data.slice(at + 3, at + 3 + length);
     if (field.length < length) return null;
     at += 3 + length;
+
+    // A second `p`, `h`, `d` or `x` is malformed (LDK refuses it too): the wallet that pays may read the
+    // other one, so the hash journaled and the text shown would not be what is paid.
+    const counted = tag === "d" || tag === "x" || ((tag === "p" || tag === "h") && length === 52);
+    if (counted && seen.has(tag)) return null;
+    if (counted) seen.add(tag);
 
     if (tag === "d") {
       description = new TextDecoder().decode(wordsToBytes(field)).trim() || undefined;

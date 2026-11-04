@@ -3,7 +3,7 @@ import { identityStatement, type IdentityStatement } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import { availableSigners } from "@ghostly/browser/proofs/verify";
 import type { ApprovalRequest, IdentityProofProvider, IdentitySigner, SignerContext, SignerInstructions } from "@ghostly/browser/proofs/contract";
-import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
+import { tabbables, useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
 import { useMoneyCopy } from "../../hooks/useMoneyCopy";
 import { addableProviders, identityPlatform } from "../../lib/identities";
 import { FieldGrid } from "../layout";
@@ -15,7 +15,11 @@ import { SubjectPreviewFacts } from "./SubjectPreview";
 import { applicableSigners, useSubjectPreview } from "./useSubjectPreview";
 import { externalLinkProps } from "../../lib/externalLink";
 import { useI18n } from "../../contexts/I18nContext";
+import { focusLost } from "../../lib/focus";
 import { problemText, type Problem } from "../../lib/problemText";
+import { exactText } from "../../lib/exactText";
+import { radioGroupKeys, radioTabStop } from "../../lib/radioGroup";
+import { CopiedStatus } from "../chat/LinkQrDialog";
 
 const VALIDITY = [7, 30, 90, 180, 365];
 
@@ -60,15 +64,56 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
     draft.current = null; setValues({}); setPasted("");
     onClose();
   };
-  useDialogFocus(dialog, close);
-  const backdrop = useBackdropDismiss(close);
+  /**
+   * A record or file to publish is put up elsewhere, slowly, and its value works only with this draft: a stray Escape,
+   * tap beside the sheet, Back or Cancel asks first. Asked, the same again answers it: the steps stay.
+   */
+  const [leaving, setLeaving] = useState(false);
+  const askFirst = !!pending && signer?.kind === "publish";
+  const requestClose = () => { if (leaving) setLeaving(false); else if (askFirst) setLeaving(true); else close(); };
+  useDialogFocus(dialog, requestClose);
+  const backdrop = useBackdropDismiss(requestClose);
   useEffect(() => () => abort.current?.abort(), []);
+
+  // Each step replaces the control that led to it, and the focus would fall to the page: the step takes it instead.
+  // The picker gives it to the card that was chosen, the form to its first field, the steps to run to their list.
+  const step = !provider ? "picker" : pending ? "steps" : approval ? "approval" : "form";
+  const shownStep = useRef(step);
+  const chosen = useRef<string | null>(null);
+  const region = useRef<HTMLDivElement>(null), back = useRef<HTMLButtonElement>(null), steps = useRef<HTMLOListElement>(null);
+  useEffect(() => {
+    if (shownStep.current === step) return;
+    shownStep.current = step;
+    const at = document.activeElement;
+    if (at && at !== document.body && dialog.current?.contains(at)) return;
+    const card = step === "picker" && chosen.current ? dialog.current?.querySelector<HTMLElement>(`[data-testid="add-identity-${chosen.current}"]`) : null;
+    const target = card ?? (step === "steps" && steps.current?.childElementCount ? steps.current : region.current && tabbables(region.current).find(el => el !== back.current));
+    (target ?? dialog.current)?.focus();
+  }, [step]);
+  // The question takes the focus on Keep open; answered, the steps have it again.
+  const keep = useRef<HTMLButtonElement>(null), asked = useRef(false);
+  useEffect(() => {
+    if (leaving) keep.current?.focus();
+    else if (asked.current) steps.current?.focus();
+    asked.current = leaving;
+  }, [leaving]);
+  // A refusal empties a secret (a bunker:// link), which leaves the button pressed disabled: the field to paste it again takes the keys.
+  useEffect(() => {
+    if (busy || !focusLost()) return;
+    [...region.current?.querySelectorAll<HTMLInputElement>('input[type="password"]') ?? []].find(f => !f.value)?.focus();
+  }, [busy]);
 
   /** Stopped by the person: nothing to do, and nothing was saved. */
   const cancelled = (): Problem => ({ tone: "error", title: t("identities.add.cancelled") });
+  /** Cancel while a signer works: a check already running is stopped with its draft, so the engine saves nothing. */
+  const stop = () => {
+    abort.current?.abort();
+    if (draft.current) void engine.call("cancelIdentityProof", { draftId: draft.current }).catch(() => {});
+    draft.current = null; setProgress(""); setError(cancelled());
+  };
   const validity = days || provider?.validity.defaultDays || 30;
   const validityOptions = provider ? [...new Set([...VALIDITY.filter(d => d <= provider.validity.maxDays), provider.validity.defaultDays])].sort((a, b) => a - b) : [];
-  const choose = (p: IdentityProofProvider) => { setProvider(p); setSignerId(""); setSubject(p.subject.options?.[0]?.value ?? ""); setDays(0); setError(""); };
+  const choose = (p: IdentityProofProvider) => { chosen.current = p.id; setProvider(p); setSignerId(""); setSubject(p.subject.options?.[0]?.value ?? ""); setDays(0); setError(""); };
 
   async function begin(forSubject: string): Promise<Pending> {
     const { draftId, binding } = await engine.call("beginIdentityProof", { provider: provider!.id, subject: forSubject, validityDays: validity });
@@ -123,6 +168,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
   });
 
   const needsSubject = signer && signer.kind !== "in-app";
+  const subjectStop = radioTabStop(provider?.subject.options?.map(o => ({ checked: subject === o.value, disabled: busy })) ?? []);
   const card = (p: IdentityProofProvider) => <ProviderCard key={p.id} provider={p} open={about === p.id} onAbout={() => setAbout(about === p.id ? null : p.id)} onChoose={() => choose(p)} />;
   const basic = providers.filter(p => !p.advanced), more = providers.filter(p => p.advanced);
   const signerChoice = <>
@@ -139,17 +185,19 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 max-md:p-0 animate-fade-in" {...backdrop}>
       <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="add-identity-title" data-testid="add-identity"
         className="sheet sheet-padded focus:outline-none w-full max-w-lg max-h-[90dvh] overflow-y-auto bg-panel-header border border-border rounded-2xl shadow-2xl p-5 space-y-4 @container">
+        {/* The progress line below, said out loud (a check can take 30 s): always there, so its first words are heard. */}
+        <p role="status" data-testid="add-identity-progress-live" className="sr-only">{progress}</p>
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h2 id="add-identity-title" className="text-lg font-medium text-text-primary">{t("identities.ghostly.addOne")}</h2>
             <p className="text-xs text-text-muted mt-1">{t("identities.add.lead")}</p>
           </div>
-          <button type="button" aria-label={t("common.close")} onClick={close} className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer">×</button>
+          <button type="button" aria-label={t("common.close")} onClick={requestClose}className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer">×</button>
         </div>
 
         {!provider ? (
           providers.length ? (
-            <div className="space-y-3">
+            <div ref={region} className="space-y-3">
               {basic.length > 0 && <div role="list" aria-label={t("identities.add.kinds")}><FieldGrid min="22rem" max={2}>{basic.map(card)}</FieldGrid></div>}
               {more.length > 0 && <AdvancedProviders open={advanced || !basic.length} onToggle={() => setAdvanced(!advanced)} labels={more.map(p => p.label)}>
                 <FieldGrid min="22rem" max={2}>{more.map(card)}</FieldGrid>
@@ -157,31 +205,40 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
             </div>
           ) : <Notice>{t("identities.add.none")}</Notice>
         ) : pending ? (
-          <div className="space-y-3">
+          <div ref={region} className="space-y-3">
             <p className="text-sm text-text-primary"><bdi>{signer?.label}</bdi></p>
             {signer?.kind === "redirect" && <p className="text-sm text-text-secondary">{t("identities.add.redirectHint", { provider: provider!.label })}</p>}
-            <ol className="space-y-3 list-decimal ps-5 text-sm text-text-secondary">
+            <ol ref={steps} tabIndex={-1} data-testid="add-identity-steps" className="space-y-3 list-decimal ps-5 text-sm text-text-secondary focus:outline-none">
               {pending.instructions?.steps.map((step, i) => (
                 <li key={i} className="space-y-2">
                   <p><bdi>{step.text}</bdi></p>
-                  {step.copy && <CopyBlock text={step.copy} testId={`add-identity-copy-${i}`} />}
+                  {step.copy && <CopyBlock text={step.copy} step={i + 1} testId={`add-identity-copy-${i}`} />}
                 </li>
               ))}
             </ol>
             {signer?.kind === "external-tool" && pending.instructions?.paste && (
               <label className="block text-xs text-text-muted">{pending.instructions.paste.label}
                 {pending.instructions.paste.multiline
-                  ? <textarea data-testid="add-identity-paste" className={`${input} mt-1 h-32 font-mono`} value={pasted} onChange={e => setPasted(e.target.value)} placeholder={pending.instructions.paste.placeholder} spellCheck={false} />
-                  : <input data-testid="add-identity-paste" className={`${input} mt-1 font-mono`} value={pasted} onChange={e => setPasted(e.target.value)} placeholder={pending.instructions.paste.placeholder} spellCheck={false} autoComplete="off" />}
+                  ? <textarea data-testid="add-identity-paste" className={`${input} mt-1 h-32 font-mono`} value={pasted} onChange={e => setPasted(e.target.value)} placeholder={pending.instructions.paste.placeholder} {...exactText} />
+                  : <input data-testid="add-identity-paste" className={`${input} mt-1 font-mono`} value={pasted} onChange={e => setPasted(e.target.value)} placeholder={pending.instructions.paste.placeholder} {...exactText} autoComplete="off" />}
               </label>
             )}
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button onClick={close}>{t("common.cancel")}</Button>
-              <Button variant="primary" data-testid="add-identity-finish" disabled={busy || (signer?.kind === "external-tool" && !pasted.trim())} onClick={finish}>{busy ? (signer?.kind === "redirect" ? t("identities.waiting") : t("identities.contact.checking")) : signer?.kind === "publish" ? t("identities.add.checkAndSave") : signer?.kind === "redirect" ? t("identities.add.continueWith", { provider: provider!.label }) : t("identities.add.verifyAndSave")}</Button>
-            </div>
+            {leaving ? (
+              <div role="group" aria-labelledby="add-identity-leave-title" aria-describedby="add-identity-leave-body" data-testid="add-identity-leave" className="space-y-2 rounded-xl border border-border p-3">
+                <p id="add-identity-leave-title" className="text-sm font-medium text-text-primary">{t("identities.add.leaveTitle")}</p>
+                <p id="add-identity-leave-body" className="text-xs text-text-muted">{t("identities.add.leaveBody")}</p>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button onClick={close}>{t("common.close")}</Button>
+                  <Button ref={keep} variant="primary" onClick={() => setLeaving(false)}>{t("identities.add.keepOpen")}</Button>
+                </div>
+              </div>
+            ) : <div className="flex flex-wrap justify-end gap-2">
+              <Button onClick={requestClose}>{t("common.cancel")}</Button>
+              <Button variant="primary" data-testid="add-identity-finish" loading={busy} disabled={signer?.kind === "external-tool" && !pasted.trim()} onClick={finish}>{busy ? (signer?.kind === "redirect" ? t("identities.waiting") : t("identities.contact.checking")) : signer?.kind === "publish" ? t("identities.add.checkAndSave") : signer?.kind === "redirect" ? t("identities.add.continueWith", { provider: provider!.label }) : t("identities.add.verifyAndSave")}</Button>
+            </div>}
           </div>
         ) : approval ? (
-          <div className="space-y-4">
+          <div ref={region} className="space-y-4">
             <div className="flex items-center gap-3">
               <ProviderMark provider={provider.id} />
               <p className="min-w-0 flex-1 text-sm text-text-primary"><bdi>{provider.label}</bdi></p>
@@ -189,29 +246,30 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
             <ApprovalPanel request={approval} onCancel={() => { abort.current?.abort(); setApproval(null); setProgress(""); setError(cancelled()); }} />
           </div>
         ) : (
-          <div className="space-y-4">
+          <div ref={region} className="space-y-4">
             <div className="flex items-center gap-3">
               <ProviderMark provider={provider.id} subject={needsSubject ? subject : undefined} />
               <div className="min-w-0 flex-1 flex flex-wrap items-center gap-x-2 gap-y-1">
                 <p className="text-sm text-text-primary"><bdi>{provider.label}</bdi></p>
                 <CategoryPill provider={provider} />
               </div>
-              <Button disabled={busy} onClick={() => { setProvider(null); setError(""); }}>{t("common.back")}</Button>
+              <Button ref={back} disabled={busy} onClick={() => { setProvider(null); setError(""); }}>{t("common.back")}</Button>
             </div>
             <ProviderAbout provider={provider} testId="add-identity-about" />
             {!previewFirst && signerChoice}
             {signer?.kind === "in-app" && signer.fields?.map(f => (
               <label key={f.name} className="block text-xs text-text-muted">{f.label}
-                <input data-testid={`add-identity-field-${f.name}`} className={`${input} mt-1`} type={f.kind === "secret" ? "password" : "text"} autoComplete="off" spellCheck={false}
+                <input data-testid={`add-identity-field-${f.name}`} className={`${input} mt-1`} type={f.kind === "secret" ? "password" : "text"} autoComplete="off" {...exactText}
                   value={values[f.name] ?? ""} placeholder={f.placeholder} disabled={busy} onChange={e => setValues({ ...values, [f.name]: e.target.value })} />
                 {f.help && <span className="block mt-1">{f.help}</span>}
               </label>
             ))}
             {needsSubject && (provider.subject.options ? (
-              <div className="text-xs text-text-muted" role="radiogroup" aria-label={provider.subject.label} data-testid="add-identity-subject" data-value={subject}>{provider.subject.label}
+              <div className="text-xs text-text-muted" role="radiogroup" aria-label={provider.subject.label} data-testid="add-identity-subject" data-value={subject}
+                onKeyDown={e => radioGroupKeys(e, { choose: true })}>{provider.subject.label}
                 <div className="mt-1 grid gap-2 grid-cols-2 @sm:grid-cols-3">
-                  {provider.subject.options.map(o => (
-                    <button key={o.value} type="button" role="radio" aria-checked={subject === o.value} disabled={busy} onClick={() => setSubject(o.value)}
+                  {provider.subject.options.map((o, i) => (
+                    <button key={o.value} type="button" role="radio" aria-checked={subject === o.value} disabled={busy} onClick={() => setSubject(o.value)} tabIndex={i === subjectStop ? 0 : -1}
                       className={`flex items-center gap-2 rounded-xl border p-2 text-sm cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${subject === o.value ? "border-accent bg-accent/5 text-text-primary" : "border-border text-text-secondary hover:bg-surface-alt"}`}>
                       <ProviderMark provider={provider.id} subject={o.value} /><span className="truncate">{o.label}</span>
                     </button>
@@ -220,7 +278,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
               </div>
             ) : (
               <label className="block text-xs text-text-muted">{provider.subject.label}
-                <input data-testid="add-identity-subject" className={`${input} mt-1 font-mono`} value={subject} placeholder={provider.subject.placeholder} disabled={busy} spellCheck={false} autoComplete="off" onChange={e => setSubject(e.target.value)} />
+                <input data-testid="add-identity-subject" className={`${input} mt-1 font-mono`} value={subject} placeholder={provider.subject.placeholder} disabled={busy} {...exactText} autoComplete="off" onChange={e => setSubject(e.target.value)} />
                 {provider.subject.help && <span className="block mt-1">{provider.subject.help}</span>}
               </label>
             ))}
@@ -233,8 +291,8 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
             <p className="text-xs text-text-muted"><bdi>{provider.privacy}</bdi> {t("identities.add.linkable")}</p>
             {provider.experimental && <Notice tone="warning">{t("identities.add.experimental")}</Notice>}
             <div className="flex flex-wrap justify-end gap-2">
-              {busy && <Button onClick={() => { abort.current?.abort(); setProgress(""); setError(cancelled()); }}>{t("common.cancel")}</Button>}
-              <Button variant="primary" data-testid="add-identity-start" disabled={busy || !signer || !fieldsFilled || (needsSubject && !subject.trim()) || (previewFirst && preview.status !== "ok")} onClick={start}>
+              {busy && <Button onClick={stop}>{t("common.cancel")}</Button>}
+              <Button variant="primary" data-testid="add-identity-start" loading={busy} disabled={!signer || !fieldsFilled || (needsSubject && !subject.trim()) || (previewFirst && preview.status !== "ok")} onClick={start}>
                 {busy ? t("identities.waiting") : signer?.action ?? (signer?.kind === "in-app" ? t("identities.add.signWithNamed", { signer: signer.label.replace(/ \(.*\)$/, "") }) : t("identities.add.continue"))}
               </Button>
             </div>
@@ -256,7 +314,7 @@ function AdvancedProviders({ open, onToggle, labels, children }: { open: boolean
     <div className="space-y-2">
       <button type="button" data-testid="add-identity-advanced" aria-expanded={open} aria-controls="add-identity-advanced-list" onClick={onToggle}
         className="flex items-center gap-1.5 min-h-11 text-xs font-medium text-text-secondary hover:text-text-primary cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
-        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${open ? "rotate-90" : ""}`}><path d="m9 6 6 6-6 6" /></svg>
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${open ? "rotate-90" : "rtl:-scale-x-100"}`}><path d="m9 6 6 6-6 6" /></svg>
         {t("identities.add.advanced")}<span className="font-normal text-text-muted">· {labels.join(", ")}</span>
       </button>
       {open && <div id="add-identity-advanced-list" role="list" aria-label={t("identities.add.advancedKinds")}>{children}</div>}
@@ -327,14 +385,16 @@ function ProviderAbout({ provider: p, testId = "identity-about" }: { provider: I
 /**
  * A command or statement to copy. It is pasted into a terminal next, so "Copied" is said only once it is (the same copy
  * as money's): a refused copy leaves the clipboard as it was, and says so, the text above to select by hand.
+ * A step has two or three of them (a record's name and value): each is named by its step, and Copied is said beside it.
  */
-function CopyBlock({ text, testId }: { text: string; testId: string }) {
+function CopyBlock({ text, step, testId }: { text: string; step: number; testId: string }) {
   const { copied, failed, copy } = useMoneyCopy(text);
   const { t } = useI18n();
   return (
     <div className="space-y-1.5">
-      <code data-testid={testId} className="block break-all select-all whitespace-pre-wrap bg-surface-alt rounded-lg p-2.5 text-xs text-text-primary font-mono">{text}</code>
-      <Button onClick={() => void copy()}>{copied ? t("identities.ghostly.copied") : t("common.copy")}</Button>
+      <CopiedStatus copied={copied} />
+      <code data-testid={testId} dir="ltr" className="block text-left break-all select-all whitespace-pre-wrap bg-surface-alt rounded-lg p-2.5 text-xs text-text-primary font-mono">{text}</code>
+      <Button aria-label={copied ? undefined : t("identities.add.copyStep", { step })} onClick={() => void copy()}>{copied ? t("identities.ghostly.copied") : t("common.copy")}</Button>
       {failed && <Notice tone="error" testId="add-identity-copy-error">{t("identities.add.copyError")}</Notice>}
     </div>
   );

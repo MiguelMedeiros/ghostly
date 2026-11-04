@@ -194,6 +194,28 @@ it("exits when the app's pipe closes, even if an endpoint never finishes closing
   expect(Date.now() - closing).toBeLessThan(5000);
 });
 
+it("outlives the session's SIGTERM, SIGINT and SIGHUP, carries the app's last frame, and leaves with the app", async () => {
+  // A logout signals every process of the session at once: the app, which still says goodbye (and hangs up a call)
+  // through this runtime on its way out, and this runtime itself, which used to leave there and then.
+  const runtime = sidecar();
+  runtime.send({ type: "start", endpoint: 1, seedB64: seed(1) });
+  runtime.send({ type: "start", endpoint: 2, seedB64: seed(2) });
+  const b = await runtime.next({ type: "started", endpoint: 2 });
+  await runtime.next({ type: "started", endpoint: 1 });
+  runtime.send({ type: "connect", endpoint: 1, descriptor: b.descriptor });
+  const result = await runtime.next({ type: "result", endpoint: 1 });
+  const incoming = await runtime.next({ type: "open", endpoint: 2, incoming: true });
+
+  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) runtime.child.kill(signal);
+  await new Promise(resolve => setTimeout(resolve, 300));
+  expect(alive(runtime.child.pid!)).toBe(true);
+  expect(runtime.events.some(e => e.type === "closed")).toBe(false);
+  runtime.send({ type: "send", endpoint: 1, id: result.id, seq: 0, text: "hang-up" });
+  runtime.child.stdin!.end();
+  expect(await runtime.exited).toBe(0);
+  expect(runtime.events).toContainEqual({ type: "frame", endpoint: 2, id: incoming.id, text: "hang-up" });
+});
+
 it("exits when its parent is killed, though its input stays open", async () => {
   // Its input is a FIFO this test holds open (a child's stdin pipe would be
   // closed by Node when that child exits), so only the parent check can end it.

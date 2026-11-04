@@ -29,6 +29,23 @@ class SharedStreamTest {
     assertFalse(SharedStream.takes("content", "tools.ghostly.app.androidx-startup", own))
   }
 
+  // Android reads "<user>@" before an authority as the user whose provider it is, and finds the provider by the rest.
+  @Test
+  fun neverTheAppsOwnProviderUnderAUser() {
+    assertFalse(SharedStream.takes("content", "0@tools.ghostly.app.fileprovider", own))
+    assertFalse(SharedStream.takes("content", "10@tools.ghostly.app.fileprovider", own))
+    assertFalse(SharedStream.takes("content", "10@Tools.Ghostly.App.FileProvider", own))
+    assertFalse(SharedStream.takes("content", "x@tools.ghostly.app.fileprovider", own))
+    assertFalse(SharedStream.takes("content", "0@1@tools.ghostly.app.androidx-startup", own))
+    assertFalse(SharedStream.takes("content", "0@", own))
+  }
+
+  // A share from a work profile to the main one comes with the work profile's user before the authority.
+  @Test
+  fun readsAnotherAppsProviderUnderAUser() {
+    assertTrue(SharedStream.takes("content", "10@com.android.providers.media.documents", own))
+  }
+
   @Test
   fun nothingElse() {
     for (scheme in listOf(null, "", "http", "https", "android.resource", "CONTENT")) {

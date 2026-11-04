@@ -49,6 +49,9 @@ export function parseLocalTarget(input: string): LocalTarget {
     throw new Error("Only services on this machine can be shared (localhost, 127.0.0.1 or [::1])");
   }
   if (url.search || url.hash) throw new Error("The target cannot contain a query or fragment");
+  // Port 0 asks the system for any free port when listening: nothing ever answers on it, so every contact who opened
+  // the service got a failure that said nothing about why.
+  if (url.port === "0") throw new Error("Port 0 is not a port a web app can listen on");
   return { origin: url.origin, basePath: url.pathname.replace(/\/+$/, "") };
 }
 

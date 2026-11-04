@@ -42,15 +42,19 @@ for (const { name, use } of VIEWPORTS) {
         expect(figures, `${id}: stills`).toBe(name.startsWith("phone") ? 1 : steps);
         for (let i = 0; i < figures; i++) {
           const figure = section.locator(".scene-static-figure").nth(i);
-          await figure.scrollIntoViewIfNeeded();
-          const ghosts = await figure.evaluate((f) =>
-            [...f.querySelectorAll("svg.ghost .ghost-lean")].filter((g) => {
+          // The still is brought on screen by the page itself, not by Playwright's scrollIntoViewIfNeeded: that one
+          // first waits for two animation frames with the same box, and a CI runner that handed the page no frame for
+          // the rest of the test failed it there, with the stills standing still. Whether anything moves is this
+          // test's own question, asked below once the page has settled.
+          const ghosts = await figure.evaluate((f) => {
+            f.scrollIntoView({ block: "center", behavior: "instant" });
+            return [...f.querySelectorAll("svg.ghost .ghost-lean")].filter((g) => {
               const r = g.getBoundingClientRect();
               let o = 1;
               for (let e: Element | null = g; e && e !== f; e = e.parentElement) o *= Number(getComputedStyle(e).opacity);
               return r.width > 4 && r.height > 4 && o > 0.1;
-            }).length,
-          );
+            }).length;
+          });
           expect(ghosts, `${id} step ${i + 1}: a still without its ghosts`).toBeGreaterThanOrEqual(1);
         }
       }

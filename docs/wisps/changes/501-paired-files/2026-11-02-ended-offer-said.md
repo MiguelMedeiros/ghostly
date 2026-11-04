@@ -1,0 +1,1 @@
+A `files/3` sender whose offer expires unanswered says `pf-abort` (the receiver's week began later, when the offer arrived). A receiver whose person has not answered an offer says `pf-wait` `consent` for it when a session opens: a sender that still offers it waits as before, one that no longer does answers `pf-abort`. No new frame.

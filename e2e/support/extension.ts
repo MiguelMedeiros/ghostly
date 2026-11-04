@@ -2,6 +2,7 @@ import { chromium } from "@playwright/test";
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CHROMIUM_SANDBOX } from "./chromiumSandbox";
 import { expect, guardArchive, openPeer, type Peer, type PeerOptions } from "./fixtures";
 import { test as base } from "./fixtures";
 import { MAINNET_MINTS, mintStandIn, type MintStandIn } from "./mint";
@@ -53,6 +54,7 @@ export const test = base.extend<Fixtures>({
       const rules = [...standIn?.rules ?? [], ...[...LocalRelay.hosts, ...mainnet].map((host) => `MAP ${host} ~NOTFOUND`)];
       const context = await chromium.launchPersistentContext(join(work, name), {
         channel: "chromium",
+        chromiumSandbox: CHROMIUM_SANDBOX,
         headless: !process.env.HEADED,
         ...(options.ignoreHTTPSErrors ? { ignoreHTTPSErrors: true } : {}),
         viewport: { width: 1280, height: 720 },
@@ -107,6 +109,7 @@ export const test = base.extend<Fixtures>({
   webPeer: async ({ relay, baseURL }, use) => {
     const browser = await chromium.launch({
       channel: "chromium",
+      chromiumSandbox: CHROMIUM_SANDBOX,
       headless: !process.env.HEADED,
       args: ["--disable-features=WebRtcHideLocalIpsWithMdns", "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"],
     });

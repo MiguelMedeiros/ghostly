@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { readQrImage, scanQrFrames } from "../../lib/qrReader";
+import { qrFrameReader, readQrImage, scanQrFrames } from "../../lib/qrReader";
 
 // covers: invite.qr.camera, invite.qr.image, wallet.cashu.send-scan
 
@@ -40,9 +40,8 @@ afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("a camera scan decodes its frames away from the page", () => {
   it("hands each frame to a worker, never decodes it on the page, and ends the worker with the scan", async () => {
-    const onPage = vi.fn(() => null);
     const found = vi.fn(() => true);
-    scanQrFrames(camera(), onPage, () => true, found);
+    const scanning = scanQrFrames(camera(), qrFrameReader(), () => true, found);
     await settle();
 
     expect(FakeWorker.made).toHaveLength(1);
@@ -50,47 +49,47 @@ describe("a camera scan decodes its frames away from the page", () => {
     expect(worker.posted).toHaveLength(1);
     expect(worker.posted[0]).toMatchObject({ width: 960, height: 540 });
     expect(worker.posted[0].pixels).toHaveLength(960 * 540 * 4);
-    expect(onPage).not.toHaveBeenCalled();
 
     worker.answer("ghostly:invite");
-    await settle();
+    await scanning;
     expect(found).toHaveBeenCalledWith("ghostly:invite");
     expect(worker.terminated).toBe(true);
+    expect(onPageDecoder.calls).toBe(0);
   });
 
   it("a scan stopped while a frame decodes ends the worker and takes no answer", async () => {
     let live = true;
     const found = vi.fn(() => true);
-    scanQrFrames(camera(), vi.fn(() => null), () => live, found);
+    const scanning = scanQrFrames(camera(), qrFrameReader(), () => live, found);
     await settle();
     const [worker] = FakeWorker.made;
     live = false;
     worker.answer("ghostly:invite");
-    await settle();
+    await scanning;
     expect(found).not.toHaveBeenCalled();
     expect(worker.terminated).toBe(true);
   });
 
   it("where no worker can start, the frames are decoded on the page as before", async () => {
     FakeWorker.refuse = true;
-    const onPage = vi.fn(() => ({ data: "ghostly:invite" }) as ReturnType<typeof import("jsqr").default>);
+    onPageDecoder.finds = "ghostly:invite";
     const found = vi.fn(() => true);
-    scanQrFrames(camera(), onPage, () => true, found);
-    await settle();
-    expect(onPage).toHaveBeenCalledTimes(1);
+    await scanQrFrames(camera(), qrFrameReader(), () => true, found);
+    expect(onPageDecoder.calls).toBe(1);
     expect(found).toHaveBeenCalledWith("ghostly:invite");
   });
 
   it("a worker whose script does not load leaves the next frames to the page", async () => {
-    const onPage = vi.fn(() => ({ data: "ghostly:invite" }) as ReturnType<typeof import("jsqr").default>);
+    onPageDecoder.finds = "ghostly:invite";
     const found = vi.fn(() => true);
-    scanQrFrames(camera(), onPage, () => true, found);
+    const scanning = scanQrFrames(camera(), qrFrameReader(), () => true, found);
     await settle();
     const [worker] = FakeWorker.made;
     worker.dispatchEvent(new Event("error"));
     expect(worker.terminated).toBe(true);
-    await vi.waitFor(() => expect(found).toHaveBeenCalledWith("ghostly:invite"));
-    expect(onPage).toHaveBeenCalledTimes(1);
+    await scanning;
+    expect(found).toHaveBeenCalledWith("ghostly:invite");
+    expect(onPageDecoder.calls).toBe(1);
     expect(worker.posted).toHaveLength(1);
   });
 });
@@ -99,7 +98,9 @@ describe("a picture's QR is decoded away from the page", () => {
   /** A phone photo, 4032x3024: read at 2048x1536. */
   const photo = { width: 4032, height: 3024, close: vi.fn() };
   beforeEach(() => { photo.close.mockClear(); vi.stubGlobal("createImageBitmap", async () => photo); });
-  const read = () => readQrImage(new Blob([new Uint8Array([137, 80, 78, 71])], { type: "image/png" }));
+  /** The photo's PNG header: the picture is decoded only once its header says its size. */
+  const header = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0x0f, 0xc0, 0, 0, 0x0b, 0xd0, 8, 6, 0, 0, 0];
+  const read = () => readQrImage(new Blob([new Uint8Array(header)], { type: "image/png" }));
   const posted = async () => { await vi.waitFor(() => expect(FakeWorker.made[0]?.posted).toHaveLength(1)); return FakeWorker.made[0]; };
 
   it("hands the picture's pixels to a worker, never decodes them on the page, and ends the worker", async () => {

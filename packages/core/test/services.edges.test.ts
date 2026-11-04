@@ -79,6 +79,13 @@ describe("service ids from names", () => {
     expect(serviceIdFromName("!!!")).toBe("service");
     expect(serviceIdFromName("  Hello, World!  ")).toBe("hello-world");
     expect(serviceIdFromName("x".repeat(40))).toBe("x".repeat(24));
+    expect(serviceIdFromName("--a--b--")).toBe("a-b");
+  });
+
+  it("answers a long name of dashes at once", () => {
+    const start = performance.now();
+    expect(serviceIdFromName("-".repeat(100_000) + "a" + "-".repeat(100_000) + "!")).toBe("a");
+    expect(performance.now() - start).toBeLessThan(100);
   });
 
   it("always yields a valid id", () => {
