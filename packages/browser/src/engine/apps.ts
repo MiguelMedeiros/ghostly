@@ -1318,10 +1318,13 @@ export class Apps {
     } else fail("bad-source", "No app to fetch");
     if (!urls.length) fail("host", "This listing has no URL Ghostly reads from");
 
+    // The install screen opened again on the version it showed (a listing, a card naming its digest): the bundle read and
+    // checked from that URL within `STAGED.ms` is taken as it is, and only its revocations are read again.
+    const kept = expect?.digest !== undefined ? this.staged.get(expect.digest) : undefined;
     let last: unknown = null;
     for (const url of urls) {
       try {
-        const { bundle, bytes } = await this.fetchBundle(url);
+        const { bundle, bytes } = kept && kept.from === url && this.now() - kept.at <= STAGED.ms ? kept : await this.fetchBundle(url);
         const version = versionOf(bundle.manifest, bundle.digest);
         if (expect) {
           if (version.ref !== expect.ref) fail("other-app", "The URL holds another app");

@@ -930,7 +930,9 @@ describe("an app installed from a store updates only to the version that store l
     await store.addStore({ url: STORE_URL });
     expect(await store.preview({ store: keyOf(STORE_KEY), ref: v1.ref })).toMatchObject({ digest: v1.digest, from: PINNED_URL });
     net.files.delete(PINNED_URL);
-    await expect(store.preview({ store: keyOf(STORE_KEY), ref: v1.ref })).rejects.toThrow(/^status|^unlisted/);
+    // The listed version just checked is taken again; one not read yet (another engine) finds none.
+    expect(await store.preview({ store: keyOf(STORE_KEY), ref: v1.ref })).toMatchObject({ digest: v1.digest, from: PINNED_URL });
+    await expect(apps(net).preview({ store: keyOf(STORE_KEY), ref: v1.ref })).rejects.toThrow(/^status|^unlisted/);
     await net.putStore(await storeFiles({ sequence: 2, apps: [listing(v1, [HEAD])] }));
     await store.refreshStores();
     await expect(store.preview({ store: keyOf(STORE_KEY), ref: v1.ref })).rejects.toThrow(/^unlisted/);
