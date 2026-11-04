@@ -1,10 +1,12 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, createEvent, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bech32 } from "@scure/base";
+import type { ClipboardFile } from "@ghostly/browser/host";
 import { TEST_MINTS } from "@ghostly/browser/shared/mints";
 import { fakeInvoice } from "@ghostly/browser/engine/paymentAdapters/providers/testing";
 import { CashuWallet } from "../../components/wallet/CashuWallet";
 import { networkState } from "../../components/walletCardData";
+import { followPlatformDrags, guardFileDrops, resetPlatformDrags } from "../../lib/pastedFiles";
 import { servicesPlatform, type LightningAddressInfo, type WalletPlatform, type WalletState } from "../../lib/platform";
 import { fakeEngine, walletView } from "../fakeEngine";
 import { liveMainnetInvoice, mint, REAL_MINT } from "../payments/fixtures";
@@ -145,6 +147,57 @@ describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
     const copied = { files: [], types: ["text/html"], items: [], getData: (type: string) => type === "text/html" ? "<img src=\"https://example.com/qr.png\">" : "" };
     fireEvent.paste(screen.getByTestId("wallet-pay-input"), { clipboardData: copied });
     await waitFor(() => expect(screen.getByTestId("wallet-send-scan-error")).toHaveTextContent("Could not read"));
+  });
+
+  describe("a picture dragged in from a file manager, which the Linux app's webview names by address only", () => {
+    /** A file manager's drag as WebKitGTK shows it to the page: no File, no text. */
+    const named = () => ({ dataTransfer: { files: [], types: ["text/uri-list", "text/html"], items: [], getData: () => "", dropEffect: "none" } });
+    const held = (name: string, size: number) => ({ name, size, mime: null, read: vi.fn(async (offset: number) => offset ? new Uint8Array() : pngHead(400, 400)), done: vi.fn() });
+    let read: ReturnType<typeof vi.fn<() => Promise<ClipboardFile[]>>>;
+    let over: (on: boolean) => void;
+    let unguard: () => void;
+    beforeEach(() => { read = vi.fn(async () => []); over = followPlatformDrags(read); unguard = guardFileDrops(window); });
+    afterEach(() => { unguard(); resetPlatformDrags(); });
+
+    it("is taken as a drop, and the app reads the picture alone: its invoice opens the review", async () => {
+      qr.text = invoice;
+      const notes = held("notes.pdf", 9), code = held("invoice.png", 29);
+      read.mockResolvedValue([notes, code]);
+      const quoteInvoice = vi.fn(async () => ({ quote: "q-7", mint: TEST_MINT, amount: 21, feeReserve: 0 }));
+      const { user } = show({ quoteInvoice });
+      await user.click(screen.getByRole("tab", { name: "Send" }));
+      act(() => over(true));
+      // Taken where it is over Send's field, not refused as the page refuses another app's files elsewhere.
+      const field = screen.getByTestId("wallet-pay-input");
+      const moved = createEvent.dragOver(field, named());
+      fireEvent(field, moved);
+      expect(moved.defaultPrevented).toBe(true);
+      expect((moved as DragEvent).dataTransfer?.dropEffect).toBe("copy");
+      expect(fireEvent.drop(field, named())).toBe(false);
+      expect(await screen.findByTestId("wallet-pay-review")).toHaveTextContent("Pay 21 test sats");
+      expect(quoteInvoice).toHaveBeenCalledWith(invoice, "cashu");
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(notes.read).not.toHaveBeenCalled();
+      expect([notes.done, code.done].map((done) => done.mock.calls.length)).toEqual([1, 1]);
+    });
+
+    it("dropped files with no picture among them, and a picture too large, say so unread", async () => {
+      read.mockResolvedValueOnce([held("a.pdf", 4)]);
+      const { user } = show({});
+      await user.click(screen.getByRole("tab", { name: "Send" }));
+      const scan = screen.getByTestId("wallet-send-scan");
+      act(() => over(true));
+      expect(fireEvent.drop(scan, named())).toBe(false);
+      expect(await screen.findByTestId("wallet-send-scan-error")).toHaveTextContent("Could not read the image. Try PNG or JPEG.");
+
+      const huge = held("photo.png", 64 * 1024 * 1024);
+      read.mockResolvedValueOnce([huge]);
+      act(() => over(true));
+      fireEvent.drop(scan, named());
+      await waitFor(() => expect(screen.getByTestId("wallet-send-scan-error")).toHaveTextContent("Choose an image smaller than 12 MB."));
+      expect(huge.read).not.toHaveBeenCalled();
+      expect(huge.done).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("Paste: a Lightning address goes to its steps, whose amount shows the balance and a Max", async () => {

@@ -222,19 +222,30 @@ export function platformPastedFiles(): Promise<File[]> | null {
  */
 export function platformPastedImage(max: number): Promise<File | "tooLarge" | "tooManyPixels" | null> | null {
   const read = servicesPlatform?.readClipboardFiles();
-  if (!read) return null;
-  return read.then(async (clips) => {
-    const image = clips.find((clip) => clipType(clip).startsWith("image/"));
-    for (const clip of clips) if (clip !== image) clip.done?.();
-    if (!image) return null;
-    if (image.name !== null && image.size > max) { image.done?.(); return "tooLarge"; }
-    if (image.name === null) {
-      let head: Uint8Array;
-      try { head = await image.read(0, IMAGE_LIMITS.headBytes); } catch (cause) { image.done?.(); throw cause; }
-      // One whose header says no size is left to the reader's own check, which refuses it as a picture it cannot read.
-      const size = imageSize(head);
-      if (size && !previewable(size)) { image.done?.(); return "tooManyPixels"; }
-    }
-    return (await readPlatformFiles([image]))[0] ?? null;
-  });
+  return read ? read.then((clips) => firstImage(clips, max)) : null;
+}
+
+/**
+ * The first picture of a drop the platform holds (`followPlatformDrags`), for a place that takes one picture, read and
+ * checked as `platformPastedImage` reads the clipboard's; null when the drop handed the page its files itself, or is no
+ * drop of files.
+ */
+export function platformDroppedImage(data: DataTransfer | null, max: number): Promise<File | "tooLarge" | "tooManyPixels" | null> | null {
+  if (!platformDrag?.over || dragHasFiles(data) || !dragNamesAddress(data)) return null;
+  return platformDrag.read().then((clips) => firstImage(clips, max));
+}
+
+async function firstImage(clips: ClipboardFile[], max: number): Promise<File | "tooLarge" | "tooManyPixels" | null> {
+  const image = clips.find((clip) => clipType(clip).startsWith("image/"));
+  for (const clip of clips) if (clip !== image) clip.done?.();
+  if (!image) return null;
+  if (image.name !== null && image.size > max) { image.done?.(); return "tooLarge"; }
+  if (image.name === null) {
+    let head: Uint8Array;
+    try { head = await image.read(0, IMAGE_LIMITS.headBytes); } catch (cause) { image.done?.(); throw cause; }
+    // One whose header says no size is left to the reader's own check, which refuses it as a picture it cannot read.
+    const size = imageSize(head);
+    if (size && !previewable(size)) { image.done?.(); return "tooManyPixels"; }
+  }
+  return (await readPlatformFiles([image]))[0] ?? null;
 }
