@@ -7,6 +7,7 @@ import { announceJoins } from "./announce";
 import { reportAppFrames } from "./appEvents";
 import { callApi, type ApiContext } from "./api";
 import { CallManager } from "./calls/manager";
+import { MAX_LINE } from "./client";
 import { greeting, HELLO, newDaemonSecret, proof, removeDaemonSecret } from "./daemonProof";
 import { asCliError, CliError } from "./errors";
 import { EventHub, type GhostlyEvent } from "./events";
@@ -15,9 +16,6 @@ import { ownFolder, privateFolder } from "./privateFolder";
 import { acquireLock, startingPath, type ProfilePaths } from "./profiles";
 import { startRuntime, type RuntimeOptions } from "./runtime/engine";
 import { flushCardUpdates } from "./statusCards";
-
-/** The longest request line the daemon reads (WISP 1100 § Framing). */
-export const MAX_LINE = 16 * 1024 * 1024;
 
 /**
  * The most a connection may leave unread (answers and events the daemon wrote that its client has not taken): past

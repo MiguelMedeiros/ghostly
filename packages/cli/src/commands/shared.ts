@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { closeSync, openSync, readSync } from "node:fs";
 // From its own module, not the package: the command table is read by every command, and the package is all of the
 // protocol (~100 ms to load), which a command a daemon answers never needs.
 import { CRON_LINE, ITEM_STATES, PR_CHECKS, PR_STATES, ROUTINE_STATES, RUN_RESULTS, STATUS_CARD_LIMITS, TASK_STATUSES, cardLine, cardUrl, statusCardBytes } from "@ghostly/core/statusCards";
@@ -50,6 +50,31 @@ export const confirmReal: OptionSpec = { type: "boolean", description: "Confirm 
 export function here(path: unknown): string | undefined {
   if (path === "") throw new CliError("usage", "A path given as \"\" names no file");
   return typeof path === "string" ? userPath(path) : undefined;
+}
+
+/** The most a command reads of stdin or of a file it sends: the longest request line a daemon reads (client.ts `MAX_LINE`). */
+export const INPUT_BYTES = 16 * 1024 * 1024;
+export const STDIN_TOO_BIG = "More than 16 MiB came on stdin, more than any command takes (a long text goes as a file: ghostly file send <chat|group> <path>)";
+
+/**
+ * A file's text, or stdin's (`0`), up to `INPUT_BYTES`: more is refused as it comes. `app send … -`, a card's `--json`
+ * and the files `identity complete` and `x401 credential add` send were read whole: 600 MiB answered V8's "Cannot
+ * create a string longer than 0x1fffffe8 characters", and past 16 MiB a daemon cut the line ("The daemon went away").
+ */
+export function readInput(file: string | 0): string {
+  const fd = file === 0 ? 0 : openSync(file, "r");
+  try {
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    for (;;) {
+      const chunk = Buffer.allocUnsafe(1024 * 1024);
+      const read = readSync(fd, chunk, 0, chunk.length, null);
+      if (!read) return Buffer.concat(chunks).toString("utf8");
+      bytes += read;
+      if (bytes > INPUT_BYTES) throw new CliError("bad_request", file === 0 ? STDIN_TOO_BIG : `${file} holds more than 16 MiB, more than any command takes (a file to share goes as one: ghostly file send <chat|group> <path>)`);
+      chunks.push(chunk.subarray(0, read));
+    }
+  } finally { if (file !== 0) closeSync(fd); }
 }
 
 /**
@@ -178,8 +203,8 @@ export function cardJson(value: unknown): Record<string, unknown> {
   // with its path, as `x401 credential add` says it: before, Node's text, and a folder's named no path.
   const file = text.startsWith("{") || text === "-" ? undefined : here(text)!;
   let raw: string;
-  try { raw = text.startsWith("{") ? text : readFileSync(file ?? 0, "utf8"); }
-  catch (error) { throw (file !== undefined && localFileError(error, file)) || new CliError("usage", `--json takes a card as JSON, - for stdin, or a file: ${error instanceof Error ? error.message : String(error)}`); }
+  try { raw = text.startsWith("{") ? text : readInput(file ?? 0); }
+  catch (error) { throw (error instanceof CliError && error) || (file !== undefined && localFileError(error, file)) || new CliError("usage", `--json takes a card as JSON, - for stdin, or a file: ${error instanceof Error ? error.message : String(error)}`); }
   let parsed: unknown;
   try { parsed = JSON.parse(raw); } catch { throw new CliError("usage", "--json is not valid JSON"); }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new CliError("usage", "--json is a JSON object of the card's fields");
