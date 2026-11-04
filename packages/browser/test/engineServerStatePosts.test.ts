@@ -19,6 +19,8 @@ vi.mock("../src/engine/node", () => ({
     start() { return Promise.resolve(); }
     getState() { return this.state; }
     async getMessages() { return []; }
+    // The server sends each chat's history with its deleted ids (`historyEvent`): a fake without them drops the client.
+    deletedIdsOf() { return []; }
     setActiveLink() {}
     appsCloseAll() {}
   },
