@@ -180,4 +180,20 @@ test("message details on a phone: a long press opens the quick bar, and Details 
   // A tap outside closes it.
   await bob.page.getByTestId("message-details-backdrop").click({ position: { x: 10, y: 10 } });
   await expect(panel(bob.page)).toHaveCount(0);
+
+  // A copy the browser refuses, by both routes: the text to select by hand, kept until the person closes it.
+  await bob.page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async () => { throw new DOMException("denied", "NotAllowedError"); } } });
+    Object.defineProperty(document, "execCommand", { configurable: true, value: () => false });
+  });
+  await hold();
+  await bob.page.getByTestId("reaction-bar-copy").click();
+  await expect(row.getByTestId("message-copy-text")).toHaveValue("press and hold me");
+  const closeNote = row.getByTestId("message-copy-close");
+  await expect(closeNote).toHaveText("Close");
+  expect((await closeNote.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await closeNote.click();
+  await expect(row.getByTestId("message-copy-error")).toHaveCount(0);
+  await expect(row.getByTestId("message-copy-text")).toHaveCount(0);
+  await expect(row.getByTestId("message-options")).toBeFocused();
 });
