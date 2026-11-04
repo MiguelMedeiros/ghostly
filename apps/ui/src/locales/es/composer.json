@@ -19,6 +19,7 @@
   "dhtTooLong": "Demasiado largo para la DHT ({{bytes}} de {{max}} bytes). Acórtalo o conéctate en vivo; el borrador se guarda.",
   "document": "Documento",
   "dropFiles": "Suelta para enviar",
+  "dropReading": "Leyendo lo que soltaste…",
   "emoji": "Emoji",
   "emojiCategories": "Categorías de emoji",
   "emojiFound": "{{count}} emojis",

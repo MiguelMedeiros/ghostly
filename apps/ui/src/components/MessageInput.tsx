@@ -215,6 +215,8 @@ export function MessageInput({
   /** A paste the platform is reading: one at a time, and said on screen (the sheet opens only once every byte is here). */
   const [reading, setReading] = useState(false);
   const readingRef = useRef(false);
+  /** Drops the platform is reading (another app's files, on Linux), said on screen as a paste is. */
+  const [dropsReading, setDropsReading] = useState(0);
   const [dragging, setDragging] = useState<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -711,8 +713,11 @@ export function MessageInput({
   const offerSharedRef = useRef(offerShared); offerSharedRef.current = offerShared;
   /** A drop's files the platform read (another app's, on Linux), as a paste's are: what could not be read is said. */
   const offerHeld = (held: Promise<File[]>) => {
-    held.then((files) => { if (!files.length) showToast(t("errors.files.dropUnreadable")); else offerRef.current(files); },
-      (error: unknown) => showToast(problemLine(error, t)));
+    // Up to 256 MB read in steps: the line says so until the sheet, or the reason there is none, takes its place.
+    setDropsReading((was) => was + 1);
+    const ended = () => setDropsReading((was) => was - 1);
+    held.then((files) => { ended(); if (!files.length) showToast(t("errors.files.dropUnreadable")); else offerRef.current(files); },
+      (error: unknown) => { ended(); showToast(problemLine(error, t)); });
   };
   const offerHeldRef = useRef(offerHeld); offerHeldRef.current = offerHeld;
 
@@ -943,10 +948,10 @@ export function MessageInput({
       </button>
     </div>
   );
-  const readingLine = reading && !locked && (
+  const readingLine = (reading || dropsReading > 0) && !locked && (
     <p role="status" data-testid="paste-reading" className="m-0 flex items-center gap-2 text-[13px] text-text-secondary animate-fade-in">
       <span aria-hidden="true" className="inline-block size-4 shrink-0 animate-spin rounded-full border-2 border-accent border-e-transparent motion-reduce:animate-none" />
-      {t("composer.pasteReading")}
+      {t(reading ? "composer.pasteReading" : "composer.dropReading")}
     </p>
   );
   const shown = preparing[0];
@@ -983,7 +988,7 @@ export function MessageInput({
   // above the composer cut at the top of the screen rather than off it (composer/fieldHeight.ts, composer/keptOnScreen.ts).
   useFieldFitsView(textareaRef);
   const aboveShown = (toastBox || readingLine || preparingLine) && !sheetOpen;
-  useKeptOnScreen(aboveRef, aboveShown ? `${toast ?? ""}|${reading}|${shown?.name ?? ""}|${shownProgress !== undefined}` : null);
+  useKeptOnScreen(aboveRef, aboveShown ? `${toast ?? ""}|${reading}|${dropsReading}|${shown?.name ?? ""}|${shownProgress !== undefined}` : null);
 
   return (
     <div ref={composerRef} data-composer className="@container/composer bg-panel-header px-3 max-md:px-2 py-2 composer-safe shrink-0 relative">
