@@ -82,15 +82,24 @@ function dragNamesAddress(data: DataTransfer | null): boolean {
  * Linux: WebKitGTK gives the page neither the files nor their addresses). The platform holds the files of its drop;
  * the page reads them by token, never by path.
  */
-let platformDrag: { over: boolean; read: () => Promise<ClipboardFile[]> } | null = null;
+let platformDrag: { over: boolean; read: () => Promise<ClipboardFile[]>; choose?: () => Promise<number>; target: Window } | null = null;
+
+/** The file input the platform picks a drop's files on (`choose`), and what it accepts: no file type, a mark the platform knows. */
+const DROP_INPUT_ID = "ghostly-dropped-files";
+const DROP_INPUT_ACCEPT = "application/x-ghostly-dropped-files";
+/** How long the page waits for the platform to pick a drop's files it said it would. */
+const CHOOSE_WAIT_MS = 10_000;
 
 /**
  * The platform takes drops of files: `read` hands over the files of the drop that just happened. Returns what the
  * platform calls while such a drag is over the window (true) and once it left (false). The page forgets it once a
  * drop's handlers ran: the platform says nothing of a drop, which it could say before the page hears of it.
+ * `choose`, where the platform has it, picks the drop's files on the page's own file input instead (the desktop app on
+ * Linux): Files read from the disk as they are sent, as + → Document picks them, of any size. It resolves to how many
+ * it picks, 0 for none.
  */
-export function followPlatformDrags(read: () => Promise<ClipboardFile[]>, target: Window = window): (over: boolean) => void {
-  const drag = { over: false, read };
+export function followPlatformDrags(read: () => Promise<ClipboardFile[]>, target: Window = window, choose?: () => Promise<number>): (over: boolean) => void {
+  const drag = { over: false, read, choose, target };
   platformDrag = drag;
   target.addEventListener("drop", () => { setTimeout(() => { drag.over = false; }); });
   return (over) => { drag.over = over; };
@@ -102,12 +111,32 @@ export function dragCarriesFiles(data: DataTransfer | null): boolean {
 }
 
 /**
- * The files of a drop the platform holds (`followPlatformDrags`), read into the page as a paste's are; null when the
- * drop handed the page its files itself, or is no drop of files.
+ * The files of a drop the platform holds (`followPlatformDrags`): picked on the page's file input where the platform
+ * can, else read into the page as a paste's are; null when the drop handed the page its files itself, or is no drop
+ * of files.
  */
 export function platformDroppedFiles(data: DataTransfer | null): Promise<File[]> | null {
   if (!platformDrag?.over || dragHasFiles(data) || !dragNamesAddress(data)) return null;
+  if (platformDrag.choose) return chooseDropped(platformDrag.choose, platformDrag.target.document);
   return platformDrag.read().then((clips) => readPlatformFiles(clips, new Date(), true));
+}
+
+/** The drop's files as the platform picks them on the page's file input; none when it picks none, or not in time. */
+function chooseDropped(choose: () => Promise<number>, doc: Document): Promise<File[]> {
+  let input = doc.getElementById(DROP_INPUT_ID) as HTMLInputElement | null;
+  if (!input) {
+    input = Object.assign(doc.createElement("input"), { type: "file", multiple: true, accept: DROP_INPUT_ACCEPT, id: DROP_INPUT_ID, hidden: true });
+    doc.body.append(input);
+  }
+  const picker = input;
+  return new Promise<File[]>((resolve, reject) => {
+    // Picked before `choose` answers, or after: the platform clicks the input as it answers.
+    const end = (then: () => void) => { picker.removeEventListener("change", picked); clearTimeout(late); then(); };
+    const picked = () => end(() => { const files = [...(picker.files ?? [])]; picker.value = ""; resolve(files); });
+    picker.addEventListener("change", picked);
+    const late = setTimeout(() => end(() => resolve([])), CHOOSE_WAIT_MS);
+    choose().then((count) => { if (!count) end(() => resolve([])); }, (error: unknown) => end(() => reject(error)));
+  });
 }
 
 /** Tests only. */
