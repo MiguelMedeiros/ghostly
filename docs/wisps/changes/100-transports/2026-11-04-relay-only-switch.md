@@ -1,0 +1,1 @@
+Relay only, Built so far: the web app, the extension and the Desktop show Hide my IP from contacts in Settings, Network, refused without a saved TURN server; on the Desktop, while it is on, the HyperDHT relay field shows, since its HyperDHT then goes through it. The headless CLI does not take the setting yet, since its calls do not keep to the relay policy.
