@@ -171,6 +171,9 @@ describe("a contact link's requests, the owner's side (WISP 8xx)", () => {
     expect(w.state.reads).toBe(4 + 4 + 1);
     expect(again.requests().map(r => r.id)).toEqual([asker.pubKeyZ32]);
     again.stop();
+    // The read's save and publish finish before the next test clears the store: a poll queues behind them.
+    await again.poll();
+    expect(w.state.reads).toBe(4 + 4 + 1);
   });
 });
 
@@ -218,6 +221,8 @@ describe("accept and decline (WISP 8xx)", () => {
     const { asker: kevin, invite } = w.ask(linkKey, { name: "Kevin", text: "Hello!" });
     await w.links.poll();
     const { asker: ana } = w.ask(linkKey, { name: "Ana", expires: NOW + 60_000 });
+    // The next read waits for the link's pace.
+    vi.setSystemTime(NOW + POLL_SHOWN_MS);
     await w.links.poll();
     expect(w.links.requests()).toHaveLength(2);
     await w.links.create();
