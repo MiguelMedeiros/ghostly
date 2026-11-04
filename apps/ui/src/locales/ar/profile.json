@@ -142,6 +142,7 @@
   "name": "الاسم",
   "nameInChats": "الاسم في المحادثات",
   "nameLabel": "اسم الملف الشخصي",
+  "nameSaved": "تم حفظ الاسم",
   "nameStep": {
     "placeholder": "اسمك",
     "save": "متابعة",
