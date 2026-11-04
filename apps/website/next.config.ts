@@ -29,7 +29,8 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: __dirname,
   },
-  // HTTPS only, for a year once a browser has seen the site (Cloudflare serves it over HTTPS and adds no HSTS itself).
+  // HTTPS only, for a year once a browser has seen the site over HTTPS (Cloudflare adds no HSTS itself, and a browser
+  // ignores it over http://: redirects() sends such a visit to HTTPS first).
   // Scripts from this site only: its own files and the inline ones Next.js writes into each page (the page's data, the
   // two head scripts in app/layout.tsx). No third-party script runs, so none that a proxy slips into the page does
   // either (Cloudflare's Web Analytics beacon was injected into every page; /privacy says there are no analytics).
@@ -48,6 +49,11 @@ const nextConfig: NextConfig = {
       ],
     }];
   },
+  // A visit over plain http:// lands on the same address over https://, before anything else: Cloudflare reaches the
+  // site through the tunnel whatever the visitor used, and says which it was in CF-Visitor. Not X-Forwarded-Proto:
+  // Next.js sets that one to "http" itself on a request without it and routes a missing page again, which would send
+  // a 404 of a plain http://localhost to https.
+  //
   // Every old address lands in one hop, its #anchor riding along:
   // - The WISPs page is /wisps. It was /developers/wisps, and before that /developers/catalog.
   // - The protocol guide at /docs is gone: the WISPs page is the one place for the protocol.
@@ -57,6 +63,15 @@ const nextConfig: NextConfig = {
   // - A WISP whose number was "xx" (3xx-ssh) moved to its number (307-ssh) once its feature shipped.
   async redirects() {
     return [
+      {
+        source: "/:path*",
+        has: [
+          { type: "header", key: "cf-visitor", value: '.*"scheme":"http".*' },
+          { type: "host", value: "(?<host>.+)" },
+        ],
+        destination: "https://:host/:path*",
+        permanent: true,
+      },
       ...ON_GITHUB.flatMap(([slug, url]) =>
         ["/wisps", "/developers/wisps", "/pt-br/developers/wisps"].map((base) => ({ source: `${base}/${slug}`, destination: url, permanent: true })),
       ),
