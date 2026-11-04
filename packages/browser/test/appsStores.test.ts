@@ -392,6 +392,22 @@ describe("stores", () => {
     expect(await store.addStore({ url: STORE_URL })).toMatchObject({ url: STORE_URL, sequence: 5 });
   });
 
+  it("a copy with the held index's sequence and other content: the preview says so, and marks the store as a read would", async () => {
+    const COPY_URL = "https://raw.githubusercontent.com/someone/store/HEAD/ghostly-store.json";
+    const store = apps(net, { defaults: [{ url: STORE_URL, key: keyOf(STORE_KEY) }] });
+    await store.start();
+    store.stop();
+    await net.putStore(await storeFiles({ sequence: 5 }));
+    await store.refreshStores();
+    // The store signed a second index under 5, listing an app the held one does not.
+    await net.putStore(await storeFiles({ sequence: 5, apps: [listing(await bundle())] }), COPY_URL);
+    expect(await store.previewStore({ url: COPY_URL })).toMatchObject({ sequence: 5, apps: 1, held: { sequence: 5, equivocation: true } });
+    const [kept] = await store.listStores();
+    expect(kept).toMatchObject({ url: STORE_URL, sequence: 5, apps: [], problem: "equivocation", equivocation: { sequence: 5 } });
+    // The held index again is not another copy.
+    expect((await store.previewStore({ url: STORE_URL })).held).toEqual({ sequence: 5 });
+  });
+
   it("a newer index added while the store is being read again stays: the read's older one does not replace it", async () => {
     const COPY_URL = "https://raw.githubusercontent.com/someone/store/HEAD/ghostly-store.json";
     const store = apps(net, { defaults: [{ url: STORE_URL, key: keyOf(STORE_KEY) }] });
