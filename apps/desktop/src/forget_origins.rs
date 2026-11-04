@@ -16,10 +16,13 @@
 //!   Until then the origin is on a list in the app's data folder; it leaves the list once its files are gone, and the
 //!   list goes once empty, since it too names contacts.
 //!
-//! On Windows, WebView2 names the origin `http://ghostly-svc.<service>.<peer>.<tag>`, and the webview's DevTools
-//! protocol clears one origin of every kind of storage at once (`Storage.clearDataForOrigin`), the files and folders
-//! named after it included. WebView2's own files shared by every origin (its Local Storage log, its quota database)
-//! keep traces of it until WebView2 compacts them.
+//! On Windows, WebView2 names the origin `http://ghostly-svc.<service>.<peer>.<tag>`, and a profile's files shared by
+//! every origin (its Local Storage log, its quota database, its history, its preferences) keep an origin's records
+//! after any clear, through every later launch: LevelDB reuses its log at each one. So each contact's app opens in a
+//! WebView2 profile of its own (`app_folder`), and forgetting it removes that folder once its window closed. An app
+//! opened before it had one kept its storage in the Ghostly window's profile: when that profile holds the origin, the
+//! webview's DevTools protocol clears it there (`Storage.clearDataForOrigin`), the files and folders named after it
+//! included.
 
 use serde::Deserialize;
 use tauri::{AppHandle, Runtime};
@@ -90,9 +93,14 @@ pub async fn forget_service_origins<R: Runtime>(
 pub use webkit::{clean_at_launch, serve, ForgetState};
 
 #[cfg(windows)]
+pub use windows::app_folder;
+
+#[cfg(windows)]
 mod windows {
+    use std::path::PathBuf;
     use std::time::Duration;
 
+    use sha2::{Digest, Sha256};
     use tauri::{AppHandle, Manager, Runtime};
     use tokio::sync::oneshot;
     use webview2_com::CallDevToolsProtocolMethodCompletedHandler;
@@ -100,13 +108,98 @@ mod windows {
 
     use crate::viewer::SCHEME;
 
-    /// How long WebView2 may take to clear one origin before the rest goes on without it.
+    /// How long WebView2 may take to clear one origin, or to let go of an app's folder, before the rest goes on
+    /// without it.
     const CLEAR_TIMEOUT: Duration = Duration::from_secs(10);
+    /// The contacts' apps' profiles, in the app's local data folder beside the Ghostly window's.
+    const APPS_FOLDER: &str = "apps";
 
-    /// Clears every kind of storage `host`'s origin has, through the Ghostly window's webview: they share one
-    /// profile, so the call reaches the contact's app's storage with no window of its origin. True once WebView2
-    /// said it cleared.
+    /// The WebView2 profile of `host`'s app (`<service>.<peer>.<tag>`): a folder of its own, named by a hash of the
+    /// host. Short, since Chromium's own paths inside it take most of Windows' 260 characters (IndexedDB fails to
+    /// open past them), and it names no contact.
+    pub fn app_folder<R: Runtime>(app: &AppHandle<R>, host: &str) -> Option<PathBuf> {
+        let digest = Sha256::digest(host.to_ascii_lowercase().as_bytes());
+        let name: String = digest.iter().take(8).map(|b| format!("{b:02x}")).collect();
+        Some(
+            app.path()
+                .app_local_data_dir()
+                .ok()?
+                .join(APPS_FOLDER)
+                .join(name),
+        )
+    }
+
+    /// Forgets what `host`'s app kept: its own profile, and what it kept in the Ghostly window's before it had one.
     pub async fn clear<R: Runtime>(app: &AppHandle<R>, host: &str) -> bool {
+        let shared = !held_in_shared(app, host) || clear_shared(app, host).await;
+        remove_folder(app, host).await && shared
+    }
+
+    /// Whether the Ghostly window's profile holds anything of `host`'s origin: a file or folder named after it, or
+    /// a record in its Local Storage. Clearing an origin it never held would write its name there all the same
+    /// (LevelDB notes each key it deletes). Always with WEBVIEW2_USER_DATA_FOLDER, which puts every webview in one
+    /// profile.
+    fn held_in_shared<R: Runtime>(app: &AppHandle<R>, host: &str) -> bool {
+        if std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_some() {
+            return true;
+        }
+        let Ok(local) = app.path().app_local_data_dir() else {
+            return true;
+        };
+        let needle = host.to_ascii_lowercase();
+        let mut folders = vec![local.join("EBWebView")];
+        while let Some(folder) = folders.pop() {
+            for path in std::fs::read_dir(&folder)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|entry| entry.path())
+            {
+                let named = path
+                    .file_name()
+                    .is_some_and(|n| n.to_string_lossy().to_ascii_lowercase().contains(&needle));
+                if named {
+                    return true;
+                }
+                if path.is_dir() {
+                    folders.push(path);
+                    continue;
+                }
+                let recorded = path.components().any(|c| c.as_os_str() == "Local Storage")
+                    && std::fs::read(&path).is_ok_and(|bytes| {
+                        bytes
+                            .windows(needle.len())
+                            .any(|w| w.eq_ignore_ascii_case(needle.as_bytes()))
+                    });
+                if recorded {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Removes `host`'s app's profile. WebView2's processes for it hold its files a moment after its window closed.
+    /// True once it is gone, or was never there.
+    async fn remove_folder<R: Runtime>(app: &AppHandle<R>, host: &str) -> bool {
+        let Some(folder) = app_folder(app, host) else {
+            return false;
+        };
+        let deadline = tokio::time::Instant::now() + CLEAR_TIMEOUT;
+        loop {
+            if std::fs::remove_dir_all(&folder).is_ok() || !folder.exists() {
+                return true;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+    }
+
+    /// Clears every kind of storage `host`'s origin has in the Ghostly window's profile, through its webview: the
+    /// call reaches the origin with no window of its own. True once WebView2 said it cleared.
+    async fn clear_shared<R: Runtime>(app: &AppHandle<R>, host: &str) -> bool {
         let Some(window) = app.get_webview_window("main") else {
             return false;
         };
