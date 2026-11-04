@@ -57,7 +57,15 @@ describe("sizes in the app's language", () => {
     expect(formatFileSize(1.5 * 1024 ** 3, inFr)).toBe("1,5 Go");
     expect(formatFileSize(144 * 1024, inAr)).toBe("144.0 ك.ب");
     const file = { id: "f", name: "a.pdf", mime: "application/pdf", size: 4.2 * 1024 * 1024 } as ChatFile;
-    expect(fileStatus(file, null, undefined, false, inPt)).toBe("4,2 MB");
+    expect(fileStatus(file, null, undefined, false, inPt)).toBe("4,2\u00a0MB");
+  });
+
+  it("a size of terabytes stays in TB in every language, never thousands of GB", () => {
+    expect(formatFileSize(3 * 1024 ** 4)).toBe("3.0 TB");
+    expect(formatFileSize(5000 * 1024 ** 4)).toBe("5000.0 TB");
+    expect(formatFileSize(1.5 * 1024 ** 4, inPt)).toBe("1,5 TB");
+    expect(formatFileSize(2 * 1024 ** 4, inFr)).toBe("2,0 To");
+    expect(formatFileSize(2 * 1024 ** 4, inAr)).toBe("2.0 ت.ب");
   });
 
   it("Settings says the storage used in the app's language", async () => {
