@@ -111,8 +111,9 @@ describe("a private group's record carries none of the frames handed on", { time
     // Fifty frames of some 700 bytes were 35 KiB in the record, written again for each message.
     expect(sizes.length).toBeGreaterThanOrEqual(50);
     expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThan(4_000);
-    // And none of them wrote the record, with its membership chain: the group's small row took what they changed.
-    expect(records).toBe(0);
+    // And none of them wrote the record, with its membership chain: the group's small row took what they changed. Only
+    // Alice's name record, which came with her first one, is the record's to keep (`names`): written once.
+    expect(records).toBeLessThanOrEqual(1);
   });
 
   it("a member whose app started again hands on what it had received to one who was away", async () => {

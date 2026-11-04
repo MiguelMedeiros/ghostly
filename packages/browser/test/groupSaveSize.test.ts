@@ -92,7 +92,9 @@ describe("a private group's saves", () => {
     const written = writes();
     await groups.send(id, "after the rotate");
     expect(written[STORES.groups] ?? 0).toBe(0);
-  });
+    // Growing the history is the slow part (50 commits, each writing a record of up to 100 KB): 2 s on a quiet machine,
+    // past the default 5 s on a busy CI runner.
+  }, 30_000);
 
   it("started again, the group goes on from its last number, without a gap or a number used twice", async () => {
     const first = engine();
