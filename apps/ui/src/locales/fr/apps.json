@@ -5,6 +5,7 @@
     "checking": "Vérification…",
     "hint": "Un dépôt GitHub, un fichier raw.githubusercontent.com ou jsDelivr à un commit.",
     "label": "Lien de l'app ou de la boutique",
+    "storeEquivocation": "Ce lien contient une autre copie de cette boutique sous le même numéro : la boutique a signé deux listes différentes. Ghostly a gardé la vôtre.",
     "storeHeld": "Vous avez déjà cette boutique : elle est sur votre page Apps.",
     "storeNewer": "Vous avez déjà cette boutique. Ce lien en contient une copie plus récente.",
     "storeOlder": "C'est une copie plus ancienne d'une boutique que vous avez déjà. La vôtre est plus récente et reste telle quelle.",

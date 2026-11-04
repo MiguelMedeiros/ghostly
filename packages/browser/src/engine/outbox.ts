@@ -12,6 +12,12 @@ export interface OutboxStore {
    * whole history and picks it out, which a chat with hundreds of messages queued did hundreds of times per check.
    */
   get?(id: string): Promise<StoredMessage | undefined>;
+  /**
+   * These messages by their ids, in one read (`db.getMessagesById`; undefined where none is). With it a look reads the
+   * rows this outbox holds however many they are: a burst of texts a bot asked for at once read the chat's whole
+   * history once per text past `KNOWN_ROWS`, 25 times for 40 texts (1.25 M rows at 50,000 messages).
+   */
+  getMany?(ids: string[]): Promise<(StoredMessage | undefined)[]>;
   /** `extra` also changes the path the message takes and its resend deadline (`resendUntil: undefined` clears it). */
   update(id: string, delivery: Delivery, error?: string, extra?: Partial<Pick<StoredMessage, "via" | "resendUntil">>): Promise<void>;
 }
@@ -55,7 +61,7 @@ export interface Resender {
 
 /** How long one turn of an outbox may hold the next one back: a send that never returns must not stop the chat. */
 const TURN_MS = 30_000;
-/** The most rows a new message's look reads one by one (`Outbox.look`). */
+/** The most rows a new message's look reads one by one (`Outbox.look`), where the store cannot read them in one go. */
 const KNOWN_ROWS = 16;
 
 /**
@@ -246,12 +252,13 @@ export class Outbox {
    * The rows a new message's look needs, itself among them: those this outbox holds, by id, where it knows them all.
    * A text sent before the last one's receipt came, or while one waits for an away contact, read the chat's whole
    * history on the page's thread (20,000 rows per send at 20,000 messages), and so did each of the texts a bot asked
-   * for at the same time. Past `KNOWN_ROWS`, the history costs less.
+   * for at the same time. Read one by one, past `KNOWN_ROWS` the history costs less; read in one go (`getMany`), they
+   * are never more than the history.
    */
   private async look(id?: string): Promise<StoredMessage[]> {
-    if (!this.store.get || !this.known || this.waiting.size + this.receipts.size + this.onTheirWay.size > KNOWN_ROWS) return this.store.read();
+    if (!this.store.get || !this.known || (!this.store.getMany && this.waiting.size + this.receipts.size + this.onTheirWay.size > KNOWN_ROWS)) return this.store.read();
     const ids = new Set([...(id === undefined ? [] : [id]), ...this.waiting.keys(), ...this.receipts.keys(), ...this.onTheirWay.keys()]);
-    const rows = await Promise.all([...ids].map(known => this.store.get!(known)));
+    const rows = this.store.getMany ? await this.store.getMany([...ids]) : await Promise.all([...ids].map(known => this.store.get!(known)));
     return rows.filter((row): row is StoredMessage => !!row);
   }
 
@@ -474,8 +481,10 @@ export class Outbox {
    */
   private async check(id: string): Promise<void> {
     if (this.stopped) return;
-    // A look since its check came due took it up: it gave it the next one, or sent it.
-    if (this.waiting.get(id)?.timer || this.receipts.has(id)) return;
+    // A look since its check came due took it up: it gave it the next one, or sent it. One this outbox no longer holds
+    // (delivered, failed or handed over meanwhile) has nothing to check: a timer that fired during the look a contact
+    // back to n queued texts began read the chat's whole history for each text that look had delivered.
+    if (!this.waiting.has(id) || this.waiting.get(id)?.timer || this.receipts.has(id)) return;
     const messages = await this.store.read(), message = messages.find(m => m.id === id);
     if (!message || !(toGo(message) || this.file(message))) { await this.attempt(id); return; }
     const soon = this.now() + this.policy.backoffMs[0], taken: string[] = [];

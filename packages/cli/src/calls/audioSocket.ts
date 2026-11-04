@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { dirname, join } from "node:path";
@@ -38,32 +38,44 @@ export function clearAudioSockets(profileDir: string): void {
 /** How far a program may fall behind reading the call's audio before frames are dropped for it. */
 export const MAX_UNREAD_MS = 1000;
 
+/** How long a connection that must send the call's token (`requireToken`) has to send it before it is closed. */
+export const PROVE_MS = 5000;
+
 /**
  * Serves one call's audio to one program at a time: what the program writes is handed to `onAudio` as it comes (raw
  * PCM, any amount); `write` gives it the caller's audio. A second connection replaces the first. `close` ends the
  * program's connection (it reads EOF) and removes the socket.
+ *
+ * Each call has a token (`token`, 32 random bytes as hex, given to the daemon's clients with the socket's path). A
+ * program sends it first, then a line feed. With `requireToken` (the default on Windows, whose named pipe any account
+ * of the machine may open and read), a connection is nobody's until it has: it hears nothing and replaces nobody, it is
+ * closed when what it sent is not the token, and when `proveMs` pass without it. On an owner-only Unix socket the token
+ * is optional: a connection is the program at once, and a token line it sends first is kept out of the call's audio.
  */
 export class AudioSocket {
   private client: Socket | null = null;
+  /** Connections that have not sent the token yet. */
+  private readonly unproven = new Set<Socket>();
   private closed = false;
   /** Frames the program did not read in time, since the start. */
   dropped = 0;
+  readonly token = randomBytes(32).toString("hex");
 
-  private constructor(readonly path: string, private readonly server: Server, private readonly rate: CallRate) {}
+  private constructor(readonly path: string, private readonly server: Server, private readonly rate: CallRate, private readonly requireToken: boolean, private readonly proveMs: number) {}
 
-  static async open(path: string, rate: CallRate, handlers: { onAudio(chunk: Buffer): void; onClient?(connected: boolean): void }): Promise<AudioSocket> {
+  static async open(path: string, rate: CallRate, handlers: { onAudio(chunk: Buffer): void; onClient?(connected: boolean): void }, options: { requireToken?: boolean; proveMs?: number } = {}): Promise<AudioSocket> {
     if (process.platform !== "win32") {
       privateFolder(join(path, ".."), "calls will not put their audio there");
       if (existsSync(path)) rmSync(path, { force: true });
     }
     let self: AudioSocket | null = null;
-    const server = createServer((socket) => self!.accept(socket, handlers));
+    const server = createServer((socket) => self ? self.accept(socket, handlers) : socket.destroy());
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
       server.listen(path, () => { server.off("error", reject); resolve(); });
     });
     if (process.platform !== "win32") chmodSync(path, 0o600);
-    self = new AudioSocket(path, server, rate);
+    self = new AudioSocket(path, server, rate, options.requireToken ?? process.platform === "win32", options.proveMs ?? PROVE_MS);
     return self;
   }
 
@@ -73,18 +85,59 @@ export class AudioSocket {
 
   private accept(socket: Socket, handlers: { onAudio(chunk: Buffer): void; onClient?(connected: boolean): void }): void {
     if (this.closed) { socket.destroy(); return; }
-    const before = this.client;
-    this.client = socket;
-    before?.end();
     socket.setNoDelay?.(true);
-    socket.on("data", (chunk: Buffer) => { if (this.client === socket) handlers.onAudio(chunk); });
     socket.on("error", () => {});
+    const line = Buffer.from(`${this.token}\n`);
+    // What came before the token line is known to be there or not: held, never audio, until then.
+    let head: Buffer | null = Buffer.alloc(0);
+    const take = () => {
+      this.unproven.delete(socket);
+      const before = this.client;
+      this.client = socket;
+      before?.end();
+      handlers.onClient?.(true);
+    };
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    if (this.requireToken) {
+      this.unproven.add(socket);
+      timer = setTimeout(() => socket.destroy(), this.proveMs);
+      timer.unref?.();
+    } else {
+      take();
+    }
+    socket.on("data", (chunk: Buffer) => {
+      if (head) {
+        head = Buffer.concat([head, chunk]);
+        if (this.requireToken) {
+          // Compared whole and in constant time: a connection that may not hear the call learns nothing byte by byte.
+          if (head.length < line.length) return;
+          if (!timingSafeEqual(head.subarray(0, line.length), line)) { socket.destroy(); return; }
+          if (timer) clearTimeout(timer);
+          take();
+        } else {
+          const seen = Math.min(head.length, line.length);
+          if (!head.subarray(0, seen).equals(line.subarray(0, seen))) {
+            // A program that sends no token: all of it is audio.
+            chunk = head;
+            head = null;
+            if (this.client === socket) handlers.onAudio(chunk);
+            return;
+          }
+          if (head.length < line.length) return;
+        }
+        chunk = head.subarray(line.length);
+        head = null;
+        if (!chunk.length) return;
+      }
+      if (this.client === socket) handlers.onAudio(chunk);
+    });
     socket.on("close", () => {
+      if (timer) clearTimeout(timer);
+      this.unproven.delete(socket);
       if (this.client !== socket) return;
       this.client = null;
       handlers.onClient?.(false);
     });
-    handlers.onClient?.(true);
   }
 
   /** One frame of the caller's audio for the program; dropped when nobody listens or the program stopped reading. */
@@ -103,6 +156,8 @@ export class AudioSocket {
     this.client = null;
     client?.end();
     if (client) setTimeout(() => client.destroy(), 2000).unref();
+    for (const socket of this.unproven) socket.destroy();
+    this.unproven.clear();
     return new Promise((resolve) => {
       this.server.close(() => resolve());
       if (process.platform !== "win32") rmSync(this.path, { force: true });

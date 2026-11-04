@@ -209,6 +209,27 @@ describe("identity exchange", () => {
     expect(receivedIdentityStatus(w.ledger(bob, alice).received[0], alice, bob, w.now())).toBe("withdrawn");
   });
 
+  it("a second proof of the same identity the contact accepts replaces the first on both sides", async () => {
+    const w = world(), { alice, bob } = w.ids;
+    const ab = w.peer(alice, bob, "a".repeat(64)); w.peer(bob, alice, "a".repeat(64));
+    const older = w.addProof();
+    w.advance(60);
+    const newer = w.addProof();
+    const status = (id: string) => w.ledger(alice, bob).shared.find(s => s.id === id)?.status;
+    await ab.share(older, true);
+    await vi.waitFor(() => expect(status(older)).toBe("accepted"));
+    await ab.share(newer, true);
+    await vi.waitFor(() => expect(status(newer)).toBe("accepted"));
+    // The contact keeps one proof per identity: the older one is gone there, so it is no longer shared here either.
+    expect(w.ledger(bob, alice).received.map(r => r.id)).toEqual([newer]);
+    expect(status(older)).toBe("withdrawn");
+    // Taking the newer one back leaves nothing standing on either side.
+    await ab.withdraw(newer, true);
+    await vi.waitFor(() => expect(status(newer)).toBe("withdrawn"));
+    expect(w.ledger(bob, alice).received.map(r => `${r.id}:${r.status}`)).toEqual([`${newer}:withdrawn`]);
+    expect(w.ledger(alice, bob).shared.filter(s => s.status === "accepted")).toEqual([]);
+  });
+
   it("withdrawing a share still queued just forgets it", async () => {
     const w = world(), { alice, bob } = w.ids;
     const ab = w.peer(alice, bob, "a".repeat(64));

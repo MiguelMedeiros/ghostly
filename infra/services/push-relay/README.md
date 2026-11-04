@@ -10,8 +10,10 @@ services (Google, Apple, Mozilla, Microsoft) on their default port, only forward
 (a VAPID `Authorization`) with the Web Push headers, and limits each address (an IPv6 one by its /64) to 30
 requests a minute. When its table of addresses is full it forgets the one seen longest ago. A client has 15 seconds
 to send its whole request; a request is weighed in bytes and one too large is refused before it is read, and so is
-a header named twice. It learns that a push to an endpoint happened, when, and the sender's address; it never
-sees what the push says (only "wake up"), since that is encrypted to the contact's browser.
+a header named twice, or a Web Push header whose value `fetch` would not send (a NUL, a line break, another control
+character, a character above U+00FF), with a 400 that names the header (`{"error":"Bad TTL value"}`). It learns
+that a push to an endpoint happened, when, and the sender's address; it never sees what the push says
+(only "wake up"), since that is encrypted to the contact's browser.
 
 It needs Node 18 or later (22 is what the HyperDHT relay's image runs): it posts with Node's own `fetch`, and on an
 older Node it would start and then fail every push.
@@ -53,7 +55,7 @@ listens and which origins it serves (`any origin` when none is set).
 
 The log holds counts and reasons only, never an endpoint or an address: `forwarded <status>`, `failed`, and each
 refusal by kind (`refused origin`, `refused method`, `refused rate`, `refused size`, or what was wrong with the
-request, such as `refused Not a push service`). The first refusal of a kind is logged at once and the rest as one count
-a minute (`refused rate 41 more`), so a flood stays a line a minute. A refused origin's first line names it, quoted
+request, such as `refused Not a push service` or `refused Bad TTL value`). The first refusal of a kind is logged at
+once and the rest as one count a minute (`refused rate 41 more`), so a flood stays a line a minute. A refused origin's first line names it, quoted
 (`refused origin "https://app.ghostly.tools.example"`, `refused origin (none)` without one), so a misspelt
 `GHOSTLY_RELAY_ORIGINS` shows; the count after it covers every origin refused that minute.

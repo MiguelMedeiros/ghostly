@@ -85,18 +85,23 @@ export interface StoredLink {
   peerAvatar?: string;
   /** Present on the side that created the link, until the peer shows up. */
   inviteCode?: string;
-  /** Messages deleted on this device, by id, so a republished one is not stored again. */
+  /**
+   * Messages deleted on this device, by id, so a republished one is not stored again: 500 at most, my deletions never
+   * pushing out the contact's ids nor theirs mine (`withDeletedId`).
+   */
   deletedIds?: string[];
   /**
-   * 1:1 chats: the contact has had a row here (a contact request's note aside), so no later row of theirs is the chat's
-   * joined line (`StoredMessage.joinLine`). Absent on a chat stored before it was kept: set as the engine starts.
+   * 1:1 chats: the contact has had a row here in the words of the chat's joined line (a contact request's note aside),
+   * so no later row of theirs is that line (`StoredMessage.joinLine`). Absent on a chat stored before it was kept: set
+   * as the engine starts.
    */
   peerSpoke?: true;
   /** My messages I deleted for everyone, their removal on its way to the contact (`engine/removals.ts`). */
   removals?: Removal[];
   /**
    * The ids both sides know (`replyRef`) of the messages deleted for everyone, mine or the contact's, here or not, the
-   * newest 500: a pin naming one shows as unpinned, the pin kept as it came (WISP 400 § Delete for everyone).
+   * newest 500: a pin naming one shows as unpinned, the pin kept as it came and marked (`StoredPin.removed`), so no
+   * later trimming brings it back (WISP 400 § Delete for everyone).
    */
   removedRefs?: string[];
   /**
@@ -350,6 +355,8 @@ export interface GroupView {
   /** On the invitee's side, until the welcome arrives. */
   /**
    * `waiting`: joining a community through its link, how many others were knocking with me when I last knocked.
+   * `othersKnocked`: joining a private group through its link, others knocked in its record lately (`KNOCK_REFRESH_MS`):
+   * the admin's app may be busy letting them in, its relay budget spent, so the wait is not a sign it is closed.
    * `since`: joining a community through its link, when the knock started (a group kept here, knocking to get back in,
    * was created long before).
    * `admittedAt`: joining a community through its link, at stage `admitted`, when a member's app let me in. A welcome
@@ -360,7 +367,7 @@ export interface GroupView {
    * this run (`JOIN_GIVE_UP_MS`), so the knocks stopped; accepting knocks again.
    * `takenBack`: who sent it took it back (the group is gone from its app, or the admin role from it): nothing to answer.
    */
-  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; takenBack?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; since?: number; admittedAt?: number; full?: { n: number; max: number } };
+  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; takenBack?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; othersKnocked?: boolean; since?: number; admittedAt?: number; full?: { n: number; max: number } };
   /** The group's link while it is on (`group1/<id>/<entry key>`); only the admin who made it sees it. */
   entryLink?: string;
   /** Contacts (by chat id) invited by me and not yet in. */
@@ -656,6 +663,12 @@ export interface StoredPayment {
   lightningPending?: boolean;
   /** Requests we pay: this device paid it over Lightning (the payee's wallet cannot say who paid an invoice). */
   paidHere?: boolean;
+  /**
+   * Requests we pay: the payee said it is paid (its `pay-res` ok), so its wallet has seen the money and our receipts
+   * for it (on-chain, Ark, Bark, Spark, USDT) are not said again when the chat reconnects. Absent: not heard yet, or a
+   * record from before this was kept (see `PaymentDesk.receiptOwed`).
+   */
+  payeeConfirmed?: boolean;
   /**
    * A request to a whole group (WISP 902 § Payments): the group's id. Its `linkId` is `group:<id>`, it went to
    * every member over their edges, and the first member whose payment settles it pays it; later ones are refused.
@@ -1005,7 +1018,7 @@ export interface StoredMessage {
   notice?: ChatNotice;
   /**
    * A 1:1 chat's "👋 <name> joined" line, drawn as the app's own line: set only on the contact's first row of the chat
-   * (`peerSpoke` on its link), when it came in those words. Decided once, as the row is stored, so it never moves to
+   * in those words (`peerSpoke` on its link), whatever they wrote before it. Decided once, as the row is stored, so it never moves to
    * another row as history loads or rows go. Any other row in those words is an ordinary message.
    */
   joinLine?: true;
@@ -1054,9 +1067,10 @@ export interface MessagePage { messages: StoredMessage[]; more: boolean }
 /**
  * A chat's pin as kept (WISP 400 § Pinned message): the message's id both sides know (`id`, "" unpinned), the pinner's
  * number (the highest wins), who pinned (`me`, `peer`, or a member's key) and when it came here. `messageId`: the row
- * here, when it was here then. A private group's keeps the pinner's signature (`k`, `sig`), to pass it on.
+ * here, when it was here then. A private group's keeps the pinner's signature (`k`, `sig`), to pass it on. `removed`: a
+ * 1:1 chat's, its message deleted for everyone: shown as unpinned for good, the pin kept as it came.
  */
-export interface StoredPin extends WirePin { by: string; at: number; messageId?: string; k?: string; sig?: string }
+export interface StoredPin extends WirePin { by: string; at: number; messageId?: string; k?: string; sig?: string; removed?: true }
 
 /** A chat's pin, as the pages and the CLI see it. `id`: the id both sides know the message by ("" once unpinned); `messageId`: the row here. */
 export interface PinView { id: string; by: string; at: number; messageId?: string }

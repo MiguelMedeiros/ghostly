@@ -141,7 +141,10 @@ function relativeExpiry(t: Translate, expiresAt: number, now: number): string {
   return t("payments.invoice.expiresDays", { n: Math.round(left / 86400) });
 }
 
-/** `peerPubKey`: the chat the invoice is in, told once it is paid (a test mint's invoice counts only on the payer's word). */
+/**
+ * `peerPubKey`: the contact told once it is paid (a test mint's invoice counts only on the payer's word): the chat's,
+ * or in a group the writer's.
+ */
 function LightningCard({ invoice, mine, off, peerPubKey }: { invoice: Bolt11Invoice; mine: boolean; off: boolean; peerPubKey?: string }) {
   const { t } = useI18n();
   const all = useWalletPlatform();
@@ -452,9 +455,11 @@ const METHOD_NAME = { cashu: "Cashu", lightning: "Lightning", arkade: "Ark", bar
  * `peerPubKey`: the chat it is in, whose choice of ways of paying, and of each one's networks, decides whether it can be
  * paid or redeemed here: the card's way of paying on the card's own network (Testnet Lightning off, Mainnet on: a
  * Testnet invoice is off here), as the composer and the engine decide.
+ * `payee`: in a group, the contact who wrote it, told (as the chat's contact is) when its invoice is paid.
  */
-export function InvoiceBubble({ money, mine, peerPubKey }: { money: MoneyInText; mine: boolean; peerPubKey?: string }) {
+export function InvoiceBubble({ money, mine, peerPubKey, payee }: { money: MoneyInText; mine: boolean; peerPubKey?: string; payee?: string }) {
   const { t } = useI18n();
+  const told = peerPubKey || payee;
   const wallets = useWalletPlatform();
   const chat = usePlatformValue(() => {
     const peer = servicesPlatform?.getPeer(peerPubKey ?? "");
@@ -474,8 +479,8 @@ export function InvoiceBubble({ money, mine, peerPubKey }: { money: MoneyInText;
     <>
       {money.rest && <p className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap m-0 mb-1.5">{money.rest}</p>}
       <Fragment key={whatItPays(money)}>
-        {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} peerPubKey={peerPubKey} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : money.type === "cashu" ? <CashuCard value={money.value} mine={mine} offOn={(network) => offHere("cashu", network)} onNetwork={setTokenNetwork} />
-          : <MoneyFormatsBubble money={money} mine={mine} off={off} renderLightning={(invoice) => <LightningCard invoice={invoice} mine={mine} off={offHere("lightning", lightningNetworkFor(state, invoice.network))} peerPubKey={peerPubKey} />} />}
+        {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} peerPubKey={told} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : money.type === "cashu" ? <CashuCard value={money.value} mine={mine} offOn={(network) => offHere("cashu", network)} onNetwork={setTokenNetwork} />
+          : <MoneyFormatsBubble money={money} mine={mine} off={off} renderLightning={(invoice) => <LightningCard invoice={invoice} mine={mine} off={offHere("lightning", lightningNetworkFor(state, invoice.network))} peerPubKey={told} />} />}
       </Fragment>
       {off && method && !mine && <p className="text-[11px] text-text-primary/65 mt-1" data-testid="money-off">{t("payments.invoice.methodOff", { method: method === "bitcoin" ? t("payments.invoice.onchainBitcoin") : METHOD_NAME[method] })}</p>}
     </>

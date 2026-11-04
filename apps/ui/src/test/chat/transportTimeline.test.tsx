@@ -345,7 +345,7 @@ describe("the chat's connection control and its panel", () => {
       ["DHT only", "false", false],
     ]);
     // The longer word is the row's tooltip.
-    expect(within(panel()).getByTestId("connection-option-hyperdht")).toHaveAttribute("title", "HyperDHT: Your contact's app doesn't support HyperDHT");
+    expect(within(panel()).getByTestId("connection-option-hyperdht")).toHaveAttribute("title", "Your contact's app doesn't support HyperDHT");
     await user.click(within(panel()).getByTestId("connection-option-iroh"));
     expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "iroh/1" }]);
     // The panel stays open: the choice moves at once, and what is in use follows when the switch lands.
@@ -444,7 +444,7 @@ describe("the chat's connection control and its panel", () => {
     expect(within(panel()).getAllByRole("radio").map(r => [r.getAttribute("aria-label"), r.getAttribute("aria-checked"), (r as HTMLButtonElement).disabled])).toEqual([
       ["Automatic", "false", false], ["WebRTC", "false", true], ["Iroh", "false", false], ["HyperDHT", "false", false], ["DHT only", "true", false],
     ]);
-    expect(within(panel()).getByTestId("connection-option-webrtc")).toHaveAttribute("title", "WebRTC: This app has no WebRTC");
+    expect(within(panel()).getByTestId("connection-option-webrtc")).toHaveAttribute("title", "This app has no WebRTC");
     await user.click(within(panel()).getByTestId("connection-option-auto"));
     expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "auto" }]);
   });

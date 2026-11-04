@@ -19,6 +19,7 @@ const wakes = ({ event_name, event }: Event) =>
   Boolean(new Function("github", "startsWith", `return (${condition.replace(/!=|==/g, (m) => `${m}=`)});`)({ event_name, event, repository }, (s: string, p: string) => String(s).startsWith(p)));
 
 const push = (type: string): Event => ({ event_name: "push", event: { sender: { type, login: type === "Bot" ? "ghostly-merge-queue-mm[bot]" : "MiguelMedeiros" } } });
+const label = (name: string, action = "labeled"): Event => ({ event_name: "pull_request_target", event: { action, label: { name } } });
 const ci = (conclusion: string, event = "pull_request", from = repository): Event => ({
   event_name: "workflow_run",
   event: { workflow_run: { event, conclusion, head_repository: { full_name: from } } },
@@ -35,8 +36,8 @@ describe("merge-queue.yml wakes the train", () => {
     expect(wakes(push("User"))).toBe(true);
     expect(wakes({ event_name: "schedule", event: {} })).toBe(true);
     expect(wakes({ event_name: "workflow_dispatch", event: {} })).toBe(true);
-    expect(wakes({ event_name: "pull_request_target", event: { label: { name: "queue" } } })).toBe(true);
-    expect(wakes({ event_name: "pull_request_target", event: { label: { name: "queue:priority" } } })).toBe(true);
+    expect(wakes(label("queue"))).toBe(true);
+    expect(wakes(label("queue:priority"))).toBe(true);
     expect(wakes(ci("success"))).toBe(true);
     expect(wakes(ci("failure"))).toBe(true);
   });
@@ -55,14 +56,24 @@ describe("merge-queue.yml wakes the train", () => {
   });
 
   it("not for the labels the train puts on a pull request it drops from the line", () => {
-    expect(wakes({ event_name: "pull_request_target", event: { label: { name: "queue:conflict" } } })).toBe(false);
-    expect(wakes({ event_name: "pull_request_target", event: { label: { name: "queue:failed" } } })).toBe(false);
+    expect(wakes(label("queue:conflict"))).toBe(false);
+    expect(wakes(label("queue:failed"))).toBe(false);
   });
 
   it("not for another label or CI on a push", () => {
-    expect(wakes({ event_name: "pull_request_target", event: { label: { name: "kind:bug" } } })).toBe(false);
-    expect(wakes({ event_name: "pull_request_target", event: { label: { name: "queued" } } })).toBe(false);
+    expect(wakes(label("kind:bug"))).toBe(false);
+    expect(wakes(label("queued"))).toBe(false);
     expect(wakes(ci("success", "push"))).toBe(false);
+  });
+
+  // A held pull request waits in line and boards once `queue:hold` comes off: nothing else may wake the train then, and
+  // GitHub runs the schedule only every 10 to 30 minutes.
+  it("for `queue:hold` taken off, and for no other label taken off", () => {
+    expect(wakes(label("queue:hold", "unlabeled"))).toBe(true);
+    // Put on hold: the train reads the labels again at its next run, and the hold only stops what it would do.
+    expect(wakes(label("queue:hold"))).toBe(false);
+    for (const name of ["queue", "queue:priority", "queue:conflict", "queue:failed", "kind:bug"]) expect(wakes(label(name, "unlabeled")), name).toBe(false);
+    expect(text).toMatch(/^ {2}pull_request_target:\n {4}types: \[labeled, unlabeled\]$/m);
   });
 });
 

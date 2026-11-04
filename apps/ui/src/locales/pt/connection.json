@@ -199,6 +199,7 @@
     "noContact": "Nenhum contato ainda",
     "offline": "Offline",
     "onDht": "Na DHT · tentando conexão direta",
+    "onDhtPlain": "Na DHT",
     "publicationUnavailable": "Publicação indisponível",
     "switching": "Mudando · {{transport}}",
     "waitingContact": "Aguardando contato"

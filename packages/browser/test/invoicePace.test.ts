@@ -142,6 +142,26 @@ describe("the invoice of a chat request that was closed (agents#2447)", () => {
   });
 });
 
+describe("a payer's \"I paid\" for one invoice of a wallet with 100 open", () => {
+  it("asks the mint about that invoice alone, then at the fast pace a while; the others keep theirs", async () => {
+    const { wallet, events } = setup();
+    for (let i = 0; i < 100; i++) await wallet.receiveLightning(100 + i);
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    mint.checkMintQuoteBolt11.mockClear();
+    expect(await wallet.vouch(INVOICE)).toBe(true);
+    if (process.env.INVOICE_PACE) console.log(`one "I paid", 100 open mint quotes: ${asked()} checks`);
+    expect(mint.checkMintQuoteBolt11.mock.calls.map(([quote]) => quote)).toEqual(["q1"]);
+    // Named by the payer or not, only this one.
+    expect(await wallet.vouch(INVOICE, false)).toBe(true);
+    expect(asked()).toBe(2);
+    mint.checkMintQuoteBolt11.mockImplementation(async (quote: string) => ({ state: quote === "q1" ? "PAID" : "UNPAID" }));
+    mint.mintProofsBolt11.mockResolvedValue([proof(64, "a"), proof(32, "b"), proof(4, "c")]);
+    await vi.advanceTimersByTimeAsync(4_001);
+    expect(events.onQuotePaid, "fast while the payment settles").toHaveBeenCalledOnce();
+    await wallet.stop();
+  });
+});
+
 describe("a round of the poll (agents#2447)", () => {
   it("reads the quotes store once", async () => {
     const { wallet } = setup();

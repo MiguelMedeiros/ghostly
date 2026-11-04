@@ -106,7 +106,14 @@ describe("renaming a device", () => {
   it("keeps what a slot keeps: 16 bytes, an emoji sequence whole, the joiner inside it", () => {
     expect(renamedDeviceName("A".repeat(16))).toBe("A".repeat(16));
     expect(renamedDeviceName("Mãe 👩‍💻")).toBe("Mãe 👩‍💻");
+    expect(renamedDeviceName("می‌خوام")).toBe("می‌خوام");
     expect(() => renamedDeviceName(42)).toThrow(RenameRefusal);
+  });
+
+  it("refuses a joiner or a variation selector that joins nothing: the name would look like one it is not", () => {
+    for (const name of ["Phone‍", "‍Phone", "Pho‌ne", "Phone️"]) {
+      expect(() => renamedDeviceName(name), JSON.stringify(name)).toThrow(/^rename-name:/);
+    }
   });
 
   it("refuses on a standby, for a device not in the set, and when another device holds the turn", async () => {

@@ -76,6 +76,21 @@ export function stopRunningApps(): void {
   for (const entry of [...running]) entry.stop();
 }
 
+const inputListeners = new Set<() => void>();
+
+/**
+ * The person tapped or typed in an app they are in (its runner's `activity`, WISP 1200): their input there never reaches
+ * this page, so the lock screen counts it here (`onAppInput`), or a game longer than the lock time would be locked out.
+ */
+export function appInput(): void {
+  for (const listener of [...inputListeners]) listener();
+}
+
+export function onAppInput(listener: () => void): () => void {
+  inputListeners.add(listener);
+  return () => { inputListeners.delete(listener); };
+}
+
 type RunOf = { status: string; by?: readonly { name: string }[] };
 
 /**

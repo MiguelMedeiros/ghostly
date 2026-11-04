@@ -146,6 +146,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Connect to an updated peer first", `${BROWSER}/platform/services.ts`],
   ["That recording cannot be sent as a voice message", `${BROWSER}/platform/services.ts`],
   ["This picture cannot be sent: Ghostly could not remove the details saved in it, like where it was taken", `${CORE}/pictureMetadata.ts`],
+  ["This video cannot be sent: Ghostly could not remove the details saved in it, like where it was recorded", `${CORE}/videoMetadata.ts`],
   ["This file cannot be retried", `${BROWSER}/platform/services.ts`],
   ["This file is no longer here", `${BROWSER}/platform/services.ts`],
   // A large file whose copy into this device failed before it was sent: nothing stored, the file is picked again.
@@ -167,6 +168,11 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Could not store the file: The stored copy is gone", `${CORE}/chatFiles.ts`, "Could not store the file: "],
   ["Your contact could not take this file", `${CORE}/chatFiles.ts`],
   ["Cancelled by the sender", `${CORE}/chatFiles.ts`],
+  // A 1:1 file declined or cancelled, by the contact (chatFiles.ts `refusalText`) or here: the bubble's ⓘ says who.
+  ["Declined by your contact", `${CORE}/chatFiles.ts`],
+  ["Cancelled by your contact", `${CORE}/chatFiles.ts`],
+  ["You declined it", `${CORE}/chatFiles.ts`],
+  ["You cancelled it", `${CORE}/chatFiles.ts`],
   // A file said on the DHT floor that ended here before it came (engine/fileDesk.ts `floorRefusal`, `sweep`).
   ["No room on this device for this file", `${BROWSER}/engine/fileDesk.ts`],
   ["Too many files are waiting here", `${BROWSER}/engine/fileDesk.ts`],
@@ -418,6 +424,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["The clipboard's picture is damaged", "apps/desktop/src/clipboard.rs"],
   ["Clipboard unavailable", "apps/desktop/src/clipboard.rs"],
   ["That paste is gone. Paste it again.", "apps/desktop/src/clipboard.rs"],
+  ["That is too large to drop. Send it with + → Document.", "apps/ui/src/lib/pastedFiles.ts"],
+  ["That drop is gone. Drop it again.", "apps/ui/src/lib/pastedFiles.ts"],
   ["Could not read the pasted file: Permission denied (os error 13)", "apps/desktop/src/clipboard.rs", "Could not read the pasted file: {e}"],
   ["Could not read the file: The file changed while it was being copied", `${CORE}/chatFiles.ts`, "Could not read the file: "],
   ["This browser cannot wake Ghostly while it is closed.", "apps/ui/src/lib/wakePush.ts"],
@@ -633,6 +641,16 @@ describe("errors in the app's language", () => {
     expect(knownErrorParts(changed, pt)).toEqual({ title: "Não foi possível ler o arquivo", next: "Envie de novo ou escolha o arquivo outra vez.", detail: changed });
   });
 
+  it.each(LANGUAGES)("a HyperDHT relay the web's listener could not use says what to do next in %s: check it in Settings, or ask whoever runs it", (language) => {
+    const t = translators[language];
+    // A browser sees no status on a refused WebSocket: a relay that leaves this app's origin out reads "unreachable" too.
+    expect(knownErrorParts("Could not reach the HyperDHT relay", t)).toEqual({ title: t("errors.transport.hyperdhtUnreachable"), next: t("errors.transport.hyperdhtUnreachableNext") });
+    expect(knownErrorParts("The HyperDHT relay did not answer", t)).toEqual({ title: t("errors.transport.hyperdhtSilent"), next: t("errors.transport.hyperdhtCheckNext") });
+    expect(knownErrorParts("The HyperDHT relay closed the connection", t)).toEqual({ title: t("errors.transport.hyperdhtClosed"), next: t("errors.transport.hyperdhtCheckNext") });
+    expect(knownErrorParts("The HyperDHT relay did not let this chat listen", t)).toEqual({ title: t("errors.transport.hyperdhtRefused"), next: t("errors.transport.hyperdhtRefusedNext") });
+    for (const key of ["hyperdhtUnreachableNext", "hyperdhtCheckNext", "hyperdhtRefusedNext"] as const) expect(t(`errors.transport.${key}`)).not.toBe(`errors.transport.${key}`);
+  });
+
   it.each(LANGUAGES)("a file said on the floor that ended here says why and what to do in %s, never the engine's English", (language) => {
     const t = translators[language];
     const file = { id: "L-in-abc", name: "x.bin", size: 30_000, mime: "application/octet-stream" };
@@ -646,6 +664,21 @@ describe("errors in the app's language", () => {
     expect(bubble("It was refused here")).toEqual({ status: t("errors.files.floor.refused"), info: { text: t("errors.files.askAgain") } });
     expect(bubble("It did not come within a week")).toEqual({ status: t("errors.files.floor.notInAWeek"), info: { text: t("errors.files.askAgain") } });
     expect(bubble("Cancelled by the sender")).toEqual({ status: t("chat.file.cancelled"), info: { text: t("errors.files.askAgain") } });
+  });
+
+  it.each(LANGUAGES)("a 1:1 file declined or cancelled says who did it behind its ⓘ in %s, never the engine's English", (language) => {
+    const t = translators[language];
+    const file = { id: "L-out-abc", name: "x.bin", size: 30_000, mime: "application/octet-stream" };
+    const bubble = (error: string, direction: "in" | "out") => {
+      const transfer = { state: "failed", direction, transferred: 0, size: 30_000, error } as const;
+      return { status: failedStatus(file, transfer, t), info: failedReason(transfer, t) };
+    };
+    expect(bubble("Declined by your contact", "out")).toEqual({ status: t("chat.file.declined"), info: { text: t("errors.files.declinedThere") } });
+    expect(bubble("Cancelled by your contact", "out")).toEqual({ status: t("chat.file.cancelled"), info: { text: t("errors.files.cancelledThere") } });
+    expect(bubble("You declined it", "in")).toEqual({ status: t("chat.file.declined"), info: { text: t("errors.files.declinedHere") } });
+    expect(bubble("You cancelled it", "in")).toEqual({ status: t("chat.file.cancelled"), info: { text: t("errors.files.cancelledHere") } });
+    expect(bubble("You cancelled it", "out")).toEqual({ status: t("chat.file.cancelled"), info: { text: t("errors.files.cancelledHere") } });
+    for (const key of ["declinedThere", "cancelledThere", "declinedHere", "cancelledHere"] as const) expect(t(`errors.files.${key}`)).not.toBe(`errors.files.${key}`);
   });
 
   it("a group's file every holder served damaged says so, and that the group is asked again, not a contact", () => {

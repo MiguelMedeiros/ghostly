@@ -130,6 +130,7 @@
   "name": "Nom",
   "nameInChats": "Nom dans les discussions",
   "nameLabel": "Nom du profil",
+  "nameSaved": "Nom enregistré",
   "nameStep": {
     "placeholder": "Votre nom",
     "save": "Continuer",

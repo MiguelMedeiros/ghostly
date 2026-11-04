@@ -230,7 +230,7 @@
     "settings": "Réglages",
     "testBalance": "{{amount}} sats de test (sans valeur)",
     "testBalance_one": "{{amount}} sat de test (sans valeur)",
-    "testMintInvoice": "En attente du paiement… Les mints de test marquent chaque facture payée d’eux-mêmes, donc celle-ci ne compte que lorsqu’un contact la paie dans un chat. Pour des sats de test tout de suite, utilisez Obtenir des pièces de test plus haut.",
+    "testMintInvoice": "En attente du paiement… Les mints de test marquent chaque facture payée d’eux-mêmes, donc partagez celle-ci dans un chat 1:1 : elle ne compte que lorsqu’un contact la paie là. Pour des sats de test tout de suite, utilisez Obtenir des pièces de test plus haut.",
     "tokenHint": "Vous avez plutôt un jeton ecash ? Collez-le sous Envoyer.",
     "tokenRedeemedFee": "{{amount}} sats encaissés (la mint a gardé {{fee}} comme frais).",
     "tokenRedeemedFeeTest": "{{amount}} sats de test encaissés (la mint a gardé {{fee}} comme frais).",

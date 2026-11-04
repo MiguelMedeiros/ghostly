@@ -79,6 +79,8 @@ export class PublicProfiles {
   private timer: ReturnType<typeof setInterval> | undefined;
   /** Before the chats are loaded every contact's identity would look ineligible: nothing is pruned until then. */
   private started = false;
+  /** The engine stopped ("Clear all data" empties the stores next): an answer still on its way writes nothing. */
+  private stopped = false;
   private readonly fetch: IdentityFetch;
 
   constructor(private host: PublicProfileHost) {
@@ -96,14 +98,17 @@ export class PublicProfiles {
   /** Starts the periodic clean-up; call once the chats are loaded, so `eligible` sees them. */
   start(): void {
     this.started = true;
+    this.stopped = false;
     void this.prune().catch(() => {});
     this.timer ??= setInterval(() => { void this.prune().catch(() => {}); }, PRUNE_MS);
   }
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
+    this.stopped = true;
   }
   private async save(): Promise<void> {
+    if (this.stopped) return;
     await transact([STORES.settings], stores => { stores[STORES.settings].put(this.cache, KEY); });
   }
 

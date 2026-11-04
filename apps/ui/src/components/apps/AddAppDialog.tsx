@@ -74,6 +74,8 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
       // Read as a store from here: one refused is a link that holds no valid store, not an app refused.
       const found = await engine.call("appStorePreview", { url: link });
       if (current()) setStore(found);
+      // The preview marked the held store (two lists under one number): the Apps page reads its stores again to show it.
+      if (found.held?.equivocation) onStoreAdded();
     } catch (e) { if (current()) setError(appStoreErrorView(e, t)); } finally { if (current()) setBusy(false); }
   };
 
@@ -90,11 +92,13 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
     catch (e) { setError(appStoreErrorView(e, t)); } finally { setBusy(false); }
   };
 
-  // A store the person has already (by its key): Add takes only a newer index of it, so only that is offered.
+  // A store the person has already (by its key): Add takes only a newer index of it, so only that is offered. Another
+  // index under the held sequence is not the one held: the store signed two lists (the engine marked it on the store).
   const held = store?.held;
   const heldLine = !store || !held ? null
     : held.sequence === undefined || store.sequence > held.sequence ? t("apps.add.storeNewer")
-    : store.sequence < held.sequence ? t("apps.add.storeOlder") : t("apps.add.storeHeld");
+    : store.sequence < held.sequence ? t("apps.add.storeOlder")
+    : held.equivocation ? t("apps.add.storeEquivocation") : t("apps.add.storeHeld");
   const offered = !!store && (!held || held.sequence === undefined || store.sequence > held.sequence);
 
   if (app) return <AppInstallDialog source={{ url: app.url }} fetched={app.preview} onClose={onClose} onInstalled={onInstalled} />;
@@ -129,7 +133,7 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
               {store.description && <p dir="auto" className="text-xs text-text-secondary whitespace-pre-line [overflow-wrap:anywhere]">{store.description}</p>}
               {store.expired && <p className="text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires, t.language) })}</p>}
             </div>
-            {heldLine && <Notice testId="apps-add-store-held">{heldLine}</Notice>}
+            {heldLine && <Notice testId="apps-add-store-held" tone={held?.equivocation ? "warning" : undefined}>{heldLine}</Notice>}
             {/* A store held is still read from its own link: this one is not where it is read from. */}
             {!held && <Notice>{t("apps.add.storeReads", { host: hostOf(store.url) })}</Notice>}
             {/* Wraps rather than push Cancel off the screen (a phone at a large text size), as the install screen's. */}

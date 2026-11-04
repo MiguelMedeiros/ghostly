@@ -61,10 +61,23 @@ describe("Add, the link of a store the person has already", () => {
   };
 
   it("the same index: says it is on the Apps page, with Close and no Add store", async () => {
-    const { card } = await check(held(5, 5));
+    const { card, onStoreAdded } = await check(held(5, 5));
     expect(within(card).getByTestId("apps-add-store-held")).toHaveTextContent("You have this store already: it is on your Apps page.");
+    expect(onStoreAdded).not.toHaveBeenCalled();
     expect(within(card).queryByTestId("apps-add-store-confirm")).not.toBeInTheDocument();
     expect(within(card).queryByRole("button", { name: "Add store" })).not.toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "Close" })).toHaveFocus();
+  });
+
+  it("another index under the held sequence: says the store signed two lists, not that it is the one held, and offers nothing to add", async () => {
+    const { card, onStoreAdded, added } = await check(() => ({ ...preview(), sequence: 5, held: { sequence: 5, equivocation: true } }));
+    // The engine marked the held store: the Apps page reads its stores again, and nothing is added.
+    expect(onStoreAdded).toHaveBeenCalledTimes(1);
+    expect(added).toEqual([]);
+    const line = within(card).getByTestId("apps-add-store-held");
+    expect(line).toHaveTextContent("This link holds a different copy of this store under the same number: the store signed two different lists. Ghostly kept yours.");
+    expect(line).not.toHaveTextContent("You have this store already");
+    expect(within(card).queryByTestId("apps-add-store-confirm")).not.toBeInTheDocument();
     expect(within(card).getByRole("button", { name: "Close" })).toHaveFocus();
   });
 

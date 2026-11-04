@@ -6,6 +6,7 @@ import { edgeLabel } from "../../lib/groups";
 import { GroupMembersDialog } from "../../components/GroupMembersDialog";
 import { groupView, type StatePatch } from "../fakeEngine";
 import { renderApp } from "../render";
+import { everythingOnScreen } from "../onScreen";
 
 // covers: groups.connection, groups.connection.auto-reconnect, transport.indicator
 
@@ -120,6 +121,17 @@ describe("GroupConnection: the popover lists every member's edge", () => {
     expect(screen.queryByText("The member's key did not match")).toBeNull();
     // Honest about transports: WebRTC, and Iroh or HyperDHT with a member that has no WebRTC; no DHT-only delivery.
     expect(screen.getByTestId("group-connection-note")).toHaveTextContent("DHT-only delivery is not offered in groups yet");
+  });
+
+  it("keeps since when a member is away current while it stays open, with no state from the engine", async () => {
+    everythingOnScreen();
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: NOW });
+    try {
+      await open(active([me, alice(), bob({ state: "waiting", transport: undefined, lastSeenAt: NOW - 5 * 60_000 })]));
+      expect(rows()[1].status).toBe("Not reachable · last seen 5 min ago");
+      await act(() => vi.advanceTimersByTimeAsync(2 * 60_000));
+      expect(rows()[1].status).toBe("Not reachable · last seen 7 min ago");
+    } finally { vi.useRealTimers(); }
   });
 
   it("gives a member's name its own direction, so in a right-to-left app a long English name is cut at its end", async () => {

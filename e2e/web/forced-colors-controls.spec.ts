@@ -33,8 +33,11 @@ const look = (el: Locator): Promise<Look> => el.evaluate((node) => {
   return { bg: text(seen(node)), border: parseFloat(style.borderTopWidth), borderColor: text(over(rgba(style.borderTopColor), around)), color: text(over(rgba(style.color), seen(node))), around: text(around) };
 });
 
-/** No transition between two reads: a colour read mid-way is neither state. */
-const still = (page: Page) => page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; }" });
+/**
+ * No transition or animation between two reads: a colour read mid-way is neither state, and a box read while Home's
+ * column still slides in (`animate-fade-in`, 4 px up, played again each time Home opens) is not where it stays.
+ */
+const still = (page: Page) => page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; animation: none !important; }" });
 
 test("forced colors keep Settings' switches, the chosen Mode and Chat list option and Home's New chat drawn", { tag: ["@feature:app.accessibility", "@feature:app.theme"] }, async ({ peer }) => {
   const { page } = await peer("alice");
@@ -103,7 +106,9 @@ test("forced colors keep Settings' switches, the chosen Mode and Chat list optio
   expect(button.border, "New chat border in forced colors").toBeGreaterThanOrEqual(1);
   expect(button.borderColor, "New chat border against the page").not.toBe(button.around);
 
-  // Back in normal colours, New chat has its old size.
+  // Back in normal colours, New chat has its old size. Its place is not compared: Home centres its content, and what
+  // shows above it after a visit to Settings can move it by a pixel or two.
   await page.emulateMedia({ forcedColors: "none", colorScheme: "dark" });
-  expect(await newChat.boundingBox()).toEqual(newChatBox);
+  const back = (await newChat.boundingBox())!;
+  expect({ width: back.width, height: back.height }).toEqual({ width: newChatBox!.width, height: newChatBox!.height });
 });

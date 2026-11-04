@@ -353,6 +353,21 @@ describe("paying on Ark or USDT without a request", () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it("after the device clock goes back an hour, the contact's next ask is answered, not an hour later", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: 10 * 3_600_000 });
+    try {
+      const { d, sent } = desk();
+      await d.start();
+      const ask = (n: number) => d.onPaymentAsk("l1", { id: `ask_00000${n}`, timestamp: n, amount: { value: "10", asset: "sat" }, method: "arkade" });
+      await ask(1);
+      vi.setSystemTime(9 * 3_600_000 + 60_000);
+      await ask(2);
+      expect(sent.map((s) => s.frame.ask)).toEqual(["ask_000001", "ask_000002"]);
+      await ask(3);
+      expect(sent, "the pace holds from the new now").toHaveLength(2);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("the payer takes a request as the answer only to an ask it made: same chat, way of paying and amount", async () => {
     const { d, sent } = desk();
     await d.start();

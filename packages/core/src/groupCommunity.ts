@@ -475,6 +475,11 @@ export interface CommunitySessionHooks {
    * Undefined for anything else. Asked once the frame is read, before the `app` hook.
    */
   lasting?(message: CommunityIncomingApp): string | undefined;
+  /**
+   * Whether an application frame (mine or a member's) is only a hint (a `group-have`, WISP 503): relayed live like any
+   * frame, but never kept, so it takes no place among those a member back from away gets.
+   */
+  fleeting?(frame: Record<string, unknown>): boolean;
   /** An application frame for the group (see `sendApp`). */
   app?(message: CommunityIncomingApp): Promise<void> | void;
   /** A payload another member sealed to me (see `sendPair`). Payloads to others are carried, never opened. */
@@ -677,6 +682,8 @@ export class CommunitySession {
   private pendingMeta: { from: string; frame: unknown } | undefined;
   /** The store's frames the app holds with their messages (`storeKey` → message id): in memory here, not in what is saved. */
   private readonly onRows = new Map<string, string>();
+  /** The oldest epoch whose seen marks are kept, as of the last `pruneSeen`. In memory only. */
+  private seenFrom = -1;
 
   /** `rows`: the frames the app holds with the messages it stored (`CommunityIncomingMessage.frame`). They join the store. */
   constructor(state: CommunityState, private readonly hooks: CommunitySessionHooks, rows: readonly { id: string; frame: CommunityMessageFrame }[] = []) {
@@ -696,6 +703,7 @@ export class CommunitySession {
         : frame.t === "group-secret" ? `secret:${frame.h}` : undefined,
     });
     this.rebuild();
+    this.pruneSeen();
     // A branch kept under the older rule (longest first) may be the better one now: it keeps an admin change mine dropped.
     if ((state.status === "active" || state.status === "lost") && this.bestBranch().tip !== this.topHash) void this.serialize(() => this.chooseBranch());
   }
@@ -1065,8 +1073,8 @@ export class CommunitySession {
     return counts;
   }
 
-  /** What each of two branches holds after their common parent: whether it has an admin change, and its first commit. */
-  private parting(a: Branch, b: Branch, counts: number[]): { parent: number; admin: [boolean, boolean]; first: [string, string] } {
+  /** What each of two branches holds after their common parent: whether it has an admin change, its first commit, and its hand-overs. */
+  private parting(a: Branch, b: Branch, counts: number[]): { parent: number; admin: [boolean, boolean]; first: [string, string]; roles: [string[], string[]] } {
     const m = Math.min(a.fork, b.fork);
     // Off the same main commit, the side paths may share their start too.
     let shared = 0;
@@ -1076,21 +1084,62 @@ export class CommunitySession {
       const path = x.path.slice(shared);
       const admin = counts[x.fork] - counts[m] > 0 || path.some(h => ADMIN_ONLY.has(this.known.get(h)!.k));
       const first = x.fork > m ? communityCommitHash(this.state.chain[m + 1]) : path[0] ?? "";
-      return { admin, first };
+      // Its hand-overs: admin changes, so none on a side without one.
+      const roles = !admin ? [] : [
+        ...this.state.chain.slice(m + 1, x.fork + 1).filter(c => c.k === "role").map(c => communityCommitHash(c)),
+        ...path.filter(h => this.known.get(h)!.k === "role"),
+      ];
+      return { admin, first, roles };
     };
     const sa = side(a), sb = side(b);
-    return { parent, admin: [sa.admin, sb.admin], first: [sa.first, sb.first] };
+    return { parent, admin: [sa.admin, sb.admin], first: [sa.first, sb.first], roles: [sa.roles, sb.roles] };
   }
 
   /**
-   * Is branch `a` better than branch `b`? After their common parent: the one that keeps an admin
-   * change first, however short and however far back it parts; then the longer; then, parting within
-   * the window, the lower hash of the first commit. Both holding admin changes means the admin signed
-   * two histories: `b` stays (a fresh one halts the group, see `receiveCommit`).
+   * Whether a hand-over (`h`, a `role`) went to a member whose leave of that admission I know on a branch that does not
+   * hold the hand-over: signed on a view from before the leave, it would leave the role with someone gone for good (a
+   * leave never names the admin). Not when that member signed a commit after the hand-over: it took the role while still
+   * in, so its leave came later, and a branch from before the hand-over must not undo what it and later admins did.
+   */
+  private handedToLeaver(h: string): boolean {
+    const role = this.known.get(h)!, at = this.mainIndex.get(h), fork = this.branch(h)?.fork;
+    if (fork === undefined || this.signedAfter(h, role.s)) return false;
+    // The main branch past a side hand-over's fork, and the side: commits before it are its own history.
+    const others = [...(at === undefined ? this.state.chain.slice(fork + 1) : []), ...this.state.side];
+    return others.some(c => {
+      if (c.k !== "leave" || c.s !== role.s) return false;
+      // Not one after the hand-over (the role went on, then that member left).
+      const b = this.branch(communityCommitHash(c));
+      if (!b || (at !== undefined ? b.fork >= at : b.path.includes(h))) return false;
+      return leaveStands(c, this.ancestry(role.p));
+    });
+  }
+
+  /** Whether `key` signed a commit I know that comes after `h` (on the main branch past it, or on a side branch through it). */
+  private signedAfter(h: string, key: string | undefined): boolean {
+    const at = this.mainIndex.get(h);
+    if (!key) return false;
+    if (at !== undefined && this.state.chain.slice(at + 1).some(c => c.by === key)) return true;
+    return this.state.side.some(c => {
+      if (c.by !== key) return false;
+      const b = this.branch(communityCommitHash(c));
+      return !!b && (at !== undefined ? b.fork >= at : b.path.includes(h));
+    });
+  }
+
+  /**
+   * Is branch `a` better than branch `b`? After their common parent: first, the one that does not hand the
+   * role to a member who left (`handedToLeaver`); then the one that keeps an admin change, however short
+   * and however far back it parts; then the longer; then, parting within the window, the lower hash of the
+   * first commit. Both holding admin changes means the admin signed two histories: `b` stays (a fresh one
+   * halts the group, see `receiveCommit`).
    */
   private better(a: Branch, b: Branch, counts: number[]): boolean {
     if (a.tip === b.tip) return false;
-    const { parent, admin, first } = this.parting(a, b, counts);
+    const { parent, admin, first, roles } = this.parting(a, b, counts);
+    // A hand-over on a view from before the new admin's leave: that branch loses, or the group keeps an admin who is gone.
+    const toLeaver = roles.map(r => r.some(h => this.handedToLeaver(h)));
+    if (toLeaver[0] !== toLeaver[1]) return toLeaver[1];
     if (admin[0] !== admin[1]) return admin[0];
     if (admin[0]) return false;
     const ea = this.known.get(a.tip)!.e, eb = this.known.get(b.tip)!.e;
@@ -1160,7 +1209,8 @@ export class CommunitySession {
       // The admin's change on a branch parting from one that holds another admin change: two histories. From a former
       // admin (my branch holds its hand-over), refused as above; from the admin of my tip, the group halts.
       if (ADMIN_ONLY.has(commit.k) && admin[1]) {
-        if (commit.by !== this.admin) { this.known.delete(h); this.rosters.delete(h); return false; }
+        // A hand-over to a member who left never wins either (`better`): the admin went on without it, not a second history.
+        if (commit.by !== this.admin || (commit.k === "role" && this.handedToLeaver(h))) { this.known.delete(h); this.rosters.delete(h); return false; }
         await this.fork(`The admin signed changes on two branches after epoch ${this.state.chain[branch.fork].e}`);
         return true;
       }
@@ -1284,6 +1334,23 @@ export class CommunitySession {
       if (!keep.has(h)) { this.known.delete(h); this.rosters.delete(h); void c; }
     }
     this.pruneSecrets();
+    this.pruneSeen();
+  }
+
+  /**
+   * Seen marks of epochs older than the window go, every sender's, once the branch I follow moves past them: as
+   * `markSeen` drops the sender's it marks. Before, only that sender's went, so a member who left or went quiet kept
+   * an entry for every epoch it wrote in, and its window of numbers, for the life of the group (agents#2904). Those
+   * within the window stay, a leaver's too: what it wrote before its leave is still taken up to its mark there.
+   */
+  private pruneSeen(): void {
+    const from = this.epoch - COMMUNITY_LIMITS.window;
+    if (from === this.seenFrom) return;
+    this.seenFrom = from;
+    for (const [sender, bySender] of Object.entries(this.state.seen)) {
+      for (const key of Object.keys(bySender)) if (Number(key.split(":")[0]) < from) delete bySender[key];
+      if (!Object.keys(bySender).length) delete this.state.seen[sender];
+    }
   }
 
   private pruneSecrets(): void {
@@ -1586,14 +1653,21 @@ export class CommunitySession {
   /**
    * An application frame to everyone in the group (a note about a payment, a request anyone may pay): sealed to
    * the epoch like text, signed, kept and caught up like text, and handed to the other members' `app` hook
-   * instead of their history.
+   * instead of their history. A fleeting one (`CommunitySessionHooks.fleeting`) is only said to those up now.
    */
   sendApp(frame: Record<string, unknown>, nick?: string, now = Date.now()): Promise<{ id: string } | { error: string }> {
     return this.serialize(async () => {
       if (!this.isMember) return { error: this.state.statusReason ?? "You are not in this group" };
       if (!isObject(frame) || utf8Encode(JSON.stringify(frame)).length > COMMUNITY_LIMITS.appBytes) return { error: "Too large for the group" };
-      const sent = await this.sendPayload(() => ({ x: frame }), nick, now);
+      const fleeting = this.hooks.fleeting?.(frame) === true;
+      const sent = await this.sendPayload(() => ({ x: frame }), nick, now, !fleeting);
       if ("error" in sent) return sent;
+      if (fleeting) {
+        // Its sequence number is spent: saved before it goes, so it is never sealed twice.
+        await this.persist();
+        this.hooks.broadcast(sent.frame);
+        return { id: sent.id };
+      }
       this.keepLasting({ id: sent.id, sender: this.myKey, epoch: sent.frame.e, timestamp: sent.frame.ts, frame }, sent.frame);
       await this.say(sent.frame);
       return { id: sent.id };
@@ -1662,7 +1736,7 @@ export class CommunitySession {
   }
 
   /** Seals, signs and keeps a frame under the current epoch (the caller holds the queue, persists and broadcasts). */
-  private async sendPayload(body: (header: Pick<CommunityMessageFrame, "g" | "e" | "h" | "s" | "n" | "ts">) => Record<string, unknown>, nick: string | undefined, now: number): Promise<{ id: string; frame: CommunityMessageFrame } | { error: string }> {
+  private async sendPayload(body: (header: Pick<CommunityMessageFrame, "g" | "e" | "h" | "s" | "n" | "ts">) => Record<string, unknown>, nick: string | undefined, now: number, kept = true): Promise<{ id: string; frame: CommunityMessageFrame } | { error: string }> {
     const h = this.topHash, secret = this.state.secrets[h];
     if (!secret) return { error: "This epoch's key has not arrived yet. Wait for a member to catch you up." };
     if (this.state.seqH !== h) { this.state.seq = 0; this.state.seqH = h; }
@@ -1677,7 +1751,7 @@ export class CommunitySession {
     const unsigned = { ...header, nn, c };
     const frame: CommunityMessageFrame = { t: "group-msg", v: 2, ...unsigned, sig: toBase64Url(sign(messageSigned(unsigned), this.identity.seed)) };
     this.markSeen(frame);
-    this.keep(frame);
+    if (kept) this.keep(frame);
     return { id: communityMessageId(this.myKey, header.e, header.h, n), frame };
   }
 
@@ -2035,7 +2109,7 @@ export class CommunitySession {
     if ([text !== undefined, isObject(parsed.x), isObject(parsed.p)].filter(Boolean).length !== 1) return false;
     const nick = typeof parsed.nick === "string" ? sanitizeNick(parsed.nick) : undefined;
     if (nick && this.state.nicks[raw.s] !== nick) { this.state.nicks[raw.s] = nick; this.hooks.changed(); }
-    let onRow: boolean | void = false;
+    let onRow: boolean | void = false, fleeting = false;
     if (text !== undefined) {
       const mentions = validMentions(parsed.m, text, false);
       // A reply that does not hold is left out, never the text.
@@ -2049,7 +2123,8 @@ export class CommunitySession {
     }
     else if (isObject(parsed.x)) {
       const app = { id, sender: raw.s, epoch: raw.e, timestamp: raw.ts, frame: parsed.x };
-      this.keepLasting(app, raw);
+      fleeting = this.hooks.fleeting?.(parsed.x) === true;
+      if (!fleeting) this.keepLasting(app, raw);
       await this.hooks.app?.(app);
     }
     else {
@@ -2067,7 +2142,8 @@ export class CommunitySession {
     // The first one, should it come too (from a member who carried it): a duplicate. Only under a commit I know: a
     // place naming none would be a new entry in `seen` per frame, never pruned before the window passes it.
     if (original && firstAt) this.markSeen({ ...raw, ...original });
-    this.keep(raw);
+    // A hint (`hooks.fleeting`) is passed on, never kept.
+    if (!fleeting) this.keep(raw);
     if (onRow === true) this.onRows.set(storeKey(raw), id);
     // The message itself is stored already; what changed here (seen, store) is saved in a batch.
     this.persistSoon();
