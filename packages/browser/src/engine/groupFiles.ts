@@ -955,22 +955,27 @@ export class GroupFileDesk {
     const theirs = active.filter(a => a.peer === edge.peer);
     const placed = theirs.length > 1 || theirs.some(a => a.sending || this.deps.now() - a.since >= GROUP_FILE_LIMITS.doneWaitMs);
     // All places taken: a member holding none gets the one held longest past `servePlaceMs`, or the slowest, if there is one.
-    if (active.length >= GROUP_FILE_LIMITS.serveAtOnce && (placed || !this.makeRoom())) { edge.busy.set(messageId, this.deps.now()); return "busy"; }
+    const full = active.length >= GROUP_FILE_LIMITS.serveAtOnce;
+    const room = full && !placed ? this.roomFor() : undefined;
+    if (full && !room) { edge.busy.set(messageId, this.deps.now()); return "busy"; }
     if (placed) return "busy";
     const today = Math.floor(this.deps.now() / 86_400_000);
     if (this.served.day !== today) this.served = { day: today, bytes: 0 };
-    const reserved = this.servingNow().reduce((sum, a) => sum + a.size, 0);
-    return this.served.bytes + reserved + kept.meta.size > GROUP_FILE_LIMITS.serveBytesPerDay ? "day" : null;
+    // The transfer ended for this member counts what it sent instead of its share: ended only when the day has room.
+    const reserved = active.reduce((sum, a) => sum + a.size, 0) - (room ? room.size - room.sent : 0);
+    if (this.served.bytes + reserved + kept.meta.size > GROUP_FILE_LIMITS.serveBytesPerDay) return "day";
+    if (room) this.cut(room);
+    return null;
   }
 
   /**
-   * Ends a served transfer for a member that holds no place: the one that has held its place longest, once past
-   * `servePaceMs`; else the slowest of those under way for `servePaceMs` with more left to go at their pace than they
-   * have been served (and than `servePaceMs`), each member's file once (its asker goes on from what it stored, from the
-   * next holder or this one, and the members on fast links do not wait for the slow ones that asked first). False when
-   * none is.
+   * The served transfer to end for a member that holds no place (undefined when none is): the one that has held its place
+   * longest, once past `servePaceMs`; else the slowest of those under way for `servePaceMs` with more left to go at their
+   * pace than they have been served (and than `servePaceMs`), each member's file once (its asker goes on from what it
+   * stored, from the next holder or this one, and the members on fast links do not wait for the slow ones that asked
+   * first). With its share of the day (as in `servingNow`) and what it sent.
    */
-  private makeRoom(): boolean {
+  private roomFor(): { edge: Edge; wire: string; size: number; sent: number; paced: boolean } | undefined {
     const now = this.deps.now();
     let oldest: { edge: Edge; wire: string; from: number } | undefined;
     let slowest: { edge: Edge; wire: string; pace: number } | undefined;
@@ -984,10 +989,22 @@ export class GroupFileDesk {
       if (!slowest || pace < slowest.pace) slowest = { edge, wire, pace };
     }
     const cut = oldest ?? slowest;
-    if (!cut) return false;
-    if (!oldest) cut.edge.paced.add(cut.edge.serving.get(cut.wire)!);
-    cut.edge.files.cancel("out", cut.wire);
-    return true;
+    if (!cut) return undefined;
+    const sent = cut.edge.files.sent(cut.wire);
+    return { edge: cut.edge, wire: cut.wire, size: Math.max(cut.edge.files.get("out", cut.wire)!.file.size, sent), sent, paced: !oldest };
+  }
+
+  /** Ends the served transfer `roomFor` chose; one ended for its pace is not served its member again. */
+  private cut(room: { edge: Edge; wire: string; paced: boolean }): void {
+    if (room.paced) room.edge.paced.add(room.edge.serving.get(room.wire)!);
+    room.edge.files.cancel("out", room.wire);
+  }
+
+  /** Ends a served transfer for a member that holds no place (`roomFor`): false when none is. */
+  private makeRoom(): boolean {
+    const room = this.roomFor();
+    if (room) this.cut(room);
+    return !!room;
   }
 
   /**
