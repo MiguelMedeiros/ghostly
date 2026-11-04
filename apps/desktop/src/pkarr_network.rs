@@ -140,11 +140,23 @@ const DHT_STARTING: Duration = Duration::from_secs(60);
 /// and a contact that reads the DHT alone never learned how to dial (two Linux Desktops DHT direct with Iroh's relay out
 /// of reach, 2026-10-07; a relay homing a few seconds later used to put a third). So the newest packet of a key is put
 /// again, this often, once the one before it is done; an older one gives way; after `DHT_NEWER_PUT_FOR` it gives up.
+/// With no other put of the key under way, the refusal is the DHT nodes' own (they hold a later-dated packet), and it
+/// gives way at once: `Pkarr::publish_dated` dates the records past that packet.
 const DHT_NEWER_PUT_EVERY: Duration = Duration::from_millis(250);
 const DHT_NEWER_PUT_FOR: Duration = Duration::from_secs(30);
 
 /// Lookups in a row that heard from no DHT node at all before reads go to the relays too (see the module's notes).
 const DHT_SILENT_LOOKUPS: u32 = 2;
+
+/// The puts of one key under way on a `MainlineNode`.
+struct PutsUnderWay {
+    /// The newest packet asked to be put.
+    newest: pkarr::Timestamp,
+    /// How many puts run.
+    running: usize,
+    /// How many have ended since the first of them began.
+    ended: u64,
+}
 
 /// The DHT as this client reaches it: the Mainline DHT itself, or, in tests, a stand-in behind a Pkarr client.
 #[derive(Clone)]
@@ -182,8 +194,8 @@ pub struct MainlineNode(
     /// The node reads go to (and puts, when the put node finds no node in time).
     watch::Receiver<Option<Result<DhtClient, String>>>,
     Instant,
-    /// The newest packet asked to be put, per key, while its put runs (`DHT_NEWER_PUT_EVERY`).
-    Arc<Mutex<HashMap<PublicKey, pkarr::Timestamp>>>,
+    /// The puts of each key under way (`DHT_NEWER_PUT_EVERY`).
+    Arc<Mutex<HashMap<PublicKey, PutsUnderWay>>>,
     /// The node puts go to (`DHT_PUT_REQUEST_TIMEOUT`).
     watch::Receiver<Option<Result<DhtClient, String>>>,
 );
@@ -232,13 +244,28 @@ impl MainlineNode {
             0
         };
         let (key, at) = (packet.public_key(), packet.timestamp());
-        {
-            let mut newest = self.2.lock().unwrap();
-            if newest.get(&key).is_none_or(|known| *known < at) {
-                newest.insert(key.clone(), at);
-            }
-        }
-        let is_newest = || self.2.lock().unwrap().get(&key) == Some(&at);
+        let ended = {
+            let mut puts = self.2.lock().unwrap();
+            let puts = puts.entry(key.clone()).or_insert(PutsUnderWay {
+                newest: at,
+                running: 0,
+                ended: 0,
+            });
+            puts.newest = puts.newest.max(at);
+            puts.running += 1;
+            std::sync::atomic::AtomicU64::new(puts.ended)
+        };
+        // Refused while another put of the key runs, or one ended since the last try (the refusal may be its): that
+        // put's refusal, tried again. With none, the DHT nodes' own.
+        let is_newest = || {
+            let puts = self.2.lock().unwrap();
+            let Some(puts) = puts.get(&key) else {
+                return false;
+            };
+            let another = puts.running > 1
+                || ended.swap(puts.ended, std::sync::atomic::Ordering::Relaxed) != puts.ended;
+            puts.newest == at && another
+        };
         let quick = match made(&self.3).await {
             Ok(dht) => Some(put_on(&dht, packet, &is_newest, retries).await),
             Err(_) => None,
@@ -255,9 +282,13 @@ impl MainlineNode {
             }
             Some(result) => result.map_err(|e| e.to_string()),
         };
-        let mut newest = self.2.lock().unwrap();
-        if newest.get(&key) == Some(&at) {
-            newest.remove(&key);
+        let mut puts = self.2.lock().unwrap();
+        if let Some(under_way) = puts.get_mut(&key) {
+            under_way.running -= 1;
+            under_way.ended += 1;
+            if under_way.running == 0 {
+                puts.remove(&key);
+            }
         }
         result
     }
@@ -434,6 +465,8 @@ struct Inner {
 
 struct State {
     newest: HashMap<PublicKey, Seen>,
+    /// The date of the last packet signed here, per key (`Pkarr::next_timestamp`).
+    dated: HashMap<PublicKey, pkarr::Timestamp>,
     /// Lookups in flight, one per key: a poll never starts a second.
     lookups: HashMap<PublicKey, watch::Receiver<u8>>,
     /// The relays, read and written with plain HTTP (`READ_TIMEOUT` / `WRITE_TIMEOUT`, `If-Match` on
@@ -598,6 +631,15 @@ fn publish_failure(errors: &[(String, WriteError)]) -> String {
 /// The start of a publish error that is a wait (`publish_failure`): packages/core's `heldBackError` reads it.
 pub const PUBLISH_HELD_BACK: &str = "Publish held back";
 
+/// A relay's 409: it holds a packet of the key dated at or after this one.
+const RELAY_HAS_NEWER: &str = "relay has a more recent packet";
+
+/// A publish error that says some write was refused for a later-dated packet of the key: a relay's 409, or the DHT
+/// nodes' 302 (pkarr's "packet is not the most recent").
+fn refused_for_newer(error: &str) -> bool {
+    error.contains(RELAY_HAS_NEWER) || error.contains(&PublishError::NotMostRecent.to_string())
+}
+
 fn short(key: &PublicKey) -> String {
     key.to_z32().chars().take(6).collect()
 }
@@ -720,6 +762,7 @@ impl Pkarr {
             .map_err(|e| format!("HTTP client: {e}"))?;
         let state = State {
             newest: HashMap::new(),
+            dated: HashMap::new(),
             lookups: HashMap::new(),
             relays: relays
                 .iter()
@@ -988,7 +1031,8 @@ impl Pkarr {
                 result = &mut settled => return self.published(&key, started, "settled", result),
                 _ = async { let _ = first_ok.wait_for(|ok| *ok).await; } => return self.published(&key, started, "written", Ok(())),
                 answer = &mut read => {
-                    let visible = matches!(&answer, RelayAnswer::Packet(seen) if seen.timestamp() >= wanted);
+                    // A later packet this app did not sign (a clock ahead dated it) is not this one out there.
+                    let visible = matches!(&answer, RelayAnswer::Packet(seen) if seen.timestamp() >= wanted && self.signed_by_now(&key, seen.timestamp()));
                     self.relay_answered(&url, answer);
                     if visible { return self.published(&key, started, "visible", Ok(())); }
                 }
@@ -998,6 +1042,63 @@ impl Pkarr {
             result = &mut settled => self.published(&key, started, if read_backs > 0 { "settled late" } else { "settled" }, result),
             _ = async { let _ = first_ok.wait_for(|ok| *ok).await; } => self.published(&key, started, "written", Ok(())),
         }
+    }
+
+    /// The time the next packet of `key` signed here is dated: now, and past every packet of it this app signed or
+    /// read. The clock that dated those may not be this one's: one that ran ahead and was set right left packets the DHT
+    /// and the relays hold, and refuse anything dated before them.
+    pub fn next_timestamp(&self, key: &PublicKey) -> pkarr::Timestamp {
+        let mut state = self.inner.state.lock().unwrap();
+        let now = pkarr::Timestamp::now();
+        let floor = state
+            .dated
+            .get(key)
+            .copied()
+            .into_iter()
+            .chain(state.newest.get(key).map(|seen| seen.packet.timestamp()))
+            .max();
+        let at = match floor {
+            Some(floor) if floor >= now => pkarr::Timestamp::from(floor.as_u64() + 1),
+            _ => now,
+        };
+        state.dated.insert(key.clone(), at);
+        at
+    }
+
+    /// A packet of `key` dated `at` is no later than the last one signed here (`next_timestamp`); true for a key this
+    /// app dates nothing of.
+    fn signed_by_now(&self, key: &PublicKey, at: pkarr::Timestamp) -> bool {
+        let state = self.inner.state.lock().unwrap();
+        state.dated.get(key).is_none_or(|last| at <= *last)
+    }
+
+    /// Signs with `sign`, dated by `next_timestamp`, and publishes. A write refused for a later-dated packet of the key
+    /// (the DHT nodes' 302, a relay's 409), and no write taking it: that packet is read, and the records go again,
+    /// dated just past it, once. Before, every publish of a key was refused after a clock that ran ahead was set right
+    /// and the app restarted, until the clock passed the held packet's date, however long that took.
+    pub async fn publish_dated(
+        &self,
+        key: &PublicKey,
+        sign: impl Fn(pkarr::Timestamp) -> Result<SignedPacket, String>,
+    ) -> Result<(), String> {
+        let packet = sign(self.next_timestamp(key))?;
+        let Err(error) = self.publish(&packet).await else {
+            return Ok(());
+        };
+        if !refused_for_newer(&error) {
+            return Err(error);
+        }
+        let held = match self.resolve(key).await {
+            Some(held) if held.timestamp() >= packet.timestamp() => held.timestamp(),
+            _ => return Err(error),
+        };
+        diagnostics::log(&format!(
+            "pkarr publish {} redated past a packet {} ms ahead",
+            short(key),
+            (held.as_u64() - packet.timestamp().as_u64()) / 1000
+        ));
+        let again = sign(self.next_timestamp(key))?;
+        self.publish(&again).await
     }
 
     fn published(
@@ -1493,7 +1594,7 @@ impl Pkarr {
                 retry: REST,
                 why: "rate limited".into(),
             }),
-            409 => Err(WriteError::Failed("relay has a more recent packet".into())),
+            409 => Err(WriteError::Failed(RELAY_HAS_NEWER.into())),
             428 => Err(WriteError::Failed(
                 "relay is still putting another packet".into(),
             )),
@@ -3180,6 +3281,91 @@ mod direct {
         }
         assert_eq!(found.unwrap().timestamp(), hello.timestamp());
         assert_eq!(bob.status().path, Some(Path::Dht));
+    }
+
+    fn records(value: &str) -> Vec<crate::records::RecordInput> {
+        vec![crate::records::RecordInput {
+            label: "_n".into(),
+            value: value.into(),
+            ttl: None,
+        }]
+    }
+
+    /// A packet of `keypair` dated two hours ahead, as a clock that ran ahead dated it before it was set right.
+    fn from_a_fast_clock(keypair: &Keypair) -> SignedPacket {
+        let ahead = pkarr::Timestamp::now().as_u64() + 2 * 3_600 * 1_000_000;
+        SignedPacket::builder()
+            .timestamp(pkarr::Timestamp::from(ahead))
+            .txt(
+                "_n".try_into().unwrap(),
+                "fast clock".try_into().unwrap(),
+                300,
+            )
+            .sign(keypair)
+            .unwrap()
+    }
+
+    /// A clock that ran ahead, set right, then a restart: every DHT node holds the key's packet the fast clock dated and
+    /// refuses each put of it (302). Before, each publish was refused until the clock passed that date (and was tried
+    /// again for 30 s each time, as if another put of the key were under way); now it goes out dated past that packet.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn after_a_restart_a_publish_the_dht_refuses_for_a_later_dated_packet_goes_out_dated_past_it(
+    ) {
+        let testnet = mainline::Testnet::builder(8).build().unwrap();
+        let bootstrap: Vec<SocketAddrV4> = testnet
+            .bootstrap
+            .iter()
+            .map(|node| node.parse().unwrap())
+            .collect();
+        let app = || Pkarr::direct(Dht::mainline(Some(bootstrap.clone())).unwrap(), &[]).unwrap();
+        let keypair = Keypair::random();
+        let key = keypair.public_key();
+        let fast = from_a_fast_clock(&keypair);
+        app().publish(&fast).await.unwrap();
+        let restarted = app();
+        let started = Instant::now();
+        let result = crate::records::publish(&restarted, &keypair, &records("right clock")).await;
+        let took = started.elapsed();
+        assert_eq!(result, Ok(()));
+        let reader = Dht::mainline(Some(bootstrap.clone())).unwrap();
+        let (found, _) = reader.resolve(&key, |_| {}).await;
+        let found = found.unwrap();
+        assert_eq!(value(&found), "right clock");
+        assert!(found.timestamp() > fast.timestamp());
+        // The next one needs no read: it is dated past the last one.
+        crate::records::publish(&restarted, &keypair, &records("again"))
+            .await
+            .unwrap();
+        let (found, _) = reader.resolve(&key, |_| {}).await;
+        assert_eq!(value(&found.unwrap()), "again");
+        assert!(took < DHT_NEWER_PUT_FOR, "the first publish took {took:?}");
+    }
+
+    /// The same on the relays: each answers 409 to a packet dated before the one it holds.
+    #[tokio::test]
+    async fn after_a_restart_a_publish_a_relay_refuses_for_a_later_dated_packet_goes_out_dated_past_it(
+    ) {
+        let (relay, dht) = (pkarr_relay().await, pkarr_relay().await);
+        let keypair = Keypair::random();
+        let fast = from_a_fast_clock(&keypair);
+        put(&relay, &fast);
+        put(&dht, &fast);
+        let restarted =
+            Pkarr::new(Some(pkarr_client(&dht)), &[relay.url.parse().unwrap()]).unwrap();
+        assert_eq!(
+            crate::records::publish(&restarted, &keypair, &records("right clock")).await,
+            Ok(())
+        );
+        let held = relay
+            .packets
+            .lock()
+            .unwrap()
+            .get(&keypair.public_key().to_z32())
+            .cloned()
+            .unwrap();
+        let held = SignedPacket::from_relay_payload(&keypair.public_key(), &held.into()).unwrap();
+        assert_eq!(value(&held), "right clock");
+        assert!(held.timestamp() > fast.timestamp());
     }
 }
 

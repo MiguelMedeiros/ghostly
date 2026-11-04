@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import type { Locator } from "@playwright/test";
 import { chat, expect, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
+import { CHROMIUM_SANDBOX } from "../support/chromiumSandbox";
 
 /**
  * Two seconds of a test pattern, VP9 in MP4 (`tools/scripts/video-media/make-fixtures.mjs`): Chromium plays it on every
@@ -12,6 +13,7 @@ const FIXTURE = fileURLToPath(new URL("../support/video-fixtures/ghosts.mp4", im
 
 test.use({
   launchOptions: {
+    chromiumSandbox: CHROMIUM_SANDBOX,
     args: [
       "--disable-features=WebRtcHideLocalIpsWithMdns",
       // Headless has no one to click play first; the tests click anyway, this only keeps it steady under load.
@@ -86,7 +88,7 @@ test("a large video asks first: Download <size>, then it plays", { tag: ["@featu
   const received = videos(bob).last();
   const accept = received.getByTestId("video-accept");
   await expect(accept).toBeVisible({ timeout: 60_000 });
-  await expect(accept).toHaveText(/^Download 26\.0 MB$/);
+  await expect(accept).toHaveText(/^Download 26\.0\sMB$/);
   // Its poster is there before a byte of it is.
   await expect(received.getByTestId("video-poster")).toBeVisible();
   await accept.click();

@@ -1,6 +1,6 @@
 import { useId, useRef, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { useBackdropDismiss, useQuestionDialog } from "../hooks/useDismiss";
+import { useBackdropDismiss, useQuestionDialog, useBackCloses } from "../hooks/useDismiss";
 import { useI18n } from "../contexts/I18nContext";
 
 /**
@@ -14,6 +14,7 @@ export function RemoveMemberDialog({ name, linkOn = false, returnFocus, onClose,
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null), cancel = useRef<HTMLButtonElement>(null);
   const backdrop = useBackdropDismiss(onClose);
+  useBackCloses(onClose);
   useQuestionDialog(dialog, cancel, returnFocus);
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); e.stopPropagation(); onClose(); }} aria-labelledby={`${id}-title`} aria-describedby={`${id}-body`}
     data-testid="group-remove-dialog" className="m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">

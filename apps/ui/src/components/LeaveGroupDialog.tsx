@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { GroupView } from "@ghostly/browser/shared/types";
-import { useBackdropDismiss } from "../hooks/useDismiss";
+import { useBackdropDismiss, useBackCloses } from "../hooks/useDismiss";
 import { memberName } from "../lib/groups";
 import { useI18n } from "../contexts/I18nContext";
 import { problemText, type Problem } from "../lib/problemText";
@@ -26,6 +26,7 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus, forge
   const leaving = useRef<HTMLElement | null | undefined>(undefined);
   const close = () => { leaving.current = undefined; onClose(); };
   const backdrop = useBackdropDismiss(close);
+  useBackCloses(close);
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null, opener = returnFocus?.current;
     const element = dialog.current!; element.showModal(); cancel.current?.focus();
@@ -61,7 +62,7 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus, forge
   };
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); close(); }} aria-labelledby={`${id}-title`} aria-describedby={`${id}-body`}
     data-testid="group-leave-dialog" className="m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
-    <h2 id={`${id}-title`} className="text-base font-semibold">{forget
+    <h2 id={`${id}-title`} className="break-words text-base font-semibold">{forget
       ? group.name ? t("group.leave.forgetTitle", { name: group.name }) : t("group.leave.forgetTitleUnnamed")
       : group.name ? t("group.leave.title", { name: group.name }) : t("group.leave.titleUnnamed")}</h2>
     <div id={`${id}-body`} className="mt-2 space-y-2 text-sm text-text-muted">

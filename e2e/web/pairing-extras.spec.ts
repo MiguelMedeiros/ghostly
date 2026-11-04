@@ -19,8 +19,8 @@ async function details(p: Peer): Promise<void> {
 async function setOnline(p: Peer, online: boolean): Promise<void> {
   await p.page.getByTestId("account-services").click();
   const toggle = p.page.getByTestId("online-toggle");
-  if ((await toggle.textContent())?.includes(online ? "Offline" : "Online")) await toggle.click();
-  await expect(toggle).toHaveText(online ? "Online" : "Offline");
+  if ((await toggle.getAttribute("aria-checked")) !== String(online)) await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", String(online));
   await p.page.goBack();
   await expect(p.page.getByPlaceholder("Message…")).toBeVisible();
 }

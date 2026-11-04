@@ -34,6 +34,26 @@ beforeEach(async () => {
 });
 
 describe("the Bark adapter", () => {
+  it("a server sync made in the last 3 s is not made again, and one under way is shared", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const c = config(), adapter = await connect(c);
+      const syncs = vi.spyOn(walletOf(c), "sync");
+      // The wallet's refresh syncs, then the look at the chat requests it starts right after syncs again.
+      await Promise.all([adapter.sync(), adapter.sync()]);
+      await adapter.sync();
+      expect(syncs).toHaveBeenCalledOnce();
+      vi.advanceTimersByTime(3_000);
+      await adapter.sync();
+      expect(syncs).toHaveBeenCalledTimes(2);
+      // A sync that failed is not counted: the next one asks again.
+      vi.advanceTimersByTime(3_000);
+      syncs.mockRejectedValueOnce(new Error("server down"));
+      await expect(adapter.sync()).rejects.toThrow("server down");
+      await adapter.sync();
+      expect(syncs).toHaveBeenCalledTimes(4);
+    } finally { vi.useRealTimers(); }
+  });
   it("pays a Bark address of the same server after review, and the payee's own history proves it", async () => {
     const aliceConfig = config(), alice = await connect(aliceConfig), bob = await connect();
     walletOf(aliceConfig).fund(10_000);

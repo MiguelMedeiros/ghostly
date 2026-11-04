@@ -59,6 +59,15 @@ describe("Sidebar: groups in the chat list", () => {
     expect(engine.callsTo("declineGroupInvitation")).toEqual([{ groupId: "group-1" }]);
   });
 
+  // They were 24 px tall and 8 px apart on a phone's chat list, where a Decline that went says so to the inviter.
+  it("Accept, Decline, Try again and Delete on an invitation's row are a thumb's height on a phone", () => {
+    sidebar([invitation(), { ...invitation({ accepted: true, viaLink: true, admin: "", stage: "knocked", unanswered: true }), id: "group-2" }, { ...invitation({ takenBack: true }), id: "group-3" }]);
+    for (const [id, testId] of [["group-1", "group-accept"], ["group-1", "group-decline"], ["group-2", "group-link-retry"], ["group-3", "group-taken-back-delete"]]) {
+      expect(within(row(id)).getByTestId(testId)).toHaveClass("max-md:min-h-11", "max-md:px-4");
+    }
+    expect(within(row()).getByTestId("group-accept").parentElement).toHaveClass("max-md:gap-3");
+  });
+
   it("keeps the invitation's buttons after an answer the engine refused", async () => {
     const { user, engine } = sidebar([invitation()]);
     engine.on("acceptGroupInvitation", () => { throw new Error("The admin is gone"); });
@@ -93,11 +102,25 @@ describe("Sidebar: groups in the chat list", () => {
     ["a link the admin answered", invitation({ accepted: true, viaLink: true }), "Joining…"],
     ["a community's link, knocked", { ...invitation({ accepted: true, viaLink: true, admin: "", stage: "knocked" }), profile: "community" as const }, "Waiting to be let in…"],
     ["a community's link a member answers", { ...invitation({ accepted: true, viaLink: true, admin: "", stage: "answered" }), profile: "community" as const }, "A member is letting you in…"],
+    ["a full community", { ...invitation({ accepted: true, viaLink: true, admin: "", stage: "full", full: { n: 256, max: 256 } }), profile: "community" as const }, "This group is full"],
+    // As the page says it: nothing more is waited on, only the current link gets in.
+    ["a community's link replaced while it was let in", { ...invitation({ accepted: true, viaLink: true, admin: "", stage: "replaced" }), profile: "community" as const }, "This link was replaced or turned off"],
   ])("says it is joining for %s, with nothing to answer", (_, group, status) => {
     sidebar([group]);
     expect(row()).toHaveTextContent(status);
     expect(within(row()).queryByTestId("group-accept")).not.toBeInTheDocument();
     expect(within(row()).queryByTestId("group-decline")).not.toBeInTheDocument();
+  });
+
+  it.each([["a private group", "mesh" as const], ["a community", "community" as const]])("a link nobody answered for an hour (%s) says so, with Try again and no Accept or Decline", async (_, profile) => {
+    const { user, engine } = sidebar([{ ...invitation({ accepted: true, viaLink: true, admin: "", stage: "knocked", unanswered: true }), profile }]);
+    engine.on("acceptGroupInvitation", () => undefined);
+    expect(row()).toHaveTextContent("The link did not answer");
+    expect(within(row()).queryByTestId("group-accept")).not.toBeInTheDocument();
+    expect(within(row()).queryByTestId("group-decline")).not.toBeInTheDocument();
+    await user.click(within(row()).getByTestId("group-link-retry"));
+    expect(engine.callsTo("acceptGroupInvitation")).toEqual([{ groupId: "group-1" }]);
+    expect(screen.getByTestId("where")).toHaveTextContent(/^\/$/);
   });
 
   it("offers the answer again for an accept the inviter's app never answered", async () => {
@@ -162,7 +185,7 @@ describe("Sidebar: groups in the chat list", () => {
   it("says why a group is over in the app's language", () => {
     fakeEngine.update({ groups: [groupView({ id: "g-removed", name: "Old", status: "removed", statusReason: "You were removed from this group" })] });
     renderApp(<UpdateProvider><Sidebar /><Routes><Route path="*" element={<Where />} /></Routes></UpdateProvider>, { language: "pt" });
-    expect(row("g-removed")).toHaveTextContent("Você foi removido deste grupo");
+    expect(row("g-removed")).toHaveTextContent("Removeram você deste grupo");
   });
 
   it("opens a group", async () => {

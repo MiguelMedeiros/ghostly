@@ -44,6 +44,9 @@ describe("saved", () => {
     expect(node.saveMessage).toHaveBeenLastCalledWith({ linkId: "group:g1", messageId: "k:0:1", remove: true });
     await expect(callApi(ctx, "saved.add", { chat: "Alice" })).rejects.toMatchObject({ code: "bad_request" });
     await expect(callApi(fake({ error: "That message is not in this chat" }).ctx, "saved.add", { chat: "Alice", message: "x" })).rejects.toMatchObject({ code: "not_found" });
+    // agents#1580: an unsave of an id that is neither saved nor in the chat (a typo) is not_found, with where the ids are.
+    await expect(callApi(fake({ error: "That message is not in this chat" }).ctx, "saved.remove", { chat: "Alice", message: "no-such-id" }))
+      .rejects.toMatchObject({ code: "not_found", message: expect.stringMatching(/^No saved message "no-such-id" in this chat \(ghostly saved list/) });
   });
 
   it("lists the saved messages with their chat or group and who wrote them", async () => {
@@ -51,8 +54,10 @@ describe("saved", () => {
       { savedAt: 30, message: row("group:g1", "k:0:1", { member: "hermes" }) },
       { savedAt: 20, message: row("chat-one", "peer_y") },
     ];
-    const list = await callApi(fake(undefined, saved).ctx, "saved.list", {}) as { chat?: string; group?: string; savedAt: number; message: { id: string; text: string; nick?: string } }[];
-    expect(list.map((s) => [s.chat ?? s.group, s.savedAt, s.message.id, s.message.text, s.message.nick])).toEqual([
+    const answer = await callApi(fake(undefined, saved).ctx, "saved.list", {}) as { saved: { chat?: string; group?: string; savedAt: number; message: { id: string; text: string; nick?: string } }[] };
+    // An object with the list under `saved`, as every other list command answers, so a later field can be added.
+    expect(Object.keys(answer)).toEqual(["saved"]);
+    expect(answer.saved.map((s) => [s.chat ?? s.group, s.savedAt, s.message.id, s.message.text, s.message.nick])).toEqual([
       ["g1", 30, "k:0:1", "text of k:0:1", "Hermes"],
       ["chat-one", 20, "peer_y", "text of peer_y", "Alice"],
     ]);
@@ -66,7 +71,7 @@ describe("saved", () => {
       { savedAt: 20, message: row("chat-one", "me_z", quoting("peer_kept", "kept")) },
     ];
     const { ctx, node } = fake(undefined, saved, [...saved.map((s) => s.message), row("chat-one", "peer_kept")]);
-    const list = await callApi(ctx, "saved.list", {}) as { message: { id: string; replyTo?: Record<string, unknown> } }[];
+    const { saved: list } = await callApi(ctx, "saved.list", {}) as { saved: { message: { id: string; replyTo?: Record<string, unknown> } }[] };
     const quote = (id: string) => list.find((s) => s.message.id === id)?.message.replyTo;
     expect(quote("me_y")).toEqual({ id: "me_x", snippet: "", from: "me", found: false, deleted: true });
     expect(quote("mine:1:1")).toMatchObject({ snippet: "", found: false, deleted: true });

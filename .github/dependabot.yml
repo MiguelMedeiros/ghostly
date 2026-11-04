@@ -76,6 +76,15 @@ updates:
       hyperdht-relay:
         patterns: ["*"]
         update-types: [minor, patch]
+  # The translation runtime (QVAC's Bergamot addon under Bare), downloaded by the Desktop as an archive of its own.
+  - package-ecosystem: npm
+    directory: /native/translation
+    schedule: { interval: weekly, day: monday }
+    target-branch: dev
+    groups:
+      translation-runtime:
+        patterns: ["*"]
+        update-types: [minor, patch]
   # Test infrastructure (the e2e suite's AT Protocol network, never shipped): one pull request a
   # week for the whole folder, transitive packages included (that is where its advisories are),
   # and its security updates as one too.

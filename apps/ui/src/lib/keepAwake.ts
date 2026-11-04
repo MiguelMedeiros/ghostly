@@ -3,14 +3,16 @@ import { getBrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import type { HandoffView } from "@ghostly/browser/devices/handoff";
+import type { FileTransferView } from "@ghostly/browser/shared/types";
 import { DEVICE_SET_EVENT } from "./devices";
+import { useEngineValue } from "./engineState";
 
 /*
  * "Keep this computer awake" (WISP 06 § User experience, Profile, Devices): on a Desktop with a standby device, a switch
  * that keeps the computer from sleeping while it is the active device, "So your phone can take over while you are out."
  * A handoff in progress keeps it awake too, on either side, switch or not: a computer that sleeps in the middle of one
  * leaves the other device waiting. The switch is this device's, not the profile's: it is kept in this app's storage and
- * never moves with the profile.
+ * never moves with the profile. A file on its way, sent or received, keeps it awake as well: one that sleeps stops it.
  */
 
 const KEY = "ghostly_keep_awake";
@@ -62,13 +64,33 @@ export function keepAwakeWanted(setting: boolean, set: DeviceSetView | null, han
 }
 
 /**
- * Holds the computer awake while `keepAwakeWanted` says so, and lets go when it no longer does or the app goes away.
- * Nothing where the app cannot (a web page, the extension). Mounted wherever the profile runs, the standby screen too.
+ * Whether a file is on its way now, sent or received, in a chat or a group: being copied, moving, in line behind another
+ * or checked. Not one that waits for a connection (the contact away), for a person's answer, or was paused, nor one that
+ * stopped moving (`stalled`, it waits for its person's "Send again"): nothing would come of staying awake for those.
+ */
+export function filesMoving(transfers: Readonly<Record<string, FileTransferView>> | undefined): boolean {
+  if (!transfers) return false;
+  for (const transfer of Object.values(transfers)) {
+    if (transfer.state !== "transferring" || transfer.stalled) continue;
+    if (transfer.stage !== "waiting" && transfer.stage !== "asking" && transfer.stage !== "paused") return true;
+  }
+  return false;
+}
+
+/** `filesMoving` of the engine's transfers, drawn again only when it changes. */
+export const useFilesMoving = (): boolean => useEngineValue((state) => filesMoving(state?.transfers));
+
+/**
+ * Holds the computer awake while `keepAwakeWanted` says so or a file is on its way, and lets go when neither is so or
+ * the app goes away. Nothing where the app cannot (a web page, the extension). Mounted wherever the profile runs, the
+ * standby screen too.
  */
 export function useComputerAwake(): void {
   const supported = keepAwakeSupported();
   const [setting] = useKeepAwakeSetting();
-  const [wanted, setWanted] = useState(false);
+  const [devices, setWanted] = useState(false);
+  const files = useFilesMoving();
+  const wanted = devices || files;
   useEffect(() => {
     if (!supported) return;
     let live = true;
@@ -98,9 +120,11 @@ export function useComputerAwake(): void {
     window.addEventListener(DEVICE_SET_EVENT, seen);
     return () => { live = false; stop(); window.removeEventListener(DEVICE_SET_EVENT, seen); };
   }, [supported, setting]);
+  // Told again when files start or stop under a hold the devices keep: Android holds its "Sending files" service for
+  // files alone.
   useEffect(() => {
     if (!supported) return;
-    void host()?.keepAwake?.(wanted).catch(() => false);
-  }, [supported, wanted]);
-  useEffect(() => () => { if (supported) void host()?.keepAwake?.(false).catch(() => false); }, [supported]);
+    void host()?.keepAwake?.(wanted, files).catch(() => false);
+  }, [supported, wanted, files]);
+  useEffect(() => () => { if (supported) void host()?.keepAwake?.(false, false).catch(() => false); }, [supported]);
 }

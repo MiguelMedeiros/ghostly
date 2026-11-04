@@ -164,6 +164,31 @@ describe("renaming a group in the app", () => {
     expect(input).toHaveValue(`${name}ね`);
   });
 
+  it("Rename, Change picture and Remove picture are a thumb's height on a phone, as the rest of the dialog is", () => {
+    // They were a line of 12 px text, 16 px high: the only way to rename the group or change its picture.
+    const group = admin({ picture: "data:image/webp;base64,AAAA" });
+    fakeEngine.update({ groups: [group] });
+    renderApp(<GroupMembersDialog group={group} onClose={() => {}} />);
+    for (const id of ["group-rename", "group-picture-pick", "group-picture-remove"]) {
+      expect(screen.getByTestId(id).className.split(/\s+/)).toContain("max-md:min-h-11");
+    }
+    // The label is an inline box until it is a flex one: a min-height would not hold on it.
+    expect(screen.getByTestId("group-picture-pick").className.split(/\s+/)).toEqual(expect.arrayContaining(["inline-flex", "items-center"]));
+  });
+
+  it("the Rename form's field, Save and Cancel are a thumb's height on a phone, apart", async () => {
+    // Cancel was 37 x 16 px, a line of 12 px text beside Save: a tap meant for it could land on Save.
+    const group = admin();
+    fakeEngine.update({ groups: [group] });
+    const { user } = renderApp(<GroupMembersDialog group={group} onClose={() => {}} />);
+    await user.click(screen.getByTestId("group-rename"));
+    for (const id of ["group-rename-input", "group-rename-save", "group-rename-cancel"]) {
+      expect(screen.getByTestId(id).className.split(/\s+/), id).toContain("max-md:min-h-11");
+    }
+    for (const id of ["group-rename-save", "group-rename-cancel"]) expect(screen.getByTestId(id).className.split(/\s+/), id).toContain("max-md:px-3");
+    expect(screen.getByTestId("group-rename-input").closest("form")!.className.split(/\s+/)).toContain("max-md:gap-3");
+  });
+
   it("a member cannot rename it", () => {
     fakeEngine.update({ groups: [notAdmin()] });
     renderApp(<GroupMembersDialog group={notAdmin()} onClose={() => {}} />);

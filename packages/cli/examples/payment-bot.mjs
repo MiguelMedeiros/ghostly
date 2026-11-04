@@ -28,7 +28,7 @@ createInterface({ input: socket }).on("line", async (line) => {
   if (message.id !== undefined && waiting.has(message.id)) {
     const { resolve, reject } = waiting.get(message.id);
     waiting.delete(message.id);
-    if (message.error) reject(new Error(`${message.error.code}: ${message.error.message}`)); else resolve(message.result);
+    if (message.error) reject(Object.assign(new Error(`${message.error.code}: ${message.error.message}`), { reason: message.error.details?.reason })); else resolve(message.result);
     return;
   }
   const event = message.event;
@@ -51,7 +51,10 @@ createInterface({ input: socket }).on("line", async (line) => {
       await say(event.chat, `Thanks: ${event.payment.amount} test sats received.`);
     }
   } catch (error) {
-    await say(event.chat, `Sorry, that did not work (${error.message}).`);
+    // The person in the chat is the "contact" of these refusals: said to them, in their words.
+    if (error.reason === "contact_no_wallet") await say(event.chat, "You have no wallet yet: make a Testnet Cashu wallet, then ask again.");
+    else if (error.reason === "contact_payments_off") await say(event.chat, "You have payments off in this chat, or need an updated Ghostly.");
+    else await say(event.chat, `Sorry, that did not work (${error.message}).`);
   }
 });
 

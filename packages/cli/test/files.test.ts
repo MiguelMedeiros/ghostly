@@ -1,9 +1,11 @@
-import { mkdtempSync, statSync } from "node:fs";
+import { mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { NO_PICTURE_METADATA } from "@ghostly/core";
 import { FILE_BYTES_STEP } from "@ghostly/browser/shared/fileBytes";
-import type { GroupView } from "@ghostly/browser/shared/types";
+import type { EngineState, GroupView } from "@ghostly/browser/shared/types";
+import { callApi, type ApiContext } from "../src/api";
 import { fitName, mimeOf, saveName } from "../src/files";
 import { findMember, pictureFrom } from "../src/groupAdmin";
 import { NodeFileBytes } from "../src/runtime/fileBytes";
@@ -98,6 +100,21 @@ describe("group administration", () => {
     for (const ref of ["595m389h77", "595m"]) {
       expect(() => findMember(own, ref)).toThrow(expect.objectContaining({ code: "bad_request", message: `${JSON.stringify(ref)} is you: name another member of Crew` }));
     }
+    // This profile's own name too (its own row has none): "No member" read as if it were not in the group.
+    for (const ref of ["Bia", "bia"]) {
+      expect(() => findMember(own, ref, " Bia")).toThrow(expect.objectContaining({ code: "bad_request", message: `${JSON.stringify(ref)} is you: name another member of Crew` }));
+    }
+    expect(() => findMember(own, "Bo", "Bia")).toThrow(expect.objectContaining({ code: "not_found" }));
+  });
+
+  it("group admin, hub and remove say that this profile's own name is you", async () => {
+    const own = { id: "g1", name: "Dev room", members: [{ key: "595m389h77", me: true }, { key: "abcd12", nick: "Ana", me: false }] } as unknown as GroupView;
+    const node = { getState: () => ({ links: [], groups: [own], settings: { nick: "Bia" }, transport: {} }) as unknown as EngineState, makeGroupAdmin: vi.fn(), setGroupHub: vi.fn(), removeGroupMember: vi.fn() };
+    const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
+    for (const method of ["group.admin", "group.hub", "group.remove"]) {
+      await expect(callApi(ctx, method, { group: "Dev room", member: "Bia" })).rejects.toMatchObject({ code: "bad_request", message: '"Bia" is you: name another member of Dev room' });
+    }
+    expect(node.makeGroupAdmin).not.toHaveBeenCalled();
   });
 
   it("a member's whole key is that member, whatever another member calls itself", () => {
@@ -114,5 +131,21 @@ describe("group administration", () => {
     expect(await pictureFrom(join(fixtures, "avatar.jpg"))).toMatch(/^data:image\/jpeg;base64,\/9j/);
     await expect(pictureFrom(join(fixtures, "avatar.png"))).rejects.toMatchObject({ code: "bad_request" });
     await expect(pictureFrom(join(fixtures, "nothing.jpg"))).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("takes a picture without the details saved in it, and refuses one they cannot be removed from", async () => {
+    const SECRET = "GHOSTLY-SECRET-GPS 52.37N 4.89E";
+    const ascii = (value: string) => [...value].map((c) => c.charCodeAt(0));
+    const segment = (marker: number, body: number[]) => [0xff, marker, (body.length + 2) >> 8, (body.length + 2) & 0xff, ...body];
+    const jpegWith = (secret?: string) => Buffer.from([0xff, 0xd8,
+      ...(secret ? segment(0xe1, [...ascii("Exif\0\0"), 0x4d, 0x4d, 0, 42, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, ...ascii(secret)]) : []),
+      ...segment(0xdb, [0, ...new Array(64).fill(1)]), ...segment(0xc0, [8, 0, 128, 0, 128, 1, 1, 0x11, 0]),
+      ...segment(0xc4, [0, ...new Array(16).fill(0)]), ...segment(0xda, [1, 1, 0, 0, 63, 0]), 0x12, 0x34, 0xff, 0xd9]);
+    const dir = folder();
+    writeFileSync(join(dir, "photo.jpg"), jpegWith(SECRET));
+    const url = await pictureFrom(join(dir, "photo.jpg"));
+    expect(Buffer.from(url.slice(url.indexOf(",") + 1), "base64")).toEqual(jpegWith());
+    writeFileSync(join(dir, "cut.jpg"), jpegWith(SECRET).subarray(0, -2));
+    await expect(pictureFrom(join(dir, "cut.jpg"))).rejects.toMatchObject({ code: "refused", message: NO_PICTURE_METADATA });
   });
 });

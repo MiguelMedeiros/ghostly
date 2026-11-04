@@ -265,21 +265,27 @@ test("a room of bots with many routines: the panel scrolls inside the window, th
     // Miguel's load: the coordinator's two tasks and two routines, Hermes Zero's ten routines, Hermes One's two tasks and two routines.
     const sent = ["--wait", "sent", "--timeout", "150"];
     const now = Date.now();
+    const room = page.locator(".chat-wallpaper");
+    // Each bot's cards on the person's page before the next bot sends: `--wait sent` is one member reached, maybe not
+    // the person, and a card shows where it arrived. Once (agents#1459) Zero's first routine reached the person before
+    // the coordinator's four and the rest after them: a row of 1 and a row of 9.
+    const shown = (count: number) => expect(room.getByTestId("status-card")).toHaveCount(count, { timeout: 300_000 });
     await coordinator.run("task", "send", group, "--id", "ux", "--title", "Status cards UX", "--steps", "2/5", "--item", "done:Reproduce", "--item", "running:Panel", ...sent);
     await coordinator.run("task", "send", group, "--id", "relay", "--title", "Fix relay rotation", "--status", "done", "--progress", "100", "--pr-url", "https://github.com/MiguelMedeiros/ghostly/pull/712", "--pr-number", "712", ...sent);
     await coordinator.run("routine", "send", group, "--id", "bughunt", "--name", "Nightly bug hunt", "--schedule", "every day 01:00", "--next", String(now + 5 * 3_600_000), "--run", "ok", ...sent);
     await coordinator.run("routine", "send", group, "--id", "prqueue", "--name", "PR queue", "--schedule", "every 5 min", "--next", String(now + 4 * 60_000), "--run", "ok", ...sent);
+    await shown(4);
     const jobs = ["watchdog 15 min", "disk usage", "backup sync", "cert renew", "docker prune", "log rotate", "uptime ping", "relay health", "DHT probe", "tunnel check"];
     for (const [i, job] of jobs.entries()) {
       await zero.run("routine", "send", group, "--id", `zero-${i}`, "--name", `Zero · ${job}`, "--schedule", i % 3 ? "every hour" : "every 15 min",
         "--next", String(now + (i + 2) * 60_000), "--run", i === 6 ? "failed:timeout" : "ok", ...sent);
     }
+    await shown(14);
     await one.run("task", "send", group, "--id", "e2e", "--title", "Run the e2e matrix on One", "--progress", "45", ...sent);
     await one.run("task", "send", group, "--id", "bench", "--title", "Benchmarks", "--status", "blocked", ...sent);
     await one.run("routine", "send", group, "--id", "one-a", "--name", "One · nightly e2e", "--schedule", "every day 03:00", "--next", String(now + 7 * 3_600_000), ...sent);
     await one.run("routine", "send", group, "--id", "one-b", "--name", "One · docker cleanup", "--schedule", "every 6 h", "--next", String(now + 2 * 3_600_000), ...sent);
-    const room = page.locator(".chat-wallpaper");
-    await expect(room.getByTestId("status-card")).toHaveCount(18, { timeout: 300_000 });
+    await shown(18);
     await expect(page.getByTestId("chat-tasks-count")).toHaveText("3");
 
     // In the chat: Hermes Zero's ten routines are one row, opened on a tap; each routine is one line.

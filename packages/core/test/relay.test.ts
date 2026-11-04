@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BACKGROUND_REQUESTS_PER_MINUTE, DEFAULT_RELAYS, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, CHAT_RESERVE_MOST_SHARE, CHAT_RESERVE_PER_CHAT, CHAT_WATCH_SHARE, DEPARTED_READS, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RELAY_REQUESTS_PER_MINUTE, RelayTransport, newerPacket, parseRelayPayload, readOwnRelayPayload, SIGNALING_WINDOW_MS, SLOW_MS, GROUP_RATION_WINDOW_MS, GROUP_OVER_PACE_MS, GROUP_SIGNALING_ALLOWANCE_SHARE, WATCH_SHARE, WAY_BACK_SHARE, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
+import { BACKGROUND_REQUESTS_PER_MINUTE, DEFAULT_RELAYS, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, CHAT_RESERVE_MOST_SHARE, CHAT_RESERVE_PER_CHAT, CHAT_WATCH_SHARE, DEPARTED_READS, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RELAY_REQUESTS_PER_MINUTE, RelayTransport, newerPacket, parseRelayPayload, readOwnRelayPayload, SIGNALING_WINDOW_MS, SLOW_MS, GROUP_RATION_WINDOW_MS, GROUP_OVER_PACE_MS, GROUP_SIGNALING_ALLOWANCE_SHARE, WATCH_SHARE, WAY_BACK_SHARE, WRITE_FIRST_MS, CarriedTransport, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
 import type { PkarrRequestOptions, PkarrTransport } from "../src/transport";
 // covers: core.relay-client
 
@@ -396,6 +396,31 @@ describe("relay transport publishing in bursts", () => {
     expect([signed, put]).toEqual([31, 1]);
   });
 
+  // agents#1573: a group edge signs its own packets (`CarriedTransport`) and hands them to `publishPayload`, which
+  // had no check before signing: a hub at its budget signed ~450-670 edge packets a minute that never went out.
+  it("a group edge that is up signs no packet every relay's budget holds back either: the wait is said before", async () => {
+    let requests = 0;
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test", "https://b.test"], fetch: (async () => {
+      requests++; return new Response(null, { status: 204 });
+    }) as typeof fetch });
+    let signed = 0;
+    const id = createIdentity(), peer = createIdentity();
+    const counted = new Proxy(id, { get: (target, name) => { if (name === "seed") signed++; return Reflect.get(target, name); } });
+    const edge = new CarriedTransport(withRequestOptions(relay, { group: true }), id.pubKeyZ32, peer.pubKeyZ32, { carry: () => ({ taken: 0, sure: false }), open: () => true, look: () => {} });
+    let held = 0;
+    for (let i = 0; i < 60; i++) await edge.publish(counted, [{ label: "_ts", value: String(i) }]).catch((error: unknown) => { if (isDiscoveryBudgetError(error)) held++; else throw error; });
+    console.log(`EDGE SIGNS: 60 publishes, ${signed} signed, ${requests} requests, ${held} held back`);
+    expect(held).toBeGreaterThan(0);
+    // Every packet signed went out.
+    expect(signed).toBe(requests / 2);
+    // Down, a packet is signed whatever the relays say: members carry it.
+    const down = new CarriedTransport(withRequestOptions(relay, { group: true }), id.pubKeyZ32, peer.pubKeyZ32, { carry: () => ({ taken: 1, sure: true }), open: () => false, look: () => {} });
+    const before = signed;
+    await down.publish(counted, [{ label: "_ts", value: "carried" }]);
+    expect(signed).toBe(before + 1);
+    down.stop();
+  });
+
   it("signs a publish one relay takes while another rate limits this address", async () => {
     let calls = 0;
     const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test", "https://b.test"], fetch: (async (input: RequestInfo | URL) => {
@@ -737,10 +762,30 @@ describe("relay transport: a chat before its groups", () => {
   it("leaves the groups part of the minute however many chats need the rest", async () => {
     const { relay, log, group } = counting();
     // Thirty chats looked fast for their contacts within the minute (their reads went elsewhere: the need is what counts).
-    for (let i = 0; i < REQUESTS_PER_MINUTE; i++) relay["chatNeed"](createIdentity().pubKeyZ32).urgentAt = Date.now();
+    for (let i = 0; i < REQUESTS_PER_MINUTE; i++) relay["chatNeed"](createIdentity().pubKeyZ32, Date.now());
     for (let i = 0; i < REQUESTS_PER_MINUTE; i++) await group.resolve(id.pubKeyZ32).catch(() => {});
     expect(log).toHaveLength(REQUESTS_PER_MINUTE - Math.floor(REQUESTS_PER_MINUTE * CHAT_RESERVE_MOST_SHARE));
     expect(log.length).toBeGreaterThan(0);
+  });
+
+  it("weighs a group's or a background request without walking every chat that needs the relay", () => {
+    // Contacts away by the thousand: each chat the budget refused needs the relay for a minute, and every group's or
+    // background request asked walked all those needs, twice (bug hunt, 2026-11-01: 2.7 s per 10 idle minutes at 500).
+    const url = "https://a.test";
+    const relay = new RelayTransport({ freshReadMs: 0, relays: [url], fetch: (async () => new Response(null, { status: 404 })) as typeof fetch });
+    const who = (options: { urgent?: boolean; write?: boolean; group?: boolean; background?: boolean }) =>
+      ({ background: false, group: false, urgent: false, door: false, write: false, signal: false, watch: false, watchWrite: false, departed: false, resume: false, back: false, ...options });
+    const chats = 5_000;
+    for (let i = 0; i < chats; i++) relay["take"](url, who({ urgent: true, write: true }), `chat-${i}`);
+    const start = performance.now();
+    let held = 0;
+    for (let i = 0; i < chats; i++) {
+      if (relay["heldFor"](url, who({ group: true }), Date.now(), `group-${i}`) > 0) held++;
+      if (relay["heldFor"](url, who({ background: true }), Date.now(), `look-${i}`) > 0) held++;
+    }
+    expect(held).toBe(2 * chats);
+    // Dev: 4.5 s, the work growing with the square of the chats.
+    expect(performance.now() - start).toBeLessThan(1_000);
   });
 
   it("does not keep a reserve for a chat that is not waiting for anything", async () => {

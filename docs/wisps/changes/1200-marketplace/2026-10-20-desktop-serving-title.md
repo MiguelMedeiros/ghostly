@@ -1,0 +1,1 @@
+Read lane on Desktop: while an app window serves the contact a file, its title says so ("Cinema · sharing a file with Ana"), where the web's panel header does, and goes back to "Cinema with Ana" once the last serve ends. The Ghostly window sets it with a new command, `app_title`, which no other window may call.

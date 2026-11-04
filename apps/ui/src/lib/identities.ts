@@ -47,7 +47,7 @@ setOwnDidSource(() => engine.state?.did?.id);
  * Calls `onNew` with a proof that was not there on the last render: one just added comes up in a deck of ID cards, so
  * the person sees what they made. Nothing on the first state (what the profile already had).
  */
-export function useNewProof(state: typeof engine.state | undefined, onNew: (id: string) => void) {
+export function useNewProof(state: { identityProofs?: readonly { id: string }[] } | null | undefined, onNew: (id: string) => void) {
   const ids = state ? (state.identityProofs ?? []).map(p => p.id).join(" ") : null;
   const known = useRef<string[] | null>(null);
   const callback = useRef(onNew); callback.current = onNew;
@@ -177,11 +177,14 @@ const subscribeSeen = (listener: () => void) => {
   return () => { window.removeEventListener("identities-seen", listener); window.removeEventListener("storage", listener); };
 };
 
-/** Whether the Identities item carries its dot. */
+/**
+ * Whether the Identities item carries its dot. The account bar and a phone's tab bar ask, always on screen: they draw
+ * again when the items change, not on every engine state.
+ */
 export function useIdentityAttention(): boolean {
-  const state = usePlainEngineState();
+  const items = usePlainEngineValue(state => identityAttention(state));
   const seen = useSyncExternalStore(subscribeSeen, rawSeen);
-  return unseenAttention(identityAttention(state), parseSeen(seen)).length > 0;
+  return unseenAttention(items, parseSeen(seen)).length > 0;
 }
 
 /**

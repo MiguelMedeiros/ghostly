@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
-import { listSessions } from "../lib/storage";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
+import { useStoredSessions } from "../hooks/useStoredSessions";
+import { listShownSessions } from "../lib/storage";
+import { sameValue } from "../lib/sameValue";
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
-import type { SharedService } from "../lib/platform";
-import { Block, Button, Notice, Row, Section, Switch, input } from "../components/wallet/ui";
+import { servicesPlatform, type SharedService } from "../lib/platform";
+import { Block, Button, Notice, Row, Section, Switch, SwitchLook, input } from "../components/wallet/ui";
 import { ButtonGroup, FieldGrid, Page } from "../components/layout";
 import { externalLinkProps } from "../lib/externalLink";
 import { useI18n } from "../contexts/I18nContext";
@@ -11,31 +13,45 @@ import { problemLine } from "../lib/problemText";
 
 const GLOBE = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>;
 
+/**
+ * The chats' keys and names, through the page's one cache of the stored chats: a chat's stored copy, messages and all,
+ * is parsed only when it changed, not on every draw.
+ */
+const storedContacts = () => listShownSessions().map((s) => ({ key: s.peerPubKeyB64, label: s.label, nick: s.nick }));
+
 /** Everyone this device has a chat with, by the key services are granted to. */
 function useContacts() {
   const { t } = useI18n();
-  return listSessions().map((s) => ({ key: s.peerPubKeyB64, name: s.label || s.nick || t("common.unnamedContact", { key: contactTag(s.peerPubKeyB64) }), short: publicKeyLabel(s.peerPubKeyB64) }));
+  return useStoredSessions(storedContacts, sameValue).map((s) => ({ key: s.key, name: s.label || s.nick || t("common.unnamedContact", { key: contactTag(s.key) }), short: publicKeyLabel(s.key) }));
 }
+
+/** What the page shows of the platform: drawn again when that changes, not on every engine state. */
+const shown = () => servicesPlatform && {
+  online: servicesPlatform.isOnline(),
+  services: servicesPlatform.getSharedServices(),
+  canShare: servicesPlatform.features.shareLocalServices,
+};
 
 /**
  * Services, as a page beside the chat list like Settings and the wallet: the local web apps this
  * device shares and exactly who can reach each one, and the apps contacts share back.
  */
 export function Services() {
-  const platform = useServicesPlatform();
+  const platform = servicesPlatform;
   const { t } = useI18n();
   const contacts = useContacts();
+  const view = usePlatformValue(shown);
+  // The apps each listed contact shares back.
+  const theirApps = usePlatformValue(() => contacts.map((c) => (servicesPlatform?.getPeer(c.key)?.services ?? []).filter((s) => s.type === "http")));
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState(""), [target, setTarget] = useState("");
   const [error, setError] = useState("");
   const [openError, setOpenError] = useState("");
-  if (!platform) return null;
+  if (!platform || !view) return null;
 
-  const online = platform.isOnline();
-  const services = platform.getSharedServices();
-  const canShare = platform.features.shareLocalServices;
+  const { online, services, canShare } = view;
   const fromContacts = contacts
-    .map((c) => ({ ...c, apps: (platform.getPeer(c.key)?.services ?? []).filter((s) => s.type === "http") }))
+    .map((c, i) => ({ ...c, apps: theirApps[i] ?? [] }))
     .filter((c) => c.apps.length > 0);
 
   const share = async () => {
@@ -46,10 +62,13 @@ export function Services() {
 
   return (
     <Page title={t("tabs.services")} testId="my-services" trailing={
-      <button data-testid="online-toggle" onClick={() => void platform.setOnline(!online)} title={online ? t("services.goOffline") : t("services.goOnline")}
+      // Ghostly's own network switch: off, every chat goes offline. Where nothing can be shared (the web) it says so,
+      // with a name that stays put, rather than a state and a hint about shares.
+      <button type="button" role="switch" aria-checked={online} data-testid="online-toggle" onClick={() => void platform.setOnline(!online)}
+        title={!online ? t("services.goOnline") : canShare ? t("services.goOffline") : t("services.offDisconnectsChats")}
         className={`flex items-center gap-2 rounded-full px-3 min-h-9 text-sm border transition-colors cursor-pointer ${online ? "border-accent/40 bg-accent/10 text-accent" : "border-border bg-surface-alt text-text-muted"}`}>
-        <span aria-hidden="true" className={`w-2 h-2 rounded-full ${online ? "bg-accent" : "bg-gray-500"}`} />
-        <span>{online ? t("services.online") : t("services.offline")}</span>
+        {canShare ? <span aria-hidden="true" className={`w-2 h-2 rounded-full ${online ? "bg-accent" : "bg-gray-500"}`} /> : <SwitchLook checked={online} className="scale-75 -mx-1.5" />}
+        <span>{canShare ? (online ? t("services.online") : t("services.offline")) : t("services.ghostlyOnline")}</span>
       </button>
     }>
       <Section title={t("services.yourApps")} testId="your-apps">
@@ -83,13 +102,25 @@ export function Services() {
           ? <Block><Notice>{t("services.fromContactsEmpty")}</Notice></Block>
           : fromContacts.map((contact) => (
             <Row key={contact.key} label={contact.name} hint={<span className="font-mono">{contact.short}</span>}>
-              {contact.apps.map((app) => (
-                <Button key={app.id} variant="primary" data-testid="contact-service-open" onClick={() => {
-                  setOpenError("");
-                  if (!platform.features.openServices) { setOpenError(t("services.openNeedsApp")); return; }
-                  platform.openService(contact.key, app.id).catch((e) => setOpenError(problemLine(e, t)));
-                }}>{t("services.open", { app: app.name ?? app.id })}</Button>
-              ))}
+              {contact.apps.map((app) => {
+                const appName = app.name ?? app.id;
+                // The verb around the name ("Open {{app}}", "{{app}} を開く") stays whole; the name alone is cut.
+                const [before, after = ""] = t("services.open", { app: "\u0000" }).split("\u0000");
+                return (
+                  // At most the row's width, the name cut with an ellipsis in its own direction: a 46-character name went
+                  // 51 px past a 375 px phone's edge, its start cut off in Arabic. The whole label is in the title.
+                  <Button key={app.id} variant="primary" data-testid="contact-service-open" title={t("services.open", { app: appName })}
+                    className="flex items-center max-w-full min-w-0" onClick={() => {
+                      setOpenError("");
+                      if (!platform.features.openServices) { setOpenError(t("services.openNeedsApp")); return; }
+                      platform.openService(contact.key, app.id).catch((e) => setOpenError(problemLine(e, t)));
+                    }}>
+                    {before && <span className="whitespace-pre">{before}</span>}
+                    <span data-testid="contact-service-name" className="truncate" dir="auto">{appName}</span>
+                    {after && <span className="whitespace-pre">{after}</span>}
+                  </Button>
+                );
+              })}
             </Row>
           ))}
         {openError && <Block><Notice tone="error">{openError}</Notice></Block>}
@@ -99,7 +130,7 @@ export function Services() {
 }
 
 function ServiceCard({ service, online, contacts }: { service: SharedService; online: boolean; contacts: { key: string; name: string; short: string }[] }) {
-  const platform = useServicesPlatform()!;
+  const platform = servicesPlatform!;
   const { t } = useI18n();
   const [showPeople, setShowPeople] = useState(false);
   const granted = service.sharedWith ?? [];
@@ -114,8 +145,10 @@ function ServiceCard({ service, online, contacts }: { service: SharedService; on
     <div data-testid="service-item">
       <Row leading={<span className={`grid place-items-center w-10 h-10 rounded-xl ${shared ? "bg-accent/15 text-accent" : "bg-surface-alt text-text-muted"}`}>{GLOBE}</span>}
         label={<>
-          <p className="font-medium truncate">{service.name}</p>
-          <a {...externalLinkProps(href)} title={service.target} className="block text-xs font-mono text-text-muted hover:text-accent truncate">{service.target.replace(/^https?:\/\//, "")}</a>
+          {/* Each in its own direction, on the box that cuts it and as wide as its words, as a contact's app below: in
+              Arabic a Latin name or address keeps its start, and a short one stays at the line's start. */}
+          <p className="font-medium"><span dir="auto" className="inline-block max-w-full truncate align-top">{service.name}</span></p>
+          <a {...externalLinkProps(href)} title={service.target} dir="auto" className="inline-block max-w-full align-top text-xs font-mono text-text-muted hover:text-accent truncate">{service.target.replace(/^https?:\/\//, "")}</a>
         </>}
         hint={<span className={`flex flex-wrap items-center gap-x-1.5 mt-0.5 ${shared ? "text-accent" : "text-text-muted"}`}>
           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${shared ? "bg-accent" : "bg-gray-500"}`} />{status}
@@ -134,7 +167,7 @@ function ServiceCard({ service, online, contacts }: { service: SharedService; on
             const on = granted.includes(c.key);
             return (
               <div key={c.key} className="flex items-center gap-3 px-4 py-2.5 min-h-12" data-testid="service-grant">
-                <div className="min-w-0 flex-1"><p className="text-sm text-text-primary truncate">{c.name}</p><p className="text-[11px] text-text-muted font-mono truncate">{c.short}</p></div>
+                <div className="min-w-0 flex-1 flex flex-col items-start"><p dir="auto" className="max-w-full text-sm text-text-primary truncate">{c.name}</p><p dir="auto" className="max-w-full text-[11px] text-text-muted font-mono truncate">{c.short}</p></div>
                 <Switch label={t("services.letReach", { contact: c.name, app: service.name })} checked={on} onChange={(next) => void platform.setServiceShared(service.id, c.key, next)} />
               </div>
             );

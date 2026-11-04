@@ -25,7 +25,7 @@ use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -43,6 +43,11 @@ pub const MAX_ENTRIES: usize = 100_000;
 pub const MAX_READ: u64 = 1024 * 1024;
 /// Extensions a pick may name (`MINI_APP_LIMITS.filesAccept`).
 const MAX_ACCEPT: usize = 32;
+/// What a folder pick reads, at most: every entry listed under it, kept or not, so a tree that `accept` keeps little of
+/// (a code folder asked for films: 6 million files for 519) answers `too-large` in seconds and is not read whole.
+const MAX_VISITED: usize = if cfg!(test) { 1_000 } else { 1_000_000 };
+/// How long a folder pick reads, at most: a cold or slow disk answers `too-large` too, not after minutes.
+const MAX_WALK: Duration = Duration::from_secs(15);
 /// Apps whose links are kept in memory, at most: past it, one is let go and read from disk again when asked.
 const MAX_BOOKS: usize = 16;
 /// Forgotten lines an app's links file takes before it is written whole again without them, at least.
@@ -259,18 +264,40 @@ fn folder_name(root: &Path) -> Option<String> {
 
 /// Everything under a folder that `accept` names, its name first in each path: hidden entries, symbolic links and
 /// folders that cannot be read left out, at most one more than `MAX_ENTRIES` (so a folder past it is known to be).
+/// Past `MAX_VISITED` entries read or `MAX_WALK`, the folder is `too-large`.
 pub fn walk(root: &Path, accept: &[String]) -> Result<Vec<(String, PathBuf)>, String> {
+    walk_until(root, accept, Instant::now() + MAX_WALK)
+}
+
+fn walk_until(
+    root: &Path,
+    accept: &[String],
+    until: Instant,
+) -> Result<Vec<(String, PathBuf)>, String> {
+    let too_large = || Err("too-large: Too many files in this folder to read".to_string());
     let top = folder_name(root).ok_or("A folder with no name")?;
     let mut found = Vec::new();
+    let mut visited = 0;
     let mut stack = vec![(top, root.to_path_buf())];
     while let Some((shown, dir)) = stack.pop() {
+        if Instant::now() > until {
+            return too_large();
+        }
         // Only the picked folder must be read: one under it that cannot be (`lost+found`, another user's) is left out.
         let listing = match fs::read_dir(&dir) {
             Ok(listing) => listing,
             Err(e) if dir == root => return Err(e.to_string()),
             Err(_) => continue,
         };
-        let mut entries: Vec<_> = listing.filter_map(Result::ok).collect();
+        // One past what is left, so a single huge folder is not read whole either.
+        let mut entries: Vec<_> = listing
+            .filter_map(Result::ok)
+            .take(MAX_VISITED - visited + 1)
+            .collect();
+        visited += entries.len();
+        if visited > MAX_VISITED {
+            return too_large();
+        }
         entries.sort_by_key(|e| e.file_name());
         for entry in entries {
             let Some(name) = entry.file_name().to_str().map(str::to_string) else {
@@ -512,21 +539,13 @@ impl LinkedFiles {
 
     /// Every link the app keeps; `available` says whether its file is there as it was.
     pub fn list(&self, space: &str, app: &str) -> Result<Vec<Entry>, String> {
-        Ok(self
-            .load(space, app)?
-            .live()
-            .map(|link| {
-                let available = fs::metadata(&link.full)
-                    .is_ok_and(|meta| stamp(&meta) == (link.size, link.modified));
-                Entry {
-                    id: link.id.clone(),
-                    path: link.path.clone(),
-                    size: link.size,
-                    modified: link.modified,
-                    available,
-                }
-            })
-            .collect())
+        Ok(self.load(space, app)?.live().map(entry).collect())
+    }
+
+    /// One link as `list` gives it, or None for an id the app does not keep: what `files.serve` looks up, so serving
+    /// one file of a library looks at that file alone on disk.
+    pub fn entry(&self, space: &str, app: &str, id: &str) -> Result<Option<Entry>, String> {
+        Ok(self.load(space, app)?.get(id).map(entry))
     }
 
     /// At most `length` bytes (and `MAX_READ`) from `offset`: fewer at the end of the file.
@@ -623,6 +642,19 @@ impl LinkedFiles {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
             _ => Ok(()),
         }
+    }
+}
+
+/// A link as the app sees it, `available` when its file is there as it was.
+fn entry(link: &Link) -> Entry {
+    let available =
+        fs::metadata(&link.full).is_ok_and(|meta| stamp(&meta) == (link.size, link.modified));
+    Entry {
+        id: link.id.clone(),
+        path: link.path.clone(),
+        size: link.size,
+        modified: link.modified,
+        available,
     }
 }
 
@@ -732,6 +764,19 @@ pub async fn linked_files_list<R: tauri::Runtime>(
 ) -> Result<Vec<Entry>, String> {
     let links = state(&app)?;
     tauri::async_runtime::spawn_blocking(move || links.list(&space, &app_ref))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn linked_files_entry<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    space: String,
+    app_ref: String,
+    id: String,
+) -> Result<Option<Entry>, String> {
+    let links = state(&app)?;
+    tauri::async_runtime::spawn_blocking(move || links.entry(&space, &app_ref, &id))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -1154,6 +1199,34 @@ mod tests {
     }
 
     #[test]
+    fn one_link_is_looked_up_as_the_list_gives_it_and_a_changed_gone_or_forgotten_one_says_so() {
+        let links = LinkedFiles::new(folder());
+        let root = films();
+        let added = pick(&links, walk(&root, &["mp4".to_string()]).unwrap()).unwrap();
+        let (up, e01) = (&added[1], &added[0]);
+        let listed = links.list("ghostly", APP).unwrap();
+        for link in &listed {
+            assert_eq!(
+                links.entry("ghostly", APP, &link.id).unwrap().as_ref(),
+                Some(link)
+            );
+        }
+        let available = |id: &str| links.entry("ghostly", APP, id).unwrap().unwrap().available;
+        assert!(available(&up.id));
+        fs::write(root.join("Up.mp4"), b"01234567890").unwrap();
+        assert!(!available(&up.id));
+        fs::remove_file(root.join("Season 1").join("E01.mp4")).unwrap();
+        assert!(!available(&e01.id));
+        links.forget("ghostly", APP, &e01.id).unwrap();
+        assert_eq!(links.entry("ghostly", APP, &e01.id).unwrap(), None);
+        assert_eq!(links.entry("ghostly", APP, &"z".repeat(22)).unwrap(), None);
+        // Another app does not find this one's links.
+        let other = APP.replace("/cinema", "/chess");
+        assert_eq!(links.entry("ghostly", &other, &up.id).unwrap(), None);
+        assert!(links.entry("../x", APP, &up.id).is_err());
+    }
+
+    #[test]
     fn forget_drops_one_link_or_all_and_a_deleted_profile_drops_its_links() {
         let links = LinkedFiles::new(folder());
         let root = films();
@@ -1341,5 +1414,35 @@ mod tests {
             .map(|i| (format!("{i}.mp4"), PathBuf::from("/nowhere")))
             .collect();
         assert!(pick(&links, many).unwrap_err().starts_with("too-large: "));
+    }
+
+    // A pick of a code folder for `mp4` read all its 6 million files to keep 519 of them: 40 s cold, nothing shown.
+    #[test]
+    fn a_folder_too_big_to_read_is_refused_even_when_accept_keeps_little_of_it() {
+        let root = folder().join("code");
+        for part in ["a", "b"] {
+            fs::create_dir_all(root.join(part)).unwrap();
+            for i in 0..600 {
+                fs::write(root.join(part).join(format!("{i}.js")), b"").unwrap();
+            }
+        }
+        fs::write(root.join("demo.mp4"), b"x").unwrap();
+        let found = walk(&root, &["mp4".to_string()]);
+        assert!(found.unwrap_err().starts_with("too-large: "));
+        // Within it, the same pick goes.
+        fs::remove_dir_all(root.join("b")).unwrap();
+        assert_eq!(walk(&root, &["mp4".to_string()]).unwrap().len(), 1);
+    }
+
+    /// A cold or slow disk: past its time, a folder pick is refused rather than read on.
+    #[test]
+    fn a_folder_that_takes_too_long_to_read_is_refused() {
+        let root = films();
+        let late = Instant::now() - Duration::from_millis(1);
+        assert!(walk_until(&root, &[], late)
+            .unwrap_err()
+            .starts_with("too-large: "));
+        let soon = Instant::now() + Duration::from_secs(60);
+        assert_eq!(walk_until(&root, &[], soon).unwrap().len(), 4);
     }
 }

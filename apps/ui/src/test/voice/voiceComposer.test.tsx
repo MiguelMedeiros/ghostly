@@ -253,6 +253,31 @@ describe("hands-free (locked) recording", () => {
     expect(onSendFile).toHaveBeenCalledOnce();
   });
 
+  it("leaves Enter to Resume reached with Tab after a click that gave it no focus (Safari, WKWebView, iOS)", async () => {
+    // Where a click does not focus a button, no blur ever cleared "pressed by a pointer", and Enter sent.
+    await locked();
+    await wait(2_000);
+    const pause = screen.getByTestId("voice-pause");
+    fireEvent.pointerDown(pause, mouse);
+    fireEvent.pointerUp(pause, mouse);
+    fireEvent.click(pause);
+    expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-phase", "paused");
+    // Shift+Tab to Resume, then Enter: the browser presses the focused button.
+    pause.focus();
+    expect(fireEvent.keyDown(pause, { key: "Enter" })).toBe(true);
+    await wait(0);
+    expect(onSendFile).not.toHaveBeenCalled();
+
+    // The bin, after a click that gave it no focus either, does not send.
+    const bin = screen.getByTestId("voice-delete");
+    fireEvent.pointerDown(bin, mouse);
+    fireEvent.pointerUp(bin, mouse);
+    bin.focus();
+    expect(fireEvent.keyDown(bin, { key: "Enter" })).toBe(true);
+    await wait(0);
+    expect(onSendFile).not.toHaveBeenCalled();
+  });
+
   it("deletes with Esc or the bin, and gives the microphone back", async () => {
     await locked();
     await wait(1_000);
@@ -351,6 +376,32 @@ describe("hands-free (locked) recording", () => {
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
     expect(audio.players.every((player) => player.paused)).toBe(true);
     expect(revoked).toHaveBeenCalledWith(created.mock.results[created.mock.results.length - 1]!.value);
+  });
+
+  it("moves the preview's waveform with the sound a few times a second rather than every frame", async () => {
+    await locked();
+    await wait(4_000);
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    fireEvent.click(screen.getByTestId("voice-preview"));
+    await wait(0);
+    const player = audio.players[0]!;
+    const wave = screen.getByTestId("voice-preview-wave");
+    const writes = vi.spyOn(wave.style, "setProperty");
+    for (let ms = 0; ms < 2_000; ms += 16) {
+      player.currentTime = ms / 1000;
+      await wait(16);
+    }
+    const progress = writes.mock.calls.filter(([name]) => name === "--voice-progress");
+    // Each write is a style recalc of the page: 60 a second was about 90 ms of main thread per second.
+    expect(progress.length).toBeLessThanOrEqual(10);
+    expect(progress.length).toBeGreaterThanOrEqual(6);
+    expect(Number(wave.style.getPropertyValue("--voice-progress"))).toBeCloseTo(0.5, 1);
+
+    // Paused, it stops following.
+    fireEvent.click(screen.getByRole("button", { name: "Pause playback" }));
+    writes.mockClear();
+    await wait(2_000);
+    expect(writes.mock.calls.filter(([name]) => name === "--voice-progress")).toHaveLength(0);
   });
 
   it("does not start the preview once Send was pressed while it was getting ready", async () => {

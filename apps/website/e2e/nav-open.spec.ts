@@ -34,6 +34,17 @@ for (const width of [1280, 960]) {
   });
 }
 
+// The scrolled bar is 78% opaque and blurs what is under it (app/site.css). The build's CSS minifier keeps only the
+// last of `backdrop-filter` and `-webkit-backdrop-filter` when they are side by side, so the standard one must come last:
+// with the -webkit- one last, Chromium had no blur and page text read through the bar and into its links.
+test("on a scrolled page the nav blurs what is under it", async ({ page }) => {
+  await page.goto("/cli");
+  await page.mouse.wheel(0, 600);
+  const nav = page.locator("header.nav");
+  await expect(nav).toHaveAttribute("data-scrolled", "true");
+  expect(await nav.evaluate((el) => getComputedStyle(el).backdropFilter)).toContain("blur(16px)");
+});
+
 test("Open app opens the web app; its chevron offers the web app or a download", async ({ page }) => {
   await page.goto("/developers");
   await expect(page.locator(".nav-open-main")).toHaveAttribute("href", "https://app.ghostly.tools");

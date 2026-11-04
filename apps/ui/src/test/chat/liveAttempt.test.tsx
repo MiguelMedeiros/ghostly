@@ -77,4 +77,16 @@ describe("the connection panel of a chat on the DHT", () => {
     panel({ deliveryMode: "dht", liveDialer: "contact" });
     expect(screen.queryByTestId("connection-not-live")).toBeNull();
   });
+
+  it("says nothing of it while the contact keeps the chat on DHT only: no attempt will come, the choice is said instead", () => {
+    const attempt: LiveAttempt = { at: 1, side: "dialled", retryAt: Date.now() + 60_000, failed: [{ transport: "webrtc/1", error: "The offer was not answered" }] };
+    const peerDht = { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } as const;
+    const answering = panel({ liveDialer: "contact", dhtDelivery: peerDht });
+    expect(screen.getByTestId("connection-options")).toHaveAttribute("aria-label", "Connection options: DHT only · chosen by your contact");
+    expect(screen.queryByTestId("connection-not-live")).toBeNull();
+    expect(screen.getByTestId("connection-option-dht")).toHaveAttribute("aria-description", "Your contact chose it · no live link until you both leave it");
+    answering.unmount();
+    panel({ liveDialer: "you", liveAttempt: attempt, dhtDelivery: peerDht });
+    expect(screen.queryByTestId("connection-not-live")).toBeNull();
+  });
 });

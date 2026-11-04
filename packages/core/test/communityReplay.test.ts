@@ -18,7 +18,7 @@ vi.mock("../src/identity", async importOriginal => {
 const hooks = { save: async () => {}, broadcast: () => 0, direct: () => {}, addressed: () => {}, message: () => {}, changed: () => {} };
 
 /** A community whose members came in and left again, one after the other, past the window of rosters kept. */
-function leftOverTime(members: number): { state: CommunityState; first: string } {
+function leftOverTime(members: number, stays?: string): { state: CommunityState; first: string } {
   const state = CommunitySession.create("Ghosts", 1);
   const admin = identityFromSeedB64(state.seedB64);
   let parent = state.chain[0], roster: Roster = [[admin.pubKeyZ32, "admin"]];
@@ -30,6 +30,7 @@ function leftOverTime(members: number): { state: CommunityState; first: string }
     state.chain.push(parent);
   };
   let first = "";
+  if (stays) next({ k: "add", s: stays });
   for (let i = 0; i < members; i++) {
     const member = createIdentity();
     first ||= member.pubKeyZ32;
@@ -55,5 +56,31 @@ describe("a stored community chain", () => {
     expect(session.commitByShort(3, shortHash(communityCommitHash(side)))?.commit).toEqual(side);
     // The side commit came from outside the stored main branch: its own signature is checked, and nothing else.
     expect(verified.calls).toBe(1);
+  });
+
+  it("tells who could read an old epoch from one replay of it, not one from the start for every message asked about", () => {
+    const veteran = createIdentity().pubKeyZ32;
+    const { state, first } = leftOverTime(4 * COMMUNITY_LIMITS.window, veteran);
+    // And someone let in last.
+    const admin = identityFromSeedB64(state.seedB64), late = createIdentity().pubKeyZ32, top = state.chain[state.chain.length - 1];
+    const base = { v: 2 as const, g: state.id, e: top.e + 1, p: communityCommitHash(top), k: "add" as const, by: admin.pubKeyZ32, s: late, ts: 3 };
+    const d = { ...base, m: rosterHash(communityRoster(state.chain.reduce<Roster | null>((r, c) => communityRoster(r, c, true), null), base)!) };
+    state.chain.push(signCommunity({ ...d, c: confirmationTag(epochKeys(newEpochSecret(), state.id, d.e).confirm, communityUntaggedHash(d)) }, admin.seed));
+    const reads = { n: 0 };
+    state.chain = new Proxy(state.chain, { get: (chain, k, r) => { if (typeof k === "string" && /^\d+$/.test(k)) reads.n++; return Reflect.get(chain, k, r) as unknown; } });
+    const session = new CommunitySession(state, hooks);
+    const ids = Array.from({ length: 16 }, (_, j) => {
+      const commit = state.chain[2 + 2 * (j * 7 % 100)];
+      return `${veteran}:${commit.e}:${shortHash(communityCommitHash(commit))}:1`;
+    });
+    reads.n = 0; verified.calls = 0;
+    // A member in the roster all along asks again and again for files of epochs past the window: every answer holds.
+    for (let round = 0; round < 25; round++) for (const id of ids) expect(session.couldRead(veteran, id)).toBe(true);
+    expect(verified.calls).toBe(0);
+    expect(reads.n).toBeLessThan(state.chain.length + 8 * 25 * ids.length);
+    // Someone who left since, or came in after, could not.
+    expect(session.couldRead(first, ids[0])).toBe(false);
+    expect(session.couldRead(late, ids[0])).toBe(false);
+    expect(session.couldRead(late, `${veteran}:${session.top.e}:${shortHash(session.topHash)}:1`)).toBe(true);
   });
 });

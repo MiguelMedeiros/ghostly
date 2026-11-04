@@ -109,6 +109,19 @@ describe("apps in the engine (apps/1)", () => {
     expect(contactGot).toEqual([]);
   });
 
+  it("on: an app closed while its open still reads the store stays closed, for the contact and here", async () => {
+    const { call, contact, contactGot, id, ref } = await setup({ apps: true });
+    await vi.waitFor(() => expect(contact.supportsApps).toBe(true));
+    // The page's calls run side by side: the close is handled before the open's store read is back.
+    await Promise.all([call("appOpen", { linkId: id, ref, version: "1.0.0" }), call("appClose", { linkId: id, ref })]);
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(contactGot).toEqual([]);
+    expect(await call("appSend", { linkId: id, ref, data: 1 })).toEqual({ error: "not-open" });
+    // Opened again afterwards, it opens.
+    await call("appOpen", { linkId: id, ref, version: "1.0.0" });
+    await vi.waitFor(() => expect(contactGot).toHaveLength(1));
+  });
+
   it("on: when the last page goes, its apps close and the contact hears it", async () => {
     const { server, page, call, contact, contactGot, id, ref, app } = await setup({ apps: true });
     await vi.waitFor(() => expect(contact.supportsApps).toBe(true));

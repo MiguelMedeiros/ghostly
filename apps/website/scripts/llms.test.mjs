@@ -78,9 +78,9 @@ test("every ghostly command the agents' text names is a command of the CLI, with
   assert.equal(JSON.parse(read("packages/cli/package.json")).name, "@ghostlytools/cli");
 });
 
-// Pages that llms.txt links before they are on dev, each written in its own pull request (the threat model in #3004).
+// Pages that llms.txt links before they are on dev, each written in its own pull request (none now).
 // One that is not there yet passes; once it is, it is checked like any other page. Take a path out once it is on dev.
-const PENDING_ROUTES = new Set(["/developers/agents/threat-model", "/agents/faq"]);
+const PENDING_ROUTES = new Set([]);
 
 /** The site's routes as patterns: app/<path>/page.tsx or route.ts, a [param] segment matching any one segment. */
 const siteRoutes = () => {

@@ -45,7 +45,7 @@ describe("saved messages", () => {
     await engine.saveMessage({ linkId: "chat-a", messageId: a.id });
     expect(await saved(engine)).toHaveLength(3);
 
-    expect(await engine.saveMessage({ linkId: "group:mesh-1", messageId: b.id, remove: true })).toEqual({ error: null });
+    expect(await engine.saveMessage({ linkId: "group:mesh-1", messageId: b.id, remove: true })).toEqual({ error: null, removed: true });
     expect(await saved(engine)).toEqual([`chat-b/${c.text}`, `chat-a/${a.text}`]);
   });
 
@@ -54,12 +54,28 @@ describe("saved messages", () => {
     await db.addMessage(m);
     expect(await node().saveMessage({ linkId: "chat-a", messageId: "wire-1" })).toEqual({ error: null });
     expect((await node().savedMessages()).map(s => s.message.id)).toEqual(["peer_wire-1"]);
-    expect(await node().saveMessage({ linkId: "chat-a", messageId: "wire-1", remove: true })).toEqual({ error: null });
+    expect(await node().saveMessage({ linkId: "chat-a", messageId: "wire-1", remove: true })).toEqual({ error: null, removed: true });
     expect(await node().savedMessages()).toEqual([]);
 
     expect(await node().saveMessage({ linkId: "chat-a", messageId: "nope" })).toEqual({ error: "That message is not in this chat" });
     expect(await node().saveMessage({ linkId: "group:mesh-1", messageId: "wire-1" })).toEqual({ error: "That message is not in this chat" });
     expect(await node().savedMessages()).toEqual([]);
+  });
+
+  // agents#1580: a typo'd id unsaved answered done, and the message meant stayed saved.
+  it("unsaving an id that names neither a mark nor a message of the chat is not in this chat; one there but not saved is quietly so", async () => {
+    const a = message("chat-a");
+    await db.addMessage(a);
+    const engine = node();
+    expect(await engine.saveMessage({ linkId: "chat-a", messageId: a.id })).toEqual({ error: null });
+    expect(await engine.saveMessage({ linkId: "chat-a", messageId: "no-such-id", remove: true })).toEqual({ error: "That message is not in this chat" });
+    expect(await saved(engine)).toEqual([`chat-a/${a.text}`]);
+    expect(await engine.saveMessage({ linkId: "chat-a", messageId: a.id, remove: true })).toEqual({ error: null, removed: true });
+    expect(await engine.saveMessage({ linkId: "chat-a", messageId: a.id, remove: true })).toEqual({ error: null, removed: false });
+    // A mark whose message is gone still goes.
+    expect(await engine.saveMessage({ linkId: "chat-a", messageId: a.id })).toEqual({ error: null });
+    await db.deleteMessage("chat-a", a.id);
+    expect(await engine.saveMessage({ linkId: "chat-a", messageId: a.id, remove: true })).toEqual({ error: null, removed: true });
   });
 
   it("keeps the marks across a restart: a new engine on the same profile reads them", async () => {
