@@ -666,7 +666,8 @@ export function GroupChat() {
   // The joining card's one live line: what changed, not the card. The five-minute line when let in and still no keys,
   // the two-minute hint while it shows; else at a dead
   // end (no transport, unanswered, replaced) its title; else the last step reached, or the title before the first.
-  const staleText = waitingWith > 0 ? t("group.join.staleBusy") : t("group.join.stale");
+  // Others waiting too (a community's queue, a private group's fresh knocks): the group is busy, not the link dead.
+  const staleText = waitingWith > 0 || group.invitation?.othersKnocked ? t("group.join.staleBusy") : t("group.join.stale");
   const lastReached = joinSteps(group.profile === "community", t).filter(step => joinStepState(stage, step.stage) === "done").pop();
   const joinAnnouncement = noLinks || linkUnanswered || linkReplaced || stage === "full" ? joining.title
     : admittedLong ? joining.body : knockedLong ? staleText : lastReached?.label ?? joining.title;
