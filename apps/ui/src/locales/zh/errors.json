@@ -159,6 +159,7 @@
     "clipboardUnavailableNext": "请用 + 添加附件。",
     "declinedHere": "你拒绝了它。如果需要，请联系人重新发送。",
     "declinedThere": "你的联系人拒绝了它。",
+    "dropLate": "刚才拖入的内容暂时无法添加。请在完成后重新拖入。",
     "dropUnreadable": "无法添加这些文件。请用 + → 文档 发送。",
     "floor": {
       "noRoomNext": "请释放空间，然后请联系人重新发送。",

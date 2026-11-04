@@ -711,12 +711,19 @@ export function MessageInput({
     shareFiles(share).then((files) => offerRef.current(files), (error: unknown) => showToast(problemLine(error, t)));
   };
   const offerSharedRef = useRef(offerShared); offerSharedRef.current = offerShared;
-  /** A drop's files the platform read (another app's, on Linux), as a paste's are: what could not be read is said. */
+  /**
+   * A drop's files the platform read (another app's, on Linux), as a paste's are: what could not be read is said, and so
+   * is a read that ends where files cannot go any more (an edit began meanwhile).
+   */
   const offerHeld = (held: Promise<File[]>) => {
     // Up to 256 MB read in steps: the line says so until the sheet, or the reason there is none, takes its place.
     setDropsReading((was) => was + 1);
     const ended = () => setDropsReading((was) => was - 1);
-    held.then((files) => { ended(); if (!files.length) showToast(t("errors.files.dropUnreadable")); else offerRef.current(files); },
+    held.then((files) => {
+      ended();
+      if (!files.length) showToast(t("errors.files.dropUnreadable"));
+      else if (!offerRef.current(files)) showToast(t("errors.files.dropLate"));
+    },
       (error: unknown) => { ended(); showToast(problemLine(error, t)); });
   };
   const offerHeldRef = useRef(offerHeld); offerHeldRef.current = offerHeld;
