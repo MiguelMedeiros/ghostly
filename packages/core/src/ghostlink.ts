@@ -3600,7 +3600,8 @@ export class GhostLink {
   closeApp(app: string): void {
     const frame = JSON.stringify(appCloseFrame(app));
     if (!this.apps.open.delete(app)) return;
-    this.appRanges.closeApp(app, "offline");
+    // Its page is gone, so nothing reads for the contact any more: the places it held free now.
+    this.appRanges.closeApp(app, "offline", true);
     if (this.supportsApps && this.channel) try { this.channel.send(frame); } catch { /* the session is going: the contact hears it ended */ }
   }
   /**
@@ -3709,7 +3710,7 @@ export class GhostLink {
   }
   /** `task`'s file cannot be read: `changed` or `gone` goes in place of its bytes (nothing once it is no longer live, but its place frees). */
   failAppRange(task: AppRangeTask, error: "changed" | "gone"): void { this.appRanges.fail(task, error); }
-  /** Whether `task` still waits for an answer on this session (`AppRanges.holds`): one that does not needs none. */
+  /** Whether `task` still holds a place until it is answered (`AppRanges.holds`): one that does not needs no answer. */
   holdsAppRange(task: AppRangeTask): boolean { return this.appRanges.holds(task); }
   /** An `ar-*` frame from the contact, on a session that agreed `app-ranges/1`. */
   private receiveAppRange(frame: Record<string, unknown>): void {

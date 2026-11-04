@@ -5708,6 +5708,11 @@ export class GhostlyNode implements EngineImplementation {
 
   /** Ranges the contact's apps asked, by chat, app and this engine's number for the ask, until a page answers them. */
   private readonly appRanges = new Map<string, AppRangeTask>();
+  /**
+   * Asks the session no longer serves (cancelled, the contact's app closed, the session ended) that a page may still be
+   * reading: its answer sends nothing, and only gives the place back. At most 4 per chat app, the places they hold.
+   */
+  private readonly appRangesStopped = new Map<string, AppRangeTask>();
   private nextAppRangeAsk = 0;
 
   /**
@@ -5717,10 +5722,15 @@ export class GhostlyNode implements EngineImplementation {
    * ask again while the page still reads the first ask, whose answer must not go out as the second's.
    */
   private appRangeAsked(linkId: string, task: AppRangeTask): void {
-    // The chat's asks its session no longer holds (it ended, or the app closed) wait for nothing: an answer to one would
-    // send and free nothing. Dropped here, or a page that never answers them left them in this table for good (agents#1698).
+    // The chat's asks its session no longer serves leave this table: an answer to one sends nothing. One that still holds
+    // a place waits in `appRangesStopped` for the page's answer to give it back; one that holds none (this side's app
+    // closed, the link went) waits for nothing, or a page that never answers it left it here for good (agents#1698).
     const link = this.links.get(linkId)?.link;
-    for (const [key, held] of this.appRanges) if (key.startsWith(`${linkId} `) && (!link || !link.holdsAppRange(held))) this.appRanges.delete(key);
+    for (const [key, held] of this.appRanges) if (key.startsWith(`${linkId} `) && !(held.live && link?.holdsAppRange(held))) {
+      this.appRanges.delete(key);
+      if (link?.holdsAppRange(held)) this.appRangesStopped.set(key, held);
+    }
+    for (const [key, held] of this.appRangesStopped) if (key.startsWith(`${linkId} `) && !link?.holdsAppRange(held)) this.appRangesStopped.delete(key);
     const request = ++this.nextAppRangeAsk;
     this.appRanges.set(`${linkId} ${task.app} ${request}`, task);
     const { app, serve, file, offset, length } = task;
@@ -5750,8 +5760,9 @@ export class GhostlyNode implements EngineImplementation {
   /** A page's answer to an `app-range` it served: the bytes and the file's size go to the contact, or why they cannot. */
   async appRangeAnswer({ linkId, app, request, bytes, size, error }: { linkId: string; app: string; request: number; bytes?: Uint8Array; size?: number; error?: "changed" | "gone" }): Promise<void> {
     if (!this.appsOn) throw this.appsOff();
-    const key = `${linkId} ${app} ${request}`, task = this.appRanges.get(key);
+    const key = `${linkId} ${app} ${request}`, task = this.appRanges.get(key) ?? this.appRangesStopped.get(key);
     this.appRanges.delete(key);
+    this.appRangesStopped.delete(key);
     if (!task) return;
     // The version that served it, stopped since (WISP 1200 § Takedowns): no byte goes, and every serve of that app ends.
     const serving = this.appServing.get(`${linkId} ${app}`);
