@@ -486,6 +486,18 @@ describe("a contact's request arriving", () => {
       expect(desk.payment("r20")).toMatchObject({ state: "pending" });
     } finally { vi.useRealTimers(); }
   });
+
+  it("after the device clock goes back an hour, a full minute of requests no longer leaves the next ones out for an hour", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: 10 * 3_600_000 });
+    try {
+      const { desk } = setup();
+      for (let i = 0; i < 21; i++) await desk.onPaymentRequest("l", lnRequest(`r${i}`));
+      expect(desk.payment("r20"), "the window is full").toBeUndefined();
+      vi.setSystemTime(9 * 3_600_000 + 2 * 60_000);
+      await desk.onPaymentRequest("l", lnRequest("r20"));
+      expect(desk.payment("r20")).toMatchObject({ state: "pending" });
+    } finally { vi.useRealTimers(); }
+  });
 });
 
 describe("ecash arriving", () => {

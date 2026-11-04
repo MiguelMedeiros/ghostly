@@ -168,6 +168,11 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Could not store the file: The stored copy is gone", `${CORE}/chatFiles.ts`, "Could not store the file: "],
   ["Your contact could not take this file", `${CORE}/chatFiles.ts`],
   ["Cancelled by the sender", `${CORE}/chatFiles.ts`],
+  // A 1:1 file declined or cancelled, by the contact (chatFiles.ts `refusalText`) or here: the bubble's ⓘ says who.
+  ["Declined by your contact", `${CORE}/chatFiles.ts`],
+  ["Cancelled by your contact", `${CORE}/chatFiles.ts`],
+  ["You declined it", `${CORE}/chatFiles.ts`],
+  ["You cancelled it", `${CORE}/chatFiles.ts`],
   // A file said on the DHT floor that ended here before it came (engine/fileDesk.ts `floorRefusal`, `sweep`).
   ["No room on this device for this file", `${BROWSER}/engine/fileDesk.ts`],
   ["Too many files are waiting here", `${BROWSER}/engine/fileDesk.ts`],
@@ -657,6 +662,21 @@ describe("errors in the app's language", () => {
     expect(bubble("It was refused here")).toEqual({ status: t("errors.files.floor.refused"), info: { text: t("errors.files.askAgain") } });
     expect(bubble("It did not come within a week")).toEqual({ status: t("errors.files.floor.notInAWeek"), info: { text: t("errors.files.askAgain") } });
     expect(bubble("Cancelled by the sender")).toEqual({ status: t("chat.file.cancelled"), info: { text: t("errors.files.askAgain") } });
+  });
+
+  it.each(LANGUAGES)("a 1:1 file declined or cancelled says who did it behind its ⓘ in %s, never the engine's English", (language) => {
+    const t = translators[language];
+    const file = { id: "L-out-abc", name: "x.bin", size: 30_000, mime: "application/octet-stream" };
+    const bubble = (error: string, direction: "in" | "out") => {
+      const transfer = { state: "failed", direction, transferred: 0, size: 30_000, error } as const;
+      return { status: failedStatus(file, transfer, t), info: failedReason(transfer, t) };
+    };
+    expect(bubble("Declined by your contact", "out")).toEqual({ status: t("chat.file.declined"), info: { text: t("errors.files.declinedThere") } });
+    expect(bubble("Cancelled by your contact", "out")).toEqual({ status: t("chat.file.cancelled"), info: { text: t("errors.files.cancelledThere") } });
+    expect(bubble("You declined it", "in")).toEqual({ status: t("chat.file.declined"), info: { text: t("errors.files.declinedHere") } });
+    expect(bubble("You cancelled it", "in")).toEqual({ status: t("chat.file.cancelled"), info: { text: t("errors.files.cancelledHere") } });
+    expect(bubble("You cancelled it", "out")).toEqual({ status: t("chat.file.cancelled"), info: { text: t("errors.files.cancelledHere") } });
+    for (const key of ["declinedThere", "cancelledThere", "declinedHere", "cancelledHere"] as const) expect(t(`errors.files.${key}`)).not.toBe(`errors.files.${key}`);
   });
 
   it("a group's file every holder served damaged says so, and that the group is asked again, not a contact", () => {

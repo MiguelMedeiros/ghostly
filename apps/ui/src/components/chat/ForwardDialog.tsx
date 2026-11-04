@@ -14,6 +14,7 @@ import { problemLine } from "../../lib/problemText";
 import { listParts, listText } from "../../lib/listText";
 import type { Translate } from "../../locales/translate";
 import { useBackCloses } from "../../hooks/useDismiss";
+import { SearchStatus } from "../ui/SearchStatus";
 
 /**
  * "Forward to…" (WISP 400 § Forwards): the chats and groups to send messages on to, most recent first, found by name,
@@ -114,6 +115,7 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
       <h2 id={`${id}-title`} className="text-base font-semibold">{t("chat.forward.title")}</h2>
       {messages.length > 1 && <p className="m-0 text-xs text-text-muted" data-testid="forward-count">{t("chat.forward.messages", { count: String(messages.length) })}</p>}
       <ChatTargetSearch inputRef={search} list={list} testId="forward-search" value={query} onChange={setQuery} />
+      <SearchStatus testId="forward-found" text={!query.trim() ? "" : shown.length ? t("chat.forward.found", { count: shown.length }) : t(targets.length ? "chat.forward.noMatch" : "chat.forward.noChats")} />
     </div>
     {/* As tall as its rows, shrinking and scrolling within the dialog's max height: `flex-1` (a basis of 0) in a
         dialog as tall as its content leaves WebKit a list of no height at all, with no chat to pick. */}

@@ -190,6 +190,9 @@
   "forward": {
     "forward": "Forward",
     "forwarded": "Forwarded",
+    "found": "{{count}} chats",
+    "found_one": "{{count}} chat",
+    "found_other": "{{count}} chats",
     "limit": "You can forward to {{count}} chats at a time",
     "limit_one": "You can forward to {{count}} chat at a time",
     "many": "Forwarded many times",
