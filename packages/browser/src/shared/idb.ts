@@ -93,8 +93,12 @@ function quotaError(error: unknown, depth = 0): { name?: unknown; message?: unkn
   return quotaError(e.error, depth + 1) ?? quotaError(e.target?.error, depth + 1) ?? quotaError(e.cause, depth + 1);
 }
 
-/** How long an open that another window blocks may wait for that window to let go before it is said to be blocked. */
-export const OPEN_TIMINGS = { blockedMs: 10_000 };
+/**
+ * `blockedMs`: how long an open that another window blocks may wait for that window to let go before it is said to be
+ * blocked. `silentMs`: how long an open may go without any answer from the browser (no success, error, blocked or
+ * upgrade) before it is said to have failed. An upgrade that started has its answer and may take as long as it needs.
+ */
+export const OPEN_TIMINGS = { blockedMs: 10_000, silentMs: 30_000 };
 
 function failureOf(error: unknown): ProfileOpenFailure {
   const name = (error as { name?: unknown } | null)?.name;
@@ -213,11 +217,15 @@ export function openDb(): Promise<IDBDatabase> {
   dbPromise ??= new Promise((resolve, reject) => {
     let settled = false;
     let blocked: ReturnType<typeof setTimeout> | undefined;
+    // A browser fault (WebKit had one on a first page load): an open that never answers, which left the app looking
+    // alive with an engine that never started. Without an answer in time it is said as a failure, and Try again reloads.
+    const silent = setTimeout(() => fail({ name: "TimeoutError", message: `the browser did not answer in ${Math.round(OPEN_TIMINGS.silentMs / 1000)} s` }), OPEN_TIMINGS.silentMs);
     // Said once, as what it is (`ProfileOpenError`): the engine does not start, and the pages show why.
     const fail = (error: unknown) => {
       if (settled) return;
       settled = true;
       clearTimeout(blocked);
+      clearTimeout(silent);
       const failure = failureOf(error);
       if (failure.reason !== "newer") { reject(new ProfileOpenError(failure)); return; }
       void storedVersion(dbName).then((version) => reject(new ProfileOpenError({ ...failure, ...(version !== undefined ? { storedVersion: version } : {}) })));
@@ -230,6 +238,7 @@ export function openDb(): Promise<IDBDatabase> {
       return;
     }
     request.onupgradeneeded = () => {
+      clearTimeout(silent);
       const db = request.result;
       const has = (name: string) => db.objectStoreNames.contains(name);
       if (!has(STORES.links)) db.createObjectStore(STORES.links, { keyPath: "id" });
@@ -282,6 +291,7 @@ export function openDb(): Promise<IDBDatabase> {
       if (settled) { request.result.close(); return; }
       settled = true;
       clearTimeout(blocked);
+      clearTimeout(silent);
       // Let the other context upgrade the schema instead of blocking it.
       request.result.onversionchange = () => {
         request.result.close();
@@ -294,6 +304,7 @@ export function openDb(): Promise<IDBDatabase> {
     // Another window holds the database at an older version and has not let go (ours do, on `versionchange`). The
     // open stays pending for as long as that lasts: before, the engine waited with it, silently and for good.
     request.onblocked = () => {
+      clearTimeout(silent);
       blocked ??= setTimeout(() => fail({ name: "BlockedError", message: "another connection holds an older version open" }), OPEN_TIMINGS.blockedMs);
     };
   });
