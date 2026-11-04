@@ -4479,6 +4479,12 @@ export class GhostlyNode implements EngineImplementation {
     void this.hold.forget(linkId, messageId).catch(() => {});
 
     const message = await db.getMessage(linkId, messageId);
+    // A row of the contact's in the joined line's words that goes here was stored first: no later one is that line.
+    if (message && contactJoinRow(message) && !live.stored.group && !live.stored.peerSpoke) {
+      this.contactSpoke.add(live);
+      live.stored = { ...live.stored, peerSpoke: true };
+      await db.patchLink(linkId, { peerSpoke: true }).catch(() => {});
+    }
     // A request that never left (waiting for live) is withdrawn with its message: the next session must not send it.
     if (message?.paymentId && message.delivery === "waiting") await this.desk.withdraw(message.paymentId).catch(() => {});
     // A contact's receipt still waiting for its money is dropped with its message: its request can take another.
@@ -9441,21 +9447,22 @@ export class GhostlyNode implements EngineImplementation {
     this.contactSpoke.add(live);
     live.stored = { ...stored, peerSpoke: true };
     const marked = db.patchLink(stored.id, { peerSpoke: true }).catch(() => {});
-    // A row of theirs deleted here was stored before this one.
-    if (stored.deletedIds?.some(contactRowId)) return false;
+    // One in those words deleted here marked the chat as it went (`forgetMessage`); any other row of theirs counts not.
     return Promise.all([contactJoinRowStored(stored.id, message.id), marked]).then(([had]) => !had, () => false);
   }
 
   /**
    * A chat stored before `peerSpoke` was kept, as the engine starts: the contact's oldest row left there in the joined
    * line's words is that line (as it was drawn before), and no later row of theirs is. Done once: the chat is marked.
+   * One with no such row waits for it, whatever else of theirs was deleted: a deleted id does not say what its row said,
+   * and one in those words deleted since `peerSpoke` was kept marked the chat as it went (`forgetMessage`).
    */
   private async settleJoinLine(stored: StoredLink, messages: StoredMessage[]): Promise<StoredLink> {
     if (stored.peerSpoke || stored.group) return stored;
     const at = messages.findIndex(contactJoinRow);
-    if (at < 0 && !stored.deletedIds?.some(contactRowId)) return stored;
-    const first = messages[at];
-    if (first && !first.joinLine) {
+    if (at < 0) return stored;
+    const first = messages[at]!;
+    if (!first.joinLine) {
       await db.patchMessage(stored.id, first.id, () => ({ joinLine: true }));
       messages[at] = { ...first, joinLine: true };
     }

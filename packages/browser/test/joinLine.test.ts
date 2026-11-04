@@ -109,6 +109,42 @@ describe("a 1:1 chat's joined line", () => {
     expect(await joinLine("peer_third")).toBeUndefined();
   });
 
+  it("is the contact's line after a message of theirs written before the chat went live was deleted here", async () => {
+    await chat();
+    const { node, store, heard } = await started();
+    await store(theirs("hi", "hello"));
+    node.deleteMessage({ linkId: CHAT, messageId: "peer_hi" });
+    await vi.waitFor(async () => expect(await db.hasMessage(CHAT, "peer_hi")).toBe(false));
+    await store(theirs("j", "👋 Alice joined"));
+    await store(theirs("again", "👋 Alice joined"));
+    expect(await joinLine("peer_j")).toBe(true);
+    expect(await joinLine("peer_again")).toBeUndefined();
+    expect(heard).toEqual([`message:${CHAT}:peer_hi`, `message:${CHAT}:peer_again`]);
+  });
+
+  it("is the contact's line after a message of theirs deleted here before a restart", async () => {
+    await chat();
+    const first = await started();
+    await first.store(theirs("hi", "hello"));
+    first.node.deleteMessage({ linkId: CHAT, messageId: "peer_hi" });
+    await vi.waitFor(async () => expect(await db.hasMessage(CHAT, "peer_hi")).toBe(false));
+    await vi.waitFor(async () => expect((await db.getLinks()).find((l) => l.id === CHAT)?.deletedIds).toContain("peer_hi"));
+    await first.server.node.shutdown();
+    const second = await started();
+    await second.store(theirs("j", "👋 Alice joined"));
+    expect(await joinLine("peer_j")).toBe(true);
+  });
+
+  it("a history brought in while the engine runs: its row in those words deleted here keeps a later one a message", async () => {
+    await chat();
+    const { node, store } = await started();
+    await db.putMessage(theirs("old", "👋 Alice joined"));
+    node.deleteMessage({ linkId: CHAT, messageId: "peer_old" });
+    await vi.waitFor(async () => expect(await db.hasMessage(CHAT, "peer_old")).toBe(false));
+    await store(theirs("j", "👋 Alice joined"));
+    expect(await joinLine("peer_j")).toBeUndefined();
+  });
+
   it("a chat stored before it was decided: its contact's oldest row is it as the engine starts, no later row is", async () => {
     await chat();
     // As an older build stored them: no `joinLine`, no `peerSpoke`.
