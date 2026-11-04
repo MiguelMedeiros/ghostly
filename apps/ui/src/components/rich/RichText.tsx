@@ -1,7 +1,7 @@
 import React, { useMemo, useState, type ComponentType } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { playCue, useCueChat } from "../../lib/cues";
-import { parseMessage, type Block, type ListBlock, type Segment } from "../../lib/parse";
+import { parseMessage, type Block, type ListBlock, type MdLinkData, type Segment } from "../../lib/parse";
 import { markMentions, type MentionView } from "../../lib/parse/mentions";
 import { Highlight, Marked } from "../chat/ChatSearch";
 import { matchRanges } from "../../lib/chatSearch";
@@ -59,15 +59,24 @@ function plain(segment: Segment, hidden = false): string {
   }
 }
 
-/** A segment's text as it reads, a spoiler's uncovered: what a chat search finds in it (lib/chatSearch). */
-const shown = (segment: Segment): string => (segment.type === "span" ? segment.children.map(shown).join("") : segment.text);
+/**
+ * A segment's text as it reads, a spoiler's uncovered and a `[label](link)`'s label: what a chat search finds in it in
+ * place (lib/chatSearch).
+ */
+const shown = (segment: Segment): string => {
+  if (segment.type === "span") return segment.children.map(shown).join("");
+  if (segment.type === "atom" && segment.kind === "md-link") return (segment.data as MdLinkData).label.map(shown).join("");
+  return segment.text;
+};
+/** Atoms that mark a chat search's words in what they show: links. A name or a time draws its own words. */
+const MARKS_ITSELF: ReadonlySet<string> = new Set(["link", "md-link"]);
 
 /**
  * A chat search's matches in one run of segments (a paragraph, a heading, a list item), found in the run's text as it
  * reads, and how far its drawing got: "*hello* world" holds "hello world" across its formatting.
  */
-interface Marks { ranges: [number, number][]; at: number }
-const marksIn = (list: readonly Segment[], term?: string): Marks | undefined => (term ? { ranges: matchRanges(list.map(shown).join(""), term), at: 0 } : undefined);
+interface Marks { term: string; ranges: [number, number][]; at: number }
+const marksIn = (list: readonly Segment[], term?: string): Marks | undefined => (term ? { term, ranges: matchRanges(list.map(shown).join(""), term), at: 0 } : undefined);
 
 /** A text segment's (or code's) words, with what falls in them of the run's matches marked. */
 function marked(text: string, marks: Marks | undefined, k?: string): React.ReactNode {
@@ -104,13 +113,14 @@ function segments(list: Segment[], sentAt: number | undefined, budget: Budget, k
         break;
       }
       case "atom": {
-        // A link, a name or a time draws its own words: none of them is marked.
-        if (marks) marks.at += segment.text.length;
+        // A link marks the words it shows; a name or a time draws its own words, none of them marked.
+        const atomMarks = marks && MARKS_ITSELF.has(segment.kind) ? { term: marks.term, ranges: marks.ranges, start: marks.at } : undefined;
+        if (marks) marks.at += shown(segment).length;
         // Each atom is isolated from the text around it: a direction control in the message cannot reorder a link,
         // a name or a time, and one inside an atom stops at its edge. A view that isolates its own parts is left bare.
         const View = VIEWS[segment.kind] as ComponentType<AtomViewProps> | undefined;
         if (View && ISOLATES_ITSELF.has(segment.kind)) out.push(<View key={k} atom={segment} sentAt={sentAt} />);
-        else out.push(<bdi key={k}>{View ? <View atom={segment} sentAt={sentAt} /> : segment.text}</bdi>);
+        else out.push(<bdi key={k}>{View ? <View atom={segment} sentAt={sentAt} marks={atomMarks} /> : segment.text}</bdi>);
         break;
       }
     }
@@ -163,7 +173,7 @@ function listView(list: ListBlock, sentAt: number | undefined, budget: Budget, k
 function blockView(block: Block, sentAt: number | undefined, budget: Budget, k: string, term?: string): React.ReactNode {
   switch (block.type) {
     case "codeblock":
-      return <CodeBlock key={k} code={block.code} lang={block.lang} />;
+      return <CodeBlock key={k} code={block.code} lang={block.lang} highlight={term} />;
     case "paragraph":
       return <React.Fragment key={k}>{segments(block.segments, sentAt, budget, `${k}.`, marksIn(block.segments, term))}</React.Fragment>;
     case "list":
