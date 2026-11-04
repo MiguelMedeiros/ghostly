@@ -2300,6 +2300,12 @@ export class GhostLink {
     }
     if (!this.channel) this.maybeAutoConnect(this.presence);
   }
+  /**
+   * This side's listener on `transport` is up again after it was let go while the contact was away (the engine's
+   * `releaseGoneListeners`), and the contact is back: it is dialled once now, whichever side's turn it is, as after a
+   * restart. The contact's own dials found no listener here meanwhile, and wait out their backoff (half a minute).
+   */
+  knockOnReturn(transport: NativeTransport): void { void this.knock(transport); }
   /** The knock under way (`knock`): its transport, its attempt, and whether it was knocked again (`knockAgain`). */
   private knocking: { transport: NativeTransport; epoch: number; again: boolean } | null = null;
   /**
