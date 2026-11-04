@@ -294,8 +294,9 @@ export const PAIRED_TAKES_MS = 10 * 60_000;
  * way, not on screen) lets its HyperDHT listener go: hyperdht keeps an announced listener reachable by pinging three DHT
  * nodes every 3 s, about 62 requests a minute, for a contact who is not there to dial it. It listens again as soon as
  * the contact is seen online (its next packet read: half a minute at most at the background pace), a text goes either
- * way, or the chat is opened; its transport key is kept. A contact gone a little while (an app restarted, a
- * laptop asleep for a few minutes) finds it as before.
+ * way, the chat is opened, or the contact's packet cannot be read (the relays out of reach: no read would say it is
+ * back); its transport key is kept. A contact gone a little while (an app restarted, a laptop asleep for a few
+ * minutes) finds it as before.
  */
 export const NATIVE_GONE_MS = 10 * 60_000;
 /** How often the chats are looked at for that (`releaseGoneListeners`). */
@@ -8388,7 +8389,13 @@ export class GhostlyNode implements EngineImplementation {
         onLiveAttempt: () => this.emitState(),
         onRtt: ms => this.noteRtt(live, ms),
         // Said on every read (no error is `null`): the pages hear only of a change.
-        onDiscoveryError: error => { if ((error ?? undefined) !== live.discoveryError) { live.discoveryError = error ?? undefined; this.emitState(); } },
+        onDiscoveryError: error => {
+          if ((error ?? undefined) === live.discoveryError) return;
+          live.discoveryError = error ?? undefined;
+          // The contact's packet cannot be read: the listener let go while it was away listens again (`contactGone`).
+          if (live.goneListener && this.contactUnread(live)) this.listenAgain(live);
+          this.emitState();
+        },
         onTransportDiscovery: async (peerDescriptors, peerTransports, peerFallback) => {
           const patch = { peerDescriptors, peerTransports, peerFallback };
           await db.patchLink(linkId, patch);
@@ -9266,13 +9273,20 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * Whether a 1:1 chat's contact is gone: no packet read in this run that says it is online for `NATIVE_GONE_MS` (since
    * the chat started, before the first), and the chat neither live, nor on screen, nor used in that time (a text either
-   * way, opened), nor paired in this run and not live yet.
+   * way, opened), nor paired in this run and not live yet. Nor while its packet cannot be read (`contactUnread`): the
+   * contact may be back and only out of sight. With the Pkarr relays down, a contact back on the HyperDHT dialled a
+   * listener let go here, and no read said it was online: the chat stayed offline for the whole outage, both apps up.
    */
   private contactGone(live: LiveLink, now: number): boolean {
     if (live.stored.group || live.presence.online || live.link?.isDataLinkOpen || live.pairedAt !== undefined) return false;
+    if (this.contactUnread(live)) return false;
     if (live.stored.id === this.activeLinkId) return false;
     const seen = Math.max(live.onlineSeenAt ?? 0, this.openedAt.get(live.stored.id) ?? 0, live.lastMessageAt);
     return now - seen >= NATIVE_GONE_MS;
+  }
+  /** The last read of the contact's packet failed (the Pkarr relays out of reach), as its link says (`onDiscoveryError`). */
+  private contactUnread(live: LiveLink): boolean {
+    return !!live.discoveryError?.includes("Could not read discovery");
   }
   private goneCheckAt = 0;
   /**
