@@ -222,7 +222,7 @@ async function main([command, ...args]) {
   if (command === "credentials") {
     const missing = missingCredentials(process.env);
     if (missing.length) {
-      const why = `Chrome Web Store upload not set up: the repository has no ${missing.join(" or ")} secret (docs/RELEASING.md, "Chrome Web Store"). Nothing was uploaded.`;
+      const why = `Chrome Web Store upload not set up: the chrome-web-store environment has no ${missing.join(" or ")} secret (docs/RELEASING.md, "Chrome Web Store"). Nothing was uploaded.`;
       console.log(`::notice::${why}`);
       summary(why);
     }
