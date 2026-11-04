@@ -51,9 +51,12 @@ jobs:
 
       # Writes `languages=<JSON list>`. Anything but a pull request, or a list of files that cannot be read, analyses
       # every language. A renamed file counts by both names (--no-renames). This workflow's own changes analyse every
-      # language, so a change to it is tried on all three.
+      # language, so a change to it is tried on all three. Names are read NUL-separated and unquoted: by default git
+      # C-quotes a name with a non-ASCII byte, a `"` or a `\` ("a\303\247.rs"), which no pattern below would match.
+      # `shell: bash` runs with pipefail, so a git that fails is not read as a short list.
       - name: Which languages this change needs
         id: plan
+        shell: bash
         env:
           EVENT: ${{ github.event_name }}
         run: |
@@ -62,7 +65,7 @@ jobs:
             echo "languages=$all" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if ! files=$(git diff --name-only --no-renames HEAD^1 HEAD) || [[ -z "$files" ]]; then
+          if ! files=$(git -c core.quotePath=false diff -z --name-only --no-renames HEAD^1 HEAD | tr '\0' '\n') || [[ -z "$files" ]]; then
             echo "::notice::Could not list what this pull request changes: every language is analysed"
             echo "languages=$all" >> "$GITHUB_OUTPUT"
             exit 0

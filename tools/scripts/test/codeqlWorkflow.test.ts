@@ -73,15 +73,38 @@ describe("which languages a pull request analyses", () => {
     .join("\n");
   const dir = mkdtempSync(join(tmpdir(), "codeql-plan-"));
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
-  // A git that answers `diff` with the pull request's files, or fails.
-  writeFileSync(join(dir, "git"), '#!/usr/bin/env bash\n[[ "$1" == diff && -z "$FAIL" ]] || exit 1\nprintf "%s" "$FILES"\n');
+  // A git that answers `diff` with the pull request's files, or fails. It prints them as git does: one per line, a name
+  // with a `"`, a `\` or a control character in C quotes, and with a byte above 0x7f too unless core.quotePath is
+  // false; with -z, NUL after each name and nothing quoted.
+  const fake = `#!/usr/bin/env node
+const args = process.argv.slice(2);
+const quotePath = !(args[0] === "-c" && /^core\\.quotePath=false$/i.test(args[1]));
+const rest = quotePath ? args : args.slice(2);
+if (rest[0] !== "diff" || process.env.FAIL) process.exit(1);
+const files = process.env.FILES ? JSON.parse(process.env.FILES) : [];
+const named = { 7: "a", 8: "b", 9: "t", 10: "n", 11: "v", 12: "f", 13: "r", 34: '"', 92: "\\\\" };
+const quote = (name) => {
+  const bytes = Buffer.from(name);
+  if (!bytes.some((b) => b < 32 || b === 34 || b === 92 || b === 127 || (quotePath && b > 127))) return bytes;
+  const out = [];
+  for (const b of bytes) {
+    if (named[b]) out.push("\\\\" + named[b]);
+    else if (b < 32 || b === 127 || (quotePath && b > 127)) out.push("\\\\" + b.toString(8).padStart(3, "0"));
+    else out.push(String.fromCharCode(b));
+  }
+  return Buffer.concat([Buffer.from('"'), Buffer.from(out.join(""), "latin1"), Buffer.from('"')]);
+};
+const z = rest.includes("-z");
+process.stdout.write(Buffer.concat(files.flatMap((f) => [z ? Buffer.from(f) : quote(f), Buffer.from(z ? "\\0" : "\\n")])));
+`;
+  writeFileSync(join(dir, "git"), fake);
   chmodSync(join(dir, "git"), 0o755);
 
   const plan = (files: string[] | null, event = "pull_request"): string[] => {
     const output = join(dir, "github-output");
     writeFileSync(output, "");
     execFileSync("bash", ["-e", "-o", "pipefail", "-c", script], {
-      env: { PATH: `${dir}:${process.env.PATH ?? ""}`, EVENT: event, FILES: (files ?? []).join("\n"), FAIL: files ? "" : "1", GITHUB_OUTPUT: output },
+      env: { PATH: `${dir}:${process.env.PATH ?? ""}`, EVENT: event, FILES: files ? JSON.stringify(files) : "", FAIL: files ? "" : "1", GITHUB_OUTPUT: output },
       stdio: "ignore",
     });
     const line = readFileSync(output, "utf8");
@@ -114,6 +137,23 @@ describe("which languages a pull request analyses", () => {
     expect(plan([".github/workflows/ci.yml"])).toEqual(["actions", "javascript-typescript"]);
     expect(plan([".github/actions/playwright-chromium/action.yml"])).toEqual(["actions", "javascript-typescript"]);
     expect(plan(["tools/actions/thing/action.yaml"])).toEqual(["actions", "javascript-typescript"]);
+  });
+
+  it("reads a name with a non-ASCII character, a quote, a backslash or a line break as it is, not as git quotes it", () => {
+    expect(plan([".github/workflows/ação.yml"])).toEqual(["actions", "javascript-typescript"]);
+    expect(plan(['.github/workflows/a"b.yml'])).toEqual(["actions", "javascript-typescript"]);
+    expect(plan(["tools/actions/é/action.yml"])).toEqual(["actions", "javascript-typescript"]);
+    expect(plan(["apps/desktop/src/café.rs"])).toEqual(["rust"]);
+    expect(plan(['apps/desktop/src/a"b.rs', "apps/desktop/src/a\\b.rs", "apps/desktop/src/a\tb.rs"])).toEqual(["rust"]);
+    // A line break splits a name in two lines: the first keeps the name's start, the last its end; at worst a language
+    // more is analysed.
+    expect(plan([".github/a\nb.md"])).toEqual(["actions", "javascript-typescript"]);
+    expect(plan(["apps/desktop/src/a\nb.rs"])).toEqual(["javascript-typescript", "rust"]);
+    expect(plan(["apps/ui/src/ç.tsx"])).toEqual(["javascript-typescript"]);
+  });
+
+  it("lists the files under `shell: bash`, which sets pipefail: a git that fails is not read as a short list", () => {
+    expect(step).toContain("        shell: bash\n");
   });
 
   it("a change to this workflow, or a list of files that cannot be read, analyses every language", () => {
