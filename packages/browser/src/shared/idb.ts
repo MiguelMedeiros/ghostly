@@ -59,6 +59,9 @@ export function profileOpenMessage(failure: ProfileOpenFailure): string {
 /** What the start of the engine failed with, as the failure the pages show: a database that did not open, or anything else. */
 export function profileOpenFailure(error: unknown): ProfileOpenFailure {
   if (error instanceof ProfileOpenError) return error.failure;
+  // The database opened but a first write found no room (Chromium aborts the transaction with an empty message).
+  const quota = quotaError(error);
+  if (quota) return failureOf(quota);
   const detail = error instanceof Error ? error.message : String(error);
   return { reason: "failed", supportedVersion: DB_VERSION, ...(detail ? { detail } : {}) };
 }
@@ -76,6 +79,20 @@ export function errorLine(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** The no-room error's names: the standard one and Firefox's (its legacy code, 22, is read as well). */
+const QUOTA_NAMES: ReadonlySet<unknown> = new Set(["QuotaExceededError", "NS_ERROR_DOM_QUOTA_REACHED"]);
+
+/**
+ * The no-room error behind `error`, as thrown or wrapped: a transaction's abort (`error`, an event's `target.error`)
+ * or an Error's `cause`. Undefined when it is not one.
+ */
+function quotaError(error: unknown, depth = 0): { name?: unknown; message?: unknown } | undefined {
+  if (!error || typeof error !== "object" || depth > 3) return undefined;
+  const e = error as { name?: unknown; code?: unknown; error?: unknown; target?: { error?: unknown } | null; cause?: unknown };
+  if (QUOTA_NAMES.has(e.name) || (typeof DOMException !== "undefined" && error instanceof DOMException && e.code === 22)) return e;
+  return quotaError(e.error, depth + 1) ?? quotaError(e.target?.error, depth + 1) ?? quotaError(e.cause, depth + 1);
+}
+
 /** How long an open that another window blocks may wait for that window to let go before it is said to be blocked. */
 export const OPEN_TIMINGS = { blockedMs: 10_000 };
 
@@ -84,7 +101,7 @@ function failureOf(error: unknown): ProfileOpenFailure {
   const message = (error as { message?: unknown } | null)?.message;
   const detail = [typeof name === "string" ? name : "", typeof message === "string" ? message : ""].filter(Boolean).join(": ");
   const reason: ProfileOpenReason = name === "VersionError" ? "newer"
-    : name === "QuotaExceededError" ? "full"
+    : quotaError(error) ? "full"
       // Firefox's private windows of old, storage blocked for the site, or no IndexedDB at all.
       : name === "BlockedError" ? "blocked"
       : name === "SecurityError" || name === "InvalidStateError" || name === "ReferenceError" || name === "TypeError" ? "denied"
