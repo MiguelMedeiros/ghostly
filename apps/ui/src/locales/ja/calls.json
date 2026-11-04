@@ -40,6 +40,7 @@
   "noPathGuide": "解決方法",
   "noPathNext": "あなたか相手のVPNやファイアウォールが通話を妨げている可能性があります。TURNサーバーを使うと通話できます。",
   "noPathSettings": "ネットワーク設定",
+  "noPathTurnSet": "設定済みのTURNサーバーも経由できませんでした。アドレス（443番ポートのTURN over TLS）と認証情報を確認してください。相手にもTURNサーバーが必要な場合があります。",
   "onAnother": "別の通話中です",
   "outgoing": "発信中...",
   "reconnecting": "再接続中...",
