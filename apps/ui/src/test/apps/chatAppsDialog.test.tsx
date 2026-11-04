@@ -1,4 +1,5 @@
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppPreview, BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
 import { ChatAppsDialog } from "../../components/apps/ChatAppsDialog";
@@ -66,6 +67,63 @@ describe("the chat's Apps with an app whose files are not on this device", () =>
     expect(screen.getByTestId("chat-app")).toHaveTextContent("Needs its files");
   });
 
+  it("Open shows it is working while the files are fetched: a turning ring on the one pressed, busy, no second click", async () => {
+    let finish: () => void = () => {};
+    setAppOpener(vi.fn(() => new Promise<void>((resolve) => { finish = () => { run = { status: "ok" }; resolve(); }; })));
+    const { user, onClose } = await dialog();
+    const open = screen.getByTestId("chat-app-open");
+    await user.click(open);
+    expect(open).toHaveAttribute("aria-busy", "true");
+    expect(open).toHaveAttribute("aria-disabled", "true");
+    expect(within(open).getByTestId("button-spinner")).toBeInTheDocument();
+    expect(open).toHaveTextContent("Open");
+    await act(async () => { finish(); });
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(open).not.toHaveAttribute("aria-busy");
+    expect(within(open).queryByTestId("button-spinner")).not.toBeInTheDocument();
+  });
+
+  it("Open pressed from the keyboard keeps the focus while it runs, so a refused start leaves it on Open", async () => {
+    // A focused button that turns disabled loses the focus to the page in a browser: the next Tab started over.
+    let refuse!: (error: Error) => void;
+    const opener = vi.fn(() => new Promise<void>((_, reject) => { refuse = reject; }));
+    setAppOpener(opener);
+    const { user } = await dialog();
+    const open = screen.getByTestId("chat-app-open");
+    open.focus();
+    await user.keyboard("{Enter}");
+    expect(open).toHaveAttribute("aria-busy", "true");
+    expect(open).toBeEnabled();
+    expect(open).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Enter}");
+    expect(opener).toHaveBeenCalledTimes(1);
+    await act(async () => { refuse(new Error("needs-files: This app's files are not on this device yet")); });
+    expect(await screen.findByTestId("chat-apps-error")).toHaveTextContent("Its files are not on this device yet.");
+    expect(open).not.toHaveAttribute("aria-disabled");
+    expect(open).toHaveFocus();
+  });
+
+  it("an Escape in the app's panel while the card is still on its way: closed, the dialog gives the focus to the message field", async () => {
+    // The panel shows before the card goes, and closed, it gives the focus back to Open (what opened it), in this dialog.
+    run = { status: "ok" };
+    setAppOpener(vi.fn(async () => {}));
+    let deliver!: () => void;
+    fakeEngine.on("sendMessage", () => new Promise((resolve) => { deliver = () => resolve({ error: null }); }));
+    function Chat() {
+      const [apps, setApps] = useState(true);
+      return <><div className="chat-column"><textarea data-testid="message-field" /></div>
+        {apps && <ChatAppsDialog linkId="link-1" name="Ana" onClose={() => setApps(false)} />}</>;
+    }
+    const { user } = renderApp(<Chat />);
+    const open = await screen.findByTestId("chat-app-open");
+    await user.click(open);
+    await waitFor(() => expect(deliver).toBeDefined());
+    open.focus();
+    await act(async () => { deliver(); });
+    await waitFor(() => expect(screen.queryByTestId("chat-apps")).not.toBeInTheDocument());
+    expect(screen.getByTestId("message-field")).toHaveFocus();
+  });
+
   it.each([{ status: "revoked" }, { status: "removed", by: [{ store: "k", name: "A store", reason: "", at: 1 }] }] as InstalledAppView["run"][])("a $status version stays Stopped, with Open off", async (taken) => {
     run = taken;
     await dialog();
@@ -73,11 +131,33 @@ describe("the chat's Apps with an app whose files are not on this device", () =>
     expect(screen.getByTestId("chat-app-open")).toBeDisabled();
   });
 
+  it("an app already running in this chat is shown again, with no second card to the contact", async () => {
+    run = { status: "ok" };
+    const opener = vi.fn(async () => "shown" as const);
+    setAppOpener(opener);
+    const { user, onClose } = await dialog();
+    await user.click(screen.getByTestId("chat-app-open"));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(opener).toHaveBeenCalledWith(REF, "link-1", {});
+    expect(sent).not.toHaveBeenCalled();
+  });
+
   it("an app that may run shows its tagline", async () => {
     run = { status: "ok" };
     await dialog();
     expect(screen.getByTestId("chat-app")).toHaveTextContent("Play chess");
     expect(screen.getByTestId("chat-app-open")).toBeEnabled();
+  });
+
+  it("names each Open with its app, so a screen reader tells two apps' Opens apart", async () => {
+    run = { status: "ok" };
+    const offer: BuiltInAppOffer = { ref: `${REF.split("/")[0]}/snake`, publisher: REF.split("/")[0]!, name: "snake", fingerprint: "yz7m oxuc bd4u 8aqt", digest: "e",
+      url: "https://raw.githubusercontent.com/a/snake/HEAD/app.ghostlyapp", title: "Snake", tagline: "Eat, grow." };
+    fakeEngine.on("appBuiltIns", () => [offer]);
+    await dialog();
+    expect(screen.getByTestId("chat-app-open")).toHaveAccessibleName("Open Chess");
+    expect(await screen.findByTestId("chat-built-in-app-open")).toHaveAccessibleName("Open Snake");
+    fakeEngine.on("appBuiltIns", () => []);
   });
 });
 
@@ -95,7 +175,8 @@ describe("the chat's Apps with an app that comes with Ghostly, never opened here
     let have = false;
     lists.mockImplementation(() => (have ? [installed()] : []));
     fakeEngine.on("appBuiltIns", () => (have ? [] : [offer])).on("appPreview", () => carried).on("appInstall", () => { have = true; return installed(); });
-    const opener = vi.fn(async () => {});
+    let finish: () => void = () => {};
+    const opener = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
     setAppOpener(opener);
     const onClose = vi.fn();
     const { user } = renderApp(<ChatAppsDialog linkId="link-1" name="Ana" onClose={onClose} />);
@@ -114,8 +195,32 @@ describe("the chat's Apps with an app that comes with Ghostly, never opened here
 
     await user.click(confirm);
     await waitFor(() => expect(opener).toHaveBeenCalledWith(REF, "link-1", {}));
+    // Installed, it is listed as an installed app: while it starts, its Open shows it is working.
+    expect(screen.queryByTestId("chat-built-in-app")).not.toBeInTheDocument();
+    const open = screen.getByTestId("chat-app-open");
+    expect(open).toHaveAttribute("aria-busy", "true");
+    expect(within(open).getByTestId("button-spinner")).toBeInTheDocument();
+    await act(async () => { finish(); });
     await waitFor(() => expect(sent).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
+    lists.mockImplementation(() => [installed()]);
+  });
+});
+
+describe("the card an app sends when it is opened in a chat", () => {
+  it("never names the query of the link it was installed from (an app installed from a private file's link before such links were refused)", async () => {
+    const token = "GHSAT0AAAAAACPRIVATEREADTOKEN";
+    const from = "https://raw.githubusercontent.com/a/chess/main/app.ghostlyapp";
+    lists.mockImplementation(() => [{ ...installed(), from: `${from}?token=${token}`, run: { status: "ok" } }]);
+    setAppOpener(vi.fn(async () => {}));
+    const { user, onClose } = await dialog();
+    await user.click(screen.getByTestId("chat-app-open"));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(sent).toHaveBeenCalledTimes(1);
+    const params = (sent.mock.calls[0] as unknown as [{ text: string; card: { url?: string } }])[0];
+    expect(params.card.url).toBe(from);
+    expect(params.text).toBe(`🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\n${from}`);
+    expect(JSON.stringify(params)).not.toContain(token);
     lists.mockImplementation(() => [installed()]);
   });
 });

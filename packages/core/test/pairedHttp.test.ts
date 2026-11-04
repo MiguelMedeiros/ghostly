@@ -78,5 +78,8 @@ it.each([
   const { viewer } = paired(async () => ({ status: 200, headers: [], body: body(big) }), { atlas: "localhost:3400" }, budgetPair());
   const response = await viewer.client.request("atlas", { method: "GET", path: "/big" });
   expect(response.status).toBe(200);
-  expect(await response.bytes()).toEqual(big);
+  // Byte for byte, at memory speed: toEqual walks a Uint8Array one element at a time (a second per MB, more on CI).
+  const bytes = await response.bytes();
+  expect(bytes.length).toBe(big.length);
+  expect(bytes.findIndex((byte, i) => byte !== big[i]), "the first byte that differs").toBe(-1);
 });

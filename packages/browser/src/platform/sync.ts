@@ -1,5 +1,6 @@
 import {
   addMessages,
+  deleteMessage,
   saveSession,
   setEngineMessages,
   STORED_MESSAGES,
@@ -8,6 +9,7 @@ import {
   forgetInviteCode,
   forgetShownSession,
   getInviteCode,
+  getUnreadCount,
   isSessionKey,
   listShownSessions,
   loadSession,
@@ -20,10 +22,14 @@ import {
   updateSessionLabel,
   wasDeleted,
 } from "../../../../apps/ui/src/lib/storage";
+import { clearChatNotification } from "../../../../apps/ui/src/lib/notifications";
 import type { ChatMessage, ChatSession } from "../../../../apps/ui/src/lib/types";
-import type { EngineState, LinkView, StoredMessage } from "../shared/types";
+import type { EngineState, LinkView, ReactionNote, StoredMessage } from "../shared/types";
 import { engine, type ListChanges } from "./engine";
+import { forgetServicesOf } from "../host";
+import { viewerTag } from "@ghostly/core";
 import { replyRef } from "../shared/replies";
+import { isRefusalId, paymentRefusal } from "../shared/refusals";
 
 /**
  * The Desktop UI keeps its sessions in localStorage and that stays the list
@@ -39,6 +45,12 @@ const MIGRATED_KEY = "gb-sessions-imported";
 const OLD_MIGRATED_KEY = "ghostly_browser_sessions_imported";
 const FORGET_AFTER_MS = 15_000;
 const JOIN_PATTERN = /^👋 (?:.+ )?joined$/;
+
+/**
+ * Whether a row is the chat's joined line, drawn as the app's own line: the contact's only when the engine took it as
+ * one (`joinLine`, their first row of the chat), any other row of theirs in those words being a message; mine by its words.
+ */
+const isJoinLine = (message: StoredMessage) => JOIN_PATTERN.test(message.text) && (message.sender === "me" || !!message.joinLine);
 
 export function notifySessionsChanged(): void {
   window.dispatchEvent(new Event("session-updated"));
@@ -76,13 +88,16 @@ export function sessionForPeer(peerPubKeyZ32: string): ChatSession | undefined {
 }
 
 export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string, myPubKeyZ32: string, modern = false): ChatMessage {
-  const isJoin = JOIN_PATTERN.test(message.text);
+  const isJoin = isJoinLine(message);
+  // A payment of the contact's this app refused: the app's own line, not the contact's (stored as theirs for the CLI).
+  const notice = paymentRefusal(message);
   return {
     id: message.id,
     delivery: message.delivery,
     deliveryError: message.deliveryError,
     text: message.text,
-    sender: isJoin ? "system" : message.sender,
+    sender: isJoin || notice ? "system" : message.sender,
+    ...(notice && { notice }),
     timestamp: message.timestamp,
     ...(message.sentAt !== undefined && { sentAt: message.sentAt }),
     nick: message.nick,
@@ -169,8 +184,25 @@ function mirrorNew(linkId: string, messages: StoredMessage[], changes?: ListChan
 
 function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: ListChanges): void {
   const link = engine.state?.links.find((l) => l.id === linkId);
-  const shown = link && sessionForPeer(link.peerPubKeyZ32);
+  let shown = link && sessionForPeer(link.peerPubKeyZ32);
   if (!link || !shown) return;
+  // A row the engine says it deleted (its author deleted it for everyone, WISP 400 § Delete for everyone) goes from the
+  // chat as a delete here does: the row, its id kept so it is not taken again, its place in the read count. Only what
+  // the change tick names, or the ids a whole list says the engine deleted (a removal no page heard, as on the
+  // extension with none open): a whole list without a row may be one a page has not caught up with (two pages of the
+  // extension over one storage), and a row the engine never had (a call's line) is the chat's own.
+  const named = changes ? changes.deleted : engine.deletedIds.get(linkId) ?? [];
+  const here = named.length ? new Set(shown.messages.map((m) => m.id)) : undefined;
+  const gone = named.filter((id) => here!.has(id));
+  if (gone.length) {
+    for (const id of gone) deleteMessage(shown.id, id);
+    forget(shown.id);
+    notifySessionsChanged();
+    shown = sessionForPeer(link.peerPubKeyZ32);
+    if (!shown) return;
+    // Nothing unread left: the chat's notification goes, as reading the chat takes it (the Android and Linux apps keep one).
+    if (!getUnreadCount(shown)) clearChatNotification(shown.id);
+  }
   // Changed here (its rows, its sort, what is added), never the one the other readers hold.
   const session: ChatSession = { ...shown, messages: shown.messages.slice() };
 
@@ -183,6 +215,13 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
   setEngineMessages(session.id, engineIds(messages, since));
   // Read without its older messages (this page just loaded): the ones the engine keeps come back below, all of them.
   const partial = !!session.older;
+  // Only the chat's newest page from the engine (the extension's pages, at attach): what it holds goes in, and the
+  // session keeps saying how many older ones it left out. Its whole history is asked for when the page and the session
+  // do not make it together (`reachesBack`): the stored copy would keep rows whose place is not known here for good.
+  const whole = engine.whole(linkId);
+  if (!whole && !reachesBack(session, messages)) engine.askWhole(linkId);
+  // A row of that page from before the first the session holds is one it left out (counted in `older`): not added again.
+  const heldFrom = !whole && partial ? firstHeld(session) : -Infinity;
   const before = partial ? storedSession(session.id) : null;
   const at = since ? placesOf(session.messages, since.messages) : new Map(session.messages.map((m, i) => [m.id, i]));
   const added: ChatMessage[] = [];
@@ -221,15 +260,34 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
         // A status card belongs to its version (WISP 405 · Status Cards): the edit's, or none.
         if (message.card) row.card = message.card; else delete row.card;
       }
-      // Only a join announcement has one; the others are not mapped again.
-      const systemEvent = JOIN_PATTERN.test(message.text) ? mapped().systemEvent : undefined;
+      // Only a joined line has one; the others are not mapped again. A row of the contact's is that line only as the
+      // engine says (`isJoinLine`): one mirrored as it from its words alone is their message again.
+      const systemEvent = isJoinLine(message) ? mapped().systemEvent : undefined;
       if (systemEvent && previous.systemEvent?.pubKey !== systemEvent.pubKey) change().systemEvent = systemEvent;
+      if (message.sender === "peer") {
+        if (systemEvent && previous.sender !== "system") change().sender = "system";
+        else if (!systemEvent && previous.systemEvent?.type === "join") {
+          const row = change();
+          row.sender = "peer";
+          delete row.systemEvent;
+        }
+      }
+      // A refused payment's line as the engine's row says it (shared/refusals.ts): one mirrored before its values were
+      // kept as the contact's, or a contact's text under its id mirrored as the app's line. The UI reads only this.
+      if (isRefusalId(message.id)) {
+        const { sender, notice } = mapped();
+        if (previous.sender !== sender || JSON.stringify(previous.notice ?? null) !== JSON.stringify(notice ?? null)) {
+          const row = change();
+          row.sender = sender;
+          if (notice) row.notice = notice; else delete row.notice;
+        }
+      }
     }
     if (next) {
       session.messages[i!] = next;
       dirty = true;
     }
-    if (previous || !mirrorable(message)) continue;
+    if (previous || !mirrorable(message) || message.timestamp <= heldFrom) continue;
     added.push(mapped());
   }
   if (moved) session.messages.sort((a, b) => a.timestamp - b.timestamp);
@@ -243,7 +301,7 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
   if (added.length) {
     const before = session.messages.length;
     // The session read above, as stored (saved just now if a row changed).
-    const updated = addMessages(session.id, added, partial, session);
+    const updated = addMessages(session.id, added, partial && whole, session);
     if (updated) session.messages = updated.messages;
     if (session.messages.length !== before) changed = true;
   }
@@ -252,19 +310,43 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
   if (dirty || added.length || changed) forget(session.id);
   const after = storedSession(session.id);
   mirrored.set(linkId, { messages, sessionId: session.id, stored: after });
-  if (changed && partial && after === before) notifyWholeAgain();
+  if (changed && partial && whole && after === before) notifyWholeAgain();
   else if (changed) notifySessionsChanged();
 }
 
 /**
+ * Whether a chat's newest page from the engine and what its session holds make its whole history together. A session
+ * that left nothing out holds every row before the page if it starts at or before it (this page had the whole history
+ * already). One that left older rows out (`older`) must hold none from before the page but a call's line (never the
+ * engine's): where those rows are in the engine's history is not known here.
+ */
+function reachesBack(session: ChatSession, page: StoredMessage[]): boolean {
+  if (!page.length) return false;
+  const from = page[0].timestamp;
+  if (!session.older) return firstHeld(session) <= from;
+  return firstHeld(session) !== Infinity && session.messages.every((m) => m.timestamp >= from || !!m.callEvent);
+}
+
+/** The time of the oldest message a session holds that is not a call's line; none, Infinity. */
+function firstHeld(session: ChatSession): number {
+  return session.messages.find((m) => !m.callEvent)?.timestamp ?? Infinity;
+}
+
+/**
  * The chat's latest reaction, for the chat list: its note, and its place, as a message would move it. Not a message,
- * so the unread count stays. Put on this session, not saved: whoever holds it saves it.
+ * so the unread count stays. Put on this session, not saved: whoever holds it saves it. A note that quotes a message
+ * deleted here is never kept: the engine's next one (the reaction before it that stands, or none) takes its place.
  */
 function noteReaction(session: ChatSession, link: LinkView): boolean {
   const note = link.lastReaction;
-  const shown = session.lastReaction;
+  const deleted = (n: ReactionNote | undefined) => !!n?.message && !!session.deletedIds?.includes(n.message);
+  const shown = deleted(session.lastReaction) ? undefined : session.lastReaction;
   // A newer reaction, or the same one whose message was edited since (its line quotes the text).
-  if (!note || note.at < (shown?.at ?? 0) || (note.at === shown?.at && note.snippet === shown.snippet)) return false;
+  if (!note || deleted(note) || note.at < (shown?.at ?? 0) || (note.at === shown?.at && note.snippet === shown.snippet)) {
+    if (shown === session.lastReaction) return false;
+    delete session.lastReaction;
+    return true;
+  }
   session.lastReaction = note;
   session.lastSyncAt = Math.max(session.lastSyncAt ?? 0, note.at);
   return true;
@@ -394,6 +476,8 @@ async function reconcile(): Promise<void> {
     // A link only just made may not have its chat yet; one whose chat was deleted here goes at once.
     if (Date.now() - link.createdAt < FORGET_AFTER_MS && !wasDeleted(link.peerPubKeyZ32)) continue;
     void engine.call("removeLink", { linkId: link.id }).catch(() => {});
+    // What the contact's apps opened from this chat kept on this device goes with it (the web app's origins).
+    void forgetServicesOf({ tag: viewerTag(link.myPubKeyZ32) });
   }
   if (!later && !renamed) settled = { state, sessions };
 }

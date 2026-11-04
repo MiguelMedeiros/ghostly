@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fire, settle, type FakeWorld } from "./fakeChrome";
 import { engineControl, okResponse, resetEngine } from "./fakeEngine";
-import { OTHER_PEER, PEER, SERVICE, bodyText, bootExtension, engine, openViewer, pauseRequest } from "./extension";
+import { OTHER_PEER, OTHER_TAG, PEER, SERVICE, TAG, bodyText, bootExtension, engine, openViewer, pauseRequest } from "./extension";
 
 // covers: extension.engine, services.open, payments.external
 
@@ -123,6 +123,8 @@ describe("open-payment-link", () => {
     "bitcoin:BC1QAR0SRRR7XFKVY5L643LYDNW9RE59GTZZWF5MDQ?ark=tark1q",
     // A label and message as the app writes them (apps/ui/src/lib/parse/money-bitcoin.ts bip21Uri).
     "bitcoin:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq?amount=0.0001&label=Bob%27s%20%28Tue%29&message=Thanks%21%2A%7E",
+    // As apps/ui/src/lib/parse/money-monero.ts writes it.
+    "monero:4AzKEX4gXdJdNeM6dfiBFL7kqund3HYGvMBF3ttsNd9SfzgYB6L7ep1Yg1osYJzLdaKAYSLVh6e6jKnAuzj3bw1oGy9kXCb?tx_amount=0.25&tx_description=Rent%20%28May%29",
   ])("hands %s to the system's wallet", async (uri) => {
     expect(await send({ target: "background", type: "open-payment-link", uri })).toEqual({ ok: true });
     expect(world.callsTo("tabs.create")).toEqual([[uri]]);
@@ -183,6 +185,20 @@ describe("the page and the peer talk over the 'ui' port", () => {
     expect(disconnected).toBe(true);
   });
 
+  it("sends a page that connects each chat's newest page, not every whole history, and the rest of one it asks for", async () => {
+    // Every chat's whole history went to each tab opened or reloaded, as JSON: about 20 MiB for 50 chats of 2,000.
+    const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
+    const connection = await extensionHost.connect(() => {}, () => {});
+    const server = engine();
+    expect(server.attachedWith).toEqual([[undefined, { newest: 400 }]]);
+
+    connection.send({ kind: "history", linkId: "chat-1" });
+    await settle();
+    expect(server.histories).toEqual([{ client: server.attached[0], linkId: "chat-1" }]);
+    // Not an engine call.
+    expect(server.handled).toEqual([]);
+  });
+
   it("detaches the page when its port closes", async () => {
     await send({ target: "background", type: "ensure-engine" });
     const port = world.chrome.runtime.connect({ name: "ui" });
@@ -222,23 +238,43 @@ describe("viewer tabs", () => {
   it("opens one tab bound to one contact's service, intercepting only the virtual origin", async () => {
     const tabId = await openViewer(world);
     expect(world.callsTo("tabs.create")).toEqual([["about:blank"]]);
-    expect(world.session.get(`viewer:${tabId}`)).toEqual({ peerPubKeyZ32: PEER, serviceId: SERVICE });
+    expect(world.session.get(`viewer:${tabId}`)).toEqual({ peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, page: expect.objectContaining({ lang: "en", dir: "ltr" }) });
     expect(world.callsTo("debugger.attach")).toEqual([[{ tabId }, "1.3"]]);
     expect(world.callsTo("debugger.sendCommand").map(([, method, params]) => [method, params])).toEqual([
       ["Fetch.enable", { patterns: [{ urlPattern: "https://*.invalid/*", requestStage: "Request" }] }],
       ["Page.enable", undefined],
     ]);
-    expect(world.tabs.get(tabId)!.url).toBe(`https://${SERVICE}.${PEER}.invalid/`);
+    expect(world.tabs.get(tabId)!.url).toBe(`https://${SERVICE}.${PEER}.${TAG}.invalid/`);
+  });
+
+  it("opens the same contact's app in another origin for another profile's chat with them", async () => {
+    // Every Ghostly profile shares the browser's storage: the origin is all that keeps the app's cookies,
+    // storage and sessions in one profile, and out of reach once that chat is cleared or deleted (WISP 04).
+    const mine = await openViewer(world);
+    const theirs = await openViewer(world, PEER, SERVICE, OTHER_TAG);
+    expect(world.tabs.get(mine)!.url).toBe(`https://${SERVICE}.${PEER}.${TAG}.invalid/`);
+    expect(world.tabs.get(theirs)!.url).toBe(`https://${SERVICE}.${PEER}.${OTHER_TAG}.invalid/`);
+    for (const [tabId, other] of [[mine, OTHER_TAG], [theirs, TAG]] as const) {
+      for (const url of [`https://${SERVICE}.${PEER}.${other}.invalid/`, `https://${SERVICE}.${PEER}.invalid/`]) {
+        const answer = await pauseRequest(world, tabId, { url });
+        expect(answer, url).toEqual({ method: "Fetch.failRequest", params: { requestId: expect.any(String), errorReason: "BlockedByClient" } });
+      }
+    }
+    expect(engine().requests).toHaveLength(0);
   });
 
   it.each([
-    ["a peer key that is not z-base-32", "l".repeat(52), SERVICE],
-    ["a short peer key", PEER.slice(1), SERVICE],
-    ["a service id with a dot", PEER, "atlas.evil"],
-    ["an upper-case service id", PEER, "Atlas"],
-    ["a host injection", `${PEER}.invalid/@evil.example`, SERVICE],
-  ])("refuses %s before opening a tab", async (_, peer, service) => {
-    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: peer, serviceId: service });
+    ["a peer key that is not z-base-32", "l".repeat(52), SERVICE, TAG],
+    ["a short peer key", PEER.slice(1), SERVICE, TAG],
+    ["a service id with a dot", PEER, "atlas.evil", TAG],
+    ["an upper-case service id", PEER, "Atlas", TAG],
+    ["a host injection", `${PEER}.${TAG}.invalid/@evil.example`, SERVICE, TAG],
+    ["no chat tag", PEER, SERVICE, undefined],
+    ["a short chat tag", PEER, SERVICE, TAG.slice(1)],
+    ["a chat tag with a dot", PEER, SERVICE, `${TAG}.evil`],
+    ["a chat tag outside z-base-32", PEER, SERVICE, "l".repeat(16)],
+  ])("refuses %s before opening a tab", async (_, peer, service, tag) => {
+    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: peer, serviceId: service, tag });
     expect(reply).toEqual({ ok: false, error: "Invalid service" });
     expect(world.callsTo("tabs.create")).toEqual([]);
     expect(world.callsTo("debugger.attach")).toEqual([]);
@@ -246,7 +282,7 @@ describe("viewer tabs", () => {
 
   it("closes the tab and forgets it when DevTools cannot attach", async () => {
     world.failDebuggerAttach = "Another debugger is already attached to the tab.";
-    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE });
+    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG });
     expect(reply).toEqual({ ok: false, error: "Another debugger is already attached to the tab." });
     const [[tabId]] = world.callsTo("tabs.remove") as [[number]];
     expect(world.tabs.has(tabId)).toBe(false);
@@ -258,7 +294,7 @@ describe("viewer tabs", () => {
     const tabId = await openViewer(world);
     engineControl().respond = async () => okResponse("<h1>atlas</h1>", 201, [["content-type", "text/html"]]);
     const answer = await pauseRequest(world, tabId, {
-      url: `https://${SERVICE}.${PEER}.invalid/api/items?limit=5`,
+      url: `https://${SERVICE}.${PEER}.${TAG}.invalid/api/items?limit=5`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       postData: '{"name":"ç"}',
@@ -279,7 +315,7 @@ describe("viewer tabs", () => {
     const tabId = await openViewer(world);
     const b64 = (s: string) => Buffer.from(s).toString("base64");
     await pauseRequest(world, tabId, {
-      url: `https://${SERVICE}.${PEER}.invalid/upload`,
+      url: `https://${SERVICE}.${PEER}.${TAG}.invalid/upload`,
       method: "PUT",
       postDataEntries: [{ bytes: b64("part one, ") }, {}, { bytes: b64("part two") }],
     });
@@ -289,11 +325,13 @@ describe("viewer tabs", () => {
   it("refuses another contact's origin, another service, or anything else in the tab", async () => {
     const tabId = await openViewer(world);
     for (const url of [
-      `https://${SERVICE}.${OTHER_PEER}.invalid/`,
-      `https://notes.${PEER}.invalid/`,
-      `https://${SERVICE}.${PEER}.invalid:8443/`,
-      `http://${SERVICE}.${PEER}.invalid/`,
-      `https://x.${SERVICE}.${PEER}.invalid/`,
+      `https://${SERVICE}.${OTHER_PEER}.${TAG}.invalid/`,
+      `https://notes.${PEER}.${TAG}.invalid/`,
+      `https://${SERVICE}.${PEER}.${OTHER_TAG}.invalid/`,
+      `https://${SERVICE}.${PEER}.invalid/`,
+      `https://${SERVICE}.${PEER}.${TAG}.invalid:8443/`,
+      `http://${SERVICE}.${PEER}.${TAG}.invalid/`,
+      `https://x.${SERVICE}.${PEER}.${TAG}.invalid/`,
       "https://example.com/",
     ]) {
       const answer = await pauseRequest(world, tabId, { url });
@@ -305,7 +343,7 @@ describe("viewer tabs", () => {
   it("sends no command to a tab it never bound, or one that was closed: it only lets go of it", async () => {
     const tabId = await openViewer(world);
     const before = world.callsTo("debugger.sendCommand").length;
-    const url = `https://${SERVICE}.${PEER}.invalid/`;
+    const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/`;
     const paused = (tab: number) =>
       fire(world.chrome.debugger.onEvent, { tabId: tab }, "Fetch.requestPaused", { requestId: `r${tab}`, request: { url, method: "GET", headers: {} } });
     paused(9999);
@@ -323,10 +361,10 @@ describe("viewer tabs", () => {
     const tabId = await openViewer(world);
     engineControl().respond = async () =>
       okResponse("", 200, [
-        ["Set-Cookie", `sid=1; Domain=${PEER}.invalid; Path=/\nother=2; path=/; domain = .invalid; HttpOnly`],
+        ["Set-Cookie", `sid=1; Domain=${PEER}.${TAG}.invalid; Path=/\nother=2; path=/; domain = .invalid; HttpOnly`],
         ["X-Domain", "Domain=kept"],
       ]);
-    const answer = await pauseRequest(world, tabId, { url: `https://${SERVICE}.${PEER}.invalid/` });
+    const answer = await pauseRequest(world, tabId, { url: `https://${SERVICE}.${PEER}.${TAG}.invalid/` });
     expect(answer.params.responseHeaders).toEqual([
       { name: "Set-Cookie", value: "sid=1; Path=/" },
       { name: "Set-Cookie", value: "other=2; path=/; HttpOnly" },
@@ -348,16 +386,17 @@ describe("viewer tabs", () => {
         ["", "x"],
         ["X-Kept", "fine; really"],
       ]);
-    const answer = await pauseRequest(world, tabId, { url: `https://${SERVICE}.${PEER}.invalid/` });
+    const answer = await pauseRequest(world, tabId, { url: `https://${SERVICE}.${PEER}.${TAG}.invalid/` });
     expect(answer.params.responseHeaders).toEqual([
       { name: "Content-Type", value: "text/html" },
       { name: "X-Kept", value: "fine; really" },
     ]);
   });
 
-  it("answers 503 when the contact is gone and 502 with an escaped reason otherwise", async () => {
-    const tabId = await openViewer(world);
-    const url = `https://${SERVICE}.${PEER}.invalid/`;
+  it("answers 503 when the contact is gone and 502 otherwise, in the words and language of the page that opened the tab", async () => {
+    const page = { lang: "ar", dir: "rtl", unreachable: "هذه الخدمة غير متاحة.", failed: 'فشل <img src=x onerror="alert(1)">' };
+    const tabId = await openViewer(world, PEER, SERVICE, TAG, page);
+    const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/`;
     const offline = await httpError("offline", "offline");
     engineControl().respond = async () => {
       throw offline;
@@ -367,17 +406,41 @@ describe("viewer tabs", () => {
       responseCode: 503,
       responseHeaders: expect.arrayContaining([{ name: "x-ghostly-error", value: "offline" }, { name: "cache-control", value: "no-store" }]),
     });
-    expect(bodyText(gone.params)).toContain("This service is not reachable");
+    expect(bodyText(gone.params)).toContain('<html lang="ar" dir="rtl">');
+    expect(bodyText(gone.params)).toContain("هذه الخدمة غير متاحة.");
+    expect(bodyText(gone.params)).not.toContain("not reachable");
 
+    // The engine's English is for the console, not the page.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     engineControl().respond = async () => {
-      throw new Error('<img src=x onerror="alert(1)">');
+      throw new Error("Request reset by peer");
     };
     const failed = await pauseRequest(world, tabId, { url });
     expect(failed.params).toMatchObject({ responseCode: 502 });
     expect(failed.params.responseHeaders).toContainEqual({ name: "x-ghostly-error", value: "error" });
     const html = bodyText(failed.params);
+    expect(html).not.toContain("Request reset by peer");
     expect(html).not.toContain("<img");
-    expect(html).toContain("&#60;img src=x onerror=&#34;alert(1)&#34;&#62;");
+    expect(html).toContain("فشل &#60;img src=x onerror=&#34;alert(1)&#34;&#62;");
+    expect(warn).toHaveBeenCalledWith("Service request failed:", "error", "Request reset by peer");
+  });
+
+  it.each([
+    ["no page", undefined],
+    ["a language that is no tag", { lang: 'ar" onload="x', dir: "rtl", unreachable: "a", failed: "b" }],
+    ["another direction", { lang: "ar", dir: "auto", unreachable: "a", failed: "b" }],
+    ["a text that is not one", { lang: "ar", dir: "rtl", unreachable: 1, failed: "b" }],
+    ["an empty text", { lang: "ar", dir: "rtl", unreachable: "a", failed: "" }],
+    ["a text too long", { lang: "ar", dir: "rtl", unreachable: "a".repeat(501), failed: "b" }],
+  ])("says it in English when the page sent %s", async (_, page) => {
+    const tabId = await openViewer(world, PEER, SERVICE, TAG, page);
+    const offline = await httpError("offline", "offline");
+    engineControl().respond = async () => {
+      throw offline;
+    };
+    const gone = await pauseRequest(world, tabId, { url: `https://${SERVICE}.${PEER}.${TAG}.invalid/` });
+    expect(bodyText(gone.params)).toContain('<html lang="en" dir="ltr">');
+    expect(bodyText(gone.params)).toContain("This service is not reachable. Services exist while their ghost is online.");
   });
 
   it("stops intercepting once the tab leaves the virtual origin, and only then", async () => {
@@ -385,7 +448,7 @@ describe("viewer tabs", () => {
     const navigate = (frame: { url: string; parentId?: string }) =>
       fire(world.chrome.debugger.onEvent, { tabId }, "Page.frameNavigated", { frame });
     navigate({ url: "about:blank" });
-    navigate({ url: `https://${SERVICE}.${PEER}.invalid/page` });
+    navigate({ url: `https://${SERVICE}.${PEER}.${TAG}.invalid/page` });
     navigate({ url: "https://example.com/", parentId: "frame-1" });
     await settle();
     expect(world.callsTo("debugger.detach")).toEqual([]);
@@ -406,7 +469,7 @@ describe("viewer tabs", () => {
   it("ignores debugger events that do not come from a tab", async () => {
     fire(world.chrome.debugger.onEvent, { extensionId: "x" }, "Fetch.requestPaused", {
       requestId: "1",
-      request: { url: `https://${SERVICE}.${PEER}.invalid/`, method: "GET", headers: {} },
+      request: { url: `https://${SERVICE}.${PEER}.${TAG}.invalid/`, method: "GET", headers: {} },
     });
     await settle();
     expect(world.callsTo("debugger.sendCommand")).toEqual([]);
@@ -414,11 +477,11 @@ describe("viewer tabs", () => {
 });
 
 describe("the debugger stays on the tabs the worker opened", () => {
-  const url = `https://${SERVICE}.${PEER}.invalid/`;
+  const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/`;
 
   it("attaches only to the tab it just created, whatever tab a page names", async () => {
     const bank = await world.chrome.tabs.create({ url: "https://bank.example/" });
-    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tabId: bank.id });
+    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, tabId: bank.id });
     expect(reply).toEqual({ ok: true });
     const viewer = [...world.tabs.values()].find((t) => t.url === url)!;
     expect(viewer.id).not.toBe(bank.id);
@@ -462,7 +525,7 @@ describe("the debugger stays on the tabs the worker opened", () => {
     ["a sender with no url", { id: "nbedaagicniejlmfcncndfjcejaidbcf" }],
   ])("does not hear %s", async (_, sender) => {
     for (const message of [
-      { target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE },
+      { target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG },
       { target: "background", type: "open-payment-link", uri: "lightning:lnbc1" },
       { target: "background", type: "ensure-engine" },
     ]) {

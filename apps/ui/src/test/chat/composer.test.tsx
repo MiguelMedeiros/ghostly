@@ -1,4 +1,5 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { Profiler } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
@@ -253,6 +254,58 @@ describe("the emoji/GIF panel", () => {
     }
   });
 
+  it("on a phone on its side takes more than half the screen, so the grid keeps room for emoji rows", async () => {
+    const height = () => screen.getByTestId("expression-panel").style.getPropertyValue("--expression-height");
+    viewport(568, 320);
+    const { user } = composer();
+    await user.click(smiley());
+    // Half (166 px) would leave the grid 8 px under the categories, the search and the switch.
+    expect(height()).toBe(`${Math.round(320 * 0.82)}px`);
+    viewport(667, 375);
+    window.dispatchEvent(new Event("resize"));
+    await waitFor(() => expect(height()).toBe("290px"));
+    // A phone held upright keeps its half.
+    viewport(320, 568);
+    window.dispatchEvent(new Event("resize"));
+    await waitFor(() => expect(height()).toBe(`${Math.round(568 * 0.52)}px`));
+  });
+
+  it("renders again only when it moves: not for a scroll or a resize that leaves it in place, nor for its own grid's scroll", async () => {
+    viewport(390, 844);
+    // The visual viewport a phone has (happy-dom has none): the sheet stands on it.
+    const visual = Object.assign(new EventTarget(), { width: 390, height: 844, offsetLeft: 0, offsetTop: 0 });
+    Object.defineProperty(window, "visualViewport", { configurable: true, value: visual });
+    let commits = 0;
+    try {
+      const { user } = renderApp(<Profiler id="composer" onRender={() => { commits++; }}><LockScreenProvider>
+        <MessageInput onSend={onSend} onSendFile={onSendFile} identities={{ peerKey: "peer", contact: "Alice" }} /></LockScreenProvider></Profiler>);
+      const frame = () => act(() => new Promise<void>((done) => requestAnimationFrame(() => done())));
+      const grid = () => screen.getByTestId("emoji-grid");
+      await user.click(smiley());
+      // The grid's first scrolls pick its category (all at the top here) and React checks once more that it stayed:
+      // the grid's own business, not the panel's place.
+      for (let i = 0; i < 2; i++) { fireEvent.scroll(grid()); await frame(); }
+      const before = commits;
+      for (let i = 0; i < 20; i++) {
+        fireEvent.scroll(grid());
+        fireEvent.scroll(window);
+        window.dispatchEvent(new Event("resize"));
+        visual.dispatchEvent(new Event("scroll"));
+        visual.dispatchEvent(new Event("resize"));
+      }
+      await frame();
+      await frame();
+      expect(commits).toBe(before);
+      // A shorter screen (a phone on its side) still changes it.
+      visual.height = 500;
+      visual.dispatchEvent(new Event("resize"));
+      await frame();
+      expect(screen.getByTestId("expression-panel").style.getPropertyValue("--expression-height")).toBe("290px");
+    } finally {
+      Reflect.deleteProperty(window, "visualViewport");
+    }
+  });
+
   it("opens on emoji, with categories, a search field and the grid, and a switch at the bottom", async () => {
     const { user } = composer();
     await user.click(smiley());
@@ -334,6 +387,31 @@ describe("the emoji/GIF panel", () => {
     await again.user.click(smiley());
     expect(screen.getByRole("button", { name: "👋🏽" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "👋" })).not.toBeInTheDocument();
+  });
+
+  it("has the skin tones as one Tab stop, the chosen tone; the arrows move and only Space or Enter chooses (and closes the row)", async () => {
+    const { user } = composer();
+    await user.click(smiley());
+    await user.click(screen.getByTestId("emoji-skin"));
+    const tones = within(screen.getByRole("radiogroup", { name: "Skin tone" })).getAllByRole("radio");
+    const chosen = tones.findIndex(r => r.getAttribute("aria-checked") === "true");
+    expect(tones.map(r => r.tabIndex)).toEqual(tones.map((_, i) => i === chosen ? 0 : -1));
+    const other = (chosen + 1) % tones.length, last = tones[tones.length - 1];
+    tones[chosen].focus();
+    await user.keyboard("{ArrowRight}");
+    expect(tones[other]).toHaveFocus();
+    // Moving chooses nothing: the row stays open, the chosen tone as it was.
+    expect(screen.getByTestId("emoji-skins")).toBeInTheDocument();
+    expect(tones[chosen]).toHaveAttribute("aria-checked", "true");
+    await user.keyboard("{End}");
+    expect(last).toHaveFocus();
+    await user.keyboard("{Home}");
+    expect(tones[0]).toHaveFocus();
+    await user.keyboard("{ArrowLeft}");
+    expect(last).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("emoji-skins")).not.toBeInTheDocument();
+    expect(screen.getByTestId("emoji-skin")).toHaveTextContent(last.textContent!);
   });
 
   it("moves through the grid with the arrow keys", async () => {
@@ -481,6 +559,24 @@ describe("the emoji/GIF panel", () => {
     expect(field()).toHaveFocus();
   });
 
+  it("opened from the keyboard, takes the focus on its search, the arrows reach the grid, and Escape gives it back to the button", async () => {
+    const { user } = composer();
+    smiley().focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByPlaceholderText("Search emoji")).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(within(screen.getByTestId("emoji-section-people")).getByRole("button", { name: "😀" })).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("expression-panel")).not.toBeInTheDocument();
+    expect(smiley()).toHaveFocus();
+    // With Space too; opened by a click, the focus stays where it was.
+    await user.keyboard(" ");
+    expect(screen.getByPlaceholderText("Search emoji")).toHaveFocus();
+    await user.keyboard("{Escape}");
+    await user.click(smiley());
+    expect(smiley()).toHaveFocus();
+  });
+
   it("the + and the panel take turns", async () => {
     const { user } = composer();
     await user.click(smiley());
@@ -584,6 +680,25 @@ describe("GIF search while the Internet Archive says to wait", () => {
     await user.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(screen.getByTestId("gif-busy-wait")).toHaveTextContent("Try again in 1:00."));
     expect(screen.getByRole("button", { name: "Try again" })).toBeDisabled();
+  });
+
+  it("counts the wait down from the moment it is on screen", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => rateLimitPage());
+    localStorage.setItem("ghostly_composer_panel_tab", "gif");
+    // The very moment the wait shows, before the page has a chance to do anything else: what a loaded runner sees.
+    const shown = new Promise<void>((resolve) => {
+      const watch = new MutationObserver(() => { if (screen.queryByTestId("gif-busy-wait")) { watch.disconnect(); resolve(); } });
+      watch.observe(document.body, { childList: true, subtree: true });
+    });
+    const { user } = composer();
+    await user.click(smiley());
+    await shown;
+    act(() => { vi.advanceTimersByTime(10_000); });
+    expect(screen.getByTestId("gif-busy-wait")).toHaveTextContent("Try again in 0:20.");
+    act(() => { vi.advanceTimersByTime(20_000); });
+    expect(screen.getByTestId("gif-busy-wait")).toHaveTextContent("You can try again now.");
+    expect(screen.getByRole("button", { name: "Try again" })).toBeEnabled();
   });
 
   it("keeps the wait across categories and panels, shows the GIFs it has, and asks nothing meanwhile", async () => {

@@ -61,4 +61,32 @@ describe("a long group", () => {
     expect(row(COUNT - 1)).toBeNull();
     expect(screen.queryByTestId("jump-latest")?.getAttribute("data-count") ?? "0").toBe("0");
   });
+
+  it("shows it is loading until its first rows come, not an empty group", async () => {
+    let page!: (answer: { messages: StoredMessage[]; more: boolean }) => void;
+    fakeEngine.on("messagePage", () => new Promise(done => { page = done; }))
+      .on("groupMessages", () => new Promise<StoredMessage[]>(() => {}))
+      .on("updateSettings", () => undefined)
+      .update({ groups: [groupView({ status: "active", epoch: 1, lastMessageAt: history[COUNT - 1].timestamp, members: [member({ key: ME, me: true }), member({ key: ALICE, nick: "Alice" })] })] });
+    renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
+
+    expect(await screen.findByTestId("group-reading")).toBeInTheDocument();
+    expect(document.querySelector("[data-message-list]")).toHaveAttribute("aria-busy", "true");
+    await act(async () => { page({ messages: history.slice(-PAGE), more: true }); await vi.advanceTimersByTimeAsync(0); });
+    await screen.findByText(`Message ${COUNT - 1}`);
+    expect(screen.queryByTestId("group-reading")).toBeNull();
+    expect(document.querySelector("[data-message-list]")).not.toHaveAttribute("aria-busy");
+  });
+
+  it("is not loading when it has no history", async () => {
+    fakeEngine.on("messagePage", () => new Promise(() => {}))
+      .on("groupMessages", () => new Promise<StoredMessage[]>(() => {}))
+      .on("updateSettings", () => undefined)
+      .update({ groups: [groupView({ status: "active", epoch: 1, members: [member({ key: ME, me: true })] })] });
+    renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
+
+    await screen.findByTestId("composer-more");
+    expect(screen.queryByTestId("group-reading")).toBeNull();
+    expect(document.querySelector("[data-message-list]")).not.toHaveAttribute("aria-busy");
+  });
 });

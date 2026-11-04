@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-close-service-windows"
+description = "Enables the close_service_windows command without any pre-configured scope."
+commands.allow = ["close_service_windows"]
+
+[[permission]]
+identifier = "deny-close-service-windows"
+description = "Denies the close_service_windows command without any pre-configured scope."
+commands.deny = ["close_service_windows"]

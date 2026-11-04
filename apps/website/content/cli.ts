@@ -38,6 +38,7 @@ export const LINKS = {
   reference: `${DOCS}/packages/cli/README.md`,
   paymentBot: `${DOCS}/packages/cli/examples/payment-bot.mjs`,
   echoBot: `${DOCS}/packages/cli/examples/echo-bot.sh`,
+  voiceAgent: "https://github.com/MiguelMedeiros/ghostly-voice-agent",
   legacy: `${DOCS}/docs/wisps/402-legacy-chat.md`,
 } as const;
 
@@ -52,7 +53,7 @@ const SCOPE: { level: Level; key: string }[] = [
   { level: "available", key: "services" },
   { level: "available", key: "calls" },
   { level: "available", key: "npm" },
-  { level: "planned", key: "dht" },
+  { level: "available", key: "dht" },
   { level: "planned", key: "wallets" },
   { level: "planned", key: "binary" },
 ];
@@ -104,7 +105,7 @@ export const cli = {
       services: "Shared services",
       calls: "Voice calls, the audio handed to your program",
       npm: "On npm as @ghostlytools/cli",
-      dht: "Reading the DHT directly (relays for now)",
+      dht: "The Mainline DHT read directly, beside the Pkarr relays",
       wallets: "Bark wallets",
       binary: "A single binary, without Node",
     } as Record<string, string>,
@@ -114,6 +115,7 @@ export const cli = {
     guide: "Guide",
     reference: "Every command and event",
     agents: "AI agents",
+    voiceAgent: "A voice agent that answers calls",
     wisp: "WISP 1100: the contract",
   },
   legacy: {

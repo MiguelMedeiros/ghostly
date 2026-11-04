@@ -15,6 +15,12 @@ describe("Notice: a few words, the rest behind the ⓘ", () => {
     expect(screen.getByTestId("n-copy")).toHaveTextContent("Copy");
   });
 
+  it("gives the Copy behind the ⓘ a 24 px tall tap target on a phone", async () => {
+    const { user } = renderApp(<Notice testId="n" problem={{ tone: "error", title: "Can't reach the relays", detail: "Error: 500" }} />);
+    await user.click(screen.getByTestId("n-info"));
+    expect(screen.getByTestId("n-copy").className.split(/\s+/)).toContain("min-h-6");
+  });
+
   it("is no alert while the app retries by itself, and has no ⓘ with nothing more to say", () => {
     renderApp(<Notice testId="n" problem={{ tone: "wait", title: "Waiting for the relays", next: "Retrying in 52 s" }} />);
     expect(screen.queryByRole("alert")).toBeNull();
@@ -25,6 +31,13 @@ describe("Notice: a few words, the rest behind the ⓘ", () => {
   it("keeps the wallet's plain notices: children are the title", () => {
     renderApp(<Notice tone="error" testId="w">Not enough sats</Notice>);
     expect(screen.getByRole("alert")).toHaveTextContent("Not enough sats");
+  });
+
+  it("writes an error in danger's ink, which reads at 4.5:1 on every theme's dialogs, panels and pages", () => {
+    // Danger's own red read 4.44:1 on Monochrome dark's #1a1a1a (Add's refusal of a link), 3.6:1 on Classic dark's.
+    renderApp(<Notice tone="error" testId="e">Apps come only from GitHub</Notice>);
+    expect(screen.getByTestId("e")).toHaveClass("text-danger-ink");
+    expect(screen.getByTestId("e")).not.toHaveClass("text-danger");
   });
 
   it("writes a warning in the warn ink, which the light themes darken to 4.5:1", () => {

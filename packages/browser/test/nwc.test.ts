@@ -288,7 +288,7 @@ describe("NWC as the engine's Lightning source", () => {
 
   function service() {
     const events = { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() } satisfies LightningEvents;
-    const cashu = { view: async () => ({ balance: 0, mints: [], history: [], feesPaid: 0 }) } as unknown as CashuWallet;
+    const cashu = { balance: async () => 0 } as unknown as CashuWallet;
     // The real descriptor, with time limits a test can wait for.
     const options: NwcOptions = { requestMs: 1_500, payMs: 1_500 };
     const descriptor = { ...nwc, create: async ({ secrets }: { secrets: Record<string, string> }, host: { signal: AbortSignal }) => NwcLightning.connect(secrets.uri, { ...options, signal: host.signal }) };

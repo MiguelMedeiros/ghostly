@@ -13,9 +13,10 @@ import { Notice } from "../wallet/ui";
 import { Toast } from "../ui/Toast";
 import { useToast } from "../../hooks/useToast";
 import { FieldError } from "../ui/FieldError";
-import { focusToRetype } from "../../lib/focus";
+import { focusToRetype, keepFocusIn } from "../../lib/focus";
 import { DeviceDialog, Digits, InfoLine, Status, field, primaryButton, quietButton } from "./DeviceDialog";
 import { said } from "../../lib/notices";
+import { fillNames } from "../../lib/fillNodes";
 import { problemLine } from "../../lib/problemText";
 
 /**
@@ -68,6 +69,8 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
     }, () => {}), 500);
     return () => clearInterval(timer);
   }, [step]);
+  // The password form, They match or Try again went away with its step: the focus stays in the dialog.
+  useEffect(() => { if (step === "enroll") keepFocusIn(body.current); }, [step, view?.step, busy]);
   // Closed before it ended: the code is spent, and nothing was added.
   useEffect(() => () => { if (!ended.current) void engine.call("deviceEnrollCancel").catch(() => {}); }, []);
 
@@ -77,11 +80,13 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
     notice.show(text);
     if (field) focusToRetype(field === "password" ? passwordInput.current : againInput.current);
   };
+  /** The error is over: the card that says it again goes with it, not over what comes next. */
+  const clear = () => { setError(null); notice.dismiss(); };
 
   const start = async () => {
-    setError(null); setBusy(true);
+    clear(); setBusy(true);
     try {
-      const first = await engine.call("deviceEnrollInvite", { name: defaultDeviceName(isDesktopApp() ? { userAgent: navigator.userAgent, desktop: true } : undefined) });
+      const first = await engine.call("deviceEnrollInvite", { name: defaultDeviceName(isDesktopApp() ? { userAgent: navigator.userAgent, desktop: true } : undefined, t) });
       ended.current = false; dismissed.current = false;
       setView(first); setStep("enroll");
     } catch (cause) {
@@ -91,7 +96,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
   };
 
   const submitPassword = async () => {
-    setError(null);
+    clear();
     if (step === "type") {
       setBusy(true);
       const valid = !!stored && await verifyPassword(password, stored);
@@ -142,13 +147,13 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
         <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void submitPassword(); }}>
           <div>
             <input ref={passwordInput} type="password" autoFocus autoComplete={step === "type" ? "current-password" : "new-password"} data-testid="device-add-password" aria-label={step === "type" ? t("devices.password.current") : t("devices.password.new")} placeholder={step === "type" ? t("devices.password.current") : t("devices.password.new")}
-              {...invalid("password")} value={password} onChange={(event) => { setPassword(event.target.value); if (error?.field === "password") setError(null); }} className={`${field} aria-invalid:border-danger aria-invalid:focus:ring-danger`} />
+              {...invalid("password")} value={password} onChange={(event) => { setPassword(event.target.value); if (error?.field === "password") clear(); }} className={`${field} aria-invalid:border-danger aria-invalid:focus:ring-danger`} />
             <FieldError id={`${id}-password-error`} testId="device-add-password-error">{wrong("password")}</FieldError>
           </div>
           {step !== "type" && (
             <div>
               <input ref={againInput} type="password" autoComplete="new-password" data-testid="device-add-password-again" aria-label={t("devices.password.confirm")} placeholder={t("devices.password.confirm")}
-                {...invalid("again")} value={again} onChange={(event) => { setAgain(event.target.value); if (error?.field === "again") setError(null); }} className={`${field} aria-invalid:border-danger aria-invalid:focus:ring-danger`} />
+                {...invalid("again")} value={again} onChange={(event) => { setAgain(event.target.value); if (error?.field === "again") clear(); }} className={`${field} aria-invalid:border-danger aria-invalid:focus:ring-danger`} />
               <FieldError id={`${id}-again-error`} testId="device-add-password-again-error">{wrong("again")}</FieldError>
             </div>
           )}
@@ -177,7 +182,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
         <p data-testid="device-add-left" className="text-text-muted text-xs">{t("devices.add.left", { time: timeLeft(view.expires, now) })}</p>
       </>}
       {view?.role === "inviter" && view.step === "confirm" && <>
-        <p data-testid="device-add-status" data-step="confirm" className="text-text-primary">{t("devices.add.found", { device: view.device })}</p>
+        <p data-testid="device-add-status" data-step="confirm" className="text-text-primary">{fillNames(t("devices.add.found"), { device: view.device })}</p>
         <Digits digits={view.digits} testId="device-add-digits" />
         <div className="grid grid-cols-2 gap-3">
           <button type="button" data-testid="device-add-no-match" disabled={busy} onClick={() => void confirm(false)} className={quietButton}>{t("devices.add.noMatch")}</button>
@@ -185,9 +190,9 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
         </div>
       </>}
       {view?.role === "inviter" && (view.step === "waiting" || view.step === "confirm") && !!view.refused && <Notice tone="warning" testId="device-add-refused">{t("devices.add.refused")}</Notice>}
-      {view?.role === "inviter" && view.step === "adding" && <Status testId="device-add-adding" step="adding">{t("devices.add.adding", { device: view.device })}</Status>}
+      {view?.role === "inviter" && view.step === "adding" && <Status testId="device-add-adding" step="adding">{fillNames(t("devices.add.adding"), { device: view.device })}</Status>}
       {view?.role === "inviter" && view.step === "done" && <>
-        <p data-testid="device-add-done" className="text-text-primary">{t("devices.add.done", { device: view.device })}</p>
+        <p data-testid="device-add-done" className="text-text-primary">{fillNames(t("devices.add.done"), { device: view.device })}</p>
         {!view.published && <p className="text-text-muted text-xs">{t("devices.add.notPublished")}</p>}
         <button type="button" onClick={onClose} className={primaryButton}>{t("devices.add.finish")}</button>
       </>}

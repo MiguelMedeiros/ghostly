@@ -1,0 +1,1 @@
+Making a new link keeps what waits in Requests: each request stays answerable until it ends, since it is under its asker's key and accepting it joins its invite. Before, the requests were dropped without a word while their askers, who had seen them arrive, waited seven days. No wire change.

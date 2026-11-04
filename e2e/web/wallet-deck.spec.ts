@@ -403,3 +403,32 @@ test("the app's own reduced-motion switch stills the deck too", async ({ peer })
   expect(await swings(page)).toEqual({});
   expect(await card(page, "lightning-testnet").locator(".wallet-deck-face").evaluate((el) => getComputedStyle(el).transitionDuration)).toBe("0s");
 });
+
+test("on a narrow phone New wallet's money badges stay inside their cards, in every language", { tag: ["@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }) => {
+  // "Dinheiro de teste" never wrapped: at 320px it ran 20px past its card and off the screen.
+  const { page } = await peer("alice", { mobile: true, viewport: { width: 320, height: 700 } });
+  const past: string[] = [];
+  for (const language of ["en", "pt", "es", "fr", "it", "ar", "ja", "zh"]) {
+    await page.evaluate((language) => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+    }, language);
+    for (const width of [320, 360]) {
+      await page.setViewportSize({ width, height: 700 });
+      await page.goto("/#/wallet");
+      await page.reload();
+      await expect(page.locator("html")).toHaveAttribute("lang", new RegExp(`^${language}`));
+      await page.getByTestId("wallet-add").click();
+      await expect(page.getByTestId("new-wallet-network")).toBeVisible();
+      for (const network of ["mainnet", "testnet"]) {
+        const over = await page.getByTestId(`new-wallet-network-${network}`).evaluate((card) => {
+          const inner = card.getBoundingClientRect(), tag = card.querySelector(".network-tag")!.getBoundingClientRect();
+          return Math.ceil(Math.max(tag.right - inner.right, inner.left - tag.left));
+        });
+        // The card's 12px padding, whichever side the badge starts on.
+        if (over > -12) past.push(`${language} ${width}px ${network}: ${over}`);
+      }
+    }
+  }
+  expect(past).toEqual([]);
+});

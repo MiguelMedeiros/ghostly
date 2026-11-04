@@ -27,6 +27,11 @@ export interface DeviceGateView {
   unfinished?: true;
   /** The device state changed under the page (a handoff froze or installed it): start again into the gate. */
   reload?: true;
+  /**
+   * With `reload`, from the read at start only: the person has just opened this page, so a lock they passed in it carries
+   * across the reload. A handoff's reload does not: the device giving the profile away is often unattended.
+   */
+  keepUnlocked?: true;
   /** `standby` after it accepted a `set-update`, once: the new device list ("Your devices are now: ..."). */
   notice?: string[];
   /** `moving` or `removed`: nothing this device can accept brings it back; it is added again by enrollment. */

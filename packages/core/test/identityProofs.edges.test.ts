@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdentity } from "../src/identity";
 import {
-  IDENTITY_CLOCK_SKEW, IDENTITY_MAX_EVIDENCE, IdentityExchange, boundVerifiedIdentity, emptyIdentityLedger, identityStatement, newIdentityBinding,
+  IDENTITY_CLOCK_SKEW, IDENTITY_MAX_EVIDENCE, IDENTITY_MAX_RECEIVED, IdentityExchange, boundVerifiedIdentity, emptyIdentityLedger, identityStatement, newIdentityBinding,
   receivedIdentityStatus, signIdentityPresentation, verifyIdentityPresentation,
   type IdentityLedger, type IdentityStatement, type LocalIdentityProof, type ReceivedIdentity, type VerifiedIdentity,
 } from "../src/identityProofs";
@@ -26,10 +26,19 @@ describe("bounding what a provider returns", () => {
   it("strips control and bidi-override characters, bounds lengths, and drops unknown fields", () => {
     const out = boundVerifiedIdentity({ subject: "alice", source: `\u202eDNS\u0007 ${"s".repeat(200)}`, attester: `  ${"a".repeat(300)}`, evil: "<script>" } as unknown as VerifiedIdentity);
     expect(out.source.startsWith("DNS s")).toBe(true);
-    expect(out.source).toHaveLength(120);
+    expect(out.source).toHaveLength(204);
+    expect(boundVerifiedIdentity({ subject: "alice", source: "s".repeat(700) }).source).toHaveLength(640);
     expect(out.attester).toHaveLength(253);
     expect(out).not.toHaveProperty("evil");
     expect(boundVerifiedIdentity({ subject: "alice", source: "s", attester: "\u200e\u2066" })).toEqual({ subject: "alice", source: "s" });
+  });
+
+  it("keeps a name, source and reason on one line with nothing hidden in it", () => {
+    const hidden = "\u2028\u2029\u200b\u2060\ufeff\u061c\u180e\u00ad";
+    const out = boundVerifiedIdentity({ subject: "alice", source: `ok${hidden} Verified by Ghostly`, display: { source: `kind-0${hidden}`, fetchedAt: 5, name: `Alice${hidden}Verified by Google` } });
+    expect(out).toMatchObject({ source: "ok Verified by Ghostly", display: { source: "kind-0", name: "AliceVerified by Google" } });
+    expect(boundVerifiedIdentity({ subject: "alice", source: "s", display: { source: "kind-0", fetchedAt: 5, name: "\u200d\u200c" } }).display).not.toHaveProperty("name");
+    expect(boundVerifiedIdentity({ subject: "alice", source: "s", display: { source: "kind-0", fetchedAt: 5, name: "\u{1F469}\u200d\u{1F4BB} Ana" } }).display!.name).toBe("\u{1F469}\u200d\u{1F4BB} Ana");
   });
 
   it("keeps only an inline PNG/JPEG avatar and an https profile link without credentials", () => {
@@ -110,8 +119,8 @@ function world() {
       revoked: async st => { if (state.revokedFails) throw new Error("resolver down"); return state.revoked.has(st.id); },
     });
   }
-  const addProof = (options: { evidence?: unknown; issuedAt?: number; validity?: number; provider?: string } = {}) => {
-    const { binding, seed } = newIdentityBinding({ provider: options.provider ?? "test", subject: SUBJECT, validitySeconds: options.validity ?? 86_400, now: options.issuedAt ?? now });
+  const addProof = (options: { evidence?: unknown; issuedAt?: number; validity?: number; provider?: string; subject?: string } = {}) => {
+    const { binding, seed } = newIdentityBinding({ provider: options.provider ?? "test", subject: options.subject ?? SUBJECT, validitySeconds: options.validity ?? 86_400, now: options.issuedAt ?? now });
     const statement = identityStatement(binding);
     proofs.set(statement.id, { statement, evidence: options.evidence ?? { for: statement.id }, seed });
     return statement.id;
@@ -202,7 +211,7 @@ describe("sharing", () => {
     const ids = [w.addProof(), w.addProof(), w.addProof()];
     for (const id of ids) { await w.peers.alice.share(id, true); await w.peers.alice.receive({ t: "idp-challenge", id, nonce: "N".repeat(43), issuedAt: NOW }); }
     await w.peers.alice.receive({ t: "idp-result", id: ids[0], ok: true, error: "ignored" });
-    await w.peers.alice.receive({ t: "idp-result", id: ids[1], ok: false, error: "\u202eNope\u0000" });
+    await w.peers.alice.receive({ t: "idp-result", id: ids[1], ok: false, error: "\u202eNo\u2028pe\u061c\u0000" });
     await w.peers.alice.receive({ t: "idp-result", id: ids[2], ok: "yes" });
     expect(w.ledgers.alice.shared.map(s => [s.status, s.error])).toEqual([["accepted", undefined], ["rejected", "Nope"], ["rejected", "Your contact could not verify it"]]);
     // A late result for a settled share changes nothing.
@@ -335,6 +344,61 @@ describe("verifying a presentation", () => {
     expect(result(w)).toMatchObject({ id, ok: true });
   });
 
+  it("refuses a proof this side found revoked, even when the revocation lookup now finds nothing", async () => {
+    const w = world();
+    const id = w.addProof();
+    await w.peers.bob.receive(await present(w, id));
+    w.state.revoked.add(id);
+    expect((await w.peers.bob.recheck(id)).status).toBe("revoked");
+    // The record is gone from the relays (or the lookup fails): the contact presents the same proof again.
+    w.state.revoked.delete(id);
+    await w.peers.bob.receive(await present(w, id));
+    expect(result(w)).toEqual({ t: "idp-result", id, ok: false, error: "Its owner revoked this proof" });
+    w.state.revokedFails = true;
+    await w.peers.bob.receive(await present(w, id));
+    expect(result(w)).toMatchObject({ id, ok: false });
+    expect(w.ledgers.bob.received.map(r => [r.id, r.status])).toEqual([[id, "revoked"]]);
+    expect(w.ledgers.bob.challenges).toEqual([]);
+  });
+
+  it("refuses a proof found revoked while its presentation was being checked", async () => {
+    const w = world();
+    const id = w.addProof();
+    await w.peers.bob.receive(await present(w, id));
+    const frame = await present(w, id);
+    w.verify.mockImplementationOnce(async s => {
+      w.state.revoked.add(s.id);
+      await w.peers.bob.recheck(s.id, { revocationOnly: true });
+      w.state.revoked.delete(s.id);
+      return { subject: SUBJECT, source: "Test" };
+    });
+    await w.peers.bob.receive(frame);
+    expect(result(w)).toEqual({ t: "idp-result", id, ok: false, error: "Its owner revoked this proof" });
+    expect(w.ledgers.bob.received.map(r => [r.id, r.status])).toEqual([[id, "revoked"]]);
+  });
+
+  it("stores a proof withdrawn while its presentation was being checked as withdrawn, not verified", async () => {
+    const w = world();
+    const id = w.addProof();
+    const frame = await present(w, id);
+    // The owner's withdraw comes on a new session while the old one's check is still out.
+    w.verify.mockImplementationOnce(async () => {
+      await w.peers.bob.receive({ t: "idp-withdraw", id });
+      return { subject: SUBJECT, source: "Test" };
+    });
+    await w.peers.bob.receive(frame);
+    expect(w.sent("idp-withdrawn").map(f => f.frame)).toEqual([{ t: "idp-withdrawn", id }]);
+    expect(w.ledgers.bob.received.map(r => [r.id, r.status])).toEqual([[id, "withdrawn"]]);
+    // No late result: it would settle a new share of the same proof.
+    expect(w.sent("idp-result")).toEqual([]);
+    expect(w.ledgers.bob.timeline?.filter(e => e.side === "theirs").map(e => [e.kind, e.state ?? e.reason])).toEqual([["shared", "verified"], ["stopped", "withdrawn"]]);
+    expect(w.ledgers.bob.challenges).toEqual([]);
+    // A second withdraw writes nothing more.
+    const ledger = w.ledgers.bob;
+    await w.peers.bob.receive({ t: "idp-withdraw", id });
+    expect(w.ledgers.bob).toBe(ledger);
+  });
+
   it("refuses evidence the provider rejects, and a presentation signed for another nonce", async () => {
     const w = world();
     const id = w.addProof({ evidence: { for: "someone else" } });
@@ -368,6 +432,48 @@ describe("verifying a presentation", () => {
     await w.peers.bob.receive(await present(w, newer));
     expect(w.ledgers.bob.received.map(r => r.id).sort()).toEqual([other, newer].sort());
   });
+  it("keeps a bounded number of a contact's proofs, refusing one more before checking or looking it up", async () => {
+    const w = world();
+    const presentAs = async (subject: string) => { w.state.subject = subject; const id = w.addProof({ subject }); await w.peers.bob.receive(await present(w, id)); return id; };
+    const kept: string[] = [];
+    for (let i = 0; i < IDENTITY_MAX_RECEIVED; i++) kept.push(await presentAs(`subject-${i}`));
+    expect(w.ledgers.bob.received).toHaveLength(IDENTITY_MAX_RECEIVED);
+    const checks = w.verify.mock.calls.length;
+    const revoked = vi.spyOn(w.state.revoked, "has");
+    // A flood of fresh identities: each refused at once, nothing stored, no provider check, no revocation lookup.
+    for (let i = 0; i < 50; i++) {
+      const id = await presentAs(`flood-${i}`);
+      expect(result(w)).toEqual({ t: "idp-result", id, ok: false, error: "Your contact keeps too many identities from you already" });
+    }
+    expect(w.ledgers.bob.received.map(r => r.id)).toEqual(kept);
+    expect(w.ledgers.bob.challenges).toEqual([]);
+    expect(w.verify.mock.calls.length).toBe(checks);
+    expect(revoked).not.toHaveBeenCalled();
+    // A newer proof of an identity already kept still replaces it.
+    const newer = await presentAs("subject-3");
+    expect(result(w)).toMatchObject({ id: newer, ok: true });
+    expect(w.ledgers.bob.received).toHaveLength(IDENTITY_MAX_RECEIVED);
+    // One the contact withdrew gives its place to a new identity.
+    await w.peers.bob.receive({ t: "idp-withdraw", id: kept[0] });
+    const fresh = await presentAs("subject-new");
+    expect(result(w)).toMatchObject({ id: fresh, ok: true });
+    expect(w.ledgers.bob.received.map(r => r.id)).not.toContain(kept[0]);
+    expect(w.ledgers.bob.received).toHaveLength(IDENTITY_MAX_RECEIVED);
+  });
+
+  it("holds the bound for presentations checked at the same time", async () => {
+    const w = world();
+    const keep = IDENTITY_MAX_RECEIVED - 4;
+    for (let i = 0; i < keep; i++) { w.state.subject = `subject-${i}`; await w.peers.bob.receive(await present(w, w.addProof({ subject: w.state.subject }))); }
+    // Eight answered challenges in flight (all a verifier keeps), each checked before any is stored: four fit.
+    const frames: Frame[] = [];
+    for (let i = 0; i < 8; i++) frames.push(await present(w, w.addProof({ subject: `late-${i}` })));
+    w.verify.mockImplementation(async s => ({ subject: s.binding.subject, source: "Test" }));
+    await Promise.all(frames.map(f => w.peers.bob.receive(f)));
+    expect(w.ledgers.bob.received).toHaveLength(IDENTITY_MAX_RECEIVED);
+    expect(w.sent("idp-result").slice(-8).filter(f => f.frame.ok === false)).toHaveLength(4);
+  });
+
 });
 
 describe("re-checking a received proof", () => {
@@ -394,6 +500,18 @@ describe("re-checking a received proof", () => {
     expect(await w.peers.bob.recheck(id)).toMatchObject({ status: "unconfirmed", error: "The identity changed", verified: { subject: SUBJECT } });
   });
 
+  it("keeps a long domain's whole record name in the How line and in the reason a re-check failed", async () => {
+    // A domain may be 253 characters: a cut inside it names a record that does not exist, and the reason no longer reads as itself.
+    const domain = `${"a".repeat(63)}.${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(57)}.example`;
+    const w = world();
+    w.verify.mockImplementation(async s => ({ subject: s.binding.subject, source: `DNS TXT record at _ghostly.${domain}, via Quad9, DNSSEC validated` }));
+    const id = await received(w);
+    expect(w.ledgers.bob.received[0].verified.source).toBe(`DNS TXT record at _ghostly.${domain}, via Quad9, DNSSEC validated`);
+    const reason = `No Ghostly TXT record at _ghostly.${domain} (DNS changes can take a few minutes)`;
+    w.verify.mockRejectedValue(new Error(reason));
+    expect(await w.peers.bob.recheck(id)).toMatchObject({ status: "unconfirmed", error: reason });
+  });
+
   it("keeps a withdrawn proof withdrawn whatever the re-check finds", async () => {
     const w = world();
     const id = await received(w);
@@ -411,6 +529,33 @@ describe("re-checking a received proof", () => {
     expect((await w.peers.bob.recheck(id)).verified.display).toEqual(earlier);
     w.state.display = { source: "kind-0", fetchedAt: NOW + 1, name: "Alice B" };
     expect((await w.peers.bob.recheck(id)).verified.display).toEqual({ source: "kind-0", fetchedAt: NOW + 1, name: "Alice B" });
+  });
+
+  it("keeps a withdraw, and a name looked up, that land while the provider is checking", async () => {
+    const w = world();
+    const id = await received(w);
+    let answer!: () => void;
+    w.verify.mockImplementationOnce(async () => { await new Promise<void>(r => { answer = r; }); return { subject: SUBJECT, source: "Test" }; });
+    const check = w.peers.bob.recheck(id);
+    await vi.waitFor(() => expect(answer).toBeDefined());
+    const display = { source: "kind-0", fetchedAt: NOW, name: "Alice" };
+    w.ledgers.bob.received[0].display = display;
+    await w.peers.bob.receive({ t: "idp-withdraw", id });
+    answer();
+    expect(await check).toMatchObject({ status: "withdrawn", display });
+    expect(w.ledgers.bob.received[0]).toMatchObject({ status: "withdrawn", display, checkedAt: NOW });
+  });
+
+  it("keeps a proof found revoked revoked when the contact's withdraw arrives later", async () => {
+    const w = world();
+    const id = await received(w);
+    w.state.revoked.add(id);
+    expect((await w.peers.bob.recheck(id)).status).toBe("revoked");
+    const timeline = structuredClone(w.ledgers.bob.timeline);
+    await w.peers.bob.receive({ t: "idp-withdraw", id });
+    expect(w.ledgers.bob.received[0].status).toBe("revoked");
+    expect(w.ledgers.bob.timeline).toEqual(timeline);
+    expect(w.sent("idp-withdrawn").map(f => f.frame)).toEqual([{ t: "idp-withdrawn", id }]);
   });
 
   it("treats a failing revocation lookup as not revoked", async () => {

@@ -14,7 +14,12 @@ export function timeLeft(seconds: number, tr: Translate = englishT): string {
   return rest ? tr("chat.file.leftHoursMinutes", { hours, minutes: rest }) : tr("chat.file.leftHours", { hours });
 }
 
-const percent = (transfer: FileTransferState) => Math.floor((transfer.transferred / Math.max(1, transfer.size)) * 100);
+/** A size as a status line shows it: a no-break space keeps "26.0" and "MB" on one line when the line wraps. */
+export const statusSize = (bytes: number): string => formatFileSize(bytes).replace(" ", "\u00a0");
+
+/** How far a transfer got, in whole percent (0-100), as its status line and its progress bar say it. */
+export const filePercent = (transfer: FileTransferState): number => Math.min(100, Math.floor((transfer.transferred / Math.max(1, transfer.size)) * 100));
+const percent = filePercent;
 
 /**
  * A group's file (WISP 503), by its local id (`group-<group>-in-…`, `group-<group>-out-…`). Each member's app fetches it
@@ -36,6 +41,16 @@ export function canRetryFile(file: ChatFile, transfer: FileTransferState | null,
 }
 
 /**
+ * Whether a file sent from here arrived whole, its contact checking it or about to: too late to cancel (a cancel then
+ * left the contact with the file while this side said it was cancelled). Its Cancel goes, and its Pause (paused, it
+ * could be cancelled); the engine refuses both too.
+ * Not while the contact decides again, its turn there (`queued`), or paused.
+ */
+export const sentWhole = (transfer: FileTransferState): boolean =>
+  transfer.direction === "out" && (transfer.stage === "verifying"
+    || (transfer.size > 0 && transfer.transferred >= transfer.size && transfer.stage !== "asking" && transfer.stage !== "queued" && transfer.stage !== "paused"));
+
+/**
  * Whether a file sent from here never left this device: its copy into the app failed (no room, the file changed), so
  * nothing was kept to send again (`retry: false`). A file the contact declined or the sender cancelled has no `retry`.
  */
@@ -43,11 +58,13 @@ export const fileNeverSent = (transfer: FileTransferState | null): boolean =>
   transfer?.state === "failed" && transfer.direction === "out" && transfer.retry === false;
 
 /**
- * Why a group's file waits, behind its ⓘ: what comes next while nobody this device is connected to has it. Null for
- * any other file or state.
+ * Why a group's file waits, behind its ⓘ: what comes next while nobody this device is connected to has it, or only its
+ * sender, out of reach in a group on hubs. Null for any other file or state.
  */
 export function groupFileHint(file: Pick<ChatFile, "id">, transfer: FileTransferState | null, tr: Translate = englishT): string | null {
-  return isGroupFile(file) && transfer?.state === "transferring" && transfer.stage === "waiting" && transfer.wait === "nobody" ? tr("chat.file.nobodyHasHint") : null;
+  if (!isGroupFile(file) || transfer?.state !== "transferring" || transfer.stage !== "waiting") return null;
+  if (transfer.wait === "nobody") return tr("chat.file.nobodyHasHint");
+  return transfer.wait === "author" ? tr("chat.file.senderOnlyHint") : null;
 }
 
 /**
@@ -92,7 +109,7 @@ export async function fileHeld(platform: Pick<ServicesPlatform, "fileHeld" | "sa
  * this device (`left-out`: a light backup left them out).
  */
 export function fileStatus(file: ChatFile, transfer: FileTransferState | null, named: string | undefined, missing: boolean | "left-out", tr: Translate = englishT): string {
-  const size = formatFileSize(file.size);
+  const size = statusSize(file.size);
   const peerName = named ?? tr("chat.file.yourContact");
   if (!transfer || transfer.state === "done") return missing === "left-out" ? tr("chat.file.notInBackup") : missing ? tr("chat.file.gone") : size;
   if (transfer.state === "failed") return failedStatus(file, transfer, tr);
@@ -104,6 +121,7 @@ export function fileStatus(file: ChatFile, transfer: FileTransferState | null, n
     if (transfer.stage === "asking") return tr("chat.file.notDownloaded", { size });
     if (transfer.stage === "queued") return tr("chat.file.askingMember");
     if (transfer.stage === "waiting" && transfer.wait === "nobody") return tr("chat.file.nobodyHas");
+    if (transfer.stage === "waiting" && transfer.wait === "author") return tr("chat.file.senderOnly");
   }
   switch (transfer.stage) {
     case "preparing": return tr("chat.file.preparing", { progress: of });
@@ -111,17 +129,20 @@ export function fileStatus(file: ChatFile, transfer: FileTransferState | null, n
       // A group's file says why it waits: its holders busy, or its bytes damaged; else, as a chat's, for a connection.
       if (transfer.wait === "damaged") return tr("chat.file.damaged", { size });
       if (transfer.wait === "busy") return transfer.transferred > 0 ? tr("chat.file.busyDone", { done }) : tr("chat.file.busySize", { size });
+      // Its holders served all they can today (WISP 503 § Serving limits): no "soon" about it (agents#1672).
+      if (transfer.wait === "day") return tr("chat.file.daySpent", { size });
       return transfer.transferred > 0 ? tr("chat.file.waitingDone", { done }) : tr("chat.file.waitingSize", { size });
     case "asking": return incoming ? tr("chat.file.askingYou", { size }) : tr("chat.file.askingThem", { name: peerName, size });
     case "queued": return incoming ? tr("chat.file.queuedHere", { done }) : tr("chat.file.queuedThere", { name: peerName, done });
     case "paused": return `${transfer.pausedBy === "peer" ? tr("chat.file.pausedBy", { name: peerName }) : tr("chat.file.paused")} · ${of}`;
-    case "verifying": return tr("chat.file.verifying", { size });
+    // Sent from here, it arrived: what is left is the contact's check (and too late to cancel).
+    case "verifying": return transfer.direction === "out" ? tr("chat.file.verifyingThere", { name: peerName, size }) : tr("chat.file.verifying", { size });
   }
   // Nothing moved for a while (or since the app started): said, so the person knows why "Send again" is there.
   if (transfer.stalled) return tr("chat.file.stalled", { progress: of });
   const parts = [of];
   if (transfer.rate && transfer.rate > 0) {
-    parts.push(`${formatFileSize(Math.round(transfer.rate))}/s`);
+    parts.push(`${statusSize(Math.round(transfer.rate))}/s`);
     const left = timeLeft((transfer.size - transfer.transferred) / transfer.rate, tr);
     if (left) parts.push(left);
   }

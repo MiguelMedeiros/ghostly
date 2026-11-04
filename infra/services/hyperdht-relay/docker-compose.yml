@@ -1,6 +1,9 @@
 # The relay as a service of its own, for a server (proposed: "zero", behind the Cloudflare tunnel as
 # wss://hyperdht-relay.ghostly.tools). Not deployed; see README.md for what it costs and what it sees.
 #   HYPERDHT_RELAY_BIND=192.168.0.57:49443 docker compose up -d --build
+# Its defaults are zero's: clients counted by CF-Connecting-IP, and Ghostly's own app and extension as the origins.
+# Anywhere else, set GHOSTLY_RELAY_CLOUDFLARE=0 (with GHOSTLY_RELAY_PROXIES=1 behind one nginx or Caddy) and
+# GHOSTLY_RELAY_ORIGINS to the origins of the app you serve, in the shell or an .env file next to this one.
 name: ghostly-hyperdht-relay
 services:
   relay:
@@ -8,7 +11,8 @@ services:
     container_name: ghostly-hyperdht-relay
     restart: unless-stopped
     environment:
-      GHOSTLY_RELAY_TRUST_PROXY: "1"
+      GHOSTLY_RELAY_CLOUDFLARE: ${GHOSTLY_RELAY_CLOUDFLARE:-1}
+      GHOSTLY_RELAY_PROXIES: ${GHOSTLY_RELAY_PROXIES:-0}
       GHOSTLY_RELAY_ORIGINS: ${GHOSTLY_RELAY_ORIGINS:-https://app.ghostly.tools,chrome-extension://nbedaagicniejlmfcncndfjcejaidbcf}
     ports: ["${HYPERDHT_RELAY_BIND:-127.0.0.1:49443}:49443"]
     # HyperDHT itself runs on UDP from inside the container (outgoing, holepunched): no UDP port to publish.

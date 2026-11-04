@@ -1,5 +1,5 @@
 import { CliError } from "../errors";
-import { type Command, here, showSecret, secret, cursor, typingFor } from "./shared";
+import { type Command, here, showSecret, secret, cursor, pageLimit, typingFor, typingKind } from "./shared";
 
 /** Groups: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
@@ -21,7 +21,7 @@ export const commands: Record<string, Command> = {
   "group history": {
     method: "group.history", usage: "group history <group> [--limit n] [--before id|ms] [--after id|ms]", summary: "A group's messages (a page)", args: ["group"],
     options: { limit: { type: "number", description: "Messages per page (default 50)" }, before: { type: "string", description: "Only before this message id or timestamp" }, after: { type: "string", description: "Only after this message id or timestamp" } },
-    params: ({ options }, { group }) => ({ group, limit: options.limit, before: cursor(options.before, "before"), after: cursor(options.after, "after") }),
+    params: ({ options }, { group }) => ({ group, limit: pageLimit(options), before: cursor(options.before, "before"), after: cursor(options.after, "after") }),
   },
   "group hub": {
     method: "group.hub", usage: "group hub <group> <member> [--pin | --exclude | --auto] [--show-secret]",
@@ -37,7 +37,7 @@ export const commands: Record<string, Command> = {
     method: "group.invite", usage: "group invite <group> <chat> [--show-secret]", summary: "Invite a contact into a group you administer", args: ["group", "chat"],
     options: showSecret, params: ({ options }, a) => ({ group: a.group, chat: a.chat, ...secret(options) }),
   },
-  "group join": { method: "group.join", usage: "group join <link>", summary: "Join a group by its link", args: ["link"], params: (_, { link }) => ({ link }) },
+  "group join": { method: "group.join", usage: "group join [<link> | -]", summary: "Join a group by its link; the link on stdin keeps it out of ps", args: ["link?"], params: (_, { link }) => ({ link }) },
   "group leave": {
     method: "group.leave", usage: "group leave <group> --yes", summary: "Leave a group; its history and files go from this device", args: ["group"],
     options: { yes: { type: "boolean", description: "Confirm" } }, params: ({ options }, { group }) => ({ group, yes: options.yes === true }),
@@ -86,7 +86,7 @@ export const commands: Record<string, Command> = {
     summary: "Show the members you are writing, recording or thinking (private groups; it fades after 6 s unless said again, or kept with --for; a send or --stop ends it)", args: ["group"],
     options: {
       stop: { type: "boolean", description: "Say you stopped" },
-      kind: { type: "string", description: "typing (default), recording (a voice note) or thinking" },
+      kind: typingKind,
       status: { type: "string", description: "A short line shown instead, e.g. \"Reading the thread…\" (40 characters, no links)" },
       for: { type: "number", description: "Keep saying it for this many seconds (up to 600), until a send or --stop" },
     },

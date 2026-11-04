@@ -1,6 +1,5 @@
-import { readFileSync } from "node:fs";
 import { CliError } from "../errors";
-import { here, type Command } from "./shared";
+import { here, readInput, type Command } from "./shared";
 
 /** The key file a command signs with: always named, never a default, never on the command line itself. */
 function keyFile(value: unknown, usage: string): string {
@@ -11,7 +10,7 @@ function keyFile(value: unknown, usage: string): string {
 /** `app send`'s message: JSON on the command line, or `-` for stdin. */
 function appData(value: string | undefined): unknown {
   if (value === undefined) throw new CliError("usage", "The message is needed, as JSON or - for stdin: ghostly app send <chat> <ref|name> <json|->");
-  const text = value.trim() === "-" ? readFileSync(0, "utf8") : value;
+  const text = value.trim() === "-" ? readInput(0) : value;
   try { return JSON.parse(text) as unknown; } catch { throw new CliError("usage", "The message is not valid JSON: quote it for the shell, like '{\"k\":\"move\"}', or pass - and write it on stdin"); }
 }
 
@@ -48,7 +47,7 @@ export const commands: Record<string, Command> = {
     params: ({ options }, a) => ({ chat: a.chat, ref: a.ref, noCard: options["no-card"] === true }),
   },
   "app publish": {
-    method: "app.publish", usage: "app publish <dir> --key <file> [--out <file>]",
+    method: "app.publish", usage: "app publish <dir> --key <file> [--out <file>] [--sequence n]",
     summary: "Bundle and sign an app (WISP 1200): <dir>/ghostly-app.json and every other file in <dir> become one .ghostlyapp, its sequence one more than the bundle at --out (default <dir>/app.ghostlyapp)",
     args: ["dir"],
     options: {
@@ -56,10 +55,10 @@ export const commands: Record<string, Command> = {
       out: { type: "string", description: "Where the bundle goes (default <dir>/app.ghostlyapp); the bundle there is the version this one follows" },
       sequence: { type: "number", description: "This version's sequence, higher than the bundle at --out's (default: one more than it)" },
     },
-    run: async ({ options }, a) => (await import("../apps")).publishApp(a.dir!, keyFile(options.key, "app publish <dir> --key <file> [--out <file>] [--sequence n]"), options.out as string | undefined, options.sequence as number | undefined),
+    run: async ({ options }, a) => (await import("../apps")).publishApp(a.dir!, keyFile(options.key, "app publish <dir> --key <file> [--out <file>] [--sequence n]"), here(options.out), options.sequence as number | undefined),
   },
   "app revoke": {
-    method: "app.revoke", usage: "app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>] [--bundle <file>]",
+    method: "app.revoke", usage: "app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>] [--bundle <file>] [--force]",
     summary: "Revoke versions of your app (WISP 1200 · Revocation): a ghostly-revoke/1 statement signed with its publisher key, added to <dir>/ghostly-revoke.json",
     args: ["dir"],
     options: {
@@ -68,10 +67,11 @@ export const commands: Record<string, Command> = {
       "up-to": { type: "number", description: "Every version with this sequence or a lower one" },
       reason: { type: "string", description: "Why, one line of up to 200 characters, shown to people" },
       bundle: { type: "string", description: "The bundle naming the app (default <dir>/app.ghostlyapp)" },
+      force: { type: "boolean", description: "Allow --up-to past the bundle's own sequence (versions published from elsewhere)" },
     },
-    run: async ({ options }, a) => (await import("../apps")).revokeApp(a.dir!, keyFile(options.key, "app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>]"), {
+    run: async ({ options }, a) => (await import("../apps")).revokeApp(a.dir!, keyFile(options.key, "app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>] [--bundle <file>] [--force]"), {
       digests: options.digest as string[] | undefined, upTo: options["up-to"] as number | undefined,
-      reason: options.reason as string | undefined, bundle: options.bundle as string | undefined,
+      reason: options.reason as string | undefined, bundle: here(options.bundle), force: options.force === true,
     }),
   },
   "app send": {
@@ -102,7 +102,7 @@ export const commands: Record<string, Command> = {
   },
   "app verify": {
     method: "app.verify", usage: "app verify <bundle|url>",
-    summary: "Check a .ghostlyapp as a client would, from a file or an https URL: its manifest and digest, or refused (exit 1) with the reason",
+    summary: "Check a .ghostlyapp as a client would, from a file or an https URL: its manifest and digest, or refused (exit 1) with the reason, revoked when the ghostly-revoke.json beside it revokes this version",
     args: ["bundle"],
     run: async (_, a) => (await import("../apps")).verifyApp(a.bundle!),
   },
@@ -111,9 +111,9 @@ export const commands: Record<string, Command> = {
     summary: "Sign a store index (WISP 1200 · Stores): writes ghostly-store.json, canonical, and ghostly-store.sig beside it or in --out",
     args: ["index"],
     options: {
-      key: { ...key, description: "The store key file (made, owner-only, when it is missing and the index names no key; keep it offline)" },
+      key: { ...key, description: "The store key file (made, owner-only, when it is missing, the index names no key and no signed index is in the output folder; keep it offline)" },
       out: { type: "string", description: "The folder to write ghostly-store.json and ghostly-store.sig in (default: the index's)" },
     },
-    run: async ({ options }, a) => (await import("../apps")).signStore(a.index!, keyFile(options.key, "store sign <index> --key <file> [--out <dir>]"), options.out as string | undefined),
+    run: async ({ options }, a) => (await import("../apps")).signStore(a.index!, keyFile(options.key, "store sign <index> --key <file> [--out <dir>]"), here(options.out)),
   },
 };

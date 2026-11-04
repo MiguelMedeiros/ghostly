@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { createIdentity, identityFromSeedB64, sign } from "../src/identity";
-import { toBase64Url } from "../src/bytes";
+import { fromBase64Url, isZ32Key, toBase64Url } from "../src/bytes";
 import { confirmationTag, epochKeys, newEpochSecret } from "../src/groupCrypto";
 import {
 // covers: groups.protocol.community-commits, groups.community.join, groups.community.remove, groups.community.leave, groups.community.late-joiner
-  COMMUNITY_LIMITS, CommunitySession, communityCommitHash, communityGroupId, communityRoster, communityUntaggedHash, leaveStatement, leftStatement, rosterHash, shortHash,
+  COMMUNITY_LIMITS, CommunitySession, communityCommitHash, communityGroupId, communityRoster, derivedSecret, communityUntaggedHash, leaveStands, leaveStatement, leaveStatement3, leftStatement, rosterHash, shortHash,
   signCommunity, verifyCommunityChain, verifyCommunityCommit,
   type CommunityCommit, type CommunityFrame, type CommunityIncomingMessage, type CommunityState,
 } from "../src/groupCommunity";
@@ -70,6 +70,15 @@ class Net {
     member.session = new CommunitySession(joined.state, this.hooks(name));
     return member;
   }
+  /** `by` lets in again a member who is out, with the key it had (it opened the link again). */
+  async readmit(by: Member, member: Member): Promise<void> {
+    const frames = await by.session.admit(identityFromSeedB64(member.seedB64).pubKeyZ32);
+    await this.settle();
+    const joined = CommunitySession.join({ g: by.session.id, host: by.session.entryKey }, clone(frames.slice(0, -1)), clone(frames[frames.length - 1]), member.seedB64);
+    if ("error" in joined) throw new Error(joined.error);
+    member.saved = joined.state;
+    member.session = new CommunitySession(joined.state, this.hooks(member.name));
+  }
   /** Two members meet (an edge opens): both say where they are. */
   async meet(a: Member, b: Member): Promise<void> {
     if (!a.online || !b.online) return;
@@ -86,25 +95,31 @@ class Net {
 
 /**
  * A commit signed by `signer` after `parent` (whose roster is `parentRoster`), as a member crafting
- * a branch by hand would: anything the rules let a member of that roster sign.
+ * a branch by hand would: anything the rules let a member of that roster sign. Its tag is from `tag.secret` if given;
+ * else, for a derived kind, from the secret derived from `tag.parent` or the parent's secret the signer holds; else from
+ * a fresh one.
  */
-function forge(signer: Member, parent: CommunityCommit, parentRoster: Roster, fields: Partial<CommunityCommit> & Pick<CommunityCommit, "k">, ts = 5): { commit: CommunityCommit; roster: Roster } {
+function forge(signer: Member, parent: CommunityCommit, parentRoster: Roster, fields: Partial<CommunityCommit> & Pick<CommunityCommit, "k">, ts = 5, tag: { secret?: Uint8Array; parent?: Uint8Array } = {}): { commit: CommunityCommit; roster: Roster; secret: Uint8Array } {
   const base = { v: 2 as const, g: parent.g, e: parent.e + 1, p: communityCommitHash(parent), by: signer.session.myKey, ts, ...fields };
   const roster = communityRoster(parentRoster, base);
   if (!roster) throw new Error(`not allowed: ${fields.k}`);
   const d = { ...base, m: rosterHash(roster) } as Omit<CommunityCommit, "sig" | "c">;
-  return { commit: signCommunity({ ...d, c: confirmationTag(epochKeys(newEpochSecret(), parent.g, d.e).confirm, communityUntaggedHash(d)) }, identityFromSeedB64(signer.seedB64).seed), roster };
+  const held = signer.session.state.secrets[base.p], from = tag.parent ?? (held ? fromBase64Url(held) : undefined);
+  const secret = tag.secret ?? (from && ["add", "role", "link"].includes(d.k) ? derivedSecret(from, communityUntaggedHash(d)) : newEpochSecret());
+  return { commit: signCommunity({ ...d, c: confirmationTag(epochKeys(secret, parent.g, d.e).confirm, communityUntaggedHash(d)) }, identityFromSeedB64(signer.seedB64).seed), roster, secret };
 }
-/** `count` admissions of throwaway keys signed by `signer`, one after the other from `parent`. */
-function addBranch(signer: Member, parent: CommunityCommit, parentRoster: Roster, count: number): CommunityCommit[] {
+/** `count` admissions of throwaway keys signed by `signer`, one after the other from `parent` (whose secret is `secret`, or the signer's), each tagged as derived. */
+function addBranch(signer: Member, parent: CommunityCommit, parentRoster: Roster, count: number, secret?: Uint8Array): CommunityCommit[] {
   const out: CommunityCommit[] = [];
   for (let i = 0; i < count; i++) {
-    const next = forge(signer, parent, parentRoster, { k: "add", s: createIdentity().pubKeyZ32 });
-    out.push(next.commit); parent = next.commit; parentRoster = next.roster;
+    const next = forge(signer, parent, parentRoster, { k: "add", s: createIdentity().pubKeyZ32 }, 5, { parent: secret });
+    out.push(next.commit); parent = next.commit; parentRoster = next.roster; secret = next.secret;
   }
   return out;
 }
 const commitFrame = (commit: CommunityCommit) => ({ t: "group-commit", v: 2, g: commit.g, commit: clone(commit) });
+/** The key with its last character swapped for the other one that decodes to the same bytes but is not canonical. */
+const respell = (key: string) => { const a = "ybndrfg8ejkmcpqxot1uwisza345h769"; return key.slice(0, 51) + a[a.indexOf(key[51]) ^ 1]; };
 
 async function say(net: Net, m: Member, text: string): Promise<void> {
   const result = await m.session.sendText(text, m.name);
@@ -206,6 +221,26 @@ describe("community sessions", { timeout: 60_000 }, () => {
     expect(alice.session.state.secrets[carol.session.topHash]).toBe(carol.session.state.secrets[carol.session.topHash]);
   });
 
+  it("an admission whose tag is not the derived secret's is not taken nor passed on: the group goes on", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol"), mallory = await net.admit(alice, "mallory");
+    for (const [a, b] of [[alice, bob], [alice, carol], [alice, mallory], [bob, carol], [bob, mallory], [carol, mallory]]) await net.meet(a, b);
+    const before = alice.session.topHash;
+    // Mallory signs an admission with a tag from a secret of her own: nobody, her included, could derive that epoch.
+    const bad = forge(mallory, alice.session.top, alice.session.roster, { k: "add", s: createIdentity().pubKeyZ32 }, Date.now(), { secret: newEpochSecret() }).commit;
+    for (const m of [alice, bob, carol]) expect(await m.session.handle(mallory.session.myKey, commitFrame(bad))).toBe(false);
+    await net.settle();
+    for (const m of [alice, bob, carol]) { expect(m.session.topHash).toBe(before); expect(m.session.canSend).toBe(true); }
+    await say(net, bob, "still talking");
+    expect(net.texts(alice)).toContain("still talking");
+    expect(net.texts(carol)).toContain("still talking");
+    // Her admission with the right tag is taken as any.
+    const good = forge(mallory, alice.session.top, alice.session.roster, { k: "add", s: createIdentity().pubKeyZ32 }, Date.now()).commit;
+    for (const m of [alice, bob, carol]) expect(await m.session.handle(mallory.session.myKey, commitFrame(good))).toBe(true);
+    for (const m of [alice, bob, carol]) { expect(m.session.topHash).toBe(communityCommitHash(good)); expect(m.session.canSend).toBe(true); }
+  });
+
   it("a removal gives everyone else a fresh secret; the removed member reads nothing after and is told", async () => {
     const net = new Net();
     const alice = net.create("alice");
@@ -258,6 +293,50 @@ describe("community sessions", { timeout: 60_000 }, () => {
     expect((bob.session as unknown as { waiting: unknown[] }).waiting).toHaveLength(0);
   });
 
+  it("drops a message or a commit whose key is respelled in its last character, and does not reject", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    await net.meet(alice, bob);
+    const captured: CommunityFrame[] = [];
+    const quiet = new CommunitySession(clone(alice.saved), { save: async () => {}, broadcast: f => { captured.push(f); }, direct: () => {}, addressed: () => {}, message: () => {}, changed: () => {} });
+    await quiet.sendText("hi", "alice");
+    const frame = captured.find(f => (f as { t?: string }).t === "group-msg") as unknown as Record<string, unknown>;
+    // The same 32 bytes under another last character: not alice's key, and not a key at all (WISP 02).
+    const s = respell(alice.session.myKey);
+    expect(isZ32Key(s)).toBe(false);
+    // A respelled key is refused at parse, so `publicKeyFromZ32` is never reached with one (it would throw, and the
+    // rejection would tear down the paired session the frame came over).
+    await expect(bob.session.handle(alice.session.myKey, { ...frame, s })).resolves.toBe(false);
+    const top = bob.session.top, roster = bob.session.roster;
+    const commit = forge(alice, top, roster, { k: "add", s: createIdentity().pubKeyZ32 }).commit;
+    await expect(bob.session.handle(alice.session.myKey, commitFrame({ ...commit, by: s }))).resolves.toBe(false);
+    await expect(bob.session.handle(alice.session.myKey, commitFrame({ ...commit, e: commit.e + 1, by: s }))).resolves.toBe(false);
+    expect(bob.session.topHash).toBe(communityCommitHash(top));
+    expect(net.texts(bob)).toEqual([]);
+  });
+
+  it("seals a fresh commit's secret to every member but one whose key an older build pinned respelled", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    const carol = await net.admit(alice, "carol");
+    // Carol as a build before `MEMBER_KEY` was canonical could have added her: under a respelled key, in the chain
+    // every member stored.
+    const s = respell(carol.session.myKey);
+    const stored = (m: Member) => { const saved = clone(m.saved); saved.chain.find(c => c.k === "add" && c.s === carol.session.myKey)!.s = s; return saved; };
+    const sealed: string[] = [], committed: CommunityFrame[] = [];
+    const quiet = (saved: CommunityState) => new CommunitySession(saved, { save: async () => {}, broadcast: f => committed.push(f), direct: () => {}, addressed: (to, f) => { if ((f as { t?: string }).t === "group-secret") sealed.push(to); }, message: () => {}, changed: () => {} });
+    const admin = quiet(stored(alice)), member = quiet(stored(bob));
+    expect(admin.roster.map(([k]) => k)).toContain(s);
+    await expect(admin.rotate()).resolves.toBeUndefined();
+    expect(sealed).toEqual([bob.session.myKey]);
+    expect(admin.canSend).toBe(true);
+    // The others take the commit: a community commit carries the roster's hash, not its keys.
+    await expect(member.handle(alice.session.myKey, clone(committed[0]))).resolves.toBe(true);
+    expect(member.topHash).toBe(admin.topHash);
+  });
+
   it("a leave is committed by another member on the leaver's request, with a fresh secret", async () => {
     const net = new Net();
     const alice = net.create("alice");
@@ -279,6 +358,21 @@ describe("community sessions", { timeout: 60_000 }, () => {
     expect(alice.session.canSend).toBe(true);
     await say(net, alice, "just us");
     expect(net.texts(bob)).toContain("just us");
+  });
+
+  it("the admin role does not go to a member whose leave the admin holds, and the leave is then committed", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol");
+    await net.meet(alice, bob); await net.meet(alice, carol);
+    await bob.session.leave();
+    await net.settle();
+    expect(alice.session.state.pendingLeaves.map(r => r.s)).toEqual([bob.session.myKey]);
+    await expect(alice.session.transferAdmin(bob.session.myKey)).rejects.toThrow("This member has left the group. Make someone else the admin.");
+    expect(alice.session.isAdmin).toBe(true);
+    expect(await alice.session.commitPendingLeaves()).toBe(1);
+    expect(alice.session.roster.map(([k]) => k)).not.toContain(bob.session.myKey);
+    await expect(alice.session.transferAdmin(carol.session.myKey)).resolves.toBeUndefined();
   });
 
   it("what a member said before it left reaches a member who was away; what a removed one said does not", async () => {
@@ -488,7 +582,7 @@ describe("community sessions", { timeout: 60_000 }, () => {
     expect(bob.session.needsCatchUp).toBe(false);
     // Two real commits by the admin, the second one first: it waits, and is placed when its parent comes.
     const first = forge(alice, top, roster, { k: "add", s: createIdentity().pubKeyZ32 });
-    const second = forge(alice, first.commit, first.roster, { k: "add", s: createIdentity().pubKeyZ32 });
+    const second = forge(alice, first.commit, first.roster, { k: "add", s: createIdentity().pubKeyZ32 }, 5, { parent: first.secret });
     expect(await bob.session.handle(alice.session.myKey, commitFrame(second.commit))).toBe(false);
     expect(bob.session.needsCatchUp).toBe(true);
     expect(await bob.session.handle(alice.session.myKey, commitFrame(first.commit))).toBe(true);
@@ -498,8 +592,8 @@ describe("community sessions", { timeout: 60_000 }, () => {
     const aliceSeed = identityFromSeedB64(alice.seedB64).seed;
     const lost = (i: number) => signCommunity({ ...forge(alice, second.commit, second.roster, { k: "rotate" }).commit, p: hash(i) }, aliceSeed);
     for (let i = 0; i < COMMUNITY_LIMITS.pendingCommits; i++) await bob.session.handle(alice.session.myKey, commitFrame(lost(i + 2000)));
-    const third = forge(alice, second.commit, second.roster, { k: "add", s: createIdentity().pubKeyZ32 });
-    const fourth = forge(alice, third.commit, third.roster, { k: "add", s: createIdentity().pubKeyZ32 });
+    const third = forge(alice, second.commit, second.roster, { k: "add", s: createIdentity().pubKeyZ32 }, 5, { parent: second.secret });
+    const fourth = forge(alice, third.commit, third.roster, { k: "add", s: createIdentity().pubKeyZ32 }, 5, { parent: third.secret });
     await bob.session.handle(alice.session.myKey, commitFrame(fourth.commit));
     await bob.session.handle(alice.session.myKey, commitFrame(third.commit));
     expect(bob.session.topHash).toBe(communityCommitHash(fourth.commit));
@@ -793,13 +887,13 @@ describe("community admin changes are final", { timeout: 60_000 }, () => {
 
   it("a member away through the change who hears the longer branch first ends on the admin's", async () => {
     const { net, alice, bob, carol, mallory } = await group();
-    const before = alice.session.top, beforeRoster = alice.session.roster;
+    const before = alice.session.top, beforeRoster = alice.session.roster, beforeSecret = fromBase64Url(mallory.session.state.secrets[alice.session.topHash]);
     carol.online = false;
     await alice.session.remove(mallory.session.myKey);
     await net.settle();
     // Carol, back, hears Mallory's branch first: nothing on her side says it drops anything, so she follows it…
     carol.online = true;
-    const branch = addBranch(mallory, before, beforeRoster, 4);
+    const branch = addBranch(mallory, before, beforeRoster, 4, beforeSecret);
     for (const commit of branch) await carol.session.handle(mallory.session.myKey, commitFrame(commit));
     expect(carol.session.topHash).toBe(communityCommitHash(branch[3]));
     // …until she meets a member on the admin's: then she follows it, and Mallory is out.
@@ -827,7 +921,7 @@ describe("community admin changes are final", { timeout: 60_000 }, () => {
     expect(bob.session.topHash).toBe(alice.session.topHash);
   });
 
-  it("an admin who handed the role on and signs another history halts the group", async () => {
+  it("an admin who handed the role on and signs another history from before is refused; the group goes on", async () => {
     const { net, alice, bob, carol, mallory } = await group();
     const before = alice.session.top, beforeRoster = alice.session.roster;
     await alice.session.transferAdmin(bob.session.myKey);
@@ -835,14 +929,39 @@ describe("community admin changes are final", { timeout: 60_000 }, () => {
     await bob.session.remove(mallory.session.myKey);
     await net.settle();
     expect(carol.session.admin).toBe(bob.session.myKey);
-    // Alice, admin before the hand-over, signs a rotation on another branch from there: two histories.
+    // Alice, admin before the hand-over, signs a rotation on another branch from there: a stale branch, not kept.
     const race = forge(carol, before, beforeRoster, { k: "add", s: createIdentity().pubKeyZ32 });
     const other = forge(alice, race.commit, race.roster, { k: "rotate" }).commit;
     expect(await carol.session.handle(bob.session.myKey, commitFrame(race.commit))).toBe(true);
     expect(carol.session.status).toBe("active");
-    await carol.session.handle(alice.session.myKey, commitFrame(other));
-    expect(carol.session.status).toBe("forked");
-    expect(carol.session.state.statusReason).toMatch(/admin signed changes on two branches/);
+    expect(await carol.session.handle(alice.session.myKey, commitFrame(other))).toBe(false);
+    expect(carol.session.status).toBe("active");
+    expect(carol.session.state.side.map(communityCommitHash)).not.toContain(communityCommitHash(other));
+    await say(net, carol, "still here");
+    expect(net.texts(bob)).toContain("still here");
+  });
+
+  it("a former admin, removed, cannot halt the group with a second commit after one it signed as admin", async () => {
+    const { net, alice, bob, carol } = await group();
+    const genesis = carol.session.state.chain[0], genesisRoster = communityRoster(null, genesis)!;
+    const beforeHandOver = alice.session.top, beforeRoster = alice.session.roster;
+    await alice.session.transferAdmin(bob.session.myKey);
+    await net.settle();
+    await bob.session.remove(alice.session.myKey);
+    await net.settle();
+    expect(carol.session.wasRemoved(alice.session.myKey)).toBe(true);
+    // After the commit before its hand-over, and after the genesis: each its second commit there, on an edge no commit names.
+    const stranger = createIdentity().pubKeyZ32;
+    for (const [parent, roster] of [[beforeHandOver, beforeRoster], [genesis, genesisRoster]] as const) {
+      const second = forge(alice, parent, roster, { k: "add", s: createIdentity().pubKeyZ32 }).commit;
+      expect(await carol.session.handle(stranger, commitFrame(second))).toBe(false);
+      expect(carol.session.status).toBe("active");
+    }
+    await say(net, bob, "after alice");
+    expect(net.texts(carol)).toContain("after alice");
+    await net.restart(carol);
+    expect(carol.session.status).toBe("active");
+    expect(carol.session.isMember).toBe(true);
   });
 
   it("a stored branch from before the fix that dropped an admin change is dropped in turn", async () => {
@@ -911,5 +1030,236 @@ describe("a member removed while it was away is told when it is back (farewell)"
     expect(bob.session.farewell(carol.session.myKey, { h: carol.session.topHash })).toEqual([]);
     // Someone out says nothing for others either.
     expect(carol.session.farewell(dave.session.myKey, {})).toEqual([]);
+  });
+});
+
+describe("a key let in only on a branch that lost", () => {
+  /** A key that only records what reaches it. */
+  function listener(net: Net, name: string): { key: string; got: CommunityFrame[] } {
+    const key = createIdentity().pubKeyZ32, got: CommunityFrame[] = [];
+    const session = { myKey: key, handle: async (_from: string, frame: CommunityFrame) => { got.push(frame); return false; } } as unknown as CommunitySession;
+    net.members.set(name, { name, session, saved: null as unknown as CommunityState, messages: [], online: true, seedB64: "" });
+    return { key, got };
+  }
+
+  it("is no member once its branch cannot win: told the commits that make it lose, never a later link", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol");
+    await net.admit(alice, "dave");
+    await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(bob, carol);
+    // Bob signs the admission of a key of his own two commits behind the tip: a shorter branch, kept by everyone.
+    const chain = alice.session.state.chain, at = chain.length - 3;
+    const parentRoster = chain.slice(0, at + 1).reduce<Roster | null>((r, c) => communityRoster(r, c, true), null)!;
+    const hidden = listener(net, "hidden");
+    const planted = forge(bob, chain[at], parentRoster, { k: "add", s: hidden.key }).commit;
+    for (const m of [alice, carol]) await m.session.handle(bob.session.myKey, commitFrame(planted));
+    await net.settle();
+    for (const m of [alice, carol]) {
+      expect(m.session.state.side.map(c => communityCommitHash(c))).toContain(communityCommitHash(planted));
+      expect(m.session.roster.map(([k]) => k)).not.toContain(hidden.key);
+      // While its branch could still grow past the main one, it is heard as the race it may be.
+      expect(m.session.isRecentMember(hidden.key)).toBe(true);
+    }
+    // The admin removes Bob and replaces the link to keep him out.
+    await alice.session.remove(bob.session.myKey);
+    await net.settle();
+    const entry = await alice.session.replaceLink();
+    await net.settle();
+    for (const m of [alice, carol]) {
+      expect(m.session.wasRemoved(bob.session.myKey)).toBe(true);
+      expect(m.session.isRecentMember(hidden.key)).toBe(false);
+    }
+    // The planted key says where it is: the main branch's commits from where its branch parts up to the one that makes
+    // it lose, and nothing more (no secret, no frame, not the link that keeps Bob out).
+    const sync = { t: "group-sync", v: 2, g: alice.session.id, e: planted.e, h: communityCommitHash(planted), loc: [planted.p] };
+    for (const m of [alice, carol]) {
+      hidden.got.length = 0;
+      await m.session.handle(hidden.key, clone(sync));
+      await net.settle();
+      expect(hidden.got.length).toBeGreaterThan(0);
+      expect(hidden.got.every(f => f.t === "group-commit")).toBe(true);
+      const commits = hidden.got.map(f => (f as { commit: CommunityCommit }).commit);
+      expect(commits).toEqual(m.session.state.chain.slice(at + 1, at + 1 + commits.length));
+      expect(commits.some(c => c.k === "link")).toBe(false);
+      expect(JSON.stringify(hidden.got)).not.toContain(entry);
+    }
+    // A key no branch names is answered nothing.
+    const stranger = listener(net, "stranger");
+    await alice.session.handle(stranger.key, clone(sync));
+    await net.settle();
+    expect(stranger.got).toEqual([]);
+  });
+
+  it("a member let in on a branch that lost to a new link asks again at the link it came by", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    await net.meet(alice, bob);
+    const old = alice.session.entryKey;
+    // Alice replaces the link while Bob, cut off, lets Carol in by the old one.
+    bob.online = false;
+    const entry = await alice.session.replaceLink();
+    await net.settle();
+    bob.online = true; alice.online = false;
+    const carol = await net.admit(bob, "carol");
+    alice.online = true;
+    await net.meet(alice, bob);
+    expect(bob.session.topHash).toBe(alice.session.topHash);
+    // Carol is told her admission lost (the link commit is what makes it lose) and asks again by the link she knew.
+    await net.meet(bob, carol);
+    expect(carol.session.status).toBe("lost");
+    expect(carol.session.lostEntryKey).toBe(old);
+    expect(carol.session.lostEntryKey).not.toBe(entry);
+  });
+});
+
+describe("a leave ends one admission", { timeout: 60_000 }, () => {
+  /** Alice's group with Bob and Carol; Carol left (Bob committed it) and was let in again. `first`: the commit of her leave. */
+  async function rejoined() {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol");
+    await carol.session.leave();
+    await net.settle();
+    expect(await bob.session.commitPendingLeaves()).toBe(1);
+    await net.settle();
+    const first = clone(bob.session.top);
+    expect(first.k).toBe("leave");
+    await net.readmit(alice, carol);
+    expect(bob.session.roster).toHaveLength(3);
+    return { net, alice, bob, carol, first };
+  }
+  const leaveFrame = (g: string, c: Pick<CommunityCommit, "s" | "ls" | "ls3">) => ({ t: "group-leave", v: 2, g, s: c.s, ls: c.ls, ...(c.ls3 ? { ls3: c.ls3 } : {}) });
+
+  it("the statement of an earlier leave does not take a member out of a later admission", async () => {
+    const { net, alice, bob, carol, first } = await rejoined();
+    const key = carol.session.myKey;
+    expect(first.ls3).toBeDefined();
+    // Alice still holds the request Bob committed: it is not one for this admission, and she commits nothing.
+    expect(alice.session.state.pendingLeaves.map(r => r.s)).toEqual([key]);
+    expect(await alice.session.commitPendingLeaves()).toBe(0);
+    expect(alice.session.state.pendingLeaves).toEqual([]);
+    // As a request, with and without the statement of the admission it ended: no member keeps it.
+    for (const request of [leaveFrame(alice.session.id, first), leaveFrame(alice.session.id, { s: first.s, ls: first.ls })]) {
+      expect(await alice.session.handle(bob.session.myKey, request)).toBe(false);
+      expect(alice.session.state.pendingLeaves).toEqual([]);
+    }
+    // As a commit a member signs by hand: no member follows it.
+    for (const fields of [{ ls: first.ls }, { ls: first.ls, ls3: first.ls3 }]) {
+      const again = forge(bob, alice.session.top, alice.session.roster, { k: "leave", s: key, ...fields });
+      expect(await alice.session.handle(bob.session.myKey, commitFrame(again.commit))).toBe(false);
+      expect(await carol.session.handle(bob.session.myKey, commitFrame(again.commit))).toBe(false);
+      expect(verifyCommunityCommit(clone(again.commit), alice.session.top, alice.session.roster, alice.session.id, [...alice.session.state.chain].reverse()))
+        .toHaveProperty("error", "This leave is not for the member's current admission");
+    }
+    await net.settle();
+    for (const m of [alice, bob, carol]) expect(m.session.roster.map(([k]) => k)).toContain(key);
+    expect(carol.session.status).toBe("active");
+    // Nor does a member commit it from what it holds (a state from before this rule).
+    bob.session.state.pendingLeaves.push({ s: first.s!, ls: first.ls! });
+    expect(await bob.session.commitPendingLeaves()).toBe(0);
+    expect(bob.session.roster).toHaveLength(3);
+  });
+
+  it("a member let in again leaves by itself, as many times as it is let in", async () => {
+    const { net, alice, bob, carol, first } = await rejoined();
+    for (let round = 0; round < 2; round++) {
+      const request = await carol.session.leave();
+      await net.settle();
+      expect(request!.ls).toBe(first.ls);
+      expect(request!.ls3).not.toBe(first.ls3);
+      expect(await alice.session.commitPendingLeaves()).toBe(1);
+      await net.settle();
+      for (const m of [alice, bob]) { expect(m.session.top.k).toBe("leave"); expect(m.session.roster).toHaveLength(2); }
+      await net.readmit(bob, carol);
+      for (const m of [alice, bob, carol]) expect(m.session.roster).toHaveLength(3);
+    }
+    // A member who restarts replays that chain, and a newcomer is handed it.
+    await net.restart(alice);
+    expect(alice.session.roster).toHaveLength(3);
+    const dave = await net.admit(alice, "dave");
+    expect(dave.session.roster).toHaveLength(4);
+  });
+
+  it("the creator, once it handed the role on, leaves the admission its genesis gave it", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    await alice.session.transferAdmin(bob.session.myKey);
+    await net.settle();
+    const request = await alice.session.leave();
+    await net.settle();
+    // Were its `ls` in an earlier leave, only the statement that names the genesis would count.
+    const before = [...bob.session.state.chain].reverse();
+    before.push({ ...before[0], k: "leave", ls: request!.ls });
+    const leave = { g: alice.session.id, s: alice.session.myKey, ls: request!.ls };
+    expect(leaveStands({ ...leave, ls3: request!.ls3 }, before)).toBe(true);
+    expect(leaveStands(leave, before)).toBe(false);
+    expect(await bob.session.commitPendingLeaves()).toBe(1);
+    expect(bob.session.roster).toHaveLength(1);
+  });
+
+  it("an app from before reads the same commit: the new statement is outside its hash and signature", async () => {
+    const { first } = await rejoined();
+    const { ls3, ...before } = first;
+    expect(ls3).toBeDefined();
+    expect(communityCommitHash(before)).toBe(communityCommitHash(first));
+    expect(signCommunity(before, new Uint8Array(32).fill(1)).sig).toBe(signCommunity(first, new Uint8Array(32).fill(1)).sig);
+  });
+
+  it("a first leave under the old statement alone still counts, and one whose new statement a hub dropped is taken when it comes whole", async () => {
+    const { net, alice, bob, carol, first } = await rejoined();
+    // Dave's app is from before: its request carries `ls` alone.
+    const dave = await net.admit(alice, "dave");
+    const seed = identityFromSeedB64(dave.seedB64).seed;
+    dave.online = false;
+    expect(await bob.session.handle(dave.session.myKey, leaveFrame(bob.session.id, { s: dave.session.myKey, ls: toBase64Url(sign(leaveStatement(bob.session.id, dave.session.myKey), seed)) }))).toBe(true);
+    // The whole request takes the place of the bare one a hub from before passed on, not the other way round.
+    const whole = { s: dave.session.myKey, ls: bob.session.state.pendingLeaves[0].ls, ls3: toBase64Url(sign(leaveStatement3(bob.session.id, dave.session.myKey, communityCommitHash(dave.session.state.chain.at(-1)!)), seed)) };
+    expect(await bob.session.handle(alice.session.myKey, leaveFrame(bob.session.id, whole))).toBe(true);
+    expect(await bob.session.handle(alice.session.myKey, leaveFrame(bob.session.id, { s: whole.s, ls: whole.ls }))).toBe(false);
+    expect(bob.session.state.pendingLeaves).toEqual([whole]);
+    bob.session.state.pendingLeaves = [{ s: whole.s, ls: whole.ls }];
+    expect(await bob.session.commitPendingLeaves()).toBe(1);
+    await net.settle();
+    for (const m of [alice, bob, carol]) expect(m.session.roster).toHaveLength(3);
+
+    // Carol's second leave, committed by Bob while Alice is away; a hub from before hands Alice the commit without `ls3`.
+    alice.online = false;
+    await carol.session.leave();
+    await net.settle();
+    expect(await bob.session.commitPendingLeaves()).toBe(1);
+    const second = clone(bob.session.top);
+    expect(second.ls).toBe(first.ls);
+    const { ls3, ...bare } = second;
+    alice.online = true;
+    expect(await alice.session.handle(bob.session.myKey, commitFrame(bare as CommunityCommit))).toBe(false);
+    expect(alice.session.roster).toHaveLength(3);
+    expect(ls3).toBeDefined();
+    expect(await alice.session.handle(bob.session.myKey, commitFrame(second))).toBe(true);
+    expect(alice.session.roster).toHaveLength(2);
+  });
+
+  it("a newcomer takes a chain from before that holds a member's second leave under the old statement", async () => {
+    const admin = createIdentity(), bob = createIdentity();
+    const n = toBase64Url(new Uint8Array(16).fill(9)), g = communityGroupId(admin.pubKeyZ32, n);
+    const chain: CommunityCommit[] = [];
+    let roster: Roster | null = null;
+    const next = (fields: Partial<CommunityCommit> & Pick<CommunityCommit, "k">) => {
+      const parent = chain.at(-1);
+      const base = { v: 2 as const, g, e: chain.length, p: parent ? communityCommitHash(parent) : "", by: admin.pubKeyZ32, ts: 1, ...fields };
+      roster = communityRoster(roster, base)!;
+      const d = { ...base, m: rosterHash(roster) } as Omit<CommunityCommit, "sig" | "c">;
+      chain.push(signCommunity({ ...d, c: confirmationTag(epochKeys(newEpochSecret(), g, d.e).confirm, communityUntaggedHash(d)) }, admin.seed));
+    };
+    const ls = toBase64Url(sign(leaveStatement(g, bob.pubKeyZ32), bob.seed));
+    next({ k: "create", x: createIdentity().pubKeyZ32, n });
+    for (let i = 0; i < 2; i++) { next({ k: "add", s: bob.pubKeyZ32 }); next({ k: "leave", s: bob.pubKeyZ32, ls }); }
+    const verified = verifyCommunityChain(clone(chain), g) as { roster: Roster; rosters: Roster[] };
+    expect(verified.roster).toEqual([[admin.pubKeyZ32, "admin"]]);
+    // A member that is there takes the first of those leaves, and no longer the second.
+    expect(verifyCommunityCommit(clone(chain[2]), chain[1], verified.rosters[1], g, chain.slice(0, 2).reverse())).toHaveProperty("commit");
+    expect(verifyCommunityCommit(clone(chain[4]), chain[3], verified.rosters[3], g, chain.slice(0, 4).reverse())).toHaveProperty("error", "This leave is not for the member's current admission");
   });
 });

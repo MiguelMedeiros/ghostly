@@ -30,7 +30,7 @@ function fake({ mode = "daemon", apps = true, served = [CHESS] }: { mode?: strin
     sendMessage: vi.fn(async (): Promise<{ error: string | null; refused?: boolean; messageId?: string }> => ({ error: null, messageId: "me_1" })),
   };
   let frames: (chat: string, frame: never) => void = () => {};
-  const hub = { onAppFrame: (listener: typeof frames) => { frames = listener; return () => {}; }, emit: vi.fn() };
+  const hub = { onAppFrame: (listener: typeof frames) => { frames = listener; return () => {}; }, emitLive: vi.fn() };
   reportAppFrames(hub as never, node, dir);
   const ctx = { runtime: { server: { node }, paths: { dir }, apps }, hub, mode, version: "test" } as unknown as ApiContext;
   return { ctx, node, frame: (frame: Record<string, unknown>) => frames("chat-one", frame as never) };
@@ -71,6 +71,10 @@ describe("app open", () => {
     }
     const { ctx } = fake();
     await expect(callApi(ctx, "app.open", { chat: "Nobody", ref: REF })).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("names a command that starts the daemon when none runs (there is no `daemon start`)", async () => {
+    await expect(callApi(fake({ mode: "one-shot" }).ctx, "app.open", { chat: "Alice", ref: REF })).rejects.toMatchObject({ message: expect.stringContaining("ghostly daemon --detach") });
   });
 
   it("says why in the engine's words when the chat cannot carry an app", async () => {

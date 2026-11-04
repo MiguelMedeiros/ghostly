@@ -1,4 +1,5 @@
 import "fake-indexeddb/auto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BUTTONS_CAPABILITY, DhtDelivery, GhostLink, createIdentity, createLink, createRelayPayload, identityFromSeedB64, parseRelayPayload, readStatusCard, type IncomingMessage, type PairingState, type PkarrTransport, type SignedPacket, type WireEdit } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
@@ -121,6 +122,29 @@ describe("a bot asks with buttons", () => {
     expect((await t.peerRow("Tell me more")).press).toBeUndefined();
   });
 
+  it("takes a press on buttons with no once among them as it takes a plain reply: the chat's history is not read for it", async () => {
+    const t = await setup();
+    const open = { kind: "buttons", id: "any-1", buttons: [{ id: "again", label: "Again" }, { id: "back", label: "Back" }] };
+    const plain = await t.node.sendMessage({ linkId: t.id, text: "Plain" });
+    const question = await t.node.sendMessage({ linkId: t.id, text: "Any time", card: open });
+    const delivered = (id: string) => t.onMessages.mock.calls.some(([, rows]) => rows.some(m => m.id === id && m.delivery === "delivered"));
+    await vi.waitFor(() => expect([delivered(plain.messageId!), delivered(question.messageId!)]).toEqual([true, true]));
+    const whole = vi.spyOn(db, "getMessages");
+    // The chat reads one received reply costs, until the page is told of it.
+    const reads = async (text: string, wire: string, to: string, b: string) => {
+      whole.mockClear();
+      expect(await t.contact.sendMessage(text, Date.now(), WIRE(wire), undefined, { i: (await db.getMessage(t.id, to))!.wireId!, s: "x", f: "recipient", b })).toBeNull();
+      await vi.waitFor(() => expect(t.onMessages.mock.calls.some(([, rows]) => rows.some(m => m.text === text && m.sender === "peer"))).toBe(true));
+      return whole.mock.calls.length;
+    };
+    const reply = await reads("Again", "R", plain.messageId!, "again");
+    const press = await reads("Back", "P", question.messageId!, "back");
+    whole.mockRestore();
+    expect((await t.peerRow("Back")).press).toEqual({ messageId: question.messageId, button: "back", label: "Back" });
+    expect((await t.peerRow("Again")).press).toBeUndefined();
+    expect(press).toBe(reply);
+  });
+
   it("takes a reply that lost its button id (the DHT floor, an older app) by its label", async () => {
     const t = await setup();
     const sent = await t.node.sendMessage({ linkId: t.id, text: QUESTION, card: ask() });
@@ -170,18 +194,18 @@ describe("pressing a contact's buttons", () => {
     expect(await t.contact.sendMessage("Any time", Date.now(), WIRE("A"), undefined, undefined, undefined, readStatusCard(open)!)).toBeNull();
     expect(await t.contact.sendMessage(QUESTION, Date.now(), WIRE("Q"), undefined, undefined, undefined, readStatusCard(ask({ closed: true, chosen: "no" }))!)).toBeNull();
     const [any, closed] = [await t.peerRow("Any time"), await t.peerRow(QUESTION)];
-    const whole = vi.spyOn(db, "getMessages");
     const mine = await t.node.sendMessage({ linkId: t.id, text: "Mine?", card: ask() });
-    // The contact's receipt reads the whole chat once more for this host (no onMessageChanges), and on a busy machine it
-    // comes after "sent": wait until the page has been told the row is delivered, so that read is over before counting.
-    await vi.waitFor(() => expect(t.onMessages.mock.calls.some(([, rows]) => rows.some(m => m.id === mine.messageId && m.delivery === "delivered"))).toBe(true));
-    whole.mockClear();
-    expect(await t.node.pressButton({ linkId: t.id, messageId: closed.id, buttonId: "yes" })).toMatchObject({ refused: true, error: "These buttons are closed" });
-    expect(await t.node.pressButton({ linkId: t.id, messageId: mine.messageId!, buttonId: "yes" })).toMatchObject({ refused: true });
-    expect(await t.node.pressButton({ linkId: t.id, messageId: "peer_notHere", buttonId: "yes" })).toMatchObject({ refused: true, error: "That message is not in this chat" });
-    expect(await t.node.pressButton({ linkId: t.id, messageId: any.id, buttonId: "nope" })).toMatchObject({ refused: true });
-    expect(whole).not.toHaveBeenCalled();
+    // Only the presses' own reads count: the send's receipt and the session's looks read the whole chat too for this host
+    // (no onMessageChanges), and on a busy machine any of them can come while the presses go.
+    const [pressing, read, byPress] = [new AsyncLocalStorage<true>(), db.getMessages, [] as string[]];
+    const whole = vi.spyOn(db, "getMessages").mockImplementation(linkId => { if (pressing.getStore()) byPress.push(linkId); return read.call(db, linkId); });
+    const press = (messageId: string, buttonId: string) => pressing.run(true, () => t.node.pressButton({ linkId: t.id, messageId, buttonId }));
+    expect(await press(closed.id, "yes")).toMatchObject({ refused: true, error: "These buttons are closed" });
+    expect(await press(mine.messageId!, "yes")).toMatchObject({ refused: true });
+    expect(await press("peer_notHere", "yes")).toMatchObject({ refused: true, error: "That message is not in this chat" });
+    expect(await press(any.id, "nope")).toMatchObject({ refused: true });
     whole.mockRestore();
+    expect(byPress).toEqual([]);
     // Buttons with no once among them are pressed as often as I like.
     expect((await t.node.pressButton({ linkId: t.id, messageId: any.id, buttonId: "again" })).error).toBeNull();
     await new Promise(resolve => setTimeout(resolve, 1_050));

@@ -173,7 +173,7 @@ export class ProfilePeek {
     // Only reads: `peekDhtMailbox` gets a transport whose publications refuse.
     const readOnly: PkarrTransport = { resolve: transport.resolve, publish: async () => { throw new Error("A peek publishes nothing"); }, describe: () => this.host.transport.describe() };
     const { text } = await peekDhtMailbox({ params: link, credentials: { seedB64: link.participationSeed!, peerKey: link.pairedPeerKey, expectedPeerKey: link.peerParticipationKeyZ32 },
-      state: link.dhtDeliveryState, transport: readOnly, background: true });
+      state: link.dhtDeliveryState, transport: readOnly, background: true, ratchet: link.ratchetState });
     let held = 0;
     if (holdable(link)) {
       const keys = new HoldKeys(link, link.participationSeed!, link.pairedPeerKey!);

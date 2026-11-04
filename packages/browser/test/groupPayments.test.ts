@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GroupPayments, authoredNote, mayAuthor, mergeGroupPay, parseGroupPay, type GroupPaymentsHost, type Placement } from "../src/engine/groupPayments";
+import { GroupPayments, WAITING, authoredNote, mayAuthor, mergeGroupPay, parseGroupPay, type GroupPaymentsHost, type Placement } from "../src/engine/groupPayments";
 import type { GroupPayFrame, GroupPayNote, PaymentView, StoredMessage } from "../src/shared/types";
 // covers: groups.payments.member, groups.payments.group-request, groups.payments.notes
 
@@ -8,7 +8,8 @@ import type { GroupPayFrame, GroupPayNote, PaymentView, StoredMessage } from "..
  * the member they are about, merged forward only, and said by each device about its own part.
  */
 
-const key = (c: string) => c.repeat(52);
+// A member key in its one canonical spelling: the last character carries four zero padding bits (WISP 02).
+const key = (c: string) => c.repeat(51) + "y";
 const A = key("a"), B = key("b"), C = key("c"), D = key("d"), X = key("x");
 const members = new Set([A, B, C, D]);
 const note = (patch: Partial<GroupPayFrame> = {}): GroupPayFrame => ({ t: "group-pay", g: "g1", id: "req-00001", k: "req", f: B, to: A, v: "100", u: "sat", d: 0, r: "cashu", ts: 1, st: "open", ...patch });
@@ -79,10 +80,16 @@ describe("mergeGroupPay: forward only, the initiator describes it", () => {
     expect(merge(paid, note({ f: "*", st: "closed" }), A), "nor closed").toBeUndefined();
   });
 
-  it("an invoice does not say who paid: one claim names them, two do not", () => {
+  it("an invoice does not say who paid: a claim names nobody, nor does the payee's word", () => {
     const open = merge(undefined, note({ f: "*", r: "lightning" }), A)!;
     const one = merge(open, note({ f: "*", r: "lightning", st: "sent", by: C }), C)!;
-    expect(merge(one, note({ f: "*", r: "lightning", st: "paid" }), A)).toMatchObject({ state: "paid", by: C });
+    const paid = merge(one, note({ f: "*", r: "lightning", st: "paid" }), A)!;
+    expect(paid).toMatchObject({ state: "paid", claims: [C] });
+    expect(paid.by).toBeUndefined();
+    // A claim that arrives once it is paid names nobody either.
+    expect(merge(paid, note({ f: "*", r: "lightning", st: "sent", by: D }), D)!.by).toBeUndefined();
+    // The payee's wallet cannot tell who paid an invoice, so a `by` it sends (an older app's) is not believed.
+    expect(merge(one, note({ f: "*", r: "lightning", st: "paid", by: C }), A)!.by).toBeUndefined();
     const two = merge(one, note({ f: "*", r: "lightning", st: "sent", by: D }), D)!;
     expect(two.claims).toEqual([C, D].sort());
     expect(merge(two, note({ f: "*", r: "lightning", st: "paid" }), A)!.by).toBeUndefined();
@@ -98,8 +105,10 @@ describe("mergeGroupPay: forward only, the initiator describes it", () => {
   it("the payee's description wins over a claim that arrived first; nobody changes who is paid", () => {
     const early = merge(undefined, note({ f: "*", st: "sent", by: C, v: "999" }), C)!;
     expect(early).toMatchObject({ amount: "999", claims: [C] });
+    expect(early.undescribed).toBe(true);
     const described = merge(early, note({ f: "*", v: "100", m: "pizza" }), A)!;
     expect(described).toMatchObject({ amount: "100", memo: "pizza", claims: [C], state: "open" });
+    expect(described.undescribed).toBeUndefined();
     expect(merge(described, note({ to: B, f: A }), B), "another payee for the same id").toBeUndefined();
   });
 
@@ -122,12 +131,14 @@ describe("authoredNote: what this device says about its own payments", () => {
     expect(authoredNote(r, atA, [r])).toMatchObject({ k: "req", f: B, to: A, st: "open", r: "cashu", x: 1 });
     expect(authoredNote({ ...r, state: "settled" }, atA, [r])).toMatchObject({ st: "paid", by: B });
   });
-  it("my request to the group names who paid from the edge the ecash came on, or the only claim", () => {
+  it("my request to the group names who paid from the edge the ecash came on, never from a claim", () => {
     const r = pay({ id: "req-00001", linkId: "group:g1", group: "g1", mints: ["https://mint.real"], state: "settled" });
     const ecash = pay({ id: "p1", kind: "payment", direction: "in", requestId: r.id, state: "settled", linkId: "AC" });
     expect(authoredNote(r, { groupId: "g1", me: A }, [r, ecash], undefined, id => id === "AC" ? C : undefined)).toMatchObject({ f: "*", to: A, st: "paid", by: C });
     const invoice = { ...r, invoice: "lnbc1", mints: [] };
-    expect(authoredNote(invoice, { groupId: "g1", me: A }, [invoice], { claims: [D] } as GroupPayNote)).toMatchObject({ r: "lightning", st: "paid", by: D });
+    const paid = authoredNote(invoice, { groupId: "g1", me: A }, [invoice], { claims: [D] } as GroupPayNote);
+    expect(paid).toMatchObject({ r: "lightning", st: "paid" });
+    expect(paid!.by).toBeUndefined();
     expect(authoredNote(invoice, { groupId: "g1", me: A }, [invoice], { claims: [C, D] } as GroupPayNote)!.by).toBeUndefined();
   });
   it("paying someone's request: nothing until paid, sent once paid, taken back when the ecash came back", () => {
@@ -155,6 +166,18 @@ describe("authoredNote: what this device says about its own payments", () => {
     expect(authoredNote(usdt, atA, [usdt])).toMatchObject({ u: "testusdt", d: 6, r: "usdt", x: 1 });
     const btc = pay({ id: "req-00003", target: { method: "bitcoin", network: "bitcoin" } as PaymentView["target"] });
     expect(authoredNote(btc, atA, [btc])).not.toHaveProperty("x");
+  });
+  it("a record's network says test money, and a federation's is Fedimint, named so", () => {
+    const lightning = pay({ id: "req-00004", invoice: "lnbc10u1ptest", mints: [], network: "testnet" });
+    expect(authoredNote(lightning, atA, [lightning])).toMatchObject({ r: "lightning", x: 1 });
+    expect(authoredNote({ ...lightning, network: "mainnet" }, atA, [lightning])).not.toHaveProperty("x");
+    const fedimint = pay({ id: "req-00005", federations: ["fed-test"], invoice: "lnbc10u1ptest", federation: "fed-test", network: "testnet" });
+    expect(authoredNote(fedimint, atA, [fedimint])).toMatchObject({ r: "fedimint", x: 1 });
+    // A contact's notes carry no network: the federation's, as this device joined it, says.
+    const networkOf = (id: string) => (id === "fed-test" ? "signet" : id === "fed-real" ? "bitcoin" : undefined);
+    const notes = pay({ id: "pay-00006", kind: "payment", direction: "in", state: "settled", federation: "fed-test" });
+    expect(authoredNote(notes, atA, [notes], undefined, undefined, networkOf)).toMatchObject({ r: "fedimint", x: 1 });
+    expect(authoredNote({ ...notes, federation: "fed-real" }, atA, [notes], undefined, undefined, networkOf)).not.toHaveProperty("x");
   });
 });
 
@@ -212,6 +235,34 @@ describe("GroupPayments: every member hears it, the parties say it", () => {
     expect(peers.get("A")!.sent).toEqual([]);
   });
 
+  it("A's request to the group over Lightning: a member who paid nothing and says it did is never named", async () => {
+    const { peers, deliver, noteOf } = world({ A, B, C });
+    const request = pay({ id: "req-00001", linkId: "group:g1", group: "g1", invoice: "lnbc1" });
+    peers.get("A")!.payments.push(request);
+    await peers.get("A")!.engine.sync();
+    await deliver();
+    // C says it paid; B pays from another wallet, which says nothing.
+    const claim = note({ f: "*", r: "lightning", st: "sent", by: C });
+    peers.get("C")!.sent.push({ to: "CA", frame: claim }, { to: "CB", frame: claim });
+    await deliver();
+    peers.get("A")!.payments[0] = { ...request, state: "settled" };
+    await peers.get("A")!.engine.sync();
+    expect(peers.get("A")!.sent.map(s => s.frame)).toEqual([expect.objectContaining({ st: "paid" }), expect.objectContaining({ st: "paid" })]);
+    expect(peers.get("A")!.sent.some(s => "by" in s.frame)).toBe(false);
+    await deliver();
+    for (const name of ["A", "B", "C"]) {
+      expect(noteOf(name, "req-00001")).toMatchObject({ state: "paid" });
+      expect(noteOf(name, "req-00001")!.by, name).toBeUndefined();
+    }
+    // B paid in the app after all, and its claim arrives late: still nobody is named.
+    const late = note({ f: "*", r: "lightning", st: "sent", by: B });
+    peers.get("B")!.sent.push({ to: "BA", frame: late }, { to: "BC", frame: late });
+    await deliver();
+    await deliver();
+    for (const name of ["A", "B", "C"]) expect(noteOf(name, "req-00001")!.by, name).toBeUndefined();
+    expect(noteOf("A", "req-00001")!.claims).toEqual([B, C].sort());
+  });
+
   it("a member whose edge was down hears the note when it opens", async () => {
     const { peers, deliver, noteOf } = world({ A, B, C });
     peers.get("A")!.down.add("AC");
@@ -225,10 +276,73 @@ describe("GroupPayments: every member hears it, the parties say it", () => {
     expect(noteOf("C", "req-00001")).toMatchObject({ state: "open", to: A });
   });
 
+  it("a member's note in another member's name shows nothing until that member describes it", async () => {
+    // M (here D) claims to have paid a request A never made, with D's amount and memo; and says A paid D.
+    const { peers, deliver, noteOf, history } = world({ A, B, C, D });
+    const fake = note({ id: "fresh0001", f: "*", to: A, by: D, st: "sent", v: "5000000", m: "new wallet, pay me here: lnbc1" });
+    await peers.get("C")!.engine.receive("g1", D, fake);
+    // Taken back: nothing of D is left on it, and it would read as A's open request.
+    await peers.get("C")!.engine.receive("g1", D, { ...fake, st: "closed" });
+    await peers.get("C")!.engine.receive("g1", D, note({ id: "pay-fake01", k: "pay", f: A, to: D, st: "paid", v: "5000000" }));
+    expect(history.get("C") ?? []).toEqual([]);
+    for (const id of ["fresh0001", "pay-fake01"]) expect(noteOf("C", id), id).toBeUndefined();
+
+    // A real request by A whose claim came first: shown once A's own note arrives, as A described it.
+    const request = pay({ id: "req-00009", linkId: "AB", memo: "lunch" });
+    await peers.get("C")!.engine.receive("g1", B, note({ id: "req-00009", f: B, to: A, by: B, st: "sent", v: "999", m: "not lunch" }));
+    expect(noteOf("C", "req-00009")).toBeUndefined();
+    peers.get("A")!.payments.push(request);
+    await peers.get("A")!.engine.sync();
+    await deliver();
+    expect(noteOf("C", "req-00009")).toMatchObject({ amount: "100", memo: "lunch", claims: [B], state: "open", to: A });
+    expect(noteOf("C", "req-00009")!.undescribed).toBeUndefined();
+    // A direct payment whose payee's word came first: shown once its payer says it sent it.
+    await peers.get("C")!.engine.receive("g1", A, note({ id: "pay-00002", k: "pay", f: B, to: A, st: "paid" }));
+    expect(noteOf("C", "pay-00002")).toBeUndefined();
+    await peers.get("C")!.engine.receive("g1", B, note({ id: "pay-00002", k: "pay", f: B, to: A, st: "sent" }));
+    expect(noteOf("C", "pay-00002")).toMatchObject({ kind: "payment", from: B, to: A, state: "paid", by: B });
+  });
+
+  it("notes waiting for their initiator are bounded per group, the oldest dropped first", async () => {
+    const { peers, deliver, noteOf } = world({ A, B, C, D });
+    const engine = peers.get("C")!.engine;
+    const kept = () => (engine as unknown as { notes: Map<string, Map<string, GroupPayNote>> }).notes.get("g1")!;
+    // B's claim on A's request arrives before A's note; then D makes up many more, each in A's name.
+    await engine.receive("g1", B, note({ id: "req-00009", f: B, to: A, by: B, st: "sent" }));
+    for (let i = 0; i < WAITING + 50; i++) await engine.receive("g1", D, note({ id: `fake-${String(i).padStart(5, "0")}`, f: "*", to: A, by: D, st: "sent", m: "x".repeat(140) }));
+    expect(kept().size).toBe(WAITING);
+    expect(kept().has("req-00009")).toBe(false);
+    expect(kept().has(`fake-${String(WAITING + 49).padStart(5, "0")}`)).toBe(true);
+    // A's own note still shows, without the claim that was dropped.
+    peers.get("A")!.payments.push(pay({ id: "req-00009", linkId: "AB" }));
+    await peers.get("A")!.engine.sync();
+    await deliver();
+    expect(noteOf("C", "req-00009")).toMatchObject({ state: "open", to: A });
+    expect(noteOf("C", "req-00009")!.claims).toBeUndefined();
+    expect(kept().size).toBe(WAITING + 1);
+  });
+
   it("a note from someone it is not about is not kept", async () => {
     const { peers, noteOf } = world({ A, B, C });
     await peers.get("C")!.engine.receive("g1", B, note({ st: "paid", by: B }));
     await peers.get("C")!.engine.receive("g1", B, { t: "group-pay", junk: true });
     expect(noteOf("C", "req-00001")).toBeUndefined();
+  });
+});
+
+describe("GroupPayments: a pass grows with the payments kept, not with their square", () => {
+  it("finds each request's payments once per pass, whatever the number of group requests", async () => {
+    const { peers } = world({ A, B, C });
+    const a = peers.get("A")!;
+    // 200 requests in the group, and 1,000 payments of 1:1 chats, each counting how often its request is looked at.
+    let reads = 0;
+    const counted = (p: PaymentView): PaymentView => { const { requestId, ...rest } = p; return Object.defineProperty(rest, "requestId", { get: () => { reads++; return requestId; }, enumerable: true }) as PaymentView; };
+    for (let i = 0; i < 200; i++) a.payments.push(counted(pay({ id: `req-${String(i).padStart(5, "0")}`, linkId: i % 2 ? "AB" : "AC", direction: i % 4 < 2 ? "out" : "in" })));
+    for (let i = 0; i < 1000; i++) a.payments.push(counted(pay({ id: `pay-${String(i).padStart(5, "0")}`, linkId: `L${i % 20}`, kind: "payment", requestId: `elsewhere-${i}` })));
+    await a.engine.sync();
+    reads = 0;
+    await a.engine.sync();
+    // Each record's request once (and a few for the notes said): searching every record per request read it 100,000 times.
+    expect(reads).toBeLessThan(3 * a.payments.length);
   });
 });

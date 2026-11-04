@@ -15,7 +15,7 @@ import { renderApp } from "../render";
  * window closed to the Dock, the contact's messages were marked read as they came, so the Dock icon showed no badge
  * and nothing was unread once the window came back. The same chat open in a page on screen reads them at once.
  */
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const PEER = "peer".padEnd(52, "p");
 const T = Date.now() - 60_000;

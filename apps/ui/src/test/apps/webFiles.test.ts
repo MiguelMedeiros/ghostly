@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MINI_APP_LIMITS } from "@ghostly/core/miniApp";
+import { PICK_AFTER_CANCEL_MS } from "../../lib/apps/broker";
 import { handlePicker, idbPickStore, pickSheetText, webLinkedFiles, type PickSheetText, type PickStore, type PickedFile, type StoredPick } from "../../lib/apps/webFiles";
 import { translatorFor } from "../../locales";
 
@@ -28,6 +29,13 @@ const shown = (selector: string) => vi.waitFor(() => {
   return element;
 });
 
+/** The sheet's first button, once it works (a moment after the sheet shows). */
+const armed = (selector = "[data-testid=app-files-choose]") => vi.waitFor(() => {
+  const button = document.querySelector<HTMLButtonElement>(selector);
+  if (!button || button.disabled) throw new Error(`${selector} not working yet`);
+  return button;
+});
+
 afterEach(() => { document.body.replaceChildren(); });
 
 describe("picking", () => {
@@ -39,7 +47,7 @@ describe("picking", () => {
     expect(sheet.textContent).toContain("Cinema asks to read a folder");
     expect(sheet.textContent).toContain("Nothing is copied: Cinema reads what you pick.");
     expect(asked).toEqual([]);
-    (document.querySelector("[data-testid=app-files-choose]") as HTMLButtonElement).click();
+    (await armed()).click();
     const [entry] = await pick;
     expect(asked).toEqual([[true, ["mp4"]]]);
     expect(entry).toMatchObject({ path: "Films/Up.mp4", size: 3, modified: 7, available: true });
@@ -50,6 +58,16 @@ describe("picking", () => {
     expect((await shown("[data-testid=app-files-sheet]")).textContent).toContain("Cinema asks to read files");
     (document.querySelector("[data-testid=app-files-cancel]") as HTMLButtonElement).click();
     await expect(cancelled).rejects.toThrow(/^cancelled: /);
+  });
+
+  it("entry gives one link as the list does, null for an id the app does not keep", async () => {
+    const host = webLinkedFiles({ text: () => text, picker: async () => ({ files: [{ path: "Films/Up.mp4", file: file("abc", 7) }] }) });
+    const pick = host.pick(REF, "Cinema", { folder: true, accept: [] });
+    (await armed()).click();
+    const [picked] = await pick;
+    expect(await host.entry!(REF, picked!.id)).toEqual(picked);
+    expect(await host.entry!(REF, "b".repeat(22))).toBeNull();
+    expect(await host.entry!("pubkeyalpha/other", picked!.id)).toBeNull();
   });
 
   it("a long app title with no space breaks inside the sheet, in its title and its note", async () => {
@@ -65,10 +83,14 @@ describe("picking", () => {
     const behind = document.body.appendChild(Object.assign(document.createElement("button"), { textContent: "Close" }));
     const host = webLinkedFiles({ text: () => text, picker: async () => null });
     void host.pick(REF, "Cinema", { folder: true, accept: [] }).catch(() => {});
-    const choose = await shown("[data-testid=app-files-choose]");
+    const choose = await armed();
     const cancel = document.querySelector<HTMLElement>("[data-testid=app-files-cancel]")!;
-    expect(document.activeElement).toBe(choose);
+    expect(document.activeElement).toBe(document.querySelector("[role=dialog]"));
     const tab = (shiftKey = false) => document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey, bubbles: true, cancelable: true }));
+    // From the box, Tab goes to its first button.
+    expect(tab()).toBe(false);
+    expect(document.activeElement).toBe(cancel);
+    choose.focus();
     // The browser's own Tab from the last button went to the app's Close and its frame, under the backdrop.
     expect(tab()).toBe(false);
     expect(document.activeElement).toBe(cancel);
@@ -93,11 +115,56 @@ describe("picking", () => {
     expect(document.querySelector("[data-testid=app-files-sheet]")).toBeNull();
   });
 
+  it("one sheet at a time per app, whichever chat asks: the others are too-fast, and so is every pick PICK_AFTER_CANCEL_MS after a Cancel", async () => {
+    let clock = 1_000;
+    const host = webLinkedFiles({ text: () => text, picker: async () => null, now: () => clock });
+    const sheets = () => document.querySelectorAll("[data-testid=app-files-sheet]").length;
+    // The app open in two chats has a broker in each: both ask at once.
+    const first = host.pick(REF, "Cinema", { folder: true, accept: [] });
+    const second = host.pick(REF, "Cinema", { folder: true, accept: [] });
+    await expect(second).rejects.toThrow(/^too-fast: /);
+    await shown("[data-testid=app-files-sheet]");
+    expect(sheets()).toBe(1);
+    // Another app is not held up by it.
+    const other = host.pick("pubkeyalpha/reader", "Reader", { folder: false, accept: [] }).catch((error: Error) => error.message);
+    await vi.waitFor(() => expect(sheets()).toBe(2));
+    for (const cancel of document.querySelectorAll<HTMLButtonElement>("[data-testid=app-files-cancel]")) cancel.click();
+    await expect(first).rejects.toThrow(/^cancelled: /);
+    expect(await other).toMatch(/^cancelled: /);
+    await expect(host.pick(REF, "Cinema", { folder: true, accept: [] })).rejects.toThrow(/^too-fast: /);
+    expect(sheets()).toBe(0);
+    clock += PICK_AFTER_CANCEL_MS;
+    void host.pick(REF, "Cinema", { folder: true, accept: [] }).catch(() => {});
+    await shown("[data-testid=app-files-sheet]");
+  });
+
   it("the picker closed without a pick is cancelled too", async () => {
     const host = webLinkedFiles({ text: () => text, picker: async () => null });
     const pick = host.pick(REF, "Cinema", { folder: true, accept: [] });
-    (await shown("[data-testid=app-files-choose]")).click();
+    (await armed()).click();
     await expect(pick).rejects.toThrow(/^cancelled: /);
+  });
+
+  it("opens with focus on its box, not its button, which answers no key or click of its first moment", async () => {
+    // The person types in the message box (or presses Enter again, or double-clicks) as an app asks.
+    const composer = document.body.appendChild(document.createElement("textarea"));
+    composer.focus();
+    let opened = 0;
+    const host = webLinkedFiles({ text: () => text, picker: async () => { opened++; return null; } });
+    const pick = host.pick(REF, "Cinema", { folder: true, accept: [] });
+    const choose = await shown("[data-testid=app-files-choose]") as HTMLButtonElement;
+    // A click that was meant for what was there before.
+    choose.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    expect(opened).toBe(0);
+    expect(document.querySelector("[data-testid=app-files-sheet]")).not.toBeNull();
+    // A Space or Enter the person goes on typing lands on the box, which does nothing with it.
+    expect(document.activeElement).toBe(document.querySelector("[role=dialog]"));
+    expect(document.activeElement).not.toBe(choose);
+    // A moment later the button is the person's deliberate answer.
+    (await armed()).click();
+    await expect(pick).rejects.toThrow(/^cancelled: /);
+    expect(opened).toBe(1);
+    expect(document.activeElement).toBe(composer);
   });
 
   it("leaves out hidden files and folders, and what accept does not name", async () => {
@@ -105,6 +172,23 @@ describe("picking", () => {
     const host = webLinkedFiles({ text: () => text, ask: async () => ({ files: picked }) });
     expect((await host.pick(REF, "Cinema", { folder: true, accept: ["mp4", "srt"] })).map((e) => e.path)).toEqual(["Films/Up.mp4", "Films/Up.SRT"]);
     expect((await host.pick("other/app", "Other", { folder: true, accept: [] })).map((e) => e.path)).toEqual(["Films/Up.mp4", "Films/Up.SRT", "Films/notes.txt"]);
+  });
+
+  it("a picked folder whose own name starts with a dot links its files, as the Desktop's walk: hidden is what is under it", async () => {
+    const picked: PickedFile[] = [".Films/Up.mp4", ".Films/.DS_Store", ".Films/.trash/old.mp4", ".Films/S1/E01.mp4"].map((path) => ({ path, file: file("x") }));
+    const host = webLinkedFiles({ text: () => text, ask: async () => ({ files: picked }) });
+    expect((await host.pick(REF, "Cinema", { folder: true, accept: [] })).map((e) => e.path)).toEqual([".Films/Up.mp4", ".Films/S1/E01.mp4"]);
+    // Through the handle picker's walk too.
+    vi.stubGlobal("showDirectoryPicker", async () => fakeDir(".Films", { "Up.mp4": "a", ".hidden.mp4": "b", S1: { "E01.mp4": "c" } }, { permission: "granted", asked: 0 }));
+    try {
+      const walked = webLinkedFiles({ text: () => text, ask: (_app, folder, accept) => handlePicker(folder, accept) });
+      expect((await walked.pick(REF, "Cinema", { folder: true, accept: [] })).map((e) => e.path)).toEqual([".Films/Up.mp4", ".Films/S1/E01.mp4"]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    // A file picked on its own is still hidden by its own name, as the Desktop's `picked_files`.
+    const files = webLinkedFiles({ text: () => text, ask: async () => ({ files: [".bashrc", "Up.mp4"].map((path) => ({ path, file: file("x") })) }) });
+    expect((await files.pick(REF, "Cinema", { folder: false, accept: [] })).map((e) => e.path)).toEqual(["Up.mp4"]);
   });
 
   it("keeps links per app, and never more than the limit", async () => {
@@ -115,6 +199,30 @@ describe("picking", () => {
     const many = webLinkedFiles({ text: () => text, ask: async () => ({ files: Array.from({ length: MINI_APP_LIMITS.filesEntries + 1 }, (_, i) => ({ path: `${i}.mp4`, file: file("") })) }) });
     await expect(many.pick(REF, "Cinema", { folder: true, accept: [] })).rejects.toThrow(/^too-large: /);
     expect(await many.list(REF, "Cinema")).toEqual([]);
+  });
+
+  it("a pick at the limit lets the page answer while its links are made, from a few draws of randomness", async () => {
+    const n = MINI_APP_LIMITS.filesEntries;
+    const files = Array.from({ length: n }, (_, i) => ({ path: `Music/Album ${i % 1000}/${i} - song.flac`, file: { size: 4096 + i, lastModified: 1 + i } }));
+    const stored: StoredPick[] = [];
+    const store: PickStore = { all: async () => [], put: async (pick) => { stored.push(pick); }, forget: async () => {}, remove: async () => {}, clear: async () => {} };
+    // A timer set as the picker answers: it fires before the pick ends only if the pick lets the thread go.
+    let answered = false;
+    const host = webLinkedFiles({ text: () => text, store, ask: async () => { setTimeout(() => { answered = true; }, 0); return { files, keep: { files: [] } }; } });
+    const draws = vi.spyOn(crypto, "getRandomValues");
+    const added = await host.pick(REF, "Player", { folder: true, accept: [] });
+    expect(answered).toBe(true);
+    // One draw per entry held the page ~250 ms at 100,000 entries; 16 bytes × 4096 ids fit one draw.
+    expect(draws.mock.calls.length).toBeLessThanOrEqual(Math.ceil(n / 4096) + 1);
+    expect(added).toHaveLength(n);
+    expect(added.every((e) => /^[A-Za-z0-9_-]{22}$/.test(e.id))).toBe(true);
+    // Each id is its 16 random bytes as base64url, unpadded.
+    const bytes = draws.mock.results[draws.mock.results.length - 1]!.value as Uint8Array;
+    expect(added[n - 1]!.id).toBe(Buffer.from(bytes.subarray(bytes.length - 16)).toString("base64url"));
+    expect(new Set(added.map((e) => e.id)).size).toBe(n);
+    expect(added[n - 1]).toMatchObject({ path: `Music/Album 999/${n - 1} - song.flac`, size: 4096 + n - 1, modified: n, available: true });
+    expect(stored[0]!.entries.map((e) => e.id)).toEqual(added.map((e) => e.id));
+    expect(await host.list(REF, "Player")).toHaveLength(n);
   });
 });
 
@@ -321,6 +429,41 @@ describe("a folder kept past the page (File System Access)", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it("walks a picked folder for what accept names: other files and hidden ones are not read, nor counted toward the limit", async () => {
+    let reads = 0;
+    const entry = (name: string) => ({ kind: "file", name, getFile: async () => { reads++; return { size: 1, lastModified: 1 }; } });
+    const folder = (name: string, items: () => Iterable<object>) => ({ kind: "directory", name, async *values() { yield* items(); } });
+    function* numbered(n: number, name: (i: number) => string) { for (let i = 0; i < n; i++) yield entry(name(i)); }
+    // More photos than an app may link, then 50 films (some named in capitals), and hidden ones that are no film.
+    const library = (photos: number, films: number) => folder("Library", function* () {
+      yield folder("a-photos", () => numbered(photos, (i) => `${i}.jpg`));
+      yield folder("b-films", function* () {
+        yield* numbered(films, (i) => `${i}.${i % 10 ? "mp4" : "MP4"}`);
+        yield entry(".partial.mp4");
+        yield entry("mp4");
+        yield folder(".trash", () => numbered(3, (i) => `${i}.mp4`));
+      });
+    });
+    const pick = (photos: number, films: number) => {
+      reads = 0;
+      vi.stubGlobal("showDirectoryPicker", async () => library(photos, films));
+      return webLinkedFiles({ text: () => text, ask: (_app, folder, accept) => handlePicker(folder, accept) }).pick(REF, "Cinema", { folder: true, accept: ["mp4"] });
+    };
+    try {
+      const entries = await pick(120_000, 50);
+      // A photo or a hidden file is never got: a real disk pays for each.
+      expect(reads).toBe(50);
+      expect(entries.map((e) => e.path)).toEqual(Array.from({ length: 50 }, (_, i) => `Library/b-films/${i}.${i % 10 ? "mp4" : "MP4"}`));
+      // More films than an app may link: too large, never some of them, and the walk stops one past the limit.
+      await expect(pick(0, MINI_APP_LIMITS.filesEntries + 1)).rejects.toThrow(/^too-large: /);
+      expect(reads).toBe(MINI_APP_LIMITS.filesEntries + 1);
+      // At the limit, every one of them.
+      expect(await pick(10, MINI_APP_LIMITS.filesEntries)).toHaveLength(MINI_APP_LIMITS.filesEntries);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  }, 30_000);
 
   it("the IndexedDB store keeps picks per app", async () => {
     const store = idbPickStore(() => "ghostly-test-files");

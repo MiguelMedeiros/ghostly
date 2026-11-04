@@ -308,6 +308,44 @@ describe("tags", () => {
   });
 });
 
+describe("clearing the finished tasks on this device", () => {
+  const CLEARED = NOW - 10_000;
+  const tasks = () => named(boardEntries([
+    row("chat-a", task({ id: "done", status: "done" }), { timestamp: NOW - 60_000 }),
+    row("chat-a", task({ id: "failed", status: "failed" }), { timestamp: NOW - 60_000 }),
+    row("chat-a", task({ id: "cancelled", status: "cancelled" }), { timestamp: NOW - 60_000 }),
+    row("chat-a", task({ id: "running", status: "running" }), { timestamp: NOW - 60_000 }),
+    row("chat-a", task({ id: "blocked", status: "blocked" }), { timestamp: NOW - 60_000 }),
+    // Finished after the clear: it stays.
+    row("chat-a", task({ id: "done-later", status: "done" }), { timestamp: NOW - 60_000, editedAt: NOW - 5_000 }),
+  ]));
+
+  it("leaves out every finished task last changed by then, and keeps the tasks still going and the ones that changed since", () => {
+    expect(boardModel(tasks(), { now: NOW })).toMatchObject({ total: 6, finished: 4 });
+    const cleared = boardModel(tasks(), { now: NOW, clearedAt: CLEARED });
+    expect(columns(tasks(), { clearedAt: CLEARED })).toMatchObject({ running: ["running"], blocked: ["blocked"], done: ["done-later"], closed: [] });
+    expect(cleared).toMatchObject({ active: 2, total: 3, shown: 3, finished: 1 });
+    // Not even behind Show older: cleared is gone from this board.
+    expect(columns(tasks(), { clearedAt: CLEARED, older: true })).toMatchObject({ done: ["done-later"], closed: [] });
+    expect(cleared.groups.map((g) => g.old)).toEqual([0, 0, 0, 0, 0]);
+  });
+
+  it("a bot's next update of a cleared task brings it back, in its new column", () => {
+    const again = named(boardEntries([row("chat-a", task({ id: "done", status: "running" }), { timestamp: NOW - 60_000, editedAt: NOW - 1_000 })]));
+    expect(columns(again, { clearedAt: CLEARED })).toMatchObject({ running: ["done"] });
+  });
+
+  it("keeps a parent while one of its parts is still going, and clears it with its parts once all are finished", () => {
+    const family = (engine: string) => named(boardEntries([
+      row("group:mesh", task({ id: "epic", status: "done" }), { member: "hermes", timestamp: NOW - 60_000 }),
+      row("group:mesh", task({ id: "codec", parent: "epic", status: "done" }), { member: "hermes", timestamp: NOW - 60_000 }),
+      row("group:mesh", task({ id: "engine", parent: "epic", status: engine }), { member: "hermes", timestamp: NOW - 60_000 }),
+    ]));
+    expect(boardModel(family("running"), { now: NOW, clearedAt: CLEARED })).toMatchObject({ total: 3, shown: 1, finished: 0 });
+    expect(boardModel(family("done"), { now: NOW, clearedAt: CLEARED })).toMatchObject({ total: 0, shown: 0, finished: 0 });
+  });
+});
+
 describe("a task's parts", () => {
   const family = () => named(boardEntries([
     row("group:mesh", task({ id: "epic", title: "Relay rework" }), { member: "hermes" }),

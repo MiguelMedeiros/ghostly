@@ -1,0 +1,10 @@
+{
+  "auto": "Pelas mensagens deles",
+  "byHand": "{{language}} (definido por você)",
+  "change": "Alterar",
+  "detected": "{{language}} (detectado)",
+  "note": "Mensagens curtas são lidas nele, e o que você envia pode ser traduzido para ele.",
+  "several": "Vários idiomas",
+  "title": "Idioma desta conversa",
+  "unknown": "Ainda não identificado"
+}

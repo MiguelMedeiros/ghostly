@@ -375,6 +375,28 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     expect(world.peers.get("carol")!.messages.filter(m => m.event === "renamed").map(m => m.member)).toEqual([alice.views()[0].myKey]);
   });
 
+  it("a decline owed while the inviter's chat was down is still said after a join by the link (agents#1652)", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob");
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    await alice.load(); await bob.load();
+    const groupId = await alice.create("Ghosts", "mesh");
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    world.chats.delete("chat-ab");
+    await bob.decline(groupId); await world.settle();
+    expect(alice.views()[0].invited).toEqual(["chat-ab"]);
+    // Bob opens the group's link before Alice heard his decline: he is in, and she must stop showing him as invited.
+    await bob.joinByLink(await alice.enableLink(groupId));
+    await vi.waitFor(() => expect(bob.views()[0].invitation!.stage).toBe("knocked"));
+    await alice.tick(); await world.settle();
+    await world.meetEntries(); await world.settle();
+    expect(bob.views()[0].status).toBe("active");
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    await bob.tick(); await world.settle();
+    expect(alice.views()[0].invited).toEqual([]);
+    expect((await world.peers.get("bob")!.store.getGroups()).map(g => g.declined)).toEqual([undefined]);
+  });
+
   it("a knock another joiner's write replaced goes again within moments, and one still there is not rewritten", async () => {
     const world = new World();
     const alice = world.add("alice"), carol = world.add("carol"), dave = world.add("dave");
@@ -728,6 +750,24 @@ describe("group engine: admission over a contact chat, edges from the roster", (
         // Commits only, and none carries a secret.
         expect(sent.length).toBeGreaterThan(1);
         expect(sent.every(f => (f as { t: string }).t === "group-commit" && !("secret" in (f as object)))).toBe(true);
+      });
+
+      it("that missed a member's leave reads that the member left, not that the admin removed them", async () => {
+        const { world, alice, bob, carol, groupId, key, edge } = await trio();
+        const bobKey = key(bob);
+        edge("alice", bob, false); edge("carol", bob, false);
+        world.chats.delete("chat-ab");
+        // Carol leaves on her own while Bob is away, then the admin removes Bob.
+        await carol.leave(groupId); await world.settle();
+        expect(world.events("alice")).toContain("left");
+        await alice.remove(groupId, bobKey); await world.settle();
+        edge("alice", bob, true);
+        await world.meet(); await world.settle();
+        expect(bob.views()[0]).toMatchObject({ status: "removed" });
+        // The commits between come over the admin's kept edge, each with the mark that says the member left.
+        const lines = (await bob.messages(groupId)).filter(m => m.event === "left" || m.event === "gone");
+        expect(lines.map(m => [m.event, m.member, m.by])).toEqual([["left", key(carol), undefined]]);
+        expect(lines[0].text).toMatch(/ left$/);
       });
 
       it("is still told after the admin's app restarts, and is given up after a week", async () => {

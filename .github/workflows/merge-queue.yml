@@ -7,7 +7,8 @@ run-name: >-
   github.event_name == 'push' && format('Merge queue: push to {0}', github.ref_name) || 'Merge queue' }}
 
 # Runs the merge train (tools/scripts/merge-train.mjs): pull requests labelled `queue` land on their base (dev or an
-# epic/* branch) in batches of up to 12, in the order they were queued (`queue:priority` first). Each run moves every
+# epic/* branch) in batches of up to 12, in the order they were queued (`queue:priority` first); a batch leaves with 3
+# that can board, or once the first has waited 15 minutes, or at once for `queue:priority`. Each run moves every
 # base's train one step: board a batch, merge a green one, split a red one, and update each queued pull request's
 # place in line. See docs/TESTING.md#the-merge-queue.
 #
@@ -23,7 +24,10 @@ run-name: >-
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    # Every 5 minutes (GitHub's shortest), which GitHub keeps only loosely (10 to 30 minutes apart on 2026-10-19). A
+    # batch that waits for company leaves at a deadline (MAX_WAIT in the script) that no event may come to wake: the
+    # `wake` job below starts the train at that time.
+    - cron: "*/5 * * * *"
   push:
     branches: [dev, "epic/**"]
   workflow_run:
@@ -145,6 +149,10 @@ jobs:
     timeout-minutes: 15
     # Nothing here uses the workflow's own token: the checkout and the train act as the queue app.
     permissions: {}
+    # Seconds until a batch this run held leaves (`wakeIn` in the script), when it held one. With trains on several
+    # bases the job that ends last sets it: the others' deadlines wait for the schedule, as before.
+    outputs:
+      wake_in: ${{ steps.train.outputs.wake_in }}
     steps:
       # The train reads CI from the jobs of ci.yml's own run ("Actions: read": a check run named "CI Success" can be
       # posted by any workflow of the repository) and cancels a boarded pull request's own CI run, which frees runners
@@ -154,7 +162,7 @@ jobs:
       - name: App token
         id: token
         continue-on-error: true
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ secrets.QUEUE_APP_ID }}
           private-key: ${{ secrets.QUEUE_APP_PRIVATE_KEY }}
@@ -168,7 +176,7 @@ jobs:
         id: token-read
         if: steps.token.outcome == 'failure'
         continue-on-error: true
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ secrets.QUEUE_APP_ID }}
           private-key: ${{ secrets.QUEUE_APP_PRIVATE_KEY }}
@@ -181,7 +189,7 @@ jobs:
       - name: App token (no Actions read)
         id: token-checks
         if: steps.token.outcome == 'failure' && steps.token-read.outcome != 'success'
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ secrets.QUEUE_APP_ID }}
           private-key: ${{ secrets.QUEUE_APP_PRIVATE_KEY }}
@@ -201,6 +209,7 @@ jobs:
           filter: blob:none
 
       - name: Run the train
+        id: train
         env:
           GH_TOKEN: ${{ steps.token.outputs.token || steps.token-read.outputs.token || steps.token-checks.outputs.token }}
           # The train trusts only its own position comments: the ones this app's bot wrote.
@@ -212,3 +221,29 @@ jobs:
           git config user.email "merge-train@users.noreply.github.com"
           if [[ "$DRY_RUN" == "true" ]]; then mode=--dry-run; else mode=--run; fi
           node tools/scripts/merge-train.mjs "$mode" --base "$BASE"
+
+  wake:
+    name: Wake the train when a held batch leaves
+    needs: train
+    # Also when another base's train failed: a held batch on dev still leaves at its time.
+    if: ${{ !cancelled() && needs.train.outputs.wake_in != '' }}
+    # A batch held for company leaves at a set time, and GitHub's schedule may not come for 30 minutes after it. This job
+    # sleeps until that time and starts the train with a workflow_dispatch, the one event the workflow's own token may
+    # start a run with. The newest wake replaces the one sleeping (every run that holds the batch says the same time,
+    # or a later one once the line moved), so at most one runner sleeps.
+    concurrency:
+      group: merge-queue-wake
+      cancel-in-progress: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      actions: write
+    steps:
+      - name: Sleep until the batch leaves, then start the train
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WAKE_IN: ${{ needs.train.outputs.wake_in }}
+        run: |
+          if [[ ! "$WAKE_IN" =~ ^[0-9]{1,4}$ ]]; then echo "::error::not a wake time: $WAKE_IN"; exit 1; fi
+          sleep "$WAKE_IN"
+          gh workflow run merge-queue.yml --repo "$GITHUB_REPOSITORY"

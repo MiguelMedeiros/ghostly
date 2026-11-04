@@ -26,11 +26,14 @@ export class CashuMintLightning implements LightningProvider {
   /** The melt quote shown to the person is the one paid: quoting again could change the fee. */
   private readonly quotes = new Map<string, { quote: string; mint: string; amount: number; feeReserve: number }>();
 
-  constructor(private readonly wallet: CashuWallet, private readonly mode: WalletMode) {}
+  /** `lastBalance`: the balance in the engine's last wallet view, once there is one (see `ProviderHost.cashuBalance`). */
+  constructor(private readonly wallet: CashuWallet, private readonly mode: WalletMode, private readonly lastBalance?: () => number | undefined) {}
 
   async info() {
     // Test mints issue invoices for worthless sats (often with a mainnet prefix): the mode says which it is.
-    return { network: this.mode === "mainnet" ? "bitcoin" as const : "testnet" as const, balance: (await this.wallet.view(this.mode)).balance };
+    // The balance is the wallets' view's, made again whenever the wallet changes: read for itself, it was a whole read
+    // of the proofs, the swaps and the history, as each card opened and every 15 s.
+    return { network: this.mode === "mainnet" ? "bitcoin" as const : "testnet" as const, balance: this.lastBalance?.() ?? await this.wallet.balance(this.mode) };
   }
 
   async createInvoice(amount: number): Promise<LightningInvoice> {
@@ -117,5 +120,5 @@ export const cashuMint: LightningProviderDescriptor = {
   platforms: PROVIDER_PLATFORMS,
   fields: [],
   custodial: true,
-  async create(_settings, host) { return new CashuMintLightning(host.cashu as CashuWallet, host.mode); },
+  async create(_settings, host) { return new CashuMintLightning(host.cashu as CashuWallet, host.mode, host.cashuBalance); },
 };

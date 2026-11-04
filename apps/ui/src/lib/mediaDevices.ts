@@ -1,3 +1,4 @@
+import { isAppleMobile } from "./installPrompt";
 import { getPrefix } from "./storage";
 
 /*
@@ -44,6 +45,22 @@ export function chooseDevice(kind: DeviceKind, device: ChosenDevice | null): voi
   window.dispatchEvent(new Event(DEVICES_EVENT));
 }
 
+/** Whether `getUserMedia` failed because the person, the browser or the system refused it (not a missing device). */
+export function isMediaDenied(error: unknown): boolean {
+  const name = (error as { name?: unknown } | null)?.name;
+  return name === "NotAllowedError" || name === "SecurityError" || name === "PermissionDeniedError";
+}
+
+/**
+ * Where to turn a refused microphone or camera back on, as a translation key. On an iPhone or iPad, Safari and the
+ * home-screen app refuse at once, with no prompt, once iOS was told no (Settings → Apps → Safari): only the Settings
+ * app turns them back on. Chrome and Firefox on iOS have their own switches, so they get the general line.
+ */
+export function mediaDeniedText(userAgent = typeof navigator === "undefined" ? "" : navigator.userAgent,
+  touchPoints = typeof navigator === "undefined" ? 0 : navigator.maxTouchPoints ?? 0): "settings.media.deniedIos" | "settings.media.denied" {
+  return isAppleMobile(userAgent, touchPoints) && !/CriOS|FxiOS|EdgiOS/.test(userAgent) ? "settings.media.deniedIos" : "settings.media.denied";
+}
+
 /** The ids browsers give their own "follow the system" entries, which the default option already is. */
 const PSEUDO = new Set(["default", "communications"]);
 
@@ -76,7 +93,25 @@ export function setDeviceSource(next: DeviceSource | null): void {
 
 export const deviceSource = (): DeviceSource | null => source;
 
-export const hasMediaDevices = () => !!source || (typeof navigator !== "undefined" && typeof navigator.mediaDevices?.enumerateDevices === "function");
+/**
+ * A camera's picture for the page (a photo, a QR scan): the device source's where there is one, as WebKitGTK refuses
+ * the page a camera (apps/desktop/src/microphone.rs), else the page's own. Rejects where there is neither.
+ */
+export function captureCamera(constraints: MediaStreamConstraints): Promise<MediaStream> {
+  if (source) return source.getUserMedia(constraints);
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return Promise.reject(new Error("unsupported"));
+  return navigator.mediaDevices.getUserMedia(constraints);
+}
+
+/** Whether there is a camera to capture from (see `captureCamera`). Browsers list theirs before any permission. */
+export async function cameraListed(): Promise<boolean> {
+  if (source) return (await source.list()).videoinput.length > 0;
+  const devices = typeof navigator !== "undefined" ? navigator.mediaDevices : undefined;
+  if (!devices?.getUserMedia || !devices.enumerateDevices) return false;
+  return (await devices.enumerateDevices()).some((d) => d.kind === "videoinput");
+}
+
+export const hasMediaDevices =() => !!source || (typeof navigator !== "undefined" && typeof navigator.mediaDevices?.enumerateDevices === "function");
 
 /** Whether this engine can send sound to a chosen speaker (Chromium does; Safari and older WebKit may not). */
 export const canPickSpeaker = () => !!source || (typeof HTMLMediaElement !== "undefined" && typeof (HTMLMediaElement.prototype as { setSinkId?: unknown }).setSinkId === "function");

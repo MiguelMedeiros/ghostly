@@ -54,7 +54,10 @@ interface SecretSocket {
 }
 interface RelayedServer {
   listen(keyPair: KeyPair): Promise<void>;
+  /** Where the relay's node listens for it, as the relay said; port 0 when the relay refused the listen. */
+  address(): { port: number } | null;
   close(): Promise<void>;
+  once(event: "close", listener: () => void): unknown;
 }
 interface RelayedNode {
   ready(): Promise<void>;
@@ -228,25 +231,29 @@ function attach(socket: SecretSocket, channels: Set<RelayedChannel>): Promise<Bo
     if (socket.opened) void socket.opened.then(ok => { if (ok) opened(); else reject(new Error("Noise handshake failed")); });
     else socket.once("open", opened);
     socket.on("data", (chunk: Uint8Array) => {
-      const joined = new Uint8Array(buffer.length + chunk.length);
-      joined.set(buffer); joined.set(chunk, buffer.length);
-      buffer = joined;
-      while (buffer.length >= 4) {
-        const word = new DataView(buffer.buffer, buffer.byteOffset, 4).getUint32(0);
+      // Frames are read by offset and only the partial one left is kept (a copy, once per chunk), as on the
+      // Desktop: copying the rest of the buffer per frame made a burst of tiny frames cost quadratic time.
+      let joined = chunk;
+      if (buffer.length) {
+        joined = new Uint8Array(buffer.length + chunk.length);
+        joined.set(buffer); joined.set(chunk, buffer.length);
+      }
+      let offset = 0;
+      while (joined.length - offset >= 4) {
+        const word = new DataView(joined.buffer, joined.byteOffset + offset, 4).getUint32(0);
         const binary = word >= BINARY, length = word % BINARY;
         // A binary frame before the preface is another protocol.
         if (length === 0 || length > MAX_FRAME || (binary && !prefaced)) { fail(new Error("Invalid frame length")); return; }
-        if (buffer.length < 4 + length) break;
+        if (joined.length - offset < 4 + length) break;
+        const payload = joined.subarray(offset + 4, offset + 4 + length);
+        offset += 4 + length;
         if (binary) {
-          const message = buffer.slice(4, 4 + length);
-          buffer = buffer.slice(4 + length);
-          if (!channel.receive(message)) { fail(new Error("Receive queue exceeded")); return; }
+          if (!channel.receive(new Uint8Array(payload))) { fail(new Error("Receive queue exceeded")); return; }
           continue;
         }
         let text: string;
-        try { text = decoder.decode(buffer.subarray(4, 4 + length)); }
+        try { text = decoder.decode(payload); }
         catch { fail(new Error("Invalid UTF-8 frame")); return; }
-        buffer = buffer.slice(4 + length);
         if (!prefaced) {
           if (text !== PREFACE) { fail(new Error("Unexpected application protocol")); return; }
           prefaced = true; clearTimeout(timer);
@@ -254,6 +261,7 @@ function attach(socket: SecretSocket, channels: Set<RelayedChannel>): Promise<Bo
             identities: [hex(socket.publicKey), hex(socket.remotePublicKey)].sort() as [string, string] } });
         } else if (!channel.receive(text)) { fail(new Error("Receive queue exceeded")); return; }
       }
+      buffer = new Uint8Array(joined.subarray(offset));
     });
   });
 }
@@ -267,6 +275,12 @@ export interface RelayedHyperOptions {
  * A chat's HyperDHT endpoint through the relay at `url`: it listens on the key of `seedB64` (the chat's
  * own transport seed, as on the Desktop) and dials a contact's descriptor. Fails, and so is not offered,
  * when the relay cannot be reached or does not let it listen.
+ *
+ * dht-relay 0.4.3 has no message for a refused listen (the relay's node refuses a key it already listens on, for
+ * another client or an old connection of this one), and its client drops a `closed` for a server that has not had
+ * `listening`. So the relay answers a refusal with `listening` at no address (port 0), then `closed`: that fails here
+ * at once. A relay that answers nothing leaves the listen to LISTEN_MS. A server the relay closes later says the
+ * endpoint is unavailable, as when the whole connection goes.
  */
 export async function createRelayedHyperEndpoint(seedB64: string, url: string, options: RelayedHyperOptions = {}): Promise<NativeEndpoint> {
   const problem = hyperdhtRelayProblem(url);
@@ -295,6 +309,8 @@ export async function createRelayedHyperEndpoint(seedB64: string, url: string, o
       else bound.channel.close();
     }).catch(() => {});
   });
+  let serverClosed = false;
+  server.once("close", () => { serverClosed = true; member.unavailable(); });
   try {
     await Promise.race([
       server.listen(keyPair),
@@ -302,6 +318,7 @@ export async function createRelayedHyperEndpoint(seedB64: string, url: string, o
       new Promise((_, reject) => setTimeout(() => reject(new Error("The HyperDHT relay did not let this chat listen")), LISTEN_MS)),
     ]);
     if (client.gone) throw new Error("The HyperDHT relay closed the connection");
+    if (serverClosed || !server.address()?.port) throw new Error("The HyperDHT relay did not let this chat listen");
   } catch (error) {
     stopped = true;
     void server.close().catch(() => {});

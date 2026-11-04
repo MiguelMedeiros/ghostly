@@ -18,7 +18,24 @@ export const IMAGE_LIMITS = {
   maxEdge: 65_535,
   /** How much of a file is read for its size: past a JPEG's EXIF, thumbnails and colour profile. */
   headBytes: 256 * 1024,
+  /**
+   * The most pixels a picture drawn in a chat may have: a 50-megapixel phone photo (8160 × 6120), about 200 MB once
+   * decoded. A few kilobytes can say far more (a PNG of 23000 × 23000 is 64 KB and 2 GB decoded): past this a picture
+   * is kept and saved, not drawn.
+   */
+  previewPixels: 50_000_000,
+  /** The longest side a picture drawn in a chat may have: a wide panorama. */
+  previewEdge: 16_384,
 } as const;
+
+/**
+ * Whether a picture of this size, read from its own bytes (never from what its sender said), may be drawn: undefined
+ * (its bytes do not say) may not either, as what draws it would find its size only by decoding it.
+ */
+export function previewable(size: ImageMeta | undefined): boolean {
+  return !!size && size.width <= IMAGE_LIMITS.previewEdge && size.height <= IMAGE_LIMITS.previewEdge
+    && size.width * size.height <= IMAGE_LIMITS.previewPixels;
+}
 
 /** Whether a file is a picture, by its type. */
 export function isImageMime(mime: string): boolean {
@@ -47,7 +64,7 @@ const sized = (width: number, height: number): ImageMeta | undefined => (edge(wi
 const JPEG_FRAME = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
 
 /** The EXIF orientation in an APP1 segment's TIFF block (1 when it says none). */
-function exifOrientation(b: Uint8Array, tiff: number, end: number): number {
+export function exifOrientation(b: Uint8Array, tiff: number, end: number): number {
   if (tiff + 8 > end) return 1;
   const little = ascii(b, tiff, "II");
   if (!little && !ascii(b, tiff, "MM")) return 1;
@@ -108,14 +125,43 @@ function webpSize(b: Uint8Array): ImageMeta | undefined {
 }
 
 /**
+ * A GIF's size as it is decoded: its logical screen, or as far as its first frame reaches past it (a browser decodes
+ * the first frame whole, at its own size, however small the screen says it is). Undefined when its first frame is not
+ * in these bytes: what it would be drawn at is not known.
+ */
+function gifSize(b: Uint8Array): ImageMeta | undefined {
+  if (b.length < 13) return undefined;
+  const screenWidth = u16le(b, 6), screenHeight = u16le(b, 8);
+  // The global colour table, when there is one: 3 bytes a colour, 2 to 256 colours.
+  let at = 13 + (b[10]! & 0x80 ? 3 * (2 << (b[10]! & 7)) : 0);
+  while (at < b.length) {
+    const block = b[at]!;
+    if (block === 0x2c) {
+      if (at + 9 > b.length) return undefined;
+      const left = u16le(b, at + 1), top = u16le(b, at + 3), width = u16le(b, at + 5), height = u16le(b, at + 7);
+      return sized(Math.max(screenWidth, left + width), Math.max(screenHeight, top + height));
+    }
+    // No frame at all: nothing past the screen is drawn.
+    if (block === 0x3b) return sized(screenWidth, screenHeight);
+    if (block !== 0x21 || at + 2 > b.length) return undefined;
+    // An extension: its label, then sub-blocks (a length byte, then that many bytes) up to an empty one.
+    at += 2;
+    while (at < b.length && b[at] !== 0) at += 1 + b[at]!;
+    at++;
+  }
+  return undefined;
+}
+
+/**
  * A picture's size as it is shown, read from its first bytes (PNG, JPEG, GIF, WebP), or undefined when they do not
- * say. Only the header is read: a JPEG whose frame header sits past `IMAGE_LIMITS.headBytes` goes without.
+ * say. Only the header is read: a JPEG whose frame header, or a GIF whose first frame, sits past
+ * `IMAGE_LIMITS.headBytes` goes without.
  */
 export function imageSize(head: Uint8Array): ImageMeta | undefined {
   const b = head;
   try {
     if (b.length >= 24 && b[0] === 0x89 && ascii(b, 1, "PNG\r\n\x1a\n") && ascii(b, 12, "IHDR")) return sized(u32be(b, 16), u32be(b, 20));
-    if (b.length >= 10 && (ascii(b, 0, "GIF87a") || ascii(b, 0, "GIF89a"))) return sized(u16le(b, 6), u16le(b, 8));
+    if (b.length >= 10 && (ascii(b, 0, "GIF87a") || ascii(b, 0, "GIF89a"))) return gifSize(b);
     if (b.length >= 4 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return jpegSize(b);
     if (b.length >= 16 && ascii(b, 0, "RIFF") && ascii(b, 8, "WEBP")) return webpSize(b);
   } catch { /* not a picture this reads */ }

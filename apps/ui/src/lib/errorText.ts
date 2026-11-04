@@ -52,6 +52,24 @@ const PARTS: Record<string, TranslationKey> = {
 };
 const readParts = (parts: string, t: Translate) => parts.split(", ").map((part) => (PARTS[part] ? t(PARTS[part]) : part)).join(", ");
 
+/**
+ * The members a group waits on, as engine/groups.ts `growthBlocked` lists them ("Ana, Member q5zt8m3x and 2 more"), in
+ * the app's language: an unnamed member as the app names one, "2 more" in its words, and the language's own list
+ * (Intl.ListFormat). They were pasted whole, English commas and "and 2 more" in every language (agents#1593).
+ */
+function behindNames(text: string, t: Translate): string {
+  const tail = text.match(/^([\s\S]+) and (\d+) more$/);
+  const names = (tail ? tail[1] : text).split(", ").map((name) => {
+    const key = name.match(/^Member ([a-z0-9]{8})$/)?.[1];
+    return key ? t("group.member.unnamed", { key }) : name;
+  });
+  if (tail) names.push(t("errors.group.growMore", { count: Number(tail[2]) }));
+  // Not in this build's TypeScript library, but in every browser the app runs in.
+  const ListFormat = (Intl as unknown as { ListFormat?: new (locale: string, options: object) => { format(list: readonly string[]): string } }).ListFormat;
+  try { if (ListFormat) return new ListFormat(t.language ?? "en", { style: "long", type: "conjunction" }).format(names); } catch { /* below */ }
+  return names.join(", ");
+}
+
 /** A transport as the engine names it ("iroh/1"), as people call it: a name, the same in every language. */
 const TRANSPORT_WORDS: Record<string, string> = { "webrtc/1": "WebRTC", "iroh/1": "Iroh", "hyperdht/1": "HyperDHT" };
 const transportWord = (transport: string) => TRANSPORT_WORDS[transport] ?? transport;
@@ -98,9 +116,14 @@ const RULES: readonly Rule[] = [
   exact("Ghostly is starting…", "errors.app.starting"),
   exact("Ghostly is still starting. Try again in a moment.", "errors.app.stillStarting"),
   exact("Lost the Ghostly peer", "errors.app.lostPeer"),
+  // A part that loads on demand (a wallet's library, the identity providers) whose file did not come: offline before the
+  // worker kept it, or a deploy replaced it under an open tab. Each browser says it its own way (Chromium, WebKit, Firefox).
+  { match: /^(?:Failed to fetch dynamically imported module|error loading dynamically imported module)(?::[\s\S]*)?$|^Importing a module script failed\.?$/, key: "errors.app.partNotLoaded", next: "app.pageNotLoaded.hint", detail: true },
   // A call whose storage write the browser refused for want of space (engine/server.ts): a group made, a text sent. A
   // forward's copy that found no room (engine/forwards.ts forwardError) says Desktop's io error the same way.
   { match: /^Not enough space on this device \((?:QuotaExceededError(?:: [\s\S]*)?|No space left on device[\s\S]*)\)$/, key: "errors.app.noRoom", next: "errors.app.noRoomNext", detail: true },
+  // A write the browser threw away for want of room (packages/browser/src/shared/idb.ts `committed`).
+  exact("This device has no room left to save this", "errors.app.noRoomToSave", "errors.app.noRoomToSaveNext"),
   // A call refused in limited mode (packages/browser/src/engine/node.ts LIMITED_MODE_ERROR): the banner's own words, and what to do.
   exact("Ghostly could not check which device is active yet. This works once it can.", "devices.limited.title", "errors.app.limitedNext"),
   exact("Ghostly needs your permission to reach that local address", "errors.app.localAddress"),
@@ -112,6 +135,10 @@ const RULES: readonly Rule[] = [
   exact("Connect to an updated peer to send files", "errors.files.updatedPeerToSend"),
   exact("Connect to an updated peer first", "errors.files.updatedPeerFirst"),
   exact("That recording cannot be sent as a voice message", "errors.files.notVoice"),
+  // A picture whose metadata could not be removed, refused before it is sent (packages/core pictureMetadata.ts).
+  exact("This picture cannot be sent: Ghostly could not remove the details saved in it, like where it was taken", "errors.files.pictureMetadata", "errors.files.pictureMetadataNext"),
+  // A video whose metadata could not be removed, refused before it is sent (packages/core videoMetadata.ts).
+  exact("This video cannot be sent: Ghostly could not remove the details saved in it, like where it was recorded", "errors.files.videoMetadata", "errors.files.videoMetadataNext"),
   exact("This file cannot be retried", "errors.files.cannotRetry"),
   exact("This file is no longer here", "errors.files.gone"),
   { match: /^Not enough space on your contact's device for this file \((?<free>.+) free\)\.$/, key: "errors.files.noRoom", next: "errors.files.noRoomNext" },
@@ -126,6 +153,18 @@ const RULES: readonly Rule[] = [
   // status, the next step behind the ⓘ. The system's reason for a file not stored stays English, as the detail.
   exact("The file arrived damaged and was deleted. Ask for it again.", "errors.files.refused.damaged", "errors.files.askAgain"),
   exact("The offer expired", "errors.files.offerExpired", "errors.files.askAgain"),
+  exact("Cancelled by the sender", "chat.file.cancelled", "errors.files.askAgain"),
+  // A 1:1 file declined or cancelled, by the contact (chatFiles.ts `refusalText`) or here: the status says what, the ⓘ who.
+  exact("Declined by your contact", "chat.file.declined", "errors.files.declinedThere"),
+  exact("Cancelled by your contact", "chat.file.cancelled", "errors.files.cancelledThere"),
+  exact("You declined it", "chat.file.declined", "errors.files.declinedHere"),
+  exact("You cancelled it", "chat.file.cancelled", "errors.files.cancelledHere"),
+  // A file said on the DHT floor that ended here before it came (packages/browser engine/fileDesk.ts): why this device
+  // refused its offer, or its week ran out. Its sender still has it, and its next offer takes the bubble over.
+  exact("No room on this device for this file", "errors.files.noRoomHere", "errors.files.floor.noRoomNext"),
+  exact("Too many files are waiting here", "errors.files.floor.tooMany", "errors.files.floor.tooManyNext"),
+  exact("It was refused here", "errors.files.floor.refused", "errors.files.askAgain"),
+  exact("It did not come within a week", "errors.files.floor.notInAWeek", "errors.files.askAgain"),
   // A group's file every holder served damaged (packages/browser groupFiles.ts DAMAGED): the group is asked, not a contact.
   exact("Every copy of this file arrived damaged and was deleted. Ask for it again later.", "errors.files.refused.damaged", "errors.files.askGroupAgain"),
   { match: /^Could not store the file: (?:This device has no space left for the file|QuotaExceededError[\s\S]*|[\s\S]*No space left on device[\s\S]*)$/, key: "errors.files.noRoomHere", next: "errors.files.noRoomHereNext", detail: true },
@@ -140,6 +179,9 @@ const RULES: readonly Rule[] = [
   exact("The clipboard's picture is damaged", "errors.files.pasteDamaged", "errors.files.pasteDamagedNext"),
   exact("Clipboard unavailable", "errors.files.clipboardUnavailable", "errors.files.clipboardUnavailableNext"),
   exact("That paste is gone. Paste it again.", "errors.files.pasteGone", "errors.files.pasteGoneNext"),
+  // Another app's drop the platform held (Linux Desktop), refused as a paste would be (lib/pastedFiles.ts).
+  exact("That is too large to drop. Send it with + → Document.", "errors.files.dropTooLarge"),
+  exact("That drop is gone. Drop it again.", "errors.files.dropGone", "errors.files.dropGoneNext"),
   { match: /^Could not read the pasted file: [\s\S]+$/, key: "errors.files.pasteFileUnreadable", next: "errors.files.pasteFileUnreadableNext", detail: true },
   // A file being sent whose copy could not be read (packages/core chatFiles.ts): picked with + or dropped, not pasted.
   { match: /^Could not read the file: [\s\S]+$/, key: "errors.files.unreadable", next: "errors.files.unreadableNext", detail: true },
@@ -171,6 +213,8 @@ const RULES: readonly Rule[] = [
   exact("Transport change cancelled", "errors.transport.switchCancelled"),
   { ...exact("Transport preferences do not overlap. Enable fallback or choose the same supported transport on both sides.", "errors.transport.noOverlap", "errors.transport.noOverlapNext"), detail: true },
   { match: /^Peer native address unavailable(?:; reconnect WebRTC once to exchange endpoints)?$/, key: "errors.transport.noAddress", next: "errors.transport.noAddressNext", detail: true },
+  // No WebRTC between the two apps: the contact's app says it once it uses the chat; no WebRTC session can ask for it.
+  { match: /^Peer native address unavailable; the contact's app has not given it yet$/, key: "errors.transport.noAddress", next: "errors.transport.noAddressWait", detail: true },
   // A native dial that failed (native/transports/hyperdht/endpoint.mjs, apps/desktop paired_transport.rs).
   { match: /^Native connection limit reached$/, key: "errors.transport.slotsFull", next: "errors.transport.slotsFullNext", detail: true },
   { match: /^HyperDHT handshake timed out$/, key: "errors.transport.handshakeTimedOut", detail: true },
@@ -208,11 +252,12 @@ const RULES: readonly Rule[] = [
   exact("Your contact's app cannot show a screen in this call", "calls.share.contactCannot"),
   exact("Screen sharing is not available on Linux yet", "calls.share.notOnLinux"),
   exact("All native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.", "errors.transport.slotsFull", "errors.transport.slotsFullNext"),
-  // Its listener, which did not start or stopped (packages/browser/src/platform: hyperdhtRelay.ts, irohWeb.ts).
-  exact("Could not reach the HyperDHT relay", "errors.transport.hyperdhtUnreachable"),
-  exact("The HyperDHT relay did not answer", "errors.transport.hyperdhtSilent"),
-  exact("The HyperDHT relay closed the connection", "errors.transport.hyperdhtClosed"),
-  exact("The HyperDHT relay did not let this chat listen", "errors.transport.hyperdhtRefused"),
+  // Its listener, which did not start or stopped (packages/browser/src/platform: hyperdhtRelay.ts, irohWeb.ts). A
+  // browser sees no status on a refused WebSocket, so a relay that leaves this app's origin out reads "unreachable" too.
+  exact("Could not reach the HyperDHT relay", "errors.transport.hyperdhtUnreachable", "errors.transport.hyperdhtUnreachableNext"),
+  exact("The HyperDHT relay did not answer", "errors.transport.hyperdhtSilent", "errors.transport.hyperdhtCheckNext"),
+  exact("The HyperDHT relay closed the connection", "errors.transport.hyperdhtClosed", "errors.transport.hyperdhtCheckNext"),
+  exact("The HyperDHT relay did not let this chat listen", "errors.transport.hyperdhtRefused", "errors.transport.hyperdhtRefusedNext"),
   exact("Iroh endpoint is stopped", "errors.transport.irohStopped"),
   // "The codes match" refused: the connection changed or closed after the code was shown (packages/core pairedSession.ts,
   // ghostlink.ts `confirmPair`).
@@ -224,6 +269,9 @@ const RULES: readonly Rule[] = [
   exact("Message too long once encoded. Shorten it or send it as a file.", "errors.chat.tooLong", "errors.chat.tooLongNext"),
   { match: /^This message was edited (?<max>\d+) times, the most one takes\.$/, key: "errors.chat.editTooMany", next: "errors.chat.editTooManyNext" },
   { match: /^That message (?:is not in this chat, or )?cannot be replied to$/, key: "errors.chat.replyGone", next: "errors.chat.replyGoneNext" },
+  // A forward of a message deleted meanwhile, or of none (engine/node.ts forwardMessages).
+  exact("That message is not in this chat", "errors.chat.messageGone", "errors.chat.messageGoneNext"),
+  exact("No message to forward", "errors.chat.forwardNone", "errors.chat.forwardNoneNext"),
   // A chat made or joined that the storage had no room for (lib/storage.ts ensureSession).
   exact("There is no room left on this device for a new chat", "errors.chat.noRoom", "errors.chat.noRoomNext"),
   exact("Someone else joined with this invite first. Ask your contact for a new one.", "pairing.reason.taken"),
@@ -245,6 +293,8 @@ const RULES: readonly Rule[] = [
   exact("That is not a valid ecash token", "errors.cashu.badToken"),
   exact("Add a mint in Settings first", "errors.cashu.addMint"),
   exact("Not enough sats in your wallet", "errors.cashu.notEnough"),
+  { match: /^Not enough sats in your wallet: (?<amount>\d[\d.,\s']*?) sats leave room for the fee$/, key: "errors.cashu.notEnoughForFee", params: ({ amount }, t) => ({ amount: sats(amount, t) }) },
+  exact("None of your mints can pay an invoice with no amount", "errors.cashu.mintsNoAnyAmount", "errors.cashu.mintsNoAnyAmountNext"),
   exact("This invoice is already being paid", "errors.cashu.alreadyPaying"),
   exact("A Lightning payment from this wallet is still in flight: wait for it to settle, then remove the wallet.", "errors.cashu.inFlight", "errors.cashu.inFlightNext"),
   // A failed payment and what came back: "<why> The sats are back in your wallet[, less N sats the mint kept as its fee]."
@@ -417,7 +467,7 @@ const RULES: readonly Rule[] = [
   exact("You are the admin and nobody else in the group is online to take over. Try again when a member is, or make someone the admin first.", "errors.group.adminAlone", "errors.group.adminAloneNext"),
   exact("Nobody in the group is connected right now to take your leave. Try again in a moment.", "errors.group.nobodyForLeave", "errors.group.nobodyForLeaveNext"),
   exact("Only the admin can share a link to the group", "errors.group.adminShares"),
-  exact("This is not a link to a group", "errors.group.notALink"),
+  exact("This is not a link to a group", "errors.group.notALink", "errors.group.notALinkNext"),
   exact("You are already joining this group", "errors.group.alreadyJoining"),
   exact("This group is joined with its current link", "errors.group.currentLink"),
   // A group's link the engine refuses for a group already here (engine/groups.ts joinGroupByLink).
@@ -427,8 +477,11 @@ const RULES: readonly Rule[] = [
   // A group's link pasted or opened while Ghostly is set offline (engine/node.ts joinGroupByLink).
   exact("Go online to join a group", "errors.group.offline", "errors.group.offlineNext"),
   exact("Only the admin can change the members of this group", "errors.group.adminMembers"),
+  exact("Only the admin can renew the group's secret", "errors.group.adminRotate"),
+  exact("Only the admin can hand the admin role over", "errors.group.adminHandOver"),
   exact("Only the admin can do that", "errors.group.adminOnly"),
   exact("Make someone else the admin before leaving", "errors.group.adminFirst"),
+  exact("This member has left the group. Make someone else the admin.", "errors.group.heirLeft", "errors.group.heirLeftNext"),
   exact("Only the admin can change the group's picture", "errors.group.adminPicture"),
   exact("Only the admin can rename the group", "errors.group.adminRename"),
   exact("Only the admin can choose the group's hubs", "errors.group.adminHubs"),
@@ -436,7 +489,7 @@ const RULES: readonly Rule[] = [
   exact("This group has reached its membership history limit. Create a new group.", "errors.group.chainFull", "errors.group.chainFullNext"),
   exact("This group runs through hubs, which their app does not take part in: they need an updated Ghostly first.", "errors.group.hubsNeedUpdate", "errors.group.hubsNeedUpdateNext"),
   { match: /^Their app takes groups of (?<max>\d+) at most: they need an updated Ghostly first\.$/, key: "errors.group.legacyApp", next: "errors.group.legacyAppNext" },
-  { match: /^A group grows past (?<max>\d+) only when everyone is on an updated Ghostly\. Not seen updated yet: (?<names>[\s\S]+)\.$/, key: "errors.group.growNeedsUpdates", next: "errors.group.growNeedsUpdatesNext" },
+  { match: /^A group grows past (?<max>\d+) only when everyone is on an updated Ghostly\. Not seen updated yet: (?<names>[\s\S]+)\.$/, key: "errors.group.growNeedsUpdates", next: "errors.group.growNeedsUpdatesNext", params: ({ max, names }, t) => ({ max, names: behindNames(names, t) }) },
   exact("Share the group's link with them: anyone who opens it joins", "errors.group.shareLinkInstead"),
   { match: /^At most (?<max>\d+) members can be pinned as hubs$/, key: "errors.group.hubsPinned" },
   exact("A community group chooses its hubs by itself", "errors.group.communityHubs"),
@@ -463,7 +516,11 @@ const RULES: readonly Rule[] = [
   exact("Your contact's app refused this item: it could not be verified as yours, or was too large for it. Retry to hold it again.", "errors.hold.contactRefused", "errors.hold.contactRefusedNext"),
   { match: /^Could not read the contact's pointer: [\s\S]+$/, key: "errors.hold.readFailed", next: "errors.hold.retryingNext", detail: true },
   exact("The contact holds items for you, but their address expired. They are handed out again when the contact is next online.", "errors.hold.addressExpired", "errors.hold.addressExpiredNext"),
+  exact("Hide my IP from contacts is on: what your contact held for you waits on their storage until you turn it off.", "errors.hold.hiddenIp", "errors.hold.hiddenIpNext"),
   { match: /^Refused what the contact's storage offered: [\s\S]+$/, key: "errors.hold.refusedOffer", detail: true },
+  // Sealed in the ratchet session the device this profile was on before shares with the contact (WISP 4xx § Held items): it
+  // waits for the contact's app to seal it again, not for anything this device retries. Before the general pick-up rule.
+  exact("Could not pick up held items: the contact's app sealed them for the device this profile was on before. They come once it seals them again for this one.", "errors.hold.sealedBefore", "errors.hold.sealedBeforeNext"),
   { match: /^Could not pick up held items: [\s\S]+$/, key: "errors.hold.pickUpFailed", next: "errors.hold.retryingNext", detail: true },
   { match: /^Refused a held item from the contact: [\s\S]+$/, key: "errors.hold.refusedItem", detail: true },
   { match: /^Picked up, but could not acknowledge: [\s\S]+$/, key: "errors.hold.ackFailed", detail: true },
@@ -534,12 +591,68 @@ const RULES: readonly Rule[] = [
   { match: /^https:\/\/\S+ was not found$/, key: "errors.proof.fileNotFound", detail: true },
   { match: /^https:\/\/\S+ was not found: it was deleted, or not uploaded yet$/, key: "errors.proof.fileNotFound", next: "errors.proof.fileNotFoundNext", detail: true },
   { match: /^https:\/\/\S+ names no Ghostly proof$/, key: "errors.proof.fileNoProof", detail: true },
+  // A domain proof's record or file that names something else, and the resolver or host that could not be asked
+  // (packages/browser/src/proofs/domain.ts). A resolver line is thrown only once none answered, and a lookup that ran
+  // out of time names the last one tried: the line says that none answered, its name goes behind the ⓘ.
+  { match: /^The TXT record at \S+ is for another proof of this key$/, key: "errors.proof.dnsOtherProof", next: "errors.proof.dnsValueNext", detail: true },
+  { match: /^The TXT record at \S+ names another Ghostly key: this proof was replaced or removed$/, key: "errors.proof.dnsOtherKey", next: "errors.proof.dnsValueNext", detail: true },
+  { match: /^https:\/\/\S+ is for another proof of this key$/, key: "errors.proof.fileOtherProof", next: "errors.proof.fileValueNext", detail: true },
+  { match: /^https:\/\/\S+ names another Ghostly key: this proof was replaced or removed$/, key: "errors.proof.fileOtherKey", next: "errors.proof.fileValueNext", detail: true },
+  { match: /^https:\/\/\S+ is not a valid (?<kind>Ghostly|NIP-05) file$/, key: "errors.proof.fileInvalid", next: "errors.proof.fileInvalidNext", detail: true },
+  { match: /^(?<domain>\S+) could not be reached\. The file must be served at exactly this address, without a redirect, with the header Access-Control-Allow-Origin: \*$/, key: "errors.proof.hostUnreachable", next: "errors.proof.hostUnreachableNext", detail: true },
+  { match: /^(?:Quad9|Cloudflare|Google) could not be reached$/, key: "errors.proof.resolverUnreachable", next: "errors.proof.resolverNext", detail: true },
+  { match: /^(?:Quad9|Cloudflare|Google) refused the lookup$/, key: "errors.proof.resolverRefused", next: "errors.proof.resolverNext", detail: true },
+  { match: /^(?<domain>\S+) has no address$/, key: "errors.proof.noAddress", next: "errors.proof.noAddressNext", detail: true },
+  { match: /^(?<domain>\S+) points to a private network address, so it was not contacted$/, key: "errors.proof.privateAddress", next: "errors.proof.privateAddressNext", detail: true },
   { match: /^[^:]+: (?<login>\S+) does not list the key that signed \([^)]*\)$/, key: "errors.proof.keyNotListed", detail: true },
+  // What the Add dialog's field refuses before anything is signed (a domain, a Bitcoin address and signature, a DID:
+  // packages/core domainProofs.ts, bip322.ts, did.ts and proofs/providers/bitcoin.ts). The names they quote stay as values.
+  exact("Enter a domain name, like example.com", "errors.proof.domainEnter"),
+  exact("Enter only the domain name, without a path or port", "errors.proof.domainOnly"),
+  exact("That is not a valid domain name", "errors.proof.domainInvalid"),
+  exact("That domain name is too long", "errors.proof.domainTooLong"),
+  exact("Use a full domain name, like example.com", "errors.proof.domainFull"),
+  exact("Use a domain name, not an IP address", "errors.proof.domainNotIp"),
+  exact("That name only works on private networks", "errors.proof.domainPrivate"),
+  exact("Enter a Bitcoin address", "errors.proof.btcEnterAddress"),
+  { match: /^Ghostly can check proofs for single-key addresses only \(.+\), not multisig or script addresses$/, key: "errors.proof.btcSingleKey" },
+  exact("Paste the signature your wallet made", "errors.proof.btcPaste"),
+  exact("That is not a Bitcoin message signature: paste the whole signature, as the wallet shows it", "errors.proof.btcNotSignature", "errors.proof.btcNotSignatureNext"),
+  exact("That is not a Bitcoin message signature", "errors.proof.btcNotSignature"),
+  exact("The signature is not valid base64", "errors.proof.btcBase64"),
+  exact("Enter a DID, like did:key:z6Mk… or did:web:example.com", "errors.proof.didEnter"),
+  { match: /^That DID is too long \(at most (?<max>\d+) characters\)$/, key: "errors.proof.didTooLong" },
+  exact("Enter the DID alone, without a #fragment, ?query or /path", "errors.proof.didAlone"),
+  exact("That is not a DID: it looks like did:<method>:<identifier>", "errors.proof.didNotDid"),
+  { match: /^Write the method in lowercase: (?<example>did:[a-z0-9]+:…)$/, key: "errors.proof.didLowercase" },
+  { match: /^did:(?<method>\S+) is not supported yet\. Ghostly checks (?<list>[^.]+)\.$/, key: "errors.proof.didUnsupported" },
+  exact("A DID has no spaces or other special characters", "errors.proof.didSpecial"),
+  exact("A did:dht identifier is 52 z-base-32 characters", "errors.proof.didDhtLength"),
+  exact("That did:key is not an Ed25519, secp256k1 or P-256 key Ghostly can read", "errors.proof.didKeyUnknown"),
+  exact("That did:key is an X25519 encryption key: it cannot sign", "errors.proof.didKeyX25519"),
+  exact("That did:jwk does not hold a JSON Web Key", "errors.proof.didJwkNone"),
+  exact("That did:jwk contains a private key. Never share it: make a new key", "errors.proof.didJwkPrivate", "errors.proof.didJwkPrivateNext"),
+  exact("That did:jwk is not an Ed25519, secp256k1 or P-256 key", "errors.proof.didJwkUnknown"),
   { match: /^Enter at least one relay address \((?:https|wss):\/\/…\)$/, key: "errors.relays.atLeastOne" },
-  // An Iroh, push or Nostr relay refused (packages/browser/src/platform/irohWeb.ts, shared/pushRelay.ts, nostr/relay.ts):
-  // the address typed stays in the line, which has no ⓘ.
+  // "Hide my IP from contacts" without the TURN server it needs (packages/browser/src/engine/node.ts, updateSettings).
+  { match: /^Add a TURN server first$/, key: "errors.relayOnly.needsTurn", next: "errors.relayOnly.needsTurnNext" },
+  { match: /^Hide my IP from contacts needs a TURN server\. Turn it off first$/, key: "errors.relayOnly.keepsTurn", next: "errors.relayOnly.keepsTurnNext" },
+  // An Iroh, push, Pkarr or Nostr relay refused (packages/browser/src/platform/irohWeb.ts, shared/pushRelay.ts,
+  // packages/core/src/relay.ts, nostr/relay.ts): the address typed stays in the line, which has no ⓘ. A Pkarr relay
+  // list's line may hold spaces ("relay .example.org").
   { match: /^Use an https:\/\/ relay address: (?<address>\S+)$/, key: "errors.relays.useHttps" },
-  { match: /^Not a relay address: (?<address>\S+)$/, key: "errors.relays.notAddress" },
+  { match: /^Not a relay address: (?<address>.+)$/, key: "errors.relays.notAddress" },
+  // The rest of what Settings, Network refuses before or on Save (packages/browser/src/shared: hyperdhtRelay.ts,
+  // pushRelay.ts, ice.ts; engine/node.ts updateSettings). The field it is about is marked there, so no line names it.
+  { match: /^Enter a relay address \((?<example>(?:https|wss):\/\/)…\)$/, key: "errors.relays.enterAddress" },
+  exact("Use a wss:// relay address", "errors.relays.useWss"),
+  exact("Leave the user and password out of the address", "errors.relays.noLogin"),
+  exact("Use at most five Iroh relays", "errors.relays.irohAtMost"),
+  exact("Enter the TURN server address", "errors.turn.enterAddress"),
+  { match: /^“(?<address>\S+)” is not a TURN or STUN address \(turn:host:port\)$/, key: "errors.turn.notAddress" },
+  exact("A TURN server needs its username and credential", "errors.turn.needsLogin"),
+  // A read that no Nostr relay answered: offline, or the relays blocked (engine/nostrSocial.ts, profiles/activity.ts, readers.ts).
+  exact("No relay answered", "errors.relays.noneAnswered", "errors.relays.noneAnsweredNext"),
   exact("Choose a picture", "errors.picture.choose"),
   exact("That picture is too large (max 20 MB)", "errors.picture.tooLarge"),
   exact("This picture cannot be read here. Try a JPEG or PNG.", "errors.picture.unreadableTryJpeg"),
@@ -585,6 +698,8 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   parkedSigned: "errors.engine.parkedSigned",
   ecashAlreadySpent: "errors.engine.ecashAlreadySpent",
   ecashBeingReceived: "errors.engine.ecashBeingReceived",
+  ecashFeeTakesAll: "errors.engine.ecashFeeTakesAll",
+  lightningRefused: "errors.engine.lightningRefused",
   ecashOtherUnit: "errors.engine.ecashOtherUnit",
   reviewedEcashSpent: "errors.engine.reviewedEcashSpent",
   lnurlExactly: "errors.engine.lnurlExactly",
@@ -603,6 +718,9 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   walletAway: "errors.engine.walletAway",
   walletAwayUnnamed: "errors.engine.walletAwayUnnamed",
   groupTurnUnconfirmed: "errors.engine.groupTurnUnconfirmed",
+  // As the chat's payment line says them (Chat.tsx).
+  contactNoWallet: "chat.payments.noWallet",
+  contactNoPayments: "chat.payments.offOrOld",
 };
 /** The next line of an engine error that has one: what to do, or what is safe. */
 const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {
@@ -611,6 +729,7 @@ const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {
   fedimintTestOnMainnet: "errors.engine.fedimintTestOnMainnetNext",
   groupTurnUnconfirmed: "errors.engine.groupTurnUnconfirmedNext",
   lastMint: "errors.engine.lastMintNext",
+  lightningRefused: "errors.engine.lightningRefusedNext",
   lnurlUnreachable: "errors.engine.lnurlUnreachableNext",
   parkedSigned: "errors.engine.parkedSignedNext",
   requestNotAwaiting: "errors.engine.requestNotAwaitingNext",
@@ -619,6 +738,8 @@ const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {
   sentAfterReview: "errors.engine.sentAfterReviewNext",
   testMintOnMainnet: "errors.engine.testMintOnMainnetNext",
 };
+/** The engine errors whose English goes behind the ⓘ too: a server's own reason in it is not said in the line. */
+const ENGINE_DETAIL: ReadonlySet<EngineErrorCode> = new Set(["lightningRefused"]);
 /** The values that are amounts: written again the app's way (the engine wrote them its own way). */
 const AMOUNTS = new Set(["amount", "fee", "min", "max"]);
 
@@ -699,7 +820,7 @@ export function knownErrorParts(cause: unknown, t: Translate = english): ErrorPa
     const amount = (value: string) => { const digits = value.replace(/\D/g, ""); return digits ? formatAmount(Number(digits), t.language ?? "en") : value; };
     const values = Object.fromEntries(Object.entries(known.values).map(([name, value]) => [name, AMOUNTS.has(name) ? amount(value) : value]));
     const next = ENGINE_NEXT[known.code];
-    return { title: t(key, values), ...(next && { next: t(next, values) }) };
+    return { title: t(key, values), ...(next && { next: t(next, values) }), ...(ENGINE_DETAIL.has(known.code) && { detail: raw }) };
   }
   return null;
 }

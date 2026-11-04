@@ -215,6 +215,69 @@ describe("hands-free (locked) recording", () => {
     expect(onSendFile).toHaveBeenCalledOnce();
   });
 
+  it("leaves Enter on the bar's own buttons to them: the bin, Pause and Play send nothing", async () => {
+    // Enter on the bin sent the recording the person was throwing away.
+    await locked();
+    await wait(2_000);
+    for (const id of ["voice-delete", "voice-pause"]) {
+      const button = screen.getByTestId(id);
+      button.focus();
+      // Not taken: the browser presses the focused button, as it does for Space.
+      expect(fireEvent.keyDown(button, { key: "Enter" })).toBe(true);
+    }
+    fireEvent.click(screen.getByTestId("voice-pause"));
+    const play = screen.getByTestId("voice-preview");
+    play.focus();
+    expect(fireEvent.keyDown(play, { key: "Enter" })).toBe(true);
+    await wait(0);
+    expect(onSendFile).not.toHaveBeenCalled();
+    expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-phase", "paused");
+
+    // Elsewhere it still sends.
+    fireEvent.keyDown(document.body, { key: "Enter" });
+    await wait(0);
+    expect(onSendFile).toHaveBeenCalledOnce();
+  });
+
+  it("still sends with Enter on the button a click left the focus on (Resume)", async () => {
+    await locked();
+    await wait(2_000);
+    const pause = screen.getByTestId("voice-pause");
+    fireEvent.click(pause);
+    // Resume, with the mouse: the press gives it the focus.
+    fireEvent.pointerDown(pause, mouse);
+    pause.focus();
+    fireEvent.click(pause);
+    expect(fireEvent.keyDown(pause, { key: "Enter" })).toBe(false);
+    await wait(0);
+    expect(onSendFile).toHaveBeenCalledOnce();
+  });
+
+  it("leaves Enter to Resume reached with Tab after a click that gave it no focus (Safari, WKWebView, iOS)", async () => {
+    // Where a click does not focus a button, no blur ever cleared "pressed by a pointer", and Enter sent.
+    await locked();
+    await wait(2_000);
+    const pause = screen.getByTestId("voice-pause");
+    fireEvent.pointerDown(pause, mouse);
+    fireEvent.pointerUp(pause, mouse);
+    fireEvent.click(pause);
+    expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-phase", "paused");
+    // Shift+Tab to Resume, then Enter: the browser presses the focused button.
+    pause.focus();
+    expect(fireEvent.keyDown(pause, { key: "Enter" })).toBe(true);
+    await wait(0);
+    expect(onSendFile).not.toHaveBeenCalled();
+
+    // The bin, after a click that gave it no focus either, does not send.
+    const bin = screen.getByTestId("voice-delete");
+    fireEvent.pointerDown(bin, mouse);
+    fireEvent.pointerUp(bin, mouse);
+    bin.focus();
+    expect(fireEvent.keyDown(bin, { key: "Enter" })).toBe(true);
+    await wait(0);
+    expect(onSendFile).not.toHaveBeenCalled();
+  });
+
   it("deletes with Esc or the bin, and gives the microphone back", async () => {
     await locked();
     await wait(1_000);
@@ -313,6 +376,32 @@ describe("hands-free (locked) recording", () => {
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
     expect(audio.players.every((player) => player.paused)).toBe(true);
     expect(revoked).toHaveBeenCalledWith(created.mock.results[created.mock.results.length - 1]!.value);
+  });
+
+  it("moves the preview's waveform with the sound a few times a second rather than every frame", async () => {
+    await locked();
+    await wait(4_000);
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    fireEvent.click(screen.getByTestId("voice-preview"));
+    await wait(0);
+    const player = audio.players[0]!;
+    const wave = screen.getByTestId("voice-preview-wave");
+    const writes = vi.spyOn(wave.style, "setProperty");
+    for (let ms = 0; ms < 2_000; ms += 16) {
+      player.currentTime = ms / 1000;
+      await wait(16);
+    }
+    const progress = writes.mock.calls.filter(([name]) => name === "--voice-progress");
+    // Each write is a style recalc of the page: 60 a second was about 90 ms of main thread per second.
+    expect(progress.length).toBeLessThanOrEqual(10);
+    expect(progress.length).toBeGreaterThanOrEqual(6);
+    expect(Number(wave.style.getPropertyValue("--voice-progress"))).toBeCloseTo(0.5, 1);
+
+    // Paused, it stops following.
+    fireEvent.click(screen.getByRole("button", { name: "Pause playback" }));
+    writes.mockClear();
+    await wait(2_000);
+    expect(writes.mock.calls.filter(([name]) => name === "--voice-progress")).toHaveLength(0);
   });
 
   it("does not start the preview once Send was pressed while it was getting ready", async () => {
@@ -566,6 +655,45 @@ describe("Esc", () => {
     expect(screen.queryByTestId("voice-bar")).not.toBeInTheDocument();
     expect(media.released()).toBe(true);
     expect(onSendFile).not.toHaveBeenCalled();
+  });
+
+  it("gives the focus to the mic when the bar closes under it, not to the page", async () => {
+    // The bin, Esc from Pause and the question's Discard each removed the focused button: the focus fell to <body>.
+    await lockedFor(1_000);
+    screen.getByTestId("voice-delete").focus();
+    fireEvent.click(screen.getByTestId("voice-delete"));
+    expect(screen.queryByTestId("voice-bar")).not.toBeInTheDocument();
+    expect(mic()).toHaveFocus();
+
+    fireEvent.click(mic());
+    await wait(1_000);
+    screen.getByTestId("voice-pause").focus();
+    fireEvent.keyDown(screen.getByTestId("voice-pause"), { key: "Escape" });
+    expect(screen.queryByTestId("voice-bar")).not.toBeInTheDocument();
+    expect(mic()).toHaveFocus();
+
+    fireEvent.click(mic());
+    await wait(4_000);
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    screen.getByTestId("voice-confirm-discard").focus();
+    fireEvent.click(screen.getByTestId("voice-confirm-discard"));
+    expect(screen.queryByTestId("voice-bar")).not.toBeInTheDocument();
+    expect(mic()).toHaveFocus();
+    expect(onSendFile).not.toHaveBeenCalled();
+  });
+
+  it("gives the focus to the send button when Enter sends from Resume, which turns disabled", async () => {
+    await lockedFor(2_000);
+    const pause = screen.getByTestId("voice-pause");
+    fireEvent.click(pause);
+    fireEvent.pointerDown(pause, mouse);
+    pause.focus();
+    fireEvent.click(pause);
+    fireEvent.keyDown(pause, { key: "Enter" });
+    expect(screen.getByTestId("voice-send")).toHaveFocus();
+    await wait(0);
+    expect(onSendFile).toHaveBeenCalledOnce();
+    expect(mic()).toHaveFocus();
   });
 
   it("stays paused after Keep when it was paused before", async () => {

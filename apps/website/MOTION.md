@@ -125,7 +125,11 @@ The opening is one timeline (`HERO` in `lib/motion.ts`, mirrored by the CSS in
    first character.
 5. 3.6: the "Follow Boo" arrow nudges twice and rests.
 
-Idle: Boo bobs 8 px with a 1.5% breath over 4.2 s and blinks every 5.3 s; the
+Idle: Boo bobs 8 px with a 1.5% breath over 4.2 s three times and blinks
+twice, then rests (so do every stage's actors, a talking mouth after eight
+beats, a waiting caret after four blinks, and the network's twinkles after
+three: looped, these CSS animations on SVG shapes laid the page out at every
+frame for as long as a stage was on screen); the
 network field behind the act drifts 12 px over 28 s and parallaxes with the
 scroll on its own composited layer; the grid holds still. Leaving: the copy
 fades and lifts 48 px over p 0.2 to 0.7 of the hero.
@@ -145,8 +149,13 @@ watches:
   each finished frame and stops at the last one.
 - The picture follows one number, `--t` (seconds along all the steps, in
   `protocolTimeline.ts`); every shape reads it through the `sx-` rules in
-  `app/dev-steps.css`, and moves on `move` (packets travel a route at an even
-  speed, and a route draws behind its packet). Two labels that share a place
+  `app/dev-steps.css`. While a step plays, the clock writes `--t` only on the
+  shapes whose picture changes between two frames (each rule changes over a
+  short stretch of its own times, listed in `stepClock.ts`), and on the whole
+  explainer once it stops: written there at every frame, `--t` restyled all of
+  its 900 elements a frame (21 fps on a 4x slower CPU). Shapes move on `move`
+  (packets travel a route at an even speed, and a route draws behind its
+  packet). Two labels that share a place
   swap: the next arrives after the last has started to leave, never on top.
   The connecting line's dashes march on `--t` too, so they stop with the
   step; the ghosts float three times and blink twice, then rest.
@@ -185,9 +194,10 @@ the look:
   story's ghosts, the boo transition, the footer's `GhostPet` and the
   404 draw it. Rounded, cloth-like folds are gone. The hem stirs, it does not
   ripple: over 3.2 s the notches move sideways and the points up or down by
-  about a unit (the corners and sides stay put), three times when the ghost
-  appears, then it rests on `GHOST_PATH` (a hem morphed for good lays the
-  page out at every frame). It waits off screen (`IdleLoops`), and reduced
+  about a unit (the corners and sides stay put), once when the ghost appears,
+  then it rests on `GHOST_PATH` (a hem morphed for good lays the page out at
+  every frame, and three stirs took a quarter of a phone's main thread for a
+  visit's first 10 s). It waits off screen (`IdleLoops`), and reduced
   motion shows `GHOST_PATH` itself. The eyes take
   the app's ink (`PAIR.eye`) and its blink: every 5 s, shut at 97%.
 - **Colour and line.** `PAIR` in `lib/motion.ts` (`--pair-*` in site.css)

@@ -58,7 +58,9 @@ export function createIdentity(): Identity {
 export function publicKeyFromZ32(z32: string): Uint8Array {
   if (z32.length !== 52) throw new Error("Invalid public key: expected 52 z-base-32 characters");
   const bytes = fromZ32(z32);
-  if (bytes.length !== 32) throw new Error("Invalid public key length");
+  // One key, one spelling: a 52-character string whose four padding bits are not zero decodes to the same 32 bytes
+  // as the canonical one but is not it, and keys are compared as strings (WISP 02).
+  if (toZ32(bytes) !== z32) throw new Error("Invalid public key: not canonical z-base-32");
   return bytes;
 }
 
@@ -66,9 +68,13 @@ export function sign(message: Uint8Array, seed: Uint8Array): Uint8Array {
   return ed25519.sign(message, seed);
 }
 
+/**
+ * Ed25519 verification as RFC 8032 writes it (`zip215: false`): canonical encodings only, and no key of small order,
+ * which no secret key goes with and which "verifies" a constant signature of any message.
+ */
 export function verify(signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array): boolean {
   try {
-    return ed25519.verify(signature, message, publicKey);
+    return ed25519.verify(signature, message, publicKey, { zip215: false });
   } catch {
     return false;
   }

@@ -8,7 +8,10 @@
    turns --t into opacity, a translation or a stroke offset, from the shape's
    own --a (start), --b (end), --d (fade-in or duration) and --f (fade-out).
    Those are registered as non-inheriting numbers, so a shape never picks up
-   its parent's times. */
+   its parent's times. While a step plays the clock writes --t only on the
+   shapes whose rule changes at that moment: a rule here that reads --t, or a
+   change to the stretch over which one changes, goes in SPANS in
+   components/dev/stepClock.ts too. */
 
 @property --t {
   syntax: "<number>";

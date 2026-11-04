@@ -201,6 +201,17 @@ describe("a video in the chat", () => {
     await waitFor(() => expect(saveFile).toHaveBeenCalledWith(file.id, "clip.webm"));
   });
 
+  it("a .mov is tried where an MP4 plays (Chromium says no to QuickTime, yet plays an H.264 one); with no MP4 either, Download", () => {
+    canPlay = (type) => (type === "video/quicktime" ? "" : "maybe");
+    const view = show(video({ name: "IMG_0001.MOV", mime: "video/quicktime" }));
+    expect(screen.getByTestId("video-play")).toBeInTheDocument();
+    expect(screen.queryByTestId("video-problem")).toBeNull();
+    view.unmount();
+    canPlay = () => "";
+    show(video({ name: "IMG_0001.MOV", mime: "video/quicktime" }));
+    expect(screen.getByTestId("video-problem")).toHaveTextContent("This device can't play this video (MOV). Download it to watch.");
+  });
+
   it("a Download the system refuses (Desktop) says so in the language, not in the system's English", async () => {
     canPlay = (type) => (type === "video/webm" ? "" : "maybe");
     vi.spyOn(servicesPlatform!, "saveFile").mockRejectedValue(new Error("Permission denied (os error 13)"));
@@ -226,6 +237,30 @@ describe("a video in the chat", () => {
     expect(screen.queryByTestId("video-player")).toBeNull();
     expect(screen.getByTestId("video-problem")).toHaveTextContent("This device can't play this video (MP4). Download it to watch.");
     expect(screen.getByTestId("video-download")).toBeInTheDocument();
+  });
+
+  it("a picture the player cannot decode (HEVC in Chromium: sound over black, no error) says so and offers Download", async () => {
+    show(video({ name: "IMG_0042.mov", mime: "video/quicktime" }));
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    const player = screen.getByTestId("video-player") as HTMLVideoElement;
+    // Chromium loads the file and plays its sound: the picture is 0 × 0 and no frame is ever drawn.
+    Object.defineProperty(player, "videoWidth", { configurable: true, value: 0 });
+    fireEvent.loadedData(player);
+    expect(screen.queryByTestId("video-player")).toBeNull();
+    expect(screen.getByTestId("video-problem")).toHaveTextContent("This device can't play this video (MOV). Download it to watch.");
+    expect(screen.getByTestId("video-download")).toBeInTheDocument();
+  });
+
+  it("a picture the player decodes goes on playing", async () => {
+    show(video());
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    const player = screen.getByTestId("video-player") as HTMLVideoElement;
+    Object.defineProperty(player, "videoWidth", { configurable: true, value: 1280 });
+    fireEvent.loadedData(player);
+    expect(screen.getByTestId("video-player")).toBe(player);
+    expect(screen.queryByTestId("video-problem")).toBeNull();
   });
 
   // covers: files.video.stream
@@ -373,6 +408,34 @@ describe("a video in the chat", () => {
     expect(fullscreenWindow.mock.calls.filter(([on]) => on)).toHaveLength(4);
   });
 
+  it("filling the window (Desktop on Linux), it goes on playing though the chat list no longer sees it", async () => {
+    let seen: ((entries: { isIntersecting: boolean }[]) => void) | null = null;
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(callback: (entries: { isIntersecting: boolean }[]) => void) { seen = callback; }
+      observe() {}
+      disconnect() {}
+    });
+    fakeEngine.fullscreenWindow = vi.fn(async () => {});
+    show(video());
+    act(() => seen!([{ isIntersecting: true }]));
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    const player = screen.getByTestId("video-player");
+    fireEvent.click(screen.getByRole("button", { name: "Full screen" }));
+    // Fixed over the window, it is out of the list's containing blocks: WebKitGTK reports it out of the list's view.
+    act(() => seen!([{ isIntersecting: false }]));
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 1600)));
+    expect(screen.getByTestId("video-player")).toBe(player);
+    expect(screen.getByTestId("video-frame")).toHaveAttribute("data-theater", "true");
+    expect(fakeEngine.fullscreenWindow).not.toHaveBeenLastCalledWith(false);
+    // Back in the chat, where the list sees it again: it plays on.
+    fireEvent.click(screen.getByRole("button", { name: "Exit full screen" }));
+    act(() => seen!([{ isIntersecting: true }]));
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 1600)));
+    expect(screen.getByTestId("video-player")).toBe(player);
+    vi.unstubAllGlobals();
+  });
+
   it("where the engine has full screen (macOS, Windows, the web), the player's own button does it", async () => {
     fakeEngine.fullscreenWindow = vi.fn(async () => {});
     Object.defineProperty(document, "fullscreenEnabled", { configurable: true, value: true });
@@ -429,6 +492,15 @@ describe("a video not here yet", () => {
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("decline"));
   });
 
+  it("Download keeps its size on one line, inside the frame", () => {
+    const file = video();
+    show(file, { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: file.size, room: 12 * 1024 * MB });
+    const accept = screen.getByTestId("video-accept");
+    // A portrait video in Japanese broke between the number and its unit.
+    expect(accept.textContent).toContain("35.0 MB");
+    expect(accept.className).toContain("max-w-[calc(100%-8px)]");
+  });
+
   it("an offer larger than the room here cannot be accepted", () => {
     const file = video();
     show(file, { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: file.size, room: 10 * MB });
@@ -447,6 +519,19 @@ describe("a video not here yet", () => {
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("pause"));
     fireEvent.click(screen.getByTestId("video-cancel"));
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("cancel"));
+  });
+
+  it("one sent from here that arrived whole, the contact checking it, has no Cancel: too late", () => {
+    const file = video({ id: "chat1-out-late" });
+    show(file, { state: "transferring", stage: "verifying", direction: "out", transferred: file.size, size: file.size });
+    expect(screen.queryByTestId("video-cancel")).toBeNull();
+  });
+
+  it("one sent from here that arrived whole, offered again, has no Pause or Cancel: paused, it could be cancelled", () => {
+    const file = video({ id: "chat1-out-again" });
+    show(file, { state: "transferring", direction: "out", transferred: file.size, size: file.size });
+    expect(screen.queryByTestId("video-pause-transfer")).toBeNull();
+    expect(screen.queryByTestId("video-cancel")).toBeNull();
   });
 
   it("once in, it plays", () => {
@@ -545,5 +630,12 @@ describe("the video's box", () => {
     expect(videoBox(100, 1000)).toEqual({ width: 140, height: 330 });
     // Nothing known: 16:9.
     expect(videoBox(undefined, undefined)).toEqual({ width: 300, height: 169 });
+  });
+
+  it("a very wide one keeps room for what is shown over it, letterboxed", () => {
+    // Download, Decline and the gap between take 63 px; a phone's bubble shrinks the box to about 230 px of its 300.
+    expect(videoBox(1600, 200)).toEqual({ width: 300, height: 96 });
+    expect(videoBox(4000, 100)).toEqual({ width: 300, height: 96 });
+    expect(videoBox(1280, 540)).toEqual({ width: 300, height: 127 });
   });
 });

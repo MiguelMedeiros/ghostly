@@ -2,6 +2,7 @@ import { identityStatement, type IdentityBinding, type IdentityStatement } from 
 import { IDENTITY_PROVIDERS } from "@ghostly/browser/proofs/registry";
 import type { IdentityProofProvider, IdentitySigner, SignerInstructions } from "@ghostly/browser/proofs/contract";
 import type { IdentityProofView } from "@ghostly/browser/shared/types";
+import { IDENTITY_DRAFT_TTL_MS, IDENTITY_MAX_DRAFTS } from "@ghostly/browser/engine/identities";
 import { chatOf, node, num, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 
@@ -14,15 +15,19 @@ import { CliError } from "./errors";
  *   `identity complete` takes what the tool printed. Between the two the draft lives in the daemon's memory.
  * - `publish` (a DNS record, a file on a domain): the same, and `complete` asks the engine to look it up.
  * - `in-app` (a Nostr signer over NIP-46, Pubky): one `identity add`, with the signer's fields; a link or code the
- *   signer waits on is reported as an `identity.approval` event and printed by the command.
+ *   signer waits on is reported as an `identity.approval` event, live only (never journaled or replayed), and printed
+ *   by the command.
  * - `redirect` (OpenID Connect), and the in-app signers that live in the page (a NIP-07 extension, an AT Protocol
  *   sign-in window), need a browser window: app only.
  */
 
 interface Draft { draftId: string; provider: string; signer: string; binding: IdentityBinding; createdAt: number }
-/** Drafts per daemon: a proof made in two steps needs the same process for both. */
+/**
+ * Drafts per daemon: a proof made in two steps needs the same process for both. Kept as long as the engine keeps them,
+ * and the oldest dropped when a fifth begins as the engine drops it, so what `identity add` promises still completes.
+ */
 const drafts = new Map<string, Draft>();
-const DRAFT_TTL_MS = 60 * 60 * 1000;
+const NO_DRAFT = `No such draft here: it is kept by the daemon that made it, for ${IDENTITY_DRAFT_TTL_MS / 60_000} minutes and while fewer than ${IDENTITY_MAX_DRAFTS} newer ones wait`;
 
 function provider(id: string): IdentityProofProvider {
   const found = IDENTITY_PROVIDERS.find((p) => p.id === id);
@@ -62,7 +67,7 @@ export function proofJson(p: IdentityProofView) {
 }
 
 function pruneDrafts(now = Date.now()) {
-  for (const [id, draft] of drafts) if (now - draft.createdAt > DRAFT_TTL_MS) drafts.delete(id);
+  for (const [id, draft] of drafts) if (now - draft.createdAt > IDENTITY_DRAFT_TTL_MS) drafts.delete(id);
 }
 
 async function begin(ctx: ApiContext, p: IdentityProofProvider, subject: string, params: Params) {
@@ -71,7 +76,7 @@ async function begin(ctx: ApiContext, p: IdentityProofProvider, subject: string,
     throw new CliError("bad_request", error instanceof Error ? error.message : String(error));
   }
   if (!normalized) throw new CliError("bad_request", `Not a ${p.subject?.label ?? "subject"} ${p.label} takes`);
-  const days = params.days === undefined ? undefined : num(params, "days", 0, { min: 1, max: p.validity.maxDays });
+  const days = params.days === undefined ? undefined : num(params, "days", 0, { min: 1, max: p.validity.maxDays, whole: true });
   return node(ctx).beginIdentityProof({ provider: p.id, subject: normalized, ...(days ? { validityDays: days } : {}) });
 }
 
@@ -99,13 +104,15 @@ export const IDENTITY_METHODS: Record<string, Method> = {
       const values = (params.fields ?? {}) as Record<string, string>;
       if (typeof values !== "object" || Array.isArray(values) || Object.values(values).some((v) => typeof v !== "string")) throw new CliError("bad_request", "fields must be an object of strings");
       for (const field of signer.fields ?? []) if (!field.optional && !values[field.name]) throw new CliError("bad_request", `${signer.label} needs ${field.name} (${field.label})`);
-      const signal = AbortSignal.timeout(num(params, "timeout", 300, { min: 5, max: 3600 }) * 1000);
+      const seconds = num(params, "timeout", 300, { min: 5, max: 3600 });
+      const signal = AbortSignal.timeout(seconds * 1000);
       const proof = await signer.run({
         values, signal,
-        onAuthUrl: (url) => { ctx.hub.emit("identity.approval", `identity.approval:${Date.now()}`, { provider: p.id, url }); },
+        // A link or code to approve with holds the request's secret (contract.ts): to the listeners live, never the journal.
+        onAuthUrl: (url) => { ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { provider: p.id, url }); },
         onProgress: (message) => { ctx.hub.emit("identity.progress", `identity.progress:${Date.now()}`, { provider: p.id, message }); },
         onApproval: (request) => {
-          if (request) ctx.hub.emit("identity.approval", `identity.approval:${Date.now()}`, { provider: p.id, ...(request.qr ? { qr: request.qr.value, label: request.qr.label } : {}), notes: request.notes ?? [] });
+          if (request) ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { provider: p.id, ...(request.qr ? { qr: request.qr.value, label: request.qr.label } : {}), notes: request.notes ?? [] });
         },
       }, async (session) => {
         const { draftId, binding } = await begin(ctx, p, await session.subject(), params);
@@ -115,27 +122,43 @@ export const IDENTITY_METHODS: Record<string, Method> = {
           try { await node(ctx).cancelIdentityProof({ draftId }); } catch { /* already gone */ }
           throw error;
         }
+      }).catch((error: unknown) => {
+        // The signer gives up with the signal's own words ("The operation was aborted due to timeout"), an engine failure to a bot.
+        if (!signal.aborted || error instanceof CliError) throw error;
+        throw new CliError("timeout", `Timed out after ${seconds} s waiting for ${signer.label} to approve the ${p.label} proof: --timeout <seconds> waits longer`);
       });
       return { done: true, proof: proofJson(proof) };
     }
     if (signer.kind === "redirect") throw new CliError("unavailable", `${signer.label} needs a browser window: make this proof in the app`);
-    const { draftId, binding } = await begin(ctx, p, str(params, "subject", true), params);
+    const subject = str(params, "subject");
+    // In the provider's words and where it goes: `identity add <provider> [subject]` shows it optional (in-app signers bring theirs).
+    if (!subject) {
+      const what = p.subject ? `, its ${p.subject.label.toLowerCase()}${p.subject.placeholder ? ` (${p.subject.placeholder})` : ""}` : "";
+      throw new CliError("bad_request", `${p.label} takes a subject${what}: ghostly identity add ${p.id} <subject>`);
+    }
+    const { draftId, binding } = await begin(ctx, p, subject, params);
     const statement = identityStatement(binding);
+    while (drafts.size >= IDENTITY_MAX_DRAFTS) drafts.delete(drafts.keys().next().value!);
     drafts.set(draftId, { draftId, provider: p.id, signer: signer.id, binding, createdAt: Date.now() });
-    return { done: false, draft: draftId, provider: p.id, signer: signer.id, statement: statement.text, instructions: instructionsJson(signer.instructions(statement)), expiresInSeconds: DRAFT_TTL_MS / 1000 };
+    return { done: false, draft: draftId, provider: p.id, signer: signer.id, statement: statement.text, instructions: instructionsJson(signer.instructions(statement)), expiresInSeconds: IDENTITY_DRAFT_TTL_MS / 1000 };
   },
 
   /** Finishes a two-step proof: what the tool printed (external-tool), or nothing (publish: the engine looks it up). */
   async "identity.complete"(ctx, params) {
+    pruneDrafts();
     const draft = drafts.get(str(params, "draft", true));
-    if (!draft) throw new CliError("not_found", "No such draft here: it is kept by the daemon that made it, for an hour");
+    if (!draft) throw new CliError("not_found", NO_DRAFT);
     const p = provider(draft.provider);
     const signer = signerOf(p, draft.signer);
     const statement: IdentityStatement = identityStatement(draft.binding);
     let evidence: unknown;
     try {
-      if (signer.kind === "external-tool") evidence = await signer.parse(str(params, "evidence", true), statement);
-      else if (signer.kind === "publish") evidence = await signer.evidence(statement);
+      if (signer.kind === "external-tool") {
+        // Said where the CLI takes it, not as the API's `evidence`; `details.needs`: the CLI reads a pipe then.
+        const output = str(params, "evidence");
+        if (!output?.trim()) throw new CliError("usage", `Missing what ${signer.label} printed: give it from a file (--evidence-file f) or on stdin (… | ghostly identity complete ${draft.draftId})`, { needs: "evidence" });
+        evidence = await signer.parse(output, statement);
+      } else if (signer.kind === "publish") evidence = await signer.evidence(statement);
       else throw new CliError("bad_request", "This draft needs no completion");
     } catch (error) {
       if (error instanceof CliError) throw error;
@@ -149,7 +172,7 @@ export const IDENTITY_METHODS: Record<string, Method> = {
   async "identity.cancel"(ctx, params) {
     const draftId = str(params, "draft", true);
     // As `identity.complete` says it: a draft that is not here was never made, is done, or is another daemon's.
-    if (!drafts.delete(draftId)) throw new CliError("not_found", "No such draft here: it is kept by the daemon that made it, for an hour");
+    if (!drafts.delete(draftId)) throw new CliError("not_found", NO_DRAFT);
     await node(ctx).cancelIdentityProof({ draftId });
     return { cancelled: draftId };
   },

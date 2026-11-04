@@ -86,7 +86,8 @@ function hostRank(parts: string[], reflexiveBases: ReadonlySet<string>): number 
   return (costly ? 2 : 0) + (wayOut ? 0 : 1);
 }
 
-export function extractRtcParams(sdp: string): Pick<RtcSignal, "u" | "p" | "f" | "s" | "c"> {
+/** `relayOnly` ("Hide my IP from contacts", the connection keeps to relays): relay candidates only, whatever else is in the SDP. */
+export function extractRtcParams(sdp: string, { relayOnly = false }: { relayOnly?: boolean } = {}): Pick<RtcSignal, "u" | "p" | "f" | "s" | "c"> {
   let u = "";
   let p = "";
   let f = "";
@@ -106,7 +107,7 @@ export function extractRtcParams(sdp: string): Pick<RtcSignal, "u" | "p" | "f" |
       const parts = line.slice("a=candidate:".length).split(" ");
       if (parts.length < 8 || parts[1] !== "1" || parts[2].toLowerCase() !== "udp") continue;
       const type = CANDIDATE_TYPES[parts[7] as keyof typeof CANDIDATE_TYPES];
-      if (!type) continue;
+      if (!type || (relayOnly && type !== "r")) continue;
       const compact = `${type},${parts[4]},${parts[5]}`;
       if (found.some((c) => c.compact === compact)) continue;
       found.push({ type, parts, compact });

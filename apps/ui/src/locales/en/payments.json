@@ -25,6 +25,7 @@
   },
   "bubble": {
     "amountSats": "{{amount}} sats",
+    "amountSats_one": "{{amount}} sat",
     "approve": "Approve payment",
     "balance": "{{amount}} {{unit}}",
     "bitcoinOnchain": "Bitcoin on-chain",
@@ -183,6 +184,9 @@
     "maxFee": "Most you accept in fees ({{unit}})",
     "maxFeeAria": "Maximum fee in {{unit}}",
     "millisats": "{{amount}} millisats",
+    "moneroInfo": "Ghostly has no Monero wallet. Pay opens this link in the Monero wallet on this device, where you check and send it.",
+    "moneroLabel": "Monero",
+    "moneroPayTitle": "Opens your Monero wallet on this device",
     "networkNotStated": "Network not stated",
     "noWallet": {
       "mainnet": "You have no Mainnet {{wallet}} wallet to pay this real money.",
@@ -250,6 +254,7 @@
     "youObject": "you"
   },
   "invoice": {
+    "alreadySpent": "Already spent",
     "anyAmount": "Any amount",
     "checking": "Checking…",
     "confirmWhat": "{{amount}} sats (plus a fee of up to {{fee}})",
@@ -288,6 +293,7 @@
     "qrTooLong": "Too long for a QR code: copy it instead.",
     "redeem": "Redeem",
     "redeemed": "Redeemed ✓",
+    "redeemedFee": "Redeemed ✓ (the mint kept {{fee}} as its fee)",
     "redeeming": "Redeeming…"
   },
   "mode": {

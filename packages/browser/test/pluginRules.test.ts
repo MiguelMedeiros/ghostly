@@ -26,7 +26,7 @@ const reserveBuiltIns = () => {
 const flags = (values: Record<string, string>) => vi.stubGlobal("localStorage", { getItem: (key: string) => values[key] ?? null });
 
 beforeEach(() => { resetAdapterRegistry(); reserveBuiltIns(); });
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe("what a mode and a platform offer", () => {
   it("a regtest-only provider is never offered in Mainnet, a mainnet one never in Testnet, and a platform it does not run on never", () => {
@@ -61,6 +61,22 @@ describe("test fakes only behind their flag", () => {
     flags({ [TEST_IDENTITIES_FLAG]: "1" });
     expect(identityProvider("fake-key")).toBeDefined();
     expect(ids()).not.toContain(fakeLightning.id);
+  });
+
+  it("a release build ignores both flags: not a dev build, no VITE_APPS_TEST", () => {
+    vi.stubEnv("DEV", false);
+    vi.stubEnv("VITE_APPS_TEST", "");
+    flags({ [TEST_PROVIDERS_FLAG]: "1", [TEST_IDENTITIES_FLAG]: "1" });
+    expect([...defaultRegistry().lightning, ...defaultRegistry().onchain].map((d) => d.id)).not.toContain(fakeLightning.id);
+    expect(identityProvider("fake-key")).toBeUndefined();
+  });
+
+  it("the e2e suite's build reads them: not a dev build, VITE_APPS_TEST set", () => {
+    vi.stubEnv("DEV", false);
+    vi.stubEnv("VITE_APPS_TEST", "1");
+    flags({ [TEST_PROVIDERS_FLAG]: "1", [TEST_IDENTITIES_FLAG]: "1" });
+    expect(defaultRegistry().lightning.map((d) => d.id)).toContain(fakeLightning.id);
+    expect(identityProvider("fake-key")).toBeDefined();
   });
 });
 

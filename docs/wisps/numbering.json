@@ -360,6 +360,15 @@
     "numberAssignment": "defined"
   },
   {
+    "oldId": "none",
+    "id": "407",
+    "oldFile": "4xx-ratchet.md",
+    "file": "4xx-ratchet.md",
+    "kind": "Profile",
+    "displayNumber": "4xx",
+    "numberAssignment": "unassigned"
+  },
+  {
     "oldId": "14",
     "id": "500",
     "oldFile": "14-files.md",
@@ -448,6 +457,15 @@
     "kind": "Profile",
     "displayNumber": "801",
     "numberAssignment": "defined"
+  },
+  {
+    "oldId": "none",
+    "id": "802",
+    "oldFile": "8xx-contact-links.md",
+    "file": "8xx-contact-links.md",
+    "kind": "Profile",
+    "displayNumber": "8xx",
+    "numberAssignment": "unassigned"
   },
   {
     "oldId": "21",

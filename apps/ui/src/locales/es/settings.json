@@ -7,6 +7,7 @@
     "compact": "Compacta"
   },
   "chatListDensity": "Lista de chats",
+  "chatsDeleted": "Todos los chats fueron eliminados",
   "clear": "Borrar",
   "clearAllData": "Borrar todos los datos",
   "clearAllDataConfirm": "Esto borra para siempre:",
@@ -55,7 +56,9 @@
   "dataCleared": "Todos los datos fueron borrados",
   "defaultNickname": "Nombre en los chats",
   "defaultNicknameHint": "Se usa al iniciar un chat nuevo",
+  "deleteAllChatsCallOn": "Hay una llamada en un chat. Termínala primero y luego elimina todos los chats.",
   "deleteAllChatsConfirm": "¿Eliminar los {{count}} chats?",
+  "deleteAllChatsConfirm_one": "¿Eliminar tu único chat?",
   "deleteAllChatsHint": "Se borran mensajes y archivos. Ajustes y billeteras se quedan.",
   "groupDownloads": {
     "always": "Siempre",
@@ -80,6 +83,8 @@
     "allow": "Permitir",
     "camera": "Cámara",
     "cameraInfo": "Se usa en llamadas y fotos. Se guarda en este dispositivo, para este perfil.",
+    "denied": "Bloqueado. Permite el micrófono y la cámara en los ajustes del navegador o del sistema.",
+    "deniedIos": "Bloqueado por iOS. En Ajustes → Apps → Safari, permite Micrófono (y Cámara) y vuelve a abrir Ghostly.",
     "failed": "No se pudo abrir. Comprueba que Ghostly tenga permiso.",
     "level": "Nivel del micrófono",
     "microphone": "Micrófono",
@@ -142,7 +147,7 @@
   "reduceMotion": "Reducir movimiento",
   "reduceMotionHint": "Menos animaciones. El ajuste del sistema siempre se respeta.",
   "removePassword": "Eliminar contraseña",
-  "search": "Buscar en la configuración",
+  "search": "Buscar en los ajustes",
   "searchEmpty": "Ningún ajuste coincide",
   "searchWords": {
     "account": "cuenta",
@@ -219,7 +224,22 @@
     "30": "30 minutos",
     "60": "1 hora"
   },
-  "title": "Configuración",
+  "title": "Ajustes",
+  "translate": {
+    "downloaded": "Idiomas descargados",
+    "downloading": "Descargando…",
+    "hint": "La opción predeterminada para los chats que no han elegido",
+    "info": "Los mensajes recibidos en otro idioma se traducen en este dispositivo con un modelo de idioma descargado una vez. Ningún texto sale del dispositivo y tus contactos nunca lo saben.",
+    "name": "Traducir mensajes",
+    "none": "No hay idiomas descargados",
+    "pair": "{{from}} → {{to}}",
+    "remove": "Eliminar",
+    "removeFailed": "No se pudo eliminar. Inténtalo de nuevo.",
+    "removeLabel": "Eliminar {{name}}",
+    "searchWords": "traducción, traducción automática, idiomas, modelos",
+    "title": "Traducir los mensajes al {{language}}",
+    "unread": "No se pudieron leer los idiomas descargados."
+  },
   "version": "Versión",
   "website": "Sitio web"
 }

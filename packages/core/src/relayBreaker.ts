@@ -145,13 +145,24 @@ export class RelayBreaker {
     if (circuit) circuit.probing = false;
   }
 
-  /** The relay answered: whatever was wrong is over. */
-  success(relay: string): void {
+  /**
+   * The relay answered: whatever was wrong is over. When it was left alone and so was every other relay of `relays`
+   * (by default those that failed), for failing, the outage is over for them too: they are asked again now, not at the
+   * end of a wait of up to `BREAKER_MAX_MS` (two clients whose probes another relay answered each would share none
+   * for minutes). Their trips stay: one really down trips again at once, for longer.
+   */
+  success(relay: string, relays: string[] = [...this.circuits.keys()]): void {
     const circuit = this.circuits.get(relay);
     if (!circuit) return;
     const recovered = circuit.openUntil !== 0;
     this.circuits.delete(relay);
-    if (recovered) this.options.onRecover?.(relay);
+    if (!recovered) return;
+    const others = relays.filter((r) => r !== relay).map((r) => this.circuits.get(r));
+    if (others.length && others.every((other): other is Circuit => !!other && other.openUntil !== 0 && other.kind === "error")) {
+      const now = this.now();
+      for (const other of others) other.openUntil = Math.min(other.openUntil, now);
+    }
+    this.options.onRecover?.(relay);
   }
 
   /**

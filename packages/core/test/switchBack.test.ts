@@ -79,6 +79,31 @@ for (const chooser of ["the dialling side", "the other side"] as const) it(`back
 }, 60_000);
 
 /**
+ * The same, when the contact moved a moment after this side (the move reached it a one-way trip later): its WebRTC
+ * session retires after this side's, and this side's new offer comes while that one still runs. Its end closed the
+ * data link it found, which by then was the answer to that new offer: the plan gave up after its 8 s and the chat
+ * waited the 20 s retry, 28.3-28.6 s in 8 of 210 moves between two CLIs (bh-zero43).
+ */
+for (const chooser of ["the dialling side", "the other side"] as const) it(`back to WebRTC while the contact's old session still retires goes at once, chosen by ${chooser}`, async () => {
+  const { inviter, joiner } = invitationWhere("inviter");
+  const a = startApp("a", inviter, { side: joiner, name: "b" }), b = startApp("b", joiner, { side: inviter, name: "a" });
+  expect(await until(on("webrtc/1"), 60_000)).toBeLessThan(60_000);
+  await run(5_000);
+  const [who, contact] = chooser === "the dialling side" ? [a, b] : [b, a];
+
+  await who.link.setTransportPreference("iroh/1", true);
+  expect(await until(on("iroh/1"), 30_000)).toBeLessThan(30_000);
+  // The contact's old session retires 300 ms after this side's: once this side's offer reached it, before it connects.
+  const retiring = (contact.link as unknown as { retiring: Map<unknown, { timer: ReturnType<typeof setTimeout>; close(): void }> }).retiring;
+  expect(retiring.size).toBe(1);
+  for (const entry of retiring.values()) { clearTimeout(entry.timer); entry.timer = setTimeout(entry.close, SWITCH_RETIRE_MS + 300); }
+  await who.link.setTransportPreference("webrtc/1", true);
+  const took = await until(on("webrtc/1"), 60_000);
+  console.log(`SWITCH_BACK_LATE ${chooser}: on WebRTC again ${took / 1000} s after choosing it (retire ${SWITCH_RETIRE_MS / 1000} s)`);
+  expect(took).toBeLessThan(8_000);
+}, 60_000);
+
+/**
  * A choice made while a move back to WebRTC waits for the session it left to retire (`SWITCH_RETIRE_MS`): nothing has
  * been dialled yet, so the newer choice replaces that move. Before, the move ran (to WebRTC) and the chat then moved
  * again to the newer choice: two needless switches, each a moment off the chat (r11f, CLI twoPeers).

@@ -102,6 +102,25 @@ describe("closing brackets after a link", () => {
   });
 });
 
+describe("many payment words next to web links", () => {
+  const fill = (unit: string) => unit.repeat(Math.floor(SIZE / unit.length));
+
+  it("are read in linear time: in the bubble and in the list", () => {
+    for (const unit of ["bitcoin:a http://b ", "bitcoin:a ", "lno1qqqq http://b "]) {
+      const text = fill(unit);
+      expect(quickly(() => findMoney(text))).toBeNull();
+      quickly(() => previewText(text));
+    }
+  });
+
+  it("inside a web link stay part of the link, before and after one", () => {
+    const address = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq";
+    expect(findBip21(`https://x.example/?u=bitcoin:${address} and http://y`)).toEqual([]);
+    expect(findBip21(`http://y and bitcoin:${address}`)[0].address).toBe(address);
+    expect(findBip21(`http://y bitcoin:${address} https://x.example/`)[0].address).toBe(address);
+  });
+});
+
 describe("a sending time no date holds", () => {
   it.each([Number.MAX_SAFE_INTEGER, -Number.MAX_SAFE_INTEGER, Number.NaN, Infinity])("leaves a clock time as text when sent at %s", sentAt => {
     const segments = tokenizeInline("see you at 14:00 UTC", DETECTORS, { sentAt });
@@ -130,6 +149,14 @@ describe("direction controls in links", () => {
 
   it("drops the invisible characters of what no URL parser takes", () => {
     expect(shownUrl("https://\u202eevil")).toBe("https://evil");
+  });
+
+  it("shows the host a link opens, not a user part before it that reads as one", () => {
+    expect(shownUrl("https://www.paypal.com@evil.example/login")).toBe("https://evil.example/login");
+    expect(shownUrl("https://accounts.google.com.security-check.verify-session@evil.example/")).toBe("https://evil.example/");
+    expect(shownUrl("https://www.paypal.com:secret@evil.example")).toBe("https://evil.example/");
+    expect(shownUrl("https://a@b@evil.example/x")).toBe("https://evil.example/x");
+    expect(shownUrl("https://x.example/@alice")).toBe("https://x.example/@alice");
   });
 });
 

@@ -34,8 +34,9 @@ async function useNode(p: Peer, node: Node) {
   expect(await p.page.content()).not.toContain(secret);
 }
 
+// The number alone (its <bdi>): the span beside it is the unit and the node's alias, whose digits are not the balance.
 const balance = async (p: Peer) => {
-  const text = await p.page.getByTestId("wallet-balance").locator("span").first().innerText();
+  const text = await p.page.getByTestId("wallet-balance").locator("bdi").first().innerText();
   return Number(text.replace(/[^\d]/g, "") || NaN);
 };
 

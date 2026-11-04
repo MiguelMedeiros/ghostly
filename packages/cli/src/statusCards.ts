@@ -1,8 +1,8 @@
-import { STATUS_CARD_LIMITS, cardLine, checkStatusCard, randomBytes, toBase64Url, type StatusCard } from "@ghostly/core";
+import { STATUS_CARD_LIMITS, cardLine, checkStatusCard, randomBytes, statusCardBytes, toBase64Url, type StatusCard } from "@ghostly/core";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
-import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
+import { findSecret } from "./secretGuard";
 import { bool, chatOrGroup, node, num, oneOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
-import { CliError } from "./errors";
+import { CliError, asCliError } from "./errors";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 
 /*
@@ -42,10 +42,18 @@ function fieldsOf(params: Params): Record<string, unknown> {
 
 /**
  * An update merged over a card: fields given replace those there, `pr` field by field, and a field given as null goes
- * (`--json '{"step":null}'`). The kind and the id never change.
+ * (`--json '{"step":null}'`). The kind and the id never change. A task says how far it is one way: a percent given
+ * replaces the steps there and steps given the percent, unless the update gives both. Before, `--steps 4/5` over an
+ * earlier `--progress 90` showed "90% · 4 of 5 steps", its bar at 90: a card's own percent wins over its steps.
  */
 export function mergeCard(base: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...base };
+  if (base.kind === "task") {
+    const given = (key: string) => patch[key] !== undefined && patch[key] !== null;
+    const steps = given("done") || given("total");
+    if (given("progress") && !steps) { delete out.done; delete out.total; }
+    else if (steps && !given("progress")) delete out.progress;
+  }
   for (const [key, value] of Object.entries(patch)) {
     if (key === "kind" || key === "id") continue;
     if (value === null) { delete out[key]; continue; }
@@ -73,10 +81,16 @@ export function withRun(fields: Record<string, unknown>, params: Params, now = D
   return { ...fields, lastRun, runs: [lastRun, ...before].slice(0, STATUS_CARD_LIMITS.runs) };
 }
 
-/** A card checked by the sender's rule, or a `bad_request` that says what is wrong. */
+/**
+ * A card checked by the sender's rule, or a `bad_request` that says what is wrong: with the card, unless the card is
+ * what is too big (its size and the bound, not kilobytes of it echoed back).
+ */
 function checked(card: Record<string, unknown>): StatusCard {
   const result = checkStatusCard(card);
-  if ("error" in result) throw new CliError("bad_request", `Status card: ${result.error}`, { card });
+  if ("error" in result) {
+    const bytes = statusCardBytes(card);
+    throw new CliError("bad_request", `Status card: ${result.error}`, bytes > STATUS_CARD_LIMITS.bytes ? { bytes, max: STATUS_CARD_LIMITS.bytes } : { card });
+  }
   return result.card;
 }
 
@@ -86,6 +100,18 @@ function cardTexts(value: unknown, out: string[] = []): string[] {
   else if (Array.isArray(value)) for (const item of value) cardTexts(item, out);
   else if (isObject(value)) for (const item of Object.values(value)) cardTexts(item, out);
   return out;
+}
+
+/**
+ * The first text in `value` (a card's fields, a message's text…) that looks like a seed, a private key or a Cashu token,
+ * read as given and as a card carries it (`cardLine`).
+ */
+export function secretIn(value: unknown): ReturnType<typeof findSecret> {
+  for (const text of cardTexts(value)) {
+    const secret = findSecret(text) ?? findSecret(cardLine(text, Infinity) ?? "");
+    if (secret) return secret;
+  }
+  return null;
 }
 
 /**
@@ -190,7 +216,10 @@ async function sendCard(ctx: ApiContext, params: Params, kind: Kind): Promise<Re
   }, params, now));
   await parentThere(ctx, target, card);
   const text = str(params, "text") ?? "";
-  const wait = oneOf(params, "wait", target.group ? ["none", "sent"] as const : ["none", "sent", "delivered"] as const, "none");
+  // A one-shot leaves once its command is done, and the card with it: in a chat it stays until it went out, as `send`.
+  const wait = target.group
+    ? oneOf(params, "wait", ["none", "sent"] as const, "none")
+    : oneOf(params, "wait", ["none", "sent", "delivered"] as const, ctx.mode === "one-shot" ? "sent" : "none");
   const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
   if (target.group) {
     const result = await node(ctx).sendGroupMessage({ groupId: target.id, text, card });
@@ -234,7 +263,10 @@ async function updateCard(ctx: ApiContext, params: Params, kind: Kind): Promise<
   const card = checked(merged);
   if (isObject(patch) && patch.parent !== undefined) await parentThere(ctx, target, card);
   const text = str(params, "text") ?? "";
-  const wait = oneOf(params, "wait", target.group ? ["none", "sent"] as const : ["none", "confirmed"] as const, "none");
+  // In a chat a one-shot stays until the contact confirmed the update, as `edit`: the process leaving took it along.
+  const wait = target.group
+    ? oneOf(params, "wait", ["none", "sent"] as const, "none")
+    : oneOf(params, "wait", ["none", "confirmed"] as const, ctx.mode === "one-shot" ? "confirmed" : "none");
   const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
   const last = Math.max(pace.last, message.edit?.at ?? message.timestamp);
   const due = last + CARD_UPDATE_GAP_MS - Date.now();
@@ -297,7 +329,8 @@ async function reportUsage(ctx: ApiContext, ref: string, fields: Record<string, 
   const report = { updatedAt: Date.now(), ...fields, kind: "usage", id };
   checked(report);
   const sent = await cardMessage(ctx, target, "usage", id).catch(() => undefined);
-  const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
+  // A one-shot's report in a chat stays until it went out (a new card) or the contact confirmed it (an update).
+  const wait = oneOf(params, "wait", ["none", "sent"] as const, !target.group && ctx.mode === "one-shot" ? "sent" : "none");
   if (!sent || (sent.edit?.seq ?? 0) >= STATUS_CARD_LIMITS.edits) {
     const answer = await sendCard(ctx, { ...params, chat: ref, card: report, wait }, "usage");
     return { ...answer, updated: false };
@@ -308,17 +341,32 @@ async function reportUsage(ctx: ApiContext, ref: string, fields: Record<string, 
   return { ...answer, updated: true };
 }
 
-/** `usage send`: one chat or group, or (`all`) every 1:1 chat with a contact; a chat that refuses is said, not fatal. */
+/**
+ * `usage send`: one chat or group, or (`all`) every 1:1 chat with a contact; a chat that refuses is said (its
+ * `{code, message}`), not fatal, unless every chat refused: then nothing was reported and the call fails.
+ */
 async function sendUsage(ctx: ApiContext, params: Params): Promise<Record<string, unknown>> {
   const fields = fieldsOf(params);
   if (!bool(params, "all")) return reportUsage(ctx, str(params, "chat", true), fields, params);
   if (str(params, "chat")) throw new CliError("bad_request", "Name a chat or --all, not both");
   checked({ updatedAt: Date.now(), ...fields, kind: "usage", id: typeof fields.id === "string" && fields.id ? fields.id : USAGE_CARD_ID });
+  // The person's mistake, said once: before, each chat refused it on its own and the call still answered.
+  oneOf(params, "wait", ["none", "sent"] as const, "none");
+  num(params, "timeout", 30, { min: 1, max: 3600 });
   const chats = state(ctx).links.filter((link) => link.profile && link.peerPubKeyZ32);
   const results: Record<string, unknown>[] = [];
+  const failed: { chat: string; error: CliError }[] = [];
   for (const link of chats) {
     try { results.push(await reportUsage(ctx, link.id, fields, params)); }
-    catch (error) { results.push({ chat: link.id, error: error instanceof Error ? error.message : String(error) }); }
+    catch (error) {
+      const refusal = { chat: link.id, error: asCliError(error) };
+      failed.push(refusal);
+      results.push({ chat: link.id, error: refusal.error.toJSON() });
+    }
+  }
+  if (failed.length && failed.length === chats.length) {
+    const codes = new Set(failed.map((f) => f.error.code));
+    throw new CliError(codes.size === 1 ? failed[0]!.error.code : "refused", `No chat took the usage card: ${failed.map((f) => `${f.chat}: ${f.error.message}`).join("; ")}`, { chats: results });
   }
   return { chats: results };
 }

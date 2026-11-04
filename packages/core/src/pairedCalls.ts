@@ -84,16 +84,38 @@ export class PairedCalls {
 
   /**
    * This app is going away: a call it placed or answered is hung up, as its person would (its latest signal an
-   * offer, an answer, or a picture change, which only a call on sends). Returns the hang-up to send before the
-   * goodbye, or null when no call of ours is on. Read by its kind, not its age: a call outlasts its offer's freshness.
+   * offer, an answer, or a picture change, which only a call on sends). `declineRinging` (the app quits: the Desktop app
+   * or a CLI daemon) also declines the contact's call still ringing here, so the caller stops ringing for nobody; a web
+   * page that goes (a reload looks the same as a close) leaves it ringing, so the reopened page rings again. Returns
+   * the hang-up to send before the goodbye, or null when no call is on. Our own call is read by its kind, not its age:
+   * a call outlasts its offer's freshness.
    */
-  hangUp(): PairedCallFrame | null {
-    if (!this.latest) return null;
-    let said: { t?: unknown; ts?: unknown };
-    try { said = JSON.parse(this.latest.signal); } catch { return null; }
-    if (said.t !== "o" && said.t !== "a" && said.t !== "v" && said.t !== "r") return null;
-    const ts = Math.max(this.now(), typeof said.ts === "number" ? said.ts + 1 : 0);
+  hangUp(options: { declineRinging?: boolean } = {}): PairedCallFrame | null {
+    const said = this.said();
+    const ours = said.t === "o" || said.t === "a" || said.t === "v" || said.t === "r";
+    const peer = this.peer;
+    const ringing = options.declineRinging === true && peer?.kind === "o" && peer.at > this.saidAt && this.now() - peer.at <= CALL_SIGNAL_MAX_AGE_MS ? peer : null;
+    if (!ours && !ringing) return null;
+    const ts = Math.max(this.now(), typeof said.ts === "number" ? said.ts + 1 : 0, ringing ? ringing.ts + 1 : 0);
     return this.set(JSON.stringify({ t: "h", ts }));
+  }
+
+  /**
+   * The hang-up of a call this side placed or answered, for the transport to send should the app go without a word
+   * (`FrameChannel.parting`: a logout ends the Desktop's page with the app), or null when no call of ours is on. Nothing
+   * is said or changed here. Its time is just after this side's latest signal, so it stays the same until that changes;
+   * a hang-up the page itself says on its way out too (`hangUp`) is no older, and finds the call over already.
+   */
+  parting(): PairedCallFrame | null {
+    const said = this.said();
+    const ours = said.t === "o" || said.t === "a" || said.t === "v" || said.t === "r";
+    if (!ours || typeof said.ts !== "number") return null;
+    return { t: PAIRED_CALL_FRAME, s: JSON.stringify({ t: "h", ts: said.ts + 1 }) };
+  }
+
+  private said(): { t?: unknown; ts?: unknown } {
+    if (this.latest) try { return JSON.parse(this.latest.signal); } catch { /* no signal of ours */ }
+    return {};
   }
 
   /** On a new session that carries calls: the latest signal again, if it is still fresh enough to act on. */

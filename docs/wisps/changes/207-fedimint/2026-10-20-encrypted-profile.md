@@ -1,0 +1,1 @@
+Storage says that the client keeps the mnemonic and its spendable notes in its file in the clear, and that on an encrypted profile the file is wrapped by a page layer at the file handle (proposed in 04, not built yet).

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { build, type Plugin } from "vite";
-import { precacheList } from "./src/sw/policy";
+import { serviceWorkerFiles } from "./src/sw/policy";
 
 const SW_ENTRY = fileURLToPath(new URL("./src/sw/sw.ts", import.meta.url));
 
@@ -23,13 +23,13 @@ export function serviceWorker(buildId: string): Plugin {
       publicFiles = (await readdir(dir, { withFileTypes: true })).filter((entry) => entry.isFile()).map((entry) => entry.name);
     },
     async generateBundle(_options, bundle) {
-      const precache = precacheList([...publicFiles, ...Object.keys(bundle)]);
+      const { precache, languages } = serviceWorkerFiles(publicFiles, Object.values(bundle));
       // The commit, and what was built from it: a rebuild of the same commit that changed a file is a new cache too.
-      const version = `${buildId}-${createHash("sha256").update(precache.join("\n")).digest("hex").slice(0, 8)}`;
+      const version = `${buildId}-${createHash("sha256").update(precache.join("\n")).update(JSON.stringify(languages)).digest("hex").slice(0, 8)}`;
       const output = await build({
         configFile: false,
         logLevel: "warn",
-        define: { __SW_BUILD__: JSON.stringify(version), __SW_PRECACHE__: JSON.stringify(precache) },
+        define: { __SW_BUILD__: JSON.stringify(version), __SW_PRECACHE__: JSON.stringify(precache), __SW_LANGUAGES__: JSON.stringify(languages) },
         build: {
           write: false,
           emptyOutDir: false,

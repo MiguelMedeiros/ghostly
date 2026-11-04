@@ -1,14 +1,16 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./components/Sidebar";
+import { ListNotices } from "./components/ListNotices";
 import { MobileTabBar } from "./components/MobileTabBar";
 import { InstallSteps } from "./components/InstallApp";
+import { TranslateDownloadFailure } from "./components/TranslateDownloadFailure";
 import { Chat } from "./pages/Chat";
 import { chatRouteSession } from "./lib/url";
 import { offerSession } from "./lib/lockedRing";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useIsMobile } from "./hooks/useIsMobile";
-import { useServicesPlatform } from "./hooks/useServicesPlatform";
+import { servicesPlatform } from "./lib/platform";
 import { useSettings } from "./contexts/SettingsContext";
 import { newSpace } from "@ghostly/browser/backup/storage";
 import { useViewportHeight } from "./hooks/useViewportHeight";
@@ -16,15 +18,22 @@ import { useEngineNick } from "./hooks/useAvatars";
 import { useProfilePeek } from "./hooks/useProfilePeek";
 import { guardFileDrops } from "./lib/pastedFiles";
 import { useWakeLock } from "./hooks/useWakeLock";
+import { useWakeOnReturn } from "./hooks/useWakeOnReturn";
 import { useAppCommands } from "./hooks/useAppCommands";
 import { useAppBadge } from "./lib/appBadge";
 import { useGoneGroups } from "./hooks/useGoneGroups";
 import { deviceWakeWords, useWakeTableSync } from "./lib/wakePush";
-import { useComputerAwake } from "./lib/keepAwake";
+import { useComputerAwake, useFilesMoving } from "./lib/keepAwake";
 import { useCallOnSync } from "./hooks/useCallOnSync";
+import { setChatOnCall } from "./lib/chatsOnCall";
 import { useI18n } from "./contexts/I18nContext";
 import { useAppSessions } from "./lib/apps/running";
 import { useGroupDownloadsSync } from "./lib/groupDownloads";
+import { NowPlayingBar } from "./components/NowPlayingBar";
+import { stopHeld } from "./lib/nowPlaying";
+import { groupRouteId } from "./lib/groups";
+import { sessionPeerKey } from "./lib/storage";
+import { useEngineValue } from "./lib/engineState";
 
 /** The browser's status bar follows the header of whichever theme is active. */
 function useThemeColor() {
@@ -50,34 +59,15 @@ function useThemeColor() {
  * The one on a call follows you to Settings as a small window instead.
  */
 /**
- * Coming back to the window or tab after a while: a laptop that slept, an app left in the background.
- * Chats look for their contacts now, and a connection that dropped meanwhile is dialled again at once.
- */
-function useWakeOnReturn() {
-  useEffect(() => {
-    let last = 0;
-    const wake = () => {
-      if (document.visibilityState !== "visible" || Date.now() - last < 5_000) return;
-      last = Date.now();
-      void engine.call("wake").catch(() => {});
-    };
-    // Back online (another network, a VPN up or down): discovery forgets the relays that failed on the old one.
-    const online = () => { last = Date.now(); void engine.call("wake", { network: true }).catch(() => {}); };
-    document.addEventListener("visibilitychange", wake);
-    window.addEventListener("focus", wake);
-    window.addEventListener("online", online);
-    return () => { document.removeEventListener("visibilitychange", wake); window.removeEventListener("focus", wake); window.removeEventListener("online", online); };
-  }, []);
-}
-
-/**
  * The peer holds items for away contacts in this profile's S3 storage (WISP 404), the one set up under
  * Profile → Backups: whenever that changes, the peer is told, credentials and space alike, and told when
  * it goes. The space is chosen here once, as a backup would choose it.
  */
 function useHoldStorageSync() {
   const { settings, updateBackupStorage } = useSettings();
-  const platform = useServicesPlatform();
+  // The platform object only (it never changes): following its state drew the app's shell, and every chat it holds, on
+  // every engine state.
+  const platform = servicesPlatform;
   const s3 = settings.backupS3 ? JSON.stringify(settings.backupS3) : null;
   const space = settings.backupSpace;
   useEffect(() => {
@@ -100,12 +90,41 @@ function useProfileNameSync() {
   }, [nick, engineNick]);
 }
 
+/**
+ * The chat or group on screen, as the route says, tells the engine (WISP 902 § Transports): its link keeps this device's
+ * native connections. From here, not from each page: a chat kept loaded off screen (on a call, running a mini-app) is
+ * the one on screen again when it comes back, after a group or another chat let go of theirs.
+ */
+function useOnScreenLink() {
+  const { pathname } = useLocation();
+  const session = chatRouteSession(pathname);
+  const groupId = groupRouteId(pathname);
+  // Read again as the state changes: a chat opened for the first time has its link once the engine made it.
+  const chatLink = useEngineValue(state => {
+    const peerKey = session ? sessionPeerKey(session) : undefined;
+    return peerKey ? state?.links.find(l => l.peerPubKeyZ32 === peerKey)?.id : undefined;
+  });
+  const onScreen = groupId ? `group:${groupId}` : chatLink ?? null;
+  const told = useRef<string | null>(null);
+  useEffect(() => {
+    if (told.current === onScreen) return;
+    told.current = onScreen;
+    void engine.call("setActiveLink", { linkId: onScreen }).catch(() => {});
+  }, [onScreen]);
+  useEffect(() => () => {
+    if (told.current) void engine.call("setActiveLink", { linkId: null }).catch(() => {});
+    told.current = null;
+  }, []);
+}
+
 function useLoadedChats() {
   const routeSession = chatRouteSession(useLocation().pathname);
   // Every chat on a call or ringing: a second call ringing (or declined) while one is on must not unload the first.
   const [callSessions, setCallSessions] = useState<readonly string[]>([]);
-  // A call keeps the screen on (Screen Wake Lock, where there is one).
-  useWakeLock(callSessions.length > 0);
+  // A call keeps the screen on (Screen Wake Lock, where there is one), and so does a file on its way: a phone that
+  // sleeps stops it.
+  const filesMoving = useFilesMoving();
+  useWakeLock(callSessions.length > 0 || filesMoving);
   // And the profile on this device: a handoff waits for the call to end.
   useCallOnSync();
   // The call window hangs here instead of inside its chat, which may be off
@@ -123,6 +142,8 @@ function useLoadedChats() {
   }), []);
 
   const onCallChange = useCallback((sessionId: string, onCall: boolean) => {
+    // Said to the pages that delete chats, too: none is deleted under its call (lib/chatsOnCall.ts).
+    setChatOnCall(sessionId, onCall);
     setCallSessions((current) =>
       onCall ? (current.includes(sessionId) ? current : [...current, sessionId]) : current.includes(sessionId) ? current.filter((id) => id !== sessionId) : current);
     if (onCall) setRingSessions((current) => (current.includes(sessionId) ? current.filter((id) => id !== sessionId) : current));
@@ -166,6 +187,7 @@ export function App() {
   // Download automatically in groups, Wi-Fi only: the engine's switch follows the connection (WISP 503).
   useGroupDownloadsSync();
   const isMobile = useIsMobile();
+  const { settings } = useSettings();
   const { pathname } = useLocation();
   useViewportHeight();
   useThemeColor();
@@ -181,10 +203,15 @@ export function App() {
   const { t } = useI18n();
   // What a wake-up shows, and which chats it may name (the installed web app; nothing elsewhere).
   useWakeTableSync({ title: "Ghostly", body: t("pwa.wakeNotice"), call: t("pwa.wakeCall"), ...deviceWakeWords(t) });
-  // Desktop: the computer stays awake for a handoff, and while the person keeps it so for a standby (WISP 06).
+  // Desktop: the computer stays awake for a handoff, while the person keeps it so for a standby (WISP 06), and while a
+  // file is on its way.
   useComputerAwake();
   const chats = useLoadedChats();
+  useOnScreenLink();
   const mainRef = useRef<HTMLElement>(null);
+  // A voice message or audio file playing on away from its chat (lib/nowPlaying.ts) stops with the app itself (the
+  // profile closing): after the bubbles' layout cleanups have handed it over.
+  useEffect(() => () => stopHeld(), []);
 
   const inChat = pathname.startsWith("/chat");
   // A group is a conversation too: on a phone it takes the whole screen, without the tab bar.
@@ -202,15 +229,21 @@ export function App() {
         <Sidebar />
         {/* Keyed as on a phone: a phone turned on its side (or back) keeps the open chat and page mounted, and the
             message field its focus and its keyboard. */}
-        <main key="main" ref={mainRef} tabIndex={-1} className="flex-1 flex min-w-0 focus:outline-none">
-          <Fragment key="chats">{chats("flex-1 flex flex-col min-w-0")}</Fragment>
+        {/* Three rows: the list's notices when it is folded to a rail, which has no room for them, and a voice message
+            playing on away from its chat (NowPlayingBar), over the open chat or page. A grid rather than a wrapper
+            around them, which would load the open chat again when the bar came. */}
+        <main key="main" ref={mainRef} tabIndex={-1} className="flex-1 grid grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_minmax(0,1fr)] min-w-0 focus:outline-none">
+          {settings.chatListCollapsed && <div key="notices" className="row-start-1 flex flex-col min-w-0"><ListNotices /></div>}
+          <NowPlayingBar key="playing" className="row-start-2" />
+          <Fragment key="chats">{chats("row-start-3 col-start-1 flex flex-col min-w-0 min-h-0")}</Fragment>
           {!inChat && (
-            <div key="page" className="flex-1 flex flex-col min-w-0">
+            <div key="page" className="row-start-3 col-start-1 flex flex-col min-w-0 min-h-0">
               <Outlet />
             </div>
           )}
         </main>
         <InstallSteps />
+        <TranslateDownloadFailure />
       </div>
     );
   }
@@ -218,8 +251,11 @@ export function App() {
   // One screen at a time. The sidebar is the chat list and stays mounted: it is
   // what keeps the sessions polling and the notifications coming.
   const onChatList = pathname === "/";
+  // A voice message playing on away from its chat: above the tab bar, or at the top in a chat, which has none.
+  const tabs = !inChat && !inGroup;
   return (
     <div className="app-shell w-full flex flex-col bg-app-bg">
+      {!tabs && <NowPlayingBar key="playing" className="now-playing-top shrink-0" />}
       <main key="main" className="flex-1 flex flex-col min-h-0 min-w-0">
         <div className={onChatList ? "flex-1 flex min-h-0" : "hidden"}>
           <Sidebar />
@@ -231,8 +267,10 @@ export function App() {
           </div>
         )}
       </main>
-      {!inChat && !inGroup && <MobileTabBar />}
+      {tabs && <NowPlayingBar key="playing" className="shrink-0 border-t" />}
+      {tabs && <MobileTabBar />}
       <InstallSteps />
+      <TranslateDownloadFailure />
     </div>
   );
 }

@@ -10,7 +10,9 @@ import type { StoredLink } from "../shared/types";
  * - each chat's DHT mailbox `sequence`, capability record `rev` (with `publishedAt` cleared, so the raised revision
  *   goes out), hold `outSeq` and hold `pointerRev`: to `max(value + S, floor)`;
  * - the group send counter, mesh and community: a floor every epoch and every new head starts at (the group sessions
- *   read it through `seqFloor`), so a copy that catches up to the next epoch does not send from 0 again there.
+ *   read it through `seqFloor`), so a copy that catches up to the next epoch does not send from 0 again there;
+ * - each private group's own name record: its session signs it again once it sees the floor above the one the
+ *   record was signed under, so a newer name the lost device took does not stay with the members.
  *
  * Not raised: edit numbers, pin numbers (clock-bound), reaction numbers (the clock already), message ids (random),
  * incoming high-water marks.
@@ -106,7 +108,10 @@ export const raisedCounter = (value: number | undefined, floor: number): number 
  */
 export function raisedLink(link: StoredLink, floor: number): StoredLink {
   const paired = !!link.profile && !link.group;
-  const next: StoredLink = { ...link };
+  // The ratchet (WISP 4xx) is this device's: the copy taken over may have sealed with keys the device it replaces used
+  // since. The next item starts a new session with the contact.
+  const { ratchetState: _ratchet, ...rest } = link;
+  const next: StoredLink = { ...rest };
   if (link.dhtDeliveryState) next.dhtDeliveryState = { ...link.dhtDeliveryState, sequence: raisedCounter(link.dhtDeliveryState.sequence, floor) };
   else if (paired) next.dhtDeliveryState = { sequence: floor, peerSequence: 0 };
   if (link.capsState) {

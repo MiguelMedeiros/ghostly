@@ -79,7 +79,7 @@ describe("reading a store's index", () => {
 
     verifies.mockClear();
     await store.addStore({ url: STORE_URL, key: keyOf(STORE_KEY) });
-    expect(verifies, "Add: the index's signature, and no revocation again").toHaveBeenCalledTimes(1);
+    expect(verifies, "Add: the index the preview read, checked once").not.toHaveBeenCalled();
 
     // The store's next index: one revocation more, the rest copied again.
     await net.putStore(await storeFiles({ sequence: 2, revoked: [...held, ...await revocations(1, 20)] }));
@@ -95,6 +95,33 @@ describe("reading a store's index", () => {
       expect(await store.refreshStores()).toMatchObject([{ sequence: 2, problem: "bad-revocation" }]);
       expect(verifies, "the index and the forged one, each time").toHaveBeenCalledTimes(2);
     }
+  });
+
+  it("Add takes the index the preview just read: no second download or check, unless it is another URL or key, or minutes old", async () => {
+    await net.putStore(await storeFiles({ revoked: await revocations(5) }));
+    let now = NOW_S * 1000;
+    const store = apps(net, { now: () => now });
+    const indexReads = () => net.requests.filter((u) => u === STORE_URL).length;
+    await store.previewStore({ url: STORE_URL });
+    verifies.mockClear();
+    expect(await store.addStore({ url: STORE_URL, key: keyOf(STORE_KEY) })).toMatchObject({ key: keyOf(STORE_KEY), sequence: 1, expired: false });
+    expect(indexReads(), "the preview's read only").toBe(1);
+    expect(verifies).not.toHaveBeenCalled();
+
+    // Taken once: a second Add reads again.
+    await store.addStore({ url: STORE_URL, key: keyOf(STORE_KEY) });
+    expect(indexReads()).toBe(2);
+
+    // Another key than the one previewed: read again, and refused.
+    await store.previewStore({ url: STORE_URL });
+    await expect(store.addStore({ url: STORE_URL, key: keyOf(signer("someone else")) })).rejects.toThrow(/^store-key/);
+    expect(indexReads()).toBe(4);
+
+    // A preview left open for more than ten minutes: read again.
+    await store.previewStore({ url: STORE_URL });
+    now += 10 * 60 * 1000 + 1;
+    await store.addStore({ url: STORE_URL, key: keyOf(STORE_KEY) });
+    expect(indexReads()).toBe(6);
   });
 
   it("an index whose own signature does not verify costs one signature check, whatever it carries", async () => {

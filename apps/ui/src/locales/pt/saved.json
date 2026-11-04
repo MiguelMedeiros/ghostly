@@ -1,0 +1,12 @@
+{
+  "empty": "Nenhuma mensagem salva",
+  "emptyHint": "Salve uma mensagem pelo menu ⋮ dela para encontrá-la aqui. As mensagens salvas ficam neste dispositivo.",
+  "noText": "Mensagem",
+  "rowLabel": "Mensagens salvas, {{count}}",
+  "rowName": "{{chat}}, {{time}}: {{text}}",
+  "rowNameBy": "{{chat}}, {{author}}, {{time}}: {{text}}",
+  "save": "Salvar",
+  "title": "Mensagens salvas",
+  "unsave": "Remover dos salvos",
+  "you": "Você"
+}

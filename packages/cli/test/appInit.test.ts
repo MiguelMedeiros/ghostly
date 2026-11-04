@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { readAppBundle } from "@ghostly/core";
@@ -78,6 +78,28 @@ describe("app init", () => {
     writeFileSync(join(root, "c", "file"), "");
     expect(error(await ghostly(["app", "init", join(root, "c", "file"), "--name", "demo"]), "bad_request", 1).message).toContain("is a file");
     expect(existsSync(join(root, "c", "file", "index.html"))).toBe(false);
+  });
+
+  it("has a README whose steps, in order, end in a published app: the SDK is installed outside the published folder", async () => {
+    const root = tmp();
+    const dir = join(root, "demo");
+    ok(await ghostly(["app", "init", dir]));
+    const readme = readFileSync(join(dir, "README.md"), "utf8");
+    const writeIt = readme.slice(readme.indexOf("## Write it"), readme.indexOf("## Build"));
+    const install = /^npm install --save-dev(?: --prefix (\S+))? @ghostlytools\/sdk$/m.exec(writeIt);
+    expect(install).not.toBeNull();
+    // What the install leaves, offline: the package files and a node_modules of the SDK and its dependencies.
+    const at = resolve(dir, install![1] ?? ".");
+    // The editor still finds the types: node_modules is in the app's folder or one above it.
+    expect(relative(at, dir).startsWith("..")).toBe(false);
+    writeFileSync(join(at, "package.json"), "{}\n");
+    writeFileSync(join(at, "package-lock.json"), "{}\n");
+    const sdk = join(at, "node_modules", "@ghostlytools", "sdk");
+    mkdirSync(sdk, { recursive: true });
+    for (let i = 0; i < 100; i++) writeFileSync(join(sdk, `file${i}.d.ts`), "export {};\n");
+
+    const published = ok(await ghostly(["app", "publish", dir, "--key", join(root, "publisher.key")]));
+    expect(published).toMatchObject({ name: "demo", files: ["README.md", "index.html"] });
   });
 
   it("writes a page whose script type checks against @ghostlytools/sdk/app", async () => {

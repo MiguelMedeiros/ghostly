@@ -6,7 +6,7 @@ import type { EngineState } from "@ghostly/browser/shared/types";
 import { normalizeMintUrl } from "@ghostly/browser/engine/wallet";
 import { callApi, type ApiContext } from "../src/api";
 import { asCliError } from "../src/errors";
-import { invoiceNetwork } from "../src/wallets";
+import { invoiceNetwork, paymentJson } from "../src/wallets";
 // covers: headless.wallets, headless.payments, headless.engine-passthrough
 
 /** The wallet and payment methods over a fake engine: what they refuse before the engine is asked. */
@@ -56,6 +56,7 @@ function fake() {
     walletReceiveToken: vi.fn(async (_: unknown) => ({ amount: 1 })),
     bitcoinReceiveAddress: vi.fn(async (_: unknown) => "tb1q"),
     connect: vi.fn(async (_: unknown) => undefined),
+    setChatPaymentMethods: vi.fn(async (_: unknown) => undefined),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {} }, mode: "daemon", version: "t" } as unknown as ApiContext;
   return { ctx, node };
@@ -90,6 +91,29 @@ describe("wallets", () => {
     await expect(callApi(ctx, "wallet.list", { network: "" })).rejects.toMatchObject({ code: "bad_request", message: "network must be one of mainnet, testnet" });
     expect(node.walletCreate).not.toHaveBeenCalled();
     expect(node.walletRemove).not.toHaveBeenCalled();
+  });
+
+  it("chat.accept refuses networks that name no network, as it refuses a bogus one, before the engine", async () => {
+    // Found in a bug hunt: `chat accept bob cashu --networks ""` exited 0 and left cashu on no network while methods still said it was on.
+    const { ctx, node } = fake();
+    for (const networks of [[], ["bogus"]]) {
+      await expect(callApi(ctx, "chat.accept", { chat: "Alice", method: "cashu", on: true, networks }), JSON.stringify(networks)).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/^networks must list mainnet and\/or testnet/) });
+    }
+    await expect(callApi(ctx, "chat.accept", { chat: "Alice", method: "cashu", on: true, networks: [] })).rejects.toThrow(/--off/);
+    expect(node.setChatPaymentMethods).not.toHaveBeenCalled();
+    await callApi(ctx, "chat.accept", { chat: "Alice", method: "cashu", on: true, networks: ["testnet"] });
+    expect(node.setChatPaymentMethods.mock.calls.at(-1)![0]).toEqual({ linkId: "chat-one", methods: { cashu: true }, networks: { cashu: ["testnet"] } });
+  });
+
+  it("chat.accept with no method answers what the chat takes now and changes nothing", async () => {
+    // Found in a bug hunt: no command showed which ways of paying a chat takes; `chat accept bob` was a usage error.
+    const { ctx, node } = fake();
+    const engine = node.getState;
+    const methods = { cashu: false, lightning: true }, networks = { cashu: [], lightning: ["testnet"] };
+    node.getState = () => { const s = engine(); s.links[0] = { ...s.links[0], paymentMethods: methods, paymentNetworks: networks } as unknown as typeof s.links[0]; return s; };
+    expect(await callApi(ctx, "chat.accept", { chat: "Alice" })).toEqual({ chat: "chat-one", methods, networks });
+    await expect(callApi(ctx, "chat.accept", { chat: "Alice", on: false })).rejects.toMatchObject({ code: "bad_request" });
+    expect(node.setChatPaymentMethods).not.toHaveBeenCalled();
   });
 
   it("removal holding money needs the person's acceptLoss", async () => {
@@ -158,6 +182,31 @@ describe("wallets", () => {
     expect(asCliError(await callApi(ctx, "wallet.receive", { amount: 10 }).catch((e: unknown) => e)).code).toBe("engine");
   });
 
+  it("pay or ask from a profile with no wallet of the network: refused, naming the wallet to make", async () => {
+    // Found in a bug hunt: `chat pay` answered `engine` "Not enough sats in your wallet" (a code a bot may retry) and
+    // `chat request` `unavailable` "No mint configured", from a profile that had no wallet at all.
+    const { ctx, node } = fake();
+    const answer = async (method: string, params: Record<string, unknown>) => asCliError(await callApi(ctx, method, params).catch((e: unknown) => e)).toJSON();
+    const short = () => Object.assign(new Error("Not enough sats in your wallet"), { engineCode: "notEnoughSats" });
+    // With the wallet, the engine's words, and its code says why.
+    node.sendPayment.mockRejectedValueOnce(short());
+    expect(await answer("chat.pay", { chat: "Alice", amount: 100 })).toEqual({ code: "refused", message: "Not enough sats in your wallet" });
+    const engine = node.getState;
+    node.getState = () => { const s = engine(); s.wallet.wallets = []; return s; };
+    const none = { code: "refused", message: "You have no Testnet Cashu wallet: ghostly wallet create cashu", details: { reason: "no_wallet" } };
+    node.sendPayment.mockRejectedValueOnce(short());
+    expect(await answer("chat.pay", { chat: "Alice", amount: 100 })).toEqual(none);
+    node.requestPayment.mockRejectedValueOnce(new Error("No mint could create an invoice: No mint configured"));
+    expect(await answer("chat.request", { chat: "Alice", amount: 100 })).toEqual(none);
+    node.requestPayment.mockRejectedValueOnce(new Error("You have no Testnet Cashu wallet: create one in Wallet → New"));
+    expect(await answer("chat.request", { chat: "Alice", amount: 100, rail: "cashu" })).toEqual(none);
+    node.sendPayment.mockRejectedValueOnce(short());
+    expect(await answer("chat.pay", { chat: "Alice", amount: 100, network: "mainnet", confirmReal: true })).toEqual({ ...none, message: "You have no Mainnet Cashu wallet: ghostly wallet create cashu --network mainnet" });
+    // A contact with no wallet is still said first: that is the engine's answer before any of these.
+    node.sendPayment.mockRejectedValueOnce(Object.assign(new Error("Your contact has no wallet yet: they need one to pay or be paid"), { engineCode: "contactNoWallet" }));
+    expect(await answer("chat.pay", { chat: "Alice", amount: 100 })).toMatchObject({ code: "refused", details: { reason: "contact_no_wallet" } });
+  });
+
   it("a wallet source that is not offered is the person's value, refused before the engine is asked", async () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "wallet.create", { type: "bitcoin", provider: "nope" })).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("ghostly wallet list") });
@@ -207,6 +256,13 @@ describe("real money", () => {
     expect(invoiceNetwork("hello")).toBeNull();
   });
 
+  it("a received Fedimint payment says its network and fedimint as its method", () => {
+    const received = { id: "p", linkId: "l", kind: "payment", direction: "in", amount: 1_200, unit: "sat", state: "settled", createdAt: 1, federation: "f" } as const;
+    expect(paymentJson({ ...received, network: "testnet" })).toMatchObject({ network: "testnet", method: "fedimint" });
+    expect(paymentJson({ ...received, network: "mainnet" })).toMatchObject({ network: "mainnet", method: "fedimint" });
+    expect(paymentJson({ id: "r", linkId: "l", kind: "request", direction: "out", amount: 5, unit: "sat", state: "pending", createdAt: 1, federations: ["f"], invoice: "lntbs1x", network: "testnet" }).method).toBe("fedimint");
+  });
+
   it("no spend on Mainnet without confirmReal, and confirmedReal only with it", async () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "pay", { target: "lnbc10u1pxyz", network: "mainnet" })).rejects.toMatchObject({ code: "confirm" });
@@ -226,6 +282,16 @@ describe("real money", () => {
     expect(node.walletPayQuote.mock.calls.at(-1)![0]).toEqual({ quote: "q", mint: "m" });
     await callApi(ctx, "chat.payRequest", { chat: "Alice", payment: "test" });
     expect(node.payRequest.mock.calls.at(-1)![0]).not.toHaveProperty("confirmedReal");
+  });
+
+  it("pay --chat names the chat the invoice came from, so a Testnet one is said paid to its contact, as a chat card's Pay does", async () => {
+    const { ctx, node } = fake();
+    await callApi(ctx, "pay", { target: "lightning:lntbs10u1pxyz", chat: "Alice" });
+    expect(node.walletPayQuote.mock.calls.at(-1)![0]).toEqual({ quote: "q", mint: "m", linkId: "chat-one", invoice: "lntbs10u1pxyz" });
+    // An address's invoice is its server's, never one of the contact's; a chat nobody joined has nobody to tell.
+    await expect(callApi(ctx, "pay", { target: "alice@example.com", amount: 5, chat: "Alice" })).rejects.toMatchObject({ code: "usage" });
+    await expect(callApi(ctx, "pay", { target: "lntbs10u1pxyz", chat: "Bob" })).rejects.toMatchObject({ code: "unavailable" });
+    expect(node.walletPayQuote).toHaveBeenCalledTimes(1);
   });
 
   it("a fee above --max-fee is refused before paying", async () => {

@@ -1,6 +1,6 @@
 import type { ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import { providerIcon } from "./ProviderIcons";
-import { currentStatus, expiringSoon, providerLabel, shortSubject, useEngineState } from "../../lib/identities";
+import { currentStatus, expiringSoon, providerLabel, shortSubject, useEngineValue } from "../../lib/identities";
 import { english } from "../../lib/english";
 import type { Translate } from "../../contexts/I18nContext";
 
@@ -115,6 +115,9 @@ export function takeBadges<T>(badges: T[], limit: number): { shown: T[]; more: n
 /** How many marks each place shows: the chat list and member lists, and the header by its width. */
 export const BADGE_LIMITS = { row: 2, rowNarrow: 1, header: 3, headerNarrow: 2, headerPhone: 1 } as const;
 
-/** A contact's received identities, from the engine's state: the chat's link with this contact key. */
+/**
+ * A contact's received identities, from the engine's state: the chat's link with this contact key. Drawn again only
+ * when they change, not on every engine state: each row of the chat list reads its own.
+ */
 export const useReceived = (peerKey: string | undefined) =>
-  useEngineState()?.links.find(l => l.peerPubKeyZ32 === peerKey)?.identities?.received;
+  useEngineValue(state => state?.links.find(l => l.peerPubKeyZ32 === peerKey)?.identities?.received);

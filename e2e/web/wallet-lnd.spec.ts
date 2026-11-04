@@ -19,12 +19,11 @@ test.describe.configure({ mode: "serial" });
 
 /** Makes the node the source of this peer's Testnet Lightning wallet, made with New through the source's form. */
 async function useNode(p: Peer, node: "alice" | "bob") {
-  const { url, macaroon, cert } = credentials(node);
+  const { url, macaroon } = credentials(node);
   await createWallet(p, "lightning", "testnet", { provider: "lnd", timeout: 30_000, fill: async (area) => {
     const form = area.getByTestId("provider-form-lnd");
     await form.getByLabel("REST address").fill(url);
     await form.getByLabel("Macaroon (hex)").fill(macaroon);
-    await form.getByLabel("TLS certificate").fill(cert);
     await form.getByTestId("provider-save").click();
   } });
   await openWallet(p, "lightning-testnet");

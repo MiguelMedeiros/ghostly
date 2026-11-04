@@ -1,0 +1,67 @@
+#!/bin/sh
+# listen: your owner's messages and button presses, one JSON line each (an `agent.turn`). Nothing else gets through.
+#
+#   listen               keep streaming; run it in the background and read its lines
+#   listen --once        wait for the next one, print it and exit (for an agent that cannot keep a stream open)
+#   --cursor <file>      where the last event handled is kept (default: one file per owner chat in
+#                        ${XDG_STATE_HOME:-~/.local/state}/ghostly-skill), so a restart goes on where it stopped
+#
+# Messages from any other chat, any group, and every other event are dropped twice: by `ghostly listen --from`, and
+# again here on the turn's `chat`. What your owner wrote is under `untrusted`; a button press has `press`.
+# Start `ghostly daemon --detach` first. Needs GHOSTLY_OWNER_CHAT and jq.
+set -eu
+owner=${GHOSTLY_OWNER_CHAT:-}
+[ -n "$owner" ] || { echo "listen: set GHOSTLY_OWNER_CHAT to your owner's chat id" >&2; exit 2; }
+command -v jq >/dev/null 2>&1 || { echo "listen: needs jq" >&2; exit 2; }
+
+once=0
+cursor=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --once) once=1; shift ;;
+    --cursor) [ $# -ge 2 ] || { echo "listen: --cursor needs a file" >&2; exit 2; }; cursor=$2; shift 2 ;;
+    -h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "listen: unknown argument $1" >&2; exit 2 ;;
+  esac
+done
+
+# The owner's chat as its id, found once now: a turn names its chat by id, and a contact who renames themselves later
+# changes nothing.
+shown=$(ghostly chat show "$owner") || { code=$?; printf '%s\n' "$shown" >&2; exit "$code"; }
+id=$(printf '%s' "$shown" | jq -r '.id // empty')
+[ -n "$id" ] || { echo "listen: no chat $owner" >&2; exit 3; }
+
+if [ -z "$cursor" ]; then
+  dir=${XDG_STATE_HOME:-$HOME/.local/state}/ghostly-skill
+  mkdir -p "$dir"
+  cursor=$dir/$(printf '%s' "$id" | tr -cd 'A-Za-z0-9_-').cursor
+fi
+since=
+if [ -s "$cursor" ]; then since=$(tr -cd '0-9' < "$cursor"); fi
+
+tmp=$(mktemp -d)
+mkfifo "$tmp/events"
+pid=
+# shellcheck disable=SC2329 # called by the EXIT trap
+cleanup() { if [ -n "$pid" ]; then kill "$pid" 2>/dev/null || true; fi; rm -rf "$tmp"; }
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+
+# This script keeps the cursor itself (not `ghostly listen --cursor`): with --once it stops right after the turn it
+# printed, so a message that came just behind it is read again next time, not lost.
+ghostly listen --turns --from "$id" ${since:+--since "$since"} > "$tmp/events" &
+pid=$!
+
+while IFS= read -r line; do
+  turn=$(printf '%s\n' "$line" | jq -R -c --arg owner "$id" \
+    'fromjson? | select(type == "object" and .type == "agent.turn" and .chat == $owner and .group == null)')
+  seq=$(printf '%s\n' "$line" | jq -R -r 'fromjson? | select(type == "object") | .seq | numbers')
+  if [ -n "$turn" ]; then printf '%s\n' "$turn"; fi
+  if [ -n "$seq" ]; then printf '%s\n' "$seq" > "$cursor.tmp"; mv -f "$cursor.tmp" "$cursor"; fi
+  if [ -n "$turn" ] && [ "$once" = 1 ]; then exit 0; fi
+done < "$tmp/events"
+
+code=0
+wait "$pid" || code=$?
+pid=
+exit "$code"

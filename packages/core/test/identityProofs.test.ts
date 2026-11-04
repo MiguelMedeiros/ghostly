@@ -209,6 +209,27 @@ describe("identity exchange", () => {
     expect(receivedIdentityStatus(w.ledger(bob, alice).received[0], alice, bob, w.now())).toBe("withdrawn");
   });
 
+  it("a second proof of the same identity the contact accepts replaces the first on both sides", async () => {
+    const w = world(), { alice, bob } = w.ids;
+    const ab = w.peer(alice, bob, "a".repeat(64)); w.peer(bob, alice, "a".repeat(64));
+    const older = w.addProof();
+    w.advance(60);
+    const newer = w.addProof();
+    const status = (id: string) => w.ledger(alice, bob).shared.find(s => s.id === id)?.status;
+    await ab.share(older, true);
+    await vi.waitFor(() => expect(status(older)).toBe("accepted"));
+    await ab.share(newer, true);
+    await vi.waitFor(() => expect(status(newer)).toBe("accepted"));
+    // The contact keeps one proof per identity: the older one is gone there, so it is no longer shared here either.
+    expect(w.ledger(bob, alice).received.map(r => r.id)).toEqual([newer]);
+    expect(status(older)).toBe("withdrawn");
+    // Taking the newer one back leaves nothing standing on either side.
+    await ab.withdraw(newer, true);
+    await vi.waitFor(() => expect(status(newer)).toBe("withdrawn"));
+    expect(w.ledger(bob, alice).received.map(r => `${r.id}:${r.status}`)).toEqual([`${newer}:withdrawn`]);
+    expect(w.ledger(alice, bob).shared.filter(s => s.status === "accepted")).toEqual([]);
+  });
+
   it("withdrawing a share still queued just forgets it", async () => {
     const w = world(), { alice, bob } = w.ids;
     const ab = w.peer(alice, bob, "a".repeat(64));
@@ -368,11 +389,33 @@ describe("identity timeline, from the exchange", () => {
     expect(kinds(bob, alice).slice(2)).toEqual(["shared:failed"]);
   });
 
-  it("a kind the contact's app cannot verify is a failed share there too", async () => {
+  it("a kind the contact's app cannot verify is refused at once, with no write on the verifier's side", async () => {
     const w = world(), { alice, bob } = w.ids;
     const ab = w.peer(alice, bob, "a".repeat(64)); w.peer(bob, alice, "a".repeat(64), { providers: [] });
     await ab.share(w.addProof(), true);
-    await vi.waitFor(() => expect(tl(w, bob, alice)[0]).toMatchObject({ side: "theirs", provider: "test", state: "failed", error: expect.stringMatching(/cannot verify/) }));
+    // The kind is the contact's to name, so the verifier replies "cannot verify" at once but keeps no timeline line
+    // and no challenge for it: a flood of such requests cannot fill the timeline or ring the cue.
+    await vi.waitFor(() => expect(w.frames.some(f => f.t === "idp-result" && f.ok === false && /cannot verify/.test(String(f.error)))).toBe(true));
+    expect(tl(w, bob, alice)).toHaveLength(0);
+    expect(w.ledger(bob, alice).challenges).toHaveLength(0);
+  });
+
+  it("a flood of unverifiable requests and unknown withdraws writes nothing, keeping the real verified line", async () => {
+    const w = world(), { alice, bob } = w.ids;
+    const ab = w.peer(alice, bob, "a".repeat(64)); const ba = w.peer(bob, alice, "a".repeat(64));
+    // Alice shares a real proof; Bob's timeline shows it verified.
+    const id = w.addProof();
+    await ab.share(id, true);
+    await vi.waitFor(() => expect(tl(w, bob, alice)[0]?.state).toBe("verified"));
+    // The contact floods requests for kinds this app does not verify (a fresh id and provider each time) and
+    // withdraws of ids this side never received. Before the fix each one was a durable write (the timeline cap is
+    // 100, so the verified line was pushed out) and a reply; now none of them touches the ledger.
+    for (let i = 0; i < 2000; i++) {
+      const fresh = i.toString(16).padStart(64, "0");
+      await ba.receive({ t: "idp-request", id: fresh, provider: `p${i}` });
+      await ba.receive({ t: "idp-withdraw", id: fresh });
+    }
+    expect(tl(w, bob, alice)).toEqual([expect.objectContaining({ proof: id, side: "theirs", state: "verified" })]);
     expect(w.ledger(bob, alice).challenges).toHaveLength(0);
   });
 

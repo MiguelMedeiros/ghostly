@@ -1,9 +1,11 @@
-import { lazy, Suspense, useState, useSyncExternalStore, type ComponentType } from "react";
+import { useEffect, useState, useSyncExternalStore, type ComponentType } from "react";
 import { useT } from "../contexts/I18nContext";
+import { reloadIfServed } from "../lib/reloadIfServed";
 
 /**
  * A page of the menu, loaded the first time it is opened: the first screen (the chat list) does not wait for them.
- * Nothing is drawn in its place for the moment it takes.
+ * Nothing is drawn in its place for the moment it takes, and the page is drawn as soon as its file is there: no
+ * `lazy` + Suspense, whose reveal React holds back until 300 ms after the empty fallback was drawn, however quick the file.
  *
  * In the web app the page is a file of its own, and that request can fail: the network dropped, or a deploy replaced
  * the file. The page then says so in its own place, with "Try again" (and Reload once that failed), and the rest of
@@ -13,25 +15,29 @@ import { useT } from "../contexts/I18nContext";
 export function menuPage<P extends object>(load: () => Promise<ComponentType<P>>) {
   const listeners = new Set<() => void>();
   const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
-  // Asked again by hand: `lazy` keeps a failure for good. The page that came takes the notice's place, on every screen showing it.
+  const show = (page: ComponentType<P>) => { Page = page; for (const listener of listeners) listener(); };
+  // Asked again by hand. The page that came takes the notice's place, on every screen showing it.
   let retried = false;
   const again = async () => {
     retried = true;
-    Page = await load();
-    for (const listener of listeners) listener();
+    show(await load());
   };
   const NotLoaded = () => <PageNotLoaded again={again} retried={retried} />;
-  let Page: ComponentType<P> = lazy(async () => {
-    try {
-      return { default: await load() };
-    } catch (error) {
+  let Page: ComponentType<P> | null = null;
+  // Asked once, by the first screen that opens the page.
+  let asked = false;
+  const ask = () => {
+    if (asked) return;
+    asked = true;
+    load().then(show, (error: unknown) => {
       console.warn("A page of the menu did not load:", error);
-      return { default: NotLoaded as ComponentType<P> };
-    }
-  });
+      show(NotLoaded as ComponentType<P>);
+    });
+  };
   return function MenuPage(props: P) {
     const Shown = useSyncExternalStore(subscribe, () => Page);
-    return <Suspense fallback={null}><Shown {...props} /></Suspense>;
+    useEffect(ask, []);
+    return Shown ? <Shown {...props} /> : null;
   };
 }
 
@@ -42,8 +48,9 @@ export function menuPage<P extends object>(load: () => Promise<ComponentType<P>>
 function PageNotLoaded({ again, retried }: { again: () => Promise<void>; retried: boolean }) {
   const t = useT();
   const [busy, setBusy] = useState(false);
-  // Chromium keeps a failed import for as long as the page lives, so there "Try again" cannot bring the file: once it
-  // has failed, Reload is offered beside it. Firefox and Safari ask the server again.
+  // A browser that keeps a failed import for as long as the page lives (older Chromium builds did) cannot bring
+  // the file with "Try again": once it has failed, Reload is offered beside it. Chromium 156, Firefox and Safari ask
+  // the server again.
   const [failedAgain, setFailedAgain] = useState(retried);
   const retry = async (button: HTMLButtonElement) => {
     if (busy) return;
@@ -62,11 +69,8 @@ function PageNotLoaded({ again, retried }: { again: () => Promise<void>; retried
   const reload = async () => {
     if (busy) return;
     setBusy(true);
-    // Only into a page the server answers for: a reload with no connection leaves the browser's own error page, and
-    // no app at all.
-    try {
-      if ((await fetch(location.pathname, { method: "HEAD", cache: "no-store" })).ok) { location.reload(); return; }
-    } catch { /* no connection yet: the notice stays */ }
+    // Only into a page the server answers for; with no connection yet the notice stays.
+    await reloadIfServed();
     setBusy(false);
   };
   const button = "px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer aria-disabled:opacity-60 aria-disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-chat-bg";

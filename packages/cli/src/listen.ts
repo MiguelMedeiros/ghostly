@@ -1,9 +1,11 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { CONTACT_KEY } from "./apiKit";
-import { CliError } from "./errors";
+import { CONTACT_KEY, namedByThem } from "./apiKit";
+import { connectDaemon, type DaemonAddress, type DaemonClient } from "./client";
+import { CliError, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
+import { jsonOut } from "./jsonOut";
 import { turnRef } from "./turnRefs";
 
 /**
@@ -25,6 +27,21 @@ export interface ListenOptions {
   allow?: Allowlist;
   /** `--turns`: only agent turns, as `agent.turn` events. */
   turns?: boolean;
+  /** `--translate`: the event with its received message's `translation` (translate.ts), before a turn is made of it. */
+  translate?: (event: GhostlyEvent) => Promise<GhostlyEvent>;
+  /** The first wait before a webhook is tried again (500 ms), doubled each time up to a minute. */
+  retryMs?: number;
+  /**
+   * The cursor could not be written (a full disk): the listener stops. Run on, each event was said on stderr and the
+   * cursor stayed where it was, so a restart handed every event since then again (agents#1710). Without it, said on
+   * stderr per event as before.
+   */
+  cursorFailed?: (error: unknown) => void;
+}
+
+/** The cursor's own write failed, not the event's handling. */
+class CursorError extends Error {
+  constructor(readonly error: unknown) { super(error instanceof Error ? error.message : String(error)); }
 }
 
 /**
@@ -55,14 +72,17 @@ export class Allowlist {
 
 /**
  * `--from` and `--group` as ids, resolved once at start: a contact key as that key (whatever any chat is named), else a
- * chat by id, prefix or name (`findChat`); a group by id, prefix or name. A name that later changes (or a contact who
- * renames themselves) moves nothing.
+ * chat by its id or a label this side gave it, as `call auto on --from` (`findOwnNamedChat`): a prefix of its id or the
+ * name its contact gave itself is refused, since another contact could call itself that; a group by id, prefix or name.
+ * A name that later changes (or a contact who renames themselves) moves nothing.
  */
 export async function allowlist(from: readonly string[], groups: readonly string[], call: (method: string, params: Record<string, unknown>) => Promise<unknown>, peerOf: (chat: string) => Promise<string | null>): Promise<Allowlist> {
   const chats = new Set<string>(), keys = new Set<string>(), groupIds = new Set<string>();
   for (const ref of from) {
-    if (CONTACT_KEY.test(ref)) keys.add(ref);
-    else chats.add(((await call("chat.get", { chat: ref })) as { id: string }).id);
+    if (CONTACT_KEY.test(ref)) { keys.add(ref); continue; }
+    const chat = (await call("chat.get", { chat: ref })) as { id: string; label?: string | null; peerName?: string | null; peer?: string };
+    if (chat.id !== ref && chat.label?.toLowerCase() !== ref.toLowerCase()) throw namedByThem(ref, { chat: chat.id, name: chat.peerName ?? null, contact: chat.peer });
+    chats.add(chat.id);
   }
   for (const ref of groups) groupIds.add(((await call("group.get", { group: ref })) as { id: string }).id);
   return new Allowlist(chats, keys, groupIds, peerOf);
@@ -89,10 +109,11 @@ export interface AgentTurn extends GhostlyEvent {
    * matched it: the question's id, the button's id and its label, all this profile's own words.
    */
   press?: { messageId: string; button: string; label: string; inferred?: true };
-  untrusted: { text: string; name: string | null; messageId: string; replyTo?: { id: string; snippet: string }; file?: { id: string; name: string; size: number; mime: string; voice: boolean } };
+  /** `translation`: `listen --translate`'s, made of the sender's text, so theirs as much. */
+  untrusted: { text: string; name: string | null; messageId: string; replyTo?: { id: string; snippet: string }; file?: { id: string; name: string; size: number; mime: string; voice: boolean }; translation?: { from: string; text: string } };
 }
 
-interface TurnMessage { id: string; text: string; timestamp: number; nick: string | null; member?: string; mentioned?: boolean; replyTo?: { id: string; snippet: string }; press?: AgentTurn["press"]; file?: { id: string; name: string; size: number; mime: string; voice?: unknown } }
+interface TurnMessage { id: string; text: string; timestamp: number; nick: string | null; member?: string; mentioned?: boolean; replyTo?: { id: string; snippet: string }; press?: AgentTurn["press"]; file?: { id: string; name: string; size: number; mime: string; voice?: unknown }; translation?: { from: string; text: string } }
 
 /** The turn an event starts, or null: only a contact's message, and a group message that mentions this profile. */
 export function toTurn(event: GhostlyEvent): AgentTurn | null {
@@ -116,6 +137,7 @@ function turn(event: GhostlyEvent, source: AgentTurn["source"], where: Pick<Agen
       text: message.text, name: message.nick ?? null, messageId: message.id,
       ...(message.replyTo ? { replyTo: { id: message.replyTo.id, snippet: message.replyTo.snippet } } : {}),
       ...(file ? { file: { id: file.id, name: file.name, size: file.size, mime: file.mime, voice: !!file.voice } } : {}),
+      ...(message.translation ? { translation: { from: message.translation.from, text: message.translation.text } } : {}),
     },
   };
 }
@@ -126,13 +148,26 @@ export function checkWebhook(url: string): URL {
   try { parsed = new URL(url); } catch { throw new CliError("usage", `Not a URL: ${url}`); }
   if (!["http:", "https:"].includes(parsed.protocol)) throw new CliError("usage", "The webhook must be http:// or https://");
   if (!["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname)) throw new CliError("usage", "The webhook must be on this machine (127.0.0.1, localhost or [::1])");
+  // fetch refuses a URL with credentials: every event was held as "not answering" for good, the password on stderr.
+  if (parsed.username || parsed.password) throw new CliError("usage", "The webhook URL takes no user or password: put the bridge's token in its path or query");
   return parsed;
 }
 
+/**
+ * The event number a cursor file holds, or undefined when there is no file (a first start: live events). A file that is
+ * there and holds no whole number (empty, half-written, edited by hand) is refused, naming the file and what it holds:
+ * taken as no cursor, the listener started at the journal's end and skipped every event since the last one handled,
+ * without a word, and its next write replaced the file.
+ */
 export function readCursor(path: string | undefined): number | undefined {
   if (!path || !existsSync(path)) return undefined;
-  const value = Number(readFileSync(path, "utf8").trim());
-  return Number.isInteger(value) && value >= 0 ? value : undefined;
+  let text: string;
+  try { text = readFileSync(path, "utf8"); } catch (error) { throw localFileError(error, path) ?? error; }
+  const trimmed = text.trim();
+  const value = trimmed === "" ? NaN : Number(trimmed);
+  if (Number.isSafeInteger(value) && value >= 0 && /^\d+$/.test(trimmed)) return value;
+  const shown = trimmed === "" ? "nothing" : JSON.stringify(trimmed.length > 32 ? `${trimmed.slice(0, 32)}…` : trimmed);
+  throw new CliError("bad_request", `${path} holds no event number (${shown}): fix or remove it, or give --since`);
 }
 
 /**
@@ -229,16 +264,39 @@ function runExec(command: string, event: GhostlyEvent): Promise<number> {
   });
 }
 
-async function post(url: URL, event: GhostlyEvent): Promise<boolean> {
-  for (let attempt = 0; attempt < 3; attempt++) {
+/** The longest wait between two tries of a webhook that is not answering. */
+const RETRY_MAX_MS = 60_000;
+
+/**
+ * Posts one event; resolves true once the bridge took it, or the status it refused it with (a 4xx or a redirect, three times).
+ * A bridge that is not there (refused connection, timeout, 5xx, 408, 429) has not handled the event: it is tried again,
+ * waiting up to a minute between tries, for as long as it takes, so the cursor never moves past it. Before, three tries
+ * in 3.5 s and the cursor moved on: a bridge restarting for longer lost every event of the time it was down, for good.
+ */
+async function post(url: URL, event: GhostlyEvent, retryMs: number): Promise<true | number> {
+  let wait = retryMs, holding = false;
+  for (let attempt = 0; ; attempt++) {
+    let down = true, status = 0;
     try {
-      // A redirect is not followed: it would post the event to wherever it points, off this machine too.
+      // A redirect is not followed: it would post the event to wherever it points, off this machine too. stderr names the
+      // bridge by its origin only: its token is in the path or query (no user:password@, `checkWebhook`).
       const response = await fetch(url, { method: "POST", redirect: "manual", headers: { "content-type": "application/json", "x-ghostly-event": event.type, "x-ghostly-seq": String(event.seq) }, body: JSON.stringify(event), signal: AbortSignal.timeout(10_000) });
-      if (response.ok) return true;
-    } catch { /* retried */ }
-    await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
+      void response.body?.cancel().catch(() => {});
+      if (response.ok) {
+        if (holding) process.stderr.write(`ghostly: the webhook at ${url.origin} answers again: event ${event.seq} taken\n`);
+        return true;
+      }
+      status = response.status;
+      down = status >= 500 || status === 408 || status === 429;
+    } catch { /* not there: tried again */ }
+    if (!down && attempt >= 2) return status;
+    if (down && attempt >= 2 && !holding) {
+      holding = true;
+      process.stderr.write(`ghostly: the webhook at ${url.origin} is not answering: holding event ${event.seq} (${event.type}) until it does\n`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, wait));
+    wait = Math.min(wait * 2, RETRY_MAX_MS);
   }
-  return false;
 }
 
 /** Events given to a handler and not handled yet: what `listen` holds in memory. */
@@ -258,34 +316,69 @@ export function eventHandler(options: ListenOptions): EventHandler {
   const webhook = options.webhook ? checkWebhook(options.webhook) : null;
   let chain = Promise.resolve();
   let behind = 0;
+  let stopped = false;
+  /** The last event the cursor says, and the last one `--type` dropped while others were still being handled. */
+  let kept = -1, dropped = -1;
+  const keep = (seq: number) => {
+    if (!options.cursor) return;
+    try { writeCursor(options.cursor, seq); } catch (error) { throw new CursorError(error); }
+    kept = Math.max(kept, seq);
+  };
+  /** The cursor past events dropped meanwhile, once nothing before them is left to handle. */
+  const keepDropped = () => {
+    if (behind > 0 || dropped <= kept) return;
+    try { keep(dropped); } catch (failed) {
+      if (!(failed instanceof CursorError) || !options.cursorFailed) return;
+      stopped = true;
+      options.cursorFailed(failed.error);
+    }
+  };
   const handle = (event: GhostlyEvent) => {
     const seq = event.seq, type = event.type;
+    if (stopped) return;
+    // A type it was not asked for is dropped as it comes: not held behind a webhook or an --exec still at work, not
+    // counted toward MAX_BEHIND, not kept. An app's frames at 48 a second, each 32 KiB, filled the bound in 21 s behind
+    // a bridge that was down, ~32 MiB held to be dropped, and the feed paused with the one wanted event pending
+    // (agents#1597). The cursor passes it once the events before it are handled.
+    if (!matches(event, options.types)) { dropped = Math.max(dropped, seq); keepDropped(); return; }
     behind++;
     chain = chain.then(async () => {
-      const skip = () => { if (options.cursor) writeCursor(options.cursor, event.seq); };
+      if (stopped) return;
+      const skip = () => keep(event.seq);
       if (!matches(event, options.types)) return skip();
       if (options.allow && !(await options.allow.allows(event))) return skip();
+      if (options.translate) event = await options.translate(event);
       if (options.turns) {
         const next = toTurn(event);
         if (!next) return skip();
         event = next;
       }
-      const full = options.print && options.write(JSON.stringify(event)) === false;
+      const full = options.print && options.write(jsonOut(event)) === false;
       if (options.exec) {
         const code = await runExec(options.exec, event);
         if (code !== 0) process.stderr.write(`ghostly: --exec exited ${code} on event ${event.seq} (${event.type})\n`);
       }
-      if (webhook && !(await post(webhook, event))) process.stderr.write(`ghostly: the webhook did not take event ${event.seq} (${event.type})\n`);
+      // A refusal passes the event for good: said with what the bridge answered, so a wrong path (404) or a missing
+      // token (401) is seen in the log, not only as messages that never came.
+      const answered = webhook ? await post(webhook, event, options.retryMs ?? 500) : true;
+      if (webhook && answered !== true) process.stderr.write(`ghostly: the webhook at ${webhook.origin} answered ${answered}: event ${event.seq} (${event.type}) passed, not taken (a 4xx or a redirect is not tried again)\n`);
       // An output whose reader stopped holds the next event here, not one more line in its buffer per event.
       if (full) await options.drained?.();
-      // A failed handler still moves the cursor: one poisonous event must not stop the stream. The failure is on stderr.
-      if (options.cursor) writeCursor(options.cursor, event.seq);
+      // A failed hook (an --exec exiting non-zero, an event the webhook refused) still moves the cursor: one poisonous
+      // event must not stop the stream. The failure is on stderr. A webhook not answering never gets here (`post`).
+      keep(event.seq);
     }).catch((error: unknown) => {
       try {
-        process.stderr.write(`ghostly: event ${seq} (${type}) failed: ${error instanceof Error ? error.message : String(error)}\n`);
-        if (options.cursor) writeCursor(options.cursor, seq);
-      } catch { /* the next event moves the cursor */ }
-    }).finally(() => { behind--; });
+        if (!(error instanceof CursorError)) {
+          process.stderr.write(`ghostly: event ${seq} (${type}) failed: ${error instanceof Error ? error.message : String(error)}\n`);
+          keep(seq);
+        } else throw error;
+      } catch (failed) {
+        if (!(failed instanceof CursorError) || !options.cursorFailed) return; // the next event moves the cursor
+        stopped = true;
+        options.cursorFailed(failed.error);
+      }
+    }).finally(() => { behind--; keepDropped(); });
   };
   return Object.assign(handle, { behind: () => behind, idle: () => chain });
 }
@@ -295,7 +388,7 @@ export const MAX_BEHIND = 1_000;
 
 /**
  * Bounds what a listener holds when its output or hooks fall behind (a stdout reader that hung, a slow --exec): past
- * `MAX_BEHIND` events not handled it stops taking events (`pause`: the subscription closes) and drops what still
+ * `MAX_BEHIND` events not handled it stops taking events (`pause`: the subscription stops reading) and drops what still
  * arrives; once every event taken is handled, `resume` opens it again after the last one taken. The daemon's journal
  * keeps what came meanwhile (and says `events.gap` past what it keeps), so a consumer that hangs for a day does not
  * grow the listener by the day's traffic.
@@ -303,7 +396,7 @@ export const MAX_BEHIND = 1_000;
 export class Feed {
   private held = false;
 
-  /** `since`: the last event taken, where a new subscription starts. */
+  /** `since`: the last event taken (or, before one, the daemon's last seq when it subscribed), where a new subscription starts. */
   constructor(private readonly handle: EventHandler, public since: number | undefined, private readonly pause: () => void, private readonly resume: (since: number | undefined) => void) {}
 
   get paused(): boolean { return this.held; }
@@ -317,4 +410,68 @@ export class Feed {
     this.pause();
     void this.handle.idle().then(() => { this.held = false; this.resume(this.since); });
   };
+}
+
+/** How long a feed that fell behind keeps its connection to the daemon open, unread, while its hooks take no event (`followDaemon`). */
+export const PAUSE_HOLD_MS = 60_000;
+
+/**
+ * Follows a daemon's events into `handle` until `close`; a daemon that restarts is picked up again after the last event
+ * seen. A feed that falls behind stops reading the connection, not closes it: what the daemon sent meanwhile (a replay
+ * written whole) is read on resume, so a catch-up reads the journal once, not once per pause. A connection the daemon
+ * ended meanwhile (past what it lets a client leave unread) is opened again after the last event taken.
+ * A feed whose hooks take no event for `holdMs` (`PAUSE_HOLD_MS`: a hook that hung) ends the connection, as a full one
+ * does, so the daemon does not keep a replay and what came live for it while it hangs; resume opens it again after the
+ * last event taken.
+ * `subscribed`: the first subscription's answer (a journal that cannot be replayed rejects it).
+ * `profile`: a daemon gone longer than a restart takes (`daemon stop`) is said once on stderr, and so is the one that
+ * answers again: the listen waits for it, it does not go silent.
+ */
+export function followDaemon(address: DaemonAddress, client: DaemonClient, handle: EventHandler, since: number | undefined, holdMs = PAUSE_HOLD_MS, profile?: string): { subscribed: Promise<unknown>; close(): void } {
+  let current: DaemonClient | null = client, missedSince = 0, missing = false;
+  let holding: ReturnType<typeof setTimeout> | undefined;
+  const reconnect = (wait: number) => void (async () => {
+    while (!current && !feed.paused) {
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      wait = 1000;
+      if (current || feed.paused) return;
+      const next = await connectDaemon(address, 1000);
+      if (next) {
+        missedSince = 0;
+        if (missing) { missing = false; process.stderr.write(`ghostly: the daemon of profile ${profile} answers again\n`); }
+        current = next;
+        await follow(next).catch(() => { if (current === next) current = null; });
+      } else if (profile === undefined) continue;
+      else if (!missedSince) missedSince = Date.now();
+      else if (!missing && Date.now() - missedSince >= 3000) {
+        missing = true;
+        process.stderr.write(`ghostly: the daemon of profile ${profile} stopped; waiting for it to start again (ghostly daemon --detach)\n`);
+      }
+    }
+  })();
+  // A hook still taking events (a slow --exec) keeps the connection; one that took none for `holdMs` lets it go.
+  const hold = (behind: number) => {
+    holding = setTimeout(() => {
+      if (handle.behind() < behind) return hold(handle.behind());
+      const c = current; current = null; c?.destroy();
+    }, holdMs);
+  };
+  const feed = new Feed(handle, since, () => {
+    current?.pause();
+    hold(handle.behind());
+  }, () => {
+    clearTimeout(holding);
+    if (current) current.resume(); else reconnect(0);
+  });
+  // A feed that took no event yet goes on after the last seq the daemon had when it subscribed: one that restarts
+  // otherwise subscribes it from its own now, past what it journaled before the reconnect (its daemon.started).
+  const follow = (c: DaemonClient) => c.subscribe(feed.since, feed.take, () => {
+    if (current !== c) return;
+    current = null;
+    reconnect(1000);
+  }).then((answer) => {
+    if (feed.since === undefined && typeof answer?.lastSeq === "number") feed.since = answer.lastSeq;
+    return answer;
+  });
+  return { subscribed: follow(client), close: () => { clearTimeout(holding); current?.close(); } };
 }

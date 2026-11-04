@@ -38,7 +38,7 @@ export function SenderAvatar({ author, onOpen }: { author: MessageAuthor; onOpen
   // A button out of the tab order (and out of the long press and the swipe, which leave buttons alone).
   return (
     <button type="button" tabIndex={-1} aria-hidden="true" data-testid="sender-avatar" data-key={author.key} onClick={onOpen}
-      // The row's own double click opens the message's details: a tap here is only who wrote it.
+      // The row's own Ctrl+double click opens the message's details: a tap here is only who wrote it.
       onDoubleClick={onOpen && (e => e.stopPropagation())}
       className={`sender-avatar relative flex items-center justify-center overflow-hidden rounded-full bg-surface-hover p-0 text-xs font-semibold select-none ${onOpen ? "cursor-pointer" : ""}`}>
       {author.picture

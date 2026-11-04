@@ -111,8 +111,11 @@ export class ArkadeAdapter implements PaymentAdapter<ArkPrepared> {
   }); }
   /** On-chain deposits land here; the SDK's settlement moves them into Ark once confirmed. */
   boardingAddress() { return this.wallet.getBoardingAddress(); }
-  /** Sats sent on-chain to the boarding address that are not in Ark yet. */
-  async incoming() { return (await this.wallet.getBalance()).boarding.total; }
+  /**
+   * The balance and the sats sent on-chain to the boarding address that are not in Ark yet, from one read: each
+   * `getBalance` asks the explorer and the indexer.
+   */
+  async balances() { const {available,boarding}=await this.wallet.getBalance(); return {balance:available,incoming:boarding.total}; }
   async dispose() { await this.wallet.dispose(); }
   private async prepareOperation(target:PaymentTarget,amount:number,feeCap:number):Promise<{fee:number;prepared:ArkPrepared}> {
     validatePaymentTarget(target); assertWholeSats(amount); this.checkTarget(target);

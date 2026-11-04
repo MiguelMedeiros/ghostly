@@ -11,9 +11,11 @@ function QuoteBody({ name, snippet, mine, member, note, italic }: { name?: strin
   const memberText = useMemberText();
   // A group member's original: their colour, on the bar and the name (lib/memberColors.ts).
   const colour = member && !mine ? memberText(member) : undefined;
+  // The name is someone's own words: laid out by its own letters, so a Latin one cut in Arabic keeps its start, and as
+  // wide as it is, so a short one stays at the line's start.
   return (
     <span className={`flex min-w-0 flex-col border-s-4 ps-2 pe-1 py-1 ${mine ? "border-accent" : colour ? `border-current ${colour}` : "border-link"}`}>
-      {name && <span data-testid="reply-quote-name" data-key={colour && member} className={`truncate text-[12.8px] font-medium leading-[18px] ${mine ? "text-accent-hover" : colour ?? "text-link"}`}>{name}</span>}
+      {name && <span data-testid="reply-quote-name" data-key={colour && member} dir="auto" className={`max-w-full self-start truncate text-[12.8px] font-medium leading-[18px] ${mine ? "text-accent-hover" : colour ?? "text-link"}`}>{name}</span>}
       <span data-testid="reply-quote-snippet" dir="auto" className={`truncate text-[13px] leading-[18px] text-text-primary/70 ${italic ? "italic" : ""}`}>{snippet}</span>
       {note && <span data-testid="reply-quote-note" className="truncate text-[11px] leading-[15px] text-text-muted">{note}</span>}
     </span>
@@ -32,14 +34,16 @@ export function ReplyQuote({ quote }: { quote: QuoteView }) {
     const timer = setTimeout(() => setNotHere(false), NOT_HERE_MS);
     return () => clearTimeout(timer);
   }, [notHere]);
-  const snippet = quote.state === "deleted" ? t("chat.reply.deleted") : quote.state === "missing" ? t("chat.reply.unavailable") : quote.snippet;
+  const snippet = quote.state === "deleted" ? t("chat.reply.deleted") : quote.state === "missing" ? t("chat.reply.unavailable")
+    : quote.state === "loading" ? quote.snippet || "…" : quote.snippet;
   const note = notHere ? t("chat.reply.notHere") : quote.state === "unverified" ? t("chat.reply.unverified") : undefined;
   return (
     <button type="button" data-testid="message-quote" data-state={quote.state} data-target={quote.targetId}
       onClick={(e) => {
-        // The bubble's own double click opens its details: a tap on the quote is only the jump.
+        // The bubble's own Ctrl+double click opens its details: a tap on the quote is only the jump.
         e.stopPropagation();
-        if (!jumpToQuoted(quote.targetId)) setNotHere(true);
+        // Not loaded yet is not "not in this chat": the quote finds it once the older messages are in.
+        if (!jumpToQuoted(quote.targetId) && quote.state !== "loading") setNotHere(true);
       }}
       onDoubleClick={(e) => e.stopPropagation()}
       title={quote.state === "found" ? t("chat.reply.jump") : undefined}

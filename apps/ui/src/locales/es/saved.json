@@ -1,0 +1,12 @@
+{
+  "empty": "No hay mensajes guardados",
+  "emptyHint": "Guarda un mensaje desde su menú ⋮ para encontrarlo aquí. Los mensajes guardados se quedan en este dispositivo.",
+  "noText": "Mensaje",
+  "rowLabel": "Mensajes guardados, {{count}}",
+  "rowName": "{{chat}}, {{time}}: {{text}}",
+  "rowNameBy": "{{chat}}, {{author}}, {{time}}: {{text}}",
+  "save": "Guardar",
+  "title": "Mensajes guardados",
+  "unsave": "Quitar de guardados",
+  "you": "Tú"
+}

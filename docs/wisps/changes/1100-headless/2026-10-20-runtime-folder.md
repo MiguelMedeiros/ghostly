@@ -1,0 +1,1 @@
+When the profile's path is too long for a socket, the daemon's socket and a call's audio socket go in the user's runtime folder (`$XDG_RUNTIME_DIR`, else the temp folder, when it is the user's alone), which no other user can write in, rather than in a `/tmp` folder whose name follows from the profile's path alone; without one, the `/tmp` folder's name carries the user's id.
