@@ -146,6 +146,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Connect to an updated peer first", `${BROWSER}/platform/services.ts`],
   ["That recording cannot be sent as a voice message", `${BROWSER}/platform/services.ts`],
   ["This picture cannot be sent: Ghostly could not remove the details saved in it, like where it was taken", `${CORE}/pictureMetadata.ts`],
+  ["This video cannot be sent: Ghostly could not remove the details saved in it, like where it was recorded", `${CORE}/videoMetadata.ts`],
   ["This file cannot be retried", `${BROWSER}/platform/services.ts`],
   ["This file is no longer here", `${BROWSER}/platform/services.ts`],
   // A large file whose copy into this device failed before it was sent: nothing stored, the file is picked again.

@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { openAsBlob } from "node:fs";
 import { access, constants, copyFile, link, open, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
-import { GROUP_FILE_LIMITS, LIMITS, NO_PICTURE_METADATA, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, claimedTime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, voiceDownloadName, withoutPictureMetadata, type VoiceMeta } from "@ghostly/core";
+import { GROUP_FILE_LIMITS, LIMITS, NO_PICTURE_METADATA, NO_VIDEO_METADATA, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, claimedTime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, voiceDownloadName, withoutPictureMetadata, withoutVideoMetadata, type VoiceMeta } from "@ghostly/core";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { removeStored, waitingGroupFile } from "@ghostly/browser/shared/storedFiles";
@@ -155,17 +155,17 @@ async function voiceOf(params: Params, path: string, mime: string, size: number)
 }
 
 /**
- * The file at `path` as it is sent, as the apps send it (platform/services.ts `sendable`): a picture without its metadata
- * (where it was taken, the device, the time), before its size is read and its digest computed. A picture whose metadata
- * cannot be removed is refused, never sent as it was. A voice note goes as it is.
+ * The file at `path` as it is sent, as the apps send it (platform/services.ts `sendable`): a picture or an MP4 or
+ * QuickTime video without its metadata (where it was taken or recorded, the device, the time), before its size is read
+ * and its digest computed. One whose metadata cannot be removed is refused, never sent as it was. A voice note goes as it is.
  */
 async function sendable(path: string, mime: string, voice: VoiceMeta | undefined): Promise<Blob> {
   const source = await openAsBlob(path, { type: mime });
   if (voice) return source;
   try {
-    return await withoutPictureMetadata(source, mime) ?? source;
+    return await withoutPictureMetadata(source, mime) ?? await withoutVideoMetadata(source, mime) ?? source;
   } catch (error) {
-    if (error instanceof Error && error.message === NO_PICTURE_METADATA) throw new CliError("refused", NO_PICTURE_METADATA);
+    if (error instanceof Error && (error.message === NO_PICTURE_METADATA || error.message === NO_VIDEO_METADATA)) throw new CliError("refused", error.message);
     throw error;
   }
 }

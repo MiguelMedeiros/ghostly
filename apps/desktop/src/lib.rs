@@ -496,6 +496,8 @@ fn page_started<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
     // The cookie jars of its Pubky approvals, which it can no longer close (`pubky_session::page_started`).
     pubky_session::page_started();
+    // Its cameras, microphone meters and calls (Linux): stopped, and its device watch no longer told.
+    native_call::page_started();
 }
 
 /// How long the page gets to say goodbye to its contacts before an exit it can be told about goes on.
