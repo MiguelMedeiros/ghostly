@@ -278,6 +278,50 @@ describe("updates", () => {
     expect(await bundleIds()).toEqual([]);
   });
 
+  it("an app uninstalled while Install of another version of it stores the files stays uninstalled", async () => {
+    const { store, v1 } = await installed();
+    const v2 = await bundle({ sequence: 2 });
+    net.put(PINNED_URL, v2.bytes);
+    await store.preview({ url: PINNED_URL });
+    // Install pressed (a link, a card in a chat); Uninstall (another tab, the Apps page) lands while it writes the files.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let writing!: () => void;
+    const started = new Promise<void>((resolve) => { writing = resolve; });
+    const engine = store as unknown as { writeBundle: (...args: unknown[]) => Promise<unknown> };
+    const write = engine.writeBundle.bind(store);
+    const spy = vi.spyOn(engine, "writeBundle").mockImplementation(async (...args: unknown[]) => { const kind = await write(...args); writing(); await held; return kind; });
+    const install = store.install({ digest: v2.digest, grant: ["chat"] });
+    await started;
+    await store.uninstall({ ref: v1.ref });
+    release();
+    await expect(install).rejects.toThrow(/^not-installed/);
+    spy.mockRestore();
+    expect(await store.list(), "not back on the new version, with its data gone").toEqual([]);
+    expect(await bundleIds()).toEqual([]);
+  });
+
+  it("an uninstall at any point of an Install of another version never brings the app back", async () => {
+    for (let offset = 0; offset < 40; offset++) {
+      await emptyProfile();
+      const { store, v1 } = await installed();
+      const v2 = await bundle({ sequence: 2 });
+      net.put(PINNED_URL, v2.bytes);
+      await store.preview({ url: PINNED_URL });
+      const install = store.install({ digest: v2.digest, grant: ["chat"] }).then(() => "ok", (e: Error) => e.message.split(":")[0]);
+      for (let i = 0; i < offset; i++) await new Promise((resolve) => setImmediate(resolve));
+      await store.uninstall({ ref: v1.ref }).catch(() => {});
+      const outcome = await install;
+      const left = await store.list();
+      // The install either finished before the uninstall (then removed with it) or stopped: never the app back, empty.
+      expect(left, `offset ${offset}: install ${outcome}`).toEqual([]);
+      if (outcome === "ok") continue;
+      // Stopped: the files it wrote go with it.
+      expect(outcome, `offset ${offset}`).toBe("not-installed");
+      expect(await bundleIds(), `offset ${offset}`).toEqual([]);
+    }
+  });
+
   it("an app uninstalled while an update that adds a permission downloads leaves no files behind", async () => {
     const { store, v1 } = await installed();
     const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"] });
