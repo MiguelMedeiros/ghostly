@@ -170,6 +170,7 @@ describe("hubs in a private group past 16 members", () => {
     const { world, id, admin, peers } = b;
     await world.until(() => onHubs(b) && allReach(b), 10 * 60_000, 1000);
     const gone = peers[9], goneKey = keyOf(b, gone);
+    await gone.groups.flush();
     const oldState = structuredClone((await gone.store.getGroups()).find(g => g.id === id)!.state!) as GroupState;
     await admin.groups.remove(id, goneKey);
     const others = peers.filter(p => p !== gone);
@@ -281,7 +282,8 @@ describe("hubs in a private group past 16 members", () => {
     await hub.groups.leave(id);
     // On its way out it took itself out of the beacon.
     const epoch = view(b, peers[9]).epoch!;
-    const state = (await peers[9].store.getGroups()).find(g => g.id === id)!.state!;
+    await peers[9].groups.flush();
+    const state =(await peers[9].store.getGroups()).find(g => g.id === id)!.state!;
     const keys = beaconKeys(meshRendezvous(fromBase64Url(state.secrets[epoch]), id, epoch), id);
     expect(readBeacon(keys, world.pkarr.get(keys.identity.pubKeyZ32) ?? []).some(h => h.key === hubKey)).toBe(false);
     await world.run(1_000);

@@ -170,6 +170,17 @@ describe('OIDC ID token verification', () => {
     await expect(t.verify(token, { now: later })).rejects.toThrow(/expired/);
   });
 
+  it('accepts a proof’s sign-in on a clock up to the proof engine’s skew slow, not more', async () => {
+    const t = await setup();
+    const token = await signToken(t.key, t.claims({ iat: NOW, exp: NOW + 3600 }));
+    const at = (now: number) => verifyIdToken(token, { provider: google, nonce: t.nonce, now, jwks: t.jwks, fetch: t.fetch, issuedWithin: [now - 300, now + 900] });
+    await expect(at(NOW - 120)).resolves.toMatchObject({ subject: 'account-123' });
+    await expect(at(NOW - 300)).resolves.toMatchObject({ subject: 'account-123' });
+    await expect(at(NOW - 301)).rejects.toThrow(/not valid yet/);
+    // An ordinary sign-in keeps the tighter tolerance.
+    await expect(t.verify(token, { now: NOW - 120 })).rejects.toThrow(/not valid yet/);
+  });
+
   it('checks Microsoft’s issuer against the tenant the token names', async () => {
     const t = await setup(microsoft);
     await expect(t.verify(await signToken(t.key, t.claims()))).resolves.toMatchObject({ provider: 'microsoft', tenant: TENANT, issuer: `https://login.microsoftonline.com/${TENANT}/v2.0` });

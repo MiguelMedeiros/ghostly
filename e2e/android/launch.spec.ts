@@ -13,9 +13,9 @@ test("the app starts with no data: the UI renders, a profile with no name step, 
   await expect(page.getByTestId("name-step")).toHaveCount(0);
   const env = await page.evaluate(() => ({ android: /Android/.test(navigator.userAgent), tauri: "__TAURI_INTERNALS__" in window, secure: isSecureContext }));
   expect(env).toEqual({ android: true, tauri: true, secure: true });
-  // Only the Desktop host (apps/ui/src/desktop/host.ts) describes Pkarr this way: Rust reaches the DHT itself.
+  // Only the Desktop host (apps/ui/src/desktop/host.ts) reaches the DHT directly: Rust reaches the DHT itself.
   await page.evaluate(() => { location.hash = "#/settings/network"; });
-  await expect(page.getByTestId("network-protocol")).toContainText("Direct UDP");
+  await expect(page.getByTestId("network-protocol")).toHaveAttribute("data-kind", "direct");
   // The relay the fixture saved is the one the engine holds now.
   await expect(page.getByTestId("network-relays")).toHaveValue(/^http:\/\/127\.0\.0\.1:\d+$/);
 });

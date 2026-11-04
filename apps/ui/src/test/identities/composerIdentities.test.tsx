@@ -1,4 +1,5 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
+import { Profiler } from "react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import type { LinkView } from "@ghostly/browser/shared/types";
@@ -380,6 +381,22 @@ describe("MessageInput: the + menu's Identity row", () => {
     expect(screen.getByTestId("composer-identities-button")).toHaveTextContent(/^Identity$/);
   });
 
+  it("is not drawn again on an engine state that changes nothing it shows, and its count follows a new share", async () => {
+    const shared = (n: number) => ({ links: [paired({ identities: identitiesView({ shared: Array.from({ length: n }, (_, i) => sharedView({ id: `p${i}` })) }) })] });
+    let draws = 0;
+    const { user, engine } = renderApp(<Profiler id="composer" onRender={() => { draws++; }}>
+      <MessageInput onSend={async () => null} identities={{ peerKey: "peer", contact: "Alice" }} />
+    </Profiler>);
+    act(() => engine.update(shared(1)));
+    const before = draws;
+    // The engine sends its whole state anew on every change, up to 20 a second while a file moves.
+    for (let i = 0; i < 5; i++) act(() => engine.setState({ ...structuredClone(engine.state), transfers: { [`file-${i}`]: { state: "transferring", transferred: i * 1000, size: 10_000 } } } as typeof engine.state));
+    expect(draws - before).toBe(0);
+    act(() => engine.update(shared(2)));
+    await user.click(plus());
+    expect(screen.getByTestId("composer-identities-button")).toHaveAttribute("data-count", "2");
+  });
+
   describe("the Ghostly card", () => {
     const KEY = "yzk3gq8qpjb1g4mzr3ff3kr1j4c1b7dxy8dd3mkwqc9k7p3e1mio";
     const withKey = (patch: Partial<LinkView> = {}) => paired({ myPubKeyZ32: KEY, ...patch });
@@ -404,6 +421,25 @@ describe("MessageInput: the + menu's Identity row", () => {
       expect(use()).toBeEnabled();
     });
 
+    it("says a refused copy of the key, and never Copied, with the key left to select", async () => {
+      const { user } = open({ settings: { nick: "Ghost" }, links: [withKey()], identityProofs: [proofView({ id: "a" })] });
+      await user.click(ghostly());
+      await waitFor(() => expect(screen.getByTestId("composer-identity-copy-key")).toHaveFocus());
+      const writeText = vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new DOMException("Denied", "NotAllowedError"));
+      const exec = vi.fn(() => false);
+      Object.defineProperty(document, "execCommand", { value: exec, configurable: true });
+      try {
+        await user.click(screen.getByTestId("composer-identity-copy-key"));
+        expect(await screen.findByTestId("composer-identity-copy-error")).toHaveTextContent("Could not copy. Select the text above and copy it yourself.");
+        expect(screen.getByTestId("composer-identity-copy-error")).toHaveAttribute("role", "alert");
+        expect(screen.getByTestId("composer-identity-copy-key")).toHaveTextContent("Copy key");
+        expect(within(back()).getByTestId("composer-identity-key")).toHaveTextContent(KEY);
+      } finally {
+        writeText.mockRestore();
+        delete (document as { execCommand?: unknown }).execCommand;
+      }
+    });
+
     it("is never blocked, even before the contact's app is known", () => {
       open({ links: [linkView({ myPubKeyZ32: KEY })], identityProofs: [] });
       expect(ghostly()).not.toHaveAttribute("aria-disabled");
@@ -419,6 +455,7 @@ describe("MessageInput: the + menu's Identity row", () => {
       expect(back()).toHaveTextContent("What Alice sees");
       expect(within(back()).getByTestId("composer-identity-sees")).toHaveTextContent("Ghostly · Ghost");
       expect(within(back()).getByTestId("composer-identity-key")).toHaveTextContent(KEY);
+      expect(within(back()).getByTestId("composer-identity-key")).toHaveAttribute("dir", "ltr");
       expect(status()).toBe("Alice sees only this identity");
       // Nothing to take back: no Share only this.
       expect(screen.queryByTestId("composer-identity-share")).not.toBeInTheDocument();

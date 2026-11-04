@@ -10,3 +10,13 @@ export function fillNodes(text: string, nodes: Record<string, ReactNode>): React
   const parts = text.split(/\{\{(\w+)\}\}/);
   return parts.map((part, i) => i % 2 === 0 ? part : <Fragment key={i}>{part in nodes ? nodes[part] : `{{${part}}}`}</Fragment>);
 }
+
+/**
+ * A translated sentence with names in it, each its own `<bdi>`: `fillNames(t("devices.remove.title"), { device })`. A
+ * name the person gave (a device's, Latin in an Arabic sentence) keeps its own direction, so the punctuation at its edge
+ * stays on its side ("Pixel-", "MacBook (Pro)", "2nd phone"), and the sentence's text is the same as without. No
+ * text (a notice with no next line) is none.
+ */
+export function fillNames(text: string | undefined, names: Record<string, string>): ReactNode {
+  return text === undefined ? undefined : fillNodes(text, Object.fromEntries(Object.entries(names).map(([key, name]) => [key, <bdi>{name}</bdi>])));
+}

@@ -50,17 +50,56 @@ export const FILE_LIMITS = {
   /** How much longer than the shortest round trip seen a confirm may take, by the queue the files keep on the path. */
   queueMs: 50,
   /**
+   * On a long path, the queue a confirm may show is this share of the shortest round trip, when that is more than `queueMs`.
+   * A relay's round trip wavers by more than 50 ms on its own: read as the files' queue, it held their window at its
+   * floor, 64 KiB per round trip (about 0.1 MiB/s at 600 ms), however fast the path.
+   */
+  queueOfBase: 0.5,
+  /**
    * A shortest round trip no confirm has come close to for this long is measured again, with the queue drained
    * (`ChatFiles.paced`). A path that got longer mid-session (another route, a relay) read as a queue for good before, and
    * held the window at its floor: 0.5 MiB/s where the same path from the start gave 8 MiB/s.
    */
   baseProbeMs: 10_000,
+  /**
+   * The window is sized by rate as well as by delay (`FilePace.tried`): a window up to this much larger is tried, and
+   * kept when it made no queue. On a path whose round trip wavers on its own (a radio's scheduling: 5G, Wi-Fi), the
+   * delay rule reads the waver as the files' queue and held the window at its floor, 0.25 MiB/s on a 50 Mbit/s link,
+   * where a larger window carried ten times as much with no longer round trip.
+   */
+  trialGain: 2,
+  /**
+   * A tried window is kept when its round trip grew by less than this share of the queue it would make on a full link
+   * (what it adds, at the rate the path carried). A full link's grows by all of it; a path that only wavers, by none.
+   */
+  trialPaid: 0.5,
+  /**
+   * What a trial may add, as queue on a full link at the rate the path carries: a chunk at least, or no trial. A 1 Mbit/s
+   * uplink never tries (a chunk is 131 ms there), so its texts keep the delay rule's queue.
+   */
+  trialQueueMs: 100,
+  /**
+   * Trials go only where the round trip wavers: its confirms' round trips within a round trip spread by this much
+   * (their standard deviation). A full link's own queue keeps them close (493-523 ms behind a relay on 5 Mbit/s); a
+   * radio's scheduling spreads them (150-450 ms on 5G). So a slow uplink's texts never wait behind a trial.
+   */
+  waverMs: 25,
+  /** Round trips between two trials that were not kept, at first (it doubles with each, up to 8 times). */
+  trialEvery: 4,
+  /** A round trip whose rate counts lasts until this many windows were confirmed: one is a coin flip on a wavering path. */
+  trialWindows: 4,
   /** A receiver asks its person before taking a file larger than this. */
   askAboveBytes: 25 * 1024 * 1024,
   /** Files taken without asking, per contact, while stored. Past it, every file is asked about. */
   autoAcceptBytesPerPeer: 500 * 1024 * 1024,
   /** Offers from one contact waiting for an answer here. */
   maxWaitingOffers: 16,
+  /**
+   * Files from one contact not finished here, whatever their state (asked about, taken and waiting their turn, paused,
+   * arriving). Only bytes were counted before: offers of 0 bytes were each taken, and 2,500 of them were 2,500
+   * messages and records waiting for good.
+   */
+  maxUnfinishedIncoming: 256,
   /** Files one contact sends at once; accepted ones beyond wait their turn. */
   maxActiveIncoming: 3,
   /** An offer nobody answered ends after this long. */
@@ -77,8 +116,20 @@ export const FILE_LIMITS = {
   stallMs: 60_000,
   /** A receiver makes what it stored durable, and records the point to resume from, this often. */
   checkpointBytes: 8 * 1024 * 1024,
-  /** A receiver confirms at least this often while writing. */
+  /**
+   * A receiver confirms at least this often while writing, and the file's last bytes at once. Its writes are buffered
+   * and done at once, so confirming whenever they were all done too was confirming nearly every chunk: 6,400 confirms for
+   * 100 MiB, each a native call and a progress update on both sides. A host that batches them (`batchConfirms`) does not.
+   */
   ackEveryBytes: 128 * 1024,
+  /**
+   * Batched (`ChatFilesHost.batchConfirms`), bytes stored and not confirmed are confirmed this long after the first of
+   * them was stored, at most. What a sender has in flight may be no more than `ackEveryBytes` (a window at its floor, one
+   * chunk while the path is measured), and bytes waiting here for a confirm are bytes it cannot send: on a slow or
+   * wavering path a confirm comes about every this long, as fast as the window needs. A round trip it measures is up to
+   * this much longer, well inside the queue it allows (`queueMs`).
+   */
+  ackWaitMs: 10,
   /** A sender reads its file this much at a time. */
   readBytes: 1024 * 1024,
   /** The session refused a data frame (its send budget was full): the sender looks again after this long. */
@@ -146,6 +197,16 @@ const FINAL: ReadonlySet<TransferState> = new Set(["done", "failed", "declined",
 export const transferEnded = (record: FileTransferRecord): boolean => FINAL.has(record.state);
 
 /**
+ * Whether a file sent from here arrived whole (the receiver confirmed every byte, and may be checking it): too late
+ * for its person to cancel. The receiver's check comes before a `pf-abort` behind it, so it would keep the file while
+ * the sender said it was cancelled. Not once the receiver asks about it again (`asking`), nor paused here.
+ */
+export function sentWhole(record: FileTransferRecord): boolean {
+  if (record.direction !== "out" || transferEnded(record)) return false;
+  return record.state === "verifying" || (record.file.size > 0 && record.confirmed === record.file.size && record.state !== "asking" && record.state !== "paused");
+}
+
+/**
  * Whether an unfinished transfer is stuck, so its person is offered to push it: "Send again" (sending) or "Ask again"
  * (receiving). `movedAt` is when its bytes last moved, `restored` that it has not moved since the app started. What
  * waits for a person (an answer, a pause) is not stuck, and a failed one has its own "Retry".
@@ -199,6 +260,12 @@ export interface ChatFilesHost {
    * sending, stored when receiving); `progress` says only that moved, so keeping it can wait.
    */
   changed(record: FileTransferRecord, transferred: number, progress: boolean): void;
+  /**
+   * Resolves once what `changed` was given so far is kept, so a restart finds it. A receiver says a file is done
+   * (`pf-done`) only then: said before, a restart found it unfinished while its sender had it done, and asking for it
+   * again got no answer. Absent: `changed` keeps it at once.
+   */
+  kept?(): Promise<void>;
   /** Bytes a file may still take here, or null when the platform does not say. */
   room?(): Promise<number | null>;
   /**
@@ -214,6 +281,12 @@ export interface ChatFilesHost {
    */
   resend?(record: FileTransferRecord, sent: number): boolean;
   now?(): number;
+  /**
+   * Receiving, a confirm goes every `FILE_LIMITS.ackEveryBytes` stored, or `FILE_LIMITS.ackWaitMs` after the first
+   * bytes it would confirm, not whenever the writes are all done (nearly every chunk). Not for a group's edges: on a
+   * shared uplink an edge's window goes down to a chunk (`FileUplink.floor`), far less than a confirm's worth.
+   */
+  batchConfirms?: boolean;
   /**
    * The uplink this chat's files share with others that leave the device by it (`FileUplink`): a group's edges, each
    * a `ChatFiles` of its own, serving one file to several members at once. Absent: the uplink is this chat's alone.
@@ -277,6 +350,23 @@ class FilePace {
   private probe?: { since: number; window: number };
   /** A confirm has sized the window on this path. */
   private sized = false;
+  /** Bytes of the chat's files confirmed on this session so far. */
+  delivered = 0;
+  /**
+   * The round trip under way (`tried`): from `start` until a chunk sent since is confirmed, and `trialWindows` windows
+   * were. `delivered` then, the round trips of its confirms added up, and whether little was in flight meanwhile
+   * (`limited`: it says nothing of the window).
+   */
+  private round?: { start: number; delivered: number; rtts: number; squares: number; count: number; limited: boolean };
+  /** The last round trip's: what the path carried, bytes per ms, its confirms' mean round trip and their spread. */
+  private last = { rate: 0, rtt: 0, spread: 0 };
+  /** A window a trial showed the path takes with no queue: the delay rule does not shrink the window below it. */
+  private held = 0;
+  /** A larger window being tried, `from` the one before: it shows in its second round trip (the first confirms what went before). */
+  private trial?: { from: number; window: number; before: { rate: number; rtt: number; spread: number }; rounds: number };
+  /** Round trips until the next trial, and between two trials while they are not kept (doubles with each, up to a limit). */
+  private wait: number = FILE_LIMITS.trialEvery;
+  private spacing: number = FILE_LIMITS.trialEvery;
 
   /** Another path (a session of its own opened): what was learnt of the old one goes. */
   reset(): void {
@@ -285,6 +375,10 @@ class FilePace {
     this.baseAt = 0;
     this.probe = undefined;
     this.sized = false;
+    this.last = { rate: 0, rtt: 0, spread: 0 };
+    this.held = 0;
+    this.round = this.trial = undefined;
+    this.wait = this.spacing = FILE_LIMITS.trialEvery;
   }
 
   /** The shortest round trip seen on this path. */
@@ -299,12 +393,14 @@ class FilePace {
 
   /**
    * A confirm came for a chunk sent at `sentAt` with `flight` bytes in flight then: the window becomes what keeps the path
-   * busy with no more than `FILE_LIMITS.queueMs` of queue on it (delay-based, as LEDBAT). Throughput is about
+   * busy with no more than `FILE_LIMITS.queueMs` of queue on it, or half its round trip on a long path
+   * (`FILE_LIMITS.queueOfBase`) (delay-based, as LEDBAT). Throughput is about
    * flight / rtt, so flight × (base + queueMs) / rtt: it grows while confirms come about as fast as they can, and shrinks
    * when they slow down because the files queue on a slow uplink, ahead of everything else the sender says there.
    * The base is measured again once no confirm has come close to it for `FILE_LIMITS.baseProbeMs`: with one chunk in
    * flight, so the queue drains first and a slow link's own queue never passes for a longer path. `floor`: the least
-   * the window is, `minWindowBytes` or the chat's share of an uplink it shares (`FileUplink.floor`).
+   * the window is, `minWindowBytes` or the chat's share of an uplink it shares (`FileUplink.floor`). A round trip that
+   * wavers on its own reads as queue here: the window is sized by rate as well (`tried`).
    */
   paced(sentAt: number, flight: number, now: number, floor: number = FILE_LIMITS.minWindowBytes, lowest = Infinity): void {
     const rtt = Math.max(1, now - sentAt);
@@ -321,16 +417,67 @@ class FilePace {
     if (rtt - this.baseRtt < FILE_LIMITS.queueMs / 2) this.baseAt = now;
     this.baseRtt = Math.min(this.baseRtt, rtt);
     if (now - this.baseAt > FILE_LIMITS.baseProbeMs) {
+      // One chunk in flight carries nothing to compare: the round trips start again after it, and a trial waits for the
+      // queue it drained to fill again (that spreads the round trips as a waver does).
       this.probe = { since: now, window: this.window };
+      this.round = this.trial = undefined;
+      this.wait = Math.max(this.wait, FILE_LIMITS.trialEvery);
       return;
     }
     // No queue to speak of yet: twice as much per round trip at least, as a long fast path needs many to fill. On a
     // shared uplink, the queue is read against the lowest round trip any of its chats saw.
     const base = Math.min(this.baseRtt, lowest);
-    const fits = Math.max((flight * (base + FILE_LIMITS.queueMs)) / rtt, rtt - base < FILE_LIMITS.queueMs / 2 ? 2 * flight : 0);
+    const queueMs = Math.max(FILE_LIMITS.queueMs, base * FILE_LIMITS.queueOfBase);
+    const fits = Math.max((flight * (base + queueMs)) / rtt, rtt - base < queueMs / 2 ? 2 * flight : 0);
     // Little was in flight (a file starting or ending): that says nothing about a larger window being too large.
-    const window = flight < this.window / 2 ? Math.max(this.window, fits) : fits;
-    this.window = Math.min(FILE_LIMITS.chatWindowBytes, Math.max(floor, Math.round(window)));
+    const limited = flight < this.window / 2;
+    const delayed = limited ? Math.max(this.window, fits) : fits;
+    this.tried(sentAt, rtt, now, limited);
+    this.window = Math.min(FILE_LIMITS.chatWindowBytes, Math.max(floor, Math.round(this.trial?.window ?? Math.max(delayed, this.held))));
+  }
+
+  /**
+   * Sizes the window by rate: what the delay rule holds back may be a waver of the path, not a queue. After
+   * `trialEvery` round trips a larger window is tried. On a full link the bytes it adds wait in its queue, and the
+   * round trip grows by them at the rate the path carries; where the path only wavers, the round trip stays and the
+   * larger window carries more. So a trial whose round trip grew by less than `trialPaid` of that queue is kept
+   * (`held`) and a larger one tried at once; else what was kept goes down a step, and the next trial waits twice as
+   * long. A trial adds `trialQueueMs` of queue at most, meanwhile, and goes only where the round trip wavers (`waverMs`).
+   */
+  private tried(sentAt: number, rtt: number, now: number, limited: boolean): void {
+    const round = this.round;
+    if (round) {
+      round.rtts += rtt;
+      round.squares += rtt * rtt;
+      round.count++;
+      if (limited) round.limited = true;
+    }
+    // A trial's first round trip only confirms what went before it: it lasts no longer than that.
+    const windows = this.trial?.rounds === 0 ? 0 : FILE_LIMITS.trialWindows;
+    if (round && (sentAt < round.start || this.delivered - round.delivered < windows * this.window)) return;
+    this.round = { start: now, delivered: this.delivered, rtts: 0, squares: 0, count: 0, limited: false };
+    if (!round) return;
+    if (round.limited) { this.trial = undefined; return; }
+    const trial = this.trial;
+    if (trial && ++trial.rounds < 2) return;
+    const mean = round.rtts / round.count;
+    const last = { rate: (this.delivered - round.delivered) / Math.max(1, now - round.start), rtt: mean, spread: Math.sqrt(Math.max(0, round.squares / round.count - mean * mean)) };
+    if (trial) {
+      const queued = (trial.window - trial.from) / trial.before.rate;
+      const paid = last.rtt - trial.before.rtt < queued * FILE_LIMITS.trialPaid;
+      this.held = paid ? trial.window : Math.min(this.held, trial.from) * (trial.from / trial.window);
+      this.spacing = paid ? FILE_LIMITS.trialEvery : Math.min(FILE_LIMITS.trialEvery * 8, this.spacing * 2);
+      this.wait = paid ? 0 : this.spacing;
+      this.trial = undefined;
+    }
+    this.last = last;
+    if (this.wait > 0) { this.wait--; return; }
+    if (last.spread < FILE_LIMITS.waverMs) return;
+    // Larger than the window it was measured with. On a full link what it adds is queue at that rate, ahead of the
+    // sender's texts: `trialQueueMs` of it at most, and a chunk at least (windows go by chunks), or no trial.
+    const step = Math.min(this.window * (FILE_LIMITS.trialGain - 1), last.rate * FILE_LIMITS.trialQueueMs);
+    const window = Math.round(this.window + step);
+    if (step >= FILE_LIMITS.chunkBytes && window <= FILE_LIMITS.chatWindowBytes) this.trial = { from: this.window, window, before: last, rounds: 0 };
   }
 }
 
@@ -360,6 +507,8 @@ interface Incoming {
   timer?: ReturnType<typeof setTimeout>;
   /** When data last came (the timer is not moved for every chunk). */
   heardAt?: number;
+  /** What was stored and is not confirmed yet is confirmed when it fires (`FILE_LIMITS.ackWaitMs`). */
+  ackTimer?: ReturnType<typeof setTimeout>;
   /** Bytes taken in order (some may still be on their way to storage). */
   written: number;
   stored: number;
@@ -444,6 +593,13 @@ export class ChatFiles {
   private peerRoomValue: number | null = null;
   /** What the chat's files may have in flight, sized by the path. */
   private readonly pace = new FilePace();
+  /**
+   * What the chat's files had in flight just before the last confirm. A receiver confirms many chunks at once
+   * (`ackEveryBytes`), and the chunks sent for them go with that much in flight, the window: counted one by one, the
+   * first went with the window less a confirm, and read as a path carrying that little, it shrank the window and ended
+   * every trial of a larger one (a fifth of the rate on a wavering path). Confirmed chunk by chunk, it is what each sends with.
+   */
+  private refill = 0;
 
   constructor(private readonly host: ChatFilesHost) {}
 
@@ -509,6 +665,7 @@ export class ChatFiles {
     this.peerRoomValue = null;
     // Another session may be another path.
     this.pace.reset();
+    this.refill = 0;
     this.host.uplink?.join(this);
     void this.sayRoom();
     this.sweep();
@@ -518,6 +675,12 @@ export class ChatFiles {
       else if (entry.record.state === "queued") this.startIncoming(entry);
       // The sender offers again on its own; one that does not (an older app, one stuck) is asked.
       else if (entry.record.state === "active") this.armNudge(entry);
+      // Paused there: a sender that cancelled it meanwhile no longer offers it, and asked, ends it (`pf-abort`). One
+      // that still has it paused answers with its paused offer, and nothing moves.
+      else if (entry.record.state === "paused" && entry.record.pausedBy === "peer") this.send({ t: "pf-accept", id: entry.record.id, offset: entry.in!.written });
+      // Still asked about here: a sender that cancelled, deleted or let it expire meanwhile no longer offers it, and asked,
+      // ends it (`pf-abort`), so Accept is not shown for a file that will never come. One that still offers it waits.
+      else if (entry.record.state === "asking") this.send({ t: "pf-wait", id: entry.record.id, why: "consent" });
     }
   }
 
@@ -530,20 +693,25 @@ export class ChatFiles {
     this.host.uplink?.leave(this);
     for (const entry of this.entries.values()) {
       if (entry.out) { entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.next = entry.record.confirmed; }
-      if (entry.in) clearTimeout(entry.in.timer);
+      if (entry.in) { clearTimeout(entry.in.timer); clearTimeout(entry.in.ackTimer); entry.in.ackTimer = undefined; }
       if (entry.in && !transferEnded(entry.record)) void this.checkpoint(entry);
     }
   }
 
-  /** Offers ended by their time to live. The host calls it now and then; `attach` does too. */
+  /**
+   * Offers ended by their time to live. The host calls it now and then; `attach` does too. A file taken here and waiting
+   * its turn ends too once nothing of it arrived in that time: its sender never sent it. Offered again, it is taken
+   * again (`retakeAgreed`).
+   */
   sweep(): void {
     const now = this.now();
     for (const entry of this.entries.values()) {
       const { record } = entry;
       if (!["queued", "offered", "asking"].includes(record.state) || record.since + FILE_LIMITS.offerTtlMs > now) continue;
-      if (record.direction === "in" && record.state === "queued") continue;
+      if (record.direction === "in" && record.state === "queued" && (entry.in?.starting || this.moved(entry) > 0)) continue;
       this.end(entry, "failed", record.direction === "in" ? "The offer expired" : record.state === "queued" ? "Not delivered in time" : "Not accepted in time");
-      if (record.direction === "in") this.send({ t: "pf-refuse", id: record.id, why: "expired" });
+      // Ended here, it ends there too: the receiver's week began when the offer arrived, later, and it still showed Accept.
+      this.send(record.direction === "in" ? { t: "pf-refuse", id: record.id, why: "expired" } : { t: "pf-abort", id: record.id });
     }
   }
 
@@ -579,7 +747,9 @@ export class ChatFiles {
     out.next = record.confirmed;
     const paused = record.state === "paused" && record.pausedBy === "me";
     if (!this.send(this.offerFrame(record, paused))) return;
-    if (!paused && record.state !== "offered") { record.state = "offered"; record.pausedBy = undefined; this.changed(entry); }
+    // Every byte was confirmed: it stays so (`sentWhole`), the receiver answers with its check (`pf-done`) or its offset.
+    // As `offered`, an empty file was one nobody had answered yet, and its Cancel left it cancelled here, kept there.
+    if (!paused && record.state !== "offered" && record.state !== "verifying") { record.state = "offered"; record.pausedBy = undefined; this.changed(entry); }
     this.armStall(entry);
   }
 
@@ -672,7 +842,7 @@ export class ChatFiles {
         out.sent += chunk.length;
         this.moving.add(entry);
         if (out.sends[out.sends.length - 1]?.generation !== generation) out.sends.length = 0;
-        out.sends.push({ end: out.next, at: this.now(), flight: this.inFlight(), generation });
+        out.sends.push({ end: out.next, at: this.now(), flight: Math.max(this.inFlight(), Math.min(this.refill, this.pace.limit(this.floor()))), generation });
       }
     } catch (error) {
       if (generation === out.generation) {
@@ -708,6 +878,10 @@ export class ChatFiles {
 
   private waitingOffers(): number {
     return [...this.entries.values()].filter((e) => e.record.direction === "in" && e.record.state === "asking").length;
+  }
+
+  private unfinishedIncoming(): number {
+    return [...this.entries.values()].filter((e) => e.record.direction === "in" && !transferEnded(e.record)).length;
   }
 
   private activeIncoming(except: Entry): number {
@@ -773,9 +947,16 @@ export class ChatFiles {
     });
   }
 
-  /** The next file waiting its turn, once one ends. */
+  /**
+   * The next file waiting its turn, once one ends. The others were told they wait when they were queued: told again at
+   * each end, n files at once made about n²/2 frames, and their sender stored its record for each.
+   */
   private startNext(): void {
-    for (const entry of this.entries.values()) if (entry.record.direction === "in" && entry.record.state === "queued") this.startIncoming(entry);
+    for (const entry of this.entries.values()) {
+      if (entry.record.direction !== "in" || entry.record.state !== "queued" || entry.in!.starting) continue;
+      if (this.activeIncoming(entry) >= FILE_LIMITS.maxActiveIncoming) return;
+      this.startIncoming(entry);
+    }
   }
 
   private async onOffer(frame: Record<string, unknown>): Promise<void> {
@@ -801,7 +982,7 @@ export class ChatFiles {
       const { record } = existing;
       if (record.file.size !== file.size || record.file.name !== file.name) { this.send({ t: "pf-refuse", id, why: "invalid" }); return; }
       switch (record.state) {
-        case "done": this.send({ t: "pf-done", id }); return;
+        case "done": this.sayDone(id); return;
         case "declined": this.send({ t: "pf-refuse", id, why: "declined" }); return;
         case "cancelled":
           // Cancelled here stays cancelled; stopped by the sender (it could not read its file), it is taken again.
@@ -825,7 +1006,9 @@ export class ChatFiles {
       this.startIncoming(existing);
       return;
     }
-    if (this.waitingOffers() >= FILE_LIMITS.maxWaitingOffers) { this.send({ t: "pf-refuse", id, why: "too-many" }); return; }
+    if (this.waitingOffers() >= FILE_LIMITS.maxWaitingOffers || this.unfinishedIncoming() >= FILE_LIMITS.maxUnfinishedIncoming) {
+      this.send({ t: "pf-refuse", id, why: "too-many" }); return;
+    }
     let decision: OfferDecision;
     try { decision = await this.host.decide(file); } catch { decision = { refuse: "invalid" }; }
     if (this.entries.has(key("in", id))) return;
@@ -848,6 +1031,7 @@ export class ChatFiles {
    */
   private async retakeAgreed(entry: Entry): Promise<boolean> {
     const { record } = entry;
+    if (this.unfinishedIncoming() >= FILE_LIMITS.maxUnfinishedIncoming) { this.send({ t: "pf-refuse", id: record.id, why: "too-many" }); return false; }
     if (!record.consented) {
       let decision: OfferDecision;
       try { decision = await this.host.decide(record.file, true); } catch { decision = { refuse: "invalid" }; }
@@ -869,6 +1053,7 @@ export class ChatFiles {
   /** An agreed file that ended here, offered again: taken again from the start. */
   private async retake(entry: Entry): Promise<void> {
     await entry.in?.target?.then((t) => t.discard()).catch(() => {});
+    clearTimeout(entry.in?.ackTimer);
     entry.in = { written: 0, stored: 0, acked: 0, checkpointed: 0, writing: Promise.resolve() };
     Object.assign(entry.record, { state: "queued", confirmed: 0, error: undefined, digest: undefined, abortedBySender: undefined, since: this.now() });
     this.changed(entry);
@@ -901,12 +1086,9 @@ export class ChatFiles {
       if (transferEnded(record) || incoming.dropped) return;
       await (await target).append(bytes);
       incoming.stored = offset + bytes.length;
-      const drained = incoming.stored === incoming.written;
-      if (drained || incoming.stored - incoming.acked >= FILE_LIMITS.ackEveryBytes) {
-        incoming.acked = incoming.stored;
-        this.send({ t: "pf-got", id: record.id, offset: incoming.stored });
-        this.changed(entry, true);
-      }
+      const due = incoming.stored - incoming.acked >= FILE_LIMITS.ackEveryBytes || incoming.stored === record.file.size;
+      if (due || (!this.host.batchConfirms && incoming.stored === incoming.written)) this.confirm(entry);
+      else if (this.host.batchConfirms) incoming.ackTimer ??= setTimeout(() => this.confirm(entry), FILE_LIMITS.ackWaitMs);
       // Inside the chain of writes: waiting for the chain here would wait for itself.
       if (incoming.stored - incoming.checkpointed >= FILE_LIMITS.checkpointBytes) await this.checkpointNow(entry);
     }).catch((error) => {
@@ -916,6 +1098,17 @@ export class ChatFiles {
       this.send({ t: "pf-refuse", id: record.id, why: "no-room" });
       this.startNext();
     });
+  }
+
+  /** `pf-got` for what is stored and not confirmed yet. */
+  private confirm(entry: Entry): void {
+    const { record } = entry, incoming = entry.in!;
+    clearTimeout(incoming.ackTimer);
+    incoming.ackTimer = undefined;
+    if (transferEnded(record) || incoming.stored <= incoming.acked) return;
+    incoming.acked = incoming.stored;
+    this.send({ t: "pf-got", id: record.id, offset: incoming.stored });
+    this.changed(entry, true);
   }
 
   /** What was stored is durable, and a restart resumes from there. */
@@ -964,7 +1157,7 @@ export class ChatFiles {
 
   private async onSum(entry: Entry, frame: Record<string, unknown>): Promise<void> {
     const { record } = entry, incoming = entry.in!;
-    if (record.state === "done") { this.send({ t: "pf-done", id: record.id }); return; }
+    if (record.state === "done") { this.sayDone(record.id); return; }
     if (record.state !== "active" || incoming.verifying || !incoming.target) return;
     if (frame.size !== record.file.size || typeof frame.digest !== "string" || !DIGEST.test(frame.digest)) return;
     const digest = frame.digest;
@@ -982,13 +1175,23 @@ export class ChatFiles {
       record.digest = digest;
       record.confirmed = record.file.size;
       this.end(entry, "done");
-      this.send({ t: "pf-done", id: record.id });
+      this.sayDone(record.id);
     } else {
       await incoming.target.then((t) => t.discard()).catch(() => {});
       this.end(entry, "failed", "The file arrived damaged and was deleted. Ask for it again.");
       this.send({ t: "pf-refuse", id: record.id, why: "damaged" });
     }
     this.startNext();
+  }
+
+  /**
+   * `pf-done` once the host kept the file's done record (`kept`). Not kept (the app gone first), the sender still
+   * waits, offers it again on the next session, and the receiver answers from what it kept.
+   */
+  private sayDone(id: string): void {
+    const kept = this.host.kept?.().catch(() => {});
+    if (!kept) { this.send({ t: "pf-done", id }); return; }
+    void kept.then(() => this.send({ t: "pf-done", id }));
   }
 
   // ─── Frames ─────────────────────────────────────────────────────────────
@@ -1013,7 +1216,10 @@ export class ChatFiles {
       return;
     }
     if (!outgoing || transferEnded(outgoing.record)) {
-      if (outgoing?.record.state === "cancelled" && frame.t !== "pf-refuse") this.send({ t: "pf-abort", id });
+      // Asked about a file this side does not send any more (deleted with its message, expired or failed while the
+      // receiver was away): it hears so, and ends it. Unanswered, it stayed under way there for good, its bytes kept.
+      const asked = frame.t === "pf-accept" || frame.t === "pf-wait";
+      if (outgoing?.record.state === "cancelled" ? frame.t !== "pf-refuse" : asked && outgoing?.record.state !== "done") this.send({ t: "pf-abort", id });
       return;
     }
     const { record } = outgoing, out = outgoing.out!;
@@ -1025,6 +1231,7 @@ export class ChatFiles {
         out.generation++;
         record.confirmed = frame.offset;
         out.next = frame.offset;
+        this.refill = 0;
         record.state = "active";
         record.pausedBy = record.waitingFor = undefined;
         this.changed(outgoing);
@@ -1036,6 +1243,9 @@ export class ChatFiles {
       case "pf-wait": {
         // The answer to the paused offer said while the person there still decides: the pause here holds.
         if (record.state === "paused" && record.pausedBy === "me") return;
+        // Told again what it already waits for (an older receiver says so each time a file there ends): nothing changes.
+        if (frame.why === "paused" ? record.state === "paused" && record.pausedBy === "peer"
+          : record.state === "asking" && record.waitingFor === (frame.why === "busy" ? "busy" : "consent")) return;
         out.generation++;
         out.next = record.confirmed;
         clearTimeout(out.timer);
@@ -1047,6 +1257,8 @@ export class ChatFiles {
       }
       case "pf-got": {
         if (!isInt(frame.offset) || frame.offset <= record.confirmed || frame.offset > out.next) return;
+        this.refill = this.inFlight();
+        this.pace.delivered += frame.offset - record.confirmed;
         record.confirmed = frame.offset;
         // The last chunk this confirms says how long the path took (one sent before a resync says nothing).
         let sample: Outgoing["sends"][number] | undefined;
@@ -1085,6 +1297,8 @@ export class ChatFiles {
     if (entry.in) {
       const incoming = entry.in;
       clearTimeout(incoming.timer);
+      clearTimeout(incoming.ackTimer);
+      incoming.ackTimer = undefined;
       // Its writer goes once the writes under way are done (a host's holds a 256 KiB buffer): every file received kept
       // one until the app quit. One taken again opens a new target.
       void incoming.writing.finally(() => { if (transferEnded(record)) incoming.target = undefined; });
@@ -1107,6 +1321,8 @@ export class ChatFiles {
     if (entry.record.state !== "asking") return;
     entry.record.state = "queued";
     entry.record.consented = entry.record.agreed = true;
+    // Its time to live, now to arrive, starts with the answer: one accepted late does not end at once (`sweep`).
+    entry.record.since = this.now();
     this.changed(entry);
     this.startIncoming(entry);
   }
@@ -1124,6 +1340,8 @@ export class ChatFiles {
     const entry = this.entry(direction, id), { record } = entry;
     if (transferEnded(record) || record.state === "verifying" || (record.state === "paused" && record.pausedBy === "me")) return;
     if (direction === "in" && record.state === "asking") return;
+    // Arrived whole (offered again after a restart or a switch while it was checked there): paused, it could be cancelled.
+    if (sentWhole(record)) return;
     record.state = "paused";
     record.pausedBy = "me";
     if (entry.out) { entry.out.generation++; entry.out.next = record.confirmed; clearTimeout(entry.out.timer); this.send(this.offerFrame(record, true)); }
@@ -1137,6 +1355,7 @@ export class ChatFiles {
     if (record.state !== "paused" || record.pausedBy !== "me") return;
     record.pausedBy = undefined;
     record.state = "queued";
+    if (direction === "in") record.since = this.now();
     this.changed(entry);
     if (direction === "out") { if (this.attached) this.announce(entry); }
     else this.startIncoming(entry);

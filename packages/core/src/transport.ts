@@ -94,6 +94,7 @@ export function withRequestOptions(transport: PkarrTransport, extra: PkarrReques
   if (transport.networkChanged) wrapped.networkChanged = () => transport.networkChanged!();
   if (transport.readAnsweredAt) wrapped.readAnsweredAt = (pubKeyZ32) => transport.readAnsweredAt!(pubKeyZ32);
   if (transport.readHeldBackFor) wrapped.readHeldBackFor = (pubKeyZ32) => transport.readHeldBackFor!(pubKeyZ32);
+  if (transport.publishHeld) wrapped.publishHeld = (pubKeyZ32, options) => transport.publishHeld!(pubKeyZ32, { ...options, ...extra });
   if (transport.onServerTime) wrapped.onServerTime = (listener) => transport.onServerTime!(listener);
   if (transport.configure) wrapped.configure = (options) => transport.configure!(options);
   if (transport.turnRead) wrapped.turnRead = (pubKeyZ32, options) => transport.turnRead!(pubKeyZ32, options);
@@ -175,6 +176,13 @@ export interface PkarrTransport {
    * copy (`readAnsweredAt` did not move): when to read again. Undefined once a read went out, or where it cannot say.
    */
   readHeldBackFor?(pubKeyZ32: string): number | undefined;
+  /**
+   * A publish of this key with these options that nothing would take now, said before anything is signed: the wait
+   * (`DiscoveryBudgetError`) a put would be refused with, or null when it would go (or where the transport cannot say,
+   * or it also puts packets where no budget holds them, the CLI's DHT). As `publish` checks itself before signing; a
+   * caller that signs its own payloads (`CarriedTransport`) asks first. A wait said is a refusal noted, as a put's.
+   */
+  publishHeld?(pubKeyZ32: string, options?: PkarrRequestOptions): DiscoveryBudgetError | null;
   /**
    * Called with each time a server gave (`ServerTime`), where the transport can read one: what `ClockWatch` holds this
    * device's clock against. Returns the unsubscribe.

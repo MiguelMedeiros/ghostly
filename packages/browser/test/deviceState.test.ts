@@ -81,6 +81,15 @@ describe("a change of state", () => {
     expect(transition(record("releasing", { breezDatabases: names }), "ghostly", "standby", { releasedTurn: 8 }).breezDatabases).toEqual(names);
   });
 
+  it("a device that runs the profile again no longer lists the files its frozen copy held", () => {
+    const heldFiles = [{ sha256: KEY, size: 5_000, id: "chat1-in-photo" }];
+    for (const from of ["taking", "standby", "superseded", "releasing", "moving"] as const) {
+      expect(transition(record(from, { heldFiles }), "ghostly", "active", { handoff: undefined }).heldFiles).toBeUndefined();
+    }
+    // Replaced, it keeps them: its frozen copy still holds them.
+    expect(transition(record("taking", { heldFiles }), "ghostly", "superseded").heldFiles).toEqual(heldFiles);
+  });
+
   it("refuses an illegal change and says which", () => {
     const refused = (() => { try { transition(record("standby"), "ghostly", "releasing"); } catch (error) { return error; } })();
     expect(refused).toBeInstanceOf(DeviceTransitionError);

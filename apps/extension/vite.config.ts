@@ -4,10 +4,12 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { ghostlyPlatformModules, repositoryRoot, tauriAliases } from "../../packages/browser/vite-plugin";
 import { appsTestGuard } from "../web/appsTestFlag";
+import { translateGuard } from "../web/translateFlag";
 
 export default defineConfig(({ mode }) => ({
-  // The extension has no e2e build with mini-apps: it never carries their switch (VITE_APPS_TEST).
-  plugins: [appsTestGuard("extension"), ghostlyPlatformModules(), react(), tailwindcss()],
+  // The extension has no e2e build with mini-apps, and no translation: it never carries their switches (VITE_APPS_TEST,
+  // VITE_TRANSLATE).
+  plugins: [appsTestGuard("extension"), translateGuard("extension"), ghostlyPlatformModules(), react(), tailwindcss()],
   base: "",
   envDir: repositoryRoot,
   resolve: { alias: tauriAliases },

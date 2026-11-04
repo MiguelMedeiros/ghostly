@@ -379,14 +379,31 @@ export interface FrameChannel {
    * Absent: text only, as the Iroh channels are, and nothing binary is offered or sent on it.
    */
   readonly binary?: boolean;
+  /**
+   * A frame the transport sends on this connection by itself as the app exits, should the page not be there to say it
+   * (the Desktop's native channels: a logout ends the WebView's processes with the app); null takes it back. Absent:
+   * whatever the page does not say on its way out is not said.
+   */
+  parting?(frame: string | null): void;
   close(): void;
   onMessage: ((data: string | Uint8Array) => void) | null;
   onClose: (() => void) | null;
 }
 
-export function wrapDataChannel(dc: RTCDataChannel): FrameChannel {
+/**
+ * `ended`: its connection was torn down. The channel closes then as if the data channel had said so, and lets go of
+ * the data channel's events: node-datachannel does not always report a channel of a closed connection closed, and its
+ * native handle would hold whatever listens to it (the session, the link) for good.
+ */
+export function wrapDataChannel(dc: RTCDataChannel, ended?: AbortSignal): FrameChannel {
   dc.binaryType = "arraybuffer";
   dc.bufferedAmountLowThreshold = LIMITS.sendLowWaterMark;
+  const listening = new AbortController();
+  const closed = () => {
+    if (listening.signal.aborted) return;
+    listening.abort();
+    channel.onClose?.();
+  };
 
   const channel: FrameChannel = {
     send(data) {
@@ -398,15 +415,15 @@ export function wrapDataChannel(dc: RTCDataChannel): FrameChannel {
       return dc.bufferedAmount;
     },
     drained() {
-      if (dc.bufferedAmount <= LIMITS.sendLowWaterMark || dc.readyState !== "open") return Promise.resolve();
+      if (dc.bufferedAmount <= LIMITS.sendLowWaterMark || dc.readyState !== "open" || listening.signal.aborted) return Promise.resolve();
       return new Promise<void>((resolve) => {
         const done = () => {
           dc.removeEventListener("bufferedamountlow", done);
-          dc.removeEventListener("close", done);
+          listening.signal.removeEventListener("abort", done);
           resolve();
         };
         dc.addEventListener("bufferedamountlow", done);
-        dc.addEventListener("close", done);
+        listening.signal.addEventListener("abort", done);
       });
     },
     close() {
@@ -417,12 +434,14 @@ export function wrapDataChannel(dc: RTCDataChannel): FrameChannel {
     onClose: null,
   };
 
+  const { signal } = listening;
   dc.addEventListener("message", (event) => {
     const data = event.data;
     if (typeof data === "string") channel.onMessage?.(data);
     else if (data instanceof ArrayBuffer) channel.onMessage?.(new Uint8Array(data));
-  });
-  dc.addEventListener("close", () => channel.onClose?.());
+  }, { signal });
+  dc.addEventListener("close", closed, { signal });
+  ended?.addEventListener("abort", closed, { signal });
   return channel;
 }
 

@@ -14,7 +14,9 @@ test("profiles keep chats and settings apart, each in its own color", { tag: ["@
   await page.getByTestId("profile-name").fill("Pessoal");
   await page.getByTestId("profile-name").press("Enter");
   await expect(page.getByTestId("account-profile")).toHaveAttribute("title", /Pessoal/);
-  // The place in the account bar wears the profile's name.
+  // Enter saves in place: the focus stays in the field and the rename is said.
+  await expect(page.getByTestId("profile-name")).toBeFocused();
+  await expect(page.getByTestId("profile-name-saved")).toHaveText("Name saved");  // The place in the account bar wears the profile's name.
   await expect(page.getByTestId("account-profile").locator(".account-label")).toHaveText("Pessoal");
   await page.getByTestId("account-nickname").fill("Miguel");
   const firstTheme = await theme();

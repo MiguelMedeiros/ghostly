@@ -268,6 +268,26 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     await listen.stop();
   });
 
+  // Neither bot made a wallet: the contact offers no way of paying, and that is what both commands say, not "update".
+  it("pay or ask a contact that has no wallet: refused as no wallet yet, and the payment-bot example tells the person so", async () => {
+    const noWallet = { reason: "contact_no_wallet" };
+    expect(error(await as(alice, "chat", "pay", "bob", "5", "--network", "testnet"), "refused", 1)).toMatchObject({ details: noWallet, message: expect.stringContaining("Your contact has no wallet yet") });
+    const asked = error(await as(alice, "chat", "request", "bob", "21"), "refused", 1);
+    expect(asked).toMatchObject({ details: noWallet, message: expect.stringContaining("ghostly wallet create cashu") });
+    expect(asked.message).not.toMatch(/updated/);
+    const bot = spawn(process.execPath, [join(import.meta.dirname, "../examples/payment-bot.mjs")], { env: { ...process.env, GHOSTLY_SOCKET: sockets[alice] }, stdio: ["ignore", "pipe", "pipe"] });
+    try {
+      const listen = await listenTo(bob, "--type", "message.received");
+      await new Promise((r) => setTimeout(r, 1000));
+      ok(await as(bob, "send", "alice", "request 21", "--wait", "delivered"));
+      const reply = await listen.waitFor((l) => l.type === "message.received");
+      expect((reply.message as { text: string }).text).toBe("You have no wallet yet: make a Testnet Cashu wallet, then ask again.");
+      await listen.stop();
+    } finally {
+      bot.kill();
+    }
+  });
+
   it("show the contact this side is typing, and its stream says when it started and stopped", async () => {
     const listen = await listenTo(bob, "--type", "typing.started", "--type", "typing.stopped");
     expect(ok(await as(alice, "typing", "bob"))).toMatchObject({ chat: chatA, typing: true, live: true, sendTyping: true });
@@ -624,8 +644,12 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(answer!.replyTo!.from).toBe("me");
     // Sound this side cannot measure (no ffmpeg for it): sent flat with a warning on stderr when the length is given,
     // refused when not. Bytes ffmpeg reads as no sound are not audio, length or not: sent, they would not play.
+    // Its first byte is no sound's: random bytes that start FF Ex are an MP3 frame's to the sniffer (1 run in 2048), and
+    // the MP3 decoder then measured a length and bars from them (310 times in 400), so no warning came.
     const noise = join(alice, "noise.m4a");
-    writeFileSync(noise, randomBytes(4000));
+    const junk = randomBytes(4000);
+    junk[0] = 0;
+    writeFileSync(noise, junk);
     if (hasFfmpeg) {
       for (const length of [["1200"], []]) expect(error(await as(alice, "file", "send", "bob", noise, "--voice", ...length), "bad_request", 1).message).toMatch(/^noise\.m4a is not audio \(ffmpeg could not read it/);
     } else {
@@ -652,7 +676,10 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(started.statement).toMatch(/^Ghostly identity proof v1: I control ssh:/);
     const signature = execFileSync("ssh-keygen", ["-Y", "sign", "-n", "ghostly", "-f", key], { input: started.statement as string }).toString();
     error(await ghostly(["--home", alice, "identity", "complete", started.draft as string, "--stdin"], { env, input: "not a signature" }), "bad_request", 1);
-    const done = ok(await ghostly(["--home", alice, "identity", "complete", started.draft as string, "--stdin"], { env, input: signature }));
+    // Nothing given: where to give it, not the API's "evidence is required"; piped without --stdin, read as a send's text.
+    expect(error(await ghostly(["--home", alice, "identity", "complete", started.draft as string], { env, input: "" }), "usage", 2).message)
+      .toBe(`Missing what ssh-keygen printed: give it from a file (--evidence-file f) or on stdin (… | ghostly identity complete ${started.draft as string})`);
+    const done = ok(await ghostly(["--home", alice, "identity", "complete", started.draft as string], { env, input: signature }));
     const proof = done.proof as { id: string; provider: string };
     expect(proof.provider).toBe("ssh");
     expect((ok(await as(alice, "identity", "list")).proofs as { id: string }[]).map((p) => p.id)).toContain(proof.id);
@@ -677,7 +704,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     try {
       error(await as(alice, "service", "add", "outside", "http://example.com"), "refused", 1);
       const added = ok(await as(alice, "service", "add", "notes", `http://127.0.0.1:${(app.address() as AddressInfo).port}`));
-      const service = added.serviceId as string;
+      const service = added.service as string;
       ok(await as(alice, "service", "share", service, "bob"));
       const until = Date.now() + 60_000;
       let peer: { services: { id: string }[] } = { services: [] };
@@ -792,7 +819,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const sha = (path: string) => createHash("sha256").update(readFileSync(path)).digest("hex");
     const listen = await listenTo(alice, "--type", "message.received", "--type", "file.done");
     const text = ok(await as(bob, "send", "alice", "pass **this** on", "--wait", "delivered")).messageId as string;
-    const picture = join(bob, "ghost.png");
+    const picture = join(bob, "ghost.bin");
     writeFileSync(picture, randomBytes(120_000));
     ok(await as(bob, "file", "send", "alice", picture));
     const got = await listen.waitFor((e) => e.type === "message.received" && !!(e.message as { file?: unknown }).file);
@@ -809,12 +836,12 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(forwarded).toMatchObject({ from: chatA, results: [{ to: chatA, kind: "chat", messageIds: [expect.any(String), expect.any(String)], error: null }] });
     const again = await watch.waitFor((e) => e.type === "message.received" && !!(e.message as { file?: unknown }).file, 60_000);
     const copy = again.message as { id: string; forwarded?: number; file: { id: string; name: string } };
-    expect(copy).toMatchObject({ forwarded: 1, file: { name: "ghost.png" } });
+    expect(copy).toMatchObject({ forwarded: 1, file: { name: "ghost.bin" } });
     await watch.waitFor((e) => e.type === "file.done" && e.file === copy.file.id, 60_000);
     await watch.stop();
     const rows = ok(await as(bob, "chat", "history", "alice", "--limit", "5")).messages as { text: string; from: string; forwarded?: number }[];
     expect(rows.find((m) => m.from === "peer" && m.text === "pass **this** on")).toMatchObject({ forwarded: 1 });
-    const saved = ok(await as(bob, "file", "save", copy.file.id, "--path", join(bob, "ghost-forwarded.png")));
+    const saved = ok(await as(bob, "file", "save", copy.file.id, "--path", join(bob, "ghost-forwarded.bin")));
     expect(sha(saved.path as string)).toBe(sha(picture));
 
     // Into the group: the text goes, and the file as a new announcement of Alice's (WISP 503); a message not in the chat is not found.
@@ -827,10 +854,10 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     // Her own copy is its first holder: Bob's app fetches it from hers, the same bytes.
     const filesIn = await listenTo(bob, "--type", "group.message");
     expect(ok(await as(alice, "forward", "bob", fileMessage.id, "--to", "Bot crew", "--wait", "sent"))).toMatchObject({ results: [{ kind: "group", error: null }] });
-    const filed = await filesIn.waitFor((e) => e.type === "group.message" && (e.message as { file?: { name?: string } }).file?.name === "ghost.png", 60_000);
+    const filed = await filesIn.waitFor((e) => e.type === "group.message" && (e.message as { file?: { name?: string } }).file?.name === "ghost.bin", 60_000);
     await filesIn.stop();
     const inGroupFile = (filed.message as { file: { id: string } }).file.id;
-    const fetched = ok(await as(bob, "file", "save", inGroupFile, "--path", join(bob, "ghost-in-group.png"), "--wait", "--timeout", "120"));
+    const fetched = ok(await as(bob, "file", "save", inGroupFile, "--path", join(bob, "ghost-in-group.bin"), "--wait", "--timeout", "120"));
     expect(sha(fetched.path as string)).toBe(sha(picture));
     error(await as(alice, "forward", "bob", "no-such-message", "--to", "bob"), "not_found", 3);
     error(await as(alice, "forward", "bob", theirs.id), "usage", 2);
@@ -918,5 +945,49 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(Date.now() - started).toBeLessThan(40_000);
     const history = ok(await as(bob, "chat", "history", "alice", "--limit", "1")).messages as { text: string }[];
     expect(history.map((m) => m.text)).toEqual(["from a one-shot"]);
+  });
+
+  it("react and pin as one-shots: each stays until the contact confirmed it, and the contact shows it as the command ends", async () => {
+    // Before, both answered in about a second and left with the reaction and the pin unsaid: Bob saw them only with
+    // Alice's next one-shot send. Each is a fresh process, as the send above; the same 50 s for its first dial.
+    const mine = (ok(await as(alice, "chat", "history", "bob", "--limit", "1")).messages as { id: string }[])[0]!;
+    const theirs = (ok(await as(bob, "chat", "history", "alice", "--limit", "1")).messages as { id: string; text: string; reactions?: unknown }[])[0]!;
+    expect(theirs.text).toBe("from a one-shot");
+    expect(ok(await as(alice, "react", "bob", mine.id, "🎈", "--timeout", "50"))).toMatchObject({ messageId: mine.id, emoji: "🎈", confirmed: true });
+    const reacted = (ok(await as(bob, "chat", "history", "alice", "--limit", "1")).messages as { reactions?: unknown }[])[0]!;
+    expect(reacted.reactions).toMatchObject([{ by: "peer", emoji: "🎈" }]);
+    expect(ok(await as(alice, "pin", "bob", mine.id, "--timeout", "50"))).toMatchObject({ messageId: mine.id, confirmed: true });
+    expect(ok(await as(bob, "chat", "show", "alice")).pin).toMatchObject({ messageId: theirs.id, by: "peer" });
+  });
+
+  it("task send and task update as one-shots: each stays until it went out, and the contact has the card done as the update ends", async () => {
+    // Before, the update answered `confirmed: false` in about a second and left with its edit unsaid: Bob's card said
+    // running until a later one-shot stayed long enough. The send goes out first (`sent`: on the DHT floor its text
+    // alone, the card once the chat is live). Each is a fresh process; the same 50 s for its first dial as above.
+    expect(ok(await as(alice, "task", "send", "bob", "--id", "one-shot-task", "--title", "From a one-shot", "--timeout", "50"))).toMatchObject({ task: "one-shot-task", delivery: expect.stringMatching(/^(sent|delivered)$/) });
+    expect(ok(await as(alice, "task", "update", "bob", "one-shot-task", "--status", "done", "--timeout", "50"))).toMatchObject({ task: "one-shot-task", confirmed: true });
+    // Bob confirms the edit as he stores it: his history may say it a moment later. Alice's process is gone by now, so
+    // nothing else carries it meanwhile.
+    const card = async () => ((ok(await as(bob, "chat", "history", "alice", "--limit", "1")).messages as { from: string; card?: Record<string, unknown> }[])[0]!);
+    let mine = await card();
+    for (const until = Date.now() + 10_000; mine.card?.status !== "done" && Date.now() < until; mine = await card()) await new Promise((r) => setTimeout(r, 250));
+    expect(mine).toMatchObject({ from: "peer", card: { kind: "task", id: "one-shot-task", title: "From a one-shot", status: "done" } });
+  });
+
+  it("file send as a one-shot stays until the contact has the whole file, saved byte for byte", async () => {
+    // Before, it answered in about 0.3 s with the file staged and left with it unsent: Bob had no file, not even its
+    // message, until a later command of Alice's stayed online long enough.
+    const sha = (path: string) => createHash("sha256").update(readFileSync(path)).digest("hex");
+    const path = join(alice, "from-a-one-shot.bin");
+    writeFileSync(path, randomBytes(2 * 1024 * 1024));
+    expect(ok(await as(alice, "file", "send", "bob", path))).toMatchObject({ file: { name: "from-a-one-shot.bin", size: 2 * 1024 * 1024 } });
+    // Alice's process is gone: nothing else carries the file. Bob stores the last bytes as Alice hears they arrived.
+    const theirs = async () => (ok(await as(bob, "file", "list", "alice")).files as { file: { id: string; name: string }; transfer: { state: string } | null }[])
+      .find((f) => f.file.name === "from-a-one-shot.bin");
+    let file = await theirs();
+    for (const until = Date.now() + 10_000; file?.transfer?.state !== "done" && Date.now() < until; file = await theirs()) await new Promise((r) => setTimeout(r, 250));
+    expect(file?.transfer).toMatchObject({ state: "done" });
+    const saved = ok(await as(bob, "file", "save", file!.file.id, "--path", join(bob, "from-a-one-shot.bin")));
+    expect(sha(saved.path as string)).toBe(sha(path));
   });
 });

@@ -49,4 +49,21 @@ describe("the composer's field", () => {
     type("one");
     expect(writes).toEqual(["auto", "40px"]);
   });
+
+  it("grows to no more than a third of what is visible: a phone on its side with the keyboard up leaves 150 px", () => {
+    // ghostly-agents#2426: a field of 120 px in what the keyboard left pushed Send, + and the emoji button under it.
+    const visible = { height: 150 };
+    Object.defineProperty(window, "visualViewport", { configurable: true, get: () => visible });
+    try {
+      const { input, type } = field();
+      type("one\ntwo\nthree\nfour\nfive");
+      expect(input.style.height).toBe("50px");
+      // The keyboard goes (the phone keeps its side, 390 px): its 120 px again.
+      visible.height = 390;
+      type("one\ntwo\nthree\nfour\nfive\nsix");
+      expect(input.style.height).toBe("120px");
+    } finally {
+      delete (window as { visualViewport?: unknown }).visualViewport;
+    }
+  });
 });

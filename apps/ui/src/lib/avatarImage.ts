@@ -1,4 +1,5 @@
 import { MAX_AVATAR_LENGTH, sanitizeAvatar } from "@ghostly/core";
+import { decodablePicture } from "./decodablePicture";
 
 /** The side of the square picture Ghostly keeps and sends. */
 export const AVATAR_SIDE = 128;
@@ -12,6 +13,7 @@ export const AVATAR_SIDE = 128;
 export async function avatarFromFile(file: File, maxLength = MAX_AVATAR_LENGTH): Promise<string> {
   if (!file.type.startsWith("image/")) throw new Error("Choose a picture");
   if (file.size > 20 * 1024 * 1024) throw new Error("That picture is too large (max 20 MB)");
+  if (!await decodablePicture(file)) throw new Error("This picture cannot be read here. Try a JPEG or PNG.");
   let bitmap: ImageBitmap;
   try { bitmap = await createImageBitmap(file); }
   catch { throw new Error("This picture cannot be read here. Try a JPEG or PNG."); }

@@ -1,4 +1,5 @@
-import { budgetRetryMs, decodeControl, fromBase64Url, isDiscoveryBudgetError, parseImageMeta, parseVideoMeta, parseVoiceMeta, HOLD_DATED_BACK_MS, HOLD_LIMITS, HoldKeys, HoldRefusedError, isHoldUrl, newHoldMailbox, pairedReplyAuthor, readForwarded, readManifest, readReply, sanitizeFileName, sanitizeMime, utf8Decode, utf8Encode, type HoldPointer, type PaymentMethodName, type PaymentRequest, type PkarrTransport, type ImageMeta, type VideoMeta, type VoiceMeta, type WireReply } from "@ghostly/core";
+import type { RatchetBox } from "@ghostly/core";
+import { budgetRetryMs, decodeControl, fromBase64Url, isDiscoveryBudgetError, parseImageMeta, parseVideoMeta, parseVoiceMeta, HOLD_DATED_BACK_MS, HOLD_LIMITS, HoldKeys, HoldRefusedError, isHoldUrl, ratchetSessionOf, newHoldMailbox, pairedReplyAuthor, readForwarded, readManifest, readReply, sanitizeFileName, sanitizeMime, utf8Decode, utf8Encode, type HoldPointer, type PaymentMethodName, type PaymentRequest, type PkarrTransport, type ImageMeta, type VideoMeta, type VoiceMeta, type WireReply } from "@ghostly/core";
 import { heldName, manifestName, type HoldStore } from "../backup/storage";
 import type { HeldEntry, HoldState, LinkHoldView, StoredLink } from "../shared/types";
 
@@ -28,13 +29,26 @@ export interface HoldHost {
   /** Returns why it was not kept (room, a reused id), or null when it was. */
   receiveFile(linkId: string, file: { wireId: string; name: string; size: number; mime: string; timestamp: number; voice?: VoiceMeta; video?: VideoMeta; image?: ImageMeta; reply?: WireReply; forwarded?: number }, bytes: Uint8Array, digest: string, held?: HeldFacts): Promise<string | null>;
   receivePaymentRequest(linkId: string, request: PaymentRequest): Promise<void>;
+  /** Whether an item with this wire id is stored here already (a text or a file; WISP 4xx § Held items). */
+  taken?(linkId: string, id: string): Promise<boolean>;
   changed(): void;
   fetch?: typeof fetch;
   /** Plain HTTP to this machine is a storage address too: the e2e suite's local server. Off in every shipped app. */
   loopbackStorage?: () => boolean;
+  /**
+   * "Hide my IP from contacts": null when it is off. On, the only storage places a pickup may reach (this person's own
+   * bucket, `holdStoragePlace`); any other address, which the contact chose, is not read, and what it holds waits there.
+   * Not a host: under path-style addresses a contact's bucket at the same provider has this person's host.
+   */
+  hiddenIpPlaces?: () => string[] | null;
   now?: () => number;
   /** How long an item is held, when a test shortens it; never longer than the profile's seven days. */
   ttlMs?: () => number | undefined;
+  /**
+   * The chat's ratchet (WISP 4xx), shared with its DHT floor, and whether the contact's record lists `ratchet/1`. Absent:
+   * every item is sealed as before.
+   */
+  ratchet?(linkId: string): { box: RatchetBox; peerSupports(): boolean } | undefined;
 }
 
 /** How often the engine looks at its held items: expiry, renewals, the contact's pointer. */
@@ -56,6 +70,25 @@ const REPUBLISH_MS = 60 * 60_000;
 export const HOLD_FETCH_MS = 20_000;
 const HOLD_FETCH_BYTES_PER_S = 64 * 1024;
 export const holdFetchTimeoutMs = (max: number): number => HOLD_FETCH_MS + Math.ceil(max / HOLD_FETCH_BYTES_PER_S) * 1000;
+/** Why a pickup waits: its storage would see this device's address, which the person hides from contacts. */
+const HOLD_HIDDEN_IP = "Hide my IP from contacts is on: what your contact held for you waits on their storage until you turn it off.";
+/** Thrown where an address is about to be read, so a pickup stops there and starts again once it may. */
+class HiddenIpError extends Error { constructor() { super(HOLD_HIDDEN_IP); } }
+
+/**
+ * Where a person's own S3 storage is, as `S3Store` addresses it (path-style): its endpoint's origin and path, then its
+ * bucket, ending in "/" so a bucket whose name starts with this one's ("bob", "bobby") is not under it.
+ */
+export function holdStoragePlace(s3: { endpoint: string; bucket: string }): string {
+  const url = new URL(`${s3.endpoint.trim().replace(/\/+$/, "")}/${s3.bucket.trim()}/`);
+  return `${url.origin}${url.pathname}`;
+}
+
+/** Whether an address is under a place: the same origin, and its (normalised) path inside the place's. */
+function underPlace(url: string, place: string): boolean {
+  const parsed = new URL(url);
+  return `${parsed.origin}${parsed.pathname}`.startsWith(place);
+}
 const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
 /**
@@ -81,6 +114,11 @@ export class HoldEngine {
   /** A read the contact's word asked for, one waiting per chat, and when the last such read went out. */
   private readonly peerPolls = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly lastPeerPoll = new Map<string, number>();
+  /**
+   * Per chat, the contact's item this device waits on (`seq`) because it came in a ratchet session this device never had,
+   * and the manifest that listed it (its `seq`): it is fetched again only once the contact rewrites its manifest.
+   */
+  private readonly waiting = new Map<string, { seq: number; manifest: number }>();
 
   constructor(private readonly host: HoldHost) {}
 
@@ -132,6 +170,10 @@ export class HoldEngine {
   /** Items can be held for this contact now: both switched it on, storage is set up and the contact is pinned. */
   canHold(linkId: string): boolean {
     const hold = this.state(linkId);
+    // Forward secrecy was on and the contact's app no longer says it has it (WISP 4xx § Downgrade): nothing is held, since
+    // it could not open a ratcheted item and nothing goes plain; it waits for the live session.
+    const ratchet = this.host.ratchet?.(linkId);
+    if (ratchet && ratchet.box.heardAny && !ratchet.peerSupports()) return false;
     return hold.enabled && !!hold.peerAllows && !!this.host.storage() && !!this.keysFor(linkId);
   }
   /** Ways of paying a request held for this contact may name: what its app allowed at the last session. */
@@ -228,6 +270,9 @@ export class HoldEngine {
       const now = this.now();
       const entry: HeldEntry = { seq, id: item.id, messageId: item.messageId, kind: item.kind, ref: item.ref, name: heldName(storage.space, mailbox, seq), bytes: item.bytes, ts: item.timestamp, expires: now + Math.min(this.ttl(), HOLD_LIMITS.ttlMs - HOLD_DATED_BACK_MS), state: "queued" };
       await this.save(linkId, { ...hold, mailbox, outSeq: seq, outbox: [...hold.outbox, entry] });
+      // What waits in a session the ratchet left goes again first: the manifest never lists a new item behind one the
+      // contact's new device cannot open yet.
+      await this.resealStale(linkId);
       await this.upload(linkId, entry);
     });
   }
@@ -240,21 +285,34 @@ export class HoldEngine {
       if (!entry) return;
       found = true;
       if (entry.state === "held") { await this.host.delivery(linkId, messageId, "held"); return; }
+      await this.resealStale(linkId);
       await this.upload(linkId, entry);
     }).then(() => found);
   }
 
   /** Seals and uploads one queued or failed entry, then the manifest and the pointer. */
   private async upload(linkId: string, entry: HeldEntry): Promise<void> {
+    await this.store(linkId, entry);
+    try { await this.publishPointer(linkId, true); }
+    catch (error) { return this.failEntry(linkId, entry, `Stored, but could not tell the contact where: ${error instanceof Error ? error.message : String(error)}`); }
+    this.errors.delete(linkId);
+    await this.host.delivery(linkId, entry.messageId, "held");
+    this.host.changed();
+  }
+
+  private async failEntry(linkId: string, entry: HeldEntry, error: string): Promise<never> {
+    await this.save(linkId, { ...this.state(linkId), outbox: this.state(linkId).outbox.map((e) => (e.seq === entry.seq ? { ...e, state: "failed" as const, error } : e)) });
+    this.errors.set(linkId, error);
+    await this.host.delivery(linkId, entry.messageId, "failed", error);
+    this.host.changed();
+    throw new Error(error);
+  }
+
+  /** Seals one entry and puts it in storage under its name; the manifest and the pointer are the caller's. */
+  private async store(linkId: string, entry: HeldEntry): Promise<void> {
     const storage = this.host.storage(), keys = this.keysFor(linkId), hold = this.state(linkId);
     const update = async (patch: Partial<HeldEntry>) => this.save(linkId, { ...this.state(linkId), outbox: this.state(linkId).outbox.map((e) => (e.seq === entry.seq ? { ...e, ...patch } : e)) });
-    const fail = async (error: string) => {
-      await update({ state: "failed", error });
-      this.errors.set(linkId, error);
-      await this.host.delivery(linkId, entry.messageId, "failed", error);
-      this.host.changed();
-      throw new Error(error);
-    };
+    const fail = (error: string) => this.failEntry(linkId, entry, error);
     if (!storage || !keys || !hold.mailbox) return fail("Held messages need S3 storage (Profile → Backups) and a pinned contact.");
     let body: Uint8Array, meta: unknown;
     try {
@@ -279,18 +337,41 @@ export class HoldEngine {
         body = utf8Encode(JSON.stringify({ id: request.id, ts: request.timestamp, v: request.amount.value, u: request.amount.asset, memo: request.memo, e: request.endpoints, a: request.ask, n: request.network }));
       }
     } catch (error) { return fail(error instanceof Error ? error.message : String(error)); }
-    let bytes: Uint8Array;
-    try { bytes = keys.seal({ mailbox: hold.mailbox, seq: entry.seq, id: entry.id, ts: entry.ts, kind: entry.kind, meta, expires: entry.expires }, body); }
+    let bytes: Uint8Array, sid: string | undefined;
+    const item = { mailbox: hold.mailbox, seq: entry.seq, id: entry.id, ts: entry.ts, kind: entry.kind, meta, expires: entry.expires };
+    // Ratcheted (WISP 4xx) when the contact's record lists ratchet/1, or a ratcheted item of its opened here: sealed, its
+    // state saved, then uploaded. A retry after a crash seals it again with a new key. The session it went in is kept,
+    // so it is sealed again once the ratchet seals in another (`resealStale`).
+    const ratchet = this.host.ratchet?.(linkId);
+    try {
+      bytes = ratchet && (ratchet.box.heardAny || ratchet.peerSupports())
+        ? await keys.sealRatcheted(item, body, (plaintext) => ratchet.box.lock(async (tx) => {
+          const sealed = await tx.seal("hold", plaintext);
+          sid = ratchetSessionOf(sealed, "hold");
+          return sealed;
+        }))
+        : keys.seal(item, body);
+    }
     catch (error) { return fail(error instanceof Error ? error.message : String(error)); }
     if (bytes.length > HOLD_LIMITS.maxBundleBytes) return fail(`An item held for an away contact is at most ${Math.round(HOLD_LIMITS.maxBundleBytes / 1024 / 1024)} MB.`);
     try { await storage.store.put(entry.name, bytes); }
     catch (error) { return fail(`Could not store the item: ${error instanceof Error ? error.message : String(error)}`); }
-    await update({ state: "held", error: undefined, bytes: bytes.length });
-    try { await this.publishPointer(linkId, true); }
-    catch (error) { return fail(`Stored, but could not tell the contact where: ${error instanceof Error ? error.message : String(error)}`); }
-    this.errors.delete(linkId);
-    await this.host.delivery(linkId, entry.messageId, "held");
-    this.host.changed();
+    await update({ state: "held", error: undefined, bytes: bytes.length, sid });
+  }
+
+  /**
+   * WISP 4xx § Held items, "A contact that started anew": the items still held that were sealed in a session other than
+   * the one the chat's ratchet seals with now are sealed again in it, under the same sequence, id and name. The contact
+   * moved to another device or restored, its floor envelope made its new session current here, and its new device never
+   * had the old one: it leaves those items unopened, unacknowledged, until they come in a session it has. True when
+   * something was sealed again: the manifest and the pointer are the caller's.
+   */
+  private async resealStale(linkId: string): Promise<boolean> {
+    const current = this.host.ratchet?.(linkId)?.box.session;
+    if (!current || !this.host.storage()) return false;
+    const stale = this.state(linkId).outbox.filter((e) => e.state === "held" && e.sid && e.sid !== current);
+    for (const entry of stale) await this.store(linkId, entry).catch(() => {});
+    return stale.length > 0;
   }
 
   /** A message deleted here: its held item goes too, so the contact never picks it up. */
@@ -321,7 +402,7 @@ export class HoldEngine {
 
   forgetLink(linkId: string): void {
     this.keyCache.delete(linkId); this.lastPoll.delete(linkId); this.lastPublish.delete(linkId); this.expecting.delete(linkId); this.errors.delete(linkId); this.chains.delete(linkId);
-    this.pointerDue.delete(linkId);
+    this.pointerDue.delete(linkId); this.waiting.delete(linkId);
     clearTimeout(this.peerPolls.get(linkId)); this.peerPolls.delete(linkId); this.lastPeerPoll.delete(linkId);
   }
 
@@ -410,9 +491,10 @@ export class HoldEngine {
       this.host.changed();
     }
     for (const entry of hold.outbox.filter((e) => e.state === "queued")) await this.upload(linkId, entry).catch(() => {});
+    const resealed = await this.resealStale(linkId);
     hold = this.state(linkId);
     const held = hold.outbox.some((e) => e.state === "held");
-    if (this.host.storage() && (expired.length || (held && (hold.manifestSignedAt ?? 0) + RENEW_AFTER_MS <= now))) await this.publishPointer(linkId, true).catch((error) => this.errors.set(linkId, String(error instanceof Error ? error.message : error)));
+    if (this.host.storage() && (expired.length || resealed || (held && (hold.manifestSignedAt ?? 0) + RENEW_AFTER_MS <= now))) await this.publishPointer(linkId, true).catch((error) => this.errors.set(linkId, String(error instanceof Error ? error.message : error)));
     else if (this.pointerDue.has(linkId) || (held && (this.lastPublish.get(linkId) ?? 0) + REPUBLISH_MS <= now)) await this.publishPointer(linkId, false).catch(() => {});
   }
 
@@ -450,29 +532,49 @@ export class HoldEngine {
       await this.publishPointer(linkId, true).catch(() => {});
       this.host.changed();
     } else if (pointer.ack !== hold.peerAck) hold = await this.save(linkId, { ...hold, peerAck: pointer.ack });
-    if (pointer.top <= hold.inSeq) { this.expecting.delete(linkId); return; }
+    // Said again below if it still holds: a pickup that may go now, or nothing left to pick up, takes the line away.
+    const wasHidden = this.errors.get(linkId) === HOLD_HIDDEN_IP;
+    if (wasHidden) this.errors.delete(linkId);
+    if (pointer.top <= hold.inSeq) { this.expecting.delete(linkId); if (wasHidden) this.host.changed(); return; }
     if (!pointer.manifestUrl || pointer.expires <= now) { this.errors.set(linkId, "The contact holds items for you, but their address expired. They are handed out again when the contact is next online."); this.host.changed(); return; }
-    let entries: ReturnType<typeof readManifest>, mailbox: string;
+    let entries: ReturnType<typeof readManifest>, mailbox: string, manifestRev: number;
     try {
       const manifest = keys.open(await this.fetchBytes(pointer.manifestUrl, HOLD_LIMITS.maxManifestBytes), { maxBytes: HOLD_LIMITS.maxManifestBytes, now, loopback: this.host.loopbackStorage?.() });
       if (manifest.header.kind !== "manifest") throw new HoldRefusedError("format", "Not a manifest");
-      mailbox = manifest.header.mailbox;
+      mailbox = manifest.header.mailbox; manifestRev = manifest.header.seq;
       // In the order the contact held them, whatever order the manifest lists them in: they take their places in the
       // history as they are stored here.
       entries = readManifest(manifest.header.meta, this.host.loopbackStorage?.()).filter(([seq]) => seq > this.state(linkId).inSeq).sort((a, b) => a[0] - b[0]);
     } catch (error) {
       if (error instanceof HoldRefusedError) { await this.save(linkId, { ...this.state(linkId), refused: this.state(linkId).refused + 1 }); this.errors.set(linkId, `Refused what the contact's storage offered: ${error.message}`); }
+      else if (error instanceof HiddenIpError) this.errors.set(linkId, HOLD_HIDDEN_IP);
       else this.errors.set(linkId, `Could not pick up held items: ${error instanceof Error ? error.message : String(error)}`);
       this.host.changed();
       return;
     }
     let changed = false, stop = false;
+    if ((this.waiting.get(linkId)?.seq ?? Infinity) <= this.state(linkId).inSeq) this.waiting.delete(linkId);
     for (const [seq, id, kind, bytes, url, expires] of entries) {
       if (stop) break;
       if (expires <= now) { await this.save(linkId, { ...this.state(linkId), inSeq: seq }); changed = true; continue; }
+      // Still the item and the manifest this device could not open: nothing to fetch until the contact seals it again.
+      const waiting = this.waiting.get(linkId);
+      if (waiting?.seq === seq && waiting.manifest === manifestRev) { stop = true; break; }
+      // A ratcheted item is opened with no lock held, stored, and only then its ratchet state saved (`commitOpen`): also
+      // when it is refused once opened, so its key goes and the chat counts as having heard the contact this way.
+      const ratchet = this.host.ratchet?.(linkId);
+      let ratcheted: Uint8Array | undefined, fetched: Uint8Array | undefined, unknownSession = false;
       try {
         // Every item must come from the mailbox its manifest names: one folder, one contact, one direction.
-        const { header, body } = keys.open(await this.fetchBytes(url, Math.min(bytes, HOLD_LIMITS.maxBundleBytes)), { maxBytes: HOLD_LIMITS.maxBundleBytes, now, mailbox });
+        fetched = await this.fetchBytes(url, Math.min(bytes, HOLD_LIMITS.maxBundleBytes));
+        const opened = keys.open(fetched, { maxBytes: HOLD_LIMITS.maxBundleBytes, now, mailbox,
+          ...(ratchet && { ratchet: (sealed: Uint8Array) => {
+            const plain = ratchet.box.peek("hold", sealed);
+            unknownSession = !plain && ratchet.box.unknownSession("hold", sealed);
+            return plain;
+          }, refusePlain: ratchet.box.heard("hold") }) });
+        const { header, body } = opened;
+        ratcheted = opened.ratcheted;
         if (header.seq !== seq || header.id !== id || header.kind !== kind) throw new HoldRefusedError("format", "The item does not match the manifest");
         // Stored before the sequence advances: a crash in between stores it again, which the id dedups.
         const held: HeldFacts = { seq, bytes, expires };
@@ -499,16 +601,31 @@ export class HoldEngine {
           if (frame?.t !== "pay-req") throw new HoldRefusedError("format", "Not a payment request");
           await this.host.receivePaymentRequest(linkId, { id: frame.id, timestamp: frame.ts, amount: { value: frame.v, asset: frame.u }, memo: frame.memo, endpoints: frame.e, ask: frame.a, network: frame.n });
         }
+        if (ratcheted && ratchet) await ratchet.box.commitOpen("hold", ratcheted);
         hold = await this.save(linkId, { ...this.state(linkId), inSeq: seq });
         changed = true;
       } catch (error) {
-        if (error instanceof HoldRefusedError) {
+        const opened = ratcheted ?? (error instanceof HoldRefusedError ? error.ratcheted : undefined);
+        if (error instanceof HoldRefusedError && opened && ratchet) await ratchet.box.commitOpen("hold", opened).catch(() => {});
+        // A ratcheted item whose key is gone, already stored here: picked up before a crash that cut its sequence's save.
+        if (error instanceof HoldRefusedError && error.reason === "tampered" && fetched?.[4] === 2 && await this.host.taken?.(linkId, id)) {
+          await this.save(linkId, { ...this.state(linkId), inSeq: seq });
+          changed = true;
+        } else if (error instanceof HoldRefusedError && error.reason === "tampered" && unknownSession) {
+          // Sealed in a ratchet session this device never had (WISP 4xx § Held items): the profile moved here, or was
+          // restored, after the turn passed in the session the contact shares with the device it was on before, which a
+          // handoff never takes along. Neither taken nor refused, so the contact keeps it, and seals it again once its
+          // ratchet follows this device's (`resealStale`); the pickup waits here, in order, until then or its expiry.
+          this.waiting.set(linkId, { seq, manifest: manifestRev });
+          this.errors.set(linkId, "Could not pick up held items: the contact's app sealed them for the device this profile was on before. They come once it seals them again for this one.");
+          stop = true;
+        } else if (error instanceof HoldRefusedError) {
           await this.save(linkId, { ...this.state(linkId), inSeq: seq, refused: this.state(linkId).refused + 1, refusedSeqs: [...(this.state(linkId).refusedSeqs ?? []), seq].slice(-32) });
           this.errors.set(linkId, `Refused a held item from the contact: ${error.message}`);
           changed = true;
         } else {
-          // A network or storage problem: the next poll starts here again.
-          this.errors.set(linkId, `Could not pick up held items: ${error instanceof Error ? error.message : String(error)}`);
+          // A network or storage problem, or an address this device may not read now: the next poll starts here again.
+          this.errors.set(linkId, error instanceof HiddenIpError ? HOLD_HIDDEN_IP : `Could not pick up held items: ${error instanceof Error ? error.message : String(error)}`);
           stop = true;
         }
       }
@@ -544,6 +661,8 @@ export class HoldEngine {
     // The contact named this address: checked where it is used as well as where it was read, and no redirect is
     // followed (one would lead anywhere, this machine and its network included; a presigned address has none).
     if (!isHoldUrl(url, this.host.loopbackStorage?.())) throw new Error("The storage address is not one this app reads");
+    const places = this.host.hiddenIpPlaces?.();
+    if (places && !places.some((place) => underPlace(url, place))) throw new HiddenIpError();
     const doFetch = this.host.fetch ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
     const response = await doFetch(url, { cache: "no-store", credentials: "omit", redirect: "error", signal });
     if (!response.ok) throw new Error(`The storage answered ${response.status}`);

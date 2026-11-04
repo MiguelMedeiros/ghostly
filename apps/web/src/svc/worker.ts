@@ -5,18 +5,18 @@
  * goes only when it is a frame's this origin started (`startedHere`): at the top, the app says it opens inside Ghostly. Built on its
  * own into `/ghostly-services-sw.js` (apps/web/svcBuild.ts). It keeps nothing: no cache, no storage.
  */
-import { BRIDGE_DIR, BRIDGE_PAGE, WORKER_SCRIPT, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, NULL_BODY, answerStatus, isServiceHostname, parseServicesHost, type ServiceReply, type ServiceRequestMessage } from "./protocol";
+import { BRIDGE_DIR, BRIDGE_PAGE, WORKER_SCRIPT, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, NULL_BODY, answerStatus, fromView, isServiceHostname, parseServicesHost, type ServiceReply, type ServiceRequestMessage } from "./protocol";
 
 declare const __SERVICES_HOST__: string;
 declare const __SERVICES_APP_ORIGIN__: string;
 
 interface ExtendableEvent extends Event { waitUntil(promise: Promise<unknown>): void }
 interface FetchEvent extends ExtendableEvent { request: Request; clientId: string; respondWith(response: Promise<Response> | Response): void }
-interface WindowClient { id: string; url: string; frameType?: string; postMessage(message: unknown, transfer: Transferable[]): void }
+interface WindowClient { id: string; url: string; type?: string; frameType?: string; postMessage(message: unknown, transfer: Transferable[]): void }
 interface WorkerScope {
   location: Location;
   skipWaiting(): Promise<void>;
-  clients: { claim(): Promise<void>; matchAll(options: { type: "window"; includeUncontrolled: boolean }): Promise<WindowClient[]> };
+  clients: { claim(): Promise<void>; get(id: string): Promise<WindowClient | undefined>; matchAll(options: { type: "window"; includeUncontrolled: boolean }): Promise<WindowClient[]> };
   addEventListener(type: "install" | "activate", listener: (event: ExtendableEvent) => void): void;
   addEventListener(type: "fetch", listener: (event: FetchEvent) => void): void;
 }
@@ -45,6 +45,22 @@ export function withoutFrameAncestors(policy: string): string {
 
 function plain(status: number, text: string): Response {
   return new Response(text, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "content-security-policy": frameAncestors() } });
+}
+
+const escape = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/**
+ * The app's words for a request it could not answer, as a page in the profile's language and direction (`lang`,
+ * `dir`, from the app's page), in place of a plain-text one: no script, nothing loaded, its style its own.
+ */
+export function said(status: number, text: string, lang?: string, dir?: string): Response {
+  if (!lang && !dir) return plain(status, text);
+  const language = lang && /^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$/.test(lang) ? ` lang="${lang}"` : "";
+  const direction = dir === "rtl" || dir === "ltr" ? ` dir="${dir}"` : "";
+  const html = `<!doctype html><html${language}${direction}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>${escape(text)}</title>`
+    + `<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;font:15px/1.5 system-ui,sans-serif;text-align:center}p{max-width:32em;margin:0}</style>`
+    + `</head><body><p>${escape(text)}</p></body></html>`;
+  return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": `${frameAncestors()}; default-src 'none'; style-src 'unsafe-inline'` } });
 }
 
 /** The bridge page open on this origin, among its pages: the one way to the app, and so to the contact. */
@@ -136,7 +152,7 @@ async function forward(event: FetchEvent): Promise<Response> {
         try { controller.close(); } catch { /* already closed */ }
         port.close();
       } else if (reply?.type === "error") {
-        if (!answered) { answered = true; clearTimeout(timer); resolve(plain(reply.status, reply.text)); }
+        if (!answered) { answered = true; clearTimeout(timer); resolve(said(reply.status, reply.text, reply.lang, reply.dir)); }
         else { try { controller.error(new Error(reply.text)); } catch { /* already closed */ } }
         port.close();
       }
@@ -150,5 +166,11 @@ worker.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   // The bridge's own files come from the server; another origin is not this app's.
   if (url.origin !== worker.location.origin || url.pathname.startsWith(BRIDGE_DIR) || url.pathname === WORKER_SCRIPT) return;
-  event.respondWith(forward(event).catch(() => plain(502, "The request failed.")));
+  const answer = async () => {
+    // A tab of its own on this origin (a window the app opened, a link from elsewhere) outlives the view: refused.
+    const client = event.clientId ? await worker.clients.get(event.clientId) : undefined;
+    if (!fromView(event.request, client)) return plain(403, "This app opens only inside Ghostly.");
+    return forward(event);
+  };
+  event.respondWith(answer().catch(() => plain(502, "The request failed.")));
 });

@@ -25,10 +25,11 @@ async function demoApp(): Promise<{ server: Server; port: number; seen: { method
       seen.push({ method: request.method ?? "", path: request.url ?? "", cookie: request.headers.cookie });
       if (request.url === "/") {
         response.writeHead(200, { "content-type": "text/html; charset=utf-8", "set-cookie": "visit=1; Path=/; HttpOnly", "x-frame-options": "DENY" });
-        response.end(`<!doctype html><title>Demo</title><h1 id="title">Hello from the demo</h1><p id="out">…</p><script src="/app.js"></script>`);
+        response.end(`<!doctype html><title>Demo</title><h1 id="title">Hello from the demo</h1><p id="out">…</p><p id="popup">…</p><script src="/app.js"></script>`);
       } else if (request.url === "/app.js") {
         response.writeHead(200, { "content-type": "text/javascript" });
-        response.end(`fetch("/api/echo?x=1", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ hello: "ghost" }) })
+        response.end(`document.getElementById("popup").textContent = window.open("/popup") ? "opened" : "refused";
+          fetch("/api/echo?x=1", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ hello: "ghost" }) })
           .then((r) => r.json()).then((j) => { document.getElementById("out").textContent = JSON.stringify({ ...j, origin: location.origin, storage: (() => { try { return Object.keys(localStorage); } catch (e) { return "refused"; } })() }); });`);
       } else if (request.url?.startsWith("/api/echo")) {
         response.writeHead(200, { "content-type": "application/json" });
@@ -88,6 +89,9 @@ test("a person on the web opens the web app a bot shares, on an origin of its ow
     expect(out.origin).not.toBe(appOrigin);
     expect(out.origin).toMatch(/^http:\/\/[ybndrfg8ejkmcpqxot1uwisza345h769]{32}\.localhost:\d+$/);
     expect(app.seen.map((r) => `${r.method} ${r.path}`)).toEqual(expect.arrayContaining(["GET /", "GET /app.js", "POST /api/echo?x=1"]));
+    // It opens no window of its own: one would be a tab on its origin, outliving the view and the lock.
+    await expect(demo.locator("#popup")).toHaveText("refused");
+    expect(app.seen.map((r) => r.path)).not.toContain("/popup");
     // The app's own storage is untouched by it, and the app still holds its chat.
     expect((await person.page.evaluate(() => Object.keys(localStorage))).filter((key) => !key.startsWith("ghostly-test-")).length).toBeGreaterThan(0);
 
@@ -158,6 +162,23 @@ test("a person on the web opens the web app a bot shares, on an origin of its ow
     await expect(view).toHaveCount(0);
     await expect(person.page).toHaveURL(chat);
     await expect(person.page.getByPlaceholder("Message…")).toBeEnabled();
+    // Forward after it: the closed view's entry is no place to stop, back on the chat itself (it stayed on that dead
+    // entry, and the next Back only left it).
+    await person.page.goForward();
+    await expect.poll(() => person.page.evaluate(() => JSON.stringify(history.state))).not.toContain("ghostlyServiceView");
+    await expect(view).toHaveCount(0);
+    await expect(person.page).toHaveURL(chat);
+
+    // Open, and the contact quits Ghostly: the view says so in the app's words, in place of the app's last page (it
+    // stayed up, and a click in it waited 75 s for the services worker's English "The app did not answer in time.").
+    await open.click();
+    await expect(demo.locator("#title")).toHaveText("Hello from the demo", { timeout: 60_000 });
+    await bot.stop();
+    const offline = person.page.getByTestId("service-view-offline");
+    await expect(offline).toBeVisible({ timeout: 120_000 });
+    await expect(offline).toContainText("Your contact is offline, so Demo cannot open now.");
+    await expect(person.page.getByTestId("service-view-frame")).toBeHidden();
+    await expect(person.page.getByTestId("service-view-retry")).toBeVisible();
   } catch (error) {
     await bot.attachLogs(info);
     throw error;

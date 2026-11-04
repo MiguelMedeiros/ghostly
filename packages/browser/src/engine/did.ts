@@ -59,6 +59,12 @@ export class ProfileDid {
   private inFlight: Promise<void> | null = null;
   private again = false;
   private unlisten: (() => void) | undefined;
+  /** The last `samePacket` answer. */
+  private compared: { payload: string; uris: string; same: boolean } | undefined;
+  /** "Clear all data" ended the DID: a publish still on its way saves nothing, or the cleared record comes back. */
+  private ended = false;
+  /** The newest sequence number signed here, so the `deactivated` packet goes past one still on its way. */
+  private signedSeq = 0;
 
   constructor(private host: ProfileDidHost) {}
 
@@ -111,12 +117,13 @@ export class ProfileDid {
   view(): ProfileDidView | undefined {
     if (!this.stored) return undefined;
     const published = this.stored.published;
+    const alsoKnownAs = this.alsoKnownAs(this.listed());
     return {
       id: this.id,
       listed: this.listed(),
-      alsoKnownAs: this.alsoKnownAs(this.listed()),
+      alsoKnownAs,
       ...(published ? { published: { at: published.at, versionId: String(published.seq) } } : {}),
-      upToDate: !!published && this.samePacket(published.payload),
+      upToDate: !!published && this.samePacket(published.payload, alsoKnownAs),
       ...(this.error ? { error: this.error } : {}),
     };
   }
@@ -168,7 +175,7 @@ export class ProfileDid {
   }
 
   private async publish(): Promise<void> {
-    if (!this.stored || !this.host.online()) return;
+    if (!this.stored || this.ended || !this.host.online()) return;
     const previous = this.stored.published;
     try {
       const packet = encodeDidDhtPacket(this.document());
@@ -182,7 +189,9 @@ export class ProfileDid {
         seq = Math.max(Math.floor(Date.now() / 1000), (previous?.seq ?? 0) + 1);
         payload = signDidDhtPacket(identityFromSeed(await this.unsealed()), packet, seq);
       }
+      this.signedSeq = Math.max(this.signedSeq, seq);
       await this.host.publish(toZ32(this.publicKey()), payload);
+      if (this.ended) return;
       this.error = undefined;
       await this.save({ ...this.stored, published: { payload: toBase64Url(payload), seq, at: Date.now() } });
     } catch (error) {
@@ -192,14 +201,16 @@ export class ProfileDid {
   }
 
   /**
-   * "Clear all data": the DID ends. When a document was ever published, a newer packet reading `deactivated` replaces
+   * "Clear all data": the DID ends. When a document was ever published (or is on its way), a newer packet reading `deactivated` replaces
    * it, so resolvers say the DID is gone instead of showing the old document until it expires. Stops publishing first.
    */
   async deactivate(): Promise<void> {
+    this.ended = true;
     this.stop();
     const previous = this.stored?.published;
-    if (!this.stored || !previous) return;
-    const seq = Math.max(Math.floor(Date.now() / 1000), previous.seq + 1);
+    // Ever published: saved, or signed and still on its way (its save never comes now).
+    if (!this.stored || (!previous && this.signedSeq === 0)) return;
+    const seq = Math.max(Math.floor(Date.now() / 1000), (previous?.seq ?? 0) + 1, this.signedSeq + 1);
     const identity = identityFromSeed(fromBase64Url(await openSecret(this.stored.seed, SEED_AT)));
     await this.host.publish(toZ32(this.publicKey()), signDidDhtPacket(identity, encodeDidDhtDeactivated(this.publicKey()), seq));
   }
@@ -209,6 +220,7 @@ export class ProfileDid {
   }
 
   private alsoKnownAs(ids: string[]): string[] {
+    if (ids.length === 0) return [];
     const listable = this.host.listable();
     return [...new Set(ids.map(id => listable.get(id)).filter((uri): uri is string => !!uri))];
   }
@@ -218,13 +230,19 @@ export class ProfileDid {
     return fromBase64Url(this.stored.publicKey);
   }
 
-  /** Whether `payload` carries the document as it is now. Never throws: the engine's state is built from it. */
-  private samePacket(payload: string): boolean {
+  /**
+   * Whether `payload` carries the document as it is now. Never throws: the engine's state is built from it. Every state
+   * asks, and the document follows from the key and its URIs alone, so it is encoded again only when those URIs or `payload` change.
+   */
+  private samePacket(payload: string, alsoKnownAs = this.alsoKnownAs(this.listed())): boolean {
+    const uris = alsoKnownAs.join(" ");
+    if (this.compared?.payload === payload && this.compared.uris === uris) return this.compared.same;
+    let same = false;
     try {
-      return bytesEqual(fromBase64Url(payload).subarray(HEADER), encodeDidDhtPacket(this.document()));
-    } catch {
-      return false;
-    }
+      same = bytesEqual(fromBase64Url(payload).subarray(HEADER), encodeDidDhtPacket(didDhtDocument(this.publicKey(), { alsoKnownAs })));
+    } catch { /* not the same */ }
+    this.compared = { payload, uris, same };
+    return same;
   }
 
   /**
@@ -242,6 +260,8 @@ export class ProfileDid {
   }
 
   private async save(next: StoredProfileDid): Promise<void> {
+    // Ended by "Clear all data": nothing writes the cleared record back (a late publish, `changed()`, `setListed`).
+    if (this.ended) return;
     await committed((await store(STORES.settings, "readwrite")).put(next, KEY));
     this.stored = next;
   }

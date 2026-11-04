@@ -92,6 +92,53 @@ describe("bump-version", () => {
     });
   });
 
+  // A patch cut on a release branch and merged into main only: dev still holds its entries and its old version, so a
+  // bump there would announce them again under the new version and leave the patch out of the changelog.
+  describe("a release the tree has not merged", () => {
+    const dirs: string[] = [];
+    afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
+    const repository = (version: string, tags: string[]) => {
+      const dir = mkdtempSync(join(tmpdir(), "ghostly-skip-"));
+      dirs.push(dir);
+      for (const file of ["tools/scripts/bump-version.mjs", "tools/scripts/changes.mjs", "packages/browser/src/shared/features.ts"]) {
+        mkdirSync(dirname(join(dir, file)), { recursive: true });
+        cpSync(join(root, file), join(dir, file));
+      }
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "ghostly", version }));
+      writeFileSync(join(dir, "CHANGELOG.md"), `# Changelog\n\n## Unreleased\n\n## ${version}\n`);
+      const git = (...args: string[]) => execFileSync("git", ["-C", dir, "-c", "user.email=t@t", "-c", "user.name=t", ...args], { stdio: "pipe" });
+      git("init", "-q");
+      git("add", "-A");
+      git("commit", "-qm", "base");
+      for (const tag of tags) git("tag", tag);
+      return dir;
+    };
+    const bump = (dir: string, next: string) => {
+      try {
+        execFileSync(process.execPath, [join(dir, "tools/scripts/bump-version.mjs"), next], { cwd: dir, stdio: "pipe" });
+        return { status: 0, stderr: "" };
+      } catch (e) {
+        const error = e as { status?: number; stderr?: Buffer };
+        return { status: error.status, stderr: String(error.stderr) };
+      }
+    };
+
+    it("stops a bump past a released version the tree is still before, before any file changes", () => {
+      const dir = repository("1.7.3", ["v1.7.2", "v1.7.3", "v1.7.4"]);
+      const before = readFileSync(join(dir, "package.json"), "utf8");
+      const { status, stderr } = bump(dir, "1.8.0");
+      expect(status).toBe(1);
+      expect(stderr).toMatch(/v1\.7\.4 is released.*1\.7\.3.*merge main/);
+      expect(readFileSync(join(dir, "package.json"), "utf8")).toBe(before);
+    });
+
+    it("lets a patch of an older line go while a newer release exists", () => {
+      // 1.6.1 → 1.6.2 skips no release: v1.7.4 is after it. It stops later, on files this copy lacks, not on the tags.
+      const { stderr } = bump(repository("1.6.1", ["v1.6.1", "v1.7.4"]), "1.6.2");
+      expect(stderr).not.toMatch(/is released/);
+    });
+  });
+
   describe("the apps flag", () => {
     const FEATURES = "packages/browser/src/shared/features.ts";
     const dirs: string[] = [];

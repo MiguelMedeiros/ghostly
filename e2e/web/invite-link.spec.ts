@@ -119,7 +119,9 @@ test("a link that is not an invite says so, and a mistyped one says it has a typ
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   const { code } = await newInvite(alice);
   for (const [fragment, message] of [
-    ["/chat/not-an-invite", "This is not a Ghostly invite."],
+    ["/chat/not/an-invite", "This is not a Ghostly invite."],
+    // One word reads as the address of a chat, and none is here.
+    ["/chat/not-an-invite", "This chat is gone from this device."],
     [typo(code), "This code has a typo. Check it, or ask for the code again."],
   ]) {
     await bob.page.goto("about:blank");
@@ -165,4 +167,23 @@ test("the keys of a chat already here, in another invite format, do not take the
   await expect(bob.page.getByTitle("New Chat")).toBeVisible();
   await expect(bob.page).not.toHaveURL(new RegExp(stored!.mySeedB64));
   expect(await storedChats(bob.page)).toBe(1);
+});
+
+test("an invite link opened while the app runs in another tab opens in that tab, and closing the new one keeps it", { tag: ["@feature:invite.link", "@feature:app.single-peer-per-browser"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
+  const { code, secret } = await newInvite(alice);
+
+  // Bob's app runs in its tab; the link opens a second one, which waits for that tab and hands it the invite.
+  const second = await bob.context.newPage();
+  await second.goto(`/#${code}`);
+  await expect(second.getByTestId("other-tab")).toHaveAttribute("data-state", "linkTaken", { timeout: 15_000 });
+  await expect(second.getByTestId("other-tab")).toContainText("Your link opened in Ghostly in your other tab.");
+  expect(second.url()).not.toContain(secret);
+
+  // The usual move: close the extra tab. The chat is in the running one, and stays.
+  await second.close();
+  await expect(bob.page).toHaveURL(/#\/chat\/[0-9a-f]+$/);
+  expect(bob.page.url()).not.toContain(secret);
+  await expect.poll(() => storedChats(bob.page)).toBe(1);
+  await expect(bob.page.getByTitle("Delete chat")).toHaveCount(1);
 });

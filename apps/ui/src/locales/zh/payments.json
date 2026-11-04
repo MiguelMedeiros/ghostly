@@ -25,6 +25,7 @@
   },
   "bubble": {
     "amountSats": "{{amount}} sats",
+    "amountSats_one": "{{amount}} sat",
     "approve": "批准付款",
     "balance": "{{amount}} {{unit}}",
     "bitcoinOnchain": "Bitcoin 链上",
@@ -183,6 +184,9 @@
     "maxFee": "可接受的最高手续费（{{unit}}）",
     "maxFeeAria": "最高手续费，单位 {{unit}}",
     "millisats": "{{amount}} millisats",
+    "moneroInfo": "Ghostly 没有 Monero 钱包。“支付”会在此设备的 Monero 钱包中打开此链接，你在那里核对并发送。",
+    "moneroLabel": "Monero",
+    "moneroPayTitle": "在此设备上打开你的 Monero 钱包",
     "networkNotStated": "未注明网络",
     "noWallet": {
       "mainnet": "你没有可用于支付这笔真实资金的 Mainnet {{wallet}} 钱包。",
@@ -289,6 +293,7 @@
     "qrTooLong": "内容太长，无法生成二维码：请改为复制。",
     "redeem": "兑换",
     "redeemed": "已兑换 ✓",
+    "redeemedFee": "已兑换 ✓（mint 扣下 {{fee}} 作为手续费）",
     "redeeming": "兑换中…"
   },
   "mode": {

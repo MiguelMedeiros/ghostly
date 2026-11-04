@@ -1,11 +1,12 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostLink, REACTION_LIMITS, createIdentity, createLink, identityFromSeedB64, type PairingState, type WireReaction } from "@ghostly/core";
-import { GhostlyNode, type NodeEvents } from "../src/engine/node";
+import { FEEDBACK_KEPT, GhostlyNode, type NodeEvents } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { Reactions, latestReaction, noteIfStanding } from "../src/engine/reactions";
+import { STORES, fileStore, transact } from "../src/shared/idb";
 import type { AttentionEvent } from "../src/shared/rpc";
-import type { StoredMessage } from "../src/shared/types";
+import type { StoredMessage, WaitingReaction } from "../src/shared/types";
 import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
 // covers: chat.reactions.wire, groups.protocol.reactions
 
@@ -20,7 +21,7 @@ Object.defineProperty(globalThis.navigator, "storage", { value: { estimate: asyn
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await step(); });
 
-async function setup(contactOptions: { reactionsSupport?: boolean; take?: boolean; onMessageChanges?: NodeEvents["onMessageChanges"]; onMessages?: NodeEvents["onMessages"] } = {}) {
+async function setup(contactOptions: { reactionsSupport?: boolean; take?: boolean; onMessageChanges?: NodeEvents["onMessageChanges"]; onMessages?: NodeEvents["onMessages"]; before?: (id: string) => Promise<void> } = {}) {
   const net = new FakeNativeNet();
   const invitation = createLink();
   const [mine, theirs] = [createIdentity().seedB64, createIdentity().seedB64];
@@ -52,6 +53,7 @@ async function setup(contactOptions: { reactionsSupport?: boolean; take?: boolea
   });
   contact.registerEndpoint(net.endpoint("iroh/1", "contact"));
   cleanup.push(async () => { await contact.stop(false); await node.shutdown(); await db.deleteLink(id); });
+  await contactOptions.before?.(id);
   await node.start();
   node.setActiveLink({ linkId: id });
   const view = () => node.getState().links.find(l => l.id === id)!;
@@ -160,6 +162,24 @@ describe("reacting over the live link", () => {
     expect(t.attention.filter(e => e.type === "message")).toEqual([]);
   });
 
+  it("a contact flipping its reaction is heard each time, and what this engine keeps to hear a fact once stays bounded", async () => {
+    const t = await setup();
+    await t.agreed();
+    const sent = await t.node.sendMessage({ linkId: t.id, text: "lunch?" });
+    const mine = (await t.messages()).find(m => m.id === sent.messageId)!;
+    for (let n = 1; n <= 6; n++) expect(t.contact.sendReaction({ id: mine.wireId!, e: n % 2 ? "👍" : "❤️", n })).toBeNull();
+    await vi.waitFor(() => expect(t.receipts).toContain(6));
+    expect(t.attention.filter(e => e.type === "reaction")).toHaveLength(6);
+    // Past the window, the next ones: each is a new fact, so what is kept to hear it once forgets the oldest.
+    const heard = t.node as unknown as { feedbackIds: Set<string>; feedback(type: AttentionEvent["type"], id: string, linkId?: string): void };
+    for (let n = 7; n <= 3 * FEEDBACK_KEPT; n++) heard.feedback("reaction", `${t.id}:${mine.id}:peer:${n}`, t.id);
+    expect(heard.feedbackIds.size).toBe(FEEDBACK_KEPT);
+    expect(t.attention.filter(e => e.type === "reaction")).toHaveLength(3 * FEEDBACK_KEPT);
+    // The newest are still heard once.
+    heard.feedback("reaction", `${t.id}:${mine.id}:peer:${3 * FEEDBACK_KEPT}`, t.id);
+    expect(t.attention.filter(e => e.type === "reaction")).toHaveLength(3 * FEEDBACK_KEPT);
+  });
+
   it("a reaction taken back leaves the chat list's line: the one before it is shown again, or none", async () => {
     const t = await setup();
     await t.agreed();
@@ -206,14 +226,52 @@ describe("reacting over the live link", () => {
     whole.mockRestore();
   });
 
+  it("a contact's reactions to my files and to payments, one right after another, each land as they come", async () => {
+    // A file of mine is `me_<its time>` here and goes by its own wire id on the wire, a payment by its id: past the first,
+    // each waited for the chat's next whole read, 10 s on, and was lost if the app stopped meanwhile.
+    const pictures = ["pictureWire01", "pictureWire02", "pictureWire03", "pictureWire04"];
+    const t = await setup({ before: async id => {
+      for (const [i, wire] of pictures.entries()) {
+        const file = { id: `${id}-out-${wire}`, name: `p${i}.png`, size: 10, mime: "image/png" };
+        await fileStore.put({ id: file.id, linkId: id, direction: "out", wireId: wire, createdAt: 1, metadata: { ...file, timestamp: 100 + i } });
+        await db.addMessage({ linkId: id, id: `me_${100 + i}`, text: file.name, sender: "me", timestamp: 100 + i, via: "datalink", file });
+      }
+      const paid = { id: "paymentOfMine01", linkId: id, kind: "payment", direction: "out", amount: 21, unit: "sat", state: "settled", createdAt: 200 } as const;
+      const asked = { ...paid, id: "requestToMe0001", kind: "request", direction: "in", state: "pending", createdAt: 201 } as const;
+      await transact([STORES.payments], s => { s[STORES.payments].put(paid); s[STORES.payments].put(asked); });
+      await db.addMessage({ linkId: id, id: "me_200", text: "⚡ 21 sats", sender: "me", timestamp: 200, via: "datalink", paymentId: paid.id });
+      await db.addMessage({ linkId: id, id: "peer_201", text: "⚡ Requested 21 sats", sender: "peer", timestamp: 201, via: "datalink", paymentId: asked.id });
+    } });
+    await t.agreed();
+    const named = [...pictures, "paymentOfMine01", "requestToMe0001"];
+    for (const [i, id] of named.entries()) {
+      expect(t.contact.sendReaction({ id, e: "❤️", n: 10 + i })).toBeNull();
+      await vi.waitFor(() => expect(t.receipts).toContain(10 + i));
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    await vi.waitFor(async () => expect((await t.messages()).map(m => m.reactions?.peer?.e)).toEqual(named.map(() => "❤️")), { timeout: 2_000 });
+  });
+
   it("a reaction to a message not here yet waits for it", async () => {
     const t = await setup();
     await t.agreed();
     const wire = "W".repeat(22);
     t.contact.sendReaction({ id: wire, e: "😮", n: 7 });
     await vi.waitFor(() => expect(t.receipts).toContain(7));
+    // Confirmed once on the chat's record: a stop before the message lands keeps it.
+    const waiting = async () => (await db.getLinks()).find(l => l.id === t.id)?.reactionsWaiting;
+    expect((await waiting())?.map(w => w.reaction)).toEqual([{ id: wire, e: "😮", n: 7 }]);
     expect(await t.contact.sendMessage("surprise", Date.now(), wire)).toBeNull();
     await vi.waitFor(async () => expect((await t.row("surprise")).reactions?.peer).toMatchObject({ e: "😮", n: 7 }));
+    await vi.waitFor(async () => expect(await waiting()).toEqual([]));
+  });
+
+  it("a reaction that waited for its message when the app stopped lands when the message comes after the start", async () => {
+    const wire = "S".repeat(22);
+    const t = await setup({ before: id => db.patchLink(id, { reactionsWaiting: [{ by: "peer", reaction: { id: wire, e: "🎉", n: 5 }, until: Date.now() + 60_000 }] }) });
+    await t.agreed();
+    expect(await t.contact.sendMessage("after the restart", Date.now(), wire)).toBeNull();
+    await vi.waitFor(async () => expect((await t.row("after the restart")).reactions?.peer).toMatchObject({ e: "🎉", n: 5 }));
   });
 
   it("an older app gets nothing on the session: the reaction waits here (and rides on the DHT envelopes meanwhile)", async () => {
@@ -444,6 +502,45 @@ describe("the reactions store", () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it("a contact's reaction to a message not here yet is on disk before it is confirmed, and still lands after a stop", async () => {
+    // It was kept in memory only, and confirmed: a stop before its message landed lost it, and the contact never says it again.
+    const rows: StoredMessage[] = [];
+    let disk: WaitingReaction[] = [];
+    const { reactions, host } = memory(rows);
+    Object.assign(host, { keep: async (_chat: string, waiting: WaitingReaction[]) => { disk = waiting; } });
+    expect(await reactions.receive("chat", "peer", { id: "AAAAAAAAAAAAAAAA", e: "😮", n: 7 })).toBe("waiting");
+    expect(await reactions.receive("chat", "peer", { id: "BBBBBBBBBBBBBBBB", e: "👍", n: 8 })).toBe("waiting");
+    expect(disk.map(w => w.reaction.n)).toEqual([7, 8]);
+    reactions.stop();
+    // The next start: one of the two messages landed before the stop wrote its reaction, the other comes now.
+    const again = memory(rows);
+    Object.assign(again.host, { keep: async (_chat: string, waiting: WaitingReaction[]) => { disk = waiting; } });
+    rows.push(row({ linkId: "chat", id: "peer_AAAAAAAAAAAAAAAA", text: "landed before the stop" }));
+    await again.reactions.restore("chat", disk, rows);
+    expect(rows[0].reactions?.peer).toMatchObject({ e: "😮", n: 7 });
+    expect(disk.map(w => w.reaction.n)).toEqual([8]);
+    rows.push(row({ linkId: "chat", id: "peer_BBBBBBBBBBBBBBBB", text: "comes after the start" }));
+    await again.reactions.stored(rows[1]);
+    expect(rows[1].reactions?.peer).toMatchObject({ e: "👍", n: 8 });
+    expect(disk).toEqual([]);
+    // One whose wait ended while stopped is let go; a group's wait stays in memory.
+    expect(await again.reactions.receive("chat", "peer", { id: "CCCCCCCCCCCCCCCC", e: "👍", n: 9 })).toBe("waiting");
+    const third = memory(rows);
+    const kept = vi.fn(async () => {});
+    Object.assign(third.host, { keep: kept });
+    third.tick(REACTION_LIMITS.bufferMs + 1_000);
+    await third.reactions.restore("chat", disk, rows);
+    expect(kept).toHaveBeenLastCalledWith("chat", []);
+    expect(await third.reactions.receive("group:g", "m", { id: "k:0:1", e: "👍", n: 1 })).toBe("waiting");
+    expect(kept).toHaveBeenCalledOnce();
+  });
+
+  it("a contact's reaction that could not be kept on disk is not confirmed", async () => {
+    const { reactions, host } = memory([]);
+    Object.assign(host, { keep: async () => { throw new Error("disk full"); } });
+    expect(await reactions.receive("chat", "peer", { id: "AAAAAAAAAAAAAAAA", e: "😮", n: 7 })).toBe("dropped");
+  });
+
   it("has room for so many waiting per sender in a chat", async () => {
     const { reactions, tick } = memory([]);
     for (let i = 0; i < REACTION_LIMITS.buffer; i++) {
@@ -531,7 +628,8 @@ describe("the reactions store", () => {
     expect(numbers.slice(2)).toEqual([7_002, 7_003, 9_002, 9_501, 9_502]);
     // What takes no reaction, or is not here, is refused without the whole group either.
     expect(await mine("group:g", "k:0:3", "👍")).toMatch(/takes no reaction/);
-    expect(await mine("group:g", "k:0:9", "👍")).toMatch(/not in this chat/);
+    // A group's refusal names the group, not a chat.
+    expect(await mine("group:g", "k:0:9", "👍")).toBe("That message is not in this group, or takes no reaction");
     expect(whole).not.toHaveBeenCalled();
     expect(rows.map(r => r.reactions?.me?.e)).toEqual(["", "👍", "", "😂", undefined]);
 

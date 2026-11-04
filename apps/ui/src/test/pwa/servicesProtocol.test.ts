@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BRIDGE_PAGE, MAX_REQUEST_BYTES, answerStatus, isServiceHostname, parseServicesHost, readRequest, serviceOrigin } from "../../../../web/src/svc/protocol";
+import { BRIDGE_PAGE, MAX_REQUEST_BYTES, answerStatus, fromView, isServiceHostname, parseServicesHost, readRequest, serviceOrigin } from "../../../../web/src/svc/protocol";
 import { precacheList } from "../../../../web/src/sw/policy";
 
 // covers: services.web-open
@@ -33,6 +33,20 @@ describe("the services host", () => {
 
   it("keeps the bridge's files out of the app's own cache", () => {
     expect(precacheList(["ghostly-services-sw.js", "_ghostly-svc/bridge.html", "_ghostly-svc/bridge.js", "index.html", "assets/a.js"])).toEqual(["/", "/assets/a.js"]);
+  });
+});
+
+describe("who the worker passes on to the contact", () => {
+  const get = { mode: "cors", destination: "" };
+  it("the app framed under the bridge, its frames and its workers", () => {
+    expect(fromView({ mode: "navigate", destination: "iframe" })).toBe(true);
+    expect(fromView(get, { type: "window", frameType: "nested" })).toBe(true);
+    expect(fromView(get, { type: "worker" })).toBe(true);
+  });
+
+  it("never a tab or a window on the app's origin: one it opened, or one another site opened, outlives the view", () => {
+    expect(fromView({ mode: "navigate", destination: "document" })).toBe(false);
+    for (const frameType of ["auxiliary", "top-level", "none", undefined]) expect(fromView(get, { type: "window", frameType })).toBe(false);
   });
 });
 

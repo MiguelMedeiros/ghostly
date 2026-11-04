@@ -4,6 +4,7 @@ import { registerFileBytes, resetFileBytes, type FileBytes } from "@ghostly/brow
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
 import type { HandoffFile } from "@ghostly/browser/devices/handoff";
 import { handoffProfileHost } from "../../lib/handoffProfile";
+import { namespaceOf, registryKey } from "../../lib/profiles";
 // covers: devices.handoff
 
 /*
@@ -34,6 +35,7 @@ const fileOf = (n: number): HandoffFile => ({ id: `chat${n % 40}-in-${String(n).
 const bytes = new Uint8Array(3);
 const legacyKey = (database: string) => `ghostly-staging:${database.replace(/^ghostly_/, "")}`;
 const byId = (a: HandoffFile, b: HandoffFile) => (a.id < b.id ? -1 : 1);
+const stagingKeys = () => Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((key): key is string => !!key?.startsWith("ghostly-staging:"));
 
 beforeEach(() => {
   localStorage.clear();
@@ -115,5 +117,22 @@ describe("the note of the files a taker's staging holds", () => {
     expect(await other.held()).toEqual([b]);
     await host.staging.drop("ghostly_stage");
     expect(await other.held()).toEqual([b]);
+  });
+
+  it("keeps none of a move's notes once its namespace is installed: they only served a pull that had not finished", async () => {
+    localStorage.setItem(registryKey(), JSON.stringify({ version: 1, active: "", profiles: [{ id: "", name: "Personal", createdAt: 0 }] }));
+    const host = handoffProfileHost("1.1.7", "web");
+    const staging = await host.staging.open(), unfinished = await host.staging.open("ghostly_stage");
+    for (let n = 0; n < 1_000; n++) { const file = fileOf(n); await staging.begin(file.id); await staging.append(file.id, 0, bytes); await staging.finish(file); }
+    await unfinished.begin(fileOf(1).id); await unfinished.append(fileOf(1).id, 0, bytes); await unfinished.finish(fileOf(1));
+
+    // The install, then the take drops the old namespace (bug hunt, 2026-11-04: 1,000 keys, 125,690 characters left).
+    await host.staging.install("ghostly", staging.database);
+    await host.staging.drop("ghostly");
+
+    expect(namespaceOf("")).toBe(staging.database.replace(/^ghostly_/, ""));
+    expect(stagingKeys().filter((key) => !key.startsWith("ghostly-staging:stage:"))).toEqual([]);
+    // Another staging, not installed, still goes on from its own.
+    expect(await unfinished.held()).toEqual([fileOf(1)]);
   });
 });

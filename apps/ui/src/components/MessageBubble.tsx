@@ -31,8 +31,10 @@ import { Notice } from "./ui/Notice";
 import { useDhtOnly, waitsForLive } from "../lib/delivery";
 import { useFocusKept } from "../hooks/useFocusKept";
 import { useTransfer } from "../hooks/useServicesPlatform";
+import { holdRow } from "../hooks/useRowWindow";
 import type { ChatFile, ChatMessage } from "../lib/types";
 import { callEventText } from "../lib/callLines";
+import { refusedLine, shownRefusal } from "../lib/refusedLine";
 import { callLineCount } from "../lib/storage";
 import { formatCallLength } from "../lib/messageDetails";
 import type { QuoteView } from "../lib/replies";
@@ -45,7 +47,11 @@ import { myReaction, reactionChips } from "../lib/reactions";
 import { DeliveryStatus } from "./chat/DeliveryStatus";
 import { forwardedLabel } from "../lib/forward";
 import { PinIcon } from "./PinIcon";
-import { copyText } from "../lib/shareLink";
+import { MessageCopyNote } from "./chat/MessageCopy";
+import { useMessageCopy } from "../hooks/useMessageCopy";
+import { originalMentions, setShowsOriginal, showsOriginal, useSentOriginal, type SentOriginal } from "../lib/sentOriginals";
+import { languageName } from "../lib/documentLanguage";
+import { translateEnabled } from "../lib/translateFlag";
 import { pictureLinkRead, pictureLinkUrl, type PictureRead } from "../lib/pictureLink";
 import { SenderAvatar, type MessageAuthor } from "./chat/SenderAvatar";
 import { useMemberText } from "../contexts/MemberColorsContext";
@@ -53,6 +59,7 @@ import { AppCardView } from "./apps/AppCardView";
 import { useAppsAvailable } from "../lib/apps/flag";
 import { useInstalledApp } from "../lib/apps/installed";
 import { SavedIcon } from "./saved/SavedIcon";
+import { useTranslation, type ShownTranslation } from "../hooks/useTranslation";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -68,8 +75,11 @@ interface MessageBubbleProps {
   contactName?: string;
   /** Forgets this message on this device; a rejection is a delete refused (Cancel sending says it). Left out where a chat cannot be edited. */
   onDelete?: () => void | Promise<void>;
-  /** Deletes this message of mine from every member's device (WISP 400 § Delete for everyone). Left out where it can't. */
-  onDeleteForEveryone?: () => void;
+  /**
+   * Deletes this message of mine from every member's device (WISP 400 § Delete for everyone). Left out where it can't.
+   * A rejection is the delete refused (limited mode): said under the message, which stays.
+   */
+  onDeleteForEveryone?: () => void | Promise<void>;
   /** The engine's link for the message's details; found from `peerPubKey` when left out (groups name theirs). */
   linkId?: string;
   /** Answers this message: its ⋮ says Reply, a pointer finds a reply button beside it, a finger swipes it right. */
@@ -109,6 +119,11 @@ interface MessageBubbleProps {
   author?: MessageAuthor;
   /** Opens what the chat knows of `author` (the group's members, theirs marked): a tap on their name or picture. */
   onOpenAuthor?: () => void;
+  /**
+   * In a group, the contact who wrote the message (`author`, when they are one): told when an invoice in it is paid from
+   * its card, as a 1:1 chat's contact is. Their choice of ways of paying is not this chat's, so nothing else reads it.
+   */
+  payee?: string;
   /**
    * A bot's buttons under the message (WISP 406 · Message Buttons), as the chat's history has them (`buttonsViews`).
    * Left out, a message with buttons shows them, and none of them answers.
@@ -286,12 +301,60 @@ function EditedMark({ edit, group }: { edit: NonNullable<ChatMessage["edit"]>; g
   );
 }
 
-/** Reply, beside a message, for a pointer: shown while the message is hovered or the button has the focus. */
+/**
+ * "Translated from Portuguese · Show original" under a received text shown in the app's language, quiet as `EditedMark`;
+ * Show original swaps the text in place, and Show translation back. A message too long to be translated by itself
+ * has Translate instead.
+ */
+function TranslatedMark({ translation }: { translation: ShownTranslation }) {
+  const { t, dir } = useI18n();
+  const quiet = "text-[11px] leading-[16px] text-text-primary/65";
+  if (translation.long) {
+    return (
+      <div dir={dir} className={`mt-[2px] ${quiet}`}>
+        <button type="button" data-testid="message-translate" onClick={translation.translate} className="cursor-pointer hover:underline">
+          {t("chat.translated.translate")}
+        </button>
+      </div>
+    );
+  }
+  if (translation.text === undefined) return null;
+  return (
+    <div dir={dir} data-testid="message-translated" data-original={translation.original || undefined} className={`mt-[2px] italic ${quiet}`}>
+      <span>{t("chat.translated.from", { language: translation.language })}</span>
+      <span aria-hidden="true"> · </span>
+      <button type="button" data-testid="message-translated-toggle" onClick={translation.toggle} className="italic cursor-pointer hover:underline">
+        {t(translation.original ? "chat.translated.showTranslation" : "chat.translated.showOriginal")}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Under a message I sent translated from this device (lib/sentOriginals.ts): "Translated to Italian · Show original",
+ * quiet like "edited". A screen reader reads the text, then the line; Show original is a button, and swaps the text in
+ * place (Show translation brings it back).
+ */
+function SentTranslationLine({ sent, showing, onToggle }: { sent: SentOriginal; showing: boolean; onToggle: () => void }) {
+  const { t, language, dir } = useI18n();
+  return (
+    <div dir={dir} data-testid="message-sent-translation" className="mt-[2px] text-[11px] leading-[16px] text-text-primary/65 italic">
+      <span>{t("chat.sentTranslation.line", { language: languageName(sent.to, language) })}</span>
+      <span aria-hidden="true"> · </span>
+      <button type="button" data-testid="message-show-original" aria-pressed={showing} onClick={onToggle} className="italic cursor-pointer hover:underline">
+        {t(showing ? "chat.translated.showTranslation" : "chat.translated.showOriginal")}
+      </button>
+    </div>
+  );
+}
+
+/** Reply, beside a message, for a pointer: shown while the message is hovered or the button has the focus. A wide touch
+ * screen (a phone in landscape) shows it too, so it gets the same 24 px tap target as the ⋮. */
 function ReplyAction({ onReply }: { onReply: () => void }) {
   const { t } = useI18n();
   return (
     <button type="button" data-testid="message-reply-action" onClick={onReply} title={t("chat.message.reply")} aria-label={t("chat.message.reply")}
-      className="self-center shrink-0 p-1 rounded-full text-text-muted hover:text-text-primary transition-all cursor-pointer max-md:hidden md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100">
+      className="relative self-center shrink-0 p-1 rounded-full text-text-muted before:absolute before:-inset-px before:content-[''] hover:text-text-primary transition-all cursor-pointer max-md:hidden md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100">
       <ReplyGlyph />
     </button>
   );
@@ -359,17 +422,33 @@ const linkPictureBox = ({ width, height }: ImageMeta): React.CSSProperties => ({
 });
 const hostOf = (url: string) => { try { return new URL(url).host; } catch { return "picture"; } };
 
+type Segmenter = { segment(text: string): Iterable<{ segment: string }> };
+const SegmenterCtor = (globalThis as { Intl?: { Segmenter?: new (locale?: string, options?: { granularity: string }) => Segmenter } }).Intl?.Segmenter;
+const graphemeSegmenter = SegmenterCtor ? new SegmenterCtor(undefined, { granularity: "grapheme" }) : null;
+/**
+ * The emoji a person sees, spaces aside: a family, a flag or a skin-toned thumb is one, however many UTF-16 units it
+ * takes. Where the browser cannot tell characters apart, code points.
+ */
+const emojiCount = (text: string) => {
+  const parts = graphemeSegmenter ? Array.from(graphemeSegmenter.segment(text), ({ segment }) => segment) : Array.from(text);
+  return parts.filter((part) => part.trim()).length;
+};
+
+/**
+ * Up to 6 emoji and nothing else show big. Besides the pictures: a keycap (a digit, # or * with U+20E3) and a tag
+ * sequence's tags (the flags of England, Scotland and Wales), which the emoji panel offers too.
+ */
 function isOnlyEmojis(text: string): boolean {
   const emojiPattern =
-    /^(?:[\p{Emoji_Presentation}\p{Extended_Pictographic}]|\u200d|\uFE0F|\s)+$/u;
-  return emojiPattern.test(text.trim()) && text.trim().length <= 12;
+    /^(?:[\p{Emoji_Presentation}\p{Extended_Pictographic}]|[0-9#*]\uFE0F?\u20E3|[\u{E0020}-\u{E007F}]|\u200d|\uFE0F|\s)+$/u;
+  return emojiPattern.test(text.trim()) && emojiCount(text) <= 6;
 }
 
 function TailSvg({ side }: { side: "left" | "right" }) {
   if (side === "right") {
     return (
       <span className="absolute top-0 -end-[8px] rtl:-scale-x-100 block w-[8px] h-[13px] overflow-hidden">
-        <svg viewBox="0 0 8 13" width="8" height="13" className="block">
+        <svg viewBox="0 0 8 13" width="8" height="13" className="block" aria-hidden="true" focusable="false">
           <path d="M5 0H0V13C0 13 1.8 8.5 5 4.5C6.4 2.7 8 1 8 1L5 0Z" className="fill-sent-bg" />
         </svg>
       </span>
@@ -377,7 +456,7 @@ function TailSvg({ side }: { side: "left" | "right" }) {
   }
   return (
     <span className="absolute top-0 -start-[8px] rtl:-scale-x-100 block w-[8px] h-[13px] overflow-hidden">
-      <svg viewBox="0 0 8 13" width="8" height="13" className="block">
+      <svg viewBox="0 0 8 13" width="8" height="13" className="block" aria-hidden="true" focusable="false">
         <path d="M3 0H8V13C8 13 6.2 8.5 3 4.5C1.6 2.7 0 1 0 1L3 0Z" className="fill-received-bg" />
       </svg>
     </span>
@@ -648,8 +727,9 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
         aria-haspopup="true"
         aria-expanded={open}
         onClick={() => { setPointed(undefined); setOpen((v) => !v); }}
-        // Faint but always reachable by touch; on a pointer it waits for the message to be hovered.
-        className={`p-1 rounded-full transition-all cursor-pointer hover:text-text-primary md:group-hover:opacity-100 md:focus-visible:opacity-100 ${
+        // Faint but always reachable by touch; on a pointer it waits for the message to be hovered. The pseudo-element takes
+        // its 22 px to the 24 px a finger needs without moving the row.
+        className={`relative p-1 rounded-full before:absolute before:-inset-px before:content-[''] transition-all cursor-pointer hover:text-text-primary md:group-hover:opacity-100 md:focus-visible:opacity-100 ${
           open || confirm ? "text-text-primary opacity-100" : "text-text-muted max-md:opacity-40 md:opacity-0"
         }`}
       >
@@ -772,7 +852,7 @@ export function MessageBubble(props: MessageBubbleProps) {
       peerPubKey={props.peerPubKey} peerNick={props.peerNick} contactName={props.contactName} linkId={props.linkId} quote={props.quote} names={names}
       onDelete={props.onDelete && stable.onDelete} onDeleteForEveryone={props.onDeleteForEveryone && stable.onDeleteForEveryone} onReply={props.onReply && stable.onReply} onEdit={props.onEdit && stable.onEdit}
       onReact={props.onReact && stable.onReact} onForward={props.onForward && stable.onForward} onSelect={props.onSelect && stable.onSelect}
-      onPin={props.onPin && stable.onPin} pinned={props.pinned} onSave={props.onSave && stable.onSave} saved={props.saved} author={props.author} onOpenAuthor={props.onOpenAuthor && stable.onOpenAuthor}
+      onPin={props.onPin && stable.onPin} pinned={props.pinned} onSave={props.onSave && stable.onSave} saved={props.saved} author={props.author} onOpenAuthor={props.onOpenAuthor && stable.onOpenAuthor} payee={props.payee}
       reactionName={stable.reactionName} highlight={props.highlight} buttons={props.buttons} compactPress={props.compactPress}
       selection={selection && { selected: selection.selected, ...(selection.onToggle && { onToggle: stable.onToggle }) }}
     />
@@ -783,7 +863,7 @@ const CALLBACKS = ["onDelete", "onDeleteForEveryone", "onReply", "onEdit", "onRe
 
 /** The same bubble to draw: see `MessageBubble`. */
 function sameBubble(a: BubbleViewProps, b: BubbleViewProps): boolean {
-  return a.peerAck === b.peerAck && a.peerPubKey === b.peerPubKey && a.peerNick === b.peerNick && a.contactName === b.contactName && a.linkId === b.linkId && a.names === b.names && a.highlight === b.highlight && !a.pinned === !b.pinned && !a.saved === !b.saved && !a.compactPress === !b.compactPress
+  return a.peerAck === b.peerAck && a.peerPubKey === b.peerPubKey && a.payee === b.payee && a.peerNick === b.peerNick && a.contactName === b.contactName && a.linkId === b.linkId && a.names === b.names && a.highlight === b.highlight && !a.pinned === !b.pinned && !a.saved === !b.saved && !a.compactPress === !b.compactPress
     && CALLBACKS.every(name => !a[name] === !b[name])
     && !a.selection === !b.selection && a.selection?.selected === b.selection?.selected && !a.selection?.onToggle === !b.selection?.onToggle
     && sameValue(a.quote, b.quote) && sameValue(a.author, b.author) && sameValue(a.buttons, b.buttons) && sameValue(a.message, b.message);
@@ -798,7 +878,7 @@ const SameBubble = memo(function SameBubble(props: BubbleViewProps) {
   );
 }, sameBubble);
 
-function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", contactName, onDelete: deleteIt, onDeleteForEveryone: deleteForEveryoneIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, onPin: pinIt, pinned, onSave: saveIt, saved, selection, names, highlight, author, onOpenAuthor, buttons, compactPress }: BubbleViewProps) {
+function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", contactName, onDelete: deleteIt, onDeleteForEveryone: deleteForEveryoneIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, onPin: pinIt, pinned, onSave: saveIt, saved, selection, names, highlight, author, onOpenAuthor, payee, buttons, compactPress }: BubbleViewProps) {
   // While the chat is choosing messages, a row is a checkbox: nothing else on it answers.
   const choosing = !!selection;
   const onPin = choosing ? undefined : pinIt, onSave = choosing ? undefined : saveIt;
@@ -819,6 +899,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const pressed = !!compactPress && isButtonPress(message);
   const money = useMemo(() => (message.paymentId || message.file || pressed || showsCard(message.card) ? null : findMoney(message.text)), [message.paymentId, message.file, pressed, message.card, message.text]);
   const [details, setDetails] = useState(false);
+  // Its row stays in the page while its details are open, however many messages come meanwhile.
+  useEffect(() => (details ? holdRow(message.id) : undefined), [details, message.id]);
   // An app card (WISP 405 § An app) in a 1:1 chat, where Apps shows; elsewhere its text, as an older app shows it.
   const appsOn = useAppsAvailable();
   const appCard = appsOn && message.card?.kind === "app" && linkId && !linkId.startsWith("group:") ? message.card : undefined;
@@ -840,10 +922,16 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   };
   // What Copy under a long press copies: a message's own words, not a file's name, a payment's or a card's.
   const copyable = message.file || message.paymentId || pressed || showsCard(message.card) ? "" : message.text.trim();
+  const optionsButton = () => rowRef.current?.querySelector<HTMLElement>("[data-testid=message-options]") ?? rowRef.current;
+  const [copyNote, copy, closeCopyNote] = useMessageCopy(optionsButton);
   // The reactions' quick bar: from the React button or the ⋮ (`button`), or a long press (`press`, with Details under it).
   const [bar, setBar] = useState<"button" | "press" | null>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
   const reactRef = useRef<HTMLSpanElement>(null);
+  // The button's bar opens at the button, which is in sight where it was clicked: from the bubble's edges, a bubble
+  // taller than the list opened it out of sight. It lines up towards the bubble (the button is on the bubble's far
+  // side); a long press's bar keeps the bubble's own edge.
+  const barAlign = (bar === "button") === (message.sender === "me") ? "start" : "end";
   const press = useLongPress(onReact ? () => setBar("press") : onSelect ?? openDetails);
   // `names`: the names `reactionName` gives now, which can change while the function stays the same.
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `names` is what `reactionName` answers
@@ -857,6 +945,14 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const isSystem = message.sender === "system";
   const isAcked = isMe && (message.delivery ? message.delivery === "delivered" : peerAck >= message.timestamp);
   const inGroup = !!linkId?.startsWith("group:");
+  // Mine, sent translated from this device: the original kept beside it. An edit changed the sent text, so the
+  // original no longer goes with it.
+  const sent = useSentOriginal(chat, message.id, translateEnabled() && isMe && !message.edit && !message.file && !message.paymentId);
+  const [showingOriginal, setShowingOriginal] = useState(() => !!chat && showsOriginal(chat, message.id));
+  const toggleOriginal = () => { const next = !showingOriginal; setShowingOriginal(next); if (chat) setShowsOriginal(chat, message.id, next); };
+  // The original in place of the sent text, with its own mention places: the message's are the translation's.
+  const original = sent && showingOriginal ? sent.original.trim() : undefined;
+  const originalMarks = useMemo(() => original === undefined ? undefined : originalMentions(original, message.text, message.mentions), [original, message.text, message.mentions]);
   const { platform, transfer } = useTransfer(isMe ? message.file?.id : undefined);
   // A file of mine whose bytes did not go has the red mark, not ticks beside its "Not sent". While they move, the
   // message keeps its own mark: the bytes' progress is the file's to show (held files travel by hold/1, not files/3).
@@ -892,6 +988,11 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     const link = engine.linkByPeer(peerPubKey);
     if (link) void engine.call("deleteMessage", { linkId: link.id, messageId: message.id }).catch(refuse(shown));
   };
+  /** Delete for everyone, confirmed: a refused one stays, with why under it, as a refused Send again. */
+  const deleteForEveryone = onDeleteForEveryone && (() => {
+    setRefused(null);
+    void Promise.resolve(onDeleteForEveryone()).catch(refuse(shown));
+  });
   const refusal = isMe && refused && refused.on === shown && (
     <Notice problem={refused.problem} testId="message-retry-error" className="max-w-full px-1 pt-1 text-[11px]" />
   );
@@ -919,6 +1020,11 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     });
     return () => { shown = false; };
   }, [readHere]);
+  // A contact's or member's plain text, read in the app's language where the chat translates (docs/AUTO-TRANSLATE.md
+  // § UI): asked for once the bubble is near the screen. Never a picture, a card, money, a file or emoji alone.
+  const plainText = !isMe && !isSystem && contentType === "text" && !pressed && !money && !message.file && !message.paymentId && !showsCard(message.card) && !appCard && !isOnlyEmojis(message.text);
+  const translation = useTranslation(message, bubbleRef, plainText);
+  const translatedText = translation && !translation.original ? translation.text : undefined;
   // Read before (the chat opened again, the row drawn again): in the first frame, so nothing above a remembered place
   // grows after the view went back there.
   const linkPicture = readHere === null ? undefined : pictureRead?.link === readHere ? pictureRead.read : pictureLinkRead(readHere);
@@ -931,7 +1037,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     : undefined;
   const detailsPanel = details && (
     <MessageDetailsPanel message={message} linkId={linkId ?? (peerPubKey ? engine.linkByPeer(peerPubKey)?.id : undefined)}
-      picture={contentType === "image"} onClose={() => setDetails(false)} returnFocus={rowRef.current} />
+      picture={contentType === "image"} onClose={() => setDetails(false)}
+      returnFocus={optionsButton()} />
   );
   const rowProps = choosing ? {
     ref: rowRef, "data-message-id": message.id, "data-selected": selection.selected || undefined,
@@ -950,6 +1057,22 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       {selection.selected && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7" /></svg>}
     </span>
   );
+
+  // A payment of the contact's this app refused: the app's own line, centred as a call's, never a bubble of theirs.
+  // From the values the mirror put on the row (lib/refusedLine.ts `shownRefusal`).
+  const refusedPayment = shownRefusal(message);
+  if (refusedPayment) {
+    return (
+      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x ${enter}`}>
+        <div data-testid="refused-line" className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-surface-alt/80 text-text-secondary ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
+          <span>{refusedLine(refusedPayment, t)}</span>
+          <span className="text-text-muted text-[10px] whitespace-nowrap shrink-0">{time}</span>
+        </div>
+        {!choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} align="right" />}
+        {detailsPanel}
+      </div>
+    );
+  }
 
   if (isSystem && message.systemEvent?.type === "join") {
     const joiner = message.systemEvent.pubKey ?? "";
@@ -971,6 +1094,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
+            aria-hidden="true"
+            focusable="false"
           >
             <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
             <polyline points="10 17 15 12 10 7" />
@@ -982,7 +1107,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
               {" "}{t("chat.joined")}
             </span>
           )}
-          <span className="text-text-muted text-[10px]">{time}</span>
+          {/* Whole on one line: "02:11 م" split at its space when the text took two lines at 320 px. */}
+          <span className="text-text-muted text-[10px] whitespace-nowrap shrink-0">{time}</span>
         </div>
         {!choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} align="right" />}
         {detailsPanel}
@@ -1008,7 +1134,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           {duration !== undefined && duration >= 1000 && (
             <span className="text-text-muted">({formatCallLength(duration, t)})</span>
           )}
-          <span className="text-text-muted text-[10px]">{time}</span>
+          <span className="text-text-muted text-[10px] whitespace-nowrap shrink-0">{time}</span>
         </div>
         {!choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} align="right" />}
         {detailsPanel}
@@ -1031,7 +1157,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     </div>
   ) : null;
   const menu = !choosing && (
-    <MessageMenu onDelete={onDelete} onDeleteForEveryone={isMe ? onDeleteForEveryone : undefined} group={inGroup} onDetails={openDetails} onReply={onReply} onEdit={isMe ? onEdit : undefined} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved}
+    <MessageMenu onDelete={onDelete} onDeleteForEveryone={isMe ? deleteForEveryone : undefined} group={inGroup} onDetails={openDetails} onReply={onReply} onEdit={isMe ? onEdit : undefined} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved}
       onForward={onForward} onSelect={onSelect} align={isMe ? "left" : "right"} download={download} sender={isMe ? "me" : "peer"} {...(isMe ? sending : {})} />
   );
 
@@ -1090,8 +1216,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         {!isMe && menu}
         {!isMe && onReply && <ReplyAction onReply={onReply} />}
         {!isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
-        {onReact && <ReactionBar open={!!bar} onClose={() => setBar(null)} anchorRef={bubbleRef} current={myReaction(message.reactions)} onReact={onReact}
-          align={isMe ? "end" : "start"} onDetails={bar === "press" ? openDetails : undefined} onSelect={bar === "press" ? onSelect : undefined} />}
+        {onReact && <ReactionBar open={!!bar} onClose={() => setBar(null)} anchorRef={bar === "button" ? reactRef : bubbleRef} current={myReaction(message.reactions)} onReact={onReact}
+          align={barAlign} onDetails={bar === "press" ? openDetails : undefined} onSelect={bar === "press" ? onSelect : undefined} />}
         {detailsPanel}
       </div>
     );
@@ -1134,7 +1260,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       )}
       {isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
       {isMe && onReply && <ReplyAction onReply={onReply} />}
-      {isMe && !choosing && <MessageMenu onDelete={onDelete} onDeleteForEveryone={onDeleteForEveryone} group={inGroup} onDetails={openDetails} onReply={onReply} onEdit={onEdit} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved} onForward={onForward} onSelect={onSelect} align="left" download={download} sender="me" {...sending} />}
+      {isMe && !choosing && <MessageMenu onDelete={onDelete} onDeleteForEveryone={deleteForEveryone} group={inGroup} onDetails={openDetails} onReply={onReply} onEdit={onEdit} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved} onForward={onForward} onSelect={onSelect} align="left" download={download} sender="me" {...sending} />}
       {/* A group member's picture at the start of the line (the reading direction's), or its empty place. */}
       {!isMe && author && <SenderAvatar author={author} onOpen={choosing ? undefined : onOpenAuthor} />}
       {/* The bubble, and its reactions under it. */}
@@ -1200,7 +1326,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </div>
         ) : money ? (
           <div className="clearfix">
-            <InvoiceBubble money={money} mine={isMe} peerPubKey={peerPubKey} />
+            <InvoiceBubble money={money} mine={isMe} peerPubKey={peerPubKey} payee={payee} />
             {timestampEl}
           </div>
         ) : contentType === "image" && !isMe && !revealed && !needsNoClick(message.text.trim()) ? (
@@ -1250,26 +1376,31 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           // What was written reads in its own direction (an English message in the Arabic app left to right, an Arabic
           // one in the English app right to left), with the time at its end; the cards and the time keep the app's.
           <div className="clearfix" dir="auto" data-testid="message-body">
-            <RichText testId="message-text" text={message.text} sentAt={shownAt} mentions={message.mentions} highlight={highlight} className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap" />
+            {/* A translation's words are its own: the original's mentions do not fall on them. */}
+            <RichText testId="message-text" text={translatedText ?? original ?? message.text} sentAt={shownAt} mentions={translatedText !== undefined ? undefined : original !== undefined ? originalMarks : message.mentions} highlight={highlight} className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap" />
+            {translation && <TranslatedMark translation={translation} />}
             {/* No box of its own: with no card the time still floats beside the last line of text. */}
             <div dir={dir} className="contents">
               <EntityCards text={message.text} mine={isMe} from={message.nick || peerNick || undefined} peerPubKey={peerPubKey} />
               <MessageLinkCards text={message.text} preview={message.preview} />
             </div>
+            {sent && <SentTranslationLine sent={sent} showing={showingOriginal} onToggle={toggleOriginal} />}
             {timestampEl}
           </div>
         )}
       </div>
       {buttonsView && <MessageButtons view={buttonsView} messageId={message.id} linkId={linkId ?? (peerPubKey ? engine.linkByPeer(peerPubKey)?.id : undefined)} />}
       {refusal}
+      <MessageCopyNote note={copyNote} onClose={closeCopyNote} />
       <ReactionChips chips={chips} onReact={onReact} align={isMe ? "end" : "start"} />
       </div>
       {!isMe && !choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved} onForward={onForward} onSelect={onSelect} align="right" download={download} sender="peer" />}
       {!isMe && onReply && <ReplyAction onReply={onReply} />}
       {!isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
-      {onReact && <ReactionBar open={!!bar} onClose={() => setBar(null)} anchorRef={bubbleRef} current={myReaction(message.reactions)} onReact={onReact}
-        align={isMe ? "end" : "start"} onDetails={bar === "press" ? openDetails : undefined} onSelect={bar === "press" ? onSelect : undefined}
-        onCopy={bar === "press" && copyable ? () => void copyText(copyable).catch(() => {}) : undefined} />}
+      {onReact && <ReactionBar open={!!bar} onClose={() => setBar(null)} anchorRef={bar === "button" ? reactRef : bubbleRef} current={myReaction(message.reactions)} onReact={onReact}
+        align={barAlign} onDetails={bar === "press" ? openDetails : undefined} onSelect={bar === "press" ? onSelect : undefined}
+        onCopy={bar === "press" && copyable ? () => copy(copyable) : undefined}
+        onCopyOriginal={bar === "press" && copyable && sent ? () => copy(sent.original.trim()) : undefined} />}
       {detailsPanel}
     </div>
   );

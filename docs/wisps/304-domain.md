@@ -47,7 +47,7 @@ _ghostly.example.com.  300  TXT  "v=ghostly1; key=<52-character z-base-32 proof 
 
 - A tag list in the style of DKIM (RFC 6376 §3.2): tag names are case-insensitive, `v=ghostly1` MUST come first, `key` and `proof` are required and must be canonical, a duplicated tag or a bare word invalidates the string, unknown tags are ignored.
 - The value is about 140 octets, one character-string; multi-string records are concatenated (RFC 7208 §3.3).
-- Several TXT records at the name are allowed (several proofs, a renewal in progress); the one naming this key and statement suffices. Other TXT strings are ignored; at most 32 strings are read and 8 records kept; a string over 1024 octets is ignored. A CNAME is followed as the resolver's answer gives it, up to 8 hops.
+- Several TXT records at the name are allowed (several proofs, a renewal in progress); the one naming this key and statement suffices. Other TXT strings are ignored; at most 32 strings are read, and the record is looked for among all of them (a TXT set has no order); a string over 1024 octets is ignored. A CNAME is followed as the resolver's answer gives it, up to 8 hops.
 
 ### `https`: `https://<domain>/.well-known/ghostly.json`
 
@@ -55,7 +55,7 @@ _ghostly.example.com.  300  TXT  "v=ghostly1; key=<52-character z-base-32 proof 
 { "ghostly": 1, "proofs": [ { "key": "<proof key>", "proof": "<statement id>" } ] }
 ```
 
-`ghostly` MUST be `1`; entries it does not understand are skipped; at most 8 kept; 16 KiB. The server MUST send `Access-Control-Allow-Origin: *` (apps read it cross-origin) and serve it at exactly that URL: redirects are refused, including `example.com` → `www.example.com`.
+`ghostly` MUST be `1`; entries it does not understand are skipped; at most 32 entries are read (an app writes at most 8); 16 KiB. The server MUST send `Access-Control-Allow-Origin: *` (apps read it cross-origin) and serve it at exactly that URL: redirects are refused, including `example.com` → `www.example.com`.
 
 ### `nip05`: an existing NIP-05 `nostr.json`
 

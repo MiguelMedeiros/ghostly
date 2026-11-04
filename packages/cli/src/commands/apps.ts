@@ -1,6 +1,5 @@
-import { readFileSync } from "node:fs";
 import { CliError } from "../errors";
-import { here, type Command } from "./shared";
+import { here, readInput, type Command } from "./shared";
 
 /** The key file a command signs with: always named, never a default, never on the command line itself. */
 function keyFile(value: unknown, usage: string): string {
@@ -11,7 +10,7 @@ function keyFile(value: unknown, usage: string): string {
 /** `app send`'s message: JSON on the command line, or `-` for stdin. */
 function appData(value: string | undefined): unknown {
   if (value === undefined) throw new CliError("usage", "The message is needed, as JSON or - for stdin: ghostly app send <chat> <ref|name> <json|->");
-  const text = value.trim() === "-" ? readFileSync(0, "utf8") : value;
+  const text = value.trim() === "-" ? readInput(0) : value;
   try { return JSON.parse(text) as unknown; } catch { throw new CliError("usage", "The message is not valid JSON: quote it for the shell, like '{\"k\":\"move\"}', or pass - and write it on stdin"); }
 }
 
@@ -48,7 +47,7 @@ export const commands: Record<string, Command> = {
     params: ({ options }, a) => ({ chat: a.chat, ref: a.ref, noCard: options["no-card"] === true }),
   },
   "app publish": {
-    method: "app.publish", usage: "app publish <dir> --key <file> [--out <file>]",
+    method: "app.publish", usage: "app publish <dir> --key <file> [--out <file>] [--sequence n]",
     summary: "Bundle and sign an app (WISP 1200): <dir>/ghostly-app.json and every other file in <dir> become one .ghostlyapp, its sequence one more than the bundle at --out (default <dir>/app.ghostlyapp)",
     args: ["dir"],
     options: {
@@ -70,7 +69,7 @@ export const commands: Record<string, Command> = {
       bundle: { type: "string", description: "The bundle naming the app (default <dir>/app.ghostlyapp)" },
       force: { type: "boolean", description: "Allow --up-to past the bundle's own sequence (versions published from elsewhere)" },
     },
-    run: async ({ options }, a) => (await import("../apps")).revokeApp(a.dir!, keyFile(options.key, "app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>]"), {
+    run: async ({ options }, a) => (await import("../apps")).revokeApp(a.dir!, keyFile(options.key, "app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>] [--bundle <file>] [--force]"), {
       digests: options.digest as string[] | undefined, upTo: options["up-to"] as number | undefined,
       reason: options.reason as string | undefined, bundle: here(options.bundle), force: options.force === true,
     }),

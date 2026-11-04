@@ -12,7 +12,10 @@ COPY packages/browser/package.json packages/browser/
 COPY packages/iroh-web/package.json packages/iroh-web/
 COPY apps/extension/package.json apps/extension/
 COPY apps/web/package.json apps/web/
-RUN npm ci --ignore-scripts
+# --ignore-scripts skips the root postinstall, and with it the dependency patches every other build has (the browser
+# fixes in keet-identity-key and bip39-mnemonic among them): apply them here, and fail the build when one does not.
+COPY tools/patches tools/patches
+RUN npm ci --ignore-scripts && npx patch-package --patch-dir tools/patches --error-on-fail
 
 COPY tsconfig.json ./
 COPY apps/ui apps/ui
@@ -30,6 +33,8 @@ ARG VITE_SERVICES_APP_ORIGIN=""
 ENV VITE_SERVICES_HOST=$VITE_SERVICES_HOST VITE_SERVICES_APP_ORIGIN=$VITE_SERVICES_APP_ORIGIN
 # The e2e suite's mini-app hook never goes into an image (apps/web/appsTestFlag.ts).
 ENV VITE_APPS_TEST=
+# Nor translation's switch while it is being built (apps/web/translateFlag.ts), with or without GHOSTLY_BUILD.
+ENV VITE_TRANSLATE=
 RUN npm run build -w @ghostly/web
 
 FROM nginx:1.30-alpine

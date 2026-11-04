@@ -6,7 +6,7 @@ import { chatPath } from "../lib/url";
 import { useAppNavigation } from "./useAppNavigation";
 
 /** Whether a modal dialog is open: a panel that says so (`aria-modal`), or a `<dialog>`, which the app only shows as one. */
-function modalOpen(): boolean {
+export function modalOpen(): boolean {
   return !!document.querySelector('[aria-modal="true"], dialog[open]');
 }
 

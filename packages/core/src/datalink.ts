@@ -159,6 +159,8 @@ async function tracePair(me: string, pc: RTCPeerConnection): Promise<void> {
 export class DataLink {
   state: DataLinkState = "idle";
   private pc: RTCPeerConnection | null = null;
+  /** Each connection's listeners, and its data channel's (`wrapDataChannel`), dropped once it is closed. */
+  private readonly ends = new WeakMap<RTCPeerConnection, AbortController>();
   private myOfferTs = 0;
   /**
    * An offer or answer of this side's that went without a public candidate came to nothing (both descriptions were
@@ -308,6 +310,15 @@ export class DataLink {
   }
 
   /**
+   * Given up for a reason that is not the network's (an answer made while the app was away, `WAKE_ANSWER_GRACE_MS`):
+   * as `close`, with nothing learnt about direct connections from it.
+   */
+  abandon(): void {
+    this.answered = null;
+    this.reset();
+  }
+
+  /**
    * This side's offer went with no public candidate and was answered, or its answer went with none, and it came to
    * nothing: the next offer or answer gathers for as long as it takes.
    */
@@ -404,7 +415,7 @@ export class DataLink {
     for (let attempt = 1; ; attempt++) {
       // The new connection takes the old one's place first: closing that one then resets nothing.
       const pc = this.createConnection();
-      stalled?.close();
+      if (stalled) this.closeConnection(stalled);
       await describe(pc);
       if (this.pc !== pc) return null;
       const gathering = Date.now();
@@ -425,6 +436,9 @@ export class DataLink {
   private createConnection(): RTCPeerConnection {
     const pc = this.options.createPeerConnection();
     this.pc = pc;
+    const ended = new AbortController();
+    this.ends.set(pc, ended);
+    const { signal } = ended;
 
     // Negotiated channel: both sides declare it, no in-band open handshake.
     const dc = pc.createDataChannel(DATA_CHANNEL_LABEL, { negotiated: true, id: DATA_CHANNEL_ID, ordered: true });
@@ -438,12 +452,12 @@ export class DataLink {
       this.options.setFastPoll(false);
       this.options.publishSignal(null);
       this.options.onDirect?.("open");
-      this.options.onOpen(wrapDataChannel(dc));
+      this.options.onOpen(wrapDataChannel(dc, signal));
       void tracePair(this.options.myPubKeyZ32, pc);
-    });
+    }, { signal });
     dc.addEventListener("close", () => {
       if (this.pc === pc) this.failed(true);
-    });
+    }, { signal });
 
     pc.addEventListener("connectionstatechange", () => {
       if (this.pc !== pc) return;
@@ -456,7 +470,7 @@ export class DataLink {
           if (this.pc === pc) this.failed();
         }, DISCONNECT_GRACE_MS);
       }
-    });
+    }, { signal });
 
     this.startAttemptTimer(pc);
     return pc;
@@ -494,8 +508,19 @@ export class DataLink {
     this.myOfferTs = 0;
     this.remoteSdp = null;
     if (!pc) return false;
-    pc.close();
+    this.closeConnection(pc);
     return true;
+  }
+
+  /**
+   * Closes `pc` and drops its listeners and its data channel's. The channel tells it closed (`wrapDataChannel`) a
+   * microtask later, after the link's own `onClose`, as when the data channel said so itself: node-datachannel does not
+   * always report a closed connection's channel closed, and the listeners it kept would hold the link for good.
+   */
+  private closeConnection(pc: RTCPeerConnection): void {
+    pc.close();
+    const ended = this.ends.get(pc);
+    if (ended) queueMicrotask(() => ended.abort());
   }
 
   private reset(): void {

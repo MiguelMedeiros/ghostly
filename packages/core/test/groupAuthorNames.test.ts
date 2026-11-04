@@ -97,11 +97,12 @@ describe("a member's name travels with its messages", { timeout: 60_000 }, () =>
     await mesh.settle();
     const frames = carol.state.sent.map(clone);
     verifies.length = 0;
-    // Handed on oldest first: `sig` and `xs` each, and `ns` once, for the name Bob did not hold yet.
+    // Handed on oldest first: `xs` alone each (it signs all `sig` does, agents#1656), and `ns` once, for the name Bob did
+    // not hold yet.
     for (const frame of frames) await bob.handle(alice.myKey, frame);
     expect(mesh.texts(bob)).toEqual(["m1", "m2", "m3", "m4"]);
     expect(bob.state.nicks[carol.myKey]).toBe("Carol");
-    expect(checksOf(carol)).toBe(2 * frames.length + 1);
+    expect(checksOf(carol)).toBe(frames.length + 1);
     // Live from Carol's edge, at Alice and Bob: `sig` only, while her name stays the same.
     mesh.setEdge(bob.myKey, carol.myKey, true);
     verifies.length = 0;
