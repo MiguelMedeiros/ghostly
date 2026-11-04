@@ -11,4 +11,7 @@
     <string name="webview_title">Update Android System WebView</string>
     <string name="webview_text">Ghostly runs in Android System WebView, and this phone\'s is too old for it (version %1$s, Ghostly needs %2$d or later). Update it from the Play Store, then open Ghostly again.</string>
     <string name="webview_update">Update</string>
+    <!-- Under the app's mark on the cover over the page while the lock screen is on and the app is not in front, as in
+         the app switcher (MainActivity). The app may be unlocked then (a permission prompt over it), so not "locked". -->
+    <string name="lock_cover">Your chats stay hidden</string>
 </resources>

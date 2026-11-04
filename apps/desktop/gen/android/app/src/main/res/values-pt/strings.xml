@@ -6,4 +6,5 @@
     <string name="webview_title">Atualize o Android System WebView</string>
     <string name="webview_text">O Ghostly roda no Android System WebView, e o deste telefone é antigo demais (versão %1$s; o Ghostly precisa da %2$d ou mais recente). Atualize-o pela Play Store e abra o Ghostly de novo.</string>
     <string name="webview_update">Atualizar</string>
+    <string name="lock_cover">Suas conversas ficam ocultas</string>
 </resources>
