@@ -113,6 +113,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["The HyperDHT relay closed the connection", `${BROWSER}/platform/hyperdhtRelay.ts`],
   ["The HyperDHT relay did not let this chat listen", `${BROWSER}/platform/hyperdhtRelay.ts`],
   ["Iroh endpoint is stopped", `${BROWSER}/platform/irohWeb.ts`],
+  ["Iroh relay unreachable", "native/transports/iroh-web/src/lib.rs"],
   ["The connection changed. Compare the current code again.", "packages/core/src/pairedSession.ts"],
   ["Compare the current code again.", "packages/core/src/ghostlink.ts"],
   ["The connection closed. Compare again after reconnecting.", "packages/core/src/pairedSession.ts"],
