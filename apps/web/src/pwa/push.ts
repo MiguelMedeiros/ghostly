@@ -1,6 +1,7 @@
 import type { VapidKeys } from "@ghostly/core";
 import { pushScope } from "../sw/policy";
 import { clearWakeEntries, writeWakeEntries, writeWakeText, type WakeEntry, type WakeText } from "../sw/wakeStore";
+import { clearWakeLimit } from "../sw/wakeLimit";
 
 /*
  * The page's side of wake-up push (WISP 401 § Wake-up push): this profile's push subscription, made on a worker
@@ -86,6 +87,7 @@ export async function unsubscribePush(profile: string): Promise<void> {
   await subscription?.unsubscribe().catch(() => false);
   await found?.unregister().catch(() => false);
   await clearWakeEntries(profile).catch(() => {});
+  await clearWakeLimit(profile).catch(() => {});
 }
 
 /** The worker's table for this profile: which chat each token names, its mute, and the words to show. */

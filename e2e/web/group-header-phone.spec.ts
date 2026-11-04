@@ -26,7 +26,8 @@ test("on a phone the group's member line stops before the header's buttons", { t
 /**
  * In Arabic (right to left) a group's Latin name that is longer than its place is cut at its end, as in English: its
  * first letter is drawn inside the name's box. It was cut at its start ("…airro Vila Madalena e amigos") in the header,
- * the members dialog's title and the chat list's row, which leaves "Team Alpha" and "Team Beta" reading the same.
+ * the members dialog's title and the chat list's row, which leaves "Team Alpha" and "Team Beta" reading the same. The
+ * members dialog's title now wraps a long name whole, its first line starting with the name's first letter.
  */
 test("in Arabic on a phone a group's long Latin name starts with its first letters", { tag: ["@feature:app.mobile-layout", "@feature:app.i18n", "@feature:groups.community.create"] }, async ({ peer }) => {
   const name = "Clube de leitura do bairro Vila Madalena e amigos";
@@ -57,7 +58,10 @@ test("in Arabic on a phone a group's long Latin name starts with its first lette
   expect(await startsInside("group-name")).toEqual({ cut: true, inside: true });
   await page.getByTestId("group-members").click();
   await expect(page.getByTestId("group-members-name")).toHaveText(name);
-  expect(await startsInside("group-members-name")).toEqual({ cut: true, inside: true });
+  // The members panel's title wraps a long name rather than cutting it: it is never cut, and still starts on the left.
+  expect(await startsInside("group-members-name")).toEqual({ cut: false, inside: true });
+  const title = (await page.getByTestId("group-members-name").boundingBox())!;
+  expect(title.height).toBeGreaterThan(30);
   await page.keyboard.press("Escape");
   await page.getByTestId("chat-back").click();
   await expect(page.getByTestId("chat-row-name").filter({ hasText: name })).toBeVisible();

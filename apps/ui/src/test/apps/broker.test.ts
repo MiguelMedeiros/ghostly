@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { MINI_APP_LIMITS } from "@ghostly/core/miniApp";
-import { BROKER_REQUESTS, createBroker, PICK_AFTER_CANCEL_MS, STOP_REQUESTS_PER_SECOND, isJsonValue, jsonValueOf, runnerFor, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
+import { BROKER_REQUESTS, createBroker, PICK_AFTER_CANCEL_MS, PING_EVERY_MS, STOP_REQUESTS_PER_SECOND, UNRESPONSIVE_AFTER_MS, isJsonValue, jsonValueOf, runnerFor, watchApp, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
 import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 
 // covers: apps.web-sandbox
@@ -13,7 +13,7 @@ import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 const REF = "pubkeyalpha/chess";
 const LINK = "link-1";
 
-function setup(launch: Partial<AppLaunch> = {}, clock = { t: 1_000 }, { byReference = false, serving }: { byReference?: boolean; serving?: (on: boolean) => void } = {}) {
+function setup(launch: Partial<AppLaunch> = {}, clock = { t: 1_000 }, { byReference = false, serving, pong }: { byReference?: boolean; serving?: (on: boolean) => void; pong?: (n: number) => void } = {}) {
   const host = memoryHost();
   const posted: { message: Record<string, unknown>; transfer?: Transferable[] }[] = [];
   const stops: AppStopReason[] = [];
@@ -25,6 +25,7 @@ function setup(launch: Partial<AppLaunch> = {}, clock = { t: 1_000 }, { byRefere
     stopped: (reason) => stops.push(reason),
     byReference,
     serving,
+    pong,
     now: () => clock.t,
   });
   let next = 1;
@@ -105,6 +106,104 @@ describe("the start, and the loads of the frame", () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(stops).toEqual(["stopped"]);
     expect(posted.length).toBe(before);
+  });
+});
+
+describe("the watchdog: an app that holds its thread past the bound is stopped", () => {
+  /** A watch on a clock the test moves, ticking as `startApp`'s interval would. */
+  function watching({ boundMs = UNRESPONSIVE_AFTER_MS }: { boundMs?: number } = {}) {
+    const clock = { t: 0, shown: true };
+    const pings: number[] = [];
+    let hung = 0;
+    const watch = watchApp({ ping: (n) => pings.push(n), hung: () => { hung++; }, boundMs, now: () => clock.t, shown: () => clock.shown });
+    /** One tick, `ms` after the last. */
+    const tick = (ms = PING_EVERY_MS) => { clock.t += ms; watch.tick(); };
+    return { clock, pings, watch, tick, hung: () => hung };
+  }
+
+  it("an app that answers each ping is never stopped, and is asked again only once it answered", () => {
+    const { pings, watch, tick, hung } = watching();
+    for (let i = 0; i < 60; i++) {
+      tick();
+      watch.pong(pings[pings.length - 1]!);
+    }
+    expect(pings).toHaveLength(60);
+    expect(hung()).toBe(0);
+  });
+
+  it("a ping unanswered for the bound, on time-keeping ticks (the frame has a thread of its own), stops it at the bound and not before", () => {
+    const { pings, tick, hung } = watching();
+    tick();
+    expect(pings).toEqual([1]);
+    for (let i = 1; i < UNRESPONSIVE_AFTER_MS / PING_EVERY_MS; i++) tick();
+    expect(hung()).toBe(0);
+    // Still the one ping: an app that answers nothing is not asked again.
+    expect(pings).toEqual([1]);
+    tick();
+    expect(hung()).toBe(1);
+  });
+
+  it("a tick that comes the bound late (the page's own thread held, as where frames share it) stops the app, though its ping was answered", () => {
+    const { pings, watch, tick, hung } = watching();
+    tick();
+    watch.pong(pings[0]!);
+    tick(UNRESPONSIVE_AFTER_MS - 1);
+    expect(hung()).toBe(0);
+    watch.pong(pings[pings.length - 1]!);
+    tick(UNRESPONSIVE_AFTER_MS);
+    expect(hung()).toBe(1);
+  });
+
+  it("an answer to an older ping is not an answer", () => {
+    const { clock, pings, watch, tick, hung } = watching();
+    tick();
+    clock.shown = false;
+    tick();
+    clock.shown = true;
+    tick();
+    expect(pings).toEqual([1, 2]);
+    watch.pong(1);
+    for (let i = 0; i < UNRESPONSIVE_AFTER_MS / PING_EVERY_MS; i++) tick();
+    expect(hung()).toBe(1);
+  });
+
+  it("what the page waited through while hidden (a frozen tab, a phone asleep) is not the app's: it is asked again once shown", () => {
+    const { clock, pings, watch, tick, hung } = watching();
+    tick();
+    // Hidden with the ping out; the page frozen for a minute; its timers come back late.
+    watch.hidden();
+    clock.shown = false;
+    tick(60_000);
+    clock.shown = true;
+    tick(30_000);
+    expect(hung()).toBe(0);
+    expect(pings).toEqual([1, 2]);
+    // The `visibilitychange` came, but no tick saw the page hidden: still excused.
+    watch.pong(2);
+    watch.hidden();
+    tick(60_000);
+    expect(hung()).toBe(0);
+    // Then judged as ever.
+    watch.pong(3);
+    tick(UNRESPONSIVE_AFTER_MS);
+    expect(hung()).toBe(1);
+  });
+
+  it("the broker hands the runner's `{pong}` to the watch, answers nothing, and counts it with the requests", () => {
+    const pongs: number[] = [];
+    const { broker, run, posted, stops } = setup({}, { t: 1_000 }, { pong: (n) => pongs.push(n) });
+    run();
+    const before = posted.length;
+    broker.message({ pong: 7 });
+    expect(pongs).toEqual([7]);
+    expect(posted.length).toBe(before);
+    // Not a pong: one with an id is a request (and not JSON a request takes), one that is not a whole number is nothing.
+    broker.message({ pong: 8, id: 3 });
+    broker.message({ pong: 1.5 });
+    expect(pongs).toEqual([7]);
+    // A flood of pongs is a flood: stopped as any other far past the rate.
+    for (let i = 0; i <= STOP_REQUESTS_PER_SECOND; i++) broker.message({ pong: i });
+    expect(stops).toEqual(["protocol"]);
   });
 });
 
@@ -535,6 +634,42 @@ it("asks the engine as the version it runs: every call goes to the platform of i
   expect(platform.calls).toEqual([]);
 });
 
+it("the read lane asks as the version it runs too: serves, reads and answers go to the platform of its digest", async () => {
+  const platform = memoryHost();
+  const bound = memoryHost();
+  platform.running = () => bound;
+  const posted: Record<string, unknown>[] = [];
+  const broker = createBroker({
+    host: platform,
+    launch: { ref: REF, digest: "digest-7", version: "1.0.0", title: "Cinema", permissions: ["chat", "files"], entry: "<p>app</p>", chat: { linkId: LINK } },
+    view: { theme: () => "dark", locale: () => "en" },
+    post: (message) => posted.push(message as Record<string, unknown>),
+    stopped: () => {},
+  });
+  const ask = async (id: number, type: string, args: unknown[] = []) => {
+    broker.message({ id, type, args });
+    await vi.waitFor(() => expect(posted.some((p) => p.id === id)).toBe(true));
+    return posted.find((p) => p.id === id)!;
+  };
+  broker.load();
+  broker.message({ id: 0, type: "writing", args: [] });
+  broker.load();
+  // Linked files are kept by the client, not a version: they stay on the outer platform.
+  const film = new Uint8Array(100).fill(7);
+  platform.nextPick = [{ path: "Films/Up.mp4", bytes: film }];
+  const id = ((await ask(1, "files.pick")).value as { id: string }[])[0]!.id;
+  await ask(2, "context");
+  const serve = (await ask(3, "files.serve", [id])).value as string;
+  const SERVE = "s".repeat(22);
+  bound.remote.set(SERVE, film);
+  expect(await ask(4, "remote.read", [SERVE, { offset: 0, length: 5 }])).toMatchObject({ ok: true });
+  expect(await ask(5, "remote.stat", [SERVE])).toMatchObject({ ok: true, value: { size: film.length } });
+  const app = memoryAppId(LINK, REF);
+  expect(await bound.askRange(LINK, { app, request: 6, serve, file: id, offset: 0, length: 5 })).toEqual({ app, request: 6, bytes: film.subarray(0, 5), size: film.length });
+  expect(bound.calls.map((c) => c.op)).toEqual(expect.arrayContaining(["ranges.serve", "ranges.read"]));
+  expect(platform.calls.map((c) => c.op).filter((op) => op.startsWith("ranges."))).toEqual([]);
+});
+
 describe("linked files (WISP 1200 · Linked files)", () => {
   const bytes = (n: number, fill = 7) => new Uint8Array(n).fill(fill);
 
@@ -937,6 +1072,15 @@ describe("the read lane (WISP 1200 § A read lane to the contact)", () => {
     for (const answer of pending) answer();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(await ask("remote.read", [SERVE, { offset: 0, length: 1 }])).toMatchObject({ ok: false, error: "too-fast" });
+  });
+
+  // agents#1766: the contact's limits answered `busy`, which reached the app as a generic `failed`: no sign to back off.
+  it("a remote.read the contact refuses as busy is too-fast for the app: a wait, not a failure", async () => {
+    const { ask, host } = await cinema(["chat"]);
+    host.remote.set(SERVE, film);
+    vi.spyOn(host.ranges!, "read").mockResolvedValueOnce({ error: "busy" });
+    expect(await ask("remote.read", [SERVE, { offset: 0, length: 5 }])).toMatchObject({ ok: false, error: "too-fast" });
+    expect(await ask("remote.read", [SERVE, { offset: 0, length: 5 }])).toMatchObject({ ok: true });
   });
 
   // A contact that never answered an `ar-get` held the app's one read chain: its own files.read, files.list and

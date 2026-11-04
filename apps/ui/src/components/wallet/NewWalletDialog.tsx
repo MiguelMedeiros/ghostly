@@ -9,9 +9,11 @@ import { Button, Notice, input } from "./ui";
 import { NETWORK_NAME, WALLET_NAME, failedBecause, shortReason } from "./names";
 import { ProviderConfigForm } from "./providers/SourcePicker";
 import { PROVIDER_FORMS } from "./providers/forms";
+import { providerText } from "./providers/providerText";
 import { rawError } from "../../lib/errorText";
 import "./new-wallet.css";
 import { problemText, type Problem } from "../../lib/problemText";
+import { exactText } from "../../lib/exactText";
 
 type Key = Parameters<Translate>[0];
 /** What each kind of wallet is, in a line, on each network. */
@@ -129,7 +131,8 @@ export function NewWalletDialog({ wallet, offers, setupFailed = [], initialNetwo
   const switchNetwork = (next: WalletNetwork) => { if (busy || next === network) return; setNetwork(next); setChosen(null); setPhase(null); setApiKey(""); };
 
   const chosenOffer = chosen ? offer(chosen) : undefined;
-  const descriptor = chosenOffer?.providers?.find((p) => p.id === providerId);
+  const found = chosenOffer?.providers?.find((p) => p.id === providerId);
+  const descriptor = found && providerText(t, found);
   const Form = descriptor ? PROVIDER_FORMS[descriptor.id] ?? ProviderConfigForm : undefined;
   const error = phase?.state === "error" ? phase : null;
 
@@ -165,7 +168,8 @@ export function NewWalletDialog({ wallet, offers, setupFailed = [], initialNetwo
 
         {chosen && chosenOffer ? (
           <div className="space-y-3" data-testid="new-wallet-step">
-            <button type="button" data-testid="new-wallet-back" disabled={busy} onClick={() => { setChosen(null); setPhase(null); setApiKey(""); }} className="text-xs text-text-secondary hover:text-text-primary cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">{t("wallet.new.back")}</button>
+            {/* A line of small text on a desktop, 24 px high on a phone, as the app's other small buttons are. */}
+            <button type="button" data-testid="new-wallet-back" disabled={busy} onClick={() => { setChosen(null); setPhase(null); setApiKey(""); }} className="text-xs text-text-secondary hover:text-text-primary cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed max-md:min-h-6">{t("wallet.new.back")}</button>
             <div className="flex items-center gap-3">
               <Mark type={chosen} />
               <div className="min-w-0">
@@ -176,7 +180,7 @@ export function NewWalletDialog({ wallet, offers, setupFailed = [], initialNetwo
             {chosenOffer.needs === "invite" && (
               <form className="space-y-2" autoComplete="off" onSubmit={(e) => { e.preventDefault(); void create("fedimint", { invite }); }}>
                 <label className="block text-xs text-text-secondary">{t("wallet.new.invite")}
-                  <input data-testid="new-wallet-invite" className={`${input} mt-1 font-mono text-xs`} value={invite} placeholder="fed11…" spellCheck={false} autoFocus disabled={busy} onChange={(e) => setInvite(e.target.value)} />
+                  <input data-testid="new-wallet-invite" className={`${input} mt-1 font-mono text-xs`} value={invite} placeholder="fed11…" {...exactText} autoFocus disabled={busy} onChange={(e) => setInvite(e.target.value)} />
                 </label>
                 <p className="text-[11px] text-text-muted">{t("wallet.new.inviteHint")}</p>
                 <Button type="submit" variant="primary" className="w-full" disabled={busy || !invite.trim()} data-testid="new-wallet-create">{busy ? t("wallet.new.busy.joining") : t("wallet.new.joinAndCreate")}</Button>
@@ -197,7 +201,8 @@ export function NewWalletDialog({ wallet, offers, setupFailed = [], initialNetwo
                   <Select aria-label={t("wallet.source.title")} data-testid="new-wallet-provider-select" value={providerId} disabled={busy} onChange={(id) => { setProviderId(id); setPhase(null); }}
                     options={(chosenOffer.providers ?? []).map((p) => ({ value: p.id, label: p.label }))} />
                 )}
-                {descriptor?.description && <p className="text-xs text-text-secondary">{descriptor.description}</p>}
+                {/* The provider's English line, in its own direction (as in SourcePicker). */}
+                {descriptor?.description && <p className="text-xs text-text-secondary"><bdi>{descriptor.description}</bdi></p>}
                 {descriptor && Form && <Form key={`${network}-${descriptor.id}`} descriptor={descriptor} mode={network} busy={busy} onSubmit={(values) => void create(chosen, { providerId: descriptor.id, values })} />}
               </div>
             )}

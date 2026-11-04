@@ -309,10 +309,12 @@ function collectFiles(dir: string, leaveOut: Set<string>): { files: { path: stri
 }
 
 /**
- * A private key in a file: a PEM private key block with its body (PKCS #8, OpenSSH, RSA, EC, encrypted), or a Ghostly
- * key file's first line. A library that only names the block's header in its code does not match.
+ * A private key in a file: a PEM private key block with its body (PKCS #8, OpenSSH, RSA, EC, encrypted, the traditional
+ * encrypted one's "Proc-Type: 4,ENCRYPTED" headers included), an OpenPGP "PRIVATE KEY BLOCK" (its "Version: GnuPG
+ * v2.4.5" headers included), or a Ghostly key file's first line. A library that only names the block's header in its
+ * code does not match.
  */
-const PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----\r?\n[A-Za-z0-9+/=\r\n:,-]{40,}-----END [A-Z0-9 ]*PRIVATE KEY-----|^Ghostly (publisher|store) key \(WISP 1200\)/;
+const PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----\r?\n[A-Za-z0-9+/=\r\n :,.-]{40,}-----END [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----|^Ghostly (publisher|store) key \(WISP 1200\)/;
 
 /** Whether `path` is `dir` or anything under it (a name like `..k.key` is under it: only a `..` segment leaves). */
 const isInside = (dir: string, path: string) => { const rel = relative(dir, path); return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); };
@@ -343,8 +345,8 @@ function writeWhole(path: string, bytes: Uint8Array): void {
 }
 
 /**
- * `app publish <dir> --key <file> [--out <file>]`: `<dir>/ghostly-app.json` (the manifest without `publisher`,
- * `sequence` and `files`) and every other file in `<dir>` become one signed bundle, by default `<dir>/app.ghostlyapp`.
+ * `app publish <dir> --key <file> [--out <file>] [--sequence n]`:`<dir>/ghostly-app.json` (the manifest without `publisher`,
+ * `sequence` and `files`) and every other file in `<dir>` (but its bundles and revocations) become one signed bundle, by default `<dir>/app.ghostlyapp`.
  * The sequence is `--sequence` (higher than the bundle already at `--out`'s), else one more than that bundle's (or
  * the source's `sequence`, if higher, else 1). The
  * key file is made when it is missing and no earlier bundle is there to update.
@@ -387,7 +389,9 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
     throw refused(`--sequence ${sequenceArg} is not higher than the ${previous.sequence} of ${out}: every client refuses a lower one, and the same one with other content is equivocation`, { reason: sequenceArg < previous.sequence ? "rollback" : "equivocation" }, { previous: previous.sequence });
   }
   const sequence = sequenceArg ?? Math.max(previous ? previous.sequence + 1 : 1, (draft.sequence as number | undefined) ?? 1);
-  const { files, skipped } = collectFiles(dir, new Set([sourcePath, out, join(dir, APP_REVOKE_FILE)]));
+  // The bundle at the folder's default name is this command's own output too: published into another --out, the
+  // version an earlier publish left there went into the new bundle as one of its files.
+  const { files, skipped } = collectFiles(dir, new Set([sourcePath, out, join(dir, APP_BUNDLE_FILE), join(dir, APP_REVOKE_FILE)]));
   const contents = files.map((f) => ({ path: f.path, bytes: new Uint8Array(readFileSync(f.full)) }));
   // A bundle is public: a private key found in the folder (an old key, a store key, any PEM) stops the publish.
   const keyFile = contents.find((f) => PRIVATE_KEY.test(Buffer.from(f.bytes).toString("latin1")));
@@ -441,7 +445,7 @@ export async function revokeApp(dirArg: string, keyArg: string, what: { digests?
   const dir = userPath(dirArg);
   const bundlePath = userPath(what.bundle ?? join(dir, APP_BUNDLE_FILE));
   const listPath = join(dir, APP_REVOKE_FILE);
-  const usage = "ghostly app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>]";
+  const usage = "ghostly app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>] [--bundle <file>] [--force]";
   const digests = what.digests ?? [];
   if ((digests.length > 0) === (what.upTo !== undefined)) throw new CliError("usage", `Give --digest (again for each) or --up-to, one of the two: ${usage}`);
   if (what.upTo !== undefined && !(Number.isSafeInteger(what.upTo) && what.upTo >= 1)) throw new CliError("usage", `--up-to takes a sequence, a whole number from 1, not ${what.upTo}`);

@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toBase64Url } from "@ghostly/core";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import type { GroupMemberView, GroupView } from "@ghostly/browser/shared/types";
 import { ProfileBackups } from "../../components/ProfileBackups";
 import { DeviceStandby } from "../../components/DeviceStandby";
 import { ForkRows } from "../../components/devices/Forks";
+import { Section } from "../../components/layout";
 import { GroupChat } from "../../pages/GroupChat";
 import { bundleDidSeed, openProfileBackup, restoreOpenedBackup, sameIdentityProfiles } from "../../lib/profileBackup";
 import { markUncheckedRestore, restoreForTakeover } from "../../lib/restoreGuard";
@@ -143,6 +144,61 @@ describe("a replaced device (WISP 06 § User experience: \"Use here\", \"It wasn
     await waitFor(() => expect(screen.queryByTestId("settings-fork")).toBeNull());
   });
 
+  it("each kept copy says when it was kept, and its Discard says which copy it removes", async () => {
+    const a = Date.UTC(2026, 9, 2, 9, 30), b = Date.UTC(2026, 10, 1, 18, 5);
+    const when = (at: number) => new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(at);
+    renderApp(<ForkRows forks={["ghostly_a", "ghostly_b"]} keptAt={{ ghostly_a: a, ghostly_b: b }} />);
+    const rows = await screen.findAllByTestId("settings-fork");
+    expect(rows.map((row) => row.textContent)).toEqual([expect.stringContaining(`Kept ${when(a)}`), expect.stringContaining(`Kept ${when(b)}`)]);
+    expect(new Set(rows.map((row) => row.textContent)).size).toBe(2);
+    expect(screen.getAllByTestId("settings-fork-discard").map((button) => button.getAttribute("aria-label"))).toEqual([`Discard: Kept ${when(a)}`, `Discard: Kept ${when(b)}`]);
+    expect(screen.getByRole("button", { name: `Discard: Kept ${when(b)}` })).toBe(screen.getAllByTestId("settings-fork-discard")[1]);
+  });
+
+  it("copies an older build kept without a time are numbered, and no two rows read the same", async () => {
+    const at = Date.UTC(2026, 10, 1, 18, 5);
+    renderApp(<ForkRows forks={["ghostly_a", "ghostly_b", "ghostly_c", "ghostly_d"]} keptAt={{ ghostly_c: at, ghostly_d: at }} />);
+    const kept = (await screen.findAllByTestId("settings-fork-kept")).map((el) => el.textContent ?? "");
+    expect(kept.slice(0, 2)).toEqual(["Older copy 1", "Older copy 2"]);
+    expect(kept[2]).toMatch(/^Kept .+ \(1\)$/);
+    expect(kept[3]).toMatch(/^Kept .+ \(2\)$/);
+    const names = screen.getAllByTestId("settings-fork-discard").map((button) => button.getAttribute("aria-label"));
+    expect(new Set(names).size).toBe(4);
+    expect(names[0]).toBe("Discard: Older copy 1");
+  });
+
+  it("a single copy kept without a time is the older copy, and Discard removes that one", async () => {
+    const { user, engine } = renderApp(<ForkRows forks={["ghostly_oldcopy"]} />);
+    engine.on("deviceForkDiscard", () => undefined);
+    expect(await screen.findByTestId("settings-fork-kept")).toHaveTextContent("Older copy");
+    await user.click(screen.getByRole("button", { name: "Discard: Older copy" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Discard: Older copy" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Discard: Older copy" }));
+    expect(engine.callsTo("deviceForkDiscard")).toEqual([{ database: "ghostly_oldcopy" }]);
+  });
+
+  it("after a Discard the focus goes to the next copy's Discard, and after the last one to the section", async () => {
+    const a = Date.UTC(2026, 9, 2, 9, 30), b = Date.UTC(2026, 10, 1, 18, 5);
+    const { user, engine } = renderApp(<Section title="Data and storage"><ForkRows forks={["ghostly_a", "ghostly_b"]} keptAt={{ ghostly_a: a, ghostly_b: b }} /></Section>);
+    engine.on("deviceForkDiscard", () => undefined);
+    const confirmed = async (index: number) => {
+      await user.click(screen.getAllByTestId("settings-fork-discard")[index]);
+      await waitFor(() => expect(screen.getByTestId("settings-fork-discard-confirm")).toBeEnabled());
+      await user.click(screen.getByTestId("settings-fork-discard-confirm"));
+    };
+    const second = screen.getAllByTestId("settings-fork-discard")[1];
+    await confirmed(0);
+    expect(engine.callsTo("deviceForkDiscard")).toEqual([{ database: "ghostly_a" }]);
+    await waitFor(() => expect(screen.getAllByTestId("settings-fork")).toHaveLength(1));
+    await waitFor(() => expect(screen.getByTestId("settings-fork-discard")).toHaveFocus());
+    expect(screen.getByTestId("settings-fork-discard")).toBe(second);
+    await confirmed(0);
+    expect(engine.callsTo("deviceForkDiscard")).toEqual([{ database: "ghostly_a" }, { database: "ghostly_b" }]);
+    await waitFor(() => expect(screen.queryByTestId("settings-fork")).toBeNull());
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Data and storage" })).toHaveFocus());
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
   it("a double press on Discard does not pass the question, and Cancel gives the focus back to Discard", async () => {
     const { user, engine } = renderApp(<ForkRows forks={["ghostly_oldcopy"]} />);
     engine.on("deviceForkDiscard", () => undefined);
@@ -182,6 +238,42 @@ describe("the forced takeover on the standby screen", () => {
     expect(engine.callsTo("deviceTakeover")).toEqual([{ password: "not it", name: "Phone", lost: false }]);
   });
 
+  it("the keyboard stays in the form during the check, which runs once, and a wrong password gets the focus back", async () => {
+    const { user, engine } = renderApp(<DeviceStandby gate={{ state: "superseded", activeDevice: "Phone" }} />);
+    let refuse = () => {};
+    engine.on("deviceTakeoverInfo", () => ({ offered: true, device: "Phone", copy: "frozen", password: true }));
+    engine.on("deviceTakeover", () => new Promise((_, reject) => { refuse = () => reject(new Error("takeover-password: Wrong password.")); }));
+    await user.click(await screen.findByTestId("takeover-open"));
+    await user.type(screen.getByTestId("takeover-password"), "not it");
+    await user.type(screen.getByTestId("takeover-name"), "Phone");
+    await user.click(screen.getByTestId("takeover-lost-no"));
+    await user.click(screen.getByTestId("takeover-go"));
+    // A disabled button would drop the focus to the page for the half minute of the check.
+    expect(await screen.findByTestId("takeover-checking")).toBeInTheDocument();
+    expect(screen.getByTestId("takeover-go")).toBeEnabled();
+    expect(screen.getByTestId("takeover-go")).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("deviceTakeover")).toHaveLength(1);
+    act(() => refuse());
+    expect(await screen.findByTestId("takeover-error")).toHaveTextContent("Wrong password.");
+    expect(screen.getByTestId("takeover-password")).toHaveFocus();
+    expect(screen.getByTestId("takeover-password")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByTestId("takeover-go")).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("Use here keeps the keyboard on its button while the pull starts, and starts it once", async () => {
+    const { user, engine } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />);
+    engine.on("deviceTakeoverInfo", () => ({ offered: false }));
+    engine.on("deviceHandoffPull", () => new Promise(() => {}));
+    await user.click(await screen.findByTestId("handoff-use-here"));
+    await user.type(screen.getByTestId("handoff-password"), "a long lock password");
+    await user.click(screen.getByTestId("handoff-start"));
+    expect(screen.getByTestId("handoff-start")).toBeEnabled();
+    expect(screen.getByTestId("handoff-start")).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("deviceHandoffPull")).toHaveLength(1);
+  });
+
   it("a standby with a frozen copy offers My other device is lost or broken; one without a copy offers nothing", async () => {
     const first = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />);
     first.engine.on("deviceTakeoverInfo", () => ({ offered: true, device: "MacBook", copy: "frozen", password: true }));
@@ -193,10 +285,24 @@ describe("the forced takeover on the standby screen", () => {
     expect(screen.queryByTestId("takeover-open")).toBeNull();
   });
 
+  it("the active device renamed while the screen is open: the dialog asks for the new name, the one the engine checks", async () => {
+    let name = "Phone";
+    const { user, engine, rerender } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: name }} />);
+    engine.on("deviceTakeoverInfo", () => ({ offered: true, device: name, copy: "frozen", password: true }));
+    expect(await screen.findByTestId("takeover-open")).toBeInTheDocument();
+    name = "Pixel";
+    rerender(<DeviceStandby gate={{ state: "standby", activeDevice: name }} />);
+    expect(screen.getByTestId("device-standby-title")).toHaveTextContent("Active on Pixel");
+    await user.click(screen.getByTestId("takeover-open"));
+    await waitFor(() => expect(screen.getByTestId("takeover-dialog")).toHaveTextContent("Take over without Pixel?"));
+    expect(screen.getByTestId("takeover-dialog")).toHaveTextContent("This will make Pixel stop.");
+    expect(screen.getByTestId("takeover-name")).toHaveAttribute("placeholder", "Pixel");
+  });
+
   it("a copy restored from a backup says where the profile is active and offers Take over, with no password", async () => {
     const { user, engine } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />);
     engine.on("deviceTakeoverInfo", () => ({ offered: true, device: "MacBook", copy: "restored", password: false }));
-    expect(await screen.findByText("This profile is active on MacBook")).toBeInTheDocument();
+    expect(await screen.findByTestId("device-standby-title")).toHaveTextContent("This profile is active on MacBook");
     expect(screen.queryByTestId("handoff-use-here")).toBeNull();
     await user.click(screen.getByTestId("takeover-open"));
     expect(screen.queryByTestId("takeover-password")).toBeNull();
@@ -218,6 +324,43 @@ describe("Manage groups from this device", () => {
     expect(screen.getByTestId("group-manage-warning")).toHaveTextContent("can break the group for everyone");
     await user.click(screen.getByTestId("group-manage-confirm"));
     await waitFor(() => expect(engine.callsTo("setGroupManage")).toEqual([{ groupId: "group-1", on: true }]));
+  });
+
+  it("a refusal to turn it on says so under the warning, and Confirm keeps the focus while it runs", async () => {
+    fakeEngine.update({ groups: [adminGroup({ adminOff: true })] });
+    const { user, engine } = renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
+    let refuse!: (e: Error) => void;
+    engine.on("setGroupManage", () => new Promise<void>((_, reject) => { refuse = reject; }));
+    await user.click(await screen.findByTestId("group-manage-open"));
+    const confirm = screen.getByTestId("group-manage-confirm");
+    await user.click(confirm);
+    expect(confirm).not.toBeDisabled();
+    expect(confirm).toHaveAttribute("aria-busy", "true");
+    expect(confirm).toHaveFocus();
+    // Pressed again while it runs: nothing more is asked.
+    await user.click(confirm);
+    expect(engine.callsTo("setGroupManage")).toHaveLength(1);
+    await act(async () => { refuse(new Error("settings could not be saved")); });
+    expect(screen.getByTestId("group-manage-problem")).toHaveTextContent("settings could not be saved");
+    expect(confirm).not.toHaveAttribute("aria-busy");
+    expect(confirm).toHaveFocus();
+  });
+
+  it("Turn on hands the focus to the warning's Cancel, and Cancel hands it back to Turn on", async () => {
+    fakeEngine.update({ groups: [adminGroup({ adminOff: true })] });
+    const { user } = renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
+    await user.click(await screen.findByTestId("group-manage-open"));
+    expect(screen.getByTestId("group-manage-cancel")).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("group-manage-open")).toHaveFocus();
+  });
+
+  it("Turn on, Confirm and Cancel are thumb-sized on a phone", async () => {
+    fakeEngine.update({ groups: [adminGroup({ adminOff: true })] });
+    const { user } = renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
+    expect(await screen.findByTestId("group-manage-open")).toHaveClass("max-md:min-h-11", "max-md:px-3");
+    await user.click(screen.getByTestId("group-manage-open"));
+    for (const id of ["group-manage-confirm", "group-manage-cancel"]) expect(screen.getByTestId(id)).toHaveClass("max-md:min-h-11", "max-md:px-3");
   });
 
   it("is not shown where admin work is on", async () => {

@@ -59,6 +59,7 @@
     },
     "label": "backup pendente",
     "later": "Depois",
+    "laterFailed": "Não foi possível adiar o lembrete. Tente de novo.",
     "line": "Faça backup da carteira {{wallet}}",
     "title": "Você tem dinheiro real em {{wallet}}"
   },
@@ -228,8 +229,15 @@
     "setAsideInfo": "Reservados para um pagamento que o mint ainda não confirmou. Saem com o pagamento ou voltam ao seu saldo assim que o mint responder.",
     "settings": "Ajustes",
     "testBalance": "{{amount}} sats de teste (sem valor)",
-    "testMintInvoice": "Aguardando o pagamento… Mints de teste marcam toda fatura como paga sozinhos, então esta só conta quando um contato a pagar em um chat. Para ter sats de teste agora, use Obter moedas de teste acima.",
+    "testBalance_one": "{{amount}} sat de teste (sem valor)",
+    "testMintInvoice": "Aguardando o pagamento… Mints de teste marcam toda fatura como paga sozinhos, então compartilhe esta em um chat 1:1: ela só conta quando um contato a pagar ali. Para ter sats de teste agora, use Obter moedas de teste acima.",
     "tokenHint": "Recebeu um token ecash? Cole-o em Enviar.",
+    "tokenRedeemedFee": "{{amount}} sats resgatados (a mint ficou com {{fee}} de taxa).",
+    "tokenRedeemedFeeTest": "{{amount}} sats de teste resgatados (a mint ficou com {{fee}} de taxa).",
+    "tokenRedeemedFeeTest_one": "{{amount}} sat de teste resgatado (a mint ficou com {{fee}} de taxa).",
+    "tokenRedeemedFeeTest_other": "{{amount}} sats de teste resgatados (a mint ficou com {{fee}} de taxa).",
+    "tokenRedeemedFee_one": "{{amount}} sat resgatado (a mint ficou com {{fee}} de taxa).",
+    "tokenRedeemedFee_other": "{{amount}} sats resgatados (a mint ficou com {{fee}} de taxa).",
     "tx": {
       "ecashIn": "Ecash recebido",
       "ecashOut": "Ecash enviado",
@@ -249,6 +257,7 @@
     "alreadyRedeemed": "Alguém já resgatou.",
     "amountFee": "{{amount}} (taxa {{fee}})",
     "asNotes": "{{amount}} sats em notas",
+    "asNotes_one": "{{amount}} sat em nota",
     "asking": "Consultando os guardiões…",
     "backup": "Backup da carteira",
     "backupHint": "A frase e as federações; o backup do perfil tem tudo",
@@ -505,6 +514,7 @@
     "network": "Rede",
     "networkStuck": "Esta rede não está respondendo. Você pode mudar para outra.",
     "noBalance": "Ainda sem saldo para enviar",
+    "notAddress": "Este não é um endereço {{wallet}} para esta carteira.",
     "off": "Desligada",
     "on": "Ligada",
     "onchain": "Bitcoin on-chain",
@@ -585,11 +595,14 @@
   },
   "sats": {
     "mainnet": "sats",
-    "testnet": "sats de teste"
+    "mainnet_one": "sat",
+    "testnet": "sats de teste",
+    "testnet_one": "sat de teste"
   },
   "send": {
     "balance": "Saldo: {{amount}} {{unit}}",
     "cameraUnavailable": "Câmera indisponível. Cole, digite ou escolha uma imagem.",
+    "chooseAmount": "Esta fatura não tem valor: escolha quanto pagar.",
     "clipboardEmpty": "Nada para colar. Copie uma fatura ou um endereço antes.",
     "clipboardUnavailable": "Não foi possível ler a área de transferência. Cole ou digite abaixo.",
     "image": "Escolher imagem",
@@ -636,6 +649,7 @@
     "experimental": "Experimental",
     "fedimint": {
       "description": "{{amount}} sats · {{network}}",
+      "description_one": "{{amount}} sat · {{network}}",
       "joinFirst": "Entre primeiro em uma federação com gateway Lightning no cartão Fedimint.",
       "label": "Federação",
       "unknownNetwork": "rede desconhecida",
@@ -655,6 +669,111 @@
       "onchainTestnet": "Ainda não há provedor de Bitcoin on-chain disponível aqui na Testnet."
     },
     "optional": "(opcional)",
+    "providers": {
+      "bdk": {
+        "description": "Uma carteira Bitcoin neste app (bitcoindevkit): você guarda as chaves, um servidor Esplora informa a blockchain. Por enquanto, só redes de teste.",
+        "fields": {
+          "esplora": {
+            "help": "Em branco: os servidores públicos da Signet (blockstream.info, mempool.space) ou da Mutinynet (mutinynet.com), o que responder. A Regtest precisa do seu próprio; ele deve permitir a origem deste app (CORS).",
+            "label": "Servidor Esplora",
+            "placeholder": "Em branco: um servidor público da rede",
+            "suggestions": {
+              "http_127_0_0_1_47002": "Este computador: a pilha regtest de e2e (npm run e2e:infra:up)"
+            }
+          },
+          "mnemonic": {
+            "help": "BIP39, em inglês. Deixe o Ghostly criar uma carteira nova, ou digite a sua para restaurá-la.",
+            "label": "Frase de recuperação",
+            "placeholder": "doze ou vinte e quatro palavras"
+          },
+          "network": {
+            "label": "Rede"
+          },
+          "script": {
+            "label": "Endereços",
+            "options": {
+              "bip84": "SegWit nativo (BIP84, bc1q…)"
+            }
+          }
+        }
+      },
+      "bitcoind": {
+        "description": "Uma carteira no seu próprio nó Bitcoin Core, pelo RPC dele. Seu nó guarda as chaves e assina. Precisa do app para desktop.",
+        "fields": {
+          "password": {
+            "help": "rpcpassword, ou o conteúdo do arquivo .cookie do nó (ele muda quando o bitcoind reinicia).",
+            "label": "Senha RPC ou cookie"
+          },
+          "url": {
+            "help": "O rpcbind e a rpcport do seu nó: 8332 mainnet, 38332 signet, 48332 testnet4, 18443 regtest.",
+            "label": "Endereço RPC"
+          },
+          "user": {
+            "help": "Deixe em branco para colar o arquivo .cookie abaixo.",
+            "label": "Usuário RPC"
+          },
+          "wallet": {
+            "help": "Uma carteira carregada no nó (bitcoin-cli listwallets). Em branco: a carteira padrão dele.",
+            "label": "Nome da carteira"
+          }
+        }
+      },
+      "breez": {
+        "description": "Uma carteira Lightning autocustodial na Spark, pelo SDK da Breez. A frase de recuperação fica selada neste dispositivo; você guarda os sats."
+      },
+      "cashu-mint": {
+        "description": "As faturas são pagas para o seu saldo Cashu, e a partir dele. Os mints guardam os sats."
+      },
+      "core-lightning": {
+        "description": "Seu próprio nó Core Lightning, pelo Commando com uma rune. Seu nó guarda os sats. O app web só o alcança por wss://.",
+        "fields": {
+          "nodeId": {
+            "help": "lightning-cli getinfo → id. A conexão é autenticada com ele.",
+            "label": "Id do nó",
+            "placeholder": "02… ou 03… (66 caracteres hex)"
+          },
+          "rune": {
+            "help": "Nunca uma rune sem restrições. Crie uma com: {{command}}",
+            "placeholder": "Uma rune restrita aos métodos do Ghostly"
+          },
+          "url": {
+            "help": "O listener bind-addr=ws:… do nó, atrás de um proxy wss:// para o app web; ws:// só para este computador.",
+            "label": "Endereço WebSocket"
+          }
+        }
+      },
+      "fedimint": {
+        "description": "Uma federação em que você entrou (Carteira → Fedimint): as faturas são pagas para o ecash dela, e a partir dele, pelo gateway dela. Os guardiões dela guardam os sats."
+      },
+      "lnd": {
+        "description": "Seu próprio nó LND, pela API REST dele. Seu nó guarda os sats.",
+        "fields": {
+          "certificate": {
+            "help": "Só no desktop: o tls.cert do nó, fixado (o nó deve apresentar exatamente este). Deixe em branco para um certificado de uma autoridade pública; em qualquer outro lugar, ele deve ficar em branco.",
+            "label": "Certificado TLS"
+          },
+          "macaroon": {
+            "help": "Nunca o macaroon de administrador: crie um com {{command}} (só invoices:… para apenas receber)."
+          },
+          "url": {
+            "help": "A porta REST do LND (restlisten, 8080 por padrão). Num navegador, o nó deve permitir este app com restcors e ter um certificado em que o navegador confie; o app para desktop não precisa de nenhum dos dois.",
+            "label": "Endereço REST"
+          }
+        }
+      },
+      "nwc": {
+        "description": "Uma carteira que você conecta pela URI NWC dela (Alby Hub, o serviço NWC de um nó, uma carteira hospedada). Essa carteira guarda os sats e define o próprio limite de taxa: ser custodial ou não depende da carteira.",
+        "fields": {
+          "uri": {
+            "help": "Nas conexões de apps da sua carteira. Permita criar, pagar e consultar faturas, e ler o saldo.",
+            "label": "URI de conexão"
+          }
+        }
+      },
+      "webln": {
+        "description": "Uma carteira Lightning neste navegador (Alby e outras). Essa carteira guarda os sats e pergunta a você antes de pagar."
+      }
+    },
     "reconfigured": "{{name}} agora usa esse servidor.",
     "reconfiguredUnnamed": "A fonte agora usa esse servidor.",
     "remove": "Remover",
@@ -767,9 +886,13 @@
   },
   "unseen": {
     "lineReal": "{{amount}} sats novos em {{wallet}}",
+    "lineRealOne": "{{amount}} sat novo em {{wallet}}",
     "lineTest": "{{amount}} sats de teste novos em {{wallet}}",
+    "lineTestOne": "{{amount}} sat de teste novo em {{wallet}}",
     "real": "{{place}}, {{amount}} sats novos",
-    "test": "{{place}}, {{amount}} sats de teste novos"
+    "realOne": "{{place}}, {{amount}} sat novo",
+    "test": "{{place}}, {{amount}} sats de teste novos",
+    "testOne": "{{place}}, {{amount}} sat de teste novo"
   },
   "usdt": {
     "approve": "Nada é enviado até você aprovar a revisão.",

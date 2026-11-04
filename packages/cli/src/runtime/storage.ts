@@ -19,7 +19,13 @@ import { handOut, openTreeFile, rollback, SqlTree, type TreeFile } from "./sqlTr
  * - at start the snapshot is loaded and the journal replayed. A short journal that is whole stays as it is, and so
  *   does the snapshot; a long one, or one whose last entry was cut short, is folded into a fresh snapshot first;
  * - a close leaves a short journal too, with a mark at its end that says the store was closed: the rows are on disk
- *   already, and writing the whole snapshot again for them cost a second or more of every command on a large profile;
+ *   already, and writing the whole snapshot again for them would add megabytes of disk writes to every command;
+ * - a chat's ratchet keys are forgotten as they are used (WISP 4xx), and an append-only journal would keep each one: a
+ *   journal that holds a ratchet state is folded once the snapshot is an hour old, at a write, a close or a start;
+ * - a chat, a message or a service deleted stays readable in an append-only journal, which has what was written before,
+ *   and so does a secret a settings row is written again without (an x401 credential, a link's or a wallet's seed, a
+ *   TURN password): a journal that holds such a delete or a settings write is folded once the snapshot is an hour old,
+ *   at a write, a close or a start;
  * - a journal begins by naming the snapshot it follows: one found beside another snapshot is in that snapshot already
  *   (the process died between writing the snapshot and removing the journal), and is not replayed over it;
  * - the engine's messages and file states, and their indexes, are kept in `rows.db` (SQLite: ./sqlTree.ts), not in memory: their
@@ -107,6 +113,27 @@ const ON_DISK = new Set(["messages", "fileState"]);
 const COMPACT_BYTES = 32 * 1024 * 1024;
 /** A journal up to this is kept at close and at start: replaying it costs less than writing the snapshot again. */
 const KEEP_BYTES = 1024 * 1024;
+/** The chat row's field that holds its ratchet, as a journal's bytes spell it. Another row that says the word only folds early. */
+const RATCHET = "ratchetState";
+/**
+ * How long a used ratchet state may stay on the disk while the store is in use, so a profile folder copied later opens
+ * nothing older. The time a fold blocks does not set this (tens of milliseconds at 100,000 messages, which are not in
+ * the snapshot); its disk writes do: 4 MB on that profile, so about 100 MB a day at this hour and 600 MB at 10 minutes.
+ */
+const RATCHET_FOLD_MS = 60 * 60_000;
+/** The stores whose rows a delete means gone from the disk: the chats (their seed, their ratchet), their messages, the services. */
+const FORGOTTEN = new Set(["links", "messages", "services"]);
+/**
+ * The stores whose rows a write means gone from the disk as they were: the settings, where every secret the profile
+ * seals is kept (an x401 credential and its key, a contact link's, a DID's or an identity proof's seed, a wallet's or a
+ * card's) and the TURN password, each removed by writing its row again without it.
+ */
+const REWRITTEN = new Set(["settings"]);
+/**
+ * How long what a delete of a chat or a message (or a settings write) took may stay in the journal while the store is
+ * in use, so a profile folder copied later holds nothing older. The hour is the ratchet's, for the same reason.
+ */
+const DELETE_FOLD_MS = 60 * 60_000;
 /**
  * The database a journal's close mark names. No profile has it, so a replay skips the mark (an older version's too:
  * it skips an op whose store it does not find).
@@ -184,10 +211,16 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   let unsaved = false;
   /** Set while the journal holds relaxed entries no sync has covered yet. */
   let relaxed: ReturnType<typeof setTimeout> | null = null;
+  /** The journal holds a chat's ratchet state, and with the next one it holds a key already used. */
+  let holdsRatchet = false;
+  /** The journal holds a delete of a chat or a message (or a settings write), and what came before it with it. */
+  let holdsDelete = false;
   const pending = new WeakMap<unknown[], Op[]>();
 
   const snapshotPath = join(dir, SNAPSHOT);
   const journalPath = join(dir, JOURNAL);
+  const ratchetDue = () => holdsRatchet && Date.now() - (statSync(snapshotPath, { throwIfNoEntry: false })?.mtimeMs ?? 0) >= RATCHET_FOLD_MS;
+  const deleteDue = () => holdsDelete && Date.now() - (statSync(snapshotPath, { throwIfNoEntry: false })?.mtimeMs ?? 0) >= DELETE_FOLD_MS;
 
   // Load what the disk holds before any connection opens; a snapshot with no journal after it is already what is held.
   const snapshotFound = existsSync(snapshotPath), journalFound = existsSync(journalPath);
@@ -214,7 +247,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   const folded = named !== undefined && snapshotName !== undefined && named !== snapshotName;
   if (folded) { rmSync(journalPath, { force: true }); journal = null; }
   // Trees just written from a snapshot of format 1 hold that snapshot and nothing after it: the whole journal replays.
-  const replayed = journal ? replay(raw._databases, journal, order, { applied: restoredToDisk ? 0 : seq, onTrees }) : { end: 0, closed: !folded, seq: 0 };
+  const replayed = journal ? replay(raw._databases, journal, order, { applied: restoredToDisk ? 0 : seq, onTrees }) : { end: 0, closed: !folded, seq: 0, deletes: false };
   // What the journal had for the trees and SQLite did not: written now, numbered as its last entry.
   seq = Math.max(seq, replayed.seq);
   if (trees) { trees.complete(null, seq); trees.apply(seq); }
@@ -226,7 +259,9 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   let marked = replayed.closed;
   // A journal cut short is never appended to: what came after the torn bytes could not be read back. Nor one that
   // does not name this snapshot (an older version's).
-  const kept = !!journal && named !== undefined && named === snapshotName && replayed.end === journal.length && journal.length <= KEEP_BYTES;
+  holdsRatchet = !!journal?.includes(RATCHET);
+  holdsDelete = replayed.deletes;
+  const kept = !!journal && named !== undefined && named === snapshotName && replayed.end === journal.length && journal.length <= KEEP_BYTES && !ratchetDue() && !deleteDue();
   const rewrite = (journal && !kept) || !snapshotFound || moved;
   if (rewrite) await writeSnapshot();
   rows?.close();
@@ -322,6 +357,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
    * and the transaction is to be refused, not completed.
    */
   function append(ops: Op[], lazy: boolean, entry: number, owner: unknown[]): { error: unknown } | null {
+    holdsDelete ||= ops.some(deletes);
     if (trees) ops = [{ db: SEQ, store: "", kind: "clear", seq: entry }, ...ops];
     if (queued === 0 && !ops.some((op) => op.kind === "put" && hasBlob(op.value))) {
       let done: boolean;
@@ -439,7 +475,8 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       throw error;
     }
     if (lazy) relaxed ??= setTimeout(() => { try { sync(); } catch (error) { failed(error); } }, RELAXED_SYNC_MS).unref();
-    if (statSync(journalPath).size > COMPACT_BYTES) void enqueue(writeSnapshot);
+    holdsRatchet ||= entry.includes(RATCHET);
+    if (statSync(journalPath).size > COMPACT_BYTES || ratchetDue() || deleteDue()) void enqueue(writeSnapshot);
     return true;
   }
 
@@ -511,11 +548,13 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     if (journalFd !== null) { closeSync(journalFd); journalFd = null; }
     rmSync(journalPath, { force: true });
     marked = true;
+    holdsRatchet = false;
+    holdsDelete = false;
   }
 
   /** What `close` leaves: a short journal with the mark at its end, synced (its relaxed entries too), or a fresh snapshot. */
   async function leave() {
-    if (schemaDirty || unsaved || journalBytes() > KEEP_BYTES) return writeSnapshot();
+    if (schemaDirty || unsaved || journalBytes() > KEEP_BYTES || ratchetDue() || deleteDue()) return writeSnapshot();
     if (marked) return;
     writeEntry(serialize([{ db: CLOSED, store: "", kind: "clear" }] satisfies Op[]));
     marked = true;
@@ -1009,7 +1048,13 @@ function fill(store: RawRecordStore, sorted: RawRecord[]) {
 interface Touched { indexes: Map<string, RawIndex>; was: Set<RawRecord> | null; now: Set<RawRecord> }
 
 /** Where the journal's whole entries end, whether the last thing in it is a close mark, and its last entry's number. */
-interface Replayed { end: number; closed: boolean; seq: number }
+/** `deletes`: an entry takes a chat, a message or a setting away, one SQLite holds already too (the journal still has the rest). */
+interface Replayed { end: number; closed: boolean; seq: number; deletes: boolean }
+
+/** Whether an op takes a chat, a message or a service away (a delete, or a clear of their store), or writes a setting over. */
+function deletes(op: Op): boolean {
+  return REWRITTEN.has(op.store) || (op.kind !== "put" && FORGOTTEN.has(op.store));
+}
 
 /** The trees' part of a replay: entries up to `applied` are in SQLite already, and a store on trees keeps its indexes. */
 interface ReplayTrees { applied: number; onTrees: (store: RawStore) => boolean }
@@ -1042,7 +1087,7 @@ function replay(databases: Map<string, RawDatabase>, journal: Buffer, cmp: (a: K
 }
 
 function replayEntries(databases: Map<string, RawDatabase>, journal: Buffer, touched: Map<RawStore, Touched>, trees: ReplayTrees): Replayed {
-  let offset = 0, closed = false, last = 0;
+  let offset = 0, closed = false, last = 0, deleted = false;
   while (offset + 4 <= journal.length) {
     const length = journal.readUInt32BE(offset);
     if (offset + 4 + length > journal.length) break;
@@ -1053,6 +1098,7 @@ function replayEntries(databases: Map<string, RawDatabase>, journal: Buffer, tou
     const marker = ops.find((op) => op.db === SEQ);
     const entry = marker?.kind === "clear" ? marker.seq : undefined;
     if (entry !== undefined) last = Math.max(last, entry);
+    deleted ||= ops.some(deletes);
     for (const op of ops) {
       const store = databases.get(op.db)?.rawObjectStores.get(op.store);
       if (!store) continue;
@@ -1070,7 +1116,7 @@ function replayEntries(databases: Map<string, RawDatabase>, journal: Buffer, tou
       }
     }
   }
-  return { end: offset, closed: closed && offset === journal.length, seq: last };
+  return { end: offset, closed: closed && offset === journal.length, seq: last, deletes: deleted };
 }
 
 /**

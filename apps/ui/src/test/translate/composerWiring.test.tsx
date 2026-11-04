@@ -27,7 +27,7 @@ const settings = (translateMessages: boolean) =>
 
 function Composer({ chat }: { chat: string }) {
   const translation = useComposerTranslation(chat);
-  return <output data-testid="composer-translation" data-detect={translation?.detect ? translation.detect("hola")[0]?.code : ""}>
+  return <output data-testid="composer-translation" data-detect={translation?.detect ? (translation.detect("hola") as readonly { code: string }[])[0]?.code : ""}>
     {JSON.stringify(translation ?? null)}
   </output>;
 }

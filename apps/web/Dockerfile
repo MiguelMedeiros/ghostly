@@ -12,7 +12,10 @@ COPY packages/browser/package.json packages/browser/
 COPY packages/iroh-web/package.json packages/iroh-web/
 COPY apps/extension/package.json apps/extension/
 COPY apps/web/package.json apps/web/
-RUN npm ci --ignore-scripts
+# --ignore-scripts skips the root postinstall, and with it the dependency patches every other build has (the browser
+# fixes in keet-identity-key and bip39-mnemonic among them): apply them here, and fail the build when one does not.
+COPY tools/patches tools/patches
+RUN npm ci --ignore-scripts && npx patch-package --patch-dir tools/patches --error-on-fail
 
 COPY tsconfig.json ./
 COPY apps/ui apps/ui

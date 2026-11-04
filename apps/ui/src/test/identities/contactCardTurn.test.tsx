@@ -54,6 +54,13 @@ it("waits again when the card is turned back and over once more", async () => {
   await waitFor(() => expect(screen.getByTestId("chat-identity-recheck")).toBeEnabled());
 });
 
+// A key is compared character by character with what the contact reads out: left to right in every language.
+it("shows the contact's Ghostly key left to right", async () => {
+  const { user } = open();
+  await user.click(screen.getByTestId("chat-identity-ghostly"));
+  expect(screen.getByTestId("chat-identity-key")).toHaveAttribute("dir", "ltr");
+});
+
 // The nightly round on dev 603a54f8c clicked Load profile on a Nostr card just turned over: nothing loaded, no error.
 it("keeps a Nostr card's Load buttons waiting while it turns over, then takes the first click", async () => {
   const npub = "npub1example";

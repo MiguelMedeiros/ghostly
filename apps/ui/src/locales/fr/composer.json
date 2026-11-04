@@ -19,8 +19,12 @@
   "dhtTooLong": "Trop long pour la DHT ({{bytes}} sur {{max}} octets). Raccourcissez ou passez en direct ; le brouillon est gardé.",
   "document": "Document",
   "dropFiles": "Déposez pour envoyer",
+  "dropReading": "Lecture de ce que vous avez déposé…",
   "emoji": "Emoji",
   "emojiCategories": "Catégories d'emoji",
+  "emojiFound": "{{count}} emojis",
+  "emojiFound_one": "{{count}} emoji",
+  "emojiFound_other": "{{count}} emojis",
   "emojiNotLoading": "Les emoji n'ont pas pu être chargés.",
   "expressions": "Emoji et GIF",
   "filePreparing": "Préparation de {{name}}…",
@@ -96,6 +100,6 @@
     "stale": "Le message a changé",
     "working": "Traduction…"
   },
-  "videoConverting": "Conversion de {{name}} en MP4… {{percent}}",
+  "videoConverting": "Conversion de {{name}} en MP4…",
   "videoSentAsIs": "{{name}} a été envoyé tel quel : cet appareil ne peut pas le convertir. Certains téléphones et ordinateurs ne pourront peut-être que le télécharger."
 }

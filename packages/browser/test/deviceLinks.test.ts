@@ -10,7 +10,7 @@ import type { DeviceRecord, DeviceSlot, StoredDeviceState } from "../src/devices
 import { DEVICES_DB, closeDevicesDb, setDeviceMirror } from "../src/devices/store";
 import { EngineServer } from "../src/engine/server";
 import { dropDevicesDatabase, putDeviceRecord } from "./helpers/deviceRecord";
-import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, fakePeerConnection, useFakeWorld, yieldToLoop } from "../../core/test/support/pairingWorld";
+import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, fakePeerConnection, rtc, useFakeWorld, yieldToLoop } from "../../core/test/support/pairingWorld";
 import { NativeWorld } from "../../core/test/support/nativeWorld";
 // covers: devices.links.session, devices.gate
 
@@ -231,6 +231,62 @@ describe("the device links of a profile on this device", () => {
     expect(phone.links.views()[0].transport).toBe("iroh/1");
     expect(await settled(phone.links.ping(desktop.slot.key))).toBeGreaterThanOrEqual(0);
   });
+
+  it.each([undefined, 15_000])("run on Iroh between two web pages whose WebRTC never connects (ICE fails after %s ms)", async (failsAfter) => {
+    // Both have WebRTC, so neither packet says it has none: offer and answer meet, and nothing connects.
+    rtc.blocked = true;
+    rtc.blockedFailsAfterMs = failsAfter;
+    const native = new NativeWorld();
+    native.hexIds = true;
+    const factories = (name: string) => Object.fromEntries((["iroh/1"] as NativeTransport[]).map((transport) => [transport, async () => native.endpoint(transport, name)]));
+    const d = newDeviceSetSecret();
+    const phone = await makeDevice("Phone", { nativeTransports: factories("Phone") });
+    const computer = await makeDevice("Computer", { nativeTransports: factories("Computer") });
+    await write(phone, "active", d, [phone, computer]);
+    await write(computer, "standby", d, [phone, computer]);
+    await settled(Promise.all([phone.links.start(), computer.links.start()]));
+    expect(await until(() => liveBetween(phone, computer), 90_000)).toBe(true);
+    expect(computer.links.views()[0].transport).toBe("iroh/1");
+    expect(await settled(computer.links.ping(phone.slot.key))).toBeGreaterThanOrEqual(0);
+  });
+
+  it("go back to WebRTC when the link that went on without it starts no native transport (an Iroh relay neither device reaches)", async () => {
+    // WebRTC connects nothing at first, so the links go on without it; neither device's Iroh starts, then or later.
+    rtc.blocked = true;
+    let refused = 0;
+    const factories = { "iroh/1": async () => { refused++; throw new Error("The Iroh relay did not answer"); } };
+    const d = newDeviceSetSecret();
+    const phone = await makeDevice("Phone", { nativeTransports: factories });
+    const computer = await makeDevice("Computer", { nativeTransports: factories });
+    await write(phone, "active", d, [phone, computer]);
+    await write(computer, "standby", d, [phone, computer]);
+    await settled(Promise.all([phone.links.start(), computer.links.start()]));
+    expect(await until(() => refused > 0, 60_000)).toBe(true);
+    // WebRTC goes through now: the links take it again rather than wait on an Iroh that never starts.
+    rtc.blocked = false;
+    expect(await until(() => liveBetween(phone, computer), 180_000)).toBe(true);
+    expect(computer.links.views()[0].transport).toBe("webrtc/1");
+  });
+
+  it("go back and forth between WebRTC and none less and less often while neither connects", async () => {
+    // WebRTC is answered and never connects, and neither device's Iroh starts: each round without WebRTC ends at once.
+    rtc.blocked = true;
+    let refused = 0;
+    const factories = { "iroh/1": async () => { refused++; throw new Error("The Iroh relay did not answer"); } };
+    const d = newDeviceSetSecret();
+    const phone = await makeDevice("Phone", { nativeTransports: factories });
+    const computer = await makeDevice("Computer", { nativeTransports: factories });
+    await write(phone, "active", d, [phone, computer]);
+    await write(computer, "standby", d, [phone, computer]);
+    await settled(Promise.all([phone.links.start(), computer.links.start()]));
+    expect(await until(() => refused > 0, 60_000)).toBe(true);
+    // The wait before each round without WebRTC doubles (20 s, 40 s, 80 s, 160 s, then 5 min): ten minutes hold about
+    // five rounds per device, not one every few seconds.
+    const before = refused;
+    await run(10 * 60_000);
+    expect(refused - before).toBeLessThanOrEqual(14);
+    expect(liveBetween(phone, computer)).toBe(false);
+  }, 120_000);
 
   it("offer HyperDHT where only it goes through, and start again a native transport that did not start", async () => {
     // The Linux Desktop has no WebRTC; the page's Iroh is on a relay the Desktop cannot reach (two Iroh worlds), so

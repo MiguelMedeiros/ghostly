@@ -94,6 +94,8 @@ export function chatDetailsJson(link: LinkView, showSecret?: boolean) {
     rttMs: link.transportRttMs ?? null,
     relays: link.transportRelayed?.relays ?? null,
     deliveryMode: link.deliveryMode ?? null,
+    // The contact's own choice, from its last envelope: `dht` keeps the chat off any live session until it chooses again.
+    peerDeliveryMode: link.dhtDelivery?.peerMode ?? null,
     capabilities: link.capabilities ?? null,
     hold: link.hold ?? null,
     peerOnline: link.peerOnline,

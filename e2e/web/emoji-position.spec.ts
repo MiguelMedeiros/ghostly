@@ -57,4 +57,12 @@ test("mobile emoji sheet stays visible and supports touch selection and dismissa
  await expect(page.getByTestId("composer-expressions")).toBeVisible();expect(await page.evaluate(()=>location.hash)).toBe(chatHash);
  await page.setViewportSize({width:320,height:480});await page.getByTestId("composer-expressions").tap();await fits(page);
  await page.keyboard.press("Escape");await expect(panel).toHaveCount(0);
+ // On its side the sheet keeps room for emoji under its categories, search and switch: a whole row shows.
+ await page.setViewportSize({width:568,height:320});await page.getByTestId("composer-expressions").tap();await fits(page);
+ await expect.poll(async()=>{
+  const strip=(await panel.locator(".expression-scroll").boundingBox())!;
+  const first=(await panel.locator(".expression-scroll .emoji-cell").first().boundingBox())!;
+  return first.y>=strip.y-1 && first.y+first.height<=strip.y+strip.height+1;
+ }).toBe(true);
+ await page.screenshot({path:info.outputPath("emoji-phone-landscape.png")});
 });

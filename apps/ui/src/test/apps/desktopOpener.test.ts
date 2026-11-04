@@ -23,9 +23,10 @@ function setup(entry: Partial<AppEntry> = {}, windowTitle?: (title: string, link
   const handlers = new Map<string, (event: { payload: unknown }) => void>();
   const calls: { command: string; args: Record<string, unknown> }[] = [];
   let labels = 0;
-  const hooks: { opened?: (label: string) => void } = {};
+  const hooks: { opened?: (label: string) => void; focused?: boolean } = {};
   const invoke = vi.fn(async (command: string, args: Record<string, unknown> = {}) => {
     calls.push({ command, args });
+    if (command === "app_focused") return hooks.focused ?? true;
     if (command === "app_open") {
       const label = `app-${++labels}`;
       hooks.opened?.(label);
@@ -73,6 +74,21 @@ describe("opening an app on Desktop", () => {
     await open(REF, null);
     const titles = calls.filter((c) => c.command === "app_open").map((c) => (c.args.request as { title: string }).title);
     expect(titles).toEqual(["Chess with Ana", "Chess"]);
+  });
+
+  it("refuses a files.pick while the person is not in the app's window: its sheet would pull the Ghostly window over what they are doing", async () => {
+    const { host, hooks, open, request, answer } = setup({ permissions: ["chat", "files"] });
+    await open(REF, LINK);
+    request("app-1", { id: 0, type: "writing", args: [] });
+    await answer("app-1", 0);
+    host.nextPick = [{ path: "Films/Up.mp4", bytes: new Uint8Array(10) }];
+    hooks.focused = false;
+    request("app-1", { id: 1, type: "files.pick", args: [] });
+    expect(await answer("app-1", 1)).toMatchObject({ ok: false, error: "too-fast" });
+    // Back in its window, the same app asks at once: nothing waits, as nobody cancelled.
+    hooks.focused = true;
+    request("app-1", { id: 2, type: "files.pick", args: [] });
+    expect(await answer("app-1", 2)).toMatchObject({ ok: true });
   });
 
   it("says in its window's title while the app serves the contact a file, and no longer once it stops", async () => {

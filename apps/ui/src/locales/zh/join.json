@@ -2,6 +2,7 @@
   "alreadyIn": "你已经在这个聊天中了。",
   "cameraPreview": "二维码相机预览",
   "cameraUnavailable": "相机不可用。请粘贴邀请或打开图片。",
+  "chatGone": "此设备上已没有这个聊天。",
   "clipboardUnavailable": "无法读取剪贴板。按 {{keys}} 将邀请粘贴到下方。",
   "clipboardUnavailableTouch": "无法读取剪贴板。长按下方的输入框，然后点按“粘贴”。",
   "close": "关闭",

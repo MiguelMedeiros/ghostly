@@ -64,10 +64,10 @@ export function useUnseenSats(): Unseen {
 
 /**
  * The wallet place's name and tooltip in the app's language: "Wallets, 109,100 new sats", "Wallets, 21 new test sats",
- * or just "Wallets". The amount is written the app's way, not the device's.
+ * "Wallets, 1 new sat", or just "Wallets". The amount is written the app's way, not the device's.
  */
 export function unseenSatsLabel(place: string, { real, test }: Unseen, t: Translate): string {
-  if (real) return t("wallet.unseen.real", { place, amount: formatAmount(real, t.language) });
-  if (test) return t("wallet.unseen.test", { place, amount: formatAmount(test, t.language) });
+  if (real) return t(real === 1 ? "wallet.unseen.realOne" : "wallet.unseen.real", { place, amount: formatAmount(real, t.language) });
+  if (test) return t(test === 1 ? "wallet.unseen.testOne" : "wallet.unseen.test", { place, amount: formatAmount(test, t.language) });
   return place;
 }

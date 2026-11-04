@@ -5,7 +5,7 @@ import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { SharePicker } from "../../pages/SharePicker";
 import { groupChat } from "../../lib/chatMute";
-import { incomingShare, receiveShare, resetIncomingShare, sendShareTo, shareText, takeShareFor, type IncomingShare } from "../../lib/incomingShare";
+import { incomingShare, receiveShare, resetIncomingShare, sendShareTo, sharePreview, shareText, takeShareFor, type IncomingShare } from "../../lib/incomingShare";
 import { saveSession, setSessionDraft } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
 import { engineState, fakeEngine, groupView } from "../fakeEngine";
@@ -30,6 +30,15 @@ describe("the text a share puts in the draft", () => {
     expect(shareText(share({ url: "https://a.example", title: "A page" }))).toBe("https://a.example");
     expect(shareText(share({ title: "Only a title" }))).toBe("Only a title");
     expect(shareText(share())).toBe("");
+  });
+
+  it("the picker previews the start of a long text, never half a character, and the draft gets it whole", () => {
+    expect(sharePreview(share({ text: "Look", url: "https://a.example" }))).toBe("Look\nhttps://a.example");
+    // A pair astride the preview's end is left out whole.
+    const text = `${"a".repeat(2047)}👻${"b".repeat(100_000)}`;
+    expect(sharePreview(share({ text }))).toBe(`${"a".repeat(2047)}…`);
+    expect(sharePreview(share({ text: `${"a".repeat(2046)}👻${"b".repeat(10)}` }))).toBe(`${"a".repeat(2046)}👻…`);
+    expect(shareText(share({ text })).length).toBe(102_049);
   });
 
   it("an empty share is dropped; a picked one waits for its chat's composer, once", () => {
@@ -273,6 +282,26 @@ describe("the Share to… picker", () => {
     expect(screen.getByTestId("share-unread-title")).toHaveTextContent("Couldn't read: IMG_2.jpg, IMG_3.jpg");
     expect(screen.getByTestId("share-unread-next")).toHaveTextContent("Share it again from its app, or open a chat and send it with + → Document.");
     expect(screen.getByTestId("share-chat")).toHaveTextContent("Ana");
+  });
+
+  it("names the files past the count cap on a line of its own, with how to send them", () => {
+    const files = Array.from({ length: 32 }, (_, i) => file(`IMG_${i + 1}.jpg`));
+    receiveShare(share({ files, pastLimit: ["IMG_33.jpg", "IMG_34.jpg"] }));
+    picker();
+    expect(screen.getByTestId("share-files")).toHaveTextContent("32 files");
+    expect(screen.getByTestId("share-past-limit-title")).toHaveTextContent("Only the first 32 files came in. Left out: IMG_33.jpg, IMG_34.jpg");
+    expect(screen.getByTestId("share-past-limit-next")).toHaveTextContent("Share the rest again, or open a chat and send them with + → Document.");
+    // Not said as too large: that is not why they were left out.
+    expect(screen.queryByTestId("share-left-out")).toBeNull();
+    expect(screen.getByTestId("share-chat")).toHaveTextContent("Ana");
+  });
+
+  it("names the files past the count cap also when that was all of a later share, with the share that waits", () => {
+    receiveShare(share({ text: "look" }));
+    receiveShare(share({ pastLimit: ["IMG_33.jpg"] }));
+    picker();
+    expect(screen.getByTestId("share-text")).toHaveTextContent("look");
+    expect(screen.getByTestId("share-past-limit-title")).toHaveTextContent("Only the first 32 files came in. Left out: IMG_33.jpg");
   });
 
   it("a share too large to read (the web app's, over 64 MB): says so without a name, and how to send it", () => {

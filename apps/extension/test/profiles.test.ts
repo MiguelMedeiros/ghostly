@@ -1,9 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { settle, type FakeWorld } from "./fakeChrome";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fire, settle, type FakeWorld } from "./fakeChrome";
 import { engineControl, resetEngine } from "./fakeEngine";
-import { bootExtension, restartServiceWorker, useProfile } from "./extension";
+import { PEER, SERVICE, TAG, bootExtension, openViewer, restartServiceWorker, useProfile } from "./extension";
 
-// covers: extension.engine, profiles.switch, app.clear-data
+// covers: extension.engine, profiles.switch, app.clear-data, services.open
 
 vi.mock("@ghostly/browser/engine/server", async () => (await import("./fakeEngine")).engineServerModule);
 // Mocked modules outlive `vi.resetModules()`: as the real one, but one instance the fake peer and every
@@ -72,6 +72,59 @@ describe("clearing the profile's data", () => {
     expect(await ensure()).toEqual({ ok: true });
     expect(log()).toHaveLength(3);
   });
+
+  it("asked while a peer was still starting: a page that opens during it waits for the new peer, not the stopping one", async () => {
+    // The first document's script runs only when let go, so the restart is asked while that start goes on.
+    let loadFirst!: () => void;
+    const loaded = new Promise<void>((resolve) => (loadFirst = resolve));
+    const createDocument = world.onCreateDocument;
+    world.onCreateDocument = async () => {
+      world.onCreateDocument = createDocument;
+      void loaded.then(createDocument);
+    };
+    const first = ensure();
+    await settle();
+    const restart = world.chrome.runtime.sendMessage({ target: "background", type: "restart-engine" });
+    await settle();
+    // Not ready until its stop is held below: on a slow host the restart would stop it first.
+    let ready!: () => void;
+    engineControl().ready = new Promise<void>((resolve) => (ready = resolve));
+    loadFirst();
+    while (!engineControl().servers.length) await settle(1);
+    // The stopped peer takes a moment to say goodbye.
+    let stopped!: () => void;
+    engineControl().servers[0].node.shutdown = () => new Promise<void>((resolve) => (stopped = () => { log().push("stop ghostly"); resolve(); }));
+    ready();
+    expect(await first).toEqual({ ok: true });
+
+    let answered = false;
+    const page = ensure().then((reply) => { answered = true; return reply; });
+    await settle(20);
+    expect(answered).toBe(false);
+    stopped();
+    expect(await restart).toEqual({ ok: true });
+    expect(await page).toEqual({ ok: true });
+    expect(log()).toEqual(["start ghostly", "stop ghostly", "start ghostly"]);
+  });
+
+  it("that fails leaves nothing unhandled in the worker: the page hears why", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      await ensure();
+      // The new document never answers.
+      world.onCreateDocument = async () => {};
+      expect(await world.chrome.runtime.sendMessage({ target: "background", type: "restart-engine" })).toEqual({
+        ok: false,
+        error: "Error: The Ghostly peer did not start. Reopen the extension to retry.",
+      });
+      await settle(20);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  }, 10_000);
 });
 
 describe("switching", () => {
@@ -124,6 +177,24 @@ describe("switching", () => {
     await ensure();
     expect(log()).toEqual([`start ghostly_${WORK}`]);
     expect(world.callsTo("offscreen.createDocument")).toHaveLength(1);
+  });
+
+  it("a second switch made while the first one's peer starts: the page of that profile gets that profile's peer", async () => {
+    await ensure();
+    // The first switch's peer takes a moment to open its database.
+    let ready!: () => void;
+    engineControl().ready = new Promise<void>((resolve) => (ready = resolve));
+    useProfile(world, WORK);
+    const first = ensure();
+    while (engineControl().servers.length < 2) await settle(1);
+    // Meanwhile another tab switches again, and its page asks for the peer.
+    useProfile(world, HOME, [WORK]);
+    const second = ensure();
+    await settle();
+    ready();
+    expect(await Promise.all([first, second])).toEqual([{ ok: true }, { ok: true }]);
+    expect(engineControl().servers.at(-1)!.database).toBe(`ghostly_${HOME}`);
+    expect(log()).toEqual(["start ghostly", "stop ghostly", `start ghostly_${WORK}`, `stop ghostly_${WORK}`, `start ghostly_${HOME}`]);
   });
 
   it("does not wait for ever on a peer that hangs while stopping", async () => {
@@ -202,10 +273,145 @@ describe("pages follow a switch made in another tab", () => {
   });
 });
 
+describe("a page that follows a switch starts again where the profile in use was left", () => {
+  // This page showed a group of the profile before the switch: that id means nothing to the profile after it.
+  async function startAgain(): Promise<{ hash: string; reloads: number }> {
+    const page = { hash: "#/group/AAAAAAAAAAAAAAAAAAAAAA", reloads: 0 };
+    Object.assign(globalThis, {
+      location: { get hash() { return page.hash; }, reload: () => page.reloads++ },
+      history: { replaceState: (_state: unknown, _title: string, url: string) => (page.hash = url) },
+    });
+    const { startAsProfileInUse } = await world.load("page", () => import("../src/profile.ts"));
+    startAsProfileInUse();
+    return page;
+  }
+
+  afterEach(() => {
+    delete (globalThis as { location?: unknown }).location;
+    delete (globalThis as { history?: unknown }).history;
+  });
+
+  it("on the chat list, for a profile never left on a page", async () => {
+    useProfile(world, WORK);
+    expect(await startAgain()).toEqual({ hash: "#/", reloads: 1 });
+  });
+
+  it("on the page that profile was left on", async () => {
+    useProfile(world, WORK);
+    world.storage.set(`ghostly_${WORK}_last_route`, "/chat/BBBBBBBBBBBBBBBBBBBBBB");
+    expect(await startAgain()).toEqual({ hash: "#/chat/BBBBBBBBBBBBBBBBBBBBBB", reloads: 1 });
+  });
+});
+
+describe("pages follow a peer started again in another tab", () => {
+  const stored = (key: string, newValue: string | null) => world.page.dispatchEvent(Object.assign(new Event("storage"), { key, newValue }));
+
+  it("the page that starts the peer again leaves the mark once the new peer runs", async () => {
+    useProfile(world, WORK);
+    await ensure();
+    const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
+    expect(world.storage.has("ghostly_engine_restarted")).toBe(false);
+    await extensionHost.restartEngine!();
+    expect(log()).toEqual([`start ghostly_${WORK}`, `stop ghostly_${WORK}`, `start ghostly_${WORK}`]);
+    expect(world.storage.has("ghostly_engine_restarted")).toBe(true);
+  });
+
+  it("another page starts again on the mark, and only on it", async () => {
+    const { followEngineRestart } = await world.load("page", () => import("../src/profile.ts"));
+    const onRestart = vi.fn();
+    const stop = followEngineRestart(onRestart);
+    stored("ghostly_app_settings", "{}");
+    stored("ghostly_engine_restarted", null);
+    expect(onRestart).not.toHaveBeenCalled();
+    stored("ghostly_engine_restarted", "1");
+    expect(onRestart).toHaveBeenCalledTimes(1);
+    stop();
+    stored("ghostly_engine_restarted", "2");
+    expect(onRestart).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a contact's app open as the profile before", () => {
+  const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/`;
+  const paused = (tabId: number, requestId: string) =>
+    fire(world.chrome.debugger.onEvent, { tabId }, "Fetch.requestPaused", { requestId, request: { url, method: "GET", headers: {} } });
+  const servers = () => engineControl().servers;
+
+  /** Its tab is gone, with its binding and the debugger, and nothing it asks for afterwards reaches any peer. */
+  async function expectClosed(tabId: number): Promise<void> {
+    expect(world.callsTo("tabs.remove")).toEqual([[tabId]]);
+    expect(world.tabs.has(tabId)).toBe(false);
+    expect(world.session.has(`viewer:${tabId}`)).toBe(false);
+    expect(world.callsTo("debugger.detach")).toContainEqual([{ tabId }]);
+    const before = world.callsTo("debugger.sendCommand").length;
+    paused(tabId, "after");
+    await settle(5);
+    expect(world.callsTo("debugger.sendCommand").slice(before)).toEqual([]);
+    expect(servers().flatMap((s) => s.requests)).toEqual([]);
+  }
+
+  it("closes when another profile becomes the one in use, before that profile's peer answers", async () => {
+    const tabId = await openViewer(world);
+    const other = await world.chrome.tabs.create({ url: "https://example.org/" });
+    useProfile(world, WORK);
+    expect(await ensure()).toEqual({ ok: true });
+    expect(servers().at(-1)!.database).toBe(`ghostly_${WORK}`);
+    await expectClosed(tabId);
+    // Only the viewer: no other tab is touched.
+    expect(world.tabs.has(other.id!)).toBe(true);
+  });
+
+  it("closes when the peer starts again (Clear all data)", async () => {
+    const tabId = await openViewer(world);
+    expect(await world.chrome.runtime.sendMessage({ target: "background", type: "restart-engine" })).toEqual({ ok: true });
+    await expectClosed(tabId);
+  });
+
+  it("a request it made as the switch began is not sent to the next profile's peer", async () => {
+    const tabId = await openViewer(world);
+    useProfile(world, WORK);
+    // The request waits on the switch it finds in progress.
+    const switched = ensure();
+    paused(tabId, "during");
+    expect(await switched).toEqual({ ok: true });
+    await settle(5);
+    expect(servers().flatMap((s) => s.requests)).toEqual([]);
+    expect(world.callsTo("debugger.sendCommand").filter(([, method]) => method === "Fetch.fulfillRequest")).toEqual([]);
+  });
+
+  it("closes when the profile locks (the lock screen's closeServiceWindows), as Desktop's windows do", async () => {
+    const tabId = await openViewer(world);
+    await world.load("page", () => import("../src/host.ts"));
+    const { closeServiceWindows } = await world.load("page", () => import("../../ui/src/lib/serviceWindows.ts"));
+    closeServiceWindows();
+    await settle(5);
+    await expectClosed(tabId);
+  });
+
+  it("does not open from a page of the profile before a switch: that page starts again instead", async () => {
+    const reload = vi.fn();
+    Object.assign(globalThis, { location: { reload }, history: { replaceState: vi.fn() } });
+    try {
+      await ensure();
+      const { openPageProfile } = await world.load("page", () => import("../src/profile.ts"));
+      const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
+      openPageProfile();
+      useProfile(world, WORK);
+      await expect(extensionHost.openService!(PEER, SERVICE, TAG)).rejects.toThrow("Switching profiles");
+      expect(reload).toHaveBeenCalledTimes(1);
+      expect(world.callsTo("tabs.create")).toEqual([]);
+    } finally {
+      delete (globalThis as { location?: unknown }).location;
+      delete (globalThis as { history?: unknown }).history;
+    }
+  });
+});
+
 describe("a page of the profile before a switch", () => {
   it("does not reach the peer of the profile after it, and starts again instead", async () => {
     const reload = vi.fn();
-    Object.assign(globalThis, { location: { reload } });
+    const replaceState = vi.fn();
+    Object.assign(globalThis, { location: { reload }, history: { replaceState } });
     try {
       const { openPageProfile } = await world.load("page", () => import("../src/profile.ts"));
       const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
@@ -216,10 +422,12 @@ describe("a page of the profile before a switch", () => {
       useProfile(world, WORK);
       await expect(extensionHost.connect(() => {}, () => {})).rejects.toThrow("Switching profiles");
       expect(reload).toHaveBeenCalledTimes(1);
+      expect(replaceState).toHaveBeenCalledWith(null, "", "#/");
       expect(world.callsTo("runtime.connect")).toHaveLength(1);
       expect(log()).toEqual(["start ghostly"]);
     } finally {
       delete (globalThis as { location?: unknown }).location;
+      delete (globalThis as { history?: unknown }).history;
     }
   });
 });

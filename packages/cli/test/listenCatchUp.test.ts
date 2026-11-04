@@ -42,9 +42,9 @@ function slowHandler(gate: Promise<void> = Promise.resolve(), step: (done: () =>
   return { seqs, handle: Object.assign(handle, { behind: () => behind, idle: () => chain }) as EventHandler };
 }
 
-async function served(name: string, hub: ReturnType<typeof countingHub>["hub"]) {
+async function served(name: string, hub: ReturnType<typeof countingHub>["hub"], again = false) {
   const dir = join(root, name);
-  mkdirSync(dir, { mode: 0o700 });
+  if (!again) mkdirSync(dir, { mode: 0o700 });
   // Held by this process, as a daemon holds its profile: the client checks its greeting's pid against the lock.
   writeFileSync(lockPath(dir), String(process.pid));
   const s = await serve({ ctx: { runtime: { paths: { dir, socket: join(dir, "daemon.sock") } }, hub } } as unknown as Host);
@@ -131,5 +131,28 @@ describe.skipIf(process.platform === "win32")("a listen attached to the daemon t
       expect(counted.replays).toBe(2);
       following.close();
     } finally { await s.close(); }
+  });
+});
+
+describe.skipIf(process.platform === "win32")("a listen attached to the daemon that took no event yet", () => {
+  it("follows a restarted daemon from the last seq it knew of: what came before its reconnect is not skipped", async () => {
+    const { hub, emit } = countingHub(3);
+    let s = await served("quiet", hub);
+    let following: ReturnType<typeof followDaemon> | undefined;
+    try {
+      const client = await connectDaemon(s.address);
+      const { seqs, handle } = slowHandler();
+      // No --since, no cursor: from now.
+      following = followDaemon(s.address, client!, handle, undefined);
+      await following.subscribed;
+      await s.close();
+      // The new daemon journals these before the listener's reconnect finds it (its daemon.started, a held message).
+      emit("started");
+      emit("right after the start");
+      s = await served("quiet", hub, true);
+      await expect.poll(() => seqs.length, { timeout: 10_000 }).toBe(2);
+      emit("later");
+      await expect.poll(() => seqs, { timeout: 5_000 }).toEqual([4, 5, 6]);
+    } finally { following?.close(); await s.close(); }
   });
 });

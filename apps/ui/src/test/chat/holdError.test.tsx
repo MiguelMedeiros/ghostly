@@ -43,6 +43,18 @@ describe("the hold's problem, in the app's language", () => {
     expect(screen.queryByTestId("hold-error-info")).toBeNull();
   });
 
+  it("items sealed for the device the profile was on before wait for the contact's app, not for a retry here", () => {
+    renderApp(<ChatHoldLine hold={hold("Could not pick up held items: the contact's app sealed them for the device this profile was on before. They come once it seals them again for this one.")} name="Ana" />, { language: "pt" });
+    expect(screen.getByTestId("hold-error")).toHaveTextContent("Seu contato deixou itens para o dispositivo que você usava antes" + "Eles chegam quando o app do seu contato os selar de novo para este.");
+    expect(screen.queryByTestId("hold-error-info")).toBeNull();
+  });
+
+  it("items left waiting while Hide my IP is on say why, in one line", () => {
+    renderApp(<ChatHoldLine hold={hold("Hide my IP from contacts is on: what your contact held for you waits on their storage until you turn it off.")} name="Ana" />, { language: "pt" });
+    expect(screen.getByTestId("hold-error")).toHaveTextContent("Seu contato deixou itens para você no armazenamento dele" + "Ocultar meu IP está ligado, então eles esperam lá até você desligar.");
+    expect(screen.queryByTestId("hold-error-info")).toBeNull();
+  });
+
   it("is not there without a problem, and the line not without anything held either", () => {
     const { rerender } = renderApp(<ChatHoldLine hold={hold()} name="Ana" />);
     expect(screen.getByTestId("hold-indicator")).toHaveTextContent("2 items held for Ana");

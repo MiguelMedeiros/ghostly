@@ -128,6 +128,61 @@ describe("What should people call you?", () => {
     }
   });
 
+  // A narrow window that opened an invite link: the chat fills the screen, the list (and New in it) is mounted but hidden.
+  it("over a chat, the focus goes to its message field, or to its back button on a touch screen; never to a hidden New", async () => {
+    const coarse = (touch: boolean) => vi.spyOn(window, "matchMedia").mockImplementation((query: string) =>
+      ({ matches: touch ? query.includes("coarse") : query.includes("fine"), media: query, addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList);
+    for (const [touch, close, expected] of [[false, "save", "composer"], [false, "skip", "composer"], [true, "save", "chat-back"], [true, "skip", "chat-back"]] as const) {
+      localStorage.clear();
+      localStorage.setItem(NAME_STEP_TEST_KEY, "on");
+      askNameIn("");
+      coarse(touch);
+      const { user, unmount } = renderApp(<>
+        <div hidden><button data-testid="sidebar-new-chat">New</button></div>
+        <button data-testid="chat-back">Back</button>
+        <textarea data-testid="composer" className="composer-textarea" />
+        <NameStep />
+      </>);
+      await settle();
+      const input = await screen.findByTestId("name-step-input");
+      input.focus();
+      if (close === "save") { await user.type(input, "Boo"); await user.keyboard("{Enter}"); }
+      else await user.click(screen.getByTestId("name-step-skip"));
+      await waitFor(() => expect(screen.queryByTestId("name-step")).toBeNull());
+      await waitFor(() => expect(document.activeElement, `${touch ? "touch" : "mouse"} ${close}`).toBe(screen.getByTestId(expected)));
+      unmount();
+      vi.restoreAllMocks();
+    }
+  });
+
+  // A link another tab forwards (`takeLinks`), or the installed app's launch with one, puts it in this page's address: a
+  // popstate onto an entry with no layer on it. That is no answer: the step stays over the chat it opened, name and all.
+  it("a link that reaches the page while it asks leaves it open, with the name typed; Back still closes it", async () => {
+    history.replaceState(null, "", "#/");
+    askNameIn("");
+    const { user } = renderApp(<NameStep />);
+    await settle();
+    const input = await screen.findByTestId("name-step-input");
+    await user.type(input, "Casper");
+    await waitFor(() => expect(typeof (history.state as Record<string, unknown> | null)?.ghostlyLayer).toBe("number"));
+
+    // `location.hash = link` as a browser does it (happy-dom fires no popstate for it): a new entry, then a popstate.
+    await act(async () => {
+      history.pushState(null, "", "#ghostly1link");
+      dispatchEvent(new PopStateEvent("popstate", { state: null }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(screen.getByTestId("name-step")).toBeTruthy();
+    expect((screen.getByTestId("name-step-input") as HTMLInputElement).value).toBe("Casper");
+    expect(nameStepPending(), "still asked").toBe(true);
+    await waitFor(() => expect(typeof (history.state as Record<string, unknown> | null)?.ghostlyLayer, "Back has an entry to close it again").toBe("number"));
+
+    await act(async () => { history.back(); await new Promise((resolve) => setTimeout(resolve, 50)); });
+    await waitFor(() => expect(screen.queryByTestId("name-step")).toBeNull());
+    expect(location.hash).toBe("#ghostly1link");
+    expect(nameStepPending()).toBe(false);
+  });
+
   it("is never asked without the mark", async () => {
     // A profile that has run before: its settings are saved.
     localStorage.setItem(settingsKeyFor(""), JSON.stringify({ language: "en" }));

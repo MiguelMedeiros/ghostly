@@ -131,6 +131,8 @@ describe("prepareVideo", () => {
     expect(fake.inits).toHaveLength(1);
     expect(fake.inits[0]).toMatchObject({ tracks: "primary", video: {} });
     expect(fake.inits[0]!.audio).toBeUndefined();
+    // None of the input's tags (where it was recorded, the device) is written into the MP4.
+    expect(fake.inits[0]!.tags).toEqual({});
     expect(progress).toEqual([0.4, 1]);
   });
 
@@ -140,6 +142,7 @@ describe("prepareVideo", () => {
     expect(sent.file.name).toBe("IMG_0001.mp4");
     expect(fake.inits[0]!.video).toMatchObject({ codec: "avc", forceTranscode: true, quality: { options: { bitrate: 8_000_000 } } });
     expect(fake.inits[0]!.audio).toBeUndefined();
+    expect(fake.inits[0]!.tags).toEqual({});
   });
 
   it("HEVC with no decoder here, or no H.264 encoder, is the chosen file, with the note", async () => {

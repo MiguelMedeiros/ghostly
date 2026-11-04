@@ -143,6 +143,34 @@ describe("community groups on headless engines", { timeout: 120_000 }, () => {
     expect(world.view(finn, id)?.members).toHaveLength(3);
   });
 
+  it("a welcome through a link replaced while its entry was open says so, and the knocking stops", async () => {
+    // The joiner sat on "admitted" for good: the welcome was refused (its entry is the new link's), and nothing said why.
+    const world = new CommunityWorld();
+    const admin = world.add("admin"), carol = world.add("carol");
+    const { id, link } = await community(world, admin);
+    // Carol's accept is held, the link is replaced, and the welcome comes after (as from an app that admits through
+    // an entry it opened before the link changed): its entry is the new link's.
+    let accept: Record<string, unknown> | undefined;
+    world.drop = (from, _to, frame) => from === carol && frame.t === "group-accept" ? (accept = frame, true) : false;
+    await carol.groups.joinByLink(link);
+    await world.until(() => !!accept, 2 * 60_000);
+    world.drop = null;
+    await admin.groups.enableLink(id, true);
+    const session = (admin.groups.communities as unknown as { live: Map<string, { session: { admit: (key: string, now: number) => Promise<Record<string, unknown>[]> } }> }).live.get(id)!.session;
+    const linkId = world.view(carol, id)!.invitation!.linkId;
+    for (const piece of await session.admit(accept!.key as string, world.now)) await carol.groups.handleContactFrame(linkId, piece);
+    expect(world.member(carol, id)).toBe(false);
+    expect(world.view(carol, id)?.invitation).toMatchObject({ stage: "replaced", admin: "" });
+    // No knock goes out any more (nothing at that door lets anyone in), and a restart keeps what it was told.
+    const knocks = () => [...carol.links.values()].filter(e => e.kind !== "edge" && e.g === id).length;
+    await world.run(60_000);
+    expect(knocks()).toBe(0);
+    await world.restart(carol);
+    await world.run(60_000);
+    expect(world.view(carol, id)?.invitation?.stage).toBe("replaced");
+    expect(knocks()).toBe(0);
+  });
+
   it("an admin who leaves hands the role on; a restart keeps everything", async () => {
     const world = new CommunityWorld();
     const admin = world.add("admin"), bob = world.add("bob"), carol = world.add("carol");

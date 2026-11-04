@@ -138,7 +138,8 @@ describe("planning a removal", () => {
     expect(first.slots[2]).toBeNull();
     // The tombstone closes the old address and lists the devices that stay; the frame carries it, signed for that address.
     const earlier = plan.patch.earlierSets!.at(-1)!;
-    expect(earlier).toMatchObject({ d: active.d, pending: [slot(1).key] });
+    expect(earlier).toMatchObject({ d: active.d, pending: [slot(1).key], removed: slot(2).key });
+    expect((await planSetMove(active, signers[0])).patch.earlierSets!.at(-1)!.removed, "a new secret removes nobody").toBeUndefined();
     const tomb = opened(oldKeys, fromBase64Url(earlier.tombstone));
     expect(tomb.tombstone).toBe(true);
     expect(tomb.slots.map((s) => s && toBase64Url(s.key))).toEqual([slot(0).key, slot(1).key, null, null]);
@@ -222,6 +223,8 @@ describe("a crash of the remover at every step", () => {
       const newKeys = keysOf(desktop.record);
       expect(opened(oldKeys, network.held(oldKeys)).tombstone).toBe(false);
       if (point === "stored") expect(network.held(newKeys)).toBeNull();
+      // The write keeps who was removed: the next start clears what that device leaves in the profile (`finishRemovals`).
+      expect(desktop.record.earlierSets.at(-1)!.removed).toBe(slot(2).key);
       const resumed = ports(desktop, network);
       await resumeSetMove(resumed);
       expect(toBase64Url(network.held(newKeys)!)).toBe(desktop.record.turnPacket);
@@ -465,6 +468,46 @@ describe("New device secret", () => {
     expect(laptop.record).toMatchObject({ state: "standby", d: desktop.record.d, deviceSet: [slot(0), null, null, slot(3)] });
     // The phone, removed by the second move, is in no list.
     expect(pendingFrames(desktop.record).some((p) => p.key === slot(1).key)).toBe(false);
+  });
+
+  it("a device off across two moves by two devices, the profile handed over between them, still reaches the newest secret", async () => {
+    const { record } = await setOf(network, 4);
+    const desktop = memory(record(0, "active")), phone = memory(record(1, "standby")), laptop = memory(record(3, "standby"));
+    // The desktop removes the tablet; the phone takes the frame, the laptop is off.
+    await moveSet(ports(desktop, network), { remove: slot(2).key });
+    const firstD = desktop.record.d!, d1Keys = keysOf(desktop.record);
+    const desktopFrame = pendingFrames(desktop.record).find((p) => p.key === slot(3).key)!.frame;
+    expect(await deliver(phone, pendingFrames(desktop.record).find((p) => p.key === slot(1).key)!.frame)).toBe(true);
+    // Use here on the phone: turn N + 1 under the new secret, a release the desktop signed. The move carries the
+    // desktop's earlier sets, its copy winning.
+    const release = await signTurnRelease(d1Keys.address, N + 1, 0, 1, signers[1].publicKey, label(7), sign(0));
+    const phoneAtN1 = await signTurnPacket(d1Keys, { turn: N + 1, rev: 0, author: 1, active: 1, slots: desktop.record.deviceSet.map((s) => s && { key: fromBase64Url(s.key), name: s.name }), instance: label(8).slice(0, 8), release }, sign(1));
+    network.of(d1Keys.identity.pubKeyZ32).seed(phoneAtN1);
+    phone.record = { ...phone.record, state: "active", d: firstD, activeSlot: 1, turn: N + 1, rev: 0, turnPacket: toBase64Url(phoneAtN1), earlierSets: desktop.record.earlierSets };
+    // The phone removes the desktop.
+    await moveSet({ ...ports(phone, network), signer: signers[1] }, { remove: slot(0).key });
+    // The frame the desktop signed goes on as the desktop signed it: the laptop believes the desktop.
+    const toLaptop = () => pendingFrames(phone.record).filter((p) => p.key === slot(3).key);
+    expect(toLaptop().find((p) => p.d === record(0, "active").d)!.frame).toEqual(desktopFrame);
+    // The laptop comes back and takes each frame waiting for it, the oldest first: each session brings the next one.
+    for (let session = 0; session < 3 && laptop.record.d !== phone.record.d; session++) {
+      for (const pending of toLaptop()) if (await deliver(laptop, pending.frame)) await phone.amend("ghostly", acknowledged(phone.record, slot(3).key, pending.d) ?? {});
+    }
+    expect(laptop.record).toMatchObject({ state: "standby", d: phone.record.d, activeSlot: 1, deviceSet: [null, slot(1), null, slot(3)] });
+  });
+
+  it("a device off across two moves with a device added between them still takes the newest secret", async () => {
+    const { record } = await setOf(network, 3);
+    const desktop = memory(record(0, "active")), phone = memory(record(1, "standby"));
+    // The tablet goes; the laptop is added in its slot; then a new device secret. The phone was off all along.
+    await moveSet(ports(desktop, network), { remove: slot(2).key });
+    await desktop.amend("ghostly", { deviceSet: [slot(0), slot(1), slot(3), null] });
+    await moveSet(ports(desktop, network));
+    const oldest = pendingFrames(desktop.record).find((p) => p.key === slot(1).key && p.d === record(0, "active").d)!;
+    // Its tombstone never listed the laptop: the frame lists only the devices it keeps, and the phone takes it. The
+    // laptop is in the turn record the phone reads at the new address.
+    expect(await deliver(phone, oldest.frame)).toBe(true);
+    expect(phone.record).toMatchObject({ state: "standby", d: desktop.record.d, deviceSet: [slot(0), slot(1), null, null] });
   });
 });
 

@@ -191,4 +191,7 @@ createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', line =
 const parent = process.ppid
 setInterval(() => { if (process.ppid !== parent) void shutdown() }, 2000).unref()
 process.stdout.on('error', () => void shutdown())
-process.on('SIGTERM', () => void shutdown())
+// A logout or a shutdown sends SIGTERM (and SIGHUP) to every process of the session at once, this one with the host,
+// and a terminal's Ctrl+C sends SIGINT to the host's whole group: this runtime stays for the host's way out, which
+// says goodbye on its connections (and hangs up a call) through it, and leaves with the host as above.
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => {})

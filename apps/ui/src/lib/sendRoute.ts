@@ -1,5 +1,8 @@
-import { decodeBolt11, parseLightningDestination, type Bolt11Invoice } from "@ghostly/core";
+import { decodeBolt11, parseLightningDestination, type Bolt11Invoice, type WalletNetwork } from "@ghostly/core";
+import { decodeArkAddress } from "./parse/money-ark";
+import { chainAccepts } from "./parse/money-bitcoin";
 import { findLinkMoney } from "./parse/money-more";
+import { findUsdtAddress } from "./parse/money-usdt";
 
 /**
  * What the Lightning and Cashu cards' Send was given (typed, pasted, scanned or read from a picture), sorted into what
@@ -10,7 +13,7 @@ export type SendRoute =
   | { kind: "empty" }
   | { kind: "token"; text: string }
   | { kind: "invoice"; text: string; invoice: Bolt11Invoice }
-  /** An invoice with no amount: the payer would have to choose one, which the cards cannot pay yet. */
+  /** An invoice with no amount: the payer chooses one, which only the mints can pay (WISP 203). */
   | { kind: "no-amount"; text: string; invoice: Bolt11Invoice }
   | { kind: "destination"; text: string }
   /** A Lightning address or LNURL, but one that must not be asked (plain HTTP, credentials, too long): the reason. */
@@ -51,4 +54,57 @@ export function routeSend(input: string): SendRoute {
   } catch (error) {
     return { kind: "bad-destination", error };
   }
+}
+
+/** What the Bitcoin card's Send was given: an address on its chain, with the amount its link names. Nothing is paid here. */
+export type BitcoinSendRoute =
+  | { kind: "address"; address: string; amountSat?: number }
+  /** A `bitcoin:` link that must not be paid (BIP 21: a `req-` parameter this app does not understand, an amount it cannot read). */
+  | { kind: "refused" }
+  | { kind: "unknown" };
+
+export function routeBitcoinSend(input: string, chain: string): BitcoinSendRoute {
+  const text = input.trim();
+  if (/^bitcoin:/i.test(text)) {
+    const money = findLinkMoney(text);
+    if (money === "refused" || (money?.type === "onchain" && money.request.unsupported?.length)) return { kind: "refused" };
+    if (money?.type !== "onchain" || !chainAccepts(chain, money.request.address)) return { kind: "unknown" };
+    const { address, amountSat } = money.request;
+    return amountSat === undefined ? { kind: "address", address } : { kind: "address", address, amountSat };
+  }
+  return chainAccepts(chain, text) ? { kind: "address", address: text } : { kind: "unknown" };
+}
+
+/** What an Ark card's Send was given: an address of its own Ark and network, with the amount its link names. */
+export type ArkSendRoute = BitcoinSendRoute;
+
+/** The two Arks never pay each other, and neither pays across networks: another's address is not this card's. */
+export function routeArkSend(input: string, kind: "arkade" | "bark", network: WalletNetwork): ArkSendRoute {
+  const text = input.trim();
+  if (/^bitcoin:/i.test(text)) {
+    const money = findLinkMoney(text);
+    if (money === "refused") return { kind: "refused" };
+    if (money?.type !== "ark" || money.request.kind !== kind || money.request.network !== network) return { kind: "unknown" };
+    const { address, amountSat } = money.request;
+    return amountSat === undefined ? { kind: "address", address } : { kind: "address", address, amountSat };
+  }
+  const decoded = decodeArkAddress(text);
+  return decoded?.kind === kind && decoded.network === network ? { kind: "address", address: text.toLowerCase() } : { kind: "unknown" };
+}
+
+/** What the USDT card's Send was given: a recipient, with the amount (base units) a transfer of its own token names. */
+export type UsdtSendRoute = { kind: "address"; address: string; amount?: bigint } | { kind: "unknown" };
+
+/**
+ * On this card USDT is meant, so a bare address or a plain `ethereum:` link needs no "USDT" beside it, as it does in a
+ * chat (`findUsdtAddress`). The whole text must be the one thing: a link for another chain or another token is not this
+ * card's, and a link's `value` is ether, never read as USDT. Whether the chain is right when none is named is left to the review.
+ */
+export function routeUsdtSend(input: string, card: { chainId?: number; token?: string }): UsdtSendRoute {
+  const text = input.trim();
+  if (!/^ethereum:\S+$/i.test(text) && !/^0x[0-9a-fA-F]{40}$/.test(text)) return { kind: "unknown" };
+  const request = findUsdtAddress(`${text} USDT`)?.request;
+  if (!request || (request.chainId !== undefined && request.chainId !== card.chainId)) return { kind: "unknown" };
+  if (request.token && request.token !== card.token?.toLowerCase()) return { kind: "unknown" };
+  return request.amount === undefined ? { kind: "address", address: request.recipient } : { kind: "address", address: request.recipient, amount: request.amount };
 }

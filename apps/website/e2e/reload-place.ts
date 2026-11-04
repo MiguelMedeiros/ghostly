@@ -23,11 +23,32 @@ function shaped() {
 }
 
 /**
+ * A real touch screen keeps its pointer. An emulated one is gone as a reload starts, with the old page still up (on a
+ * slow runner, for up to seconds): the head's script (layout.tsx) then takes `data-touch` away, and on its way out the
+ * page reads as a wide window with a mouse, keeps no place, and the browser restores the offset into the server's page.
+ */
+function touchStays() {
+  const coarse = "(pointer: coarse)";
+  const read = Object.getOwnPropertyDescriptor(MediaQueryList.prototype, "matches")!.get!;
+  const add = MediaQueryList.prototype.addEventListener;
+  const held = read.call(matchMedia(coarse));
+  Object.defineProperty(MediaQueryList.prototype, "matches", {
+    get(this: MediaQueryList) {
+      return this.media === coarse ? held : read.call(this);
+    },
+  });
+  MediaQueryList.prototype.addEventListener = function (this: MediaQueryList, ...args: Parameters<typeof add>) {
+    if (this.media !== coarse) add.apply(this, args);
+  };
+}
+
+/**
  * A reader scrolls the home to `at` (a fraction of the way down), reloads it, and finds the lines they were reading
  * on screen once the reloaded page has settled. `sameOffset`: the page is the server's (a wide window with a
  * mouse), where the offset is the place, to the frame of a scroll-driven film.
  */
 export async function reloadKeepsLines(page: Page, at: number, sameOffset = false) {
+  await page.addInitScript(touchStays);
   await page.goto("/", { waitUntil: "load" });
   await page.waitForFunction(shaped);
   await page.waitForTimeout(1500);

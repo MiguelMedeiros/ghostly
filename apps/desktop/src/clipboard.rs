@@ -265,17 +265,13 @@ pub fn encode_png(width: usize, height: usize, rgba: &[u8]) -> Result<Vec<u8>, S
 }
 
 /// The files of a paste the page may read: regular files only (a copied folder is not sent),
-/// each once, at most [`MAX_PASTED_FILES`], with their names and sizes. On Linux arboard splits
-/// the file manager's `text/uri-list` on '\n' alone, so each path keeps the '\r' of its CRLF line
-/// end (RFC 2483, as GTK and Qt write it): dropped here, or no copied file was ever found.
+/// each once, at most [`MAX_PASTED_FILES`], with their names and sizes. On Linux arboard drops the
+/// CRLF line end of the file manager's `text/uri-list` (RFC 2483, as GTK and Qt write it) before
+/// decoding, so a '\r' left at the end of a path is the file's own name (`%0D`) and stays.
 pub fn pasted_files(paths: Vec<PathBuf>) -> Vec<(PathBuf, String, u64)> {
     let mut seen = std::collections::HashSet::new();
     paths
         .into_iter()
-        .map(|path| {
-            let trimmed = path.to_str().and_then(|p| p.strip_suffix('\r'));
-            trimmed.map(PathBuf::from).unwrap_or(path)
-        })
         .filter(|path| path.is_absolute() && seen.insert(path.clone()))
         .filter_map(|path| {
             let meta = std::fs::metadata(&path).ok()?;
@@ -331,22 +327,28 @@ pub async fn read_clipboard_files<R: tauri::Runtime>(
                 mime: Some("image/png".into()),
             }]
         }
-        Ready::Files(files) => files
-            .into_iter()
-            .map(|(path, name, size)| PastedItem {
-                token: shelf.put(Held::Path(path)),
-                name: Some(name),
-                size,
-                mime: None,
-            })
-            .collect(),
+        Ready::Files(files) => shelve_files(&shelf, files),
     })
+}
+
+/// Files ([`pasted_files`]'s) on the shelf, for the page to read by token: a paste's, or a drop's
+/// (`dropped_files`).
+pub fn shelve_files(shelf: &PasteShelf, files: Vec<(PathBuf, String, u64)>) -> Vec<PastedItem> {
+    files
+        .into_iter()
+        .map(|(path, name, size)| PastedItem {
+            token: shelf.put(Held::Path(path)),
+            name: Some(name),
+            size,
+            mime: None,
+        })
+        .collect()
 }
 
 /// Something another app shared into Ghostly (Android's "Share to Ghostly"), for the page's share picker: its text,
 /// and its files on the shelf, which the page reads by token as a paste's ([`read_pasted_bytes`]). `left_out` names
-/// the files Android did not copy, too large to bring in, `unread` those it could not read and `no_room` those it had
-/// no room for on the device: the page's picker says so.
+/// the files Android did not copy, too large to bring in, `unread` those it could not read, `no_room` those it had
+/// no room for on the device and `past_limit` those past the most one share brings: the page's picker says so.
 #[derive(serde::Serialize, Debug, PartialEq)]
 pub struct IncomingShare {
     pub title: String,
@@ -357,11 +359,14 @@ pub struct IncomingShare {
     pub unread: Vec<String>,
     #[serde(rename = "noRoom")]
     pub no_room: Vec<String>,
+    #[serde(rename = "pastLimit")]
+    pub past_limit: Vec<String>,
 }
 
 /// A share's files on the shelf: regular files only, each once, at most [`MAX_PASTED_FILES`] (as a paste's), with
 /// the type the sharing app gave each.
 #[cfg_attr(not(any(test, target_os = "android")), allow(dead_code))]
+#[allow(clippy::too_many_arguments)]
 pub fn shelve_share(
     shelf: &PasteShelf,
     title: String,
@@ -370,6 +375,7 @@ pub fn shelve_share(
     left_out: Vec<String>,
     unread: Vec<String>,
     no_room: Vec<String>,
+    past_limit: Vec<String>,
 ) -> IncomingShare {
     let mimes: std::collections::HashMap<PathBuf, Option<String>> = files.iter().cloned().collect();
     let files = pasted_files(files.into_iter().map(|(path, _)| path).collect())
@@ -391,6 +397,7 @@ pub fn shelve_share(
         left_out,
         unread,
         no_room,
+        past_limit,
     }
 }
 
@@ -427,6 +434,7 @@ pub fn incoming_share_take<R: tauri::Runtime>(
             shared.left_out,
             shared.unread,
             shared.no_room,
+            shared.past_limit,
         )))
     }
     #[cfg(not(target_os = "android"))]
@@ -660,7 +668,8 @@ mod tests {
 
     /// Android's "Share to Ghostly": the files the share brought are read by token, as a paste's, with the type the
     /// sharing app gave; a folder or a missing file is left out, and the names of those Android left out as too large,
-    /// could not read or had no room for reach the page. Desktop has no share waiting, ever.
+    /// could not read, had no room for, or left past the most one share brings reach the page. Desktop has no share
+    /// waiting, ever.
     #[test]
     fn a_share_from_another_app_is_read_like_a_paste() {
         // covers: app.android.share-target
@@ -681,6 +690,7 @@ mod tests {
             vec!["VID_1.mp4".into()],
             vec!["IMG_2.jpg".into()],
             vec!["VID_3.mp4".into()],
+            vec!["IMG_33.jpg".into()],
         );
         assert_eq!(
             serde_json::to_value(&share).unwrap()["leftOut"],
@@ -693,6 +703,10 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&share).unwrap()["noRoom"],
             serde_json::json!(["VID_3.mp4"])
+        );
+        assert_eq!(
+            serde_json::to_value(&share).unwrap()["pastLimit"],
+            serde_json::json!(["IMG_33.jpg"])
         );
         assert_eq!(share.title, "A title");
         assert_eq!(share.text, "Look at this https://example.com");
@@ -730,6 +744,7 @@ mod tests {
             String::new(),
             String::new(),
             vec![(dir.join("photo.jpg"), None), (dir.join("video.mp4"), None)],
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -932,15 +947,20 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    /// Nautilus, Dolphin and Thunar offer "file:///…/a%20b.txt\r\nfile:///…/c.txt\r\n"; arboard
-    /// splits it on '\n' and hands back each path with its '\r'.
+    /// Nautilus, Dolphin and Thunar offer "file:///…/a%20b.txt\r\nfile:///…/c.txt%0D\r\n"; arboard
+    /// drops each line's CRLF before decoding, so a '\r' left on a path is the file name's own.
     #[test]
-    fn files_from_a_crlf_uri_list_are_found() {
+    fn a_copied_file_whose_name_ends_in_a_carriage_return_is_the_one_pasted() {
         let dir = scratch();
         std::fs::write(dir.join("a b.txt"), b"ab").unwrap();
-        std::fs::write(dir.join("c.txt"), b"c").unwrap();
-        let carriage = |name: &str| PathBuf::from(format!("{}\r", dir.join(name).display()));
-        let paths = vec![carriage("a b.txt"), carriage("c.txt")];
+        std::fs::write(dir.join("twin.txt\r"), b"the copied one").unwrap();
+        std::fs::write(dir.join("twin.txt"), b"other").unwrap();
+        std::fs::write(dir.join("lone.txt\r"), b"lone").unwrap();
+        let paths = vec![
+            dir.join("a b.txt"),
+            dir.join("twin.txt\r"),
+            dir.join("lone.txt\r"),
+        ];
         let app = paste_app(PasteSource::fixed(move || Ok(Pasted::Files(paths.clone()))));
         let main = main_window(&app);
         let items = files(&main).unwrap();
@@ -948,8 +968,18 @@ mod tests {
             .iter()
             .map(|i| (i.name.clone().unwrap(), i.size))
             .collect();
-        assert_eq!(named, vec![("a b.txt".into(), 2), ("c.txt".into(), 1)]);
-        assert_eq!(bytes(&main, &items[0].token, 10).unwrap(), b"ab");
+        assert_eq!(
+            named,
+            vec![
+                ("a b.txt".into(), 2),
+                ("twin.txt\r".into(), 14),
+                ("lone.txt\r".into(), 4)
+            ]
+        );
+        assert_eq!(
+            bytes(&main, &items[1].token, 20).unwrap(),
+            b"the copied one"
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 

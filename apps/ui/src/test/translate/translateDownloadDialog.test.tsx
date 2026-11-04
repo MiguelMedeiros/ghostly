@@ -53,6 +53,17 @@ describe("the translation download question", () => {
     expect(onDownload).toHaveBeenCalledOnce();
   });
 
+  it("while it downloads, says it goes on if closed, and Close and Escape close it", async () => {
+    const { onNotNow, onDownload } = ask({ busy: true });
+    expect(await screen.findByTestId("translate-download-goes-on")).toHaveTextContent("the download goes on");
+    expect(screen.getByTestId("translate-download-not-now")).toHaveTextContent("Close");
+    expect(screen.getByTestId("translate-download-yes")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("translate-download-not-now"));
+    fireEvent(screen.getByTestId("translate-download"), new Event("cancel", { cancelable: true }));
+    expect(onNotNow).toHaveBeenCalledTimes(2);
+    expect(onDownload).not.toHaveBeenCalled();
+  });
+
   it("names the languages in the app's language", async () => {
     ask({}, "fr");
     expect(await screen.findByTestId("translate-download-pair")).toHaveTextContent(/^Portugais vers anglais et retour, 73 Mo$/);

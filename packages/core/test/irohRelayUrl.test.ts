@@ -10,15 +10,29 @@ import { irohDescriptor, irohRelayUrl, type TransportDescriptors } from "../src/
  * Iroh compares relay URLs as text and names n0's relays with the trailing dot of a full domain name. The web app
  * wrote them without it, so a browser and a Desktop on the same server each took the other's relay for another one.
  */
-it("spells a relay the way Iroh's own peers do: a domain name with its trailing dot", () => {
+it("spells n0's relays the way Iroh's own peers do: a domain name with its trailing dot", () => {
   expect(irohRelayUrl("https://use1-1.relay.n0.iroh.link/")).toBe("https://use1-1.relay.n0.iroh.link./");
   expect(irohRelayUrl("https://use1-1.relay.n0.iroh.link./")).toBe("https://use1-1.relay.n0.iroh.link./");
-  // As a person types it in Settings: no path, capitals, a port.
-  expect(irohRelayUrl("https://Relay.Example.com")).toBe("https://relay.example.com./");
-  expect(irohRelayUrl("https://relay.example.com:8443/")).toBe("https://relay.example.com.:8443/");
-  expect(irohRelayUrl("https://relay.example.com.:8443")).toBe("https://relay.example.com.:8443");
+  expect(irohRelayUrl("https://EUC1-1.Relay.N0.Iroh.Link")).toBe("https://euc1-1.relay.n0.iroh.link./");
   // Once is enough.
-  for (const url of ["https://relay.example.com/", "http://localhost.:3340/", "http://127.0.0.1:3340"]) expect(irohRelayUrl(irohRelayUrl(url))).toBe(irohRelayUrl(url));
+  for (const url of ["https://relay.example.com/", "https://aps1-1.relay.n0.iroh.link/", "http://localhost.:3340/", "http://127.0.0.1:3340"]) expect(irohRelayUrl(irohRelayUrl(url))).toBe(irohRelayUrl(url));
+});
+
+/**
+ * A self-hosted relay behind a proxy (iroh-relay behind a Cloudflare tunnel) is found by its Host header, and the
+ * dotted name is another host to the proxy: it answers 404 and native Iroh never comes online on that relay. Only n0's
+ * relays need the dot (native Iroh names them so by itself), so every other relay keeps its plain name on the Desktop too.
+ */
+it("keeps a self-hosted relay's name without the dot, on the Desktop too", () => {
+  // As a person types it in Settings: no path, a port.
+  expect(irohRelayUrl("https://relay.example.com")).toBe("https://relay.example.com");
+  expect(irohRelayUrl("https://relay.example.com:8443/")).toBe("https://relay.example.com:8443/");
+  expect(irohRelayUrl("https://relay.example.com.:8443")).toBe("https://relay.example.com:8443/");
+  expect(irohRelayUrl("https://iroh.miguelmedeiros.dev./")).toBe("https://iroh.miguelmedeiros.dev/");
+  // A name that only ends like n0's is not n0's.
+  expect(irohRelayUrl("https://relay.notiroh.link./")).toBe("https://relay.notiroh.link/");
+  const contact = { id: "a".repeat(64), relay: "https://iroh.example.org./", addresses: [] };
+  expect(irohDescriptor(contact)).toEqual({ ...contact, relay: "https://iroh.example.org/" });
 });
 
 it("has a spelling without the dot for a browser's Iroh: WebKit opens no host name that ends in one", () => {

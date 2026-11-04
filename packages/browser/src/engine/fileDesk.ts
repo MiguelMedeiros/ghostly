@@ -4,6 +4,7 @@ import {
   claimedTime,
   fileMessageText,
   randomBytes,
+  sentWhole,
   toBase64Url,
   transferEnded,
   transferStalled,
@@ -129,9 +130,12 @@ export class FileDesk {
       openTarget: (record) => this.openTarget(linkId, record),
       openSource: (record) => this.openSource(linkId, record),
       changed: (record, transferred, progress) => this.changed(linkId, record, transferred, progress),
+      // A change of state is written at once (`changed`): the chat's writes so far hold it.
+      kept: () => made.saving,
       room: async () => (await fileBytes()).room(),
       ...(this.deps.sendData && { sendData: (id: string, offset: number, data: Uint8Array) => this.deps.sendData!(linkId, id, offset, data) }),
       writable: () => this.deps.writable?.(linkId),
+      batchConfirms: true,
     });
     this.chats.set(linkId, made);
     chat = made;
@@ -297,7 +301,8 @@ export class FileDesk {
       case "decline": if (!out) chat.files.decline(wireId); break;
       case "pause": chat.files.pause(direction, wireId); break;
       case "resume": chat.files.resume(direction, wireId); break;
-      case "cancel": chat.files.cancel(direction, wireId); break;
+      // Arrived whole: too late to cancel, it ends done on both sides (the bubble shows no Cancel then).
+      case "cancel": if (!sentWhole(record)) chat.files.cancel(direction, wireId); break;
       case "retry": if (out) chat.files.retry(wireId); break;
       case "resend": case "request": {
         if ((action === "resend") !== out) throw new Error(out ? "A file you sent is sent again, not asked for" : "A file you receive is asked for again, not sent");

@@ -19,8 +19,15 @@
   "dhtTooLong": "أطول من أن يُرسل عبر DHT ({{bytes}} من {{max}} بايت). اختصره أو اتصل مباشرة؛ المسودة محفوظة.",
   "document": "مستند",
   "dropFiles": "أفلت للإرسال",
+  "dropReading": "جارٍ قراءة ما أفلتّه…",
   "emoji": "إيموجي",
   "emojiCategories": "فئات الإيموجي",
+  "emojiFound": "{{count}} إيموجي",
+  "emojiFound_many": "{{count}} إيموجي",
+  "emojiFound_one": "إيموجي واحد",
+  "emojiFound_other": "{{count}} إيموجي",
+  "emojiFound_two": "إيموجيان",
+  "emojiFound_zero": "لا إيموجي",
   "emojiNotLoading": "تعذر تحميل الإيموجي.",
   "expressions": "إيموجي وصور GIF",
   "filePreparing": "جارٍ تجهيز {{name}}…",
@@ -73,9 +80,12 @@
   "sharedTextFile": "نص مشارك",
   "skinTone": "لون البشرة",
   "takePhoto": "التقاط صورة",
-  "tooLong": "النص طويل جدًا للإرسال ({{count}} حرفًا، والحد {{max}}).",
+  "tooLong": "النص طويل جدًا للإرسال ({{count}} أحرف، والحد {{max}}).",
   "tooLongBytes": "النص طويل جدًا للإرسال ({{bytes}} بايت، والحد {{max}}). اختصره، أو أرسله كملف.",
   "tooLongDht": "أطول من أن يُرسل عبر DHT. يتسع حين تتصلان مباشرة.",
+  "tooLong_many": "النص طويل جدًا للإرسال ({{count}} حرفًا، والحد {{max}}).",
+  "tooLong_other": "النص طويل جدًا للإرسال ({{count}} حرف، والحد {{max}}).",
+  "tooLong_two": "النص طويل جدًا للإرسال (حرفان، والحد {{max}}).",
   "translate": {
     "again": "ترجمة مرة أخرى",
     "button": "ترجمة",
@@ -96,6 +106,6 @@
     "stale": "تغيّرت الرسالة",
     "working": "جارٍ الترجمة…"
   },
-  "videoConverting": "جارٍ تحويل {{name}} إلى MP4… {{percent}}",
+  "videoConverting": "جارٍ تحويل {{name}} إلى MP4…",
   "videoSentAsIs": "أُرسل {{name}} كما هو: لا يستطيع هذا الجهاز تحويله. قد لا تتمكن بعض الهواتف والحواسيب إلا من تنزيله."
 }

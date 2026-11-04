@@ -178,7 +178,8 @@ export function isAppUrl(value: unknown): value is string {
   let url: URL;
   try { url = new URL(value); } catch { return false; }
   if (url.protocol !== "https:" || url.username || url.password || !url.hostname) return false;
-  const host = url.hostname.toLowerCase();
+  // A fully qualified `cdn.jsdelivr.net.` is the same host: drop the trailing dots before the jsDelivr test.
+  const host = url.hostname.toLowerCase().replace(/\.+$/, "");
   if (host === "jsdelivr.net" || host.endsWith(".jsdelivr.net")) {
     return host === "cdn.jsdelivr.net" && /^\/gh\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{40}\/./.test(url.pathname);
   }

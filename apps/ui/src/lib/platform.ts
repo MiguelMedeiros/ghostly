@@ -91,8 +91,13 @@ export interface PeerHoldState {
 }
 
 export interface NetworkSettings {
-  /** How this client reaches Pkarr, for display. */
+  /** How this client reaches Pkarr, as the engine words it in English (logs, the CLI). The page shows `kind` instead. */
   protocol: string;
+  /**
+   * How this client reaches the Mainline DHT, for a line in the page's language: `relays`, only through the Pkarr
+   * relays over HTTP (a browser); `direct`, the DHT itself over UDP and the relays too (Desktop, Android).
+   */
+  kind: "relays" | "direct";
   relays: string[];
   defaultRelays: string[];
   /** Optional TURN server, used only when no direct path exists. */
@@ -145,10 +150,10 @@ export interface FileTransferState {
    */
   stalled?: boolean;
   /**
-   * A group's file, `waiting`: why. `nobody` connected has it, its holders are `busy`, or what came was `damaged`
-   * (it was dropped; `stalled`, so its person can ask again).
+   * A group's file, `waiting`: why. `nobody` connected has it, only its `author` has it (out of reach, on hubs), its
+   * holders are `busy`, or what came was `damaged` (it was dropped; `stalled`, so its person can ask again).
    */
-  wait?: "nobody" | "busy" | "day" | "damaged";
+  wait?: "nobody" | "author" | "busy" | "day" | "damaged";
   /** The same, in the engine's words. */
   note?: string;
 }
@@ -362,7 +367,9 @@ export interface WalletPlatform {
   setPrimaryMint(url: string): Promise<void>;
   /** An invoice from the bound Lightning card (else the default for receiving); `via: "cashu"` asks the Cashu mints. */
   receiveLightning(amount: number, via?: "cashu"): Promise<{ quote?: string; invoice: string; expiresAt: number | null; paymentHash?: string; source?: string }>;
-  quoteInvoice(invoice: string, via?: "cashu"): Promise<{ quote: string; mint: string; amount: number; feeReserve: number; source?: string }>;
+  /** The screen shows this invoice of ours: its mint or source is asked about it every few seconds for a while. Said again while it shows. */
+  watchInvoice?(invoice: string): Promise<void>;
+  quoteInvoice(invoice: string, via?: "cashu", amount?: number): Promise<{ quote: string; mint: string; amount: number; feeReserve: number; source?: string }>;
   /**
    * True when paid, false while the payment is pending (or its answer lost). Throws when the sats did not leave. `note`: what it was for, kept with the wallet's record.
    * `confirmedReal`: the person confirmed a Mainnet payment as real money; the engine refuses one without it.
@@ -396,7 +403,8 @@ export interface WalletPlatform {
   /** A fresh address of the Bitcoin source to be paid on. */
   bitcoinReceiveAddress(): Promise<string>;
   bitcoinRefresh(): Promise<void>;
-  receiveToken(token: string): Promise<number>;
+  /** `amount`: what arrived; `fee`: what the mint kept of the token's face value to take it in. */
+  receiveToken(token: string): Promise<{ amount: number; fee: number }>;
   /** Null when the text is neither an ecash token nor a Cashu payment request. */
   inspectCashu(text: string): Promise<CashuInspection | null>;
   exportTokens(): Promise<{ mint: string; token: string; amount: number }[]>;

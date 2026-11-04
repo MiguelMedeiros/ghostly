@@ -26,7 +26,10 @@ import { clearChatNotification } from "../../../../apps/ui/src/lib/notifications
 import type { ChatMessage, ChatSession } from "../../../../apps/ui/src/lib/types";
 import type { EngineState, LinkView, ReactionNote, StoredMessage } from "../shared/types";
 import { engine, type ListChanges } from "./engine";
+import { forgetServicesOf } from "../host";
+import { viewerTag } from "@ghostly/core";
 import { replyRef } from "../shared/replies";
+import { isRefusalId, paymentRefusal } from "../shared/refusals";
 
 /**
  * The Desktop UI keeps its sessions in localStorage and that stays the list
@@ -42,6 +45,12 @@ const MIGRATED_KEY = "gb-sessions-imported";
 const OLD_MIGRATED_KEY = "ghostly_browser_sessions_imported";
 const FORGET_AFTER_MS = 15_000;
 const JOIN_PATTERN = /^👋 (?:.+ )?joined$/;
+
+/**
+ * Whether a row is the chat's joined line, drawn as the app's own line: the contact's only when the engine took it as
+ * one (`joinLine`, their first row of the chat), any other row of theirs in those words being a message; mine by its words.
+ */
+const isJoinLine = (message: StoredMessage) => JOIN_PATTERN.test(message.text) && (message.sender === "me" || !!message.joinLine);
 
 export function notifySessionsChanged(): void {
   window.dispatchEvent(new Event("session-updated"));
@@ -79,13 +88,16 @@ export function sessionForPeer(peerPubKeyZ32: string): ChatSession | undefined {
 }
 
 export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string, myPubKeyZ32: string, modern = false): ChatMessage {
-  const isJoin = JOIN_PATTERN.test(message.text);
+  const isJoin = isJoinLine(message);
+  // A payment of the contact's this app refused: the app's own line, not the contact's (stored as theirs for the CLI).
+  const notice = paymentRefusal(message);
   return {
     id: message.id,
     delivery: message.delivery,
     deliveryError: message.deliveryError,
     text: message.text,
-    sender: isJoin ? "system" : message.sender,
+    sender: isJoin || notice ? "system" : message.sender,
+    ...(notice && { notice }),
     timestamp: message.timestamp,
     ...(message.sentAt !== undefined && { sentAt: message.sentAt }),
     nick: message.nick,
@@ -248,9 +260,28 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
         // A status card belongs to its version (WISP 405 · Status Cards): the edit's, or none.
         if (message.card) row.card = message.card; else delete row.card;
       }
-      // Only a join announcement has one; the others are not mapped again.
-      const systemEvent = JOIN_PATTERN.test(message.text) ? mapped().systemEvent : undefined;
+      // Only a joined line has one; the others are not mapped again. A row of the contact's is that line only as the
+      // engine says (`isJoinLine`): one mirrored as it from its words alone is their message again.
+      const systemEvent = isJoinLine(message) ? mapped().systemEvent : undefined;
       if (systemEvent && previous.systemEvent?.pubKey !== systemEvent.pubKey) change().systemEvent = systemEvent;
+      if (message.sender === "peer") {
+        if (systemEvent && previous.sender !== "system") change().sender = "system";
+        else if (!systemEvent && previous.systemEvent?.type === "join") {
+          const row = change();
+          row.sender = "peer";
+          delete row.systemEvent;
+        }
+      }
+      // A refused payment's line as the engine's row says it (shared/refusals.ts): one mirrored before its values were
+      // kept as the contact's, or a contact's text under its id mirrored as the app's line. The UI reads only this.
+      if (isRefusalId(message.id)) {
+        const { sender, notice } = mapped();
+        if (previous.sender !== sender || JSON.stringify(previous.notice ?? null) !== JSON.stringify(notice ?? null)) {
+          const row = change();
+          row.sender = sender;
+          if (notice) row.notice = notice; else delete row.notice;
+        }
+      }
     }
     if (next) {
       session.messages[i!] = next;
@@ -445,6 +476,8 @@ async function reconcile(): Promise<void> {
     // A link only just made may not have its chat yet; one whose chat was deleted here goes at once.
     if (Date.now() - link.createdAt < FORGET_AFTER_MS && !wasDeleted(link.peerPubKeyZ32)) continue;
     void engine.call("removeLink", { linkId: link.id }).catch(() => {});
+    // What the contact's apps opened from this chat kept on this device goes with it (the web app's origins).
+    void forgetServicesOf({ tag: viewerTag(link.myPubKeyZ32) });
   }
   if (!later && !renamed) settled = { state, sessions };
 }

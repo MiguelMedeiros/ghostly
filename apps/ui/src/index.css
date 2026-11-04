@@ -25,9 +25,8 @@
   --color-accent: var(--theme-accent);
   --color-accent-dim: var(--theme-accent-dim);
   --color-accent-hover: var(--theme-accent-hover);
-  /* The keyboard focus's ring around a field: the accent, 3:1 or more on what is around it (WCAG 2.4.13), except where
-     the accent is too light for that (the classic light theme, below). */
-  --color-focus-ring: var(--theme-focus-ring, var(--theme-accent));
+  /* The keyboard focus's ring around a field: the accent, 3:1 or more on what is around it (WCAG 2.4.13). */
+  --color-focus-ring: var(--theme-accent);
   /* Danger's red: brighter on dark themes, darker on light ones, so its words read at 4.5:1 on either. */
   --color-danger: var(--theme-danger);
   /* Danger as a fill under white words (Delete, hang up): dark enough for 4.5:1 with white in every theme. */
@@ -86,15 +85,17 @@
   --theme-border: #222d34;
   --theme-border-bright: #334155;
   --theme-text-primary: #e9edef;
-  --theme-text-secondary: #8696a0;
-  --theme-text-muted: #667781;
+  --theme-text-secondary: #aebbc3;
+  /* At least 4.5:1 on the list, the panels and a chosen row, as the accent's words. */
+  --theme-text-muted: #94a3ad;
   --theme-received-bg: #202c33;
   --theme-input-bg: #2a3942;
   --theme-search-bg: #202c33;
   --theme-chat-pattern: #0d1418;
   --theme-scrollbar: #374151;
   --theme-scrollbar-hover: #4b5563;
-  --theme-accent: #00a884;
+  /* Its words (Join, a link, a chosen tab) read at 4.5:1 on every surface, a chosen row and its own tints (a pill at 15 %). */
+  --theme-accent: #15c099;
   --theme-accent-dim: #005c4b;
   --theme-accent-hover: #06cf9c;
   --theme-sent-bg: #005c4b;
@@ -131,24 +132,27 @@
   --theme-border: #e9edef;
   --theme-border-bright: #d1d5db;
   --theme-text-primary: #111b21;
-  --theme-text-secondary: #54656f;
-  --theme-text-muted: #8696a0;
+  --theme-text-secondary: #3b4a54;
+  /* At least 4.5:1 on white, the greys and the chat's beige. */
+  --theme-text-muted: #5a6a74;
   --theme-received-bg: #ffffff;
   --theme-input-bg: #f0f2f5;
   --theme-search-bg: #f0f2f5;
   --theme-chat-pattern: #d9dbd5;
   --theme-scrollbar: #c5c6c8;
   --theme-scrollbar-hover: #9a9b9d;
-  --theme-accent: #00a884;
+  /* Words in the accent (links, section titles, a chosen tab, Real money) read at 4.5:1 on white, the greys, the
+     chat's beige and the accent's own tints, and white words on it as well. */
+  --theme-accent: #006954;
   --theme-accent-dim: #dcf8c6;
-  --theme-accent-hover: #008f6f;
+  --theme-accent-hover: #005c4b;
   --theme-sent-bg: #d9fdd3;
   /* Shared by every light theme, as for dark. */
   --theme-link: #026aa0;
   --theme-danger-ink: #c5221f;
   --theme-danger: #c5221f;
   --theme-danger-fill: #c5221f;
-  --theme-on-accent: #111b21;
+  --theme-on-accent: #ffffff;
   /* Shared by every light theme, as for dark. */
   --theme-member-0: #c82020;
   --theme-member-1: #a94b1b;
@@ -180,7 +184,8 @@
   --theme-border-bright: #3a3a3a;
   --theme-text-primary: #f5f5f5;
   --theme-text-secondary: #a0a0a0;
-  --theme-text-muted: #707070;
+  /* At least 4.5:1 on the list, the panels, a field and a chosen row. */
+  --theme-text-muted: #949494;
   --theme-received-bg: #1a1a1a;
   --theme-input-bg: #2a2a2a;
   --theme-search-bg: #1a1a1a;
@@ -205,7 +210,8 @@
   --theme-border-bright: #d0d0d0;
   --theme-text-primary: #0a0a0a;
   --theme-text-secondary: #505050;
-  --theme-text-muted: #808080;
+  /* At least 4.5:1 on the list, the panels, a field and a chosen row. */
+  --theme-text-muted: #666666;
   --theme-received-bg: #ffffff;
   --theme-input-bg: #f5f5f5;
   --theme-search-bg: #f5f5f5;
@@ -293,7 +299,8 @@
   --theme-border-bright: #3d3455;
   --theme-text-primary: #f3e8ff;
   --theme-text-secondary: #b8a5d0;
-  --theme-text-muted: #8b7aa8;
+  /* At least 4.5:1 on the list, the panels, a field and a chosen row. */
+  --theme-text-muted: #9a8ab6;
   --theme-received-bg: #1a1625;
   --theme-input-bg: #2a2438;
   --theme-search-bg: #1a1625;
@@ -325,22 +332,16 @@
   --theme-chat-pattern: #f0e5f8;
   --theme-scrollbar: #e9d5ff;
   --theme-scrollbar-hover: #d8b4fe;
-  --theme-accent: #7c3aed;
+  /* 4.5:1 or more on its own tints too (a pill at 10-15 %). */
+  --theme-accent: #6d28d9;
   --theme-accent-dim: #f3e8ff;
-  --theme-accent-hover: #6d28d9;
+  --theme-accent-hover: #5b21b6;
   --theme-sent-bg: #f3e8ff;
   --theme-on-accent: #ffffff;
 }
 
 html {
   color-scheme: dark;
-}
-
-/* The classic green reads at about 2.7:1 on the light greys: a darker one, 4.3:1 or more on white, the greys and the
-   chat's beige. The other light themes' accents already do. */
-:root[data-theme="light"]:not([data-color-theme]),
-:root[data-theme="light"][data-color-theme="classic"] {
-  --theme-focus-ring: #008069;
 }
 
 html[data-theme="light"] {
@@ -378,6 +379,15 @@ html[data-standalone="true"] {
   html {
     height: 100vh;
   }
+}
+
+/* What the keyboard leaves of the screen (hooks/useViewportHeight.ts), written on each element that reads it
+   (`APP_HEIGHT_READERS` there): not inherited, so a new value restyles those few elements. Inherited from `<html>`,
+   each keyboard opening or closing and each turn restyled the whole document, about 60ms in WebKit with a long chat
+   open. A rule that reads it must match one of those elements. */
+@property --app-height {
+  syntax: "*";
+  inherits: false;
 }
 
 /* ── Phones: one screen at a time, sized to what is really visible ── */
@@ -904,6 +914,16 @@ html[data-standalone="true"] {
   }
 }
 
+/* An incoming call on a phone on its side (320-480px high): that padding left no room for End and answer's words under
+   its button. The screen scrolls if it still does not fit. */
+@media (max-width: 767px) and (max-height: 480px) {
+  .incoming-call {
+    padding-top: calc(1.5rem + env(safe-area-inset-top));
+    padding-bottom: calc(1.5rem + env(safe-area-inset-bottom));
+    overflow-y: auto;
+  }
+}
+
 @keyframes fade-in {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
@@ -976,6 +996,28 @@ html[data-standalone="true"] {
 
   html[data-keyboard="true"] .fixed.inset-0 > [aria-modal="true"] {
     max-height: 100%;
+  }
+}
+
+/* Send files (components/composer/AttachmentSheet.tsx): a layer over the whole screen with its panel centred, which
+   opens with the focus in its caption, so on a phone the keyboard comes up at once. As the rule above, but on a phone
+   held upright too: centred on the whole screen, the caption and Cancel/Send were under the keyboard. The layer ends
+   where the keyboard starts, below the notch, and the picture is never taller than what is left once the caption and
+   the buttons (about 12rem with the panel's edges) have their room. `--keyboard-room` passes the visible height down
+   to the picture: `--app-height` itself is not inherited. */
+.fixed.inset-0.keyboard-layer {
+  --keyboard-room: var(--app-height, 100dvh);
+}
+
+.keyboard-layer-picture {
+  max-height: min(55vh, max(4rem, calc(var(--keyboard-room, 100dvh) - env(safe-area-inset-top) - 12rem)));
+}
+
+@media (pointer: coarse) {
+  html[data-keyboard="true"] .fixed.inset-0.keyboard-layer {
+    bottom: calc(100% - var(--app-height, 100%));
+    padding-top: max(0.5rem, env(safe-area-inset-top));
+    padding-bottom: 0.5rem;
   }
 }
 
@@ -1316,10 +1358,15 @@ html .toast-place.toast-place-page[data-at="top"] {
 .account-action { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-width: 0; border-radius: 8px; cursor: pointer; color: var(--theme-text-secondary); }
 .account-action:hover, .account-action[aria-expanded="true"], .account-action[aria-current="page"] { background: var(--theme-surface-hover); color: var(--theme-accent); }
 .account-action:focus-visible { outline: 2px solid var(--theme-accent); outline-offset: -2px; }
-.account-label { font-size: 10px; line-height: 12px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-label { font-size: 0.625rem; line-height: 0.75rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A place's name that would be cut at this width hides with the others; the icon, its tooltip and its name stay. It
    keeps its line, so the icons stay level. The profile's own name never decides it: a long one ends in "…". */
 .account-actions[data-compact] .account-label { visibility: hidden; }
+/* Under the chat list folded to a rail (ChatRail.tsx): the places stacked, by their icons; the switcher as wide as on the list. */
+.account-footer[data-rail] .account-actions { grid-auto-flow: row; grid-auto-rows: 44px; height: auto; }
+.account-footer[data-rail] .account-label { display: none; }
+.account-footer[data-rail] .profile-switcher-popover { right: auto; width: 20rem; }
+[dir="rtl"] .account-footer[data-rail] .profile-switcher-popover { left: auto; right: 0.5rem; }
 /* Something to look at behind an icon (Identities, sats that came in): a dot on its corner, ringed in the bar's color. */
 .nav-dot { --dot-ring: var(--theme-sidebar-bg); position: absolute; top: -2px; right: -3px; width: 9px; height: 9px; border-radius: 999px;
   background: var(--theme-accent); box-shadow: 0 0 0 2px var(--dot-ring); animation: nav-dot-in 0.45s cubic-bezier(.2,1.6,.4,1) both; }
@@ -1391,6 +1438,12 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
     padding-bottom: calc((var(--conversation-footer-height) - var(--conversation-control-height) - 1px) / 2);
     min-height: var(--conversation-footer-height);
   }
+  html[data-keyboard="true"] .account-footer { padding-bottom: 0; }
+}
+/* A phone on its side: the keyboard leaves about 150px, and the list pane's header, its search field and the account bar
+   took all of it (a search showed no chat). The bar goes behind the keyboard, as the tab bar does upright. */
+@media (min-width: 768px) and (pointer: coarse) and (max-height: 500px) {
+  html[data-keyboard="true"] .account-footer { display: none; }
 }
 
 .conversation-pin { transform-origin: center; transition: transform 180ms ease-out; }
@@ -1451,4 +1504,17 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
   padding-top: max(0.5rem, env(safe-area-inset-top));
   padding-inline-start: max(0.75rem, env(safe-area-inset-left));
   padding-inline-end: max(0.75rem, env(safe-area-inset-right));
+}
+
+/* Forced colors (Windows Contrast themes, Edge and Chrome's forced colors): the keyboard focus's mark. Most controls
+   show the focus with a Tailwind ring alone (`focus-visible:outline-none focus-visible:ring-2`), a box-shadow, which
+   forced colors drops, and Tailwind 4's `outline-none` is `outline-style: none`: nothing marked the focus there. A
+   system-colour outline instead, where the ring was (an inset ring's inside the control). Only the focus's mark here;
+   other forced-colors rules go in blocks of their own. Elements focused only by script (`tabindex="-1"`) keep none. */
+@media (forced-colors: active) {
+  :focus-visible:not([tabindex="-1"]) { outline: 2px solid Highlight !important; }
+  [class~="focus-visible:ring-inset"]:focus-visible { outline-offset: -2px; }
+  /* A field whose frame draws the focus (the chat list's search, `has-[input:focus-visible]:outline-2`): one mark, the frame's. */
+  :has(> input:focus-visible)[class~="has-[input:focus-visible]:outline-2"] { outline: 2px solid Highlight !important; }
+  [class~="has-[input:focus-visible]:outline-2"] > input:focus-visible { outline: none !important; }
 }

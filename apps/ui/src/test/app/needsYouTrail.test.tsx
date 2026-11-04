@@ -23,9 +23,9 @@ const wallets = (test: number, backupReminders?: BackupReminders) =>
   walletView({ mints: [mint(REAL_MINT, 50), mint(TEST_MINT, test)], ...(backupReminders && { backupReminders }) });
 
 /** The sidebar and, beside it, the Wallets page or the chat list; the wallets as read when the app started. */
-function openApp(wallet = wallets(10)) {
+function openApp(wallet = wallets(10), language?: "en" | "pt") {
   fakeEngine.update({ wallet });
-  return renderApp(<><AccountBar /><Routes><Route path="/wallet" element={<Wallet />} /><Route path="*" element={<p data-testid="home" />} /></Routes></>);
+  return renderApp(<><AccountBar /><Routes><Route path="/wallet" element={<Wallet />} /><Route path="*" element={<p data-testid="home" />} /></Routes></>, { language });
 }
 
 beforeEach(() => { localStorage.setItem("ghostly-wallet-network", "mainnet"); });
@@ -63,6 +63,13 @@ describe("the Wallets dot's trail", () => {
     expect(await screen.findByTestId("wallet-networks")).toBeInTheDocument();
     expect(screen.queryByTestId("needs-you")).not.toBeInTheDocument();
     expect(screen.queryByTestId("needs-you-dot")).not.toBeInTheDocument();
+  });
+
+  it.each([["en", "1 new test sat in Cashu"], ["pt", "1 sat de teste novo em Cashu"]] as const)("a single new sat is said as one (%s)", async (language, line) => {
+    const { user } = openApp(wallets(10), language);
+    act(() => fakeEngine.update({ wallet: wallets(11) }));
+    await user.click(screen.getByTestId("wallet-chip"));
+    expect(within(await screen.findByTestId("needs-you")).getByTestId("needs-you-item")).toHaveTextContent(line);
   });
 
   it("sats on a network never shown stay new after the page closes", async () => {

@@ -30,6 +30,8 @@
   "shareNoRoomNext": "أفرغ بعض المساحة، ثم شاركه مرة أخرى.",
   "shareNone": "لم تتم مشاركة شيء، أو تم استلامه بالفعل.",
   "shareOneFile": "ملف واحد",
+  "sharePastLimit": "وصل أول {{count}} ملفًا فقط. استُبعد: {{names}}",
+  "sharePastLimitNext": "شارك الباقي مرة أخرى، أو افتح محادثة وأرسلها عبر + ← مستند.",
   "shareTitle": "مشاركة إلى…",
   "shareTooLarge": "أكبر من أن يُشارك هنا: {{names}}",
   "shareTooLargeNext": "افتح محادثة وأرسله عبر + ← مستند.",
@@ -47,6 +49,7 @@
   "wakeHint": "يمكن لتطبيقات جهات اتصالك إيقاظ هذا التطبيق بإشعار دفع. لا يحتوي على أي شيء من الرسالة.",
   "wakeInfo": "يمر عبر خدمة الدفع في متصفحك (Google أو Apple أو Mozilla)، التي تعرف متى. تعرف جهات اتصالك عنوان الدفع الخاص بك؛ «عنوان جديد» ينشئ عنوانًا آخر.",
   "wakeMoveHere": "يريد {{device}} نقل هذا الملف الشخصي إلى هنا. افتح Ghostly.",
+  "wakeNoPushService": "لا توجد خدمة دفع في هذا المتصفح، لذا لا يمكن إيقاظ Ghostly وهو مغلق. على GrapheneOS، ثبّت Google Play المعزول أو استخدم متصفحًا آخر.",
   "wakeNotice": "رسالة جديدة",
   "wakeOnHint": "مفعّل. الرسالة المرسلة وGhostly مغلق تظهر «رسالة جديدة».",
   "wakeRotate": "عنوان جديد",
@@ -55,5 +58,6 @@
   "wakeStandbyCallUnnamed": "مكالمة لك. افتح Ghostly على جهازك النشط.",
   "wakeStandbyUnnamed": "رسالة جديدة. افتح Ghostly على جهازك النشط.",
   "wakeTakeover": "يريد {{device}} تولي الملف. افتح Ghostly.",
+  "wakeTryAgain": "حاول مرة أخرى",
   "wakeUnavailable": "هذا المتصفح لا يستطيع إيقاظ Ghostly وهو مغلق."
 }

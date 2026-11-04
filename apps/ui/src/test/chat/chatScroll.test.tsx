@@ -461,6 +461,21 @@ describe("the chat timeline's scrolling", () => {
     expect(pill()).toBeNull();
   });
 
+  it("at the bottom, the browser moving the view far up as rows lay out, with no hand on it, goes back to the bottom", () => {
+    renderApp(<Timeline rows={theirs(0, 20)} />);
+    expect(list().scrollTop).toBe(700);
+    // WebKit, laying out a chat just opened (link pictures taking their placeholders' place, the pairing scene coming in
+    // above the rows), moves the view 600 px up by itself, and says so before the ResizeObserver says the list grew.
+    act(() => { above = 300; list().scrollTop = 100; });
+    resized();
+    expect(list().scrollHeight - list().scrollTop - list().clientHeight).toBe(0);
+    expect(pill()).toBeNull();
+    // With nothing laid out meanwhile, a move with no wheel or touch (a screen reader, find in page) stays where it went.
+    scrollTo(300);
+    resized();
+    expect(list().scrollTop).toBe(300);
+  });
+
   it("at the bottom, a hand's small scroll up stays where the hand put it", () => {
     renderApp(<Timeline rows={theirs(0, 10)} />);
     fireEvent.wheel(list());

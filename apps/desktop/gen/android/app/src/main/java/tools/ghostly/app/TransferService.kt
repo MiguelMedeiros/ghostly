@@ -29,16 +29,26 @@ class TransferService : Service() {
     /** Never held past this, should the page never say the files are through (a wake lock left held drains a battery). */
     private const val WAKE_AT_MOST_MS = 6L * 60 * 60 * 1000
 
+    /** Whether a stop may reach Android now (TransferHold.kt); Android's calls are made under it, so they keep its order. */
+    private val hold = TransferHold()
+
     /** Starts it; false when Android refuses (an app already in the background may not start one, Android 12 and up). */
-    fun start(context: Context): Boolean = try {
-      ContextCompat.startForegroundService(context, Intent(context, TransferService::class.java))
-      true
-    } catch (e: Exception) {
-      false
+    fun start(context: Context): Boolean = synchronized(hold) {
+      hold.starting()
+      try {
+        ContextCompat.startForegroundService(context, Intent(context, TransferService::class.java))
+        true
+      } catch (e: Exception) {
+        hold.refused()
+        false
+      }
     }
 
+    /** Stops it, or leaves that to a start still on its way: stopped before it is in the foreground, Android ends the app. */
     fun stop(context: Context) {
-      context.stopService(Intent(context, TransferService::class.java))
+      synchronized(hold) {
+        if (hold.stopping()) context.stopService(Intent(context, TransferService::class.java))
+      }
     }
   }
 
@@ -56,9 +66,16 @@ class TransferService : Service() {
       )
     } catch (e: Exception) {
       // Refused (the app went to the background before the service came up): nothing held.
-      stopSelf()
+      synchronized(hold) {
+        hold.started()
+        stopSelf(startId)
+      }
       return START_NOT_STICKY
     }
+    // The page said stop while this start was on its way (a file through at once): in the foreground now, it may stop.
+    // By this start's id, so a start that came in since keeps it.
+    val stays = synchronized(hold) { hold.started().also { if (!it) stopSelf(startId) } }
+    if (!stays) return START_NOT_STICKY
     if (wake == null) {
       val power = getSystemService(Context.POWER_SERVICE) as PowerManager
       wake = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ghostly:transfer").apply {

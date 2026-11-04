@@ -379,6 +379,12 @@ export interface FrameChannel {
    * Absent: text only, as the Iroh channels are, and nothing binary is offered or sent on it.
    */
   readonly binary?: boolean;
+  /**
+   * A frame the transport sends on this connection by itself as the app exits, should the page not be there to say it
+   * (the Desktop's native channels: a logout ends the WebView's processes with the app); null takes it back. Absent:
+   * whatever the page does not say on its way out is not said.
+   */
+  parting?(frame: string | null): void;
   close(): void;
   onMessage: ((data: string | Uint8Array) => void) | null;
   onClose: (() => void) | null;

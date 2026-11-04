@@ -7,6 +7,7 @@
     "compact": "Compacte"
   },
   "chatListDensity": "Liste des discussions",
+  "chatsDeleted": "Toutes les discussions ont été supprimées",
   "clear": "Effacer",
   "clearAllData": "Effacer toutes les données",
   "clearAllDataConfirm": "Ceci efface pour de bon :",
@@ -55,7 +56,9 @@
   "dataCleared": "Toutes les données ont été effacées",
   "defaultNickname": "Nom dans les discussions",
   "defaultNicknameHint": "Utilisé quand vous démarrez une discussion",
+  "deleteAllChatsCallOn": "Un appel est en cours dans une discussion. Raccrochez d’abord, puis supprimez toutes les discussions.",
   "deleteAllChatsConfirm": "Supprimer les {{count}} discussions ?",
+  "deleteAllChatsConfirm_one": "Supprimer {{count}} discussion ?",
   "deleteAllChatsHint": "Messages et fichiers partent. Réglages et portefeuilles restent.",
   "groupDownloads": {
     "always": "Toujours",
@@ -144,7 +147,7 @@
   "reduceMotion": "Réduire les animations",
   "reduceMotionHint": "Moins d'animations. Le réglage du système s'applique toujours.",
   "removePassword": "Supprimer le mot de passe",
-  "search": "Rechercher un paramètre",
+  "search": "Rechercher un réglage",
   "searchEmpty": "Aucun paramètre ne correspond",
   "searchWords": {
     "account": "compte",
@@ -221,9 +224,10 @@
     "30": "30 minutes",
     "60": "1 heure"
   },
-  "title": "Paramètres",
+  "title": "Réglages",
   "translate": {
     "downloaded": "Langues téléchargées",
+    "downloading": "Téléchargement…",
     "hint": "Le choix par défaut des discussions qui n’ont pas choisi",
     "info": "Les messages reçus dans une autre langue sont traduits sur cet appareil par un modèle de langue téléchargé une fois. Aucun texte ne quitte l’appareil, et vos contacts n’en savent rien.",
     "name": "Traduire les messages",

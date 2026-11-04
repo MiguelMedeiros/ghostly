@@ -19,8 +19,12 @@
   "dhtTooLong": "DHT には長すぎます（{{bytes}} / {{max}} バイト）。短くするかライブ接続にしてください。下書きは残ります。",
   "document": "書類",
   "dropFiles": "ドロップして送信",
+  "dropReading": "ドロップした内容を読み込んでいます…",
   "emoji": "絵文字",
   "emojiCategories": "絵文字のカテゴリ",
+  "emojiFound": "{{count}} 件の絵文字",
+  "emojiFound_one": "{{count}} 件の絵文字",
+  "emojiFound_other": "{{count}} 件の絵文字",
   "emojiNotLoading": "絵文字を読み込めませんでした。",
   "expressions": "絵文字と GIF",
   "filePreparing": "{{name}} を準備しています…",
@@ -96,6 +100,6 @@
     "stale": "メッセージが変更されました",
     "working": "翻訳中…"
   },
-  "videoConverting": "{{name}} を MP4 に変換しています… {{percent}}",
+  "videoConverting": "{{name}} を MP4 に変換しています…",
   "videoSentAsIs": "{{name}} をそのまま送りました。このデバイスでは変換できません。一部のスマートフォンやパソコンではダウンロードしかできない場合があります。"
 }
