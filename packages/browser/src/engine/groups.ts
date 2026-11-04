@@ -594,6 +594,8 @@ export class Groups {
   private readonly lastPoll = new Map<string, number>();
   /** Admin side: when a link nobody is using was last read. Those links share one `pollMs` between them, read in turn. */
   private lastQuietPoll = 0;
+  /** Admin side: until when the relays' budget holds back reads of a group's link (`pollKnocks`). */
+  private readonly knocksHeldUntil = new Map<string, number>();
   /** Admin side: until when a group's link is looked at the warm pace. */
   private readonly warmUntil = new Map<string, number>();
   private readonly lastKnock = new Map<string, number>();
@@ -1506,6 +1508,7 @@ export class Groups {
       group.entry = { seedB64: createIdentity().seedB64, createdAt: Date.now() };
       await this.store.putGroup(group);
       this.lastPoll.delete(groupId);
+      this.knocksHeldUntil.delete(groupId);
     }
     // Asked for the link: it is being handed out, and whoever gets it opens it soon.
     this.warmUntil.set(groupId, Date.now() + this.timings.warmMs);
@@ -1618,15 +1621,18 @@ export class Groups {
         const busy = (pending?.size ?? 0) >= MAX_PENDING_ENTRIES || session.roster.length + (pending?.size ?? 0) >= GROUP_MEMBER_CAP.max;
         const since = now - (this.lastPoll.get(group.id) ?? 0);
         if (busy) continue;
-        if (now >= (this.warmUntil.get(group.id) ?? 0)) { if (since >= this.timings.pollMs) quiet.push(group.id); }
-        else if (since >= this.timings.warmPollMs) { this.lastPoll.set(group.id, now); await this.answerKnocks(group, session, now).catch(() => {}); }
+        // A read the relays' budget held back is no reading: none while the hold lasts, and one as soon as it ends.
+        const held = this.knocksHeldUntil.get(group.id);
+        if (held !== undefined && now < held) continue;
+        if (now >= (this.warmUntil.get(group.id) ?? 0)) { if (since >= this.timings.pollMs || held !== undefined) quiet.push(group.id); }
+        else if (since >= this.timings.warmPollMs || held !== undefined) await this.pollKnocks(group, session, now);
       }
       if (quiet.length && now - this.lastQuietPoll >= this.timings.pollMs) {
         const groupId = quiet.reduce((a, b) => (this.lastPoll.get(b) ?? 0) < (this.lastPoll.get(a) ?? 0) ? b : a);
         const group = this.stored.get(groupId), session = this.sessions.get(groupId);
         if (group?.entry && !group.left && session?.isAdmin) {
-          this.lastQuietPoll = now; this.lastPoll.set(groupId, now);
-          await this.answerKnocks(group, session, now).catch(() => {});
+          this.lastQuietPoll = now;
+          await this.pollKnocks(group, session, now);
         }
       }
       for (const [key, until] of this.refused) if (until <= now) this.refused.delete(key);
@@ -1818,11 +1824,29 @@ export class Groups {
     if (!this.knocked.has(group.id)) { this.knocked.add(group.id); this.host.emit(); }
   }
 
-  private async answerKnocks(group: StoredGroup, session: GroupSession, now: number): Promise<void> {
+  /**
+   * Reads the link's knocks, and counts the read only if the relays answered it. One their budget held back answered
+   * the record as last read: taken for a reading, the knock that came meanwhile waited for the next turn, and a burst's
+   * tenth joiner waited ~40 s with the admin's app open. The link keeps its place and is read once the hold ends.
+   */
+  private async pollKnocks(group: StoredGroup, session: GroupSession, now: number): Promise<void> {
+    const before = this.lastPoll.get(group.id);
+    this.lastPoll.set(group.id, now);
+    const held = await this.answerKnocks(group, session, now).catch(() => undefined);
+    if (held === undefined) { this.knocksHeldUntil.delete(group.id); return; }
+    this.knocksHeldUntil.set(group.id, now + held);
+    if (before === undefined) this.lastPoll.delete(group.id); else this.lastPoll.set(group.id, before);
+  }
+
+  /** Answers the knocks in the link's record; how long the relays' budget still holds its reads back, if it held this one. */
+  private async answerKnocks(group: StoredGroup, session: GroupSession, now: number): Promise<number | undefined> {
     const entry = this.entryOf(group)!;
     const started = Date.now();
-    const knocks = readKnocks(entry.link, (await this.host.resolve(knockIdentity(entry.link).pubKeyZ32)) ?? []);
-    traceJoin(group.id, "knocks.read", { ms: Date.now() - started, knocks: knocks.length });
+    const knockKey = knockIdentity(entry.link).pubKeyZ32;
+    const records = await this.host.resolve(knockKey).catch(() => null);
+    const held = this.host.readHeldBackFor?.(knockKey);
+    const knocks = readKnocks(entry.link, records ?? []);
+    traceJoin(group.id, "knocks.read", { ms: Date.now() - started, knocks: knocks.length, ...(held !== undefined && { held }) });
     let pending = this.pendingEntries.get(group.id);
     let ever: Set<string> | undefined;
     for (const { key, ts } of knocks) {
@@ -1848,6 +1872,7 @@ export class Groups {
       traceJoin(group.id, "knock.seen", { age: Date.now() - ts });
       try { await this.host.openEntry(entry.link, "host", entry.seedB64, key); } catch { pending.delete(key); }
     }
+    return held;
   }
 
   /** The admin's entry session this link is, and whom it is pinned to. */
