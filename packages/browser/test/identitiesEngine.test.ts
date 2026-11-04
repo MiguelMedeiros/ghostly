@@ -347,6 +347,32 @@ describe("removing a proof and its revocation", () => {
     engines.b.stop();
   });
 
+  it("a proof removed while the contact is still checking it: the contact keeps it withdrawn, not verified, then finds it revoked", async () => {
+    const { engines, state, resolved, pkarr } = pair();
+    await clearStorage();
+    await engines.a.load(); await engines.b.load();
+    let checking!: () => void, release!: () => void;
+    const entered = new Promise<void>(resolve => { checking = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    state.providers.b = [{ ...fakeKey, verify: async (statement, evidence, ctx) => { checking(); await gate; return fakeKey.verify(statement, evidence, ctx); } }];
+    const { id } = await prove(engines.a);
+    await engines.a.share({ linkId: "chat", id });
+    await entered;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    resolved.length = 0;
+    await engines.a.remove({ id });
+    // The relays do not return the owner's revocation yet when the check looks it up.
+    const published = [...pkarr];
+    pkarr.clear();
+    release();
+    await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received.map(r => r.status)).toEqual(["withdrawn"]));
+    for (const [key, records] of published) pkarr.set(key, records);
+    await vi.advanceTimersByTimeAsync(20_000);
+    await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received[0].status).toBe("revoked"));
+    expect(resolved.length, "its revocation looked up after the withdraw").toBeGreaterThan(0);
+    engines.b.stop();
+  });
+
   it("a proof only withdrawn from this chat (still in the owner's profile) stays withdrawn, after a few lookups that back off", async () => {
     const { engines, resolved, id } = await shared();
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
