@@ -52,6 +52,49 @@ describe("changelog fragments", () => {
     expect(fragment("Fixed / Wallet", "- x").problems[0]).toMatch(/"Wallets", not "Wallet"/);
   });
 
+  it("refuses a heading the release notes do not use, naming the ones they do", () => {
+    const x = "docs/changelog/unreleased/x.md";
+    for (const heading of ["Security", "For users", "Fixed", "For developers"]) expect(fragment(`${heading} / Chat`, "- x").problems, heading).toEqual([]);
+    // 1.8.0 put its wallet features under these two, after "For developers".
+    for (const old of ["Changed", "Added", "Fixes"]) {
+      expect(fragment(`${old} / Wallets`, "- x").problems, old).toEqual([
+        `${x}: "${old}" is not a heading of the release notes: write Security, For users, Fixed or For developers`,
+      ]);
+    }
+    expect(fragment("fixed / Chat", "- x").problems).toEqual([`${x}: the heading is written "Fixed", not "fixed"`]);
+    expect(fragment("FOR USERS", "- x").problems).toEqual([`${x}: the heading is written "For users", not "FOR USERS"`]);
+  });
+
+  it("refuses a section without the spaces around /, naming the right spelling", () => {
+    const x = "docs/changelog/unreleased/x.md";
+    expect(fragment("For users/Chat", "- x").problems).toEqual([`${x}: "section" is written "For users / Chat", with a space on each side of /`]);
+    expect(fragment("Fixed / Chat", "- x").problems).toEqual([`${x}: "section" is written "Fixed / Chat", with a space on each side of /`]);
+    expect(fragment("Fixed /Chat", "- x").problems).toEqual([`${x}: "section" is written "Fixed / Chat", with a space on each side of /`]);
+  });
+
+  it("refuses a group that differs from the changelog's only by case", () => {
+    const x = "docs/changelog/unreleased/x.md";
+    expect(fragment("Fixed / chat", "- x").problems).toEqual([`${x}: the group is written "Chat", not "chat"`]);
+    expect(fragment("Fixed / Cli", "- x").problems).toEqual([`${x}: the group is written "CLI", not "Cli"`]);
+    expect(fragment("Fixed / wallet", "- x").problems).toEqual([`${x}: the group is written "Wallets", not "wallet"`]);
+    expect(fragment("Fixed / newthing", "- x").problems).toEqual([`${x}: the group is written "Newthing", not "newthing"`]);
+    expect(fragment("Fixed / Linux Desktop", "- x").problems).toEqual([]);
+    expect(fragment("Fixed / A new group", "- x").problems).toEqual([]);
+  });
+
+  it("refuses a line of the text that would be a heading or the Unreleased note", () => {
+    const x = "docs/changelog/unreleased/x.md";
+    const line = (text: string) => `${x}: the line "${text}" would be a heading or a note in the changelog: write it as a list item ("- ...")`;
+    expect(fragment("Fixed", "- First.\n<!-- note -->\n- Second.").problems).toEqual([line("<!-- note -->")]);
+    expect(fragment("Fixed", "- First.\n\n## 9.9.9\n- second").problems).toEqual([line("## 9.9.9")]);
+    expect(fragment("Fixed", "- First.\n  ### Inside").problems).toEqual([line("  ### Inside")]);
+    expect(fragment("Fixed", "- First, with #1 and <!-- inline -->.\n  - A sub-item.").problems).toEqual([]);
+  });
+
+  it("passes every entry waiting in docs/changelog/unreleased/", () => {
+    expect(readFragments(root).flatMap((f: { problems: string[] }) => f.problems)).toEqual([]);
+  });
+
   it("adds items at the end of their group, of their heading, or in a new one", () => {
     const out = assembleChangelog(CHANGELOG, [
       fragment("For users / Chat", "- Forwards."),
