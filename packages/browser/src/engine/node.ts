@@ -2863,6 +2863,11 @@ export class GhostlyNode implements EngineImplementation {
     return (await db.getMessages(linkId)).map(withoutFrame);
   }
 
+  /** A chat's or a group's (`group:<id>`) messages that carry a file, by time: read without the rest of its history. */
+  async fileMessages(linkId: string): Promise<StoredMessage[]> {
+    return (await db.getFileMessages(linkId)).map(withoutFrame);
+  }
+
   /**
    * The 1:1 chats among `linkIds` with a message whose text holds `query`, whatever the case and the accents: the chat
    * list's search, read here so a page that holds each chat's newest page only is not sent every whole history for it.

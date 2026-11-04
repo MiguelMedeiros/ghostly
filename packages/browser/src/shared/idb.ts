@@ -14,7 +14,7 @@ export function databaseName(): string {
   return dbName;
 }
 /** The schema this build reads and writes. A database stored at a higher one is a newer build's: it is never opened. */
-export const DB_VERSION = 15;
+export const DB_VERSION = 16;
 
 /**
  * Why the profile's database did not open. `newer`: a newer Ghostly stored it (IndexedDB never opens a database below
@@ -130,6 +130,8 @@ function storedVersion(name: string): Promise<number | undefined> {
 }
 /** The messages store's index of card messages (`card.kind`): what `db.getCardMessages` reads. */
 export const CARD_INDEX = "byCardKind";
+/** The messages store's index of the messages that carry a file, by chat (`linkId`, `file.id`): what `db.getFileMessages` reads. */
+export const FILE_INDEX = "byLinkFile";
 /** The wallet history's index by (mint, time): what `newestWalletTx` reads. */
 export const WALLET_TX_INDEX = "byMintTime";
 
@@ -285,6 +287,9 @@ export function openDb(): Promise<IDBDatabase> {
       // v15: the wallet history by mint and time, so a refresh reads each network's newest movements without the rest.
       const walletTx = request.transaction!.objectStore(STORES.walletTx);
       if (!walletTx.indexNames.contains(WALLET_TX_INDEX)) walletTx.createIndex(WALLET_TX_INDEX, ["mint", "timestamp"]);
+      // v16: the messages that carry a file, by chat or group, so a chat's files are read without its texts (`file list`).
+      // A message without a file has no such key and is not in it.
+      if (!messages.indexNames.contains(FILE_INDEX)) messages.createIndex(FILE_INDEX, ["linkId", "file.id"]);
     };
     request.onsuccess = () => {
       // Opened after it was said to be blocked: nobody uses this connection, and it must not block the next open.
