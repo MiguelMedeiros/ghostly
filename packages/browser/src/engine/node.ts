@@ -4385,9 +4385,13 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * The message of mine that carries a payment or a request, read by its id: `me_<the time the desk keeps for it>`.
    * The chat's history is read only when that row does not carry it, so it costs the same in a long chat as in a short one.
+   * A contact's request or payment is never on a message of mine: nothing is read for it (the payee says a paid request
+   * is paid again at each reconnect, `PaymentDesk.replay`).
    */
   private async paymentMessage(linkId: string, paymentId: string): Promise<StoredMessage | undefined> {
-    const at = this.desk.payment(paymentId)?.createdAt;
+    const payment = this.desk.payment(paymentId);
+    if (payment?.direction === "in") return undefined;
+    const at = payment?.createdAt;
     const message = at === undefined ? undefined : await db.getMessage(linkId, `me_${at}`);
     if (message?.sender === "me" && message.paymentId === paymentId) return message;
     return (await db.getMessages(linkId)).find(m => m.sender === "me" && m.paymentId === paymentId);
