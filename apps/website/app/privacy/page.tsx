@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { A, Code, ISSUES_URL, LegalPage, Section, Term } from "@/components/site/Legal";
 import { SECURITY_URL } from "@/content/shell";
 import { appsReleased } from "@/lib/appsGate";
+import { LAST_UPDATED, LAST_UPDATED_APPS } from "./updated";
 
 const DESCRIPTION =
   "No accounts, no server holding your data, and no cookies or analytics on this site. What stays on your device, what travels the network, and who sees it.";
@@ -25,10 +26,6 @@ export const metadata: Metadata = {
     creator: "@_miguelmedeiros",
   },
 };
-
-const LAST_UPDATED = "September 29, 2026";
-/** The date of the lines about Apps, which show only once the released Ghostly has them. */
-const LAST_UPDATED_APPS = "October 8, 2026";
 
 // Rendered for each visit, so the lines about Apps follow the release gate (lib/appsGate.ts) as the /apps pages do.
 export const revalidate = 0;

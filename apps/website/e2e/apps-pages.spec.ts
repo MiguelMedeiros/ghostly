@@ -3,6 +3,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { LAST_UPDATED_APPS } from "../app/privacy/updated";
 import { clientLabel } from "../content/apps";
 import { APPS_RELEASE, versionAtLeast } from "../lib/appsGate";
 import { VERSION } from "../lib/release";
@@ -257,7 +258,7 @@ test.describe("once the released Ghostly has Apps", () => {
     await expect(main).toContainText("Apps and stores.");
     await expect(main).toContainText("The apps pages.");
     await expect(main).toContainText("cdn.jsdelivr.net");
-    await expect(main).toContainText("Last updated: October 8, 2026");
+    await expect(main).toContainText(`Last updated: ${LAST_UPDATED_APPS}`);
   });
 
   test("a prerendered page keeps the build's gate until it is revalidated", async ({ page }) => {
