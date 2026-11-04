@@ -3,10 +3,12 @@ import type { KeyboardEvent } from "react";
 /**
  * The arrow keys of a `role="radiogroup"` (WAI-ARIA radio group): Down and Right go to the next enabled radio, Up and
  * Left to the one before, around the ends, Home and End to the first and last; Right and Left swap in a right-to-left
- * layout. Focus moves, the choice does not: Space or Enter makes it, since choosing may be an action (another
- * connection for a live chat), not one a key held down should repeat. The group has one Tab stop (`radioTabStop`).
+ * layout. By default focus moves and the choice does not: Space or Enter makes it, since choosing may be an action
+ * (another connection for a live chat), not one a key held down should repeat. Where choosing is only a setting that
+ * shows at once (a colour theme), `choose` makes the arrows choose as they move, as a native radio group does. The
+ * group has one Tab stop (`radioTabStop`).
  */
-export function radioGroupKeys(e: KeyboardEvent<HTMLElement>): void {
+export function radioGroupKeys(e: KeyboardEvent<HTMLElement>, { choose = false }: { choose?: boolean } = {}): void {
   const rtl = getComputedStyle(e.currentTarget).direction === "rtl";
   const forward = e.key === "ArrowDown" || e.key === (rtl ? "ArrowLeft" : "ArrowRight");
   const back = e.key === "ArrowUp" || e.key === (rtl ? "ArrowRight" : "ArrowLeft");
@@ -20,6 +22,7 @@ export function radioGroupKeys(e: KeyboardEvent<HTMLElement>): void {
     : at < 0 ? (forward ? 0 : radios.length - 1)
     : (at + (forward ? 1 : -1) + radios.length) % radios.length;
   radios[next].focus();
+  if (choose && radios[next].getAttribute("aria-checked") !== "true") radios[next].click();
 }
 
 /** Which of a group's radios is its one Tab stop: the checked one when it can be chosen, else the first that can. */

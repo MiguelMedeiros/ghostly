@@ -40,10 +40,13 @@ const pushPlatform: PushPlatform = {
 /** A peer that answers like the real one would: `clearProfileData` empties its database (the node's part is tested apart). */
 let peer: ((request: RpcRequest) => Promise<unknown>) | null = null;
 const restarted = vi.fn(async () => {});
+/** What the contacts' apps this profile opened kept on their origins (the web app's `forgetServices`). */
+const forgotServices = vi.fn(async (_which: { tag: string } | { profile: string }) => {});
 const host = {
   version: "test",
   features: { shareLocalServices: false, openServices: false, profiles: true },
   restartEngine: restarted,
+  forgetServices: forgotServices,
   async connect(onMessage: (message: RpcResponse) => void) {
     return {
       send: (request: RpcRequest) => {
@@ -69,6 +72,7 @@ beforeEach(async () => {
   setPushPlatform(pushPlatform);
   push.unsubscribed = [];
   restarted.mockClear();
+  forgotServices.mockClear();
   setBrowserHost(host);
   for (const db of await indexedDB.databases()) if (db.name && db.name !== "ghostly") await wrap(indexedDB.deleteDatabase(db.name));
   await clearEverything();
@@ -186,6 +190,9 @@ async function expectOnlyWalletsLeft() {
   const databases = (await indexedDB.databases()).map((d) => d.name);
   expect(databases).toEqual(expect.arrayContaining(["ghostly-ark-ark1", "ghostly-bark-bark1", "ghostly-bark-bark1-onchain"]));
   expect([...opfs], "the files go, the Fedimint client file stays").toEqual(["ghostly-fedimint-f1.db"]);
+
+  // What the contacts' apps this profile opened kept on their own origins, and only this profile's.
+  expect(forgotServices.mock.calls).toEqual([[{ profile: "" }]]);
 
   // Outside the device: the push subscription ends at the push service.
   expect(push.unsubscribed).toEqual([""]);

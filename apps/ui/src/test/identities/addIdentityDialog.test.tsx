@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { newIdentityBinding } from "@ghostly/core";
 import type { BrowserHost } from "@ghostly/browser/host";
@@ -225,6 +225,57 @@ describe("AddIdentityDialog", () => {
       expect(start).toBeEnabled();
     });
 
+    it("takes the keyboard's focus into each step: the first field, the chosen card after Back, the steps after Continue", async () => {
+      const { user } = dialog();
+      answerBegin();
+      screen.getByTestId("add-identity-domain").focus();
+      await user.keyboard("{Enter}");
+      // Several signers here: their choice comes first.
+      expect(document.activeElement).toBe(screen.getByTestId("add-identity-signer"));
+      screen.getByRole("button", { name: "Back" }).focus();
+      await user.keyboard("{Enter}");
+      expect(document.activeElement).toBe(screen.getByTestId("add-identity-domain"));
+      await user.keyboard("{Enter}");
+      await user.type(screen.getByTestId("add-identity-subject"), "example.com");
+      screen.getByTestId("add-identity-start").focus();
+      await user.keyboard("{Enter}");
+      expect(await screen.findByTestId("add-identity-steps")).toHaveFocus();
+    });
+
+    it("keeps the focus on Continue while the engine works, and there when it is refused", async () => {
+      const { user, engine } = dialog();
+      let refuse!: (e: Error) => void;
+      engine.on("beginIdentityProof", () => new Promise((_, reject) => { refuse = reject; }));
+      await user.click(screen.getByTestId("add-identity-domain"));
+      await user.type(screen.getByTestId("add-identity-subject"), "example.com");
+      const start = screen.getByTestId("add-identity-start");
+      start.focus();
+      await user.keyboard("{Enter}");
+      expect(start).not.toBeDisabled();
+      expect(start).toHaveAttribute("aria-busy", "true");
+      expect(start).toHaveFocus();
+      // A second press while it waits does not begin again.
+      await user.keyboard("{Enter}");
+      expect(engine.callsTo("beginIdentityProof")).toHaveLength(1);
+      await act(async () => { refuse(new Error("declined")); });
+      expect(await screen.findByTestId("add-identity-error")).toHaveTextContent("declined");
+      expect(start).not.toHaveAttribute("aria-busy");
+      expect(start).toHaveFocus();
+    });
+
+    it("gives the focus to the emptied bunker:// link when the remote signer refuses", async () => {
+      const { user } = dialog();
+      await user.click(screen.getByTestId("add-identity-nostr"));
+      // A link the signer refuses.
+      await user.type(screen.getByTestId("add-identity-field-bunker"), "bunker://abc");
+      screen.getByTestId("add-identity-start").focus();
+      await user.keyboard("{Enter}");
+      expect(await screen.findByTestId("add-identity-error")).toHaveTextContent("Invalid bunker connection URL");
+      // The secret is not kept, so Continue cannot be pressed again: the link's field takes the keys.
+      expect(screen.getByTestId("add-identity-start")).toBeDisabled();
+      expect(screen.getByTestId("add-identity-field-bunker")).toHaveFocus();
+    });
+
     it("switches between a publish signer and an in-app one", async () => {
       const { user } = dialog();
       await user.click(screen.getByTestId("add-identity-domain"));
@@ -297,6 +348,28 @@ describe("AddIdentityDialog", () => {
       expect(group).toHaveAttribute("data-value", "https://login.microsoftonline.com/{tenantid}/v2.0");
     });
 
+    it("are one Tab stop, the chosen provider, the arrows moving and choosing", async () => {
+      restore = configureOidc();
+      const { user } = dialog();
+      await user.click(screen.getByTestId("add-identity-oidc"));
+      const group = screen.getByRole("radiogroup", { name: "Provider" });
+      const [google, microsoft] = within(group).getAllByRole("radio");
+      expect([google.tabIndex, microsoft.tabIndex]).toEqual([0, -1]);
+      google.focus();
+      await user.keyboard("{ArrowRight}");
+      expect(microsoft).toHaveFocus();
+      expect(microsoft).toHaveAttribute("aria-checked", "true");
+      expect([google.tabIndex, microsoft.tabIndex]).toEqual([-1, 0]);
+      await user.keyboard("{ArrowDown}");
+      expect(google).toHaveFocus();
+      expect(google).toHaveAttribute("aria-checked", "true");
+      await user.keyboard("{End}");
+      expect(microsoft).toHaveFocus();
+      await user.keyboard("{Home}");
+      expect(google).toHaveFocus();
+      expect(group).toHaveAttribute("data-value", "https://accounts.google.com");
+    });
+
     it("keep proofs short-lived and begin with the chosen issuer", async () => {
       restore = configureOidc();
       const { user, engine } = dialog();
@@ -346,6 +419,8 @@ describe("AddIdentityDialog", () => {
       await user.type(screen.getByTestId("add-identity-subject"), "example.com");
       await user.click(screen.getByTestId("add-identity-start"));
       expect(await screen.findByTestId("add-identity-copy-0")).toBeInTheDocument();
+      // What is typed into a DNS host's form reads left to right in every language (in Arabic "_ghostly." ended "ghostly._").
+      for (const code of screen.getAllByTestId(/^add-identity-copy-\d+$/)) expect(code).toHaveAttribute("dir", "ltr");
       await user.click(screen.getByRole("button", { name: "Check and save" }));
       expect(engine.callsTo("completeIdentityProof")).toEqual([{ draftId: "draft-1", evidence: expect.anything() }]);
       expect(onClose).toHaveBeenCalledOnce();
@@ -361,8 +436,59 @@ describe("AddIdentityDialog", () => {
       await user.type(screen.getByTestId("add-identity-subject"), "example.com");
       await user.click(screen.getByTestId("add-identity-start"));
       await user.click(await screen.findByRole("button", { name: "Cancel" }));
+      await user.click(within(screen.getByTestId("add-identity-leave")).getByRole("button", { name: "Close" }));
       expect(engine.callsTo("cancelIdentityProof")).toEqual([{ draftId: "draft-1" }]);
       expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    /**
+     * The record or file is published elsewhere, and slowly: a stray Escape, a tap beside the sheet or Cancel would
+     * throw its value away, and the next try gives another one. Each asks first; the question's own Escape keeps the steps.
+     */
+    it.each([
+      ["Escape", async (user: ReturnType<typeof dialog>["user"]) => { await user.keyboard("{Escape}"); }],
+      ["a tap beside the sheet", async (user: ReturnType<typeof dialog>["user"]) => { await user.pointer({ keys: "[MouseLeft]", target: screen.getByTestId("add-identity").parentElement! }); }],
+      ["Cancel", async (user: ReturnType<typeof dialog>["user"]) => { await user.click(screen.getByRole("button", { name: "Cancel" })); }],
+      ["the close button", async (user: ReturnType<typeof dialog>["user"]) => { await user.click(screen.getByRole("button", { name: "Close" })); }],
+    ])("asks before %s throws away the value being published", async (_, leave) => {
+      const { user, engine, onClose } = dialog();
+      answerBegin();
+      engine.on("cancelIdentityProof", () => undefined);
+      await user.click(screen.getByTestId("add-identity-domain"));
+      await user.type(screen.getByTestId("add-identity-subject"), "example.com");
+      await user.click(screen.getByTestId("add-identity-start"));
+      const value = (await screen.findByTestId("add-identity-copy-1")).textContent;
+      await leave(user);
+      const question = screen.getByRole("group", { name: "Close without saving?" });
+      expect(question).toHaveAccessibleDescription("The value shown works only with these steps. Once they are closed, a new try gives a new value, and the one you published must be replaced.");
+      expect(within(question).getByRole("button", { name: "Keep open" })).toHaveFocus();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(engine.callsTo("cancelIdentityProof")).toEqual([]);
+      // Escape answers the question: the steps stay, with the same value.
+      await user.keyboard("{Escape}");
+      expect(screen.queryByTestId("add-identity-leave")).not.toBeInTheDocument();
+      expect(screen.getByTestId("add-identity-steps")).toHaveFocus();
+      expect(screen.getByTestId("add-identity-copy-1")).toHaveTextContent(value!);
+      expect(onClose).not.toHaveBeenCalled();
+      // Asked again, Keep open does the same.
+      await leave(user);
+      await user.click(screen.getByRole("button", { name: "Keep open" }));
+      expect(screen.getByTestId("add-identity-finish")).toBeInTheDocument();
+      expect(engine.callsTo("cancelIdentityProof")).toEqual([]);
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("closes an external tool's steps at once: nothing was published", async () => {
+      const { user, engine, onClose } = dialog();
+      answerBegin();
+      engine.on("cancelIdentityProof", () => undefined);
+      await user.click(screen.getByTestId("add-identity-ssh"));
+      await user.type(screen.getByTestId("add-identity-subject"), "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl");
+      await user.click(screen.getByTestId("add-identity-start"));
+      await screen.findByTestId("add-identity-steps");
+      await user.keyboard("{Escape}");
+      expect(onClose).toHaveBeenCalledOnce();
+      expect(engine.callsTo("cancelIdentityProof")).toEqual([{ draftId: "draft-1" }]);
     });
 
     it("needs a pasted signature from an external tool, and says when it is not one", async () => {
@@ -379,6 +505,120 @@ describe("AddIdentityDialog", () => {
       expect(await screen.findByTestId("add-identity-error")).toHaveTextContent("Paste the whole signature, from -----BEGIN SSH SIGNATURE----- to -----END SSH SIGNATURE-----");
       // Refused in the page: nothing reached the engine.
       expect(engine.callsTo("completeIdentityProof")).toEqual([]);
+    });
+    it("keeps the focus on Verify and save while it checks, and there when it is refused", async () => {
+      const { user, engine } = dialog();
+      answerBegin();
+      let refuse!: (e: Error) => void;
+      engine.on("completeIdentityProof", () => new Promise((_, reject) => { refuse = reject; }));
+      await user.click(screen.getByTestId("add-identity-domain"));
+      await user.type(screen.getByTestId("add-identity-subject"), "example.com");
+      await user.click(screen.getByTestId("add-identity-start"));
+      const finish = await screen.findByTestId("add-identity-finish");
+      finish.focus();
+      await user.keyboard("{Enter}");
+      expect(finish).not.toBeDisabled();
+      expect(finish).toHaveAttribute("aria-busy", "true");
+      expect(finish).toHaveFocus();
+      await act(async () => { refuse(new Error("TXT record not found")); });
+      expect(await screen.findByTestId("add-identity-error")).toHaveTextContent("TXT record not found");
+      expect(finish).toHaveFocus();
+    });
+
+    it("says the check out loud while it runs, from a status that was there before it", async () => {
+      const { user, engine } = dialog();
+      answerBegin();
+      engine.on("completeIdentityProof", () => new Promise(() => {}));
+      await user.click(screen.getByTestId("add-identity-domain"));
+      await user.type(screen.getByTestId("add-identity-subject"), "example.com");
+      await user.click(screen.getByTestId("add-identity-start"));
+      await screen.findByTestId("add-identity-finish");
+      const status = screen.getByTestId("add-identity-progress-live");
+      expect(status).toHaveAttribute("role", "status");
+      expect(status).toHaveTextContent(/^$/);
+      await user.click(screen.getByTestId("add-identity-finish"));
+      expect(status).toHaveTextContent("Checking it the way your contacts will…");
+      expect(screen.getByTestId("add-identity-progress-live")).toBe(status);
+    });
+  });
+
+  /**
+   * Copy on a command or a statement: it is pasted into a terminal next, so "Copied" is said only once it is. A refused
+   * copy leaves the clipboard as it was, and pasting that would run something else.
+   */
+  describe("Copy", () => {
+    const execCommand = document.execCommand;
+    afterEach(() => { vi.restoreAllMocks(); document.execCommand = execCommand; });
+
+    const openCommand = async () => {
+      const { user } = dialog();
+      answerBegin();
+      await user.click(screen.getByTestId("add-identity-ssh-github"));
+      await user.type(screen.getByTestId("add-identity-subject"), "octocat");
+      await user.click(screen.getByTestId("add-identity-start"));
+      const command = await screen.findByTestId("add-identity-copy-0");
+      return { user, command, step: command.closest("li")! };
+    };
+
+    it("a refused copy says so, never Copied, and leaves the command to select", async () => {
+      const { user, command, step } = await openCommand();
+      vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new DOMException("Write permission denied.", "NotAllowedError"));
+      document.execCommand = vi.fn(() => false);
+      await user.click(within(step).getByRole("button", { name: "Copy step 1" }));
+      expect(await within(step).findByTestId("add-identity-copy-error")).toHaveTextContent("Could not copy. Select the text above and copy it yourself.");
+      expect(within(step).queryByRole("button", { name: "Copied" })).not.toBeInTheDocument();
+      expect(command).toHaveClass("select-all");
+    });
+
+    it("with no Clipboard API, copies the older way and says Copied", async () => {
+      const { user, command, step } = await openCommand();
+      vi.spyOn(navigator, "clipboard", "get").mockReturnValue(undefined as unknown as Clipboard);
+      const copied: string[] = [];
+      // The older route copies from a textarea it adds at the end of the page for the moment.
+      document.execCommand = vi.fn(() => { copied.push(document.body.querySelector<HTMLTextAreaElement>(":scope > textarea:last-of-type")!.value); return true; });
+      await user.click(within(step).getByRole("button", { name: "Copy step 1" }));
+      expect(await within(step).findByRole("button", { name: "Copied" })).toBeInTheDocument();
+      expect(copied).toEqual([command.textContent]);
+      expect(within(step).queryByTestId("add-identity-copy-error")).not.toBeInTheDocument();
+    });
+
+    it("a copy that worked says Copied, and takes an earlier refusal away", async () => {
+      const { user, command, step } = await openCommand();
+      vi.spyOn(navigator.clipboard, "writeText").mockRejectedValueOnce(new DOMException("Document is not focused.", "NotAllowedError"));
+      document.execCommand = vi.fn(() => false);
+      await user.click(within(step).getByRole("button", { name: "Copy step 1" }));
+      await within(step).findByTestId("add-identity-copy-error");
+      const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+      await user.click(within(step).getByRole("button", { name: "Copy step 1" }));
+      expect(await within(step).findByRole("button", { name: "Copied" })).toBeInTheDocument();
+      expect(writeText).toHaveBeenCalledWith(command.textContent);
+      expect(within(step).queryByTestId("add-identity-copy-error")).not.toBeInTheDocument();
+    });
+
+    it("each Copy names its step, so a button list or a voice command tells them apart",async () => {
+      const { user } = dialog();
+      answerBegin();
+      await user.click(screen.getByTestId("add-identity-domain"));
+      await user.type(screen.getByTestId("add-identity-subject"), "example.com");
+      await user.click(screen.getByTestId("add-identity-start"));
+      const steps = await screen.findByTestId("add-identity-steps");
+      const names = (list: HTMLElement) => within(list).getAllByRole("button").map(b => b.getAttribute("aria-label") ?? b.textContent);
+      expect(names(steps)).toEqual(["Copy step 1", "Copy step 2"]);
+      // The visible "Copy" starts each name, for "click Copy step 2".
+      expect(within(steps).getByRole("button", { name: "Copy step 2" })).toHaveTextContent(/^Copy$/);
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+    });
+
+    it("says Copied once from a status beside the button, which keeps its step as its name", async () => {
+      const { user, step } = await openCommand();
+      vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+      const status = within(step).getByRole("status");
+      expect(status).toHaveTextContent(/^$/);
+      await user.click(within(step).getByRole("button", { name: "Copy step 1" }));
+      expect(await within(step).findByText("Copied!", { selector: "[role=status]" })).toBe(status);
+      expect(within(step).getByRole("button", { name: "Copied" })).toBeInTheDocument();
+      await waitFor(() => expect(within(step).getByRole("button", { name: "Copy step 1" })).toBeInTheDocument(), { timeout: 3000 });
+      expect(status).toHaveTextContent(/^$/);
     });
   });
 });

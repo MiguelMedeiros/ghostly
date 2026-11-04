@@ -18,6 +18,7 @@ import { assertUnlocked, identityKeysOf, profileIdentityKeys } from "./profileDa
 import { holdRestore, noteRestore, sweepInterruptedRestores, undoRestore } from "./restoreJournal";
 import { builtInNameBefore, currentProfile, isBuiltInName, listProfiles, namespaceOf, newProfileId, registerProfile, registryKey, storedProfileName, type ProfileEntry } from "./profiles";
 import { NAME_STEP_SUFFIX } from "./nameStep";
+import { SENT_ORIGINALS_SUFFIX } from "./sentOriginals";
 
 /** What a bundle says about the profile it holds, and the profile's local keys without its prefix. */
 interface ProfileHead {
@@ -258,6 +259,8 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
     if (handoff && (suffix === "lock_attempts" || suffix.startsWith("handoff_"))) continue;
     // A new profile's question for a name (NameStep) stays with it: a restored or added copy is not a new profile.
     if (suffix === NAME_STEP_SUFFIX) continue;
+    // The originals of what I sent translated never leave this device, not even to my other devices (lib/sentOriginals.ts).
+    if (suffix.startsWith(SENT_ORIGINALS_SUFFIX)) continue;
     if (suffix === "app_settings" && !handoff) {
       try { const settings = JSON.parse(value) as Record<string, unknown>; delete settings.backupS3; value = JSON.stringify(settings); } catch { /* kept as it is */ }
     }
@@ -267,6 +270,14 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
   // The pieces of large files are not read here: every file's bytes are read through file storage, a step at a time.
   const peer = await snapshotDatabase(space, ["fileChunks"]);
   const storeOf = (name: string) => peer?.stores.find((store) => store.name === name);
+  // A chat's ratchet (WISP 4xx) is this device's alone: never in a backup, never moved by a handoff. A restored chat, or
+  // the device that takes the profile, starts a new session with its contact on its first item.
+  const linksStore = storeOf("links");
+  if (linksStore) linksStore.values = linksStore.values.map((value) => {
+    if (!value || typeof value !== "object" || !("ratchetState" in value)) return value;
+    const { ratchetState: _ratchet, ...link } = value as Record<string, unknown>;
+    return link;
+  });
   const settingsStore = storeOf("settings");
   // The engine's settings without what a backup leaves out (`backupSettings`). A handoff keeps them whole: the new active
   // device goes on holding items for contacts, a desktop with no push subscription of its own goes on giving contacts the

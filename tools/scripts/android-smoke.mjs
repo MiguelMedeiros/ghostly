@@ -26,7 +26,8 @@ const out = resolve(process.env.ANDROID_SMOKE_OUT ?? "android-smoke");
 if (!apk) throw new Error("ANDROID_SMOKE_APK: the APK to install");
 mkdirSync(out, { recursive: true });
 
-const adb = (...args) => execFileSync("adb", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+// A time limit as e2e/android/support/android.ts has: with the emulator gone, adb waits for a device until the job's timeout.
+const adb = (...args) => execFileSync("adb", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 120_000 });
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 const results = [];
 /** One line of the table: `ok` true (works), false (does not), or null (not measured / unknown). */

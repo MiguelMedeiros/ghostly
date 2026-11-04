@@ -1,0 +1,1 @@
+A leave of one admission is built: the leaver signs `ls3` with `ls`, hubs carry it, and a member takes in a `leave` only under the rule of § A leave ends one admission. § Conformance lists its tests; § Security and privacy says what a member can rely on. The choices in § Open decisions stay open; the app takes the first of each.

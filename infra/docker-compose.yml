@@ -7,6 +7,8 @@ name: ghostly
 services:
   web:
     # Releases publish this image; `docker compose -f infra/docker-compose.yml pull` then `up -d` uses it as is.
+    # To run only a release's own build: GHOSTLY_WEB_TAG=$(node tools/scripts/web-image.mjs v1.0.0) checks its
+    # provenance with gh and pins its digest (docs/RELEASING.md, Deploy).
     # `up --build` builds it from this checkout instead.
     image: ghcr.io/miguelmedeiros/ghostly-web:${GHOSTLY_WEB_TAG:-latest}
     build:

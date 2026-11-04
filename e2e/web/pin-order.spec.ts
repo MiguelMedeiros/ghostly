@@ -2,9 +2,9 @@ import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { expect, test } from "../support/fixtures";
 
 /**
- * The pinned chats in the order their owner puts them: from the chat's ⋮ (Move up, Move down), by dragging a row with
- * the mouse, and on a phone by holding a row and dragging it. The other chats stay under them, the latest first, and
- * are neither dragged nor dropped on. The order is kept across a reload.
+ * The pinned chats in the order their owner puts them, in the list: Alt+↑/↓ on a focused row, by dragging a row with
+ * the mouse, and on a phone by holding a row and dragging it. The chat's ⋮ has no Move up or Move down. The other
+ * chats stay under them, the latest first, and are neither dragged nor dropped on. The order is kept across a reload.
  */
 
 const rows = (page: Page) => page.getByTestId("sidebar").getByTestId("chat-row");
@@ -40,22 +40,32 @@ test("pinned chats are put in order from the chat's menu and by dragging, and a 
   }
   await expect.poll(() => order(page)).toEqual([c, b, a, loose]);
 
-  // From the ⋮ of the chat at the bottom of the pinned ones: up one place, then to the top, where Move up stops.
+  // The chat's ⋮ has no Move up or Move down: the place is the list's.
   await page.mouse.move(900, 700);
   await row(page, a).click();
   await expect(page).toHaveURL(new RegExp(`#/chat/${a}$`));
-  await expect(await options(page, "chat-pin-down")).toBeDisabled();
-  await page.getByTestId("chat-options-menu").getByTestId("chat-pin-up").click();
-  await expect(page.getByTestId("chat-options-menu")).toHaveCount(0);
-  await expect(page.getByTestId("chat-pin-announcement")).toHaveText("Moved to place 2 of 3 pinned chats");
-  await expect.poll(() => order(page)).toEqual([c, a, b, loose]);
-  await (await options(page, "chat-pin-up")).click();
-  await expect.poll(() => order(page)).toEqual([a, c, b, loose]);
-  const up = await options(page, "chat-pin-up");
-  await expect(up).toBeDisabled();
-  await expect(up).toHaveAttribute("title", "Already first");
+  await expect(await options(page, "chat-pin-toggle")).toHaveText("Unpin chat");
+  for (const id of ["chat-pin-up", "chat-pin-down"]) await expect(page.getByTestId("chat-options-menu").getByTestId(id)).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("chat-options-menu")).toHaveCount(0);
+
+  // From the keyboard, on the row at the bottom of the pinned ones: up one place, then to the top, where it stops.
+  const opener = row(page, a).getByTestId("chat-row-open");
+  await expect(opener).toHaveAttribute("aria-keyshortcuts", "Alt+ArrowUp Alt+ArrowDown");
+  await opener.focus();
+  await page.keyboard.press("Alt+ArrowUp");
+  await expect(page.getByTestId("chat-pin-announcement")).toHaveText("Moved to place 2 of 3 pinned chats");
+  await expect.poll(() => order(page)).toEqual([c, a, b, loose]);
+  await expect(opener).toBeFocused();
+  await page.keyboard.press("Alt+ArrowUp");
+  await expect.poll(() => order(page)).toEqual([a, c, b, loose]);
+  await expect(page.getByTestId("chat-pin-announcement")).toHaveText("Moved to place 1 of 3 pinned chats");
+  await expect(opener).toBeFocused();
+  // At the top it goes no further.
+  await page.keyboard.press("Alt+ArrowUp");
+  expect(await order(page)).toEqual([a, c, b, loose]);
+  // Nothing opened on the way: the chat that was open still is.
+  await expect(page).toHaveURL(new RegExp(`#/chat/${a}$`));
 
   // With the mouse: the top chat is dragged under the last pinned one. A line shows where it would land, and the
   // row goes no further than the pinned chats however far the pointer does.
@@ -103,7 +113,8 @@ test("pinned chats are put in order from the chat's menu and by dragging, and a 
   await expect(page.getByTestId("chat-row-pinned")).toHaveCount(3);
 
   // Unpinned, a chat is back among the others by its time; pinned again, at the top.
-  await (await options(page, "chat-pin-up")).click();
+  await row(page, c).getByTestId("chat-row-open").focus();
+  await page.keyboard.press("Alt+ArrowUp");
   await expect.poll(() => order(page)).toEqual([c, b, a, loose]);
   await row(page, b).hover();
   await row(page, b).getByTestId("chat-row-pin").click();
@@ -162,10 +173,9 @@ test("on a phone a pinned chat is held, then dragged; a swipe still scrolls and 
   await page.reload();
   await expect.poll(pinned).toEqual([b, a, c]);
 
-  // From the ⋮, in the sheet a phone shows.
+  // The sheet a phone's ⋮ shows has no Move up or Move down: the hold and drag above is the way.
   await row(page, c).tap();
   await expect(page).toHaveURL(new RegExp(`#/chat/${c}$`));
-  await (await options(page, "chat-pin-up")).click();
-  await page.goto("/#/");
-  await expect.poll(pinned).toEqual([b, c, a]);
+  await expect(await options(page, "chat-pin-toggle")).toHaveText("Unpin chat");
+  for (const id of ["chat-pin-up", "chat-pin-down"]) await expect(page.getByTestId("chat-options-menu").getByTestId(id)).toHaveCount(0);
 });

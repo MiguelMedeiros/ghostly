@@ -1,3 +1,4 @@
+import { toBase64Url } from "@ghostly/core";
 import { FILE_BYTES_STEP, NO_ROOM_TO_PLAY, checkFileId, fileSpace, type FileBytes, type FileStream, type FileUsage } from "./fileBytes";
 
 /** Tauri's `invoke`, with the raw-body form the file commands take. */
@@ -7,19 +8,25 @@ export type NativeInvoke = (command: string, args?: Record<string, unknown> | Ui
 export const NATIVE_BLOB_MAX = 64 * 1024 * 1024;
 
 /**
+ * `jsonIpc`: the IPC carries no request bodies (Android), so Tauri sends every invoke as JSON, where a Uint8Array
+ * becomes an array of numbers (3.6 characters a byte, ~90 ms of the page's thread per MiB). There a step goes as a
+ * base64url string in the args instead. `space`: another profile's folder (`forSpace`); the active profile's when left out.
+ */
+export interface NativeFileBytesOptions { jsonIpc?: boolean; space?: string }
+
+/**
  * Files as real files in the app's data folder (`files/<space>/<id>`), written and read by the Rust
  * commands in `apps/desktop/src/file_store.rs`. Bytes cross as raw IPC bodies, a step at a time.
  */
 export class NativeFileBytes implements FileBytes {
   readonly kind = "native" as const;
-  /** `fixedSpace`: another profile's folder (`forSpace`); the active profile's when left out. */
-  constructor(private readonly invoke: NativeInvoke, private readonly fixedSpace?: string) {}
+  constructor(private readonly invoke: NativeInvoke, private readonly options: NativeFileBytesOptions = {}) {}
 
-  private space(): string { return this.fixedSpace ?? fileSpace(); }
+  private space(): string { return this.options.space ?? fileSpace(); }
   private args(id: string, extra: Record<string, unknown> = {}) {
     return { space: this.space(), id: checkFileId(id), ...extra };
   }
-  forSpace(space: string): NativeFileBytes { return new NativeFileBytes(this.invoke, space); }
+  forSpace(space: string): NativeFileBytes { return new NativeFileBytes(this.invoke, { ...this.options, space }); }
 
   async stage(id: string, source: Blob, onProgress?: (copied: number) => void): Promise<string> {
     await this.remove(id);
@@ -39,7 +46,8 @@ export class NativeFileBytes implements FileBytes {
   }
 
   async append(id: string, offset: number, bytes: Uint8Array): Promise<void> {
-    await this.invoke("file_bytes_append", bytes, { headers: { "x-space": this.space(), "x-id": checkFileId(id), "x-offset": String(offset) } });
+    if (this.options.jsonIpc) await this.invoke("file_bytes_append", this.args(id, { offset, bytes: toBase64Url(bytes) }));
+    else await this.invoke("file_bytes_append", bytes, { headers: { "x-space": this.space(), "x-id": checkFileId(id), "x-offset": String(offset) } });
   }
   async flush(id: string): Promise<void> { await this.invoke("file_bytes_flush", this.args(id)); }
   async close(id: string): Promise<void> { await this.invoke("file_bytes_close", this.args(id)); }

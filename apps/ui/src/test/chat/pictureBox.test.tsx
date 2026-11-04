@@ -114,6 +114,34 @@ describe("FileBubble: a picture's box is there before the picture", () => {
     expect(box()).toBeNull();
   });
 
+  // agents#1682: the box went once the read found no bytes, each time the bubble mounted: flinging up a long chat on a
+  // phone, the row shrank by its height above the view and the glide jerked back.
+  it("one whose bytes are no longer here keeps the box its sender's size gave it, and says so", async () => {
+    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(null as never);
+    for (const held of ["gone", "left-out"] as const) {
+      const fileHeld = vi.fn(async () => held);
+      Object.assign(servicesPlatform!, { fileHeld });
+      try {
+        const view = show(picture({ image: { width: 800, height: 600 } }));
+        const before = box()!.style.width;
+        await vi.waitFor(() => expect(screen.getByTestId("file-status")).toHaveTextContent(held === "gone" ? "No longer available" : "Not in this backup"));
+        expect(box(), held).toHaveAttribute("data-box", "sized");
+        expect(box()).toHaveAttribute("data-gone");
+        expect(box()!.style.width).toBe(before);
+        expect(box()!.style.aspectRatio).toBe("800 / 600");
+        expect(screen.queryByRole("img")).toBeNull();
+        view.unmount();
+      } finally { delete (servicesPlatform as { fileHeld?: unknown }).fileHeld; }
+    }
+    // One whose sender said no size has no box to keep: nothing is reserved for it.
+    Object.assign(servicesPlatform!, { fileHeld: vi.fn(async () => "gone") });
+    try {
+      show(picture());
+      await vi.waitFor(() => expect(screen.getByTestId("file-status")).toHaveTextContent("No longer available"));
+      expect(box()).toBeNull();
+    } finally { delete (servicesPlatform as { fileHeld?: unknown }).fileHeld; }
+  });
+
   it("a picture that cannot be shown gives its box back", async () => {
     vi.mocked(servicesPlatform!.getFile).mockResolvedValue(pngHead(40, 30));
     show(picture({ mime: "image/png", image: { width: 40, height: 30 } }));

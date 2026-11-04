@@ -2,7 +2,7 @@ import { memo, useCallback, useId, useMemo, useRef, useState, useSyncExternalSto
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { PeerAvatar } from "./Avatar";
 import { GroupAvatar } from "./GroupAvatar";
-import { answerable, InvitationButtons, TakenBackDelete, invitationLine, useInvitationAnswer } from "./GroupInvitation";
+import { answerable, InvitationButtons, InvitationRefusal, LinkTryAgain, TakenBackDelete, invitationStatus, useInvitationAnswer } from "./GroupInvitation";
 import { ContactMarks, FaceCorner } from "./identities/ContactMarks";
 import { useChosenProfile, type ContactFace } from "./identities/contactFace";
 import { PinIcon } from "./PinIcon";
@@ -12,7 +12,8 @@ import { usePeerTypingActivity } from "../hooks/useTyping";
 import { BellIcon, MuteMenu } from "./ChatMute";
 import { useI18n } from "../contexts/I18nContext";
 import { filePreview, formatListTime, previewText } from "../lib/chatList";
-import { cardLine, showsCard } from "../lib/statusCards";
+import { appCardLine, cardLine, showsCard } from "../lib/statusCards";
+import { useInstalledApps } from "../lib/apps/installed";
 import { deliveryShape, useDeliveryWords, useDhtOnly, waitsForLive, type DhtOnlyBy } from "../lib/delivery";
 import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chatMute";
 import { authorName, groupReadAt, groupStatusText, groupUnreadAt, invitationRow } from "../lib/groups";
@@ -24,11 +25,14 @@ import type { ChatMessage } from "../lib/types";
 import { servicesPlatform } from "../lib/platform";
 import { paymentLine } from "./paymentWords";
 import { callEventText } from "../lib/callLines";
+import { refusedRowText } from "../lib/refusedLine";
+import { callLineCount } from "../lib/storage";
 import type { Translate } from "../locales/translate";
 import type { UsageEntry } from "../lib/usage";
 import { UsagePill } from "./chat/UsageMeter";
 import type { WorkingEntry } from "../lib/working";
 import { WorkingDot, WorkingGap } from "./chat/WorkingMark";
+import { REORDER_KEYS } from "../hooks/useRowReorder";
 
 /*
  * The rows of the chat list, drawn the way messengers draw theirs: the name and the time on one line, the last
@@ -66,10 +70,10 @@ export function DeliveryMark({ delivery, live }: { delivery?: ChatMessage["deliv
   );
 }
 
-/** The unread count; grey in a muted chat, a quiet cue rather than a call for attention. */
+/** The unread count; grey in a muted chat, a quiet cue rather than a call for attention. The row's button says it (rowLabel). */
 function UnreadBadge({ count, muted }: { count: number; muted: boolean }) {
   return (
-    <span data-testid="chat-row-unread" data-muted={muted || undefined} className={`min-w-5 h-5 inline-flex items-center justify-center rounded-full px-1.5 text-[11px] font-bold leading-none ${muted ? "bg-text-secondary text-sidebar-bg" : "bg-accent text-on-accent"}`}>
+    <span aria-hidden="true" data-testid="chat-row-unread" data-muted={muted || undefined} className={`min-w-5 h-5 inline-flex items-center justify-center rounded-full px-1.5 text-[11px] font-bold leading-none ${muted ? "bg-text-secondary text-sidebar-bg" : "bg-accent text-on-accent"}`}>
       {count > 99 ? "99+" : count}
     </span>
   );
@@ -77,15 +81,25 @@ function UnreadBadge({ count, muted }: { count: number; muted: boolean }) {
 
 /**
  * A quiet mark for what the chat is set to, sized like the delivery ticks. Marks sit together in `status`, before
- * the time: the per-chat mute bell goes first, then the pin.
+ * the time: the per-chat mute bell goes first, then the pin. Hidden from a screen reader: the row's button says them
+ * (rowLabel), so they are not read a second time outside it.
  */
-export function StatusMark({ label, testId, children }: { label: string; testId: string; children: ReactNode }) {
-  return <span role="img" aria-label={label} data-testid={testId} className="inline-flex h-3 w-3 items-center justify-center">{children}</span>;
+function StatusMark({ testId, children }: { testId: string; children: ReactNode }) {
+  return <span aria-hidden="true" data-testid={testId} className="inline-flex h-3 w-3 items-center justify-center">{children}</span>;
 }
 
 /** A muted chat's bell, first among the status marks. */
-function MutedMark({ label }: { label: string }) {
-  return <StatusMark label={label} testId="chat-row-muted"><BellIcon muted size={12} /></StatusMark>;
+function MutedMark() {
+  return <StatusMark testId="chat-row-muted"><BellIcon muted size={12} /></StatusMark>;
+}
+
+/**
+ * What the row's button is called: the name shown first (so a voice command saying it still finds the row, WCAG
+ * 2.5.3), then, in words, what the row's badges and marks show, which are hidden from a screen reader: "Alice, 3 unread
+ * messages, notifications muted, pinned". Moving row by row, a screen reader so hears which chats have something new.
+ */
+function rowLabel(t: Translate, name: string, state: (string | false | undefined)[]): string {
+  return [name, ...state.filter((part): part is string => !!part)].join(t("sidebar.row.separator"));
 }
 
 /** A button in the row's actions: a round target that lights up under the pointer, and in the accent while it is on. */
@@ -174,10 +188,11 @@ function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-
 /**
  * What opens the row from the keyboard: a button over the whole row, first in it, so Tab reaches every chat and group
  * and Enter or Space opens it (the click it makes is the row's own). The pointer goes through it to the row and to the
- * buttons laid over it, as before; its ring is the row's edge.
+ * buttons laid over it, as before; its ring is the row's edge. A row that can be put in order says so with its keys
+ * (Alt+↑/↓, hooks/useRowReorder.ts).
  */
-function RowOpen({ label, active, describedBy, testId }: { label: string; active: boolean; describedBy: string; testId: string }) {
-  return <button type="button" data-testid={testId} aria-label={label} aria-describedby={describedBy} aria-current={active ? "page" : undefined}
+function RowOpen({ label, active, describedBy, testId, reorders }: { label: string; active: boolean; describedBy: string; testId: string; reorders?: boolean }) {
+  return <button type="button" data-testid={testId} aria-label={label} aria-describedby={describedBy} aria-current={active ? "page" : undefined} aria-keyshortcuts={reorders ? REORDER_KEYS : undefined}
     className="pointer-events-none absolute inset-0 rounded-sm focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent" />;
 }
 
@@ -272,6 +287,10 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
   const pinLabel = p.pinned ? t("chat.menu.unpin") : t("chat.menu.pin");
   const typing = usePeerTypingActivity(p.peerPubKey);
   const payment = usePaymentLine(p.lastMessage?.paymentId, t);
+  // A payment of the contact's this app refused: the app's line, in the app's language (not the stored English).
+  const refused = p.lastMessage && refusedRowText(p.lastMessage, t);
+  // An app card names an app installed here as its bubble does (appCardLine): the list read, and the row drawn again.
+  const installed = useInstalledApps(p.lastMessage?.card?.kind === "app");
   // A file of mine waiting in a DHT-only chat waits for a live connection, as its bubble says.
   const live = waitsForLive(p.lastMessage?.sender === "me" ? p.lastMessage : undefined, useDhtOnly(p.peerPubKey));
   const previewId = useId();
@@ -286,7 +305,8 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
       className={`${rowClass(p.active, p.density)} ${p.reorder ? "select-none [-webkit-touch-callout:none]" : ""} ${p.reorder?.dragging ? "z-20 cursor-grabbing bg-surface-hover opacity-70 shadow-lg transition-none" : ""}`}>
       {p.reorder?.drop && <span aria-hidden="true" data-testid="chat-row-drop" data-edge={p.reorder.drop}
         className={`pointer-events-none absolute inset-x-0 z-30 h-0.5 rounded-full bg-accent ${p.reorder.drop === "before" ? "top-0" : "bottom-0"}`} />}
-      <RowOpen testId="chat-row-open" label={p.named ? p.label : `${p.label} · ${p.keyLabel}`} active={p.active} describedBy={previewId} />
+      <RowOpen testId="chat-row-open" active={p.active} describedBy={previewId} reorders={!!p.reorder?.props["data-reorder-id"]}
+        label={rowLabel(t, p.named ? p.label : `${p.label} · ${p.keyLabel}`, [p.unread > 0 && t("sidebar.row.unread", { count: p.unread }), muted && t("sidebar.row.muted"), p.pinned && t("sidebar.row.pinned")])} />
       <div className={`relative shrink-0 rounded-full flex items-center justify-center ${p.active ? "bg-surface-alt" : "bg-surface-hover"}`} style={{ width: size, height: size }}>
         <PeerAvatar peerPubKey={p.peerPubKey} label={p.label} named={p.named} photo={p.face?.photo} testId="chat-row-avatar" />
         {p.face && <FaceCorner face={p.face} />}
@@ -342,14 +362,15 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
           ? <span className={p.unread > 0 ? "text-text-secondary font-medium" : "text-text-muted"}>
               {p.lastMessage.sender === "me" && <DeliveryMark delivery={p.lastMessage.delivery} live={live} />}
               {p.lastMessage.systemEvent?.type === "join" ? joinPreview(p, p.lastMessage.systemEvent.pubKey, t)
-                : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo) ?? p.lastMessage.text
+                : refused !== undefined ? refused
+                : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo, callLineCount(p.lastMessage.callEvent)) ?? p.lastMessage.text
                 : showsCard(p.lastMessage.card) ? cardLine(p.lastMessage.card)
-                : payment ?? filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t)}
+                : payment ?? appCardLine(p.lastMessage.card, t, installed) ?? filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t)}
             </span>
           : <span className="italic text-text-muted">{t("chat.noMessages")}</span>}
         status={(muted || p.pinned) && <>
-          {muted && <MutedMark label={t("mute.bell")} />}
-          {p.pinned && <StatusMark label={t("sidebar.pinned")} testId="chat-row-pinned"><PinIcon active size={12} /></StatusMark>}
+          {muted && <MutedMark />}
+          {p.pinned && <StatusMark testId="chat-row-pinned"><PinIcon active size={12} /></StatusMark>}
         </>}
         trailing={meter && p.density === "compact" ? <span className={USAGE_COLUMN}>{meter}{unread}</span> : unread}
         timeCover={
@@ -389,7 +410,7 @@ export function GroupRow({ group, active, density, onOpen, drag }: {
   latest.current = onOpen;
   const open = useCallback(() => latest.current(), []);
   const time = group.lastMessageAt > 0 ? formatListTime(group.lastMessageAt, undefined, language, t) : undefined;
-  const row = <SameGroupRow group={group} active={active} density={density} onOpen={open} time={time} readAt={groupReadAt(group.id)} />;
+  const row = <SameGroupRow group={group} active={active} density={density} onOpen={open} time={time} readAt={groupReadAt(group.id)} reorders={!!drag?.props["data-reorder-id"]} />;
   if (!drag) return row;
   // The drag is on a box around the row, so the row itself is drawn again only when the group changes.
   return (
@@ -402,8 +423,8 @@ export function GroupRow({ group, active, density, onOpen, drag }: {
   );
 }
 
-const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen, time, readAt }: {
-  group: GroupView; active: boolean; density: ChatListDensity; onOpen(): void; time?: string; readAt: number;
+const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen, time, readAt, reorders }: {
+  group: GroupView; active: boolean; density: ChatListDensity; onOpen(): void; time?: string; readAt: number; reorders: boolean;
 }) {
   const { t } = useI18n();
   const muted = useChatMute(groupChat(group.id)) !== undefined;
@@ -414,8 +435,7 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
   const mentionQuiet = muted && !mentionsNotify(groupChat(group.id));
   const { busy, refused, answer } = useInvitationAnswer(group);
   const members = (count: number) => count === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count });
-  const status = invitation ? (invitation.viaLink ? (invitation.admin ? t("group.chat.joining") : group.profile === "community" ? (invitation.stage === "answered" ? t("sidebar.group.letting") : t("sidebar.group.waitingIn")) : invitation.stage === "answered" ? t("sidebar.group.adminAnswered") : t("sidebar.group.waitingAdmin"))
-      : invitationLine(invitation, t))
+  const status = invitation ? invitationStatus(group, t)
     : group.status !== "active" ? (group.statusReason ? problemText(group.statusReason, t).title : group.status && groupStatusText(group.status, t)) : members(group.members.length);
   // The latest reaction, while nothing was said after it (WISP 400 § Reactions).
   const reacted = !invitation && group.status === "active" && group.lastReaction && group.lastReaction.at > group.lastMessageAt ? group.lastReaction : undefined;
@@ -424,7 +444,8 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
   const size = AVATAR[density];
   return (
     <div data-testid="group-row" data-group={group.id} data-muted={muted || undefined} onClick={onOpen} title={group.name || t("group.chat.unnamed")} className={rowClass(active, density)}>
-      <RowOpen testId="group-row-open" label={group.name || t("group.chat.unnamed")} active={active} describedBy={previewId} />
+      <RowOpen testId="group-row-open" active={active} describedBy={previewId} reorders={reorders}
+        label={rowLabel(t, group.name || t("group.chat.unnamed"), [unread && t("sidebar.row.unreadSome"), mention && t("sidebar.row.mention"), muted && t("sidebar.row.muted")])} />
       <div className="relative shrink-0">
         <GroupAvatar picture={group.picture} size={size} glyph={Math.round(size * 0.46)} testId="group-row-avatar" className={active ? "bg-surface-alt" : "bg-surface-hover"} />
       </div>
@@ -435,19 +456,22 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
           nameClass={unread ? "text-text-primary font-semibold" : "text-text-primary"}
           time={time}
           timeClass={unread && !muted ? "text-accent font-medium" : "text-text-muted"}
-          status={muted && <MutedMark label={t("mute.bell")} />}
+          status={muted && <MutedMark />}
           timeCover={!invitationRow(group) && <RowActions active={active}><RowMute chat={groupChat(group.id)} mentions /></RowActions>}
           preview={note ? <span data-testid="group-row-note" className="text-text-muted">{note}</span> : <span className="text-text-muted">{status}</span>}
           trailing={unread && <span className="flex items-center gap-1.5">
-            {mention && <span data-testid="group-row-mention" data-muted={mentionQuiet || undefined} aria-label={t("mentions.unread")} title={t("mentions.unread")} role="img"
+            {/* Hidden from a screen reader, as the dot: the row's button says both (rowLabel). */}
+            {mention && <span aria-hidden="true" data-testid="group-row-mention" data-muted={mentionQuiet || undefined} title={t("mentions.unread")}
               className={`flex h-5 w-5 items-center justify-center rounded-full text-[12px] font-bold leading-none ${mentionQuiet ? "bg-text-secondary text-sidebar-bg" : "bg-accent text-on-accent"}`}>@</span>}
-            <span data-testid="group-row-unread" data-muted={muted || undefined} aria-label={t("sidebar.unread")} role="img" className={`w-2.5 h-2.5 rounded-full ${muted ? "bg-text-secondary" : "bg-accent"}`} />
+            <span aria-hidden="true" data-testid="group-row-unread" data-muted={muted || undefined} className={`w-2.5 h-2.5 rounded-full ${muted ? "bg-text-secondary" : "bg-accent"}`} />
           </span>}
         />
         {/* Taken back: nothing to answer, only to clear away (it says nothing to whoever took it back). */}
-        {invitation?.takenBack && <div className="mt-1.5 flex gap-2"><TakenBackDelete busy={busy} answer={answer} /></div>}
-        {invitation && answerable(invitation) && <div className="mt-1.5 flex gap-2"><InvitationButtons busy={busy} answer={answer} /></div>}
-        {invitation && refused && <p role="status" data-testid="group-answer-refused" className="mt-1 text-xs text-danger">{refused}</p>}
+        {/* On a phone, a thumb's height and apart: a Decline that went is said to the inviter. */}
+        {invitation?.takenBack && <div className="mt-1.5 flex gap-2 max-md:gap-3"><TakenBackDelete busy={busy} answer={answer} /></div>}
+        {invitation && answerable(invitation) && <div className="mt-1.5 flex gap-2 max-md:gap-3"><InvitationButtons busy={busy} answer={answer} /></div>}
+        {invitation?.viaLink && invitation.unanswered && <div className="mt-1.5 flex gap-2 max-md:gap-3"><LinkTryAgain busy={busy} answer={answer} /></div>}
+        {invitation && refused && <InvitationRefusal refused={refused} className="mt-1" />}
       </div>
     </div>
   );

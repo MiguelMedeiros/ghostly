@@ -1,6 +1,6 @@
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { APP_PERMISSIONS, appRef, isAppRef, isAppUrl, type AppPermission } from "@ghostly/core";
+import { APP_PERMISSIONS, appCardUrl, appRef, isAppRef, isAppUrl, type AppPermission } from "@ghostly/core";
 import { list, str, type ApiContext, type Method } from "./apiKit";
 import { checkedBundle } from "./apps";
 import { CliError } from "./errors";
@@ -65,6 +65,7 @@ export const APP_SERVE_METHODS: Record<string, Method> = {
     if (grant.includes("internet")) throw new CliError("refused", "internet cannot be granted here: no app's page runs on the CLI, and a bot reaches the network as its own program");
     const given = str(params, "url");
     if (given !== undefined && !isAppUrl(given)) throw new CliError("bad_request", "url is where a contact's app reads the bundle: https only, no user or password, jsDelivr only at a full commit");
+    if (given !== undefined && /[?#]/.test(given)) throw new CliError("bad_request", "url goes to contacts on the app's card: no query or fragment (a private repository's token rides there); publish the app in a public repository");
     const { bundle, url } = await checkedBundle(source);
     const m = bundle.manifest;
     if (!m.permissions.includes("chat")) throw new CliError("refused", `${m.title} does not ask for chat: it talks to no contact, so a bot has nothing to speak for it`);
@@ -74,7 +75,8 @@ export const APP_SERVE_METHODS: Record<string, Method> = {
     if (missing.length)
       throw new CliError("confirm", `${m.title} asks for ${missing.join(" and ")}: serve it with ${missing.map((p) => `--grant ${p}`).join(" ")} to allow that`, { asks: m.permissions, missing });
     const ref = appRef(m.publisher, m.name);
-    const cardUrl = given ?? url ?? m.sources?.[0];
+    // The card's link never carries the query of the URL the bundle was read from (a private file's token).
+    const cardUrl = appCardUrl(given ?? url ?? m.sources?.[0]);
     const app: ServedApp = {
       ref, title: m.title, version: m.version, sequence: m.sequence, digest: bundle.digest, ...(cardUrl !== undefined && { url: cardUrl }),
       permissions: m.permissions, granted: m.permissions.filter((p) => grant.includes(p)), servedAt: Date.now(),

@@ -13,7 +13,7 @@ import type { PlannedWallet } from "../src/devices/handoffWallets";
  * the wallets that moved are deleted by name, nothing else.
  */
 
-const connect = vi.fn(async (config: { provider: string }) => ({ config, address: async () => "ark1fixture", balance: async () => 0, boardingAddress: async () => "tb1qfixture", incoming: async () => 0, expired: async () => ({ recoverable: 0, sweeping: 0, small: 0 }), expiresAt: async () => undefined, dispose: vi.fn() }));
+const connect = vi.fn(async (config: { provider: string }) => ({ config, address: async () => "ark1fixture", balance: async () => 0, boardingAddress: async () => "tb1qfixture", balances: async () => ({ balance: 0, incoming: 0 }), expired: async () => ({ recoverable: 0, sweeping: 0, small: 0 }), expiresAt: async () => undefined, dispose: vi.fn() }));
 vi.mock("@arkade-os/sdk", async (original) => ({ ...await original<object>(), RestArkProvider: class { getInfo = async () => ({ network: "mutinynet", signerPubkey: `02${"ab".repeat(32)}` }); } }));
 vi.mock("../src/engine/paymentAdapters/arkade", () => ({ ARK_NETWORKS: ["bitcoin", "mutinynet", "signet", "regtest"], ArkadeAdapter: { connect } }));
 const { ArkWallet } = await import("../src/engine/paymentAdapters/arkWallet");

@@ -28,6 +28,65 @@ export const MAX_REMOVALS = 500;
 /** The removal of a message after its last edit `seq`: one past it, at most `MAX_REMOVAL_NUMBER`. */
 export const removalNumber = (seq: number | undefined) => Math.min((seq ?? 0) + 1, MAX_REMOVAL_NUMBER);
 
+/** How often a chat is read whole for the quotes of removed messages (`QuoteSweeps`). */
+export const QUOTE_SWEEP_MS = 10_000;
+
+/** Removed messages whose quotes go, by their id here: the reference a reply names each by (`replyRef`), if any. */
+export type RemovedQuotes = ReadonlyMap<string, string | undefined>;
+
+/**
+ * The quotes of removed messages, here or not (never came, or deleted here first). The replies that quote one are found
+ * by reading the chat whole, and a contact or a member can send and remove, or remove ids that never were, at its edit
+ * pace. So a chat is read for them at most once a `QUOTE_SWEEP_MS`: the first at once, the ones that come meanwhile
+ * together when the time is up.
+ */
+export class QuoteSweeps {
+  private readonly chats = new Map<string, { due: Map<string, string | undefined>; at: number; busy?: Promise<void>; timer?: ReturnType<typeof setTimeout> }>();
+
+  constructor(private readonly sweep: (chat: string, removed: RemovedQuotes) => Promise<void>, private readonly now: () => number = Date.now) {}
+
+  add(chat: string, id: string, ref: string | undefined): void {
+    let state = this.chats.get(chat);
+    if (!state) this.chats.set(chat, state = { due: new Map(), at: -Infinity });
+    state.due.set(id, ref);
+    this.next(chat);
+  }
+
+  /** The chat is gone: what waits for it is dropped. */
+  forget(chat: string): void {
+    clearTimeout(this.chats.get(chat)?.timer);
+    this.chats.delete(chat);
+  }
+
+  /**
+   * The peer stops: what waits is swept now, after a sweep still running, not dropped. Nothing would look again at the
+   * next start, so the replies would keep the removed messages' lines for good.
+   */
+  async stop(): Promise<void> {
+    const chats = [...this.chats];
+    this.chats.clear();
+    await Promise.allSettled(chats.map(async ([chat, state]) => {
+      clearTimeout(state.timer);
+      await state.busy;
+      if (state.due.size) await this.sweep(chat, state.due);
+    }));
+  }
+
+  private next(chat: string): void {
+    const state = this.chats.get(chat);
+    if (!state?.due.size || state.busy || state.timer) return;
+    const wait = state.at + QUOTE_SWEEP_MS - this.now();
+    if (wait > 0) { state.timer = setTimeout(() => { state.timer = undefined; this.next(chat); }, wait); return; }
+    const removed = state.due;
+    state.due = new Map();
+    state.at = this.now();
+    state.busy = this.sweep(chat, removed).catch(() => {}).finally(() => {
+      state.busy = undefined;
+      if (this.chats.get(chat) === state) this.next(chat);
+    });
+  }
+}
+
 /** The row a removal reads as to the edit queues: mine, its fallback text, its edit pending until said. */
 export function removalRow(linkId: string, removal: Removal): StoredMessage {
   return {

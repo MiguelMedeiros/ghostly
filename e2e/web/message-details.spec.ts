@@ -1,7 +1,9 @@
 import { fileURLToPath } from "node:url";
+import AxeBuilder from "@axe-core/playwright";
 import type { Locator, Page } from "@playwright/test";
 import { GIF, chat, expect, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
+import { CHROMIUM_SANDBOX } from "../support/chromiumSandbox";
 
 /**
  * A message's details (WISP 400 § Message details), between two people on the web: a text, a file and a voice
@@ -13,6 +15,7 @@ const SAMPLE = fileURLToPath(new URL("../support/voice-sample.wav", import.meta.
 
 test.use({
   launchOptions: {
+    chromiumSandbox: CHROMIUM_SANDBOX,
     args: [
       "--disable-features=WebRtcHideLocalIpsWithMdns",
       "--use-fake-device-for-media-stream",
@@ -35,6 +38,18 @@ async function openFromMenu(peer: Peer, row: Locator) {
   await expect(panel(peer.page)).toHaveAttribute("data-loaded", "yes");
 }
 
+/**
+ * Each value that copies is at least 24 px tall (WCAG 2.2 SC 2.5.8), at whatever width the page has: the rows sit
+ * 2 px apart, so a shorter one has no spacing exception and a near miss copies its neighbour. And axe agrees.
+ */
+async function copiesAreTargets(page: Page) {
+  const copies = panel(page).getByTestId("message-details-copy");
+  expect(await copies.count()).toBeGreaterThan(1);
+  for (const box of await copies.evaluateAll((all) => all.map((copy) => copy.getBoundingClientRect().height))) expect(box).toBeGreaterThanOrEqual(24);
+  const { violations } = await new AxeBuilder({ page }).include('[data-testid="message-details"]').withRules(["target-size"]).analyze();
+  expect(violations.flatMap((v) => v.nodes.map((n) => `${v.id}: ${n.target.join(" ")}`))).toEqual([]);
+}
+
 async function close(page: Page) {
   await page.keyboard.press("Escape");
   await expect(panel(page)).toHaveCount(0);
@@ -55,10 +70,23 @@ test("message details: a text, a file and a voice message, on both sides", { tag
   const [alice, bob] = await Promise.all([peer("details-alice"), peer("details-bob")]);
   await pair(alice, bob);
 
-  // A text, seen from the side that sent it (double click) and from the side that got it (the ⋮ menu).
+  // A text, seen from the side that sent it (Ctrl/⌘+double click) and from the side that got it (the ⋮ menu).
   await say(alice, "how did this travel?");
   await expect(chat(bob).getByText("how did this travel?")).toBeVisible();
-  await rowOf(alice, "how did this travel?").dblclick();
+  // A plain double click on the words selects a word, a triple click the line, as anywhere else: no details.
+  // The bubble settles first: until the receipt its mark changes (and its width with it), so the words move.
+  await expect(rowOf(alice, "how did this travel?").getByTestId("message-delivery")).toHaveAttribute("data-delivery", "delivered");
+  const words = rowOf(alice, "how did this travel?").getByTestId("message-text");
+  const selected = () => alice.page.evaluate(() => window.getSelection()?.toString().trim());
+  // On the first word, where the words are at the moment of the click (a locator's click waits for them to hold still).
+  const first = async () => ({ x: 4, y: (await words.boundingBox())!.height / 2 });
+  await words.dblclick({ position: await first() });
+  await expect.poll(selected).toBe("how");
+  await words.click({ position: await first(), clickCount: 3 });
+  await expect.poll(selected).toBe("how did this travel?");
+  await expect(panel(alice.page)).toHaveCount(0);
+  // Ctrl+double click (⌘ on a Mac) opens them.
+  await words.dblclick({ modifiers: ["ControlOrMeta"] });
   await expect(panel(alice.page)).toHaveAttribute("data-loaded", "yes");
   await expect(panel(alice.page)).toHaveAttribute("data-side", "end");
   await expect(rowOf(alice, "how did this travel?")).toHaveAttribute("data-details-open", "true");
@@ -77,12 +105,17 @@ test("message details: a text, a file and a voice message, on both sides", { tag
   expect(copied).toMatchObject({ kind: "Text", path: { "Sent over": "WebRTC, direct" }, engine: { message: { kind: "text" } } });
   await close(alice.page);
   await expect(rowOf(alice, "how did this travel?")).not.toHaveAttribute("data-details-open");
+  // ⌘ by name, whatever the machine running the test.
+  await words.dblclick({ modifiers: ["Meta"] });
+  await expect(panel(alice.page)).toHaveAttribute("data-loaded", "yes");
+  await close(alice.page);
 
   await openFromMenu(bob, rowOf(bob, "how did this travel?"));
   await expect(field(bob.page, "Received over")).toHaveText("WebRTC, direct");
   await expect(field(bob.page, "Direction")).toHaveText("Received");
   await expect(field(bob.page, "After composing")).toContainText("by the two devices' clocks");
   await expect(field(bob.page, "Channel")).toHaveText("WebRTC data channel: DTLS 1.2+ with SCTP");
+  await copiesAreTargets(bob.page);
   await close(bob.page);
 
   // A file: files/3 between two current apps, its digest and chunking on both sides.
@@ -152,12 +185,32 @@ test("message details on a phone: a long press opens the quick bar, and Details 
   await bob.page.getByTestId("reaction-bar-copy").click();
   await expect(bob.page.getByTestId("reaction-bar")).toHaveCount(0);
   await expect.poll(() => bob.page.evaluate(() => (window as unknown as { copied?: string }).copied)).toBe("press and hold me");
+  // Said once it is copied, and the focus is back on the message's ⋮, not on the page.
+  await expect(row.getByTestId("message-copied")).toHaveText("Copied");
+  await expect(row.getByTestId("message-options")).toBeFocused();
   await hold();
   await bob.page.getByTestId("reaction-bar-details").click();
   await expect(panel(bob.page)).toHaveAttribute("data-loaded", "yes");
   await expect(panel(bob.page)).toHaveAttribute("data-side", "bottom");
   await expect(field(bob.page, "Received over")).toHaveText("WebRTC, direct");
+  await copiesAreTargets(bob.page);
   // A tap outside closes it.
   await bob.page.getByTestId("message-details-backdrop").click({ position: { x: 10, y: 10 } });
   await expect(panel(bob.page)).toHaveCount(0);
+
+  // A copy the browser refuses, by both routes: the text to select by hand, kept until the person closes it.
+  await bob.page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async () => { throw new DOMException("denied", "NotAllowedError"); } } });
+    Object.defineProperty(document, "execCommand", { configurable: true, value: () => false });
+  });
+  await hold();
+  await bob.page.getByTestId("reaction-bar-copy").click();
+  await expect(row.getByTestId("message-copy-text")).toHaveValue("press and hold me");
+  const closeNote = row.getByTestId("message-copy-close");
+  await expect(closeNote).toHaveText("Close");
+  expect((await closeNote.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await closeNote.click();
+  await expect(row.getByTestId("message-copy-error")).toHaveCount(0);
+  await expect(row.getByTestId("message-copy-text")).toHaveCount(0);
+  await expect(row.getByTestId("message-options")).toBeFocused();
 });

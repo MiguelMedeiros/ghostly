@@ -187,6 +187,11 @@ export interface EarlierDeviceSet {
    * device, "When the remover is gone for good"). The frame is still delivered.
    */
   foreign?: true;
+  /**
+   * The signing key of the device this move removed, until what it leaves in the profile is cleared (its wake
+   * subscription, its wallets' home marks): stored in the move's own write, so a reload or a crash after it still clears them.
+   */
+  removed?: string;
 }
 
 /**
@@ -283,6 +288,11 @@ export interface DeviceRecord {
    * person discards one.
    */
   forks?: string[];
+  /**
+   * When each fork was kept (ms), by its name in `forks`: what tells two of them apart in Data and storage. A fork kept
+   * by an older build has none, and an older build that discards one leaves its time here: read it through `forkTimes`.
+   */
+  forkKeptAt?: Record<string, number>;
   earlierSets: EarlierDeviceSet[];
   /** Grants sent whose `enroll-done` never came back: devices that hold `D` and are in no record. */
   unfinishedGrants?: UnfinishedGrant[];
@@ -409,6 +419,9 @@ export function transition(from: DeviceRecord | null, profile: string, to: Store
   const failed = from.state === "releasing" && to === "active" && !("breezDatabases" in patch);
   const next = { ...from, ...clean(patch), state: to };
   if (failed) delete next.breezDatabases;
+  // A device that runs the profile again changes and deletes its files: the list of what its frozen copy held is of
+  // another copy, and a pull would claim files no longer here.
+  if (to === "active" && !("heldFiles" in patch)) delete next.heldFiles;
   return checked(rising(from, next));
 }
 
@@ -490,6 +503,13 @@ function isPush(value: unknown): value is DevicePush {
   return true;
 }
 
+/** One earlier device set as a record keeps it, and as a handoff's part `devices` carries it. */
+export function isEarlierSet(value: unknown): value is EarlierDeviceSet {
+  const set = value as Partial<EarlierDeviceSet> | null;
+  if (!set || typeof set !== "object" || !bytes(set.d) || !bytes(set.tombstone) || !text(set.setUpdate) || !Array.isArray(set.pending) || !set.pending.every(bytes)) return false;
+  return set.pending.length <= MAX_DEVICES && (set.foreign === undefined || set.foreign === true) && optional(set.removed, bytes);
+}
+
 /** Why a stored record cannot be trusted. The gate then starts nothing (see `gate.ts`). */
 export class DeviceRecordError extends Error {
   constructor(what: string) {
@@ -523,7 +543,8 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
   for (const field of ["turnPacket", "d", "lineage"] as const) if (!optional(r[field], bytes)) return bad(field);
   if (!optional(r.signingKey, (v): v is DeviceSigningKeyKind => (DEVICE_SIGNING_KEY_KINDS as readonly unknown[]).includes(v))) return bad("signingKey");
   if (r.network !== undefined && !isNetwork(r.network)) return bad("network");
-  if (!optional(r.forks, (v): v is string[] => Array.isArray(v) && v.length <= 8 && v.every((name) => text(name) && /^ghostly(_[A-Za-z0-9_-]{1,64})?$/.test(name)))) return bad("forks");
+  // No cap: each fork is a whole database on this device, and one left out of the list could never be discarded.
+  if (!optional(r.forks, (v): v is string[] => Array.isArray(v) && v.every((name) => text(name) && /^ghostly(_[A-Za-z0-9_-]{1,64})?$/.test(name)))) return bad("forks");
   if (!optional(r.breezDatabases, (v): v is string[] => Array.isArray(v) && v.length <= 8 && v.every((name) => text(name) && /^ghostly-breez-/.test(name)))) return bad("breezDatabases");
   if (!optional(r.releasedTurn, (v): v is number => count(v, 2 ** 32 - 1))) return bad("releasedTurn");
   if (!optional(r.seenSequence, (v): v is number => count(v, Number.MAX_SAFE_INTEGER))) return bad("seenSequence");
@@ -578,10 +599,7 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
     if (!raise || typeof raise !== "object" || !bytes(raise.id) || (raise.why !== "takeover" && raise.why !== "restore") || !count(raise.takeovers, 2 ** 32 - 1) || !count(raise.at, Number.MAX_SAFE_INTEGER)) return bad("raise");
   }
   if (!Array.isArray(r.earlierSets) || r.earlierSets.length > MAX_EARLIER_SETS) return bad("the earlier device sets");
-  for (const set of r.earlierSets as Partial<EarlierDeviceSet>[]) {
-    if (!set || !bytes(set.d) || !bytes(set.tombstone) || !text(set.setUpdate) || !Array.isArray(set.pending) || !set.pending.every(bytes)) return bad("an earlier device set");
-    if (set.pending.length > MAX_DEVICES || (set.foreign !== undefined && set.foreign !== true)) return bad("an earlier device set");
-  }
+  if (!r.earlierSets.every(isEarlierSet)) return bad("an earlier device set");
   if (r.setNotice !== undefined) {
     const n = r.setNotice as Partial<SetNotice> | null;
     if (!n || typeof n !== "object" || !texts(n.names, MAX_DEVICES) || !count(n.at, Number.MAX_SAFE_INTEGER) || (n.seen !== undefined && n.seen !== true)) return bad("setNotice");
@@ -612,6 +630,21 @@ function cleanNames(record: DeviceRecord): DeviceRecord {
     ...record, deviceSet: record.deviceSet.map((slot) => slot && { ...slot, name: turnName(slot.name) }),
     ...(record.unfinishedGrants ? { unfinishedGrants: record.unfinishedGrants.map((grant) => ({ ...grant, name: turnName(grant.name) })) } : {}),
   };
+}
+
+/**
+ * When each fork the record lists was kept (`forkKeptAt`): only a listed fork's, only a time a date holds. A fork kept
+ * before the time was written has none, and anything else in the field is taken as no time: it only tells rows apart.
+ */
+export function forkTimes(record: Pick<DeviceRecord, "forks" | "forkKeptAt">): Record<string, number> {
+  const kept = record.forkKeptAt;
+  if (!kept || typeof kept !== "object" || Array.isArray(kept)) return {};
+  const times: Record<string, number> = {};
+  for (const fork of record.forks ?? []) {
+    const at = Object.prototype.hasOwnProperty.call(kept, fork) ? kept[fork] : undefined;
+    if (count(at, 8.64e15)) times[fork] = at;
+  }
+  return times;
 }
 
 function checked(record: DeviceRecord): DeviceRecord {

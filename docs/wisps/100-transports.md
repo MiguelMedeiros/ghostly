@@ -158,7 +158,7 @@ A profile may keep every path to its contacts on relays, so no contact learns it
 3. **Native transports.** The app's own direct endpoints are not offered to a contact: the Desktop's Iroh (its descriptor lists direct addresses) and its HyperDHT (direct). Iroh may stay with relay addresses only, and HyperDHT may go through the HyperDHT relay, with a `relayed: true` descriptor, as in a browser. A profile's own devices are not contacts: their links keep their transports.
 4. **Fail closed.** A TURN server that does not answer leaves the connection without a candidate: a call fails, saying the relay did not answer, and a chat goes on over the DHT floor. Nothing falls back to a direct path. Call media that cannot keep to the relay policy (the Linux Desktop's own call engine) places and answers no call while it is on.
 5. **Turned on or off** while online, every chat and edge starts over, without a goodbye, so no session opened before keeps a direct path.
-6. **Built so far.** The engine keeps WebRTC to the relay (rules 1, 2, 4 and 5). Rule 3, the Desktop's DHT reads (Pkarr, [01](01-ghost-core.md), which DHT nodes see, not contacts) and the setting in Settings, Network come in later revisions; until the setting is shown, nobody turns it on.
+6. **Built so far.** The engine keeps WebRTC to the relay and the Desktop's own Iroh and HyperDHT off contacts (rules 1 to 5). The Desktop's DHT reads (Pkarr, [01](01-ghost-core.md), which DHT nodes see, not contacts) and the setting in Settings, Network come in later revisions; until the setting is shown, nobody turns it on.
 
 ### DHT only as a choice
 

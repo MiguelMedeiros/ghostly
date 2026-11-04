@@ -7,6 +7,7 @@
     "compact": "Compatto"
   },
   "chatListDensity": "Elenco chat",
+  "chatsDeleted": "Tutte le chat sono state eliminate",
   "clear": "Cancella",
   "clearAllData": "Cancella tutti i dati",
   "clearAllDataConfirm": "Questo cancella per sempre:",
@@ -19,8 +20,8 @@
     "identities": "Prove di identità, il tuo DID e i dati Nostr",
     "profile": "Il tuo nome e la tua foto",
     "services": "Servizi condivisi",
-    "settings": "Impostazioni, schermata di blocco e rete",
-    "storage": "Impostazioni S3 e risveglio ad app chiusa"
+    "settings": "Opzioni, schermata di blocco e rete",
+    "storage": "Opzioni S3 e risveglio ad app chiusa"
   },
   "clearAllDataKeeps": "Restano: i tuoi wallet, i tuoi backup e gli altri profili.",
   "colorScheme": "Modalità",
@@ -55,8 +56,10 @@
   "dataCleared": "Tutti i dati sono stati cancellati",
   "defaultNickname": "Nome nelle chat",
   "defaultNicknameHint": "Usato quando avvii una nuova chat",
+  "deleteAllChatsCallOn": "C’è una chiamata in una chat. Chiudila prima, poi elimina tutte le chat.",
   "deleteAllChatsConfirm": "Eliminare tutte le {{count}} chat?",
-  "deleteAllChatsHint": "Messaggi e file vengono eliminati. Impostazioni e wallet restano.",
+  "deleteAllChatsConfirm_one": "Eliminare l'unica chat?",
+  "deleteAllChatsHint": "Messaggi e file vengono eliminati. Opzioni e wallet restano.",
   "groupDownloads": {
     "always": "Sempre",
     "hint": "Messaggi vocali e file piccoli",
@@ -80,6 +83,8 @@
     "allow": "Consenti",
     "camera": "Fotocamera",
     "cameraInfo": "Usata per chiamate e foto. Resta su questo dispositivo, per questo profilo.",
+    "denied": "Bloccato. Consenti microfono e fotocamera nelle impostazioni del browser o del sistema.",
+    "deniedIos": "Bloccato da iOS. In Impostazioni → App → Safari, consenti Microfono (e Fotocamera), poi riapri Ghostly.",
     "failed": "Impossibile aprirlo. Controlla che Ghostly abbia il permesso.",
     "level": "Livello del microfono",
     "microphone": "Microfono",
@@ -142,7 +147,7 @@
   "reduceMotion": "Riduci animazioni",
   "reduceMotionHint": "Meno animazioni. L'impostazione di sistema vale sempre.",
   "removePassword": "Rimuovi password",
-  "search": "Cerca nelle impostazioni",
+  "search": "Cerca nelle opzioni",
   "searchEmpty": "Nessuna impostazione trovata",
   "searchWords": {
     "account": "account",
@@ -193,7 +198,7 @@
   "storageParts": {
     "app": "Messaggi e dati dell'app: {{size}}",
     "files": "File ({{count}}): {{size}}",
-    "local": "Impostazioni: {{size}}",
+    "local": "Opzioni: {{size}}",
     "staged": "Copie in salvataggio: {{size}}"
   },
   "storagePartsNote": "Messaggi e dati dell'app contano tutti i profili di questo dispositivo. I file sono di questo profilo.",
@@ -219,7 +224,22 @@
     "30": "30 minuti",
     "60": "1 ora"
   },
-  "title": "Impostazioni",
+  "title": "Opzioni",
+  "translate": {
+    "downloaded": "Lingue scaricate",
+    "downloading": "Download in corso…",
+    "hint": "L'impostazione predefinita per le chat che non hanno scelto",
+    "info": "I messaggi ricevuti in un'altra lingua vengono tradotti su questo dispositivo da un modello linguistico scaricato una volta. Nessun testo lascia il dispositivo e i tuoi contatti non lo sanno mai.",
+    "name": "Traduci i messaggi",
+    "none": "Nessuna lingua scaricata",
+    "pair": "{{from}} → {{to}}",
+    "remove": "Rimuovi",
+    "removeFailed": "Impossibile rimuoverla. Riprova.",
+    "removeLabel": "Rimuovi {{name}}",
+    "searchWords": "traduzione, traduzione automatica, lingue, modelli",
+    "title": "Traduci i messaggi in {{language}}",
+    "unread": "Impossibile leggere le lingue scaricate."
+  },
   "version": "Versione",
   "website": "Sito web"
 }

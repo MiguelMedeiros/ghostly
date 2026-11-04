@@ -24,9 +24,12 @@ export function callsBlockedText(t: Translate, reason: string | null | undefined
 
 /**
  * A call's line, in the person's language: the history keeps it in English (Chat.tsx `addCallEventMessage`), with its
- * kind beside it. The timeline (MessageBubble) and the chat list's last line say it the same way.
+ * kind beside it, and how many calls it stands for (`callLineCount`). The timeline (MessageBubble) and the chat
+ * list's last line say it the same way.
  */
-export function callEventText(t: Translate, type: CallEventType, hasVideo?: boolean): string | undefined {
+export function callEventText(t: Translate, type: CallEventType, hasVideo?: boolean, count = 1): string | undefined {
+  // A burst of missed calls is one line (`addMissedCall`): "12 missed calls".
+  if (type === "call_missed" && count > 1) return hasVideo ? t("calls.timeline.videoMissedMany", { count }) : t("calls.timeline.audioMissedMany", { count });
   switch (type) {
     case "call_started": return hasVideo ? t("calls.timeline.videoStarted") : t("calls.timeline.audioStarted");
     case "call_received": return hasVideo ? t("calls.timeline.videoIncoming") : t("calls.timeline.audioIncoming");

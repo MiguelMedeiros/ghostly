@@ -11,6 +11,7 @@ import { callLevels } from "../lib/voiceLevels";
 import { Menu, MenuItem } from "./Menu";
 import { initial } from "../lib/initial";
 import { errorText } from "../lib/errorText";
+import { callWindowShown } from "../lib/serviceWindows";
 
 interface CallOverlayProps {
   callState: CallState;
@@ -66,10 +67,13 @@ function Grips({ handleProps }: { handleProps: (corner: Corner) => Record<string
   );
 }
 
+/** `mm:ss`, or `h:mm:ss` past the hour: an hour and five minutes read 65:00. */
 function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
-  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  const mmss = `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  return h ? `${h}:${mmss}` : mmss;
 }
 
 export function CallOverlay({
@@ -130,6 +134,8 @@ export function CallOverlay({
   // by the contact while the focus was on its Mute, left it on the page body.
   const box = miniWindow.boxProps.ref;
   const opener = useRef<HTMLElement | null>(null);
+  // Over a contact's app too (the web draws it over everything): it closes first, so Mute and End call are in reach.
+  useEffect(callWindowShown, []);
   useTabTrap(box, !mini);
   useEffect(() => {
     const active = document.activeElement as HTMLElement | null;
@@ -300,15 +306,18 @@ export function CallOverlay({
         </p>
       </div>
 
-      {/* On a phone your own picture starts at the top right, 64 to 154 px down (`selfView` above): the notice goes
-          below it, and over it when the picture is dragged or grown there, or "… is sharing their screen" lost its end. */}
+      {/* On a phone your own picture starts at the top right, 64 px down and 120 px wide (`selfView` above), as high as
+          its shape makes it: 90 px for a camera held sideways (4:3), 160 px held upright (3:4). The notice goes 16 px
+          below that, and over it when the picture is dragged or grown there, or "… is sharing their screen" lost its
+          end. A fixed 10.5rem put it 48 px into an upright camera's picture (agents#1630). */}
       {sharingNotice && (
         <p
           role="status"
           data-testid="call-sharing"
           data-self={isScreenSharing}
           data-peer={remoteIsScreenSharing}
-          className="call-share-notice absolute top-16 max-md:top-[calc(10.5rem+env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-20 max-w-[calc(100%-2rem)] flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium bg-accent text-on-accent shadow-lg"
+          style={phone && !mini ? { top: `calc(${64 + Math.round(120 / selfAspect) + 16}px + env(safe-area-inset-top))` } : undefined}
+          className="call-share-notice absolute top-16 left-1/2 -translate-x-1/2 z-20 max-w-[calc(100%-2rem)] flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium bg-accent text-on-accent shadow-lg"
         >
           <svg className="shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <rect x="2" y="4" width="20" height="13" rx="2" />
@@ -497,6 +506,7 @@ export function CallOverlay({
 
 const DEVICE_KINDS_SHOWN: readonly DeviceKind[] = ["audioinput", "videoinput", "audiooutput"];
 const KIND_NAME = { audioinput: "settings.media.microphone", videoinput: "settings.media.camera", audiooutput: "settings.media.speaker" } as const;
+const NOTICE_TEXT = { lost: "calls.devices.lost", gone: "calls.devices.gone", failed: "calls.devices.failed", back: "calls.devices.back" } as const;
 
 /** The call's device menu: which microphone, camera and speaker, switched without leaving the call. */
 function DeviceMenu({ devices }: { devices: CallDevices }) {
@@ -549,7 +559,7 @@ function DeviceMenu({ devices }: { devices: CallDevices }) {
   );
 }
 
-/** A device went away and the default took over, or the chosen one is back, with the way to switch to it. */
+/** A device went away and the default took over (or none could), the chosen one is back (with the way to switch to it), or one chosen could not be used. */
 function DeviceNoticeBar({ devices }: { devices: CallDevices }) {
   const { t } = useI18n();
   const notice = devices.notice!;
@@ -557,7 +567,7 @@ function DeviceNoticeBar({ devices }: { devices: CallDevices }) {
   return (
     <div role="status" data-testid="call-device-notice" data-type={notice.type} data-kind={notice.kind}
       className="call-share-error absolute bottom-32 max-md:bottom-[calc(8.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-10 w-max max-w-[calc(100%-2rem)] flex items-center gap-3 rounded-lg bg-black/70 px-3 py-2 text-xs text-white">
-      <span className="min-w-0 truncate">{t(notice.type === "lost" ? "calls.devices.lost" : "calls.devices.back", { name })}</span>
+      <span className="min-w-0 truncate">{t(NOTICE_TEXT[notice.type], { name })}</span>
       {notice.type === "back" && (
         <button type="button" data-testid="call-device-switch-back" onClick={devices.switchBack}
           className="shrink-0 rounded-full bg-accent text-on-accent px-2.5 py-1 font-medium cursor-pointer hover:bg-accent-hover">

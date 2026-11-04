@@ -46,6 +46,15 @@ const SWAPPED_ON_PURPOSE = {
   "hooks/useBackgroundPoller.ts": "The shared peer polls for itself; Desktop has nothing to add.",
 };
 
+/**
+ * Desktop modules whose calls into Rust only a build with a flag on carries: without it the module's code is dead and
+ * the minifier drops it, as it should. Their calls are required only when the check runs with that flag set, as the
+ * build did (the same job's environment).
+ */
+const BEHIND_A_BUILD_FLAG = {
+  "apps/ui/src/desktop/translate.ts": "VITE_TRANSLATE",
+};
+
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const problems = [];
 
@@ -81,8 +90,18 @@ for (const path of Object.keys(SWAPPED_ON_PURPOSE)) {
 // 2. What Desktop's own modules ask of Rust survived into the built app.
 const own = [join(root, "apps/ui/src/main.tsx"), ...walk(join(root, "apps/ui/src/desktop"))].filter((path) => /\.tsx?$/.test(path));
 const wanted = new Map();
+const flagged = new Set();
+for (const [path, flag] of Object.entries(BEHIND_A_BUILD_FLAG)) {
+  if (!existsSync(join(root, path))) problems.push(`${path} is gone — drop it from BEHIND_A_BUILD_FLAG.`);
+  else if (process.env[flag] !== "1") flagged.add(join(root, path));
+}
 for (const path of own) {
+  // Still read for check 3: its calls are Desktop's, never a swapped module's.
   const source = readFileSync(path, "utf8");
+  if (flagged.has(path)) {
+    for (const [, needle] of source.matchAll(/\binvoke\s*(?:<[\s\S]*?>)?\s*\(\s*"([^"]+)"/g)) wanted.set(needle, null);
+    continue;
+  }
   const found = [
     ...source.matchAll(/\binvoke\s*(?:<[\s\S]*?>)?\s*\(\s*"([^"]+)"/g),
     ...source.matchAll(/\bprotocol:\s*"([^"]+)"/g),
@@ -102,6 +121,7 @@ if (bundle.length === 0) {
   problems.push("No JavaScript in apps/ui/dist/. Run `npm run build` first.");
 } else {
   for (const [needle, source] of wanted) {
+    if (source === null) continue; // behind a build flag that is off
     if (!bundle.includes(needle)) problems.push(`${JSON.stringify(needle)}, from ${source}, is not in the built app.`);
   }
   // 3. The stand-ins are what shipped: a swapped module's own calls into Rust are not in the built app. One name alone

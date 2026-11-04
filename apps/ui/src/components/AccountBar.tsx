@@ -6,7 +6,8 @@ import { useMyAvatar } from "../hooks/useAvatars";
 import { useLocation } from "react-router-dom";
 import { useI18n } from "../contexts/I18nContext";
 import { useSettings } from "../contexts/SettingsContext";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
 import { THEME_COLOR, currentProfile, themeOf } from "../lib/profiles";
 import { useIdentityAttention } from "../lib/identities";
 import { IdentitiesIcon } from "./identities/IdentitiesIcon";
@@ -47,14 +48,18 @@ function placeNameCut(nav: HTMLElement): boolean {
   });
 }
 
-export function AccountBar() {
+/** `rail`: under the chat list folded to a rail (ChatRail.tsx), the places stacked by their icons, their names in the tooltips. */
+export function AccountBar({ rail = false }: { rail?: boolean }) {
   const nav = useAppNavigation();
   const location = useLocation();
   const { t } = useI18n();
   const { settings } = useSettings();
-  const platform = useServicesPlatform();
+  // What the bar shows of the platform, drawn again when that changes: the engine sends its state anew on every
+  // change, up to 20 a second while a file moves, and the bar is always on screen.
+  const { platform, wallet, online, canSwitch } = usePlatformValue(() => ({
+    platform: !!servicesPlatform, wallet: !!servicesPlatform?.wallet, online: servicesPlatform?.isOnline() ?? false, canSwitch: !!servicesPlatform?.features.profiles,
+  }));
   const panelRoot = useRef<HTMLDivElement>(null);
-  const wallet = platform?.wallet;
   // The balance is not shown here (the Wallet page and its cards have it). What came in while the wallet was closed
   // is a dot on the icon, filled for real sats, hollow for test sats; how many is in the tooltip and the name.
   const unseen = useUnseenSats();
@@ -90,7 +95,6 @@ export function AccountBar() {
   }, [placeNames, placeCount]);
   const identityAttention = useIdentityAttention();
   const onIdentities = location.pathname === "/identities";
-  const online = platform?.isOnline() ?? false;
   const name = settings.defaultNickname;
 
   const onWallet = location.pathname === "/wallet";
@@ -98,16 +102,15 @@ export function AccountBar() {
   const myAvatar = useMyAvatar();
   // The account switcher: a click on the Profile place (the menu leads to the Profile page too), or Alt+Shift+P.
   // Where there is one profile only, the place is the way to the Profile page.
-  const canSwitch = !!platform?.features.profiles;
   const switcher = useProfileSwitcher(canSwitch);
   const glances = useProfileGlances();
-  const profileLabel = `${t("settings.profile")}: ${profile.name}${name ? `, ${name}` : `, ${t("common.anonymous")}`}, ${online ? "Online" : "Offline"}${
+  const profileLabel = `${t("settings.profile")}: ${profile.name}${name ? `, ${name}` : `, ${t("common.anonymous")}`}, ${online ? t("services.online") : t("services.offline")}${
     canSwitch && glances.othersFresh ? `, ${t("profileSwitcher.othersNew")}` : canSwitch && glances.othersUnread ? `, ${t("profileSwitcher.othersUnread")}` : ""}`;
   const walletLabel = `${unseenSatsLabel(t("tabs.wallets"), unseen, t)}${backupDue ? `, ${t("wallet.backupReminder.label")}` : ""}`;
 
   return (
-    <div ref={panelRoot} className="account-footer relative border-t border-border bg-sidebar-bg" data-testid="account-bar">
-      <nav ref={navRef} aria-label={t("sidebar.account")} className="account-actions" data-compact={labelsHidden || undefined}>
+    <div ref={panelRoot} className="account-footer relative border-t border-border bg-sidebar-bg" data-testid="account-bar" data-rail={rail || undefined}>
+      <nav ref={navRef} aria-label={t("sidebar.account")} className="account-actions" data-compact={labelsHidden || rail || undefined}>
         <button
           data-testid="account-profile"
           onClick={canSwitch ? switcher.toggle : () => (onProfile ? nav.home() : nav.place("/profile"))}
@@ -118,10 +121,11 @@ export function AccountBar() {
           title={`${t("settings.profile")}: ${profile.name}`}
         >
           <span className="relative w-[23px] h-[23px] shrink-0 flex items-center justify-center">
-            {/* The active profile's initial in its own color: which profile this is, at a glance. */}
+            {/* The active profile's initial in its own color: which profile this is, at a glance. Drawn by CSS, so the
+                place shows only the name its own name holds (Label in Name), not "P" glued to "Personal". */}
             {myAvatar
               ? <img src={myAvatar} alt="" aria-hidden="true" draggable={false} className="w-[23px] h-[23px] rounded-full object-cover" />
-              : <span aria-hidden="true" className="grid place-items-center w-[23px] h-[23px] rounded-full text-[12px] font-bold text-[#111b21]" style={{ background: THEME_COLOR[themeOf(profile.id)] }}>{initial(profile.name)}</span>}
+              : <span aria-hidden="true" data-initial={initial(profile.name)} className="grid place-items-center w-[23px] h-[23px] rounded-full text-[12px] font-bold text-[#111b21] before:content-[attr(data-initial)]" style={{ background: THEME_COLOR[themeOf(profile.id)] }} />}
             {platform && (
               <span
                 className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-sidebar-bg ${
@@ -134,7 +138,7 @@ export function AccountBar() {
             {canSwitch && (glances.othersUnread > 0 || glances.othersFresh > 0) && <span data-testid="account-profile-others" aria-hidden="true" className="profile-others-ring" />}
             {canSwitch && glances.othersFresh > 0 && <span data-testid="account-profile-others-new" aria-hidden="true" className="profile-others-new" />}
           </span>
-          <span className="account-label" data-name="">{profileName}</span>
+          <span className="account-label" data-name="" dir="auto">{profileName}</span>
         </button>
 
         {wallet && (

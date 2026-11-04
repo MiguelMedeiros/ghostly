@@ -5,9 +5,19 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { tabbables } from "../hooks/useDismiss";
 import { JUMP_TO } from "../hooks/useJumpTo";
 import { languageTag } from "../lib/documentLanguage";
-import { pauseHeld, resumeHeld, stopHeld, useNowPlaying } from "../lib/nowPlaying";
+import { onNowPlaying, pauseHeld, resumeHeld, stopHeld, useNowPlaying } from "../lib/nowPlaying";
 import { onVoiceRate, voiceRate } from "../lib/voicePlayback";
 import { SpeedPill } from "./voice/VoiceBubble";
+
+/**
+ * The bar is going with the focus in it: the focus goes on first to what Tab reaches after it (the tab bar, or the
+ * open chat or page), or else to the main region, not to the page's body.
+ */
+function focusPast(bar: HTMLElement | null): void {
+  if (!bar?.contains(document.activeElement)) return;
+  const next = tabbables(document.body).find((el) => !bar.contains(el) && bar.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+  (next ?? bar.closest<HTMLElement>("main[tabindex]"))?.focus();
+}
 
 /**
  * The voice message or audio file playing on away from its chat (lib/nowPlaying.ts): who sent it and where, play and
@@ -23,6 +33,8 @@ export function NowPlayingBar({ className = "" }: { className?: string }) {
   useEffect(() => onVoiceRate(setRate), []);
   const playRef = useRef<HTMLButtonElement>(null);
   const barRef = useRef<HTMLElement>(null);
+  // It also goes by itself (played to its end, a broken file, another one starting): the focus goes on as Close's does.
+  useEffect(() => onNowPlaying((next) => { if (!next) focusPast(barRef.current); }), []);
   if (!now) return null;
 
   const voice = now.kind === "voice";
@@ -32,14 +44,9 @@ export function NowPlayingBar({ className = "" }: { className?: string }) {
   const open = () => {
     if (now.chat) nav.conversation(now.chat.path, now.messageId ? { [JUMP_TO]: now.messageId } : undefined);
   };
-  // Close goes with the bar: the focus goes on first to what Tab reaches after it (the tab bar, or the open chat or
-  // page), or else to the main region, not to the page's body.
+  // Close goes with the bar: the focus goes on first.
   const close = () => {
-    const bar = barRef.current;
-    if (bar?.contains(document.activeElement)) {
-      const next = tabbables(document.body).find((el) => !bar.contains(el) && bar.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
-      (next ?? bar.closest<HTMLElement>("main[tabindex]"))?.focus();
-    }
+    focusPast(barRef.current);
     stopHeld();
   };
 

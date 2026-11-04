@@ -26,6 +26,8 @@
       "tagsLabel": "الوسوم:",
       "updatedLabel": "آخر تحديث:"
     },
+    "clearFinished": "مسح المنتهية",
+    "clearFinishedHint": "يخفي المهام المنجزة والفاشلة والملغاة على هذا الجهاز. يعيد التحديث التالي من الروبوت المهمة.",
     "column": {
       "blocked": "متوقفة مؤقتًا",
       "closed": "متوقفة",
@@ -54,6 +56,10 @@
     "tagFilter": "عرض {{tag}} فقط",
     "tags": "الوسوم",
     "tasksMany": "{{count}} مهام",
+    "tasksMany_many": "{{count}} مهمة",
+    "tasksMany_one": "مهمة واحدة",
+    "tasksMany_other": "{{count}} مهمة",
+    "tasksMany_two": "مهمتان",
     "tasksOne": "مهمة واحدة",
     "title": "المهام",
     "view": {
@@ -83,6 +89,10 @@
     "info": "تنشر الروبوتات هذه البطاقات وتحدّثها. اضغط على واحدة للانتقال إليها في المحادثة.",
     "nextRun": "التالي {{when}}",
     "routinesMany": "{{count}} روتينات",
+    "routinesMany_many": "{{count}} روتينًا",
+    "routinesMany_one": "روتين واحد",
+    "routinesMany_other": "{{count}} روتين",
+    "routinesMany_two": "روتينان",
     "routinesOne": "روتين واحد",
     "title": "المهام"
   },
@@ -134,7 +144,7 @@
       "queued": "في الانتظار",
       "running": "قيد التنفيذ"
     },
-    "steps": "{{done}} من {{total}} خطوات",
+    "steps": "الخطوات: {{done}}/{{total}}",
     "updated": "حُدّثت {{ago}}"
   },
   "usage": {

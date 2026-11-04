@@ -1,0 +1,1 @@
+On an encrypted profile the Breez databases stay as they are and open only after the passphrase: they keep no phrase or private key, only payments with their preimages, leaves, deposits and the operators' session tokens.

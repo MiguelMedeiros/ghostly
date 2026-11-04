@@ -1,10 +1,10 @@
 import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { PairedTransport } from "@ghostly/core";
+import type { IdentityTimelineEntry, PairedTransport } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { TransportLine } from "../../components/TransportTimeline";
 import { ChatConnection } from "../../components/ChatConnection";
-import { liveAttemptText, mergeTimeline, shortReason, transportEventText, transportLineDetails, transportLineText, transportOptions, transportWaitText, type TransportEntry } from "../../lib/transportEvents";
+import { liveAttemptText, mergeTimeline, timelineMerger, shortReason, transportEventText, transportLineDetails, transportLineText, transportOptions, transportWaitText, type TransportEntry } from "../../lib/transportEvents";
 import { problemText } from "../../lib/problemText";
 import { translateWith } from "../../locales/translate";
 import { LANGUAGES, LOCALES } from "../i18n/locales";
@@ -236,6 +236,60 @@ describe("transport lines in the timeline", () => {
   });
 });
 
+describe("a chat's timeline as its list changes", () => {
+  type Row = { id: string; timestamp: number };
+  /** Each field read of a message counts. */
+  function counted(rows: Row[]) {
+    const reads = { n: 0 };
+    return { reads, rows: rows.map(m => new Proxy(m, { get(target, key, receiver) { reads.n++; return Reflect.get(target, key, receiver); } })) };
+  }
+  const lines = [line({ id: "a", at: 5 }), line({ id: "b", at: 1_500 }), line({ id: "c", kind: "flapping", since: 2_500, at: 9_000 })];
+  const shares = [{ id: "s", at: 3_500 } as IdentityTimelineEntry];
+
+  it("reads only the rows after those the list has the same, and keeps the rows before them", () => {
+    const merge = timelineMerger<Row>();
+    const { reads, rows } = counted(Array.from({ length: 1_000 }, (_, i) => ({ id: `m${i}`, timestamp: i * 10 })));
+    const before = merge(rows, lines, shares);
+    reads.n = 0;
+    // A message comes; the newest rows are handed out anew, as the stored copy does.
+    const list = [...rows.slice(0, 995), ...rows.slice(995).map(m => ({ ...m })), { id: "m1000", timestamp: 10_000 }];
+    const after = merge(list, lines, shares);
+    expect(reads.n).toBeLessThan(20);
+    expect(after).toEqual(mergeTimeline(list, lines, shares));
+    expect(after.slice(0, 990)).toEqual(before.slice(0, 990));
+    after.slice(0, 990).forEach((row, k) => { if (row !== before[k]) expect.fail(`row ${k} is a new object`); });
+  });
+
+  it("gives what mergeTimeline gives, whatever happens to the list, its lines and its shares", () => {
+    // A small generator with a fixed seed: the same lists on every run.
+    let seed = 7;
+    const pick = (n: number) => { seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648; return seed % n; };
+    const merge = timelineMerger<Row>();
+    let list: Row[] = [], log: TransportEntry[] = [], ids: IdentityTimelineEntry[] = [], next = 0;
+    const steps: (() => void)[] = [
+      // A message comes, now or a while back (a clock off).
+      () => { list = [...list, { id: `m${next}`, timestamp: next++ * 10 - pick(30) }]; },
+      // The newest rows handed out anew.
+      () => { list = [...list.slice(0, -3), ...list.slice(-3).map(m => ({ ...m }))]; },
+      // A row deleted.
+      () => { list = list.filter((_, i) => i !== pick(list.length || 1)); },
+      // A transport line, a flapping one with its start, or an identity share.
+      () => { log = [...log, line({ id: `l${next}`, at: next++ * 10 - pick(50) })]; },
+      () => { log = [...log, line({ id: `f${next}`, kind: "flapping", since: next * 10 - 40, at: next++ * 10 })]; },
+      () => { ids = [...ids, { id: `s${next}`, at: next++ * 10 - pick(50) } as IdentityTimelineEntry]; },
+      // The same lines as a new copy, or none, as a new empty list.
+      () => { log = [...log]; },
+      () => { if (!pick(4)) { log = []; ids = []; } },
+    ];
+    for (let k = 0; k < 800; k++) {
+      steps[pick(steps.length)]();
+      const lines = log.length || pick(2) ? log : [], shared = ids.length || pick(2) ? ids : [];
+      expect(merge(list, lines, shared), `step ${k}`).toEqual(mergeTimeline(list, lines, shared));
+    }
+    expect(list.length).toBeGreaterThan(50);
+  });
+});
+
 describe("the chat's connection control and its panel", () => {
   const all = ["webrtc/1", "iroh/1", "hyperdht/1"] as LinkView["availableTransports"];
 
@@ -254,6 +308,12 @@ describe("the chat's connection control and its panel", () => {
     ]);
     expect(transportOptions({ availableTransports: ["webrtc/1"], peerTransports: undefined }).filter(o => !o.available).map(o => o.reason))
       .toEqual(["Iroh needs Ghostly Desktop", "HyperDHT needs Ghostly Desktop, or a HyperDHT relay in Settings"]);
+    // This app has Iroh (the web on its Iroh relays) and it did not start: the relays are where to look, not another app.
+    expect(transportOptions({ availableTransports: ["webrtc/1"], runnableTransports: ["webrtc/1", "iroh/1"] }).find(o => o.transport === "iroh/1"))
+      .toEqual({ transport: "iroh/1", available: false, reason: "Iroh couldn't reach its relay · Settings, Network" });
+    // The same for HyperDHT on a HyperDHT relay that went away (its endpoint starting again): not "set a relay", one is set.
+    expect(transportOptions({ availableTransports: ["webrtc/1"], runnableTransports: ["webrtc/1", "hyperdht/1"] }).find(o => o.transport === "hyperdht/1"))
+      .toEqual({ transport: "hyperdht/1", available: false, reason: "HyperDHT couldn't reach its relay · Settings, Network" });
     // A native adapter that could not start says so in a few words, its next step left to the line below; Linux WebKitGTK has no WebRTC.
     expect(transportOptions({ availableTransports: ["hyperdht/1"], transportErrors: { "iroh/1": "All native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now." } }).map(o => o.reason))
       .toEqual(["This app has no WebRTC", "All native connections in use", undefined]);
@@ -285,7 +345,7 @@ describe("the chat's connection control and its panel", () => {
       ["DHT only", "false", false],
     ]);
     // The longer word is the row's tooltip.
-    expect(within(panel()).getByTestId("connection-option-hyperdht")).toHaveAttribute("title", "HyperDHT: Your contact's app doesn't support HyperDHT");
+    expect(within(panel()).getByTestId("connection-option-hyperdht")).toHaveAttribute("title", "Your contact's app doesn't support HyperDHT");
     await user.click(within(panel()).getByTestId("connection-option-iroh"));
     expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "iroh/1" }]);
     // The panel stays open: the choice moves at once, and what is in use follows when the switch lands.
@@ -384,7 +444,7 @@ describe("the chat's connection control and its panel", () => {
     expect(within(panel()).getAllByRole("radio").map(r => [r.getAttribute("aria-label"), r.getAttribute("aria-checked"), (r as HTMLButtonElement).disabled])).toEqual([
       ["Automatic", "false", false], ["WebRTC", "false", true], ["Iroh", "false", false], ["HyperDHT", "false", false], ["DHT only", "true", false],
     ]);
-    expect(within(panel()).getByTestId("connection-option-webrtc")).toHaveAttribute("title", "WebRTC: This app has no WebRTC");
+    expect(within(panel()).getByTestId("connection-option-webrtc")).toHaveAttribute("title", "This app has no WebRTC");
     await user.click(within(panel()).getByTestId("connection-option-auto"));
     expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "auto" }]);
   });

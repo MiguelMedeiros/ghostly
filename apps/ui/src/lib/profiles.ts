@@ -1,4 +1,6 @@
 import { knownDeviceGate } from "@ghostly/browser/devices/gate";
+import { fitText } from "./fitText";
+import { carryIncomingShare } from "./incomingShare";
 import type { ColorTheme } from "./settings";
 
 /**
@@ -139,7 +141,16 @@ function write(registry: Registry, notify = true): void {
   localStorage.setItem(registryKey(), JSON.stringify(registry));
   if (notify) window.dispatchEvent(new Event("profiles-updated"));
 }
-const cleanName = (name: string) => name.replace(/\s+/g, " ").trim().slice(0, 32);
+/** The longest profile name, in characters as a device link counts them (code points, `LINK_PROFILE_MAX`). */
+export const PROFILE_NAME_MAX = 32;
+/**
+ * Whether a profile's name fits whole. It is cut between whole characters (`fitText`), never inside an emoji: an
+ * input's `maxLength` counts UTF-16 units, so 16 emoji filled it and a pasted family lost its last people, leaving a
+ * dangling joiner in the name.
+ */
+export const fitsProfileName = (name: string): boolean => [...name].length <= PROFILE_NAME_MAX;
+/** Cleaned and cut to what fits; a joiner left at the end (an emoji typed a part at a time into the last room) goes. */
+const cleanName = (name: string) => fitText(name.replace(/\s+/g, " ").trim(), fitsProfileName).replace(/\u200d+$/u, "").trim();
 
 export function listProfiles(): ProfileEntry[] { return read().profiles.map(shown); }
 
@@ -383,13 +394,15 @@ export function switchProfile(id: string, options: { route?: string; avatar?: st
   const pending: PendingSwitch = { id, name: shown(target).name, color: THEME_COLOR[themeOf(id)], avatar: options.avatar, at: Date.now() };
   try { sessionStorage.setItem(SWITCH_KEY, JSON.stringify(pending)); } catch { /* no overlay after the reload */ }
   window.dispatchEvent(new CustomEvent<PendingSwitch>("profile-switching", { detail: pending }));
+  // A share waiting for a chat to be picked goes along: the profile opened shows it in its Share to… picker.
+  const shareKept = carryIncomingShare();
   // A moment for the overlay to be painted: the browser keeps that frame until the new page draws. Until
   // then this page stays the old profile under it (whatever re-renders reads the registry), so the new one
   // becomes active only now, quietly.
   setTimeout(() => {
     write({ ...read(), active: id }, false);
     // Not through the router: the old profile would try to open the new one's chat first.
-    window.history.replaceState(null, "", `#${options.route ?? lastRouteOf(id)}`);
+    window.history.replaceState(null, "", `#${options.route ?? (shareKept ? "/shared" : lastRouteOf(id))}`);
     window.location.reload();
   }, 80);
 }

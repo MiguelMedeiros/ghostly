@@ -1,7 +1,8 @@
 import { emptyIdentityLedger, emptyProofLedger, type IdentityLedger, type ProofLedger } from "@ghostly/core";
-import { APP_STORAGE_CHAT_INDEX, CARD_INDEX, STORES, fileStore, store, wrap, openDb } from "../shared/idb";
+import { APP_STORAGE_CHAT_INDEX, CARD_INDEX, STORES, fileStore, store, wrap, committed, openDb } from "../shared/idb";
 import { removeFileBytes } from "../shared/fileBytes";
 import type { MessagePage, Settings, StoredGroup, StoredLink, StoredMessage, StoredService } from "../shared/types";
+import { openRow, openRows, RowSeals, sealRow } from "./sealedRows";
 
 /**
  * The newest `count` rows of an index range, newest first: one descending read where IndexedDB has it (the options
@@ -28,6 +29,23 @@ function newestMessages(index: IDBIndex, query: IDBKeyRange, count: number): Pro
 /** A write that waits for no disk sync of its own (in a browser, the engine's default already; on Node, the CLI's store). */
 const RELAXED: IDBTransactionOptions = { durability: "relaxed" };
 
+const CHANGED = Symbol("changed");
+
+/**
+ * A chat's pinned key, for the transaction that checks and changes it, and the seals of the keys that change writes.
+ * Sealed (the data key is set), it is opened before the transaction, and holds inside it only while the row still has
+ * the sealed value that was opened: `CHANGED` otherwise.
+ */
+async function pinnedKey(linkId: string, key: string) {
+  const seals = new RowSeals();
+  if (!seals.on) return { seals, pinned: (link?: StoredLink) => link?.pairedPeerKey };
+  const seen = await wrap<StoredLink | undefined>((await store(STORES.links, "readonly")).get(linkId));
+  const opened = await openRow(STORES.links, seen);
+  await seals.prepare(STORES.links, [{ id: linkId, pairedPeerKey: key, peerTrust: { verifiedKey: key } }, { id: linkId, peerTrust: { verifiedKey: opened?.pairedPeerKey } }]);
+  const then = JSON.stringify(seen?.pairedPeerKey);
+  return { seals, pinned: (link?: StoredLink): string | undefined | typeof CHANGED => (JSON.stringify(link?.pairedPeerKey) === then ? opened?.pairedPeerKey : CHANGED) };
+}
+
 /**
  * Durable local state of the browser peer. Identity seeds live here the same
  * way Desktop keeps them in its WebView storage: local to this profile, never
@@ -35,11 +53,12 @@ const RELAXED: IDBTransactionOptions = { durability: "relaxed" };
  */
 export const db = {
   async getLinks(): Promise<StoredLink[]> {
-    return wrap((await store(STORES.links, "readonly")).getAll());
+    return openRows(STORES.links, await wrap((await store(STORES.links, "readonly")).getAll()));
   },
   async putLink(link: StoredLink): Promise<void> {
+    const row = await sealRow(STORES.links, link);
     const tx = (await openDb()).transaction(STORES.links, "readwrite");
-    tx.objectStore(STORES.links).put(link);
+    tx.objectStore(STORES.links).put(row);
     await new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve();
       tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("Link storage failed"));
@@ -47,10 +66,12 @@ export const db = {
   },
   /** `relaxed`: for what a power cut may cost (a round trip, a note made again later), no disk sync of its own. */
   async patchLink(linkId: string, patch: Partial<StoredLink>, relaxed = false): Promise<void> {
+    // Sealed before the transaction opens: one that waits for WebCrypto commits. What the patch leaves stays as stored.
+    const sealed = await sealRow(STORES.links, { ...patch, id: linkId });
     const tx = (await openDb()).transaction(STORES.links, "readwrite", relaxed ? RELAXED : undefined);
     const links = tx.objectStore(STORES.links);
     const request = links.get(linkId);
-    request.onsuccess = () => { if (!request.result) { tx.abort(); return; } links.put({ ...request.result, ...patch, id: linkId }); };
+    request.onsuccess = () => { if (!request.result) { tx.abort(); return; } links.put({ ...request.result, ...sealed }); };
     await new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve();
       tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("Link unavailable"));
@@ -98,13 +119,15 @@ export const db = {
     return result!;
   },
   async pinPeer(linkId: string, key: string, signedSignals = false): Promise<void> {
+    const { seals, pinned } = await pinnedKey(linkId, key);
     const tx = (await openDb()).transaction(STORES.links, "readwrite");
     const links = tx.objectStore(STORES.links);
     const request = links.get(linkId);
     request.onsuccess = () => {
       const link = request.result as StoredLink | undefined;
-      if (!link?.participationSeed || (link.pairedPeerKey && link.pairedPeerKey !== key)) { tx.abort(); return; }
-      links.put({ ...link, peerTrust: link.peerTrust ?? { version: 1, verifiedKey: link.pairedPeerKey }, pairedPeerKey: key, requireSignedSignals: link.requireSignedSignals || signedSignals, inviteCode: undefined });
+      const before = pinned(link);
+      if (!link?.participationSeed || before === CHANGED || (before && before !== key)) { tx.abort(); return; }
+      links.put(seals.row(STORES.links, { ...link, peerTrust: link.peerTrust ?? { version: 1, verifiedKey: before }, pairedPeerKey: key, requireSignedSignals: link.requireSignedSignals || signedSignals, inviteCode: undefined }));
     };
     await new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve();
@@ -112,13 +135,14 @@ export const db = {
     });
   },
   async verifyPeer(linkId: string, key: string): Promise<void> {
+    const { seals, pinned } = await pinnedKey(linkId, key);
     const tx = (await openDb()).transaction(STORES.links, "readwrite");
     const links = tx.objectStore(STORES.links);
     const request = links.get(linkId);
     request.onsuccess = () => {
       const link = request.result as StoredLink | undefined;
-      if (!link?.pairedPeerKey || link.pairedPeerKey !== key) { tx.abort(); return; }
-      links.put({ ...link, peerTrust: { version: 1, verifiedKey: key, verifiedAt: Date.now() } });
+      if (!link?.pairedPeerKey || pinned(link) !== key) { tx.abort(); return; }
+      links.put(seals.row(STORES.links, { ...link, peerTrust: { version: 1, verifiedKey: key, verifiedAt: Date.now() } }));
     };
     await new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve();
@@ -126,9 +150,9 @@ export const db = {
     });
   },
   async deleteLink(linkId: string): Promise<void> {
-    await wrap((await store(STORES.links, "readwrite")).delete(linkId));
+    await committed((await store(STORES.links, "readwrite")).delete(linkId));
     // By key range, inside IndexedDB: a chat of many rows builds no key list and no request per row on this thread.
-    await wrap((await store(STORES.messages, "readwrite")).delete(IDBKeyRange.bound([linkId], [linkId, []])));
+    await committed((await store(STORES.messages, "readwrite")).delete(IDBKeyRange.bound([linkId], [linkId, []])));
     await fileStore.deleteForLink(linkId);
     await removeFileBytes(`${linkId}-in-`);
     await removeFileBytes(`${linkId}-out-`);
@@ -192,6 +216,26 @@ export const db = {
     }
   },
   /**
+   * The oldest `limit` messages of a chat after `after` (and before `before`, when given), oldest first, and whether
+   * newer ones remain in that window. Reads those rows only: a bot that reads what came since its last message costs
+   * a page, where reading the whole history and cutting it cost 94 ms of the daemon's time a call at 7,000 messages.
+   */
+  async getMessagePageAfter(linkId: string, { limit, before, after }: { limit: number; before?: { timestamp: number; id?: string }; after: { timestamp: number; id?: string } }): Promise<MessagePage> {
+    const upper = before?.timestamp ?? Infinity;
+    // A window with nothing in it (crossed, or one time both ends leave out): IndexedDB refuses such a range.
+    if (after.timestamp > upper || (after.timestamp === upper && (after.id === undefined || before?.id === undefined))) return { messages: [], more: false };
+    const range = IDBKeyRange.bound([linkId, after.timestamp], [linkId, upper], after.id === undefined, !!before && before.id === undefined);
+    // Messages of `after`'s time up to it, and of `before`'s from it on, are in the range but not in the window.
+    const kept = (m: StoredMessage) => !(after.id !== undefined && m.timestamp === after.timestamp && m.id <= after.id)
+      && !(before?.id !== undefined && m.timestamp === before.timestamp && m.id >= before.id);
+    for (let want = limit + 1; ;) {
+      const oldest = await wrap<StoredMessage[]>((await store(STORES.messages, "readonly")).index("byLinkTime").getAll(range, want));
+      const page = oldest.filter(kept);
+      if (page.length > limit || oldest.length < want) return { messages: page.slice(0, limit), more: page.length > limit };
+      want += oldest.length - page.length;
+    }
+  },
+  /**
    * Every message of this profile that carries a task, a routine or a usage card, from every chat and group, oldest first (time,
    * then id). Reads the card index only (`CARD_INDEX`): no chat's history is read, however long. The index follows the
    * rows, so an edit's card, a deleted message and a deleted chat or group are in step with no bookkeeping.
@@ -220,7 +264,7 @@ export const db = {
   },
   /** Writes a message whether or not it is there: lines of history that change as what they tell changes. */
   async putMessage(message: StoredMessage): Promise<void> {
-    await wrap((await store(STORES.messages, "readwrite")).put(message));
+    await committed((await store(STORES.messages, "readwrite")).put(message));
   },
   async updateDelivery(linkId: string, id: string, delivery: NonNullable<StoredMessage["delivery"]>, deliveryError?: string, extra?: Partial<Pick<StoredMessage, "via" | "resendUntil">>): Promise<void> {
     // `sent` and `delivered` are relaxed (written, with no disk sync of their own): a mark lost to a power cut is made
@@ -294,37 +338,38 @@ export const db = {
     return results.filter((row): row is StoredMessage => !!row);
   },
   async deleteMessage(linkId: string, messageId: string): Promise<void> {
-    await wrap((await store(STORES.messages, "readwrite")).delete([linkId, messageId]));
+    await committed((await store(STORES.messages, "readwrite")).delete([linkId, messageId]));
   },
 
   async getGroups(): Promise<StoredGroup[]> {
-    return wrap((await store(STORES.groups, "readonly")).getAll());
+    return openRows(STORES.groups, await wrap((await store(STORES.groups, "readonly")).getAll()));
   },
   async putGroup(group: StoredGroup): Promise<void> {
-    await wrap((await store(STORES.groups, "readwrite")).put(group));
+    const row = await sealRow(STORES.groups, group);
+    await committed((await store(STORES.groups, "readwrite")).put(row));
   },
   /** The group and its history. */
   async deleteGroup(groupId: string): Promise<void> {
-    await wrap((await store(STORES.groups, "readwrite")).delete(groupId));
+    await committed((await store(STORES.groups, "readwrite")).delete(groupId));
     // By key range, as a chat's (`deleteLink`): one request, not one per message of a long group.
     const link = `group:${groupId}`;
-    await wrap((await store(STORES.messages, "readwrite")).delete(IDBKeyRange.bound([link], [link, []])));
+    await committed((await store(STORES.messages, "readwrite")).delete(IDBKeyRange.bound([link], [link, []])));
   },
 
   async getServices(): Promise<StoredService[]> {
     return wrap((await store(STORES.services, "readonly")).getAll());
   },
   async putService(service: StoredService): Promise<void> {
-    await wrap((await store(STORES.services, "readwrite")).put(service));
+    await committed((await store(STORES.services, "readwrite")).put(service));
   },
   async deleteService(serviceId: string): Promise<void> {
-    await wrap((await store(STORES.services, "readwrite")).delete(serviceId));
+    await committed((await store(STORES.services, "readwrite")).delete(serviceId));
   },
 
   async getSettings(): Promise<Partial<Settings>> {
     return (await wrap((await store(STORES.settings, "readonly")).get("settings"))) ?? {};
   },
   async putSettings(settings: Settings): Promise<void> {
-    await wrap((await store(STORES.settings, "readwrite")).put(settings, "settings"));
+    await committed((await store(STORES.settings, "readwrite")).put(settings, "settings"));
   },
 };

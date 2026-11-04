@@ -47,6 +47,7 @@ function objectStore(target: Map<string, Map<string, Row>>, name: string) {
 export const idbModule = {
   STORES: { links: "links", messages: "messages", services: "services", settings: "settings", files: "files", ...Object.fromEntries(Object.keys(KEYS).map((k) => [k, k])) },
   wrap: async <T>(value: T) => value,
+  committed: async <T>(value: T) => value,
   store: async (name: string) => objectStore(db, name),
   /** As the real one reads it from its index: the `count` newest movements of the mints wanted, newest first. */
   newestWalletTx: async (wanted: (mint: string) => boolean, count: number) =>
@@ -111,6 +112,9 @@ export class FakeWallet {
   sendOffline(..._args: unknown[]): { send: unknown[] } { throw new Error("No exact coins"); }
   /** A mint with no input fee. */
   getFeesForProofs(): { toNumber(): number } { return { toNumber: () => 0 }; }
+  getFeesToInclude(): { toNumber(): number } { return { toNumber: () => 0 }; }
+  /** A swap takes in every coin: what the wallet holds is what it can send. */
+  selectProofsToSend(proofs: { amount: number }[]) { return { keep: [], send: proofs.map((p) => ({ ...p, amount: { toNumber: () => p.amount } })) }; }
   async prepareSwapToSend(amount: number, proofs: { secret: string; amount: number }[], config: unknown) {
     const { Amount } = await real();
     prepared.set(spends(proofs), { kind: "send", args: [amount, proofs, config] });

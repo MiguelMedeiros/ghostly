@@ -175,11 +175,15 @@ impl ServerCertVerifier for Pinned {
     }
 }
 
-fn build_client(certificate: Option<&[u8]>) -> Result<reqwest::Client, String> {
+/// `plain`: the node is reached in plain http, on this machine. A proxy set in the environment would read that
+/// request whole, macaroon included (and could not reach this machine anyway), so it goes straight to the node.
+/// Over https a proxy only relays the encrypted connection, which a node reached through Tor may need.
+fn build_client(certificate: Option<&[u8]>, plain: bool) -> Result<reqwest::Client, String> {
     let builder = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(15))
         .pool_idle_timeout(Duration::from_secs(60));
+    let builder = if plain { builder.no_proxy() } else { builder };
     let builder = match certificate {
         Some(der) => {
             let provider = Arc::new(rustls::crypto::ring::default_provider());
@@ -200,20 +204,22 @@ fn build_client(certificate: Option<&[u8]>) -> Result<reqwest::Client, String> {
     builder.build().map_err(|e| format!("HTTP client: {}", e))
 }
 
-/// A few clients, one per certificate, so polling a node reuses its connection.
-fn client(certificate: Option<Vec<u8>>) -> Result<reqwest::Client, String> {
-    static CACHE: Mutex<Vec<(Option<Vec<u8>>, reqwest::Client)>> = Mutex::new(Vec::new());
+/// A few clients, one per certificate and scheme, so polling a node reuses its connection.
+fn client(certificate: Option<Vec<u8>>, plain: bool) -> Result<reqwest::Client, String> {
+    type Key = (Option<Vec<u8>>, bool);
+    static CACHE: Mutex<Vec<(Key, reqwest::Client)>> = Mutex::new(Vec::new());
+    let key = (certificate, plain);
     let mut cache = CACHE
         .lock()
         .map_err(|_| "HTTP client cache poisoned".to_string())?;
-    if let Some((_, client)) = cache.iter().find(|(key, _)| *key == certificate) {
+    if let Some((_, client)) = cache.iter().find(|(held, _)| *held == key) {
         return Ok(client.clone());
     }
-    let client = build_client(certificate.as_deref())?;
+    let client = build_client(key.0.as_deref(), plain)?;
     if cache.len() >= CLIENTS {
         cache.remove(0);
     }
-    cache.push((certificate, client.clone()));
+    cache.push((key, client.clone()));
     Ok(client)
 }
 
@@ -247,7 +253,7 @@ pub async fn request(request: LndRequest) -> Result<LndResponse, String> {
         ),
         None => None,
     };
-    let client = client(certificate)?;
+    let client = client(certificate, url.scheme() != "https")?;
     let mut builder = match request.method.as_str() {
         "GET" => client.get(url),
         "POST" => client.post(url),
@@ -772,6 +778,29 @@ mod http_tests {
             body: body.map(Into::into),
             stream: None,
             timeout_ms: 5_000,
+        }
+    }
+
+    /// A proxy set in the environment never sees a request to a node in plain http, where it would read the
+    /// macaroon: by name or by address, it goes straight to the node.
+    #[test]
+    fn a_plain_http_node_is_never_reached_through_a_proxy() {
+        let used =
+            crate::test_support::proxied_run("lnd::http_tests::plain_http_requests_skip_the_proxy");
+        assert_eq!(used, 0);
+    }
+
+    #[tokio::test]
+    #[ignore = "run by a_plain_http_node_is_never_reached_through_a_proxy, with a proxy set"]
+    async fn plain_http_requests_skip_the_proxy() {
+        for host in ["localhost", "127.0.0.1"] {
+            let (url, seen) = node(unary(r#"{"alias":"node"}"#));
+            let url = url.replace("127.0.0.1", host);
+            let answer = request(call(&url, "GET", "/v1/getinfo", None))
+                .await
+                .unwrap();
+            assert_eq!(answer.status, 200, "{host}");
+            assert_eq!(seen.lock().unwrap().len(), 1, "{host}");
         }
     }
 

@@ -3,6 +3,7 @@ import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppBrand } from "../../components/AppBrand";
 import { BRAND_MOTION_KEY, resetBrandLaunch } from "../../lib/brandMotion";
+import { shownInName } from "../labelInName";
 import { renderApp } from "../render";
 
 // covers: app.home, wallet.mode
@@ -18,7 +19,11 @@ describe("the logo at the top of the chat list", () => {
 
   it("is the ghost and GHOSTLY, one link home, with no Testnet badge and no way to the wallets", () => {
     open();
-    expect(screen.getByRole("link", { name: "Go home" })).toHaveTextContent("GHOSTLY");
+    // Named by the word it shows, so "click Ghostly" finds it; where it goes is its description.
+    const link = screen.getByRole("link", { name: "Ghostly" });
+    expect(link).toHaveTextContent("GHOSTLY");
+    expect(link).toHaveAccessibleName(shownInName(link));
+    expect(link).toHaveAccessibleDescription("Go home");
     expect(screen.getAllByRole("link")).toHaveLength(1);
     expect(screen.queryByTestId("testnet-badge")).not.toBeInTheDocument();
     expect(brand()).not.toHaveTextContent(/testnet/i);

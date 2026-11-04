@@ -10,7 +10,7 @@ export type IdentityTimelineSide = "mine" | "theirs";
 export type IdentityTimelineState = "verifying" | "verified" | "failed";
 
 export interface IdentityTimelineEntry {
-  /** Unique in the chat: side, proof and how many entries that proof already had on that side. */
+  /** Unique in the chat: side, proof and one past the highest number that proof's kept entries on that side have. */
   id: string;
   /** The proof's id (identityStatement().id). */
   proof: string;
@@ -57,8 +57,11 @@ export function applyIdentityEvent(timeline: readonly IdentityTimelineEntry[], e
   const i = lastOf(out, event.side, event.type === "result" ? [event.proof, event.requested] : [event.proof]);
   const last = i >= 0 ? out[i] : undefined;
   const add = (entry: Omit<IdentityTimelineEntry, "id" | "at">) => {
-    const n = out.filter(e => e.side === entry.side && e.proof === entry.proof).length;
-    out.push({ ...entry, id: `${entry.side}:${entry.proof}:${n}`, at });
+    // One past the highest number kept, not the count: the bound may have cut this proof's earlier entries.
+    const prefix = `${entry.side}:${entry.proof}:`;
+    let n = 0;
+    for (const e of out) if (e.id.startsWith(prefix)) n = Math.max(n, Number(e.id.slice(prefix.length)) + 1 || 0);
+    out.push({ ...entry, id: `${prefix}${n}`, at });
   };
   switch (event.type) {
     case "shared":

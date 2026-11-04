@@ -45,6 +45,51 @@ function comesBack(world: CommunityWorld, back: Peer, first: Peer): void {
   world.reopen(back);
 }
 
+/**
+ * A mesh whose `slow` member's app handles `rate` group frames a second, every member's in one queue, as a phone's
+ * single thread does: `linkHandled` says when nothing of that way is queued any more, `linkWaiting` how much is.
+ * Turned on with `start`, once the members are in.
+ */
+async function slowAppMesh(names: string[], slowName: string, rate: number) {
+  const world = new CommunityWorld(undefined, null);
+  const queue: { from: Peer; frame: Record<string, unknown> }[] = [];
+  const waiters: { from: string; done: (v: boolean) => void }[] = [];
+  const keyOf = new Map<Peer, string>();
+  let slow: Peer | null = null, groupId = "";
+  const nameOf = (peer: Peer, linkId: string) => [...keyOf].find(([, key]) => key === peer.links.get(linkId)?.peer)?.[0].name;
+  const extra = (peer: Peer) => ({
+    linkHandled: (linkId: string) => new Promise<boolean>(done => { const to = nameOf(peer, linkId); if (to === slowName) waiters.push({ from: peer.name, done }); else done(false); }),
+    linkWaiting: (linkId: string) => { const from = nameOf(peer, linkId); return peer === slow ? queue.filter(item => item.from.name === from).length : 0; },
+  });
+  const run = world.run.bind(world);
+  world.run = async (ms: number, step = 1000) => {
+    for (let t = 0; t < ms; t += step) {
+      await run(step, step);
+      if (!slow?.online) { queue.length = 0; continue; }
+      for (const { from, frame } of queue.splice(0, rate)) if (from.online) await slow.groups.handleEdgeFrame(groupId, keyOf.get(from)!, frame);
+      for (const waiter of waiters.splice(0)) if (queue.some(item => item.from.name === waiter.from)) waiters.push(waiter); else waiter.done(true);
+      await world.settle();
+    }
+  };
+  const [admin, ...rest] = names.map(name => world.add(name, extra));
+  const id = groupId = await admin.groups.create("Turns", "mesh");
+  const link = await admin.groups.enableLink(id);
+  for (const p of rest) await p.groups.joinByLink(link);
+  const peers = [admin, ...rest];
+  await world.until(() => peers.every(p => world.view(p, id)?.members.length === peers.length && world.view(p, id)!.members.every(m => m.online)), 20 * 60_000, 1000);
+  for (const p of peers) keyOf.set(p, world.view(p, id)!.myKey!);
+  const start = (onFrame: (from: Peer, frame: Record<string, unknown>) => void) => {
+    slow = peers.find(p => p.name === slowName)!;
+    world.drop = (from, to, frame) => {
+      if (to !== slow) return false;
+      onFrame(from, frame);
+      queue.push({ from, frame });
+      return true;
+    };
+  };
+  return { world, peers, id, start };
+}
+
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe("a member back in a private group reads what it missed in the order it was written", { timeout: 120_000 }, () => {
@@ -266,5 +311,31 @@ describe("a member back in a private group reads what it missed in the order it 
     expect(world.texts(dave, id).filter(t => written.includes(t))).toEqual(written);
     expect(toldNext - back).toBeGreaterThanOrEqual(MESH_SYNC_HOLD_MS);
     expect(toldNext - back).toBeLessThanOrEqual(5_000);
+  });
+
+  it("an app that handles a frame a second: the others wait while the first answer is still queued, and each message comes about once", async () => {
+    const { world, peers, id, start } = await slowAppMesh(["alice", "bob", "carol", "dave"], "dave", 1);
+    const [alice, , carol, dave] = peers;
+    dave.online = false;
+    await world.run(2_000);
+    for (let i = 0; i < 200; i++) await carol.groups.send(id, `carol ${i}`);
+    await world.run(2_000);
+    // Every frame to Dave waits its turn behind the others: the members' syncs first, then Alice's answer of all 200.
+    const seen = new Set<string>();
+    let copies = 0, told = false;
+    start((_from, frame) => {
+      if (frame.t !== "group-msg") return;
+      const key = `${frame.s}:${frame.e}:${frame.n}`;
+      if (seen.has(key)) copies++; else seen.add(key);
+    });
+    const drop = world.drop!;
+    world.drop = (from, to, frame) => { if (from === dave && to === alice && frame.t === "group-sync") told = true; return drop(from, to, frame); };
+    world.holdEdge = (a, b) => (a === dave || b === dave) && a !== alice && b !== alice && !told;
+    await world.restart(dave);
+    const has = () => world.texts(dave, id).filter(t => /^carol \d+$/.test(t)).length;
+    const took = await world.until(() => has() === 200, 20 * 60_000);
+    // Told 1.5 s after the ask, with nothing of Alice's answer handled yet, Bob or Carol sent the same ones again (49).
+    expect(copies).toBeLessThanOrEqual(5);
+    expect(took).toBeLessThanOrEqual(215_000);
   });
 });

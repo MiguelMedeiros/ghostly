@@ -18,6 +18,8 @@ const RANK: Record<GroupPayNote["state"], number> = { open: 0, sent: 1, closed: 
 const ID = /^[A-Za-z0-9_-]{8,64}$/;
 /** Notes of mine sent again to a member whose edge opens. */
 const RESEND = 32;
+/** Notes from others still waiting for their initiator, kept per group in memory only; the oldest go first. */
+export const WAITING = 256;
 export const NOTE_ID = (id: string) => `gpay:${id}`;
 
 /** A `group-pay` frame, strictly: anything else is dropped. */
@@ -107,7 +109,8 @@ const testOf = (p: PaymentView, federationNetwork: (federation: string) => strin
 
 /**
  * What this device says about one of its own payments in a group, or null when it says nothing (not a group's,
- * or nothing to say yet). `all` is every desk record, to find a request's payments and whether this device paid it.
+ * or nothing to say yet). `all` is the desk records to find a request's payments in (and whether this device paid it):
+ * every record, or only that request's.
  */
 export function authoredNote(p: PaymentView, at: Placement, all: readonly PaymentView[], current?: GroupPayNote, memberOf: (linkId: string) => string | undefined = () => undefined,
   federationNetwork: (federation: string) => string | undefined = () => undefined): GroupPayFrame | null {
@@ -163,6 +166,8 @@ export interface GroupPaymentsHost {
 
 export class GroupPayments {
   private readonly notes = new Map<string, Map<string, GroupPayNote>>();
+  /** Per group, the ids of others' notes still `undescribed`, oldest first. */
+  private readonly waiting = new Map<string, Set<string>>();
   private queue = Promise.resolve();
 
   constructor(private readonly host: GroupPaymentsHost) {}
@@ -200,12 +205,16 @@ export class GroupPayments {
     // Once per group per pass: a device may keep many payments, in few groups.
     const known = new Map<string, ReturnType<GroupPaymentsHost["membership"]>>();
     const membership = (groupId: string) => { if (!known.has(groupId)) known.set(groupId, this.host.membership(groupId)); return known.get(groupId); };
+    // A request's payments, found once per pass: each request searching every record made a pass with 1,000 group
+    // requests among 5,000 payments take 32 ms, on every payment change.
+    const answers = new Map<string, PaymentView[]>();
+    for (const x of all) if (x.requestId) { const list = answers.get(x.requestId); if (list) list.push(x); else answers.set(x.requestId, [x]); }
     for (const p of all) {
       const at = this.placement(p, membership);
       if (!at) continue;
       const notes = await this.load(at.groupId);
       const current = notes.get(paymentWireId(p.id));
-      const frame = authoredNote(p, at, all, current, linkId => this.host.edgeOf(linkId)?.member, federation => this.host.federationNetwork?.(federation));
+      const frame = authoredNote(p, at, answers.get(p.id) ?? [], current, linkId => this.host.edgeOf(linkId)?.member, federation => this.host.federationNetwork?.(federation));
       if (!frame || JSON.stringify(frame) === JSON.stringify(current?.mine)) continue;
       const merged = mergeGroupPay(current, frame, at.me, membership(at.groupId)!.members) ?? current;
       if (!merged) continue;
@@ -232,7 +241,16 @@ export class GroupPayments {
   }
 
   private async write(groupId: string, me: string, note: GroupPayNote): Promise<void> {
-    this.notes.get(groupId)?.set(note.id, note);
+    const notes = this.notes.get(groupId);
+    notes?.set(note.id, note);
+    // Nothing removes a note nobody described, and any member can make up fresh ones: at most WAITING of them stay.
+    // Mine are not counted (my own payments bound them), so others' cannot push them out.
+    let waiting = this.waiting.get(groupId);
+    if (note.undescribed && !note.mine) {
+      if (!waiting) this.waiting.set(groupId, waiting = new Set());
+      waiting.add(note.id);
+      for (const id of waiting) { if (waiting.size <= WAITING) break; waiting.delete(id); notes?.delete(id); }
+    } else waiting?.delete(note.id);
     // Shown once the member it is about described it; what others said about it waits here until then.
     if (note.undescribed) return;
     const initiator = note.kind === "request" ? note.to : note.from;

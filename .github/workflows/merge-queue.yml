@@ -18,9 +18,9 @@ run-name: >-
 # meanwhile (`node tools/scripts/merge-train.mjs --run --every 300`, with its own gh login).
 #
 # These runs hold the app's key, so they always run the default branch's copy of the script (both checkouts pin it),
-# never a pull request's: there is no pull_request trigger, and pull_request_target (a label added) and pushes take
-# this file from dev or an epic, which only writers change. The train only merges pull requests' commits with git;
-# it never runs their code.
+# never a pull request's: there is no pull_request trigger, and pull_request_target (a label added or taken off) and
+# pushes take this file from dev or an epic, which only writers change. The train only merges pull requests' commits
+# with git; it never runs their code.
 
 on:
   schedule:
@@ -34,7 +34,7 @@ on:
     workflows: [CI]
     types: [completed]
   pull_request_target:
-    types: [labeled]
+    types: [labeled, unlabeled]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -57,15 +57,17 @@ jobs:
     # run): the train reads it as not finished, and the run that replaced it wakes the train when it ends. Nor does a
     # fork's: the train never boards a fork's pull request, and anyone whose fork runs need no approval could otherwise
     # start runs here every few seconds, each replacing the one that waits. A label matters only when it puts a pull
-    # request in line: `queue:conflict` and `queue:failed` are the train's own, on one it dropped. A push matters
+    # request in line: `queue:conflict` and `queue:failed` are the train's own, on one it dropped. Or when `queue:hold`
+    # comes off: a held pull request waits in line and boards then, and no other event may come. A push matters
     # when a person moved the base: the train's own pushes (a batch lands as one squash merge per pull request) come
     # from the run that goes on by itself.
     if: >-
       (github.event_name != 'workflow_run' ||
       (github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion != 'cancelled' &&
       github.event.workflow_run.head_repository.full_name == github.repository)) &&
-      (github.event_name != 'pull_request_target' || github.event.label.name == 'queue' ||
-      github.event.label.name == 'queue:priority') &&
+      (github.event_name != 'pull_request_target' ||
+      (github.event.action == 'labeled' && (github.event.label.name == 'queue' || github.event.label.name == 'queue:priority')) ||
+      (github.event.action == 'unlabeled' && github.event.label.name == 'queue:hold')) &&
       (github.event_name != 'push' || github.event.sender.type != 'Bot')
     # One at a time and one waiting: every CI run that ends and every label added starts a run, and with many pull
     # requests open this job alone filled the runners (2026-10-13: 47 queued ahead of the batches' CI). A newer one
@@ -162,7 +164,7 @@ jobs:
       - name: App token
         id: token
         continue-on-error: true
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ secrets.QUEUE_APP_ID }}
           private-key: ${{ secrets.QUEUE_APP_PRIVATE_KEY }}
@@ -176,7 +178,7 @@ jobs:
         id: token-read
         if: steps.token.outcome == 'failure'
         continue-on-error: true
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ secrets.QUEUE_APP_ID }}
           private-key: ${{ secrets.QUEUE_APP_PRIVATE_KEY }}
@@ -189,7 +191,7 @@ jobs:
       - name: App token (no Actions read)
         id: token-checks
         if: steps.token.outcome == 'failure' && steps.token-read.outcome != 'success'
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ secrets.QUEUE_APP_ID }}
           private-key: ${{ secrets.QUEUE_APP_PRIVATE_KEY }}

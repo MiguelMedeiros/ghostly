@@ -4,7 +4,7 @@ import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
 import { useFocusKept } from "../../hooks/useFocusKept";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { downloadFile } from "../../lib/fileDownload";
-import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, stalledAction } from "../../lib/fileStatus";
+import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, sentWhole, stalledAction, statusSize } from "../../lib/fileStatus";
 import type { FileAction } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { claimPlayback, registerVoicePlayer, releasePlayback } from "../../lib/voicePlayback";
@@ -194,12 +194,13 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
 
   // Scrolled away: it stops, and its bytes go (a Blob in memory, or the platform stops serving the stream). Not for a
   // moment out of view: a phone turned on its side lays the chat out again, and the video is below the fold until the
-  // chat brings its place back, a few frames later. Nor while it fills the screen (iOS plays it full screen itself).
+  // chat brings its place back, a few frames later. Nor while it fills the screen (iOS plays it full screen itself), or
+  // the window: fixed over it, the frame is out of the list's containing blocks, so the list never sees it then.
   useEffect(() => {
-    if (visible !== false || phase !== "playing") return;
+    if (visible !== false || phase !== "playing" || theater) return;
     const timer = setTimeout(() => { if (!fullScreen(videoRef.current)) unload(); }, OUT_OF_VIEW_MS);
     return () => clearTimeout(timer);
-  }, [visible, phase, unload]);
+  }, [visible, phase, theater, unload]);
 
   useEffect(() => {
     mounted.current = true;
@@ -246,7 +247,9 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   const offered = controls && transfer.direction === "in" && transfer.stage === "asking";
   const noRoom = offered && typeof transfer.room === "number" && transfer.room < file.size;
   const pausedHere = moving && transfer.stage === "paused" && transfer.pausedBy !== "peer";
-  const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking";
+  // Sent whole: too late to pause or cancel, the contact keeps it.
+  const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking" && !sentWhole(transfer);
+  const canCancel = controls && !sentWhole(transfer);
   const canRetry = canRetryFile(file, transfer, platform);
   const stuck = platform?.fileAction ? stalledAction(transfer, t) : null;
   const failed = transfer?.state === "failed";
@@ -304,6 +307,8 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
               onPause={() => releasePlayback(file.id)}
               onEnded={() => { resumeAt.current = 0; unload(); }}
               onError={refused}
+              // A picture it has no decoder for (HEVC in Chromium, Vanadium): no error, the sound plays over black.
+              onLoadedData={(event) => { if (event.currentTarget.videoWidth === 0) refused(); }}
             />
             {canTheater && (
               <button
@@ -338,10 +343,10 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
                     data-testid="video-accept"
                     disabled={noRoom}
                     onClick={() => act("accept")}
-                    className="flex items-center gap-2 px-4 py-2 rounded-full bg-black/60 hover:bg-black/75 text-white text-[14px] font-medium border-none cursor-pointer disabled:opacity-50 disabled:cursor-default"
+                    className="flex items-center gap-2 max-w-[calc(100%-8px)] px-3 py-2 rounded-full bg-black/60 hover:bg-black/75 text-white text-[14px] font-medium border-none cursor-pointer disabled:opacity-50 disabled:cursor-default"
                   >
                     <DownloadIcon size={18} />
-                    {t("chat.media.downloadSize", { size: formatFileSize(file.size) })}
+                    {t("chat.media.downloadSize", { size: statusSize(file.size) })}
                   </button>
                   {/* A group's video (WISP 503) is downloaded or not: nothing to decline. */}
                   {!group && <button type="button" data-testid="video-decline" onClick={() => act("decline")} className="text-[12px] text-white/90 underline bg-transparent border-none cursor-pointer">{t("chat.file.decline")}</button>}
@@ -398,17 +403,18 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
           ) : null}
           {status && (
             <p className={`flex items-center gap-1 min-w-0 text-[11px] m-0 ${failed ? "text-danger-ink" : "text-text-primary/65"}`}>
-              <span className="min-w-0 truncate" data-testid="video-status">{status}</span>
+              {/* Wraps, as a file's line: cut, it lost its speed and time left. */}
+              <span className="min-w-0 [overflow-wrap:anywhere]" data-testid="video-status">{status}</span>
               {(reason || hint) && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="video-why" danger={!!reason} />}
             </p>
           )}
         </div>
       )}
-      {controls && !offered && !group && (
+      {controls && !offered && !group && (canPause || pausedHere || canCancel) && (
         <div className="flex gap-1.5 mt-1 px-1">
           {canPause && <button type="button" className={linkButton} data-testid="video-pause-transfer" onClick={() => act("pause")}>{t("chat.file.pause")}</button>}
           {pausedHere && <button type="button" className={linkButton} data-testid="video-resume-transfer" onClick={() => act("resume")}>{t("chat.file.resume")}</button>}
-          <button type="button" className={linkButton} data-testid="video-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>
+          {canCancel && <button type="button" className={linkButton} data-testid="video-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>}
         </div>
       )}
       {(reason || hint) && why && <WhyText id={whyId} testId="video-why-text" english={reason?.english}>{reason?.text ?? hint}</WhyText>}
@@ -427,7 +433,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
 
 function DownloadIcon({ size }: { size: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
       <polyline points="7 10 12 15 17 10" />
       <line x1="12" y1="15" x2="12" y2="3" />

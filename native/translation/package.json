@@ -1,0 +1,6 @@
+{
+  "name": "ghostly-translation-native",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": { "@qvac/translation-nmtcpp": "0.21.1", "bare-process": "4.5.1", "bare-runtime": "1.36.0" }
+}

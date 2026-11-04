@@ -1,4 +1,4 @@
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { generateVapidKeys, type VapidKeys } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import { databaseName } from "@ghostly/browser/shared/idb";
@@ -6,6 +6,7 @@ import { activeProfileId } from "./profiles";
 import { MUTE_EVENT, chatOfLink, groupChat, mutedUntil } from "./chatMute";
 import { groupPath } from "./groups";
 import { chatPath } from "./url";
+import { useEngineValue } from "./engineState";
 
 /*
  * Wake-up push, the receiving side (WISP 401 § Wake-up push): this profile's browser push subscription, which the
@@ -75,20 +76,72 @@ export function pushUnavailable(): boolean {
   try { return !!platform && !platform.supported(); } catch { return !!platform; }
 }
 
+/** Where this browser keeps that it has no push service: for the browser, every profile alike (`noPushService`). */
+export const NO_PUSH_SERVICE_KEY = "ghostly-no-push-service";
+
+/**
+ * Whether a subscription the browser refused says it has no push service at all, rather than a refusal of
+ * notifications (NotAllowedError, said on its own). Chromium without Google Play services (GrapheneOS's Vanadium)
+ * rejects with "AbortError: Registration failed - push service not available", a Firefox with push turned off with
+ * an AbortError too, and a browser that has none may say NotSupportedError.
+ */
+export function isNoPushService(error: unknown): boolean {
+  const { name, message } = (error ?? {}) as { name?: unknown; message?: unknown };
+  if (name === "NotAllowedError") return false;
+  return name === "AbortError" || name === "NotSupportedError" || (typeof message === "string" && /push service not available/i.test(message));
+}
+
+const noPushListeners = new Set<() => void>();
+/**
+ * Whether this browser was found to have no push service (a subscription refused as `isNoPushService` says): the
+ * switch then reads as unavailable, with why and a Try again (sandboxed Google Play may be installed since), instead
+ * of failing at every try. Kept until a try makes a subscription or is refused for another reason. In the browser's
+ * storage, not a page's state: a page drawn again, another tab or the app reopened says it too.
+ */
+export function noPushService(): boolean {
+  try { return localStorage.getItem(NO_PUSH_SERVICE_KEY) === "1"; } catch { return false; }
+}
+function rememberNoPushService(none: boolean): void {
+  try {
+    if (none) localStorage.setItem(NO_PUSH_SERVICE_KEY, "1");
+    else localStorage.removeItem(NO_PUSH_SERVICE_KEY);
+  } catch { /* storage refused: the next try finds out again */ }
+  for (const listener of noPushListeners) listener();
+}
+const subscribeNoPush = (listener: () => void) => {
+  noPushListeners.add(listener);
+  const fromOtherTab = (event: StorageEvent) => { if (event.key === NO_PUSH_SERVICE_KEY || event.key === null) listener(); };
+  window.addEventListener("storage", fromOtherTab);
+  return () => { noPushListeners.delete(listener); window.removeEventListener("storage", fromOtherTab); };
+};
+/** `noPushService`, kept up to date. */
+export function useNoPushService(): boolean {
+  return useSyncExternalStore(subscribeNoPush, noPushService);
+}
+
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
-const engineSnapshot = () => engine.state;
 
 /**
  * Whether this device is woken now (it shared a subscription of its own), as the engine has it. In a profile on several
  * devices a subscription that is another device's (the phone's, given to contacts while this desktop is active) is not
- * this device's: the switch is off here (WISP 06 § Push and the phone).
+ * this device's: the switch is off here (WISP 06 § Push and the phone). Drawn again only when the answer changes, not
+ * on every state of the engine.
  */
 export function useWakeOn(): boolean {
-  const state = useSyncExternalStore(subscribeEngine, engineSnapshot);
-  return !!state?.settings.wake && state.wakeOwner !== "away";
+  return useSyncExternalStore(subscribeEngine, wakeIsOn);
 }
 
-/** Turns wake-ups on (a new subscription and key pair, so a new token for every chat) or off. Throws a sentence to show. */
+/** Whether this device is woken now, as the engine has it (`useWakeOn`, read once). */
+export function wakeIsOn(): boolean {
+  return !!engine.state?.settings.wake && engine.state.wakeOwner !== "away";
+}
+
+/**
+ * Turns wake-ups on (a new subscription and key pair, so a new token for every chat) or off. Throws a sentence to show;
+ * a browser with no push service is kept as such (`noPushService`) before it throws. A new one refused while they were
+ * on (New token) may come after the old one ended (a browser takes no second key while one is held): wake-ups are
+ * then turned off, as contacts could no longer wake this app anyway.
+ */
 export async function setWake(on: boolean): Promise<void> {
   const push = pushPlatform();
   if (!push) throw new Error("This browser cannot wake Ghostly while it is closed.");
@@ -99,8 +152,21 @@ export async function setWake(on: boolean): Promise<void> {
     await push.unsubscribe(profile);
     return;
   }
+  const old = wakeIsOn() ? engine.state?.settings.wake?.endpoint : undefined;
   const vapid = generateVapidKeys();
-  const keys = await push.subscribe(profile, vapid);
+  let keys: PushKeys;
+  try {
+    keys = await push.subscribe(profile, vapid);
+  } catch (error) {
+    // Kept as the last try found it: a refusal of another kind (notifications turned off) says nothing of the service.
+    const none = isNoPushService(error);
+    if (none !== noPushService()) rememberNoPushService(none);
+    if (old && (await push.current(profile).catch(() => null))?.endpoint !== old) {
+      await engine.call("setWakeSubscription", { subscription: null }).catch(() => {});
+    }
+    throw error;
+  }
+  if (noPushService()) rememberNoPushService(false);
   await engine.call("setWakeSubscription", { subscription: { ...keys, vapid } });
 }
 
@@ -160,22 +226,21 @@ export function rotateWake(): Promise<void> {
  * app was closed: made again when notifications are still allowed, else wake-ups are turned off.
  */
 export function useWakeTableSync(text: WakeWords): void {
-  const state = useSyncExternalStore(subscribeEngine, engineSnapshot);
-  const wake = state?.settings.wake;
-  const owner = state?.wakeOwner;
-  const links = state?.links;
-  const groups = state?.groups;
+  // What the table is made of, as one string, and the subscription, compared by content. The engine builds `links` and
+  // `groups` anew in every state (up to one every 50 ms while someone types or a file moves), so the arrays themselves
+  // say nothing about a change: written on them, the table was a database transaction per state, and read whole, they
+  // drew the app's shell (and every chat it holds) on each.
+  const { wake, owner, rotateAsked, held } = useEngineValue((state) => ({
+    wake: state?.settings.wake,
+    owner: state?.wakeOwner,
+    rotateAsked: !!state?.settings.wakeRotate,
+    held: state?.links && JSON.stringify([
+      state.links.map((link) => [link.id, link.peerPubKeyZ32, link.wakeToken, !!link.wakeMuted]),
+      (state.groups ?? []).filter((group) => group.profile === "mesh").map((group) => [group.id, group.wakeTokens, !!group.wakeMuted]),
+    ]),
+  }));
   const words = JSON.stringify({ ...text, db: databaseName() });
-  // What the table is made of, as one string. The engine builds `links` and `groups` anew in every state (up to one
-  // every 50 ms while someone types or a file moves), so the arrays themselves say nothing about a change: written on
-  // them, the table was a database transaction per state.
   const on = !!wake;
-  const held = links && JSON.stringify([
-    links.map((link) => [link.id, link.peerPubKeyZ32, link.wakeToken, !!link.wakeMuted]),
-    (groups ?? []).filter((group) => group.profile === "mesh").map((group) => [group.id, group.wakeTokens, !!group.wakeMuted]),
-  ]);
-  const latest = useRef({ links, groups });
-  latest.current = { links, groups };
   useEffect(() => {
     const push = pushPlatform();
     if (!push || !held) return;
@@ -183,7 +248,8 @@ export function useWakeTableSync(text: WakeWords): void {
     let muteEnds: ReturnType<typeof setTimeout> | undefined;
     const write = () => {
       clearTimeout(muteEnds);
-      const { links, groups } = latest.current;
+      // The engine's chats as they are now.
+      const links = engine.state?.links, groups = engine.state?.groups;
       if (!links) return;
       const entries: WakeTableEntry[] = [];
       let soonest = Infinity;
@@ -226,7 +292,7 @@ export function useWakeTableSync(text: WakeWords): void {
   // A contact that held the subscription was deleted or muted: a new one (new endpoint, new key pair, new tokens for
   // the others), and the old one ends at the push service, so that contact can no longer wake this app. Not for
   // another device's subscription, which that device replaces.
-  const rotate = !!state?.settings.wakeRotate && !!wake && owner !== "away";
+  const rotate = rotateAsked && !!wake && owner !== "away";
   useEffect(() => {
     if (rotate) void rotateWake();
   }, [rotate]);

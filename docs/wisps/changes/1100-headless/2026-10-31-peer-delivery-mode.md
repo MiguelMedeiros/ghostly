@@ -1,0 +1,1 @@
+`chat show` (`chat.get`) gains `peerDeliveryMode`: the contact's delivery choice as its last envelope said it (`dht` while the contact keeps the chat on DHT only, `stream` otherwise, null until its app has said), beside this side's `deliveryMode`. Before, a chat the contact kept on DHT only read like any chat not live, and nothing said who had to choose a live method.

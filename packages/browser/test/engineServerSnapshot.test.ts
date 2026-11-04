@@ -15,6 +15,7 @@ vi.mock("../src/engine/node", () => ({
     start() { return fake.start(); }
     getState() { return { links: [{ id: "a" }] }; }
     async getMessages() { return []; }
+    deletedIdsOf() { return []; }
     setActiveLink() {}
   },
 }));

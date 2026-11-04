@@ -2,14 +2,20 @@
 // into the environment's containers, a "miner" wallet in bitcoind that pays for everything. Worthless coins.
 import { execFileSync } from "node:child_process";
 import { container, endpoints } from "./env.mjs";
-import { exec, remote } from "./remote.mjs";
+import { docker, remote } from "./remote.mjs";
 
-/** Runs a command in one of the environment's containers (by service name) and returns its trimmed output. */
-export function run(service, args) {
+/** Runs `docker <args>` against the environment's Docker and returns its trimmed output. */
+function dockerRun(args) {
   const options = { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1 << 22 };
   // On another host (E2E_INFRA_HOST): over the environment's SSH connection, by that host's docker (remote.mjs).
-  return (remote ? exec(container(service), args, options) : execFileSync("docker", ["exec", container(service), ...args], options)).trim();
+  return (remote ? docker(args, options) : execFileSync("docker", args, options)).trim();
 }
+
+/** Runs a command in one of the environment's containers (by service name) and returns its trimmed output. */
+export const run = (service, args) => dockerRun(["exec", container(service), ...args]);
+
+/** Restarts one of the environment's containers (by service name). */
+export const restart = (service) => { dockerRun(["restart", container(service)]); };
 
 export const cli = (...args) => run("bitcoind", ["bitcoin-cli", "-regtest", `-rpcuser=${endpoints.bitcoind.user}`, `-rpcpassword=${endpoints.bitcoind.password}`, ...args]);
 export const miner = (...args) => cli("-rpcwallet=miner", ...args);

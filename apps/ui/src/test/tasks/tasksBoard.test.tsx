@@ -211,6 +211,30 @@ describe("the Tasks board", () => {
     expect(screen.getByTestId("tasks-no-match")).toHaveTextContent("No task matches");
   });
 
+  it("has Group by as one Tab stop, the chosen grouping, the arrows moving and choosing", async () => {
+    const { user } = profile(rowsOfThree());
+    await loaded();
+    const group = screen.getByRole("radiogroup", { name: "Group by" });
+    const radio = (g: string) => screen.getByTestId(`tasks-group-${g}`);
+    const headings = () => screen.getAllByTestId("board-column").map((c) => within(c).getByRole("heading").textContent);
+    expect(within(group).getAllByRole("radio").map((r) => r.tabIndex)).toEqual([0, -1, -1]);
+    radio("status").focus();
+    await user.keyboard("{ArrowRight}");
+    expect(radio("bot")).toHaveFocus();
+    expect(radio("bot")).toHaveAttribute("aria-checked", "true");
+    expect(headings()).toEqual(["Hermes One2", "Coordinator1"]);
+    expect(within(group).getAllByRole("radio").map((r) => r.tabIndex)).toEqual([-1, 0, -1]);
+    await user.keyboard("{End}");
+    expect(radio("chat")).toHaveFocus();
+    expect(radio("chat")).toHaveAttribute("aria-checked", "true");
+    await user.keyboard("{ArrowDown}");
+    expect(radio("status")).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(radio("chat")).toHaveFocus();
+    await user.keyboard("{Home}");
+    expect(radio("status")).toHaveAttribute("aria-checked", "true");
+  });
+
   it("keeps finished tasks for a day, with older ones behind Show older", async () => {
     const { user } = profile([
       row("link-1", task({ id: "fresh", status: "done" })),
@@ -225,6 +249,37 @@ describe("the Tasks board", () => {
     await user.click(older);
     expect(cardIds("done")).toEqual(["fresh", "stale"]);
     expect(within(column("done")).getByTestId("board-column-older")).toHaveTextContent("Hide older");
+  });
+
+  it("Clear finished hides the done, failed and cancelled tasks on this device, for good after a reload; a bot's update brings one back", async () => {
+    const finished = () => [
+      row("link-1", task({ id: "relay", status: "running" })),
+      row("link-1", task({ id: "done", status: "done" })),
+      row("group:g1", task({ id: "failed", title: "Fix the flaky spec", status: "failed" }), { member: "hermes-key" }),
+    ];
+    const first = profile(finished());
+    await loaded();
+    const clear = screen.getByTestId("tasks-clear-finished");
+    expect(clear).toHaveTextContent("Clear finished");
+    expect(clear).toHaveAttribute("title", expect.stringMatching(/on this device/));
+    await first.user.click(clear);
+    expect(cardIds("done")).toEqual([]);
+    expect(cardIds("closed")).toEqual([]);
+    expect(cardIds("running")).toEqual(["relay"]);
+    expect(screen.getByTestId("tasks-summary")).toHaveTextContent("1 active · 1 task");
+    // Nothing finished is left to clear.
+    expect(screen.queryByTestId("tasks-clear-finished")).not.toBeInTheDocument();
+    first.unmount();
+
+    // The page again: still cleared. Then the bot runs the failed task again, and it is back in its new column.
+    const again = profile(finished());
+    await loaded();
+    expect(cardIds("closed")).toEqual([]);
+    const rerun = task({ id: "failed", title: "Fix the flaky spec", status: "running" }), at = Date.now() + 1_000;
+    const back = row("group:g1", rerun, { member: "hermes-key", editedAt: at });
+    again.set([...finished().slice(0, 2), back]);
+    act(() => again.engine.messages("group:g1", [{ linkId: "group:g1", id: back.id, text: statusCardText(rerun), sender: "peer", timestamp: back.timestamp, via: "datalink", card: rerun, edit: { seq: 1, at, history: [] } } as StoredMessage]));
+    await waitFor(() => expect(cardIds("running").sort()).toEqual(["failed", "relay"]));
   });
 
   it("with hundreds of cards, draws fifty a column and more on Show more", async () => {

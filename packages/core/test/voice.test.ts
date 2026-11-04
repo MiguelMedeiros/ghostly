@@ -143,6 +143,13 @@ describe("names and times", () => {
     expect(voiceDownloadName("audio/ogg;codecs=opus", ts)).toMatch(/\.ogg$/);
   });
 
+  it("a time no date can hold makes a name without one, never NaN", () => {
+    // Past Date's end (8.64e15) yet a safe integer, as a sender may claim one.
+    expect(voiceDownloadName("audio/webm", 8_700_000_000_000_000)).toBe("Ghostly voice.webm");
+    expect(voiceDownloadName("audio/webm", Number.NaN)).toBe("Ghostly voice.webm");
+    expect(voiceFileName("audio/ogg", Number.POSITIVE_INFINITY)).toBe("Voice message.ogg");
+  });
+
   it("shows minutes and seconds", () => {
     expect(formatVoiceDuration(0)).toBe("0:00");
     expect(formatVoiceDuration(999)).toBe("0:00");

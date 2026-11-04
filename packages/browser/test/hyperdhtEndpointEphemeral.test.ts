@@ -42,8 +42,8 @@ async function endpoint(): Promise<NativeEndpoint> {
 
 it("a chat's listener stays an ephemeral DHT client for good, and still reaches its contact", async () => {
   const [alice, bob] = [await endpoint(), await endpoint()];
-  expect(built.slice(-2).map(({ ephemeral, adaptive }) => ({ ephemeral, adaptive }))).toEqual([
-    { ephemeral: true, adaptive: false },
+  // The app's chats share one node (hyperdhtEndpointShared.test.ts).
+  expect(built.map(({ ephemeral, adaptive }) => ({ ephemeral, adaptive }))).toEqual([
     { ephemeral: true, adaptive: false },
   ]);
   const theirs = new Promise<BoundChannel>((resolve) => { bob.onConnection = resolve; });

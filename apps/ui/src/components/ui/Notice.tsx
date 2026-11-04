@@ -10,8 +10,9 @@ import type { Problem } from "../../lib/problemText";
  */
 export type NoticeTone = "muted" | "error" | "success" | "warning" | "wait";
 
+/** An error in danger's ink, not its own red: that read under 4.5:1 on dark themes' dialogs, panels and bubbles. */
 const COLOR: Record<NoticeTone, string> = {
-  muted: "text-text-muted", wait: "text-text-secondary", error: "text-danger", success: "text-accent", warning: "text-warn-ink",
+  muted: "text-text-muted", wait: "text-text-secondary", error: "text-danger-ink", success: "text-accent", warning: "text-warn-ink",
 };
 
 /**
@@ -20,10 +21,8 @@ const COLOR: Record<NoticeTone, string> = {
  * Copy button, never in the line itself. A plain `children` is the title, as the wallet's notices always were.
  * `problem` (lib/problemText.ts) gives the three parts and the tone at once.
  */
-export function Notice({ tone, title, next, details, problem, children, testId, className = "text-xs", ink = false }: {
+export function Notice({ tone, title, next, details, problem, children, testId, className = "text-xs" }: {
   tone?: NoticeTone; title?: ReactNode; next?: ReactNode; details?: string; problem?: Problem | null; children?: ReactNode; testId?: string; className?: string;
-  /** On a chat bubble or a surface-hover row: the error's red that reads on that colour (`text-danger-ink`). */
-  ink?: boolean;
 }) {
   const id = useId();
   const [open, setOpen] = useState(false);
@@ -31,9 +30,9 @@ export function Notice({ tone, title, next, details, problem, children, testId, 
   const said = problem ? { tone: problem.tone, title: problem.title, next: problem.next, details: problem.detail } : {};
   const kind: NoticeTone = tone ?? said.tone ?? "muted";
   const head = title ?? said.title ?? children, then = next ?? said.next, more = details ?? said.details;
-  const { copied, copy } = useCopyKey(more ?? "");
+  const { copied, failed, copy } = useCopyKey(more ?? "");
   return (
-    <div role={kind === "error" ? "alert" : undefined} data-testid={testId} data-tone={kind} className={`${ink && kind === "error" ? "text-danger-ink" : COLOR[kind]} ${className}`}>
+    <div role={kind === "error" ? "alert" : undefined} data-testid={testId} data-tone={kind} className={`${COLOR[kind]} ${className}`}>
       <div className="flex items-start gap-1.5">
         <p className="m-0 min-w-0 flex-1 break-words">
           <span data-testid={testId ? `${testId}-title` : undefined}>{head}</span>
@@ -45,7 +44,7 @@ export function Notice({ tone, title, next, details, problem, children, testId, 
         <p dir="ltr" lang="en" className="m-0 min-w-0 flex-1 break-words font-mono text-[11px] leading-4">{more}</p>
         <button type="button" onClick={copy} data-testid={testId ? `${testId}-copy` : undefined}
           className="min-h-6 shrink-0 rounded-md px-1.5 text-[11px] text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
-          {copied ? i18n?.t("common.copied") ?? "Copied!" : i18n?.t("common.copy") ?? "Copy"}
+          {copied ? i18n?.t("common.copied") ?? "Copied!" : failed ? i18n?.t("common.notCopied") ?? "Not copied" : i18n?.t("common.copy") ?? "Copy"}
         </button>
       </div>}
     </div>

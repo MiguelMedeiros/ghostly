@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type * as Desktop from "../../../../apps/ui/src/hooks/useChat";
 import {
   addMessage,
+  addMissedCall,
   deleteMessage as deleteStoredMessage,
+  uncountMissedCall as uncountStoredMissedCall,
   getInviteCode,
   hasAnnouncedJoin,
   loadSession,
@@ -11,14 +13,41 @@ import {
   saveSession,
   sessionLinkParams,
 } from "../../../../apps/ui/src/lib/storage";
+import { sameValue } from "../../../../apps/ui/src/lib/sameValue";
 import type { LinkParams, LinkPreview } from "@ghostly/core";
 import type { ChatMessage, ChatTechInfo, ConnectionStatus } from "../../../../apps/ui/src/lib/types";
+import type { LinkView } from "../shared/types";
 import { engine } from "./engine";
 import { notifySessionsChanged, startSessionSync } from "./sync";
 
 const NO_MESSAGES: ChatMessage[] = [];
 const subscribe = (listener: () => void) => engine.subscribe(listener);
-const getState = () => engine.state;
+const NO_RELAYS: string[] = [];
+
+/** What a chat shows of the engine's state (`useChat`). */
+interface ChatEngineView {
+  link: LinkView | undefined;
+  offline: boolean;
+  protocol: string;
+  relays: string[];
+}
+const NONE_LANDED: ReadonlySet<ChatMessage> = new Set();
+
+/**
+ * Of the texts still sending, the ones the engine's history holds: a text of mine at the same timestamp. One pass over the
+ * history for all of them, from the newest, where they land: in a long chat sent to with no pause, a pass per text still
+ * sending, in two places per list, was the sender's largest read of the history.
+ */
+function landedRows(pending: ChatMessage[], history: ChatMessage[]): ReadonlySet<ChatMessage> {
+  if (!pending.length) return NONE_LANDED;
+  const sentAt = new Set(pending.map((row) => row.timestamp));
+  const found = new Set<number>();
+  for (let i = history.length - 1; i >= 0 && found.size < sentAt.size; i--) {
+    const m = history[i]!;
+    if (sentAt.has(m.timestamp) && m.id.startsWith("me_")) found.add(m.timestamp);
+  }
+  return found.size ? new Set(pending.filter((row) => found.has(row.timestamp))) : NONE_LANDED;
+}
 
 /**
  * Stands in for Desktop's `useChat`. Same contract towards the Chat page, but
@@ -27,7 +56,22 @@ const getState = () => engine.state;
  * page is open. The session in localStorage is kept exactly as Desktop keeps it.
  */
 export const useChat: typeof Desktop.useChat = (params) => {
-  const state = useSyncExternalStore(subscribe, getState);
+  const peerPubKey = params?.peerPubKeyB64;
+  // Only what the chat shows of the engine's state, compared by content: the engine sends its whole state anew on every
+  // change (up to 20 a second while a file moves), and the whole of it drew this chat on each, and every chat kept
+  // loaded off screen for its call or mini-app too.
+  const shown = useRef<ChatEngineView | null>(null);
+  const view = useSyncExternalStore(subscribe, () => {
+    const state = engine.state;
+    const next: ChatEngineView = {
+      link: peerPubKey ? state?.links.find((l) => l.peerPubKeyZ32 === peerPubKey) : undefined,
+      offline: state?.settings.online === false,
+      protocol: state?.transport.protocol ?? "",
+      relays: state?.transport.relays ?? NO_RELAYS,
+    };
+    if (!shown.current || !sameValue(next, shown.current)) shown.current = next;
+    return shown.current;
+  });
   const [sessionMessages, setMessages] = useState<ChatMessage[]>([]);
   /**
    * A paired chat's texts sent from this page that the engine's history has not brought back yet: shown at once as
@@ -38,14 +82,15 @@ export const useChat: typeof Desktop.useChat = (params) => {
   const [isSending, setIsSending] = useState(false);
   const [isBurned, setIsBurned] = useState(false);
   const [incomingCallSignal, setIncomingCallSignal] = useState<string | null>(null);
+  /** Counts the calls another page answered or declined while they rang in this chat (`useWebRTC`'s `callHandledElsewhere`). */
+  const [callHandledElsewhere, setCallHandledElsewhere] = useState(0);
 
   const profile = params?.profile;
   const deliveryMode = params?.deliveryMode;
   const seedB64 = params?.seedB64;
-  const peerPubKey = params?.peerPubKeyB64;
   const encKeyB64 = params?.encKeyB64;
   const sessionId = params?.sessionId ?? "";
-  const link = peerPubKey ? state?.links.find((l) => l.peerPubKeyZ32 === peerPubKey) : undefined;
+  const { link } = view;
   const linkId = link?.id;
 
   const nickRef = useRef(params?.nick);
@@ -71,13 +116,13 @@ export const useChat: typeof Desktop.useChat = (params) => {
   }, [sessionId]);
 
   useEffect(() => setPending([]), [sessionId]);
-  const landed = useCallback((row: ChatMessage) => sessionMessages.some((m) => m.id.startsWith("me_") && m.timestamp === row.timestamp), [sessionMessages]);
+  const landed = useMemo(() => landedRows(pending, sessionMessages), [pending, sessionMessages]);
   // One the engine's history brought back is its row from now on.
   useEffect(() => {
-    if (pending.some(landed)) setPending((rows) => rows.filter((row) => !landed(row)));
-  }, [pending, landed]);
+    if (landed.size) setPending((rows) => rows.filter((row) => !landed.has(row)));
+  }, [landed]);
   const messages = useMemo(() => {
-    const waiting = pending.filter((row) => !landed(row));
+    const waiting = landed.size ? pending.filter((row) => !landed.has(row)) : pending;
     return waiting.length ? [...sessionMessages, ...waiting].sort((a, b) => a.timestamp - b.timestamp) : sessionMessages;
   }, [sessionMessages, pending, landed]);
 
@@ -123,12 +168,18 @@ export const useChat: typeof Desktop.useChat = (params) => {
       engine.takeCallOffer(linkId);
       setIncomingCallSignal(signal);
     });
-    return off;
+    const handled = engine.onCallHandled((id) => {
+      if (id === linkId) setCallHandledElsewhere((count) => count + 1);
+    });
+    return () => { off(); handled(); };
   }, [linkId]);
 
-  /** `replyTo`: the id of the message of this chat the text answers; the engine keeps the reply with it (WISP 400 § Replies). */
+  /**
+   * `replyTo`: the id of the message of this chat the text answers; the engine keeps the reply with it (WISP 400 § Replies).
+   * `onSent`: told the id the engine stored the message under, once it did.
+   */
   const publish = useCallback(
-    async (message: ChatMessage, replyTo?: string): Promise<string | null> => {
+    async (message: ChatMessage, replyTo?: string, onSent?: (messageId: string) => void): Promise<string | null> => {
       if (!profile) {
         const updated = addMessage(sessionId, message);
         if (updated) setMessages([...updated.messages]);
@@ -139,7 +190,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
       }
       // A send that stored nothing (refused, or failed before the engine kept it): its sending row goes.
       const unsent = () => { if (profile) setPending((rows) => rows.filter((row) => row.id !== message.id)); };
-      let error: string | null, refused: boolean | undefined;
+      let error: string | null, refused: boolean | undefined, messageId: string | undefined;
       try {
         // Typing can be faster than the peer taking the link on; `ensureLink` is idempotent.
         const id =
@@ -151,7 +202,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
           unsent();
           return "Ghostly is still starting. Try again in a moment.";
         }
-        ({ error, refused } = await engine.call("sendMessage", {
+        ({ error, refused, messageId } = await engine.call("sendMessage", {
           linkId: id,
           text: message.text,
           timestamp: message.timestamp,
@@ -163,6 +214,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
         throw failure;
       }
       if (error) unsent();
+      else if (onSent) onSent(messageId ?? message.id);
       // Refused: the copy kept here for a legacy chat goes too, so it never shows as sent.
       if (refused && !profile) {
         const updated = deleteStoredMessage(sessionId, message.id);
@@ -208,7 +260,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
   }, [canAnnounce, linkId, sessionId, messages, announce]);
 
   const sendMessage = useCallback(
-    async (text: string, extra?: { preview?: LinkPreview; replyTo?: string }): Promise<string | null> => {
+    async (text: string, extra?: { preview?: LinkPreview; replyTo?: string; onSent?: (messageId: string) => void }): Promise<string | null> => {
       if (isBurned) return "Chat has been burned";
       const trimmed = text.trim();
       if (!trimmed) return null;
@@ -230,7 +282,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
             dnsRecords: open ? ["webrtc"] : ["_msgs", "_ts", "_ack", ...(nickRef.current ? ["_nick"] : [])],
             packetTimestamp: timestamp,
           },
-        }, profile ? extra?.replyTo : undefined);
+        }, profile ? extra?.replyTo : undefined, extra?.onSent);
       } catch (error) {
         return error instanceof Error ? error.message : "Failed to send message. Check your connection.";
       } finally {
@@ -271,6 +323,29 @@ export const useChat: typeof Desktop.useChat = (params) => {
     [sessionId],
   );
 
+  /** A missed call's line, or one more call on the chat's last missed line (`addMissedCall`): the line's id. */
+  const addMissedCallMessage = useCallback(
+    (message: ChatMessage, options: { rang?: string; seen?: boolean }) => {
+      const updated = addMissedCall(sessionId, message, options);
+      if (!updated) return undefined;
+      setMessages([...updated.session.messages]);
+      notifySessionsChanged();
+      return updated.line;
+    },
+    [sessionId],
+  );
+
+  /** One call less on a line that counts several (`uncountMissedCall`). */
+  const uncountMissedCall = useCallback(
+    (line: string) => {
+      const updated = uncountStoredMissedCall(sessionId, line);
+      if (!updated) return;
+      setMessages([...updated.messages]);
+      notifySessionsChanged();
+    },
+    [sessionId],
+  );
+
   const deleteMessage = useCallback(
     (messageId: string) => {
       const updated = deleteStoredMessage(sessionId, messageId);
@@ -289,7 +364,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
   };
 
   let status: ConnectionStatus = "connecting";
-  if (isBurned || state?.settings.online === false) status = "offline";
+  if (isBurned || view.offline) status = "offline";
   else if (link) status = link.status;
 
   const techInfo: ChatTechInfo = {
@@ -297,20 +372,15 @@ export const useChat: typeof Desktop.useChat = (params) => {
     myPubKey: link?.myPubKeyZ32 ?? "",
     peerPubKey: peerPubKey ?? "",
     encKeyPreview: encKeyB64 ? `${encKeyB64.slice(0, 8)}...${encKeyB64.slice(-4)}` : "",
-    pollCount: 0,
     currentPollInterval: poll?.interval ?? 0,
     republishInterval: 4 * 60_000,
     messageTtl: 300,
-    protocol:
-      link?.dataLink === "open"
-        ? "WebRTC DataChannel (peer to peer) · Pkarr for discovery"
-        : (state?.transport.protocol ?? ""),
+    protocol: view.protocol,
+    peerToPeer: link?.dataLink === "open",
     encryption: "NaCl secretbox (XSalsa20-Poly1305)",
-    relays: state?.transport.relays ?? [],
+    relays: view.relays,
     createdAt: createdAtRef.current,
-    myAck: 0,
     peerAck: link?.peerAck ?? 0,
-    sentBufferSize: 0,
   };
 
   return {
@@ -326,9 +396,12 @@ export const useChat: typeof Desktop.useChat = (params) => {
     peerAck: link?.peerAck ?? 0,
     forceRefresh,
     incomingCallSignal,
+    callHandledElsewhere,
     setCallSignal,
     setChatFastPoll,
     addSystemMessage,
+    addMissedCallMessage,
+    uncountMissedCall,
     deleteMessage,
     pollCountdown,
   };

@@ -121,6 +121,35 @@ export function checkAppListing(value: unknown, options: AppFormatOptions = {}):
 }
 
 /**
+ * The first object key `text` writes twice in one object, as JSON.parse reads it (`"title"` is `title`), or null.
+ * `text` is JSON that JSON.parse already took: one pass, each string read to its closing quote.
+ */
+function repeatedJsonKey(text: string): string | null {
+  /** Each open object's keys so far; null for an array. */
+  const open: (Set<string> | null)[] = [];
+  let keyNext = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === "\"") {
+      let end = i + 1;
+      while (text[end] !== "\"") end += text[end] === "\\" ? 2 : 1;
+      const keys = open[open.length - 1];
+      if (keys && keyNext) {
+        const key = JSON.parse(text.slice(i, end + 1)) as string;
+        if (keys.has(key)) return key;
+        keys.add(key);
+        keyNext = false;
+      }
+      i = end;
+    } else if (c === "{") { open.push(new Set()); keyNext = true; }
+    else if (c === "[") open.push(null);
+    else if (c === "}" || c === "]") open.pop();
+    else if (c === ",") keyNext = open[open.length - 1] !== null;
+  }
+  return null;
+}
+
+/**
  * Reads a `listing.json`: JSON holding exactly one listing (written by hand in release 1.2, so not required canonical).
  * A store reads it, as a writer: strict by default, so a misspelt key is refused before the owner signs the index (the
  * client never reads a `listing.json`, only the signed index). `{ strict: false }` reads it as a client reads an index
@@ -129,6 +158,9 @@ export function checkAppListing(value: unknown, options: AppFormatOptions = {}):
 export function readAppListing(text: string, options: AppFormatOptions = { strict: true }): { ok: true; listing: AppListing } | { ok: false; reason: AppStoreRefusal; detail?: string } {
   let value: unknown;
   try { value = JSON.parse(text); } catch (error) { return { ok: false, reason: "not-json", detail: String(error) }; }
+  // JSON.parse keeps a key's last value, where a person reading the file sees the first: strict, both are refused.
+  const twice = options.strict ? repeatedJsonKey(text) : null;
+  if (twice !== null) return { ok: false, reason: "not-json", detail: `${JSON.stringify(twice)} is written twice` };
   const checked = checkAppListing(value, options);
   return checked.ok ? { ok: true, listing: value as AppListing } : checked;
 }
@@ -157,11 +189,11 @@ function inOneRun<T>(steps: Generator<void, T>): T {
  * Checks an index's fields and bounds, and every revocation it carries (one that does not verify refuses the index:
  * the store copied it, so a broken one is the store's fault). The signature and `expires` are `readAppStore`'s. An
  * unknown key of the index, a listing or a removal is ignored unless `strict`; a revocation is its publisher's signed
- * statement and keeps its exact keys.
+ * statement and keeps its exact keys. With `checked`, a revocation it holds is not checked again.
  */
-export function checkAppStoreIndex(value: unknown, options: AppFormatOptions = {}): Check {
+export function checkAppStoreIndex(value: unknown, options: AppFormatOptions = {}, checked?: AppRevocationsChecked): Check {
   const fields = inOneRun(checkAppStoreFieldsSteps(value, options));
-  return fields.ok ? inOneRun(checkAppStoreRevocationsSteps(value as unknown as AppStoreIndex)) : fields;
+  return fields.ok ? inOneRun(checkAppStoreRevocationsSteps(value as unknown as AppStoreIndex, checked)) : fields;
 }
 
 /**
@@ -228,10 +260,10 @@ export type AppStoreRead = { ok: true; store: AppStoreReading } | { ok: false; r
  * signature, the signature of each revocation, then `expires` against `now` (seconds): more than 90 days ahead is
  * refused, past is `expired`. The index's own signature comes before its revocations': an index nobody signed costs
  * its reader one signature check, whatever it carries. A key it does not know is ignored (a later store's optional
- * field) and stays in the bytes the signature covers.
+ * field) and stays in the bytes the signature covers. With `checked`, a revocation it holds is not checked again.
  */
-export function readAppStore(indexBytes: Uint8Array, sigBytes: Uint8Array, now: number, heldKey?: string): AppStoreRead {
-  return inOneRun(readAppStoreSteps(indexBytes, sigBytes, now, heldKey));
+export function readAppStore(indexBytes: Uint8Array, sigBytes: Uint8Array, now: number, heldKey?: string, checked?: AppRevocationsChecked): AppStoreRead {
+  return inOneRun(readAppStoreSteps(indexBytes, sigBytes, now, heldKey, checked));
 }
 
 /**
@@ -261,11 +293,12 @@ export function* readAppStoreSteps(indexBytes: Uint8Array, sigBytes: Uint8Array,
 
 /**
  * Signs an index with the store key: its canonical bytes and the `ghostly-store.sig` bytes. Throws on a bad index, and
- * on a key this format does not define: a writer is strict, so a misspelt key is never signed.
+ * on a key this format does not define: a writer is strict, so a misspelt key is never signed. With `revocations`, a
+ * revocation it holds is not checked again.
  */
-export async function signAppStore(index: AppStoreIndex, signer: Signer): Promise<{ indexBytes: Uint8Array; sigBytes: Uint8Array; signature: AppSignature }> {
+export async function signAppStore(index: AppStoreIndex, signer: Signer, revocations?: AppRevocationsChecked): Promise<{ indexBytes: Uint8Array; sigBytes: Uint8Array; signature: AppSignature }> {
   if (index.key !== toZ32(signer.publicKey)) throw new Error("A store index is signed by its own key");
-  const checked = checkAppStoreIndex(JSON.parse(JSON.stringify(index)), { strict: true });
+  const checked = checkAppStoreIndex(JSON.parse(JSON.stringify(index)), { strict: true }, revocations);
   if (!checked.ok) throw new Error(`Not a valid store index (${checked.reason}${checked.detail ? `: ${checked.detail}` : ""})`);
   const { bytes, signature } = await signAppObject(APP_PREFIXES.store, index, signer);
   return { indexBytes: bytes, sigBytes: canonicalJsonBytes(signature), signature };

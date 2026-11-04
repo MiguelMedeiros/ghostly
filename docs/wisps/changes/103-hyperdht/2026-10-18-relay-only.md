@@ -1,0 +1,1 @@
+Relay only: with Hide my IP from contacts on, a Desktop's chats with contacts use HyperDHT through the HyperDHT relay as a browser does (`relayed: true` descriptor), and offer no `hyperdht/1` with no relay set; the links to the profile's own devices keep the Desktop's own HyperDHT. No wire change.
