@@ -395,6 +395,14 @@ describe("GroupLinkPanel", () => {
     expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: id }]);
   });
 
+  it("tells a community member the admin turned the link off, with nothing to turn it on", () => {
+    // The member's Share dialog stays open while the admin turns the link off: turning it on is the admin's alone.
+    renderApp(<GroupLinkPanel group={groupView({ id, status: "active", profile: "community", isAdmin: false, members })} large />);
+    expect(screen.getByTestId("group-link")).toHaveAttribute("data-state", "off");
+    expect(screen.getByTestId("group-link")).toHaveTextContent("The admin turned the link off: nobody can join with it, and the link shared before will not work again. Only the admin can make a new one.");
+    expect(screen.queryByTestId("group-link-enable")).not.toBeInTheDocument();
+  });
+
   it("cannot create a link for a full group", () => {
     const full = Array.from({ length: 32 }, (_, i) => member({ key: String(i).padEnd(52, "y") }));
     renderApp(<GroupLinkPanel group={admin({ members: full })} />);
