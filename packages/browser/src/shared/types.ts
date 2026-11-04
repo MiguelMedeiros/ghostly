@@ -664,6 +664,12 @@ export interface StoredPayment {
   /** Requests we pay: this device paid it over Lightning (the payee's wallet cannot say who paid an invoice). */
   paidHere?: boolean;
   /**
+   * Requests we pay: the payee said it is paid (its `pay-res` ok), so its wallet has seen the money and our receipts
+   * for it (on-chain, Ark, Bark, Spark, USDT) are not said again when the chat reconnects. Absent: not heard yet, or a
+   * record from before this was kept (see `PaymentDesk.receiptOwed`).
+   */
+  payeeConfirmed?: boolean;
+  /**
    * A request to a whole group (WISP 902 § Payments): the group's id. Its `linkId` is `group:<id>`, it went to
    * every member over their edges, and the first member whose payment settles it pays it; later ones are refused.
    */
