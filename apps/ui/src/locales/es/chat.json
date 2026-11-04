@@ -190,6 +190,9 @@
   "forward": {
     "forward": "Reenviar",
     "forwarded": "Reenviado",
+    "found": "{{count}} chats",
+    "found_one": "{{count}} chat",
+    "found_other": "{{count}} chats",
     "many": "Reenviado muchas veces",
     "messages": "{{count}} mensajes",
     "noChats": "Aún no hay chats",

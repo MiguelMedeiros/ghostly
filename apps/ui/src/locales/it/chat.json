@@ -190,6 +190,9 @@
   "forward": {
     "forward": "Inoltra",
     "forwarded": "Inoltrato",
+    "found": "{{count}} chat",
+    "found_one": "{{count}} chat",
+    "found_other": "{{count}} chat",
     "many": "Inoltrato molte volte",
     "messages": "{{count}} messaggi",
     "noChats": "Ancora nessuna chat",

@@ -201,6 +201,12 @@
   "forward": {
     "forward": "إعادة توجيه",
     "forwarded": "تمت إعادة توجيهها",
+    "found": "{{count}} محادثات",
+    "found_many": "{{count}} محادثة",
+    "found_one": "محادثة واحدة",
+    "found_other": "{{count}} محادثة",
+    "found_two": "محادثتان",
+    "found_zero": "لا محادثات",
     "many": "تمت إعادة توجيهها عدة مرات",
     "messages": "{{count}} رسائل",
     "messages_many": "{{count}} رسالة",

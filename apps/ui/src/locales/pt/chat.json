@@ -190,6 +190,9 @@
   "forward": {
     "forward": "Encaminhar",
     "forwarded": "Encaminhada",
+    "found": "{{count}} conversas",
+    "found_one": "{{count}} conversa",
+    "found_other": "{{count}} conversas",
     "many": "Encaminhada muitas vezes",
     "messages": "{{count}} mensagens",
     "noChats": "Nenhuma conversa ainda",

@@ -190,6 +190,9 @@
   "forward": {
     "forward": "転送",
     "forwarded": "転送されたメッセージ",
+    "found": "{{count}} 件のチャット",
+    "found_one": "{{count}} 件のチャット",
+    "found_other": "{{count}} 件のチャット",
     "many": "何度も転送されたメッセージ",
     "messages": "{{count}}件のメッセージ",
     "noChats": "チャットはまだありません",

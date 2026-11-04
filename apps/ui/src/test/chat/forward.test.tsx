@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { MessageBubble } from "../../components/MessageBubble";
@@ -89,6 +89,28 @@ describe("the Forward to… picker", () => {
     expect(names()).toEqual(["Friends"]);
     await user.type(screen.getByTestId("forward-search"), "x");
     expect(screen.getByTestId("forward-none")).toHaveTextContent("No chat by that name");
+  });
+
+  it("says how many chats a settled search found, or that none has that name, once the typing settles", async () => {
+    const { user } = open([message()]);
+    const status = screen.getByTestId("forward-found");
+    expect(status).toHaveAttribute("role", "status");
+    expect(status).toHaveTextContent("");
+    await user.type(screen.getByTestId("forward-search"), "fri");
+    expect(status).toHaveTextContent("");
+    await waitFor(() => expect(status).toHaveTextContent("1 chat"));
+    await user.type(screen.getByTestId("forward-search"), "x");
+    await waitFor(() => expect(status).toHaveTextContent("No chat by that name"));
+    await user.clear(screen.getByTestId("forward-search"));
+    await waitFor(() => expect(status).toHaveTextContent(""));
+  });
+
+  it("says the count in the language's own forms (Arabic's dual)", async () => {
+    const { user } = open([message()], "link-bo", "ar");
+    await user.type(screen.getByTestId("forward-search"), "n");
+    await waitFor(() => expect(screen.getByTestId("forward-found")).toHaveTextContent("محادثتان"));
+    await user.type(screen.getByTestId("forward-search"), "x");
+    await waitFor(() => expect(screen.getByTestId("forward-found")).toHaveTextContent("لا توجد محادثة بهذا الاسم"));
   });
 
   it("starts on its search; the down arrow goes on to the chats found, up from the first goes back", async () => {
