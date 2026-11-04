@@ -113,8 +113,9 @@ export const NOT_APP = /^(apps\/website|docs)\//;
 export const PACKAGES_READ_FROM_SITE = [
   // packages/core's websiteInvite test: the join page's own copy of the invite rules.
   "apps/website/lib/invite.ts",
-  // packages/browser's atprotoOAuth test: the client metadata the site serves.
+  // packages/browser's atprotoOAuth test: the client metadata the site serves, and the home's Bluesky proof card.
   "apps/website/public/oauth/",
+  "apps/website/content/home.ts",
   // packages/cli's agentDocs test: every command the agents guide (and its prompt) and the agents page teach, and the
   // guides and pages that point to the voice agent.
   "docs/AI-AGENTS.md",
