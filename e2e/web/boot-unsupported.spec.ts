@@ -221,6 +221,28 @@ test("a bundle the browser cannot parse, or that does not load: the page says so
   }
 });
 
+test("a first visit draws \"Starting Ghostly…\" from the page alone while the app's files arrive, and the app takes its place", tags, async ({ browser, relay, baseURL }) => {
+  // A slow phone on its first visit: the page is read at once, the bundle comes seconds later. It was blank until then.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const context = await browser.newContext({ baseURL, viewport: { width: 393, height: 851 }, isMobile: true, hasTouch: true });
+  await guardArchive(context);
+  await relay.attach(context);
+  await context.addInitScript(() => { localStorage.setItem("ghostly-test-iroh", "off"); });
+  await context.route(/\/assets\/main-[^/]+\.js$/, async (route) => { await held; await route.continue(); });
+  const page = await context.newPage();
+  // Not until "load": the page's load waits for the bundle held here.
+  await page.goto("/", { waitUntil: "commit" });
+  const shell = page.getByRole("status").filter({ hasText: "Starting Ghostly…" });
+  // Visible: after its short wait (a warm start draws the app before it), the ghost and the words are on screen.
+  await expect(shell).toBeVisible();
+  await expect(page.getByTestId("boot-fallback")).toHaveCount(0);
+  release();
+  await expect(page.getByTestId("sidebar")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("boot-shell")).toHaveCount(0);
+  await context.close();
+});
+
 test("a page that loads and stays empty says it is taking long, in the browser's language", tags, async ({ browser, relay, baseURL }) => {
   const context = await browser.newContext({ baseURL, viewport: { width: 393, height: 851 }, isMobile: true, hasTouch: true, locale: "pt-BR", permissions: ["clipboard-read", "clipboard-write"] });
   await relay.attach(context);

@@ -9,7 +9,7 @@ import { ENGINE_PARAMS } from "../src/engineMethods";
 import { asCliError } from "../src/errors";
 import type { GhostlyEvent } from "../src/events";
 import { allowlist } from "../src/listen";
-import { chatJson, isLive } from "../src/views";
+import { chatDetailsJson, chatJson, isLive } from "../src/views";
 import { pageOf } from "./support/messagePage";
 import { ONE_SHOT_RECEIPT_MS } from "../src/waits";
 // covers: headless.api, headless.engine-passthrough, headless.secret-guard, headless.typing, chat.order
@@ -45,6 +45,7 @@ function fake(messages: StoredMessage[] = []) {
   const ctx = {
     runtime: { server: { node }, paths: { name: "default" } },
     hub: { onEvent: (l: (e: GhostlyEvent) => void) => { listeners.add(l); return () => listeners.delete(l); }, onState: () => () => {}, lastSeq: 0, replay: () => [] },
+    calls: { list: () => [], forgetChat: vi.fn() },
     mode: "daemon", version: "test",
   } as unknown as ApiContext;
   return { ctx, node, emit: (e: GhostlyEvent) => { for (const l of listeners) l(e); } };
@@ -125,9 +126,9 @@ describe("chats", () => {
     // An ambiguous name stays what it is, from either side; group:<id> is a group only.
     expect(refused([link("chatA", { label: "Twin" }), link("chatB", { label: "Twin" })], "twin")).toMatchObject({ code: "bad_request", message: expect.stringMatching(/more than one chat/) });
     expect(() => findChatOrGroup([], [room, { ...room, id: "h".repeat(22) } as unknown as GroupView], "team room")).toThrow(/more than one group/);
-    expect(refused([asName], "group:zed")).toEqual({ code: "not_found", message: 'No group "zed"' });
+    expect(refused([asName], "group:zed")).toEqual({ code: "not_found", message: 'No group "zed" (ghostly group list)' });
     const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o";
-    expect(refused([asName], KEY)).toMatchObject({ code: "not_found", message: `No chat with "${KEY}"` });
+    expect(refused([asName], KEY)).toMatchObject({ code: "not_found", message: `No chat with "${KEY}" (ghostly chat list)` });
     // The same bytes with the last character respelled: no key, and never a name (a contact calling itself that is not found by it).
     const respelled = KEY.slice(0, 51) + "t";
     expect(refused([link("chatMallory", { peerNick: respelled })], respelled)).toMatchObject({ code: "bad_request", message: expect.stringMatching(/not a contact key/) });
@@ -159,6 +160,23 @@ describe("chats", () => {
     expect(await list.allows(event(bob.id))).toBe(true);
     expect(await list.allows(event(mallory.id))).toBe(false);
     expect(await list.allows({ seq: 2, id: "g", type: "group.message", at: 1, group: theirs.id } as GhostlyEvent)).toBe(false);
+  });
+
+  it("listen --from takes a chat only by its id, its contact's key or a label given here, as call auto on --from", async () => {
+    // No chat is labelled "owner" here; Mallory calls herself that. Her chat never wakes the agent.
+    const owner = link("chatOwnerxxxxxxx", { peerNick: "Miguel" }), mallory = link("chatMalloryxxxxx", { peerNick: "owner" });
+    const ctx = { runtime: { server: { node: { getState: () => ({ links: [owner, mallory], groups: [] }) } } } } as unknown as ApiContext;
+    const call = (method: string, params: Record<string, unknown>) => callApi(ctx, method, params);
+    await expect(allowlist(["owner"], [], call, async () => null)).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/ghostly chat rename/), details: { chat: mallory.id, name: "owner", contact: mallory.peerPubKeyZ32 } });
+    await expect(allowlist(["chatMallory"], [], call, async () => null)).rejects.toMatchObject({ code: "bad_request", details: { chat: mallory.id } });
+    // Its id, or the label this side gave it (any case), still names it.
+    const event = (chat: string) => ({ seq: 1, id: "e", type: "message.received", at: 1, chat, message: { id: "m", text: "hi", timestamp: 1 } }) as GhostlyEvent;
+    expect(await (await allowlist([owner.id], [], call, async () => null)).allows(event(owner.id))).toBe(true);
+    const labelled = link(owner.id, { peerNick: "Miguel", label: "Owner" });
+    const named = { runtime: { server: { node: { getState: () => ({ links: [labelled, mallory], groups: [] }) } } } } as unknown as ApiContext;
+    const list = await allowlist(["owner"], [], (method, params) => callApi(named, method, params), async () => null);
+    expect(await list.allows(event(owner.id))).toBe(true);
+    expect(await list.allows(event(mallory.id))).toBe(false);
   });
 
   it("\"\" (and \"group:\" alone) names no chat and no group, even where it is a prefix of the only one's id", async () => {
@@ -206,6 +224,10 @@ describe("chats", () => {
     const { ctx, node } = fake([msg("me_1", 5, { sender: "me", delivery: "sending" })]);
     await expect(callApi(ctx, "chat.send", { chat: "Alice", text: "cashuAeyJ0b2tlbiI6W3sicHJvb2ZzIjpbXX1dfQ" })).rejects.toMatchObject({ code: "confirm" });
     await expect(callApi(ctx, "chat.send", { chat: "Alice", text: "legal winner thank year wave sausage worth useful legal winner thank yellow" })).rejects.toMatchObject({ code: "confirm" });
+    // BIP39's Portuguese list, entropy 0x7f repeated: the app's other languages' lists are the guard's too.
+    await expect(callApi(ctx, "chat.send", { chat: "Alice", text: "imitador vinheta sogro xerife veleiro pomar volumoso tratador imitador vinheta sogro xingar" })).rejects.toMatchObject({ code: "confirm" });
+    // Monero's own Portuguese test seed (tests/unit_tests/mnemonics.cpp): Monero's lists in them too.
+    await expect(callApi(ctx, "chat.send", { chat: "Alice", text: "cinzento luxuriante leonardo gnostico digressao cupula fifa broxar iniquo louvor ovario dorsal ideologo besuntar decurso rosto susto lemure unheiro pagodeiro nitroglicerina eclusa mazurca bigorna gnostico" })).rejects.toMatchObject({ code: "confirm" });
     expect(node.sendMessage).not.toHaveBeenCalled();
     expect(await callApi(ctx, "chat.send", { chat: "Alice", text: "hi" })).toEqual({ chat: "chat-one", messageId: "me_1", delivery: "sending" });
     await callApi(ctx, "chat.send", { chat: "Alice", text: "legal winner thank year wave sausage worth useful legal winner thank yellow", force: true });
@@ -265,6 +287,10 @@ describe("chats", () => {
     expect(node.setGroupTyping).toHaveBeenLastCalledWith({ groupId: "m1", typing: false });
     await expect(callApi(ctx, "group.typing", { group: "Mesh", status: "see https://x.example" })).rejects.toMatchObject({ code: "bad_request" });
     await expect(callApi(ctx, "group.typing", { group: "Mesh", stop: true, for: 5 })).rejects.toMatchObject({ code: "bad_request" });
+    expect(node.setGroupTyping).toHaveBeenCalledTimes(2);
+    // Removed from it: refused with the group's reason, as `group send` says it (it was `bad_request`).
+    node.getState = () => ({ ...state, groups: [{ ...mesh, status: "removed", statusReason: "You were removed from this group" } as GroupView] });
+    await expect(callApi(ctx, "group.typing", { group: "Mesh" })).rejects.toMatchObject({ code: "refused", message: "You were removed from this group" });
     expect(node.setGroupTyping).toHaveBeenCalledTimes(2);
   });
 
@@ -403,6 +429,18 @@ describe("chats", () => {
     await expect(callApi(ctx, "chat.history", { chat: "chat-one", limit: -1 })).rejects.toMatchObject({ code: "bad_request" });
   });
 
+  it("history after a message or a time reads that page, never the whole history (a bot reading what came since)", async () => {
+    // Read whole and cut, each such call cost a daemon 94 ms at 7,000 messages, against 6 ms for the newest page.
+    const { ctx, node } = fake([msg("c", 3), msg("a", 1), msg("b", 2), msg("d", 4), msg("e", 5)]);
+    expect(await callApi(ctx, "chat.history", { chat: "chat-one", after: "b", limit: 2 })).toMatchObject({ messages: [{ id: "c" }, { id: "d" }], more: true });
+    expect(await callApi(ctx, "chat.history", { chat: "chat-one", after: "d" })).toMatchObject({ messages: [{ id: "e" }], more: false });
+    expect(await callApi(ctx, "chat.history", { chat: "chat-one", after: 2, before: "e" })).toMatchObject({ messages: [{ id: "c" }, { id: "d" }], more: false });
+    expect(await callApi(ctx, "group.history", { group: "g1", after: 0, limit: 1 })).toMatchObject({ more: true });
+    expect(node.getMessages).not.toHaveBeenCalled();
+    expect(node.messagePage).toHaveBeenCalledWith({ linkId: "chat-one", limit: 2, before: undefined, after: "b" });
+    expect(node.messagePage).toHaveBeenCalledWith({ linkId: "group:g1", limit: 1, before: undefined, after: 0 });
+  });
+
   it("a window between two messages it holds that has nothing in it is an empty page, not a message not found", async () => {
     const { ctx } = fake([msg("a", 1), msg("b", 2), msg("c", 3)]);
     const page = (after: unknown, before: unknown) => callApi(ctx, "chat.history", { chat: "chat-one", after, before });
@@ -454,6 +492,23 @@ describe("chats", () => {
   it("remove needs a yes", async () => {
     const { ctx } = fake();
     await expect(callApi(ctx, "chat.remove", { chat: "chat-one" })).rejects.toMatchObject({ code: "confirm" });
+    expect(ctx.calls.forgetChat).not.toHaveBeenCalled();
+  });
+
+  // Auto-answer from the chats named kept the removed one: it read as on and could answer nobody.
+  it("remove takes the chat out of auto-answer's chats", async () => {
+    const { ctx, node } = fake();
+    Object.assign(node, { removeLink: vi.fn(async () => undefined) });
+    expect(await callApi(ctx, "chat.remove", { chat: "Alice", yes: true })).toEqual({ removed: "chat-one" });
+    expect(ctx.calls.forgetChat).toHaveBeenCalledWith("chat-one");
+  });
+
+  // "pass yes (--yes)" put the socket's name first: a person at a terminal types the flag.
+  it("each confirm refusal names the flag first, the socket's name after it", async () => {
+    const { ctx } = fake();
+    for (const [method, params] of [["chat.remove", { chat: "Alice" }], ["group.leave", { group: "g1" }], ["group.forget", { group: "g1" }]] as const) {
+      await expect(callApi(ctx, method, params)).rejects.toMatchObject({ code: "confirm", message: expect.stringMatching(/; pass --yes \(yes: true over the socket\) to go on$/) });
+    }
   });
 });
 
@@ -463,7 +518,7 @@ describe("group leave", () => {
     const { ctx, node } = fake();
     const leaveGroup = vi.fn(async () => ({}));
     Object.assign(node, { leaveGroup });
-    await expect(callApi(ctx, "group.leave", { group: "g1" })).rejects.toMatchObject({ code: "confirm", message: expect.stringMatching(/history and files on this device; pass yes \(--yes\)/) });
+    await expect(callApi(ctx, "group.leave", { group: "g1" })).rejects.toMatchObject({ code: "confirm", message: expect.stringMatching(/history and files on this device; pass --yes \(yes: true over the socket\) to go on/) });
     expect(leaveGroup).not.toHaveBeenCalled();
     expect(await callApi(ctx, "group.leave", { group: "g1", yes: true })).toEqual({ left: "g1" });
     expect(leaveGroup).toHaveBeenCalledWith({ groupId: "g1" });
@@ -496,7 +551,9 @@ describe("chat wait", () => {
       hub: { onEvent: () => () => {}, onState: (l: (s: EngineState) => void) => { listeners.add(l); return () => listeners.delete(l); }, lastSeq: 0, replay: () => [] },
       mode: "daemon", version: "test",
     } as unknown as ApiContext;
-    return { ctx, set: (next: LinkView) => { links = [next]; for (const l of listeners) l(stateOf()); } };
+    // As the daemon's hub does (EventHub.setState): a listener that throws is its own business.
+    const hand = () => { for (const l of listeners) { try { l(stateOf()); } catch { /* its own */ } } };
+    return { ctx, set: (next: LinkView) => { links = [next]; hand(); }, remove: () => { links = []; hand(); } };
   }
   /** Live when the app last ran (its history ends on a live stretch, WISP 100), and no session in this run yet. */
   const remembered = (fields: Partial<LinkView> = {}) => link("chat-one", {
@@ -552,6 +609,19 @@ describe("chat wait", () => {
     set(remembered(session));
     expect(await callApi(ctx, "chat.wait", { chat: "Alice", until: "paired", timeout: 1 })).toMatchObject({ live: true });
   });
+
+  it("a chat removed while it is waited for answers not_found at once, not a timeout at the end", async () => {
+    // The check's not_found was thrown inside the hub's state listener, which swallows it: the wait went on to its
+    // --timeout (up to a day) and answered "Timed out … to be live", exit 4.
+    const { ctx, remove } = moving(remembered());
+    const from = Date.now();
+    const waiting = callApi(ctx, "chat.wait", { chat: "Alice", until: "live", timeout: 5 });
+    waiting.catch(() => {});
+    await new Promise((r) => setTimeout(r, 20));
+    remove();
+    await expect(waiting).rejects.toMatchObject({ code: "not_found", message: "Chat chat-one was removed" });
+    expect(Date.now() - from).toBeLessThan(1000);
+  });
 });
 
 describe("invite create", () => {
@@ -577,7 +647,7 @@ describe("invite create", () => {
   it("a daemon answers at once when the relays' request budget holds the invite back, and says when it goes", async () => {
     const held = inviting("daemon", { stage: "publishing", relayWaitUntil: 1_042_000 });
     await vi.advanceTimersByTimeAsync(0);
-    expect(held.answer()).toEqual({ chat: "inv1", invite: "ghostly1abc", link: expect.stringContaining("ghostly1abc"), published: false, retryInMs: 42_000 });
+    expect(held.answer()).toEqual({ chat: "inv1", invite: "ghostly1abc", link: expect.stringContaining("ghostly1abc"), published: false, retryInMs: 42_000, note: expect.stringContaining("once a relay answers") });
 
     // Published first: so it says, with no wait.
     const out = inviting("daemon", { stage: "publishing" });
@@ -587,6 +657,18 @@ describe("invite create", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(out.answer()).toMatchObject({ published: true });
     expect(out.answer()).not.toHaveProperty("retryInMs");
+    expect(out.answer()).not.toHaveProperty("reason");
+    expect(out.answer()).not.toHaveProperty("note");
+  });
+
+  it("says why when no relay took the invite, and that the invite still goes out", async () => {
+    const failed = inviting("daemon", { stage: "failed", reason: "publish", retryable: true, detail: "Publish failed on every relay: Error: https://a.test did not answer a moment ago; retry shortly" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(failed.answer()).toEqual({
+      chat: "inv1", invite: "ghostly1abc", link: expect.stringContaining("ghostly1abc"), published: false,
+      reason: "Publish failed on every relay: Error: https://a.test did not answer a moment ago; retry shortly",
+      note: "The invite is good: it goes out by itself once a relay answers, while a daemon runs for this profile",
+    });
   });
 
   it("a one-shot still waits for the invite to go out before it leaves, and says when it did not", async () => {
@@ -701,13 +783,23 @@ describe("the engine passthrough", () => {
     const { ctx, node } = fake();
     const updateSettings = vi.fn(async () => undefined);
     Object.assign(node, { updateSettings });
-    for (const relayOnly of [true, false]) {
+    for (const relayOnly of [true, "yes", null]) {
       await expect(callApi(ctx, "engine.call", { method: "updateSettings", params: { settings: { relayOnly } } })).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("relayOnly") });
     }
     await expect(callApi(ctx, "settings.set", { relayOnly: true })).rejects.toMatchObject({ code: "bad_request" });
     expect(updateSettings).not.toHaveBeenCalled();
     await callApi(ctx, "engine.call", { method: "updateSettings", params: { settings: { sendTyping: false } } });
     expect(updateSettings).toHaveBeenCalledWith({ settings: { sendTyping: false } });
+  });
+
+  // A profile an older CLI (or a dev build) turned it on in kept it for good: false was refused too, and while it is on
+  // the TURN server it needs cannot be taken away either.
+  it("still turns Hide my IP from contacts off on a profile that has it on", async () => {
+    const { ctx, node } = fake();
+    const updateSettings = vi.fn(async () => undefined);
+    Object.assign(node, { updateSettings });
+    await callApi(ctx, "engine.call", { method: "updateSettings", params: { settings: { relayOnly: false } } });
+    expect(updateSettings).toHaveBeenCalledWith({ settings: { relayOnly: false } });
   });
 
   it("refuses a real-money confirmation it was not given", async () => {
@@ -726,8 +818,10 @@ describe("the engine passthrough", () => {
       await expect(callApi(ctx, "engine.call", { method, params: {} }), method).rejects.toMatchObject({ code: "confirm", message: expect.stringContaining("--yes") });
       expect(call, method).not.toHaveBeenCalled();
     }
+    expect(ctx.calls.forgetChat).not.toHaveBeenCalled();
     await callApi(ctx, "engine.call", { method: "removeLink", params: { linkId: "chat-one" }, yes: true });
     expect(calls.removeLink).toHaveBeenCalledWith({ linkId: "chat-one" });
+    expect(ctx.calls.forgetChat).toHaveBeenCalledWith("chat-one");
   });
 
   it("clearProfileData says what it removed, and a daemon stops instead of serving the engine it shut down", async () => {
@@ -820,6 +914,15 @@ describe("groups", () => {
   });
 });
 
+describe("chat show names who keeps a chat on DHT only", () => {
+  it("says the contact's delivery mode beside this side's, null before the contact told it", () => {
+    const peerDht = link("c", { deliveryMode: "stream", textDelivery: "dht", dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } });
+    expect(chatDetailsJson(peerDht)).toMatchObject({ live: false, deliveryMode: "stream", peerDeliveryMode: "dht" });
+    expect(chatDetailsJson(link("c", { deliveryMode: "dht", dhtDelivery: { mode: "dht", peerMode: "stream", authenticated: true, maxTextBytes: 256 } }))).toMatchObject({ deliveryMode: "dht", peerDeliveryMode: "stream" });
+    expect(chatDetailsJson(link("c"))).toMatchObject({ peerDeliveryMode: null });
+  });
+});
+
 describe("a pending chat's invite code is a secret", () => {
   const CODE = "ghostly1pendingsecret";
   const pending = () => {
@@ -831,7 +934,7 @@ describe("a pending chat's invite code is a secret", () => {
 
   it("is hidden in every chat summary unless asked for, and only list and show take the asking", async () => {
     const made = pending();
-    const ctx = { ...made.ctx, runtime: { server: { node: made.node }, paths: { name: "default" } } } as unknown as ApiContext;
+    const ctx = { ...made.ctx, runtime: { server: { node: made.node }, paths: { name: "default" } }, calls: { list: () => [] } } as unknown as ApiContext;
     expect(chatJson(link("c", { inviteCode: CODE } as never), true).invite).toBe(CODE);
     expect(chatJson(link("c")).invite).toBeNull();
     // Array.map hands the index as the second argument: it must never read as "show".
@@ -880,8 +983,13 @@ describe("settings", () => {
     expect(JSON.stringify(capabilities)).not.toMatch(/fcm|AUTH|VK|SPACE/);
     await expect(callApi(ctx, "settings.set", { mints: [] })).rejects.toMatchObject({ code: "bad_request" });
     await expect(callApi(ctx, "settings.set", { relays: "x" })).rejects.toMatchObject({ code: "bad_request" });
-    await callApi(ctx, "settings.set", { relays: ["http://127.0.0.1:1"], readRelays: true });
-    expect(node.updateSettings).toHaveBeenCalledWith({ settings: { relays: ["http://127.0.0.1:1"], readRelays: true } });
+    await callApi(ctx, "settings.set", { relays: ["http://127.0.0.1:1"] });
+    expect(node.updateSettings).toHaveBeenCalledWith({ settings: { relays: ["http://127.0.0.1:1"] } });
+    // readRelays (the app's "Also use Pkarr relays") is refused with the reason: the CLI reads the relays first anyway.
+    node.updateSettings.mockClear();
+    for (const value of [false, true])
+      await expect(callApi(ctx, "settings.set", { readRelays: value })).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("reads the Pkarr relays first") });
+    expect(node.updateSettings).not.toHaveBeenCalled();
     // ICE servers in WebRTC's form (urls a list) are taken; one without urls is a bad_request that says what to write.
     await callApi(ctx, "settings.set", { iceServers: [{ urls: ["stun:stun.example.org:3478", "stun:b.example.org"] }] });
     expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { iceServers: [{ urls: "stun:stun.example.org:3478, stun:b.example.org" }] } });
@@ -946,5 +1054,44 @@ describe("a name every object has", () => {
   it("is no method: not found, as any other unknown one", async () => {
     const { ctx } = fake();
     for (const name of [...NAMES, "nope"]) await expect(callApi(ctx, name, {}), name).rejects.toMatchObject({ code: "not_found", message: `No method ${name}` });
+  });
+});
+
+/**
+ * `chat transport` toward a contact whose app has no WebRTC (`GHOSTLY_WEBRTC=0`) kept the choice and answered the chat
+ * still on HyperDHT, with nothing waiting: a bot could not tell it never would be. For one this app lacks, the engine
+ * answered `engine`, "Transport unavailable". The Connection menu offers neither; the CLI refuses them the same way.
+ */
+describe("chat transport", () => {
+  const withChat = (fields: Partial<LinkView>) => {
+    const made = fake();
+    made.node.getState = () => ({ links: [link("chat-one", { label: "Alice", ...fields })], groups: [], settings: {} }) as unknown as EngineState;
+    return made;
+  };
+
+  it("refuses a transport the contact's app lacks, and the engine is not asked", async () => {
+    const { ctx, node } = withChat({ availableTransports: ["webrtc/1", "hyperdht/1", "iroh/1"], peerTransports: ["hyperdht/1", "iroh/1"] });
+    await expect(callApi(ctx, "chat.transport", { chat: "Alice", transport: "webrtc" })).rejects.toMatchObject({
+      code: "refused", message: "Your contact's app doesn't have WebRTC: choose another, or auto", details: { reason: "contact-lacks", transport: "webrtc/1" },
+    });
+    expect(node.setChatTransport).not.toHaveBeenCalled();
+    await callApi(ctx, "chat.transport", { chat: "Alice", transport: "hyperdht" });
+    expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-one", transport: "hyperdht/1" });
+  });
+
+  it("refuses one this app lacks, with why it is not running", async () => {
+    const { ctx, node } = withChat({ availableTransports: ["hyperdht/1"], peerTransports: ["webrtc/1", "hyperdht/1", "iroh/1"], transportErrors: { "iroh/1": "Iroh relay unreachable" } });
+    await expect(callApi(ctx, "chat.transport", { chat: "Alice", transport: "webrtc" })).rejects.toMatchObject({ code: "refused", message: "This app has no WebRTC running", details: { reason: "app-lacks" } });
+    await expect(callApi(ctx, "chat.transport", { chat: "Alice", transport: "iroh" })).rejects.toMatchObject({ code: "refused", message: "This app has no Iroh running: Iroh relay unreachable", details: { reason: "app-lacks" } });
+    expect(node.setChatTransport).not.toHaveBeenCalled();
+  });
+
+  it("takes any on DHT only that this app can start, auto and dht always, and any while the contact's are not known", async () => {
+    const dhtOnly = withChat({ deliveryMode: "dht", availableTransports: [], runnableTransports: ["webrtc/1", "iroh/1"], peerTransports: ["webrtc/1", "iroh/1"] });
+    await callApi(dhtOnly.ctx, "chat.transport", { chat: "Alice", transport: "iroh" });
+    await expect(callApi(dhtOnly.ctx, "chat.transport", { chat: "Alice", transport: "hyperdht" })).rejects.toMatchObject({ details: { reason: "app-lacks" } });
+    const unknown = withChat({ availableTransports: ["webrtc/1", "hyperdht/1"], peerTransports: [] });
+    for (const transport of ["webrtc", "auto", "dht"]) await callApi(unknown.ctx, "chat.transport", { chat: "Alice", transport });
+    expect(unknown.node.setChatTransport).toHaveBeenCalledTimes(3);
   });
 });

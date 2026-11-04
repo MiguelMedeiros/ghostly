@@ -117,6 +117,25 @@ describe("switching the microphone during a call", () => {
     expect(call.result.current.isMuted).toBe(true);
   });
 
+  it.each([["unmuted", false], ["muted", true]])("%s, mute pressed while the microphone is swapped in: the new one is as the button says", async (_, mutedFirst) => {
+    const { call, audio } = await connectedCall();
+    if (mutedFirst) act(() => call.result.current.toggleMute());
+    // The swap takes a moment (the Linux Desktop opens the device in Rust): the press lands in it.
+    let swapped!: () => void;
+    audio.replaceTrack.mockImplementationOnce((track) => new Promise<void>((resolve) => { swapped = () => { audio.track = track; resolve(); }; }));
+
+    act(() => { void call.result.current.switchMicrophone("mic-headset"); });
+    const headset = devices.userMedia[1].grant().getAudioTracks()[0];
+    await settle();
+    act(() => call.result.current.toggleMute());
+    swapped();
+    await settle();
+
+    expect(audio.track).toBe(headset);
+    expect(call.result.current.isMuted).toBe(!mutedFirst);
+    expect(headset.enabled, "what the contact hears").toBe(mutedFirst);
+  });
+
   it("back to the default asks for no device", async () => {
     const { call } = await connectedCall();
     act(() => { void call.result.current.switchMicrophone(null); });
@@ -231,6 +250,36 @@ describe("switching the camera during a call", () => {
     expect(call.result.current.isScreenSharing).toBe(false);
     expect(video.track).toBe(camera);
     expect(camera.stop).not.toHaveBeenCalled();
+  });
+
+  it("a camera that is gone fails, and the call keeps the one it shows", async () => {
+    const { call, stream, video } = await connectedCall(true);
+    let failure: unknown;
+    act(() => { call.result.current.switchCamera("cam-gone").catch((e: unknown) => { failure = e; }); });
+    devices.userMedia[1].grant();
+    await settle();
+    expect((failure as Error).name).toBe("OverconstrainedError");
+    expect(video.track).toBe(stream.getVideoTracks()[0]);
+    expect(call.result.current.isVideoOff).toBe(false);
+  });
+
+  it("the only camera unplugged: no other opens, and the camera goes off, as its button turns it off", async () => {
+    const { call, stream, video } = await connectedCall(true);
+    const kinds = call.publishedKinds();
+    const unplugged = stream.getVideoTracks()[0] as FakeTrack;
+    unplugged.unplug();
+
+    let failure: unknown;
+    act(() => { call.result.current.switchCamera(null).catch((e: unknown) => { failure = e; }); });
+    devices.userMedia[1].deny(new DOMException("Requested device not found", "NotFoundError"));
+    await settle();
+
+    expect((failure as Error).name, "the caller still hears it failed").toBe("NotFoundError");
+    expect(call.result.current.isVideoOff).toBe(true);
+    expect(video.track).toBeNull();
+    expect(call.result.current.localStream?.getVideoTracks()).toEqual([]);
+    expect(call.publishedKinds().slice(kinds.length), "the contact is told the camera is off").toEqual(["v"]);
+    expect(call.result.current.callState).toBe("connected");
   });
 
   it("with the camera off, or a screen shared, there is nothing to swap", async () => {

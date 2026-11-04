@@ -83,6 +83,24 @@ describe("the read lane in the engine", () => {
     expect(await settled(contact.readAppRange(app, served.serve, 0, 1))).toEqual({ error: "not-served" });
   });
 
+  // Each serve kept a serve of its own until unserve or close: an app that served on each play grew the engine by one
+  // a call (144 000 in an hour at 40 a second, 58 MiB).
+  it("a page that serves the same file again and again holds one serve: the last id reads, and the app's close ends it", async () => {
+    const { call, contact, server, id, ref, app, ranges } = await setup();
+    const link = () => (server.node as unknown as { links: Map<string, { link?: GhostLink }> }).links.get(id)!.link!;
+    const ids = new Set<string>();
+    for (let i = 0; i < 1_000; i++) ids.add((await call("appServe", { linkId: id, ref, file: "LinkIdOfAFilm000000000" }) as { serve: string }).serve);
+    expect(ids.size).toBe(1);
+    expect(link().appServes(app)).toHaveLength(1);
+    const [serve] = ids;
+    const reading = contact.readAppRange(app, serve!, 0, 100);
+    await vi.waitFor(() => expect(ranges()).toHaveLength(1));
+    await call("appRangeAnswer", { linkId: id, app, request: ranges()[0].range.request, bytes: FILM.subarray(0, 100), size: FILM.length });
+    expect(await reading).toEqual({ bytes: FILM.subarray(0, 100), size: FILM.length });
+    await call("appClose", { linkId: id, ref });
+    expect(link().appServes(app)).toEqual([]);
+  });
+
   it("a request number the contact cancelled and asks again gets the bytes of its new ask, not the answer to the first", async () => {
     const { call, contact, id, ref, app, ranges } = await setup();
     const first = await call("appServe", { linkId: id, ref, file: "LinkIdOfAFilm000000000" }) as { serve: string };

@@ -1,0 +1,1 @@
+Adding a device says what happens when both sides have WebRTC and it connects nothing: a side whose attempt stalled or failed, or that saw the other side's packet 20 seconds ago with no session open, starts its link again as an app with no WebRTC, and the two meet over Iroh's relay. A device link does the same.

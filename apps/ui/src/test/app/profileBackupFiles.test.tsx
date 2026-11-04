@@ -242,6 +242,24 @@ describe("a profile backup's file", () => {
     expect(screen.getByTestId("backup-done")).toHaveTextContent("Cancelled. Nothing was restored.");
   });
 
+  it("while it works, Tab and Shift+Tab stay in the progress dialog, never on the page behind it", async () => {
+    // From Cancel, Tab went on to the Backups section and the rest of the page, usable while the backup ran.
+    const backup = drivenBackup();
+    const { user } = renderApp(<ProfileBackups canSwitch={false} />);
+    await startBackup(user);
+    const dialog = await screen.findByTestId("backup-progress");
+    const cancel = screen.getByTestId("backup-progress-cancel");
+    cancel.focus();
+    await user.tab();
+    expect(document.activeElement).toBe(cancel);
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(cancel);
+    // Saving the file: no Cancel left, and Tab stays on the dialog.
+    await backup.saving();
+    await user.tab();
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+  });
+
   it("on a phone the progress is a sheet from the bottom", async () => {
     const wide = window.matchMedia;
     window.matchMedia = ((query: string) => ({ matches: query.includes("max-width"), media: query, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia;

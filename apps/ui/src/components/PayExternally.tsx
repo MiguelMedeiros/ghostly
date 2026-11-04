@@ -92,7 +92,7 @@ export function PayExternally({ uri, value, testId, note, onPaid, size = 144, ac
         </div>
         {checked && <p className="text-[11px] m-0 opacity-70" data-testid={`${testId}-checking`}>{t("payments.external.checkingNote")}</p>}
         {note && <p className="text-[11px] m-0 opacity-70">{note}</p>}
-        {error && <Notice problem={error} className="text-[11px] m-0" ink />}
+        {error && <Notice problem={error} className="text-[11px] m-0" />}
       </div>
     </div>
   );

@@ -1,0 +1,1 @@
+Apps in a chat: the 16 apps a peer may have open count the ones still held from its previous sessions, and each held app keeps its own 10 seconds from the end of the session it was open on, so a later suspension's apps are not closed at an earlier one's time.

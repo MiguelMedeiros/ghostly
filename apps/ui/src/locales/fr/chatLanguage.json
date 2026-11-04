@@ -1,0 +1,10 @@
+{
+  "auto": "D’après leurs messages",
+  "byHand": "{{language}} (choisi par vous)",
+  "change": "Modifier",
+  "detected": "{{language}} (détecté)",
+  "note": "Les messages courts sont lus dans cette langue, et ce que vous envoyez peut y être traduit.",
+  "several": "Plusieurs langues",
+  "title": "Langue de cette discussion",
+  "unknown": "Pas encore connue"
+}

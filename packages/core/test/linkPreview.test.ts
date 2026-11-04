@@ -27,9 +27,19 @@ describe("canonicalUrl", () => {
 });
 
 describe("linksIn", () => {
+  it("finds a link whose scheme a phone's keyboard capitalized, as the bubble does", () => {
+    expect(linksIn("Https://a.example/x and HTTP://b.example/y")).toEqual(["Https://a.example/x", "HTTP://b.example/y"]);
+  });
+
   it("finds the links of a text as the bubble ends them", () => {
     expect(linksIn("see (https://a.example/x), and https://b.example/y.")).toEqual(["https://a.example/x", "https://b.example/y"]);
     expect(linksIn("no links here")).toEqual([]);
+  });
+
+  // The preview was fetched from /a%E3%80%82, a page the person never linked.
+  it("ends a link at a Chinese, Japanese or Arabic sentence's punctuation, as the bubble does", () => {
+    expect(linksIn("見て https://a.example/x。看 https://b.example/y，好")).toEqual(["https://a.example/x", "https://b.example/y"]);
+    expect(linksIn("هل رأيت https://a.example/x؟ «https://b.example/y»")).toEqual(["https://a.example/x", "https://b.example/y"]);
   });
 });
 

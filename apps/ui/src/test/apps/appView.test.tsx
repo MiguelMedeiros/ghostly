@@ -22,6 +22,8 @@ import type { AppsPlatform } from "../../lib/platform";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { windowIs } from "../viewport";
+import { PHONE_HEADER_QUERY } from "../../hooks/usePhoneHeader";
+import { MOBILE_QUERY } from "../../hooks/useIsMobile";
 
 // covers: apps.view
 
@@ -130,6 +132,21 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     const kept = [...line.children].filter((node) => node !== name);
     expect(kept.some((node) => node.textContent === words)).toBe(true);
     for (const node of kept) expect(node).toHaveClass("shrink-0");
+  });
+
+  it("in pt on a 320 px phone, the words that fill the line stop short of its end: some of the name shows, nothing runs under the buttons", async () => {
+    windowIs(true);
+    renderApp(<ChatAppPanel linkId="link-1" sessionId="s1" contact={{ name: "Ana", named: true }} peerKey="peer" />, { language: "pt" });
+    act(() => fakeEngine.update({ links: [ana(true)] }));
+    await act(() => open(REF, "link-1"));
+    act(() => updateChatApp("link-1", { serving: true }));
+    const line = within(screen.getByTestId("mini-app")).getByTestId("mini-app-with");
+    expect(line).toHaveTextContent("compartilhando um arquivo com Ana");
+    // The line clips: its words, cut if they must, leave 4ch of it to the name.
+    expect(line).toHaveClass("overflow-hidden");
+    const name = within(line).getByTestId("mini-app-with-name");
+    const words = [...line.children].filter((node) => node !== name);
+    for (const node of words) expect(node).toHaveClass("max-w-[calc(100%-4ch)]", "overflow-hidden", "text-ellipsis", "whitespace-pre");
   });
 
   it("has the chat's look in its header: the app, with the contact, and the chat's connection", async () => {
@@ -248,6 +265,21 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     expect(app).not.toBeVisible();
     expect(started[0]!.stop).not.toHaveBeenCalled();
     expect(screen.getByTestId("mini-app-resume")).toHaveFocus();
+  });
+
+  it("on a phone held upright, its Back, connection and Close are as big to tap as the chat header's (44 px)", async () => {
+    const matchMedia = window.matchMedia.bind(window);
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => query === MOBILE_QUERY || query === PHONE_HEADER_QUERY
+      ? ({ ...matchMedia(query), matches: true, addEventListener: () => {}, removeEventListener: () => {} } as MediaQueryList) : matchMedia(query));
+    panel();
+    await act(() => open(REF, "link-1"));
+    const app = screen.getByTestId("mini-app");
+    expect(within(app).getByTestId("app-connection-options")).toHaveClass("h-11", "w-11");
+    expect(within(app).getByTestId("mini-app-close")).toHaveClass("h-11", "w-11");
+    // Back as the chat header's Back right under it: 36 px only under 340 px.
+    const back = within(app).getByTestId("mini-app-back");
+    expect(back).toHaveClass("h-11", "w-11", "max-[340px]:w-9");
+    expect(back).not.toHaveClass("w-9");
   });
 
   it("a full-screen app on a phone is as any app there: over the chat, with Back", async () => {

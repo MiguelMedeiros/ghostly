@@ -17,14 +17,14 @@ const hash = () => crypto.getRandomValues(new Uint8Array(32));
 
 /** Only what CashuMintLightning uses of the Cashu wallet. */
 class FakeCashu {
-  balance = 1_000;
+  sats = 1_000;
   readonly mintQuotes = new Map<string, "UNPAID" | "PAID" | "ISSUED">();
   readonly meltQuotes = new Map<string, { invoice: string; amount: number; state: "UNPAID" | "PENDING" | "PAID" }>();
   /** Melts the mint takes but has not finished: `payQuote` answers false. */
   pendingMelts = false;
   feeReserve = 2;
   private n = 0;
-  view = vi.fn(async () => ({ balance: this.balance }));
+  balance = vi.fn(async () => this.sats);
   receiveLightning = vi.fn(async (amount: number) => {
     const quote = `mq${++this.n}`;
     this.mintQuotes.set(quote, "UNPAID");
@@ -35,7 +35,7 @@ class FakeCashu {
   quoteInvoice = vi.fn(async (invoice: string) => {
     const amount = decodeBolt11(invoice)?.amountSat;
     if (!amount) throw new Error("Not an invoice");
-    if (amount + this.feeReserve > this.balance) throw new Error("Not enough sats in your wallet");
+    if (amount + this.feeReserve > this.sats) throw new Error("Not enough sats in your wallet");
     const quote = `melt${++this.n}`;
     this.meltQuotes.set(quote, { invoice, amount, state: "UNPAID" });
     return { quote, mint: MINT, amount, feeReserve: this.feeReserve };
@@ -43,7 +43,7 @@ class FakeCashu {
   payQuote = vi.fn(async (quote: string) => {
     const melt = this.meltQuotes.get(quote);
     if (!melt) throw new Error("Unknown quote");
-    this.balance -= melt.amount;
+    this.sats -= melt.amount;
     melt.state = this.pendingMelts ? "PENDING" : "PAID";
     return !this.pendingMelts;
   });
@@ -101,7 +101,7 @@ describe("the Cashu mints as a Lightning source, beyond the contract", () => {
     cashu.feeReserve = 1;
     cashu.payQuote.mockRejectedValueOnce("mint offline");
     await expect(p.payInvoice(fakeInvoice(10, hash()), 5)).rejects.toSatisfy((error: unknown) => isNothingSpentError(error) && (error as Error).message === "mint offline");
-    expect(cashu.balance).toBe(1_000);
+    expect(cashu.sats).toBe(1_000);
   });
 
   it("a melt the mint left pending is pending, then failed when the mint gives the sats back", async () => {

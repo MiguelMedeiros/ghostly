@@ -43,7 +43,7 @@ let mints = true;
 const registries: LightningCards[] = [];
 function cards(network: "testnet" | "mainnet" = "testnet") {
   const events = { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() } satisfies LightningEvents;
-  const cashu = { view: async () => ({ balance: 7, mints: [], history: [], feesPaid: 0 }) } as unknown as CashuWallet;
+  const cashu = { balance: async () => 7 } as unknown as CashuWallet;
   const registry = new LightningCards(network, { descriptors: () => [cashuMint, fakeNode], host: () => ({ platform: "web", cashu }), events, hasMints: () => mints });
   registries.push(registry);
   return { registry, events };

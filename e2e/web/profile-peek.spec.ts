@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { chat, connect, expect, link, say, test, type Peer } from "../support/fixtures";
+import { chat, connect, deployedBuild, expect, link, say, test, type Peer } from "../support/fixtures";
 
 // Checking other profiles for new messages (WISP 04 § Checking other profiles): while Work runs, a contact writes to
 // Personal, which is not running. Work sees it waiting and says "New"; one tap opens Personal, which fetches it itself.
@@ -9,6 +9,9 @@ const item = (page: Page, name: string) => switcher(page).getByTestId("profile-s
 const profileIs = async (page: Page, name: string) => {
   await expect(page.getByTestId("account-profile")).toHaveAttribute("title", new RegExp(`: ${name}$`), { timeout: 30_000 });
 };
+
+// A look every few minutes would outlast the test.
+test.skip(deployedBuild, "a deployed build is a release build: it ignores ghostly-test-peek-ms");
 
 test("a message for a profile that is not running shows as New, and one tap opens it", { tag: ["@feature:profiles.peek", "@feature:profiles.switcher"] }, async ({ peer }) => {
   const alice = await peer("peek-alice");

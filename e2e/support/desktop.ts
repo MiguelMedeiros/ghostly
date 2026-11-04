@@ -76,9 +76,13 @@ class Driver {
   }
 
   private static async send(url: string, method: string, body?: unknown): Promise<unknown> {
+    // A bare "fetch failed" names no call: say which one, and what the socket said.
     const response = await fetch(url, {
       method,
       ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+    }).catch((error: Error) => {
+      const cause = (error.cause as Error | undefined)?.message;
+      throw new Error(`${method} ${url}: ${error.message}${cause ? ` (${cause})` : ""}`, { cause: error });
     });
     const text = await response.text();
     let payload: { value?: unknown };
@@ -265,10 +269,29 @@ export const homeEnv = (dir: string): Record<string, string> => {
   return env;
 };
 
-/** `tauri-driver`, and the app it opens, until `stop`. */
+/**
+ * What the drivers say when a port `freePort` handed out was taken before they bound it: WebKitWebDriver's (it exits)
+ * and tauri-driver's (it does not). Either way tauri-driver closed every request without an answer ("other side
+ * closed") until the session's 30 s were out, and nothing said why (Omarchy, 2026-10-29 and 2026-10-31, three specs).
+ */
+const PORT_TAKEN = /Unable to listen for HTTP server|can not listen to address/;
+
+class PortTaken extends Error {}
+
+/** `tauri-driver`, and the app it opens, until `stop`. A driver that lost one of its ports starts again on others. */
 export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: DesktopApp; stop: () => Promise<void> }> {
   // Before anything is spawned: a missing binary is not something to retry for 30 seconds.
   const application = options.binary ?? desktopBinary();
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await launchDesktop(application, options);
+    } catch (error) {
+      if (!(error instanceof PortTaken) || attempt === 3) throw error;
+    }
+  }
+}
+
+async function launchDesktop(application: string, options: DesktopOptions): Promise<{ app: DesktopApp; stop: () => Promise<void> }> {
   const port = await freePort();
   const nativePort = await freePort();
   // A session bus of its own unless the test brings one: see `privateBus`.
@@ -293,10 +316,17 @@ export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: 
     },
   );
   const log: string[] = [];
-  for (const stream of [driver.stdout, driver.stderr]) stream?.on("data", (chunk: Buffer) => log.push(chunk.toString()));
+  let lostPort: (error: Error) => void = () => {};
+  const taken = new Promise<never>((_, fail) => { lostPort = fail; });
+  for (const stream of [driver.stdout, driver.stderr]) stream?.on("data", (chunk: Buffer) => {
+    log.push(chunk.toString());
+    if (PORT_TAKEN.test(log.join(""))) lostPort(new PortTaken(`A driver port (${port}, ${nativePort}) was taken:\n${log.join("")}`));
+  });
   const died = new Promise<never>((_, fail) =>
     driver.on("exit", (code) => fail(new Error(`tauri-driver exited (${code}). Is it installed, with a WebDriver for this platform?\n${log.join("")}`))),
   );
+  // Once either has ended the open, the session's retries stop too: no asking a driver that is gone.
+  const settled = new AbortController();
 
   const endpoint = `http://127.0.0.1:${port}`;
   const exited = new Promise<void>((done) => driver.once("exit", () => done()));
@@ -316,7 +346,8 @@ export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: 
   };
   try {
     // The driver needs a moment to bind, and the app a while longer to boot.
-    const app = await Promise.race([died, withRetries(() => Driver.open(endpoint, application), 30_000)]);
+    const app = await Promise.race([died, taken, withRetries(() => Driver.open(endpoint, application), 30_000, settled.signal)])
+      .finally(() => settled.abort());
     await expectUnderTest(app);
     return { app, stop: async () => {
       const started = launched();
@@ -468,13 +499,13 @@ async function endAll(launched: Launched[]): Promise<void> {
   if (still.length > 0) throw new Error(`The Desktop app's processes ${still.map(({ pid }) => pid).join(", ")} outlived SIGKILL`);
 }
 
-async function withRetries<T>(attempt: () => Promise<T>, budgetMs: number): Promise<T> {
+async function withRetries<T>(attempt: () => Promise<T>, budgetMs: number, stop?: AbortSignal): Promise<T> {
   const deadline = Date.now() + budgetMs;
   for (;;) {
     try {
       return await attempt();
     } catch (error) {
-      if (Date.now() > deadline) throw error;
+      if (Date.now() > deadline || stop?.aborted) throw error;
       await new Promise((done) => setTimeout(done, 300));
     }
   }

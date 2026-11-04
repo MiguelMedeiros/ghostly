@@ -12,6 +12,8 @@
   "decline": "拒否",
   "devices": {
     "back": "{{name}} が戻りました",
+    "failed": "{{name}} を使えませんでした。通話はそれまでのデバイスのまま続きます。",
+    "gone": "{{name}} が外れました。続けるには別のデバイスを接続してください。",
     "lost": "{{name}} が外れました。既定を使用中です。",
     "menu": "デバイス",
     "switchBack": "元に戻す"
@@ -34,6 +36,11 @@
   "mute": "ミュート",
   "needLive": "通話には直接接続が必要です",
   "noAnswer": "応答がありません",
+  "noPath": "通話を接続できませんでした",
+  "noPathGuide": "解決方法",
+  "noPathNext": "あなたか相手のVPNやファイアウォールが通話を妨げている可能性があります。TURNサーバーを使うと通話できます。",
+  "noPathSettings": "ネットワーク設定",
+  "noPathTurnSet": "設定済みのTURNサーバーも経由できませんでした。アドレス（443番ポートのTURN over TLS）と認証情報を確認してください。相手にもTURNサーバーが必要な場合があります。",
   "onAnother": "別の通話中です",
   "outgoing": "発信中...",
   "reconnecting": "再接続中...",

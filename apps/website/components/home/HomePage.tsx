@@ -31,20 +31,6 @@ export function HomePage({ version }: { version: string }) {
     <Shell>
       <LandOnHash />
       <KeepPlace />
-      <StoryRail
-        label={t.rail}
-        marks={[
-          { id: "hero", label: `00 · ${t.hero.title1}` },
-          { id: "invite", label: t.invite.eyebrow },
-          { id: "dht", label: t.dht.eyebrow },
-          { id: "agree", label: t.agree.eyebrow },
-          { id: "alive", label: t.alive.eyebrow },
-          { id: "next", label: t.next.eyebrow },
-          { id: "space", label: t.space.eyebrow },
-          { id: "open", label: t.open.eyebrow },
-          { id: "finale", label: t.finale.eyebrow },
-        ]}
-      />
       <Act
         id="act-1"
         field
@@ -95,6 +81,21 @@ export function HomePage({ version }: { version: string }) {
         </div>
       </div>
       <Finale t={t.finale} version={version} />
+      {/* After the story, so Skip to content and Tab reach the hero before its marks; it is fixed, so this does not move it. */}
+      <StoryRail
+        label={t.rail}
+        marks={[
+          { id: "hero", label: `00 · ${t.hero.title1}` },
+          { id: "invite", label: t.invite.eyebrow },
+          { id: "dht", label: t.dht.eyebrow },
+          { id: "agree", label: t.agree.eyebrow },
+          { id: "alive", label: t.alive.eyebrow },
+          { id: "next", label: t.next.eyebrow },
+          { id: "space", label: t.space.eyebrow },
+          { id: "open", label: t.open.eyebrow },
+          { id: "finale", label: t.finale.eyebrow },
+        ]}
+      />
     </Shell>
   );
 }

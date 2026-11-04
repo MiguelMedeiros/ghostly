@@ -1,8 +1,6 @@
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import { QRCodeSVG } from "qrcode.react";
 import type { Page } from "@playwright/test";
-import { expect, getTestCoins, openWallet, test, useTestnet } from "../support/fixtures";
+import { expect, getTestCoins, openWallet, TEST_COINS, test, useTestnet } from "../support/fixtures";
+import { qrPicture } from "../support/qr";
 import { strangerInvoice } from "../support/bolt11";
 import { LocalLnurlServer } from "../support/lnurl";
 import { endpoints } from "../infra/env.mjs";
@@ -12,19 +10,11 @@ import { endpoints } from "../infra/env.mjs";
  * frames the same way) goes to its review, then Pay. Sats move through the test mint (`E2E_MINT_URL` answers for the
  * public one when set, see support/mint.ts), worthless. The invoice is a stranger's (support/bolt11.ts): a test mint
  * marks its own invoices paid by itself, so paying one of those proves nothing. The Lightning address is served by a
- * server of this test's own (support/lnurl.ts); its invoices are the mint's, so it is paid only against the suite's own
- * mint (`E2E_MINT_URL`), which settles them inside, and the public one refuses them as already paid.
+ * server of this test's own (support/lnurl.ts), whose invoices are a stranger's too.
  */
 
-/** A PNG of `text`'s QR, as a screenshot of one would be: drawn by the app's own QR component, on a blank page. */
-async function qrPicture(page: Page, text: string): Promise<{ name: string; mimeType: string; buffer: Buffer }> {
-  const svg = renderToStaticMarkup(createElement(QRCodeSVG, { value: text, size: 360, marginSize: 4 }));
-  const blank = await page.context().newPage();
-  try {
-    await blank.setContent(`<body style="margin:0;background:#fff">${svg}</body>`);
-    return { name: "qr.png", mimeType: "image/png", buffer: await blank.locator("svg").screenshot() };
-  } finally { await blank.close(); }
-}
+/** The card's balance, in sats. */
+const sats = async (page: Page) => Number((await page.getByTestId("wallet-balance").innerText()).replace(/[^\d]/g, ""));
 
 test.describe("Send scans a QR", () => {
   test.describe.configure({ retries: 2 });
@@ -76,11 +66,49 @@ test.describe("Send scans a QR", () => {
       await pay.getByTestId("lnurl-amount").fill("8");
       await pay.getByTestId("lnurl-invoice").click();
       await expect(pay.getByTestId("lnurl-review")).toContainText("Pay 8 test sats to shop@");
-      if (!process.env.E2E_MINT_URL) return;
       await pay.getByTestId("lnurl-pay").click();
       await expect(pay.getByTestId("lnurl-paid")).toContainText(`Paid 8 test sats to ${server.address("shop")}`);
-      await expect.poll(() => server.paid("shop"), { timeout: 30_000 }).toBe(true);
+      // The 8 sats and the mint's fee left the card (a refused melt gives the sats back, less a fee).
+      await expect.poll(() => sats(page)).toBeLessThanOrEqual(TEST_COINS - 8);
     } finally { server.close(); }
+  });
+
+  test("on a phone, Send opens with the camera running and the keyboard down; Paste stops it and reads, and so does the field taken to type", { tag: ["@feature:wallet.cashu.send-scan", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+    const alice = await peer("alice");
+    await useTestnet(alice);
+    const page = alice.page;
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    // A touch screen with no mouse (lib/touchOnly.ts), set up after the wallet is: only these two answers are changed.
+    await page.context().addInitScript(() => {
+      const real = window.matchMedia.bind(window);
+      window.matchMedia = (query: string) => query === "(any-pointer: coarse)" || query === "(any-pointer: fine)"
+        ? { matches: query === "(any-pointer: coarse)", media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }
+        : real(query);
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload();
+    await openWallet(alice, "cashu-testnet");
+    await page.getByTestId("wallet-send").click();
+    // The browser's fake camera: frames are playing in the preview, not only a button that changed.
+    const preview = page.getByTestId("wallet-send-scan").locator("video");
+    await expect(page.getByTestId("wallet-send-scan-stop")).toBeVisible();
+    await expect.poll(() => preview.evaluate((video: HTMLVideoElement) => video.videoWidth > 0 && !video.paused)).toBe(true);
+    await expect(page.getByTestId("wallet-pay-input")).not.toBeFocused();
+
+    await page.evaluate(() => navigator.clipboard.writeText("shop@example.com"));
+    await page.getByTestId("wallet-send-paste").click();
+    await expect(page.getByTestId("wallet-pay-input")).toHaveValue("shop@example.com");
+    await expect(page.getByTestId("wallet-send-camera")).toBeVisible();
+    await expect(preview).toBeHidden();
+    expect(await preview.evaluate((video: HTMLVideoElement) => (video.srcObject as MediaStream | null)?.getTracks().every((track) => track.readyState === "ended") ?? true), "the camera is off").toBe(true);
+
+    // Started again, then the person taps the field to type: the camera goes, and does not stay above the keyboard.
+    await page.getByTestId("wallet-send-camera").click();
+    await expect.poll(() => preview.evaluate((video: HTMLVideoElement) => video.videoWidth > 0 && !video.paused)).toBe(true);
+    await page.getByTestId("wallet-pay-input").click();
+    await expect(page.getByTestId("wallet-send-camera")).toBeVisible();
+    await expect(preview).toBeHidden();
+    expect(await preview.evaluate((video: HTMLVideoElement) => (video.srcObject as MediaStream).getTracks().every((track) => track.readyState === "ended")), "the camera is off").toBe(true);
   });
 
   test("on a phone, Scan, Paste and Choose image read whole in every language", { tag: ["@feature:wallet.cashu.send-scan", "@feature:app.i18n"] }, async ({ peer }) => {

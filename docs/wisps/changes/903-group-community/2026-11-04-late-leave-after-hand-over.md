@@ -1,0 +1,1 @@
+Rule 0 (§ Races and forks) no longer counts a `role` whose `s` signed a commit after it: that member took the role while still in, so a leave it signs later, committed on a view from before the `role`, no longer undoes every admin change made since the hand-over. No change on the wire.

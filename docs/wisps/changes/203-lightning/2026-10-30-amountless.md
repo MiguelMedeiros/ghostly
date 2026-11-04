@@ -1,0 +1,1 @@
+An amountless invoice now has its explicit behavior: paid only for an amount the person typed, through a component that says it takes one (a Cashu mint's NUT-05 `amountless` option) and confirms that amount before anything is spent, or refused. An invoice with its own amount takes no other. Client policy, no wire change.

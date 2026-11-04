@@ -1,6 +1,7 @@
 {
   "fromContacts": "Dai tuoi contatti",
   "fromContactsEmpty": "Qui compaiono le app condivise dai tuoi contatti.",
+  "ghostlyOnline": "Ghostly online",
   "goOffline": "Vai offline: niente di ciò che condividi resta raggiungibile",
   "goOnline": "Vai online",
   "letReach": "Consenti a {{contact}} di raggiungere {{app}}",
@@ -9,6 +10,7 @@
   "noContacts": "Ancora nessun contatto.",
   "nobodyYet": "Nessuno può aprirla finché non scegli chi.",
   "nothingShared": "Ancora niente di condiviso.",
+  "offDisconnectsChats": "Disattivarlo disconnette tutte le chat",
   "offline": "Offline",
   "online": "Online",
   "open": "Apri {{app}}",
@@ -18,6 +20,7 @@
   "remove": "Rimuovi",
   "removeNamed": "Rimuovi {{app}}",
   "requestCount": "· {{count}} richieste",
+  "requestCount_one": "· {{count}} richiesta",
   "share": "Condividi",
   "shareLocal": "Condividi un servizio locale",
   "shareNamed": "Condividi {{app}}",
@@ -29,12 +32,18 @@
     "stopped": "Fermo"
   },
   "window": {
+    "busy": "{{app}} sta caricando troppe pagine insieme sulla macchina del tuo contatto. Riprova tra poco.",
     "callOn": "C'è una chiamata in corso. Chiudila per aprire {{app}}.",
     "elsewhere": "{{app}} ha provato a mandarti altrove, fuori da ciò che il tuo contatto condivide.",
     "failed": "La richiesta non è riuscita.",
+    "label": "{{app}}, condivisa da {{contact}}",
     "notAnswering": "{{app}} non risponde sul computer del tuo contatto. Chiedi al tuo contatto di controllare che sia in esecuzione.",
+    "offline": "Il tuo contatto è offline, quindi {{app}} non può aprirsi ora. Si riaprirà qui quando tornerà.",
+    "owner": "App di {{contact}}, in esecuzione sul suo computer. Non è Ghostly: non digitare mai qui le tue parole di recupero o le password.",
+    "retry": "Riprova",
     "tooSlow": "{{app}} non ha risposto in tempo sul computer del tuo contatto. Riprova tra un momento.",
-    "unreachable": "Questo servizio non è raggiungibile. I servizi esistono finché il loro fantasma è online."
+    "unreachable": "Questo servizio non è raggiungibile. I servizi esistono finché il loro fantasma è online.",
+    "unshared": "{{app}} non è più condiviso con te."
   },
   "yourApps": "Le tue app"
 }

@@ -47,11 +47,16 @@ export function MessageDetailsPanel({ message, linkId, picture, onClose, returnF
     // A receipt or a resend changes what is stored: asked again when the row's state moves.
   }, [linkId, message.id, message.delivery, message.deliveryError]);
 
+  // The focus goes back to what had it as the panel opened (the ⋮, which its menu gave it back to); when nothing
+  // focusable had it (a Ctrl+double click) or that is gone, to `returnFocus`.
+  const fallback = useRef(returnFocus);
+  fallback.current = returnFocus;
   useEffect(() => {
+    const at = document.activeElement;
+    const opener = at instanceof HTMLElement && at !== document.body && !ref.current?.contains(at) ? at : null;
     ref.current?.focus({ preventScroll: true });
-    const back = returnFocus;
-    return () => { back?.focus({ preventScroll: true }); };
-  }, [returnFocus]);
+    return () => { (opener?.isConnected ? opener : fallback.current)?.focus({ preventScroll: true }); };
+  }, []);
 
   const model = useMemo(() => buildDetails(message, view, { picture, t }), [message, view, picture, t]);
   const mine = message.sender === "me";
@@ -117,7 +122,7 @@ function Row({ row, copyHint, copied }: { row: DetailRow; copyHint: string; copi
       {row.copy !== undefined
         ? <button type="button" data-testid="message-details-copy" title={copyHint} aria-label={`${copyHint}: ${row.label}`}
             onClick={() => { void navigator.clipboard?.writeText(row.copy!).then(() => { setDone(true); setTimeout(() => setDone(false), 1500); }).catch(() => {}); }}
-            className="bg-transparent border-none p-0 text-start text-inherit cursor-pointer hover:text-accent transition-colors">{value}</button>
+            className="bg-transparent border-none p-0 text-start text-inherit cursor-pointer hover:text-accent transition-colors min-h-6">{value}</button>
         : value}
     </dd>
   </>;

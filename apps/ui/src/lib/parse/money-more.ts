@@ -2,6 +2,7 @@ import { decodeBolt11, type Bolt11Invoice } from "@ghostly/core";
 import { findArkAddress, type ArkRequest } from "./money-ark";
 import { btcToSats, findBip21, findBitcoinAddress, hasLongBip21, onchainFromBip21, unknownRequired, type OnchainRequest } from "./money-bitcoin";
 import { decodeBolt12Offer, findBolt12Offer, type Bolt12Offer } from "./money-bolt12";
+import { findMoneroAddress, type MoneroRequest } from "./money-monero";
 import { cut } from "./money-text";
 import { findUsdtAddress, type UsdtRequest } from "./money-usdt";
 
@@ -10,7 +11,8 @@ export type MoreMoney =
   | { type: "onchain"; request: OnchainRequest; rest: string }
   | { type: "bolt12"; offer: Bolt12Offer; rest: string }
   | { type: "ark"; request: ArkRequest; rest: string }
-  | { type: "usdt"; request: UsdtRequest; rest: string };
+  | { type: "usdt"; request: UsdtRequest; rest: string }
+  | { type: "monero"; request: MoneroRequest; rest: string };
 
 /**
  * A `bitcoin:` link, read before anything inside it: its address wins over the Lightning invoice it may carry
@@ -44,7 +46,8 @@ export function findLinkMoney(text: string): MoreMoney | { type: "lightning"; in
 
 /**
  * The formats read after invoices, ecash and LNURL: a BOLT 12 offer, an Ark address, a bare Bitcoin address
- * (checksum-validated), a USDT address (an `ethereum:` link, or `0x…` with USDT named).
+ * (checksum-validated), a USDT address (an `ethereum:` link, or `0x…` with USDT named), a Monero address or
+ * `monero:` link (checksum-validated).
  */
 export function findMoreMoney(text: string): MoreMoney | null {
   const offer = findBolt12Offer(text);
@@ -55,10 +58,12 @@ export function findMoreMoney(text: string): MoreMoney | null {
   if (onchain) return { type: "onchain", ...onchain };
   const usdt = findUsdtAddress(text);
   if (usdt) return { type: "usdt", ...usdt };
+  const monero = findMoneroAddress(text);
+  if (monero) return { type: "monero", ...monero };
   return null;
 }
 
-/** The chat's switch for each format: the way of paying that pays it. */
-export function moreMoneyMethod(money: MoreMoney): "bitcoin" | "lightning" | "arkade" | "bark" | "usdt" {
-  return money.type === "onchain" ? "bitcoin" : money.type === "bolt12" ? "lightning" : money.type === "ark" ? money.request.kind : "usdt";
+/** The chat's switch for each format: the way of paying that pays it. None for Monero: the app has no wallet for it. */
+export function moreMoneyMethod(money: MoreMoney): "bitcoin" | "lightning" | "arkade" | "bark" | "usdt" | null {
+  return money.type === "onchain" ? "bitcoin" : money.type === "bolt12" ? "lightning" : money.type === "ark" ? money.request.kind : money.type === "usdt" ? "usdt" : null;
 }

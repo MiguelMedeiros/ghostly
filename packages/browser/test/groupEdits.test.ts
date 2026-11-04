@@ -44,13 +44,13 @@ describe("GroupEdits on its own", () => {
   const mine = (n: number, text = `text ${n}`): StoredMessage => ({ linkId: chat, id: `${me}:1:${n}`, text, sender: "me", member: me, timestamp: n + 1, via: "datalink" });
   const bobs = (n: number, text = `bob ${n}`): StoredMessage => ({ linkId: chat, id: `${bob}:1:${n}`, text, sender: "peer", member: bob, timestamp: n + 100, via: "datalink" });
 
-  function setup(messages: StoredMessage[], members = [me, bob, carol], removed: string[] = []) {
+  function setup(messages: StoredMessage[], members = [me, bob, carol], removed: string[] = [], community = false) {
     const sent: { edit: GroupEdit; to?: string }[] = [];
     let clock = 1_000_000, connection = {};
     const edits = new GroupEdits({
       ...rows(messages, removed),
       changed: () => {},
-      membership: () => ({ me, members: new Set(members), community: false, admin: true }),
+      membership: () => ({ me, members: new Set(members), community, admin: true }),
       send: async (_g, edit, to) => { sent.push({ edit, ...(to && { to }) }); return null; },
       edge: () => connection,
       now: () => clock,
@@ -244,6 +244,18 @@ describe("GroupEdits on its own", () => {
     expect(messages).toHaveLength(4);
   });
 
+  it("a private group's removal stands once its author is out of the group, its text edits do not; a community's neither", async () => {
+    const removed: string[] = [];
+    const { edits, messages } = setup([bobs(0, "secret"), bobs(1, "v0")], [me, carol], removed);
+    expect(await edits.receive("g1", bob, { id: bobs(1).id, e: 1, ts: 1, m: "rewritten" })).toBe("dropped");
+    expect(await edits.receive("g1", bob, { id: bobs(0).id, e: 1, ts: 1, m: REMOVED_TEXT, rm: true })).toBe("applied");
+    expect(removed).toEqual([bobs(0).id]);
+    expect(messages.map(m => m.text)).toEqual(["v0"]);
+    const community = setup([bobs(0, "secret")], [me, carol], [], true);
+    expect(await community.edits.receive("g1", bob, { id: bobs(0).id, e: 1, ts: 1, m: REMOVED_TEXT, rm: true })).toBe("dropped");
+    expect(community.messages).toHaveLength(1);
+  });
+
   it("an edit that came before its message is shown once the message is stored", async () => {
     const { edits, messages } = setup([]);
     expect(await edits.receive("g1", bob, { id: bobs(0).id, e: 1, ts: 1, m: "early" })).toBe("waiting");
@@ -389,6 +401,27 @@ describe("GroupEdits on its own", () => {
       expect(sent.slice(3)).toEqual(messages.slice(2, 2 + GROUP_EDIT_RESEND).map(m => m.id));
       clock += GROUP_EDIT_RESEND_WINDOW_MS; await vi.advanceTimersByTimeAsync(GROUP_EDIT_RESEND_WINDOW_MS);
       expect(sent.slice(3)).toEqual(messages.slice(2).map(m => m.id));
+      edits.stop();
+    });
+
+    it("a member who left the roster: what was kept of its edge goes, the others' stays; out of the group, all of it", async () => {
+      const members = [me, bob, carol], edges = new Map([[bob, {}], [carol, {}]]);
+      const edits = new GroupEdits({
+        ...rows(edited(0, 3)), changed: () => {}, send: async () => null,
+        membership: () => members.length ? { me, members: new Set(members), community: false } : undefined,
+        edge: (_g, member) => edges.get(member),
+      });
+      const inner = edits as unknown as { resentOn: Map<string, unknown>; heard: Map<string, unknown>; resendPace: Map<string, unknown> };
+      const kept = () => [inner.resentOn, inner.heard, inner.resendPace].map(map => [...map.keys()].sort());
+      await edits.resend("g1", bob);
+      await edits.resend("g1", carol);
+      expect(kept()).toEqual(Array(3).fill([`g1\n${bob}`, `g1\n${carol}`].sort()));
+      members.splice(members.indexOf(carol), 1);
+      edits.membersChanged("g1");
+      expect(kept()).toEqual(Array(3).fill([`g1\n${bob}`]));
+      members.length = 0;
+      edits.membersChanged("g1");
+      expect(kept()).toEqual(Array(3).fill([]));
       edits.stop();
     });
   });

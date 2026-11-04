@@ -13,6 +13,7 @@ import { useSameValue } from "../hooks/useSameValue";
 import { setSaved, useSavedMessages, useSavedRead } from "../hooks/useSavedMessages";
 import { filePreview, formatListTime, previewText } from "../lib/chatList";
 import { appCardLine } from "../lib/statusCards";
+import { useInstalledApps } from "../lib/apps/installed";
 import { authorName, groupPath } from "../lib/groups";
 import { sameValue } from "../lib/sameValue";
 
@@ -38,6 +39,8 @@ export function Saved() {
   const read = useSavedRead();
   const targets = useChatTargets();
   const groups = useSyncExternalStore(subscribeEngine, engineGroups);
+  // An app card names an app installed here as its bubble does (appCardLine): the list read, and the rows made again.
+  const installed = useInstalledApps(saved.some((s) => s.message.card?.kind === "app"));
 
   // The engine sends its chats and groups anew on every state (up to 20 a second while a file moves): the rows stay the
   // same ones while what they show does, and a row is drawn again only when its own content changes (`SavedItem`).
@@ -47,7 +50,7 @@ export function Saved() {
     return saved.flatMap((s): SavedRow[] => {
       const { message } = s, target = byTarget.get(message.linkId);
       // A voice message, a video or an app card in this app's language, as the chat list says it: the history keeps it in English.
-      const text = appCardLine(message.card, t) ?? filePreview(message.file, t) ?? (previewText(message.text, t) || message.file?.name || t("saved.noText"));
+      const text = appCardLine(message.card, t, installed) ?? filePreview(message.file, t) ?? (previewText(message.text, t) || message.file?.name || t("saved.noText"));
       if (message.linkId.startsWith("group:")) {
         // A group this device cannot write in is not a target of a forward, and still has its saved messages.
         const group = byGroup.get(message.linkId);
@@ -58,7 +61,7 @@ export function Saved() {
       if (!target) return [];
       return [{ saved: s, chat: target.name, path: target.path, author: message.sender === "me" ? t("saved.you") : target.name, text }];
     });
-  }, [saved, targets, groups, t]));
+  }, [saved, targets, groups, installed, t]));
 
   // An unsave takes its row, and the button with the focus, away: the focus goes to the row now in its place (the one
   // before it at the end), or to the empty list, not to the page.

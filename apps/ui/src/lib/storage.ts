@@ -416,7 +416,8 @@ export function addMessages(
 
   for (const message of fresh) {
     if ((message.sender === "peer" || message.sender === "system") && message.id.startsWith("peer_")) {
-      const joinMatch = message.nick ? null : message.text.match(/^👋 (.+) joined$/);
+      // Named by the words of the chat's joined line only (`systemEvent`): a message of theirs in those words names nobody.
+      const joinMatch = message.nick || message.systemEvent?.type !== "join" ? null : message.text.match(/^👋 (.+) joined$/);
       const nick = peerDisplayName(message.nick ?? joinMatch?.[1]);
       if (nick && session.nickSource !== "profile") session.nick = nick;
     }
@@ -500,7 +501,14 @@ export function deleteSession(sessionId: string): void {
     `${getPrefix()}pin_${sessionId}`,
     `${getPrefix()}mute_${sessionId}`,
     `${getPrefix()}mute_mentions_${sessionId}`,
+    `${getPrefix()}translate_${sessionId}`,
+    // Translate what I send (lib/chatTranslateSend.ts).
+    `${getPrefix()}translate_send_${sessionId}`,
+    // The chat's language, when it was set by hand (lib/chatLanguage.ts).
+    `${getPrefix()}translate_lang_${sessionId}`,
     `${getPrefix()}draft_${sessionId}`,
+    // The originals of what I sent translated (lib/sentOriginals.ts).
+    `${getPrefix()}sent_originals_${sessionId}`,
     joinKey(sessionId),
     LEGACY_JOIN_PREFIX + sessionId,
   ]) {

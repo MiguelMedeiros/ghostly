@@ -16,10 +16,12 @@
  *   (`app_title`): "Chess · sharing a file with Ana", where the web's panel header says it.
  * - The app stops when the broker says so (`app_close`) or when the person closes its window (`ghostly-app-closed`).
  * - Opened again in the same chat (or alone again) while it runs, its window comes to the front (`app_focus`).
+ * - A `files.pick` is taken only while the app's window has the focus (`app_focused`): its sheet raises the Ghostly window.
+ *   So is the runner's `activity`: the person's taps and keys there count for the lock screen of the Ghostly window.
  */
 import { toBase64 } from "@ghostly/core";
 import { createBroker, runnerFor, START_TIMEOUT_MS, type AppStopReason, type AppView, type Broker } from "./broker";
-import { registerRunningApp, type AppOpener } from "./open";
+import { appInput, registerRunningApp, type AppOpener } from "./open";
 import type { AppsPlatform, LinkedFilesHost } from "../platform";
 
 /** Rust's events to the Ghostly window (apps/desktop/src/app_sandbox.rs). */
@@ -123,6 +125,9 @@ export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (tit
       view,
       post: (message) => { void invoke("app_post", { label, message: forIpc(message) }).catch(() => { /* the window went */ }); },
       byReference: true,
+      shown: () => invoke<boolean>("app_focused", { label }).catch(() => false),
+      inUse: () => invoke<boolean>("app_focused", { label }).catch(() => false),
+      onInput: appInput,
       serving: (on) => { void invoke("app_title", { label, title: windowTitle(entry.title, linkId, on) }).catch(() => { /* the window went */ }); },
       stopped: (reason) => {
         if (timer) clearTimeout(timer);

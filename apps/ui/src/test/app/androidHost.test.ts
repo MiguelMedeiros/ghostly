@@ -166,6 +166,20 @@ describe("a share from another app", () => {
     expect(incomingShare()?.unread).toBeUndefined();
   });
 
+  it("names the files Android left out past the count cap, apart from those too large", async () => {
+    const shares: unknown[] = [
+      { title: "", text: "", files: [{ token: "paste-1", name: "IMG_1.jpg", size: 10, mime: "image/jpeg" }], leftOut: ["VID_1.mp4"], pastLimit: ["IMG_33.jpg", "IMG_34.jpg"] },
+    ];
+    const invoke = vi.fn(async (command: string) => {
+      if (command === "incoming_share_take") return shares.shift() ?? null;
+      if (command === "incoming_share_done") return undefined;
+      throw new Error(command);
+    });
+    takeIncomingShares(invoke as never, vi.fn(async () => {}));
+    await vi.waitFor(() => expect(incomingShare()).not.toBeNull());
+    expect(incomingShare()).toMatchObject({ leftOut: ["VID_1.mp4"], pastLimit: ["IMG_33.jpg", "IMG_34.jpg"] });
+  });
+
   it("still names what a newer share left out when an older one still copying is handed over after it", async () => {
     // The newer share ends first: its one video too large, only a notice. The older one ends after, with its video.
     const shares: unknown[] = [{ title: "", text: "", files: [], leftOut: ["VID_B.mp4"], unread: [], noRoom: [] }];

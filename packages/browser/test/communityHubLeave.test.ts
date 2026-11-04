@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { beaconKeys, freshHubs, lobbyKeys, readBeacon } from "@ghostly/core";
-import { CommunityWorld, RELAY_NETWORK, type Peer } from "./communityWorld";
+import { CommunityWorld, RELAY_NETWORK, sameRun, seededRandom, type Peer } from "./communityWorld";
 import { COMMUNITY_TIMINGS } from "../src/engine/community";
 // covers: groups.community.leave, groups.protocol.community-topology
 
@@ -166,10 +166,17 @@ describe("a hub whose app is killed", { timeout: 120_000 }, () => {
  * (2026-10-03).
  */
 describe("a member with no edge up when the admin leaves", { timeout: 120_000 }, () => {
+  let restore: (() => void) | null = null;
+  afterEach(() => { restore?.(); restore = null; });
+
   it("drops the admin once the beacon does not list it, and its edge to a hub left comes up within half a minute", async () => {
     let found: { world: CommunityWorld; id: string; admin: Peer; last: Peer; rest: Peer[] } | undefined;
-    for (let tries = 0; tries < 12 && !found; tries++) {
-      const world = new CommunityWorld(undefined, RELAY_NETWORK);
+    // From seeds, the same worlds every run: about half of random ones put its edge on another member, and 12 random
+    // tries all did once on a GitHub runner.
+    for (let seed = 1; seed <= 12 && !found; seed++) {
+      restore?.();
+      const world = new CommunityWorld(undefined, RELAY_NETWORK, seededRandom(seed));
+      restore = sameRun(world, seed);
       const peers = ["admin", "bob", "carol", "dave", "erin"].map(n => world.add(n));
       const [admin, ...rest] = peers;
       const last = rest[rest.length - 1];

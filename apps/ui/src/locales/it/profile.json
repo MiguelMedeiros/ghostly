@@ -78,7 +78,7 @@
     },
     "sameDevice": {
       "copy": "Ripristina comunque come copia",
-      "firstProfile": "Il primo profilo non si può eliminare. Per sostituirlo, cancella i suoi dati in Impostazioni.",
+      "firstProfile": "Il primo profilo non si può eliminare. Per sostituirlo, cancella i suoi dati in Opzioni.",
       "hint": "Entrambi agirebbero come la stessa persona per i tuoi contatti. Sostituisci l'originale, o non usarli tutti e due.",
       "info": "Se sono attivi entrambi, i messaggi possono arrivare all'uno o all'altro. Sostituisci ripristina la copia, passa a quella e poi propone di eliminare l'originale, con i soliti controlli.",
       "replace": "Sostituisci l'originale",
@@ -108,6 +108,7 @@
     "backupFirst": "Scarica prima un backup",
     "backupPassphrase": "Passphrase del backup",
     "cashuSats": "{{amount}} sats in Cashu",
+    "cashuSats_one": "{{amount}} sat in Cashu",
     "confirmLabel": "Digita il nome del profilo per confermare",
     "confirmPlaceholder": "Digita {{name}}",
     "deleting": "Eliminazione…",
@@ -129,6 +130,7 @@
   "name": "Nome",
   "nameInChats": "Nome nelle chat",
   "nameLabel": "Nome del profilo",
+  "nameSaved": "Nome salvato",
   "nameStep": {
     "placeholder": "Il tuo nome",
     "save": "Continua",
@@ -144,5 +146,6 @@
   "restoredTag": "Ripristinato",
   "restoredTagHint": "Recuperato da un backup",
   "sats": "{{amount}} sats",
+  "sats_one": "{{amount}} sat",
   "switch": "Passa"
 }
