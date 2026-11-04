@@ -393,7 +393,8 @@ needs a person who holds the key: leave that to the owner.
 - Output is JSON. A failure is `{"error":{"code","message"}}` with exit 1 (failed), 2 (usage), 3 (not found),
   4 (timed out), 5 (needs `--force`, `--yes` or `--confirm-real`) or 130 (stopped with Ctrl-C, `interrupted`).
 - `send` (and `ghostly engine sendMessage` and the other sends through `engine`) refuses text that looks like a recovery
-  phrase, a private key or a Cashu token unless `--force`.
+  phrase, a private key or a Cashu token unless `--force`; so does every other text that leaves the device: a payment's
+  memo or comment, a group's name, the name contacts see, a file's `--name`, an app revocation's `--reason`.
 - Spending real money (Mainnet) needs `--confirm-real`.
 - Seeds, keys and backups are never printed without `--show-secret`; `group show` and `group list` hide entry links, and
   `chat list` and `chat show` a pending chat's invite code.

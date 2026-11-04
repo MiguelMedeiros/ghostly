@@ -4,6 +4,7 @@ import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, MAX_GROUP_NAME_LENGTH, NO_PICTURE_M
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { bool, chatOf, groupOf, node, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError, localFileError } from "./errors";
+import { guardText } from "./secretGuard";
 import { groupJson } from "./views";
 
 /**
@@ -97,6 +98,8 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
     const group = groupOf(ctx, params, "chat rename <chat> <name...>");
     const name = groupName(str(params, "name", true));
     if (!name) throw new CliError("bad_request", `A group's name is 1 to ${MAX_GROUP_NAME_LENGTH} characters on one line`);
+    // Every member reads it, and a community's anyone who opens its link (docs/CLI.md § Safety).
+    guardText(name, bool(params, "force"), "group's name", "rename it");
     await node(ctx).renameGroup({ groupId: group.id, name });
     return view(ctx, group.id, params);
   },

@@ -1,7 +1,7 @@
 import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, ownInviteRefusal, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
-import { findSecret } from "./secretGuard";
+import { findSecret, guardText } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
 import {
@@ -212,6 +212,8 @@ const METHODS: Record<string, Method> = {
   async "profile.set"(ctx, params) {
     const patch: Partial<Settings> = {};
     if (params.name !== undefined) patch.nick = checkShownName(params.name);
+    // Every contact reads it, as a message's text.
+    guardText(patch.nick, bool(params, "force"), "name", "set it");
     if (params.shareProfile !== undefined) patch.shareProfile = bool(params, "shareProfile");
     await node(ctx).updateSettings({ settings: patch });
     return METHODS["profile.get"](ctx, {});
@@ -224,6 +226,7 @@ const METHODS: Record<string, Method> = {
     const patch: Record<string, unknown> = {};
     let warning: string | undefined;
     for (const [key, value] of Object.entries(params)) {
+      if (key === "force") continue;
       // The table's own keys only: every object has `constructor` and `toString`, which are no settings.
       const kind = Object.hasOwn(SETTABLE, key) ? SETTABLE[key] : undefined;
       // The app's "Also use Pkarr relays": the CLI reads the relays first whatever it says (README § Network), and a
@@ -234,7 +237,7 @@ const METHODS: Record<string, Method> = {
       if (kind === "string" && typeof value !== "string") throw new CliError("bad_request", `${key} must be a string`);
       if (kind === "boolean" && typeof value !== "boolean") throw new CliError("bad_request", `${key} must be true or false`);
       // The name contacts see: `profile set --name`'s rule.
-      if (key === "nick") { patch.nick = checkShownName(value, key); continue; }
+      if (key === "nick") { patch.nick = checkShownName(value, key); guardText(patch.nick, bool(params, "force"), "nick", "set it"); continue; }
       if (kind === "ice") {
         if (!(Array.isArray(value) && value.every((v) => v && typeof v === "object"))) throw new CliError("bad_request", `${key} must be a list of ICE servers`);
         // WebRTC's own form (`urls` a list) is taken; a server without urls is said here, not as the engine's TypeError.
@@ -600,6 +603,8 @@ const METHODS: Record<string, Method> = {
     // As `group rename` checks it: a name a group cannot have is said here, before anything is made.
     const name = groupName(str(params, "name", true));
     if (!name) throw new CliError("bad_request", `A group's name is 1 to ${MAX_GROUP_NAME_LENGTH} characters on one line`);
+    // Every member reads it, and a community's anyone who opens its link.
+    guardText(name, bool(params, "force"), "group's name", "create it");
     const profile = oneOf(params, "profile", ["community", "mesh"] as const, "community");
     const { groupId } = await node(ctx).createGroup({ name, profile });
     let link: string | null = null;
@@ -816,7 +821,8 @@ async function clearProfile(ctx: ApiContext): Promise<{ cleared: { chats: number
 }
 
 /**
- * The engine's calls that send a text this side writes (a message, a file's caption, a payment's memo): `engine.call`
+ * The engine's calls that send a text this side writes (a message, a file's caption, a payment's memo, a name others
+ * read): `engine.call`
  * runs the secret guard of `send`, `edit` and `forward` on them too (docs/CLI.md § Safety), so a raw call is no way around it. `force: true` (`--force`) sends it.
  */
 const ENGINE_SENDS: ReadonlySet<string> = new Set([
@@ -826,10 +832,14 @@ const ENGINE_SENDS: ReadonlySet<string> = new Set([
   // The payment sheet's own path (its memo goes out with the token), an invoice's description the payer reads, and a
   // Lightning address's comment its owner reads (agents#1624).
   "preparePayment", "fedimintInvoice", "lnurlInvoice",
+  // A group's name, the name contacts see and a file's name, as `group create`, `group rename`, `profile set` and
+  // `file send` guard them.
+  "createGroup", "renameGroup", "updateSettings", "sendFile",
 ]);
 
 async function guardEngineSend(ctx: ApiContext, method: string, args: Params): Promise<void> {
-  let texts: unknown = [args.text, args.card, args.caption, args.memo, args.comment];
+  const of = (value: unknown, key: string) => (value && typeof value === "object" ? (value as Params)[key] : undefined);
+  let texts: unknown = [args.text, args.card, args.caption, args.memo, args.comment, args.name, of(args.settings, "nick"), of(args.file, "name")];
   if (method === "forwardMessages") {
     const ids = Array.isArray(args.messageIds) ? args.messageIds.filter((id): id is string => typeof id === "string") : [];
     const linkId = args.linkId;

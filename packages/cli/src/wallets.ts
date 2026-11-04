@@ -325,6 +325,8 @@ const WALLETS: Record<string, Method> = {
       n = network(params);
       const amount = num(params, "amount", 0, { min: 1 });
       if (!amount) throw new CliError("bad_request", "amount is required to pay a Lightning address or LNURL");
+      // Asked before the address's server hears of the payment (and its comment).
+      if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This pays real money (Mainnet): pass --confirm-real to confirm this payment");
       const view = await node(ctx).lnurlResolve({ text, network: n });
       if (amount < view.minSat || amount > view.maxSat) throw new CliError("refused", `${view.domain} takes from ${view.minSat} to ${view.maxSat} sats`);
       const got = await node(ctx).lnurlInvoice({ id: view.id, amount, ...(comment ? { comment } : {}), network: n });

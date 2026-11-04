@@ -9,6 +9,7 @@ import {
 } from "@ghostly/core";
 import { templateManifest, templatePage, templateReadme } from "./appTemplate";
 import { CliError, localFileError } from "./errors";
+import { guardText } from "./secretGuard";
 import { nativeEd25519 } from "./nativeEd25519";
 import { userPath } from "./profiles";
 
@@ -449,6 +450,8 @@ export async function revokeApp(dirArg: string, keyArg: string, what: { digests?
   const digests = what.digests ?? [];
   if ((digests.length > 0) === (what.upTo !== undefined)) throw new CliError("usage", `Give --digest (again for each) or --up-to, one of the two: ${usage}`);
   if (what.upTo !== undefined && !(Number.isSafeInteger(what.upTo) && what.upTo >= 1)) throw new CliError("usage", `--up-to takes a sequence, a whole number from 1, not ${what.upTo}`);
+  // The list is published beside the bundle and every client shows the reason (docs/CLI.md § Safety).
+  guardText(what.reason, what.force === true, "reason", "revoke");
 
   if (!existsSync(bundlePath)) throw new CliError("not_found", `No bundle ${bundlePath}: a revocation names the app of the bundle in <dir> (or --bundle)`);
   const read = readAppBundle(readBundleFile(bundlePath));

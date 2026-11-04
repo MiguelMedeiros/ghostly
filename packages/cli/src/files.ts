@@ -12,6 +12,7 @@ import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
 import { bool, chatOf, findChatOrGroup, list, node, num, oneOf, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
 import { groupSendRefused } from "./api";
 import { CliError } from "./errors";
+import { guardText } from "./secretGuard";
 import { endTyping } from "./typing";
 import { measureVoice } from "./voicePeaks";
 
@@ -269,6 +270,8 @@ const ACTIONS = ["accept", "decline", "pause", "resume", "cancel", "resend", "re
 
 export const FILE_METHODS: Record<string, Method> = {
   async "file.send"(ctx, params) {
+    // The contact (or every member) reads its name as a message's text (docs/CLI.md § Safety).
+    guardText(str(params, "name"), bool(params, "force"), "file's name", "send it");
     const target = chatOrGroupOf(ctx, params);
     const path = resolve(str(params, "path", true));
     let info;
