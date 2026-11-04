@@ -260,7 +260,8 @@ service manager instead.
 ### The secret guard
 
 `send` and `group send` refuse text that looks like a recovery phrase, a private key (nsec, WIF, xprv, 64 hex
-characters named as a key) or a Cashu token (money anyone who reads it can take), with exit `5`, unless `--force`;
+characters named as a key), a login to a node (an LND macaroon, a Core Lightning rune, a bitcoind RPC password or
+cookie) or a Cashu token (money anyone who reads it can take), with exit `5`, unless `--force`;
 so do `edit`, `forward`, `button update --text`, the task, routine and usage cards (any text on the card), the
 memo of `chat pay` and `chat request`, the comment of `pay`, a group's name (`group create`, `group rename`), the
 name contacts see (`profile set --name`, `profile create --name`, `settings set nick`), `file send --name` and

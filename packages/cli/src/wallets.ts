@@ -6,7 +6,7 @@ import { bool, chatOf, inviteTaken, node, num, oneOf, sentAt, state, str, type A
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
 import { CliError, type ErrorCode } from "./errors";
 import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "./words";
-import { findSecret } from "./secretGuard";
+import { findSecret, secretWords } from "./secretGuard";
 
 /**
  * Wallets and payments (WISP 1100, phase 2): the app's wallet deck and a chat's payment sheet, as methods. Test
@@ -152,7 +152,7 @@ function memoOf(params: Params, verb: string, field: "memo" | "comment" = "memo"
   const memo = str(params, field);
   if (memo && !bool(params, "force")) {
     const secret = findSecret(memo);
-    if (secret) throw new CliError("confirm", `The ${field} looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; ${verb} with --force if you mean to`, { kind: secret.kind });
+    if (secret) throw new CliError("confirm", `The ${field} looks like ${secretWords(secret)}; ${verb} with --force if you mean to`, { kind: secret.kind });
   }
   return memo || undefined;
 }
