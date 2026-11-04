@@ -1,5 +1,6 @@
 import { identityFromSeedB64 } from "@ghostly/core";
 import { databaseExists } from "@ghostly/browser/backup/database";
+import { forgetServicesOf, releaseUnusedLocalAccessOf } from "@ghostly/browser/host";
 import { runsEngine } from "@ghostly/browser/devices/state";
 import { deviceStateOf, forgetDevice, readDeviceRecord } from "@ghostly/browser/devices/store";
 import { handoffProfileHost } from "@ghostly/browser/devices/handoffHost";
@@ -271,6 +272,8 @@ export async function deleteProfile(id: string, password?: string): Promise<void
   retryUnsaved();
   // Its push subscription (WISP 401 § Wake-up push) ends with it: its worker goes, and contacts who kept it get 410.
   await pushPlatform()?.unsubscribe(id).catch(() => {});
+  // What the contacts' apps it opened kept on their own origins (the web app's).
+  await forgetServicesOf({ profile: id });
   // Each fork of it goes as "Discard this copy" takes it, with its linked files: no screen lists it once the record
   // is gone. Never a database a profile on the list runs on.
   const listed = new Set(listProfiles().map((p) => databaseOf(p.id)));
@@ -284,4 +287,6 @@ export async function deleteProfile(id: string, password?: string): Promise<void
   // What another profile's peek saw of it (its contacts' keys, link and message ids), and its notice.
   clearPeek(id);
   unregisterProfile(id);
+  // The local hosts it shared apps at (the extension's host permissions), unless a profile still on the list shares one there.
+  await releaseUnusedLocalAccessOf();
 }

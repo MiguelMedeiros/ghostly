@@ -9,6 +9,7 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import { JUMP_TO } from "../hooks/useJumpTo";
 import { useMinuteClock } from "../hooks/useMinuteClock";
 import { useTaskBoard, type TaskBoardData } from "../hooks/useTaskBoard";
+import { radioGroupKeys } from "../lib/radioGroup";
 import { RESULT_TONE, sortRoutines, untilIn } from "../lib/statusCards";
 import { getPrefix } from "../lib/storage";
 import { COLUMN_PAGE, boardModel, boardMove, type BoardColumn, type BoardEntry, type BoardGroup, type BoardGrouping, type BoardRoutine } from "../lib/taskBoard";
@@ -229,10 +230,10 @@ export function Tasks() {
             )}
             {showing === "tasks" && (
               <>
-                <div role="radiogroup" aria-label={t("cards.board.groupBy.label")} className="flex items-center gap-1">
+                <div role="radiogroup" aria-label={t("cards.board.groupBy.label")} className="flex items-center gap-1" onKeyDown={(e) => radioGroupKeys(e, { choose: true })}>
                   <span aria-hidden="true" className="text-xs text-text-muted">{t("cards.board.groupBy.label")}</span>
                   {GROUPINGS.map((g) => (
-                    <button key={g} type="button" role="radio" aria-checked={grouping === g} data-testid={`tasks-group-${g}`} onClick={() => { setGrouping(g); toTab(0, false); }} className={pill(grouping === g)}>
+                    <button key={g} type="button" role="radio" aria-checked={grouping === g} tabIndex={grouping === g ? 0 : -1} data-testid={`tasks-group-${g}`} onClick={() => { setGrouping(g); toTab(0, false); }} className={pill(grouping === g)}>
                       {t(`cards.board.groupBy.${g}`)}
                     </button>
                   ))}

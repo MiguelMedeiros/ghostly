@@ -10,7 +10,7 @@ import { SendScan } from "./wallet/SendScan";
 import { routeArkSend } from "../lib/sendRoute";
 import { externalLinkProps } from "../lib/externalLink";
 import { useI18n, type Translate } from "../contexts/I18nContext";
-import { satsIn } from "./NetworkTag";
+import { satsIn, unitFor } from "./NetworkTag";
 import { formatAmount } from "../lib/amount";
 import { problemText } from "../lib/problemText";
 import { exactText } from "../lib/exactText";
@@ -64,7 +64,7 @@ export function BarkWalletPanel({ wallet, state, backupNow = false }: { wallet: 
  return <div className="space-y-6" data-testid="bark-wallet">
   {!ready ? <div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="bark-connecting"><p className="text-text-primary">{t("wallet.panel.connecting", { wallet: "Bark" })}</p>{bark?.error ? <Notice problem={problemText(bark.error, t)} tone="muted" /> : <Notice>{t("wallet.bark.connectingNote")}</Notice>}</div>
   : <div className="space-y-4">
-   <p className="text-text-primary" data-testid="bark-balance"><bdi className="text-4xl font-semibold tabular-nums">{formatAmount(bark.balance, t.language)}</bdi><span className="text-text-muted text-sm ms-2">{unit}</span>{bark.network !== "bitcoin" && <span className="block text-xs text-warn-ink mt-1">{t("wallet.bark.testCoins", { network: NETWORKS[network].label })}</span>}</p>
+   <p className="text-text-primary" data-testid="bark-balance"><bdi className="text-4xl font-semibold tabular-nums">{formatAmount(bark.balance, t.language)}</bdi><span className="text-text-muted text-sm ms-2">{unitFor(t, unit, bark.balance)}</span>{bark.network !== "bitcoin" && <span className="block text-xs text-warn-ink mt-1">{t("wallet.bark.testCoins", { network: NETWORKS[network].label })}</span>}</p>
    {!!bark.pending && <Notice tone="warning" testId="bark-pending">{t("wallet.bark.pending", { amount: formatAmount(bark.pending, t.language), unit })}</Notice>}
    {!!bark.exiting && <Notice tone="warning" testId="bark-exiting">{t("wallet.bark.exiting", { amount: formatAmount(bark.exiting, t.language), unit })}</Notice>}
    {bark.scanning && <Notice testId="bark-scanning">{t("wallet.bark.scanning")}</Notice>}

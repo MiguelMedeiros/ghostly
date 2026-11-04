@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdentity } from "../src/identity";
 import { createRelayPayload, RELAY_PAYLOAD_MAX_BYTES } from "../src/pkarr";
 import { didDhtDocument, encodeDidDhtPacket, signDidDhtPacket } from "../src/didDht";
-import { DEFAULT_RELAYS, RelayTransport, normalizeRelayUrl, readRelayBody } from "../src/relay";
+import { DEFAULT_RELAYS, RelayTransport, normalizeRelayUrl, readRelayBody, relayUrlProblem } from "../src/relay";
 import { DiscoveryBudgetError, heldBackError, isDiscoveryBudgetError } from "../src/transport";
 import { BREAKER_THRESHOLD } from "../src/relayBreaker";
 
@@ -19,6 +19,21 @@ describe("relay URLs", () => {
     expect(normalizeRelayUrl("http://relay.test")).toBe("http://relay.test");
     expect(normalizeRelayUrl("https://relay.test/?q=1#x")).toBe("https://relay.test");
     for (const bad of ["ftp://relay.test", "javascript:alert(1)", "relay.test", "", "file:///etc/passwd"]) expect(normalizeRelayUrl(bad)).toBeNull();
+  });
+
+  it("says why a relay list's line is not a relay, with the line as typed: https:// for a host alone or another scheme", () => {
+    expect(relayUrlProblem(" https://relay.test/pkarr ")).toBeNull();
+    for (const meant of ["wss://relay.example.org", "relay.example.org", "ftp://relay.example.org"]) expect(relayUrlProblem(meant)).toBe(`Use an https:// relay address: ${meant}`);
+    for (const bad of ["not a url", "https://relay .example.org", "javascript:alert(1)"]) expect(relayUrlProblem(bad)).toBe(`Not a relay address: ${bad}`);
+    for (const meant of [".relay.example.org", "a.b://", "wss://.relay.example"]) expect(relayUrlProblem(meant)).toBe(`Use an https:// relay address: ${meant}`);
+    for (const bad of [".relay", "relay.", "a/b.c", "a:b.c"]) expect(relayUrlProblem(bad)).toBe(`Not a relay address: ${bad}`);
+  });
+
+  it("answers a long pasted line at once", () => {
+    const line = "a.".repeat(60_000) + " x";
+    const start = performance.now();
+    expect(relayUrlProblem(line)).toBe(`Not a relay address: ${line}`);
+    expect(performance.now() - start).toBeLessThan(100);
   });
 
   it("defaults to the public relays, drops invalid and duplicate ones, and describes itself", () => {
@@ -107,7 +122,9 @@ describe("publishing", () => {
 
   it("says a relay that refused the connection did not answer, by its address, not that it cools down", async () => {
     const relay = new RelayTransport({ relays: ["https://a.test", "https://b.test"], fetch: (async () => { throw new TypeError("fetch failed"); }) as typeof fetch });
-    await expect(relay.publish(id, [])).rejects.toThrow("fetch failed");
+    const first = await relay.publish(id, []).then(() => "", (e: Error) => e.message);
+    // It said "TypeError: fetch failed", once per relay: Node's words, no relay named.
+    expect(first).toBe("Publish failed on every relay: Error: https://a.test did not answer; Error: https://b.test did not answer");
     const error = await relay.publish(id, []).then(() => "", (e: Error) => e.message);
     expect(error).toContain("https://a.test did not answer a moment ago");
     expect(error).toContain("https://b.test did not answer a moment ago");

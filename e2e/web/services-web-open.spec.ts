@@ -162,6 +162,12 @@ test("a person on the web opens the web app a bot shares, on an origin of its ow
     await expect(view).toHaveCount(0);
     await expect(person.page).toHaveURL(chat);
     await expect(person.page.getByPlaceholder("Message…")).toBeEnabled();
+    // Forward after it: the closed view's entry is no place to stop, back on the chat itself (it stayed on that dead
+    // entry, and the next Back only left it).
+    await person.page.goForward();
+    await expect.poll(() => person.page.evaluate(() => JSON.stringify(history.state))).not.toContain("ghostlyServiceView");
+    await expect(view).toHaveCount(0);
+    await expect(person.page).toHaveURL(chat);
 
     // Open, and the contact quits Ghostly: the view says so in the app's words, in place of the app's last page (it
     // stayed up, and a click in it waited 75 s for the services worker's English "The app did not answer in time.").

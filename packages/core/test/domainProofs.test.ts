@@ -61,7 +61,7 @@ describe('record formats', () => {
   it('collects distinct records from every TXT string at the name, bounded', () => {
     const other = record();
     expect(recordsFromTxt(['v=spf1 -all', domainTxtRecord(mine), domainTxtRecord(other), domainTxtRecord(mine)])).toEqual([mine, other]);
-    expect(recordsFromTxt(Array.from({ length: 40 }, () => domainTxtRecord(record())))).toHaveLength(8);
+    expect(recordsFromTxt(Array.from({ length: 40 }, () => domainTxtRecord(record())))).toHaveLength(32);
   });
 
   it('writes and reads back ghostly.json, skipping entries it does not understand', () => {

@@ -40,12 +40,16 @@
     "continueIn": "Continuez dans la fenêtre {{provider}}…",
     "continueWith": "Continuer avec {{provider}}",
     "copyError": "Copie impossible. Sélectionnez le texte ci-dessus et copiez-le vous-même.",
+    "copyStep": "Copier étape {{step}}",
     "dayOne": "1 jour",
     "days": "{{count}} jours",
     "experimental": "Expérimental : pas encore testé avec tous les outils.",
+    "keepOpen": "Garder ouvert",
     "keyAbout": "Seul le détenteur de cette clé peut produire cette preuve.",
     "kinds": "Types d'identité",
     "lead": "Facultatif. Rien n'est partagé tant que vous ne choisissez pas un contact dans une discussion.",
+    "leaveBody": "La valeur affichée ne fonctionne qu’avec ces étapes. Une fois fermées, un nouvel essai donne une nouvelle valeur, et celle que vous avez publiée devra être remplacée.",
+    "leaveTitle": "Fermer sans enregistrer ?",
     "linkable": "Partager la même identité avec plusieurs contacts leur permet de savoir qu'il s'agit de la même personne.",
     "lookingUp": "Recherche…",
     "none": "Aucun type d'identité ne peut encore être ajouté dans cette app.",
@@ -69,7 +73,7 @@
   "card": {
     "attestedBy": "Attestée par {{attester}}",
     "attestedByProvider": "Attestée par le fournisseur",
-    "checked": "Vérifiée {{time}}",
+    "checked": "Contrôlée {{time}}",
     "expired": "Expirée",
     "expiredOn": "Expirée le {{date}}",
     "expiresIn": "Expire dans {{count}} jours",
@@ -91,7 +95,7 @@
     "attested": "{{attester}} indique que ce compte s'est connecté : aussi fiable que {{attester}}, pas plus.",
     "attestedByProvider": "Le fournisseur indique que ce compte s'est connecté : aussi fiable que lui, pas plus.",
     "backToCards": "Retour aux cartes de {{name}}",
-    "checked": "Vérifiée",
+    "checked": "Contrôlée",
     "checkedAgain": "Sur cet appareil le {{time}}, dernière fois le {{last}}",
     "checkedOnce": "Sur cet appareil le {{time}}",
     "checking": "Vérification…",
@@ -119,7 +123,7 @@
     "theirProfile": "son profil public",
     "title": "Identités avec {{name}}",
     "unconfirmed": "{{status}} : n'a pas pu être confirmée",
-    "unconfirmedWhy": "{{status}} : n'a pas pu être confirmée ({{error}})",
+    "unconfirmedWhy": "{{status}} : {{error}}",
     "validity": "Validité"
   },
   "did": {
@@ -352,7 +356,7 @@
     "sourceFound": "Chargé depuis {{from}} {{time}}. Ce que le compte dit de lui-même, pas une partie de la preuve. La requête a révélé à ce serveur l'adresse IP de cet appareil."
   },
   "received": {
-    "checked": "{{category}} · vérifiée le {{time}}",
+    "checked": "{{category}} · contrôlée le {{time}}",
     "title": "De vos contacts"
   },
   "share": {
@@ -361,11 +365,8 @@
     "checking": "Vérification",
     "notChecked": "Non vérifiée",
     "notVerified": "Non vérifiée",
-    "notVerifiedWhy": "Non vérifiée : {{error}}",
     "revokedMine": "Votre {{what}} a été révoqué",
     "revokedTheirs": "Le {{what}} de {{contact}} a été révoqué",
-    "sharedMineState": "Vous avez partagé {{what}} · {{state}}",
-    "sharedTheirsState": "{{contact}} a partagé {{what}} · {{state}}",
     "stoppedMine": "Vous avez arrêté de partager {{what}}",
     "stoppedTheirs": "{{contact}} a arrêté de partager {{what}}",
     "waiting": "En attente"

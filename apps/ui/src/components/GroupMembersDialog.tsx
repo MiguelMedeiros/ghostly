@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { COMMUNITY_LIMITS, GROUP_LIMITS, MAX_GROUP_MEMBERS, MAX_GROUP_PICTURE_LENGTH, MESH_HUBS, groupName } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
-import { useBackdropDismiss } from "../hooks/useDismiss";
+import { useBackdropDismiss, useBackCloses } from "../hooks/useDismiss";
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { edgeDot, edgeLabel, groupStatusText, memberName, memberPhoto } from "../lib/groups";
 import { useGroupNameField } from "../hooks/useGroupNameField";
@@ -42,6 +42,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   const state = useSyncExternalStore(subscribe, snapshot);
   const dialog = useRef<HTMLDialogElement>(null);
   const backdrop = useBackdropDismiss(onClose);
+  useBackCloses(onClose);
   const faces = useContactFaces();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<Problem | null>(null);
@@ -122,6 +123,8 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   // each edge says its own state, and a member without one has no connection.
   const linked = live.members.some(m => m.edge?.state === "open");
   const viaHubs = (m: GroupMemberView) => live.profile === "community" && !m.me && linked && m.edge?.state !== "open";
+  // Left, removed, or a fork that went on without me: my app reaches none of them again, so no row says it will, nor dots as if live.
+  const out = live.status === "left" || live.status === "removed" || live.status === "forked";
   const photoOf = (m: GroupMemberView) => memberPhoto(live, m, state?.links, faces, state?.settings.avatar);
   // What each row says of its member's edge, as of this draw ("3 min ago" in the interface's language).
   const now = Date.now(), since = agoIn(language);
@@ -131,6 +134,14 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   useEffect(() => {
     if (focusKey) list.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(focusKey)}"]`)?.scrollIntoView?.({ block: "nearest" });
   }, [focusKey]);
+  // The link turned off or on elsewhere (the admin, another of my devices) swaps the link panel, or takes it away from a
+  // community's member, with what had the focus: the list, next in the dialog, has it rather than the page.
+  const linkOn = !!live.entryLink, wasOn = useRef(linkOn);
+  useEffect(() => {
+    if (wasOn.current === linkOn) return;
+    wasOn.current = linkOn;
+    if (focusLost() || document.activeElement === dialog.current) list.current?.focus();
+  }, [linkOn]);
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`} data-testid="group-members-dialog"
     className="m-auto w-[calc(100%_-_2rem)] max-w-md max-h-[90dvh] overflow-y-auto rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <div className="flex items-start justify-between gap-3">
@@ -140,8 +151,9 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
         </AvatarOpener>
         <div className="min-w-0">
           {/* The group's and each person's name read in their own direction: a Latin name in Arabic is cut at its end. As
-              wide as the name, the title stays beside the picture whichever way the name runs. */}
-          {naming === null ? <h2 id={`${id}-title`} dir="auto" data-testid="group-members-name" className="w-fit max-w-full truncate text-base font-semibold">{live.name}</h2>
+              wide as the name, the title stays beside the picture whichever way the name runs. A long name wraps rather
+              than ends in "…": on a phone this panel is the group's only info screen, and a member has no Rename field. */}
+          {naming === null ? <h2 id={`${id}-title`} dir="auto" data-testid="group-members-name" className="w-fit max-w-full break-words text-base font-semibold">{live.name}</h2>
             : <form className="flex items-center gap-2 max-md:gap-3" onSubmit={e => { e.preventDefault(); void rename(); }}>
               <h2 id={`${id}-title`} className="sr-only">{live.name}</h2>
               {/* While the engine renames, the field is read-only and Save does nothing: disabled, they would drop the focus to the page. */}
@@ -176,8 +188,8 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
     </div>
     {live.status === "active" && (live.isAdmin || (live.profile === "community" && live.entryLink)) && <GroupLinkPanel group={live} />}
     <ul ref={list} tabIndex={-1} className="mt-3 max-h-56 space-y-1 overflow-y-auto rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent" data-testid="group-member-list">
-      {live.members.map(m => <MemberRow key={m.key} member={m} focused={m.key === focusKey} viaHub={viaHubs(m)} photo={photoOf(m)} myNick={m.me ? state?.settings.nick : undefined}
-        peerKey={m.me ? undefined : contactKey(m.key)} status={m.me ? "" : viaHubs(m) ? t("group.member.viaHub") : edgeLabel(m, now, t, since)}
+      {live.members.map(m => <MemberRow key={m.key} member={m} focused={m.key === focusKey} out={out} viaHub={viaHubs(m)} photo={photoOf(m)} myNick={m.me ? state?.settings.nick : undefined}
+        peerKey={m.me ? undefined : contactKey(m.key)} status={m.me || out ? "" : viaHubs(m) ? t("group.member.viaHub") : edgeLabel(m, now, t, since)}
         tools={!live.isAdmin || m.me ? "" : hubChoice ? "hubs" : "admin"} busy={busy !== null} onHub={setHub} onPromote={setPromoting} onRemove={setRemoving} />)}
     </ul>
     {/* What being a hub means, once under the list: it was a tooltip on each badge, which a phone never shows. */}
@@ -219,6 +231,8 @@ interface MemberRowProps {
   member: GroupMemberView;
   /** The member the chat opened the list for. */
   focused: boolean;
+  /** I am out of the group: no edge to them, now or to come, and no dot. */
+  out: boolean;
   /** Reached through the hubs (a community): no edge of mine to speak of. */
   viaHub: boolean;
   photo?: string;
@@ -247,20 +261,20 @@ function sameRow(a: MemberRowProps, b: MemberRowProps): boolean {
  * One member of the list. Drawn again only when what it shows changed: a community has up to 256 of them, and the
  * engine sends a state up to 20 times a second, most of which change no member.
  */
-const MemberRow = memo(function MemberRow({ member: m, focused, viaHub, photo, myNick, peerKey, status, tools, busy, onHub, onPromote, onRemove }: MemberRowProps) {
+const MemberRow = memo(function MemberRow({ member: m, focused, out, viaHub, photo, myNick, peerKey, status, tools, busy, onHub, onPromote, onRemove }: MemberRowProps) {
   const { t } = useI18n();
   const hubLabels = { auto: t("group.hubs.auto"), pin: t("group.hubs.pin"), exclude: t("group.hubs.exclude") };
   return <li data-testid="group-member" data-key={m.key} data-role={m.role} data-focused={focused || undefined}
     className={`flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-2 py-1.5 hover:bg-surface-hover ${focused ? "bg-surface-hover ring-1 ring-accent/60" : ""}`}>
     {/* A community member my app holds no edge with is reached through the hubs: not "not reachable", and nothing says whether their app is open. */}
-    {viaHub ? <span role="img" aria-label={t("group.member.viaHub")} className="h-2 w-2 shrink-0 rounded-full bg-text-muted/50" />
+    {out ? null : viaHub ? <span role="img" aria-label={t("group.member.viaHub")} className="h-2 w-2 shrink-0 rounded-full bg-text-muted/50" />
       : <span role="img" aria-label={m.online ? t("group.members.reachable") : t("group.members.notReachable")} className={`h-2 w-2 shrink-0 rounded-full ${m.edge || m.me ? edgeDot(m) : m.online ? "bg-accent" : "bg-text-muted"}`} />}
     <MemberAvatar src={photo} name={myNick || memberName(m, t)} />
     {/* The name keeps room for about 16 characters: the badges and an admin's buttons go under it when the row is narrower (a phone, a long word in another language). */}
     <span className="contact-row min-w-[8.5rem] flex-1">
       <span className="flex min-w-0 items-center gap-1.5 text-sm"><span dir="auto" data-testid="group-member-name" className="min-w-0 truncate">{memberName(m, t)}</span>{!m.me && <ContactMarks peerKey={peerKey} testId="group-member-marks" />}{/* An unnamed member's name is its key already ("Member 3r69cg...d51a"): the key again was cut to one character on a phone. */}
         {(m.me || m.nick) && <span data-testid="group-member-key" className="min-w-0 shrink-[100] truncate font-mono text-[10px] text-text-muted">{publicKeyLabel(m.key)}</span>}</span>
-      {!m.me && <span className="block truncate text-[11px] text-text-muted" data-testid="group-member-status">{status}</span>}
+      {status && <span className="block truncate text-[11px] text-text-muted" data-testid="group-member-status">{status}</span>}
       {/* A whole phrase under the status: "2 missing" beside a name read as two members missing, its meaning only in a tooltip. */}
       {m.missing > 0 && <span className="block text-[11px] text-warn-ink" data-testid="group-member-missing">{t(m.missing === 1 ? "group.members.missingOne" : "group.members.missing", { count: m.missing })}</span>}
     </span>

@@ -7,6 +7,7 @@
     "compact": "Compacta"
   },
   "chatListDensity": "Lista de chats",
+  "chatsDeleted": "Todos los chats fueron eliminados",
   "clear": "Borrar",
   "clearAllData": "Borrar todos los datos",
   "clearAllDataConfirm": "Esto borra para siempre:",
@@ -55,7 +56,9 @@
   "dataCleared": "Todos los datos fueron borrados",
   "defaultNickname": "Nombre en los chats",
   "defaultNicknameHint": "Se usa al iniciar un chat nuevo",
+  "deleteAllChatsCallOn": "Hay una llamada en un chat. Termínala primero y luego elimina todos los chats.",
   "deleteAllChatsConfirm": "¿Eliminar los {{count}} chats?",
+  "deleteAllChatsConfirm_one": "¿Eliminar tu único chat?",
   "deleteAllChatsHint": "Se borran mensajes y archivos. Ajustes y billeteras se quedan.",
   "groupDownloads": {
     "always": "Siempre",

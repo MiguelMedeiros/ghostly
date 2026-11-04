@@ -179,11 +179,36 @@ describe("Menu: one line per row", () => {
     expect(screen.queryByTestId("menu")).not.toBeInTheDocument();
   });
 
+  it("on a phone the sheet keeps Tab: Tab and Shift+Tab go round its rows, never to the page behind its backdrop", async () => {
+    // From the last row Tab went on to the page under the backdrop (the chat's Back, its messages, the composer), the
+    // sheet still open over it; Shift+Tab from the first row went to the composer, whose + opened a second sheet.
+    viewport(390, 844);
+    const { user } = renderApp(<><Harness /><button>Behind</button></>);
+    await user.click(screen.getByRole("button", { name: "Options" }));
+    const [short, long] = [screen.getByTestId("short"), screen.getByTestId("long")];
+    short.focus();
+    await user.tab();
+    expect(document.activeElement).toBe(long);
+    await user.tab();
+    expect(document.activeElement).toBe(short);
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(long);
+    expect(screen.getByTestId("menu")).toBeInTheDocument();
+  });
+
   it("closes on Escape", async () => {
     const { user } = renderApp(<Harness />);
     await user.click(screen.getByRole("button", { name: "Options" }));
     await user.keyboard("{Escape}");
     expect(screen.queryByTestId("menu")).not.toBeInTheDocument();
+  });
+
+  it("writes a red row (Remove, Delete) in danger's ink, which reads at 4.5:1 on the menu and on a row under the pointer", () => {
+    renderApp(<MenuItem testId="remove" danger onClick={() => {}}>Remove</MenuItem>);
+    const row = screen.getByTestId("remove");
+    // Danger's own red read 3.8:1 on Cyan dark's hovered or focused row (#ea4335 on #142840), 3.6:1 at rest on Classic dark.
+    expect(row).toHaveClass("text-danger-ink");
+    expect(row).not.toHaveClass("text-danger");
   });
 });
 

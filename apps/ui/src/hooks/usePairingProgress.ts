@@ -1,13 +1,11 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { contactArrived, deriveStage, pairingView, reportedProgress, stepIndex, type PairingProgress, type PairingRole, type PairingStage } from "../lib/pairingProgress";
 import { loadSettings } from "../lib/settings";
-import { playSound } from "../lib/sounds";
+import { playSound, warmSound } from "../lib/sounds";
 import { problemLine } from "../lib/problemText";
+import { useEngineValue } from "../lib/engineState";
 import { useT } from "../contexts/I18nContext";
-
-const subscribe = (listener: () => void) => engine.subscribe(listener);
-const snapshot = () => engine.state;
 
 /** How long the "connected" moment stays before the chat takes over. The chat is live, and usable, all along. */
 export const CELEBRATE_MS = 1800;
@@ -55,10 +53,13 @@ export interface PairingPresence {
  */
 export function usePairingProgress(peerKey: string | undefined, { inviter, enabled, createdAt, muted = false }: { inviter: boolean; enabled: boolean; createdAt?: number; muted?: boolean }): PairingPresence {
   const t = useT();
-  const state = useSyncExternalStore(subscribe, snapshot);
-  const link = peerKey ? state?.links.find(l => l.peerPubKeyZ32 === peerKey) : undefined;
+  // The chat's link and the online switch, compared by content: the whole state drew the chat on every engine state.
+  const { loaded, link, online } = useEngineValue((state) => ({
+    loaded: !!state,
+    link: peerKey ? state?.links.find(l => l.peerPubKeyZ32 === peerKey) : undefined,
+    online: state?.settings.online ?? true,
+  }));
   const reported = reportedProgress(link);
-  const online = state?.settings.online ?? true;
 
   // Everything latched below belongs to one chat: another chat in this place starts over.
   const owner = useRef(peerKey);
@@ -94,7 +95,7 @@ export function usePairingProgress(peerKey: string | undefined, { inviter, enabl
   // Only a chat made since this page loaded: after a reload or a restart, the engine can be a moment behind with its
   // links, and a chat made a minute before (paired since) would show the scene for a reconnect. That one waits for its link.
   const made = createdAt ?? Date.now();
-  const provisional = !!state && made >= pageStart() && Date.now() - made < NEW_CHAT_MS;
+  const provisional = loaded && made >= pageStart() && Date.now() - made < NEW_CHAT_MS;
   // Someone else used the invite first: the pairing never happened, though the look-up pinned the inviter. After a
   // restart too, and once the chat was on the DHT, the scene says so: nobody will answer this chat.
   const taken = reported?.stage === "failed" && reported.reason === "taken";
@@ -160,6 +161,12 @@ export function usePairingProgress(peerKey: string | undefined, { inviter, enabl
   }, [until]);
   // Heard as the scene bursts: in the commit that shows it. Reduced motion stills the scene, not the sound: that is the
   // sound setting's.
+  // Its file is fetched while the pairing is on its way: fetched and decoded only when the moment came, the sound came
+  // after the scene had burst.
+  const soundAhead = enabled && firstPairing && !celebrated.current && !muted;
+  useEffect(() => {
+    if (soundAhead && loadSettings().notifications.soundEnabled) warmSound("connected");
+  });
   useEffect(() => {
     if (!soundOwed.current) return;
     soundOwed.current = false;

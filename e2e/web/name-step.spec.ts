@@ -1,5 +1,6 @@
 import type { BrowserContext, Page } from "@playwright/test";
-import { expect, openProfilePage, test } from "../support/fixtures";
+import { copyInvite } from "../support/clipboard";
+import { chat, expect, openProfilePage, test } from "../support/fixtures";
 
 /*
  * A new profile asks once "What should people call you?" (apps/ui/src/components/NameStep.tsx): the field empty, and
@@ -63,6 +64,28 @@ test("on a phone, Skip keeps the anonymous label and is not asked again", { tag:
   await expect(step).toHaveCount(0);
   await page.goto("/#/profile");
   await expect(page.getByTestId("account-nickname")).toHaveValue("");
+});
+
+// A link that reaches the tab while it asks (another tab forwards it, the installed app's launch puts it in the address:
+// `location.hash = link` both) is no answer: the step stays over the chat it opened, with the name typed, as on a first
+// visit with the link, and the inviter sees that name.
+test("a chat link that reaches the tab while it asks leaves the question open, and the name typed", { tag: ["@feature:profiles.name-step", "@feature:invite.link"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("alice"), peer("bob", { beforeOpen: askForName })]);
+  const step = bob.page.getByTestId("name-step");
+  await expect(step).toBeVisible();
+  await bob.page.getByTestId("name-step-input").fill("Guest G");
+  await alice.page.getByTitle("New Chat").click();
+  const code = (await copyInvite(alice.page)).split("#")[1];
+
+  await bob.page.evaluate((code) => { location.hash = code; }, code);
+  await expect(bob.page).toHaveURL(/#\/chat\/[0-9a-f]+$/);
+  await expect(step, "still asked").toBeVisible();
+  await expect(bob.page.getByTestId("name-step-input")).toHaveValue("Guest G");
+  expect(await bob.page.evaluate(() => localStorage.getItem("ghostly_name_step"))).toBe("ask");
+
+  await bob.page.getByTestId("name-step-save").click();
+  await expect(step).toBeHidden();
+  await expect(chat(alice).getByText(/Guest G joined the chat/).first()).toBeVisible({ timeout: 60000 });
 });
 
 test("an automated run with no switch is never asked", { tag: ["@feature:profiles.name-step"] }, async ({ peer }) => {

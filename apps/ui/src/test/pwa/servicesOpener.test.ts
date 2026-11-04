@@ -1,8 +1,8 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { ANSWER_BY_MS, CookieJar, openServiceView, serve, serviceLabel } from "../../../../web/src/svc/opener";
-import { closeServiceWindows, hostErrorText, setServiceWindowsCloser } from "../../lib/serviceWindows";
-import { translatorFor } from "../../locales";
-import { HEAD_TIMEOUT_MS, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
+import { closeServiceWindows, hostErrorText, serviceFraming, setServiceWindowsCloser } from "../../lib/serviceWindows";
+import { loadLocale, translatorFor } from "../../locales";
+import { BRIDGE_READY, HEAD_TIMEOUT_MS, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
 import { GhostlyHttpError, type ClientRequest, type ClientResponse } from "@ghostly/core";
 
 // covers: services.web-open
@@ -13,6 +13,31 @@ import { GhostlyHttpError, type ClientRequest, type ClientResponse } from "@ghos
  */
 const host = parseServicesHost("https://*.svc.ghostly.example")!;
 const PEER = "o".repeat(52);
+
+describe("what frames a contact's app (serviceFraming)", () => {
+  const t = translatorFor("en");
+
+  it("names the contact as this side calls them, else their nickname, else by their key", () => {
+    expect(serviceFraming("Demo", { label: "Ana (work)", nick: "Ghostly" }, PEER, t)).toEqual({
+      label: "Demo, shared by \u2068Ana (work)\u2069",
+      owner: "\u2068Ana (work)\u2069's app, running on their machine. Not Ghostly: never type your recovery words or passwords here.",
+    });
+    expect(serviceFraming("Demo", { label: " ", nick: "Demo bot" }, PEER, t).label).toBe("Demo, shared by \u2068Demo bot\u2069");
+    expect(serviceFraming("Demo", undefined, PEER, t).label).toBe(`Demo, shared by \u2068${t("common.unnamedContact", { key: PEER.slice(0, 6) })}\u2069`);
+  });
+
+  it("is said in every language, with the contact in each", async () => {
+    for (const language of ["en", "pt", "es", "fr", "it", "zh", "ja", "ar"] as const) {
+      await loadLocale(language);
+      const said = serviceFraming("Demo", { nick: "Bob" }, PEER, translatorFor(language));
+      if (language !== "en") expect(said.owner, language).not.toBe(serviceFraming("Demo", { nick: "Bob" }, PEER, translatorFor("en")).owner);
+      expect(said.label, language).toContain("\u2068Bob\u2069");
+      expect(said.label, language).toContain("Demo");
+      expect(said.owner, language).toContain("\u2068Bob\u2069");
+      expect(said.owner, language).toContain("Ghostly");
+    }
+  });
+});
 
 describe("the origin a contact's app runs on", () => {
   it("is one DNS label under the services host, never the app's own host", async () => {
@@ -71,7 +96,7 @@ function answer(status: number, headers: [string, string][], chunks: string[]): 
   };
 }
 
-const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Your contact is offline", retry: "Try again", hostError: () => null };
+const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Your contact is offline", retry: "Try again", label: "Demo, shared by Demo bot", owner: "Demo bot's app, running on their machine. Not Ghostly.", hostError: () => null };
 
 describe("one request from the app, over the contact's link", () => {
   it("goes with the page's headers and the app's cookies, and its answer streams back: cookies kept here, never handed to the page", async () => {
@@ -206,7 +231,56 @@ describe("a contact's app shown over the app", () => {
     await open("one");
     await open("two");
     expect(document.querySelectorAll(`#${SERVICE_VIEW_ID}`)).toHaveLength(1);
-    expect(document.getElementById(SERVICE_VIEW_ID)?.getAttribute("aria-label")).toBe("two");
+    expect([...document.getElementById(SERVICE_VIEW_ID)!.querySelectorAll("span")].map((el) => el.textContent)).toContain("two");
+  });
+
+  it("says whose app it is and that it is not Ghostly, always on screen, never the contact's name for it alone", async () => {
+    // The contact names their app freely: "Ghostly" is as easy as "Demo".
+    await openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service: "demo", title: "Ghostly", send: async () => answer(200, [], []), words });
+    const view = document.getElementById(SERVICE_VIEW_ID)!;
+    const owner = view.querySelector<HTMLElement>("[data-testid=service-view-owner]");
+    expect(owner?.textContent).toBe(words.owner);
+    expect(owner?.hidden).toBe(false);
+    expect(owner?.style.display).not.toBe("none");
+    // On the bar, next to ✕ and the app's name, not inside the contact's frame.
+    expect(owner?.closest("[data-testid=service-view-frame]")).toBeNull();
+    expect(owner?.parentElement?.contains(view.querySelector("[data-testid=service-view-close]"))).toBe(false);
+    expect(owner?.parentElement?.parentElement?.contains(view.querySelector("[data-testid=service-view-close]"))).toBe(true);
+    // A screen reader hears the same: a modal dialog named with the contact, and so is the frame.
+    expect(view.getAttribute("role")).toBe("dialog");
+    expect(view.getAttribute("aria-modal")).toBe("true");
+    expect(view.getAttribute("aria-label")).toBe(words.label);
+    expect(view.querySelector("[data-testid=service-view-frame]")?.getAttribute("title")).toBe(words.label);
+  });
+
+  it("ends every request of the app still waiting on the contact when it closes, or when its frame loads again: none holds a place on the link", async () => {
+    const signals: AbortSignal[] = [];
+    const send = (request: ClientRequest) => new Promise<ClientResponse>((_, reject) => {
+      signals.push(request.signal!);
+      request.signal!.addEventListener("abort", () => reject(new GhostlyHttpError("aborted", "x")));
+    });
+    await openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service: "demo", title: "Demo", send, words });
+    const frame = document.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+    const origin = new URL(frame.src).origin;
+    // The bridge in the frame (happy-dom loads none): says it is ready, takes its channel, and asks for what the app's page asks.
+    const inFrame = { postMessage: vi.fn() };
+    Object.defineProperty(frame, "contentWindow", { value: inFrame, configurable: true });
+    const bridge = async () => {
+      inFrame.postMessage.mockClear();
+      dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_READY }, origin, source: inFrame as unknown as Window }));
+      const channel = (inFrame.postMessage.mock.calls[0]![2] as MessagePort[])[0]!;
+      return (count: number) => {
+        for (let i = 0; i < count; i++) channel.postMessage({ type: "request", method: "GET", path: `/poll/${i}`, headers: [], body: null }, [new MessageChannel().port2]);
+      };
+    };
+    const until = (n: number) => vi.waitFor(() => expect(signals).toHaveLength(n));
+    (await bridge())(3);
+    await until(3);
+    (await bridge())(2);
+    await until(5);
+    expect(signals.map((s) => s.aborted), "the frame loaded again: the old page's requests end").toEqual([true, true, true, false, false]);
+    document.querySelector<HTMLButtonElement>("[data-testid=service-view-close]")!.click();
+    expect(signals.every((s) => s.aborted), "closed: every request ends").toBe(true);
   });
 
   it("reads the app's name in its own direction: in the Arabic app a Latin name is cut at its end, not its start", async () => {
@@ -227,12 +301,31 @@ describe("a contact's app shown over the app", () => {
     expect(sandbox.filter((flag) => flag.startsWith("allow-popups") || flag.startsWith("allow-top-navigation"))).toEqual([]);
   });
 
+  it("keeps the view's bar on screen, and draws no dialog of the browser's over it: no full screen, no alert or prompt", async () => {
+    await open("one");
+    const frame = document.querySelector("[data-testid=service-view-frame]")!;
+    expect(frame.getAttribute("allow")).toBe("");
+    expect(frame.getAttribute("sandbox")!.split(" ")).not.toContain("allow-modals");
+  });
+
+  it("saves no file by itself: the contact's app starts no download on this device, as on Desktop", async () => {
+    await open("one");
+    const sandbox = document.querySelector("[data-testid=service-view-frame]")!.getAttribute("sandbox")!.split(" ");
+    expect(sandbox.filter((flag) => flag.startsWith("allow-downloads"))).toEqual([]);
+  });
+
   it("closes when the profile locks (the lock screen's closeServiceWindows), as Desktop's windows do", async () => {
     setServiceWindowsCloser(closeServiceView);
     await open("one");
     expect(document.getElementById(SERVICE_VIEW_ID)).not.toBeNull();
     closeServiceWindows();
     expect(document.getElementById(SERVICE_VIEW_ID)).toBeNull();
+  });
+
+  it("writes nothing to the clipboard by itself: no `clipboard-write`, a copy button in the app still copies on a tap", async () => {
+    await open("one");
+    const allow = document.querySelector("[data-testid=service-view-frame]")!.getAttribute("allow") ?? "";
+    expect(allow.split(";").map((feature) => feature.trim())).not.toContain("clipboard-write");
   });
 
   it("holds the keyboard while open: the app under it is out of reach, and closing gives the focus back to Open", async () => {
@@ -289,6 +382,25 @@ describe("a contact's app shown over the app", () => {
       expect(location.hash).toBe(CHAT);
       expect(history.state).toEqual(ROUTER);
       expect(history.length).toBe(length + 1); // the view's entry is only ahead now, as after any Back
+    });
+
+    it("leaves no dead step ahead once ✕ closed it: Forward lands back on the chat, and the next Back leaves it", async () => {
+      history.pushState({ usr: null, key: "k0", idx: 2 }, "", "#/chats");
+      history.pushState(ROUTER, "", CHAT);
+      await open("one");
+      const pop = settled();
+      (document.querySelector('[data-testid="service-view-close"]') as HTMLButtonElement).click();
+      await pop;
+      // Forward onto the closed view's entry: nothing to show there, so the page is the chat again, unmarked.
+      const forward = settled();
+      history.forward();
+      await forward;
+      await settled();
+      expect(document.getElementById(SERVICE_VIEW_ID)).toBeNull();
+      expect(history.state).toEqual(ROUTER);
+      // The next Back is the app's own: off the chat, not a press spent leaving a dead entry.
+      await back();
+      expect(location.hash).toBe("#/chats");
     });
 
     it("is one step for one view, however many were opened in turn", async () => {

@@ -1,6 +1,5 @@
-import { readFileSync } from "node:fs";
 import { CliError } from "../errors";
-import { here, type Command } from "./shared";
+import { here, readInput, type Command } from "./shared";
 
 /** The key file a command signs with: always named, never a default, never on the command line itself. */
 function keyFile(value: unknown, usage: string): string {
@@ -11,7 +10,7 @@ function keyFile(value: unknown, usage: string): string {
 /** `app send`'s message: JSON on the command line, or `-` for stdin. */
 function appData(value: string | undefined): unknown {
   if (value === undefined) throw new CliError("usage", "The message is needed, as JSON or - for stdin: ghostly app send <chat> <ref|name> <json|->");
-  const text = value.trim() === "-" ? readFileSync(0, "utf8") : value;
+  const text = value.trim() === "-" ? readInput(0) : value;
   try { return JSON.parse(text) as unknown; } catch { throw new CliError("usage", "The message is not valid JSON: quote it for the shell, like '{\"k\":\"move\"}', or pass - and write it on stdin"); }
 }
 

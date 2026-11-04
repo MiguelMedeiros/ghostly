@@ -7,6 +7,7 @@
     "compact": "Compacta"
   },
   "chatListDensity": "Lista de conversas",
+  "chatsDeleted": "Todas as conversas foram excluídas",
   "clear": "Limpar",
   "clearAllData": "Limpar todos os dados",
   "clearAllDataConfirm": "Isto apaga de vez:",
@@ -55,7 +56,9 @@
   "dataCleared": "Todos os dados foram limpos",
   "defaultNickname": "Nome nas conversas",
   "defaultNicknameHint": "Usado ao iniciar uma nova conversa",
+  "deleteAllChatsCallOn": "Há uma chamada em uma conversa. Encerre-a primeiro e depois exclua todas as conversas.",
   "deleteAllChatsConfirm": "Excluir todas as {{count}} conversas?",
+  "deleteAllChatsConfirm_one": "Excluir {{count}} conversa?",
   "deleteAllChatsHint": "Mensagens e arquivos são apagados. Ajustes e carteiras ficam.",
   "groupDownloads": {
     "always": "Sempre",

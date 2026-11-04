@@ -40,6 +40,7 @@
   "joinChat": "Entra in una chat",
   "new": "Nuova",
   "newChat": "Nuova chat",
+  "newChatShort": "Nuova",
   "newMenu": {
     "chat": "Chat",
     "chatHint": "Una persona, con un invito",
@@ -63,6 +64,16 @@
     "unread": "{{name}}, messaggi non letti",
     "unreadCount": "{{name}}, {{count}} messaggi non letti",
     "unreadOne": "{{name}}, 1 messaggio non letto"
+  },
+  "row": {
+    "mention": "sei stato menzionato",
+    "muted": "notifiche silenziate",
+    "pinned": "fissata",
+    "separator": ", ",
+    "unread": "{{count}} messaggi non letti",
+    "unreadSome": "messaggi non letti",
+    "unread_one": "{{count}} messaggio non letto",
+    "unread_other": "{{count}} messaggi non letti"
   },
   "searchPlaceholder": "Cerca chat...",
   "settings": "Opzioni",

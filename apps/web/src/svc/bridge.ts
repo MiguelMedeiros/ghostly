@@ -5,7 +5,8 @@
  * to the app, with the request's own port, so the answer goes straight back to the worker. Built on its own into
  * `/_ghostly-svc/bridge.js` (apps/web/svcBuild.ts).
  */
-import { BRIDGE_PORT, BRIDGE_READY, WORKER_SCRIPT, isServiceHostname, parseServicesHost } from "./protocol";
+import { BRIDGE_CLEAR, BRIDGE_CLEARED, BRIDGE_PORT, BRIDGE_READY, SERVICE_FRAME_ALLOW, WORKER_SCRIPT, isServiceHostname, parseServicesHost } from "./protocol";
+import { clearSite, dropSharedCookies } from "./clearSite";
 
 declare const __SERVICES_HOST__: string;
 /** The app's own origin: the one page that may hand this bridge its port. */
@@ -35,14 +36,23 @@ function start(): void {
   workers.startMessages();
 
   addEventListener("message", (event) => {
-    if (appPort || event.source !== window.parent || event.origin !== __SERVICES_APP_ORIGIN__ || (event.data as { type?: unknown } | null)?.type !== BRIDGE_PORT || !event.ports[0]) return;
+    if (appPort || event.source !== window.parent || event.origin !== __SERVICES_APP_ORIGIN__) return;
+    const type = (event.data as { type?: unknown } | null)?.type;
+    // The chat, its data or its profile went: what the contact's app kept here goes too.
+    if (type === BRIDGE_CLEAR) {
+      void clearSite(host.suffix).then(() => window.parent.postMessage({ type: BRIDGE_CLEARED }, __SERVICES_APP_ORIGIN__));
+      return;
+    }
+    if (type !== BRIDGE_PORT || !event.ports[0]) return;
     appPort = event.ports[0];
+    // One left by another contact's app (any chat, any profile) is not this one's to read.
+    dropSharedCookies(host.suffix);
     void workers.register(WORKER_SCRIPT, { scope: "/", updateViaCache: "none" })
       .then(() => workers.ready)
       .then(() => {
         const frame = document.createElement("iframe");
         frame.title = document.title;
-        frame.setAttribute("allow", "fullscreen; clipboard-write");
+        frame.setAttribute("allow", SERVICE_FRAME_ALLOW);
         // This page sends no referrer (its server says so); the worker forwards a navigation only with this origin's.
         frame.setAttribute("referrerpolicy", "same-origin");
         frame.src = "/";

@@ -576,6 +576,25 @@ describe("a headset plugged in and out during a call", () => {
     await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
     expect(devices.userMedia).toHaveLength(2);
   });
+
+  it("a device chosen in the call that cannot be opened: the call keeps its own, says so, and the choice stays as it was", async () => {
+    chooseDevice("audioinput", { id: "mic-builtin", label: "MacBook Pro Microphone" });
+    const { hook, audio } = await callWithDevices();
+    const before = audio.track;
+    // Another app holds the headset's microphone.
+    act(() => hook.result.current.devices!.choose("audioinput", "mic-headset"));
+    await waitFor(() => expect(devices.userMedia).toHaveLength(2));
+    act(() => devices.userMedia[1].deny(new DOMException("Could not start audio source", "NotReadableError")));
+
+    await waitFor(() => expect(hook.result.current.devices?.notice).toEqual({ kind: "audioinput", type: "failed", name: "AirPods" }));
+    expect(audio.track).toBe(before);
+    expect(hook.result.current.webrtc.callState).toBe("connected");
+    expect(hook.result.current.devices?.current.audioinput).toBe("mic-builtin");
+    expect(loadDeviceChoices().audioinput).toEqual({ id: "mic-builtin", label: "MacBook Pro Microphone" });
+    // Putting the choice back is not taken for one made in Settings.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(devices.userMedia).toHaveLength(2);
+  });
 });
 
 describe("a device chosen in Settings during a call", () => {
@@ -686,6 +705,12 @@ describe("the call window's device menu", () => {
     expect(screen.getByTestId("call-device-notice")).toHaveTextContent("AirPods is back");
     await user.click(screen.getByTestId("call-device-switch-back"));
     expect(switchBack).toHaveBeenCalledOnce();
+  });
+
+  it("tells about a device chosen in the call that could not be opened", () => {
+    overlayWith(view({ notice: { kind: "videoinput", type: "failed", name: "Logitech C920" } }));
+    expect(screen.getByTestId("call-device-notice")).toHaveTextContent("Could not use Logitech C920. The call keeps the one it had.");
+    expect(screen.queryByTestId("call-device-switch-back")).toBeNull();
   });
 
   it("speaks the app's language", async () => {

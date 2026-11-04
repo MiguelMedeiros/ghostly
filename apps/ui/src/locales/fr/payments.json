@@ -25,6 +25,7 @@
   },
   "bubble": {
     "amountSats": "{{amount}} sats",
+    "amountSats_one": "{{amount}} sat",
     "approve": "Approuver le paiement",
     "balance": "{{amount}} {{unit}}",
     "bitcoinOnchain": "Bitcoin on-chain",
@@ -183,6 +184,9 @@
     "maxFee": "Frais maximum acceptés ({{unit}})",
     "maxFeeAria": "Frais maximum en {{unit}}",
     "millisats": "{{amount}} millisats",
+    "moneroInfo": "Ghostly n'a pas de portefeuille Monero. Payer ouvre ce lien dans le portefeuille Monero de cet appareil, où vous le vérifiez et l'envoyez.",
+    "moneroLabel": "Monero",
+    "moneroPayTitle": "Ouvre votre portefeuille Monero sur cet appareil",
     "networkNotStated": "Réseau non précisé",
     "noWallet": {
       "mainnet": "Vous n'avez aucun portefeuille {{wallet}} Mainnet pour payer cet argent réel.",
@@ -289,6 +293,7 @@
     "qrTooLong": "Trop long pour un QR code : copiez-le plutôt.",
     "redeem": "Encaisser",
     "redeemed": "Encaissé ✓",
+    "redeemedFee": "Encaissé ✓ (la mint a gardé {{fee}} comme frais)",
     "redeeming": "Encaissement…"
   },
   "mode": {

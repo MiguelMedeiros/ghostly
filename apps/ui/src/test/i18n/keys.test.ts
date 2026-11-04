@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 // @ts-expect-error: a plain script, no types
 import { formatLocale } from "../../../../../tools/scripts/locales-sort.mjs";
 import english from "../../locales/en";
+import { translateWith } from "../../locales/translate";
 import { LANGUAGES, LOCALES, appSources, flatten, literalKeys, lookup } from "./locales";
 
 // covers: app.i18n
@@ -19,6 +20,12 @@ const others = LANGUAGES.filter((l) => l !== "en");
 const placeholders = (text: string) => [...new Set(text.match(/\{\{\w+\}\}/g) ?? [])];
 /** The English key a plural form (`chat.forward.messages_two`) is said for, or undefined. */
 const pluralBase = (key: string) => /^(.+)_(zero|one|two|few|many|other)$/.exec(key)?.[1];
+/**
+ * English keys that are not a plural form of another one. A form (`apps.store.count_one`) is checked against its
+ * key instead, as every language's forms are: Arabic's one reads "تطبيق واحد" without the English "{{count}} app"'s
+ * number, and French's one, said for 0 too, needs it.
+ */
+const ownKeys = () => [...en].filter(([key]) => !en.has(pluralBase(key) ?? ""));
 
 const LOCALE_DIR = join(fileURLToPath(import.meta.url), "../../../locales");
 const areaFiles = (language: string) => readdirSync(join(LOCALE_DIR, language)).filter((f) => f.endsWith(".json")).sort();
@@ -60,7 +67,7 @@ describe("every locale has the same keys as English", () => {
   });
 
   it.each(others)("%s keeps every {{placeholder}} of the English text", (language) => {
-    const lost = [...en].flatMap(([key, text]) => {
+    const lost = ownKeys().flatMap(([key, text]) => {
       const translation = lookup(language, key);
       if (translation === undefined) return [];
       return placeholders(text as string).filter((p) => !translation.includes(p)).map((p) => `${key} ${p}`);
@@ -79,12 +86,70 @@ describe("every locale has the same keys as English", () => {
 
   it.each(others)("%s adds no {{placeholder}} English does not fill", (language) => {
     // `t()` only fills the params the English text was written for; a new one would show up raw.
-    const unknown = [...en].flatMap(([key, text]) => {
+    const unknown = ownKeys().flatMap(([key, text]) => {
       const translation = lookup(language, key);
       if (translation === undefined) return [];
       return placeholders(translation).filter((p) => !(text as string).includes(p)).map((p) => `${key} ${p}`);
     });
     expect(unknown).toEqual([]);
+  });
+});
+
+/**
+ * Arabic strings with `{{count}}` that need no `<key>_<category>` forms: the number stands alone or beside an adjective
+ * ("عرض المزيد ({{count}})", "{{count}} نشطة"), the noun counts another number, or the count is a fixed cap of 32 or
+ * 256, which takes the 11-99 form the string is written in ("حتى {{count}} عضوًا").
+ */
+const ARABIC_COUNT_ALONE = new Set([
+  "apps.files.askAgainMore", "apps.store.showMore", "calls.timeline.audioMissedMany", "calls.timeline.videoMissedMany",
+  "cards.board.showMore", "cards.board.showOlder", "cards.panel.activeCount", "cards.panel.buttonCount", "cards.panel.failedCount",
+  "cards.panel.finishedCount", "chat.announce.rowMoved", "chat.forward.partial", "chat.forward.pick", "chat.forward.selected",
+  "chat.hold.quota", "chat.jump.count", "chat.listTime.days", "chat.listTime.hours", "chat.listTime.minutes",
+  "composer.identityShared", "composer.sendCount", "composer.servicesShared", "connection.history.showAll",
+  "connection.history.title", "errors.group.growMore", "group.create.communityHint", "group.link.full", "group.link.note",
+  "group.link.noteCommunity", "group.members.missing", "group.members.missingOne", "group.readNote", "group.readNoteCommunity",
+  "messageDetails.value.edits", "profileSwitcher.unread", "pwa.sharePastLimit", "saved.rowLabel", "secretGuard.sat",
+  "secretGuard.sats", "settings.storageParts.files", "sidebar.folder.unreadCount",
+  "sidebar.rail.unreadCount", "wallet.fedimint.facts.guardianList", "wallet.fedimint.restoreFailed", "wallet.remove.pending",
+  "wallet.source.available",
+]);
+
+describe("Arabic counted strings", () => {
+  const ar = flatten(LOCALES.ar);
+  const hasForms = (key: string) => [...ar.keys()].some((k) => pluralBase(k) === key);
+  const counted = [...ar].filter(([key, value]) => !pluralBase(key) && typeof value === "string" && value.includes("{{count}}")).map(([key]) => key);
+
+  it("give a counted noun its forms for 2 and 11+, not the 3-10 form for every count (translate.ts pluralForm)", () => {
+    // "2 محادثات" and "15 محادثات" read as "2 chats" said wrong: two is "محادثتان", 11-99 "15 محادثة".
+    expect(counted.filter((key) => !hasForms(key) && !ARABIC_COUNT_ALONE.has(key))).toEqual([]);
+  });
+
+  it("list no string as standing alone that is gone or has its forms", () => {
+    expect([...ARABIC_COUNT_ALONE].filter((key) => !counted.includes(key) || hasForms(key))).toEqual([]);
+  });
+
+  const t = translateWith(LOCALES.ar, "ar");
+  it.each([
+    ["profile.chatCount", 2, "محادثتان"],
+    ["profile.chatCount", 5, "5 محادثات"],
+    ["profile.chatCount", 15, "15 محادثة"],
+    ["group.connection.reconnectingTo", 2, "جارٍ إعادة الاتصال بعضوين…"],
+    ["group.connection.reconnectingTo", 12, "جارٍ إعادة الاتصال بـ 12 عضوًا…"],
+    ["services.status.sharedCount", 2, "تمت مشاركته مع جهتي اتصال"],
+    ["composer.tooLong", 4097, "النص طويل جدًا للإرسال (4097 حرفًا، والحد 4096)."],
+  ] as const)("%s says %d as a person reads it", (key, count, want) => {
+    expect(t(key, { count, max: 4096 })).toBe(want);
+  });
+
+  // A string with one number not named count is said for that number.
+  it.each([
+    ["payments.invoice.expiresDays", { n: 1 }, "تنتهي خلال يوم واحد"],
+    ["payments.invoice.expiresDays", { n: 2 }, "تنتهي خلال يومين"],
+    ["payments.invoice.expiresDays", { n: 14 }, "تنتهي خلال 14 يومًا"],
+    ["connection.duration.days", { n: 30 }, "30 يومًا"],
+    ["chat.voice.limit", { minutes: 15 }, "الحد الأقصى للرسائل الصوتية 15 دقيقة"],
+  ] as const)("%s says %o as a person reads it", (key, params, want) => {
+    expect(t(key, params)).toBe(want);
   });
 });
 
