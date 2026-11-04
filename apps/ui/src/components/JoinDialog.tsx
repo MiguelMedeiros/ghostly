@@ -5,7 +5,7 @@ import { enrollErrorKey, failureKey, offerDeviceLink } from "../lib/devices";
 import { INVITE_REFUSAL_MESSAGE, classifyInvite, readInvite } from "../lib/url";
 import { showJoinNotice } from "../lib/joinNotice";
 import { pasteShortcut, readClipboardText } from "../lib/clipboard";
-import { dragHasFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteNamesFiles, pasteShowsNothing, platformPastedImage } from "../lib/pastedFiles";
+import { dragCarriesFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteNamesFiles, pasteShowsNothing, platformDroppedImage, platformPastedImage } from "../lib/pastedFiles";
 import { rawError } from "../lib/errorText";
 import { touchOnly } from "../lib/touchOnly";
 import { useI18n } from "../contexts/I18nContext";
@@ -195,8 +195,13 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     const reading = platformPastedImage(IMAGE_MAX);
     if (!reading) return;
     event.preventDefault();
+    readHeld(reading, picture || pasteNamesFiles(event.clipboardData));
+  };
+  // A picture the app holds (pasted, or dropped from another app), weighed as it was read. `named`: files or a picture
+  // were offered, so finding none is said.
+  const readHeld = (reading: NonNullable<ReturnType<typeof platformPastedImage>>, named: boolean) => {
     stop(); setError(null); busyRef.current = true; setBusy(true);
-    const current = generation.current, named = picture || pasteNamesFiles(event.clipboardData);
+    const current = generation.current;
     const ended = () => { if (current !== generation.current || closed.current) return false; busyRef.current = false; setBusy(false); return true; };
     reading.then(found => {
       if (!ended()) return;
@@ -210,17 +215,25 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       if (ended()) setError(said(t(rawError(cause) === "That picture is too large to paste" ? "join.pastedTooLarge" : "join.imageFailed")));
     });
   };
+  const draggedOver = (event: DragEvent) => {
+    if (!dragCarriesFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  };
   const droppedImage = (event: DragEvent) => {
-    if (!dragHasFiles(event.dataTransfer)) return;
+    if (!dragCarriesFiles(event.dataTransfer)) return;
     // Taken here, so the window does not open the file in place of the app.
     event.preventDefault();
+    // Another app's files the Linux app's webview names by address only: the app holds them, and reads the picture.
+    const held = busyRef.current || joined.current || closed.current ? null : platformDroppedImage(event.dataTransfer, IMAGE_MAX);
+    if (held) { readHeld(held, true); return; }
     const file = droppedFiles(event.dataTransfer)[0];
     if (file?.type.startsWith("image/")) void readImage(file);
     else if (file) setError({ tone: "error", title: t("join.imageFailed") });
   };
   const button = "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-semibold cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 disabled:cursor-not-allowed";
   return <dialog ref={dialog} {...backdrop} onCancel={event => { event.preventDefault(); close(); }}
-    onPaste={pastedImage} onDragOver={event => { if (dragHasFiles(event.dataTransfer)) event.preventDefault(); }} onDrop={droppedImage}
+    onPaste={pastedImage} onDragOver={draggedOver} onDrop={droppedImage}
     onKeyDown={event => {
       if (event.key !== "Tab") return;
       const elements = Array.from(dialog.current?.querySelectorAll<HTMLElement>("button:not(:disabled), textarea, input:not(:disabled)") ?? []).filter(element => element.getClientRects().length);

@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, createEvent, fireEvent, screen, waitFor } from "@testing-library/react";
 import { createLink, encodeInviteCode } from "@ghostly/core";
 import type { ClipboardFile } from "@ghostly/browser/host";
 import { JoinDialog } from "../../components/JoinDialog";
+import { followPlatformDrags, guardFileDrops, resetPlatformDrags } from "../../lib/pastedFiles";
 import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
 // covers: invite.qr.image
@@ -182,6 +183,55 @@ describe("A QR screenshot pasted or dropped on Join", () => {
       fireEvent.paste(dialog(), { clipboardData: transfer({}) });
       await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Could not read the image. Try PNG or JPEG."));
       expect(createImageBitmap).not.toHaveBeenCalled();
+    });
+
+    describe("a picture dragged in from a file manager, which the webview names by address only", () => {
+      /** A file manager's drag as WebKitGTK shows it to the page: no File, no text. */
+      const named = () => ({ dataTransfer: transfer({ types: ["text/uri-list", "text/html"] }) });
+      let read: ReturnType<typeof vi.fn<() => Promise<ClipboardFile[]>>>;
+      let over: (on: boolean) => void;
+      let unguard: () => void;
+      beforeEach(() => { read = vi.fn(async () => []); over = followPlatformDrags(read); unguard = guardFileDrops(window); });
+      afterEach(() => { unguard(); resetPlatformDrags(); });
+
+      it("is taken as a drop, and the app reads the picture alone: its QR joins", async () => {
+        const { invite } = createLink();
+        qr.data = encodeInviteCode(invite);
+        const notes = held("notes.pdf", 9), code = held("invite.png", PNG.length);
+        read.mockResolvedValue([notes, code]);
+        const onJoin = vi.fn();
+        renderApp(<JoinDialog onJoin={onJoin} onClose={() => {}} />);
+        act(() => over(true));
+        // Taken where it is over the dialog, not refused as the page refuses another app's files elsewhere.
+        const moved = createEvent.dragOver(dialog(), named());
+        fireEvent(dialog(), moved);
+        expect(moved.defaultPrevented).toBe(true);
+        expect((moved as DragEvent).dataTransfer?.dropEffect).toBe("copy");
+        expect(fireEvent.drop(dialog(), named())).toBe(false);
+        await waitFor(() => expect(onJoin).toHaveBeenCalledTimes(1));
+        expect(onJoin.mock.calls[0][0]).toMatchObject({ seedB64: invite.seedB64 });
+        expect(read).toHaveBeenCalledTimes(1);
+        expect(notes.read).not.toHaveBeenCalled();
+        expect([notes.done, code.done].map((done) => done.mock.calls.length)).toEqual([1, 1]);
+      });
+
+      it("dropped files with no picture among them, and a picture too large, say so unread", async () => {
+        read.mockResolvedValueOnce([held("a.pdf", 4)]);
+        renderApp(<JoinDialog onJoin={() => {}} onClose={() => {}} />);
+        act(() => over(true));
+        expect(fireEvent.drop(dialog(), named())).toBe(false);
+        expect(await screen.findByRole("alert")).toHaveTextContent("Could not read the image. Try PNG or JPEG.");
+
+        const huge = held("photo.png", 12 * 1024 * 1024 + 1);
+        read.mockResolvedValueOnce([huge]);
+        await waitFor(() => expect(screen.getByRole("button", { name: "Paste from clipboard" })).toBeEnabled());
+        act(() => over(true));
+        fireEvent.drop(dialog(), named());
+        await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Choose an image smaller than 12 MB."));
+        expect(huge.read).not.toHaveBeenCalled();
+        expect(huge.done).toHaveBeenCalledTimes(1);
+        expect(createImageBitmap).not.toHaveBeenCalled();
+      });
     });
 
     it("text never asks the app, and the web app has no such read", () => {
