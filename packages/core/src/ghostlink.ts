@@ -1585,14 +1585,6 @@ export class GhostLink {
     return !this.streamBlocked && this.channel !== null && (!this.options.params.profile || (this.paired?.state.status === "ready" && this.currentTransportAllowed()));
   }
 
-  /**
-   * The link's first exchange is still under way: its first read is not done, or the answer it read an offer for is
-   * being made or waits for the relays to take it. Used to start a group's edges ahead of the chats (agents#1637).
-   */
-  get firstExchangeUnderWay(): boolean {
-    return !this.session.polledOnce || this.dataLink.state === "answering" || this.session.rtcSignalWaiting;
-  }
-
   private currentTransportAllowed(): boolean {
     const actual = this.paired?.state.transport;
     const remote = this.switcher?.peerPolicy;
