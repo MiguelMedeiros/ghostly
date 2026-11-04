@@ -28,6 +28,7 @@ import { openOnArrow } from "../lib/menuButton";
 import { useI18n } from "../contexts/I18nContext";
 import { InviteCard } from "../components/InviteCard";
 import { LinkQrDialog } from "../components/chat/LinkQrDialog";
+import { CallNoPathNotice } from "../components/CallNoPathNotice";
 import { ChatConnection } from "../components/ChatConnection";
 import { focus } from "../lib/connection";
 import { PairingScene } from "../components/pairing/PairingScene";
@@ -798,6 +799,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           <span className="block text-text-secondary">{t(webrtc.mediaProblem === "denied" && mediaDeniedText() === "settings.media.deniedIos" ? "settings.media.deniedIos" : MEDIA_PROBLEM_TEXT[webrtc.mediaProblem][1])}</span>
         </div>
       )}
+      {/* Our call found no path to the contact (a VPN or firewall that blocks UDP, on either side): where a TURN server
+          is set, and the guide. */}
+      {webrtc.noPath && !webrtc.mediaProblem && <CallNoPathNotice onClose={webrtc.dismissNoPath} />}
       {/* The system paused our microphone in a call (an iPhone's Home Screen app while the screen is locked): the
           contact hears nothing until Ghostly is back on screen, and the call is still on. */}
       {webrtc.micPaused && !webrtc.mediaProblem && (
