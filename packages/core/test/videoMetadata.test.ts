@@ -186,6 +186,50 @@ describe("withoutVideoMetadata", () => {
     }
   });
 
+  it("any bytes after the last whole box (1 to 7 zeros, a phone's trailer) go as zeros, the size kept", async () => {
+    const mp4 = withMovie(H264_MP4, [xyzUdta()]);
+    const trailer = Buffer.from(`SEFT trailer ${PLACE}`, "latin1");
+    for (const tail of [Buffer.alloc(1), Buffer.alloc(7), Buffer.alloc(100), trailer, Buffer.from(PLACE.slice(0, 5), "latin1")]) {
+      const padded = Buffer.concat([mp4, tail]);
+      const out = await bytesOf((await withoutVideoMetadata(new Blob([padded]), "video/mp4"))!);
+      expect(hasPlace(out), `${tail.length}`).toBe(false);
+      expect(out.length).toBe(padded.length);
+      expect(Buffer.from(out.subarray(0, mp4.length)).equals(await bytesOf((await withoutVideoMetadata(new Blob([mp4]), "video/mp4"))!))).toBe(true);
+      expect(out.subarray(mp4.length).every((b) => b === 0)).toBe(true);
+      expect(await played(out)).toEqual(await played(mp4));
+    }
+  });
+
+  it("a top-level box this does not know (Samsung's sefd, a GPS track's gps0) is emptied into free", async () => {
+    const mp4 = withMovie(H264_MP4, [xyzUdta()]);
+    for (const type of ["sefd", "gps0", "junk"]) {
+      const extra = box(type, Buffer.from(`SEFT ${PLACE}`, "latin1"));
+      const file = Buffer.concat([mp4, extra]);
+      const out = await bytesOf((await withoutVideoMetadata(new Blob([file]), "video/mp4"))!);
+      expect(hasPlace(out), type).toBe(false);
+      expect(out.length).toBe(file.length);
+      expect(Buffer.from(out.subarray(mp4.length)).equals(box("free", Buffer.alloc(extra.length - 8)))).toBe(true);
+      expect(await played(out)).toEqual(await played(mp4));
+    }
+  });
+
+  it("a video is refused when its samples are where a box it empties or its trailer is", async () => {
+    // The fixture's chunks moved into a `sefd` box, or into bytes after its last box (an `mdat` cut short).
+    const top = (file: Buffer) => {
+      const found: [string, number, number][] = [];
+      for (let at = 0; at < file.length; at += file.readUInt32BE(at)) found.push([file.toString("latin1", at + 4, at + 8), at, at + file.readUInt32BE(at)]);
+      return found;
+    };
+    const mdat = top(H264_MP4).find(([type]) => type === "mdat")!;
+    const renamed = Buffer.from(H264_MP4);
+    renamed.write("sefd", mdat[1] + 4, "latin1");
+    const cut = Buffer.from(H264_MP4.subarray(0, mdat[2] - 1));
+    // Or into a `free` box, whose body goes as zeros.
+    const space = Buffer.from(H264_MP4);
+    space.write("free", mdat[1] + 4, "latin1");
+    for (const file of [renamed, cut, space]) await expect(withoutVideoMetadata(new Blob([file]), "video/mp4")).rejects.toThrow(NO_VIDEO_METADATA);
+  });
+
   it("a video with nothing left to remove goes the same: the fixture's encoder tag (udta/meta/ilst) went the first time", async () => {
     const once = await bytesOf((await withoutVideoMetadata(new Blob([H264_MP4]), "video/mp4"))!);
     expect(Buffer.from(once).includes(Buffer.from("ilst", "latin1"))).toBe(false);
@@ -201,8 +245,6 @@ describe("withoutVideoMetadata", () => {
       // Cut inside a box.
       [mp4.subarray(0, mp4.length - 10), "video/mp4"],
       [mp4.subarray(0, moov + 100), "video/mp4"],
-      // A box at the top this does not know.
-      [Buffer.concat([mp4, box("junk", Buffer.from(PLACE, "latin1"))]), "video/mp4"],
       // A compressed movie header, a box it does not know in it.
       [withMovie(H264_MP4, [box("cmov", Buffer.from(PLACE, "latin1"))]), "video/quicktime"],
       // Typed as a video, and not one.
@@ -210,6 +252,9 @@ describe("withoutVideoMetadata", () => {
       [Buffer.from(`not a movie ${PLACE}`, "latin1"), "video/quicktime"],
       // No movie header at all.
       [Buffer.concat([H264_MP4.subarray(0, 32), box("mdat", Buffer.from(PLACE, "latin1"))]), "video/mp4"],
+      // Untyped, made of boxes and without a movie header: a box it does not know, or bytes that are no box.
+      [Buffer.concat([xyzUdta(), box("sefd", Buffer.from(PLACE, "latin1"))]), ""],
+      [Buffer.concat([xyzUdta(), Buffer.from(PLACE.slice(0, 5), "latin1")]), ""],
       // A fragmented movie with a metadata track (its samples in fragments are not looked for).
       [withMovie(await repack(false, "fragmented"), [], Buffer.from(PLACE, "latin1")), "video/mp4"],
     ];

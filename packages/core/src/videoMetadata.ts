@@ -12,7 +12,7 @@
  * media goes untouched.
  *
  * Fail-closed: a file that is an MP4 or QuickTime video, by its bytes or by its type, and whose metadata cannot be
- * removed (truncated, malformed, a part this does not know) is refused with `NO_VIDEO_METADATA`, never sent as it was.
+ * removed (truncated, malformed, a part of its movie this does not know) is refused with `NO_VIDEO_METADATA`, never sent as it was.
  * A picture (HEIF is pictureMetadata.ts's), a file without a video track (an M4A) and any other file go as they are.
  */
 import { isStrippedPicture } from "./pictureMetadata";
@@ -46,10 +46,12 @@ const METADATA = new Set(["udta", "meta", "uuid"]);
  */
 const SPACE = new Set(["free", "skip", "wide"]);
 /**
- * At the top: what makes the movie, kept (`moov` and `moof` looked into); a preview picture, an event message, the
- * wall-clock time a fragment was made (`prft`), emptied.
+ * At the top: what makes the movie, kept (`moov` and `moof` looked into). Any other box is emptied, unless the movie's
+ * samples are in it: the ones known at a movie's top (a preview picture, an event message, the wall-clock time a
+ * fragment was made, `prft`) and a device's own (Samsung's `sefd`, a GPS track's `gps0`) alike.
  */
 const TOP_KEEPS = new Set(["ftyp", "styp", "moov", "mdat", "moof", "mfra", "sidx", "ssix", "pdin", ...SPACE]);
+/** The boxes emptied that are known at a movie's top: a file that starts with one is read as boxes. */
 const TOP_EMPTIED = new Set([...METADATA, "pnot", "PICT", "emsg", "Xtra", "prft"]);
 const MOOV_KEEPS = new Set(["mvhd", "trak", "mvex", "iods", "ctab", ...SPACE]);
 const TRAK_KEEPS = new Set(["tkhd", "edts", "mdia", "tref", "tapt", "load", "txas", "matt", ...SPACE]);
@@ -146,11 +148,22 @@ const child = (b: Uint8Array, parent: Box | undefined, type: string): Box | unde
   return of[0];
 };
 
+/** A sample table's chunks, from its `stco` or `co64`: how many, and where each starts in the file. */
+function chunkOffsets(b: Uint8Array, stbl: Box): { chunks: number; offsetOf: (i: number) => number } {
+  const stco = child(b, stbl, "stco"), co64 = child(b, stbl, "co64");
+  check(!!stco !== !!co64);
+  const offsets = (stco ?? co64)!;
+  check(offsets.body + 8 <= offsets.end);
+  const chunks = u32be(b, offsets.body + 4);
+  check(offsets.body + 8 + chunks * (co64 ? 8 : 4) <= offsets.end);
+  const offsetOf = (i: number) => co64 ? u32be(b, co64.body + 8 + i * 8) * 2 ** 32 + u32be(b, co64.body + 12 + i * 8) : u32be(b, stco!.body + 8 + i * 4);
+  return { chunks, offsetOf };
+}
+
 /** The byte ranges of a track's samples in the file, one per chunk, from its sample table. */
 function sampleRanges(b: Uint8Array, stbl: Box): [number, number][] {
   const stsz = child(b, stbl, "stsz"), stz2 = child(b, stbl, "stz2"), stsc = child(b, stbl, "stsc");
-  const stco = child(b, stbl, "stco"), co64 = child(b, stbl, "co64");
-  check(!!stsc && !!stsz !== !!stz2 && !!stco !== !!co64);
+  check(!!stsc && !!stsz !== !!stz2);
   const need = (box: Box, at: number, bytes: number) => check(at + bytes <= box.end);
 
   // Each sample's size.
@@ -175,11 +188,7 @@ function sampleRanges(b: Uint8Array, stbl: Box): [number, number][] {
   }
 
   // Each chunk's offset.
-  const offsets = (stco ?? co64)!;
-  need(offsets, offsets.body, 8);
-  const chunks = u32be(b, offsets.body + 4);
-  need(offsets, offsets.body + 8, chunks * (co64 ? 8 : 4));
-  const offsetOf = (i: number) => co64 ? u32be(b, co64.body + 8 + i * 8) * 2 ** 32 + u32be(b, co64.body + 12 + i * 8) : u32be(b, stco!.body + 8 + i * 4);
+  const { chunks, offsetOf } = chunkOffsets(b, stbl);
 
   // How many samples each chunk holds.
   need(stsc, stsc.body, 8);
@@ -213,13 +222,13 @@ function selfContained(b: Uint8Array, minf: Box): boolean {
 }
 
 /**
- * `moov` with its metadata boxes emptied and its headers' times zeroed, read whole: whether it has a video track, and
- * the byte ranges of its metadata and timecode tracks' samples (zeroed by the caller where they are), and whether a
- * metadata track has any.
+ * `moov` with its metadata boxes emptied and its headers' times zeroed, read whole: whether it has a video track, the
+ * byte ranges of its metadata and timecode tracks' samples (zeroed by the caller where they are), whether a metadata
+ * track has any, and every track's sample table.
  */
-function stripMoov(b: Uint8Array): { video: boolean; fragmented: boolean; metadata: boolean; zeroed: [number, number][] } {
+function stripMoov(b: Uint8Array): { video: boolean; fragmented: boolean; metadata: boolean; zeroed: [number, number][]; tables: Box[] } {
   let video = false, fragmented = false, metadata = false;
-  const zeroed: [number, number][] = [];
+  const zeroed: [number, number][] = [], tables: Box[] = [];
   for (const box of boxes(b, header(b, 0, b.length).body, b.length)) {
     if (METADATA.has(box.type)) { empty(b, box); continue; }
     check(MOOV_KEEPS.has(box.type));
@@ -241,6 +250,7 @@ function stripMoov(b: Uint8Array): { video: boolean; fragmented: boolean; metada
     const handler = text(b, hdlr.body + 8, 4);
     const stbl = child(b, minf, "stbl");
     check(!!stbl);
+    tables.push(stbl);
     if (handler === "meta") {
       check(selfContained(b, minf));
       const ranges = sampleRanges(b, stbl);
@@ -254,7 +264,7 @@ function stripMoov(b: Uint8Array): { video: boolean; fragmented: boolean; metada
     if (VISUAL.has(handler)) zeroCompressorNames(b, stbl);
     emptyWithin(b, box.body, box.end);
   }
-  return { video, fragmented, metadata, zeroed };
+  return { video, fragmented, metadata, zeroed, tables };
 }
 
 /** A video as it is read: its size, and `length` of its bytes from `offset` (fewer only at its end). */
@@ -266,10 +276,14 @@ export interface VideoSource {
 /** A part of a video replaced as it is sent, `start` to `end` of the file: by `bytes`, or by zeros. */
 export interface VideoPatch { start: number; end: number; bytes?: Uint8Array }
 
-/** A box's header in the file at `at`, read from it. */
-async function headerAt(source: VideoSource, at: number): Promise<Box> {
+/** A whole box's header in the file at `at`, read from it; undefined where none fits (bytes after the last box). */
+async function headerAt(source: VideoSource, at: number): Promise<Box | undefined> {
   const head = await source.read(at, 16);
-  return header(head, 0, source.size, at);
+  try {
+    return header(head, 0, source.size, at);
+  } catch {
+    return undefined;
+  }
 }
 
 /** A box read whole, within the limit. */
@@ -331,26 +345,46 @@ export async function videoMetadataPatches(source: VideoSource, mime: string): P
 
   // The top-level boxes, by their headers alone.
   const top: Box[] = [];
+  /** What goes as zeros at the top: the boxes emptied, the space's bodies, and the bytes after the last box. */
+  const dropped: [number, number][] = [];
+  let trailer = false;
   for (let at = 0; at < source.size;) {
     check(top.length < VIDEO_METADATA_LIMITS.maxBoxes);
     const box = await headerAt(source, at);
-    // Zeros after the last box (a recorder's padding) are no box: they go as zeros, whatever follows.
-    if (top.length && box.type === "\0\0\0\0" && box.end === source.size) {
+    // Bytes after the last whole box (a recorder's zeros, a phone's trailer) are no box: they go as zeros.
+    if (!box || (top.length && box.type === "\0\0\0\0")) {
       patches.push({ start: at, end: source.size });
+      dropped.push([at, source.size]);
+      // A box of zeros to the end was let through before as it is; bytes that are no box were not.
+      trailer = !box || box.end !== source.size;
       break;
     }
-    check(TOP_KEEPS.has(box.type) || TOP_EMPTIED.has(box.type));
     top.push(box);
+    if (SPACE.has(box.type)) dropped.push([box.body, box.end]);
+    else if (!TOP_KEEPS.has(box.type)) dropped.push([box.start, box.end]);
     at = box.end;
   }
   const moovs = top.filter((box) => box.type === "moov");
-  if (!moovs.length && container === "boxes" && !typed) return undefined;
+  // A stream's segment goes as it is; boxes that are not all known ones, or bytes that are no box, are refused.
+  if (!moovs.length && container === "boxes" && !typed) {
+    check(!trailer && top.every((box) => TOP_KEEPS.has(box.type) || TOP_EMPTIED.has(box.type)));
+    return undefined;
+  }
   check(moovs.length === 1);
 
   const moov = await whole(source, moovs[0]!);
-  const { video, fragmented, metadata, zeroed } = stripMoov(moov);
+  const { video, fragmented, metadata, zeroed, tables } = stripMoov(moov);
   if (!video && !typed) return undefined;
   patches.push({ start: moovs[0]!.start, end: moovs[0]!.end, bytes: moov });
+
+  // No sample is where zeros go.
+  if (dropped.length) for (const stbl of tables) {
+    const { chunks, offsetOf } = chunkOffsets(moov, stbl);
+    for (let i = 0; i < chunks; i++) {
+      const offset = offsetOf(i);
+      check(!dropped.some(([start, end]) => offset >= start && offset < end));
+    }
+  }
 
   // A metadata track's samples in fragments are not looked for: such a video is refused.
   check(!fragmented || !metadata);
@@ -362,7 +396,7 @@ export async function videoMetadataPatches(source: VideoSource, mime: string): P
     } else if (SPACE.has(box.type)) {
       // Its header kept, its body zeros.
       if (box.body < box.end) patches.push({ start: box.body, end: box.end });
-    } else if (TOP_EMPTIED.has(box.type)) {
+    } else if (!TOP_KEEPS.has(box.type)) {
       // Its header made `free`, its body zeros.
       const head = await source.read(box.start, box.body - box.start);
       empty(head, { type: box.type, start: 0, body: head.length, end: head.length });
