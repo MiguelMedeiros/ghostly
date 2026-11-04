@@ -108,8 +108,8 @@ interface BrokerOptions {
    */
   shown?: () => boolean | Promise<boolean>;
   /**
-   * Whether the person is in the app now: its frame has the focus in a page that has it (web), its window has it
-   * (Desktop). Only then is the runner's `activity` their input (`onInput`): an app on screen beside a chat, or one
+   * Whether the person is in the app now: its frame has the focus in a page that has it and was just tapped or typed in
+   * (web), its window has it (Desktop). Only then is the runner's `activity` their input (`onInput`): an app on screen beside a chat, or one
    * left behind another window, keeps nothing unlocked.
    */
   inUse?: () => boolean | Promise<boolean>;
@@ -762,7 +762,11 @@ export function startApp({ container, host, launch, view, onStop, onServing, sta
   const broker = createBroker({
     host, launch, view,
     shown: () => onScreen(frame),
-    inUse: () => onScreen(frame) && document.hasFocus() && document.activeElement === frame,
+    // The app can post `activity` itself, and left in front it would keep the lock away for good: the person's tap or key
+    // in the frame also activates this page (HTML § user activation), which no script can, so that is asked too (a
+    // browser without the API: the focus only, as before).
+    inUse: () => onScreen(frame) && document.hasFocus() && document.activeElement === frame
+      && ((navigator as { userActivation?: { isActive: boolean } }).userActivation?.isActive ?? true),
     onInput: appInput,
     serving: onServing,
     pong: (n) => watch?.pong(n),
