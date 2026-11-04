@@ -414,7 +414,9 @@ function writtenDay(text: string): [number, number, number] | undefined {
  * A time a command names: milliseconds, or a date the JavaScript Date reads (`2026-09-30T01:00:00Z`). A date with no
  * zone is local time in every form: `Date.parse` reads `2026-09-30 01:00` and `Sep 30 2026` as local but an ISO date
  * alone as UTC midnight (21:00 the day before in UTC-03, agents#2355), so that one is read as `2026-09-30T00:00`.
- * A day the month does not have (`2026-04-31`) is refused, where `Date.parse` made it May 1.
+ * A day the month does not have (`2026-04-31`) is refused, where `Date.parse` made it May 1. A time more than a year
+ * ahead is a usage error that names the flag and the last time it takes: before, it reached the card's check and failed
+ * as `bad_request` (exit 1), "Status card: resetsAt is a time in milliseconds, within a year". A time past is taken.
  */
 export function cardTime(value: unknown, flag: string): number | undefined {
   if (value === undefined) return undefined;
@@ -426,6 +428,12 @@ export function cardTime(value: unknown, flag: string): number | undefined {
   if (written) {
     const [year, month, date] = written, days = new Date(Date.UTC(year, month, 0)).getUTCDate();
     if (date > days) throw new CliError("usage", `--${flag} takes a day the month has (${year}-${String(month).padStart(2, "0")} has ${days}), not ${JSON.stringify(value)}`);
+  }
+  const last = new Date(Date.now() + STATUS_CARD_LIMITS.nextRunMs);
+  if (ms > last.getTime()) {
+    const two = (n: number) => String(n).padStart(2, "0");
+    const shown = `${last.getFullYear()}-${two(last.getMonth() + 1)}-${two(last.getDate())} ${two(last.getHours())}:${two(last.getMinutes())}`;
+    throw new CliError("usage", `--${flag} takes a time within a year from now (until ${shown}), not ${JSON.stringify(value)}`);
   }
   return ms;
 }
@@ -465,7 +473,7 @@ export const routineOptions: Record<string, OptionSpec> = {
   schedule: { type: "string", description: "When it runs, as people say it: \"every day 01:00\" (80 characters)" },
   cron: { type: "string", description: "Its cron line, shown beside the schedule (never run)" },
   state: { type: "string", description: "active (default on send) or paused" },
-  next: { type: "string", description: `Its next run: milliseconds or a date: ${CARD_TIME_FORMS}` },
+  next: { type: "string", description: `Its next run, within a year: milliseconds or a date: ${CARD_TIME_FORMS}` },
   run: { type: "string", description: "Record a run now: ok, failed or skipped, with :a summary if you like (it becomes the last run)" },
   ...cardOptions,
 };
@@ -528,7 +536,7 @@ export const usageOptions: Record<string, OptionSpec> = {
   label: { type: "string", description: "What the quota is of, like Claude (24 characters)" },
   account: { type: "string", description: "Which of your accounts it is, short (24 characters)" },
   window: { type: "string", description: "The quota's window, as people say it: \"5 h\", \"week\" (16 characters)" },
-  resets: { type: "string", description: `When the window starts again: milliseconds or a date: ${CARD_TIME_FORMS}` },
+  resets: { type: "string", description: `When the window starts again, within a year: milliseconds or a date: ${CARD_TIME_FORMS}` },
   also: { type: "list", description: "Another window, window=percent[@time], like week=80@2026-10-10T00:00:00Z or week=80@2026-10-10 (up to 3; shown in the details; a time as --resets takes, no zone: local time)" },
   id: { type: "string", description: "The card's id (default usage: one card per chat)" },
   all: { type: "boolean", description: "Every 1:1 chat with a contact, instead of one chat" },

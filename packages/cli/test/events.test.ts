@@ -81,6 +81,24 @@ describe("the event stream", () => {
     expect(sent).toMatchObject({ type: "message.sent", message: { id: "me_1", nick: null } });
   });
 
+  it("a contact's message in the words of a joined line is a message: only the row the engine took as that line is chat.joined", async () => {
+    const { h, events } = await hub("joined.jsonl");
+    h.baseline(state([link("c1")]), new Map([["c1", []]]));
+    h.sink.post({ kind: "messages", linkId: "c1", messages: [
+      message("c1", "peer_1", { text: "👋 Bob joined", joinLine: true }),
+      message("c1", "peer_2", { text: "👋 I just joined" }),
+      message("c1", "peer_3", { text: "👋 joined" }),
+      message("c1", "me_4", { sender: "me", text: "👋 Bot joined", delivery: "sending" }),
+    ] });
+    expect(events.map((e) => [e.type, (e as { name?: unknown }).name ?? null])).toEqual([
+      ["chat.joined", "Bob"],
+      ["message.received", null],
+      ["message.received", null],
+      ["chat.announced", "Bot"],
+    ]);
+    expect(toTurn(events[1]!)).toMatchObject({ untrusted: { text: "👋 I just joined" } });
+  });
+
   it("reports the same events from only what changed as from the whole history, a deletion included", async () => {
     const run = async (journal: string, changesOnly: boolean) => {
       const { h, events } = await hub(journal);
