@@ -26,6 +26,14 @@ export function shortReason(reason: string, tr: Translate = englishT): string {
   return problemText(short, tr, "connect").title.replace(/\.$/, "");
 }
 
+/**
+ * "Iroh: UDP blocked": a reason said of one transport, with its name before it, unless the reason already names it
+ * ("HyperDHT relay unreachable", in every language), which says it once.
+ */
+export function namedReason(transport: string, reason: string, tr: Translate = englishT): string {
+  return reason.includes(transport) ? reason : tr("connection.line.withReason", { text: transport, reason });
+}
+
 /** How long a run of changes took, as people say it. */
 function span(ms: number, tr: Translate): string {
   const minutes = Math.max(1, Math.round(ms / 60_000));
