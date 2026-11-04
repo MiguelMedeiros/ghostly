@@ -1,6 +1,6 @@
 import {
-  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, APP_STATEMENT_LIMITS, APP_STORE_LIMITS, appDigest, appViewOf, appFingerprint, appRef, appRevocationFor, appStoreDecision,
-  addedAppPermissions, appUpdateDecision, canonicalJson, checkAppBeforeRun, isAppHash, isAppKey, isAppRef, planAppUpdate, readAppBundleAsync, readAppRevocation,
+  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, APP_STATEMENT_LIMITS, APP_STORE_LIMITS, appDigest, appViewOf, appFingerprint, appRef, appRefPublisher, appRevocationFor, appStoreDecision,
+  addedAppPermissions, appUpdateDecision, canonicalJson, checkAppBeforeRun, isAppHash, isAppKey, isAppRef, planAppUpdate, readAppBundleAsync, readAppRevocation, readAppRevocationShape,
   pacer, readAppStoreSteps, readCanonicalJson, sha256Paced, toBase64Url, utf8Decode, utf8Encode,
   type AppBundle, type AppListing, type AppManifest, type AppPermission, type AppRemoval, type AppRevocationsChecked, type AppStoreIndex, type AppStoreKind,
   type AppStoreRead,
@@ -415,6 +415,62 @@ async function noteBundles(change: (noted: Set<string>) => void): Promise<void> 
   await done(tx);
 }
 
+/**
+ * The key, in `STORES.settings`, of the revocations this profile verified, by app reference (one of
+ * `PROFILE_SETTINGS_KEYS`: only "Clear all data" drops them). A client keeps every revocation it verified (WISP 1200 §
+ * Publisher keys): kept beside the app's record, not in it, so Uninstall leaves them and the same version from a copy at
+ * another URL, with no `ghostly-revoke.json` beside it, is still refused.
+ */
+export const APP_REVOCATIONS_KEY = "appRevocations";
+/**
+ * Revocations kept there: at most `each` of one app and `all` in all, the ones kept longest ago dropped first. A
+ * revocation is at most about 3.5 KiB (64 digests and a reason).
+ */
+const REVOCATIONS_KEPT = { each: 64, all: 1024 } as const;
+
+/**
+ * The revocations as kept, by reference, in the order they were last added to: read with nothing taken on trust but
+ * their signatures (checked before they were kept), so an entry that is not one of that app's publisher is none.
+ */
+function keptRevocations(kept: unknown): Map<string, SignedAppRevocation[]> {
+  const out = new Map<string, SignedAppRevocation[]>();
+  if (!Array.isArray(kept)) return out;
+  for (const entry of kept) {
+    if (!Array.isArray(entry) || !isAppRef(entry[0]) || !Array.isArray(entry[1])) continue;
+    const ref = entry[0];
+    const list = entry[1].flatMap((r: unknown) => {
+      const read = readAppRevocationShape(r);
+      return read.ok && read.revocation.statement.app === ref && read.revocation.signature.key === appRefPublisher(ref) ? [read.revocation] : [];
+    });
+    if (list.length) out.set(ref, list);
+  }
+  return out;
+}
+
+/** Queues, on the settings store of an open transaction, these revocations of `ref` kept with the others (each once). */
+function keepRevocations(settings: IDBObjectStore, ref: string, add: readonly SignedAppRevocation[]): void {
+  if (!add.length) return;
+  const read = settings.get(APP_REVOCATIONS_KEY);
+  read.onsuccess = () => {
+    const kept = keptRevocations(read.result);
+    const before = kept.get(ref) ?? [];
+    const merged = new Map(before.map((r) => [canonicalJson(r), r]));
+    for (const r of add) if (r.statement.app === ref) merged.set(canonicalJson(r), r);
+    if (merged.size === before.length) return;
+    kept.delete(ref);
+    kept.set(ref, [...merged.values()].slice(-REVOCATIONS_KEPT.each));
+    let all = 0;
+    for (const list of kept.values()) all += list.length;
+    for (const [other, list] of kept) {
+      if (all <= REVOCATIONS_KEPT.all || other === ref) break;
+      const drop = Math.min(list.length, all - REVOCATIONS_KEPT.all);
+      all -= drop;
+      if (drop === list.length) kept.delete(other); else kept.set(other, list.slice(drop));
+    }
+    settings.put([...kept], APP_REVOCATIONS_KEY);
+  };
+}
+
 const builtInRef = (app: BuiltInApp) => appRef(app.publisher, app.name);
 
 /**
@@ -694,6 +750,10 @@ export class Apps {
   }
   private async builtInMarks(): Promise<BuiltInAppMarks> {
     return builtInMarks(await wrap((await store(STORES.settings, "readonly")).get(BUILT_IN_APPS_KEY)));
+  }
+  /** The revocations of this app this profile verified and keeps (`APP_REVOCATIONS_KEY`), installed or not. */
+  private async keptRevocationsOf(ref: string): Promise<SignedAppRevocation[]> {
+    return keptRevocations(await wrap((await store(STORES.settings, "readonly")).get(APP_REVOCATIONS_KEY))).get(ref) ?? [];
   }
 
   /**
@@ -1401,7 +1461,16 @@ export class Apps {
     // A fetched version is checked against its publisher's revocations before Install, as the update check does: beside
     // the URL it came from and beside each source it names (beside a pinned commit, the file is that commit's). A version
     // this build carries makes no request; the update check reads them.
-    const revocations = carried ? [] : (await this.readRevocations(version.ref, [from, ...(manifest.sources ?? [])])) ?? [];
+    const read = carried ? [] : (await this.readRevocations(version.ref, [from, ...(manifest.sources ?? [])])) ?? [];
+    // One that stops this version is kept (the person was shown it revoked: a copy of it elsewhere is refused too), and
+    // the ones kept before are judged with them, whatever URL this one came from.
+    const stops = stopping([version], read);
+    if (stops.length) {
+      const tx = (await openDb()).transaction(STORES.settings, "readwrite");
+      keepRevocations(tx.objectStore(STORES.settings), version.ref, stops);
+      await done(tx);
+    }
+    const revocations = [...await this.keptRevocationsOf(version.ref), ...read];
     for (const [d, s] of this.staged) if (this.now() - s.at > STAGED.ms) this.staged.delete(d);
     this.staged.delete(digest);
     while (this.staged.size >= STAGED.max) this.staged.delete(this.staged.keys().next().value!);
@@ -1445,10 +1514,12 @@ export class Apps {
       // data gone, as Accept does.
       let read = false;
       for (;;) {
-        const [installed, stores] = await Promise.all([this.app(version.ref), this.stores()]);
+        const [installed, stores, kept] = await Promise.all([this.app(version.ref), this.stores(), this.keptRevocationsOf(version.ref)]);
         if (read && !installed) fail("not-installed", "This app is not installed");
         read = installed !== undefined;
-        const run = this.runStatus(version, this.storeViews(stores), [...(installed?.revocations ?? []), ...revocations]);
+        // The ones kept now too: an uninstall since the preview left the app's there.
+        const known = [...kept, ...revocations];
+        const run = this.runStatus(version, this.storeViews(stores), [...(installed?.revocations ?? []), ...known]);
         if (run.status === "revoked") fail("revoked", "Its publisher revoked this version");
         if (run.status === "removed") fail("removed", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
         const decision = installDecision(installed, version);
@@ -1473,8 +1544,8 @@ export class Apps {
         }
         const kind = wrote = await this.writeBundle(digest, bytes);
         // Installed from a store's listing: its updates come from that store from now on; from a URL or a card: from anywhere.
-        // It starts with the revocations read for the preview (of other versions: a later one may name one).
-        const next = withRevocations(this.versionRecord(installed, bundle, kind, from, fromStore), revocations);
+        // It starts with the revocations read for the preview and the ones kept (of other versions: a later one may name one).
+        const next = withRevocations(this.versionRecord(installed, bundle, kind, from, fromStore), known);
         if (!(await this.putAppIfUnchanged(next, installed))) continue;
         // The person installed a built-in app they had removed (from a store, a link or a card): it is theirs again.
         if (!installed && this.builtIn(version.ref)) await this.keepBuiltIn(version.ref);
@@ -1888,12 +1959,15 @@ export class Apps {
     const app = await this.app(ref);
     const builtIn = this.builtIn(ref) !== undefined;
     if (!app && !builtIn) fail("not-installed", "This app is not installed");
-    const tx = (await openDb()).transaction([STORES.apps, STORES.appStorage, ...(builtIn ? [STORES.settings] : [])], "readwrite");
+    const tx = (await openDb()).transaction([STORES.apps, STORES.appStorage, STORES.settings], "readwrite");
     // Counted with the transaction, nothing awaited between: a write that sees the old count is in an older transaction,
     // whose row this delete takes; a later one is refused (`storageSet`). The record held goes now, so an app asked for
     // from here on is read after this delete.
     this.uninstalls.set(ref, (this.uninstalls.get(ref) ?? 0) + 1);
     this.held.delete(ref);
+    // Its revocations stay (`APP_REVOCATIONS_KEY`): the record's as it is in this transaction, read before it goes.
+    const record = tx.objectStore(STORES.apps).get(ref);
+    record.onsuccess = () => keepRevocations(tx.objectStore(STORES.settings), ref, (record.result as InstalledApp | undefined)?.revocations ?? []);
     tx.objectStore(STORES.apps).delete(ref);
     tx.objectStore(STORES.appStorage).delete(rowsOf(ref));
     if (builtIn) markBuiltIns(tx.objectStore(STORES.settings), (marks) => { marks.removed[ref] ??= this.now(); });
