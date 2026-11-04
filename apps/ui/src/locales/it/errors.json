@@ -235,7 +235,6 @@
     "adminRename": "Solo l'admin può rinominare il gruppo",
     "adminRotate": "Solo l'admin può rinnovare il segreto del gruppo",
     "adminShares": "Solo l'admin può condividere un link al gruppo",
-    "alreadyJoining": "Stai già entrando in questo gruppo",
     "alreadyMember": "Questo contatto è già un membro",
     "chainFull": "La cronologia dei membri del gruppo è piena",
     "chainFullNext": "Crea un nuovo gruppo.",

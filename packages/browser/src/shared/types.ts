@@ -147,6 +147,9 @@ export interface StoredLink {
 export type GroupEvent = "created" | "joined" | "gone" | "admin" | "rotated" | "removed" | "left" | "forked" | "picture" | "renamed";
 
 /** A private group as stored: an invitation not yet answered, or a group I am (or was) in. */
+/** Another group under the id of one held (`StoredGroup.others`): a contact's invitation, or a group link opened. */
+export type OtherGroup = { at: number; linkId: string; name: string; admin: string; e: number; n: number } | { at: number; link: string };
+
 export interface StoredGroup {
   id: string;
   createdAt: number;
@@ -213,6 +216,13 @@ export interface StoredGroup {
   formerNames?: Record<string, string>;
   /** Removed, then invited again: the removed group as it was, which a Decline puts back (with the history it kept). */
   previous?: StoredGroup;
+  /**
+   * Other groups that came under this id while it was held: an invitation over a contact chat from someone outside the
+   * group held, or a link opened. A private group's id names no genesis (anyone who knows it may sign one under it), so
+   * which of them is the real one is the person's to say: each is kept beside the group held until they pick
+   * (`Groups.keepGroup`, `Groups.switchGroup`), and an inviter turned down hears a decline.
+   */
+  others?: OtherGroup[];
   /**
    * Past 16 members, with hubs (WISP 902 · Group Mesh § Hubs): the hubs I kept edges with (as a hub, the other hubs),
    * where my edges go when the app starts again, before the beacon is read.
@@ -368,6 +378,11 @@ export interface GroupView {
    * `takenBack`: who sent it took it back (the group is gone from its app, or the admin role from it): nothing to answer.
    */
   invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; takenBack?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; othersKnocked?: boolean; since?: number; admittedAt?: number; full?: { n: number; max: number } };
+  /**
+   * Other groups that came under this one's id (a contact's invitation, or a link opened) while it was here: kept beside
+   * it until the person picks the real one (`keepGroup`, `switchGroup` with the other's `linkId` or `link`).
+   */
+  others?: ({ linkId: string; contact: string; name: string; members: number } | { link: string })[];
   /** The group's link while it is on (`group1/<id>/<entry key>`); only the admin who made it sees it. */
   entryLink?: string;
   /**

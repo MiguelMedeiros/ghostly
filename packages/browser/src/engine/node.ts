@@ -5272,6 +5272,11 @@ export class GhostlyNode implements EngineImplementation {
     return this.groups.accept(groupId);
   }
   declineGroupInvitation({ groupId }: { groupId: string }): Promise<void> { return this.groups.decline(groupId); }
+  keepGroup({ groupId }: { groupId: string }): Promise<void> { return this.groups.keepGroup(groupId); }
+  switchGroup({ groupId, to }: { groupId: string; to: string }): Promise<void> {
+    if (typeof to !== "string") throw new Error("No other group under this id");
+    return this.groups.switchGroup(groupId, to);
+  }
   async enableGroupLink({ groupId, reset }: { groupId: string; reset?: boolean }): Promise<{ link: string }> { return { link: await this.groups.enableLink(groupId, reset === true) }; }
   disableGroupLink({ groupId }: { groupId: string }): Promise<void> { return this.groups.disableLink(groupId); }
   async joinGroupByLink({ link }: { link: string }): Promise<{ groupId: string }> {

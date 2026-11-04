@@ -31,6 +31,7 @@
     "inviterAwayUnknown": "The contact who invited you is not connected yet. Try again in a moment.",
     "letting": "A member is letting you in…",
     "linkUnanswered": "The link did not answer",
+    "others": "Another group has this id: pick one",
     "takenBack": "Invitation taken back",
     "unanswered": "No answer from the inviter's app. Accept again, or decline.",
     "waitingAdmin": "Waiting for the admin's app…",

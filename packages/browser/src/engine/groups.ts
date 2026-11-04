@@ -5,7 +5,7 @@ import {
   GROUP_HAVE_FRAME, GROUP_VERSION_FILES, GROUP_WANT_FRAME, GROUP_WANT_NO_FRAME, type GroupFileMeta,
   type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
-import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
+import type { GroupEvent, GroupJoinStage, GroupView, OtherGroup, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
 import type { Removal } from "./removals";
 import { groupReply } from "../shared/replies";
 import { pinOfFormerMember, pinView } from "./pins";
@@ -486,6 +486,8 @@ const ACCEPT_AGAINS = 5;
 const REWELCOME_MS = ACCEPT_AGAIN_MS / 2;
 /** Invitee side: the invitations one contact chat may have waiting here at a time. More are answered as declined. */
 const MAX_INVITATIONS_PER_CHAT = 4;
+/** Other groups kept beside one under its id (`StoredGroup.others`), at most; an invitation past them is declined. */
+const MAX_OTHER_GROUPS = 4;
 /** Invitee side, removed and invited again: the chat that let me into the group I kept, if it is its admin's. */
 const keptAdminChat = (kept?: StoredGroup): string | undefined => {
   const admin = kept?.state && rosterAdmin(kept.state.chain[kept.state.chain.length - 1].m);
@@ -851,7 +853,7 @@ export class Groups {
     // A chat stays in `contacts` after its member is removed or leaves (the removal notice goes over it): only a member still in the roster counts.
     const contacts = Object.entries(group.contacts ?? {}).filter(([key]) => !session || rosterHas(session.roster, key));
     const base = { id: group.id, profile: "mesh" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...peerMessageAt(this.lastPeerMessageAt, group.id), ...mentionAt(this.lastMentionAt, group.id), invited: [...(this.invited.get(group.id) ?? [])],
-      memberLinks: Object.fromEntries(contacts.map(([key, linkId]) => [linkId, key])) };
+      memberLinks: Object.fromEntries(contacts.map(([key, linkId]) => [linkId, key])), ...(group.others?.length ? { others: group.others.map(other => this.otherView(other)) } : {}) };
     if (!session) {
       const invitation = group.invitation!;
       return { ...base, name: groupName(invitation.name) ?? "", isAdmin: false, members: [], canSend: false, ...(group.formerNames ? { formerNames: group.formerNames } : {}),
@@ -879,6 +881,11 @@ export class Groups {
         return { key, role, me: key === session.myKey, nick: key === session.myKey ? undefined : (edge && this.host.edgeNick(edge)) || nicks[key],
           online: direct || viaHub, ...(viaHub ? { viaHub } : {}), ...(hubKeys.has(key) ? { hub: true } : {}), ...(hubRole ? { hubRole } : {}), missing: session.missing(key, this.gapsGone.get(group.id)?.get(key)?.[session.epoch]) };
       }) };
+  }
+
+  private otherView(other: OtherGroup): NonNullable<GroupView["others"]>[number] {
+    if ("link" in other) return { link: other.link };
+    return { linkId: other.linkId, contact: this.host.contactName(other.linkId) ?? "", name: groupName(other.name) ?? "", members: Math.min(Math.max(other.n, 0), GROUP_MEMBER_CAP.max) };
   }
 
   messages(groupId: string): Promise<StoredMessage[]> { return this.store.getMessages(MESSAGE_LINK(groupId)); }
@@ -1027,6 +1034,55 @@ export class Groups {
     await this.dropInvitation(group, this.sayDecline(groupId, group.invitation.linkId));
   }
 
+  /**
+   * Another group under the id of one held (`StoredGroup.others`): kept beside it and shown, for the person to pick. One
+   * per contact chat (said again, it replaces its own) and one link; past `MAX_OTHER_GROUPS` a contact's is declined, so
+   * its inviter is told rather than left counting me as invited.
+   */
+  private async noteOther(group: StoredGroup, other: OtherGroup): Promise<void> {
+    const kept = (group.others ?? []).filter(o => "link" in other ? !("link" in o) : !("linkId" in o) || o.linkId !== other.linkId);
+    if (kept.length >= MAX_OTHER_GROUPS) { if ("linkId" in other) this.sayDecline(group.id, other.linkId); return; }
+    group.others = [...kept, other];
+    await this.store.putGroup(group);
+    this.host.emit();
+  }
+
+  /** The others under a group's id go, each contact who invited told no (best effort: its invitation ages out otherwise). */
+  private declineOthers(group: StoredGroup): void {
+    for (const other of group.others ?? []) if ("linkId" in other) this.sayDecline(group.id, other.linkId);
+    delete group.others;
+  }
+
+  /** The group held under this id is the real one: the others that came under it go, their inviters told no. */
+  async keepGroup(groupId: string): Promise<void> {
+    const group = this.stored.get(groupId);
+    if (!group?.others) return;
+    this.declineOthers(group);
+    await this.store.putGroup(group);
+    this.host.emit();
+  }
+
+  /**
+   * Another group under this id is the real one (`to`: its contact chat, or its link): the group held goes as Delete
+   * takes it (left, or its invitation declined), the rest of the others are told no, and the one picked takes its place:
+   * a contact's invitation waits for Accept, a link is joined.
+   */
+  async switchGroup(groupId: string, to: string): Promise<void> {
+    const group = this.stored.get(groupId);
+    const other = group?.others?.find(o => "link" in o ? o.link === to : o.linkId === to);
+    if (!group || !other) throw new Error("No other group under this id");
+    const others = group.others!;
+    group.others = others.filter(o => o !== other);
+    try { await this.forget(groupId); } catch (error) { group.others = others; throw error; }
+    if ("link" in other) { await this.joinByLink(other.link); return; }
+    const declined = this.stored.get(groupId)?.declined;
+    const invitation: StoredGroup = { id: groupId, createdAt: Date.now(), invitation: { name: other.name, admin: other.admin, linkId: other.linkId, e: other.e, n: other.n, pieces: [] },
+      ...(declined ? { declined } : {}) };
+    this.stored.set(groupId, invitation);
+    await this.store.putGroup(invitation);
+    this.host.emit();
+  }
+
   /** An invitation goes from the list: declined here (`owed`: the answer, when it could not be sent), or taken back by who sent it. */
   private async dropInvitation(group: StoredGroup, owed?: StoredGroup["declined"]): Promise<void> {
     // Removed, then invited again: the answer is to the invitation only; the removed group and its history stay.
@@ -1035,6 +1091,8 @@ export class Groups {
     if (!previous) return this.forget(group.id, false);
     // A decline owed to another chat (the admin's, while another contact's invitation stood) stays owed.
     if (owed) previous.declined = owed; else if (previous.declined?.linkId === group.invitation?.linkId) delete previous.declined;
+    // Other groups that came under the id while the invitation stood still wait to be picked or turned down.
+    if (group.others) previous.others = group.others;
     this.acceptSaid.delete(group.id);
     this.stored.set(group.id, previous);
     if (previous.state) this.attach(previous.state);
@@ -1236,6 +1294,7 @@ export class Groups {
     // without hubs too: a join by the link before the admin heard it says it on the new key's edge (`owedBye`).
     group.left = { at: Date.now(), admin, ...(hubs.length ? { hubs } : {}), bye: bye ?? session.byeFrame() };
     delete group.entry;
+    this.declineOthers(group);
     this.takeBack(groupId, group);
     this.pendingEntries.delete(groupId);
     this.entriesSeen.delete(groupId);
@@ -1485,6 +1544,8 @@ export class Groups {
     // An invitation a contact sent goes with a decline, answered or not, or its inviter counts me as invited for good.
     const gone = this.stored.get(groupId), invitation = answer && gone?.invitation && !gone.invitation.entry && !gone.invitation.takenBack ? gone.invitation : undefined;
     const owed = invitation && this.sayDecline(groupId, invitation.linkId);
+    // Other groups that came under the id were invitations too: their inviters hear no as well.
+    if (gone) this.declineOthers(gone);
     this.sessions.delete(groupId);
     this.stored.delete(groupId);
     this.leavesHeard.delete(groupId);
@@ -1595,12 +1656,21 @@ export class Groups {
     if (!link) throw new Error("This is not a link to a group");
     if (this.isCommunity(link.g)) throw new Error("This group is joined with its current link");
     const existing = this.stored.get(link.g);
-    if (existing?.state?.status === "active") return link.g;
+    // In a group under its id already. Its id names no genesis, and nothing but the welcome says whose a link is: unless
+    // it is my own group's link, it may be another group's, so it is kept beside the one held and shown, for the person
+    // to say which is real (`switchGroup` joins through it).
+    if (existing?.state?.status === "active") {
+      const mine = this.sessions.get(link.g)?.isAdmin && this.entryOf(existing)?.link.host === link.host;
+      if (!mine) await this.noteOther(existing, { at: Date.now(), link: encodeGroupEntryLink(link) });
+      return link.g;
+    }
     // Opened again while joining: a join nobody answered (`giveUpJoin`) knocks again.
     if (existing?.invitation?.entry === link.host) { if (!existing.state) await this.knockAgain(existing); return link.g; }
-    if (existing?.invitation?.seedB64 && !existing.invitation.entry) throw new Error("You are already joining this group");
     // Opening a link never deletes what is kept or drops what a contact sent: a group I am out of (removed, forked) still
-    // holds its history, and an invitation over a contact chat waits for my answer. Each is refused, and stays as it is.
+    // holds its history, and an invitation over a contact chat waits for my answer (or its welcome, accepted). Such an
+    // invitation keeps its place, and the link is kept beside it, as another group under the id may be, for the person
+    // to pick; the rest are refused, and stay as they are.
+    if (existing?.invitation && !existing.invitation.entry && !existing.invitation.takenBack) { await this.noteOther(existing, { at: Date.now(), link: encodeGroupEntryLink(link) }); return link.g; }
     if (existing?.invitation && !existing.invitation.entry) throw new Error("You have an invitation to this group. Answer it first.");
     if (existing?.state && !existing.left) throw new Error("You are out of this group and its history is still here. Delete it from this device to join with a link.");
     // Left (a tombstone, its history gone with the leave), or an older link of it: this one replaces that. A leave the
@@ -1989,9 +2059,11 @@ export class Groups {
       case "group-invite": {
         if (typeof frame.admin !== "string" || !MEMBER_KEY.test(frame.admin) || typeof frame.name !== "string") return;
         const existing = this.stored.get(g);
+        // Another group under an id held here, from a contact: kept beside it and shown, for the person to say which is real.
+        const other = (): Promise<void> => this.noteOther(existing!, { at: Date.now(), linkId, name: groupName(frame.name) ?? "Group", admin: frame.admin as string, ...invitationClaims(frame) });
         // Through the group's link: the entry session is pinned to the key the link named, so this is its admin. Accepted at once.
         if (existing?.invitation?.entry && !existing.state) {
-          if (existing.invitation.linkId !== linkId) return;
+          if (existing.invitation.linkId !== linkId) return other();
           existing.invitation = { ...existing.invitation, name: groupName(frame.name) ?? "Group", admin: frame.admin, pieces: [],
             ...invitationClaims(frame) };
           await this.store.putGroup(existing);
@@ -2005,19 +2077,23 @@ export class Groups {
           // anyone else who knows the id and the admin's key would learn from the answer whether we are still in. One
           // who came in through the link has no such chat; its admin's invitation ages out unanswered.
           if (this.sessions.get(g)?.admin === frame.admin && existing.contacts?.[frame.admin] === linkId) this.host.sendOnLink(linkId, { t: "group-decline", g });
+          // Its id names no genesis: an inviter who is no member of the group held here invites to another group under it.
+          const session = this.sessions.get(g);
+          if (session && !rosterHas(session.roster, frame.admin)) await other();
           return;
         }
         // Already accepting one. The same admin inviting again over the same chat never got my accept: this one replaces it.
-        if (existing?.invitation?.seedB64 && (existing.invitation.linkId !== linkId || existing.invitation.admin !== frame.admin)) return;
+        if (existing?.invitation?.seedB64 && existing.invitation.linkId !== linkId) return other();
+        if (existing?.invitation?.seedB64 && existing.invitation.admin !== frame.admin) return;
         // A group I left, its leave not yet heard: only the admin I owe it to, over the chat that let me in, invites me
         // again (its app invites nobody it still holds as a member). Anyone else's frame would end the leave unsaid.
         if (existing?.left && (existing.left.admin !== frame.admin || existing.contacts?.[existing.left.admin] !== linkId)) return;
         // An invitation waits for my answer: another contact's, under the same id, does not take its place (Accept would
         // go to that contact). The one who sent it may send it again. One to a group I kept (`genesis`) gives way to its
         // admin's, over the chat that let me in: only that group's chain is let in on Accept, and its admin must not find
-        // the place taken by anyone's. Another contact's would take the admin's place. One taken back waits for nothing:
-        // any invitation takes its place.
-        if (existing?.invitation && !existing.state && existing.invitation.linkId !== linkId && !(existing.invitation.genesis && linkId === keptAdminChat(existing.previous)) && !existing.invitation.takenBack) return;
+        // the place taken by anyone's. Another contact's would take the admin's place: it is kept beside it, for the person
+        // to pick. One taken back waits for nothing: any invitation takes its place.
+        if (existing?.invitation && !existing.state && existing.invitation.linkId !== linkId && !(existing.invitation.genesis && linkId === keptAdminChat(existing.previous)) && !existing.invitation.takenBack) return other();
         if ([...this.stored.values()].filter(x => x.invitation && !x.invitation.takenBack).length >= 32) return;
         // One chat holds a few unanswered at a time, so a contact cannot use up the room the others' invitations need.
         // Past that the inviter is told no, as it would be by a Decline, and may invite again later. Only one of its own
@@ -2032,9 +2108,10 @@ export class Groups {
         // Declined, the removed group comes back as it was (an invitation that replaced another keeps the one it kept).
         const previous = existing?.state ? existing : existing?.previous;
         const genesis = existing?.state ? commitHash(existing.state.chain[0]) : existing?.invitation?.genesis;
+        const others = existing?.others?.filter(o => !("linkId" in o) || o.linkId !== linkId);
         const invitation: StoredGroup = { id: g, createdAt: Date.now(), invitation: { name: groupName(frame.name) ?? "Group", admin: frame.admin, linkId,
           ...invitationClaims(frame), pieces: [], ...(genesis ? { genesis } : {}) },
-          ...(Object.keys(known).length ? { formerNames: known } : {}), ...(previous ? { previous } : {}) };
+          ...(Object.keys(known).length ? { formerNames: known } : {}), ...(previous ? { previous } : {}), ...(others?.length ? { others } : {}) };
         if (existing) { this.sessions.delete(g); for (const edge of this.host.edges(g).values()) await this.host.closeEdge(edge); }
         this.stored.set(g, invitation);
         this.acceptSaid.delete(g);
@@ -2113,6 +2190,13 @@ export class Groups {
         // its app, or it is not the admin any more). Accepted already or not, nothing comes of it: the list says so.
         const mine = this.stored.get(g);
         if (mine?.invitation && !mine.invitation.entry && !mine.state && mine.invitation.linkId === linkId) { await this.takeBackFrom(mine); return; }
+        // Another group's invitation kept beside the one held, taken back by who sent it: nothing is left to pick.
+        if (mine?.others?.some(o => "linkId" in o && o.linkId === linkId)) {
+          mine.others = mine.others.filter(o => !("linkId" in o) || o.linkId !== linkId);
+          if (!mine.others.length) delete mine.others;
+          await this.store.putGroup(mine);
+          this.host.emit();
+        }
         const entryPeer = this.hostEntry(g, linkId);
         if (entryPeer) { this.pendingEntries.get(g)?.delete(entryPeer); await this.host.closeEdge(linkId); }
         const group = this.stored.get(g);
@@ -2152,7 +2236,7 @@ export class Groups {
         this.meet(g, group.invitation.admin);
         // An entry session is not a contact chat: once in, the edges carry everything.
         const member: StoredGroup = { id: g, createdAt: group.createdAt, state: joined.state, contacts: viaLink ? {} : { [group.invitation.admin]: linkId },
-          ...(group.owedBye ? { owedBye: group.owedBye } : {}), ...(group.declined ? { declined: group.declined } : {}) };
+          ...(group.owedBye ? { owedBye: group.owedBye } : {}), ...(group.declined ? { declined: group.declined } : {}), ...(group.others ? { others: group.others } : {}) };
         // Attached before anything awaits: the list must never see a member row without its session.
         this.stored.set(g, member);
         this.acceptSaid.delete(g);

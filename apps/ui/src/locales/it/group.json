@@ -247,6 +247,15 @@
     "members": "Membri…",
     "rotate": "Rinnova chiavi"
   },
+  "others": {
+    "body": "Chi conosce l'id di un gruppo può crearne uno suo con lo stesso id, e solo uno dei due può stare su questo dispositivo. Tieni questo o passa all'altro: passare esce da questo e lo elimina da questo dispositivo.",
+    "invitedBy": "{{contact}} ti ha invitato a {{name}} ({{members}})",
+    "invitedByUnknown": "Un invito a {{name}} ({{members}})",
+    "keep": "Tieni questo",
+    "link": "Un link di gruppo che hai aperto",
+    "switch": "Passa a questo",
+    "title": "Un altro gruppo ha l'id di questo gruppo"
+  },
   "readNote": "Tutti nel gruppo possono leggere tutto ciò che viene inviato mentre ne fanno parte. Chi viene rimosso conserva ciò che ha già ricevuto e non può leggere ciò che segue; chi entra dopo non può leggere ciò che c'era prima. I messaggi vanno a ogni membro; chi era assente riceve ciò che ha perso da qualsiasi membro che lo abbia (gli ultimi {{count}} messaggi del gruppo) quando si ritrovano.",
   "readNoteCommunity": "Chiunque abbia il link del gruppo può entrare, e qualsiasi membro può far entrare altre persone. Tutti nel gruppo possono leggere tutto ciò che viene inviato mentre ne fanno parte; chi viene rimosso non può leggere ciò che segue, chi entra dopo non può leggere ciò che c'era prima. I membri che erano assenti ricevono gli ultimi {{count}} messaggi da chi c'è quando tornano.",
   "remove": {

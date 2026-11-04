@@ -247,6 +247,15 @@
     "members": "Membres…",
     "rotate": "Renouveler les clés"
   },
+  "others": {
+    "body": "Qui connaît l'identifiant d'un groupe peut créer son propre groupe avec, et un seul d'entre eux peut être sur cet appareil. Gardez celui-ci ou passez à l'autre : changer quitte celui-ci et le supprime de cet appareil.",
+    "invitedBy": "{{contact}} vous a invité à {{name}} ({{members}})",
+    "invitedByUnknown": "Une invitation à {{name}} ({{members}})",
+    "keep": "Garder celui-ci",
+    "link": "Un lien de groupe que vous avez ouvert",
+    "switch": "Passer à celui-ci",
+    "title": "Un autre groupe a l'identifiant de ce groupe"
+  },
   "readNote": "Chaque membre du groupe peut lire tout ce qui est envoyé tant qu'il en fait partie. Une personne retirée garde ce qu'elle a déjà reçu et ne peut pas lire la suite ; une personne arrivée plus tard ne peut pas lire ce qui précède. Les messages vont à chaque membre ; qui était absent reçoit ce qu'il a manqué de n'importe quel membre qui l'a (les {{count}} derniers messages du groupe) quand ils se retrouvent.",
   "readNoteCommunity": "Toute personne ayant le lien du groupe peut le rejoindre, et n'importe quel membre peut faire entrer quelqu'un. Chaque membre peut lire tout ce qui est envoyé tant qu'il en fait partie ; une personne retirée ne peut pas lire la suite, une personne arrivée plus tard ne peut pas lire ce qui précède. Les membres absents reçoivent les {{count}} derniers messages de ceux qui sont là à leur retour.",
   "remove": {
