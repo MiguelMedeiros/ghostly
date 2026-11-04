@@ -33,8 +33,11 @@ const look = (el: Locator): Promise<Look> => el.evaluate((node) => {
   return { bg: text(seen(node)), border: parseFloat(style.borderTopWidth), borderColor: text(over(rgba(style.borderTopColor), around)), color: text(over(rgba(style.color), seen(node))), around: text(around) };
 });
 
-/** No transition between two reads: a colour read mid-way is neither state. */
-const still = (page: Page) => page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; }" });
+/**
+ * No transition or animation between two reads: a colour read mid-way is neither state, and a box read while Home's
+ * column still slides in (`animate-fade-in`, 4 px up, played again each time Home opens) is not where it stays.
+ */
+const still = (page: Page) => page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; animation: none !important; }" });
 
 test("forced colors keep Settings' switches, the chosen Mode and Chat list option and Home's New chat drawn", { tag: ["@feature:app.accessibility", "@feature:app.theme"] }, async ({ peer }) => {
   const { page } = await peer("alice");
