@@ -140,7 +140,9 @@ async function copyFrom(from: FileSource, to: FileBytes, file: HandoffFile): Pro
  * one is in file storage. A Blob whose record's checked digest is the file's is not copied (WISP 06 § Installing the
  * staged state: "Files `B` already held are linked into it, not copied"): `restore` puts that Blob on the staged record.
  * Copied, every file was written twice and read back once at each move back, the device's whole media history (bug hunt,
- * 2026-11-04). Resolves to whether it was left where it is.
+ * 2026-11-04). A larger one is linked where file storage can give it a second name (Desktop): the staged profile's
+ * name is a file of its own, and the frozen copy keeps its own, so a revert or a kept fork finds it as it was.
+ * Resolves to whether its Blob was left on the frozen copy's record.
  */
 async function copyHeldFile(db: IDBDatabase, id: string, to: FileBytes, file: HandoffFile): Promise<boolean> {
   const tx = db.transaction(["files", "fileState"], "readonly");
@@ -151,6 +153,11 @@ async function copyHeldFile(db: IDBDatabase, id: string, to: FileBytes, file: Ha
   if (stored?.blob && checked && stored.digest === file.sha256 && stored.blob.size === file.size) {
     await to.remove(file.id).catch(() => {});
     return true;
+  }
+  // A link that fails (a disk with no such names) or is not the file's size is copied and checked below.
+  if (stored && !stored.blob && stored.bytes === to.kind && to.link && checked && stored.digest === file.sha256) {
+    if (await to.link(db.name, id, file.id).then(async () => (await to.size(file.id)) === file.size, () => false)) return false;
+    await to.remove(file.id).catch(() => {});
   }
   const source = stored ? await fileSource(stored, db.name, false, async () => db) : null;
   if (!source) throw new Error("The file is not on this device");

@@ -34,6 +34,7 @@
     "allow-file-bytes-close",
     "allow-file-bytes-digest",
     "allow-file-bytes-flush",
+    "allow-file-bytes-link",
     "allow-file-bytes-read",
     "allow-file-bytes-remove",
     "allow-file-bytes-remove-where",

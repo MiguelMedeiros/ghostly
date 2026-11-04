@@ -121,6 +121,17 @@ describe("choosing where files go", () => {
     await expect(dropFileSpace("../x")).rejects.toThrow("Invalid profile space");
     registerFileBytes("native", async () => null);
   });
+
+  it("a Desktop file is linked from another space by name, never by path; the others have no links", async () => {
+    // covers: devices.handoff
+    const invoke = vi.fn(async () => null);
+    const staged = new NativeFileBytes(invoke as unknown as NativeInvoke).forSpace("ghostly_staged");
+    await staged.link("ghostly", "chat-in-v", "chat-in-w");
+    expect(invoke).toHaveBeenCalledWith("file_bytes_link", { space: "ghostly_staged", id: "chat-in-w", fromSpace: "ghostly", fromId: "chat-in-v" });
+    await expect(staged.link("ghostly", "../x", "chat-in-w")).rejects.toThrow("Invalid file id");
+    resetFileBytes();
+    expect((await fileBytes()).link).toBeUndefined();
+  });
 });
 
 describe("files on Desktop (Rust commands)", () => {

@@ -22,6 +22,7 @@ const COMMANDS: &[&str] = &[
     "file_bytes_close",
     "file_bytes_digest",
     "file_bytes_flush",
+    "file_bytes_link",
     "file_bytes_read",
     "file_bytes_remove",
     "file_bytes_remove_where",

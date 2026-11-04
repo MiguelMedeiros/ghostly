@@ -182,6 +182,7 @@ macro_rules! commands {
             file_store::file_bytes_close,
             file_store::file_bytes_digest,
             file_store::file_bytes_flush,
+            file_store::file_bytes_link,
             file_store::file_bytes_read,
             file_store::file_bytes_remove,
             file_store::file_bytes_remove_where,
