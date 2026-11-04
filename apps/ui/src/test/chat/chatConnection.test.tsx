@@ -265,7 +265,8 @@ describe("ChatConnection: what the header says", () => {
     const view = renderApp(<ChatConnection peerKey="peer" />, { language: "ar" });
     act(() => view.engine.update({ links: [linkView({ availableTransports: ["webrtc/1"], pairing: ready(), transportErrors: { "iroh/1": "Iroh relay unreachable" } })] }));
     const notice = screen.getByTestId("connection-transport-error");
-    expect(within(notice).getByTestId("connection-transport-error-title")).toHaveTextContent("Iroh: تعذّر الوصول إلى مُرحِّل Iroh");
+    // The reason names Iroh already, so the line does not put "Iroh:" before it.
+    expect(within(notice).getByTestId("connection-transport-error-title")).toHaveTextContent(/^تعذّر الوصول إلى مُرحِّل Iroh$/);
     expect(within(notice).getByTestId("connection-transport-error-next")).toHaveTextContent("تحقّق من مرحّلات Iroh في الإعدادات، الشبكة، أو استخدم وسيلة نقل أخرى.");
     expect(notice).not.toHaveTextContent("Iroh relay unreachable");
   });
