@@ -16,6 +16,12 @@ type Result<M extends EngineMethod> = Awaited<ReturnType<EngineApi[M]>>;
 export const MESSAGE_CHANGES_TICK_MS = 50;
 
 /**
+ * The longest a page waits between two tries to connect again after the peer went away: each try that fails doubles the
+ * wait, from half a second up to this, until one succeeds (a tab in the background calls nothing that would reconnect it).
+ */
+export const RECONNECT_MAX_MS = 30_000;
+
+/**
  * What changed in a chat's list since `from`, the list its listeners last heard: the rows added or changed, as they are
  * now, and the ids deleted. A listener that kept what it made of `from` has only these to look at.
  */
@@ -229,7 +235,7 @@ class EngineClient {
           this.held.clear();
           for (const pending of this.pending.values()) pending.reject(new Error("Lost the Ghostly peer"));
           this.pending.clear();
-          setTimeout(() => void this.connect().catch(() => {}), 500);
+          this.reconnect(500);
         },
       )
       .then((connection) => {
@@ -237,6 +243,11 @@ class EngineClient {
       })
       .finally(() => (this.connecting = null));
     return this.connecting;
+  }
+
+  /** Connects again after `delay`, and again after twice as long while the tries fail. */
+  private reconnect(delay: number): void {
+    setTimeout(() => void this.connect().catch(() => this.reconnect(Math.min(delay * 2, RECONNECT_MAX_MS))), delay);
   }
 
   private handle(message: EngineEvent | RpcResponse): void {
