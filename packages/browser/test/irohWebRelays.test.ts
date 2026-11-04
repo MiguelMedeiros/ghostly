@@ -11,15 +11,19 @@ import { DEFAULT_IROH_RELAYS, MAX_IROH_RELAYS, createIrohWebEndpoint, irohRelayP
  * ends in one: neither the `wss://…/relay` socket nor the `https://…/ping` probe. A Desktop's record names its relay
  * with the dot, so this is the one place that keeps a browser from being asked to open it.
  */
-function fakeWasm() {
+function fakeWasm({ home = 0, refuse = (_relays: string[]) => false } = {}) {
   const started: string[][] = [], dialled: unknown[] = [];
   const conn = { binding: () => ({ transport: "iroh/1" as const, context: "00", identities: ["a", "b"] as [string, string] }), send: async () => {}, recv: () => new Promise<undefined>(() => {}), rtt: () => -1, close() {}, free() {} };
   const load = async (): Promise<IrohWasm> => ({
     IrohNode: {
       start: async (_seed, relays) => {
         started.push(relays);
+        await new Promise(resolve => setTimeout(resolve, 5));
+        if (refuse(relays)) throw new Error("Iroh relay unreachable");
+        // The relay it measured as nearest, spelled as Iroh spells a relay URL.
+        const relay = home ? new URL(relays[Math.min(home, relays.length - 1)]).href : relays[0];
         return {
-          address: () => ({ id: "c".repeat(64), relay: relays[0], addresses: [] }),
+          address: () => ({ id: "c".repeat(64), relay, addresses: [] }),
           connect: async (descriptor: unknown) => { dialled.push(descriptor); return conn; },
           accept: () => new Promise<undefined>(() => {}), close: async () => {}, free() {},
         };
@@ -91,4 +95,38 @@ it("dials a Desktop through its relay without the dot its record has, so one on 
   expect((wasm.dialled[0] as { relay: string }).relay).toBe(wasm.started[0][0]);
   noDottedHost(wasm.dialled.map(d => (d as { relay: string }).relay));
   await endpoint.close();
+});
+
+/**
+ * Each endpoint pings every relay in its list about 1.3 times a minute, and an app runs up to 16 of them on one
+ * network. The first measures; the others, started at the same time or later, home on its relay alone.
+ */
+it("measures the relays once per app: endpoints after the first start on its home relay alone", async () => {
+  const wasm = fakeWasm({ home: 1 });
+  const own = ["https://relay.example.com/", "http://127.0.0.1:47085"];
+  const endpoints = await Promise.all([...[1, 2, 3].map(n => createIrohWebEndpoint(Buffer.alloc(32, n).toString("base64url"), { load: wasm.load })),
+    createIrohWebEndpoint(seed, { load: wasm.load, relays: own })]);
+  const later = await createIrohWebEndpoint(Buffer.alloc(32, 4).toString("base64url"), { load: wasm.load, relays: own });
+  expect(wasm.started).toEqual([[...DEFAULT_IROH_RELAYS], own, [DEFAULT_IROH_RELAYS[1]], [DEFAULT_IROH_RELAYS[1]], ["http://127.0.0.1:47085"]]);
+  expect(endpoints.slice(0, 3).map(e => (e.descriptor as { relay: string }).relay)).toEqual(Array(3).fill(DEFAULT_IROH_RELAYS[1]));
+  expect((later.descriptor as { relay: string }).relay).toBe("http://127.0.0.1:47085/");
+  await Promise.all([...endpoints, later].map(e => e.close()));
+});
+
+it("measures every relay again when the home relay stops answering, or the first endpoint fails", async () => {
+  let down = false;
+  const wasm = fakeWasm({ home: 1, refuse: relays => down && relays.length === 1 });
+  const first = await createIrohWebEndpoint(seed, { load: wasm.load });
+  down = true;
+  const second = await createIrohWebEndpoint(Buffer.alloc(32, 2).toString("base64url"), { load: wasm.load });
+  expect(wasm.started).toEqual([[...DEFAULT_IROH_RELAYS], [DEFAULT_IROH_RELAYS[1]], [...DEFAULT_IROH_RELAYS]]);
+  expect((second.descriptor as { relay: string }).relay).toBe(DEFAULT_IROH_RELAYS[1]);
+
+  let calls = 0;
+  const failing = fakeWasm({ home: 1, refuse: () => calls++ === 0 });
+  const [lost, kept] = await Promise.allSettled([1, 2].map(n => createIrohWebEndpoint(Buffer.alloc(32, n).toString("base64url"), { load: failing.load })));
+  expect(lost.status).toBe("rejected");
+  expect(kept.status).toBe("fulfilled");
+  expect(failing.started).toEqual([[...DEFAULT_IROH_RELAYS], [...DEFAULT_IROH_RELAYS]]);
+  await Promise.all([first.close(), second.close(), (kept as PromiseFulfilledResult<{ close(): Promise<void> }>).value.close()]);
 });

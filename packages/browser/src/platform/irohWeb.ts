@@ -146,14 +146,51 @@ class IrohWebChannel implements FrameChannel {
   }
 }
 
+/**
+ * The relay the first endpoint on a relay list homed on, per wasm loader and list. Each endpoint keeps measuring
+ * every relay in its list (a `GET /ping` to each, about 1.3 a minute), and all the endpoints in one app share one
+ * network, so the first measures for all: the others start on its home relay alone, which is also the one their
+ * descriptor names. Dialling a contact on another relay still works; only the measuring is skipped.
+ */
+const homes = new WeakMap<object, Map<string, Promise<string | null>>>();
+
+/** Starts a node on the home relay the first endpoint found, or on every relay when there is none or it fails. */
+async function startNode(wasm: IrohWasm, homesOfList: Map<string, Promise<string | null>>, seed: Uint8Array, relays: string[], onlineMs: number): Promise<WasmNode> {
+  const key = relays.join(" ");
+  const found = relays.length > 1 ? homesOfList.get(key) : undefined;
+  const home = found ? await found : null;
+  if (found && home) {
+    try { return await wasm.IrohNode.start(seed, [home], onlineMs); } catch {
+      // That relay stopped answering: measure again, from the next endpoint on.
+      if (homesOfList.get(key) === found) homesOfList.delete(key);
+    }
+  }
+  let settle = (_home: string | null) => {};
+  const mine = relays.length > 1 && !homesOfList.has(key) ? new Promise<string | null>(resolve => { settle = resolve; }) : null;
+  if (mine) homesOfList.set(key, mine);
+  try {
+    const node = await wasm.IrohNode.start(seed, relays, onlineMs);
+    const homed = node.address().relay;
+    settle(relays.find(relay => homed && new URL(relay).href === new URL(homed).href) ?? null);
+    return node;
+  } catch (error) {
+    if (mine && homesOfList.get(key) === mine) homesOfList.delete(key);
+    settle(null);
+    throw error;
+  }
+}
+
 /** A NativeEndpoint for `iroh/1`, as the Desktop's is, for one chat's transport seed. */
 export async function createIrohWebEndpoint(seedB64: string, options: IrohWebOptions = {}): Promise<NativeEndpoint> {
   const seed = fromBase64Url(seedB64);
   if (seed.length !== 32) throw new Error("Invalid transport seed");
   // Either spelling of a relay (with or without the trailing dot) homes on it under the one a browser opens.
   const relays = [...new Set((options.relays?.length ? options.relays : DEFAULT_IROH_RELAYS).map(relay => irohRelayUrl(relay, BROWSER_SPELLING)))];
-  const wasm = await (options.load ?? loadIrohWasm)();
-  const node = await wasm.IrohNode.start(seed, relays, options.onlineMs ?? 10_000);
+  const load = options.load ?? loadIrohWasm;
+  const wasm = await load();
+  let homesOfList = homes.get(load);
+  if (!homesOfList) homes.set(load, homesOfList = new Map());
+  const node = await startNode(wasm, homesOfList, seed, relays, options.onlineMs ?? 10_000);
   const channels = new Set<IrohWebChannel>();
   let stopped = false;
   let handler: NativeEndpoint["onConnection"] = null;
