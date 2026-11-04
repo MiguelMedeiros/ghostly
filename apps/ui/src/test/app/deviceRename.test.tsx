@@ -94,16 +94,19 @@ describe("Rename, on the active device", () => {
     await waitFor(() => expect(engine.callsTo("deviceRename")).toEqual([{ key: DESKTOP, name: "Office PC" }]));
   });
 
-  it("says why the engine refused, and keeps the dialog open", async () => {
+  it("says why the engine refused, keeps the dialog open, and gives the keyboard focus back to the name", async () => {
     const { user, engine } = renderApp(<DevicesSection />);
     engine.on("deviceSet", () => activeSet());
     engine.on("deviceRename", () => { throw new Error("rename-name: A device name cannot hold this character."); });
     await user.click(await screen.findByTestId("device-menu"));
     await user.click(screen.getByTestId("device-rename-open"));
-    await user.type(screen.getByTestId("device-rename-name"), "x");
+    const field = screen.getByTestId("device-rename-name");
+    await user.type(field, "x");
     await user.click(screen.getByTestId("device-rename-save"));
     expect(await screen.findByTestId("device-rename-error")).toHaveTextContent("This name can't be used. Try another one.");
     expect(screen.getByTestId("device-rename")).toBeTruthy();
+    // The field and Save were disabled while it saved, which leaves a browser's focus on the page: it comes back here.
+    await waitFor(() => expect(field).toHaveFocus());
   });
 
   it("while the save runs it says so and stays open, so a refusal that comes later is still said", async () => {
