@@ -1013,7 +1013,7 @@ function quoteChecked(json: MessageJson, message: StoredMessage, originals: Orig
   return { ...json, replyTo: { ...json.replyTo, snippet: replySnippet(original.text) } };
 }
 
-export { findChat, findGroup } from "./apiKit";
+export { findChat, findGroup, startNamedChats } from "./apiKit";
 export type { ApiContext } from "./apiKit";
 export const API_METHODS: readonly string[] = Object.keys(METHODS);
 
