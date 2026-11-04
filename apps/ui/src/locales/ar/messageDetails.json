@@ -141,7 +141,7 @@
   "path": {
     "aRelay": "مرحِّل",
     "dht": "أرضية DHT (Pkarr)",
-    "direct": "{{name}}، مباشر",
+    "direct": "{{name}}، دون مرحِّل",
     "hold": "تخزين الحفظ (hold/1)",
     "legacyDatalink": "WebRTC (محادثة التوافق)",
     "legacyDht": "DHT (محادثة التوافق)",
