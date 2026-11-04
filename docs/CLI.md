@@ -72,6 +72,8 @@ step (keep the profile running with `ghostly daemon --detach`, then `ghostly cha
 ## Profiles
 
 A profile is a folder, `~/.ghostly/profiles/<name>/` (0700, files 0600), with its own chats, keys and wallets.
+The keys are not encrypted on disk: any program running as your user can read them. To keep them from an agent's
+tools, run Ghostly as an OS user of its own ([threat model](https://ghostly.tools/developers/agents/threat-model#apart)).
 
 | Command or option | What |
 |---|---|

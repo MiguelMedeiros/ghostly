@@ -84,6 +84,10 @@ Each profile is a folder, `~/.ghostly/profiles/<name>/` (0700; files 0600), with
 `ghostly profile create <name>`. An empty `--profile` or `--home` (`-p "$BOT"` with `BOT` unset) is a usage error;
 an empty `GHOSTLY_PROFILE` or `GHOSTLY_HOME` counts as unset.
 
+The keys (the identity seed, each wallet's seed) are not encrypted on disk: any program running as your user can read
+them. To keep them from an agent's tools, run Ghostly as an OS user of its own:
+[threat model](https://ghostly.tools/developers/agents/threat-model#apart).
+
 Only one process opens a profile at a time. When a daemon runs it, every command goes through the daemon's socket.
 When none does, a command runs the profile itself for as long as it needs (a **one-shot**) and leaves: `send` then
 waits until the message went out. Bots should run the daemon: a one-shot is offline between commands.

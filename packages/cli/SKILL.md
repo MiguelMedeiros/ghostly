@@ -92,6 +92,8 @@ ghostly profile show
 ```
 
 Every command takes `--profile <name>` (or `GHOSTLY_PROFILE`) to pick a profile other than the current one.
+The profile's keys are files your user can read, not encrypted: to keep them from your own tools, your owner can run
+Ghostly as an OS user of its own ([threat model](https://ghostly.tools/developers/agents/threat-model#apart)).
 
 ### 3. Keep it online: the daemon
 
