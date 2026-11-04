@@ -334,6 +334,20 @@ const MAX_DELETED_IDS = 500;
 /** A link's `removedRefs` with `ref`, the newest `MAX_DELETED_IDS`. */
 const withRemovedRef = (refs: readonly string[] | undefined, ref: string) => [...(refs ?? []).filter(r => r !== ref), ref].slice(-MAX_DELETED_IDS);
 /**
+ * A 1:1 chat's `deletedIds` with `id`. Full (`MAX_DELETED_IDS`), the oldest of the side that has the most goes (the one
+ * just noted's own on a tie), as a group's removed ids by author (`withRemovedId`): my deletions, as many as I make,
+ * never push out an id of the contact's, so a copy of theirs that comes again stays deleted, nor theirs one of mine.
+ */
+const withDeletedId = (ids: readonly string[] | undefined, id: string) => {
+  const next = [...(ids ?? []), id];
+  if (next.length <= MAX_DELETED_IDS) return next;
+  const theirs = (row: string) => row.startsWith("peer_");
+  const peer = next.filter(theirs).length;
+  const side = peer * 2 === next.length ? theirs(id) : peer * 2 > next.length;
+  next.splice(next.findIndex(row => theirs(row) === side), 1);
+  return next;
+};
+/**
  * A card that went on the DHT floor or into a hold goes again live (`restoreCards`) only for the newest this many
  * messages of a chat, sent within this long: an old chat's cards are not worth a burst of edits.
  */
@@ -3951,6 +3965,7 @@ export class GhostlyNode implements EngineImplementation {
         this.quoteSweeps.add(linkId, id, replyRef({ id, linkId }));
         if (!live.stored.removedRefs?.includes(edit.id)) {
           live.stored = { ...live.stored, removedRefs: withRemovedRef(live.stored.removedRefs, edit.id) };
+          this.pinRemoved(linkId, edit.id);
           await this.writeDeletions(linkId, { removedRefs: live.stored.removedRefs });
           this.emitState();
         }
@@ -4452,6 +4467,18 @@ export class GhostlyNode implements EngineImplementation {
     return entry.done;
   }
 
+  /**
+   * A 1:1 chat's message `ref` was deleted for everyone: its pin is marked so (`StoredPin.removed`), shown as unpinned
+   * however many removals come after and push `ref` out of `removedRefs`. Written at once, not merged with a burst's
+   * write: a newer pin taken meanwhile writes after it.
+   */
+  private pinRemoved(linkId: string, ref: string): void {
+    const live = this.links.get(linkId), pin = live?.stored.pin;
+    if (!live || pin?.id !== ref || pin.removed) return;
+    live.stored = { ...live.stored, pin: { ...pin, removed: true } };
+    void db.patchLink(linkId, { pin: live.stored.pin }).catch(() => {});
+  }
+
   /** Whether a 1:1 chat's wire id names a message of mine: here, deleted here, removed, or a file or payment of mine. */
   private async namesMine(linkId: string, wireId: string): Promise<boolean> {
     const stored = this.links.get(linkId)?.stored, row = `me_${wireId}`;
@@ -4464,7 +4491,7 @@ export class GhostlyNode implements EngineImplementation {
    * Forgets one message of a chat on this device, the bytes of its file and any transfer of it, and keeps its id so a
    * copy that comes again is not stored: a delete here, or the contact's own removal (WISP 400 § Delete for everyone),
    * also of a message not here yet. `removed`: deleted for everyone (its row, when the caller read it), so the replies
-   * here that quote it lose its line too, and a pin of it goes (`removedRefs`).
+   * here that quote it lose its line too, and a pin of it goes (`removedRefs`, and marked on the pin for good).
    */
   private async forgetMessage(linkId: string, messageId: string, removed: StoredMessage | boolean = false): Promise<void> {
     const live = this.links.get(linkId);
@@ -4472,9 +4499,10 @@ export class GhostlyNode implements EngineImplementation {
     const ref = removed ? replyRef(removed === true ? { id: messageId, linkId } : removed) : undefined;
     live.stored = {
       ...live.stored,
-      deletedIds: [...(live.stored.deletedIds ?? []), messageId].slice(-MAX_DELETED_IDS),
+      deletedIds: withDeletedId(live.stored.deletedIds, messageId),
       ...(ref && { removedRefs: withRemovedRef(live.stored.removedRefs, ref) }),
     };
+    if (ref) this.pinRemoved(linkId, ref);
     void this.writeDeletions(linkId, { deletedIds: live.stored.deletedIds, ...(ref && { removedRefs: live.stored.removedRefs }) }).catch(() => {});
     void this.hold.forget(linkId, messageId).catch(() => {});
 
@@ -5744,9 +5772,11 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** Keeps a pin of a 1:1 chat when it is newer than the chat's; `out`: mine, to say until the contact confirms it. */
-  private async keepLinkPin(linkId: string, pin: StoredPin, out?: WirePin): Promise<void> {
+  private async keepLinkPin(linkId: string, came: StoredPin, out?: WirePin): Promise<void> {
     const live = this.links.get(linkId);
-    if (!live || !pinIsNewer(live.stored.pin, pin)) return;
+    if (!live || !pinIsNewer(live.stored.pin, came)) return;
+    // One of a message deleted for everyone (the pin crossed the removal) is marked so as it is kept.
+    const pin = came.id && live.stored.removedRefs?.includes(came.id) ? { ...came, removed: true as const } : came;
     const patch = { pin, ...(out && { pinOut: out }) };
     live.stored = { ...live.stored, ...patch };
     await db.patchLink(linkId, patch);
@@ -5780,7 +5810,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   private async pinnedRowCame(linkId: string, ids: readonly string[]): Promise<void> {
     const live = this.links.get(linkId), pin = live?.stored.pin;
-    if (!live || live.stored.group || !pin?.id || pin.messageId) return;
+    if (!live || live.stored.group || !pin?.id || pin.messageId || pin.removed) return;
     for (const id of new Set(ids)) {
       const row = await db.getMessage(linkId, id);
       if (!row || replyRef(row) !== pin.id) continue;
@@ -9559,8 +9589,8 @@ export class GhostlyNode implements EngineImplementation {
       ...(stored.profile && !stored.group && { wakeToken: this.settings.wake ? stored.wakeToken : undefined, peerWakes: !!stored.peerWake, ...(stored.wakeMuted && { wakeMuted: true }) }),
       ...(this.reactionNotes.has(stored.id) && { lastReaction: this.reactionNotes.get(stored.id) }),
       // The pinned message was deleted for everyone: nothing of it stays, its pin neither, as in a group (`Groups.pinned`).
-      // The pin is kept as it came, so the same pin said again is no newer.
-      ...(stored.pin && { pin: pinView(stored.pin.id && stored.removedRefs?.includes(stored.pin.id) ? { ...stored.pin, id: "", messageId: undefined } : stored.pin) }),
+      // The pin is kept as it came, so the same pin said again is no newer; one kept before it was marked, by `removedRefs`.
+      ...(stored.pin && { pin: pinView(stored.pin.id && (stored.pin.removed || stored.removedRefs?.includes(stored.pin.id)) ? { ...stored.pin, id: "", messageId: undefined } : stored.pin) }),
       participationKey: participationKeyOf(live),
       peerParticipationKey: stored.pairedPeerKey,
       publicProfiles: EXTERNAL_IDENTITIES_ENABLED ? stored.publicProfiles : undefined,
