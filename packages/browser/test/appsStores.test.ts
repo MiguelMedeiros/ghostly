@@ -368,6 +368,29 @@ describe("stores", () => {
     expect(await store.refreshStores()).toMatchObject([{ sequence: 7, apps: [{ ref: v1.ref }], problem: "rollback" }]);
   });
 
+  it("a store's own URL behind the copy the person took is not checked again while its bytes stay the same", async () => {
+    const PINNED_STORE = `https://cdn.jsdelivr.net/gh/ghostly/store@${"0".repeat(40)}/ghostly-store.json`;
+    const store = apps(net);
+    await net.putStore(await storeFiles({ sequence: 5 }), PINNED_STORE);
+    await store.addStore({ url: PINNED_STORE });
+    await net.putStore(await storeFiles({ sequence: 6 }));
+    await store.previewStore({ url: STORE_URL });
+    await store.addStore({ url: STORE_URL });
+    await store.refreshStores();
+    // Each Apps page visit reads both URLs: the pinned one's index never changes, and was checked whole already.
+    vi.mocked(readAppStoreSteps).mockClear();
+    for (let i = 0; i < 3; i++) {
+      const [read] = await store.refreshStores();
+      expect(read).toMatchObject({ url: PINNED_STORE, sequence: 6 });
+      expect(read!.problem).toBeUndefined();
+    }
+    expect(readAppStoreSteps, "neither URL's bytes changed").not.toHaveBeenCalled();
+    // An index changed at the copy's URL is read whole, once.
+    await net.putStore(await storeFiles({ sequence: 7 }));
+    expect(await store.refreshStores()).toMatchObject([{ sequence: 7 }]);
+    expect(readAppStoreSteps).toHaveBeenCalledTimes(1);
+  });
+
   it("a store's preview says whether the person has it already, and the held index's sequence; a removed one is new again", async () => {
     const COPY_URL = "https://raw.githubusercontent.com/someone/store/HEAD/ghostly-store.json";
     const store = apps(net, { defaults: [{ url: STORE_URL, key: keyOf(STORE_KEY) }] });
