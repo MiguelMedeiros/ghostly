@@ -4,7 +4,7 @@ import { IDENTITY_CHALLENGE_WINDOW } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { focus } from "../../lib/connection";
 import { clockTime } from "../../lib/time";
-import { useEngineState } from "../../lib/identities";
+import { useEngineValue } from "../../lib/identities";
 import { playSwitch, reducedMotion } from "../deck/motion";
 import "../deck/deck.css";
 import { IdCardFace } from "./IdCardFace";
@@ -40,15 +40,17 @@ function shareState(entry: IdentityTimelineEntry, link: Pick<LinkView, "identiti
  * is a button: it opens the chat's identities on that card.
  */
 export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: IdentityTimelineEntry; link: LinkView | undefined; contact: string; onOpen: (entry: IdentityTimelineEntry) => void }) {
-  const engine = useEngineState();
+  const mine = entry.side === "mine";
+  // My proof as this app holds it now, and nothing else of the engine's state: the chat's timeline shows one line per
+  // share, and on the whole state each was drawn again on every state (up to 20 a second while a file moves).
+  const proof = useEngineValue(state => (mine ? state?.identityProofs?.find(p => p.id === entry.proof) : undefined));
   const { t, language } = useI18n();
   const id = useId();
-  const mine = entry.side === "mine";
   const time = <time dateTime={new Date(entry.at).toISOString()} className="shrink-0 text-[10px] text-text-muted">{clockTime(entry.at, language)}</time>;
   // The identity as this app holds it now (mine: my proof, theirs: what the contact presented), else as the entry kept it.
   const state: ShareState = entry.kind === "stopped" ? (entry.reason === "revoked" ? "revoked" : "withdrawn") : shareState(entry, link);
   const card = shareIdCard(entry, state, {
-    proof: mine ? engine?.identityProofs?.find(p => p.id === entry.proof) : undefined,
+    proof,
     received: mine ? undefined : link?.identities?.received.find(r => r.id === entry.proof),
     contact, t, language,
   });
