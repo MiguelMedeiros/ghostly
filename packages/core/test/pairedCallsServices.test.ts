@@ -437,6 +437,21 @@ describe("shared apps on a paired session (services/1)", () => {
     expect((await a.link.request("private", { method: "GET", path: "/" })).status).toBe(404);
   });
 
+  it("a request on a live session says nothing about transports: a page's every file used to send the transport policy again", async () => {
+    const policies: string[] = [];
+    const { a, b } = pair({
+      b: hosting(async () => ({ status: 200, headers: [], body: [new TextEncoder().encode("ok")] })),
+      drop: { a: (data) => { if (data.includes(`"t":"paired-policy"`)) policies.push(data); return false; } },
+    });
+    await live(a, b);
+    await vi.waitFor(() => expect(a.presenceServices()).toEqual(["atlas"]));
+    const before = policies.length;
+    // A shared app's page and its files: one request each. The contact reads 10 policies a minute (POLICY_RECEIVE_LIMIT),
+    // so these used up its budget, and a transport choice made in that minute waited for it.
+    for (let i = 0; i < 12; i++) expect((await a.link.request("atlas", { method: "GET", path: `/file${i}.js` })).status).toBe(200);
+    expect(policies.length - before).toBe(0);
+  });
+
   it("travels over none of it when the contact does not offer services/1 (the web app)", async () => {
     const localFetch = vi.fn<LocalFetch>(async () => ({ status: 200, headers: [], body: [] }));
     const { a, b } = pair({ a: { servicesSupport: false }, b: hosting(localFetch) });
