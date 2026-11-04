@@ -1254,9 +1254,10 @@ export class GhostlyNode implements EngineImplementation {
     createInvoice: async (amount: number, paymentId: string, card?: string) => (await this.lightningCard(network, card)).createInvoice(amount, { paymentId }),
     quote: async (invoice: string, card?: string) => { const quote = await (await this.lightningCard(network, card)).quote(invoice); return { ...quote, mint: quote.source === CASHU_MINT_SOURCE ? quote.mint : undefined }; },
     pay: (quote: { quote: string }, note: string, paymentId: string) => this.lightningQuote(network, quote.quote).pay(quote.quote, { note, paymentId }),
-    // "I paid": the source, the mints and the federations are asked now; the request is paid only once one of them saw it.
-    // A test mint's invoice waits for that word (StoredQuote `held`): the one the contact says it paid is let go.
-    check: async (paid?: string) => { await Promise.all([this.lightnings[network].reconcile(), paid ? this.wallet.vouch(paid) : this.wallet.checkQuotes(), this.fedimintWallets[network].checkReceives()]); },
+    // "I paid": the source and the mints are asked now about this invoice alone (the others keep their pace), and the
+    // federations; the request is paid only once one of them saw it. A test mint's invoice waits for that word
+    // (StoredQuote `held`): it is let go when the contact named it.
+    check: async (invoice: string, named: boolean) => { await Promise.all([this.lightnings[network].check(invoice), this.wallet.vouch(invoice, named), this.fedimintWallets[network].checkReceives()]); },
     // Every card journals a payment before its source is asked to spend: a restart reads what became of it there.
     interrupted: journaledPayment,
   })), this.bitcoins, this.fedimintWallets, perNetwork((network) => ({

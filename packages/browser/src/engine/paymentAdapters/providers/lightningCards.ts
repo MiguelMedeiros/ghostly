@@ -320,6 +320,8 @@ export class LightningCards {
   async reconcile() { await Promise.all(this.here().map((s) => s.reconcile())); }
   /** The screen shows this invoice of ours: the card that made it asks about it at the fast pace a while longer. */
   async watch(invoice: string): Promise<boolean> { return (await Promise.all(this.here().map((s) => s.watch(invoice)))).some(Boolean); }
+  /** A payer says it paid this invoice of ours: the card that made it asks its source about it now, and about nothing else. */
+  async check(invoice: string): Promise<boolean> { return (await Promise.all(this.here().map((s) => s.check(invoice)))).some(Boolean); }
   async recover() { for (const s of this.here()) await s.recover(); }
   async ensureReady() { await Promise.all(this.here().map((s) => s.ensureReady())); }
   refreshOffered() { for (const s of this.all()) s.refreshOffered(); }
