@@ -351,6 +351,8 @@ export interface GroupView {
   /** On the invitee's side, until the welcome arrives. */
   /**
    * `waiting`: joining a community through its link, how many others were knocking with me when I last knocked.
+   * `othersKnocked`: joining a private group through its link, others knocked in its record lately (`KNOCK_REFRESH_MS`):
+   * the admin's app may be busy letting them in, its relay budget spent, so the wait is not a sign it is closed.
    * `since`: joining a community through its link, when the knock started (a group kept here, knocking to get back in,
    * was created long before).
    * `admittedAt`: joining a community through its link, at stage `admitted`, when a member's app let me in. A welcome
@@ -361,7 +363,7 @@ export interface GroupView {
    * this run (`JOIN_GIVE_UP_MS`), so the knocks stopped; accepting knocks again.
    * `takenBack`: who sent it took it back (the group is gone from its app, or the admin role from it): nothing to answer.
    */
-  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; takenBack?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; since?: number; admittedAt?: number; full?: { n: number; max: number } };
+  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; takenBack?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; othersKnocked?: boolean; since?: number; admittedAt?: number; full?: { n: number; max: number } };
   /** The group's link while it is on (`group1/<id>/<entry key>`); only the admin who made it sees it. */
   entryLink?: string;
   /** Contacts (by chat id) invited by me and not yet in. */

@@ -121,6 +121,7 @@
     "joiningGroup": "正在加入群组…",
     "joiningName": "正在加入 {{name}}…",
     "knocked": "管理员的应用打开后会自动完成。你可以离开此页面。",
+    "knockedBusy": "其他人也在敲门，管理员的应用可能正忙着让他们加入。你可以离开此页面。",
     "knockedCommunity": "有成员的应用打开后会自动完成。你可以离开此页面。",
     "knocking": "正在管理员应用会查看的地方留下敲门请求…",
     "knockingCommunity": "正在群组应用会查看的地方留下敲门请求…",

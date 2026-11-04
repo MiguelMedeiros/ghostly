@@ -121,6 +121,7 @@
     "joiningGroup": "Joining the group…",
     "joiningName": "Joining {{name}}…",
     "knocked": "It happens once the admin's app is open. You can leave this page.",
+    "knockedBusy": "Others knocked too, so the admin's app may be busy letting them in. You can leave this page.",
     "knockedCommunity": "It happens once a member's app is open. You can leave this page.",
     "knocking": "Leaving a knock where the admin's app looks for one…",
     "knockingCommunity": "Leaving a knock where the group's apps look for one…",
