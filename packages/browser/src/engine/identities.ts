@@ -1,5 +1,5 @@
 import {
-  emptyIdentityLedger, fromBase64Url, identityRevocationValue, identityStatement, IdentityCheckUnavailable, IdentityExchange, IDENTITY_REVOCATION_LABEL, newIdentityBinding,
+  emptyIdentityLedger, fromBase64Url, identityRevocationValue, identityStatement, IdentityCheckUnavailable, IdentityExchange, IDENTITY_REVOCATION_LABEL, isIdentityBinding, newIdentityBinding,
   receivedIdentityStatus, revokesIdentity, toBase64Url,
   type IdentityBinding, type IdentityLedger, type IdentityScope, type ReceivedIdentity, type IdentityStatement, type LocalIdentityProof, type VerifiedIdentity,
 } from "@ghostly/core";
@@ -456,10 +456,13 @@ export class IdentityProofs {
   async frame(linkId: string, frame: Record<string, unknown>): Promise<void> {
     const x = this.exchange(linkId);
     if (!x) return;
-    const withdrawn = frame.t === "idp-withdraw" && typeof frame.id === "string"
-      && this.host.ledger(linkId)?.received.some(r => r.id === frame.id && r.status !== "withdrawn" && r.status !== "revoked");
+    // A proof withdrawn now, or one whose check ends after its owner withdrew it (`idp-present`), gets its revocation lookups.
+    const id = frame.t === "idp-withdraw" && typeof frame.id === "string" ? frame.id
+      : frame.t === "idp-present" && isIdentityBinding(frame.binding) ? identityStatement(frame.binding).id : undefined;
+    const withdrawn = () => !!id && !!this.host.ledger(linkId)?.received.some(r => r.id === id && r.status === "withdrawn");
+    const before = withdrawn();
     await x.receive(frame);
-    if (withdrawn && this.host.ledger(linkId)?.received.some(r => r.id === frame.id && r.status === "withdrawn")) this.afterWithdrawal(linkId, frame.id as string);
+    if (id && !before && withdrawn()) this.afterWithdrawal(linkId, id);
   }
   ready(linkId: string): void {
     if (this.greeted.has(linkId) || !this.host.channel(linkId)) return;
