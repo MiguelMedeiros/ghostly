@@ -65,16 +65,39 @@ function shiftChunks(b: Buffer, start: number, end: number, delta: number): void
 
 /**
  * `file` with `extra` boxes added at the end of its `moov` (its samples' offsets moved where `moov` comes before them)
- * and, with `sample`, a metadata track whose one sample it is, in a `mdat` added at the end of the file.
+ * and, with `sample`, a metadata track (or a track of another `handler`) whose one sample it is, in a `mdat` added at
+ * the end of the file.
  */
-export function withMovie(file: Buffer, extra: Buffer[], sample?: Buffer): Buffer<ArrayBuffer> {
+export function withMovie(file: Buffer, extra: Buffer[], sample?: Buffer, handler = "meta"): Buffer<ArrayBuffer> {
   const top = children(file, 0, file.length);
   const [, at, , end] = top.find(([type]) => type === "moov")!;
   const added = extra.reduce((sum, b) => sum + b.length, 0) + (sample ? metadataTrack(0, 0).length : 0);
   const moov = Buffer.from(file.subarray(at, end));
   if (top.some(([type, start]) => type === "mdat" && start > at)) shiftChunks(moov, 8, moov.length, added);
-  const track = sample ? [metadataTrack(file.length + added + 8, sample.length)] : [];
+  const track = sample ? [metadataTrack(file.length + added + 8, sample.length, handler)] : [];
   const grown = Buffer.concat([moov, ...extra, ...track]);
   grown.writeUInt32BE(grown.length, 0);
   return Buffer.concat([file.subarray(0, at), grown, file.subarray(end), ...(sample ? [box("mdat", sample)] : [])]);
+}
+
+/**
+ * When a movie says it was made, as a player reads it (ffprobe's `creation_time`, exiftool's `CreateDate`,
+ * `TrackCreateDate`, `MediaCreateDate`): each `mvhd`, `tkhd` and `mdhd` in its `moov`, with its version and its
+ * creation and modification times (seconds since 1904).
+ */
+export function headerTimes(b: Buffer): { type: string; version: number; created: number; modified: number }[] {
+  const out: { type: string; version: number; created: number; modified: number }[] = [];
+  const walk = (start: number, end: number) => {
+    for (const [type, , body, until] of children(b, start, end)) {
+      if (["moov", "trak", "mdia"].includes(type)) walk(body, until);
+      else if (["mvhd", "tkhd", "mdhd"].includes(type)) {
+        const version = b[body]!;
+        const created = version === 1 ? Number(b.readBigUInt64BE(body + 4)) : b.readUInt32BE(body + 4);
+        const modified = version === 1 ? Number(b.readBigUInt64BE(body + 12)) : b.readUInt32BE(body + 8);
+        out.push({ type, version, created, modified });
+      }
+    }
+  };
+  walk(0, b.length);
+  return out;
 }

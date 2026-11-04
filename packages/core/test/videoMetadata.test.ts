@@ -1,18 +1,21 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { BlobSource, BufferTarget, Conversion, EncodedPacketSink, Input, MP4, MovOutputFormat, Mp4OutputFormat, Output, QTFF } from "mediabunny";
 import { NO_VIDEO_METADATA, withoutVideoMetadata } from "../src/videoMetadata";
-import { H264_MP4, PLACE, box, hasPlace, metadataTrack, withMovie, xyzUdta } from "./support/videoFixtures";
+import { H264_MP4, PLACE, box, hasPlace, headerTimes, metadataTrack, withMovie, xyzUdta } from "./support/videoFixtures";
 // covers: files.video.metadata
 
 const bytesOf = async (blob: Blob) => new Uint8Array(await blob.arrayBuffer());
 
-/** The fixture repackaged with `moov` last: a .MOV with its place in `moov/meta` keys (as an iPhone writes it), or an MP4. */
-async function repack(mov: boolean): Promise<Buffer> {
+/**
+ * The fixture repackaged with `moov` last (or fragmented): a .MOV with its place in `moov/meta` keys (as an iPhone
+ * writes it), or an MP4. Its movie and track headers say it was made now, as a recorder's do.
+ */
+async function repack(mov: boolean, fastStart: false | "fragmented" = false): Promise<Buffer> {
   const input = new Input({ source: new BlobSource(new Blob([H264_MP4])), formats: [MP4, QTFF] });
   const target = new BufferTarget();
-  const output = new Output({ format: mov ? new MovOutputFormat({ fastStart: false }) : new Mp4OutputFormat({ fastStart: false }), target });
+  const output = new Output({ format: mov ? new MovOutputFormat({ fastStart }) : new Mp4OutputFormat({ fastStart }), target });
   const conversion = await Conversion.init({ input, output, ...(mov ? { tags: { raw: { "com.apple.quicktime.location.ISO6709": PLACE } } } : {}) });
   await conversion.execute();
   return Buffer.from(target.buffer!);
@@ -70,6 +73,44 @@ describe("withoutVideoMetadata", () => {
     expect(await played(out)).toEqual(await played(mp4));
   });
 
+  it("the times it was recorded go: mvhd, every tkhd and every mdhd, 32-bit and 64-bit, in place", async () => {
+    // A recorder writes when it recorded (seconds since 1904): 2026 fits in 32 bits (version 0), 2050 does not (version 1).
+    for (const [when, version] of [["2026-11-04T02:33:13Z", 0], ["2050-01-01T00:00:00Z", 1]] as const) {
+      for (const [mov, fastStart] of [[false, false], [true, false], [false, "fragmented"]] as const) {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(new Date(when));
+        const video = await repack(mov, fastStart).finally(() => vi.useRealTimers());
+        const recorded = Date.parse(when) / 1000 + 2082844800;
+        const before = headerTimes(video);
+        expect(before.map((h) => h.type).sort()).toEqual(["mdhd", "mvhd", "tkhd"]);
+        for (const h of before) expect(h, `${when} ${mov} ${fastStart}`).toEqual({ type: h.type, version, created: recorded, modified: recorded });
+        const out = Buffer.from(await bytesOf((await withoutVideoMetadata(new Blob([video as BlobPart]), mov ? "video/quicktime" : "video/mp4"))!));
+        for (const h of headerTimes(out)) expect(h, `${when} ${mov} ${fastStart}`).toEqual({ type: h.type, version, created: 0, modified: 0 });
+        expect(out.length).toBe(video.length);
+        expect(await played(out)).toEqual(await played(video));
+      }
+    }
+  });
+
+  it("a timecode track's start (a camera's time of day) is zeroed; a fragment's wall-clock time (prft) goes", async () => {
+    const at = Buffer.alloc(4);
+    at.writeUInt32BE((14 * 3600 + 23 * 60 + 5) * 25);
+    const timed = withMovie(H264_MP4, [], at, "tmcd");
+    const out = await bytesOf((await withoutVideoMetadata(new Blob([timed]), "video/quicktime"))!);
+    const zeroed = await bytesOf((await withoutVideoMetadata(new Blob([withMovie(H264_MP4, [], Buffer.alloc(4), "tmcd")]), "video/quicktime"))!);
+    expect(Buffer.from(out).equals(zeroed)).toBe(true);
+    expect(out.subarray(-4).every((b) => b === 0)).toBe(true);
+    expect(await played(out)).toEqual(await played(timed));
+
+    const ntp = Buffer.from("e8a1b2c3d4e5f607", "hex");
+    const prft = box("prft", Buffer.alloc(4), Buffer.from([0, 0, 0, 1]), ntp, Buffer.alloc(4));
+    const live = Buffer.concat([H264_MP4, prft]);
+    const sent = Buffer.from(await bytesOf((await withoutVideoMetadata(new Blob([live]), "video/mp4"))!));
+    expect(sent.length).toBe(live.length);
+    expect(sent.includes(ntp)).toBe(false);
+    expect(sent.subarray(H264_MP4.length + 4, H264_MP4.length + 8).toString("latin1")).toBe("free");
+  });
+
   it("a file typed as one without a type, or one in any other name, is stripped by its bytes", async () => {
     const mp4 = withMovie(H264_MP4, [xyzUdta()]);
     for (const mime of ["", "application/octet-stream", "video/webm"]) expect(hasPlace(await bytesOf((await withoutVideoMetadata(new Blob([mp4]), mime))!))).toBe(false);
@@ -111,6 +152,8 @@ describe("withoutVideoMetadata", () => {
       [Buffer.from(`not a movie ${PLACE}`, "latin1"), "video/quicktime"],
       // No movie header at all.
       [Buffer.concat([H264_MP4.subarray(0, 32), box("mdat", Buffer.from(PLACE, "latin1"))]), "video/mp4"],
+      // A fragmented movie with a metadata track (its samples in fragments are not looked for).
+      [withMovie(await repack(false, "fragmented"), [], Buffer.from(PLACE, "latin1")), "video/mp4"],
     ];
     for (const [bytes, mime] of bad) await expect(withoutVideoMetadata(new Blob([bytes as BlobPart]), mime), `${mime} ${bytes.length}`).rejects.toThrow(NO_VIDEO_METADATA);
   });
