@@ -369,10 +369,27 @@ const CARD_TIME_FORMS = "2026-09-30 or 2026-09-30 01:00 (no zone: local time; a 
 /** An ISO date with no time, which `Date.parse` alone reads as UTC midnight: `2026-09-30`, `2026-09`. */
 const ISO_DAY = /^(?:[+-]\d{6}|\d{4})-\d{2}(-\d{2})?$/;
 
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+const MONTH_DAY = new RegExp(`\\b(${MONTHS.join("|")})[a-z]*\\.?\\s+(\\d{1,2})(?!\\d)`, "i");
+const DAY_MONTH = new RegExp(`(?<!\\d)(\\d{1,2})\\s+(${MONTHS.join("|")})`, "i");
+
+/**
+ * The year, month (1 to 12) and day a date is written with: `2026-04-31`, `2026/4/31`, `Apr 31 2026`, `31 Apr 2026`.
+ * `Date.parse` takes any day up to 31 and moves it past the month's end, so the day is checked here.
+ */
+function writtenDay(text: string): [number, number, number] | undefined {
+  const numeric = /^([+-]\d{6}|\d{4})[-/](\d{1,2})[-/](\d{1,2})(?!\d)/.exec(text);
+  if (numeric) return [Number(numeric[1]), Number(numeric[2]), Number(numeric[3])];
+  const year = /\b(\d{4})\b/.exec(text), monthDay = MONTH_DAY.exec(text), dayMonth = monthDay ? null : DAY_MONTH.exec(text);
+  const [word, day] = monthDay ? [monthDay[1]!, monthDay[2]!] : dayMonth ? [dayMonth[2]!, dayMonth[1]!] : [];
+  return year && word ? [Number(year[1]), MONTHS.indexOf(word.toLowerCase()) + 1, Number(day)] : undefined;
+}
+
 /**
  * A time a command names: milliseconds, or a date the JavaScript Date reads (`2026-09-30T01:00:00Z`). A date with no
  * zone is local time in every form: `Date.parse` reads `2026-09-30 01:00` and `Sep 30 2026` as local but an ISO date
  * alone as UTC midnight (21:00 the day before in UTC-03, agents#2355), so that one is read as `2026-09-30T00:00`.
+ * A day the month does not have (`2026-04-31`) is refused, where `Date.parse` made it May 1.
  */
 export function cardTime(value: unknown, flag: string): number | undefined {
   if (value === undefined) return undefined;
@@ -380,6 +397,11 @@ export function cardTime(value: unknown, flag: string): number | undefined {
   const day = ISO_DAY.exec(text);
   const ms = /^\d+$/.test(text) ? milliseconds(text, flag) : Date.parse(day ? `${text}${day[1] ? "" : "-01"}T00:00` : text);
   if (!Number.isSafeInteger(ms) || ms <= 0) throw new CliError("usage", `--${flag} takes a time in milliseconds or a date: ${CARD_TIME_FORMS}, not ${JSON.stringify(value)}`);
+  const written = writtenDay(text);
+  if (written) {
+    const [year, month, date] = written, days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    if (date > days) throw new CliError("usage", `--${flag} takes a day the month has (${year}-${String(month).padStart(2, "0")} has ${days}), not ${JSON.stringify(value)}`);
+  }
   return ms;
 }
 
