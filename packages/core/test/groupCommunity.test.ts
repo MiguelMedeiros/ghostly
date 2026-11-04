@@ -444,6 +444,42 @@ describe("community sessions", { timeout: 60_000 }, () => {
     expect(net.texts(carol)).not.toContain("erin after");
   });
 
+  it("a leave's mark reaches only as far as its committer heard the leaver without a gap", async () => {
+    for (const jump of [3, 300]) {
+      const net = new Net();
+      const alice = net.create("alice");
+      const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol"), mallory = await net.admit(alice, "mallory");
+      const dave = await net.admit(alice, "dave");
+      await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(alice, mallory); await net.meet(alice, dave);
+      dave.online = false;
+      await say(net, bob, "bob 1");
+      await say(net, bob, "bob 2");
+      // Bob numbers his next frame past some he never sends (a modified app), keeps a copy of his state and leaves.
+      bob.session.state.seq += jump;
+      await say(net, bob, "bob 3");
+      await bob.session.flush();
+      const kept = clone(bob.saved);
+      await bob.session.leave(); await net.settle();
+      expect(await alice.session.commitPendingLeaves()).toBe(1);
+      await net.settle();
+      expect(net.texts(carol)).toEqual(["bob 1", "bob 2", "bob 3"]);
+      // From the copy, Bob signs a new line numbered in the gap; Mallory hands it on as a hub would.
+      kept.seq = 1 + jump;
+      const said: CommunityFrame[] = [];
+      const copy = new CommunitySession(kept, { save: async () => {}, broadcast: (f: CommunityFrame) => { said.push(f); return 1; }, direct: () => {}, addressed: () => {}, message: () => {}, changed: () => {}, clock: () => net.now() });
+      expect("id" in (await copy.sendText("bob AFTER he left", "bob"))).toBe(true);
+      const after = said.find(f => f.t === "group-msg") as CommunityFrame & { n: number };
+      expect(after.n).toBe(1 + jump);
+      expect(await carol.session.handle(mallory.session.myKey, clone(after))).toBe(false);
+      expect(net.texts(carol)).toEqual(["bob 1", "bob 2", "bob 3"]);
+      // Dave, away all along, is not handed it either; what Bob said before the gap still reaches him.
+      dave.online = true;
+      await net.meet(dave, carol);
+      expect(net.texts(dave)).not.toContain("bob AFTER he left");
+      if (jump < COMMUNITY_LIMITS.replay) expect(net.texts(dave)).toEqual(["bob 1", "bob 2"]);
+    }
+  });
+
   it("the member who committed a leave cannot change its mark once taken", async () => {
     const net = new Net();
     const alice = net.create("alice");

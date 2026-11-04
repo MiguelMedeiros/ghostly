@@ -1598,11 +1598,21 @@ export class CommunitySession {
     });
   }
 
-  /** Signs and says how far I had heard a member whose leave I just committed (`group-left`). */
+  /**
+   * Signs and says how far I had heard a member whose leave I just committed (`group-left`): per epoch, up to the first
+   * number of my window of it I never heard, so a copy of the leaver's state cannot sign one later into the gap. A gap
+   * at the window's bottom (a jump past it, or a counter raised by a restore) leaves the epoch out: nothing of it then.
+   */
   private markLeft(h: string, leaver: string): void {
     const hi: Record<string, number> = {};
     const heard = Object.entries(this.state.seen[leaver] ?? {}).filter(([k]) => LEFT_EPOCH.test(k)).slice(-COMMUNITY_LIMITS.leftMarks);
-    for (const [k, entry] of heard) hi[k] = entry.high;
+    for (const [k, entry] of heard) {
+      const bottom = Math.max(0, entry.high - COMMUNITY_LIMITS.replay + 1);
+      let n = bottom;
+      while (n < entry.high && entry.window.includes(n)) n++;
+      const top = n === entry.high ? n : n - 1;
+      if (top >= bottom) hi[k] = top;
+    }
     const sig = toBase64Url(sign(leftStatement(this.id, h, hi), this.identity.seed));
     this.keepLeft(h, { hi, sig });
     this.hooks.broadcast({ t: "group-left", v: 2, g: this.id, h, hi, sig });
