@@ -1161,12 +1161,12 @@ r.onsuccess = () => {
     #[ignore = "needs a display and a process of its own (GTK, WebView2)"]
     fn what_a_contacts_app_kept_is_gone_and_no_file_names_it() {
         // covers: services.desktop-viewer
-        let home =
-            std::env::temp_dir().join(format!("ghostly-forget-display-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&home);
-        std::fs::create_dir_all(&home).unwrap();
         #[cfg(target_os = "linux")]
-        {
+        let home = {
+            let home =
+                std::env::temp_dir().join(format!("ghostly-forget-display-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&home);
+            std::fs::create_dir_all(&home).unwrap();
             std::env::set_var("HOME", &home);
             for (name, folder) in [
                 ("XDG_CONFIG_HOME", ".config"),
@@ -1175,10 +1175,20 @@ r.onsuccess = () => {
             ] {
                 std::env::set_var(name, home.join(folder));
             }
-        }
-        // WebView2 keeps every webview's storage here instead of the app's own data folder.
+            home
+        };
+        // The app's own local data folder, where WebView2 keeps the Ghostly window's profile and each contact's
+        // app's, under an id of the test's own. Not WEBVIEW2_USER_DATA_FOLDER: it puts every webview in one profile.
+        #[allow(unused_mut)]
+        let mut context = tauri::generate_context!(test = true);
         #[cfg(windows)]
-        std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &home);
+        let home = {
+            const ID: &str = "tools.ghostly.test.forget";
+            context.config_mut().identifier = ID.into();
+            let home = std::path::PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap()).join(ID);
+            let _ = std::fs::remove_dir_all(&home);
+            home
+        };
         let host = format!("keeper.{PEER}.{TAG}");
 
         let builder = tauri::Builder::default()
@@ -1194,8 +1204,10 @@ r.onsuccess = () => {
                     responder.respond(viewer::handle(app, label, request).await);
                 });
             })
-            .build(tauri::generate_context!(test = true))
+            .build(context)
             .expect("app");
+        #[cfg(windows)]
+        assert_eq!(app.path().app_local_data_dir().unwrap(), home);
 
         // The main window's part: the contact's app is the page above, and what it says comes back here.
         let (said, heard) = mpsc::channel::<String>();
@@ -1260,16 +1272,18 @@ r.onsuccess = () => {
             };
             assert_eq!(windows("svc-"), 1);
 
-            let cleared = tauri::async_runtime::block_on(forget_service_origins(
-                handle.clone(),
-                vec![ServiceOrigin {
-                    service: "keeper".into(),
-                    peer: PEER.into(),
-                    tag: TAG.into(),
-                }],
-            ))
-            .unwrap();
-            assert_eq!(cleared, [true]);
+            let forget = || {
+                tauri::async_runtime::block_on(forget_service_origins(
+                    handle.clone(),
+                    vec![ServiceOrigin {
+                        service: "keeper".into(),
+                        peer: PEER.into(),
+                        tag: TAG.into(),
+                    }],
+                ))
+                .unwrap()
+            };
+            assert_eq!(forget(), [true]);
             std::thread::sleep(Duration::from_millis(500));
             assert_eq!(windows("svc-"), 0, "the app's window closed");
             #[cfg(target_os = "linux")]
@@ -1281,6 +1295,9 @@ r.onsuccess = () => {
             let read = wait("/read");
             assert_eq!(read, "/read?ls=null&idb=&caches=");
             std::thread::sleep(Duration::from_millis(500));
+            // Its visit to read is forgotten too: then nothing on the disk may name it.
+            #[cfg(windows)]
+            assert_eq!(forget(), [true]);
         });
         #[cfg(target_os = "linux")]
         let list = app
@@ -1291,24 +1308,24 @@ r.onsuccess = () => {
         app.run_return(|_, _| {});
         steps.join().unwrap();
 
-        // WebView2's processes let go of the folder once they are gone.
+        // WebView2's processes let go of the folder once they are gone. No file of the app's folder names the
+        // origin or holds what the app kept, the Ghostly window's profile included: the files WebView2 shares
+        // between a profile's origins (its Local Storage log, its quota database, its history, its preferences)
+        // keep an origin's records after any clear, through every later launch.
         #[cfg(windows)]
         {
             std::thread::sleep(Duration::from_secs(3));
             let (by_name, by_bytes) = named_anywhere(&home, &host);
+            let (_, kept) = named_anywhere(&home, "probe-");
             eprintln!("files: {:#?}", files(&home));
-            eprintln!("named after the origin: {by_name:#?}");
-            eprintln!("holding its name: {by_bytes:#?}");
+            let _ = std::fs::remove_dir_all(&home);
             assert_eq!(
                 by_name,
                 Vec::<String>::new(),
                 "no file or folder is named after the origin"
             );
-            // Not asserted: WebView2 keeps the profile's own records (its Local Storage log, its quota database)
-            // in files shared by every origin, until it compacts them.
-            let (_, kept) = named_anywhere(&home, "probe-");
-            eprintln!("holding what the app kept: {kept:#?}");
-            let _ = std::fs::remove_dir_all(&home);
+            assert_eq!(by_bytes, Vec::<String>::new(), "no file holds its name");
+            assert_eq!(kept, Vec::<String>::new(), "no file holds what it kept");
         }
 
         // The files still named after the origin, until the next launch: at least its folders' `origin` files.
