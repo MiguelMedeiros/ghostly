@@ -2,6 +2,7 @@
   "alreadyIn": "You're already in this chat.",
   "cameraPreview": "QR camera preview",
   "cameraUnavailable": "Camera unavailable. Paste an invite or open an image.",
+  "chatGone": "This chat is gone from this device.",
   "clipboardUnavailable": "Could not read the clipboard. Press {{keys}} to paste the invite below.",
   "clipboardUnavailableTouch": "Could not read the clipboard. Touch and hold the field below, then tap Paste.",
   "close": "Close join",

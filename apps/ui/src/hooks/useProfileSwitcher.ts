@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPoi
 import { changesGlance, profileGlance, recounted, type ProfileGlance } from "../lib/profileData";
 import { currentProfile, listProfiles, type ProfileEntry } from "../lib/profiles";
 import { PEEK_EVENT } from "../lib/profilePeek";
+import { modalOpen } from "./useAppCommands";
 
 /**
  * The account switcher (WISP 04): the profiles saved on this device, one tap from any of them, like the
@@ -86,7 +87,8 @@ export function useProfileSwitcher(available: boolean) {
   useEffect(() => {
     if (!available) return;
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (!isShortcut(e)) return;
+      // Not behind a modal dialog or the lock screen: the menu would open under it, out of reach.
+      if (!isShortcut(e) || modalOpen()) return;
       e.preventDefault();
       setOpen((was) => { if (!was) returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; return !was; });
     };

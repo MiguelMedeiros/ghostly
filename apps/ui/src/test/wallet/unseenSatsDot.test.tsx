@@ -52,6 +52,18 @@ describe("the wallet's new-sats dot", () => {
     expect(screen.getByTestId("wallet-chip")).toHaveAccessibleName("Wallets, 21 new test sats");
   });
 
+  it("a single sat is said as one", () => {
+    renderApp(<AccountBar />);
+    arrive(1);
+    expect(screen.getByTestId("wallet-chip")).toHaveAccessibleName("Wallets, 1 new sat");
+  });
+
+  it("a single test sat is said as one, in Portuguese too", () => {
+    renderApp(<AccountBar />, { language: "pt" });
+    arrive(1, "testnet");
+    expect(screen.getByTestId("wallet-chip")).toHaveAccessibleName(/, 1 sat de teste novo$/);
+  });
+
   it("says it in the app's language and number format, test sats as test sats", () => {
     renderApp(<AccountBar />, { language: "pt" });
     arrive(1_500, "testnet");

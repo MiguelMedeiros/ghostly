@@ -2,6 +2,7 @@
   "alreadyIn": "Ya estás en este chat.",
   "cameraPreview": "Vista previa de cámara QR",
   "cameraUnavailable": "Cámara no disponible. Pega una invitación o abre una imagen.",
+  "chatGone": "Este chat ya no está en este dispositivo.",
   "clipboardUnavailable": "No se pudo leer el portapapeles. Pulsa {{keys}} para pegar la invitación abajo.",
   "clipboardUnavailableTouch": "No se pudo leer el portapapeles. Mantén pulsado el campo de abajo y toca Pegar.",
   "close": "Cerrar",

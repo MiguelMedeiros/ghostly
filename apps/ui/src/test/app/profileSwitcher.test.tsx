@@ -1,10 +1,14 @@
-import { act, fireEvent, screen, within } from "@testing-library/react";
-import { Route, Routes, useLocation } from "react-router-dom";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { HashRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AccountBar } from "../../components/AccountBar";
 import { MobileTabBar } from "../../components/MobileTabBar";
 import { ProfileSwitchSplash } from "../../components/ProfileSwitchSplash";
+import { I18nProvider } from "../../contexts/I18nContext";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
+import { SettingsProvider } from "../../contexts/SettingsContext";
+import { openProfileSwitcher } from "../../hooks/useProfileSwitcher";
 import { activeProfileId, createProfile, lastRouteOf, pendingSwitch, prefixOf, renameProfile, settingsKeyFor, type ProfileEntry } from "../../lib/profiles";
 import { fakeEngine } from "../fakeEngine";
 import { shownInName } from "../labelInName";
@@ -49,6 +53,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   fakeEngine.features = { ...fakeEngine.features, profiles: false };
+  // What a sheet opened under fake timers left to do (its history entry, lib/layerHistory.ts) is done before the next.
+  if (vi.isFakeTimers()) act(() => { vi.runOnlyPendingTimers(); });
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -154,6 +160,26 @@ describe("the account switcher on the account bar", () => {
     expect(before).toHaveFocus();
   });
 
+  it("stays shut on Alt+Shift+P behind a modal dialog or the lock screen, and opens again once it is gone", async () => {
+    createProfile("Work");
+    const { user } = renderBar();
+    // A `<dialog>` shown as a modal (Join), then the lock screen: a modal panel over the whole app (LockScreen.tsx).
+    const join = document.body.appendChild(document.createElement("dialog"));
+    join.setAttribute("open", "");
+    const lockPanel = Object.assign(document.createElement("div"), { role: "dialog" });
+    lockPanel.setAttribute("aria-modal", "true");
+    try {
+      await user.keyboard("{Alt>}{Shift>}P{/Shift}{/Alt}");
+      expect(screen.queryByTestId("profile-switcher")).not.toBeInTheDocument();
+      join.remove();
+      document.body.appendChild(lockPanel);
+      await user.keyboard("{Alt>}{Shift>}P{/Shift}{/Alt}");
+      expect(screen.queryByTestId("profile-switcher")).not.toBeInTheDocument();
+    } finally { join.remove(); lockPanel.remove(); }
+    await user.keyboard("{Alt>}{Shift>}P{/Shift}{/Alt}");
+    expect(screen.getByTestId("profile-switcher")).toBeInTheDocument();
+  });
+
   it("opens on a click on Profile, closes on a click outside or a second click, and its first entry is the Profile page", async () => {
     const { user } = renderBar();
     await user.click(screen.getByTestId("account-profile"));
@@ -225,6 +251,37 @@ describe("the account switcher on a phone", () => {
     fireEvent.pointerUp(tab, { pointerType: "touch" });
     fireEvent.click(tab);
     expect(screen.queryByTestId("landed")).not.toBeInTheDocument();
+  });
+
+  it("Back (Android's back gesture) closes the sheet alone: Settings stays under it, and the next Back goes on", async () => {
+    createProfile("Work");
+    window.history.replaceState(null, "", "#/");
+    const user = userEvent.setup();
+    render(
+      <HashRouter><SettingsProvider><I18nProvider>
+        <Routes>
+          <Route path="/" element={<h1>Chats</h1>} />
+          {/* Settings → Profiles, as the page's row opens it. */}
+          <Route path="/settings" element={<button onClick={openProfileSwitcher}>Profiles</button>} />
+        </Routes>
+        <Landed />
+        <MobileTabBar />
+      </I18nProvider></SettingsProvider></HashRouter>,
+    );
+    await user.click(screen.getByTestId("mobile-tab-settings"));
+    await waitFor(() => expect(screen.getByTestId("landed")).toHaveTextContent("/settings"));
+    await user.click(screen.getByRole("button", { name: "Profiles" }));
+    expect(menu()).toHaveClass("profile-switcher-sheet");
+    // Its history entry is pushed once the tap's changes are in.
+    await act(() => new Promise((done) => setTimeout(done, 20)));
+
+    await act(async () => { window.history.back(); });
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("profile-switcher-backdrop")).not.toBeInTheDocument();
+    expect(screen.getByTestId("landed")).toHaveTextContent("/settings");
+
+    await act(async () => { window.history.back(); });
+    await waitFor(() => expect(screen.getByTestId("landed")).toHaveTextContent(/^\/$/));
   });
 });
 

@@ -665,8 +665,13 @@ describe("back from the background (a phone that slept), the contact's chat not 
    * `times`: the app sleeps and wakes this many times, the same link throughout (the lab: only the first was fast).
    * The numbers are the last return's.
    */
-  async function sleepAndWake({ higher, awayMs, frozen = false, afterAttempt = false, duringAttemptMs = 0, times = 1 }: { higher: boolean; awayMs: number; frozen?: boolean; afterAttempt?: boolean; duringAttemptMs?: number; times?: number }) {
+  async function sleepAndWake({ higher, awayMs, frozen = false, afterAttempt = false, duringAttemptMs = 0, times = 1, relayBackMs, dialFailMs }: { higher: boolean; awayMs: number; frozen?: boolean; afterAttempt?: boolean; duringAttemptMs?: number; times?: number;
+    /** The app's Iroh is off its relay at the wake, and back on it this long after (`NativeWorld.offRelay`). */
+    relayBackMs?: number;
+    /** A dial that reaches nobody fails this long after it began (Iroh's: 20 s). */
+    dialFailMs?: number }) {
     const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    if (dialFailMs) world.native.dialFailMs = dialFailMs;
     const made = invitationWhere("inviter");
     const [phoneSide, cliSide] = higher ? [made.joiner, made.inviter] : [made.inviter, made.joiner];
     const up = { mine: true, contact: true };
@@ -701,6 +706,7 @@ describe("back from the background (a phone that slept), the contact's chat not 
         rtc.srflxAfterMs = 450;
       }
       phone.offline = false; world.native.asleep.delete("phone"); world.native.dialsLost.delete("phone");
+      if (relayBackMs !== undefined) { world.native.offRelay.add("phone"); setTimeout(() => world.native.relayBack("phone"), relayBackMs); }
       if (frozen) for (const channel of dead) channel.dispatchEvent(new Event("close"));
       const requests = () => phone.requests.length + cli.requests.length, before = requests();
       phone.link.wake();
@@ -732,6 +738,23 @@ describe("back from the background (a phone that slept), the contact's chat not 
     expect(directMs, "then to WebRTC, on the session").toBeLessThan(5_000);
     // A knock costs the relays nothing: the reads and publishes of a return, no more (4 to 8 here).
     expect(requestsToLive).toBeLessThanOrEqual(10);
+  }, 240_000);
+
+  /**
+   * An Android phone back from Doze (the emulator, 2026-11-01): its Iroh lost its relay while the network was cut, and
+   * finds it again only seconds after the return, once its own reconnect backoff (up to 16 s) runs out. The knock went at
+   * once and went nowhere; QUIC sends it again only seconds later, and Iroh gives a dial 20 s. Live again 4.4 s and
+   * 9.8 s after the return (away 5 and 15 minutes), once never over Iroh.
+   */
+  it.each([false, true])("back from Doze with its Iroh off its relay, it knocks again once the relay is back (higher key: %s)", async higher => {
+    const relayBackMs = 4_000, knocks: string[] = [];
+    setLinkTraceSink(line => { const step = JSON.parse(line) as { step: string }; if (step.step.startsWith("knock")) knocks.push(step.step); });
+    const { liveMs, firstOn } = await sleepAndWake({ higher, awayMs: 5 * 60_000 + 3_700, relayBackMs, dialFailMs: 20_000 });
+    setLinkTraceSink(null);
+    // Before: the knock's 20 s, or the CLI's background read of the offer. After: the relay's 4 s and a dial.
+    expect(liveMs, "from the return to live on both sides").toBeLessThan(relayBackMs + 2_000);
+    expect(firstOn).toBe("iroh/1");
+    expect(knocks.filter(step => step === "knock-again")).toHaveLength(1);
   }, 240_000);
 
   it.each([

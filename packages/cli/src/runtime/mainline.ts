@@ -39,21 +39,38 @@ export class DhtRefusedError extends Error {
   }
 }
 
-/** A DHT node of this process: puts and gets Pkarr packets. */
+/**
+ * A DHT node of this process: puts and gets Pkarr packets. The node starts at the first thing asked of it: a command
+ * that reads only the profile (`chat list`, `settings get`) or a profile set offline asks nothing, and before, every
+ * command bound a UDP port and bootstrapped from the public routers all the same, sending them this machine's address.
+ */
 export class Mainline {
-  private readonly dht: DHT;
-  /** Its UDP socket is bound. */
-  readonly listening: Promise<void>;
+  private node: { dht: DHT; listening: Promise<void> } | null = null;
+  private closed = false;
   private readonly timeoutMs: number;
 
-  constructor(options: MainlineOptions = {}) {
+  constructor(private readonly options: MainlineOptions = {}) {
     this.timeoutMs = options.timeoutMs ?? 20_000;
-    const bootstrap = options.bootstrap === false ? false : options.bootstrap?.length ? options.bootstrap : undefined;
-    this.dht = new DHT({ verify, ...(bootstrap !== undefined ? { bootstrap } : {}), ...(options.host ? { host: options.host } : {}) });
-    this.listening = new Promise((resolve) => this.dht.listen(0, options.host, () => resolve()));
-    // A node of the table that errors must not end the process.
-    this.dht.on("error", () => {});
   }
+
+  private get dht(): DHT { return this.started().dht; }
+
+  private started(): { dht: DHT; listening: Promise<void> } {
+    if (this.closed) throw new Error("The DHT node is closed");
+    if (this.node) return this.node;
+    const { host } = this.options;
+    const bootstrap = this.options.bootstrap === false ? false : this.options.bootstrap?.length ? this.options.bootstrap : undefined;
+    const dht = new DHT({ verify, ...(bootstrap !== undefined ? { bootstrap } : {}), ...(host ? { host } : {}) });
+    // A node of the table that errors must not end the process.
+    dht.on("error", () => {});
+    this.node = { dht, listening: new Promise((resolve) => dht.listen(0, host, () => resolve())) };
+    return this.node;
+  }
+
+  /** Whether the node started (something was put, got or added). */
+  get running(): boolean { return this.node !== null; }
+  /** Its UDP socket is bound (starts the node). */
+  get listening(): Promise<void> { return this.started().listening; }
 
   /** Adds a node (a testnet's peers). */
   addNode(host: string, port: number): void { this.dht.addNode({ host, port }); }
@@ -98,7 +115,11 @@ export class Mainline {
     });
   }
 
-  destroy(): Promise<void> { return new Promise((resolve) => this.dht.destroy(() => resolve())); }
+  destroy(): Promise<void> {
+    const node = this.node;
+    this.closed = true;
+    return node ? new Promise((resolve) => node.dht.destroy(() => resolve())) : Promise.resolve();
+  }
 }
 
 /** Keys a `RelaysAndDht` remembers as found nowhere (`missing`). */

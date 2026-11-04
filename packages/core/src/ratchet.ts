@@ -358,6 +358,23 @@ export function ratchetOpen(prev: RatchetState, keys: RatchetKeys, lane: Ratchet
 
 /** Whether `sealed` is shaped as a ratcheted item of this lane (it may still not open). */
 export const isRatcheted = (sealed: Uint8Array, lane: RatchetLane) => parseHeader(sealed)?.lane === lane;
+/** The session a ratcheted item of this lane names (its `sid`, base64url), as its header says; undefined for anything else. */
+export const ratchetSessionOf = (sealed: Uint8Array, lane: RatchetLane): string | undefined => {
+  const h = parseHeader(sealed);
+  return h?.lane === lane ? h.sid : undefined;
+};
+/**
+ * Whether `sealed` names a session this side has no state of and did not retire: neither the current one nor one of the
+ * others. What the contact sealed in the session it shares with a device this profile was on before (a Move, a restore:
+ * WISP 4xx § Several devices) is such an item, once the turn passed there; so is anything under a made-up `sid`. It says
+ * nothing of whether the item is genuine: only that this side could not tell, having never had the session.
+ */
+export function ratchetUnknownSession(state: RatchetState | undefined, sealed: Uint8Array, lane: RatchetLane): boolean {
+  const h = parseHeader(sealed);
+  if (!h || h.lane !== lane) return false;
+  const s = state ?? emptyRatchetState();
+  return s.current?.sid !== h.sid && !s.others.some(o => o.sid === h.sid) && !s.retired.includes(h.sid);
+}
 /** Whether forward secrecy is on for this chat: the turn passed both ways in the session this side seals with. */
 export const ratchetOn = (state: RatchetState | undefined) => !!state?.current?.fs;
 /** Whether a lane refuses plain items from the contact: a ratcheted one opened there (WISP 4xx § Downgrade). */
@@ -416,6 +433,10 @@ export class RatchetBox {
   /** A ratcheted item from the contact opened on either lane: this side seals with the ratchet whatever the contact's record says. */
   get heardAny(): boolean { return this.heard("floor") || this.heard("hold"); }
   get on(): boolean { return ratchetOn(this.state); }
+  /** The session this side seals with now, if any (its `sid`). */
+  get session(): string | undefined { return this.state.current?.sid; }
+  /** `ratchetUnknownSession` on the state as it is: an item under a session this side never had. */
+  unknownSession(lane: RatchetLane, sealed: Uint8Array): boolean { return ratchetUnknownSession(this.state, sealed, lane); }
 }
 export interface RatchetTransaction {
   seal(lane: RatchetLane, plaintext: Uint8Array): Promise<Uint8Array>;

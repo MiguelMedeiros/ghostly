@@ -141,7 +141,11 @@ test("a long name under a picture opened large reads from its start in either ap
     { language: "en", name: "لقطة شاشة من اجتماع التخطيط الفصلي للفريق كاملة مع السبورة البيضاء والملاحظات.png", first: "لقطة" },
   ];
   for (const { name } of names) await alice.page.getByTestId("file-input").setInputFiles({ name, mimeType: "image/png", buffer: png(300, 200) });
-  for (const { name } of names) await expect(chat(bob).getByTestId("file-bubble").filter({ hasText: name })).toBeVisible({ timeout: 30_000 });
+  // Both drawn before Bob's app reloads: a bubble is there as soon as its file starts to come, and a reload in the
+  // middle of it left the picture at "Not moving · 0%", its first button Pause and no picture to open.
+  const drawn = (name: string) => expect.poll(() => chat(bob).getByTestId("file-bubble").filter({ hasText: name }).getByRole("img", { name })
+    .evaluate((img) => (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth), { timeout: 30_000 }).toBe(300);
+  for (const { name } of names) await drawn(name);
 
   for (const { language, name, first } of names) {
     await bob.page.evaluate((language) => {
@@ -151,7 +155,8 @@ test("a long name under a picture opened large reads from its start in either ap
     await bob.page.reload();
     await expect(bob.page.locator("html")).toHaveAttribute("dir", language === "ar" ? "rtl" : "ltr");
 
-    await chat(bob).getByTestId("file-bubble").filter({ hasText: name }).getByRole("button").first().click();
+    await drawn(name);
+    await chat(bob).getByTestId("file-bubble").filter({ hasText: name }).getByTestId("file-picture-open").click();
     const viewer = bob.page.getByTestId("avatar-viewer");
     const caption = viewer.locator("figcaption");
     await expect(caption).toHaveText(name);

@@ -47,7 +47,15 @@ export function shareFiles(share: IncomingShare): Promise<File[]> {
   return share.read ? share.read() : Promise.resolve(share.files.filter((file): file is File => file instanceof File));
 }
 
+/**
+ * Most shares the picker holds at once, the one shown and those behind it (the web app's worker holds as many,
+ * sw/messages.ts `MAX_HELD_SHARES`: keep the two alike).
+ */
+export const MAX_WAITING_SHARES = 3;
+
 let pending: IncomingShare | null = null;
+/** Shares that came while `pending` waited (`receiveShare` with `behind`), oldest first: each is shown once the one before it goes. */
+let behind: IncomingShare[] = [];
 const forChat = new Map<string, IncomingShare>();
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((listener) => listener());
@@ -62,8 +70,20 @@ export function isEmptyShare(share: IncomingShare): boolean {
  * that only names files left out (too large, not read, no room for them, or past the most one share brings) is said
  * all the same, with the share that waits when there is one. A share with something replaces the one that waits, but
  * still names what a waiting notice named (Android may hand an older share still copying over after a newer notice).
+ *
+ * `queue` (the web app, whose share target any website can post to): a share never replaces or changes the one that
+ * waits; it waits behind it, and is shown once that one is sent to a chat or put aside. Past `MAX_WAITING_SHARES` the
+ * newest is dropped.
  */
-export function receiveShare(share: IncomingShare): void {
+export function receiveShare(share: IncomingShare, { queue = false } = {}): void {
+  if (queue) {
+    if (isEmptyShare(share) && !share.leftOut?.length && !share.unread?.length && !share.noRoom?.length && !share.pastLimit?.length) return;
+    if (!pending) pending = share;
+    else if (behind.length + 1 < MAX_WAITING_SHARES) behind.push(share);
+    else return;
+    emit();
+    return;
+  }
   if (isEmptyShare(share)) {
     if (!share.leftOut?.length && !share.unread?.length && !share.noRoom?.length && !share.pastLimit?.length) return;
     pending = pending ? withNames(pending, share) : share;
@@ -87,22 +107,28 @@ export function incomingShare(): IncomingShare | null {
   return pending;
 }
 
-/** The share was put aside (Cancel): it is gone. */
+/** The share was put aside (Cancel): it is gone, and the next one behind it, if any, is shown. */
 export function dropIncomingShare(): void {
-  pending = null;
+  pending = behind.shift() ?? null;
   emit();
 }
 
-/** The page is about to restart: the share that waits for a chat to be picked is kept for the next page. Whether it was. */
+/**
+ * The page is about to restart: the shares that wait for a chat to be picked are kept for the next page, in their
+ * order. Whether the one shown was.
+ */
 export function carryIncomingShare(): boolean {
-  try { return pending?.carry?.() ?? false; } catch { return false; }
+  const carry = (share: IncomingShare | null) => { try { return share?.carry?.() ?? false; } catch { return false; } };
+  const kept = carry(pending);
+  for (const share of behind) carry(share);
+  return kept;
 }
 
 /** The chat picked: the share waits for its composer. `chat` is the composer's draft id (a session id, `group:<id>`). */
 export function sendShareTo(chat: string): void {
   if (!pending) return;
   forChat.set(chat, pending);
-  pending = null;
+  pending = behind.shift() ?? null;
   emit();
 }
 
@@ -130,6 +156,17 @@ export function shareText(share: Pick<IncomingShare, "title" | "text" | "url">):
   return parts.join("\n");
 }
 
+/** How much of a share's text the picker lays out: it shows three lines of it, and a share's text may be megabytes. */
+const PREVIEW_UNITS = 2048;
+
+/** The start of a share's text, for the picker: never ending on half a character (a surrogate pair kept whole). */
+export function sharePreview(share: Pick<IncomingShare, "title" | "text" | "url">): string {
+  const text = shareText(share);
+  if (text.length <= PREVIEW_UNITS) return text;
+  const end = /[\uD800-\uDBFF]/.test(text[PREVIEW_UNITS - 1]!) ? PREVIEW_UNITS - 1 : PREVIEW_UNITS;
+  return `${text.slice(0, end)}…`;
+}
+
 const subscribe = (listener: () => void) => {
   listeners.add(listener);
   return () => listeners.delete(listener);
@@ -148,6 +185,7 @@ export function onShareChange(listener: () => void): () => void {
 /** Tests only. */
 export function resetIncomingShare(): void {
   pending = null;
+  behind = [];
   forChat.clear();
   emit();
 }

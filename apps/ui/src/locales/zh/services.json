@@ -1,6 +1,7 @@
 {
   "fromContacts": "来自联系人",
   "fromContactsEmpty": "联系人共享的应用会显示在这里。",
+  "ghostlyOnline": "Ghostly 在线",
   "goOffline": "离线：你共享的内容都将无法访问",
   "goOnline": "上线",
   "letReach": "允许 {{contact}} 访问 {{app}}",
@@ -9,6 +10,7 @@
   "noContacts": "还没有联系人。",
   "nobodyYet": "在你选择谁可以访问之前，没人能打开它。",
   "nothingShared": "还没有共享任何内容。",
+  "offDisconnectsChats": "关闭后，所有聊天都会断开连接",
   "offline": "离线",
   "online": "在线",
   "open": "打开 {{app}}",
@@ -18,6 +20,7 @@
   "remove": "移除",
   "removeNamed": "移除 {{app}}",
   "requestCount": "· {{count}} 次请求",
+  "requestCount_one": "· {{count}} 次请求",
   "share": "共享",
   "shareLocal": "共享本地服务",
   "shareNamed": "共享 {{app}}",
@@ -29,12 +32,18 @@
     "stopped": "已停止"
   },
   "window": {
+    "busy": "{{app}} 正在你联系人的机器上同时加载太多页面。请稍后再试。",
     "callOn": "正在通话中。结束通话后才能打开 {{app}}。",
     "elsewhere": "{{app}} 试图把你带到别处，超出了联系人共享的范围。",
     "failed": "请求失败。",
+    "label": "{{app}}（由 {{contact}} 分享）",
     "notAnswering": "{{app}} 在联系人的机器上没有响应。请对方检查它是否在运行。",
+    "offline": "你的联系人已离线，{{app}} 现在无法打开。对方回来后会在这里重新打开。",
+    "owner": "这是 {{contact}} 的应用，运行在对方的设备上。它不是 Ghostly：切勿在这里输入你的恢复词或密码。",
+    "retry": "重试",
     "tooSlow": "{{app}} 在联系人的机器上没有及时响应。请稍后再试。",
-    "unreachable": "无法访问此服务。服务仅在其幽灵在线时存在。"
+    "unreachable": "无法访问此服务。服务仅在其幽灵在线时存在。",
+    "unshared": "{{app}} 已不再与你共享。"
   },
   "yourApps": "你的应用"
 }

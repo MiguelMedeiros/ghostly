@@ -45,13 +45,14 @@ export function engine(): FakeEngineServer {
 }
 
 /** Opens a viewer tab for PEER's service from a page, and returns the tab id. */
-export async function openViewer(world: FakeWorld, peer = PEER, service = SERVICE, tag = TAG): Promise<number> {
+export async function openViewer(world: FakeWorld, peer = PEER, service = SERVICE, tag = TAG, page?: unknown): Promise<number> {
   const reply = (await world.chrome.runtime.sendMessage({
     target: "background",
     type: "open-service",
     peerPubKeyZ32: peer,
     serviceId: service,
     tag,
+    page,
   })) as { ok: boolean; error?: string };
   if (!reply.ok) throw new Error(reply.error);
   const tab = [...world.tabs.values()].find((t) => t.url === `https://${service}.${peer}.${tag}.invalid/`);

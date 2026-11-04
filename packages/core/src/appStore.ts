@@ -120,6 +120,35 @@ export function checkAppListing(value: unknown, options: AppFormatOptions = {}):
 }
 
 /**
+ * The first object key `text` writes twice in one object, as JSON.parse reads it (`"title"` is `title`), or null.
+ * `text` is JSON that JSON.parse already took: one pass, each string read to its closing quote.
+ */
+function repeatedJsonKey(text: string): string | null {
+  /** Each open object's keys so far; null for an array. */
+  const open: (Set<string> | null)[] = [];
+  let keyNext = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === "\"") {
+      let end = i + 1;
+      while (text[end] !== "\"") end += text[end] === "\\" ? 2 : 1;
+      const keys = open[open.length - 1];
+      if (keys && keyNext) {
+        const key = JSON.parse(text.slice(i, end + 1)) as string;
+        if (keys.has(key)) return key;
+        keys.add(key);
+        keyNext = false;
+      }
+      i = end;
+    } else if (c === "{") { open.push(new Set()); keyNext = true; }
+    else if (c === "[") open.push(null);
+    else if (c === "}" || c === "]") open.pop();
+    else if (c === ",") keyNext = open[open.length - 1] !== null;
+  }
+  return null;
+}
+
+/**
  * Reads a `listing.json`: JSON holding exactly one listing (written by hand in release 1.2, so not required canonical).
  * A store reads it, as a writer: strict by default, so a misspelt key is refused before the owner signs the index (the
  * client never reads a `listing.json`, only the signed index). `{ strict: false }` reads it as a client reads an index
@@ -128,6 +157,9 @@ export function checkAppListing(value: unknown, options: AppFormatOptions = {}):
 export function readAppListing(text: string, options: AppFormatOptions = { strict: true }): { ok: true; listing: AppListing } | { ok: false; reason: AppStoreRefusal; detail?: string } {
   let value: unknown;
   try { value = JSON.parse(text); } catch (error) { return { ok: false, reason: "not-json", detail: String(error) }; }
+  // JSON.parse keeps a key's last value, where a person reading the file sees the first: strict, both are refused.
+  const twice = options.strict ? repeatedJsonKey(text) : null;
+  if (twice !== null) return { ok: false, reason: "not-json", detail: `${JSON.stringify(twice)} is written twice` };
   const checked = checkAppListing(value, options);
   return checked.ok ? { ok: true, listing: value as AppListing } : checked;
 }

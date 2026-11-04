@@ -54,10 +54,17 @@ by IP), so about 3 invites a minute go out at once. Past that, `invite create` s
 `"published":false` and `retryInMs`: the invite goes out by itself when the relays' minute frees a request, and the
 link works from then on. A one-shot (no daemon) waits up to 20 s for it before it leaves.
 
+With no relay answering at all, `invite create` answers `"published":false` with a `reason` (what the relays said) and a
+`note`. The invite is good, so don't make another: it goes out by itself once a relay answers, while a daemon runs for
+the profile.
+
 To join someone else's invite: `printf '%s' "$INVITE" | ghostly invite join --label bob` (stdin keeps it out of `ps`
 and the shell's history; `ghostly invite join <ghostly1… or link>` works too, with a warning). With no invite given,
 a join whose stdin stays empty says so on stderr after 2 s and gives up with a usage error after 60 s; `invite join -`
-waits for stdin as long as it takes. The invite is the app's own, so
+waits for stdin as long as it takes. Any command that reads stdin takes at most 16 MiB there, the most a daemon's
+request line holds: more is refused as it comes (`bad_request`), and so is a file a request carries (a card's `--json`,
+`identity complete --evidence-file`, `x401 credential add`). A request whose JSON passes 16 MiB all the same (a text's
+escapes) is refused before it goes to the daemon. The invite is the app's own, so
 the other side can be the web app, the extension, the Desktop or another `ghostly`. A one-shot (no daemon) waits up
 to 60 s for the inviter, then answers `"paired":true|false` and the `stage`; when it did not pair, stderr says the next
 step (keep the profile running with `ghostly daemon --detach`, then `ghostly chat wait bob --until paired`).
@@ -81,7 +88,10 @@ Only one process opens a profile at a time.
 `ghostly daemon --detach` keeps a profile online; `ghostly daemon status` and `ghostly daemon stop` check and end it,
 and `ghostly daemon restart` starts it again on the CLI's own code (after an upgrade, commands warn on stderr that
 the daemon runs another version). Ctrl-C, a service manager's stop, or the terminal or SSH session closing all stop
-it cleanly: it tells contacts it is going and removes its socket.
+it cleanly: it tells contacts it is going and removes its socket. While a daemon is starting (its engine, before its
+socket listens: seconds on a large profile), `ghostly daemon status` says `"running": false, "starting": true` with its `pid`, and `daemon stop` and `daemon restart`
+wait up to `--timeout` for its socket, then stop it. Any other command run meanwhile waits up to 30 s for that socket
+and goes through it.
 While it runs, every command goes through its socket. With no daemon, a command runs the profile itself and leaves
 (a one-shot), so the contact sees it come and go. Bots should run the daemon.
 
@@ -140,7 +150,8 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
   followed; no `user:password@` in the URL, so put a token in its path or query). A bridge that is not answering (connection refused, a timeout, a 5xx, 408 or 429) holds the stream: the
   event is tried again, up to a minute apart, until the bridge takes it, and the cursor never moves past it, so a
   bridge restart loses nothing. stderr says so once ("the webhook at … is not answering: holding event N") and again
-  when it answers. An event the bridge refuses (another 4xx, or a redirect) is said on stderr and passed.
+  when it answers. An event the bridge refuses (another 4xx, or a redirect) is said on stderr and passed. These lines
+  name the bridge by its origin only (`http://127.0.0.1:8787`), never its path or query, so its token stays off stderr.
 - With no daemon running, `listen` becomes the daemon, so a hook can answer with `ghostly send`.
 - A `listen` started while a daemon runs follows that daemon across a `daemon restart`. When the daemon stays gone
   (`daemon stop`), it says so once on stderr and waits; it says again when a daemon answers, and goes on from the last
@@ -163,9 +174,11 @@ Main types: `message.received`, `message.sent`, `message.delivery`, `message.edi
 ghostly listen --from alice --from bob --group team --exec ./bot.sh
 ```
 
-- `--from` takes a chat (id, prefix or name) or a contact's key (`peer` in `chat show`); a key also matches a chat
-  made after `listen` started, and only ever the chat of that key (a contact's own name never stands for a key, and
-  a chat's label wins over a contact's name and over an id prefix). `--group` takes a group (id, prefix or name). Names are turned into ids once, at the
+- `--from` takes a chat (its id or a label given here) or a contact's key (`peer` in `chat show`); a key also matches a
+  chat made after `listen` started, and only ever the chat of that key (a contact's own name never stands for a key).
+  A prefix of a chat's id or the name its contact gave itself is refused, with the chat it found: another contact
+  could call itself that. Name the chat first (`ghostly chat rename <chat> <name>`). `--group` takes a group (id,
+  prefix or name). Names are turned into ids once, at the
   start, so a contact who renames themselves later changes nothing. A name that matches nothing is an error (exit 3).
 - With either flag, an event of any other chat or group never reaches `--exec`, `--webhook` or stdout. The message
   itself is kept in the chat as always, and the cursor moves past it. Events of the profile itself
@@ -214,9 +227,9 @@ reactions, typing).
 | Transports | `chat transport <chat> auto\|dht\|webrtc\|iroh\|hyperdht`, `chat connect\|disconnect`, `chat disconnect <chat> --hold <minutes>` (off the direct link that long, on the DHT; `settings online false` is the whole profile); relays and ICE servers with `settings set` (the CLI reaches TURN over UDP only: a `turns:` or `?transport=tcp` server is kept for the apps, unused here, and the answer says so) |
 | Files and voice | `file send <chat\|group> <path>` (to a group: up to 100 MiB, fetched by each member's app from a member who has it), `file send … --voice [ms]` (length and waveform measured from the file), `file send … --reply <message>` (quotes it), `file accept\|decline\|pause\|resume\|cancel\|resend\|request [<chat>] <file>` (a resent file goes on from what the receiver holds), `file wait <file>`, `file save <file> [--wait]`. Files over 25 MiB wait for `file accept`, and so does a group's file that did not come by itself (over 8 MiB). `message.received` carries the file (`id`, and a voice note's `duration` and `peaks`); `file.*` events name its `messageId` |
 | Groups | `group create <name>` (a community link) or `--mesh` (private), `group join` (with no link, from stdin), `group send … --mention <member> --reply <message>` (answers with the message id), `group history` (each message names its author), `group react`, `group edit <group> <message>` (a status updated in place), `group typing <group>` (private groups: typing, recording, thinking or a status line), `--wait sent` on both (until an edge took it); admin: `group invite\|remove\|admin\|rotate\|link\|picture\|hub\|rename` (`group rename <group> <name…>` keeps the picture) |
-| Wallets | `wallet create cashu\|lightning\|arkade\|spark\|bitcoin\|fedimint\|usdt` (`fedimint --invite <code>`; Spark on Mainnet with your Breez API key; `--stdin` takes secret fields as `name=value` lines, `api-key=…` too, out of `ps` and the shell's history), `wallet add-mint`, `wallet list`, `wallet faucet` (test coins), `wallet receive\|address\|redeem\|history` (`wallet redeem` with no token reads it from stdin), `wallet remove` (refused while it holds or awaits money), several `lightning` cards |
+| Wallets | `wallet create cashu\|lightning\|arkade\|spark\|bitcoin\|fedimint\|usdt` (`fedimint --invite <code>`; Spark on Mainnet with your Breez API key; `--stdin` takes secret fields as `name=value` lines, `api-key=…` too, out of `ps` and the shell's history), `wallet add-mint`, `wallet list`, `wallet faucet` (test coins), `wallet receive\|address\|redeem\|history` (`wallet redeem` with no token or `-` reads it from stdin), `wallet remove` (refused while it holds or awaits money), several `lightning` cards |
 | Payments | `chat pay <chat> <sats>`, `chat request`, `chat pay-request`, `chat accept`, `pay <invoice\|address\|lnurl>`, `payment list\|check\|reclaim` |
-| Identities | `identity providers\|list\|add\|complete\|cancel\|remove`, `identity share\|withdraw\|recheck <chat> <id>`, `identity contact <chat>` |
+| Identities | `identity providers\|list\|add\|complete\|cancel\|remove` (`add --stdin` takes a signer's fields as `name=value` lines, a NIP-46 `bunker://` link out of `ps` and the shell's history), `identity share\|withdraw\|recheck <chat> <id>`, `identity contact <chat>` |
 | Shared services | `service add <name> http://127.0.0.1:<port>`, `service share <service> <chat>`, `service peer\|open\|close` |
 | Voice calls | `call start <chat>`, `call answer`, `call auto on [--from <chat>]`, `call hangup\|list\|flush`, `call pipe`: the audio as raw PCM on a Unix socket per call, for a program of yours |
 
@@ -250,8 +263,8 @@ Safety rules the CLI enforces:
   unless `--force`.
 - **Secrets stay hidden.** Seeds, keys, wallet phrases, backups, group entry links and a pending chat's invite code are printed only with `--show-secret` (or `group link`, for a group's link, and `invite create`, for the invite it makes).
 
-Errors print `{"error":{"code","message"}}` and exit with 1 (failed), 2 (usage), 3 (not found), 4 (timed out) or
-5 (needs `--force`, `--yes` or `--confirm-real`). A daemon that does not answer a read or `daemon status` within 15
+Errors print `{"error":{"code","message"}}` and exit with 1 (failed), 2 (usage), 3 (not found), 4 (timed out),
+5 (needs `--force`, `--yes` or `--confirm-real`) or 130 (stopped with Ctrl-C, `interrupted`). A daemon that does not answer a read or `daemon status` within 15
 seconds (`daemon status --timeout s` sets its own), or a command that waits (`chat wait`, `file wait`, `--wait`)
 within its `--timeout` (or the default, 60, 300 and 30 s) plus 10 seconds, is a timeout too (exit 4,
 `details.method`). Any other command (`send`, `react`, `invite create`, `settings set` and the like) is sent only
@@ -320,11 +333,16 @@ ghostly call auto on --from alice        # or: ghostly call answer alice, on eac
 ghostly listen --type call.              # call.connected carries {"audio":{"socket":…,"rate":48000,…}}
 ```
 
+`call auto on --from` names chats: removing one (`chat remove`) takes it off the list, and removing the last one turns
+auto-answer off rather than leaving an empty list, which would answer everyone.
+
 A ready one: [ghostly-voice-agent](https://github.com/MiguelMedeiros/ghostly-voice-agent) answers calls by voice (speech to text, Claude,
 text to speech) on this socket. Clone it; its `AGENTS.md` takes an AI agent through the setup.
 
 The audio contract, one Unix socket per call:
 
+- **Token.** A program's first bytes are the call's `audio.token` and a line feed. Required on Windows (a named
+  pipe there): before it, a connection hears nothing and replaces no program.
 - **Format.** Raw PCM, no framing: s16le, mono, at the call's rate (48000 by default; 24000, 16000, 12000 or 8000
   with `--rate`).
 - **From the call.** The contact's voice in 20 ms frames, as they are decoded.

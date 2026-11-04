@@ -734,7 +734,7 @@
   padding: 8px 14px;
   border-radius: 999px;
   background: #1f2c34;
-  color: var(--dim);
+  color: var(--muted); /* --dim reads at 4.09:1 on this field */
   font-size: 13px;
 }
 

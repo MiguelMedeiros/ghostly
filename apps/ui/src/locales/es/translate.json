@@ -5,6 +5,7 @@
     "engine": "La primera descarga también trae el motor de traducción, de las versiones de Ghostly en GitHub.",
     "failed": "Los idiomas no se descargaron",
     "failedNext": "Inténtalo de nuevo.",
+    "goesOn": "Puedes cerrar esto: la descarga continúa y se te avisa aquí si falla.",
     "notNow": "Ahora no",
     "pair": "{{from}} a {{to}}, {{size}}",
     "pairBack": "{{from}} a {{to}} y de vuelta, {{size}}",

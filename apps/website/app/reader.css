@@ -324,8 +324,7 @@
   display: grid;
   /* An auto track takes the longest unbreakable entry's width (a source path), and every entry runs past the box. */
   grid-template-columns: minmax(0, 1fr);
-  gap: 4px;
-  margin-top: 12px;
+  margin-top: 10px;
   columns: 2;
   font-size: 14px;
 }
@@ -333,7 +332,11 @@
   padding-left: 16px;
   font-size: 13px;
 }
+/* A line of 13-14 px text is 15-19 px high, by font: each entry is a 24 px target, and its padding is the space between rows. */
 .reader-toc a {
+  display: inline-block;
+  min-height: 24px;
+  padding-block: 2px;
   color: var(--muted);
   overflow-wrap: anywhere;
 }
@@ -348,6 +351,11 @@
     position: static;
     max-height: none;
     order: 2;
+  }
+  /* The list comes first in the HTML and goes under the article: until the article's end has arrived, a paint would
+     show the list alone at the top, then the article would push it off the screen. */
+  .reader-layout:not(:has(.reader-foot)) .reader-side {
+    display: none;
   }
   .reader-all {
     border-top: 1px solid var(--line);
@@ -372,6 +380,9 @@
   color: #cdd6e2;
   font-size: 16.5px;
   line-height: 1.75;
+  /* A slash list (A/B/C) is one word: with larger text or spacing it ran past a phone's screen. break-word, not
+     anywhere, so a table's columns keep their widths. */
+  overflow-wrap: break-word;
 }
 .reader-prose > * + * {
   margin-top: 1em;
@@ -490,7 +501,8 @@
   text-align: left;
   vertical-align: top;
 }
-.reader-prose th {
+.reader-prose th,
+.reader-prose thead td {
   background: var(--surface);
   color: var(--text);
   font-weight: 650;

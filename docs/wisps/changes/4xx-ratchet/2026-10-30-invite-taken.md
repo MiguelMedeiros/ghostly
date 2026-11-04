@@ -1,0 +1,1 @@
+A `_dr` in the invite's mailbox that does not open says someone else used the invite first, as a `_dm` sealed to another key does. It said nothing, so once both apps said ratchet/1, a joiner who lost the race was never told and waited for good. Found by the end-to-end test.

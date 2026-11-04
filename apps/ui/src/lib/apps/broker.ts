@@ -21,6 +21,7 @@
 import type { AppFileAt } from "@ghostly/browser/engine/apps";
 import { MINI_APP_LIMITS, type MiniAppContext, type MiniAppErrorCode, type MiniAppJson, type MiniAppLinkedFile, type MiniAppPeerEvent, type MiniAppRequestType } from "@ghostly/core/miniApp";
 import type { AppsPlatform } from "../platform";
+import { appInput } from "./open";
 
 /** An app to run: its checked entry (the engine's `appEntry`), what the person granted it, and where it opens. */
 export interface AppLaunch {
@@ -46,10 +47,10 @@ export interface AppView {
 
 /**
  * Why an app stopped: it asked (`closed`), its frame loaded when it should not have (`navigated`), it broke the
- * protocol before it started or sent far past the request rate (`protocol`), it never started (`timeout`), or the
- * client stopped it (`stopped`).
+ * protocol before it started or sent far past the request rate (`protocol`), it never started (`timeout`), it stopped
+ * answering the page's watchdog (`unresponsive`, `watchApp`), or the client stopped it (`stopped`).
  */
-export type AppStopReason = "closed" | "navigated" | "protocol" | "timeout" | "stopped";
+export type AppStopReason = "closed" | "navigated" | "protocol" | "timeout" | "unresponsive" | "stopped";
 
 export type AppPhase = "loading" | "starting" | "writing" | "running" | "stopped";
 
@@ -61,6 +62,15 @@ export const BROKER_REQUESTS: readonly MiniAppRequestType[] = [
 
 /** How long the runner has to say `writing` once it has the port. */
 export const START_TIMEOUT_MS = 15_000;
+
+/** How often the page asks a running app's runner whether it still answers (`watchApp`). */
+export const PING_EVERY_MS = 1_000;
+
+/**
+ * How long a running app may hold its thread before the page stops it (`watchApp`): far past any frame an app draws
+ * or a move an engine thinks on its own thread, and short enough that a hung app does not hold the person's chats.
+ */
+export const UNRESPONSIVE_AFTER_MS = 10_000;
 
 /**
  * How many messages in one second stop the app: ten times the rate. Past the rate a request is refused, yet the page
@@ -93,11 +103,22 @@ interface BrokerOptions {
   /**
    * Whether the app is on screen now. A `files.pick` from one that is not (its chat's panel hidden, another chat or
    * page showing) is refused (`too-fast`): its sheet would come up over what the person is doing, take the focus from
-   * the box they type in, and name an app they cannot see. None: always (a Desktop app window).
+   * the box they type in, and name an app they cannot see. On Desktop the sheet is in the Ghostly window, so an app
+   * whose own window does not have the focus would pull that window over what the person is doing.
    */
-  shown?: () => boolean;
+  shown?: () => boolean | Promise<boolean>;
+  /**
+   * Whether the person is in the app now: its frame has the focus in a page that has it and was just tapped or typed in
+   * (web), its window has it (Desktop). Only then is the runner's `activity` their input (`onInput`): an app on screen beside a chat, or one
+   * left behind another window, keeps nothing unlocked.
+   */
+  inUse?: () => boolean | Promise<boolean>;
+  /** The person tapped or typed in the app (`activity`, while `inUse`): the lock screen counts it. */
+  onInput?: () => void;
   /** The app serves a file to its contact now (true), or no longer (false): the panel's header says so. */
   serving?: (on: boolean) => void;
+  /** The runner answered the watchdog's ping `n` (`{pong: n}` on the port, counted with the requests). */
+  pong?: (n: number) => void;
   now?: () => number;
 }
 
@@ -260,7 +281,7 @@ function storageKey(value: unknown): string {
   return value as string;
 }
 
-export function createBroker({ host: platform, launch, view, post, stopped, byReference = false, shown = () => true, serving: onServing, now = Date.now }: BrokerOptions): Broker {
+export function createBroker({ host: platform, launch, view, post, stopped, byReference = false, shown = () => true, inUse = () => false, onInput, serving: onServing, pong, now = Date.now }: BrokerOptions): Broker {
   const host = platform.running?.(launch.digest) ?? platform;
   let phase: AppPhase = "loading";
   const recent: number[] = [];
@@ -278,8 +299,8 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
   const chatAllowed = !!launch.chat && launch.permissions.includes("chat");
   /** Linked files: only for an app granted `files`, in a client that keeps them. Not a version's: the outer platform's. */
   const linkedFiles = () => (launch.permissions.includes("files") ? platform.linkedFiles ?? null : null);
-  /** The read lane: only in a chat, for an app granted `chat`, where the engine has it. */
-  const ranges = () => (chatAllowed ? platform.ranges ?? null : null);
+  /** The read lane: only in a chat, for an app granted `chat`, where the engine has it. The version's, as the chat's. */
+  const ranges = () => (chatAllowed ? host.ranges ?? null : null);
   /**
    * What this app serves on its chat's session now: serve id to the linked file, its size as listed and the serves not
    * unserved yet. The engine answers the same id for a file served again, so each serve needs its own unserve.
@@ -462,9 +483,10 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         const files = linkedFiles();
         if (!files) return refuse("not-allowed");
         const options = pickOptions(args[0]);
-        if (picking || now() < pickAgainAt || !shown()) refuse("too-fast");
+        if (picking || now() < pickAgainAt) refuse("too-fast");
         picking = true;
         try {
+          if (!await shown()) refuse("too-fast");
           return { value: await files.pick(launch.ref, launch.title, options, alive.signal) as unknown as MiniAppJson };
         } catch (error) {
           if (refusalOf(error) === "cancelled") pickAgainAt = now() + PICK_AFTER_CANCEL_MS;
@@ -580,6 +602,13 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
     while (recent.length && recent[0]! <= at - 1000) recent.shift();
     // Before anything of the message is read: stopping closes the port, so `recent` never holds more than this.
     if (recent.length > STOP_REQUESTS_PER_SECOND) return stop("protocol");
+    // The runner's answer to the watchdog, one a second: counted with the requests (a flood of them is a flood) but never
+    // refused for the rate, so an app busy with requests still answers it.
+    // Two reads, not a walk of the message: a pong is `{pong: n}` with no `id`.
+    if (data && typeof data === "object" && Number.isSafeInteger((data as { pong?: unknown }).pong) && !("id" in data)) {
+      pong?.((data as { pong: number }).pong);
+      return;
+    }
 
     const id = data && typeof data === "object" && Number.isSafeInteger((data as { id?: unknown }).id) && (data as { id: number }).id >= 0 ? (data as { id: number }).id : null;
     const fail = (error: MiniAppErrorCode) => { if (id !== null) post({ id, ok: false, error }); };
@@ -600,6 +629,14 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
     if (type === "close") {
       post({ id, ok: true });
       return stop("closed");
+    }
+    // The runner's word that the person tapped or typed in the app (a trusted pointerdown or keydown, at most one every
+    // few seconds). The app runs in the runner's realm and can send it too, so it counts only while the person is in
+    // the app; the answer is the same either way.
+    if (type === "activity") {
+      post({ id, ok: true });
+      void Promise.resolve().then(inUse).then((yes) => { if (yes && phase !== "stopped") onInput?.(); }, () => {});
+      return;
     }
 
     answer(type, args).then(({ value, transfer, file }) => {
@@ -648,11 +685,57 @@ export function onScreen(frame: HTMLIFrameElement): boolean {
   return frame.isConnected && document.visibilityState !== "hidden" && (frame.checkVisibility?.() ?? true);
 }
 
+export interface AppWatch {
+  /** Every `PING_EVERY_MS` while the app runs. */
+  tick(): void;
+  /** The runner answered ping `n`. */
+  pong(n: number): void;
+  /** The page was hidden: what it waited through meanwhile (a frozen tab, a phone asleep) is not the app's. */
+  hidden(): void;
+}
+
+/**
+ * The page's watchdog on a running app (WISP 1200 § The runner and the broker): a ping on the port each tick, which
+ * the runner answers at once, and `hung` once the app has held its thread `boundMs` while the page was shown.
+ *
+ * Where the runner's frame has a thread of its own (site isolation), an app that loops leaves its ping unanswered
+ * while the page runs on, and is stopped at the bound. Where it shares the page's (WebKit, Chromium without site
+ * isolation), nothing of the page runs while the app loops: it is seen when the loop gives the thread back, by a tick
+ * that comes `boundMs` late. The page cannot tell which frame held that thread, so every app running then is stopped;
+ * an endless loop there never gives it back, and the tab hangs until the browser offers to close it.
+ */
+export function watchApp({ ping, hung, boundMs = UNRESPONSIVE_AFTER_MS, now = () => performance.now(), shown = () => document.visibilityState !== "hidden" }: {
+  ping: (n: number) => void;
+  hung: () => void;
+  boundMs?: number;
+  now?: () => number;
+  shown?: () => boolean;
+}): AppWatch {
+  let asked: { n: number; at: number } | null = null;
+  let count = 0;
+  let last = now();
+  /** The page was hidden since the last tick: nothing is judged until a ping goes out in a shown page again. */
+  let excused = false;
+  return {
+    tick() {
+      const at = now();
+      const gap = at - last;
+      last = at;
+      if (!shown()) { excused = true; return; }
+      if (!excused && (gap >= boundMs || (asked && at - asked.at >= boundMs))) return hung();
+      if (!asked || excused) { asked = { n: ++count, at }; ping(asked.n); }
+      excused = false;
+    },
+    pong(n) { if (asked?.n === n) asked = null; },
+    hidden() { excused = true; },
+  };
+}
+
 /**
  * Runs an app in a sandboxed frame of the runner, inside `container`: the frame, its one port, the start and the
- * teardown. The frame is removed when the app stops, for whatever reason.
+ * teardown, and once it runs the watchdog (`watchApp`). The frame is removed when the app stops, for whatever reason.
  */
-export function startApp({ container, host, launch, view, onStop, onServing, startTimeoutMs = START_TIMEOUT_MS }: {
+export function startApp({ container, host, launch, view, onStop, onServing, startTimeoutMs = START_TIMEOUT_MS, unresponsiveAfterMs = UNRESPONSIVE_AFTER_MS }: {
   container: HTMLElement;
   host: AppsPlatform;
   launch: AppLaunch;
@@ -661,6 +744,7 @@ export function startApp({ container, host, launch, view, onStop, onServing, sta
   /** It serves a file to its contact now, or no longer. */
   onServing?: (on: boolean) => void;
   startTimeoutMs?: number;
+  unresponsiveAfterMs?: number;
 }): RunningApp {
   const runner = runnerFor(host, launch);
   const frame = document.createElement("iframe");
@@ -671,14 +755,26 @@ export function startApp({ container, host, launch, view, onStop, onServing, sta
   frame.title = launch.title;
   let port: MessagePort | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let watch: AppWatch | null = null;
+  let watching: ReturnType<typeof setInterval> | null = null;
+  const hidden = () => { if (document.visibilityState === "hidden") watch?.hidden(); };
 
   const broker = createBroker({
     host, launch, view,
     shown: () => onScreen(frame),
+    // The app can post `activity` itself, and left in front it would keep the lock away for good: the person's tap or key
+    // in the frame also activates this page (HTML § user activation), which no script can, so that is asked too (a
+    // browser without the API: the focus only, as before).
+    inUse: () => onScreen(frame) && document.hasFocus() && document.activeElement === frame
+      && ((navigator as { userActivation?: { isActive: boolean } }).userActivation?.isActive ?? true),
+    onInput: appInput,
     serving: onServing,
+    pong: (n) => watch?.pong(n),
     post:(message, transfer) => { try { port?.postMessage(message, transfer ?? []); } catch { /* closed */ } },
     stopped: (reason) => {
       if (timer) clearTimeout(timer);
+      if (watching) clearInterval(watching);
+      document.removeEventListener("visibilitychange", hidden);
       frame.removeEventListener("load", loaded);
       port?.close();
       port = null;
@@ -690,6 +786,16 @@ export function startApp({ container, host, launch, view, onStop, onServing, sta
   function loaded() {
     broker.load();
     if (broker.phase === "running" && timer) { clearTimeout(timer); timer = null; }
+    if (broker.phase === "running" && !watch) {
+      watch = watchApp({
+        boundMs: unresponsiveAfterMs,
+        ping: (n) => { try { port?.postMessage({ event: "ping", data: n }); } catch { /* closed */ } },
+        hung: () => broker.stop("unresponsive"),
+      });
+      watching = setInterval(() => watch?.tick(), PING_EVERY_MS);
+      document.addEventListener("visibilitychange", hidden);
+      watch.tick();
+    }
     if (broker.phase !== "starting" || port) return;
     const channel = new MessageChannel();
     port = channel.port1;

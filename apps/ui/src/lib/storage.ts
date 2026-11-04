@@ -416,7 +416,8 @@ export function addMessages(
 
   for (const message of fresh) {
     if ((message.sender === "peer" || message.sender === "system") && message.id.startsWith("peer_")) {
-      const joinMatch = message.nick ? null : message.text.match(/^👋 (.+) joined$/);
+      // Named by the words of the chat's joined line only (`systemEvent`): a message of theirs in those words names nobody.
+      const joinMatch = message.nick || message.systemEvent?.type !== "join" ? null : message.text.match(/^👋 (.+) joined$/);
       const nick = peerDisplayName(message.nick ?? joinMatch?.[1]);
       if (nick && session.nickSource !== "profile") session.nick = nick;
     }

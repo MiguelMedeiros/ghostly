@@ -271,32 +271,32 @@ if (!('encodeInto' in cachedTextEncoder)) {
 
 let WASM_VECTOR_LEN = 0;
 
-function __wasm_bindgen_func_elem_4186(arg0, arg1, arg2) {
-    wasm.__wasm_bindgen_func_elem_4186(arg0, arg1, addHeapObject(arg2));
-}
-
-function __wasm_bindgen_func_elem_8907(arg0, arg1) {
-    wasm.__wasm_bindgen_func_elem_8907(arg0, arg1);
-}
-
 function __wasm_bindgen_func_elem_3598(arg0, arg1) {
     wasm.__wasm_bindgen_func_elem_3598(arg0, arg1);
+}
+
+function __wasm_bindgen_func_elem_1646(arg0, arg1, arg2) {
+    wasm.__wasm_bindgen_func_elem_1646(arg0, arg1, addHeapObject(arg2));
 }
 
 function __wasm_bindgen_func_elem_3637(arg0, arg1) {
     wasm.__wasm_bindgen_func_elem_3637(arg0, arg1);
 }
 
+function __wasm_bindgen_func_elem_4186(arg0, arg1, arg2) {
+    wasm.__wasm_bindgen_func_elem_4186(arg0, arg1, addHeapObject(arg2));
+}
+
 function __wasm_bindgen_func_elem_8961(arg0, arg1, arg2) {
     wasm.__wasm_bindgen_func_elem_8961(arg0, arg1, addHeapObject(arg2));
 }
 
-function __wasm_bindgen_func_elem_3298(arg0, arg1) {
-    wasm.__wasm_bindgen_func_elem_3298(arg0, arg1);
+function __wasm_bindgen_func_elem_8907(arg0, arg1) {
+    wasm.__wasm_bindgen_func_elem_8907(arg0, arg1);
 }
 
-function __wasm_bindgen_func_elem_1646(arg0, arg1, arg2) {
-    wasm.__wasm_bindgen_func_elem_1646(arg0, arg1, addHeapObject(arg2));
+function __wasm_bindgen_func_elem_3298(arg0, arg1) {
+    wasm.__wasm_bindgen_func_elem_3298(arg0, arg1);
 }
 
 function __wasm_bindgen_func_elem_9044(arg0, arg1, arg2, arg3) {

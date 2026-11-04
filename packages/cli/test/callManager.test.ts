@@ -226,6 +226,62 @@ describe("the audio socket", () => {
     expect(existsSync(path)).toBe(false);
   });
 
+  it("with the call's token required (a named pipe others may open), hears and replaces nobody before the token", async () => {
+    const path = audioSocketPath(tmp(), "abc");
+    const got: Buffer[] = [];
+    const socket = await AudioSocket.open(path, 16000, { onAudio: (c) => got.push(c) }, { requireToken: true, proveMs: 300 });
+    expect(socket.token).toMatch(/^[0-9a-f]{64}$/);
+    const frame = Buffer.alloc(640, 7);
+    // The program sends the token first, its audio in the same write: only the audio goes to the call.
+    const first = await program(path);
+    first.socket.write(Buffer.concat([Buffer.from(`${socket.token}\n`), Buffer.from([1, 2])]));
+    await until(() => socket.connected);
+    await until(() => Buffer.concat(got).length === 2);
+    socket.write(frame);
+    await until(() => first.heard().length === 640);
+    // Another account's client that only reads: no audio, and the program keeps the call.
+    const reader = await program(path);
+    await new Promise((r) => setTimeout(r, 50));
+    for (let i = 0; i < 10; i++) socket.write(frame);
+    await until(() => first.heard().length === 11 * 640);
+    expect(reader.heard().length).toBe(0);
+    // It is closed once its time to prove itself is up; a wrong token is closed at once.
+    await reader.ended;
+    const wrong = await program(path);
+    wrong.socket.write(`${"0".repeat(64)}\n`);
+    await wrong.ended;
+    expect(wrong.heard().length).toBe(0);
+    expect(socket.connected).toBe(true);
+    first.socket.write(Buffer.from([3]));
+    await until(() => Buffer.concat(got).length === 3);
+    // A program with the token replaces the first, which reads EOF.
+    const second = await program(path);
+    second.socket.write(`${socket.token}\n`);
+    await first.ended;
+    socket.write(frame);
+    await until(() => second.heard().length === 640);
+    await socket.close();
+    await second.ended;
+  });
+
+  it("on an owner-only socket takes a program with or without the token, and keeps the token out of the audio", async () => {
+    const path = audioSocketPath(tmp(), "abc");
+    const got: Buffer[] = [];
+    const socket = await AudioSocket.open(path, 16000, { onAudio: (c) => got.push(c) }, { requireToken: false });
+    const first = await program(path);
+    first.socket.write(`${socket.token}\n`);
+    first.socket.write(Buffer.from([1, 2]));
+    await until(() => Buffer.concat(got).length === 2);
+    expect(Buffer.concat(got)).toEqual(Buffer.from([1, 2]));
+    // One written to the contract before the token: its audio from the first byte.
+    const second = await program(path);
+    await first.ended;
+    second.socket.write(Buffer.from([0x61, 0x62, 9]));
+    await until(() => Buffer.concat(got).length === 5);
+    expect(Buffer.concat(got).subarray(2)).toEqual(Buffer.from([0x61, 0x62, 9]));
+    await socket.close();
+  });
+
   it("moves to a private folder in /tmp when the profile's path is too long for a socket, and refuses a shared one", async () => {
     vi.stubEnv("XDG_RUNTIME_DIR", "");
     vi.stubEnv("TMPDIR", "/tmp");
@@ -266,6 +322,18 @@ describe("the audio socket", () => {
   });
 });
 
+describe("a one-shot's call", () => {
+  it("names the daemon it needs, before the chat's own not-live reason", async () => {
+    const link = { id: "chat-ab", label: "bia", profile: "paired-chat/1", callsUnavailable: "Calls need a live connection" } as unknown as LinkView;
+    const engine: CallEngine = { getState: () => ({ links: [link] }) as unknown as EngineState, setCallSignal: () => {} };
+    const calls = new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: false });
+    const daemon = { code: "unavailable", message: "Calls need the daemon (a call outlives this command): start it with `ghostly daemon --detach`" };
+    await expect(calls.start("bia", {})).rejects.toMatchObject(daemon);
+    // A daemon still says why the chat cannot call.
+    await expect(new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: true }).start("bia", {})).rejects.toMatchObject({ code: "unavailable", message: "Calls need a live connection" });
+  });
+});
+
 describe("two call managers", { timeout: 60_000 }, () => {
   it("call, auto-answer, a tone each way through the programs, flush, hang up", async () => {
     const { a, b } = pairOfManagers();
@@ -273,7 +341,7 @@ describe("two call managers", { timeout: 60_000 }, () => {
     expect(JSON.parse(readFileSync(join(dirs.at(-1)!, "calls.json"), "utf8"))).toEqual({ autoAnswer: { on: true, from: ["chat-ba"], rate: 16000 } });
 
     const placed = await a.calls.start("chat-ab", { rate: 48000 }) as { call: string; audio: { socket: string; rate: number } };
-    expect(placed).toMatchObject({ direction: "out", state: "ringing", audio: { rate: 48000, channels: 1, format: "s16le", frameMs: 20 } });
+    expect(placed).toMatchObject({ direction: "out", state: "ringing", audio: { token: expect.stringMatching(/^[0-9a-f]{64}$/), rate: 48000, channels: 1, format: "s16le", frameMs: 20 } });
     expect(a.events.map((e) => e.type)).toEqual(["call.outgoing"]);
     // The program may connect before anyone answered.
     const alice = await program(placed.audio.socket);
@@ -1063,6 +1131,23 @@ describe("auto-answer from the chats named", () => {
     }
     expect(calls.getAuto()).toMatchObject({ on: false, from: [] });
     expect(existsSync(saved(calls))).toBe(false);
+  });
+
+  it("drops a removed chat from the list, and turns auto-answer off when the last one goes", () => {
+    const calls = manager();
+    calls.setAuto({ on: true, from: ["chat-mallory", "alice"], rate: 16000 });
+    calls.forgetChat("chat-mallory");
+    expect(calls.getAuto()).toEqual({ on: true, from: ["chat-real-alice"], rate: 16000 });
+    calls.forgetChat("chat-real-alice");
+    expect(calls.getAuto()).toEqual({ on: false, from: [], rate: 48000 });
+    expect(JSON.parse(readFileSync(saved(calls), "utf8"))).toEqual({ autoAnswer: { on: false, from: [], rate: 48000 } });
+  });
+
+  it("leaves auto-answer from anyone on when a chat is removed", () => {
+    const calls = manager();
+    calls.setAuto({ on: true });
+    calls.forgetChat("chat-mallory");
+    expect(calls.getAuto()).toMatchObject({ on: true, from: [] });
   });
 
   it("names the command that gives the chat a label when it refuses one", () => {

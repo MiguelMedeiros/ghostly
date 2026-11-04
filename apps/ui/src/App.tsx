@@ -1,14 +1,16 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./components/Sidebar";
+import { ListNotices } from "./components/ListNotices";
 import { MobileTabBar } from "./components/MobileTabBar";
 import { InstallSteps } from "./components/InstallApp";
+import { TranslateDownloadFailure } from "./components/TranslateDownloadFailure";
 import { Chat } from "./pages/Chat";
 import { chatRouteSession } from "./lib/url";
 import { offerSession } from "./lib/lockedRing";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useIsMobile } from "./hooks/useIsMobile";
-import { useServicesPlatform } from "./hooks/useServicesPlatform";
+import { servicesPlatform } from "./lib/platform";
 import { useSettings } from "./contexts/SettingsContext";
 import { newSpace } from "@ghostly/browser/backup/storage";
 import { useViewportHeight } from "./hooks/useViewportHeight";
@@ -23,6 +25,7 @@ import { useGoneGroups } from "./hooks/useGoneGroups";
 import { deviceWakeWords, useWakeTableSync } from "./lib/wakePush";
 import { useComputerAwake, useFilesMoving } from "./lib/keepAwake";
 import { useCallOnSync } from "./hooks/useCallOnSync";
+import { setChatOnCall } from "./lib/chatsOnCall";
 import { useI18n } from "./contexts/I18nContext";
 import { useAppSessions } from "./lib/apps/running";
 import { useGroupDownloadsSync } from "./lib/groupDownloads";
@@ -62,7 +65,9 @@ function useThemeColor() {
  */
 function useHoldStorageSync() {
   const { settings, updateBackupStorage } = useSettings();
-  const platform = useServicesPlatform();
+  // The platform object only (it never changes): following its state drew the app's shell, and every chat it holds, on
+  // every engine state.
+  const platform = servicesPlatform;
   const s3 = settings.backupS3 ? JSON.stringify(settings.backupS3) : null;
   const space = settings.backupSpace;
   useEffect(() => {
@@ -137,6 +142,8 @@ function useLoadedChats() {
   }), []);
 
   const onCallChange = useCallback((sessionId: string, onCall: boolean) => {
+    // Said to the pages that delete chats, too: none is deleted under its call (lib/chatsOnCall.ts).
+    setChatOnCall(sessionId, onCall);
     setCallSessions((current) =>
       onCall ? (current.includes(sessionId) ? current : [...current, sessionId]) : current.includes(sessionId) ? current.filter((id) => id !== sessionId) : current);
     if (onCall) setRingSessions((current) => (current.includes(sessionId) ? current.filter((id) => id !== sessionId) : current));
@@ -180,6 +187,7 @@ export function App() {
   // Download automatically in groups, Wi-Fi only: the engine's switch follows the connection (WISP 503).
   useGroupDownloadsSync();
   const isMobile = useIsMobile();
+  const { settings } = useSettings();
   const { pathname } = useLocation();
   useViewportHeight();
   useThemeColor();
@@ -221,18 +229,21 @@ export function App() {
         <Sidebar />
         {/* Keyed as on a phone: a phone turned on its side (or back) keeps the open chat and page mounted, and the
             message field its focus and its keyboard. */}
-        {/* Two rows: a voice message playing on away from its chat (NowPlayingBar) over the open chat or page. A grid
-            rather than a wrapper around them, which would load the open chat again when the bar came. */}
-        <main key="main" ref={mainRef} tabIndex={-1} className="flex-1 grid grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] min-w-0 focus:outline-none">
-          <NowPlayingBar key="playing" className="row-start-1" />
-          <Fragment key="chats">{chats("row-start-2 col-start-1 flex flex-col min-w-0 min-h-0")}</Fragment>
+        {/* Three rows: the list's notices when it is folded to a rail, which has no room for them, and a voice message
+            playing on away from its chat (NowPlayingBar), over the open chat or page. A grid rather than a wrapper
+            around them, which would load the open chat again when the bar came. */}
+        <main key="main" ref={mainRef} tabIndex={-1} className="flex-1 grid grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_minmax(0,1fr)] min-w-0 focus:outline-none">
+          {settings.chatListCollapsed && <div key="notices" className="row-start-1 flex flex-col min-w-0"><ListNotices /></div>}
+          <NowPlayingBar key="playing" className="row-start-2" />
+          <Fragment key="chats">{chats("row-start-3 col-start-1 flex flex-col min-w-0 min-h-0")}</Fragment>
           {!inChat && (
-            <div key="page" className="row-start-2 col-start-1 flex flex-col min-w-0 min-h-0">
+            <div key="page" className="row-start-3 col-start-1 flex flex-col min-w-0 min-h-0">
               <Outlet />
             </div>
           )}
         </main>
         <InstallSteps />
+        <TranslateDownloadFailure />
       </div>
     );
   }
@@ -259,6 +270,7 @@ export function App() {
       {tabs && <NowPlayingBar key="playing" className="shrink-0 border-t" />}
       {tabs && <MobileTabBar />}
       <InstallSteps />
+      <TranslateDownloadFailure />
     </div>
   );
 }

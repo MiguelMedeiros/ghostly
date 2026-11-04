@@ -6,12 +6,13 @@ export type DeviceLook = "phone" | "tablet" | "computer" | "browser";
 /**
  * What a device looks like, read from its name: the device set keeps a name for each device and no kind, so the name
  * the app suggested ("iPhone", "Chrome on Mac", "Mac app") or the person typed is all there is. Only a picture: the
- * name beside it says what the device is.
+ * name beside it says what the device is. The words are those of every app language, so a name suggested or typed in
+ * any of them ("هاتف", "スマホ", "Celular", `devices.defaultName`) shows its kind.
  */
 export function deviceLook(name: string): DeviceLook {
-  if (/chrome|firefox|safari|edge|brave|opera|browser|extension/i.test(name)) return "browser";
-  if (/ipad|tablet/i.test(name)) return "tablet";
-  if (/phone|android|pixel|galaxy|mobile/i.test(name)) return "phone";
+  if (/chrome|firefox|safari|edge|brave|opera|browser|extension|navegador|navigateur|ブラウザ|浏览器|متصفح/i.test(name)) return "browser";
+  if (/ipad|tablet|タブレット|平板|لوحي|تابلت/i.test(name)) return "tablet";
+  if (/phone|android|pixel|galaxy|mobile|móvil|movil|celular|telefon|teléfon|téléphon|telemóvel|cellulare|スマホ|スマートフォン|携帯|電話|手机|电话|هاتف|جوال|جوّال|موبايل/i.test(name)) return "phone";
   return "computer";
 }
 

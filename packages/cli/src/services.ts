@@ -3,8 +3,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { GhostlyHttpError, LIMITS, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
-import { bool, chatOf, node, num, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { GhostlyHttpError, LIMITS, parseLocalTarget, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
+import { bool, chatOf, findOwnNamedChat, node, num, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 import { isLive } from "./views";
 
@@ -34,8 +34,11 @@ export const nodeLocalFetch: LocalFetch = async (request) => {
   };
 };
 
-/** Contact services open on loopback ports, by `<peer>/<service>`, while this process runs. */
-const open = new Map<string, OpenedService>();
+/**
+ * Contact services open on loopback ports, by `<peer>/<service>`, while this process runs: each as soon as it starts
+ * opening, so a second `service open` meanwhile answers the same one. A server that could not open is taken out.
+ */
+const open = new Map<string, Promise<OpenedService>>();
 const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 /** Cookie names an opened service may set and have passed back (browsers keep about 180 per host). */
 const MAX_COOKIE_NAMES = 256;
@@ -202,6 +205,17 @@ function serviceOf(ctx: ApiContext, params: Params): string {
   return serviceId;
 }
 
+/**
+ * A port the person chose that could not be taken, in words that name it. Before, one in use was Node's EADDRINUSE as
+ * `engine`, and one not allowed read as a file (`localFileError`): "Not allowed to write or read the path".
+ */
+function portError(error: unknown, port: number): unknown {
+  const { code } = (error ?? {}) as { code?: unknown };
+  if (port && code === "EADDRINUSE") return new CliError("busy", `Port ${port} is in use on this machine: choose another, or leave out --port`);
+  if (port && (code === "EACCES" || code === "EPERM")) return new CliError("refused", `Port ${port} is not allowed for this user: choose another, or leave out --port`);
+  return error;
+}
+
 export const SERVICE_METHODS: Record<string, Method> = {
   async "service.list"(ctx) {
     return { services: state(ctx).services.map((s) => ({ id: s.id, name: s.name, target: s.target, enabled: s.enabled, sharedWith: s.sharedWith ?? [], requests: s.requests })) };
@@ -210,7 +224,17 @@ export const SERVICE_METHODS: Record<string, Method> = {
     const target = str(params, "target", true);
     let url: URL;
     try { url = new URL(target); } catch { throw new CliError("bad_request", `Not a URL: ${target}`); }
-    if (!(LOOPBACK.has(url.hostname) || /^127\.\d+\.\d+\.\d+$/.test(url.hostname))) throw new CliError("refused", "Only a web app on this machine (127.0.0.1, localhost) can be shared");
+    const here = LOOPBACK.has(url.hostname) || /^127\.\d+\.\d+\.\d+$/.test(url.hostname);
+    if (!here) throw new CliError("refused", "Only a web app on this machine (127.0.0.1, localhost) can be shared");
+    // The engine's own check of the target (core http.ts `parseLocalTarget`), first: a query, a fragment, a user and
+    // password or a scheme other than http(s) is the person's input to fix, `bad_request` naming it. Thrown by the engine,
+    // they were plain errors, `engine` (exit 1): "the engine failed" (agents#894).
+    try { parseLocalTarget(target); } catch (error) {
+      const said = error instanceof Error ? error.message : String(error);
+      // Named without its user, password, query and fragment: the parts refused here can hold a secret (a token).
+      const shown = `${url.protocol}//${url.host}${url.pathname}`;
+      throw new CliError(/^Only services on this machine/.test(said) ? "refused" : "bad_request", `${said}: ${shown}`);
+    }
     // `service`, as the rest of the family answers it; `serviceId` (the engine's key) stays beside it for a release.
     const { serviceId } = node(ctx).addService({ name: str(params, "name", true), target });
     return { service: serviceId, serviceId };
@@ -226,7 +250,8 @@ export const SERVICE_METHODS: Record<string, Method> = {
     return { service: serviceId, enabled: !bool(params, "off") };
   },
   async "service.share"(ctx, params) {
-    const link = chatOf(ctx, params);
+    // A grant the contact keeps using: only what this side chose names its chat, as for `call auto --from`.
+    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true));
     const shared = !bool(params, "off");
     const serviceId = serviceOf(ctx, params);
     await node(ctx).setServiceShared({ serviceId, peerPubKeyZ32: link.peerPubKeyZ32, shared });
@@ -243,21 +268,40 @@ export const SERVICE_METHODS: Record<string, Method> = {
     const link = chatOf(ctx, params);
     const service = str(params, "service", true);
     const key = `${link.peerPubKeyZ32}/${service}`;
-    const already = open.get(key);
-    if (already) return { chat: link.id, service, url: already.url };
+    const port = num(params, "port", 0, { min: 0, max: 65535, whole: true });
+    // One still opening counts: before, two opens at once each made a server, and `service close` closed only the second.
+    const already = await open.get(key)?.catch(() => undefined);
+    if (already) {
+      // Another port asked for: the link on this one, with exit 0, left a script that was told a port on the wrong one.
+      const on = (already.server.address() as AddressInfo).port;
+      if (port && port !== on) throw new CliError("busy", `That service is open here on port ${on}: ghostly service close ${link.id} ${service} first, or leave out --port`);
+      return { chat: link.id, service, url: already.url };
+    }
     if (!link.peerServices?.some((s) => s.id === service)) throw new CliError("not_found", `The contact shares no service ${service} (or is not live)`);
     const peer = link.peerPubKeyZ32;
-    const opened = await openServiceServer((request) => node(ctx).request(peer, service, request), num(params, "port", 0, { min: 0, max: 65535 }));
-    open.set(key, opened);
+    // Another open began while this one waited: it answers that one.
+    if (open.has(key)) return SERVICE_METHODS["service.open"](ctx, params);
+    const opening = openServiceServer((request) => node(ctx).request(peer, service, request), port).catch((error: unknown) => {
+      if (open.get(key) === opening) open.delete(key);
+      throw portError(error, port);
+    });
+    open.set(key, opening);
+    const opened = await opening;
     return { chat: link.id, service, url: opened.url };
   },
   async "service.close"(ctx, params) {
     const link = chatOf(ctx, params);
     const key = `${link.peerPubKeyZ32}/${str(params, "service", true)}`;
-    const entry = open.get(key);
-    if (!entry) throw new CliError("not_found", "That service is not open here");
+    const pending = open.get(key);
     open.delete(key);
-    await new Promise<void>((resolve) => entry.server.close(() => resolve()));
+    const entry = await pending?.catch(() => undefined);
+    if (!entry) throw new CliError("not_found", "That service is not open here");
+    // Closed means closed: an answer still streaming (a page's EventSource) kept `close` waiting for good, and kept coming.
+    // Each connection's end stops the contact's answer too (`proxy`).
+    await new Promise<void>((resolve) => {
+      entry.server.close(() => resolve());
+      entry.server.closeAllConnections();
+    });
     return { closed: key };
   },
 };

@@ -61,3 +61,25 @@ test("reader scroll regions: a table that stops fitting becomes a tab stop again
   const after = await boxes(page);
   expect(after.filter((b) => b.tabindex === "0").length).toBeGreaterThan(before.filter((b) => b.tabindex === "0").length);
 });
+
+for (const wisp of ["/wisps/400-chat", "/wisps/adapter-roadmap", "/wisps/map"]) {
+  test(`reader scroll regions on ${wisp}: a Mermaid diagram's source that scrolls is a tab stop, also once its closed details opens`, async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 900 });
+    await page.goto(wisp);
+    const sources = await page.locator(".reference-diagram details").all();
+    expect(sources.length).toBeGreaterThan(0);
+    for (const details of sources) {
+      const pre = details.locator("pre");
+      const focusable = () => pre.evaluate((el) => (el.focus(), document.activeElement === el));
+      // A closed one keeps the keyboard out (its content is hidden) until it opens.
+      if (!(await details.evaluate((el) => (el as HTMLDetailsElement).open))) {
+        expect(await focusable()).toBe(false);
+        await details.locator("summary").click();
+      }
+      expect(await pre.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+      await expect(pre).toHaveAttribute("tabindex", "0");
+      expect(await focusable()).toBe(true);
+    }
+    expect((await axe(page, ".reader-prose")).filter((v) => v.startsWith("scrollable-region-focusable"))).toEqual([]);
+  });
+}

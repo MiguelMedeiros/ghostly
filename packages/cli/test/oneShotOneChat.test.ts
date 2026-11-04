@@ -90,12 +90,13 @@ describe("a one-shot about one chat", { timeout: 180_000 }, () => {
     }
   });
 
-  it("starts every chat for a call that names none, or one that may name a group", () => {
+  it("starts every chat for a call that names none and makes none, or one that may name a group", () => {
     expect(oneChatOnly("invite.join", { invite: "ghostly1…" })).toBe(true);
+    expect(oneChatOnly("invite.create", {})).toBe(true);
     expect(oneChatOnly("file.send", { chat: "carol", path: "a.txt" })).toBe(true);
     expect(oneChatOnly("usage.send", { all: true })).toBe(false);
     expect(oneChatOnly("task.send", { chat: "Sala" })).toBe(false);
     expect(oneChatOnly("group.send", { group: "Sala", chat: "carol" })).toBe(false);
-    expect(oneChatOnly("invite.create", {})).toBe(false);
+    expect(oneChatOnly("chat.list", {})).toBe(false);
   });
 });

@@ -55,7 +55,9 @@ export function useDraftTranslation({ config, appLanguage, onFailure }: {
     const source = draft.trim();
     const id = ++run.current;
     const current = () => mounted.current && run.current === id;
-    const from = config.detect ? draftLanguage(source, config.detect, named) ?? appLanguage : appLanguage;
+    const detected = config.detect ? await draftLanguage(source, config.detect, named) : appLanguage;
+    if (!current()) return;
+    const from = detected === null ? appLanguage : detected;
     if (from === undefined || from === to) { setState({ step: "shown", to, source, text: source, same: true }); return; }
     setState({ step: "working", to, source });
     const pair = `${from}-${to}`;

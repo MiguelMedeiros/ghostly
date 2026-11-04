@@ -4,7 +4,7 @@ import { MoneyQr } from "./MoneyQr";
 import { parseEngineError, type Bolt11Invoice, type LightningDestination, type PaymentMethodName } from "@ghostly/core";
 import { LightningAddressPay } from "./wallet/LightningAddressPay";
 import { holdsLess, lightningNetworkFor } from "./walletCardData";
-import { NetworkTag, satsIn } from "./NetworkTag";
+import { NetworkTag, satsIn, unitFor } from "./NetworkTag";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
 import { LightningPayWith, useLightningPayer } from "./LightningPayWith";
@@ -104,7 +104,7 @@ function Card({ label, tag, amount, unit, otherUnit, lines, qr, children, testId
             {/* Only the number isolated: in a right-to-left page a Latin unit beside it was one run with it, glued to it,
                 and one isolate around both read "تجريبية sats 250,000". The unit stays in the line's direction. */}
             <bdi className="text-[22px] font-semibold" data-testid="money-amount">{formatAmount(amount, t.language)}</bdi>
-            <span className="text-text-primary/65 text-xs ms-1">{unit === "sat" ? "sats" : unit}</span>
+            <span className="text-text-primary/65 text-xs ms-1">{unit === "sat" ? (amount === 1 ? "sat" : "sats") : unitFor(t, unit, amount)}</span>
           </>
         )}
       </p>
@@ -141,7 +141,10 @@ function relativeExpiry(t: Translate, expiresAt: number, now: number): string {
   return t("payments.invoice.expiresDays", { n: Math.round(left / 86400) });
 }
 
-/** `peerPubKey`: the chat the invoice is in, told once it is paid (a test mint's invoice counts only on the payer's word). */
+/**
+ * `peerPubKey`: the contact told once it is paid (a test mint's invoice counts only on the payer's word): the chat's,
+ * or in a group the writer's.
+ */
 function LightningCard({ invoice, mine, off, peerPubKey }: { invoice: Bolt11Invoice; mine: boolean; off: boolean; peerPubKey?: string }) {
   const { t } = useI18n();
   const all = useWalletPlatform();
@@ -213,7 +216,9 @@ function LightningCard({ invoice, mine, off, peerPubKey }: { invoice: Bolt11Invo
         }
       } catch (e) {
         // Someone else got there first. The mint refused, so it is not paid twice, and there is nothing left to pay.
-        if (!/already paid/i.test(rawError(e))) throw e;
+        // Not a recipient that refused an invoice it does not know or already settled (LND's "unknown or already paid"):
+        // nobody is known to have paid it.
+        if (!/already paid/i.test(rawError(e)) || /unknown or already paid/i.test(rawError(e))) throw e;
       }
       markSettled(payable.id);
       if (payable.id === id) setPaid(true);
@@ -261,7 +266,7 @@ function LightningCard({ invoice, mine, off, peerPubKey }: { invoice: Bolt11Invo
         </Fragment>
       )}
       {failed && <MoneyCopyRefused value={invoice.invoice} />}
-      {error && <Notice problem={error} className="text-xs m-0 basis-full" ink />}
+      {error && <Notice problem={error} className="text-xs m-0 basis-full" />}
     </Card>
   );
 }
@@ -275,6 +280,13 @@ function LightningAddressCard({ destination, mine, off }: { destination: Lightni
   const wallet = lightningPayer.payer;
   const [paying, setPaying] = useState(false);
   const { copied, failed, copy } = useMoneyCopy(destination.text);
+  // Done takes the payment away with the button pressed: the keys go back to Pay, drawn again, not to the page.
+  const payOpen = useRef<HTMLButtonElement>(null);
+  const wasPaying = useRef(paying);
+  useEffect(() => {
+    if (wasPaying.current && !paying && focusLost()) payOpen.current?.focus({ preventScroll: true });
+    wasPaying.current = paying;
+  }, [paying]);
   return (
     <div className="min-w-[230px] max-md:min-w-[min(230px,68vw)] max-w-[min(300px,72vw)] px-1 py-0.5" data-testid="lnurl-bubble">
       <p className="text-[11px] uppercase tracking-wider text-text-primary/65 m-0">{destination.kind === "address" ? t("payments.invoice.lightningAddress") : "LNURL"}</p>
@@ -285,7 +297,7 @@ function LightningAddressCard({ destination, mine, off }: { destination: Lightni
       ) : (
         <div className="flex flex-wrap gap-1.5 mt-2">
           {wallet && !mine && !off && <LightningPayWith payer={lightningPayer} unit={satsIn(t, network)} testId="lnurl-lightning-card" />}
-          {wallet && !mine && !off && <button className={button} data-testid="lnurl-pay-open" onClick={() => setPaying(true)}>{t("payments.invoice.pay")}</button>}
+          {wallet && !mine && !off && <button ref={payOpen} className={button} data-testid="lnurl-pay-open" onClick={() => setPaying(true)}>{t("payments.invoice.pay")}</button>}
           <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("common.copy")}</button>
           {failed && <MoneyCopyRefused value={destination.text} />}
         </div>
@@ -307,6 +319,9 @@ function CashuCard({ value, mine, offOn, onNetwork }: { value: string; mine: boo
   const id = useMemo(() => settledMoneyId(value), [value]);
   const [redeemed, setRedeemed] = useSettled(id);
   const [spent, setSpent] = useState(false);
+  // What the mint kept to take the token in, when this card redeemed it: the card shows the token's face value, which
+  // is more than arrived (agents#2255).
+  const [feeKept, setFeeKept] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
   const { copied, failed, copy } = useMoneyCopy(value);
@@ -383,7 +398,7 @@ function CashuCard({ value, mine, offOn, onNetwork }: { value: string; mine: boo
       qr={value}
     >
       {redeemed ? (
-        <span ref={redeemedLine} tabIndex={-1} className="text-accent-hover text-xs font-bold self-center focus:outline-none" data-testid="token-redeemed">{t("payments.invoice.redeemed")}</span>
+        <span ref={redeemedLine} tabIndex={-1} className="text-accent-hover text-xs font-bold self-center focus:outline-none" data-testid="token-redeemed">{feeKept > 0 ? t("payments.invoice.redeemedFee", { fee: formatAmount(feeKept, t.language) }) : t("payments.invoice.redeemed")}</span>
       ) : spent ? (
         <span ref={redeemedLine} tabIndex={-1} className="text-text-primary/65 text-xs font-bold self-center focus:outline-none" data-testid="token-spent">{t("payments.invoice.alreadySpent")}</span>
       ) : (
@@ -397,7 +412,8 @@ function CashuCard({ value, mine, offOn, onNetwork }: { value: string; mine: boo
               setError(null);
               setBusy(true);
               try {
-                await wallet.receiveToken(value);
+                const { fee } = await wallet.receiveToken(value);
+                setFeeKept(fee);
                 markSettled(id);
                 setRedeemed(true);
               } catch (e) {
@@ -417,7 +433,7 @@ function CashuCard({ value, mine, offOn, onNetwork }: { value: string; mine: boo
       )}
       <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("common.copy")}</button>
       {failed && <MoneyCopyRefused value={value} />}
-      {error && <Notice problem={error} className="text-xs m-0 basis-full" ink />}
+      {error && <Notice problem={error} className="text-xs m-0 basis-full" />}
     </Card>
   );
 }
@@ -439,9 +455,11 @@ const METHOD_NAME = { cashu: "Cashu", lightning: "Lightning", arkade: "Ark", bar
  * `peerPubKey`: the chat it is in, whose choice of ways of paying, and of each one's networks, decides whether it can be
  * paid or redeemed here: the card's way of paying on the card's own network (Testnet Lightning off, Mainnet on: a
  * Testnet invoice is off here), as the composer and the engine decide.
+ * `payee`: in a group, the contact who wrote it, told (as the chat's contact is) when its invoice is paid.
  */
-export function InvoiceBubble({ money, mine, peerPubKey }: { money: MoneyInText; mine: boolean; peerPubKey?: string }) {
+export function InvoiceBubble({ money, mine, peerPubKey, payee }: { money: MoneyInText; mine: boolean; peerPubKey?: string; payee?: string }) {
   const { t } = useI18n();
+  const told = peerPubKey || payee;
   const wallets = useWalletPlatform();
   const chat = usePlatformValue(() => {
     const peer = servicesPlatform?.getPeer(peerPubKey ?? "");
@@ -455,15 +473,16 @@ export function InvoiceBubble({ money, mine, peerPubKey }: { money: MoneyInText;
   const method = money.type === "cashu" ? "cashu" : money.type === "lightning" || money.type === "lnurl" ? "lightning" : moreMoneyMethod(money);
   const network = money.type === "lightning" ? lightningNetworkFor(state, money.invoice.network) : money.type === "lnurl" ? lightningNetworkFor(state)
     : money.type === "cashu" ? tokenNetwork : money.type === "bolt12" ? money.offer.network : money.request.network;
-  const off = offHere(method, network);
+  // No way of paying in the app (Monero): nothing for the chat's switches to turn off.
+  const off = !!method && offHere(method, network);
   return (
     <>
       {money.rest && <p className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap m-0 mb-1.5">{money.rest}</p>}
       <Fragment key={whatItPays(money)}>
-        {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} peerPubKey={peerPubKey} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : money.type === "cashu" ? <CashuCard value={money.value} mine={mine} offOn={(network) => offHere("cashu", network)} onNetwork={setTokenNetwork} />
-          : <MoneyFormatsBubble money={money} mine={mine} off={off} renderLightning={(invoice) => <LightningCard invoice={invoice} mine={mine} off={offHere("lightning", lightningNetworkFor(state, invoice.network))} peerPubKey={peerPubKey} />} />}
+        {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} peerPubKey={told} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : money.type === "cashu" ? <CashuCard value={money.value} mine={mine} offOn={(network) => offHere("cashu", network)} onNetwork={setTokenNetwork} />
+          : <MoneyFormatsBubble money={money} mine={mine} off={off} renderLightning={(invoice) => <LightningCard invoice={invoice} mine={mine} off={offHere("lightning", lightningNetworkFor(state, invoice.network))} peerPubKey={told} />} />}
       </Fragment>
-      {off && !mine && <p className="text-[11px] text-text-primary/65 mt-1" data-testid="money-off">{t("payments.invoice.methodOff", { method: method === "bitcoin" ? t("payments.invoice.onchainBitcoin") : METHOD_NAME[method] })}</p>}
+      {off && method && !mine && <p className="text-[11px] text-text-primary/65 mt-1" data-testid="money-off">{t("payments.invoice.methodOff", { method: method === "bitcoin" ? t("payments.invoice.onchainBitcoin") : METHOD_NAME[method] })}</p>}
     </>
   );
 }

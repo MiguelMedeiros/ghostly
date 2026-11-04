@@ -290,9 +290,14 @@ it.skipIf(!existsSync(`${BUILT}.tar.gz`))(`translates pt-en on this host (${PLAT
   const dir = unpacked();
   step("archive unpacked");
   const runtime = start(dir);
-  // Nothing but the protocol's files, the addon's graph and `bare`: no GPU backend, no other platform, no bare-runtime.
-  expect(readdirSync(dir).sort()).toEqual(["bare", "node_modules", "package-lock.json", "package.json", "protocol.mjs", "runtime.mjs"].map((name) => (name === "bare" && process.platform === "win32" ? "bare.exe" : name)).sort());
+  // Nothing but the protocol's files, the addon's graph, `bare` and its license: no GPU backend, no other platform, no
+  // bare-runtime.
+  expect(readdirSync(dir).sort()).toEqual(["bare", "licenses", "node_modules", "package-lock.json", "package.json", "protocol.mjs", "runtime.mjs"].map((name) => (name === "bare" && process.platform === "win32" ? "bare.exe" : name)).sort());
   expect(existsSync(join(dir, "node_modules/bare-runtime"))).toBe(false);
+  // bare is Apache-2.0: its copy carries the license and Holepunch's NOTICE (section 4).
+  expect(readdirSync(join(dir, "licenses/bare-runtime")).sort()).toEqual(["LICENSE", "NOTICE"]);
+  expect(readFileSync(join(dir, "licenses/bare-runtime/LICENSE"), "utf8")).toContain("Apache License");
+  expect(readFileSync(join(dir, "licenses/bare-runtime/NOTICE"), "utf8")).toContain("Holepunch");
   expect(readdirSync(join(dir, "node_modules/@qvac/translation-nmtcpp/prebuilds"))).toEqual([PLATFORM]);
   expect(
     readdirSync(join(dir, "node_modules/@qvac"), { recursive: true, encoding: "utf8" }).filter((path) => /ggml-(cuda|hip|vulkan|rpc)/.test(path)),

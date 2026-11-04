@@ -33,6 +33,11 @@ pub mod hyperdht {
     }
 
     #[tauri::command]
+    pub fn paired_hyperdht_parting() -> Result<(), String> {
+        Err(NOT_HERE.into())
+    }
+
+    #[tauri::command]
     pub fn paired_hyperdht_send() -> Result<(), String> {
         Err(NOT_HERE.into())
     }
@@ -146,6 +151,17 @@ pub mod viewer {
     pub fn close_all<R: tauri::Runtime>(_app: &tauri::AppHandle<R>) {}
 }
 
+pub mod forget_origins {
+    use super::NOT_HERE;
+    use serde_json::Value;
+
+    #[tauri::command]
+    pub fn forget_service_origins(origins: Vec<Value>) -> Result<Vec<bool>, String> {
+        let _ = origins;
+        Err(NOT_HERE.into())
+    }
+}
+
 pub mod app_sandbox {
     use super::NOT_HERE;
     use serde_json::Value;
@@ -167,6 +183,11 @@ pub mod app_sandbox {
 
     #[tauri::command]
     pub fn app_focus() -> Result<(), String> {
+        Err(NOT_HERE.into())
+    }
+
+    #[tauri::command]
+    pub fn app_focused() -> Result<bool, String> {
         Err(NOT_HERE.into())
     }
 

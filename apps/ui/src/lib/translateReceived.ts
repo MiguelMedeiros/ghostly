@@ -3,7 +3,7 @@ import { TranslateError, translateTexts } from "../desktop/translate";
 import { GROUP_WINDOW, chatLanguageOf, isGroupChat, languageSetByHand, type ChatLanguage } from "./chatLanguage";
 import type { Language } from "./settings";
 import { loadDetector } from "./translateDetector";
-import { translateFrom, type DetectLanguages } from "./translateWhich";
+import { translateFrom, type DetectLanguages, type TranslateWhich } from "./translateWhich";
 import type { ChatMessage } from "./types";
 
 /*
@@ -64,6 +64,8 @@ let generation = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let running = false;
 let detecting: Promise<DetectLanguages | null> | undefined;
+/** The messages being decided, one after another as they asked: a short one takes the language of those before it. */
+let decisions: Promise<void> = Promise.resolve();
 
 const viewKey = (message: Pick<Received, "id" | "text">, language: Language) => `${language}\n${message.id}\n${message.text}`;
 const textKey = (pair: string, text: string) => `${pair}\n${text}`;
@@ -187,14 +189,16 @@ export function askTranslation(message: Received, chat: string, language: Langua
   if (deciding.has(key)) return;
   deciding.add(key);
   const asking = generation;
-  void (detecting ??= loadDetector().catch(() => null)).then((detect) => {
+  decisions = decisions.then(async () => {
+    const detect = await (detecting ??= loadDetector().catch(() => null));
+    if (asking !== generation) return;
+    if (!detect) { deciding.delete(key); return; }
+    let which: TranslateWhich = { from: null, detected: null };
+    try {
+      which = await translateFrom(message, { appLanguage: language, detect, canTranslate: (from) => usable(`${from}-${language}`), chatLanguage: chatLanguageNow(chat).language });
+    } catch { /* a detector that throws translates nothing */ }
     if (asking !== generation) return;
     deciding.delete(key);
-    if (!detect) return;
-    let which: ReturnType<typeof translateFrom> = { from: null, detected: null };
-    try {
-      which = translateFrom(message, { appLanguage: language, detect, canTranslate: (from) => usable(`${from}-${language}`), chatLanguage: chatLanguageNow(chat).language });
-    } catch { /* a detector that throws translates nothing */ }
     if (which.detected) detectedIn(chat, message, which.detected);
     keep(decided, key, which.from);
     go(which.from);

@@ -35,9 +35,19 @@ pub struct SessionResponse {
 /// One approval's cookies: origin → cookie name → value.
 type Jar = HashMap<String, HashMap<String, String>>;
 
+#[cfg(not(test))]
 fn sessions() -> &'static Mutex<HashMap<String, Jar>> {
     static SESSIONS: OnceLock<Mutex<HashMap<String, Jar>>> = OnceLock::new();
     SESSIONS.get_or_init(Default::default)
+}
+
+/// Each test thread has its own: a test's `page_started` would drop the jars of another test running meanwhile.
+#[cfg(test)]
+fn sessions() -> &'static Mutex<HashMap<String, Jar>> {
+    thread_local! {
+        static SESSIONS: &'static Mutex<HashMap<String, Jar>> = Box::leak(Default::default());
+    }
+    SESSIONS.with(|sessions| *sessions)
 }
 
 fn client() -> Result<&'static reqwest::Client, String> {
@@ -207,6 +217,19 @@ pub async fn fetch(
 /// Forgets the session's cookies.
 pub fn close(session: String) {
     sessions().lock().unwrap().remove(&session);
+}
+
+/// The Ghostly window's page starts: the sessions of the page before it are forgotten. That page's approvals never
+/// close them (a reload during one, the WebView's process restarting), their ids were its own, and with eight left
+/// behind no approval would get a session again.
+#[cfg(desktop)]
+pub fn page_started() {
+    sessions().lock().unwrap().clear();
+}
+
+#[cfg(test)]
+pub fn open_sessions() -> usize {
+    sessions().lock().unwrap().len()
 }
 
 #[cfg(test)]
@@ -447,6 +470,31 @@ mod tests {
         ] {
             assert!(allowed(&reqwest::Url::parse(url).unwrap()), "{url}");
         }
+    }
+
+    /// Eight sessions a reloaded page left open: the next page's approval still gets one.
+    #[tokio::test]
+    async fn a_new_page_drops_the_sessions_the_page_before_left_open() {
+        let (url, _) = homeserver();
+        for n in 10..10 + MAX_SESSIONS as u8 {
+            sessions().lock().unwrap().insert(id(n), Jar::default());
+        }
+        let session = || {
+            fetch(
+                id(30),
+                format!("{url}/session"),
+                "POST".into(),
+                vec![],
+                None,
+            )
+        };
+        assert_eq!(session().await.unwrap_err(), "Too many Pubky sessions");
+
+        page_started();
+
+        assert_eq!(session().await.unwrap().status, 200);
+        assert_eq!(open_sessions(), 1);
+        close(id(30));
     }
 
     #[test]

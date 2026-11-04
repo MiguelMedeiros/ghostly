@@ -1,8 +1,10 @@
 /*
  * The lock passed once, carried across one reload the app itself makes (WISP 06 § User experience): adding this device
  * to a profile makes a new profile behind the same lock and switches to it, then starts again into the standby screen.
- * The person just typed the password in this tab; asking it twice more for the same lock says nothing new. The page,
- * unlocked, writes a marker for the profile it reloads into, with that profile's password hash, just before it reloads;
+ * A forced takeover starts again into the profile, and a device that reads at start that it was replaced starts again
+ * into its standby screen, in the same way. A handoff's reload does not carry it: the device giving the profile away is
+ * often unattended. The person just typed the password in this tab; asking it again for the same lock says nothing new.
+ * The page, unlocked, writes a marker for the profile it reloads into, with that profile's password hash, just before it reloads;
  * the next page takes it at once. It counts only for that profile, only while the hash is the same, and only within a
  * few seconds; a reload the person makes, or any later one, asks for the password as always.
  */

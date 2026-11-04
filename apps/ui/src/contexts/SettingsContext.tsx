@@ -21,6 +21,7 @@ import {
   type NotificationSettings,
 } from "../lib/settings";
 import { getRandomGhostName } from "../lib/storage";
+import { cleanOwnName } from "../lib/ownName";
 
 interface SettingsContextValue {
   settings: AppSettings;
@@ -33,6 +34,7 @@ interface SettingsContextValue {
   updateDefaultNickname: (nickname: string) => void;
   updateReduceMotion: (reduce: boolean) => void;
   updateChatListDensity: (density: ChatListDensity) => void;
+  updateChatListCollapsed: (collapsed: boolean) => void;
   updateCheckForUpdates: (check: boolean) => void;
   updateLinkPreviews: (on: boolean) => void;
   updateTranslateMessages: (on: boolean) => void;
@@ -91,8 +93,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  // Kept as contacts will show it (`cleanOwnName`): what a field shows as typed is its own draft (`useOwnNameField`).
   const updateDefaultNickname = useCallback((nickname: string) => {
-    setSettings((prev) => ({ ...prev, defaultNickname: nickname }));
+    setSettings((prev) => ({ ...prev, defaultNickname: cleanOwnName(nickname) }));
   }, []);
 
   const updateReduceMotion = useCallback((reduce: boolean) => {
@@ -101,6 +104,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   const updateChatListDensity = useCallback((chatListDensity: ChatListDensity) => {
     setSettings((prev) => ({ ...prev, chatListDensity }));
+  }, []);
+
+  const updateChatListCollapsed = useCallback((chatListCollapsed: boolean) => {
+    setSettings((prev) => ({ ...prev, chatListCollapsed }));
   }, []);
 
   const updateCheckForUpdates = useCallback((check: boolean) => {
@@ -151,6 +158,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         updateDefaultNickname,
         updateReduceMotion,
         updateChatListDensity,
+        updateChatListCollapsed,
         updateCheckForUpdates,
         updateLinkPreviews,
         updateTranslateMessages,

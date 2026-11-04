@@ -23,6 +23,13 @@ describe("what of a draft is translated", () => {
     expect(upper.startsWith("LOOK AT THIS https://")).toBe(true);
   });
 
+  it("a payment link the chat shows as a card stays whole, amount and all", () => {
+    const usdt = "ethereum:0xdAC17F958D2ee523a2206206994597C13D831ec7@1/transfer?address=0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed&uint256=1000000";
+    const xmr = "monero:4AzKEX4gXdJdNeM6dfiBFL7kqund3HYGvMBF3ttsNd9SfzgYB6L7ep1Yg1osYJzLdaKAYSLVh6e6jKnAuzj3bw1oGy9kXCb?tx_amount=0.25&tx_description=Rent%20%28May%29";
+    expect(words(`pay ${usdt} today`)).toEqual(["pay", "today"]);
+    expect(words(`pay ${xmr} today`)).toEqual(["pay", "today"]);
+  });
+
   it("each line goes on its own, and its spaces and line breaks stay", () => {
     expect(words("  bom dia\n\ntudo bem?  ")).toEqual(["bom dia", "tudo bem?"]);
     expect(joinParts(draftParts("  bom dia\n\ntudo bem?  "), ["good morning", "all good?"])).toBe("  good morning\n\nall good?  ");
@@ -58,18 +65,18 @@ describe("the members a translation names", () => {
 describe("the language a draft is written in", () => {
   const detect = (code: string, probability = 0.9): DetectLanguages => () => [{ code, probability }];
 
-  it("is the detector's, when it is sure", () => {
-    expect(draftLanguage("Tomorrow I can after six", detect("en"))).toBe("en");
-    expect(draftLanguage("Amanhã eu posso depois das seis", detect("pt-BR"))).toBe("pt");
+  it("is the detector's, when it is sure", async () => {
+    expect(await draftLanguage("Tomorrow I can after six", detect("en"))).toBe("en");
+    expect(await draftLanguage("Amanhã eu posso depois das seis", detect("pt-BR"))).toBe("pt");
   });
 
-  it("is unknown for a few letters, a guess it is not sure of, or undetermined", () => {
-    expect(draftLanguage("ok", detect("en"))).toBeNull();
-    expect(draftLanguage("lol no way 😂", detect("vo", 0.3))).toBeNull();
-    expect(draftLanguage("something long enough", detect("und"))).toBeNull();
+  it("is unknown for a few letters, a guess it is not sure of, or undetermined", async () => {
+    expect(await draftLanguage("ok", detect("en"))).toBeNull();
+    expect(await draftLanguage("lol no way 😂", detect("vo", 0.3))).toBeNull();
+    expect(await draftLanguage("something long enough", detect("und"))).toBeNull();
   });
 
-  it("is nothing at all for a draft with no words", () => {
-    expect(draftLanguage("https://example.com 42 😀", detect("en"))).toBeUndefined();
+  it("is nothing at all for a draft with no words", async () => {
+    expect(await draftLanguage("https://example.com 42 😀", detect("en"))).toBeUndefined();
   });
 });

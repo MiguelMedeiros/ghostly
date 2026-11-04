@@ -13,6 +13,7 @@
     "turnBack": "Tarjetas"
   },
   "delete": "Eliminar",
+  "deleteChatCallOn": "Hay una llamada en este chat. Termínala primero y luego elimina el chat.",
   "deleteChatLocal": "Se eliminarán el chat y su historial de este dispositivo, no la copia de tu contacto.",
   "deleteChatTitle": "¿Eliminar chat?",
   "error": "Error",
@@ -24,6 +25,7 @@
     "show": "Ver",
     "title": "Te espera"
   },
+  "notCopied": "No se copió",
   "save": "Guardar",
   "size": {
     "b": "{{n}} B",
