@@ -130,6 +130,40 @@ describe("ChatConnection: what the header says", () => {
       banner({ ...onDht, ...history });
       expect(header()).toMatchObject({ kind: "dht", name: "On DHT · retrying live", dot: "bg-text-muted", pulse: true });
     });
+
+    // With held messages on, the same close said "Away · messages are held" with Reconnect at once: the contact was
+    // online, and the engine refuses the dial while they keep DHT only.
+    describe("with messages held", () => {
+      const held: Partial<LinkView> = { textDelivery: "hold", dataLink: "idle", peerOnline: true, peerParticipationKey: "saved", pairing: { status: "connecting", peerKey: "peer" } as Pairing };
+      const downHeld = (at: number) => down(at, { text: "hold" });
+      const reconnect = () => screen.queryByRole("button", { name: "Reconnect" });
+
+      it("says the messages are held, not that the contact is away, and offers no Reconnect for the first seconds", () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        try {
+          banner({ ...held, ...downHeld(Date.now() - 2_000) });
+          expect(header()).toMatchObject({ name: "Messages are held", popover: "Messages are held", pulse: false });
+          expect(reconnect()).not.toBeInTheDocument();
+          act(() => { vi.advanceTimersByTime(13_000); });
+          expect(header()).toMatchObject({ kind: "waiting", name: "Away · messages are held" });
+          expect(reconnect()).toBeInTheDocument();
+        } finally { vi.useRealTimers(); }
+      });
+
+      it("is DHT only, chosen by the contact, with no Reconnect, as soon as its envelope says so", () => {
+        const view = banner({ ...held, ...downHeld(Date.now() - 2_000) });
+        act(() => view.engine.update({ links: [linkView({ availableTransports: all, ...held, ...downHeld(Date.now() - 3_000),
+          dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } })] }));
+        expect(header()).toMatchObject({ kind: "dht", name: "DHT only · chosen by your contact", dot: null, pulse: false });
+        expect(reconnect()).not.toBeInTheDocument();
+      });
+
+      it("says the contact is away when the link closed long ago", () => {
+        banner({ ...held, ...downHeld(Date.now() - 20_000) });
+        expect(header()).toMatchObject({ kind: "waiting", name: "Away · messages are held" });
+        expect(reconnect()).toBeInTheDocument();
+      });
+    });
   });
 
   it("is back to what the connection says once the device is online again", () => {
