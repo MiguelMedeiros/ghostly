@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { DEFAULT_IROH_RELAYS, MAX_IROH_RELAYS, createIrohWebEndpoint, irohRelayProblem, onPublicIrohRelay, type IrohWasm } from "../src/platform/irohWeb";
 
 // covers: transport.iroh-web, settings.network.iroh-relays
@@ -77,6 +77,46 @@ it("homes on the same relays whichever way they are spelled, never under a dotte
   noDottedHost(wasm.started.flat());
   expect(byDefault.descriptor).toEqual({ id: "c".repeat(64), relay: "https://use1-1.relay.n0.iroh.link/", addresses: [], relayed: true });
   await Promise.all([byDefault.close(), typed.close()]);
+});
+
+/**
+ * Iroh moves an endpoint's home to another of its relays when the one it homed on goes away, or another answers
+ * faster. The contact reaches it only through the relay its record names: one dialled through the relay it left timed
+ * out (15 s, every time, 7 of 7 on local relays, the old one up or down), and through the new one it was live in 2 to 16 ms.
+ */
+it("says when the wasm Iroh moves home to another relay, and publishes that one", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  try {
+    let home: string | null = "https://use1-1.relay.n0.iroh.link/";
+    const load = async (): Promise<IrohWasm> => ({
+      IrohNode: {
+        start: async () => ({
+          address: () => ({ id: "c".repeat(64), relay: home, addresses: [] }),
+          connect: async () => { throw new Error("unused"); },
+          accept: () => new Promise<undefined>(() => {}), close: async () => {}, free() {},
+        }),
+      },
+    });
+    const endpoint = await createIrohWebEndpoint(seed, { load });
+    const told = vi.fn(() => (endpoint.descriptor as { relay: string }).relay);
+    endpoint.onDescriptor = told;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(told).not.toHaveBeenCalled();
+    // Between two homes it has none for a moment: the last one stays published.
+    home = null;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(told).not.toHaveBeenCalled();
+    home = "https://iroh.miguelmedeiros.dev/";
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(told).toHaveBeenCalledTimes(1);
+    expect(told).toHaveReturnedWith("https://iroh.miguelmedeiros.dev/");
+    expect(endpoint.descriptor).toEqual({ id: "c".repeat(64), relay: "https://iroh.miguelmedeiros.dev/", addresses: [], relayed: true });
+    // Closed, it says nothing more.
+    await endpoint.close();
+    home = "https://euc1-1.relay.n0.iroh.link/";
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(told).toHaveBeenCalledTimes(1);
+  } finally { vi.useRealTimers(); }
 });
 
 it("dials a Desktop through its relay without the dot its record has, so one on this endpoint's relay needs no second connection", async () => {
