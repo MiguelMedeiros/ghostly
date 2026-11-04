@@ -123,12 +123,21 @@ pub async fn publish_records(
     records::publish(&state.pkarr, &keypair, &records).await
 }
 
-/// Settings, Network: the Pkarr relays written to, and whether reads may use them too ("Also use Pkarr relays").
+/// Settings, Network: the Pkarr relays written to, whether reads may use them too ("Also use Pkarr relays"), and
+/// whether the DHT is reached directly at all (`dht_direct`: false with Hide my IP from contacts, reads and writes
+/// then keep to the relays; absent leaves it as it is).
 #[tauri::command]
-pub fn set_pkarr_relays(state: State<'_, AppState>, relays: Vec<String>, read_relays: bool) {
-    state
-        .pkarr
-        .configure(crate::pkarr_network::relay_urls(&relays), read_relays);
+pub fn set_pkarr_relays(
+    state: State<'_, AppState>,
+    relays: Vec<String>,
+    read_relays: bool,
+    dht_direct: Option<bool>,
+) {
+    state.pkarr.configure(
+        crate::pkarr_network::relay_urls(&relays),
+        read_relays,
+        dht_direct,
+    );
 }
 
 /// The network changed (the WebView went back online, another Wi-Fi, a VPN): every relay is asked again.

@@ -141,8 +141,9 @@ export function createTauriTransport(): PkarrTransport {
         for (const listener of listeners) listener("recovered");
       }).catch(() => {});
     },
-    configure({ relays, readRelays }) {
-      void invoke("set_pkarr_relays", { relays, readRelays }).then(() => { askedAt = 0; refresh(); }).catch(() => {});
+    // `dhtDirect: false` (Hide my IP from contacts): Rust closes its DHT nodes, and reads and writes go to the relays.
+    configure({ relays, readRelays, dhtDirect }) {
+      void invoke("set_pkarr_relays", { relays, readRelays, ...(dhtDirect !== undefined ? { dhtDirect } : {}) }).then(() => { askedAt = 0; refresh(); }).catch(() => {});
     },
     discovery: () => status ?? { path: null, relays: [] },
     subscribe(listener) {
