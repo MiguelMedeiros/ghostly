@@ -378,6 +378,24 @@ describe("per chat", () => {
     expect(engines.a.views()[0].sharedWith).toBe(0);
   });
 
+  it("two proofs of the same identity shared in one chat: the profile counts only the one the contact keeps, and removing it leaves both sides with none", async () => {
+    const { engines, ledgers, id: older } = await shared();
+    const { id: newer } = await prove(engines.a);
+    expect(engines.a.views().map(v => v.subject)).toEqual([fakeKeySubject(), fakeKeySubject()]);
+    await engines.a.share({ linkId: "chat", id: newer });
+    await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === newer)?.status).toBe("accepted"));
+    expect(engines.b.linkView("chat", true)!.received.map(r => r.id)).toEqual([newer]);
+    const sharedWith = () => Object.fromEntries(engines.a.views().map(v => [v.id, v.sharedWith]));
+    expect(sharedWith()).toEqual({ [older]: 0, [newer]: 1 });
+    await engines.a.remove({ id: newer });
+    await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received.map(r => `${r.id}:${r.status}`)).toEqual([`${newer}:withdrawn`]));
+    expect(sharedWith()).toEqual({ [older]: 0 });
+    // Shared again by hand, the older one is what the contact holds.
+    await engines.a.share({ linkId: "chat", id: older });
+    await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received.find(r => r.id === older)?.status).toBe("verified"));
+    expect(sharedWith()).toEqual({ [older]: 1 });
+  });
+
   it("a recheck is refused offline, and a proof that no longer verifies shows unconfirmed with the reason", async () => {
     const { engines, state } = await shared();
     const id = engines.b.linkView("chat", true)!.received[0].id;
