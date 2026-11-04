@@ -1375,6 +1375,21 @@ describe("text in a chat", () => {
     expect(history).toHaveBeenCalled();
   });
 
+  it("forty texts asked for at once, as a bot's workers do, read the rows on their way, not the chat's whole history", async () => {
+    const chat = row();
+    const { node, events: pages, linkOf } = await started(chat);
+    // As the CLI and the web app host it: the pages hear the rows that changed, not the whole history.
+    Object.assign(pages, { onMessageChanges: vi.fn() });
+    await node.sendMessage({ linkId: chat.id, text: "first", timestamp: 1 });
+    const history = vi.spyOn(db, "getMessages");
+    const texts =Array.from({ length: 40 }, (_, i) => `m${i}`);
+    const sends = await Promise.all(texts.map((text, i) => node.sendMessage({ linkId: chat.id, text, timestamp: 2 + i })));
+    expect(sends.every(sent => sent.error === null)).toBe(true);
+    // Past the sixteenth on its way (or awaiting its receipt), each one's turn read the history.
+    expect(history).not.toHaveBeenCalled();
+    expect(linkOf(chat.id).sendMessage.mock.calls.map(([text]) => text)).toEqual(["first", ...texts]);
+  });
+
   it("a receipt for a file said on the DHT floor finds it without reading the chat's whole history again", async () => {
     const chat = row();
     const { node, events: pages, linkOf } = await started(chat);
