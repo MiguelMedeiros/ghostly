@@ -21,6 +21,7 @@ import {
   type NotificationSettings,
 } from "../lib/settings";
 import { getRandomGhostName } from "../lib/storage";
+import { cleanOwnName } from "../lib/ownName";
 
 interface SettingsContextValue {
   settings: AppSettings;
@@ -92,8 +93,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  // Kept as contacts will show it (`cleanOwnName`): what a field shows as typed is its own draft (`useOwnNameField`).
   const updateDefaultNickname = useCallback((nickname: string) => {
-    setSettings((prev) => ({ ...prev, defaultNickname: nickname }));
+    setSettings((prev) => ({ ...prev, defaultNickname: cleanOwnName(nickname) }));
   }, []);
 
   const updateReduceMotion = useCallback((reduce: boolean) => {

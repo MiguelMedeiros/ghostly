@@ -6,6 +6,7 @@ import type { GroupMemberView, GroupView } from "@ghostly/browser/shared/types";
 import { ProfileBackups } from "../../components/ProfileBackups";
 import { DeviceStandby } from "../../components/DeviceStandby";
 import { ForkRows } from "../../components/devices/Forks";
+import { Section } from "../../components/layout";
 import { GroupChat } from "../../pages/GroupChat";
 import { bundleDidSeed, openProfileBackup, restoreOpenedBackup, sameIdentityProfiles } from "../../lib/profileBackup";
 import { markUncheckedRestore, restoreForTakeover } from "../../lib/restoreGuard";
@@ -143,6 +144,61 @@ describe("a replaced device (WISP 06 § User experience: \"Use here\", \"It wasn
     await waitFor(() => expect(screen.queryByTestId("settings-fork")).toBeNull());
   });
 
+  it("each kept copy says when it was kept, and its Discard says which copy it removes", async () => {
+    const a = Date.UTC(2026, 9, 2, 9, 30), b = Date.UTC(2026, 10, 1, 18, 5);
+    const when = (at: number) => new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(at);
+    renderApp(<ForkRows forks={["ghostly_a", "ghostly_b"]} keptAt={{ ghostly_a: a, ghostly_b: b }} />);
+    const rows = await screen.findAllByTestId("settings-fork");
+    expect(rows.map((row) => row.textContent)).toEqual([expect.stringContaining(`Kept ${when(a)}`), expect.stringContaining(`Kept ${when(b)}`)]);
+    expect(new Set(rows.map((row) => row.textContent)).size).toBe(2);
+    expect(screen.getAllByTestId("settings-fork-discard").map((button) => button.getAttribute("aria-label"))).toEqual([`Discard: Kept ${when(a)}`, `Discard: Kept ${when(b)}`]);
+    expect(screen.getByRole("button", { name: `Discard: Kept ${when(b)}` })).toBe(screen.getAllByTestId("settings-fork-discard")[1]);
+  });
+
+  it("copies an older build kept without a time are numbered, and no two rows read the same", async () => {
+    const at = Date.UTC(2026, 10, 1, 18, 5);
+    renderApp(<ForkRows forks={["ghostly_a", "ghostly_b", "ghostly_c", "ghostly_d"]} keptAt={{ ghostly_c: at, ghostly_d: at }} />);
+    const kept = (await screen.findAllByTestId("settings-fork-kept")).map((el) => el.textContent ?? "");
+    expect(kept.slice(0, 2)).toEqual(["Older copy 1", "Older copy 2"]);
+    expect(kept[2]).toMatch(/^Kept .+ \(1\)$/);
+    expect(kept[3]).toMatch(/^Kept .+ \(2\)$/);
+    const names = screen.getAllByTestId("settings-fork-discard").map((button) => button.getAttribute("aria-label"));
+    expect(new Set(names).size).toBe(4);
+    expect(names[0]).toBe("Discard: Older copy 1");
+  });
+
+  it("a single copy kept without a time is the older copy, and Discard removes that one", async () => {
+    const { user, engine } = renderApp(<ForkRows forks={["ghostly_oldcopy"]} />);
+    engine.on("deviceForkDiscard", () => undefined);
+    expect(await screen.findByTestId("settings-fork-kept")).toHaveTextContent("Older copy");
+    await user.click(screen.getByRole("button", { name: "Discard: Older copy" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Discard: Older copy" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Discard: Older copy" }));
+    expect(engine.callsTo("deviceForkDiscard")).toEqual([{ database: "ghostly_oldcopy" }]);
+  });
+
+  it("after a Discard the focus goes to the next copy's Discard, and after the last one to the section", async () => {
+    const a = Date.UTC(2026, 9, 2, 9, 30), b = Date.UTC(2026, 10, 1, 18, 5);
+    const { user, engine } = renderApp(<Section title="Data and storage"><ForkRows forks={["ghostly_a", "ghostly_b"]} keptAt={{ ghostly_a: a, ghostly_b: b }} /></Section>);
+    engine.on("deviceForkDiscard", () => undefined);
+    const confirmed = async (index: number) => {
+      await user.click(screen.getAllByTestId("settings-fork-discard")[index]);
+      await waitFor(() => expect(screen.getByTestId("settings-fork-discard-confirm")).toBeEnabled());
+      await user.click(screen.getByTestId("settings-fork-discard-confirm"));
+    };
+    const second = screen.getAllByTestId("settings-fork-discard")[1];
+    await confirmed(0);
+    expect(engine.callsTo("deviceForkDiscard")).toEqual([{ database: "ghostly_a" }]);
+    await waitFor(() => expect(screen.getAllByTestId("settings-fork")).toHaveLength(1));
+    await waitFor(() => expect(screen.getByTestId("settings-fork-discard")).toHaveFocus());
+    expect(screen.getByTestId("settings-fork-discard")).toBe(second);
+    await confirmed(0);
+    expect(engine.callsTo("deviceForkDiscard")).toEqual([{ database: "ghostly_a" }, { database: "ghostly_b" }]);
+    await waitFor(() => expect(screen.queryByTestId("settings-fork")).toBeNull());
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Data and storage" })).toHaveFocus());
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
   it("a double press on Discard does not pass the question, and Cancel gives the focus back to Discard", async () => {
     const { user, engine } = renderApp(<ForkRows forks={["ghostly_oldcopy"]} />);
     engine.on("deviceForkDiscard", () => undefined);
@@ -227,6 +283,20 @@ describe("the forced takeover on the standby screen", () => {
     second.engine.on("deviceTakeoverInfo", () => ({ offered: false }));
     await waitFor(() => expect(second.engine.callsTo("deviceTakeoverInfo").length).toBeGreaterThan(0));
     expect(screen.queryByTestId("takeover-open")).toBeNull();
+  });
+
+  it("the active device renamed while the screen is open: the dialog asks for the new name, the one the engine checks", async () => {
+    let name = "Phone";
+    const { user, engine, rerender } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: name }} />);
+    engine.on("deviceTakeoverInfo", () => ({ offered: true, device: name, copy: "frozen", password: true }));
+    expect(await screen.findByTestId("takeover-open")).toBeInTheDocument();
+    name = "Pixel";
+    rerender(<DeviceStandby gate={{ state: "standby", activeDevice: name }} />);
+    expect(screen.getByTestId("device-standby-title")).toHaveTextContent("Active on Pixel");
+    await user.click(screen.getByTestId("takeover-open"));
+    await waitFor(() => expect(screen.getByTestId("takeover-dialog")).toHaveTextContent("Take over without Pixel?"));
+    expect(screen.getByTestId("takeover-dialog")).toHaveTextContent("This will make Pixel stop.");
+    expect(screen.getByTestId("takeover-name")).toHaveAttribute("placeholder", "Pixel");
   });
 
   it("a copy restored from a backup says where the profile is active and offers Take over, with no password", async () => {

@@ -17,6 +17,15 @@ export const BRIDGE_SCRIPT = `${BRIDGE_DIR}bridge.js`;
 /** At the root, so its scope can be the whole origin without a `Service-Worker-Allowed` header. */
 export const WORKER_SCRIPT = "/ghostly-services-sw.js";
 
+/**
+ * What the view's frame and the bridge's frame of the contact's app allow: nothing. No `fullscreen`: in full screen the
+ * app would cover the view's bar, the one thing that says it is the contact's app and not Ghostly (as a mini-app's
+ * frame, WISP 1200). No `clipboard-write`: once tapped, the contact's code could replace what the person copied (an
+ * address, an invoice) every second with no further tap. A copy button in it still copies on its tap
+ * (`document.execCommand("copy")`).
+ */
+export const SERVICE_FRAME_ALLOW = "";
+
 /** A request body above this is refused before it leaves the device: the data link carries 8 MiB at most (LIMITS). */
 export const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
 /** What one answer may weigh, as on Desktop and the CLI. */
@@ -92,6 +101,12 @@ export function closeServiceView(): void {
 /** The bridge says it loaded; the app answers with the port. */
 export const BRIDGE_READY = "ghostly-svc-ready";
 export const BRIDGE_PORT = "ghostly-svc-port";
+/**
+ * The app answers with this in place of the port when it only wants the origin cleared (the chat deleted, Clear all
+ * data, the profile deleted): the bridge erases what the contact's app kept there, then says `BRIDGE_CLEARED`.
+ */
+export const BRIDGE_CLEAR = "ghostly-svc-clear";
+export const BRIDGE_CLEARED = "ghostly-svc-cleared";
 
 /** A request the app takes from a port: anything else (a page of the contact's posting to it) is dropped. */
 export function readRequest(data: unknown): ServiceRequestMessage | null {

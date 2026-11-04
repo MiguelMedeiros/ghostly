@@ -5,11 +5,12 @@
  */
 export type ErrorCode =
   | "bad_request" | "usage" | "not_found" | "refused" | "unavailable" | "confirm" | "timeout"
-  | "engine" | "busy" | "internal";
+  | "engine" | "busy" | "internal" | "interrupted";
 
+/** `interrupted`: Ctrl-C (SIGINT) ended the command, 128 + 2 as a shell says of a command its signal ended. */
 export const EXIT: Record<ErrorCode, number> = {
   engine: 1, refused: 1, unavailable: 1, bad_request: 1, busy: 1, internal: 1,
-  usage: 2, not_found: 3, timeout: 4, confirm: 5,
+  usage: 2, not_found: 3, timeout: 4, confirm: 5, interrupted: 130,
 };
 
 export class CliError extends Error {
@@ -58,7 +59,7 @@ const ENGINE_CODES: Record<string, ErrorCode> = {
   mintUnreachable: "unavailable", lnurlUnreachable: "unavailable", hostUnreachable: "unavailable", networkUnreachable: "unavailable", usdtRpcUnavailable: "unavailable",
   hostTimedOut: "timeout", networkTimedOut: "timeout",
   invalidMintUrl: "bad_request", mintNotHttps: "bad_request", invalidMaxFee: "bad_request",
-  notEnoughSats: "refused", notEnoughForFee: "refused", mintsNoAnyAmount: "refused", ecashAlreadySpent: "refused", ecashFeeTakesAll: "refused", contactNoWallet: "refused", contactNoPayments: "refused",
+  notEnoughSats: "refused", notEnoughForFee: "refused", mintsNoAnyAmount: "refused", ecashAlreadySpent: "refused", ecashFeeTakesAll: "refused", lightningRefused: "refused", contactNoWallet: "refused", contactNoPayments: "refused",
 };
 /** `details.reason` of an engine error a bot tells apart from others of its code. */
 const ENGINE_REASONS: Record<string, string> = { contactNoWallet: "contact_no_wallet", contactNoPayments: "contact_payments_off" };

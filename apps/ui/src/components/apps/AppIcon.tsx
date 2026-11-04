@@ -41,9 +41,11 @@ export function AppIcon({ size = 40, icon, installed }: { size?: number; icon?: 
   }, [ref, digest]);
   const shown = useBytesUrl(icon);
   const url = icon ? shown : read;
+  // The check reads only an icon's PNG header: one that does not draw shows the generic mark, not the browser's broken picture.
+  const [broken, setBroken] = useState<string | null>(null);
   return (
     <span className="shrink-0 grid place-items-center overflow-hidden rounded-xl bg-accent/15 text-accent" style={{ width: size, height: size }} data-testid="app-icon">
-      {url ? <img src={url} alt="" draggable={false} className="w-full h-full object-cover" /> : <AppGlyph size={Math.round(size * 0.5)} />}
+      {url && url !== broken ? <img src={url} alt="" draggable={false} onError={() => setBroken(url)} className="w-full h-full object-cover" /> : <AppGlyph size={Math.round(size * 0.5)} />}
     </span>
   );
 }

@@ -26,11 +26,41 @@
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="Ghostly: two friendly ghosts, Boo and Casper, talking peer to peer" />
     <meta name="twitter:card" content="summary_large_image" />
-    <!-- What the page says when the app cannot start (public/boot-guard.js): a plain script, before the bundle. -->
+    <!-- What the page says when the app cannot start (public/boot-guard.js): a plain script, before the bundle. It
+         also puts the saved theme on <html> and in the theme-color above, before the first paint. -->
     <script src="/boot-guard.js"></script>
+    <!-- The first paint (#boot-shell below), styled here because it must draw before any file of the app arrives.
+         Over the page's own background, so a warm start that draws the app in a moment shows nothing new; its ghost
+         and words come only after a short wait, and at once (visibility, not a fade: an opacity animation runs off
+         the main thread, and the browser never counts it as the page's first contentful paint). The site's policy
+         allows inline styles (style-src 'unsafe-inline'). -->
+    <style>
+      #boot-shell {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        color: var(--theme-text-secondary, #8696a0);
+        font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        text-align: center;
+        animation: boot-shell-in 0s 0.4s both;
+      }
+      #boot-shell svg { width: 64px; height: 64px; }
+      #boot-shell p { margin: 0; }
+      @keyframes boot-shell-in { from { visibility: hidden; } to { visibility: visible; } }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- What a cold first visit shows while the app's files arrive (seconds on a slow phone): React's first render
+         replaces it, and the boot guard (public/boot-guard.js) puts its words in the browser's language and does not
+         take it for the app having drawn. -->
+    <div id="root"><div id="boot-shell" role="status" data-testid="boot-shell"><svg viewBox="0 0 64 64" aria-hidden="true" focusable="false"><rect width="64" height="64" rx="12" fill="#0f172a"/><path transform="translate(12 8)" d="M20 4C10.059 4 2 12.059 2 22v18c0 1.5 1.2 2 2 1.2l4-3.2 4 3.2c.8.6 1.6.6 2.4 0L18 38l3.6 3.2c.8.6 1.6.6 2.4 0L28 38l4 3.2c.8.8 2 .3 2-1.2V22C34 12.059 25.941 4 20 4z" fill="#22d3ee" opacity="0.9"/><circle cx="25" cy="28" r="3" fill="#0f172a"/><circle cx="39" cy="28" r="3" fill="#0f172a"/></svg><p>Starting Ghostly…</p></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

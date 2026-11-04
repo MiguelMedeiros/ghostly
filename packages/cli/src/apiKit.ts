@@ -1,4 +1,4 @@
-import { INVITE_TAKEN, isZ32Key } from "@ghostly/core";
+import { INVITE_TAKEN, isZ32Key, type PairedTransport } from "@ghostly/core";
 import type { GhostlyNode } from "@ghostly/browser/engine/node";
 import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { CliError } from "./errors";
@@ -25,6 +25,8 @@ export interface ApiContext {
    * timeout with `details.reason: "daemon-stopped"`, before the connections end.
    */
   stopping?: AbortSignal;
+  /** The daemon is a `listen` that found none and runs the profile itself: a stop ends that listen too. */
+  listen?: true;
 }
 
 export type Params = Record<string, unknown>;
@@ -121,7 +123,7 @@ function chatBy(links: readonly LinkView[], ref: string): { link: LinkView; thei
     const byKey = links.filter((link) => link.peerPubKeyZ32 === ref);
     if (byKey.length === 1) return { link: byKey[0], theirName: false };
     if (byKey.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: byKey.map((link) => link.id) });
-    throw new CliError("not_found", `No chat with ${JSON.stringify(ref)}`);
+    throw new CliError("not_found", `No chat with ${JSON.stringify(ref)} (ghostly chat list)`);
   }
   const lower = ref.toLowerCase();
   const named = (name: string | null | undefined) => name?.trim().toLowerCase() === lower;
@@ -129,7 +131,7 @@ function chatBy(links: readonly LinkView[], ref: string): { link: LinkView; thei
   const found = byLabel.length ? byLabel : [...new Set([...links.filter((link) => link.id.startsWith(ref)), ...links.filter((link) => named(link.peerNick))])];
   if (found.length === 1) return { link: found[0], theirName: !byLabel.length };
   if (found.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: found.map((link) => link.id) });
-  throw new CliError("not_found", `No chat ${JSON.stringify(ref)}`);
+  throw new CliError("not_found", `No chat ${JSON.stringify(ref)} (ghostly chat list)`);
 }
 
 /**
@@ -168,7 +170,7 @@ export function findGroup(groups: readonly GroupView[], ref: string): GroupView 
     if (found.length === 1) return found[0];
     if (found.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one group: use its id`, { matches: found.map((group) => group.id) });
   }
-  throw new CliError("not_found", `No group ${JSON.stringify(ref)}`);
+  throw new CliError("not_found", `No group ${JSON.stringify(ref)} (ghostly group list)`);
 }
 
 /**
@@ -224,6 +226,21 @@ export function dhtOnly(link: LinkView): void {
   if (link.dhtDelivery?.peerMode === "dht") throw new CliError("refused", "Your contact keeps this chat on DHT only: it goes live once they choose a live method. Short texts still go on the DHT", { reason: "peer-dht-only" });
 }
 
+const TRANSPORT_TITLES: Record<PairedTransport, string> = { "webrtc/1": "WebRTC", "iroh/1": "Iroh", "hyperdht/1": "HyperDHT" };
+
+/**
+ * A transport the chat's Connection menu offers: one this app runs (on DHT only, one it can start), and the contact's
+ * app too, by its last word. `chat transport` took any: toward a contact with no WebRTC (`GHOSTLY_WEBRTC=0`) the choice
+ * was kept and the chat stayed where it was, saying nothing; for one this app lacks, the engine answered `engine`,
+ * "Transport unavailable". Refused instead, saying whose app lacks it (`details.reason`, as a chat's wait says it).
+ */
+export function transportOffered(link: LinkView, transport: PairedTransport): void {
+  const mine = (link.deliveryMode === "dht" ? link.runnableTransports : undefined) ?? link.availableTransports;
+  const title = TRANSPORT_TITLES[transport], error = link.transportErrors?.[transport];
+  if (mine && !mine.includes(transport)) throw new CliError("refused", `This app has no ${title} running${error ? `: ${error}` : ""}`, { reason: "app-lacks", transport });
+  if (link.peerTransports?.length && !link.peerTransports.includes(transport)) throw new CliError("refused", `Your contact's app doesn't have ${title}: choose another, or auto`, { reason: "contact-lacks", transport });
+}
+
 /** A chat or a group as `findChatOrGroup` reads it. `linkId` is what the engine calls it. */
 export function chatOrGroup(ctx: ApiContext, ref: string): { id: string; linkId: string; group: boolean } {
   const found = findChatOrGroup(state(ctx).links, state(ctx).groups, ref);
@@ -260,14 +277,19 @@ export async function messageOf(ctx: ApiContext, linkId: string, ref: string, ke
 
 // ---------- waiting ----------
 
-/** Resolves with `check`'s first defined answer: now, or on a later state; `timeout` error after `ms`. */
+/**
+ * Resolves with `check`'s first defined answer: now, or on a later state; `timeout` error after `ms`. A check that
+ * throws on a later state (`chat wait`'s chat removed) ends the wait with its error: the hub swallows what its
+ * listeners throw, and the wait went on to its timeout.
+ */
 export function waitForState<T>(ctx: ApiContext, check: (state: EngineState) => T | undefined, ms: number, what: string): Promise<T> {
   const now = check(state(ctx));
   if (now !== undefined) return Promise.resolve(now);
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => { off(); reject(new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s waiting for ${what}`)); }, ms);
     const off = ctx.hub.onState((next) => {
-      const value = check(next);
+      let value: T | undefined;
+      try { value = check(next); } catch (error) { clearTimeout(timer); off(); reject(error); return; }
       if (value === undefined) return;
       clearTimeout(timer);
       off();

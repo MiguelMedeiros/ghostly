@@ -1,7 +1,7 @@
 import { MAX_GROUP_NAME_BYTES, MAX_GROUP_NAME_LENGTH, decodeCommunityLink, decodeGroupEntryLink, groupEntryUrl, type PairedTransport } from "@ghostly/core";
 import { fitText, fitTextEdit, utf8Bytes } from "./fitText";
 import { getPrefix, setSessionDraft } from "./storage";
-import { decodePart } from "./url";
+import { appLinkOrigin, decodePart } from "./url";
 import { setChatFolder } from "./chatFolders";
 import { forgetChatLanguage } from "./chatLanguage";
 import { forgetChatMute, groupChat } from "./chatMute";
@@ -124,6 +124,19 @@ export const edgeDot = (member: GroupMemberView) => member.me || member.edge?.st
  */
 export const invitationRow = (group: Pick<GroupView, "invitation" | "status">): boolean => !!group.invitation && !(group.invitation.viaLink && group.status);
 
+/**
+ * How many groups joined by a link may wait to be let in while a link in the app's address still joins one (WISP 902
+ * § The group's link): opening a link is not an act of the person's. Join's paste is not held back.
+ */
+export const LINK_GROUPS_WAITING = 3;
+
+/** The groups joined by a link that are not in yet: knocking, or given up on and kept until deleted. */
+export const linkGroupsWaiting = (groups: readonly Pick<GroupView, "id" | "invitation" | "status">[]): string[] =>
+  groups.filter(group => group.invitation?.viaLink && !group.status).map(group => group.id);
+
+/** The group a link names (`group1/…`, `group2/…`), or null when it is no group's link. */
+export const linkGroupId = (link: string): string | null => decodeGroupEntryLink(link)?.g ?? decodeCommunityLink(link)?.g ?? null;
+
 /** Where a private group lives in the app: by its id. */
 export function groupPath(groupId: string): string {
   return `/group/${encodeURIComponent(groupId)}`;
@@ -164,16 +177,13 @@ export function forgetGroupLocal(groupId: string): void {
   setChatFolder(groupChat(groupId), undefined);
 }
 
-/** The web app opens a group's link; the extension and desktop hand out the public app's address, which they also accept pasted. */
-const PUBLIC_APP = "https://app.ghostly.tools";
-function linkOrigin(): string {
-  return /^https?:$/.test(window.location.protocol) ? window.location.origin : PUBLIC_APP;
-}
-
-/** The address a group's link opens (`group1/…` for a private group, `group2/…` for a community), or "" while it is off. */
+/**
+ * The address a group's link opens (`group1/…` for a private group, `group2/…` for a community), or "" while it is off.
+ * The web app hands out its own; the extension, desktop and Android the public app's (`appLinkOrigin`), which they also accept pasted.
+ */
 export function groupLinkUrl(group: { entryLink?: string }): string {
   if (!group.entryLink) return "";
   const mesh = decodeGroupEntryLink(group.entryLink);
-  if (mesh) return groupEntryUrl(linkOrigin(), mesh);
-  return decodeCommunityLink(group.entryLink) ? `${linkOrigin().replace(/\/+$/, "")}/#/join/${group.entryLink}` : "";
+  if (mesh) return groupEntryUrl(appLinkOrigin(), mesh);
+  return decodeCommunityLink(group.entryLink) ? `${appLinkOrigin().replace(/\/+$/, "")}/#/join/${group.entryLink}` : "";
 }

@@ -1,5 +1,5 @@
 import { act, screen, within } from "@testing-library/react";
-import { Route, Routes, useNavigate } from "react-router-dom";
+import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import type { GroupJoinStage, GroupMemberView, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
 import { Sidebar } from "../../components/Sidebar";
@@ -266,6 +266,30 @@ describe("GroupChat: joining through a link", () => {
     expect(engine.callsTo("acceptGroupInvitation")).toEqual([{ groupId: "group-1" }]);
   });
 
+  it("a full community: says it is full (n of max), with the knock left, and never that the link may be old", async () => {
+    openGroup(groupView({ profile: "community", createdAt: Date.now() - 2 * 60_000 + 400, canSend: false,
+      invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "full", full: { n: 256, max: 256 } } }));
+    const card = screen.getByTestId("group-joining");
+    expect(card).toHaveTextContent("This group is full");
+    expect(card).toHaveTextContent("It has 256 of 256 members. You get in once someone leaves: keep the app open.");
+    expect(screen.getByTestId("group-joining-live")).toHaveTextContent("This group is full");
+    expect(within(card).getByTestId("group-joining-steps").querySelector("li")).toHaveAttribute("data-state", "done");
+    await new Promise(resolve => setTimeout(resolve, 600));
+    expect(screen.queryByTestId("group-joining-stale")).not.toBeInTheDocument();
+  });
+
+  it("a private group waiting for its members' updates: says so, with the knock left, and never that the link may be old", async () => {
+    openGroup(groupView({ createdAt: Date.now() - 2 * 60_000 + 400, canSend: false,
+      invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "blocked", full: { n: 8, max: 32 } } }));
+    const card = screen.getByTestId("group-joining");
+    expect(card).toHaveTextContent("This group is waiting for updates");
+    expect(card).toHaveTextContent("It takes new members again once everyone in it has an updated Ghostly.");
+    expect(screen.getByTestId("group-joining-live")).toHaveTextContent("This group is waiting for updates");
+    expect(within(card).getByTestId("group-joining-steps").querySelector("li")).toHaveAttribute("data-state", "done");
+    await new Promise(resolve => setTimeout(resolve, 600));
+    expect(screen.queryByTestId("group-joining-stale")).not.toBeInTheDocument();
+  });
+
   it("a knock someone answered is not told the link may be old", () => {
     openGroup(groupView({ createdAt: Date.now() - 10 * 60_000, canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "answered" } }));
     expect(screen.getByTestId("group-joining")).toHaveTextContent("The admin's app saw you knock");
@@ -303,8 +327,86 @@ describe("GroupChat: joining through a link", () => {
     expect(screen.getByTestId("group-joining")).toHaveTextContent("The admin's app answered: getting the group's keys.");
   });
 
+  it("let into a community five minutes ago and still no keys: says no member could finish, and to ask for the current link", () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      // The welcome was lost and the link replaced since: nobody answers the old link's knocks any more.
+      const admitted = (admittedAt: number) => groupView({ profile: "community", canSend: false,
+        invitation: { linkId: "", contact: "", admin: ALICE, members: 0, accepted: true, viaLink: true, stage: "admitted", admittedAt } });
+      const stuck = "No member could finish letting you in. Ask someone in the group for the current link.";
+      const view = openGroup(admitted(Date.now()));
+      const card = screen.getByTestId("group-joining");
+      expect(card).toHaveTextContent("A member's app answered: getting the group's keys. You are in in a moment.");
+      act(() => { vi.advanceTimersByTime(5 * 60_000 - 1_000); });
+      expect(card).not.toHaveTextContent(stuck);
+      act(() => { vi.advanceTimersByTime(1_000); });
+      expect(card).toHaveTextContent(stuck);
+      expect(card).not.toHaveTextContent("You are in in a moment");
+      expect(spoken()).toEqual([stuck]);
+      // It keeps knocking: the steps and Cancel joining stay.
+      expect(screen.getByTestId("group-joining-steps")).toHaveAttribute("data-stage", "admitted");
+      expect(screen.getByTestId("group-joining-cancel")).toBeInTheDocument();
+      // Let in again since (a member answered a later knock): the moment starts over.
+      act(() => view.engine.update({ groups: [admitted(Date.now())] }));
+      expect(card).toHaveTextContent("You are in in a moment");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("welcomed within five minutes: never told no member could finish", () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const view = openGroup(groupView({ profile: "community", canSend: false,
+        invitation: { linkId: "", contact: "", admin: ALICE, members: 0, accepted: true, viaLink: true, stage: "admitted", admittedAt: Date.now() } }));
+      act(() => { vi.advanceTimersByTime(4 * 60_000); });
+      act(() => view.engine.update({ groups: [active()] }));
+      act(() => { vi.advanceTimersByTime(2 * 60_000); });
+      expect(document.body).not.toHaveTextContent("No member could finish letting you in");
+    } finally { vi.useRealTimers(); }
+  });
+
   const staged = (stage: GroupJoinStage, admin = "") => groupView({ canSend: false, invitation: { linkId: "", contact: "", admin, members: 0, accepted: true, viaLink: true, stage } });
   const steps = () => within(screen.getByTestId("group-joining-steps")).getAllByRole("listitem").map(li => li.getAttribute("data-state"));
+  /** The text of every live region on the page that says something now: what a screen reader is told. */
+  const spoken = () => [...document.querySelectorAll("[role=status], [role=alert], [role=log], [aria-live]")]
+    .filter(el => el.getAttribute("aria-live") !== "off" && !el.parentElement?.closest("[role=status], [role=alert], [role=log], [aria-live]"))
+    .map(el => el.textContent!.trim()).filter(Boolean);
+
+  it.each([
+    ["knocking", "", [], "Knock left for the admin's app", "Waiting to be let in"],
+    ["knocked", "", ["Knock left for the admin's app"], "The admin's app answered", "Knock left for the admin's app"],
+    ["answered", "", ["Knock left for the admin's app", "The admin's app answered"], "Let in: getting the group's keys", "The admin's app answered"],
+    ["admitted", ALICE, ["Knock left for the admin's app", "The admin's app answered", "Let in: getting the group's keys"], "Connecting to the members", "Let in: getting the group's keys"],
+  ] as const)("each join step says its state to a screen reader, and only the step just reached is said: %s", (stage, admin, done, current, said) => {
+    // Knocked just now: the two-minute hint is not due.
+    openGroup({ ...staged(stage, admin), createdAt: Date.now() });
+    const items = within(screen.getByTestId("group-joining-steps")).getAllByRole("listitem");
+    // The step under way is the current one; the ones reached say so in words, not only with a hidden ✓.
+    expect(items.filter(li => li.getAttribute("aria-current") === "step").map(li => li.textContent)).toEqual([current]);
+    expect(items.filter(li => li.textContent!.endsWith(" (done)")).map(li => li.textContent!.replace("✓", "").replace(" (done)", ""))).toEqual(done);
+    // The card is no live region: one short line is, and Cancel joining is outside it.
+    expect(screen.getByTestId("group-joining")).not.toHaveAttribute("role");
+    expect(screen.getByTestId("group-joining-cancel").closest("[role=status], [aria-live]")).toBeNull();
+    expect(spoken()).toEqual([said]);
+  });
+
+  it("a stage change is said once, as the step just reached, not the whole card again", () => {
+    const view = openGroup({ ...staged("knocking"), profile: "community", createdAt: Date.now() });
+    const said: string[][] = [spoken()];
+    for (const stage of ["knocked", "answered", "admitted"] as const) {
+      act(() => view.engine.update({ groups: [{ ...staged(stage, stage === "admitted" ? ALICE : ""), profile: "community", createdAt: Date.now() }] }));
+      said.push(spoken());
+    }
+    expect(said).toEqual([["Waiting to be let in"], ["Knock sent to the group"], ["A member's app is answering"], ["Let in: getting the group's keys"]]);
+  });
+
+  it("a dead end or the two-minute hint is what the live line says", async () => {
+    const view = openGroup(groupView({ profile: "community", createdAt: Date.now() - 2 * 60_000 + 400, canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "knocked" } }));
+    expect(spoken()).toEqual(["Knock sent to the group"]);
+    await screen.findByTestId("group-joining-stale", {}, { timeout: 3_000 });
+    expect(spoken()).toEqual(["Still no answer. If the link was replaced, ask for the new one."]);
+    act(() => view.engine.update({ groups: [{ ...staged("replaced"), profile: "community" }] }));
+    expect(spoken()).toEqual(["This link was replaced or turned off"]);
+  });
 
   it.each([
     ["knocking", "", "Leaving a knock where the admin's app looks for one", ["current", "todo", "todo", "todo"]],
@@ -319,11 +421,36 @@ describe("GroupChat: joining through a link", () => {
     expect(steps()).toEqual(states);
   });
 
+  it("with others knocking just before, says the admin's app may be busy letting them in, not that it must be opened", () => {
+    const view = staged("knocked");
+    openGroup({ ...view, invitation: { ...view.invitation!, othersKnocked: true } });
+    expect(screen.getByTestId("group-joining")).toHaveTextContent("Others knocked too, so the admin's app may be busy letting them in. You can leave this page.");
+    expect(screen.getByTestId("group-joining")).not.toHaveTextContent("It happens once the admin's app is open");
+  });
+
+  it("with others knocking, two minutes on: says the group lets people in a few at a time, not that the link may be dead", async () => {
+    const view = staged("knocked");
+    openGroup({ ...view, createdAt: Date.now() - 2 * 60_000 + 400, invitation: { ...view.invitation!, othersKnocked: true } });
+    const hint = await screen.findByTestId("group-joining-stale", {}, { timeout: 3_000 });
+    expect(hint).toHaveTextContent("Still waiting: the group lets people in a few at a time.");
+    expect(screen.getByTestId("group-joining")).not.toHaveTextContent("link was replaced");
+    expect(screen.getByTestId("group-joining-live")).toHaveTextContent("Still waiting: the group lets people in a few at a time.");
+  });
+
+  it("says the link was replaced or turned off, with no steps left to wait on", () => {
+    openGroup({ ...staged("replaced"), profile: "community" });
+    expect(screen.getByTestId("group-joining")).toHaveTextContent("This link was replaced or turned off");
+    expect(screen.getByTestId("group-joining")).toHaveTextContent("Ask someone in the group for the current link, then open it.");
+    expect(screen.queryByTestId("group-joining-steps")).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-joining").querySelector(".animate-spin")).toBeNull();
+    expect(screen.getByTestId("group-joining-cancel")).toBeInTheDocument();
+  });
+
   it("in a community, says a member (any) is answering, then that it connects to the group", () => {
     const labels = () => within(screen.getByTestId("group-joining-steps")).getAllByRole("listitem").map(li => li.textContent);
     openGroup({ ...staged("answered"), profile: "community" });
     expect(screen.getByTestId("group-joining")).toHaveTextContent("A member is letting you in");
-    expect(labels()).toEqual(["✓Knock sent to the group", "✓A member's app is answering", "Let in: getting the group's keys", "Connecting to the group"]);
+    expect(labels()).toEqual(["✓Knock sent to the group (done)", "✓A member's app is answering (done)", "Let in: getting the group's keys", "Connecting to the group"]);
     expect(steps()).toEqual(["done", "done", "current", "todo"]);
   });
 
@@ -350,6 +477,40 @@ describe("GroupChat: joining through a link", () => {
     await user.click(screen.getByTestId("group-joining-cancel"));
     expect(engine.callsTo("forgetGroup")).toEqual([{ groupId: "group-1" }]);
     expect(screen.getByText("Chat list")).toBeInTheDocument();
+  });
+
+  /** A phone's shell: one screen at a time, the chat list mounted but hidden until home shows (App's mobile layout). */
+  function PhoneList() {
+    return <div hidden={useLocation().pathname !== "/"}><Sidebar /></div>;
+  }
+
+  it.each([["a desktop", false], ["a phone", true]] as const)(
+    "Cancel joining from the keyboard hands the focus to the next row of the list, or to New after the last, on %s", async (_, phone) => {
+    // It was left on the page's body once home: the next Tab started again from the top, and nothing was said.
+    if (phone) {
+      // As a browser does: a hidden element (the list, while the group's page fills the screen) takes no focus.
+      const focus = HTMLElement.prototype.focus;
+      vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(function (this: HTMLElement, options?: FocusOptions) { if (!this.closest("[hidden]")) focus.call(this, options); });
+    }
+    const joiningOne = viaLink("");
+    const other = active({ id: "group-2", name: "Others" });
+    fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
+    for (const [groups, next] of [[[joiningOne, other], "group-2"], [[joiningOne], undefined]] as const) {
+      fakeEngine.update({ groups: [...groups] });
+      const { user, engine, unmount } = renderApp(<UpdateProvider>{phone ? <PhoneList /> : <Sidebar />}<Routes>
+        <Route path="/" element={<p>Chat list</p>} />
+        <Route path="/group/:groupId" element={<GroupChat />} />
+      </Routes></UpdateProvider>, { route: "/group/group-1" });
+      engine.on("forgetGroup", () => { fakeEngine.update({ groups: groups.slice(1) }); });
+      screen.getByTestId("group-joining-cancel").focus();
+      await user.keyboard("{Enter}");
+      expect(engine.callsTo("forgetGroup").slice(-1)).toEqual([{ groupId: "group-1" }]);
+      expect(await screen.findByText("Chat list")).toBeInTheDocument();
+      await vi.waitFor(() => expect(screen.queryAllByTestId("group-row").map(r => r.dataset.group)).toEqual(next ? [next] : []));
+      const row = next && screen.getAllByTestId("group-row").find(r => r.dataset.group === next)!;
+      await vi.waitFor(() => expect(row ? within(row).getByTestId("group-row-open") : screen.getByTestId("sidebar-new-chat")).toHaveFocus());
+      unmount();
+    }
   });
 });
 
@@ -491,7 +652,7 @@ describe("GroupChat: out of the group", () => {
   });
 
   it.each([
-    ["removed", "You were removed from this group", "Você foi removido deste grupo"],
+    ["removed", "You were removed from this group", "Removeram você deste grupo"],
     ["forked", "Member 3r69cgd5 holds a different membership history for epoch 4. Membership changes are halted; the admin must re-form the group.",
       "As mudanças no grupo estão pausadas. O admin precisa recriar o grupo."],
     ["lost", "Two members let people in at the same moment and yours did not count. Asking to be let in again…",
@@ -1037,8 +1198,26 @@ describe("GroupChat: history and sending", () => {
     fakeEngine.update({ groups: [active({ profile: "community" })] });
     renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
     return screen.findAllByTestId("group-event").then(lines => expect(lines.map(l => l.textContent)).toEqual([
-      "Carol entrou", "Carol agora é o admin", "Carol renomeou o grupo para “Town”", "Carol alterou a foto do grupo", "Carol removeu a foto do grupo",
+      "Carol entrou", "Carol agora administra o grupo", "Carol renomeou o grupo para “Town”", "Carol alterou a foto do grupo", "Carol removeu a foto do grupo",
     ]));
+  });
+
+  it.each([
+    ["ja", "グループを作成しました。グループの全員が", "参加しました。グループの全員が"],
+    ["zh", "群组已创建。", "你已加入。"],
+    ["pt", "Grupo criado. ", "Você entrou. "],
+  ] as const)("in %s, the first line joins its sentence and the read note as the language does", async (language, created, joined) => {
+    // Bug hunt 1102-groups-ux: "参加しました。 グループの全員が…", a Latin space after 。 in Japanese and Chinese.
+    fakeEngine.on("groupMessages", () => [
+      stored({ id: "e1", event: "created", text: "Group created. Everyone in the group can read…" }),
+      stored({ id: "e2", event: "joined", text: "You joined. Everyone in the group can read…", timestamp: 1_700_000_000_001 }),
+    ]).on("updateSettings", () => undefined);
+    fakeEngine.update({ groups: [active()] });
+    renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language });
+    const [first, second] = (await screen.findAllByTestId("group-event")).map(l => l.textContent ?? "");
+    expect(first.startsWith(created)).toBe(true);
+    expect(second.startsWith(joined)).toBe(true);
+    if (language !== "pt") expect(`${first}${second}`).not.toMatch(/。 /);
   });
 
   for (const profile of ["mesh", "community"] as const) it(`after being removed (${profile}), my own lines still read as mine, in the app's language`, async () => {
@@ -1054,7 +1233,7 @@ describe("GroupChat: history and sending", () => {
     renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
     const lines = await screen.findAllByTestId("group-event");
     expect(lines.map(l => l.textContent)).toEqual([
-      "Agora você é o admin", "Você renomeou o grupo para “Ghost Club”", "Você alterou a foto do grupo", "Você removeu a foto do grupo", "Você foi removido deste grupo",
+      "Agora você administra o grupo", "Você renomeou o grupo para “Ghost Club”", "Você alterou a foto do grupo", "Você removeu a foto do grupo", "Removeram você deste grupo",
     ]);
   });
 
@@ -1067,7 +1246,7 @@ describe("GroupChat: history and sending", () => {
     fakeEngine.update({ groups: [active()] });
     renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
     return screen.findAllByTestId("group-event").then(lines => expect(lines.map(l => l.textContent)).toEqual([
-      "O histórico de membros se bifurcou", "O histórico de membros se bifurcou", "Você foi removido deste grupo",
+      "O histórico de membros se bifurcou", "O histórico de membros se bifurcou", "Removeram você deste grupo",
     ]));
   });
 

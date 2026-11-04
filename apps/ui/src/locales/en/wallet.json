@@ -229,8 +229,15 @@
     "setAsideInfo": "Held for a payment the mint has not confirmed yet. It leaves with the payment or returns to your balance once the mint answers.",
     "settings": "Settings",
     "testBalance": "{{amount}} test sats (worthless)",
-    "testMintInvoice": "Waiting for the payment… Test mints mark every invoice paid by themselves, so this one counts only once a contact pays it in a chat. For test sats now, use Get test coins above.",
+    "testBalance_one": "{{amount}} test sat (worthless)",
+    "testMintInvoice": "Waiting for the payment… Test mints mark every invoice paid by themselves, so share this one in a 1:1 chat: it counts only once a contact pays it there. For test sats now, use Get test coins above.",
     "tokenHint": "Got an ecash token instead? Paste it under Send.",
+    "tokenRedeemedFee": "Redeemed {{amount}} sats (the mint kept {{fee}} as its fee).",
+    "tokenRedeemedFeeTest": "Redeemed {{amount}} test sats (the mint kept {{fee}} as its fee).",
+    "tokenRedeemedFeeTest_one": "Redeemed {{amount}} test sat (the mint kept {{fee}} as its fee).",
+    "tokenRedeemedFeeTest_other": "Redeemed {{amount}} test sats (the mint kept {{fee}} as its fee).",
+    "tokenRedeemedFee_one": "Redeemed {{amount}} sat (the mint kept {{fee}} as its fee).",
+    "tokenRedeemedFee_other": "Redeemed {{amount}} sats (the mint kept {{fee}} as its fee).",
     "tx": {
       "ecashIn": "Received ecash",
       "ecashOut": "Sent ecash",
@@ -250,6 +257,7 @@
     "alreadyRedeemed": "Already redeemed by someone.",
     "amountFee": "{{amount}} (fee {{fee}})",
     "asNotes": "{{amount}} sats as notes",
+    "asNotes_one": "{{amount}} sat as a note",
     "asking": "Asking its guardians…",
     "backup": "Wallet backup",
     "backupHint": "The phrase and the federations; the profile backup has everything",
@@ -587,7 +595,9 @@
   },
   "sats": {
     "mainnet": "sats",
-    "testnet": "test sats"
+    "mainnet_one": "sat",
+    "testnet": "test sats",
+    "testnet_one": "test sat"
   },
   "send": {
     "balance": "Balance: {{amount}} {{unit}}",
@@ -639,6 +649,7 @@
     "experimental": "Experimental",
     "fedimint": {
       "description": "{{amount}} sats · {{network}}",
+      "description_one": "{{amount}} sat · {{network}}",
       "joinFirst": "Join a federation with a Lightning gateway on the Fedimint card first.",
       "label": "Federation",
       "unknownNetwork": "unknown network",
@@ -658,6 +669,111 @@
       "onchainTestnet": "No on-chain Bitcoin provider is available here yet in Testnet."
     },
     "optional": "(optional)",
+    "providers": {
+      "bdk": {
+        "description": "A Bitcoin wallet in this app (bitcoindevkit): you hold the keys, an Esplora server tells it the chain. Test networks only for now.",
+        "fields": {
+          "esplora": {
+            "help": "Blank: the public servers of Signet (blockstream.info, mempool.space) or Mutinynet (mutinynet.com), whichever answers. Regtest needs your own; it must allow this app's origin (CORS).",
+            "label": "Esplora server",
+            "placeholder": "Blank: a public server of the network",
+            "suggestions": {
+              "http_127_0_0_1_47002": "This computer: the e2e regtest stack (npm run e2e:infra:up)"
+            }
+          },
+          "mnemonic": {
+            "help": "BIP39, English. Leave it to Ghostly to make a new wallet, or type yours to restore one.",
+            "label": "Recovery phrase",
+            "placeholder": "twelve or twenty-four words"
+          },
+          "network": {
+            "label": "Network"
+          },
+          "script": {
+            "label": "Addresses",
+            "options": {
+              "bip84": "Native SegWit (BIP84, bc1q…)"
+            }
+          }
+        }
+      },
+      "bitcoind": {
+        "description": "A wallet on your own Bitcoin Core node, over its RPC. Your node holds the keys and signs. Needs the desktop app.",
+        "fields": {
+          "password": {
+            "help": "rpcpassword, or the contents of the node's .cookie file (it changes when bitcoind restarts).",
+            "label": "RPC password or cookie"
+          },
+          "url": {
+            "help": "Your node's rpcbind and rpcport: 8332 mainnet, 38332 signet, 48332 testnet4, 18443 regtest.",
+            "label": "RPC address"
+          },
+          "user": {
+            "help": "Leave empty to paste the .cookie file below.",
+            "label": "RPC user"
+          },
+          "wallet": {
+            "help": "A wallet loaded in the node (bitcoin-cli listwallets). Empty: its default wallet.",
+            "label": "Wallet name"
+          }
+        }
+      },
+      "breez": {
+        "description": "A self-custodial Lightning wallet on Spark, through the Breez SDK. Its recovery phrase is sealed on this device; you hold the sats."
+      },
+      "cashu-mint": {
+        "description": "Invoices are paid into, and paid from, your Cashu balance. The mints hold the sats."
+      },
+      "core-lightning": {
+        "description": "Your own Core Lightning node, over Commando with a rune. Your node holds the sats. The web app reaches it only through wss://.",
+        "fields": {
+          "nodeId": {
+            "help": "lightning-cli getinfo → id. The connection is authenticated against it.",
+            "label": "Node id",
+            "placeholder": "02… or 03… (66 hex characters)"
+          },
+          "rune": {
+            "help": "Never an unrestricted rune. Create one with: {{command}}",
+            "placeholder": "A rune restricted to Ghostly's methods"
+          },
+          "url": {
+            "help": "The node's bind-addr=ws:… listener, behind a wss:// proxy for the web app; ws:// only to this machine.",
+            "label": "WebSocket address"
+          }
+        }
+      },
+      "fedimint": {
+        "description": "A federation you joined (Wallet → Fedimint): invoices are paid into, and from, its ecash through its gateway. Its guardians hold the sats."
+      },
+      "lnd": {
+        "description": "Your own LND node, over its REST API. Your node holds the sats.",
+        "fields": {
+          "certificate": {
+            "help": "Desktop only: the node's tls.cert, pinned (the node must present exactly this one). Leave empty for a certificate from a public authority; anywhere else it must stay empty.",
+            "label": "TLS certificate"
+          },
+          "macaroon": {
+            "help": "Never the admin macaroon: bake one with {{command}} (only invoices:… to receive only)."
+          },
+          "url": {
+            "help": "LND's REST port (restlisten, 8080 by default). In a browser the node must allow this app with restcors and have a certificate the browser trusts; the desktop app needs neither.",
+            "label": "REST address"
+          }
+        }
+      },
+      "nwc": {
+        "description": "A wallet you connect with its NWC URI (Alby Hub, a node's NWC service, a hosted wallet). That wallet holds the sats and sets its own fee limit: custodial or not depends on the wallet.",
+        "fields": {
+          "uri": {
+            "help": "From your wallet's app connections. Allow making, paying and looking up invoices, and reading the balance.",
+            "label": "Connection URI"
+          }
+        }
+      },
+      "webln": {
+        "description": "A Lightning wallet in this browser (Alby and others). That wallet holds the sats and asks you before it pays."
+      }
+    },
     "reconfigured": "{{name}} now uses that server.",
     "reconfiguredUnnamed": "The source now uses that server.",
     "remove": "Remove",

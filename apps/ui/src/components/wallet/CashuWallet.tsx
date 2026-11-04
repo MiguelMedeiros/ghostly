@@ -17,7 +17,7 @@ import { LightningCardSettings } from "./LightningCardSettings";
 import { CASHU_MINT_SOURCE, holdsLess } from "../walletCardData";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { fillNodes } from "../../lib/fillNodes";
-import { satsIn } from "../NetworkTag";
+import { satsIn, unitFor } from "../NetworkTag";
 import { mintNetwork } from "@ghostly/browser/shared/mints";
 import { lightningStateLabel, paymentStateLabel } from "../paymentWords";
 import { formatAmount } from "../../lib/amount";
@@ -54,6 +54,9 @@ const noteText = (t: Translate, { kind, note = "" }: { kind: keyof typeof TX_LAB
   const key = ENGINE_NOTES[kind]?.[note];
   return key ? t(key) : note;
 };
+/** How often the Receive screen says again that it shows its invoice (the engine's watch lasts 90 s). */
+const INVOICE_WATCH_AGAIN_MS = 60_000;
+
 /** When a movement happened, as the history writes it ("Sep 30, 03:15 PM"; "30 de set., 15:15" in Portuguese). */
 const MOVED_AT: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" };
 
@@ -124,6 +127,11 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
   const unit = satsIn(t, testnet ? "testnet" : "mainnet");
   // Test sats say so wherever an amount shows on a Testnet wallet: its invoice, its mints, what came in.
   const sats = (amount: number) => t("wallet.cards.amount", { amount: formatAmount(amount, t.language), unit });
+  // A redeemed token says what arrived and, at a mint that charges to take ecash in, what it kept: the face value
+  // the person was handed is the two together (agents#2255).
+  const redeemedLine = ({ amount, fee }: { amount: number; fee: number }) => fee > 0
+    ? t(testnet ? "wallet.cashu.tokenRedeemedFeeTest" : "wallet.cashu.tokenRedeemedFee", { count: amount, amount: formatAmount(amount, t.language), fee: formatAmount(fee, t.language) })
+    : t("wallet.cashu.redeemed", { amount: formatAmount(amount, t.language), unit });
   // Only this invoice's own receipt: other money of the same amount (a contact's ecash, a token taken back, a chat
   // request paid, test coins) is not a payment of it. A Lightning card's invoice is matched by its hash below.
   const mintPaid = !!invoiceQuote && state.history.some((tx) => tx.kind === "lightning-in" && tx.quote === invoiceQuote);
@@ -196,6 +204,17 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
     const timer = setTimeout(() => setInvoiceExpired(true), Math.max(0, invoiceExpiresAt - Date.now()));
     return () => clearTimeout(timer);
   }, [invoice, invoiceExpiresAt]);
+  // While the invoice shows, its mint or source is asked about it every few seconds: the engine asks less and less about
+  // an invoice nobody looks at (agents#2447). Said again before the engine's watch (90 s) runs out.
+  const walletNow = useRef(wallet);
+  useEffect(() => { walletNow.current = wallet; });
+  useEffect(() => {
+    if (showing !== "invoice" || invoicePaid || !invoice) return;
+    const watch = () => void walletNow.current.watchInvoice?.(invoice)?.catch(() => {});
+    watch();
+    const timer = setInterval(watch, INVOICE_WATCH_AGAIN_MS);
+    return () => clearInterval(timer);
+  }, [showing, invoicePaid, invoice]);
 
   // The button pressed keeps the keys while it works (Button's `loading`, by the key `run` was given); the others wait,
   // disabled. A mint's question closed hands them back to its Remove, or (the mint gone) to the field that adds one.
@@ -228,7 +247,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
             {/* Only the number isolated, as an invoice's card does: in a right-to-left page the unit's Latin "sats" was one
                 run with it, glued to it ("100,000sats"). The unit stays in the line's direction. */}
             <bdi className="text-4xl font-semibold tabular-nums">{formatAmount(testnet ? testShown : realShown, t.language)}</bdi>
-            <span className="text-text-muted text-sm ms-2">{unit}</span>
+            <span className="text-text-muted text-sm ms-2">{unitFor(t, unit, testnet ? testShown : realShown)}</span>
             {/* A Testnet wallet's whole balance is test sats; a test mint's sats never count in a Mainnet one. */}
             {testMint && !testnet && <span className="block text-xs text-warn-ink mt-1" data-testid="wallet-test-balance">{t("wallet.cashu.testBalance", { amount: formatAmount(testShown, t.language) })}</span>}
             {!!state.setAside && (
@@ -322,7 +341,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
               </div>
             ) : (
               <SendScan onText={given} disabled={busy} scanOnOpen={sendOpened}>
-              <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (isToken) void run(async () => { const received = await wallet.receiveToken(route.text); setPayInput(""); setNotice(t("wallet.cashu.redeemed", { amount: formatAmount(received, t.language), unit })); }, "send"); else if (route.kind === "invoice") quoteFor(route.invoice); else if (route.kind === "no-amount" && chosen) quoteFor(route.invoice, chosen); }}>
+              <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (isToken) void run(async () => { const received = await wallet.receiveToken(route.text); setPayInput(""); setNotice(redeemedLine(received)); }, "send"); else if (route.kind === "invoice") quoteFor(route.invoice); else if (route.kind === "no-amount" && chosen) quoteFor(route.invoice, chosen); }}>
                 <textarea ref={payField} data-testid="wallet-pay-input" className={`${input} font-mono text-xs resize-none`} rows={3} {...exactText} autoFocus={!touchOnly()}
                   placeholder={rail === "cashu" ? t("wallet.cashu.pastePlaceholder") : t("wallet.lightning.pastePlaceholder")} value={payInput} onChange={(e) => { setNotice(""); setPayInput(e.target.value); setPayAmount(""); maxed.current = false; }} />
                 {destination && <div className="bg-surface-alt rounded-xl p-3 text-text-primary" data-testid="wallet-lnurl"><LightningAddressPay key={destination} wallet={wallet} text={destination} via={rail === "cashu" ? "cashu" : undefined} onDone={() => { setPayInput(""); payField.current?.focus(); }} /></div>}
@@ -365,7 +384,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
                   <div key={tx.id} className="text-sm py-2" data-testid="wallet-tx">
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="text-text-primary truncate">{t(TX_LABEL[tx.kind])}</span>
-                      <span className={`font-semibold shrink-0 tabular-nums ${incoming ? "text-accent" : "text-text-primary"}`}><Signed sign={incoming ? "+" : "−"} amount={formatAmount(tx.amount, t.language)} /> <span className="text-xs font-normal text-text-muted">{unit}</span></span>
+                      <span className={`font-semibold shrink-0 tabular-nums ${incoming ? "text-accent" : "text-text-primary"}`}><Signed sign={incoming ? "+" : "−"} amount={formatAmount(tx.amount, t.language)} /> <span className="text-xs font-normal text-text-muted">{unitFor(t, unit, tx.amount)}</span></span>
                     </div>
                     <div className="flex items-baseline justify-between gap-2 text-xs text-text-muted">
                       <span className="truncate">{formatAt(tx.timestamp, MOVED_AT, t.language)} · {mint?.name ?? new URL(tx.mint).hostname}{tx.note ? ` · ${noteText(t, tx)}` : ""}</span>

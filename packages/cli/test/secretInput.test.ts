@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { CliError } from "../src/errors";
-import { completeWithPipedEvidence, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, textFromStdin } from "../src/secretInput";
+import { completeWithPipedEvidence, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, settingValue, textFromStdin } from "../src/secretInput";
 // covers: headless.cli
 
 const stdin = (text: string) => async () => text;
@@ -217,6 +217,21 @@ describe("secrets from stdin, out of ps", () => {
       await vi.advanceTimersByTimeAsync(60_000);
       await failed;
     } finally { vi.useRealTimers(); }
+  });
+
+  it("settings set takes its value from stdin with - or with none on a pipe, and warns about a TURN password on the command line", async () => {
+    const turn = '[{"urls":"turn:t.example.org:3478","username":"u","credential":"pw"}]';
+    expect(await settingValue("iceServers", "-", stdin(`${turn}\n`))).toEqual({ value: turn });
+    expect(await settingValue("iceServers", undefined, stdin(turn))).toEqual({ value: turn });
+    expect((await settingValue("iceServers", turn, never)).warning).toMatch(/^A TURN password on the command line shows in ps and the shell's history: give it on stdin instead \(… \| ghostly settings set iceServers -\)$/);
+    // No password, or another setting: no warning, and stdin is not read.
+    expect(await settingValue("iceServers", '[{"urls":"stun:s.example.org"}]', never)).toEqual({ value: '[{"urls":"stun:s.example.org"}]' });
+    expect(await settingValue("iceServers", '[{"urls":"turn:t.example.org","credential":""}]', never)).not.toHaveProperty("warning");
+    expect(await settingValue("relays", '["http://r.example"]', never)).toEqual({ value: '["http://r.example"]' });
+    // A nick keeps its spaces; only the newline that ends the line goes.
+    expect(await settingValue("nick", "-", stdin(" Ana \n"))).toEqual({ value: " Ana " });
+    await expect(settingValue("iceServers", "-", stdin("\n"))).rejects.toMatchObject({ code: "usage", message: expect.stringContaining("| ghostly settings set iceServers -") });
+    await expect(settingValue("iceServers", undefined, never, true)).rejects.toMatchObject({ code: "usage", message: expect.stringMatching(/^Missing <json-value>/) });
   });
 
   it("other commands are left alone", async () => {

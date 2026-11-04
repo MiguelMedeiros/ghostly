@@ -338,6 +338,42 @@ describe("refusals", () => {
     await a.cancel();
   });
 
+  it("the inviter reads the clock, not only its timer: past the ten minutes it takes no hello and no answer", async () => {
+    // The timer did not run (the computer slept, the tab was throttled): the clock moved on without it.
+    let now = Date.now();
+    const late = () => new EnrollInviter({ profile: A, network, open: pipe.openInviter, didSeed: async () => didSeed, name: "MacBook", now: () => now, sleep: noSleep, timing: quick, forceSeed: true });
+    const a = late();
+    const waiting = await a.start();
+    if (waiting.step !== "waiting") throw new Error("no code");
+    now += 2 * 3_600_000;
+    // A joiner whose own clock is behind reads the code as still good.
+    const b = joiner();
+    await b.start(waiting.code);
+    await until(() => a.ended && b.ended);
+    expect(a.current()).toMatchObject({ step: "failed", reason: "expired" });
+    expect(b.current()).toMatchObject({ step: "failed", reason: "expired" });
+    expect(await readDeviceRecord(A)).toBeNull();
+    expect(await readDeviceRecord(B)).toBeNull();
+
+    // The hello came in time, the answer did not.
+    pipe = new Pipe();
+    now = Date.now();
+    const c = late();
+    const code = await c.start();
+    if (code.step !== "waiting") throw new Error("no code");
+    const d = joiner();
+    await d.start(code.code);
+    await until(() => c.current().step === "confirm");
+    now += 601_000;
+    await c.confirm(true);
+    await until(() => d.ended);
+    expect(c.current()).toMatchObject({ step: "failed", reason: "expired" });
+    expect(d.current()).toMatchObject({ step: "failed", reason: "expired" });
+    expect(pipe.frames.some((f) => f.frame.t === ENROLL_GRANT)).toBe(false);
+    expect(await readDeviceRecord(A)).toBeNull();
+    expect(await readDeviceRecord(B)).toBeNull();
+  });
+
   it("a tab of a browser on iPhone or iPad is told to add Ghostly to the Home Screen first; the app there may join", async () => {
     const a = inviter();
     const waiting = await a.start();

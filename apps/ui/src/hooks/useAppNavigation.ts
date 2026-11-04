@@ -4,6 +4,7 @@ import {
   HOME, anchorTarget, conversationTarget, hasParent, homeTarget, openTarget, openUnderTarget, placeTarget, plan, readNav, stackOf, upTarget, userState,
   type NavEntry, type NavPlan,
 } from "../lib/navigation";
+import { afterLayers, pagesUnder, traversing } from "../lib/layerHistory";
 
 /**
  * What is left of a plan once the history has gone back: going back is asynchronous (the browser answers
@@ -14,13 +15,20 @@ let pending: { from: string; at: number; run: (navigate: NavigateFunction) => vo
 const PENDING_MS = 1500;
 
 function execute(navigate: NavigateFunction, fromKey: string, steps: NavPlan) {
+  // Off the entries of the dialogs and menus open first (lib/layerHistory.ts): the steps count the pages' entries.
+  afterLayers(() => run(navigate, fromKey, steps));
+}
+
+function run(navigate: NavigateFunction, fromKey: string, steps: NavPlan) {
   const rest = (nav: NavigateFunction) => {
     if (steps.replace) nav(steps.replace.path, { replace: true, state: steps.replace.state });
     for (const step of steps.push) nav(step.path, { state: step.state });
   };
   if (steps.back > 0) {
     pending = { from: fromKey, at: Date.now(), run: rest };
-    void navigate(-steps.back);
+    traversing();
+    // Over this page's entries from before a reload too (lib/layerHistory.ts).
+    void navigate(-steps.back - pagesUnder());
   } else rest(navigate);
 }
 

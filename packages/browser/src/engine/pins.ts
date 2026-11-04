@@ -15,6 +15,11 @@ export interface PinsHost {
   message?(chat: string, id: string): Promise<StoredMessage | undefined>;
   /** The rows of a 1:1 chat a wire id may name besides `peer_`/`me_` and that id (`ReactionsHost.rows`), each read alone. */
   rows?(chat: string, id: string): Promise<string[]>;
+  /**
+   * The rows of a 1:1 chat that go by another id than their own, by that id, read once in a run; undefined when the
+   * host keeps none for that chat (the chat is then read whole).
+   */
+  unkeyed?(chat: string): Promise<ReadonlyMap<string, string>> | undefined;
 }
 
 const isGroup = (chat: string) => chat.startsWith("group:");
@@ -39,7 +44,8 @@ export function mayPinIn(group: GroupView | undefined): boolean {
 
 /**
  * The row a pin names, when it is here: the row of that id (a group's), or of `peer_`/`me_` and that id, or one the host
- * knows that id names (a file of mine, a payment), each read alone; else any other of a chat's.
+ * knows that id names (a file of mine, a payment), each read alone; else any other of a chat's, from the rows the host
+ * knows by another id (`unkeyed`) or, without those, the whole chat.
  */
 export async function pinnedRow(host: PinsHost, chat: string, id: string): Promise<StoredMessage | undefined> {
   if (!id) return undefined;
@@ -51,6 +57,12 @@ export async function pinnedRow(host: PinsHost, chat: string, id: string): Promi
     }
     // In a group there is no other: a row that takes a pin goes by its own id there, and a long group is not read whole.
     if (group) return undefined;
+    // Nor is a chat for each pin: a contact can name ids that never were, ten a window.
+    const unkeyed = host.unkeyed?.(chat);
+    if (unkeyed) {
+      const rowId = (await unkeyed).get(id), row = rowId === undefined ? undefined : await host.message(chat, rowId);
+      return row && replyRef(row, false) === id ? row : undefined;
+    }
   }
   return reactionTarget(await host.messages(chat), id, group);
 }
@@ -61,15 +73,15 @@ export async function pinnedRow(host: PinsHost, chat: string, id: string): Promi
  */
 export async function myPin(host: PinsHost, chat: string, messageId: unknown, remove: boolean, current: WirePin | undefined, now = Date.now()): Promise<StoredPin | { error: string }> {
   const n = nextPinNumber(current?.n, now);
-  if (remove) return current?.id ? { id: "", n, by: "me", at: now } : { error: "Nothing is pinned in this chat" };
-  if (typeof messageId !== "string" || !messageId) return { error: "No message to pin" };
   const group = isGroup(chat);
+  if (remove) return current?.id ? { id: "", n, by: "me", at: now } : { error: `Nothing is pinned in this ${group ? "group" : "chat"}` };
+  if (typeof messageId !== "string" || !messageId) return { error: "No message to pin" };
   // By its row's id, read alone, else by the id both sides know (as the pages may name it): the chat read whole only
   // when neither finds it.
   const target = host.message
     ? (await host.message(chat, messageId)) ?? await pinnedRow(host, chat, messageId)
     : (await host.messages(chat)).find(m => m.id === messageId) ?? await pinnedRow(host, chat, messageId);
   const id = target && replyRef(target, group);
-  if (!target || !id) return { error: "That message is not in this chat, or cannot be pinned" };
+  if (!target || !id) return { error: `That message is not in this ${group ? "group" : "chat"}, or cannot be pinned` };
   return { id, n, by: "me", at: now, messageId: target.id };
 }

@@ -396,7 +396,7 @@ export const MAX_BEHIND = 1_000;
 export class Feed {
   private held = false;
 
-  /** `since`: the last event taken, where a new subscription starts. */
+  /** `since`: the last event taken (or, before one, the daemon's last seq when it subscribed), where a new subscription starts. */
   constructor(private readonly handle: EventHandler, public since: number | undefined, private readonly pause: () => void, private readonly resume: (since: number | undefined) => void) {}
 
   get paused(): boolean { return this.held; }
@@ -463,10 +463,15 @@ export function followDaemon(address: DaemonAddress, client: DaemonClient, handl
     clearTimeout(holding);
     if (current) current.resume(); else reconnect(0);
   });
+  // A feed that took no event yet goes on after the last seq the daemon had when it subscribed: one that restarts
+  // otherwise subscribes it from its own now, past what it journaled before the reconnect (its daemon.started).
   const follow = (c: DaemonClient) => c.subscribe(feed.since, feed.take, () => {
     if (current !== c) return;
     current = null;
     reconnect(1000);
+  }).then((answer) => {
+    if (feed.since === undefined && typeof answer?.lastSeq === "number") feed.since = answer.lastSeq;
+    return answer;
   });
   return { subscribed: follow(client), close: () => { clearTimeout(holding); current?.close(); } };
 }

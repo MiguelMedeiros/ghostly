@@ -2,6 +2,7 @@ import type { StoredMessage } from "@ghostly/browser/shared/types";
 import { node, type ApiContext } from "./apiKit";
 import { CliError } from "./errors";
 import type { GhostlyEvent } from "./events";
+import { goesOn as goesOnIn } from "./waitNotice";
 
 /*
  * Waiting on what a command sent (WISP 1100): a message's delivery, an edit's confirmation, a group frame taken by an
@@ -12,11 +13,9 @@ const DELIVERY_RANK: Record<string, number> = { sending: 0, waiting: 1, queued: 
 
 /**
  * What a timed-out wait says of what happens next: a daemon goes on, a one-shot's profile closes now. A one-shot's
- * `edit` and `group edit` said "while this profile is online" too, as it was about to leave.
+ * `edit` and `group edit` said "while this profile is online" too, as it was about to leave. Ctrl-C says the same.
  */
-const goesOn = (ctx: ApiContext) => ctx.mode === "one-shot"
-  ? "goes with this profile's next command, or keep it online with `ghostly daemon --detach`"
-  : stopped(ctx) ? "goes by itself once this profile is online again" : "still goes by itself while this profile is online";
+const goesOn = (ctx: ApiContext) => ctx.mode === "daemon" && stopped(ctx) ? "goes by itself once this profile is online again" : goesOnIn(ctx.mode);
 
 /**
  * A daemon that stops (`ApiContext.stopping`) ends every wait still open at once, with what it knows, as a timeout:

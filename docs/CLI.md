@@ -61,7 +61,10 @@ the profile.
 To join someone else's invite: `printf '%s' "$INVITE" | ghostly invite join --label bob` (stdin keeps it out of `ps`
 and the shell's history; `ghostly invite join <ghostly1… or link>` works too, with a warning). With no invite given,
 a join whose stdin stays empty says so on stderr after 2 s and gives up with a usage error after 60 s; `invite join -`
-waits for stdin as long as it takes. The invite is the app's own, so
+waits for stdin as long as it takes. Any command that reads stdin takes at most 16 MiB there, the most a daemon's
+request line holds: more is refused as it comes (`bad_request`), and so is a file a request carries (a card's `--json`,
+`identity complete --evidence-file`, `x401 credential add`). A request whose JSON passes 16 MiB all the same (a text's
+escapes) is refused before it goes to the daemon. The invite is the app's own, so
 the other side can be the web app, the extension, the Desktop or another `ghostly`. A one-shot (no daemon) waits up
 to 60 s for the inviter, then answers `"paired":true|false` and the `stage`; when it did not pair, stderr says the next
 step (keep the profile running with `ghostly daemon --detach`, then `ghostly chat wait bob --until paired`).
@@ -85,7 +88,10 @@ Only one process opens a profile at a time.
 `ghostly daemon --detach` keeps a profile online; `ghostly daemon status` and `ghostly daemon stop` check and end it,
 and `ghostly daemon restart` starts it again on the CLI's own code (after an upgrade, commands warn on stderr that
 the daemon runs another version). Ctrl-C, a service manager's stop, or the terminal or SSH session closing all stop
-it cleanly: it tells contacts it is going and removes its socket.
+it cleanly: it tells contacts it is going and removes its socket. While a daemon is starting (its engine, before its
+socket listens: seconds on a large profile), `ghostly daemon status` says `"running": false, "starting": true` with its `pid`, and `daemon stop` and `daemon restart`
+wait up to `--timeout` for its socket, then stop it. Any other command run meanwhile waits up to 30 s for that socket
+and goes through it.
 While it runs, every command goes through its socket. With no daemon, a command runs the profile itself and leaves
 (a one-shot), so the contact sees it come and go. Bots should run the daemon.
 
@@ -257,8 +263,8 @@ Safety rules the CLI enforces:
   unless `--force`.
 - **Secrets stay hidden.** Seeds, keys, wallet phrases, backups, group entry links and a pending chat's invite code are printed only with `--show-secret` (or `group link`, for a group's link, and `invite create`, for the invite it makes).
 
-Errors print `{"error":{"code","message"}}` and exit with 1 (failed), 2 (usage), 3 (not found), 4 (timed out) or
-5 (needs `--force`, `--yes` or `--confirm-real`). A daemon that does not answer a read or `daemon status` within 15
+Errors print `{"error":{"code","message"}}` and exit with 1 (failed), 2 (usage), 3 (not found), 4 (timed out),
+5 (needs `--force`, `--yes` or `--confirm-real`) or 130 (stopped with Ctrl-C, `interrupted`). A daemon that does not answer a read or `daemon status` within 15
 seconds (`daemon status --timeout s` sets its own), or a command that waits (`chat wait`, `file wait`, `--wait`)
 within its `--timeout` (or the default, 60, 300 and 30 s) plus 10 seconds, is a timeout too (exit 4,
 `details.method`). Any other command (`send`, `react`, `invite create`, `settings set` and the like) is sent only
@@ -335,6 +341,8 @@ text to speech) on this socket. Clone it; its `AGENTS.md` takes an AI agent thro
 
 The audio contract, one Unix socket per call:
 
+- **Token.** A program's first bytes are the call's `audio.token` and a line feed. Required on Windows (a named
+  pipe there): before it, a connection hears nothing and replaces no program.
 - **Format.** Raw PCM, no framing: s16le, mono, at the call's rate (48000 by default; 24000, 16000, 12000 or 8000
   with `--rate`).
 - **From the call.** The contact's voice in 20 ms frames, as they are decoded.

@@ -80,6 +80,14 @@ means "I paid it: look now"; the payee bounds how often it looks and answers `ok
 paid. Opening the URI is the client's platform's job (desktop and extension hand it to the system); copy and
 the code are the fallback.
 
+A receipt the payer sent (an on-chain, Ark, Bark, Spark or USDT payment already made, `pay` with the request's ID)
+is said again when the chat's session opens or switches transport, since the payee may have been away. The payee
+answers a receipt for a request it already marked paid with `pay-res ok` again, whether it knew the receipt or
+not. The payer keeps on its copy of the request that the payee said so, and from then on does not send those
+receipts again. Until then it sends each one at every reconnect for a week after the payment, and after that once
+per run of the app, so a payee that was away when it was paid still gets the receipt the first time the chat
+opens. Records from before this rule carry no such mark: they follow the same bound until the payee answers.
+
 ## Compatibility, privacy and open decisions
 
 Preserve legacy frames/endpoint vocabulary, inspired by Paykit; do not claim Paykit transport integration. Payments and tokens MUST NOT be placed in DHT records or group broadcasts. Group context may identify a payee, but actual payment remains a specifically authorized exchange. Choose generic wallet interface, cancellation/expiry and receipt evidence semantics before Proposed. On-chain, Ark, Spark and Fedimint are implemented as experimental rails; none has a reserved number here.

@@ -103,6 +103,15 @@ describe("RateWindow", () => {
     window.reset();
     expect(window.wait()).toBe(0);
   });
+
+  it("after the clock goes back, a time later than now is long ago, not a wait as long as the clock went back", () => {
+    let now = 3_600_000;
+    const window = new RateWindow(3, 1_000, () => now);
+    expect([window.take(), window.take(), window.take(), window.take()]).toEqual([true, true, true, false]);
+    now -= 3_600_000 - 10;
+    expect(window.wait()).toBe(0);
+    expect(window.take()).toBe(true);
+  });
 });
 
 // Two GhostLinks over an in-memory stand-in for Iroh, each with a real PairedSession handshake

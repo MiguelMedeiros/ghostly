@@ -26,10 +26,13 @@ interface CallMediaControls {
   switchCamera: (deviceId: string | null) => Promise<void>;
 }
 
-/** A device went away mid-call and the default took over, or the chosen one came back. */
+/**
+ * A device went away mid-call and the default took over (or none could), the chosen one came back, or one chosen in
+ * the call could not be opened.
+ */
 export interface DeviceNotice {
   kind: DeviceKind;
-  type: "lost" | "back";
+  type: "lost" | "gone" | "back" | "failed";
   name: string;
   /** For "back": the device to switch back to. */
   id?: string;
@@ -117,15 +120,25 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
       offered.current.add(`${kind}:missing`);
       setNotice({ kind, type: "lost", name });
     };
+    /** The default takes over from a device that went; when it cannot be opened (it was the only one), that is said instead. */
+    const fallBack = (kind: DeviceKind, name: string, to: () => Promise<void>) => {
+      lost(kind, name);
+      return run(async () => {
+        try {
+          await to();
+        } catch (error) {
+          setNotice({ kind, type: "gone", name });
+          throw error;
+        }
+      });
+    };
 
     if (audio && gone("audioinput", mic, audio)) {
-      lost("audioinput", audio.label);
-      await run(() => call.switchMicrophone(null));
+      await fallBack("audioinput", audio.label, () => call.switchMicrophone(null));
       return;
     }
     if (showing && video && gone("videoinput", camera, video)) {
-      lost("videoinput", video.label);
-      await run(() => call.switchCamera(null));
+      await fallBack("videoinput", video.label, () => call.switchCamera(null));
       return;
     }
     if (sink && !next.audiooutput.some((d) => d.id === sink)) {
@@ -248,17 +261,32 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
 
   const choose = useCallback((kind: DeviceKind, deviceId: string) => {
     const device = list[kind].find((d) => d.id === deviceId);
-    choosing.current = true;
-    try {
-      chooseDevice(kind, deviceId ? { id: deviceId, label: device?.label ?? "" } : null);
-    } finally {
-      choosing.current = false;
-    }
+    const was = loadDeviceChoices()[kind] ?? null;
+    const save = (choice: typeof was) => {
+      choosing.current = true;
+      try {
+        chooseDevice(kind, choice);
+      } finally {
+        choosing.current = false;
+      }
+    };
+    save(deviceId ? { id: deviceId, label: device?.label ?? "" } : null);
     setNotice(null);
     const { webrtc: call } = state.current;
-    if (kind === "audioinput") void run(() => call.switchMicrophone(deviceId || null));
-    else if (kind === "videoinput") void run(() => call.switchCamera(deviceId || null));
-    else setSpeaker(deviceId || undefined);
+    if (kind === "audioinput" || kind === "videoinput") {
+      void run(async () => {
+        try {
+          await (kind === "audioinput" ? call.switchMicrophone(deviceId || null) : call.switchCamera(deviceId || null));
+        } catch (error) {
+          // Held by another app, or refused: the call keeps the one it had, and so does the profile, unless another
+          // choice was made since. Said, or the menu's click would seem to do nothing.
+          if ((loadDeviceChoices()[kind]?.id ?? "") === deviceId) save(was);
+          const now = state.current.webrtc.callState;
+          if (now !== "idle" && now !== "incoming") setNotice({ kind, type: "failed", name: device?.label ?? "" });
+          throw error;
+        }
+      });
+    } else setSpeaker(deviceId || undefined);
   }, [list, run, setNotice]);
 
   const switchBack = useCallback(() => {

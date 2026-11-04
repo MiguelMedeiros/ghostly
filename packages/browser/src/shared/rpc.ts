@@ -272,6 +272,8 @@ export interface EngineApi {
   walletRemoveMint(params: { url: string; acceptLoss?: boolean }): void;
   /** A Lightning invoice from the active source (`via: "cashu"`: from the mints, landing as ecash). */
   walletReceiveLightning(params: { amount: number; via?: "cashu"; network?:WalletNetwork; card?: string }): { quote: string; invoice: string; expiresAt: number | null; paymentHash?: string; source: string };
+  /** The screen shows this invoice of ours: it is asked about every few seconds for a while (agents#2447). Say it again while it shows. */
+  walletWatchInvoice(params: { invoice: string; network?: WalletNetwork }): void;
   walletQuoteInvoice(params: { invoice: string; via?: "cashu"; network?:WalletNetwork; card?: string; amount?: number }): { quote: string; mint: string; amount: number; feeReserve: number; source?: string };
   /** `note`: what the payment was for, kept with the wallet's own record of it (a Lightning address, for one). */
   /** `confirmedReal`: required to pay a quote of a Mainnet wallet (real money), refused without it. */
@@ -301,8 +303,11 @@ export interface EngineApi {
   bitcoinReconfigureSource(params: { values: Record<string, string>; network?:WalletNetwork }): void;
   bitcoinReceiveAddress(params?: { network?:WalletNetwork }): string;
   bitcoinRefresh(params?: { network?:WalletNetwork }): void;
-  /** Redeems a token pasted by the user. Only mints the user added are accepted. */
-  walletReceiveToken(params: { token: string }): { amount: number };
+  /**
+   * Redeems a token pasted by the user. Only mints the user added are accepted. `amount`: what arrived; `fee`: what the
+   * mint kept of the token's face value to take it in (absent from an engine older than agents#2255: none said).
+   */
+  walletReceiveToken(params: { token: string }): { amount: number; fee?: number };
   walletInspectCashu(params: { text: string }): { inspection: CashuInspection | null };
   /** Everything held, as tokens: the only backup there is for now. */
   walletExport(params?: { network?: WalletNetwork }): { mint: string; token: string; amount: number }[];
@@ -520,6 +525,12 @@ export interface EngineApi {
    * start with `remove-<reason>:`.
    */
   deviceRemove(params: { key: string }): import("../devices/links").DeviceSetView;
+  /**
+   * Rename (WISP 06 § User experience), on the active device: the device with this signing key gets this name in the
+   * set's next record, which every device reads. The name is trimmed; one the record would change (empty, over 16 bytes,
+   * a control, invisible or direction-changing character) is refused. Errors start with `rename-<reason>:`.
+   */
+  deviceRename(params: { key: string; name: string }): import("../devices/links").DeviceSetView;
   /** "New device secret": the set moves to a new device-set secret with nobody removed. */
   deviceNewSecret(): import("../devices/links").DeviceSetView;
   /** The offer of a new device secret after a takeover, answered without making one. */
@@ -667,6 +678,8 @@ export type EngineEvent =
   /** What changed in a history the client was sent whole already (`applyMessageChanges`): only those rows. */
   | ({ kind: "message-changes"; linkId: string } & MessageChanges)
   | { kind: "call-signal"; linkId: string; signal: string }
+  /** Another page on this engine answered or declined the contact's call ringing in that chat: it rings here no more. */
+  | { kind: "call-handled"; linkId: string }
   /** A contact's mini-app frame in a 1:1 chat (`apps/1`, WISP 1200 § In a chat), already checked; never stored. */
   | { kind: "app-frame"; linkId: string; event: import("@ghostly/core").AppFrameEvent }
   /** The contact's app asks for a range of a file this side's app serves (`appServe`): the page that served it answers. */

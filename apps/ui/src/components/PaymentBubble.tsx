@@ -182,7 +182,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
 
           {tokenPayment?formatTokenAmount(payment.amount,payment.target?.decimals,t.language):formatAmount(celebrate ? amountShown : payment.amount, t.language)}
         </span>
-        {" "}<span className="text-xs ms-1 text-text-primary/75">{tokenPayment?payment.target?.asset:sats}</span>
+        {" "}<span className="text-xs ms-1 text-text-primary/75">{tokenPayment?payment.target?.asset:satsIn(t, network, payment.amount)}</span>
       </p>
       {payment.target && <p className="text-xs text-text-primary/65" data-testid="payment-rail">{railLine(t, payment.target.method, payment.target.network)}</p>}
       {!payment.target && fedimint && <p className="text-xs text-text-primary/65" data-testid="payment-fedimint">{isRequest && !outgoing && payment.state === "pending" ? t("payments.bubble.fedimintNoFederation") : "Fedimint"}</p>}
@@ -257,7 +257,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
         </button>
       )}
       {/* What went wrong with an attempt here: gone once the request is paid, however it was paid. */}
-      {error && payment.state !== "settled" && <Notice problem={error} className="text-[11px] m-0 mt-1" ink />}
+      {error && payment.state !== "settled" && <Notice problem={error} className="text-[11px] m-0 mt-1" />}
     </div>
   );
 }

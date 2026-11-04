@@ -129,7 +129,9 @@ test("four people: create, invite, everyone reads everyone, catch-up, removal, a
   await expect(groupChat(carol)).toHaveAttribute("data-status", "removed", { timeout: 60_000 });
   await expect(carol.page.getByTestId("group-notice")).toContainText("removed");
   await expect(carol.page.getByPlaceholder("Message…")).toBeDisabled();
-  await expect(bob.page.getByTestId("group-event").filter({ hasText: "Carol is no longer a member" })).toBeVisible({ timeout: 60_000 });
+  // The line names who removed her: in Alice's own words in her chat.
+  await expect(bob.page.getByTestId("group-event").filter({ hasText: "Alice removed Carol" })).toBeVisible({ timeout: 60_000 });
+  await expect(alice.page.getByTestId("group-event").filter({ hasText: "You removed Carol" })).toBeVisible({ timeout: 60_000 });
   await say(alice, "after carol left");
   await say(bob, "just the two of us");
   await sees(bob, "after carol left");

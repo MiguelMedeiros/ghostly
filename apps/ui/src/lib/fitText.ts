@@ -1,7 +1,7 @@
 type Segmenter = { segment(text: string): Iterable<{ segment: string }> };
 const SegmenterCtor = (globalThis as { Intl?: { Segmenter?: new (locale?: string, options?: { granularity: string }) => Segmenter } }).Intl?.Segmenter;
 const graphemes = SegmenterCtor ? new SegmenterCtor(undefined, { granularity: "grapheme" }) : null;
-const splitGraphemes = (s: string) => graphemes ? Array.from(graphemes.segment(s), (g) => g.segment) : [...s];
+export const splitGraphemes = (s: string) => graphemes ? Array.from(graphemes.segment(s), (g) => g.segment) : [...s];
 const lowSurrogate = (s: string, i: number) => { const c = s.charCodeAt(i); return c >= 0xdc00 && c <= 0xdfff; };
 
 export const utf8Bytes = (s: string) => new TextEncoder().encode(s).length;

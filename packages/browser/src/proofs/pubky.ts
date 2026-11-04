@@ -6,6 +6,9 @@ import type { AuthFlow, GrantAuthFlow, Session } from "@synonymdev/pubky";
 import type { ApprovalRequest, IdentityFetch } from "./contract";
 import { assertPublicHost, chosenResolver, type DohResolverId } from "./domain";
 import { getBrowserHost, type PubkyCookieSession } from "../host";
+import { PUBKY_RELAYS } from "./pubkyRelays";
+
+export { PUBKY_RELAYS };
 
 /**
  * Pubky, browser side: reading a key's records and files the way a contact's app does (through the proof
@@ -15,8 +18,6 @@ import { getBrowserHost, type PubkyCookieSession } from "../host";
 
 // -- reading ---------------------------------------------------------------------------------------
 
-/** Pkarr relays the records are read from: Pubky's own, the ones the Pubky SDK uses. */
-export const PUBKY_RELAYS: readonly string[] = ["https://pkarr.pubky.org", "https://pkarr.pubky.app"];
 
 /**
  * The newest DNS packet the relays hold for `key`, its signature checked against `key`. Every relay is asked; one

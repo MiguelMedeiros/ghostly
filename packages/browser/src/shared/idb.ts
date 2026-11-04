@@ -59,6 +59,9 @@ export function profileOpenMessage(failure: ProfileOpenFailure): string {
 /** What the start of the engine failed with, as the failure the pages show: a database that did not open, or anything else. */
 export function profileOpenFailure(error: unknown): ProfileOpenFailure {
   if (error instanceof ProfileOpenError) return error.failure;
+  // The database opened but a first write found no room (Chromium aborts the transaction with an empty message).
+  const quota = quotaError(error);
+  if (quota) return failureOf(quota);
   const detail = error instanceof Error ? error.message : String(error);
   return { reason: "failed", supportedVersion: DB_VERSION, ...(detail ? { detail } : {}) };
 }
@@ -76,15 +79,33 @@ export function errorLine(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** How long an open that another window blocks may wait for that window to let go before it is said to be blocked. */
-export const OPEN_TIMINGS = { blockedMs: 10_000 };
+/** The no-room error's names: the standard one and Firefox's (its legacy code, 22, is read as well). */
+const QUOTA_NAMES: ReadonlySet<unknown> = new Set(["QuotaExceededError", "NS_ERROR_DOM_QUOTA_REACHED"]);
+
+/**
+ * The no-room error behind `error`, as thrown or wrapped: a transaction's abort (`error`, an event's `target.error`)
+ * or an Error's `cause`. Undefined when it is not one.
+ */
+function quotaError(error: unknown, depth = 0): { name?: unknown; message?: unknown } | undefined {
+  if (!error || typeof error !== "object" || depth > 3) return undefined;
+  const e = error as { name?: unknown; code?: unknown; error?: unknown; target?: { error?: unknown } | null; cause?: unknown };
+  if (QUOTA_NAMES.has(e.name) || (typeof DOMException !== "undefined" && error instanceof DOMException && e.code === 22)) return e;
+  return quotaError(e.error, depth + 1) ?? quotaError(e.target?.error, depth + 1) ?? quotaError(e.cause, depth + 1);
+}
+
+/**
+ * `blockedMs`: how long an open that another window blocks may wait for that window to let go before it is said to be
+ * blocked. `silentMs`: how long an open may go without any answer from the browser (no success, error, blocked or
+ * upgrade) before it is said to have failed. An upgrade that started has its answer and may take as long as it needs.
+ */
+export const OPEN_TIMINGS = { blockedMs: 10_000, silentMs: 30_000 };
 
 function failureOf(error: unknown): ProfileOpenFailure {
   const name = (error as { name?: unknown } | null)?.name;
   const message = (error as { message?: unknown } | null)?.message;
   const detail = [typeof name === "string" ? name : "", typeof message === "string" ? message : ""].filter(Boolean).join(": ");
   const reason: ProfileOpenReason = name === "VersionError" ? "newer"
-    : name === "QuotaExceededError" ? "full"
+    : quotaError(error) ? "full"
       // Firefox's private windows of old, storage blocked for the site, or no IndexedDB at all.
       : name === "BlockedError" ? "blocked"
       : name === "SecurityError" || name === "InvalidStateError" || name === "ReferenceError" || name === "TypeError" ? "denied"
@@ -196,11 +217,15 @@ export function openDb(): Promise<IDBDatabase> {
   dbPromise ??= new Promise((resolve, reject) => {
     let settled = false;
     let blocked: ReturnType<typeof setTimeout> | undefined;
+    // A browser fault (WebKit had one on a first page load): an open that never answers, which left the app looking
+    // alive with an engine that never started. Without an answer in time it is said as a failure, and Try again reloads.
+    const silent = setTimeout(() => fail({ name: "TimeoutError", message: `the browser did not answer in ${Math.round(OPEN_TIMINGS.silentMs / 1000)} s` }), OPEN_TIMINGS.silentMs);
     // Said once, as what it is (`ProfileOpenError`): the engine does not start, and the pages show why.
     const fail = (error: unknown) => {
       if (settled) return;
       settled = true;
       clearTimeout(blocked);
+      clearTimeout(silent);
       const failure = failureOf(error);
       if (failure.reason !== "newer") { reject(new ProfileOpenError(failure)); return; }
       void storedVersion(dbName).then((version) => reject(new ProfileOpenError({ ...failure, ...(version !== undefined ? { storedVersion: version } : {}) })));
@@ -213,6 +238,7 @@ export function openDb(): Promise<IDBDatabase> {
       return;
     }
     request.onupgradeneeded = () => {
+      clearTimeout(silent);
       const db = request.result;
       const has = (name: string) => db.objectStoreNames.contains(name);
       if (!has(STORES.links)) db.createObjectStore(STORES.links, { keyPath: "id" });
@@ -265,6 +291,7 @@ export function openDb(): Promise<IDBDatabase> {
       if (settled) { request.result.close(); return; }
       settled = true;
       clearTimeout(blocked);
+      clearTimeout(silent);
       // Let the other context upgrade the schema instead of blocking it.
       request.result.onversionchange = () => {
         request.result.close();
@@ -277,6 +304,7 @@ export function openDb(): Promise<IDBDatabase> {
     // Another window holds the database at an older version and has not let go (ours do, on `versionchange`). The
     // open stays pending for as long as that lasts: before, the engine waited with it, silently and for good.
     request.onblocked = () => {
+      clearTimeout(silent);
       blocked ??= setTimeout(() => fail({ name: "BlockedError", message: "another connection holds an older version open" }), OPEN_TIMINGS.blockedMs);
     };
   });
@@ -289,13 +317,13 @@ export const PROFILE_STORES = [STORES.links, STORES.messages, STORES.files, STOR
 /**
  * Records of the settings store that belong to the profile, not to a wallet: its DID and its key, its identity proofs
  * with their keys and revocations and when the contacts' were last looked up for one, its own Nostr data, the public profiles it read, the built-in mini-apps it removed
- * (`BUILT_IN_APPS_KEY` of `engine/apps.ts`), its x401 credentials and their keys (`engine/x401.ts`), its contact links
+ * (`BUILT_IN_APPS_KEY` of `engine/apps.ts`) and the digests of the mini-app bundles it may hold (`APP_BUNDLES_KEY`), its x401 credentials and their keys (`engine/x401.ts`), its contact links
  * (`engine/contactLinks.ts`), the requests it sent through others' (`engine/contactAsks.ts`) and its saved messages
  * (`engine/saved.ts`). A list of what goes
  * rather than of what stays, on purpose: every other record of that store is a wallet's (seeds, configuration, pending
  * operations), and a wallet record a newer version adds must never be deleted by mistake.
  */
-export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "nostrSocial", "publicProfiles", "appBuiltIns", "x401Credentials", "contactLinks", "contactAsks", "savedMessages"] as const;
+export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "nostrSocial", "publicProfiles", "appBuiltIns", "appBundles", "x401Credentials", "contactLinks", "contactAsks", "savedMessages"] as const;
 
 /**
  * The fields of the peer's `settings` record that are a wallet's, kept by "Clear all data": the mint list, the first-run

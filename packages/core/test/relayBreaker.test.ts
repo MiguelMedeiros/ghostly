@@ -206,7 +206,7 @@ describe("relay transport with a breaker", () => {
         vi.advanceTimersByTime(21_000);
       }
       expect(relay.discovery().relays[0]).toMatchObject({ relay: "https://down.test", state: "failing", reason: "no answer" });
-      expect(log).toEqual(["down.test tripped (no answer); left alone for 60 s"]);
+      expect(log).toEqual(["relay down.test did not answer; asked again in 60 s"]);
       expect(log.join()).not.toContain(id.pubKeyZ32);
       calls.length = 0;
       for (let i = 0; i < 6; i++) await relay.resolve(id.pubKeyZ32);
@@ -226,7 +226,7 @@ describe("relay transport with a breaker", () => {
         "a.test": () => new Response(null, { status: 204 }),
       });
       await Promise.all(Array.from({ length: 15 }, () => relay.publish(id, []).catch(() => {})));
-      expect(log).toEqual(["refusing.test tripped (no answer); left alone for 60 s"]);
+      expect(log).toEqual(["relay refusing.test did not answer; asked again in 60 s"]);
       vi.advanceTimersByTime(70_000);
       // Its minute is over: its probe is due, not four more minutes of waiting.
       expect(relay.discovery().relays[0]).toEqual({ relay: "https://refusing.test", state: "ok" });
@@ -261,7 +261,7 @@ describe("relay transport with a breaker", () => {
       expect((await relay.resolve(id.pubKeyZ32))?.timestampMicros).toBe(1000n);
       expect(calls).toEqual(["GET flaky.test"]);
       expect(relay.discovery()).toEqual({ path: { via: "relay", relay: "https://flaky.test" }, relays: [{ relay: "https://flaky.test", state: "ok" }] });
-      expect(log.at(-1)).toBe("flaky.test answered again");
+      expect(log.at(-1)).toBe("relay flaky.test answers again");
       expect(recovered.mock.calls.map(([change]) => change)).toEqual(["tripped", "tripped", "recovered"]);
     } finally {
       vi.useRealTimers();

@@ -1,4 +1,4 @@
-import { act, screen } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import { createChatInvite } from "@ghostly/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LinkView } from "@ghostly/browser/shared/types";
@@ -13,13 +13,16 @@ import { renderApp } from "../render";
 
 const { inviteCode } = createChatInvite();
 
-/** Chat.tsx's inviter side: the scene, and the invite card while the contact has not arrived with it. */
+/** Chat.tsx's inviter side: the scene, and the invite card while the contact has not arrived with it; the composer under them. */
 function Inviter() {
   const p = usePairingProgress("peer", { inviter: true, enabled: true, createdAt: Date.now() });
-  return <>
-    {p.scene && p.progress && <PairingScene progress={p.progress} contact="Alice" retry={() => void p.retry()} retrying={p.retrying} retryError={p.retryError} />}
-    <InviteCard code={inviteCode} shown={!contactArrived(p.progress)} />
-  </>;
+  return <div className="chat-column">
+    <div data-message-list>
+      {p.scene && p.progress && <PairingScene progress={p.progress} contact="Alice" retry={() => void p.retry()} retrying={p.retrying} retryError={p.retryError} />}
+      <InviteCard code={inviteCode} shown={!contactArrived(p.progress)} />
+    </div>
+    <div data-composer><textarea aria-label="Message" /></div>
+  </div>;
 }
 
 type Pairing = NonNullable<LinkView["pairing"]>;
@@ -126,6 +129,54 @@ describe("the inviter's invite card, once the contact answers", () => {
     // It fades back in; the first card never did.
     expect(card()).toHaveAttribute("data-returning");
     expect(card()).not.toHaveAttribute("aria-hidden");
+  });
+
+  it("hands the focus on its Copy to the message field, not to the page", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { engine } = renderApp(<Inviter />);
+    show(report("waiting"), engine);
+    const copy = within(card()!).getByRole("button", { name: "Copy invite" });
+    copy.focus();
+    expect(copy).toHaveFocus();
+    show(report("waiting", { peerSeen: true }), engine);
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus();
+    leave();
+    expect(card()).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus();
+  });
+
+  it("leaves a focus elsewhere where it is", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { engine } = renderApp(<><Inviter /><button type="button">Elsewhere</button></>);
+    show(report("waiting"), engine);
+    const elsewhere = screen.getByRole("button", { name: "Elsewhere" });
+    elsewhere.focus();
+    show(report("answering"), engine);
+    leave();
+    expect(elsewhere).toHaveFocus();
+  });
+
+  it("on a touch screen, hands it to the messages: the field would bring the keyboard up", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const touch = vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({ media: query, matches: query === "(any-pointer: coarse)", onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }) as MediaQueryList);
+    try {
+      const { engine } = renderApp(<Inviter />);
+      show(report("waiting"), engine);
+      within(card()!).getByRole("button", { name: "Copy invite" }).focus();
+      show(report("answering"), engine);
+      leave();
+      expect(document.activeElement).toBe(document.querySelector("[data-message-list]"));
+    } finally { touch.mockRestore(); }
+  });
+
+  it("with reduced motion, hands the focus over as it goes at once", () => {
+    const { engine } = renderApp(<Inviter />);
+    document.documentElement.dataset.reduceMotion = "true";
+    show(report("waiting"), engine);
+    within(card()!).getByRole("button", { name: "Copy invite" }).focus();
+    show(report("answering"), engine);
+    expect(card()).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus();
   });
 
   it("goes at once with reduced motion", () => {
