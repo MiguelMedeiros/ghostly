@@ -1,5 +1,5 @@
 import {
-  emptyIdentityLedger, fromBase64Url, identityRevocationValue, identityStatement, IdentityCheckUnavailable, IdentityExchange, IDENTITY_REVOCATION_LABEL, isIdentityBinding, newIdentityBinding,
+  budgetRetryMs, emptyIdentityLedger, fromBase64Url, isDiscoveryBudgetError, identityRevocationValue, identityStatement, IdentityCheckUnavailable, IdentityExchange, IDENTITY_REVOCATION_LABEL, isIdentityBinding, newIdentityBinding,
   receivedIdentityStatus, revokesIdentity, toBase64Url,
   type IdentityBinding, type IdentityLedger, type IdentityScope, type ReceivedIdentity, type IdentityStatement, type LocalIdentityProof, type VerifiedIdentity,
 } from "@ghostly/core";
@@ -60,6 +60,8 @@ const REPUBLISH_MS = 60 * 60_000;
 const REVOCATION_CHECK_MS = 12 * 60 * 60_000;
 /** A lookup that could not run (offline, no relay answered) is tried again after this, doubled each time, up to the 12 h. */
 const REVOCATION_RETRY_MS = 5 * 60_000;
+/** A proof's lookup the relays' budget held back is read again when it frees, at most this many times; then the lookup counts as missed. */
+const BUDGET_TRIES = 5;
 /**
  * After a contact withdraws a proof, how long to wait before each lookup for its revocation (WISP 300: removing a proof withdraws it from
  * every chat and revokes it). The notice goes out before the revocation is published, so not at once; each try backs
@@ -87,6 +89,10 @@ export class IdentityProofs {
   private lookupFailures = 0;
   private lookupTimer: ReturnType<typeof setTimeout> | undefined;
   private looking = false;
+  /** How long until the relays' budget takes the read it last held back, 0 if none was (`revoked`). */
+  private budgetWait = 0;
+  /** Ends a lookup's wait for the budget: `stop`. */
+  private wakeLookup: (() => void) | undefined;
   /** Revocations not published because the app was offline: published when the network comes back (`networkBack`). */
   private unpublished = new Set<string>();
   private running = false;
@@ -164,6 +170,7 @@ export class IdentityProofs {
     for (const t of this.timers) clearTimeout(t);
     this.timers = [];
     this.lookupTimer = undefined;
+    this.wakeLookup?.();
     this.unlisten?.();
     this.unlisten = undefined;
     this.forgetSeeds();
@@ -221,10 +228,16 @@ export class IdentityProofs {
       throw e;
     }
   };
-  /** The exchange reads a lookup that failed as "not revoked": counted here, so the 12 h lookup is not noted as done. */
+  /**
+   * The exchange reads a lookup that failed as "not revoked": counted here, so the 12 h lookup is not noted as done. One
+   * the relays' budget held back is kept apart (`budgetWait`): the lookup waits for the budget and reads it again.
+   */
   private revoked = async (statement: IdentityStatement): Promise<boolean> => {
     if (!this.host.online()) { this.lookupFailures++; return false; }
-    const records = await this.host.resolve(statement.binding.key).catch((e: unknown) => { this.lookupFailures++; throw e; });
+    const records = await this.host.resolve(statement.binding.key).catch((e: unknown) => {
+      if (isDiscoveryBudgetError(e)) this.budgetWait = budgetRetryMs(e, 1_000, 60_000); else this.lookupFailures++;
+      throw e;
+    });
     return !!records && revokesIdentity(records, statement.id);
   };
 
@@ -345,7 +358,19 @@ export class IdentityProofs {
     for (const linkId of this.host.linkIds()) {
       for (const r of this.host.ledger(linkId)?.received ?? []) {
         if (this.ended) return false;
-        if (this.revocable(r)) await this.exchange(linkId)?.recheck(r.id, { revocationOnly: true }).catch(() => {});
+        if (!this.revocable(r)) continue;
+        // The relays hold background reads past their minute's share: this one waits for it and goes again, as nobody
+        // waits on the lookup. Counted a failure instead, a lookup of more proofs than the minute allows never completed,
+        // and each retry read them all again, refused at the same place.
+        for (let tries = 0; ; tries++) {
+          this.budgetWait = 0;
+          await this.exchange(linkId)?.recheck(r.id, { revocationOnly: true }).catch(() => {});
+          if (!this.budgetWait) break;
+          if (tries >= BUDGET_TRIES) { this.lookupFailures++; break; }
+          await new Promise<void>(resolve => { const timer = setTimeout(resolve, this.budgetWait); this.wakeLookup = () => { clearTimeout(timer); resolve(); }; });
+          this.wakeLookup = undefined;
+          if (!this.running || this.ended) return false;
+        }
       }
     }
     // "Clear all data" came meanwhile: the profile it was for is gone, and its time must not land in the cleared one.

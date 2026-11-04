@@ -1,6 +1,9 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createIdentity, emptyIdentityLedger, identityFromSeed, identityStatement, type IdentityDisplay, type IdentityLedger } from "@ghostly/core";
+import {
+  createIdentity, DiscoveryBudgetError, emptyIdentityLedger, identityFromSeed, identityRevocationValue, identityStatement, IDENTITY_REVOCATION_LABEL, newIdentityBinding,
+  type IdentityDisplay, type IdentityLedger, type VerifiedIdentity,
+} from "@ghostly/core";
 import { STORES, clearProfileStores, store, transact, wrap } from "../src/shared/idb";
 import { IdentityProofs, type IdentityLinkHost } from "../src/engine/identities";
 import { fakeKey, fakeKeySign, fakeKeySubject } from "../src/proofs/testing";
@@ -385,6 +388,47 @@ describe("removing a proof and its revocation", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(pkarr.get(binding.key)?.[0]).toMatchObject({ label: "_ghostly-revoked", value: expect.stringContaining(id) });
     a.stop();
+  });
+
+  /**
+   * The relays hold a background read back past their minute's share (`DiscoveryBudgetError`, ~45 a minute on the default
+   * three): with more of the contacts' proofs than that, the lookup was never noted done. Each retry (5 min, 10, 20…, at
+   * every start and every time the network came back) read every proof again and was refused at the same place, so
+   * the proofs past it were never looked up: 150 proofs took 709 relay reads in 12 h, and the last 61 none.
+   */
+  it("a revocation lookup held back by the relays' budget waits for it: every proof looked up once, and the lookup noted done", async () => {
+    await clearStorage();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const ledgers = new Map<string, IdentityLedger>();
+    for (let i = 0; i < 12; i++) {
+      const { binding } = newIdentityBinding({ provider: "fake-key", subject: fakeKeySubject(), validitySeconds: 30 * 86_400 });
+      const id = identityStatement(binding).id;
+      ledgers.set(`chat${i}`, { ...emptyIdentityLedger(), received: [{ id, binding, evidence: null, verified: { provider: "fake-key", subject: binding.subject } as VerifiedIdentity,
+        presenter: "p", audience: "a", context: "c".repeat(64), verifiedAt: 0, checkedAt: 0, status: "verified" }] });
+    }
+    // The last contact removed its proof: its key holds the revocation.
+    const last = ledgers.get("chat11")!.received[0];
+    const pkarr = new Map([[last.binding.key, [{ label: IDENTITY_REVOCATION_LABEL, value: identityRevocationValue(last.id, Math.floor(Date.now() / 1000)) }]]]);
+    // Five background reads a minute.
+    const answered: string[] = [], spent: number[] = [];
+    const engine = new IdentityProofs({
+      ledger: id => ledgers.get(id), updateLedger: async (id, change) => { ledgers.set(id, change(structuredClone(ledgers.get(id)!))); return ledgers.get(id)!; },
+      channel: () => undefined, keys: () => ({}), linkIds: () => [...ledgers.keys()], online: () => true, emit: () => {}, publish: async () => {},
+      resolve: async key => {
+        const recent = spent.filter(at => Date.now() - at < 60_000);
+        if (recent.length >= 5) throw new DiscoveryBudgetError(recent[0] + 60_000 - Date.now());
+        spent.push(Date.now());
+        answered.push(key);
+        return pkarr.get(key) ?? null;
+      },
+    }, () => [fakeKey]);
+    await engine.load(); engine.start();
+    await vi.advanceTimersByTimeAsync(12 * 60 * 60_000 - 60_000);
+    engine.stop();
+    expect(ledgers.get("chat11")!.received[0].status, "the proof past the budget is looked up").toBe("revoked");
+    expect(answered, "each proof read once in 12 h").toHaveLength(12);
+    expect(new Set(answered).size).toBe(12);
+    expect(await stored("identityRevocationsCheckedAt")).toBeTypeOf("number");
   });
 
   it("a revocation lookup still on its way when the profile's data is cleared does not note its time in the cleared profile", async () => {
