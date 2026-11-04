@@ -598,6 +598,29 @@ describe("routines", () => {
     expect(next("Dec 31 2026 12:00Z")).toBe(Date.UTC(2026, 11, 31, 12));
   });
 
+  it("refuse a day the month does not have in the other forms a JavaScript date reads: month first in numbers, a month's name between dashes, slashes or dots", () => {
+    const next = (value: string) => (params("routine update", ["g1", "nightly", "--next", value]).card as { nextRunAt: number }).nextRunAt;
+    const refused = (value: string, month: string, days: number) => expect(() => next(value), value).toThrow(expect.objectContaining({ code: "usage", message: `--next takes a day the month has (${month} has ${days}), not ${JSON.stringify(value)}` }));
+    // Before, each was the next month's first day.
+    refused("4/31/2026", "2026-04", 30);
+    refused("04/31/2026 10:00", "2026-04", 30);
+    refused("2/29/2027", "2027-02", 28);
+    refused("4/31/26", "2026-04", 30);
+    refused("4-31-2026", "2026-04", 30);
+    refused("4.31.2026", "2026-04", 30);
+    refused("31-Apr-2026", "2026-04", 30);
+    refused("31/Apr/2026", "2026-04", 30);
+    refused("Apr-31-2026", "2026-04", 30);
+    refused("Apr.31.2026", "2026-04", 30);
+    refused("2026-Apr-31", "2026-04", 30);
+    refused("31 Apr, 2026", "2026-04", 30);
+    // Days the month has stay as they were, a leap day included, as local time.
+    expect(next("12/31/2026")).toBe(new Date(2026, 11, 31).getTime());
+    expect(next("2/29/28 10:00")).toBe(new Date(2028, 1, 29, 10).getTime());
+    expect(next("29-Feb-2028")).toBe(new Date(2028, 1, 29).getTime());
+    expect(next("Apr-30-2026")).toBe(new Date(2026, 3, 30).getTime());
+  });
+
   it("refuse a wrong state or a text too long or blank as a usage error (exit 2) that names the flag, not the card's field", () => {
     const usage = (name: string, argv: string[], message: RegExp) => expect(() => params(name, argv)).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(message) }));
     const send = (...flags: string[]) => ["g1", "--name", "Nightly", "--schedule", "every day", ...flags];
