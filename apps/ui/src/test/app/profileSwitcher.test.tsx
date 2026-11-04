@@ -1,10 +1,14 @@
-import { act, fireEvent, screen, within } from "@testing-library/react";
-import { Route, Routes, useLocation } from "react-router-dom";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { HashRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AccountBar } from "../../components/AccountBar";
 import { MobileTabBar } from "../../components/MobileTabBar";
 import { ProfileSwitchSplash } from "../../components/ProfileSwitchSplash";
+import { I18nProvider } from "../../contexts/I18nContext";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
+import { SettingsProvider } from "../../contexts/SettingsContext";
+import { openProfileSwitcher } from "../../hooks/useProfileSwitcher";
 import { activeProfileId, createProfile, lastRouteOf, pendingSwitch, prefixOf, renameProfile, settingsKeyFor, type ProfileEntry } from "../../lib/profiles";
 import { fakeEngine } from "../fakeEngine";
 import { shownInName } from "../labelInName";
@@ -49,6 +53,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   fakeEngine.features = { ...fakeEngine.features, profiles: false };
+  // What a sheet opened under fake timers left to do (its history entry, lib/layerHistory.ts) is done before the next.
+  if (vi.isFakeTimers()) act(() => { vi.runOnlyPendingTimers(); });
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -245,6 +251,37 @@ describe("the account switcher on a phone", () => {
     fireEvent.pointerUp(tab, { pointerType: "touch" });
     fireEvent.click(tab);
     expect(screen.queryByTestId("landed")).not.toBeInTheDocument();
+  });
+
+  it("Back (Android's back gesture) closes the sheet alone: Settings stays under it, and the next Back goes on", async () => {
+    createProfile("Work");
+    window.history.replaceState(null, "", "#/");
+    const user = userEvent.setup();
+    render(
+      <HashRouter><SettingsProvider><I18nProvider>
+        <Routes>
+          <Route path="/" element={<h1>Chats</h1>} />
+          {/* Settings → Profiles, as the page's row opens it. */}
+          <Route path="/settings" element={<button onClick={openProfileSwitcher}>Profiles</button>} />
+        </Routes>
+        <Landed />
+        <MobileTabBar />
+      </I18nProvider></SettingsProvider></HashRouter>,
+    );
+    await user.click(screen.getByTestId("mobile-tab-settings"));
+    await waitFor(() => expect(screen.getByTestId("landed")).toHaveTextContent("/settings"));
+    await user.click(screen.getByRole("button", { name: "Profiles" }));
+    expect(menu()).toHaveClass("profile-switcher-sheet");
+    // Its history entry is pushed once the tap's changes are in.
+    await act(() => new Promise((done) => setTimeout(done, 20)));
+
+    await act(async () => { window.history.back(); });
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("profile-switcher-backdrop")).not.toBeInTheDocument();
+    expect(screen.getByTestId("landed")).toHaveTextContent("/settings");
+
+    await act(async () => { window.history.back(); });
+    await waitFor(() => expect(screen.getByTestId("landed")).toHaveTextContent(/^\/$/));
   });
 });
 

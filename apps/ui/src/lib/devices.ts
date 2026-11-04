@@ -8,6 +8,7 @@ import { useI18n, type Translate, type TranslationKey } from "../contexts/I18nCo
 import { englishT } from "../locales/translate";
 import { DEVICE_INVITE_LIFETIME_S, TURN_NAME_BYTES, inviteLink, inviteQrSegments, readInviteCode, sanitizeDisplayText } from "@ghostly/core";
 import { utf8Bytes } from "./fitText";
+import { reloadPage } from "./layerHistory";
 import { handOverUnlock } from "./lockHandover";
 import { activeProfileId, createProfile, currentProfile, settingsKeyFor, switchProfile } from "./profiles";
 import { protocolLinkCode } from "./url";
@@ -180,7 +181,7 @@ const lockHashOf = (id: string): string | null => {
 export async function reloadIntoGate(options: { keepUnlocked?: boolean } = {}): Promise<void> {
   try { await getBrowserHost().restartEngine?.(); } catch { /* the reload says what is wrong now */ }
   if (options.keepUnlocked) handOverUnlock(activeProfileId(), lockHashOf(activeProfileId()));
-  window.location.reload();
+  reloadPage();
 }
 
 /** What the engine's `takeover-<reason>:` errors say to the person. */
@@ -202,6 +203,19 @@ export function removeErrorKey(error: unknown): TranslationKey | null {
   const reason = message.match(/^remove-([a-z-]+):/)?.[1];
   if (!reason) return null;
   return reason === "busy" ? "devices.remove.fail.busy" : reason === "offline" ? "devices.fail.offline" : "devices.remove.fail.failed";
+}
+
+/** What a refused rename (`rename-<reason>:`) says; null for an error the engine did not word as one. */
+export function renameErrorKey(error: unknown): TranslationKey | null {
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const reason = message.match(/^rename-([a-z-]+):/)?.[1];
+  if (!reason) return null;
+  if (reason === "name" || reason === "long") return "devices.rename.fail.name";
+  if (reason === "busy") return "devices.remove.fail.busy";
+  if (reason === "offline") return "devices.fail.offline";
+  if (reason === "unreachable") return "devices.fail.unreachable";
+  if (reason === "replaced") return "devices.fail.replaced";
+  return "devices.remove.fail.failed";
 }
 
 /** Names as a list a person reads in their language: "Desktop and Phone", "Desktop, Phone and Tablet". */

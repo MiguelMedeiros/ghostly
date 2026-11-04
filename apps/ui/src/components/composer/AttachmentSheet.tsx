@@ -81,13 +81,17 @@ export function AttachmentSheet({ files, alert, status, returnFocus, onPaste, on
   const button = "min-h-10 px-4 rounded-full text-sm font-medium cursor-pointer";
 
   return createPortal(
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 animate-fade-in" {...backdrop}>
+    // \`keyboard-layer\` (index.css): with a phone's keyboard up the layer ends where the keyboard starts, so the panel is
+    // centred in what is left, and the picture takes only the room the caption and the buttons leave.
+    <div className="keyboard-layer fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 animate-fade-in" {...backdrop}>
       <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t("composer.sendFiles")} data-testid="attachment-sheet"
-        onPaste={paste} className="focus:outline-none w-full max-w-md max-h-full flex flex-col bg-panel-header border border-border rounded-2xl shadow-2xl overflow-hidden">
+        onPaste={paste} className="focus:outline-none w-full max-w-md max-h-full flex flex-col bg-panel-header border border-border rounded-2xl shadow-2xl overflow-y-auto">
         {single && picture(0) ? (
-          <figure className="m-0 flex flex-col min-h-0">
-            <div className="bg-black/40 flex items-center justify-center min-h-0">
-              <img src={picture(0)} alt={single.name} onError={() => lost(single)} data-testid="attachment-image" className="max-w-full max-h-[55vh] object-contain" />
+          // Where even the smallest picture leaves no room (a phone on its side, the keyboard up), the picture scrolls
+          // within the panel: the caption and the buttons under it stay in view.
+          <figure className="m-0 min-h-0 overflow-y-auto">
+            <div className="bg-black/40 flex items-center justify-center">
+              <img src={picture(0)} alt={single.name} onError={() => lost(single)} data-testid="attachment-image" className="keyboard-layer-picture max-w-full object-contain" />
             </div>
             {/* The name is cut in its own direction, at its end, as in the file rows; the size stays whole beside it. */}
             <figcaption className="px-4 pt-2 text-xs text-text-muted flex min-w-0" data-testid="attachment-name">

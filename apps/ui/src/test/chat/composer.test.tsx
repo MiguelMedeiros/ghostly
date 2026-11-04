@@ -389,6 +389,31 @@ describe("the emoji/GIF panel", () => {
     expect(screen.queryByRole("button", { name: "👋" })).not.toBeInTheDocument();
   });
 
+  it("has the skin tones as one Tab stop, the chosen tone; the arrows move and only Space or Enter chooses (and closes the row)", async () => {
+    const { user } = composer();
+    await user.click(smiley());
+    await user.click(screen.getByTestId("emoji-skin"));
+    const tones = within(screen.getByRole("radiogroup", { name: "Skin tone" })).getAllByRole("radio");
+    const chosen = tones.findIndex(r => r.getAttribute("aria-checked") === "true");
+    expect(tones.map(r => r.tabIndex)).toEqual(tones.map((_, i) => i === chosen ? 0 : -1));
+    const other = (chosen + 1) % tones.length, last = tones[tones.length - 1];
+    tones[chosen].focus();
+    await user.keyboard("{ArrowRight}");
+    expect(tones[other]).toHaveFocus();
+    // Moving chooses nothing: the row stays open, the chosen tone as it was.
+    expect(screen.getByTestId("emoji-skins")).toBeInTheDocument();
+    expect(tones[chosen]).toHaveAttribute("aria-checked", "true");
+    await user.keyboard("{End}");
+    expect(last).toHaveFocus();
+    await user.keyboard("{Home}");
+    expect(tones[0]).toHaveFocus();
+    await user.keyboard("{ArrowLeft}");
+    expect(last).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("emoji-skins")).not.toBeInTheDocument();
+    expect(screen.getByTestId("emoji-skin")).toHaveTextContent(last.textContent!);
+  });
+
   it("moves through the grid with the arrow keys", async () => {
     const { user } = composer();
     await user.click(smiley());
@@ -532,6 +557,24 @@ describe("the emoji/GIF panel", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByTestId("expression-panel")).not.toBeInTheDocument();
     expect(field()).toHaveFocus();
+  });
+
+  it("opened from the keyboard, takes the focus on its search, the arrows reach the grid, and Escape gives it back to the button", async () => {
+    const { user } = composer();
+    smiley().focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByPlaceholderText("Search emoji")).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(within(screen.getByTestId("emoji-section-people")).getByRole("button", { name: "😀" })).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("expression-panel")).not.toBeInTheDocument();
+    expect(smiley()).toHaveFocus();
+    // With Space too; opened by a click, the focus stays where it was.
+    await user.keyboard(" ");
+    expect(screen.getByPlaceholderText("Search emoji")).toHaveFocus();
+    await user.keyboard("{Escape}");
+    await user.click(smiley());
+    expect(smiley()).toHaveFocus();
   });
 
   it("the + and the panel take turns", async () => {

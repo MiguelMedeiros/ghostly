@@ -148,6 +148,14 @@ export const REQUESTS_PER_MINUTE = 30;
  */
 export const BACKGROUND_REQUESTS_PER_MINUTE = 20;
 /**
+ * Of the background share, what background writes may spend in a minute on a relay (10 of the 20): the rest is kept
+ * for background reads. Those writes are mostly the upkeep of chats whose contacts are away (the link's heartbeat, the
+ * DHT floor's keep-alive, the capability record), about one a minute for every two chats. A profile with 200 such chats
+ * spent the share on them, and on one relay 147 of its 200 contacts were not read once in 25 minutes: a contact back
+ * then went unnoticed (bug hunt, 2026-11-01). Upkeep held back goes when a request of this share frees.
+ */
+export const BACKGROUND_WRITES_SHARE = 1 / 2;
+/**
  * A link's write the budget refused (its presence, its offer, its answer) goes first when the minute
  * frees a request: reads on that relay wait this long after the refusal. A link that polls fast for a
  * peer while its offer waits would otherwise take every request the minute frees, and the offer (the
@@ -426,6 +434,25 @@ export function normalizeRelayUrl(input: string): string | null {
   }
 }
 
+/**
+ * Why a line of a Pkarr relay list is not a relay `normalizeRelayUrl` keeps, with the line as typed; null when it is
+ * one. A host alone or another scheme (`relay.example.org`, `wss://…`) was meant as an https:// relay.
+ */
+export function relayUrlProblem(input: string): string | null {
+  const line = input.trim();
+  if (normalizeRelayUrl(line)) return null;
+  const meant = looksLikeHost(line) || looksLikeHost(line.replace(/^[a-z][a-z\d+.-]*:\/\//i, ""));
+  return meant ? `Use an https:// relay address: ${line}` : `Not a relay address: ${line}`;
+}
+
+/** No space, and a dot after the first character, before the last one and before any `/` or `:`; linear, for a long pasted line. */
+function looksLikeHost(text: string): boolean {
+  if (/\s/.test(text)) return false;
+  const slash = text.search(/[/:]/);
+  const dot = text.indexOf(".", 1);
+  return dot > 0 && dot < text.length - 1 && (slash < 0 || dot < slash);
+}
+
 /** A relay the breaker leaves alone for failing (`RelayBreaker`): nothing was asked of it now. */
 class RelayLeftAloneError extends Error {}
 
@@ -466,6 +493,8 @@ export class RelayTransport implements PkarrTransport {
   private readonly lastReadFrom = new Map<string, string>();
   private readonly spent = new Map<string, number[]>();
   private readonly spentBackground = new Map<string, number[]>();
+  /** Background writes on each relay in the last minute (`BACKGROUND_WRITES_SHARE`). */
+  private readonly spentBackgroundWrites = new Map<string, number[]>();
   /** Groups' urgent reads on each relay in the last `GROUP_BURST_MS`. */
   private readonly spentGroupUrgent = new Map<string, number[]>();
   /** Watch reads on each relay in the last `GROUP_RATION_WINDOW_MS` (`WATCH_SHARE`). */
@@ -545,16 +574,17 @@ export class RelayTransport implements PkarrTransport {
     this.perMinuteGiven = options.requestsPerMinute !== undefined;
     this.backgroundPerMinute = this.perMinute === REQUESTS_PER_MINUTE ? BACKGROUND_REQUESTS_PER_MINUTE : Math.ceil(this.perMinute * 2 / 3);
     this.backgroundWhileSignaling = this.perMinute === REQUESTS_PER_MINUTE ? BACKGROUND_WHILE_SIGNALING : Math.ceil(this.perMinute / 6);
-    const log = options.log ?? ((line: string) => console.info(`[ghostly:relay] ${line}`));
+    // Read at a terminal too (a CLI one-shot writes it on stderr): "tripped" and "left alone" were the breaker's words.
+    const log = options.log ?? ((line: string) => console.info(`ghostly: ${line}`));
     this.breaker = new RelayBreaker({
       ...options.breaker,
       onTrip: (relay, reason, forMs) => {
-        log(`${new URL(relay).host} tripped (${reason}); left alone for ${Math.round(forMs / 1000)} s`);
+        log(`relay ${new URL(relay).host} ${reason === "no answer" ? "did not answer" : reason === "slow" ? "answered too slowly" : `failed (${reason})`}; asked again in ${Math.round(forMs / 1000)} s`);
         options.breaker?.onTrip?.(relay, reason, forMs);
         this.changed("tripped");
       },
       onRecover: (relay) => {
-        log(`${new URL(relay).host} answered again`);
+        log(`relay ${new URL(relay).host} answers again`);
         options.breaker?.onRecover?.(relay);
         this.changed("recovered");
       },
@@ -1233,10 +1263,11 @@ export class RelayTransport implements PkarrTransport {
     });
     sent?.(request.then((r) => r.ok, () => false));
     let response: Response;
-    try { response = await request; } catch (error) {
+    try { response = await request; } catch {
       this.networkCooldown.set(`PUT ${relay}`, Date.now() + NETWORK_ERROR_COOLDOWN_MS);
       this.answered(relay, { kind: "error", reason: "no answer" });
-      throw error;
+      // Node's own words for it ("TypeError: fetch failed") named neither the relay nor what happened.
+      throw new Error(`${relay} did not answer`);
     }
     // 409, 412 and 428 are the relay working as it should; its rate limit and its own errors count against it.
     if (response.status === 429) this.answered(relay, { kind: "throttled", reason: "rate limited (429)" });
@@ -1280,6 +1311,7 @@ export class RelayTransport implements PkarrTransport {
     if (departedOver) this.departedOverAdd(key, now);
     this.spent.get(relay)!.push(now);
     if (who.background) this.spentBackground.get(relay)!.push(now);
+    if (who.background && who.write) this.spentBackgroundWrites.get(relay)!.push(now);
     if (isGroupUrgentRead(who)) this.spentGroupUrgent.get(relay)!.push(now);
     if (isWatch(who)) this.spentWatch.get(relay)!.push(now);
     if (isChatWatch(who) && !departedOver) this.spentChatWatch.get(relay)!.push(now);
@@ -1303,6 +1335,8 @@ export class RelayTransport implements PkarrTransport {
     const recentBackground = (this.spentBackground.get(relay) ?? []).filter((at) => now - at < 60_000);
     this.spent.set(relay, recent);
     this.spentBackground.set(relay, recentBackground);
+    const recentBackgroundWrites = (this.spentBackgroundWrites.get(relay) ?? []).filter((at) => now - at < 60_000);
+    this.spentBackgroundWrites.set(relay, recentBackgroundWrites);
     // Until the `limit`-th newest request of the minute ages out; 0 while fewer than `limit` were made.
     const over = (list: number[], limit: number) => (list.length >= limit ? list[list.length - limit] + 60_000 - now : 0);
     const limit = this.limitOf(relay);
@@ -1324,7 +1358,10 @@ export class RelayTransport implements PkarrTransport {
     if (who.background && !starved) {
       // On a relay with a small share of its own (5), background requests keep to two thirds of it, as on a smaller
       // budget: they would otherwise take the whole minute there, and leave nothing for a link's write.
-      wait = Math.max(wait, over(recentBackground, Math.min(this.backgroundPerMinute, Math.ceil(limit * 2 / 3))));
+      const backgroundShare = Math.min(this.backgroundPerMinute, Math.ceil(limit * 2 / 3));
+      wait = Math.max(wait, over(recentBackground, backgroundShare));
+      // Background writes leave the rest of that share to background reads (`BACKGROUND_WRITES_SHARE`).
+      if (who.write) wait = Math.max(wait, over(recentBackgroundWrites, Math.max(1, Math.floor(backgroundShare * BACKGROUND_WRITES_SHARE))));
       // A link signaling: background takes a smaller share until it stops, or until enough of its own age out. A
       // community door's bell does not: the links it signals for are often the ones its last admission opened.
       const signaling = this.urgentAt + SIGNALING_WINDOW_MS - now;

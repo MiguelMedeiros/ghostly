@@ -57,8 +57,13 @@
   "fork": {
     "confirm": "Supprimer définitivement cette copie ? Ce qui n'est que dans celle-ci sera perdu.",
     "discard": "Supprimer",
+    "discardWhich": "Supprimer : {{which}}",
     "hint": "Une copie de ce profil d'avant la reprise par un autre appareil.",
     "info": "Utiliser ici a gardé ce que cet appareil contenait alors. Les messages et paiements qui ne sont que dans cette copie ne sont pas dans votre profil. Supprimer la retire définitivement.",
+    "kept": "Gardée le {{when}}",
+    "older": "Copie plus ancienne",
+    "olderNumbered": "Copie plus ancienne {{n}}",
+    "repeat": "{{which}} ({{n}})",
     "title": "Uniquement sur cet appareil"
   },
   "handoff": {
@@ -255,6 +260,16 @@
     "removing": "Retrait…",
     "text": "Il ne pourra plus prendre ce profil.",
     "title": "Retirer {{device}} ?"
+  },
+  "rename": {
+    "button": "Renommer",
+    "fail": {
+      "name": "Ce nom ne peut pas être utilisé. Essayez-en un autre."
+    },
+    "label": "Nom de l’appareil",
+    "save": "Enregistrer",
+    "saving": "Enregistrement…",
+    "title": "Renommer {{device}}"
   },
   "restore": {
     "activeHint": "Démarrer cette sauvegarde ici créerait une deuxième copie.",

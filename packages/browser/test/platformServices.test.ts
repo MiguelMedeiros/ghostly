@@ -1,8 +1,9 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { LIMITS, isViewerTag, viewerTag } from "@ghostly/core";
+import { LIMITS, NO_PICTURE_METADATA, NO_VIDEO_METADATA, isViewerTag, viewerTag } from "@ghostly/core";
+import { H264_MP4, PLACE, hasPlace, withMovie, xyzUdta } from "../../core/test/support/videoFixtures";
 import { setBrowserHost, type BrowserHost } from "../src/host";
-import { registerFileBytes, resetFileBytes, type FileBytes } from "../src/shared/fileBytes";
+import { blobDigest, registerFileBytes, resetFileBytes, type FileBytes } from "../src/shared/fileBytes";
 import { fileStore } from "../src/shared/idb";
 import { TEST_MINT } from "../src/shared/mints";
 import type { EngineState, LinkView } from "../src/shared/types";
@@ -36,6 +37,24 @@ const chat = (over: Partial<LinkView> = {}) => ({ id: "link-1", peerPubKeyZ32: "
 const withLinks = (...links: LinkView[]) => {
   engine.state = { links, settings: { online: true, relays: ["wss://r"], iceServers: [] }, transport: { protocol: "pkarr", relays: [] }, services: [], transfers: {}, payments: {}, wallet: { balance: 1 } } as unknown as EngineState;
 };
+
+const SECRET = "GHOSTLY-SECRET-GPS 52.37N 4.89E";
+const ascii = (value: string) => [...value].map((c) => c.charCodeAt(0));
+const text = (bytes: Uint8Array) => String.fromCharCode(...bytes.subarray(0, 4096)) + String.fromCharCode(...bytes.subarray(-4096));
+const segment = (marker: number, body: number[]) => [0xff, marker, (body.length + 2) >> 8, (body.length + 2) & 0xff, ...body];
+/** A 300 × 200 JPEG's segments, with an Exif holding `secret` when given; its scan `scan` bytes long. */
+function jpegWith(secret?: string, scan = 16): Uint8Array {
+  const exif = secret ? segment(0xe1, [...ascii("Exif\0\0"), 0x4d, 0x4d, 0, 42, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, ...ascii(secret)]) : [];
+  const head = [0xff, 0xd8, ...exif, ...segment(0xdb, [0, ...new Array(64).fill(1)]), ...segment(0xc0, [8, 0, 200, 1, 44, 1, 1, 0x11, 0]),
+    ...segment(0xc4, [0, ...new Array(16).fill(0)]), ...segment(0xda, [1, 1, 0, 0, 63, 0])];
+  const bytes = new Uint8Array(head.length + scan + 2);
+  bytes.set(head);
+  bytes.set([0xff, 0xd9], bytes.length - 2);
+  return bytes;
+}
+/** A PNG's signature, IHDR, IDAT and IEND. */
+const PNG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, ...ascii("IHDR"), 0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0, 0x90, 0x77, 0x53, 0xde,
+  0, 0, 0, 12, ...ascii("IDAT"), 8, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0, 0, 3, 1, 1, 0, 0x18, 0xdd, 0x8d, 0xb0, 0, 0, 0, 0, ...ascii("IEND"), 0xae, 0x42, 0x60, 0x82]);
 
 let access: string[];
 let asked: string[];
@@ -220,18 +239,108 @@ describe("sending files", () => {
 
   it("shows a file just sent from the bytes handed over, at once, until the message is deleted", async () => {
     withLinks(chat({ id: "pic-link" }));
-    const png = new File([new Uint8Array([137, 80, 78, 71])], "Pasted image.png", { type: "image/png" });
+    const png = new File([PNG], "Pasted image.png", { type: "image/png" });
     const { file } = await services.sendFile("peer-1", png);
     // Even with the stored copy unreadable (WebKit lost an IndexedDB Blob), the sender's bubble has its picture.
     const get = vi.spyOn(fileStore, "get").mockRejectedValue(new Error("The object can not be found here."));
     const shown = await services.getFile(file.id);
     expect(shown?.type).toBe("image/png");
-    expect(new Uint8Array(await shown!.arrayBuffer())).toEqual(new Uint8Array([137, 80, 78, 71]));
+    expect(new Uint8Array(await shown!.arrayBuffer())).toEqual(PNG);
     expect(get).not.toHaveBeenCalled();
     get.mockRestore();
     await services.deleteMessage("peer-1", "me_1");
     await fileStore.delete(file.id);
     expect(await services.getFile(file.id)).toBeNull();
+  });
+
+  // covers: files.image.metadata
+  it("a picture goes without its metadata, to a chat and to a group: what is stored and digested is the stripped copy", async () => {
+    withLinks(chat({ id: "exif-link" }));
+    engine.answers = { groupFileCheck: {}, sendGroupFile: { messageId: "m" } };
+    const photo = () => new File([jpegWith(SECRET)], "IMG_0001.jpg", { type: "image/jpeg" });
+    const chatPhoto = await services.sendFile("peer-1", photo());
+    const groupPhoto = await services.sendGroupFile!("g1", photo());
+    for (const { file } of [chatPhoto, groupPhoto]) {
+      const stored = await fileStore.get(file.id);
+      const bytes = new Uint8Array(await stored!.blob!.arrayBuffer());
+      expect(text(bytes)).not.toContain(SECRET);
+      expect(bytes).toEqual(jpegWith());
+      expect(file.size).toBe(bytes.length);
+      expect(stored!.metadata!.size).toBe(bytes.length);
+      expect(file.image).toEqual({ width: 300, height: 200 });
+      expect(stored!.digest).toBe(await blobDigest(new Blob([bytes])));
+      expect(text(new Uint8Array(await (await services.getFile(file.id))!.arrayBuffer()))).not.toContain(SECRET);
+    }
+    // The name and type it was picked with.
+    expect(chatPhoto.file).toMatchObject({ name: "IMG_0001.jpg", mime: "image/jpeg" });
+  });
+
+  it("a large picture is stripped before it is copied in a step at a time", async () => {
+    withLinks(chat({ id: "big-exif-link" }));
+    let staged: Blob | undefined;
+    const copies = { kind: "native", stage: vi.fn(async (_id: string, source: Blob) => { staged = source; return "digest"; }) } as unknown as FileBytes;
+    registerFileBytes("native", async () => copies, true);
+    try {
+      const { file } = await services.sendFile("peer-1", new File([jpegWith(SECRET, 17 * 1024 * 1024)], "pano.jpg", { type: "image/jpeg" }));
+      await vi.waitFor(() => expect(staged).toBeDefined());
+      expect(text(new Uint8Array(await staged!.arrayBuffer()))).not.toContain(SECRET);
+      expect(file.size).toBe(staged!.size);
+    } finally {
+      registerFileBytes("native", async () => null);
+      resetFileBytes();
+    }
+  });
+
+  it("a picture whose metadata cannot be removed is refused, to a chat and to a group, and nothing of it is stored or sent", async () => {
+    withLinks(chat({ id: "bad-pic-link" }));
+    engine.answers = { groupFileCheck: {}, sendGroupFile: { messageId: "m" } };
+    const cut = jpegWith(SECRET).slice(0, -2);
+    for (const bad of [new File([cut], "cut.jpg", { type: "image/jpeg" }), new File([new Uint8Array([137, 80, 78, 71])], "x.png", { type: "image/png" })]) {
+      await expect(services.sendFile("peer-1", bad)).rejects.toThrow(NO_PICTURE_METADATA);
+      await expect(services.sendGroupFile!("g1", bad)).rejects.toThrow(NO_PICTURE_METADATA);
+    }
+    expect(engine.calls.map(([method]) => method)).toEqual(["groupFileCheck", "groupFileCheck"]);
+    expect(await fileStore.listForLink("bad-pic-link")).toEqual([]);
+  });
+
+  // covers: files.video.metadata
+  it("a video goes without where it was recorded, to a chat and to a group, described or not: what is stored and digested is the stripped copy", async () => {
+    withLinks(chat({ id: "video-link" }));
+    engine.answers = { groupFileCheck: {}, sendGroupFile: { messageId: "m" } };
+    const recorded = withMovie(H264_MP4, [xyzUdta()], Buffer.from(`location ${PLACE}`, "latin1"));
+    const video = () => new File([recorded], "VID_20261103.mp4", { type: "video/mp4" });
+    // As the chat sends a video it could describe (Chat.tsx), and one it could not.
+    const described = { duration: 1000, width: 320, height: 240 };
+    const sent = [
+      await services.sendFile("peer-1", video(), { video: described }),
+      await services.sendFile("peer-1", video()),
+      await services.sendGroupFile!("g1", video(), { video: described }),
+      await services.sendGroupFile!("g1", video()),
+    ];
+    for (const { file } of sent) {
+      const stored = await fileStore.get(file.id);
+      const bytes = new Uint8Array(await stored!.blob!.arrayBuffer());
+      expect(hasPlace(bytes)).toBe(false);
+      expect(bytes.length).toBe(recorded.length);
+      expect(file.size).toBe(bytes.length);
+      expect(stored!.digest).toBe(await blobDigest(new Blob([bytes])));
+      expect(hasPlace(new Uint8Array(await (await services.getFile(file.id))!.arrayBuffer()))).toBe(false);
+      expect(file).toMatchObject({ name: "VID_20261103.mp4", mime: "video/mp4" });
+    }
+    expect(sent[0]!.file.video).toEqual(described);
+  });
+
+  it("a video whose metadata cannot be removed is refused, to a chat and to a group, and nothing of it is stored or sent", async () => {
+    withLinks(chat({ id: "bad-video-link" }));
+    engine.answers = { groupFileCheck: {}, sendGroupFile: { messageId: "m" } };
+    const cut = withMovie(H264_MP4, [xyzUdta()]).subarray(0, 500);
+    for (const options of [undefined, { video: { duration: 1000, width: 320, height: 240 } }]) {
+      const bad = new File([cut], "cut.mp4", { type: "video/mp4" });
+      await expect(services.sendFile("peer-1", bad, options)).rejects.toThrow(NO_VIDEO_METADATA);
+      await expect(services.sendGroupFile!("g1", bad, options)).rejects.toThrow(NO_VIDEO_METADATA);
+    }
+    expect(engine.calls.map(([method]) => method)).toEqual(["groupFileCheck", "groupFileCheck"]);
+    expect(await fileStore.listForLink("bad-video-link")).toEqual([]);
   });
 
   it("a file whose copy into this device fails says it in the app's words, the system's reason kept, to a chat and to a group", async () => {
@@ -405,7 +514,10 @@ describe("wallet and settings", () => {
     expect(services.wallet.getPayment("p")).toBeNull();
     withLinks(chat({ peerOnline: true }));
     expect(services.isOnline()).toBe(true);
-    expect(services.getNetwork()).toMatchObject({ protocol: "pkarr", relays: ["wss://r"], turn: null });
+    expect(services.getNetwork()).toMatchObject({ protocol: "pkarr", kind: "relays", relays: ["wss://r"], turn: null });
+    // The Desktop's transport reaches the DHT itself: the page words that from `kind`, not from the English line.
+    engine.state = { ...engine.state!, transport: { ...engine.state!.transport, direct: true } };
+    expect(services.getNetwork()).toMatchObject({ protocol: "pkarr", kind: "direct" });
     expect(services.getPeer("peer-1")).toMatchObject({ id: "link-1", online: true });
   });
 

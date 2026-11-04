@@ -341,6 +341,26 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
     expect(plain.stderr).not.toContain("listen");
   });
 
+  it("daemon status says when the daemon is a listen running the profile, as its stop does", async () => {
+    const own = home("listen-status");
+    ok(await ghostly(["--home", own, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));
+    const listen = new Running(["--home", own, "listen", "--since", "0"], env);
+    try {
+      await listen.waitFor((l) => l.type === "daemon.started" && l.listen === true && l.pid === listen.child.pid);
+      // A `daemon --detach` refused as "A daemon already runs" is looked up here: the restart that would end the listen is not a surprise.
+      expect(ok(await ghostly(["--home", own, "daemon", "status"], { env }))).toMatchObject({ running: true, pid: listen.child.pid, listen: true });
+      expect(ok(await ghostly(["--home", own, "status"], { env }))).toMatchObject({ mode: "daemon", pid: listen.child.pid, listen: true });
+    } finally {
+      await listen.stop();
+    }
+    ok(await ghostly(["--home", own, "daemon", "--detach"], { env }));
+    try {
+      expect(ok(await ghostly(["--home", own, "daemon", "status"], { env }))).not.toHaveProperty("listen");
+    } finally {
+      ok(await ghostly(["--home", own, "daemon", "stop"], { env }));
+    }
+  });
+
   it("a listen through a daemon that stops says so once on stderr, waits, and says when a daemon answers again", async () => {
     const orphan = home("listen-orphan");
     ok(await ghostly(["--home", orphan, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));

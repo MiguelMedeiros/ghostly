@@ -1,8 +1,10 @@
 /* The identities' ID cards (identities/IdCardFace.tsx) in their deck (IdentityProofsSection.tsx; the stack, the track, the lift
    and the glow are deck/deck.css). The wallet's payment cards are dark and plain; an ID card is laminated: a band
    along the top in its provider's ink, a guilloche behind the fields, a photo slot, a hologram seal and the
-   machine-readable line along the bottom. Sizes follow the card's width (--card-w), like the wallet's. */
-.id-card-face{--seal-eye:#10131f;--pad:clamp(10px,calc(var(--card-w) * .05),18px);position:relative;display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto;grid-template-areas:"band band" "photo fields" "mrz mrz";column-gap:clamp(10px,calc(var(--card-w) * .045),16px);row-gap:clamp(5px,calc(var(--card-w) * .022),9px);
+   machine-readable line along the bottom. Sizes follow the card's width (--card-w), like the wallet's. Its text also
+   follows the browser's text size: the bounds are in rem, and --text-grow (0 at the default 16px) adds to each line
+   what the root adds to its largest size, so at twice the text size each line is at least twice its size (#2418). */
+.id-card-face{--seal-eye:#10131f;--text-grow:calc(1rem - 16px);--pad:clamp(10px,calc(var(--card-w) * .05),18px);position:relative;display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto;grid-template-areas:"band band" "photo fields" "mrz mrz";column-gap:clamp(10px,calc(var(--card-w) * .045),16px);row-gap:clamp(5px,calc(var(--card-w) * .022),9px);
  box-sizing:border-box;width:100%;height:100%;border-radius:clamp(12px,calc(var(--card-w) * .05),18px);padding:0 var(--pad) clamp(7px,calc(var(--card-w) * .03),11px);overflow:hidden;color:#fff;text-align:left;
  background:
   radial-gradient(120% 80% at 100% 0%,rgba(var(--card-rgb),.22),transparent 60%),
@@ -32,8 +34,8 @@
 
 .id-card-band{grid-area:band;display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 calc(var(--pad) * -1);padding:clamp(6px,calc(var(--card-w) * .026),10px) var(--pad);min-width:0;
  background:linear-gradient(90deg,rgba(var(--card-rgb),.34),rgba(var(--card-rgb),.12));border-bottom:1px solid rgba(var(--card-rgb),.3)}
-.id-card-issuer{font-size:clamp(8px,calc(var(--card-w) * .026),10px);font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:rgba(255,255,255,.85);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.id-card-status{display:inline-flex;align-items:center;gap:4px;flex-shrink:0;border-radius:999px;padding:1px 7px;font-size:clamp(9px,calc(var(--card-w) * .028),11px);font-weight:600;white-space:nowrap;background:rgba(0,0,0,.35);color:#7ee2b8;transition:opacity .4s}
+.id-card-issuer{font-size:clamp(.5rem,calc(var(--card-w) * .026 + var(--text-grow) * .625),.625rem);font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:rgba(255,255,255,.85);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.id-card-status{display:inline-flex;align-items:center;gap:4px;flex-shrink:0;border-radius:999px;padding:1px 7px;font-size:clamp(.5625rem,calc(var(--card-w) * .028 + var(--text-grow) * .6875),.6875rem);font-weight:600;white-space:nowrap;background:rgba(0,0,0,.35);color:#7ee2b8;transition:opacity .4s}
 .id-card-face[data-status=expiring] .id-card-status{color:#fbbf24}
 .id-card-face[data-status=expired] .id-card-status{color:#fca5a5}
 /* A check that failed is amber, as everywhere a contact's identity shows (contact-marks.css). */
@@ -58,12 +60,14 @@
 .id-card-monogram{font-size:clamp(22px,calc(var(--card-w) * .11),36px);font-weight:700;line-height:1;color:rgb(var(--card-rgb))}
 
 .id-card-fields{grid-area:fields;display:grid;align-content:start;gap:1px;min-width:0}
-.id-card-provider{font-size:clamp(14px,calc(var(--card-w) * .055),20px);font-weight:700;letter-spacing:-.01em;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.id-card-name{font-size:clamp(11px,calc(var(--card-w) * .036),13px);color:rgba(255,255,255,.88);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.id-card-subject{margin-bottom:2px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(10px,calc(var(--card-w) * .034),12.5px);letter-spacing:.02em;color:rgb(var(--card-rgb));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.id-card-field{font-size:clamp(9px,calc(var(--card-w) * .03),11px);line-height:1.35;color:rgba(255,255,255,.7);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.id-card-provider{font-size:clamp(.875rem,calc(var(--card-w) * .055 + var(--text-grow) * 1.25),1.25rem);font-weight:700;letter-spacing:-.01em;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.id-card-name{font-size:clamp(.6875rem,calc(var(--card-w) * .036 + var(--text-grow) * .8125),.8125rem);color:rgba(255,255,255,.88);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.id-card-subject{margin-bottom:2px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(.625rem,calc(var(--card-w) * .034 + var(--text-grow) * .78125),.78125rem);letter-spacing:.02em;color:rgb(var(--card-rgb));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* The fields are sentences ("What contacts see by default"): one that no longer fits its line (wider text spacing,
+   WCAG 1.4.12, or a longer language) goes on to a second rather than lose its end to an ellipsis. */
+.id-card-field{font-size:clamp(.5625rem,calc(var(--card-w) * .03 + var(--text-grow) * .6875),.6875rem);line-height:1.35;color:rgba(255,255,255,.7);overflow-wrap:break-word}
 
-.id-card-mrz{grid-area:mrz;min-width:0;overflow:hidden;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(8px,calc(var(--card-w) * .027),10px);letter-spacing:.14em;color:rgba(255,255,255,.3)}
+.id-card-mrz{grid-area:mrz;min-width:0;overflow:hidden;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(.5rem,calc(var(--card-w) * .027 + var(--text-grow) * .625),.625rem);letter-spacing:.14em;color:rgba(255,255,255,.3)}
 
 /* The hologram seal: a disc of shifting colour with the ghost pressed into it, where the wallet's cards have a chip.
    It is the deck's ghost (deck/motion.ts peeks it in as the card comes up). */
@@ -104,17 +108,20 @@
    the photo, the identity and one status line (its validity); no machine line. Small (under 190px): the provider's
    mark and name and the status seal alone. (A container query reads the face's content box: the card's width less its
    padding, --pad on each side, and border: 250px of card is about 223px inside, 190px about 168px.) Text a size leaves out stays in the card's accessible name (hidden to the
-   eye only); what is decoration goes. Every line is one line, cut with an ellipsis, never mid-word or under the seal. */
+   eye only); what is decoration goes. Every line but the fields is one line, cut with an ellipsis, never mid-word or
+   under the seal; a field that does not fit wraps.
+   The widths are in rem (the same px at the default 16px text size): at a larger text size a card is narrower for its
+   text, so it shows fewer lines rather than lines drawn over each other. */
 .id-card-face{container:id-card/inline-size}
 .id-card-issuer-kind,.id-card-status-text{white-space:nowrap}
-@container id-card (width < 223px){
+@container id-card (width < 13.9375rem){
  .id-card-mrz{display:none}
  .id-card-face{grid-template-rows:auto minmax(0,1fr)}
  .id-card-issuer-kind,.id-card-field-category,.id-card-field-shared{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
  .id-card-fields{align-content:center}
  .id-card-providers{display:none}
 }
-@container id-card (width < 168px){
+@container id-card (width < 10.5rem){
  .id-card-face{grid-template-columns:minmax(0,1fr);grid-template-areas:"band" "fields";column-gap:0}
  .id-card-photo,.id-card-seal{display:none}
  .id-card-issuer{flex:1;min-width:0}
@@ -122,7 +129,7 @@
  .id-card-status-text,.id-card-name,.id-card-subject,.id-card-field-validity{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
  .id-card-mark-end{display:flex;align-items:center;gap:4px}
  .id-card-field{padding-right:0}
- .id-card-provider{font-size:16px}
+ .id-card-provider{font-size:clamp(1rem,calc(var(--card-w) * .055 + var(--text-grow) * 1.25),1.25rem)}
 }
 /* Arabic is joined writing: Safari pulls its letters apart under wide letter-spacing, so the issuer line keeps none there. */
 :lang(ar) .id-card-issuer{letter-spacing:0}

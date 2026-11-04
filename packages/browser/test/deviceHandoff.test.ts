@@ -2,12 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import {
-  HANDOFF_ATTEMPTS, HANDOFF_PIECE_BYTES, HANDOFF_TIMINGS, fromBase64Url, handoffDigest, randomBytes, readHandoffManifest, readTurnPacket, seedSigner,
+  HANDOFF_ATTEMPTS, HANDOFF_PIECE_BYTES, HANDOFF_TIMINGS, fromBase64Url, handoffDigest, randomBytes, readHandoffHave, readHandoffManifest, readTurnPacket, seedSigner,
   toBase64Url, turnReleaseMessage, verify, type DeviceFrame, type HandoffPart, type TurnRelease,
 } from "@ghostly/core";
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type StoredDeviceState } from "../src/devices/state";
 import {
-  HandoffGiver, HandoffTaker, STOPPED_STEP, WOKEN_CONNECT_MS, type GiverPorts, type HandoffFile, type HandoffLinks, type HandoffRecords, type HandoffSelf, type HandoffSource,
+  HandoffGiver, HandoffTaker, MAX_HELD_FILES, STOPPED_STEP, WOKEN_CONNECT_MS, type GiverPorts, type HandoffFile, type HandoffLinks, type HandoffRecords, type HandoffSelf, type HandoffSource,
   type BusyReport, type HandoffStaging, type HandoffStagingHost, type HandoffStay, type HandoffView, type LocalBusy, type TakerPorts,
 } from "../src/devices/handoff";
 import { makeHandoffVerifier, type HandoffVerifier } from "../src/devices/handoffPake";
@@ -152,7 +152,14 @@ class Storage implements HandoffStagingHost {
       },
       finish: async (file) => { space.held.set(file.id, file); },
       discard: async (id) => { space.files.delete(id); space.held.delete(id); },
-      copyHeld: async (copies) => { for (const { fromId, file } of copies) { space.files.set(file.id, this.frozen.get(fromId)!.slice()); space.held.set(file.id, file); } },
+      // As the app's own: a file the frozen copy no longer holds is left out, and the ones after it are still copied.
+      copyHeld: async (copies) => {
+        for (const { fromId, file } of copies) {
+          const bytes = this.frozen.get(fromId);
+          if (!bytes) continue;
+          space.files.set(file.id, bytes.slice()); space.held.set(file.id, file);
+        }
+      },
       copyStaged: async (fromId, file) => { space.files.set(file.id, space.files.get(fromId)!.slice()); space.held.set(file.id, file); },
       restore: async (bundle, files) => { this.restoring?.(); space.restored = { bundle: bundle.slice(), files }; },
       dropRest: async () => { space.restored = null; },
@@ -424,7 +431,49 @@ describe("the password proof and its limits", () => {
     w.profile.add("f1", bytesOf(100));
     await w.taker.pull(PASSWORD);
     await until(() => w.quiesced.length === 1);
-    expect(w.giverRecords.record.handoffAttempts?.[B]).toEqual({ recent: [], total: 0 });
+    expect(w.giverRecords.record.handoffAttempts?.[B]).toBeUndefined();
+  });
+
+  it("the counts of devices no longer in the set go at the next try: a giver holding 16 of them still hands over", async () => {
+    // Before, every device that ever pulled kept an entry (a device removed and added again has a new key): with 16, the
+    // record's cap, the count of the next pull could not be written, and that pull got no answer.
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    const gone = Array.from({ length: 16 }, (_, i) => toBase64Url(new Uint8Array(32).fill(i + 1)));
+    w.giverRecords.record = { ...w.giverRecords.record, handoffAttempts: Object.fromEntries(gone.map((key) => [key, { recent: [], total: 3 }])) };
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1);
+    expect(w.giverRecords.record.handoffAttempts).toEqual({});
+  });
+
+  it("the device that takes the profile keeps the counts of the devices in the set only, its own old ones too", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    const gone = toBase64Url(new Uint8Array(32).fill(0x01));
+    await w.giverRecords.amend({ handoffAttempts: { [C]: { recent: [], total: 9 }, [gone]: { recent: [], total: 4 } } });
+    await w.takerRecords.amend({ handoffAttempts: { [gone]: { recent: [], total: 2 } } });
+    await fullPull(w);
+    expect(w.takerRecords.record.handoffAttempts).toEqual({ [C]: { recent: [], total: 9 } });
+  });
+
+  it("a count the active device started again stays started again when the profile moves back to a device that kept the old one", async () => {
+    // B gave the profile away with C refused (15); on A, "Let C try again" cleared it. Moving back to B brought B's own old
+    // 15 back, and C was refused again right after the person let it try.
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    await w.giverRecords.amend({ handoffAttempts: { [C]: { recent: [], total: HANDOFF_ATTEMPTS.total } } });
+    await w.giver.allowAgain(C);
+    await w.takerRecords.amend({ handoffAttempts: { [C]: { recent: [], total: HANDOFF_ATTEMPTS.total } } });
+    await fullPull(w);
+    expect(w.takerRecords.record.handoffAttempts?.[C]).toBeUndefined();
+  });
+
+  it("a count the giver no longer holds (a right password cleared it) goes from the taker's old copy too", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    await w.takerRecords.amend({ handoffAttempts: { [C]: { recent: [], total: 9 } } });
+    await fullPull(w);
+    expect(w.takerRecords.record.handoffAttempts?.[C]).toBeUndefined();
   });
 
   it("fifteen with no success: refused until the person lets that device try again", { timeout: 30_000 }, async () => {
@@ -1019,6 +1068,51 @@ describe("refusals before a byte is copied", () => {
     for (const space of w.storage.spaces.values()) expect([...space.files.values()].every((bytes) => bytes.length === 0)).toBe(true);
   });
 
+  it("no room for the copies of a file that is in several chats: it is sent once and written once per chat, so refused", async () => {
+    const w = world();
+    const video = bytesOf(50_000);
+    for (const chat of ["a", "b", "c", "d", "e"]) w.profile.add(`chat-${chat}-video`, video);
+    // Room for what is sent (one copy and the rest), not for the five copies this device writes.
+    w.storage.room = 100_000;
+    await w.taker.pull(PASSWORD);
+    await until(() => w.taker.view()?.step === "failed" || w.quiesced.length === 1);
+    expect(w.taker.view()!.failure).toBe("room");
+    expect(w.quiesced).toHaveLength(0);
+    for (const space of w.storage.spaces.values()) expect([...space.files.values()].every((bytes) => bytes.length === 0)).toBe(true);
+  });
+
+  it("no room for the files the frozen copy holds: they are copied in, not sent, and still take room, so refused", async () => {
+    const w = world();
+    const kept = w.profile.add("old-file", bytesOf(80_000));
+    w.profile.add("new-file", bytesOf(2_000));
+    w.storage.frozen.set("frozen-id", w.profile.files_.get("old-file")!);
+    await w.takerRecords.amend({ heldFiles: [{ sha256: kept.sha256, size: kept.size, id: "frozen-id" }] });
+    w.storage.room = 20_000;
+    await w.taker.pull(PASSWORD);
+    await until(() => w.taker.view()?.step === "failed" || w.quiesced.length === 1);
+    expect(w.taker.view()!.failure).toBe("room");
+    expect(w.quiesced).toHaveLength(0);
+    for (const space of w.storage.spaces.values()) expect(space.files.size).toBe(0);
+  });
+
+  it("room for every copy: the move goes on, and its progress counts the bytes sent", async () => {
+    const w = world();
+    const video = bytesOf(50_000);
+    for (const chat of ["a", "b", "c"]) w.profile.add(`chat-${chat}-video`, video);
+    w.storage.room = 160_000;
+    const totals: number[] = [];
+    const open = w.storage.open.bind(w.storage);
+    w.storage.open = async (database) => {
+      const staging = await open(database);
+      return { ...staging, append: async (id, offset, bytes) => { totals.push(w.taker.view()!.total); await staging.append(id, offset, bytes); } };
+    };
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1 || !!w.taker.view()?.failure);
+    expect(w.taker.view()?.failure).toBeUndefined();
+    expect(totals.length).toBeGreaterThan(0);
+    expect(totals.every((total) => total === 50_000)).toBe(true);
+  });
+
   it("the giver does not answer within 30 seconds: Can't reach", async () => {
     vi.useFakeTimers();
     const w = world();
@@ -1122,6 +1216,43 @@ describe("pass 1 and its resumption", () => {
     expect(toBase64Url(sha256(space.files.get("old-file")!))).toBe(kept.sha256);
   });
 
+  it("a file this device deleted after it ran the profile again is sent, not claimed from the list of its last release", async () => {
+    const w = world();
+    const gone = w.profile.add("x", bytesOf(5_000));
+    // 1. This device gave the profile away: its frozen copy held the file, listed at its release.
+    await w.takerRecords.amend({ heldFiles: [{ sha256: gone.sha256, size: gone.size, id: "deleted-since" }], copy: "frozen" });
+    // 2. The profile came back to it: it runs it again.
+    await w.takerRecords.move("taking", { handoff: { role: "taking", step: "install", id: "back", peer: A, from: N, at: Date.now() } });
+    await w.takerRecords.move("active", { handoff: undefined });
+    expect(w.takerRecords.record.heldFiles).toBeUndefined();
+    // 3. It deleted the file (nothing of it in its own copy), 4. was replaced by the other device...
+    await w.takerRecords.move("superseded", { copy: "frozen" });
+    // 5. ...and Use here.
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1 || !!w.taker.view()?.failure);
+    await reloadGiver(w);
+    await until(() => w.reloads === 1 || !!w.taker.view()?.failure || !!w.giver.view()?.failure);
+    expect([w.taker.view()?.failure, w.giver.view()?.failure, w.giverRecords.record.state]).toEqual([undefined, undefined, "standby"]);
+    const parts = w.link.sent.filter((s) => s.frame.t === "handoff-manifest").flatMap((s) => readHandoffManifest(s.frame)!.parts.map((p) => p[0]));
+    expect(parts).toContain(`file/${gone.sha256}`);
+    // Not said to be here before it came.
+    const first = w.link.sent.find((s) => s.from === B && s.frame.t === "handoff-have")!;
+    expect(readHandoffHave(first.frame)!.d).not.toContain(gone.sha256);
+  });
+
+  it("a held file the frozen copy no longer has is asked for, not counted as here", async () => {
+    const w = world();
+    const gone = w.profile.add("x", bytesOf(5_000));
+    await w.takerRecords.amend({ heldFiles: [{ sha256: gone.sha256, size: gone.size, id: "deleted-since" }] });
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1 || !!w.taker.view()?.failure);
+    await reloadGiver(w);
+    await until(() => w.reloads === 1 || !!w.taker.view()?.failure || !!w.giver.view()?.failure);
+    expect([w.taker.view()?.failure, w.giver.view()?.failure, w.giverRecords.record.state]).toEqual([undefined, undefined, "standby"]);
+    const space = w.storage.spaces.get(w.takerRecords.record.handoff!.staging!)!;
+    expect(toBase64Url(sha256(space.files.get("x")!))).toBe(gone.sha256);
+  });
+
   it("on mobile data, files over the limit stay behind: not sent, not in H, noted by the giver for later", async () => {
     const w = world();
     const small = w.profile.add("small", bytesOf(1_000));
@@ -1135,6 +1266,29 @@ describe("pass 1 and its resumption", () => {
     const h = release ? release.h : toBase64Url(handoffDigest(N + 1, giverKey.publicKey, takerKey.publicKey, [[`file/${small.sha256}`, small.size, small.sha256], ["db/peer", w.profile.rest.length, toBase64Url(sha256(w.profile.rest))]]));
     expect(h).toBe(toBase64Url(handoffDigest(N + 1, giverKey.publicKey, takerKey.publicKey, [[`file/${small.sha256}`, small.size, small.sha256], ["db/peer", w.profile.rest.length, toBase64Url(sha256(w.profile.rest))]])));
   });
+
+  it("a giver with 36,000 files writes a standby record Desktop can keep: the largest files held, one per digest", async () => {
+    const w = world();
+    // File ids as the app makes them (`group-<group>-in-<12 random bytes>`).
+    const group = `group-${toBase64Url(randomBytes(16))}`;
+    const files = Array.from({ length: 36_000 }, (_, i) => w.profile.add(`${group}-in-${toBase64Url(randomBytes(12))}`, bytesOf(8 + (i % 97))));
+    const largest = files.reduce((a, b) => (b.size > a.size ? b : a));
+    w.profile.add(`${group}-in-twin`, w.profile.files_.get(largest.id)!);
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1, 60_000);
+    await reloadGiver(w);
+    await until(() => w.reloads === 1, 60_000);
+    const record = w.giverRecords.record;
+    expect(record.state).toBe("standby");
+    // Desktop keeps the record in a file of at most 4 MiB (`device_state.rs`), and refuses a larger one.
+    expect(JSON.stringify(record).length).toBeLessThan(4 * 1024 * 1024);
+    const held = record.heldFiles!;
+    expect(held).toHaveLength(MAX_HELD_FILES);
+    expect(new Set(held.map((f) => f.sha256)).size).toBe(held.length);
+    const smallestHeld = Math.min(...held.map((f) => f.size));
+    const heldDigests = new Set(held.map((f) => f.sha256));
+    expect(files.filter((f) => !heldDigests.has(f.sha256)).every((f) => f.size <= smallestHeld)).toBe(true);
+  }, 120_000);
 });
 
 describe("pass 2 and the release", () => {
@@ -1415,6 +1569,27 @@ describe("crash recovery (WISP 06 § Installing the staged state)", () => {
     expect(toBase64Url(sha256(w.storage.spaces.get(staged)!.files.get("f1")!))).toBe(file.sha256);
   });
 
+  it("B at Checking, the release lost: Cancel changes nothing, B asks again, and installs the release that comes", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(2_000));
+    w.link.meddle = (_from, frame) => (frame.t === "handoff-release" ? null : frame);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1);
+    await reloadGiver(w);
+    await until(() => w.giverRecords.record.state === "standby");
+    expect(w.taker.view()?.step).toBe("checking");
+    // A released already: B may leave only on A's cancel or its own turn read, never on the person's Cancel.
+    await w.taker.cancel();
+    expect(w.taker.view()?.step).toBe("checking");
+    expect(w.takerRecords.record.handoff?.step).toBe("verified");
+    expect(w.link.sent.some((s) => s.from === B && s.frame.t === "handoff-cancel")).toBe(false);
+    w.link.meddle = undefined;
+    await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.releaseMs + 10);
+    await until(() => w.reloads === 1);
+    expect(w.takerRecords.record.state).toBe("taking");
+  });
+
   it("a standby whose last pull stopped: a reload shows nothing more about it", async () => {
     const w = world();
     await w.taker.pull("not the password");
@@ -1528,12 +1703,29 @@ describe("Use here on a replaced device (WISP 06 § States and events, supersede
     const w = world();
     // The phone was replaced at turn N - 3: its own record stays there, and its mark holds the turn that replaced it.
     w.takerRecords.record = { ...w.takerRecords.record, state: "superseded", turn: N - 3, seenSequence: N * 2 ** 20 + 1, copy: "frozen" };
+    const before = Date.now();
     await fullPull(w);
     expect(w.takes).toHaveLength(1);
     expect(w.takes[0].turn).toBe(N + 1);
-    // What only the phone held stays: its old namespace is not dropped, and the new record lists it.
+    // What only the phone held stays: its old namespace is not dropped, and the new record lists it, with when it was kept.
     expect(w.storage.dropped).toEqual([]);
     expect(w.takerRecords.record.forks).toEqual(["ghostly"]);
+    expect(Object.keys(w.takerRecords.record.forkKeptAt ?? {})).toEqual(["ghostly"]);
+    expect(w.takerRecords.record.forkKeptAt!.ghostly).toBeGreaterThanOrEqual(before);
+    expect(w.takerRecords.record.forkKeptAt!.ghostly).toBeLessThanOrEqual(Date.now());
+    expect(w.takerRecords.record.handoff).toBeUndefined();
+  });
+
+  it("lists the old namespace as one more fork when the device already keeps 8: none is left on disk unlisted", async () => {
+    const w = world();
+    const earlier = Array.from({ length: 8 }, (_, i) => `ghostly_fork${i}`);
+    // Two kept with their time, the rest by a build that wrote none; a time left of a fork no longer listed goes.
+    const forkKeptAt = { ghostly_fork6: 1_000, ghostly_fork7: 2_000, ghostly_gone: 500 };
+    w.takerRecords.record = { ...w.takerRecords.record, state: "superseded", turn: N - 3, seenSequence: N * 2 ** 20 + 1, copy: "frozen", forks: earlier, forkKeptAt };
+    await fullPull(w);
+    expect(w.storage.dropped).toEqual([]);
+    expect(w.takerRecords.record.forks).toEqual([...earlier, "ghostly"]);
+    expect(w.takerRecords.record.forkKeptAt).toEqual({ ghostly_fork6: 1_000, ghostly_fork7: 2_000, ghostly: expect.any(Number) });
     expect(w.takerRecords.record.handoff).toBeUndefined();
   });
 });

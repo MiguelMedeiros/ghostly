@@ -16,6 +16,8 @@ export interface OptionSpec {
   choices?: readonly string[];
 }
 export interface Parsed { positionals: string[]; options: Record<string, string | number | boolean | string[] | undefined> }
+/** The command a line is parsed for, as its unknown options name it: `send`, and whether text comes on its line. */
+export interface ParseFor { command: string; text?: boolean }
 
 /**
  * Options every command takes. They may come anywhere on the line.
@@ -36,8 +38,10 @@ export const GLOBAL_OPTIONS: Record<string, OptionSpec> = {
  * that starts with `-`, is longer than two characters and is no option of the command is the value (`--` starts one
  * id in 4096; `-x` stays an option). Any other positional that starts with `-` is refused instead of sent: a
  * mistyped flag must not reach a contact as text. Put `--` before a message that starts with a dash.
+ *
+ * An unknown option names the command `parsing` gives, the nearest of its options and its help.
  */
-export function parseArgs(argv: readonly string[], spec: Record<string, OptionSpec>, idSlot: (index: number) => boolean = () => false): Parsed {
+export function parseArgs(argv: readonly string[], spec: Record<string, OptionSpec>, idSlot: (index: number) => boolean = () => false, parsing?: ParseFor): Parsed {
   const all = { ...GLOBAL_OPTIONS, ...spec };
   const byShort = new Map(Object.entries(all).filter(([, s]) => s.short).map(([name, s]) => [s.short!, name]));
   const isOption = (arg: string) => {
@@ -63,12 +67,17 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
         inline = eq === -1 ? undefined : arg.slice(eq + 1);
       } else {
         const long = byShort.get(arg.slice(1));
-        if (!long) throw new CliError("usage", `Unknown option ${arg} (put -- before text that starts with a dash)`);
+        if (!long) throw unknownOption(arg, all, parsing);
         name = long;
       }
-      if (name.startsWith("no-") && all[name.slice(3)]?.type === "boolean" && inline === undefined) { setBoolean(name.slice(3), false); continue; }
+      if (name.startsWith("no-") && all[name.slice(3)]?.type === "boolean") {
+        // `--no-pretty=true` was an unknown option whose nearest name was `--no-pretty`, the word typed.
+        if (inline !== undefined) throw new CliError("usage", `--${name} takes no value`);
+        setBoolean(name.slice(3), false);
+        continue;
+      }
       const option = all[name];
-      if (!option) throw new CliError("usage", `Unknown option --${name}`);
+      if (!option) throw unknownOption(`--${name}`, all, parsing);
       if (option.type === "boolean") {
         if (inline !== undefined && !["true", "false"].includes(inline)) throw new CliError("usage", `--${name} takes no value`);
         setBoolean(name, inline === undefined || inline === "true");
@@ -96,10 +105,55 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
       }
       continue;
     }
-    if (arg.startsWith("-") && arg !== "-") throw new CliError("usage", `Unknown option ${arg} (put -- before text that starts with a dash)`);
+    if (arg.startsWith("-") && arg !== "-") throw unknownOption(arg, all, parsing);
     positionals.push(arg);
   }
   return { positionals, options };
+}
+
+/**
+ * `Unknown option --wiat for ghostly send (did you mean --wait? ghostly help send)`. The `--` hint only where text comes
+ * and for a word with one dash, which may be text (`-1`, `-x`): `version -x` has no text to put after `--`.
+ */
+function unknownOption(arg: string, all: Record<string, OptionSpec>, parsing: ParseFor | undefined): CliError {
+  const names = Object.entries(all).flatMap(([name, o]) => (o.type === "boolean" ? [name, `no-${name}`] : [name]));
+  const near = nearest(arg.replace(/^--?/, ""), names);
+  const hints = [
+    ...(near ? [`did you mean --${near}?`] : []),
+    ...(parsing?.text && /^-[^-]/.test(arg) ? ["put -- before text that starts with a dash;"] : []),
+    ...(parsing ? [`ghostly help ${parsing.command}`] : []),
+  ];
+  return new CliError("usage", `Unknown option ${arg}${parsing ? ` for ghostly ${parsing.command}` : ""}${hints.length ? ` (${hints.join(" ")})` : ""}`);
+}
+
+/**
+ * The word of `words` a typo most likely meant: the nearest by Damerau-Levenshtein distance (a letter added, dropped,
+ * changed or two swapped), at most 2 and at most a third of the word's length (`wiat` one: `nope` is not `home`; `-x`
+ * none), else undefined.
+ */
+export function nearest(typed: string, words: Iterable<string>): string | undefined {
+  const most = Math.min(2, Math.floor(typed.length / 3));
+  let best: string | undefined, bestDistance = most + 1;
+  for (const word of words) {
+    // The distance is at least the lengths' difference: a long text that starts with a dash builds no table per name.
+    if (Math.abs(typed.length - word.length) >= bestDistance) continue;
+    const d = distance(typed, word);
+    if (d < bestDistance) { best = word; bestDistance = d; }
+  }
+  return best;
+}
+
+/** The optimal string alignment distance: the edits that turn `a` into `b`, a swap of two neighbours one of them. */
+function distance(a: string, b: string): number {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  }
+  return d[a.length][b.length];
 }
 
 /** Words as a sentence lists them: "a", "a or b", "a, b or c". */

@@ -1,11 +1,11 @@
 import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, ownInviteRefusal, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
-import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
+import { findSecret } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
 import {
-  bool, chatOf, chatOrGroup, dhtOnly, findChat, findGroup, groupOf, inviteTaken, list, messageOf, node, num, oneOf, state, str, waitForState,
+  bool, chatOf, chatOrGroup, dhtOnly, findChat, findGroup, groupOf, inviteTaken, list, messageOf, node, num, oneOf, state, str, transportOffered, waitForState,
   type ApiContext, type Method, type Params,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -141,7 +141,8 @@ const inviteShown = new WeakMap<ApiContext, () => void>();
  * Refuses DHT only (a hold, `chat transport dht`) while a call is on in the chat. A call's signals cross the live
  * link: off it, the call talked on over its own connection, and a hang-up from either side never reached the other
  * (that call ended only when its media stalled out, 16 s later). Removing the chat (`chat remove`) is refused the same
- * way: the call talked on in a chat gone from this device, and its hang-up had no chat left to cross.
+ * way: the call talked on in a chat gone from this device, and its hang-up had no chat left to cross. `engine.call`
+ * refuses the raw calls that do the same (`removeLink`, `setChatTransport` / `setDeliveryMode` to `dht`).
  */
 function noCallOn(ctx: ApiContext, linkId: string, then: string): void {
   const call = ctx.calls.list().find((c) => c.chat === linkId);
@@ -199,6 +200,8 @@ const METHODS: Record<string, Method> = {
       chats: s.links.length, live: s.links.filter(isLive).length, groups: s.groups.length,
       discovery: { protocol: s.transport.protocol, relays: s.transport.relays },
       events: { lastSeq: ctx.hub.lastSeq },
+      // A listen running the profile: `daemon stop` and `restart` end it too, as their answers say.
+      ...(ctx.listen && { listen: true }),
     };
   },
 
@@ -401,7 +404,7 @@ const METHODS: Record<string, Method> = {
     if (target.group && params.wait === "confirmed") throw new CliError("bad_request", "A group has no receipts: wait confirmed is for a 1:1 chat");
     const { wait, ms } = confirmWait(ctx, params);
     const result = await node(ctx).pinMessage({ linkId: target.linkId, ...(messageId && { messageId }), remove });
-    if (result.error) throw new CliError(result.refused || /Only the admin/.test(result.error) ? "refused" : /not in this chat|Nothing is pinned/.test(result.error) ? "not_found" : "bad_request", result.error);
+    if (result.error) throw new CliError(result.refused || /Only the admin/.test(result.error) ? "refused" : /not in this (?:chat|group)|Nothing is pinned/.test(result.error) ? "not_found" : "bad_request", result.error);
     if (target.group) return { group: target.id, messageId: remove ? null : messageId, removed: remove };
     // The chat's one pin of mine waiting for the contact is this one (none: the contact confirmed it already).
     const mine = node(ctx).chatUnconfirmed({ linkId: target.linkId }).pin;
@@ -416,19 +419,21 @@ const METHODS: Record<string, Method> = {
   async "saved.remove"(ctx, params) {
     return saveMark(ctx, params, true);
   },
-  /** The saved messages, the last saved first, each as it is now and named by its chat or group. */
+  /** The saved messages under `saved`, the last saved first, each as it is now and named by its chat or group. */
   async "saved.list"(ctx) {
     const { links, groups } = state(ctx);
     const saved = await node(ctx).savedMessages();
     // A saved reply quotes its original as history gives it: per chat or group, one read per quoted original.
     const originals = new Map<string, Originals>();
     for (const linkId of new Set(saved.map((s) => s.message.linkId))) originals.set(linkId, await originalsNow(ctx, linkId, saved.flatMap((s) => (s.message.linkId === linkId ? [s.message] : []))));
-    return saved.map(({ savedAt, message }) => {
-      const checked = (json: MessageJson) => quoteChecked(json, message, originals.get(message.linkId)!);
-      if (!message.linkId.startsWith("group:")) return { chat: message.linkId, savedAt, message: checked(chatMessageJson(message, links.find((l) => l.id === message.linkId))) };
-      const id = message.linkId.slice("group:".length);
-      return { group: id, savedAt, message: checked(groupMessageJson(message, groups.find((g) => g.id === id))) };
-    });
+    return {
+      saved: saved.map(({ savedAt, message }) => {
+        const checked = (json: MessageJson) => quoteChecked(json, message, originals.get(message.linkId)!);
+        if (!message.linkId.startsWith("group:")) return { chat: message.linkId, savedAt, message: checked(chatMessageJson(message, links.find((l) => l.id === message.linkId))) };
+        const id = message.linkId.slice("group:".length);
+        return { group: id, savedAt, message: checked(groupMessageJson(message, groups.find((g) => g.id === id))) };
+      }),
+    };
   },
   /**
    * WISP 400 § Forwards: messages of a chat or a group sent on to up to 5 chats and groups, each as a new message of mine
@@ -523,7 +528,7 @@ const METHODS: Record<string, Method> = {
   },
   async "chat.remove"(ctx, params) {
     const link = chatNotGroup(ctx, params, "group forget", "--yes");
-    if (!bool(params, "yes")) throw new CliError("confirm", "Removing a chat deletes its keys and history on this device; pass yes (--yes) to go on");
+    if (!bool(params, "yes")) throw new CliError("confirm", "Removing a chat deletes its keys and history on this device; pass --yes (yes: true over the socket) to go on");
     noCallOn(ctx, link.id, "remove the chat");
     await node(ctx).removeLink({ linkId: link.id });
     ctx.calls.forgetChat(link.id);
@@ -535,6 +540,7 @@ const METHODS: Record<string, Method> = {
     const transport = Object.hasOwn(TRANSPORT_NAMES, name) ? TRANSPORT_NAMES[name] : undefined;
     if (!transport) throw new CliError("bad_request", `transport must be one of auto, dht, webrtc, iroh, hyperdht`);
     if (transport === "dht") noCallOn(ctx, link.id, "put the chat on DHT only");
+    else if (transport !== "auto") transportOffered(link, transport);
     await node(ctx).setChatTransport({ linkId: link.id, transport });
     // A choice made during a hold (`chat disconnect --hold`) ends it: its time running out takes nothing back.
     await releaseHold(ctx, link.id, "lifted", true);
@@ -709,7 +715,7 @@ const METHODS: Record<string, Method> = {
   },
   async "group.leave"(ctx, params) {
     const group = groupOf(ctx, params);
-    if (!bool(params, "yes")) throw new CliError("confirm", "Leaving a group deletes its history and files on this device; pass yes (--yes) to go on");
+    if (!bool(params, "yes")) throw new CliError("confirm", "Leaving a group deletes its history and files on this device; pass --yes (yes: true over the socket) to go on");
     const { admin } = await node(ctx).leaveGroup({ groupId: group.id });
     // The member who became the admin, named from the roster read before leaving: the group is gone from the state now.
     const next = admin ? group.members.find((m) => m.key === admin) : undefined;
@@ -717,7 +723,7 @@ const METHODS: Record<string, Method> = {
   },
   async "group.forget"(ctx, params) {
     const group = groupOf(ctx, params, "chat remove <chat> --yes");
-    if (!bool(params, "yes")) throw new CliError("confirm", "Forgetting a group deletes its history on this device; pass yes (--yes) to go on");
+    if (!bool(params, "yes")) throw new CliError("confirm", "Forgetting a group deletes its history on this device; pass --yes (yes: true over the socket) to go on");
     await node(ctx).forgetGroup({ groupId: group.id });
     return { forgotten: group.id };
   },
@@ -766,6 +772,11 @@ const METHODS: Record<string, Method> = {
     const wrong = (why: string, rawError?: string) => new CliError("bad_request", `${method} takes ${takes || "no parameters"}: ${why} (ghostly engine --list --verbose)`, { takes, ...(rawError ? { rawError } : {}) });
     const problem = engineParamsProblem(method, args);
     if (problem) throw wrong(problem);
+    // Removing the chat or putting it on DHT only is refused mid-call, as `chat remove` and `chat transport dht` are.
+    if (typeof args?.linkId === "string") {
+      if (method === "removeLink") noCallOn(ctx, args.linkId, "remove the chat");
+      else if ((method === "setChatTransport" && args.transport === "dht") || (method === "setDeliveryMode" && args.mode === "dht")) noCallOn(ctx, args.linkId, "put the chat on DHT only");
+    }
     if (args && ENGINE_SENDS.has(method) && !bool(params, "force")) await guardEngineSend(ctx, method, args);
     if (method === "getMessages") return node(ctx).getMessages(str(args ?? {}, "linkId", true));
     if (method === "getState") return state(ctx);
@@ -793,6 +804,9 @@ const METHODS: Record<string, Method> = {
  * kept): it stops once it has answered, and the next command starts on the emptied profile.
  */
 async function clearProfile(ctx: ApiContext): Promise<{ cleared: { chats: number; groups: number }; stopped?: true }> {
+  // Every chat goes at once: mid-call, the call's hang-up had no chat left to cross, as with `chat remove` (`noCallOn`).
+  const call = ctx.calls.list()[0];
+  if (call) throw new CliError("busy", `A call is on in a chat: hang it up first (ghostly call hangup ${call.chat}), then clear the profile`, { call: call.call });
   const { links, groups } = state(ctx);
   await node(ctx).clearProfileData();
   const cleared = { chats: links.length, groups: groups.length };
@@ -844,7 +858,7 @@ async function react(ctx: ApiContext, linkId: string, params: Params): Promise<{
   const emoji = removed ? "" : str(params, "emoji");
   if (!removed && !emoji) throw new CliError("usage", "Give one emoji, or --remove to take yours back");
   const result = await node(ctx).react({ linkId, messageId, emoji: emoji ?? "" });
-  if (result.error) throw new CliError(result.refused ? "refused" : /not in this chat|No reaction of yours/.test(result.error) ? "not_found" : "bad_request", result.error);
+  if (result.error) throw new CliError(result.refused ? "refused" : /not in this (?:chat|group)|No reaction of yours/.test(result.error) ? "not_found" : "bad_request", result.error);
   return { messageId, emoji: emoji || null, removed };
 }
 

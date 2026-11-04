@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { GroupView } from "@ghostly/browser/shared/types";
-import { useBackdropDismiss } from "../hooks/useDismiss";
+import { useBackdropDismiss, useBackCloses } from "../hooks/useDismiss";
 import { memberName } from "../lib/groups";
 import { useI18n } from "../contexts/I18nContext";
 import { problemText, type Problem } from "../lib/problemText";
@@ -26,6 +26,7 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus, forge
   const leaving = useRef<HTMLElement | null | undefined>(undefined);
   const close = () => { leaving.current = undefined; onClose(); };
   const backdrop = useBackdropDismiss(close);
+  useBackCloses(close);
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null, opener = returnFocus?.current;
     const element = dialog.current!; element.showModal(); cancel.current?.focus();

@@ -72,6 +72,11 @@ describe("a refusal above the composer", () => {
     expect(document.activeElement).not.toBe(document.body);
   });
 
+  it("gives its × a 32 x 32 px tap target, as the app's other card does", async () => {
+    const alert = await sendRefused(SHORT_EN, "en");
+    expect(within(alert).getByRole("button", { name: "Close" })).toHaveClass("grid", "h-8", "w-8", "place-items-center");
+  });
+
   it("goes by itself once the focus has left its ×", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const alert = await sendRefused(PACED_JA, "ja");

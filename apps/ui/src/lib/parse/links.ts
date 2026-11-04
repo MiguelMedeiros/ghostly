@@ -26,8 +26,15 @@ export function linkEnd(whole: string): string {
   return url.slice(0, end);
 }
 
-/** Direction and other invisible format characters, which can make a link read as another address. */
-export const INVISIBLE = /[\u00ad\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g;
+/**
+ * Characters that draw as nothing, which can make a link read as another address: format characters (direction
+ * marks and overrides, zero-width ones, the soft hyphen, tags, interlinear annotation, shorthand and musical format
+ * controls), everything Unicode marks as ignorable by default (the grapheme joiner, the Hangul fillers, variation
+ * selectors, the Khmer inherent vowels, the Mongolian free variation selectors), and the line and paragraph
+ * separators. Spelled out as well as by property, so none of them depends on the engine's Unicode version.
+ */
+export const INVISIBLE =
+  /[\p{Cf}\p{Default_Ignorable_Code_Point}\u115f\u1160\u180e\u2028\u2029\u3164\uffa0\ufff9-\ufffb\u{1bca0}-\u{1bca3}\u{1d173}-\u{1d17a}\u{e0000}-\u{e007f}]|\u034f|[\u17b4\u17b5]|[\u180b-\u180d]|\u180f|[\ufe00-\ufe0f]|[\u{e0100}-\u{e01ef}]/gu;
 
 /**
  * A link as a bubble shows it. Plain ASCII shows as typed. Anything else shows as the browser reads it: the host

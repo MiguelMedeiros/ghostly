@@ -109,7 +109,8 @@ const testOf = (p: PaymentView, federationNetwork: (federation: string) => strin
 
 /**
  * What this device says about one of its own payments in a group, or null when it says nothing (not a group's,
- * or nothing to say yet). `all` is every desk record, to find a request's payments and whether this device paid it.
+ * or nothing to say yet). `all` is the desk records to find a request's payments in (and whether this device paid it):
+ * every record, or only that request's.
  */
 export function authoredNote(p: PaymentView, at: Placement, all: readonly PaymentView[], current?: GroupPayNote, memberOf: (linkId: string) => string | undefined = () => undefined,
   federationNetwork: (federation: string) => string | undefined = () => undefined): GroupPayFrame | null {
@@ -204,12 +205,16 @@ export class GroupPayments {
     // Once per group per pass: a device may keep many payments, in few groups.
     const known = new Map<string, ReturnType<GroupPaymentsHost["membership"]>>();
     const membership = (groupId: string) => { if (!known.has(groupId)) known.set(groupId, this.host.membership(groupId)); return known.get(groupId); };
+    // A request's payments, found once per pass: each request searching every record made a pass with 1,000 group
+    // requests among 5,000 payments take 32 ms, on every payment change.
+    const answers = new Map<string, PaymentView[]>();
+    for (const x of all) if (x.requestId) { const list = answers.get(x.requestId); if (list) list.push(x); else answers.set(x.requestId, [x]); }
     for (const p of all) {
       const at = this.placement(p, membership);
       if (!at) continue;
       const notes = await this.load(at.groupId);
       const current = notes.get(paymentWireId(p.id));
-      const frame = authoredNote(p, at, all, current, linkId => this.host.edgeOf(linkId)?.member, federation => this.host.federationNetwork?.(federation));
+      const frame = authoredNote(p, at, answers.get(p.id) ?? [], current, linkId => this.host.edgeOf(linkId)?.member, federation => this.host.federationNetwork?.(federation));
       if (!frame || JSON.stringify(frame) === JSON.stringify(current?.mine)) continue;
       const merged = mergeGroupPay(current, frame, at.me, membership(at.groupId)!.members) ?? current;
       if (!merged) continue;

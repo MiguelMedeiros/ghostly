@@ -63,4 +63,43 @@ describe("a chat's publish the relays' budget holds back", () => {
     expect(carry).toHaveBeenCalled();
     await link.stop();
   });
+
+  /** A group edge that is down, on relays that refuse what their budget holds back, as `RelayTransport` does. */
+  function downEdge(canCarry: () => boolean) {
+    const inner = relays();
+    inner.publish.mockImplementation(async () => { if (inner.held) throw new DiscoveryBudgetError(5_000); });
+    const params = createLink().mine;
+    const carry = vi.fn(() => ({ taken: 0, sure: false }));
+    const edge = new CarriedTransport(inner, identityFromSeedB64(params.seedB64).pubKeyZ32, params.peerPubKeyZ32, { carry, canCarry, open: () => false, look: () => {} });
+    const link = new LinkSession({ params, transport: edge, pollIntervals: RELAY_POLL_INTERVALS, events: {}, lastSeenTimestamp: 5 });
+    return { inner, carry, edge, link };
+  }
+
+  it("a group edge that is down, with no member to carry it, signs no packet the relays' budget holds back: it goes when the wait is over", async () => {
+    const { inner, carry, link } = downEdge(() => false);
+    link.start();
+    await vi.advanceTimersByTimeAsync(60_000);
+    // On dev each try was signed, handed to nobody and refused by the relays, again at every retry.
+    expect(carry).not.toHaveBeenCalled();
+    expect(inner.publish).not.toHaveBeenCalled();
+
+    inner.held = false;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(inner.publish).toHaveBeenCalledTimes(1);
+    await link.stop();
+  });
+
+  it("a member that can carry it comes up meanwhile: it is handed the newest packet, signed then", async () => {
+    let reachable = false;
+    const { inner, edge, link } = downEdge(() => reachable);
+    link.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(inner.publish).not.toHaveBeenCalled();
+    reachable = true;
+    const packet = edge.latest();
+    expect(packet).not.toBeNull();
+    // Signed once: the member's link asking again gets the same bytes.
+    expect(edge.latest()).toBe(packet);
+    await link.stop();
+  });
 });

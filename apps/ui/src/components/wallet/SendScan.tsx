@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
-import { dragHasFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteNamesFiles, pasteShowsNothing, platformPastedImage } from "../../lib/pastedFiles";
+import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type ReactNode } from "react";
+import { dragCarriesFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteNamesFiles, pasteShowsNothing, platformDroppedImage, platformPastedImage } from "../../lib/pastedFiles";
 import { readClipboardText } from "../../lib/clipboard";
 import { rawError } from "../../lib/errorText";
 import { QR_IMAGE_MAX, QrReaderNotLoaded, qrCamera, qrFrameReader, qrReaderFailures, readQrImage, scanQrFrames } from "../../lib/qrReader";
@@ -107,8 +107,13 @@ export function SendScan({ onText, disabled = false, scanOnOpen = false, childre
     const reading = platformPastedImage(QR_IMAGE_MAX);
     if (!reading) return;
     event.preventDefault();
+    readHeld(reading, picture || pasteNamesFiles(event.clipboardData));
+  };
+  // A picture the app holds (pasted, or dropped from another app), weighed as it was read. `named`: files or a picture
+  // were offered, so finding none is said.
+  const readHeld = (reading: NonNullable<ReturnType<typeof platformPastedImage>>, named: boolean) => {
     stop(); setError(""); setBusy(true);
-    const current = generation.current, named = picture || pasteNamesFiles(event.clipboardData);
+    const current = generation.current;
     const ended = () => { if (current !== generation.current) return false; setBusy(false); return true; };
     reading.then((found) => {
       if (!ended()) return;
@@ -120,6 +125,20 @@ export function SendScan({ onText, disabled = false, scanOnOpen = false, childre
     }, (cause: unknown) => {
       if (ended()) setError(t(rawError(cause) === "That picture is too large to paste" ? "join.pastedTooLarge" : "join.imageFailed"));
     });
+  };
+  const draggedOver = (event: DragEvent) => {
+    if (!dragCarriesFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  };
+  const dropped = (event: DragEvent) => {
+    if (!dragCarriesFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    // Another app's files the Linux app's webview names by address only: the app holds them, and reads the picture.
+    const held = off ? null : platformDroppedImage(event.dataTransfer, QR_IMAGE_MAX);
+    if (held) { readHeld(held, true); return; }
+    const file = droppedFiles(event.dataTransfer)[0];
+    if (file?.type.startsWith("image/")) { if (!off) void image(file); } else if (file) setError(t("join.imageFailed"));
   };
 
   // A field taken to type in stops the camera: its light and preview do not stay above the keyboard, and a QR that comes
@@ -140,8 +159,7 @@ export function SendScan({ onText, disabled = false, scanOnOpen = false, childre
       // A screenshot of a QR, dropped: read as Choose image reads one.
       onPaste={pasted}
       onFocus={(event) => typing(event.target)} onInput={(event) => typing(event.target)}
-      onDragOver={(event) => { if (dragHasFiles(event.dataTransfer)) event.preventDefault(); }}
-      onDrop={(event) => { if (!dragHasFiles(event.dataTransfer)) return; event.preventDefault(); const file = droppedFiles(event.dataTransfer)[0]; if (file?.type.startsWith("image/")) { if (!off) void image(file); } else if (file) setError(t("join.imageFailed")); }}>
+      onDragOver={draggedOver} onDrop={dropped}>
       <video ref={video} muted playsInline aria-label={t("join.cameraPreview")} className={`${scanning ? "block" : "hidden"} aspect-square w-full max-w-xs mx-auto rounded-xl bg-black object-cover`} />
       <div className="grid grid-cols-3 gap-2">
         {scanning ? <button ref={stopButton} type="button" onClick={stop} className={`${tile} border border-border text-text-secondary`} data-testid="wallet-send-scan-stop">

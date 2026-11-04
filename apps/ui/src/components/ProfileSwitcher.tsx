@@ -6,6 +6,7 @@ import { shortcutLabel, type OtherProfile, type useProfileGlances } from "../hoo
 import { THEME_COLOR, switchProfile, themeOf } from "../lib/profiles";
 import { ProfileBadge } from "./ProfileBadge";
 import { useAppNavigation } from "../hooks/useAppNavigation";
+import { useBackCloses } from "../hooks/useDismiss";
 import { InstallMenuItem } from "./InstallApp";
 import { openJoinAnother } from "../lib/devices";
 
@@ -35,6 +36,8 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
 
   // The most likely next step has focus: the first other profile, or adding one.
   useEffect(() => { items()[1]?.focus(); }, []);
+  // Back (Android's back gesture) closes it alone, as every other menu and sheet.
+  useBackCloses(() => onClose());
   useEffect(() => {
     const outside = (e: PointerEvent) => {
       const target = e.target as Element | null;
@@ -81,9 +84,11 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
         <span className="shrink-0 rounded-full" style={{ boxShadow: `0 0 0 2px var(--theme-panel-header), 0 0 0 4px ${color}` }}>
           <ProfileBadge entry={current} size={38} avatar={myAvatar} />
         </span>
-        <span className="flex-1 min-w-0">
-          <span className="block truncate text-sm font-semibold text-text-primary">{current.name}</span>
-          <span className="block truncate text-xs text-text-muted">{nickname}</span>
+        {/* The person's own words, in their own direction, on the box that cuts them, as a chat's name: a Latin name in
+            Arabic is cut at its end, not its start. Each box is as wide as its words, so a short one stays at the start. */}
+        <span className="flex-1 min-w-0 flex flex-col items-start">
+          <span dir="auto" className="max-w-full truncate text-sm font-semibold text-text-primary">{current.name}</span>
+          <span dir="auto" className="max-w-full truncate text-xs text-text-muted">{nickname}</span>
         </span>
         <span className="shrink-0 flex items-center gap-0.5 text-xs text-text-secondary" aria-hidden="true">
           {t("profileSwitcher.open")}
@@ -105,7 +110,7 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
             <span className="shrink-0 rounded-full" style={{ boxShadow: `0 0 0 2px ${THEME_COLOR[themeOf(entry.id)]}66` }}>
               <ProfileBadge entry={entry} size={32} avatar={glance?.avatar} />
             </span>
-            <span className="flex-1 min-w-0 truncate text-sm text-text-primary">{entry.name}</span>
+            <span className="flex-1 min-w-0 flex"><span dir="auto" className="min-w-0 truncate text-sm text-text-primary">{entry.name}</span></span>
             {glance?.locked
               ? <span className="shrink-0 text-text-muted" title={t("profileSwitcher.locked")} data-testid="profile-switcher-locked"><LockIcon /></span>
               : glance?.standby

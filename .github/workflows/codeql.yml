@@ -1,0 +1,118 @@
+name: CodeQL
+
+# Code scanning (actions, javascript-typescript, rust; the default query suite), in place of CodeQL's default setup,
+# which scanned all of the repository on every push the merge train lands on dev (a push per pull request, seconds
+# apart) and ran its 12-minute Rust analysis on every pull request.
+# - A pull request into dev, main or a release branch analyses only the languages its files can change (see `plan`):
+#   Rust when a Rust source, Cargo.toml, Cargo.lock or the toolchain file changes, Actions when a workflow or an action
+#   does, JavaScript/TypeScript unless every change is one that analysis never reads.
+# - Pushes to dev are not scanned: everything on dev landed through a pull request into dev, which was scanned, and the
+#   daily run below scans dev (the default branch) whole, every language, so dev's alerts are at most a day old.
+# - Pushes to main (what ships) are scanned whole, every language.
+# Inert until the repository variable CODEQL_WORKFLOW is `on`: GitHub rejects this workflow's results while the
+# default setup is on, so the setup is switched to advanced and the variable set at the same time.
+on:
+  # Not the release branches: the merge train may push a rebase to one that is a pull request's head (see
+  # merge-train.test.ts); what they release lands on main.
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main, dev, "release/**"]
+  schedule:
+    - cron: "47 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to a pull request cancels the analysis it supersedes; anything else gets a group of its own.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  plan:
+    name: Languages to analyse
+    if: vars.CODEQL_WORKFLOW == 'on'
+    runs-on: ubuntu-24.04
+    outputs:
+      languages: ${{ steps.plan.outputs.languages }}
+    steps:
+      # The pull request's merge commit and its first parent (the base), trees only: enough to list what it changes.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 2
+          filter: blob:none
+          sparse-checkout: .github/workflows/codeql.yml
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      # Writes `languages=<JSON list>`. Anything but a pull request, or a list of files that cannot be read, analyses
+      # every language. A renamed file counts by both names (--no-renames). This workflow's own changes analyse every
+      # language, so a change to it is tried on all three. Names are read NUL-separated and unquoted: by default git
+      # C-quotes a name with a non-ASCII byte, a `"` or a `\` ("a\303\247.rs"), which no pattern below would match.
+      # `shell: bash` runs with pipefail, so a git that fails is not read as a short list.
+      - name: Which languages this change needs
+        id: plan
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          all='["actions","javascript-typescript","rust"]'
+          if [[ "$EVENT" != "pull_request" ]]; then
+            echo "languages=$all" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! files=$(git -c core.quotePath=false diff -z --name-only --no-renames HEAD^1 HEAD | tr '\0' '\n') || [[ -z "$files" ]]; then
+            echo "::notice::Could not list what this pull request changes: every language is analysed"
+            echo "languages=$all" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "$files"
+          if grep -qxF .github/workflows/codeql.yml <<< "$files"; then
+            echo "::notice::This workflow changed: every language is analysed"
+            echo "languages=$all" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          rust='(\.rs|(^|/)Cargo\.(toml|lock)|(^|/)rust-toolchain(\.toml)?)$'
+          langs=()
+          if grep -qE '^\.github/|(^|/)action\.ya?ml$' <<< "$files"; then langs+=(actions); else echo "::notice::No workflow or action changed: Actions not analysed"; fi
+          # Rust sources, Rust manifests, Markdown and images: JavaScript/TypeScript's extraction reads none of them.
+          if grep -qvE "$rust|\.(md|png|jpe?g|gif|webp|ico)$" <<< "$files"; then langs+=(javascript-typescript); else echo "::notice::Nothing JavaScript/TypeScript's analysis reads changed: not analysed"; fi
+          if grep -qE "$rust" <<< "$files"; then langs+=(rust); else echo "::notice::No Rust source, Cargo manifest or toolchain changed: Rust not analysed"; fi
+          list=""
+          for l in "${langs[@]}"; do list+="${list:+,}\"$l\""; done
+          echo "languages=[$list]" >> "$GITHUB_OUTPUT"
+
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    needs: plan
+    if: needs.plan.outputs.languages != '[]'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJSON(needs.plan.outputs.languages) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # As the default setup did: no build for any of the three, and no `queries`, which is the default query suite.
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+
+      # The default setup's category, so the alerts it raised carry on under this workflow.
+      - name: Analyze
+        uses: github/codeql-action/analyze@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
+        with:
+          category: /language:${{ matrix.language }}

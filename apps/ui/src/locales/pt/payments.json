@@ -184,6 +184,9 @@
     "maxFee": "Taxa máxima que você aceita ({{unit}})",
     "maxFeeAria": "Taxa máxima em {{unit}}",
     "millisats": "{{amount}} millisats",
+    "moneroInfo": "O Ghostly não tem carteira Monero. Pagar abre este link na carteira Monero deste aparelho, onde você confere e envia.",
+    "moneroLabel": "Monero",
+    "moneroPayTitle": "Abre sua carteira Monero neste aparelho",
     "networkNotStated": "Rede não informada",
     "noWallet": {
       "mainnet": "Você não tem carteira {{wallet}} Mainnet para pagar este dinheiro real.",

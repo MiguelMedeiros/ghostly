@@ -10,7 +10,15 @@ const live = (patch: Partial<EdgeLive> = {}): EdgeLive => ({
 describe("edgeView: how a group's edge to one member is doing", () => {
   it("open means group frames flow: reachable now, over the transport the pairing chose", () => {
     expect(edgeView(live({ link: { groupsSupport: true }, dataLink: "open", pairing: { status: "ready", transport: "webrtc/1" } }), 1_000))
-      .toEqual({ linkId: "edge-1", state: "open", transport: "webrtc/1", lastSeenAt: 1_000 });
+      .toEqual({ linkId: "edge-1", state: "open", transport: "webrtc/1", lastSeenAt: 0 });
+  });
+
+  it("an open edge's view is the same from one state to the next: what the pages compare by content is not drawn again", () => {
+    // Its member is heard all along: a "last seen" of now made every group with a member connected a change on each
+    // engine state, and the chat list drew each such group's row again on every one.
+    const open = live({ link: { groupsSupport: true }, dataLink: "open", pairing: { status: "ready", transport: "webrtc/1" }, lastSyncAt: 400 });
+    expect(edgeView(open, 1_000)).toEqual(edgeView(open, 61_000));
+    expect(edgeView(open, 1_000).lastSeenAt).toBe(400);
   });
 
   it("a data channel open without groups on the other side is not reachable: nothing of the group can cross it", () => {
@@ -70,6 +78,11 @@ describe("edgeView: how a group's edge to one member is doing", () => {
     // Live, then the member's app closed three days ago: last seen then, not "Reconnecting…" (and a pulsing icon) for good.
     expect(edgeView(live({ link, lastSyncAt: at - days, presence: { lastPacketAt: at - days } }), at)).toEqual({ linkId: "edge-1", state: "waiting", lastSeenAt: at - days });
     expect(edgeView(live({ link, stored: { id: "edge-1", edgeLive: true }, lastSyncAt: 0, presence: { lastPacketAt: at - days } }), at)).not.toHaveProperty("reconnecting");
+    // Back after a restart and no packet read since (the relays keep none of an app closed that long): the resume's
+    // window, then not dialled, so not reconnecting either.
+    const restarted = { link, stored: { id: "edge-1", edgeLive: true }, lastSyncAt: 0, edgeStartedAt: at };
+    expect(edgeView(live(restarted), at + 5_000)).toMatchObject({ reconnecting: true });
+    expect(edgeView(live(restarted), at + 11 * 60_000)).toEqual({ linkId: "edge-1", state: "waiting", lastSeenAt: 0 });
     // Within the window (10 minutes) it still is: a member who dropped a minute ago, or whose packet is fresh.
     expect(edgeView(live({ link, lastSyncAt: at - 60_000 }), at)).toMatchObject({ reconnecting: true, attempt: 4 });
     expect(edgeView(live({ link, lastSyncAt: at - days, presence: { lastPacketAt: at - 5_000 } }), at)).toMatchObject({ reconnecting: true });
@@ -81,6 +94,6 @@ describe("edgeView: how a group's edge to one member is doing", () => {
 
   it("an open edge hides an old discovery error: what matters is that it works", () => {
     const view = edgeView(live({ link: { groupsSupport: true }, dataLink: "open", discoveryError: "Could not publish discovery: x", pairing: { status: "ready", transport: "webrtc/1" } }), 7);
-    expect(view).toEqual({ linkId: "edge-1", state: "open", transport: "webrtc/1", lastSeenAt: 7 });
+    expect(view).toEqual({ linkId: "edge-1", state: "open", transport: "webrtc/1", lastSeenAt: 0 });
   });
 });
