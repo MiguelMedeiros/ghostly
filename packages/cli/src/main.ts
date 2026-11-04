@@ -11,6 +11,7 @@ import { asCliError, CliError, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import { jsonOut } from "./jsonOut";
+import { ownProfile } from "./privateFolder";
 import { waitNotice, waitsFor, type WaitNotice } from "./waitNotice";
 import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, readCursor } from "./listen";
@@ -957,6 +958,8 @@ function processAlive(pid: number): boolean {
  */
 async function startDetached(g: Globals, seconds: number) {
   requireProfile(g);
+  // Before the log is opened in the profile's folder; the child checks again before it takes the profile (`openHost`).
+  ownProfile(g.paths.dir);
   const until = Date.now() + seconds * 1000;
   for (;;) {
     if (await connectDaemon(g.paths)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
