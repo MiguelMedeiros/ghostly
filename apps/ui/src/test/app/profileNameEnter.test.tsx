@@ -38,4 +38,16 @@ describe("the profile's name field", () => {
     expect(listProfiles()[0].name).not.toBe("   ");
     expect(screen.getByTestId("profile-name-saved")).toHaveTextContent("");
   });
+
+  it("shows the saved name again when the field is left empty, as the nickname field does", async () => {
+    const { user } = renderApp(<Profile />);
+    const name = screen.getByTestId("profile-name");
+    const saved = listProfiles()[0].name;
+    await user.clear(name);
+    await user.type(name, "   ");
+    await user.tab();
+    // The name stays as it was: the field said nothing and showed an empty name until the page was opened again.
+    expect(listProfiles()[0].name).toBe(saved);
+    expect(name).toHaveValue(saved);
+  });
 });
