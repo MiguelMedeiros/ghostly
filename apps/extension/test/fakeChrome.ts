@@ -124,6 +124,15 @@ export interface FakeWorld {
   storage: Map<string, string>;
   /** Web Locks held now, by name, with the context holding each. */
   locks: Map<string, Context>;
+  /** `chrome.alarms` set now, by name: they outlive the worker, as Chrome's do. */
+  alarms: Map<string, { periodInMinutes?: number }>;
+  /** Chrome fires alarm `name`, as it does when its time comes (it starts a stopped worker for it). */
+  fireAlarm(name: string): void;
+  /**
+   * The offscreen document goes away by itself (its renderer crashed, or it was ended from Chrome's task manager): the
+   * worker is not told, and nothing of it runs any more.
+   */
+  endOffscreen(): void;
 }
 
 export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld {
@@ -281,6 +290,18 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
       },
     },
     action: { onClicked: event<() => void>() },
+    alarms: {
+      onAlarm: event<(alarm: { name: string }) => void>(),
+      /** One with the same name takes the place of the one before. */
+      async create(name: string, info: { periodInMinutes?: number }) {
+        record("alarms.create", name, info);
+        world.alarms.set(name, { ...info });
+      },
+      async get(name: string) {
+        const alarm = world.alarms.get(name);
+        return alarm ? { name, scheduledTime: 0, ...alarm } : undefined;
+      },
+    },
     debugger: {
       onEvent: event<(source: chrome.debugger.Debuggee, method: string, params?: object) => void>(),
       onDetach: event<(source: chrome.debugger.Debuggee, reason: string) => void>(),
@@ -347,17 +368,31 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
   };
 
   world.chrome = chromeApi as unknown as typeof chrome;
-  world.load = async (context, importer) => {
-    const previous = world.context;
-    world.context = context;
-    try {
-      return await importer();
-    } finally {
-      world.context = previous;
-    }
+  // One load at a time: the worker starts the peer as it loads, and the document's script loading inside the worker's
+  // load would take the worker's context back as its own when it ends.
+  let loading: Promise<unknown> = Promise.resolve();
+  world.load = (context, importer) => {
+    const run = loading.then(async () => {
+      const previous = world.context;
+      world.context = context;
+      try {
+        return await importer();
+      } finally {
+        world.context = previous;
+      }
+    });
+    loading = run.catch(() => {});
+    return run;
   };
   world.restartServiceWorker = () => {
     for (const e of world.events) e.dropContext("background");
+  };
+  world.alarms = new Map();
+  world.fireAlarm = (name) => {
+    if (world.alarms.has(name)) chromeApi.alarms.onAlarm.dispatch({ name } as never);
+  };
+  world.endOffscreen = () => {
+    if (world.offscreenDocument) closeOffscreen();
   };
   world.callsTo = (api) => world.calls.filter((c) => c.api === api).map((c) => c.args);
   world.connectFrom = (sender, name) => {
