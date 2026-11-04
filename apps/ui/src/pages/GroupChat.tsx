@@ -398,6 +398,8 @@ export function GroupChat() {
   openGroupId.current = groupId;
   const setError = (problem: Problem | null) => { if (openGroupId.current === groupId) setRefused(problem && { groupId, problem }); };
   const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null), shareRef = useRef<HTMLButtonElement>(null);
+  // Where the Share dialog gives the focus back: Share, or the ⋮ once the link went off and took Share with it.
+  const shareBack = useMemo(() => ({ get current() { return shareRef.current ?? optionsRef.current; } }), []);
   const { settings } = useSettings();
   // Forward, and Select then Forward (WISP 400 § Forwards): a group's texts, to chats and other groups.
   // The group is a new object on every state of the engine (up to 20 a second): the names, and so the rows, are made
@@ -868,7 +870,7 @@ export function GroupChat() {
 
       {showMembers && <GroupMembersDialog group={group} focusKey={focusMember} returnFocus={optionsRef} onClose={() => { setShowMembers(false); setFocusMember(undefined); }} />}
       {viewingPicture && group.picture && <AvatarViewer src={group.picture} name={group.name || t("group.chat.unnamed")} returnFocus={avatarButton} onClose={() => setViewingPicture(false)} />}
-      {sharing && (group.entryLink || shareShown) && <GroupShareDialog group={group} created={sharing === "created"} returnFocus={shareRef} onClose={closeShare} />}
+      {sharing && (group.entryLink || shareShown) && <GroupShareDialog group={group} created={sharing === "created"} returnFocus={shareBack} onClose={closeShare} />}
       {confirmLeave && <LeaveGroupDialog group={group} returnFocus={optionsRef} onClose={() => setConfirmLeave(false)}
         onConfirm={async () => { await engine.call("leaveGroup", { groupId }); goneHere(); setConfirmLeave(false); nav.home(); }} />}
       {/* Deleting an active group, private or community, leaves it: said so, and refused as Leave is while nobody could
