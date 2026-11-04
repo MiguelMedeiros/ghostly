@@ -214,6 +214,76 @@ function sampleRanges(b: Uint8Array, stbl: Box): [number, number][] {
   return ranges;
 }
 
+/** Each track's default sample size in fragments, from `moov`'s `mvex/trex` boxes, by track ID. */
+function defaultSampleSizes(moov: Uint8Array): Map<number, number> {
+  const sizes = new Map<number, number>();
+  const mvex = child(moov, header(moov, 0, moov.length), "mvex");
+  for (const trex of mvex ? boxes(moov, mvex.body, mvex.end) : []) {
+    if (trex.type !== "trex") continue;
+    check(trex.body + 24 <= trex.end);
+    sizes.set(u32be(moov, trex.body + 4), u32be(moov, trex.body + 16));
+  }
+  return sizes;
+}
+
+/**
+ * The byte ranges of a fragment's samples in the file, one per track run (`trun`), from its `moof` read whole (`at` its
+ * offset in the file): each run starts at its data offset from its track fragment's base (`tfhd`'s base data offset,
+ * else the `moof`'s start for the first track fragment or one that says so, else where the previous one's data ended),
+ * or where the previous run ended; its length is its samples' sizes, its own or `tfhd`'s or `trex`'s default.
+ */
+function fragmentRanges(b: Uint8Array, at: number, sizes: Map<number, number>): [number, number][] {
+  const ranges: [number, number][] = [];
+  let previous = at;
+  for (const traf of boxes(b, header(b, 0, b.length).body, b.length)) {
+    if (traf.type !== "traf") continue;
+    const tfhd = child(b, traf, "tfhd");
+    check(!!tfhd && tfhd.body + 8 <= tfhd.end);
+    const flags = u32be(b, tfhd.body) & 0xffffff;
+    let field = tfhd.body + 8, base = flags & 0x20000 ? at : previous;
+    if (flags & 0x1) {
+      check(field + 8 <= tfhd.end);
+      base = u32be(b, field) * 2 ** 32 + u32be(b, field + 4);
+      field += 8;
+    }
+    if (flags & 0x2) field += 4;
+    if (flags & 0x8) field += 4;
+    let size = sizes.get(u32be(b, tfhd.body + 4));
+    if (flags & 0x10) {
+      check(field + 4 <= tfhd.end);
+      size = u32be(b, field);
+    }
+    let next = base;
+    for (const trun of boxes(b, traf.body, traf.end)) {
+      if (trun.type !== "trun") continue;
+      check(trun.body + 8 <= trun.end);
+      const runFlags = u32be(b, trun.body) & 0xffffff, count = u32be(b, trun.body + 4);
+      let field = trun.body + 8;
+      if (runFlags & 0x1) {
+        check(field + 4 <= trun.end);
+        next = base + (u32be(b, field) | 0);
+        field += 4;
+      }
+      if (runFlags & 0x4) field += 4;
+      const stride = [0x100, 0x200, 0x400, 0x800].filter((flag) => runFlags & flag).length * 4;
+      check(field + count * stride <= trun.end);
+      let length = 0;
+      if (runFlags & 0x200) {
+        const sizeAt = field + (runFlags & 0x100 ? 4 : 0);
+        for (let i = 0; i < count; i++) length += u32be(b, sizeAt + i * stride);
+      } else if (count) {
+        check(size !== undefined);
+        length = count * size;
+      }
+      check(Number.isSafeInteger(next) && Number.isSafeInteger(next + length));
+      if (length) ranges.push([next, next + length]);
+      next += length;
+    }
+    previous = next;
+  }
+  return ranges;
+}
+
 /** Whether every data reference of a track is this file (a self-contained `url ` or `alis`). */
 function selfContained(b: Uint8Array, minf: Box): boolean {
   const dref = child(b, child(b, minf, "dinf"), "dref");
@@ -388,9 +458,14 @@ export async function videoMetadataPatches(source: VideoSource, mime: string): P
 
   // A metadata track's samples in fragments are not looked for: such a video is refused.
   check(!fragmented || !metadata);
+  const sizes = dropped.length && fragmented ? defaultSampleSizes(moov) : undefined;
   for (const box of top) {
     if (box.type === "moof") {
       const moof = await whole(source, box);
+      // No fragment's sample is where zeros go either.
+      if (dropped.length) for (const [start, end] of fragmentRanges(moof, box.start, sizes ?? new Map())) {
+        check(!dropped.some(([from, to]) => start < to && end > from));
+      }
       emptyWithin(moof, box.body - box.start, moof.length);
       patches.push({ start: box.start, end: box.end, bytes: moof });
     } else if (SPACE.has(box.type)) {

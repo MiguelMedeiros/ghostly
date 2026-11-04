@@ -230,6 +230,42 @@ describe("withoutVideoMetadata", () => {
     for (const file of [renamed, cut, space]) await expect(withoutVideoMetadata(new Blob([file]), "video/mp4")).rejects.toThrow(NO_VIDEO_METADATA);
   });
 
+  it("a fragmented video is refused when a fragment's samples are where a box it empties or its trailer is", async () => {
+    const fragmented = await repack(false, "fragmented");
+    const top = (file: Buffer) => {
+      const found: [string, number, number][] = [];
+      for (let at = 0; at < file.length; at += file.readUInt32BE(at)) found.push([file.toString("latin1", at + 4, at + 8), at, at + file.readUInt32BE(at)]);
+      return found;
+    };
+    const mdats = top(fragmented).filter(([type]) => type === "mdat");
+    expect(mdats.length).toBeGreaterThan(0);
+    // It goes, its frames as they were.
+    const out = await bytesOf((await withoutVideoMetadata(new Blob([fragmented as BlobPart]), "video/mp4"))!);
+    expect(await played(out)).toEqual(await played(fragmented));
+    // A fragment's `mdat` made a box it empties (one it does not know, or space), or cut short into a trailer.
+    const renamed = (type: string) => {
+      const file = Buffer.from(fragmented);
+      file.write(type, mdats[mdats.length - 1]![1] + 4, "latin1");
+      return file;
+    };
+    const cut = Buffer.from(fragmented.subarray(0, mdats[mdats.length - 1]![2] - 1));
+    for (const file of [renamed("sefd"), renamed("free"), renamed("skip"), cut]) await expect(withoutVideoMetadata(new Blob([file]), "video/mp4")).rejects.toThrow(NO_VIDEO_METADATA);
+
+    // A fragment whose run starts at its track fragment's own base offset, its samples of the size `trex` says.
+    const u32 = (n: number) => Buffer.from([n >>> 24, (n >> 16) & 255, (n >> 8) & 255, n & 255]);
+    const head = box("ftyp", Buffer.from("isom\0\0\0\0isom", "latin1"));
+    const moov = (offset: number) => box("moov", box("mvhd", Buffer.alloc(100)), metadataTrack(offset, 4, "soun"),
+      box("mvex", box("trex", u32(0), u32(1), u32(1), u32(0), u32(6), u32(0))));
+    const mdat = box("mdat", Buffer.from("aac!frame1frame2", "latin1"));
+    const moof = (base: number) => box("moof", box("mfhd", u32(0), u32(1)), box("traf", box("tfhd", u32(1), u32(1), u32(0), u32(base)), box("trun", u32(0), u32(2))));
+    const sefd = box("sefd", Buffer.from(`frame1frame2 ${PLACE}`, "latin1"));
+    const at = head.length + moov(0).length;
+    const file = (base: number) => Buffer.concat([head, moov(at + 8), mdat, moof(base), sefd]);
+    const inMdat = file(at + 12), inSefd = file(at + mdat.length + moof(0).length + 8);
+    expect(hasPlace(await bytesOf((await withoutVideoMetadata(new Blob([inMdat]), "video/mp4"))!))).toBe(false);
+    await expect(withoutVideoMetadata(new Blob([inSefd]), "video/mp4")).rejects.toThrow(NO_VIDEO_METADATA);
+  });
+
   it("a video with nothing left to remove goes the same: the fixture's encoder tag (udta/meta/ilst) went the first time", async () => {
     const once = await bytesOf((await withoutVideoMetadata(new Blob([H264_MP4]), "video/mp4"))!);
     expect(Buffer.from(once).includes(Buffer.from("ilst", "latin1"))).toBe(false);
