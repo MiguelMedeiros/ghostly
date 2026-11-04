@@ -417,7 +417,10 @@ interface LiveLink {
    * started in this run before that (`contactGone`).
    */
   onlineSeenAt?: number;
-  /** A 1:1 chat whose HyperDHT listener was let go because its contact is gone (`releaseGoneListeners`), until it listens again. */
+  /**
+   * A 1:1 chat whose HyperDHT listener was let go (or not started) because its contact is gone (`releaseGoneListeners`),
+   * until it listens again.
+   */
   goneListener?: boolean;
   /** A group's edge: when the member's packet last said, in this run, which transports its app runs here (`_tr`). */
   peerSaidAt?: number;
@@ -9050,7 +9053,6 @@ export class GhostlyNode implements EngineImplementation {
     if (link.availableTransports.includes(key)) return false;
     // Nor a HyperDHT listener for a contact who is gone (`releaseGoneListeners`), unless the chat is in use.
     if (key === GONE_TRANSPORT && !inUse && this.contactGone(live, Date.now())) { live.goneListener = true; return false; }
-    if (key === GONE_TRANSPORT) live.goneListener = false;
     live.transportErrors ??= {};
     try {
       // The native SDKs each allow eight listeners, Iroh's browser build sixteen (`nativeSlots`). They go to the chats
@@ -9146,6 +9148,8 @@ export class GhostlyNode implements EngineImplementation {
       if (!endpoint) { void starting.then((late) => late.close(), () => {}); return false; }
       if (this.shuttingDown || live.stored.deliveryMode === "dht" || live.link !== link || !this.links.has(linkId) || link.takenFromUs) { await endpoint.close(); return false; }
       link.registerEndpoint(endpoint);
+      // Back after it was let go for a contact who was gone: the contact is dialled now (`knockOnReturn`).
+      if (key === GONE_TRANSPORT && live.goneListener) { live.goneListener = false; link.knockOnReturn(key); }
       if (group) live.nativeUpAt = { ...live.nativeUpAt, [key]: Date.now() };
       delete live.transportErrors[key];
       // The record says how to dial it, so a contact whose WebRTC never connects can try it (WISP 03).
@@ -9252,10 +9256,12 @@ export class GhostlyNode implements EngineImplementation {
       void link.releaseEndpoint(GONE_TRANSPORT).then(() => this.emitState(), () => {});
     }
   }
-  /** The contact of a chat whose HyperDHT listener was let go is back (`releaseGoneListeners`): it listens again. */
+  /**
+   * The contact of a chat whose HyperDHT listener was let go is back (`releaseGoneListeners`): it listens again (and
+   * dials the contact once it does, `startNativeEndpoint`).
+   */
   private listenAgain(live: LiveLink): void {
     const link = live.link;
-    live.goneListener = false;
     if (this.shuttingDown || !link || link.availableTransports.includes(GONE_TRANSPORT) || !this.keepsNativeEndpoints(live.stored.id, live.stored)) return;
     void this.ensureNativeEndpoints(live.stored.id);
   }

@@ -18,6 +18,7 @@ type Recorded = {
   options: GhostLinkOptions & { params: StoredLink; events: Required<NonNullable<GhostLinkOptions["events"]>> };
   availableTransports: string[]; isDataLinkOpen: boolean;
   registerEndpoint: ReturnType<typeof vi.fn>; releaseEndpoint: ReturnType<typeof vi.fn>; canReleaseEndpoint: ReturnType<typeof vi.fn>;
+  knockOnReturn: ReturnType<typeof vi.fn>;
 };
 const links = vi.hoisted(() => [] as Recorded[]);
 vi.mock("@ghostly/core", async (importOriginal) => {
@@ -40,6 +41,7 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     canReleaseEndpoint = vi.fn(() => true);
     releaseEndpoint = vi.fn(async (transport: string) => { this.availableTransports = this.availableTransports.filter((t) => t !== transport); });
     lastActivityAt = Date.now();
+    knockOnReturn = vi.fn();
     canYieldEndpoint = vi.fn(() => false);
     yieldEndpoint = vi.fn(async () => false);
     nativeDescriptors = {};
@@ -131,10 +133,13 @@ it("a chat whose contact is gone lets its HyperDHT listener go, and listens agai
   await node["ensureNativeEndpoints"](gone.id);
   expect(hyperdht.mock.calls.length).toBe(starts);
 
-  // The contact's packet says it is online again: it listens again at once, on its saved transport key.
+  // The contact's packet says it is online again: it listens again at once, on its saved transport key, and dials the
+  // contact (whose own dials found no listener here and wait out their backoff).
   linkOf(gone.id).options.events.onPresence(online(2));
   await vi.waitFor(() => expect(linkOf(gone.id).availableTransports).toContain("hyperdht/1"));
   expect(hyperdht.mock.calls.at(-1)).toEqual([seeds?.["hyperdht/1"]]);
+  expect(linkOf(gone.id).knockOnReturn.mock.calls).toEqual([["hyperdht/1"]]);
+  expect(linkOf(here.id).knockOnReturn).not.toHaveBeenCalled();
   expect((await db.getLinks()).find((l) => l.id === gone.id)?.transportSeeds).toEqual(seeds);
   expect(NATIVE_GONE_MS).toBe(GONE_MS);
 });
