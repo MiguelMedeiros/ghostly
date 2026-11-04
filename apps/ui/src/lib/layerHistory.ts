@@ -45,6 +45,16 @@ const seen = () => { last = { page: pageOf(history.state), depth: depthOf(histor
 const busy = () => !!going && Date.now() - going.at < GOING_MS;
 
 /**
+ * The layers open as a popstate began, heard before anything else (the router starts listening as the app mounts). A
+ * browser runs the page's microtasks between a navigation's listeners: the page the router leads to is drawn before
+ * `onPop` runs, and a layer it opens (a device code's link pasted in the address bar opens "Add this device") was never
+ * under that Back.
+ */
+let popping: { event: Event; layers: Layer[] } | null = null;
+// No events where the page runs without a DOM (the engine's tests stand in a `window` without one).
+if (typeof window !== "undefined") window.addEventListener?.("popstate", (event) => { popping = { event, layers: [...open] }; });
+
+/**
  * A page that starts on a layer's entry (reloaded with a dialog open, as a move or a takeover of the profile does, or
  * after a layer closed another way) has no layer open: that entry is the page's own now. Gone back off, it would leave
  * this page for the one before the reload, and the move waiting for it would never run (a chat tapped in the list
@@ -87,15 +97,17 @@ function schedule() {
   setTimeout(settle, 0);
 }
 
-function onPop() {
+function onPop(event: Event) {
   const landed = going;
   going = null;
   const from = last;
   seen();
   if (landed) { landed.then?.(); schedule(); return; }
-  // The person's Back: the layers over the entry it reached close.
+  // The person's Back: the layers over the entry it reached close, of those open as it began.
   const depth = depthOf(history.state);
-  const closing = open.splice(depth).reverse();
+  const before = popping?.event === event ? popping.layers : open;
+  const closing = open.slice(depth).filter((layer) => before.includes(layer)).reverse();
+  for (const layer of closing) open.splice(open.indexOf(layer), 1);
   for (const layer of closing) layer.close();
   // Back off an entry a layer closed another way left, over what was still open: that Back would show nothing. It
   // closes the layer on top, or with none, leaves the page, as it would have with that entry gone.
