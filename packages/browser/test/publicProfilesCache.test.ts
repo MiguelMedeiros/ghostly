@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { describe, expect, it, vi } from "vitest";
-import { transact, STORES } from "../src/shared/idb";
+import { clearProfileStores, transact, STORES } from "../src/shared/idb";
 import { MAX_CACHED_PROFILES, PROFILE_REFRESH_SECONDS, PROFILE_RETRY_SECONDS, PublicProfiles, READERS_VERSION, type ProfileSubject, type PublicProfileHost } from "../src/engine/publicProfiles";
 import type { PublicProfileData, PublicProfileReader } from "../src/profiles/readers";
 // covers: proofs.public-profile, proofs.public-profile.setting, proofs.public-profile.picture
@@ -133,6 +133,28 @@ describe("public profile cache", () => {
     release(); await pending;
     t.world.eligible = [ALICE];
     expect(t.cache.view(ALICE)).toBeUndefined();
+  });
+
+  /**
+   * A card's profile still being read (a slow host, up to 20 s) when "Clear all data" stops the engine and empties its
+   * stores: the answer saved the whole cache, every contact identity's name and picture, back into the cleared profile.
+   */
+  it("an answer that arrives after the engine stopped for Clear all data is not kept", async () => {
+    const t = setup({ eligible: [ALICE, BOB] });
+    await t.fresh();
+    t.cache.start();
+    await t.cache.request(ALICE);
+    let release!: () => void;
+    t.read.mockImplementationOnce(() => new Promise(resolve => { release = () => resolve({ found: true, name: "Late", hosts: [] }); }));
+    const pending = t.cache.request(BOB);
+    t.cache.stop();
+    await clearProfileStores();
+    release(); await pending;
+    await t.cache.prune();
+    const reloaded = setup({ eligible: [ALICE, BOB] });
+    await reloaded.cache.load();
+    expect(reloaded.cache.view(ALICE), "the cleared profile keeps no profile").toBeUndefined();
+    expect(reloaded.cache.view(BOB)).toBeUndefined();
   });
 
   it("with the setting off nothing is shown, and turning it off deletes what was kept", async () => {

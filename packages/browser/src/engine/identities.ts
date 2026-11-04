@@ -79,7 +79,7 @@ export class IdentityProofs {
   private proofs: StoredIdentityProof[] = [];
   private revocations: Revocation[] = [];
   private revocationsCheckedAt = 0;
-  /** "Clear all data" (`revokeAll`): a revocation lookup still on its way notes nothing. */
+  /** "Clear all data" (`revokeAll`): a revocation lookup or a proof's save still on its way writes nothing. */
   private ended = false;
   /** Unsealed proof-key seeds, by proof id, for this run only. */
   private seeds = new Map<string, Uint8Array>();
@@ -138,6 +138,8 @@ export class IdentityProofs {
    */
   private save(change: (proofs: StoredIdentityProof[], revocations: Revocation[]) => [StoredIdentityProof[], Revocation[]]): Promise<void> {
     const run = this.saving.then(async () => {
+      // "Clear all data" came while a check or a removal was on its way: the list in memory is the cleared profile's.
+      if (this.ended) throw new Error("This profile's data was cleared");
       const [proofs, revocations] = change(this.proofs, this.revocations);
       await transact([STORES.settings], stores => { stores[STORES.settings].put(proofs, KEY); stores[STORES.settings].put(revocations, REVOCATIONS); });
       this.proofs = proofs;
