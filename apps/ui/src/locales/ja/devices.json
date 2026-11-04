@@ -268,6 +268,7 @@
     },
     "label": "デバイス名",
     "save": "保存",
+    "saving": "保存中…",
     "title": "{{device}} の名前を変更"
   },
   "restore": {

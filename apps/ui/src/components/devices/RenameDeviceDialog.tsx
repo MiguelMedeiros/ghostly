@@ -11,7 +11,7 @@ import { fillNames } from "../../lib/fillNodes";
 
 /**
  * Rename (WISP 06 § User experience, the row menu), on the active device: one field with the name the set holds now,
- * Save and Cancel. Enter saves and Escape cancels. The name fits the 16 bytes a device's slot keeps, as the join step's
+ * Save and Cancel. Enter saves and Escape cancels; while the save runs it says "Saving…" and stays open. The name fits the 16 bytes a device's slot keeps, as the join step's
  * does; every device of the set shows it once it reads the set's next record.
  */
 export function RenameDeviceDialog({ device, deviceKey, onClose, onRenamed }: { device: string; deviceKey: string; onClose(): void; onRenamed?(name: string): void }) {
@@ -35,13 +35,17 @@ export function RenameDeviceDialog({ device, deviceKey, onClose, onRenamed }: { 
       setBusy(false);
     }
   };
+  // While the save runs × and Escape do nothing, as Cancel: closed, its refusal would be said nowhere, and a save that
+  // went through would rename the device after the person cancelled.
+  const close = () => { if (!busy) onClose(); };
   return (
-    <DeviceDialog title={fillNames(t("devices.rename.title"), { device })} onClose={onClose} testId="device-rename">
+    <DeviceDialog title={fillNames(t("devices.rename.title"), { device })} onClose={close} testId="device-rename">
       <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void save(); }}>
         <label className="block space-y-1">
           <span className="text-text-secondary">{t("devices.rename.label")}</span>
           <input data-testid="device-rename-name" autoFocus {...nameField} value={name} disabled={busy} onFocus={(event) => event.currentTarget.select()} className={field} />
         </label>
+        {busy && <p role="status" data-testid="device-rename-busy" className="text-text-secondary">{t("devices.rename.saving")}</p>}
         {error && <Notice problem={error} testId="device-rename-error" className="" />}
         <button type="submit" data-testid="device-rename-save" disabled={!typed || busy} className={primaryButton}>{t("devices.rename.save")}</button>
         <button type="button" data-testid="device-rename-cancel" disabled={busy} onClick={onClose} className={quietButton}>{t("common.cancel")}</button>
