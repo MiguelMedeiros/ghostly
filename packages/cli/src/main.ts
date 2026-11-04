@@ -5,7 +5,7 @@ import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, type OptionSpec, type Parsed } from "./args";
 import { connectDaemon, DaemonClient, isNotTheDaemon } from "./client";
 import { COMMANDS, idSlot, noMoreThan, positionals, takesText, TEXT_COMMANDS } from "./commands";
-import { here, inRange, since as sinceOf, timeout, translate } from "./commands/shared";
+import { here, inRange, INPUT_BYTES, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS } from "./engineMethods";
 import { asCliError, CliError, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
@@ -374,11 +374,8 @@ export async function oneShotJoinWait(s: Pick<Session, "call">, result: Record<s
   return { answer, note: `Not paired yet: the inviter's app is offline. It pairs when both are online: keep this profile running (ghostly daemon --detach), then ghostly chat wait ${ref} --until paired` };
 }
 
-/** The most stdin gives a command: the longest request line a daemon reads (host.ts `MAX_LINE`). */
-const STDIN_BYTES = 16 * 1024 * 1024;
-
 /**
- * Stdin up to `STDIN_BYTES`; more is refused as it comes. It was read to its end first: `send bob --stdin < big.log`
+ * Stdin up to `INPUT_BYTES` (commands/shared.ts, as `readInput` reads it where a command reads it at once); more is refused as it comes. It was read to its end first: `send bob --stdin < big.log`
  * with 1 GiB took 3 GB and answered V8's "Cannot create a string longer than 0x1fffffe8 characters", 128 MiB to
  * `settings set nick -` ran the CLI out of memory, an endless pipe never ended, and past 16 MiB a daemon cut the line,
  * answered "The daemon went away".
@@ -389,7 +386,7 @@ async function readStdin(onData?: () => void): Promise<string> {
   for await (const chunk of process.stdin) {
     onData?.();
     bytes += (chunk as Buffer).length;
-    if (bytes > STDIN_BYTES) throw new CliError("bad_request", "More than 16 MiB came on stdin, more than any command takes (a long text goes as a file: ghostly file send <chat|group> <path>)");
+    if (bytes > INPUT_BYTES) throw new CliError("bad_request", STDIN_TOO_BIG);
     chunks.push(chunk as Buffer);
   }
   return Buffer.concat(chunks).toString("utf8");
@@ -1328,15 +1325,15 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
   const pipedEvidence = command.method === "identity.complete" && !params.evidenceFile && !params.stdin && process.stdin.isTTY !== true;
   if (command.method === "identity.complete") {
     if (params.evidenceFile) {
-      try { params.evidence = readFileSync(params.evidenceFile as string, "utf8"); } catch (error) { throw localFileError(error, params.evidenceFile as string) ?? error; }
+      try { params.evidence = readInput(params.evidenceFile as string); } catch (error) { throw localFileError(error, params.evidenceFile as string) ?? error; }
     }
     else if (params.stdin) params.evidence = await readStdin();
     delete params.evidenceFile; delete params.stdin;
   }
   if (command.method === "x401.credential.add") {
-    try { params.credential = params.file === "-" ? await readStdin() : readFileSync(params.file as string, "utf8"); }
+    try { params.credential = params.file === "-" ? await readStdin() : readInput(params.file as string); }
     // A file not there, a folder, one not allowed: said as every other file the CLI reads.
-    catch (error) { throw localFileError(error, params.file as string) ?? new CliError("usage", `Cannot read the credential: ${error instanceof Error ? error.message : String(error)}`); }
+    catch (error) { throw (error instanceof CliError && error) || localFileError(error, params.file as string) || new CliError("usage", `Cannot read the credential: ${error instanceof Error ? error.message : String(error)}`); }
     // Nothing read is said of the file or stdin given, not as the API's missing `credential`; nothing on stdin as a
     // join or a redeem says it, a usage error.
     if (!params.credential && params.file === "-") throw new CliError("usage", "Missing <file|->: give the SD-JWT VC on stdin (… | ghostly x401 credential add -) or as a file");
