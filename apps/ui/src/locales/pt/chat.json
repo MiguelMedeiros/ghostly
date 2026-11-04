@@ -190,8 +190,11 @@
   "forward": {
     "forward": "Encaminhar",
     "forwarded": "Encaminhada",
+    "limit": "Você pode encaminhar para {{count}} conversas por vez",
+    "limit_one": "Você pode encaminhar para {{count}} conversa por vez",
     "many": "Encaminhada muitas vezes",
     "messages": "{{count}} mensagens",
+    "more": "mais {{count}}",
     "noChats": "Nenhuma conversa ainda",
     "noMatch": "Nenhuma conversa com esse nome",
     "partial": "{{sent}} de {{count}} enviadas",
