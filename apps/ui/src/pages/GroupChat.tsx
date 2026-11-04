@@ -307,7 +307,7 @@ function joinStepState(at: GroupJoinStage, step: JoinStep): "done" | "current" |
   return JOIN_ORDER[JOIN_ORDER.indexOf(step) - 1] === stage ? "current" : "todo";
 }
 
-function joiningText(stage: GroupJoinStage, name: string, community: boolean, t: Translate, full?: { n: number; max: number }, admittedLong = false): { title: string; body: string } {
+function joiningText(stage: GroupJoinStage, name: string, community: boolean, t: Translate, full?: { n: number; max: number }, admittedLong = false, othersKnocked = false): { title: string; body: string } {
   const waiting = t("group.join.waiting");
   if (stage === "replaced") return { title: t("group.join.replaced"), body: t("group.join.replacedBody") };
   // A member's app answered that there is no room yet (`group-full`): the link works, and asking for a new one won't help.
@@ -316,7 +316,8 @@ function joiningText(stage: GroupJoinStage, name: string, community: boolean, t:
     body: !community ? t("group.join.admitted") : admittedLong ? t("group.join.admittedStuck") : t("group.join.admittedCommunity") };
   if (stage === "answered") return { title: community ? t("group.join.answeredTitleCommunity") : waiting,
     body: community ? t("group.join.answeredCommunity") : t("group.join.answered") };
-  if (stage === "knocked") return { title: waiting, body: community ? t("group.join.knockedCommunity") : t("group.join.knocked") };
+  // Others knocked just before: the admin's app may be letting them in, not closed.
+  if (stage === "knocked") return { title: waiting, body: community ? t("group.join.knockedCommunity") : othersKnocked ? t("group.join.knockedBusy") : t("group.join.knocked") };
   return { title: waiting, body: community ? t("group.join.knockingCommunity") : t("group.join.knocking") };
 }
 
@@ -654,7 +655,7 @@ export function GroupChat() {
   const noLinks = state?.transport.groupLinks === false;
   const joining = noLinks ? { title: t("group.connection.noWebrtc"), body: t("group.connection.noWebrtcHint") }
     : linkUnanswered ? { title: t("group.join.unanswered"), body: t("group.join.unansweredBody") }
-    : joiningText(stage, group.name, group.profile === "community", t, group.invitation?.full, admittedLong);
+    : joiningText(stage, group.name, group.profile === "community", t, group.invitation?.full, admittedLong, !!group.invitation?.othersKnocked);
   // The joining card's one live line: what changed, not the card. The five-minute line when let in and still no keys,
   // the two-minute hint while it shows; else at a dead
   // end (no transport, unanswered, replaced) its title; else the last step reached, or the title before the first.

@@ -409,6 +409,13 @@ describe("GroupChat: joining through a link", () => {
     expect(steps()).toEqual(states);
   });
 
+  it("with others knocking just before, says the admin's app may be busy letting them in, not that it must be opened", () => {
+    const view = staged("knocked");
+    openGroup({ ...view, invitation: { ...view.invitation!, othersKnocked: true } });
+    expect(screen.getByTestId("group-joining")).toHaveTextContent("Others knocked too, so the admin's app may be busy letting them in. You can leave this page.");
+    expect(screen.getByTestId("group-joining")).not.toHaveTextContent("It happens once the admin's app is open");
+  });
+
   it("says the link was replaced or turned off, with no steps left to wait on", () => {
     openGroup({ ...staged("replaced"), profile: "community" });
     expect(screen.getByTestId("group-joining")).toHaveTextContent("This link was replaced or turned off");

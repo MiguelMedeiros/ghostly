@@ -121,6 +121,7 @@
     "joiningGroup": "Uniéndote al grupo…",
     "joiningName": "Uniéndote a {{name}}…",
     "knocked": "Ocurre cuando la app del admin esté abierta. Puedes salir de esta página.",
+    "knockedBusy": "Otras personas también llamaron, así que la app del admin puede estar ocupada dejándolas entrar. Puedes salir de esta página.",
     "knockedCommunity": "Ocurre cuando la app de un miembro esté abierta. Puedes salir de esta página.",
     "knocking": "Dejando una llamada donde la app del admin la busca…",
     "knockingCommunity": "Dejando una llamada donde las apps del grupo la buscan…",

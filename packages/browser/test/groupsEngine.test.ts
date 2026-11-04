@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Groups, type EntryTimings, type GroupStore, type GroupsHost } from "../src/engine/groups";
+import { Groups, KNOCK_REFRESH_MS, type EntryTimings, type GroupStore, type GroupsHost } from "../src/engine/groups";
 import { GroupSession, commitUntaggedHash, confirmationTag, createIdentity, decodeGroupEntryLink, encodeCommunityLink, epochKeys, fromBase64Url, identityFromSeedB64, knockIdentity, signCommit, type GhostRecord, type GroupState } from "@ghostly/core";
 import type { StoredGroup, StoredMessage } from "../src/shared/types";
 
@@ -1307,6 +1307,29 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     // The held read took no turn: the link is the next one read, at the hold's end, not two turns (10 s) later.
     expect(world.reads.find(r => r.name === "alice" && r.at >= holdEnd)?.key).toBe(key);
     expect(seen).toBe(holdEnd);
+  });
+
+  it("a joiner whose link's record holds others' fresh knocks is told the admin's app may be busy with them, until they age", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t0 = Date.now();
+    const world = new World();
+    const alice = world.add("alice", timings);
+    const code = await alice.enableLink(await alice.create("Ghosts", "mesh"));
+    const dan = world.add("dan", timings), erin = world.add("erin", timings);
+    await dan.joinByLink(code); await flush();
+    // Alone in the record: the admin's app is the one to open.
+    expect(view(dan).invitation).toMatchObject({ stage: "knocked" });
+    expect(view(dan).invitation?.othersKnocked).toBeUndefined();
+    vi.setSystemTime(t0 + 1_000);
+    await erin.joinByLink(code); await flush();
+    expect(view(erin).invitation?.othersKnocked).toBe(true);
+    // Dan's next knock reads Erin's.
+    vi.setSystemTime(t0 + 3_000); await dan.tick(t0 + 3_000);
+    expect(view(dan).invitation?.othersKnocked).toBe(true);
+    // Erin's knock not written again (she got in, or left) for longer than a waiting joiner lets it age: no one else waits.
+    const later = t0 + 1_000 + KNOCK_REFRESH_MS + timings.knockMs;
+    vi.setSystemTime(later); await dan.tick(later);
+    expect(view(dan).invitation?.othersKnocked).toBeUndefined();
   });
 
   it("a link just handed out is looked at fast for a minute, as a community's door, not for ten", async () => {
