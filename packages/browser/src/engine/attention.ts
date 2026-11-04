@@ -11,7 +11,8 @@ import { groupCue } from "./cues";
  * catch-up past its first message: a member back in a group is handed what it missed oldest first, each message newer
  * than the last, and every one rang and notified, written up to hours before. The times
  * compared are the ones the senders say, never a row's place; a 1:1 chat's contact's is read by how far its clock
- * runs behind this one (`writtenAt`), and so is a group member's, told by what came straight from it. What never becomes a row is quiet
+ * runs behind this one (`writtenAt`), and so is a group member's, told by what came straight from it (or, in a community,
+ * what a hub says it passed on as it came: WISP 903 § Relaying). What never becomes a row is quiet
  * by construction: typing and a bot's status, edits, reactions, receipts, call signals, transport lines.
  */
 

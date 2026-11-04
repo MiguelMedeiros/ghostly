@@ -7,7 +7,7 @@ import { DEFAULT_LIMITS, PUSH_HOSTS, clientAddress, rateKey, readRelayRequest, s
 
 const body = Buffer.from("encrypted").toString("base64url");
 const request = (patch: Record<string, unknown> = {}) => JSON.stringify({
-  endpoint: "https://fcm.googleapis.com/fcm/send/x", headers: { Authorization: "vapid t=a.b.c, k=K", TTL: "3600", Cookie: "no", Urgency: "high\r\nX: 1" }, body, ...patch,
+  endpoint: "https://fcm.googleapis.com/fcm/send/x", headers: { Authorization: "vapid t=a.b.c, k=K", TTL: "3600", Cookie: "no" }, body, ...patch,
 });
 
 describe("the push relay (infra/services/push-relay)", () => {
@@ -39,6 +39,21 @@ describe("the push relay (infra/services/push-relay)", () => {
     ["a body too large", { body: Buffer.alloc(9000).toString("base64url") }],
   ])("refuses %s", (_what, patch) => {
     expect(readRelayRequest(request(patch)).error).toBeTruthy();
+  });
+
+  it.each([
+    ["a NUL", { TTL: "6\u00000" }, "Bad TTL value"],
+    ["a character above U+00FF", { Topic: "Āabc" }, "Bad Topic value"],
+    ["a line break", { Urgency: "high\r\nX: 1" }, "Bad Urgency value"],
+    ["another control character", { Topic: "a\u0001b" }, "Bad Topic value"],
+    ["a DEL", { "content-type": "a\u007fb" }, "Bad Content-Type value"],
+  ])("refuses a Web Push header value fetch would not send (%s), naming the header", (_what, header, error) => {
+    expect(readRelayRequest(request({ headers: { Authorization: "vapid t=a.b.c, k=K", ...header } })).error).toBe(error);
+  });
+
+  it("forwards a header value fetch sends: Latin-1, a tab around it", () => {
+    expect(readRelayRequest(request({ headers: { Authorization: "vapid t=a.b.c, k=K", Topic: "é", Urgency: "high\t" } })).headers)
+      .toEqual({ Authorization: "vapid t=a.b.c, k=K", Topic: "é", Urgency: "high\t" });
   });
 
   it("counts a request against the socket's address, and X-Forwarded-For only behind configured proxies", () => {

@@ -38,13 +38,19 @@ async function startEngine(): Promise<void> {
 
 /** `next`: the id of the profile the new peer runs as, when a switch is what replaces it. */
 async function replaceEngine(next?: string): Promise<void> {
-  // A contact's app open as the profile before is no page of the next one's: its tab closes before that peer answers.
-  await closeViewers();
-  await clearNotices(next);
-  await chrome.runtime.sendMessage({ target: "engine", type: "stop" } satisfies RuntimeMessage).catch(() => {});
-  await chrome.offscreen.closeDocument().catch(() => {});
-  await createEngineDocument();
-  await waitForEngine();
+  // A page that switched again while the next peer started (another tab's) waits on this start, and must get the
+  // profile it named, not the one before: that peer goes too. A few times at most, should the registry keep moving.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    // A contact's app open as the profile before is no page of the next one's: its tab closes before that peer answers.
+    await closeViewers();
+    await clearNotices(next);
+    await chrome.runtime.sendMessage({ target: "engine", type: "stop" } satisfies RuntimeMessage).catch(() => {});
+    await chrome.offscreen.closeDocument().catch(() => {});
+    await createEngineDocument();
+    const status = await waitForEngine();
+    if (status.profile === status.active) return;
+    next = status.activeId;
+  }
 }
 
 /** A new peer in place of the running one, which stopped for good ("Clear all data"); after any start in progress. */
@@ -86,6 +92,20 @@ async function waitForEngine(): Promise<EngineStatus> {
 }
 
 chrome.runtime.onStartup.addListener(() => void ensureEngine());
+
+/**
+ * The peer runs with no page open (it fetches mailbox texts that live minutes, answers contacts), so it comes back by
+ * itself: each start of the worker makes sure it runs, as Chrome fires neither `onStartup` nor `onInstalled` when the
+ * extension is turned on again, and an alarm wakes the worker once a minute, should the document go away with no tab
+ * open (its renderer crashed, or it was ended from Chrome's task manager). Set once: setting it again puts it off.
+ */
+const PEER_CHECK = "peer-check";
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === PEER_CHECK) void ensureEngine().catch(() => {});
+});
+void chrome.alarms.get(PEER_CHECK).then((alarm) => { if (!alarm) return chrome.alarms.create(PEER_CHECK, { periodInMinutes: 1 }); }).catch(() => {});
+void ensureEngine().catch(() => {});
+
 /**
  * A first install also opens the app in a tab: without it nothing showed, and a new user had to find the toolbar
  * button. The tab opens even when the peer does not start, so the page can say why. An update opens again the pages

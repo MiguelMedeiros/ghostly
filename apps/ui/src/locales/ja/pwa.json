@@ -45,6 +45,7 @@
   "wakeHint": "連絡先のアプリがプッシュでこのアプリを起こせます。メッセージの内容は含まれません。",
   "wakeInfo": "ブラウザのプッシュサービス(Google、Apple、Mozilla)を通り、サービスにはその時刻がわかります。連絡先はあなたのプッシュアドレスを知ります。「新しいアドレス」で作り直せます。",
   "wakeMoveHere": "{{device}} がこのプロフィールをこちらに移そうとしています。Ghostly を開いてください。",
+  "wakeNoPushService": "このブラウザにはプッシュサービスがないため、閉じている Ghostly を起こせません。GrapheneOS では、サンドボックス化された Google Play を入れるか、別のブラウザを使ってください。",
   "wakeNotice": "新しいメッセージ",
   "wakeOnHint": "オン。Ghostly が閉じている間に届いたメッセージは「新しいメッセージ」と表示されます。",
   "wakeRotate": "新しいアドレス",
@@ -53,5 +54,6 @@
   "wakeStandbyCallUnnamed": "着信があります。使用中のデバイスで Ghostly を開いてください。",
   "wakeStandbyUnnamed": "新しいメッセージ。使用中のデバイスで Ghostly を開いてください。",
   "wakeTakeover": "{{device}} が引き継ごうとしています。Ghostly を開いてください。",
+  "wakeTryAgain": "もう一度試す",
   "wakeUnavailable": "このブラウザは、閉じている Ghostly を起こせません。"
 }

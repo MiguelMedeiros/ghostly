@@ -121,6 +121,7 @@
     "allow-push-send",
     "allow-read-clipboard-files",
     "allow-read-clipboard-text",
+    "allow-read-dropped-files",
     "allow-read-pasted-bytes",
     "allow-resolve-messages",
     "allow-resolve-records",

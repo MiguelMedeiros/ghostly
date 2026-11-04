@@ -9,6 +9,7 @@ if (existsSync(infraEnv)) process.loadEnvFile(infraEnv);
 
 const { OIDC_TEST_ISSUER } = await import("./support/oidcIssuer");
 const { ATPROTO_TEST_PLC } = await import("./support/atproto");
+const { CHROMIUM_SANDBOX } = await import("./support/chromiumSandbox");
 
 /**
  * End-to-end tests for Ghostly: real browsers, the shipped build, no servers.
@@ -49,6 +50,8 @@ export default defineConfig({
     screenshot: "only-on-failure",
     video: "retain-on-failure",
     actionTimeout: 30_000,
+    // The extension project's own launches inherit these; the web project's launchOptions replace them, so carry it too.
+    launchOptions: { chromiumSandbox: CHROMIUM_SANDBOX },
   },
   projects: [
     {
@@ -60,6 +63,7 @@ export default defineConfig({
         // routes: blocked here, allowed by the specs about it (web/pwa.spec.ts, `serviceWorkers` in openPeer).
         serviceWorkers: "block",
         launchOptions: {
+          chromiumSandbox: CHROMIUM_SANDBOX,
           args: [
             // Every peer is on this machine: let ICE use plain host addresses.
             "--disable-features=WebRtcHideLocalIpsWithMdns",

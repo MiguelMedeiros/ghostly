@@ -278,6 +278,18 @@ describe("GroupChat: joining through a link", () => {
     expect(screen.queryByTestId("group-joining-stale")).not.toBeInTheDocument();
   });
 
+  it("a private group waiting for its members' updates: says so, with the knock left, and never that the link may be old", async () => {
+    openGroup(groupView({ createdAt: Date.now() - 2 * 60_000 + 400, canSend: false,
+      invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "blocked", full: { n: 8, max: 32 } } }));
+    const card = screen.getByTestId("group-joining");
+    expect(card).toHaveTextContent("This group is waiting for updates");
+    expect(card).toHaveTextContent("It takes new members again once everyone in it has an updated Ghostly.");
+    expect(screen.getByTestId("group-joining-live")).toHaveTextContent("This group is waiting for updates");
+    expect(within(card).getByTestId("group-joining-steps").querySelector("li")).toHaveAttribute("data-state", "done");
+    await new Promise(resolve => setTimeout(resolve, 600));
+    expect(screen.queryByTestId("group-joining-stale")).not.toBeInTheDocument();
+  });
+
   it("a knock someone answered is not told the link may be old", () => {
     openGroup(groupView({ createdAt: Date.now() - 10 * 60_000, canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "answered" } }));
     expect(screen.getByTestId("group-joining")).toHaveTextContent("The admin's app saw you knock");
@@ -407,6 +419,22 @@ describe("GroupChat: joining through a link", () => {
     expect(screen.getByTestId("group-joining")).toHaveTextContent(text);
     expect(screen.getByTestId("group-joining-steps")).toHaveAttribute("data-stage", stage);
     expect(steps()).toEqual(states);
+  });
+
+  it("with others knocking just before, says the admin's app may be busy letting them in, not that it must be opened", () => {
+    const view = staged("knocked");
+    openGroup({ ...view, invitation: { ...view.invitation!, othersKnocked: true } });
+    expect(screen.getByTestId("group-joining")).toHaveTextContent("Others knocked too, so the admin's app may be busy letting them in. You can leave this page.");
+    expect(screen.getByTestId("group-joining")).not.toHaveTextContent("It happens once the admin's app is open");
+  });
+
+  it("with others knocking, two minutes on: says the group lets people in a few at a time, not that the link may be dead", async () => {
+    const view = staged("knocked");
+    openGroup({ ...view, createdAt: Date.now() - 2 * 60_000 + 400, invitation: { ...view.invitation!, othersKnocked: true } });
+    const hint = await screen.findByTestId("group-joining-stale", {}, { timeout: 3_000 });
+    expect(hint).toHaveTextContent("Still waiting: the group lets people in a few at a time.");
+    expect(screen.getByTestId("group-joining")).not.toHaveTextContent("link was replaced");
+    expect(screen.getByTestId("group-joining-live")).toHaveTextContent("Still waiting: the group lets people in a few at a time.");
   });
 
   it("says the link was replaced or turned off, with no steps left to wait on", () => {

@@ -21,8 +21,11 @@ import "./identity-activity.css";
 
 const fullDate = (seconds: number, language: Language) => formatAt(seconds * 1000, { dateStyle: "medium", timeStyle: "short" }, language);
 
+/** What a chip reads of a chat's link: whose it is, and the identities that contact shared (the name they are shown by). */
+export type ChipLink = Pick<LinkView, "id" | "peerPubKeyZ32"> & { identities?: Pick<NonNullable<LinkView["identities"]>, "received"> };
+
 /** A contact's name for a chip, as the chat list shows it: a nickname, the identity they are shown as, their own name, or their key's tag. */
-function contactName(linkId: string, links: readonly LinkView[], t: Translate): string {
+function contactName(linkId: string, links: readonly ChipLink[], t: Translate): string {
   const link = links.find(l => l.id === linkId);
   const peer = link?.peerPubKeyZ32;
   const session = peer ? chatNamesForPeer(peer) : undefined;
@@ -36,7 +39,7 @@ function contactName(linkId: string, links: readonly LinkView[], t: Translate): 
  * screen, from the hosts named at the bottom; what the account says about itself, never part of the proof. Posts are
  * safe rich text (apps/ui/src/lib/parse, no markup), their pictures loaded on a tap.
  */
-export function IdentityActivity({ provider, subject, profile, links }: { provider: string; subject: string; profile?: PublicProfileView; links: readonly LinkView[] }) {
+export function IdentityActivity({ provider, subject, profile, links }: { provider: string; subject: string; profile?: PublicProfileView; links: readonly ChipLink[] }) {
   const { t } = useI18n();
   const on = useLoadPublicProfiles();
   const { posts, graph, loading, error, more, retry } = usePublicActivity(provider, subject, on);
@@ -86,7 +89,7 @@ export function IdentityActivity({ provider, subject, profile, links }: { provid
 }
 
 /** "Follows you", "You follow", and the reader's contacts it follows or is followed by. Only what is true is shown. */
-function Chips({ graph, links }: { graph?: PublicGraphViewLike | null; links: readonly LinkView[] }) {
+function Chips({ graph, links }: { graph?: PublicGraphViewLike | null; links: readonly ChipLink[] }) {
   const { t } = useI18n();
   if (!graph?.compared) return null;
   const any = graph.followsYou || graph.youFollow || graph.contacts.length > 0;

@@ -363,6 +363,17 @@ function fileFloodApp() {
     await G.storage.set("report", { ok, refused: [...new Set(refused)] });
   })();
 }
+/**
+ * Once it has said it is ready, answers nothing for P.ms (0: never again): one synchronous loop, as a chess engine
+ * thinking on its own thread, an image filter, or a `while (true) {}` would.
+ */
+function hangApp(P: any) {
+  const G: any = (window as any).ghostly;
+  G.storage.set("ready", true).then(() => setTimeout(() => {
+    const end = P.ms > 0 ? Date.now() + P.ms : Infinity;
+    while (Date.now() < end) { /* busy */ }
+  }, 100));
+}
 /** The session history: the way named in P.way, five times where it adds an entry. */
 function historyProbe(P: any) {
   const G: any = (window as any).ghostly;
@@ -389,7 +400,7 @@ function historyProbe(P: any) {
 }
 /* eslint-enable */
 
-const SOURCES = { net: netProbes, escape: escapeProbe, history: historyProbe, victim: victimApp, flood: floodApp, storm: stormApp, fileFlood: fileFloodApp, internet: internetApp, talker: talkerApp, eavesdropper: eavesdropperApp } as const;
+const SOURCES = { net: netProbes, escape: escapeProbe, history: historyProbe, victim: victimApp, flood: floodApp, storm: stormApp, fileFlood: fileFloodApp, hang: hangApp, internet: internetApp, talker: talkerApp, eavesdropper: eavesdropperApp } as const;
 
 /** An app's entry: the probe's source, given its targets. */
 export function appEntry(kind: keyof typeof SOURCES, targets: object = {}): string {

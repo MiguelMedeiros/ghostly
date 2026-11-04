@@ -161,6 +161,55 @@ describe("opening the lock password form", () => {
   });
 });
 
+describe("closing the lock password form", () => {
+  it("Cancel hands the focus back to the Lock Screen switch that opened it, not to the page", async () => {
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-lock"));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByTestId("settings-password-form")).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-lock")).toHaveFocus();
+  });
+
+  it("a password set: the focus goes back to the Lock Screen switch", async () => {
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-lock"));
+    await user.type(screen.getByTestId("settings-password-new"), "spooky");
+    await user.type(screen.getByTestId("settings-password-confirm"), "spooky");
+    await user.click(screen.getByRole("button", { name: "Set password" }));
+    expect(await screen.findByTestId("settings-notice-text")).toHaveTextContent("Password set successfully");
+    expect(screen.queryByTestId("settings-password-form")).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-lock")).toHaveFocus();
+  }, 30_000);
+
+  it("a password changed: the focus goes back to Change password", async () => {
+    await lockWith("first secret");
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-password-edit"));
+    await user.type(screen.getByTestId("settings-password-current"), "first secret");
+    await user.type(screen.getByTestId("settings-password-new"), "second secret");
+    await user.type(screen.getByTestId("settings-password-confirm"), "second secret{Enter}");
+    expect(await screen.findByTestId("settings-notice-text")).toHaveTextContent("Password changed successfully");
+    expect(screen.queryByTestId("settings-password-form")).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-password-edit")).toHaveFocus();
+  }, 30_000);
+
+  it("a password removed: Change password goes with it, so the focus goes to the Lock Screen switch", async () => {
+    await lockWith("first secret");
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-password-edit"));
+    await user.type(screen.getByTestId("settings-password-current"), "first secret");
+    await user.click(screen.getByRole("button", { name: "Remove password" }));
+    expect(await screen.findByTestId("settings-notice-text")).toHaveTextContent("Password removed");
+    expect(screen.queryByTestId("settings-password-edit")).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-lock")).toHaveFocus();
+  }, 30_000);
+
+  it("Settings opened with the focus on the page: nothing takes it", async () => {
+    await renderSettings();
+    expect(document.body).toHaveFocus();
+  });
+});
+
 describe("Enter in the lock password form", () => {
   it("Enter in New password or in Confirm password sets it, as the button does", async () => {
     for (const which of ["new", "confirm"]) {

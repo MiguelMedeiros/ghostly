@@ -26,6 +26,7 @@ mod crypto;
 mod device_state;
 mod diagnostics;
 mod downloads;
+mod dropped_files;
 // The macOS end-to-end tests' way into the page (debug builds with `--features e2e-driver` only).
 #[cfg(any(test, feature = "e2e-driver"))]
 #[cfg_attr(not(feature = "e2e-driver"), allow(dead_code))]
@@ -177,6 +178,7 @@ macro_rules! commands {
             commands::webkit_version,
             device_state::device_state_read,
             device_state::device_state_write,
+            dropped_files::read_dropped_files,
             file_store::file_bytes_append,
             file_store::file_bytes_close,
             file_store::file_bytes_digest,
@@ -357,6 +359,7 @@ pub fn run() {
         .manage(clipboard_source())
         .manage(paste_source())
         .manage(clipboard::PasteShelf::default())
+        .manage(dropped_files::DroppedFiles::default())
         .setup(|app| {
             // The app's log, where the peer and the Pkarr client say how a link is doing.
             if let Ok(dir) = app.path().app_log_dir() {
@@ -390,6 +393,8 @@ pub fn run() {
                 microphone::install(&main);
                 // A file is saved through the app's own Save only, never by the WebView's own menu.
                 downloads::install(&main);
+                // A file dragged in from a file manager reaches the chat (WebKitGTK hands the page its address only).
+                dropped_files::install(&main);
             }
             #[cfg(feature = "e2e-driver")]
             {
@@ -492,6 +497,8 @@ fn page_started<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
     // The cookie jars of its Pubky approvals, which it can no longer close (`pubky_session::page_started`).
     pubky_session::page_started();
+    // Its cameras, microphone meters and calls (Linux): stopped, and its device watch no longer told.
+    native_call::page_started();
 }
 
 /// How long the page gets to say goodbye to its contacts before an exit it can be told about goes on.

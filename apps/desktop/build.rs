@@ -109,6 +109,7 @@ const COMMANDS: &[&str] = &[
     "push_send",
     "read_clipboard_files",
     "read_clipboard_text",
+    "read_dropped_files",
     "read_pasted_bytes",
     "resolve_messages",
     "resolve_records",
