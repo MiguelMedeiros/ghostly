@@ -138,6 +138,69 @@ describe("the engine over a profile it cannot open", () => {
   });
 });
 
+describe("a start whose first writes find no room (the database opens, then a write is refused for space)", () => {
+  /** The engine over a fresh profile whose first write `refuse` turns down; what a client is told. */
+  async function startWith(name: string, refuse: (store: IDBObjectStore) => void) {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("no network in this test"); }));
+    const idb = await fresh(name);
+    const proto = IDBObjectStore.prototype;
+    const { put, add } = proto;
+    const refusing = <F extends (...args: never[]) => IDBRequest>(write: F) => function (this: IDBObjectStore, ...args: Parameters<F>) {
+      const request = (write as (...a: Parameters<F>) => IDBRequest).apply(this, args);
+      refuse(this);
+      return request;
+    };
+    proto.put = refusing(put);
+    proto.add = refusing(add);
+    try {
+      const { EngineServer } = await import("../src/engine/server");
+      const server = new EngineServer({ automaticWallets: false });
+      await server.ready.catch(() => {});
+      const heard: (EngineEvent | RpcResponse)[] = [];
+      server.attach({ post: (message) => { heard.push(message); } });
+      await vi.waitFor(() => expect(heard.length).toBe(1));
+      return { heard: heard[0], idb };
+    } finally {
+      proto.put = put;
+      proto.add = add;
+    }
+  }
+  const full = "QuotaExceededError";
+
+  it("Chromium's way: the write's transaction aborts with a QuotaExceededError that has no message; said as `full`, its name in the detail", async () => {
+    const { heard, idb } = await startWith("quota-abort", (store) => {
+      const tx = store.transaction;
+      Object.defineProperty(tx, "error", { value: new DOMException("", full), configurable: true });
+      queueMicrotask(() => { try { tx.abort(); } catch { /* already over */ } });
+    });
+    expect(heard).toEqual({ kind: "start-failed", failure: { reason: "full", supportedVersion: idb.DB_VERSION, detail: expect.stringContaining(full) } });
+  });
+
+  it("the write itself throws a QuotaExceededError with no message: `full`", async () => {
+    const { heard, idb } = await startWith("quota-thrown", () => { throw new DOMException("", full); });
+    expect(heard).toEqual({ kind: "start-failed", failure: { reason: "full", supportedVersion: idb.DB_VERSION, detail: full } });
+  });
+
+  it("any other refusal keeps the generic `failed`, with the system's words", async () => {
+    const { heard, idb } = await startWith("quota-other", () => { throw new DOMException("Internal error.", "UnknownError"); });
+    expect(heard).toEqual({ kind: "start-failed", failure: { reason: "failed", supportedVersion: idb.DB_VERSION, detail: "Internal error." } });
+  });
+
+  it("read through any wrapping: a transaction's AbortError, an abort event, an Error's cause, Firefox's name", async () => {
+    const { profileOpenFailure, DB_VERSION } = await fresh("quota-shapes");
+    const quota = new DOMException("", full);
+    const abort = Object.assign(new DOMException("", "AbortError"), { error: quota });
+    const event = { type: "abort", target: { error: quota } };
+    const caused = new Error("The write was not saved", { cause: abort });
+    const firefox = new DOMException("", "NS_ERROR_DOM_QUOTA_REACHED");
+    for (const error of [quota, abort, event, caused, firefox]) expect(profileOpenFailure(error)).toMatchObject({ reason: "full", supportedVersion: DB_VERSION });
+    expect(profileOpenFailure(abort).detail).toBe(full);
+    // Not about space: the generic answer, as before.
+    expect(profileOpenFailure(new DOMException("", "AbortError"))).toEqual({ reason: "failed", supportedVersion: DB_VERSION });
+    expect(profileOpenFailure(new Error("boom", { cause: new TypeError("x") }))).toEqual({ reason: "failed", supportedVersion: DB_VERSION, detail: "boom" });
+  });
+});
+
 describe("the version step of devices (WISP 06 § Compatibility and rollout)", () => {
   it("a database at 12 (1.0.3) opens at the current version (13 and on) with its stores and rows kept, and a build at 12 then reads it as newer", async () => {
     const idb = await fresh("profile-twelve");
