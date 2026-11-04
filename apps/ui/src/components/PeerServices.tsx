@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
 import { useI18n } from "../contexts/I18nContext";
 import { problemLine } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
@@ -9,7 +10,9 @@ import { Notice } from "./ui/Notice";
  * open, with the way to change it. `showLink`: also the state of an older chat's data link.
  */
 export function PeerServices({ peerPubKey, showLink = true, onManage }: { peerPubKey: string; showLink?: boolean; onManage: () => void }) {
-  const platform = useServicesPlatform();
+  const platform = servicesPlatform;
+  // Drawn again when this contact or the apps shared change, not on every engine state.
+  usePlatformValue(() => [platform?.getPeer(peerPubKey), platform?.getSharedServices()]);
   const { t } = useI18n();
   const [error, setError] = useState("");
   const peer = platform?.getPeer(peerPubKey);

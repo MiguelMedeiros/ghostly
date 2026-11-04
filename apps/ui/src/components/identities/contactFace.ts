@@ -3,7 +3,7 @@ import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/typ
 import { engine } from "@ghostly/browser/platform/engine";
 import { hasPublicProfile } from "@ghostly/browser/profiles/readers";
 import { badgeState, isGood } from "./contactBadges";
-import { providerLabel, useEngineState } from "../../lib/identities";
+import { providerLabel, useEngineState, useEngineValue } from "../../lib/identities";
 import { getPrefix } from "../../lib/storage";
 
 /*
@@ -148,10 +148,13 @@ export function shownContactName({ nickname, face, nick, fallback }: { nickname?
 const receivedOf = (links: LinkView[] | undefined, peerKey: string | undefined) =>
   peerKey ? links?.find(l => l.peerPubKeyZ32 === peerKey)?.identities?.received : undefined;
 
-/** The contact's face as chosen, redrawn when the engine or the choice changes. */
+/**
+ * The contact's face as chosen, redrawn when their identities or the choice change: not on every engine state, which
+ * drew the chat it shows in each time.
+ */
 export function useContactFace(peerKey: string | undefined): ContactFace | undefined {
-  const state = useEngineState();
-  return contactFace(receivedOf(state?.links, peerKey), useFaceChoice(peerKey));
+  const received = useEngineValue((state) => receivedOf(state?.links, peerKey));
+  return contactFace(received, useFaceChoice(peerKey));
 }
 
 const version = { n: 0 };
