@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { bundleReaches, checkPaths, featureGrep, globToRegExp, plan, specsImporting, testsReaching, throughCoreBarrel, UNIT_PROJECTS } from "../affected/select.mjs";
@@ -397,6 +397,50 @@ describe("the rest", () => {
       expect(mode(file), file).toBe("whole");
     }
     expect(mode("tools/scripts/ci-changes.mjs")).toBe("related");
+  });
+
+  it("a doc, crate or config a scripts test reads from disk runs that test", () => {
+    // A draft's tier is all the train waits for: a README link, a RELEASING.md line or an iroh-web source edited
+    // without its rebuild went red only in the train's batches.
+    const scripts = (...files: string[]) => byName(plan({ changed: changed(...files), inventory, e2eFiles }).unit).scripts;
+    const cases: [string, string][] = [
+      ["README.md", "readme.test.ts"],
+      ["docs/INSTALLATION.md", "readme.test.ts"],
+      ["docs/WEB.md", "androidNotReleased.test.ts"],
+      ["apps/website/content/home.ts", "androidNotReleased.test.ts"],
+      ["docs/RELEASING.md", "chromeWebStore.test.ts"],
+      ["docs/RELEASING.md", "npmPublish.test.ts"],
+      ["docs/RELEASING.md", "webLatest.test.ts"],
+      ["CHANGELOG.md", "bumpVersion.test.ts"],
+      ["apps/desktop/src/translate.rs", "translationRuntimes.test.ts"],
+      ["e2e/playwright.config.ts", "e2eWorkflow.test.ts"],
+      ["native/transports/iroh-web/src/lib.rs", "irohWebBuild.test.ts"],
+      ["packages/iroh-web/pkg/ghostly_iroh_web_bg.wasm", "irohWebBuild.test.ts"],
+    ];
+    for (const [file, test] of cases) {
+      const p = scripts(file);
+      expect(p.mode, file).toBe("related");
+      expect(p.files, file).toContain(`tools/scripts/test/${test}`);
+    }
+    // Only those: a doc no scripts test reads still runs nothing.
+    expect(scripts("docs/TESTING.md").mode).toBe("skip");
+  });
+
+  it("every repository file a scripts test reads by name runs that test", () => {
+    // `read("x")`, `json("x")`, `readFileSync(join(root, "x"))` and the like, for an existing file outside
+    // tools/scripts (vitest related sees those): a new read must come with an entry in the scripts project's `reads`.
+    const root = join(import.meta.dirname, "..", "..", "..");
+    const dir = join(root, "tools/scripts/test");
+    const read = /\b(?:read|json|readFileSync|copyFileSync|cpSync)\(\s*(?:(?:join|resolve)\(\s*root\s*,\s*)?["'`]([^"'`$]+)["'`]/g;
+    const missed = new Set<string>();
+    for (const name of readdirSync(dir).filter((n) => n.endsWith(".test.ts"))) {
+      for (const [, file] of readFileSync(join(dir, name), "utf8").matchAll(read)) {
+        if (file.startsWith("tools/scripts/") || !existsSync(join(root, file)) || !statSync(join(root, file)).isFile()) continue;
+        const p = byName(plan({ changed: changed(file), inventory, e2eFiles }).unit).scripts;
+        if (p.mode !== "whole" && !p.files?.includes(`tools/scripts/test/${name}`)) missed.add(`${name} reads ${file}`);
+      }
+    }
+    expect([...missed]).toEqual([]);
   });
 
   it("a file whose named paths CI's gates must cover runs the check of them, which reads it from disk", () => {
