@@ -2261,6 +2261,9 @@ export class Groups {
     if (!this.holdSync(groupId, peerKey)) {
       try { this.host.sendOnLink(linkId, session.syncFrame(this.askOf(groupId, session, peerKey), peerKey)); } catch { return; /* it closed again */ }
     }
+    // My name record: a hub passes it on to the members I have no edge with (WISP 902 § Messages, "The name record").
+    const name = session.nameFrame();
+    if (name) { try { this.host.sendOnLink(linkId, name); } catch { return; /* it closed again */ } }
     // The admin was away when a member's signed leave went round the hubs: it hears it now.
     // And the leave of my old key, when I came back by the link before it heard that leave.
     if (peerKey === session.admin) {
@@ -2649,6 +2652,8 @@ export class Groups {
       if (session.status !== "active" || this.stored.get(groupId)?.left) continue;
       // What I wrote while behind on the chain, for the members let in meanwhile (WISP 902 § Catch-up).
       void session.reseal().catch(() => {});
+      // My name, to members that may have no edge with me: once per start and on a rename (WISP 902 § Messages).
+      void session.sayName().catch(() => {});
       this.farewellsTick(groupId, session, now);
       this.heldSyncs(groupId, session, now);
       if (reconcile) {
