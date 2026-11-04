@@ -624,6 +624,8 @@
     "hyperdhtUnreachable": "HyperDHTリレーに接続できません",
     "hyperdhtUnreachableNext": "設定 → ネットワーク でアドレスを確認してください。このアプリを受け入れていない可能性もあるため、運営者にも確認してください。",
     "irohStopped": "Irohエンドポイントが停止しています",
+    "irohUnreachable": "Irohリレーに接続できません",
+    "irohUnreachableNext": "設定、ネットワークでIrohリレーを確認するか、別のトランスポートを使ってください。",
     "listenerGiven": "より活発なチャットのため一時停止中。このチャットを開くと再開します。",
     "listenerReleased": "別のチャットのため一時停止中。このチャットを開くと再開します。",
     "noAddress": "このトランスポートでの連絡先のアドレスがまだわかりません",

@@ -624,6 +624,8 @@
     "hyperdhtUnreachable": "HyperDHT relay unreachable",
     "hyperdhtUnreachableNext": "Check its address in Settings → Network. It may also not let this app in: ask whoever runs it.",
     "irohStopped": "Iroh endpoint stopped",
+    "irohUnreachable": "Iroh relay unreachable",
+    "irohUnreachableNext": "Check the Iroh relays in Settings, Network, or use another transport.",
     "listenerGiven": "Paused for a busier chat. Open this chat to resume.",
     "listenerReleased": "Paused for another chat. Open this chat to resume.",
     "noAddress": "Your contact's address for this transport isn't known yet",

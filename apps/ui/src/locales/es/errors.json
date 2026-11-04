@@ -624,6 +624,8 @@
     "hyperdhtUnreachable": "Relay HyperDHT inaccesible",
     "hyperdhtUnreachableNext": "Comprueba su dirección en Ajustes → Red. Puede que tampoco deje entrar a esta app: pregunta a quien lo gestiona.",
     "irohStopped": "Endpoint de Iroh detenido",
+    "irohUnreachable": "Relay Iroh inaccesible",
+    "irohUnreachableNext": "Revisa los relays Iroh en Ajustes, Red, o usa otro transporte.",
     "listenerGiven": "En pausa por un chat más activo. Abre este chat para reanudar.",
     "listenerReleased": "En pausa por otro chat. Abre este chat para reanudar.",
     "noAddress": "Aún no se conoce la dirección de tu contacto para este transporte",
