@@ -250,6 +250,37 @@ describe("a committed leave undone by a stale admin commit is said again", { tim
     expect(updated.session.topHash).toBe(alice.session.topHash);
   });
 
+  it("a former admin's late leave, committed on a view from before its hand-over, does not undo later admins' changes", async () => {
+    const net = new Net();
+    const alice = net.create("Alice");
+    const bob = await net.admit(alice, "Bob");
+    const carol = await net.admit(alice, "Carol");
+    const mallory = await net.admit(alice, "Mallory");
+    const zed = await net.admit(alice, "Zed");
+    await net.settle();
+    // Mallory is away while the role goes Alice to Bob to Carol, and Carol removes Zed.
+    mallory.online = false;
+    await alice.session.transferAdmin(bob.session.myKey); await net.settle();
+    await bob.session.transferAdmin(carol.session.myKey); await net.settle();
+    await carol.session.remove(zed.session.myKey); await net.settle();
+    zed.online = false;
+    // Bob, no longer admin, leaves; only Mallory hears it and commits it on her view from before Bob's hand-over.
+    alice.online = false; carol.online = false; mallory.online = true;
+    await bob.session.leave(); await net.settle();
+    bob.online = false;
+    expect(await mallory.session.commitPendingLeaves()).toBe(1);
+    await net.settle();
+    alice.online = true; carol.online = true;
+    for (const [x, y] of [[alice, mallory], [carol, mallory], [mallory, carol], [mallory, alice]] as const) x.session.catchUp(y.session.myKey);
+    await net.settle();
+    // Bob took the role and handed it on: his leave came later, and Carol's changes stand.
+    for (const m of [alice, carol, mallory]) {
+      expect(names(net, m), m.name).not.toContain("Zed");
+      expect(net.byKey(m.session.admin!)?.name, m.name).toBe("Carol");
+    }
+    expect(new Set([alice, carol, mallory].map(m => m.session.topHash)).size).toBe(1);
+  });
+
   it("a leave the winning branch holds too is not asked again", async () => {
     const { net, alice, carol, dave } = await staleAdminAfterLeave(async (alice, carol, net) => {
       // Alice is back first and syncs, then rotates: no fork, the leave stays.
