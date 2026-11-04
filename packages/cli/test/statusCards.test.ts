@@ -581,6 +581,23 @@ describe("routines", () => {
     expect(COMMANDS["routine send"]!.options!.next.description).toMatch(/2026-09-30 01:00.*no zone: local time/);
   });
 
+  it("refuse a day the month does not have as a usage error, where it was the next month's first days", () => {
+    const next = (value: string) => (params("routine update", ["g1", "nightly", "--next", value]).card as { nextRunAt: number }).nextRunAt;
+    const refused = (value: string, month: string, days: number) => expect(() => next(value), value).toThrow(expect.objectContaining({ code: "usage", message: `--next takes a day the month has (${month} has ${days}), not ${JSON.stringify(value)}` }));
+    // Before, each was May 1, March 3, July 1, December 1, March 1 and May 1.
+    refused("2026-04-31", "2026-04", 30);
+    refused("2026-02-31 01:00", "2026-02", 28);
+    refused("2026-06-31T10:00:00Z", "2026-06", 30);
+    refused("Nov 31 2026", "2026-11", 30);
+    refused("Feb 29 2026", "2026-02", 28);
+    refused("31 Apr 2026", "2026-04", 30);
+    refused("2026/4/31", "2026-04", 30);
+    // The days a month has, a leap day and a date whose zone moves it to the next day stay as they were.
+    expect(next("2028-02-29T00:00:00Z")).toBe(Date.UTC(2028, 1, 29));
+    expect(next("2026-04-30T23:00-05:00")).toBe(Date.UTC(2026, 4, 1, 4));
+    expect(next("Dec 31 2026 12:00Z")).toBe(Date.UTC(2026, 11, 31, 12));
+  });
+
   it("refuse a wrong state or a text too long or blank as a usage error (exit 2) that names the flag, not the card's field", () => {
     const usage = (name: string, argv: string[], message: RegExp) => expect(() => params(name, argv)).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(message) }));
     const send = (...flags: string[]) => ["g1", "--name", "Nightly", "--schedule", "every day", ...flags];

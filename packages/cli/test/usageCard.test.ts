@@ -83,6 +83,11 @@ describe("usage send", () => {
     for (const flag of ["resets", "also"] as const) expect(COMMANDS["usage send"]!.options![flag].description).toMatch(/no zone: local time/);
   });
 
+  it("refuses a day the month does not have in --resets and --also, where the card showed the next month's first day", () => {
+    expect(() => params(["Miguel", "--left", "40", "--resets", "2026-04-31"])).toThrow(expect.objectContaining({ code: "usage", message: "--resets takes a day the month has (2026-04 has 30), not \"2026-04-31\"" }));
+    expect(() => params(["Miguel", "--left", "40", "--also", "week=80@2026-02-30"])).toThrow(expect.objectContaining({ code: "usage", message: "--also takes a day the month has (2026-02 has 28), not \"2026-02-30\"" }));
+  });
+
   it("refuses a report that says no quota as a usage error (exit 2) that names the flag, not the card's field", () => {
     const usage = (argv: string[], message: RegExp) => expect(() => params(argv)).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(message) }));
     usage(["Alice"], /^--left is needed \(or --used with --limit\): ghostly usage send/);
