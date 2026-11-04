@@ -194,7 +194,7 @@ describe("Page", () => {
     const header = screen.getByRole("banner");
     expect(header).toHaveClass("flex-wrap");
     expect(header).toContainElement(screen.getByRole("button", { name: "Online" }));
-    expect(screen.getByRole("button", { name: "Online" }).parentElement).toHaveClass("shrink-0", "ml-auto");
+    expect(screen.getByRole("button", { name: "Online" }).parentElement).toHaveClass("shrink-0", "ms-auto");
     const body = screen.getByTestId("page").querySelector("[data-page-body]")!;
     expect(body).toHaveClass("@container/page");
     expect(body).toContainElement(screen.getByText("Body"));

@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import type { StatusCard } from "@ghostly/core";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { filePreview, previewText } from "../../lib/chatList";
+import { fileMoment, fileMomentLine, fileOfferLine, type FileMoment } from "../../lib/fileAnnounce";
+import { isGroupFile } from "../../lib/fileStatus";
 import { servicesPlatform } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { paymentLine } from "../paymentWords";
-import { cardLine, showsCard } from "../../lib/statusCards";
+import { appCardLine, cardLine, showsCard } from "../../lib/statusCards";
 
 /** What the announcer reads of a message: a 1:1 chat's and a group's both have it. */
 export interface Announceable {
@@ -38,7 +40,7 @@ function spoken(message: Announceable, t: Translate): string {
   if (showsCard(message.card)) return cardLine(message.card);
   const wallet = message.paymentId ? servicesPlatform?.wallet : undefined;
   const payment = wallet?.getPayment(message.paymentId!);
-  return payment ? paymentLine(t, payment, wallet!.getState()) : filePreview(message.file, t) ?? previewText(message.text, t);
+  return payment ? paymentLine(t, payment, wallet!.getState()) : appCardLine(message.card, t) ?? filePreview(message.file, t) ?? previewText(message.text, t);
 }
 
 const short = (text: string) => {
@@ -47,10 +49,28 @@ const short = (text: string) => {
 };
 
 /**
+ * A chat's 1:1 file, as last heard: its message, where it stood, and since when it is in the chat (`-Infinity`: it
+ * was there as the chat opened).
+ */
+interface FileHeard { message: Announceable & { file: ChatFile }; moment: FileMoment | null; since: number }
+
+/** A message whose 1:1 file's steps are followed: a group's file is fetched, never answered, paused or cancelled. */
+const followed = (m: Announceable): m is Announceable & { file: ChatFile } =>
+  !!m.file && !isGroupFile(m.file) && !m.systemEvent && !m.callEvent && !m.event;
+
+const heardNow = (message: Announceable & { file: ChatFile }, since: number): FileHeard =>
+  ({ message, moment: fileMoment(servicesPlatform?.getTransfer(message.file.id) ?? null), since });
+
+/**
  * Tells a screen reader, politely, that a message came into the open chat: who and the start of what, one line per
  * message, or a count when several come at once. The timeline itself is not a live region (it would read out every
  * row it draws); this one line is. The chat's history, my own messages and the chat's notes (joins, calls) are not
  * read out.
+ *
+ * A 1:1 file says more, in the same line: an offer that waits for this person's answer says so as it arrives, and
+ * each later step its person did not take is read out once (the contact accepted, declined, paused, went on or
+ * cancelled; it arrived; it failed), never its progress. A step within the arrival window of a file just in the chat
+ * is part of how it arrived (a small file done at once), not news of its own.
  */
 export function MessageAnnouncer({ chat, messages, nameOf, active = true }: {
   chat: string;
@@ -67,12 +87,49 @@ export function MessageAnnouncer({ chat, messages, nameOf, active = true }: {
   const timers = useRef<{ flush?: ReturnType<typeof setTimeout>; clear?: ReturnType<typeof setTimeout> }>({});
   const words = useRef({ t, nameOf, active });
   words.current = { t, nameOf, active };
+  /** Lines waiting for the one being read to clear: two that come together are both read, one after the other. */
+  const queued = useRef<string[]>([]);
+  /** The chat's 1:1 files, by file id: kept as the rows come, so a step is not looked for in the whole history. */
+  const files = useRef(new Map<string, FileHeard>());
+
+  const say = (line: string) => {
+    if (timers.current.clear) { queued.current.push(line); return; }
+    setText(line);
+    const next = () => {
+      const after = queued.current.shift();
+      setText(after ?? "");
+      timers.current.clear = after === undefined ? undefined : setTimeout(next, ANNOUNCE_CLEAR_MS);
+    };
+    timers.current.clear = setTimeout(next, ANNOUNCE_CLEAR_MS);
+  };
+  const sayRef = useRef(say);
+  sayRef.current = say;
+
+  /** Looks at each 1:1 file of the chat again: a step it took is read out once; its progress is no step. */
+  const checkFiles = useRef(() => {});
+  checkFiles.current = () => {
+    const { t, nameOf, active } = words.current;
+    const now = Date.now();
+    for (const heard of files.current.values()) {
+      const file = heard.message.file;
+      const transfer = servicesPlatform?.getTransfer(file.id) ?? null;
+      const moment = fileMoment(transfer);
+      if (moment === heard.moment || moment === null) continue;
+      const before = heard.moment;
+      heard.moment = moment;
+      if (!active || now - heard.since < ANNOUNCE_WINDOW_MS) continue;
+      const line = fileMomentLine(file, before, moment, transfer, nameOf(heard.message), t);
+      if (line) sayRef.current(line);
+    }
+  };
+  useEffect(() => servicesPlatform?.subscribe(() => checkFiles.current()), []);
 
   useEffect(() => {
     const known = seen.current;
     // A chat just opened (or another one): what it already has is history, not news.
     if (!known || known.chat !== chat) {
       seen.current = { chat, ids: new Set(messages.map(m => m.id)), last: messages[messages.length - 1]?.id, at: messages.length - 1 };
+      files.current = new Map(messages.filter(followed).map(m => [m.file.id, heardNow(m, -Infinity)]));
       pending.current = [];
       clearTimeout(timers.current.flush);
       timers.current.flush = undefined;
@@ -86,7 +143,16 @@ export function MessageAnnouncer({ chat, messages, nameOf, active = true }: {
     const fresh = from > 0 || known.last === undefined ? messages.slice(from).filter(m => !known.ids.has(m.id)) : [];
     // The rows above it are known already unless some came or went there (older history, a late one sorted in, one
     // deleted): only then is every id read again.
-    for (const m of from > 0 && at === known.at ? messages.slice(from) : messages) known.ids.add(m.id);
+    const reread = !(from > 0 && at === known.at);
+    for (const m of reread ? messages : messages.slice(from)) known.ids.add(m.id);
+    // A file whose message went (deleted) is followed no more; one just in the chat is from now on.
+    if (reread) {
+      const kept = new Set(messages.filter(followed).map(m => m.file.id));
+      for (const id of files.current.keys()) if (!kept.has(id)) files.current.delete(id);
+    }
+    const now = Date.now();
+    for (const m of fresh) if (followed(m) && !files.current.has(m.file.id)) files.current.set(m.file.id, heardNow(m, now));
+    checkFiles.current();
     if (messages.length) known.last = messages[messages.length - 1].id;
     known.at = messages.length - 1;
     const incoming = fresh.filter(m => m.sender === "peer" && !m.systemEvent && !m.callEvent && !m.event);
@@ -100,20 +166,24 @@ export function MessageAnnouncer({ chat, messages, nameOf, active = true }: {
       const { t, nameOf, active } = words.current;
       if (!batch.length || !active) return;
       const names = new Set(batch.map(m => nameOf(m)));
-      const line = batch.length === 1
+      const offer = batch.length === 1 && batch[0].file ? fileOfferLine(batch[0].file, servicesPlatform?.getTransfer(batch[0].file.id) ?? null, nameOf(batch[0]), t) : null;
+      const line = offer ?? (batch.length === 1
         ? t("chat.announce.message", { name: nameOf(batch[0]), text: short(spoken(batch[0], t)) })
         : names.size === 1
         ? t("chat.announce.messagesFrom", { count: batch.length, name: [...names][0] })
-        : t("chat.announce.messages", { count: batch.length });
-      setText(line);
-      clearTimeout(timers.current.clear);
-      timers.current.clear = setTimeout(() => setText(""), ANNOUNCE_CLEAR_MS);
+        : t("chat.announce.messages", { count: batch.length }));
+      sayRef.current(line);
     }, ANNOUNCE_WINDOW_MS);
   }, [chat, messages, active]);
 
   useEffect(() => () => { clearTimeout(timers.current.flush); clearTimeout(timers.current.clear); }, []);
   // Another chat: nothing of the last one is read out in this one.
-  useEffect(() => { setText(""); }, [chat]);
+  useEffect(() => {
+    setText("");
+    queued.current = [];
+    clearTimeout(timers.current.clear);
+    timers.current.clear = undefined;
+  }, [chat]);
 
   return <p className="sr-only" aria-live="polite" aria-atomic="true" data-testid="chat-announcement">{text}</p>;
 }

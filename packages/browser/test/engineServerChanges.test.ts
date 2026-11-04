@@ -13,6 +13,7 @@ type Events = { onMessages(linkId: string, messages: StoredMessage[]): void; onM
 const fake = vi.hoisted(() => ({
   nodes: [] as { events: Events }[],
   stored: new Map<string, StoredMessage[]>(),
+  deleted: new Map<string, string[]>(),
   reads: [] as string[],
   gate: null as Promise<void> | null,
 }));
@@ -28,6 +29,7 @@ vi.mock("../src/engine/node", () => ({
       await fake.gate;
       return list;
     }
+    deletedIdsOf(linkId: string) { return fake.deleted.get(linkId) ?? []; }
     setActiveLink() {}
   },
 }));
@@ -144,5 +146,25 @@ describe("what changed in a history", () => {
     fake.nodes.at(-1)!.events.onMessageChanges!("group:g", { messages: [row("group:g", "v")], deleted: [] });
     expect(page.history().at(-1)).toMatchObject({ kind: "message-changes" });
     expect(fake.reads).toEqual([]);
+  });
+
+  it("names the ids the engine deleted in a chat with each whole history: a removal no client heard reaches the next one", async () => {
+    fake.stored.set("chat", [row("chat", "a")]);
+    fake.stored.set("group:g", [row("group:g", "x")]);
+    fake.deleted.set("chat", ["peer_b"]);
+    const server = new EngineServer();
+    const page = client();
+    server.attach(page);
+    await flush();
+    expect(page.history()).toEqual([{ kind: "messages", linkId: "chat", messages: [row("chat", "a")], deleted: ["peer_b"] }]);
+    const events = fake.nodes.at(-1)!.events;
+    // Sent whole again, and to a client that lacked it (read on its first change): named each time.
+    events.onMessages("chat", [row("chat", "a")]);
+    expect(page.history().at(-1)).toEqual({ kind: "messages", linkId: "chat", messages: [row("chat", "a")], deleted: ["peer_b"] });
+    fake.deleted.set("group:g", []);
+    events.onMessageChanges!("group:g", { messages: [], deleted: [] });
+    await flush();
+    expect(page.history().at(-1)).toEqual({ kind: "messages", linkId: "group:g", messages: [row("group:g", "x")] });
+    fake.deleted.clear();
   });
 });

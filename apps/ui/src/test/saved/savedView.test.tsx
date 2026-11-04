@@ -27,7 +27,7 @@ const state = {
   groups: [groupView({ id: "g1", name: "Crew", status: "active", canSend: true, members: [{ key: "me-key", me: true, nick: "Me" }, { key: "hermes-key", me: false, nick: "Hermes" }] as never })],
 };
 
-function profile(rows: SavedMessage[], ui = <><Saved /><Where /></>, language?: "pt") {
+function profile(rows: SavedMessage[], ui = <><Saved /><Where /></>, language?: "pt" | "zh") {
   saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", messages: [], createdAt: 1_700_000_000_000, nick: "Alice" });
   let current = rows;
   const rendered = renderApp(ui, { route: "/saved", language });
@@ -39,6 +39,13 @@ function profile(rows: SavedMessage[], ui = <><Saved /><Where /></>, language?: 
 }
 
 const texts = () => screen.getAllByTestId("saved-row").map((row) => within(row).getByTestId("saved-text").textContent);
+
+/**
+ * Label in Name (WCAG 2.5.3) as axe-core reads it: the words a control shows (its text nodes joined with nothing between
+ * them, parentheticals left out), in their order, one after another in its name.
+ */
+const words = (text: string) => (text.normalize("NFKD").replace(/\([^()]*\)/g, "").toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).join(" ");
+const expectShownInName = (control: HTMLElement) => expect(` ${words(control.getAttribute("aria-label") ?? "")} `).toContain(` ${words(control.textContent ?? "")} `);
 
 describe("the Saved view", () => {
   it("lists the saved messages of chats and groups, the last saved first, with where they are and who wrote them", async () => {
@@ -56,7 +63,11 @@ describe("the Saved view", () => {
     expect(within(mine).getByTestId("saved-author")).toHaveTextContent("You");
     // In a 1:1 chat the contact is the chat: named once.
     expect(within(theirs).queryByTestId("saved-author")).not.toBeInTheDocument();
-    expect(within(theirs).getByTestId("saved-open")).toHaveAccessibleName("Open in Alice: the address");
+    // A row is named by what it shows, in its order: the chat, who wrote it when that is not the chat, when, the text.
+    expect(within(group).getByTestId("saved-open")).toHaveAccessibleName(/^Crew, Hermes, \S.*: deploy at 5$/);
+    expect(within(mine).getByTestId("saved-open")).toHaveAccessibleName(/^Alice, You, \S.*: my note$/);
+    expect(within(theirs).getByTestId("saved-open")).toHaveAccessibleName(/^Alice, \S.*: the address$/);
+    for (const open of screen.getAllByTestId("saved-open")) expectShownInName(open);
   });
 
   it("says a voice message or a video in the app's language, not in the English the history keeps", async () => {
@@ -66,7 +77,16 @@ describe("the Saved view", () => {
       saved(message("link-1", "peer_3", { text: "📎 notes.pdf", file: { id: "f3", name: "notes.pdf", size: 10, mime: "application/pdf" } })),
     ], undefined, "pt");
     await waitFor(() => expect(texts()).toEqual(["🎤 Mensagem de voz (0:02)", "🎬 Vídeo (0:07)", "📎 notes.pdf"]));
-    expect(within(screen.getAllByTestId("saved-row")[0]).getByTestId("saved-open")).toHaveAccessibleName("Abrir em Alice: 🎤 Mensagem de voz (0:02)");
+    const open = within(screen.getAllByTestId("saved-row")[0]).getByTestId("saved-open");
+    expect(open).toHaveAccessibleName(/^Alice, \S.*: 🎤 Mensagem de voz \(0:02\)$/);
+    expectShownInName(open);
+  });
+
+  it("says an app card as the card names it, in the app's language, not its English fallback with the bundle's link", async () => {
+    const url = "https://raw.githubusercontent.com/ana/chess/HEAD/chess.ghostlyapp";
+    profile([saved(message("link-1", "peer_1", { text: `🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\n${url}`,
+      card: { kind: "app", id: "a".repeat(22), ref: "r".repeat(52), digest: "d".repeat(43), sequence: 1, title: "Chess", version: "1.2.0", url, opened: true } }))], undefined, "zh");
+    await waitFor(() => expect(texts()).toEqual(["🧩 应用：Chess 1.2.0"]));
   });
 
   it("opens a message's chat on the message", async () => {
@@ -130,5 +150,6 @@ describe("the Saved view", () => {
     act(() => engine.setState({ ...state, groups: [...state.groups, groupView({ id: "g2", name: "Other", status: "active" })] }));
     const entry = await screen.findByTestId("sidebar-saved");
     expect(entry).toHaveAccessibleName("Saved messages, 2");
+    expectShownInName(entry);
   });
 });

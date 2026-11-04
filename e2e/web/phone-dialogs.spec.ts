@@ -217,10 +217,14 @@ test("on an iPhone: a message's quick bar opened while typing puts the keyboard 
   await keyboard(page, KEYBOARD);
 
   const row = page.locator(".chat-wallpaper [data-message-row]").filter({ hasText: "hold me while typing" }).last();
+  // The text shows at once in a row of its own (useChat's sending row), which takes no reaction; the engine's row takes
+  // its place once it has stored it. A press on the first is lost with it: pressed once the row that takes one is there.
+  await expect(row.getByTestId("message-react-action")).toBeAttached();
   const box = (await row.boundingBox())!;
   const at = { pointerType: "touch", button: 0, clientX: box.x + box.width / 2, clientY: box.y + box.height / 2, bubbles: true };
   await row.dispatchEvent("pointerdown", at);
-  await page.waitForTimeout(700);
+  // Held until the bar is up, as a finger is.
+  await expect(page.getByTestId("reaction-bar")).toBeVisible();
   await row.dispatchEvent("pointerup", at);
   await expect(page.getByTestId("reaction-bar")).toBeVisible();
   await expect(input).not.toBeFocused();

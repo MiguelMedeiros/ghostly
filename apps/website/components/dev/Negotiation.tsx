@@ -453,7 +453,7 @@ export function Negotiation({ t, relayedLabel }: { t: Copy; relayedLabel: string
             className="ng-tab"
             aria-pressed={i === play.scenario}
             onClick={() => pick(i)}
-            style={i === play.scenario ? ({ "--p": progress } as CSSProperties) : undefined}
+            style={i === play.scenario ? ({ "--ng-p": progress } as CSSProperties) : undefined}
           >
             <span className="ng-tab-n" aria-hidden="true">
               {i + 1}

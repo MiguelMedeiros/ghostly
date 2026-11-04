@@ -11,6 +11,7 @@ import type { Language } from "../../lib/settings";
 import { engineState, fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { proofView } from "../identities/views";
+import { translateWith } from "../../locales/translate";
 import { LOCALES, SECTIONS, flatten, lookup } from "./locales";
 
 // covers: app.i18n
@@ -20,8 +21,9 @@ import { LOCALES, SECTIONS, flatten, lookup } from "./locales";
 const ME = "me".padEnd(52, "y"), ANA = "ana".padEnd(52, "y");
 const member = (patch: Partial<GroupMemberView>): GroupMemberView => ({ key: ME, role: "member", me: false, online: false, missing: 0, ...patch });
 const stored = (patch: Partial<StoredMessage>): StoredMessage => ({ linkId: "group:group-1", id: "g1", text: "", sender: "peer", timestamp: 1_700_000_000_000, via: "datalink", ...patch });
+/** As the app says it: a counted string takes its language's plural form (agents#1614). */
 const t = (language: Language, key: string, params: Record<string, string | number> = {}) =>
-  Object.entries(params).reduce((text, [k, v]) => text.split(`{{${k}}}`).join(String(v)), lookup(language, key)!);
+  translateWith(LOCALES[language], language)(key as never, params);
 const RAW_KEY = new RegExp(`\\b(?:${SECTIONS.join("|")})(?:\\.[a-zA-Z]+)+\\b`);
 
 function openGroup(language: Language, group: GroupView, history: StoredMessage[] = []) {
@@ -101,6 +103,27 @@ describe.each(["pt", "ar"] as const)("in %s", (language) => {
     expect(lines.join(" ")).not.toMatch(/joined|no longer| left/);
   });
 
+  it("a private group's removal names the admin who removed the member, and says mine in my words", async () => {
+    const BIA = "bia".padEnd(52, "y"), CAIO = "caio".padEnd(52, "y");
+    openGroup(language, groupView({
+      status: "active", myKey: ME, formerNames: { [BIA]: "Bia", [CAIO]: "Caio" },
+      members: [member({ key: ME, me: true, online: true }), member({ key: ANA, nick: "Ana", online: true, role: "admin" })],
+    }), [
+      // As the engine stores them: the removed member's key, and the admin's who signed the remove commit (`by`).
+      stored({ id: "e1", event: "gone", member: BIA, by: ME, text: "You removed Bia" }),
+      stored({ id: "e2", event: "gone", member: CAIO, by: ANA, text: "Ana removed Caio" }),
+      // One with no remover known (written before, or by a community): as it was.
+      stored({ id: "e3", event: "gone", member: CAIO, text: "Caio is no longer a member" }),
+    ]);
+    const lines = (await screen.findAllByTestId("group-event")).map(e => e.textContent);
+    expect(lines).toEqual([
+      t(language, "group.event.goneByYou", { name: "Bia" }),
+      t(language, "group.event.goneBy", { by: "Ana", name: "Caio" }),
+      t(language, "group.event.gone", { name: "Caio" }),
+    ]);
+    expect(lines.join(" ")).not.toMatch(/removed|no longer/);
+  });
+
   it("a line about a member who never said a name, and has left, names it in the interface's words", async () => {
     const GONE = "46ishssi".padEnd(52, "y");
     // As the engine stores them: "Member" and the start of the key, in English.
@@ -132,10 +155,13 @@ describe.each(["pt", "ar"] as const)("in %s", (language) => {
     const joining = screen.getByTestId("group-joining");
     expect(within(joining).getByRole("heading")).toHaveTextContent(t(language, "group.join.answeredTitleCommunity"));
     expect(joining).toHaveTextContent(t(language, "group.join.answeredCommunity"));
+    // The steps reached say so in this language too (hidden on screen, where a ✓ says it).
+    const done = ` (${t(language, "pairing.done")})`;
     expect(within(screen.getByTestId("group-joining-steps")).getAllByRole("listitem").map(li => li.textContent!.replace("✓", ""))).toEqual([
-      t(language, "group.join.step.knockedCommunity"), t(language, "group.join.step.answeredCommunity"),
+      t(language, "group.join.step.knockedCommunity") + done, t(language, "group.join.step.answeredCommunity") + done,
       t(language, "group.join.step.admitted"), t(language, "group.join.step.inCommunity"),
     ]);
+    expect(screen.getByTestId("group-joining-live")).toHaveTextContent(t(language, "group.join.step.answeredCommunity"));
     expect(screen.getByTestId("group-joining-cancel")).toHaveTextContent(t(language, "group.join.cancel"));
     expect(container.textContent).not.toMatch(RAW_KEY);
   });
@@ -151,6 +177,24 @@ describe.each(["pt", "ar"] as const)("in %s", (language) => {
     const english = [...flatten(LOCALES.en)].filter(([key]) => /^identities\.(page|mine|card)\./.test(key) && lookup(language, key) !== lookup("en", key));
     const texts = new Set([...container.querySelectorAll("*")].flatMap(el => [...el.childNodes].filter(n => n.nodeType === 3).map(n => n.nodeValue!.trim())));
     expect(english.map(([, text]) => text).filter(text => texts.has(text as string))).toEqual([]);
+  });
+});
+
+describe("the lines a group writes about a member", () => {
+  // The app knows no one's gender: a masculine form reads wrong for every woman it names, or who reads it about herself.
+  const GENDERED: Partial<Record<Language, RegExp>> = {
+    pt: /\bvocê foi removid| é [oa] admin\b/i,
+    fr: /\bvous avez été retiré|\bvous a retiré/i,
+    it: /\bsei stat[oa]\b| è entrat| è uscit/i,
+    es: /\b(el|la) admin\b/i,
+    // A verb before the name takes the man's form: "انضم Carol".
+    ar: /^(انضم|غادر|أصبح|لم يعد|غيّر|أزال) \{\{name\}\}|المشرف/,
+  };
+  const keys = [...flatten(LOCALES.en).keys()].filter(key => key.startsWith("group.event.") || ["group.chat.removedCommunity", "errors.group.removed"].includes(key));
+
+  it.each(Object.keys(GENDERED) as Language[])("in %s, say it without a gender", (language) => {
+    const gendered = keys.map(key => [key, lookup(language, key)] as const).filter(([, text]) => text && GENDERED[language]!.test(text));
+    expect(gendered).toEqual([]);
   });
 });
 

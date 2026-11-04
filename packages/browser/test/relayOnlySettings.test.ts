@@ -79,9 +79,27 @@ describe("Hide my IP from contacts (relayOnly)", () => {
     expect(link.stop).not.toHaveBeenCalled();
     await node.updateSettings({ settings: { relayOnly: true } });
     expect(link.stop).toHaveBeenCalledWith(false);
-    expect(started).toHaveBeenCalledWith(chat.id, []);
+    expect(started).toHaveBeenCalledWith(chat.id);
     // The same value again changes nothing.
     await node.updateSettings({ settings: { relayOnly: true } });
     expect(link.stop).toHaveBeenCalledOnce();
+  });
+
+  it("held items are picked up only from this person's own bucket while it is on, and looked for again once it is off", async () => {
+    const node = engine();
+    const hosts = () => node["hold"]["host"].hiddenIpPlaces!();
+    await node.updateSettings({ settings: { iceServers: [TURN] } });
+    expect(hosts()).toBeNull();
+    await node.updateSettings({ settings: { relayOnly: true } });
+    expect(hosts()).toEqual([]);
+    node["settings"].holdStorage = { s3: { endpoint: "https://S3.eu.example.org/", region: "eu", bucket: "mine", prefix: "", accessKeyId: "k", secretAccessKey: "s" }, space: "abcdefghijklmnop" };
+    // Its bucket, not the endpoint's host alone: a contact at the same provider has the same host.
+    expect(hosts()).toEqual(["https://s3.eu.example.org/mine/"]);
+    node["settings"].holdStorage.s3.endpoint = "https://S3.example.org:8443/storage";
+    expect(hosts()).toEqual(["https://s3.example.org:8443/storage/mine/"]);
+    const wake = vi.spyOn(node["hold"], "wake");
+    await node.updateSettings({ settings: { relayOnly: false } });
+    expect(hosts()).toBeNull();
+    expect(wake).toHaveBeenCalledOnce();
   });
 });

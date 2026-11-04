@@ -1,5 +1,6 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { voiceDownloadName } from "@ghostly/core";
 import { MessageBubble } from "../../components/MessageBubble";
 import { TransportLine } from "../../components/TransportTimeline";
 import type { MessageAuthor } from "../../components/chat/SenderAvatar";
@@ -367,7 +368,7 @@ describe("a voice message in the chat", () => {
     fireEvent.click(screen.getByTestId("voice-play"));
     await flush();
     expect(screen.getByTestId("voice-problem")).toHaveTextContent("This device can't play M4A recordings");
-    expect(screen.getByTestId("voice-save")).toHaveAttribute("download", "Voice message.m4a");
+    expect(screen.getByTestId("voice-save")).toHaveAttribute("download", voiceDownloadName("audio/mp4", aac.timestamp));
     expect(audio.players).toHaveLength(0);
   });
 

@@ -27,8 +27,21 @@ const LOOKS_LIKE_HOST = /\.\p{L}[\p{L}\p{N}-]{1,62}$|^\d{1,3}(?:\.\d{1,3}){3}$/u
 const NOT_A_TLD = /\.(?:[cm]?js|jsx|tsx?|json|css|html?|txt|log|csv|png|jpe?g|gif|svg|webp|toml|ya?ml|lock|wasm|pdf|rb|go)$/i;
 /** Extensions that are country domains too (Moldova, Paraguay…): a file only as a path's last part ("docs/CHAT.md"). */
 const FILE_IN_PATH = /\.(?:md|py|rs|sh)$/i;
-/** Characters a browser reads as the dot between a host's labels, and ones that only look like it. */
-const DOTS = /[\u00b7\u0701\u06d4\u2024\u2027\u2e3c\u3002\uff0e\uff61]/g;
+/**
+ * Characters a browser reads as the dot between a host's labels, and ones that only look like it (Unicode's
+ * confusables of "." and the middle, raised and word-separator dots fonts draw like it). Read before NFKC ("˙" would
+ * become a space and an accent) and after it ("･" becomes "・").
+ */
+const DOTS =
+  /[\u00b7\u02d9\u0660\u06d4\u06f0\u0701\u0702\u0f0b\u0f0c\u1427\u16eb\u2022\u2024\u2027\u2219\u22c5\u2e30\u2e31\u2e33\u2e3c\u3002\u30fb\u318d\ua4f8\ua60e\ua78f\uff0e\uff61\u{10a50}]/gu;
+
+/**
+ * A whole emoji: a keycap ("1️⃣"), a flag drawn from tags (🏴 and its tag letters), or pictographs joined by zero-width
+ * joiners, each with its variation selector or skin tone ("❤️", "👩🏽‍💻"). Their invisible parts are drawn as part of
+ * the emoji, so they hide nothing; the same characters anywhere else still count.
+ */
+const EMOJI =
+  /[#*0-9]️?⃣|\u{1f3f4}[\u{e0020}-\u{e007e}]+\u{e007f}|\p{Extended_Pictographic}(?:[︎️]|\p{Emoji_Modifier})?(?:‍\p{Extended_Pictographic}(?:[︎️]|\p{Emoji_Modifier})?)*/gu;
 
 /**
  * Whether a link's text would make a reader think it goes somewhere else: it names a host that is not the link's (nor
@@ -40,8 +53,8 @@ const DOTS = /[\u00b7\u0701\u06d4\u2024\u2027\u2e3c\u3002\uff0e\uff61]/g;
 export function labelMisleads(label: string, url: string): boolean {
   const target = hostOf(url);
   if (!target) return true;
-  if (new RegExp(INVISIBLE.source).test(label)) return true;
-  const text = label.normalize("NFKC").replace(DOTS, ".");
+  if (new RegExp(INVISIBLE.source, "u").test(label.replace(EMOJI, ""))) return true;
+  const text = label.replace(DOTS, ".").normalize("NFKC").replace(DOTS, ".");
   for (const found of text.matchAll(ADDRESS)) {
     const written = found[0];
     const bare = written.replace(/^[a-z][a-z\d+.-]*:\/\//i, "");

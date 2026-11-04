@@ -243,6 +243,22 @@ describe("a member's catch-up answer goes a slice at a time", { timeout: 120_000
     expect(mostWaiting).toBeLessThanOrEqual(2 * CATCH_UP_SLICE);
   });
 
+  it("a newer answer leaves out frames still queued that it built again as new objects, by their `key` (a community's commits and secrets)", async () => {
+    const sent: string[] = [], waits: (() => void)[] = [];
+    const answers = new CatchUpAnswers<{ k: string }>({
+      send: (_to, frame) => { sent.push(frame.k); },
+      handled: () => new Promise<boolean>(resolve => waits.push(() => resolve(true))),
+      active: () => true,
+      key: frame => frame.k,
+    });
+    const build = () => Array.from({ length: 4 * CATCH_UP_SLICE }, (_, i) => ({ k: `commit ${i}` }));
+    answers.handOut("Bob", build());
+    expect(sent).toHaveLength(2 * CATCH_UP_SLICE);
+    answers.handOut("Bob", build());
+    while (waits.length) { waits.shift()!(); await sleep(0); }
+    expect(sent).toEqual(build().map(f => f.k));
+  });
+
   it("a host that cannot tell (no `handled`) sends the answer at once, as before", async () => {
     const { alice, bob, sync } = await busyGroup(30);
     const sent: GroupEdgeFrame[] = [];

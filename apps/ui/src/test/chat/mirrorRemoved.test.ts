@@ -56,3 +56,24 @@ it("only the rows the change names go: a whole list without a row (one a page is
   await tick();
   expect(loadSession("b")!.messages.map((m) => m.id)).toEqual(["peer_0", "peer_1"]);
 });
+
+it("a removal no page heard (the extension's engine ran with none open) leaves the chat with the next whole list, which names it", async () => {
+  const { linkId, row, stored } = await chat("c");
+  markSessionAsRead("c");
+  fakeEngine.messages(linkId, [row(0), row(2)], ["older_9", "peer_1"]);
+  await tick();
+  const session = loadSession("c")!;
+  expect(session.messages.map((m) => m.id)).toEqual(["peer_0", "peer_2"]);
+  expect(session.deletedIds).toContain("peer_1");
+  expect(getLastReadCount("c")).toBe(2);
+  expect(stored()).toEqual([]);
+});
+
+it("a removal still in the change tick when a whole list comes goes with that list", async () => {
+  const { linkId, row } = await chat("d");
+  // The whole list takes the tick's place (it holds what changed): the tick's deletion is told by the list.
+  fakeEngine.emit({ kind: "message-changes", linkId, messages: [], deleted: ["peer_1"] });
+  fakeEngine.messages(linkId, [row(0), row(2)], ["peer_1"]);
+  await tick();
+  expect(loadSession("d")!.messages.map((m) => m.id)).toEqual(["peer_0", "peer_2"]);
+});

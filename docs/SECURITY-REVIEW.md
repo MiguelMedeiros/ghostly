@@ -37,7 +37,7 @@ This repository is public, so anything written here or in an issue or pull reque
 - **Never** open a public issue or pull request that describes an unfixed or unreleased flaw, and never leave a security issue open. `.github/SECURITY.md` asks reporters not to; the repository's own practice has to match.
 - The private channel is GitHub **private vulnerability reporting** (enabled) and a **draft security advisory**: the advisory carries the detail, its **private fork** carries the fix, and the advisory is published only after the release is out and people have had a chance to update.
 - Findings recorded here while still **open** are written as the shape of the problem and the invariant it touches, not as steps to reproduce it, and not with the code path that makes it work. The reproduction lives in the private advisory.
-- A finding that can be fixed and proven ships straight through the autorelease gate; that is the preferred path, because a released fix is also the shortest disclosure window.
+- A finding that can be fixed and proven ships in the next patch release; that is the preferred path, because a released fix is also the shortest disclosure window.
 
 ### 2026-09-19: first full review (v0.3.1)
 
@@ -58,7 +58,7 @@ This repository is public, so anything written here or in an issue or pull reque
 | S13 | Med | Images | website on node 20 (EOL), web on nginx 1.27 | fixed: node 22, nginx 1.30 |
 | S14 | Med | Protocol | Plaintext `_ts`/`_ack` let relays/DHT pair a link's two keys and time messages | open (needs a protocol change) |
 | S15 | Low | Privacy | Google STUN always on, no relay-only mode; Google Analytics on the site | open for STUN. The site's analytics are gone (#535): no page calls another site or sets a cookie, checked by `apps/website/e2e/launch-checklist.spec.ts` |
-| S16 | Low | Invite | Invite is a long-lived bearer secret, creator keeps the peer's seed, no forward secrecy | open |
+| S16 | Low | Invite | Invite is a long-lived bearer secret, creator keeps the peer's seed, no forward secrecy | open: the bearer invite stays as it is; forward secrecy for the DHT floor and held items is built on `dev` ([WISP 4xx · Forward Secrecy](wisps/4xx-ratchet.md), between two apps that list `ratchet/1`; a session's first chains open with a participation key until the turn passes both ways) |
 | S17 | Low | CLI | `--seed`/`--key` on the command line (visible in `ps`, shell history) | resolved: no longer shipped from 1.0, and the Rust `ghostly-cli` was removed after 1.0. Bots use `ghostly` (`packages/cli`) |
 | S18 | Low | Storage | Seeds, messages and proofs are plaintext in localStorage/IndexedDB | open: design proposed in [WISP 04 § Encrypted profile](wisps/04-profiles.md#encrypted-profile-proposal), not built |
 | S20 | Low | HTTP host | Browser hosts follow redirects and check the final URL afterwards: one blind request elsewhere on the machine via an open redirect in the shared app | open |
@@ -185,9 +185,7 @@ A scheduled Claude Code agent reviews the repository a few times a week. Each ru
 
 1. reads this file, runs `node tools/scripts/security-scan.mjs`, and reviews what changed since the last run plus one area in depth (rotating);
 2. fixes what it can prove, with a test, on a `claude/security-auto-<date>` branch that also bumps the patch version and adds a changelog entry;
-3. `security-autorelease.yml` then checks the branch (`tools/scripts/autorelease-gate.mjs`: nothing of `dev` that `main` does not have, no CI or release changes, no new dependencies, size cap, one patch bump, one release per 20 h, CI and Security green), fast-forwards main to it (no pull request), tags it and publishes the release;
+3. a person then cuts the patch release from it and pushes the tag ([RELEASING.md](RELEASING.md)). No workflow releases it by itself: the tag ruleset on `v*` lets only a repository admin create a release tag;
 4. anything it cannot fix safely is added here as **open**, in the shape described under [Disclosure](#disclosure-nothing-unfixed-is-described-in-public), and the reproduction goes into a **draft security advisory**, never into an issue or pull request.
 
-When the gate refuses a run (the 20 h window, a change outside its limits, a red check), the fix does **not** become a public pull request describing the flaw. It waits for the next window, or goes through a draft advisory and its private fork and is released from there. A run that opens a public branch or pull request must not say what the flaw lets an attacker do until the release carrying the fix is out.
-
-The repository variable `SECURITY_AUTORELEASE` turns this down to `deps` (only dependency updates ship on their own) or `off`.
+A fix waiting for its release does **not** become a public pull request describing the flaw: it goes through a draft advisory and its private fork and is released from there. A run that opens a public branch or pull request must not say what the flaw lets an attacker do until the release carrying the fix is out.

@@ -14,6 +14,7 @@ import {useI18n} from "../contexts/I18nContext";
 import {switchProfile} from "../lib/profiles";
 import {PROFILE_NOTICE} from "../lib/profilePeek";
 import {claimFeedback} from "../lib/feedbackClaims";
+import {appAway} from "../lib/appInSight";
 
 const seen=new Set<string>();
 /** The engine sends live facts separately from replayed snapshots. */
@@ -37,7 +38,9 @@ export function AttentionFeedback(){
       // one names me in a group that still notifies mentions.
       const chat=chatOfLink(event.linkId,engine.state?.links);
       const muted=mutedFor(chat,!!event.mention);
-      const background=document.visibilityState==="hidden" || !document.hasFocus();
+      // Out of sight only when no page of the app is in sight: the page that claimed it may be a tab behind the one the
+      // person is reading.
+      const background=await appAway();
       // A fact that had no sound before the categories: its cue alone, under the cue's own rules (apps/ui/src/lib/cues.ts).
       if(event.type==="cue"){ if(event.cue) playCue(event.cue,{chat,key:event.id}); return; }
       const notifications=loadSettings().notifications;

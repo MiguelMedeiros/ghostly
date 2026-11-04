@@ -1,6 +1,7 @@
 import { TRANSPORTS, type IdentityTimelineEntry, type LiveAttempt, type PairedTransport, type TransportWait } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import type { TransportEntry, TransportEvent } from "@ghostly/browser/engine/transportLog";
+import { sharedRows } from "./chatRows";
 import { transportName } from "./connection";
 import { englishT, type Translate } from "../locales/translate";
 import { problemLine, problemText, sentences } from "./problemText";
@@ -23,6 +24,14 @@ export function shortReason(reason: string, tr: Translate = englishT): string {
     .replace(/\s*Retry when both peers are connected\.?$/, "")
     .trim().replace(/\.$/, "");
   return problemText(short, tr, "connect").title.replace(/\.$/, "");
+}
+
+/**
+ * "Iroh: UDP blocked": a reason said of one transport, with its name before it, unless the reason already names it
+ * ("HyperDHT relay unreachable", in every language), which says it once.
+ */
+export function namedReason(transport: string, reason: string, tr: Translate = englishT): string {
+  return reason.includes(transport) ? reason : tr("connection.line.withReason", { text: transport, reason });
 }
 
 /** How long a run of changes took, as people say it. */
@@ -154,9 +163,13 @@ export interface TransportOption {
   relayed?: boolean;
 }
 
-/** Why this app lacks a transport, and how to get it where there is a way. */
-function missing(transport: PairedTransport, tr: Translate): string {
+/**
+ * Why this app lacks a transport, and how to get it where there is a way. Iroh or HyperDHT this app runs (the web on
+ * its Iroh relays or its HyperDHT relay) that did not start is not lacking: its relays in Settings, Network are where to look.
+ */
+function missing(transport: PairedTransport, link: OwnTransports, tr: Translate): string {
   if (transport === "webrtc/1") return tr("connection.option.noWebrtc");
+  if (link.runnableTransports?.includes(transport)) return tr("connection.option.relayUnreached", { transport: name(transport) });
   if (transport === "hyperdht/1") return tr("connection.option.hyperdhtNeeds");
   return tr("connection.option.needsDesktop", { transport: name(transport) });
 }
@@ -180,7 +193,7 @@ export function transportOptions(link: OwnTransports & Pick<LinkView, "peerTrans
   return MENU_ORDER.map(transport => {
     const error = link.transportErrors?.[transport];
     // The engine's error in a few words of the app's language, as the line below the choices says it; its next step stays there.
-    if (!mine.includes(transport)) return { transport, available: false, reason: error ? shortReason(error, tr) : missing(transport, tr) };
+    if (!mine.includes(transport)) return { transport, available: false, reason: error ? shortReason(error, tr) : missing(transport, link, tr) };
     if (theirs && !theirs.includes(transport)) return { transport, available: false, reason: tr("connection.option.contactLacks", { transport: name(transport) }) };
     return { transport, available: true, ...(link.relayedTransports?.includes(transport) ? { relayed: true } : {}) };
   });
@@ -198,11 +211,50 @@ export type TimelineRow<M> =
  * row, where it began (its later steps settle it in place).
  */
 export function mergeTimeline<M extends { timestamp: number }>(messages: readonly M[], lines: readonly TransportEntry[], identities: readonly IdentityTimelineEntry[] = []): TimelineRow<M>[] {
+  return merge(messages, lines, identities).out;
+}
+
+/**
+ * `mergeTimeline` for one chat as its list changes. While its transport lines and identity shares are the same, the rows
+ * up to the last message the new list has the same from its start are the ones given before (the same objects), and only
+ * the rows after it are put together again: a message arriving in a chat of thousands costs what it does in a short one.
+ */
+export function timelineMerger<M extends { timestamp: number }>(): (messages: readonly M[], lines: readonly TransportEntry[], identities?: readonly IdentityTimelineEntry[]) => TimelineRow<M>[] {
+  let last: Merged<M> | undefined;
+  // A chat with none has a new empty list each time.
+  const alike = <T,>(a: readonly T[], b: readonly T[]) => a === b || (!a.length && !b.length);
+  return (messages, lines, identities = []) => {
+    const from = last && alike(last.lines, lines) && alike(last.identities, identities) ? last : undefined;
+    last = merge(messages, lines, identities, from && { ...from, same: from.messages === messages ? messages.length : sharedRows(from.messages, messages) });
+    return last.out;
+  };
+}
+
+interface Merged<M> {
+  messages: readonly M[];
+  lines: readonly TransportEntry[];
+  identities: readonly IdentityTimelineEntry[];
+  sorted: readonly TransportEntry[];
+  shares: readonly IdentityTimelineEntry[];
+  out: TimelineRow<M>[];
+  /** For each message, three numbers: the rows given up to its own, and the lines and the shares placed by then. */
+  marks: number[];
+}
+
+/**
+ * The timeline of these rows, the first `same` messages' rows taken from `from` (put together with the same lines and
+ * shares), which is not to be read again.
+ */
+function merge<M extends { timestamp: number }>(messages: readonly M[], lines: readonly TransportEntry[], identities: readonly IdentityTimelineEntry[], from?: Merged<M> & { same: number }): Merged<M> {
   const at = (e: TransportEntry) => e.since ?? e.at;
-  const sorted = [...lines].sort((a, b) => at(a) - at(b));
-  const shares = [...identities].sort((a, b) => a.at - b.at);
-  const out: TimelineRow<M>[] = [];
-  let i = 0, j = 0;
+  const sorted = from?.sorted ?? [...lines].sort((a, b) => at(a) - at(b));
+  const shares = from?.shares ?? [...identities].sort((a, b) => a.at - b.at);
+  const same = from?.same ?? 0, mark = (same - 1) * 3;
+  const out: TimelineRow<M>[] = same ? from!.out.slice(0, from!.marks[mark]) : [];
+  // The marks are this merge's alone: the one before is not read again.
+  const marks = same ? from!.marks : [];
+  marks.length = same * 3;
+  let i = same ? from!.marks[mark + 1]! : 0, j = same ? from!.marks[mark + 2]! : 0;
   const rows = (until: number) => {
     let run: TransportEntry[] = [];
     const flush = () => { if (run.length) out.push({ kind: "transport", entry: run[run.length - 1], earlier: run.slice(0, -1) }); run = []; };
@@ -214,12 +266,14 @@ export function mergeTimeline<M extends { timestamp: number }>(messages: readonl
     }
     flush();
   };
-  for (const message of messages) {
+  for (let k = same; k < messages.length; k++) {
+    const message = messages[k]!;
     rows(message.timestamp);
     out.push({ kind: "message", message });
+    marks.push(out.length, i, j);
   }
   rows(Infinity);
-  return out;
+  return { messages, lines, identities, sorted, shares, out, marks };
 }
 
 /** How long, to the second when short: the connection history is about exact moments. */
@@ -227,8 +281,11 @@ function duration(ms: number, tr: Translate): string {
   return ms < 60_000 ? tr("connection.duration.seconds", { n: Math.max(1, Math.round(ms / 1_000)) }) : lasting(ms, tr);
 }
 
-/** One event of the connection panel's history, in a line. */
-export function transportEventText(event: TransportEvent, contact: string, tr: Translate = englishT): string {
+/**
+ * One event of the connection panel's history, in a line. `contact`: the contact's name, or nothing when they shared
+ * none; then the line says "your contact" in its own words, never a fallback name dropped into the sentence.
+ */
+export function transportEventText(event: TransportEvent, contact: string | undefined, tr: Translate = englishT): string {
   const transport = name(event.transport), rtt = event.rttMs !== undefined ? tr("connection.ms", { ms: event.rttMs }) : undefined;
   const parts = (...items: (string | false | undefined)[]) => items.filter(Boolean).join(" · ");
   switch (event.kind) {
@@ -239,7 +296,7 @@ export function transportEventText(event: TransportEvent, contact: string, tr: T
     case "down": {
       // The live stretch this app quit in, not back by the time the contact's side would have let it go.
       if (event.restart) return tr("connection.event.notBack", { from: name(event.from) });
-      const meanwhile = event.text === "dht" ? tr("connection.event.textsDht") : event.text === "hold" ? tr("connection.event.messagesWait", { contact }) : undefined;
+      const meanwhile = event.text === "dht" ? tr("connection.event.textsDht") : event.text === "hold" ? (contact ? tr("connection.event.messagesWait", { contact }) : tr("connection.event.messagesWaitUnnamed")) : undefined;
       // Off live to wait for a chosen transport (Fallback off), not a drop.
       if (event.target) return parts(tr("connection.waitingFor", { transport: name(event.target) }), !!event.from && tr("connection.event.offFrom", { from: name(event.from) }), meanwhile);
       // A drop's `reason` was only ever an older release's English ("Dropped and came back 4 times", saved into the
@@ -247,20 +304,27 @@ export function transportEventText(event: TransportEvent, contact: string, tr: T
       return parts(event.from ? tr("connection.event.lostFrom", { from: name(event.from) }) : tr("connection.line.lost"), meanwhile);
     }
     case "switched": {
-      const why = event.cause === "you" ? tr("connection.event.yourChoice") : event.cause === "contact" ? tr("connection.event.contactsChoice", { contact })
+      const why = event.cause === "you" ? tr("connection.event.yourChoice") : event.cause === "contact" ? (contact ? tr("connection.event.contactsChoice", { contact }) : tr("connection.summary.yourContactsChoice"))
         : event.cause === "dropped" ? tr("connection.event.afterDrop") : tr("connection.event.automatic");
       return parts(tr("connection.event.moved", { from: name(event.from), transport }), why, rtt);
     }
     case "chose":
-      if (event.target) return event.cause === "contact" ? tr("connection.line.contactChose", { contact, transport: name(event.target) }) : tr("connection.line.youChose", { transport: name(event.target) });
-      return event.cause === "contact" ? tr("connection.line.contactBackAuto", { contact }) : tr("connection.event.youBackAuto");
+      if (event.target) return event.cause === "contact" ? contactChose(contact, name(event.target), tr) : tr("connection.line.youChose", { transport: name(event.target) });
+      if (event.cause !== "contact") return tr("connection.event.youBackAuto");
+      return contact ? tr("connection.line.contactBackAuto", { contact }) : tr("connection.line.contactBackAutoUnnamed");
     case "failed": return couldNotSwitch(event.target, event.reason, tr);
     case "attempt":
       if (event.target) return parts(tr("connection.waitingFor", { transport: name(event.target) }), !!event.reason && tr("connection.event.lastAttempt", { reason: shortReason(event.reason, tr) }));
       return event.reason ? tr("connection.line.withReason", { text: tr("connection.event.attemptFailed"), reason: shortReason(event.reason, tr) }) : tr("connection.event.attemptFailed");
-    case "dht-only": return event.cause === "contact" ? tr("connection.line.contactDhtOnly", { contact }) : tr("connection.line.youDhtOnly");
+    case "dht-only": return event.cause !== "contact" ? tr("connection.line.youDhtOnly")
+      : contact ? tr("connection.line.contactDhtOnly", { contact }) : tr("connection.line.contactDhtOnlyUnnamed");
     case "dht-left": return parts(tr("connection.event.dhtLeft"), event.transport ? tr("connection.event.setTo", { transport }) : tr("connection.event.automatic"));
   }
+}
+
+/** "Ana chose Iroh", or "Your contact chose Iroh" for a contact with no name. */
+function contactChose(contact: string | undefined, transport: string, tr: Translate): string {
+  return contact ? tr("connection.line.contactChose", { contact, transport }) : tr("connection.line.contactChoseUnnamed", { transport });
 }
 
 const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -268,20 +332,20 @@ const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: "2-dig
 /**
  * What a chat waits for, said for people (WISP 100, "A chosen transport not reached yet"): the header's label when
  * nothing else carries the chat, why in a sentence, where the chat is meanwhile, and whether Automatic is the way out
- * (the contact's app lacks it). `contact`: the name the chat shows for the other side.
+ * (the contact's app lacks it). `contact`: the contact's name, or nothing when they shared none ("your contact").
  */
-export function transportWaitText(wait: TransportWait, contact: string, format: (at: number) => string = clock, tr: Translate = englishT):
+export function transportWaitText(wait: TransportWait, contact: string | undefined, format: (at: number) => string = clock, tr: Translate = englishT):
   { label: string; why: string; meanwhile: string; automatic: boolean } {
   const transport = name(wait.transport);
-  const who = wait.by === "you" ? tr("connection.line.youChose", { transport }) : wait.by === "contact" ? tr("connection.line.contactChose", { contact, transport }) : tr("connection.wait.fallbackOff", { transport });
+  const who = wait.by === "you" ? tr("connection.line.youChose", { transport }) : wait.by === "contact" ? contactChose(contact, transport, tr) : tr("connection.wait.fallbackOff", { transport });
   const next = wait.retryAt ? tr("connection.wait.retryAt", { time: format(wait.retryAt) }) : tr("connection.wait.retryAuto");
   const reason = {
-    "unknown": () => tr("connection.wait.unknown", { contact, transport }),
-    "starting": () => tr("connection.wait.starting", { contact, transport }),
+    "unknown": () => contact ? tr("connection.wait.unknown", { contact, transport }) : tr("connection.wait.unknownUnnamed", { transport }),
+    "starting": () => contact ? tr("connection.wait.starting", { contact, transport }) : tr("connection.wait.startingUnnamed", { transport }),
     "connecting": () => tr("connection.wait.connecting", { transport }),
     "unreachable": () => `${wait.error ? tr("connection.wait.failedWith", { reason: shortReason(wait.error, tr) }) : tr("connection.wait.failed")} ${next}`,
-    "waiting": () => tr("connection.wait.waiting", { contact }),
-    "contact-lacks": () => tr("connection.wait.contactLacks", { contact, transport }),
+    "waiting": () => contact ? tr("connection.wait.waiting", { contact }) : tr("connection.wait.waitingUnnamed"),
+    "contact-lacks": () => contact ? tr("connection.wait.contactLacks", { contact, transport }) : tr("connection.wait.contactLacksUnnamed", { transport }),
     "app-lacks": () => wait.by === "contact" ? tr("connection.wait.appLacks", { transport }) : tr("connection.wait.appLacksNow", { transport }),
   }[wait.reason]();
   return {
@@ -295,15 +359,16 @@ export function transportWaitText(wait: TransportWait, contact: string, format: 
 /**
  * Why a chat on the DHT is not live, said for people (WISP 100, "Why a chat is not live"): what this side's last
  * attempt tried and why each did not connect, and when it tries again; on the side that answers, that the contact's
- * app dials, and what of its attempts reached this one. Nothing when there is nothing to say yet.
+ * app dials, and what of its attempts reached this one. Nothing when there is nothing to say yet. `contact`: the
+ * contact's name, or nothing when they shared none: then whole sentences of their own ("No attempt from your contact").
  */
-export function liveAttemptText(attempt: LiveAttempt | undefined, dialer: "you" | "contact" | undefined, contact: string,
+export function liveAttemptText(attempt: LiveAttempt | undefined, dialer: "you" | "contact" | undefined, contact: string | undefined,
   format: (at: number) => string = clock, tr: Translate = englishT): { label: string; lines: string[] } | undefined {
   if (!attempt && dialer !== "contact") return undefined;
   const lines: string[] = [];
-  if (dialer === "contact") lines.push(tr("connection.attempt.contactDials", { contact }));
-  if (!attempt) return { label: tr("connection.attempt.notLiveYet"), lines: [...lines, tr("connection.attempt.none", { contact })] };
-  if (attempt.side === "answered") lines.push(tr("connection.attempt.answered", { contact }));
+  if (dialer === "contact") lines.push(contact ? tr("connection.attempt.contactDials", { contact }) : tr("connection.attempt.contactDialsUnnamed"));
+  if (!attempt) return { label: tr("connection.attempt.notLiveYet"), lines: [...lines, contact ? tr("connection.attempt.none", { contact }) : tr("connection.attempt.noneUnnamed")] };
+  if (attempt.side === "answered") lines.push(contact ? tr("connection.attempt.answered", { contact }) : tr("connection.attempt.answeredUnnamed"));
   for (const f of attempt.failed) lines.push(tr("connection.attempt.failure", { transport: name(f.transport), reason: shortReason(f.error, tr) }));
   if (!attempt.failed.length && attempt.reason) lines.push(tr("connection.attempt.reason", { reason: shortReason(attempt.reason, tr) }));
   // One past is not coming: nothing dialled when it came.
@@ -355,7 +420,7 @@ export function connectionSummary(link: LinkView | undefined, now: number, conta
   // One app without WebRTC (Linux Desktop) ranks its own first: the two apps' first choices may differ.
   const noWebrtc = !ownTransports(link).includes("webrtc/1") || !!link.peerTransports && !link.peerTransports.includes("webrtc/1");
   const [whyShort, why] = only ? [tr("connection.summary.onlyShort"), tr("connection.summary.only", { transport: t })]
-    : cause === "contact" ? [contact ? tr("connection.event.contactsChoice", { contact }) : tr("connection.summary.yourContactsChoice"), tr("connection.summary.contactChose", { contact: contact ?? tr("pairing.contact"), transport: t })]
+    : cause === "contact" ? [contact ? tr("connection.event.contactsChoice", { contact }) : tr("connection.summary.yourContactsChoice"), contact ? tr("connection.summary.contactChose", { contact, transport: t }) : tr("connection.summary.contactChoseUnnamed", { transport: t })]
     : chosen && link.preferredTransport === transport ? [tr("connection.event.yourChoice"), tr("connection.summary.youChose", { transport: t })]
     : chosen ? [tr("connection.summary.fallbackShort"), tr("connection.summary.fallback", { preferred: name(link.preferredTransport), transport: t })]
     : cause === "dropped" ? [tr("connection.summary.afterDropShort"), tr("connection.summary.afterDrop", { transport: t })]

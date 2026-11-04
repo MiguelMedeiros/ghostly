@@ -188,7 +188,7 @@ describe("an audio file in the chat", () => {
     const revoke = vi.spyOn(URL, "revokeObjectURL");
     fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
     const voice: ChatFile & { voice: { duration: number; peaks: number[] } } = { id: "chat1-in-voice1", name: "Voice message.webm", size: 900, mime: "audio/webm", voice: { duration: 3000, peaks: [1, 2, 3] } };
-    renderApp(<><AudioBubble file={song()} sender="peer" /><VoiceBubble file={voice} sender="peer" /></>);
+    renderApp(<><AudioBubble file={song()} sender="peer" /><VoiceBubble file={voice} sender="peer" timestamp={1_700_000_000_000} /></>);
     fireEvent.click(screen.getByTestId("audio-play"));
     await flush();
     const url = screen.getByTestId("audio-element").getAttribute("src");
@@ -387,6 +387,19 @@ describe("an audio file not here yet", () => {
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("pause"));
     fireEvent.click(screen.getByTestId("audio-cancel"));
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("cancel"));
+  });
+
+  it("one sent from here that arrived whole, the contact checking it, has no Cancel: too late", () => {
+    const file = song({ id: "chat1-out-song-late", size: 10 * MB });
+    show(file, { state: "transferring", stage: "verifying", direction: "out", transferred: file.size, size: file.size });
+    expect(screen.queryByTestId("audio-cancel")).toBeNull();
+  });
+
+  it("one sent from here that arrived whole, offered again, has no Pause or Cancel: paused, it could be cancelled", () => {
+    const file = song({ id: "chat1-out-song-again", size: 10 * MB });
+    show(file, { state: "transferring", direction: "out", transferred: file.size, size: file.size });
+    expect(screen.queryByTestId("audio-pause-transfer")).toBeNull();
+    expect(screen.queryByTestId("audio-cancel")).toBeNull();
   });
 
   it("one sent from here whose bytes cannot be read yet says so, and plays once it has gone", async () => {

@@ -225,59 +225,76 @@ describe("where a notification goes, and what a click opens", () => {
     expect(tauri.plugin.sendNotification).toHaveBeenCalledWith({ title: "Ghostly", body: "New message", silent: true });
   });
 
-  it("extension: chrome.notifications, and a click on one of this page's opens its chat", async () => {
-    let clicked: ((id: string) => void) | undefined;
-    const chrome = {
-      runtime: { id: "ext", getURL: (path: string) => `chrome-extension://ext/${path}` },
-      permissions: { contains: vi.fn(async () => true), request: vi.fn(async () => true) },
-      notifications: { create: vi.fn(async (id: string) => id), clear: vi.fn(async () => true), onClicked: { addListener: (listener: (id: string) => void) => { clicked = listener; } } },
-      tabs: { getCurrent: vi.fn(async () => ({ id: 7, windowId: 3 })), update: vi.fn(async () => ({})) },
-      windows: { update: vi.fn(async () => ({})) },
+  /** The extension's page: the worker hears a click and asks the pages (apps/extension/src/background.ts). */
+  function extensionPage(granted: boolean) {
+    let heard: ((message: unknown, sender: { id?: string }, answer: (response: unknown) => void) => boolean) | undefined;
+    const session = new Map<string, string>();
+    const tabs = { getCurrent: vi.fn(async () => ({ id: 7, windowId: 3 })), update: vi.fn(async () => ({})) };
+    const windows = { update: vi.fn(async () => ({})) };
+    const chrome: { runtime: object; permissions: object; storage: object; notifications?: object; tabs: object; windows: object } = {
+      runtime: { id: "ext", getURL: (path: string) => `chrome-extension://ext/${path}`, onMessage: { addListener: (listener: typeof heard) => { heard = listener; } } },
+      permissions: { contains: vi.fn(async () => granted), request: vi.fn(async () => true) },
+      storage: { session: { set: async (items: Record<string, string>) => { for (const [k, v] of Object.entries(items)) session.set(k, v); }, remove: async (key: string) => { session.delete(key); } } },
+      tabs,
+      windows,
     };
     (globalThis as { chrome?: unknown }).chrome = chrome;
-    const { showPrivateNotification, onNotificationOpen } = await lib();
+    /** What this page answered the worker's question about notification `id`. */
+    const click = (id: string, sender = "ext") => {
+      let answered: unknown;
+      heard!({ target: "app", type: "notification-open", id }, { id: sender }, (response) => { answered = response; });
+      return answered;
+    };
+    return { chrome, session, tabs, windows, click };
+  }
+
+  it("extension: chrome.notifications, its chat kept for the worker, and a click on one of this page's opens its chat", async () => {
+    const { chrome, session, tabs, windows, click } = extensionPage(true);
+    const notifications = { create: vi.fn(async (id: string) => id), clear: vi.fn(async () => true) };
+    chrome.notifications = notifications;
+    const { showPrivateNotification, onNotificationOpen, clearNotification } = await lib();
     const opened = vi.fn();
     onNotificationOpen(opened);
     vi.spyOn(window, "focus").mockImplementation(() => {});
     await showPrivateNotification("event-1", "New message", "chat-a");
-    expect(chrome.notifications.create).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ title: "Ghostly", message: "New message", silent: true }));
-    const id = chrome.notifications.create.mock.calls[0]![0];
+    expect(notifications.create).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ title: "Ghostly", message: "New message", silent: true }));
+    const id = notifications.create.mock.calls[0]![0];
     expect(id).not.toContain("event-1");
-    // Another page's notification: this page does nothing, and stays where it is.
-    clicked!("event-other");
+    // Where the worker reads it once this page is gone: by the random id, never the page's.
+    expect([...session]).toEqual([[`notice:${id}`, "chat-a"]]);
+    // Another page's notification, or a message from anyone but the extension: this page does nothing, and stays where it is.
+    expect(click("event-other")).toBeUndefined();
+    expect(click(id, "another-extension")).toBeUndefined();
     expect(opened).not.toHaveBeenCalled();
-    expect(chrome.notifications.clear).not.toHaveBeenCalled();
-    expect(chrome.tabs.update).not.toHaveBeenCalled();
-    clicked!(id);
+    expect(tabs.update).not.toHaveBeenCalled();
+    expect(click(id)).toBe(true);
     expect(opened).toHaveBeenCalledWith("chat-a");
-    expect(chrome.notifications.clear).toHaveBeenCalledWith(id);
     // The app page is a tab: window.focus() cannot bring a background tab forward, so the tab and its window are.
-    await waitFor(() => expect(chrome.windows.update).toHaveBeenCalledWith(3, { focused: true }));
-    expect(chrome.tabs.update).toHaveBeenCalledWith(7, { active: true });
+    await waitFor(() => expect(windows.update).toHaveBeenCalledWith(3, { focused: true }));
+    expect(tabs.update).toHaveBeenCalledWith(7, { active: true });
+    // A ring that ended takes its notification back, and what was kept for it.
+    await showPrivateNotification("call:1", "Incoming call", "chat-b");
+    clearNotification("call:1");
+    await waitFor(() => expect([...session.keys()]).toEqual([`notice:${id}`]));
   });
+
   it("extension without the notifications permission: listening does not throw, and a grant later still opens chats", async () => {
     // "notifications" is an optional permission: until the user grants it, chrome.notifications is undefined.
-    let clicked: ((id: string) => void) | undefined;
-    const chrome: { runtime: object; permissions: object; notifications?: object } = {
-      runtime: { id: "ext", getURL: (path: string) => `chrome-extension://ext/${path}` },
-      permissions: { contains: vi.fn(async () => false), request: vi.fn(async () => true) },
-    };
-    (globalThis as { chrome?: unknown }).chrome = chrome;
+    const { chrome, click } = extensionPage(false);
     const { showPrivateNotification, onNotificationOpen, notificationPermission } = await lib();
     const opened = vi.fn();
     expect(() => onNotificationOpen(opened)).not.toThrow();
     expect(await notificationPermission()).toBe("default");
     // Granted from Settings: the API appears in the running page.
-    const notifications = { create: vi.fn(async (id: string) => id), clear: vi.fn(async () => true), onClicked: { addListener: (listener: (id: string) => void) => { clicked = listener; } } };
+    const notifications = { create: vi.fn(async (id: string) => id), clear: vi.fn(async () => true) };
     chrome.notifications = notifications;
     chrome.permissions = { contains: vi.fn(async () => true), request: vi.fn(async () => true) };
     vi.spyOn(window, "focus").mockImplementation(() => {});
     await showPrivateNotification("event-1", "New message", "chat-a");
     expect(notifications.create).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ message: "New message" }));
     const id = notifications.create.mock.calls[0]![0];
-    clicked!(id);
+    expect(click(id)).toBe(true);
     expect(opened).toHaveBeenCalledWith("chat-a");
-    expect(notifications.clear).toHaveBeenCalledWith(id);
   });
 });
 

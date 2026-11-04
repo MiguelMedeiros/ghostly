@@ -5,7 +5,7 @@ import type { MessageReply } from "@ghostly/browser/shared/types";
 import { MessageBubble } from "../../components/MessageBubble";
 import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
-import { jumpToMessage, quoteFor, replyIndex, replyTarget, REPLY_FLASH_MS, type NameOf } from "../../lib/replies";
+import { jumpToMessage, quoteFor, replyIndex, replyIndexer, replyTarget, REPLY_FLASH_MS, type NameOf } from "../../lib/replies";
 import type { ChatMessage } from "../../lib/types";
 import { renderApp } from "../render";
 
@@ -38,6 +38,14 @@ describe("starting a reply on a message", () => {
     renderApp(<MessageBubble message={message({ id: `me_${WIRE}`, sender: "me" })} peerPubKey="peer" onReply={onReply} />);
     fireEvent.click(screen.getByTestId("message-reply-action"));
     expect(onReply).toHaveBeenCalledTimes(2);
+  });
+
+  it("its ⋮ and the Reply beside it reach 24 × 24 px for a finger, without moving the row", () => {
+    renderApp(<MessageBubble message={message()} peerPubKey="peer" onReply={vi.fn()} />);
+    // 14 px of glyph plus p-1 is 22 px; a 1 px pseudo-element all round makes 24 and stays inside the row's 4 px gap.
+    for (const id of ["message-options", "message-reply-action"]) {
+      expect(screen.getByTestId(id).className.split(/\s+/)).toEqual(expect.arrayContaining(["p-1", "relative", "before:absolute", "before:-inset-px", "before:content-['']"]));
+    }
   });
 
   it("a finger swiping it right past the threshold replies; a short, a vertical or a mouse drag does not", () => {
@@ -114,8 +122,89 @@ describe("the composer's quote bar", () => {
   });
 });
 
+describe("a chat's reply index as its list changes", () => {
+  const wire = (n: number) => String(n).padStart(22, "w");
+  const row = (n: number, patch: Partial<ChatMessage> = {}) => message({ id: `peer_${wire(n)}`, text: `m${n}`, timestamp: n, ...patch });
+
+  /** Each field read of a row counts: what a new list costs the index, whatever the rows hold. */
+  function counted(rows: ChatMessage[]) {
+    const reads = { n: 0 };
+    return { reads, rows: rows.map(m => new Proxy(m, { get(target, key, receiver) { reads.n++; return Reflect.get(target, key, receiver); } })) };
+  }
+
+  it("reads only the row that came, and the newest ones the stored copy hands out anew, not the chat's whole history", () => {
+    const index = replyIndexer();
+    const { reads, rows } = counted(Array.from({ length: 1_000 }, (_, i) => row(i)));
+    index(rows);
+    reads.n = 0;
+    const found = index([...rows.slice(0, 999), { ...rows[999] }, row(1_000)]);
+    expect(reads.n).toBeLessThan(40);
+    expect(found.byId.get(`peer_${wire(1_000)}`)?.text).toBe("m1000");
+    expect(found.byRef.get(wire(999))?.text).toBe("m999");
+  });
+
+  it("reads only that row when a text I sent takes its wire id", () => {
+    const index = replyIndexer();
+    const { reads, rows } = counted(Array.from({ length: 1_000 }, (_, i) => row(i)));
+    const sending = message({ id: "me_1700000000000", sender: "me", text: "hi" });
+    index([...rows, sending]);
+    reads.n = 0;
+    const found = index([...rows, { ...sending, id: `me_${WIRE}` }]);
+    expect(reads.n).toBeLessThan(40);
+    expect(found.byId.has("me_1700000000000")).toBe(false);
+    expect(found.byRef.get(WIRE)?.id).toBe(`me_${WIRE}`);
+  });
+
+  it("gives what replyIndex gives, whatever happens to the list", () => {
+    // A small generator with a fixed seed: the same lists on every run.
+    let seed = 42;
+    const pick = (n: number) => { seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648; return seed % n; };
+    const index = replyIndexer();
+    let list: ChatMessage[] = [], next = 0;
+    const steps: ((l: ChatMessage[]) => ChatMessage[])[] = [
+      // A message comes.
+      l => [...l, row(next++)],
+      // Sent by me, with no wire id yet.
+      l => [...l, message({ id: `me_${1_000_000 + next++}`, sender: "me", text: "sending" })],
+      // It takes its wire id.
+      l => l.map(m => (/^me_\d+$/.test(m.id) && pick(2) ? { ...m, id: `me_${wire(next++)}` } : m)),
+      // The newest rows read again from storage, as new objects.
+      l => [...l.slice(0, -5), ...l.slice(-5).map(m => ({ ...m }))],
+      // A row deleted.
+      l => (l.length ? l.filter((_, i) => i !== pick(l.length)) : l),
+      // Two rows trade places, each with its id.
+      l => { if (l.length < 2) return l; const c = [...l], at = pick(l.length - 1); [c[at], c[at + 1]] = [c[at + 1], c[at]]; return c; },
+      // Two rows the same reply can name: the first holds the ref.
+      l => (l.length ? [...l, { ...l[pick(l.length)], id: `peer_copy${next++}` }] : l),
+      // A row named by a payment now.
+      l => l.map((m, i) => (i === l.length - 1 ? { ...m, paymentId: `pay${next++}` } : m)),
+    ];
+    for (let i = 0; i < 600; i++) {
+      list = steps[pick(steps.length)](list);
+      const { byId, byRef } = index(list), whole = replyIndex(list);
+      const differs = (a: Map<string, unknown>, b: Map<string, unknown>) => a.size !== b.size || [...a].some(([key, value]) => b.get(key) !== value);
+      if (differs(byId, whole.byId) || differs(byRef, whole.byRef)) expect.fail(`the index differs from replyIndex at step ${i}`);
+    }
+    expect(list.length).toBeGreaterThan(50);
+  });
+
+  it("keeps both of two texts with no wire id yet that trade places", () => {
+    const index = replyIndexer();
+    const a = message({ id: "me_1", sender: "me", text: "a" }), b = message({ id: "me_2", sender: "me", text: "b" });
+    index([a, b]);
+    const { byId } = index([{ ...b }, { ...a }]);
+    expect([...byId.keys()].sort()).toEqual(["me_1", "me_2"]);
+  });
+
+  it("says its older messages are not all here when told so", () => {
+    const index = replyIndexer();
+    expect(index([row(1)], true).partial).toBe(true);
+    expect(index([row(1)]).partial).toBeUndefined();
+  });
+});
+
 describe("the quote on a reply's bubble", () => {
-  const quoted = (reply: MessageReply, list: ChatMessage[]) => quoteFor(reply, replyIndex(list), names);
+  const quoted =(reply: MessageReply, list: ChatMessage[]) => quoteFor(reply, replyIndex(list), names);
 
   it("shows the original as it is here, not as the wire said, and a tap scrolls to it and marks it a moment", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -156,6 +245,19 @@ describe("the quote on a reply's bubble", () => {
     expect(screen.getByTestId("reply-quote-snippet")).toHaveTextContent("Original message deleted");
     await user.click(screen.getByTestId("message-quote"));
     expect(screen.getByTestId("reply-quote-note")).toHaveTextContent("The original is not in this chat");
+  });
+
+  it("an original not loaded yet (the app just started, the engine's history not in) is not called deleted, and a tap says nothing", async () => {
+    const reply = message({ id: `peer_${OTHER}`, text: "?", replyTo: { id: WIRE, snippet: "lunch at noon?", from: "me", messageId: `me_${WIRE}` } });
+    const quote = quoteFor(reply.replyTo!, replyIndex([reply], false, true), names);
+    expect(quote).toEqual({ state: "loading", name: "You", snippet: "lunch at noon?", mine: true });
+    const { user } = renderApp(<MessageBubble message={reply} peerPubKey="peer" quote={quote} />);
+    expect(screen.getByTestId("message-quote")).toHaveAttribute("data-state", "loading");
+    expect(screen.getByTestId("reply-quote-snippet")).toHaveTextContent("lunch at noon?");
+    await user.click(screen.getByTestId("message-quote"));
+    expect(screen.queryByTestId("reply-quote-note")).not.toBeInTheDocument();
+    // Once the history is all here, one still missing was deleted.
+    expect(quoteFor(reply.replyTo!, replyIndex([reply]), names).state).toBe("deleted");
   });
 
   it("an original never here shows the replier's line, marked as not found here", () => {

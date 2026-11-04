@@ -4,7 +4,7 @@ import { useFocusKept } from "../hooks/useFocusKept";
 import { useTransfer } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
 import { downloadFile } from "../lib/fileDownload";
-import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, stalledAction } from "../lib/fileStatus";
+import { canRetryFile, failedReason, fileHeld, filePercent, fileStatus, groupFileHint, isGroupFile, sentWhole, stalledAction, statusSize } from "../lib/fileStatus";
 import { knownPictureSize, pictureBox, PLACEHOLDER_BOX, rememberPictureSize, sameShape } from "../lib/pictureBox";
 import { forgetPicture, readPicture, type HeldPicture } from "../lib/pictureReads";
 import type { FileAction } from "../lib/platform";
@@ -143,9 +143,13 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   };
 
   // A picture's box is there before it is: from the size its sender said, else from what this device found, else
-  // a placeholder while it looks. Nothing is reserved for a picture that will not show (failed, missing, awaiting
-  // consent), and one that says it is one size but loads as another is shown as it loaded.
-  const failedHere = transfer?.state === "failed" || missing || saveOnly || (loaded?.url === blobUrl && loaded?.ok === false);
+  // a placeholder while it looks. Nothing is reserved for a picture that will not show (failed, awaiting consent, too
+  // large to draw), and one that says it is one size but loads as another is shown as it loaded. One whose bytes are
+  // no longer here ("No longer available", "Not in this backup") keeps the box its sender's size gave it: it was laid
+  // out with it before the read found nothing, and dropped then, a row above the view shrank by its height mid-fling
+  // and the glide jerked 107-210 px back for a frame (agents#1682).
+  const gone = !!missing && !!file.image;
+  const failedHere = transfer?.state === "failed" || (missing && !gone) || saveOnly || (loaded?.url === blobUrl && loaded?.ok === false);
   const awaiting = transfer?.state === "transferring" && transfer.stage === "asking";
   const size = (found?.id === file.id ? found.size : undefined) ?? file.image ?? knownPictureSize(file.id);
   const box = !picture || failedHere || awaiting ? null
@@ -162,14 +166,16 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
 
   /** The picture is drawn, so it can open large. */
   const drawn = !!blobUrl && loaded?.url === blobUrl && loaded.ok;
-  const status = restoring ? t("chat.file.restoring", { size: formatFileSize(file.size) }) : fileStatus(file, transfer, named, missing, t);
+  const status = restoring ? t("chat.file.restoring", { size: statusSize(file.size) }) : fileStatus(file, transfer, named, missing, t);
   const moving = transfer?.state === "transferring";
   // A group's file (WISP 503) is downloaded or not: no Decline, no pause or cancel.
   const group = isGroupFile(file);
   const controls = moving && !!transfer.direction && !!platform?.fileAction;
   const offered = controls && transfer.direction === "in" && transfer.stage === "asking";
   const pausedHere = moving && transfer.stage === "paused" && transfer.pausedBy !== "peer";
-  const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking";
+  // Sent whole: too late to pause or cancel, the contact keeps it.
+  const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking" && !sentWhole(transfer);
+  const canCancel = controls && !sentWhole(transfer);
   const canRetry = canRetryFile(file, transfer, platform);
   const stuck = platform?.fileAction ? stalledAction(transfer, t) : null;
   const failed = transfer?.state === "failed";
@@ -187,7 +193,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   return (
     <div ref={rootRef} className="min-w-[220px] max-md:min-w-[min(220px,68vw)] max-w-[min(330px,72vw)] rounded-[4px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent" data-testid="file-bubble" data-stage={transfer?.stage ?? transfer?.state ?? (restoring ? "restoring" : "done")}>
       {box && (
-        <div data-testid="file-picture" data-box={size ? "sized" : "placeholder"}
+        <div data-testid="file-picture" data-box={size ? "sized" : "placeholder"} {...(gone && { "data-gone": "" })}
           className={`rounded-[4px] overflow-hidden mb-1 ${blobUrl && loaded?.url === blobUrl ? "" : "bg-black/10"}`}
           style={{ width: box.width, maxWidth: "100%", aspectRatio: box.ratio }}>
           {blobUrl && (
@@ -219,29 +225,31 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
             onClick={() => again(() => platform!.fileAction!(file.id, stuck.action))} />
         ) : (
           <span className="w-9 h-9 rounded-full bg-black/20 flex items-center justify-center shrink-0">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
               <polyline points="14 2 14 8 20 8" />
             </svg>
           </span>
         )}
         <div className="min-w-0 flex-1">
-          <p className="text-[14px] leading-tight truncate m-0" title={file.name}>
+          {/* In its own direction: an Arabic name in an English app was cut at its start, hiding what the file is. */}
+          <p dir="auto" className="text-[14px] leading-tight truncate m-0" title={file.name}>
             <Highlight text={file.name} term={highlight} />
           </p>
+          {/* The status wraps: cut with … on a phone, it lost its end (how far the file is, its size). */}
           <p className={`flex items-center gap-1 text-[11px] m-0 ${failed || missing ? "text-danger-ink" : "text-text-primary/65"}`}>
-            <span className="min-w-0 truncate" data-testid="file-status">{status}</span>
+            <span className="min-w-0 [overflow-wrap:anywhere]" data-testid="file-status">{status}</span>
             {(reason || hint) && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="file-why" danger={!!reason} />}
           </p>
         </div>
         {(blobUrl || saveOnly) && (
-          <a
-            href={blobUrl ?? undefined}
-            download={blobUrl ? file.name : undefined}
-            onClick={(event) => { event.preventDefault(); save(); }}
-            role="button"
+          // A button, not a link to the picture's address: a file that is no picture has none here, and a link
+          // without one is no stop for Tab.
+          <button
+            type="button"
+            onClick={save}
             data-testid="file-save"
-            className={`w-9 h-9 rounded-full bg-black/20 hover:bg-black/30 flex items-center justify-center shrink-0 text-inherit transition-colors cursor-pointer ${watched ? "animate-pop" : ""}`}
+            className={`w-9 h-9 rounded-full bg-black/20 hover:bg-black/30 border-none p-0 flex items-center justify-center shrink-0 text-inherit transition-colors cursor-pointer ${watched ? "animate-pop" : ""}`}
             title={t("common.save")}
             aria-label={t("common.save")}
           >
@@ -250,7 +258,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
-          </a>
+          </button>
         )}
       </div>
       {offered && group && (
@@ -277,19 +285,23 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
           </div>
         </div>
       )}
-      {(controls && !offered && !group) && (
+      {(controls && !offered && !group && (canPause || pausedHere || canCancel)) && (
         <div className="flex gap-1.5 px-2 pb-1">
           {canPause && <button type="button" className={linkButton} data-testid="file-pause" onClick={() => act("pause")}>{t("chat.file.pause")}</button>}
           {pausedHere && <button type="button" className={linkButton} data-testid="file-resume" onClick={() => act("resume")}>{t("chat.file.resume")}</button>}
-          <button type="button" className={linkButton} data-testid="file-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>
+          {canCancel && <button type="button" className={linkButton} data-testid="file-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>}
         </div>
       )}
       {(reason || hint) && why && <WhyText id={whyId} testId="file-why-text" english={reason?.english}>{reason?.text ?? hint}</WhyText>}
       {moving && transfer.stage !== "asking" && (
-        <div className="h-1 mx-2 mb-1 rounded-full bg-black/20 overflow-hidden" data-testid="file-progress">
+        // A progress bar to a screen reader too, named by its file, read as the status says it ("62% of 4.2 GB").
+        // Not live: what is said as it goes is each step it takes (MessageAnnouncer), never each percent.
+        <div className="h-1 mx-2 mb-1 rounded-full bg-black/20 overflow-hidden" data-testid="file-progress"
+          role="progressbar" aria-label={file.name} aria-valuemin={0} aria-valuemax={100} aria-valuenow={filePercent(transfer)}
+          aria-valuetext={t("chat.file.of", { done: `${filePercent(transfer)}%`, size: statusSize(file.size) })}>
           <div
-            className={`h-full transition-[width] duration-200 ${transfer.stage === "paused" || transfer.stage === "waiting" ? "bg-text-primary/40" : "bg-accent"}`}
-            style={{ width: `${(transfer.transferred / Math.max(1, transfer.size)) * 100}%` }}
+            className={`h-full origin-left rtl:origin-right ${transfer.stage === "paused" || transfer.stage === "waiting" ? "bg-text-primary/40" : "bg-accent"}`}
+            style={{ transform: `scaleX(${Math.min(1, transfer.transferred / Math.max(1, transfer.size))})` }}
           />
         </div>
       )}

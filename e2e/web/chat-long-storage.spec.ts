@@ -43,3 +43,34 @@ test("a long chat the engine keeps stores only its last messages in the page, an
   await expect(first).toBeInViewport();
   await expect(bob.page.getByTestId("reply-quote-note")).toHaveCount(0);
 });
+
+test("started again on a long chat, a quote of an older message never says it was deleted while the history comes in", { tag: ["@feature:chat.paired.storage", "@feature:chat.replies"] }, async ({ peer }) => {
+  test.setTimeout(3 * 60_000);
+  const bob = await peer("storage-quote-bob");
+  await seed(bob.page, [{ label: "Long chat", count: 1 }]);
+  await bob.page.reload();
+  await expect(bob.page.getByTestId("chat-row-name").filter({ hasText: "Long chat" })).toBeVisible();
+  await engineHistory(bob.page, "Long chat", 5_000);
+  await bob.page.reload();
+  await bob.page.getByTestId("chat-row-name").filter({ hasText: "Long chat" }).click();
+  const quote = chat(bob).locator("[data-message-id=peer_r004999ab]").getByTestId("message-quote");
+  await expect(quote).toHaveAttribute("data-state", "found");
+
+  // Reloaded on the chat: its stored copy has the last messages only until the engine's history is in. The newest
+  // quotes the first, 5,000 up: every frame, what its quote says.
+  await bob.page.addInitScript(() => {
+    const seen: string[] = [];
+    (window as unknown as { quoteStates: string[] }).quoteStates = seen;
+    const look = () => {
+      const state = document.querySelector("[data-message-id=peer_r004999ab] [data-testid=message-quote]")?.getAttribute("data-state");
+      if (state) seen.push(state);
+      requestAnimationFrame(look);
+    };
+    requestAnimationFrame(look);
+  });
+  await bob.page.reload();
+  await expect(quote).toHaveAttribute("data-state", "found", { timeout: 30_000 });
+  const states = await bob.page.evaluate(() => (window as unknown as { quoteStates: string[] }).quoteStates);
+  expect(states.length).toBeGreaterThan(0);
+  expect(states.filter((s) => s === "deleted")).toHaveLength(0);
+});

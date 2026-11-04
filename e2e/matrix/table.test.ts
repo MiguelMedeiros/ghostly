@@ -17,6 +17,12 @@ describe("the matrix matrix.spec.ts carries", () => {
     expect(new Set(scenarios.map((s) => s.id)).size).toBe(scenarios.length);
   });
 
+  it("has no extension pick up what A's S3 holds: the suite's S3 is plain HTTP on this machine, which no shipped build reads", () => {
+    const held = scenarios.filter((s) => s.combination.delivery === "store-forward").map((s) => s.combination.client);
+    expect(held.length).toBeGreaterThan(0);
+    expect(held.filter((client) => client.endsWith("-extension"))).toEqual([]);
+  });
+
   it("is the generated one (MATRIX_WRITE=1 rewrites it)", () => {
     const text = readFileSync(spec, "utf8");
     const start = text.indexOf(BEGIN);

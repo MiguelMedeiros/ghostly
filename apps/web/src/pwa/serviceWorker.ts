@@ -1,6 +1,6 @@
-import { receiveShare, type IncomingShare } from "../../../ui/src/lib/incomingShare";
+import { incomingShare, receiveShare, type IncomingShare } from "../../../ui/src/lib/incomingShare";
 import { activeProfileId, listProfiles, switchProfile } from "../../../ui/src/lib/profiles";
-import type { FromWorker, ToWorker } from "../sw/messages";
+import type { FromWorker, ToWorker, WindowSays } from "../sw/messages";
 
 /*
  * The page's side of the service worker (`src/sw/sw.ts`): registering it, putting a new version in place when
@@ -42,26 +42,31 @@ export function prepareUpdate(): void {
   void container()?.getRegistration().then((registration) => registration?.update()).catch(() => {});
 }
 
+/**
+ * The new worker once it is installed. Called after `update()` settled: a new script is `installing` by then, so
+ * with neither a waiting nor an installing worker the active one is already the newest (another tab's Reload put it
+ * in control of this page too) and there is nothing to wait for.
+ */
 function installed(registration: ServiceWorkerRegistration, timeoutMs: number): Promise<ServiceWorker | null> {
   if (registration.waiting) return Promise.resolve(registration.waiting);
+  const worker = registration.installing;
+  if (!worker) return Promise.resolve(null);
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(registration.waiting), timeoutMs);
-    const follow = (worker: ServiceWorker | null) => {
-      if (!worker) return;
-      worker.addEventListener("statechange", () => {
-        if (worker.state === "installed") { clearTimeout(timer); resolve(worker); }
-        if (worker.state === "redundant") { clearTimeout(timer); resolve(null); }
-      });
-    };
-    if (registration.installing) follow(registration.installing);
-    else registration.addEventListener("updatefound", () => follow(registration.installing), { once: true });
+    worker.addEventListener("statechange", () => {
+      if (worker.state === "installed") { clearTimeout(timer); resolve(worker); }
+      if (worker.state === "redundant") { clearTimeout(timer); resolve(null); }
+    });
   });
 }
+
+/** This page pressed Reload and reloads on its own once the new worker takes it (not `followNewVersion`). */
+let applying = false;
 
 /**
  * Reload into the new version: the waiting worker (fetched now if it is not yet) takes over, then the page
  * reloads on it. The worker never does this on its own, so a deploy never swaps the app under a chat. With no
- * worker, or none newer after a while, it is a plain reload.
+ * worker, none newer, or one that does not finish installing in time, it is a plain reload.
  */
 export async function applyUpdate({ timeoutMs = 60_000, reload = () => window.location.reload() } = {}): Promise<void> {
   const workers = container();
@@ -70,14 +75,51 @@ export async function applyUpdate({ timeoutMs = 60_000, reload = () => window.lo
     await registration.update().catch(() => {});
     const next = await installed(registration, timeoutMs);
     if (next) {
+      applying = true;
       await new Promise<void>((resolve) => {
         workers.addEventListener("controllerchange", () => resolve(), { once: true });
         setTimeout(resolve, 10_000);
         tell(next, { type: "skip-waiting" });
       });
+      applying = false;
     }
   }
   reload();
+}
+
+// ---------- another tab took a new version ----------
+
+/**
+ * Keeps this page off a build another tab replaced. Reload on "New version" in one tab activates the new worker,
+ * which takes every open page of the app and deletes the old build's files: a page still running that build could
+ * no longer open any screen it had not opened yet. A page that runs the app reloads into the new version at once.
+ * A page waiting for another tab's lock reloads instead of starting once the lock is its own, after `handOver` (the
+ * tab that pressed Reload asking for it again), so that tab runs the app and this one waits on the new build.
+ *
+ * Called before anything else of the page's start. Returns what the page awaits once the lock is its own: it
+ * resolves when the app may start here, and never when the page reloads instead.
+ */
+export function followNewVersion({ reload = () => window.location.reload() } = {}): (handOver: () => Promise<void>) => Promise<void> {
+  const workers = container();
+  let current = workers?.controller ?? null;
+  let replaced = false;
+  let running = false;
+  workers?.addEventListener("controllerchange", () => {
+    const before = current;
+    current = workers.controller;
+    // The first worker of all takes a page that had none: the same build, nothing replaced.
+    if (!before || current === before || applying) return;
+    replaced = true;
+    if (running) reload();
+  });
+  return async (handOver) => {
+    if (replaced) {
+      await handOver();
+      reload();
+      return new Promise<never>(() => {});
+    }
+    running = true;
+  };
 }
 
 // ---------- a build gone from the server ----------
@@ -115,19 +157,57 @@ export function openedForShare(): boolean {
 
 /**
  * What the worker tells this page, now and later. Shares: a share made while this tab is the app arrives here from
- * another tab that opened for it, and each goes to the "Share to…" picker. A wake-up notification tapped: its chat.
- * A file of this build gone from the server: the app's update check runs now (`onBuildGone`).
+ * another tab that opened for it, and each goes to the "Share to…" picker. A file of this build gone from the server:
+ * the app's update check runs now (`onBuildGone`). A wake-up notification tapped: `listenForTaps`.
  */
 export function listenForShares(): void {
   const workers = container();
   if (!workers) return;
   workers.addEventListener("message", (event: MessageEvent<FromWorker>) => {
     const message = event.data;
-    if (message?.type === "open-chat") { openChat(message.path, message.profile); return; }
     if (message?.type === "build-gone") { noteBuildGone(); return; }
     if (message?.type !== "share" || !message.item) return;
-    receiveShare(message.item as IncomingShare);
-    if (!openedForShare()) window.location.hash = "#/shared";
+    const { item } = message;
+    // The page restarts with it still in the picker (a profile switch): the worker holds it again for the next page.
+    const carry = () => {
+      if (!workers.controller) return false;
+      tell(workers.controller, { type: "share-keep", item });
+      return true;
+    };
+    // Any website can post to the share target: a share waits behind one already in the picker, never in its place,
+    // and only one that is shown at once opens the picker.
+    const shown = !!incomingShare();
+    receiveShare({ ...(item as IncomingShare), carry }, { queue: true });
+    if (!shown && incomingShare() && !openedForShare()) window.location.hash = "#/shared";
+  });
+  workers.startMessages();
+  // This page takes the shares forwarded to its profile: the worker gives one to the page of the profile in front last.
+  const here = () => tellReady({ type: "share-here", profile: activeProfileId() });
+  here();
+  addEventListener("focus", here);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") here(); });
+}
+
+/** Tells the active worker, once there is one, even before it controls this page. */
+function tellReady(message: ToWorker): void {
+  const workers = container();
+  void workers?.ready.then((registration) => tell(workers.controller ?? registration.active, message)).catch(() => {});
+}
+
+/**
+ * A wake-up notification tapped, heard from the moment the page loads, whether it runs the app or waits behind another
+ * tab. The push worker first asks every window what it runs (`open-ask`), to tell the one that holds the notice's
+ * profile's peer to open the chat (`open-chat`). One that waits gets it only when no window answered for that profile
+ * (a new window it opened, or pages of an older build): of its own profile, the chat is where it starts once it takes
+ * over; of another, it runs nothing, so it switches. `peer`: whether this page holds its profile's peer yet.
+ */
+export function listenForTaps(peer: () => boolean): void {
+  const workers = container();
+  if (!workers) return;
+  workers.addEventListener("message", (event: MessageEvent<FromWorker>) => {
+    const message = event.data;
+    if (message?.type === "open-ask") { event.ports[0]?.postMessage({ profile: activeProfileId(), peer: peer() } satisfies WindowSays); return; }
+    if (message?.type === "open-chat") openChat(message.path, message.profile);
   });
   workers.startMessages();
 }
@@ -151,15 +231,15 @@ export function openChat(path: string, profile: string): void {
 export function askForShare(): void {
   const workers = container();
   if (!workers || !openedForShare()) return;
-  void workers.ready.then((registration) => tell(workers.controller ?? registration.active, { type: "share-ready" })).catch(() => {});
+  tellReady({ type: "share-ready" });
 }
 
 /** How long a tab opened for a share waits for the peer's lock before it hands the share to the tab that holds it. */
 export const SHARE_FORWARD_AFTER_MS = 3000;
 
-/** Another tab holds the peer: the worker hands the share to that one instead. */
+/** Another tab of this profile holds the peer: the worker hands the share to that one instead, and to no other. */
 export function forwardShare(): void {
   const workers = container();
   if (!workers || !openedForShare()) return;
-  void workers.ready.then((registration) => tell(workers.controller ?? registration.active, { type: "share-forward" })).catch(() => {});
+  tellReady({ type: "share-forward", profile: activeProfileId() });
 }

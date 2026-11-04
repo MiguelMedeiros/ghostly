@@ -11,12 +11,17 @@
  *   `files.read` and `files.list` answer at most 16 MiB a second together, one at a time.
  * - `files.*` (WISP 1200 · Linked files) only for an app granted `files`, through the platform's `linkedFiles`: the client
  *   asks the person and keeps the links; the app names only the ids it was given.
+ * - The read lane (WISP 1200 § A read lane to the contact), through the platform's `ranges`, in a chat with `chat`:
+ *   `files.serve` (with `files` too) lets the same app on the contact's side read one kept file, and this broker answers
+ *   the ranges it asks of its own serves; `remote.read` and `remote.stat` read what the contact's app serves, counted
+ *   with `file`'s bytes.
  *
  * `createBroker` is the protocol alone (tested without a browser); `startApp` frames it in a page.
  */
 import type { AppFileAt } from "@ghostly/browser/engine/apps";
 import { MINI_APP_LIMITS, type MiniAppContext, type MiniAppErrorCode, type MiniAppJson, type MiniAppLinkedFile, type MiniAppPeerEvent, type MiniAppRequestType } from "@ghostly/core/miniApp";
 import type { AppsPlatform } from "../platform";
+import { appInput } from "./open";
 
 /** An app to run: its checked entry (the engine's `appEntry`), what the person granted it, and where it opens. */
 export interface AppLaunch {
@@ -42,20 +47,30 @@ export interface AppView {
 
 /**
  * Why an app stopped: it asked (`closed`), its frame loaded when it should not have (`navigated`), it broke the
- * protocol before it started or sent far past the request rate (`protocol`), it never started (`timeout`), or the
- * client stopped it (`stopped`).
+ * protocol before it started or sent far past the request rate (`protocol`), it never started (`timeout`), it stopped
+ * answering the page's watchdog (`unresponsive`, `watchApp`), or the client stopped it (`stopped`).
  */
-export type AppStopReason = "closed" | "navigated" | "protocol" | "timeout" | "stopped";
+export type AppStopReason = "closed" | "navigated" | "protocol" | "timeout" | "unresponsive" | "stopped";
 
 export type AppPhase = "loading" | "starting" | "writing" | "running" | "stopped";
 
 /** Every request type the broker answers: the whole `ghostly.*` API (WISP 1200). */
 export const BROKER_REQUESTS: readonly MiniAppRequestType[] = [
-  "context", "file", "storage.get", "storage.set", "storage.delete", "storage.keys", "chat.send", "files.pick", "files.list", "files.read", "files.forget", "close",
+  "context", "file", "storage.get", "storage.set", "storage.delete", "storage.keys", "chat.send", "files.pick", "files.list", "files.read", "files.forget",
+  "files.serve", "files.unserve", "remote.read", "remote.stat", "close",
 ];
 
 /** How long the runner has to say `writing` once it has the port. */
 export const START_TIMEOUT_MS = 15_000;
+
+/** How often the page asks a running app's runner whether it still answers (`watchApp`). */
+export const PING_EVERY_MS = 1_000;
+
+/**
+ * How long a running app may hold its thread before the page stops it (`watchApp`): far past any frame an app draws
+ * or a move an engine thinks on its own thread, and short enough that a hung app does not hold the person's chats.
+ */
+export const UNRESPONSIVE_AFTER_MS = 10_000;
 
 /**
  * How many messages in one second stop the app: ten times the rate. Past the rate a request is refused, yet the page
@@ -88,9 +103,22 @@ interface BrokerOptions {
   /**
    * Whether the app is on screen now. A `files.pick` from one that is not (its chat's panel hidden, another chat or
    * page showing) is refused (`too-fast`): its sheet would come up over what the person is doing, take the focus from
-   * the box they type in, and name an app they cannot see. None: always (a Desktop app window).
+   * the box they type in, and name an app they cannot see. On Desktop the sheet is in the Ghostly window, so an app
+   * whose own window does not have the focus would pull that window over what the person is doing.
    */
-  shown?: () => boolean;
+  shown?: () => boolean | Promise<boolean>;
+  /**
+   * Whether the person is in the app now: its frame has the focus in a page that has it and was just tapped or typed in
+   * (web), its window has it (Desktop). Only then is the runner's `activity` their input (`onInput`): an app on screen beside a chat, or one
+   * left behind another window, keeps nothing unlocked.
+   */
+  inUse?: () => boolean | Promise<boolean>;
+  /** The person tapped or typed in the app (`activity`, while `inUse`): the lock screen counts it. */
+  onInput?: () => void;
+  /** The app serves a file to its contact now (true), or no longer (false): the panel's header says so. */
+  serving?: (on: boolean) => void;
+  /** The runner answered the watchdog's ping `n` (`{pong: n}` on the port, counted with the requests). */
+  pong?: (n: number) => void;
   now?: () => number;
 }
 
@@ -199,6 +227,15 @@ const refuse = (code: MiniAppErrorCode): never => { throw new Refusal(code); };
  */
 const ENGINE_REFUSALS: ReadonlySet<string> = new Set<MiniAppErrorCode>(["full", "no-file", "too-large", "too-fast", "bad-key", "stopped", "cancelled", "changed", "gone"]);
 
+/** What the read lane answers an app with, as it is; anything else is `failed`. */
+const RANGE_REFUSALS: ReadonlySet<string> = new Set<MiniAppErrorCode>(["not-open", "not-served", "offline", "peer-closed", "changed", "gone"]);
+
+/**
+ * The serve ids an app ended that it still answers asks under. The engine holds at most 4 asks of an app's in flight,
+ * so one still on its way is under one of the last few ids ended; every id it was ever given grew with each serve.
+ */
+const ENDED_SERVES_KEPT = 16;
+
 function refusalOf(error: unknown): MiniAppErrorCode {
   if (error instanceof Refusal) return error.message;
   const code = error instanceof Error ? /^([a-z][a-z-]*): /.exec(error.message)?.[1] : undefined;
@@ -244,7 +281,7 @@ function storageKey(value: unknown): string {
   return value as string;
 }
 
-export function createBroker({ host: platform, launch, view, post, stopped, byReference = false, shown = () => true, now = Date.now }: BrokerOptions): Broker {
+export function createBroker({ host: platform, launch, view, post, stopped, byReference = false, shown = () => true, inUse = () => false, onInput, serving: onServing, pong, now = Date.now }: BrokerOptions): Broker {
   const host = platform.running?.(launch.digest) ?? platform;
   let phase: AppPhase = "loading";
   const recent: number[] = [];
@@ -262,6 +299,21 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
   const chatAllowed = !!launch.chat && launch.permissions.includes("chat");
   /** Linked files: only for an app granted `files`, in a client that keeps them. Not a version's: the outer platform's. */
   const linkedFiles = () => (launch.permissions.includes("files") ? platform.linkedFiles ?? null : null);
+  /** The read lane: only in a chat, for an app granted `chat`, where the engine has it. The version's, as the chat's. */
+  const ranges = () => (chatAllowed ? host.ranges ?? null : null);
+  /**
+   * What this app serves on its chat's session now: serve id to the linked file, its size as listed and the serves not
+   * unserved yet. The engine answers the same id for a file served again, so each serve needs its own unserve.
+   */
+  const serving = new Map<string, { file: string; size: number; count: number }>();
+  /** The last serve ids this app ended: an ask under one that was on its way is still answered, so its place frees at once. */
+  const ended: string[] = [];
+  /** Says when the app starts or stops serving anything. */
+  const servingChange = (change: () => void) => {
+    const was = serving.size > 0;
+    change();
+    if (was !== serving.size > 0) onServing?.(!was);
+  };
   /** A pick waiting for the person: one at a time per app. */
   let picking = false;
   /** Aborts as the app stops: a sheet the client shows for it goes with it. */
@@ -286,8 +338,23 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
       if (frameLink !== linkId || appId === null || frame.app !== appId) return;
       if ("d" in frame) { if (peer) event("chat.message", frame.d as MiniAppJson); return; }
       if (frame.o === "open") { peer = { version: frame.v }; event("chat.peer", { open: true, version: frame.v }); }
-      else { peer = null; event("chat.peer", { open: false }); }
+      // The contact's side closed (or the session went): every serve ended with it.
+      else { peer = null; servingChange(() => serving.clear()); ended.length = 0; event("chat.peer", { open: false }); }
     });
+    const lane = ranges(), files = linkedFiles();
+    const asks = lane && files ? lane.onAsk((askLink, ask) => {
+      if (askLink !== linkId || ask.app !== appId || (!serving.has(ask.serve) && !ended.includes(ask.serve))) return;
+      const serve = serving.get(ask.serve);
+      // Ended meanwhile (unserved, or the app stopped): nothing to read, but the answer frees its place.
+      if (serve?.file !== ask.file || phase === "stopped") { void lane.answer(linkId, { app: ask.app, request: ask.request, error: "gone" }).catch(() => {}); return; }
+      // The bytes as the link reads them now: a file that changed or went says so, as `files.read` would.
+      void files.read(launch.ref, ask.file, ask.offset, ask.length).then(
+        (bytes) => lane.answer(linkId, { app: ask.app, request: ask.request, bytes, size: serve.size }),
+        (error) => { const code = refusalOf(error); return lane.answer(linkId, { app: ask.app, request: ask.request, error: code === "changed" ? "changed" : "gone" }); },
+      ).catch(() => { /* the engine went: the contact's read fails as the session does */ });
+    }) : null;
+    const frames = unsubscribe;
+    unsubscribe = () => { frames?.(); asks?.(); };
     chatOpened = true;
     opened = host.chat.open(linkId, launch.ref, launch.version).then(({ app }) => {
       if (phase === "stopped") return;
@@ -301,6 +368,8 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
     if (phase === "stopped") return;
     phase = "stopped";
     alive.abort();
+    servingChange(() => serving.clear());
+    ended.length = 0;
     unsubscribe?.();
     unsubscribe = null;
     if (chatOpened && launch.chat) void host.chat.close(launch.chat.linkId, launch.ref).catch(() => {});
@@ -325,6 +394,30 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
     });
     reading = read.catch(() => {});
     return read;
+  };
+
+  /** The bytes of the contact's reads (`remote.*`) asked and not answered yet: counted against the budget with `served`. */
+  let remoteAsked = 0;
+  /**
+   * Counted as `counted` counts, but waiting for the contact only: a contact that never answered held the app's own
+   * `file`, `files.read`, `files.list` and `files.serve` behind it for good. Not one at a time either: the read lane
+   * keeps 4 asks in flight (and queues the rest), where a chain made each wait for the one before it. Its `length`
+   * is reserved against the budget before it asks, so asks at once cannot pass it; the bytes that came replace it.
+   */
+  const countedRemote = async <T>(length: number, load: () => Promise<T>, size: (answer: T) => number): Promise<T> => {
+    await counted(async () => {
+      if (servedBytes + remoteAsked >= MINI_APP_LIMITS.fileBytesPerSecond) refuse("too-fast");
+      remoteAsked += length;
+    }, () => 0);
+    try {
+      const answer = await load();
+      const bytes = size(answer);
+      served.push({ at: now(), bytes });
+      servedBytes += bytes;
+      return answer;
+    } finally {
+      remoteAsked -= length;
+    }
   };
 
   const answer = async (type: string, args: unknown[]): Promise<{ value?: MiniAppJson | ArrayBuffer; transfer?: Transferable[]; file?: AppFileAt }> => {
@@ -390,9 +483,10 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         const files = linkedFiles();
         if (!files) return refuse("not-allowed");
         const options = pickOptions(args[0]);
-        if (picking || now() < pickAgainAt || !shown()) refuse("too-fast");
+        if (picking || now() < pickAgainAt) refuse("too-fast");
         picking = true;
         try {
+          if (!await shown()) refuse("too-fast");
           return { value: await files.pick(launch.ref, launch.title, options, alive.signal) as unknown as MiniAppJson };
         } catch (error) {
           if (refusalOf(error) === "cancelled") pickAgainAt = now() + PICK_AFTER_CANCEL_MS;
@@ -417,6 +511,57 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         if (bytes.byteLength > length) refuse("failed");
         // The host's answer is the caller's (LinkedFilesHost.read): handed over as it is, as `file`'s is, where copying
         // it again cost the page a third of the read.
+        const whole = bytes.byteOffset === 0 && bytes.buffer instanceof ArrayBuffer && bytes.byteLength === bytes.buffer.byteLength;
+        const buffer = whole ? bytes.buffer as ArrayBuffer : bytes.slice().buffer as ArrayBuffer;
+        return { value: buffer, transfer: [buffer] };
+      }
+      case "files.serve": {
+        const files = linkedFiles(), lane = ranges();
+        if (!files || !lane || !launch.chat) return refuse("not-allowed");
+        const id = args[0];
+        if (typeof id !== "string" || !LINK_ID.test(id)) refuse("bad-request");
+        // Its size, as the contact's reads tell it: an id this app does not keep, or cannot read now, is gone.
+        // The one link where the host can look it up: a library's whole list per serve spent the app's second on it.
+        const entry = files.entry
+          ? await counted(() => files.entry!(launch.ref, id as string), (link) => (link ? listBytes([link]) : 0))
+          : (await counted(() => files.list(launch.ref, launch.title, alive.signal), listBytes)).find((link) => link.id === id);
+        if (!entry?.available) refuse("gone");
+        const answer = await lane.serve(launch.chat!.linkId, launch.ref, id as string);
+        if ("error" in answer) refuse(answer.error);
+        const { serve } = answer as { serve: string };
+        const held = serving.get(serve);
+        const count = (held && held.file === id ? held.count : 0) + 1;
+        servingChange(() => serving.set(serve, { file: id as string, size: entry!.size, count }));
+        return { value: serve };
+      }
+      case "files.unserve": {
+        const lane = ranges();
+        if (!linkedFiles() || !lane || !launch.chat) return refuse("not-allowed");
+        const serve = args[0];
+        if (typeof serve !== "string" || !LINK_ID.test(serve)) refuse("bad-request");
+        const held = serving.get(serve as string);
+        if (held && held.count > 1) held.count--;
+        else if (held) {
+          servingChange(() => serving.delete(serve as string));
+          ended.push(serve as string);
+          if (ended.length > ENDED_SERVES_KEPT) ended.shift();
+          await lane.unserve(launch.chat!.linkId, serve as string);
+        }
+        return {};
+      }
+      case "remote.read":
+      case "remote.stat": {
+        const lane = ranges();
+        if (!lane || !launch.chat) return refuse("not-allowed");
+        const serve = args[0];
+        if (typeof serve !== "string" || !LINK_ID.test(serve)) refuse("bad-request");
+        const { offset, length } = type === "remote.stat" ? { offset: 0, length: 1 } : readRange(args[1]);
+        const read = await countedRemote(length, () => lane.read(launch.chat!.linkId, launch.ref, serve as string, offset, length), (got) => ("bytes" in got ? got.bytes.byteLength : 0));
+        // The contact's limits (`busy`) are a wait: the app backs off and asks again, as for its own (agents#1766).
+        if ("error" in read) refuse(read.error === "busy" ? "too-fast" : RANGE_REFUSALS.has(read.error) ? read.error as MiniAppErrorCode : "failed");
+        const { bytes, size } = read as { bytes: Uint8Array; size: number };
+        if (type === "remote.stat") return { value: { size } };
+        if (bytes.byteLength > length) refuse("failed");
         const whole = bytes.byteOffset === 0 && bytes.buffer instanceof ArrayBuffer && bytes.byteLength === bytes.buffer.byteLength;
         const buffer = whole ? bytes.buffer as ArrayBuffer : bytes.slice().buffer as ArrayBuffer;
         return { value: buffer, transfer: [buffer] };
@@ -457,6 +602,13 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
     while (recent.length && recent[0]! <= at - 1000) recent.shift();
     // Before anything of the message is read: stopping closes the port, so `recent` never holds more than this.
     if (recent.length > STOP_REQUESTS_PER_SECOND) return stop("protocol");
+    // The runner's answer to the watchdog, one a second: counted with the requests (a flood of them is a flood) but never
+    // refused for the rate, so an app busy with requests still answers it.
+    // Two reads, not a walk of the message: a pong is `{pong: n}` with no `id`.
+    if (data && typeof data === "object" && Number.isSafeInteger((data as { pong?: unknown }).pong) && !("id" in data)) {
+      pong?.((data as { pong: number }).pong);
+      return;
+    }
 
     const id = data && typeof data === "object" && Number.isSafeInteger((data as { id?: unknown }).id) && (data as { id: number }).id >= 0 ? (data as { id: number }).id : null;
     const fail = (error: MiniAppErrorCode) => { if (id !== null) post({ id, ok: false, error }); };
@@ -477,6 +629,14 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
     if (type === "close") {
       post({ id, ok: true });
       return stop("closed");
+    }
+    // The runner's word that the person tapped or typed in the app (a trusted pointerdown or keydown, at most one every
+    // few seconds). The app runs in the runner's realm and can send it too, so it counts only while the person is in
+    // the app; the answer is the same either way.
+    if (type === "activity") {
+      post({ id, ok: true });
+      void Promise.resolve().then(inUse).then((yes) => { if (yes && phase !== "stopped") onInput?.(); }, () => {});
+      return;
     }
 
     answer(type, args).then(({ value, transfer, file }) => {
@@ -525,17 +685,66 @@ export function onScreen(frame: HTMLIFrameElement): boolean {
   return frame.isConnected && document.visibilityState !== "hidden" && (frame.checkVisibility?.() ?? true);
 }
 
+export interface AppWatch {
+  /** Every `PING_EVERY_MS` while the app runs. */
+  tick(): void;
+  /** The runner answered ping `n`. */
+  pong(n: number): void;
+  /** The page was hidden: what it waited through meanwhile (a frozen tab, a phone asleep) is not the app's. */
+  hidden(): void;
+}
+
+/**
+ * The page's watchdog on a running app (WISP 1200 § The runner and the broker): a ping on the port each tick, which
+ * the runner answers at once, and `hung` once the app has held its thread `boundMs` while the page was shown.
+ *
+ * Where the runner's frame has a thread of its own (site isolation), an app that loops leaves its ping unanswered
+ * while the page runs on, and is stopped at the bound. Where it shares the page's (WebKit, Chromium without site
+ * isolation), nothing of the page runs while the app loops: it is seen when the loop gives the thread back, by a tick
+ * that comes `boundMs` late. The page cannot tell which frame held that thread, so every app running then is stopped;
+ * an endless loop there never gives it back, and the tab hangs until the browser offers to close it.
+ */
+export function watchApp({ ping, hung, boundMs = UNRESPONSIVE_AFTER_MS, now = () => performance.now(), shown = () => document.visibilityState !== "hidden" }: {
+  ping: (n: number) => void;
+  hung: () => void;
+  boundMs?: number;
+  now?: () => number;
+  shown?: () => boolean;
+}): AppWatch {
+  let asked: { n: number; at: number } | null = null;
+  let count = 0;
+  let last = now();
+  /** The page was hidden since the last tick: nothing is judged until a ping goes out in a shown page again. */
+  let excused = false;
+  return {
+    tick() {
+      const at = now();
+      const gap = at - last;
+      last = at;
+      if (!shown()) { excused = true; return; }
+      if (!excused && (gap >= boundMs || (asked && at - asked.at >= boundMs))) return hung();
+      if (!asked || excused) { asked = { n: ++count, at }; ping(asked.n); }
+      excused = false;
+    },
+    pong(n) { if (asked?.n === n) asked = null; },
+    hidden() { excused = true; },
+  };
+}
+
 /**
  * Runs an app in a sandboxed frame of the runner, inside `container`: the frame, its one port, the start and the
- * teardown. The frame is removed when the app stops, for whatever reason.
+ * teardown, and once it runs the watchdog (`watchApp`). The frame is removed when the app stops, for whatever reason.
  */
-export function startApp({ container, host, launch, view, onStop, startTimeoutMs = START_TIMEOUT_MS }: {
+export function startApp({ container, host, launch, view, onStop, onServing, startTimeoutMs = START_TIMEOUT_MS, unresponsiveAfterMs = UNRESPONSIVE_AFTER_MS }: {
   container: HTMLElement;
   host: AppsPlatform;
   launch: AppLaunch;
   view: AppView;
   onStop?: (reason: AppStopReason) => void;
+  /** It serves a file to its contact now, or no longer. */
+  onServing?: (on: boolean) => void;
   startTimeoutMs?: number;
+  unresponsiveAfterMs?: number;
 }): RunningApp {
   const runner = runnerFor(host, launch);
   const frame = document.createElement("iframe");
@@ -546,13 +755,26 @@ export function startApp({ container, host, launch, view, onStop, startTimeoutMs
   frame.title = launch.title;
   let port: MessagePort | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let watch: AppWatch | null = null;
+  let watching: ReturnType<typeof setInterval> | null = null;
+  const hidden = () => { if (document.visibilityState === "hidden") watch?.hidden(); };
 
   const broker = createBroker({
     host, launch, view,
     shown: () => onScreen(frame),
+    // The app can post `activity` itself, and left in front it would keep the lock away for good: the person's tap or key
+    // in the frame also activates this page (HTML § user activation), which no script can, so that is asked too (a
+    // browser without the API: the focus only, as before).
+    inUse: () => onScreen(frame) && document.hasFocus() && document.activeElement === frame
+      && ((navigator as { userActivation?: { isActive: boolean } }).userActivation?.isActive ?? true),
+    onInput: appInput,
+    serving: onServing,
+    pong: (n) => watch?.pong(n),
     post:(message, transfer) => { try { port?.postMessage(message, transfer ?? []); } catch { /* closed */ } },
     stopped: (reason) => {
       if (timer) clearTimeout(timer);
+      if (watching) clearInterval(watching);
+      document.removeEventListener("visibilitychange", hidden);
       frame.removeEventListener("load", loaded);
       port?.close();
       port = null;
@@ -564,6 +786,16 @@ export function startApp({ container, host, launch, view, onStop, startTimeoutMs
   function loaded() {
     broker.load();
     if (broker.phase === "running" && timer) { clearTimeout(timer); timer = null; }
+    if (broker.phase === "running" && !watch) {
+      watch = watchApp({
+        boundMs: unresponsiveAfterMs,
+        ping: (n) => { try { port?.postMessage({ event: "ping", data: n }); } catch { /* closed */ } },
+        hung: () => broker.stop("unresponsive"),
+      });
+      watching = setInterval(() => watch?.tick(), PING_EVERY_MS);
+      document.addEventListener("visibilitychange", hidden);
+      watch.tick();
+    }
     if (broker.phase !== "starting" || port) return;
     const channel = new MessageChannel();
     port = channel.port1;

@@ -30,6 +30,8 @@ export const LOCKFILES = [
   { ecosystem: "npm", file: "infra/services/hyperdht-relay/package-lock.json" },
   // Iroh for browsers: packages/iroh-web/pkg, which the web app loads, is built from it.
   { ecosystem: "crates.io", file: "native/transports/iroh-web/Cargo.lock" },
+  // The translation runtime: its node_modules go into the archive the Desktop downloads with a first language model.
+  { ecosystem: "npm", file: "native/translation/package-lock.json" },
 ];
 
 /** Lockfiles the scan leaves out, each with why: nothing of them reaches a person who runs Ghostly. */

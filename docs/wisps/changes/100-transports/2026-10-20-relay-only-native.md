@@ -1,0 +1,1 @@
+Relay only, rule 3 built: with Hide my IP from contacts on, the Desktop offers its contacts no Iroh or HyperDHT endpoint of its own; HyperDHT goes through the HyperDHT relay as in a browser, and the profile's own devices keep theirs. The Desktop's DHT reads and the setting in Settings come later. No wire change.

@@ -217,7 +217,8 @@ export type StatusCardKind = StatusCard["kind"];
 const ID = /^[A-Za-z0-9_.:][A-Za-z0-9_.:-]{0,63}$/;
 /** A button's id: 1 to 32 of `A-Z a-z 0-9 _ . : -`, not starting with `-`. */
 export const BUTTON_ID = /^[A-Za-z0-9_.:][A-Za-z0-9_.:-]{0,31}$/;
-const CRON = /^[0-9A-Za-z*,/?#\- ]{1,64}$/;
+/** A routine's cron line, trimmed: 1 to 64 of `0-9 A-Z a-z * , / ? # -` and spaces (shown, never run). */
+export const CRON_LINE = /^[0-9A-Za-z*,/?#\- ]{1,64}$/;
 
 /**
  * Whether a typed answer is a button's label or id (WISP 406 · Message Buttons): ignoring case and spaces at the ends.
@@ -269,6 +270,19 @@ export function cardUrl(value: unknown): string | undefined {
   try { url = new URL(value); } catch { return undefined; }
   if (url.protocol !== "https:" || !url.hostname || url.username || url.password) return undefined;
   return url.href.length <= STATUS_CARD_LIMITS.url ? url.href : undefined;
+}
+
+/**
+ * The link an app card names, sent or read (WISP 405 § An app): a card's link without its query or fragment. A
+ * private file's read token rides in a query, and a card goes to a contact; a bundle is pinned by its digest, not its link.
+ */
+export function appCardUrl(value: unknown): string | undefined {
+  const href = cardUrl(value);
+  if (!href) return undefined;
+  const url = new URL(href);
+  url.search = "";
+  url.hash = "";
+  return url.href;
 }
 
 /** The host a card shows beside a link, so the reader sees where it goes before following it. */
@@ -378,7 +392,7 @@ export function readStatusCard(raw: unknown, now = Date.now()): StatusCard | und
     if (!isAppRef(raw.ref) || id !== appCardId(raw.ref) || !isAppHash(raw.digest) || !appSequence(raw.sequence)) return undefined;
     const title = cardLine(raw.title, STATUS_CARD_LIMITS.appTitle);
     if (!title) return undefined;
-    const version = cardLine(raw.version, STATUS_CARD_LIMITS.appVersion), url = cardUrl(raw.url);
+    const version = cardLine(raw.version, STATUS_CARD_LIMITS.appVersion), url = appCardUrl(raw.url);
     return { kind: "app", id, ref: raw.ref, digest: raw.digest, sequence: raw.sequence, title,
       ...(version && { version }), ...(url && { url }), ...(raw.opened === true && { opened: true as const }) };
   }
@@ -428,7 +442,7 @@ export function readStatusCard(raw: unknown, now = Date.now()): StatusCard | und
   if (raw.kind === "routine") {
     const name = cardLine(raw.name, STATUS_CARD_LIMITS.title), schedule = cardLine(raw.schedule, STATUS_CARD_LIMITS.schedule), state = oneOf(ROUTINE_STATES, raw.state);
     if (!name || !schedule || !state) return undefined;
-    const cron = typeof raw.cron === "string" && CRON.test(raw.cron.trim()) ? raw.cron.trim() : undefined;
+    const cron = typeof raw.cron === "string" && CRON_LINE.test(raw.cron.trim()) ? raw.cron.trim() : undefined;
     const lastRun = readRun(raw.lastRun, now);
     const nextRunAt = typeof raw.nextRunAt === "number" && Number.isSafeInteger(raw.nextRunAt) && raw.nextRunAt > 0 && raw.nextRunAt <= now + STATUS_CARD_LIMITS.nextRunMs ? raw.nextRunAt : undefined;
     const runs: RoutineRun[] = [];
@@ -593,7 +607,7 @@ export function checkStatusCard(raw: unknown, now = Date.now()): { card: StatusC
   } else {
     errors.push(line("name", raw.name, STATUS_CARD_LIMITS.title, true), line("schedule", raw.schedule, STATUS_CARD_LIMITS.schedule, true));
     if (!oneOf(ROUTINE_STATES, raw.state)) errors.push(`state is one of ${ROUTINE_STATES.join(", ")}`);
-    if (raw.cron !== undefined && !(typeof raw.cron === "string" && CRON.test(raw.cron.trim()))) errors.push(`cron is a cron line of at most ${STATUS_CARD_LIMITS.cron} characters`);
+    if (raw.cron !== undefined && !(typeof raw.cron === "string" && CRON_LINE.test(raw.cron.trim()))) errors.push(`cron is a cron line of at most ${STATUS_CARD_LIMITS.cron} characters`);
     if (raw.nextRunAt !== undefined && !(typeof raw.nextRunAt === "number" && Number.isSafeInteger(raw.nextRunAt) && raw.nextRunAt > 0 && raw.nextRunAt <= now + STATUS_CARD_LIMITS.nextRunMs)) errors.push("nextRunAt is a time in milliseconds, within a year");
     const run = (field: string, value: unknown) => {
       if (!isObject(value)) return errors.push(`${field} is an object`);
@@ -645,8 +659,8 @@ export function statusCardText(card: StatusCard): string {
   if (card.kind === "removed") return removedCardText(card.of);
   // An app card names the app, and its url on a line of its own so an older app shows a link (WISP 405 § An app).
   if (card.kind === "app") {
-    const named = `${card.title}${card.version ? ` ${card.version}` : ""}`;
-    return [card.opened ? `🧩 Opened ${named} in this chat (Ghostly app)` : `🧩 ${named} (Ghostly app)`, ...(card.url ? [card.url] : [])].join("\n");
+    const named = `${card.title}${card.version ? ` ${card.version}` : ""}`, url = appCardUrl(card.url);
+    return [card.opened ? `🧩 Opened ${named} in this chat (Ghostly app)` : `🧩 ${named} (Ghostly app)`, ...(url ? [url] : [])].join("\n");
   }
   // One line: what an older app shows, and the chat list's line (WISP 405 § Usage).
   if (card.kind === "usage") {

@@ -511,6 +511,18 @@ describe("request and send", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it("Back on the real-money step from the keyboard puts the keys back on Send, not on the page", async () => {
+    const { user, onSend } = open({ withWallet: false });
+    await user.type(amount(), "21");
+    send().focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("review-confirm-back")).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("review-mainnet-confirm")).not.toBeInTheDocument();
+    await waitFor(() => expect(send()).toHaveFocus());
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("shows why a send failed and stays open", async () => {
     const { user, onClose } = open({ withWallet: false, onSend: async () => "Not enough sats at that mint" });
     await user.type(amount(), "21");

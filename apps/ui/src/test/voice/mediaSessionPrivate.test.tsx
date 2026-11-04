@@ -45,7 +45,7 @@ function Screen({ voice = [], songs = [], open = true }: { voice?: ReturnType<ty
       <LockButton />
       {open && (
         <NowPlayingChat.Provider value={{ path: "/chat/chat1", name: "Ana Souza", contact: true }}>
-          {voice.map((file) => <VoiceBubble key={file.id} file={file} sender="peer" peerName="Ana Souza" />)}
+          {voice.map((file) => <VoiceBubble key={file.id} file={file} sender="peer" peerName="Ana Souza" timestamp={1_700_000_000_000} />)}
           {songs.map((file) => <AudioBubble key={file.id} file={file} sender="peer" peerName="Ana Souza" />)}
         </NowPlayingChat.Provider>
       )}

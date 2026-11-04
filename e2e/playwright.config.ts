@@ -9,6 +9,7 @@ if (existsSync(infraEnv)) process.loadEnvFile(infraEnv);
 
 const { OIDC_TEST_ISSUER } = await import("./support/oidcIssuer");
 const { ATPROTO_TEST_PLC } = await import("./support/atproto");
+const { CHROMIUM_SANDBOX } = await import("./support/chromiumSandbox");
 
 /**
  * End-to-end tests for Ghostly: real browsers, the shipped build, no servers.
@@ -39,13 +40,18 @@ export default defineConfig({
   // Two peers find each other by polling every few seconds: messages take seconds, not milliseconds.
   timeout: 3 * 60_000,
   expect: { timeout: 60_000 },
-  reporter: process.env.CI ? [["list"], ["html", { open: "never", outputFolder: "../playwright-report" }], ["github"]] : [["list"], ["html", { open: "never", outputFolder: "../playwright-report" }]],
+  // On CI also a blob report: e2e.yml runs the suite in shards and merges their blobs into one HTML report.
+  reporter: process.env.CI
+    ? [["list"], ["html", { open: "never", outputFolder: "../playwright-report" }], ["github"], ["blob", { outputDir: "../blob-report" }]]
+    : [["list"], ["html", { open: "never", outputFolder: "../playwright-report" }]],
   use: {
     baseURL: deployed ?? `http://localhost:${port}`,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
     actionTimeout: 30_000,
+    // The extension project's own launches inherit these; the web project's launchOptions replace them, so carry it too.
+    launchOptions: { chromiumSandbox: CHROMIUM_SANDBOX },
   },
   projects: [
     {
@@ -57,6 +63,7 @@ export default defineConfig({
         // routes: blocked here, allowed by the specs about it (web/pwa.spec.ts, `serviceWorkers` in openPeer).
         serviceWorkers: "block",
         launchOptions: {
+          chromiumSandbox: CHROMIUM_SANDBOX,
           args: [
             // Every peer is on this machine: let ICE use plain host addresses.
             "--disable-features=WebRtcHideLocalIpsWithMdns",
@@ -85,6 +92,9 @@ export default defineConfig({
         timeout: 5 * 60_000,
         // The suite's build knows the local OIDC issuer (support/oidcIssuer.ts) and carries the SDK example's
         // adapters (web/sdk-plugin.spec.ts); a release build does neither.
-        env: { VITE_OIDC_TEST_ISSUER: OIDC_TEST_ISSUER, VITE_ATPROTO_TEST_PLC: ATPROTO_TEST_PLC, GHOSTLY_PLUGINS: "packages/sdk/examples/adapter/src/index.ts", VITE_APPS_TEST: "1" },
+        // A contact's shared app opens on `<label>.localhost` (web/services-web-open.spec.ts): Chromium sends every
+        // *.localhost to this machine, and `vite preview` serves those names too.
+        env: { VITE_OIDC_TEST_ISSUER: OIDC_TEST_ISSUER, VITE_ATPROTO_TEST_PLC: ATPROTO_TEST_PLC, GHOSTLY_PLUGINS: "packages/sdk/examples/adapter/src/index.ts", VITE_APPS_TEST: "1",
+          VITE_SERVICES_HOST: `http://*.localhost:${port}`, VITE_SERVICES_APP_ORIGIN: `http://localhost:${port}` },
       },
 });

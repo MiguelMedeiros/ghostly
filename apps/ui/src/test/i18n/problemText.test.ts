@@ -19,7 +19,7 @@ describe("relayCause: what a relay error comes down to", () => {
   it.each<[string, string, ReturnType<typeof relayCause>]>([
     ["every relay held back or left alone, with the soonest retry", PHONE, { kind: "wait", retryInS: 52 }],
     ["held back on every relay", "Could not publish discovery: Publish held back on every relay: DiscoveryBudgetError: Discovery request budget reached; retry shortly", { kind: "wait" }],
-    ["a relay cooling down", "Could not publish discovery: Publish failed on every relay: Error: Discovery relay is cooling down; retry shortly", { kind: "wait" }],
+    ["a relay that did not answer a moment ago", "Could not publish discovery: Publish failed on every relay: Error: https://a.test did not answer a moment ago; retry shortly", { kind: "wait" }],
     ["connection details held back, retried in a minute", "Could not publish connection details: Publish held back on every relay: DiscoveryBudgetError: Discovery request budget reached; retry shortly. Retrying in 60 s.", { kind: "wait", retryInS: 60 }],
     ["a relay failing now beside one held back", "Could not publish discovery: Publish failed on every relay: DiscoveryBudgetError: Discovery request budget reached; retry shortly; Error: https://a.test responded 500", { kind: "unreachable" }],
     ["a read that timed out", "Could not read discovery: timeout", { kind: "unreachable" }],
@@ -105,8 +105,8 @@ describe("problemLine: a problem where only a line fits", () => {
     ["That signature was made by SHA256:AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdefg, not the key you entered (SHA256:x)", /made by another key\. Not the key you entered\./],
     ["GitHub: octo-cat does not list the key that signed (SHA256:AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdefg)", /octo-cat doesn't list the key that signed/],
     ["Enter at least one relay address (https://…)", /at least one relay/],
+    ["The TXT record at _ghostly.example.com names another Ghostly key: this proof was replaced or removed", /TXT record names another Ghostly key\. The record must hold this proof's value\./],
     // None of these is known: their words stay after the title.
-    ["The TXT record at _ghostly.example.com names another Ghostly key: this proof was replaced or removed", /_ghostly\.example\.com names another Ghostly key/],
     ["https://example.com/.well-known/nostr.json names another Nostr key for example.com", /names another Nostr key/],
     ["Key SHA256:AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdefg is not allowed here", /is not allowed here/],
   ];

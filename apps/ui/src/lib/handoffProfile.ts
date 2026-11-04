@@ -19,7 +19,7 @@ import { dropWalletStorageOf } from "./profileData";
  *
  * A staging namespace notes which files it holds whole and checked under keys of its own outside every profile's
  * prefix (`ghostly-staging:<ns>:<file id>`, one per file), so a pull that stopped goes on without sending them again,
- * and nothing of it is ever taken for a profile's own key. One key per file: a file that begins or finishes writes
+ * and nothing of it is ever taken for a profile's own key. They go when the namespace is installed or dropped. One key per file: a file that begins or finishes writes
  * its own few bytes. As one list, read and written whole twice per file, the n-th file moved about 400 × n characters
  * through the page's storage: 0.77 GB for a profile of 2,000 files.
  */
@@ -31,6 +31,13 @@ const stagedKey = (ns: string, id: string) => `${stagingKey(ns)}:${id}`;
 const stagedKeys = (ns: string): string[] => {
   const prefix = stagedKey(ns, "");
   return Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((key): key is string => !!key?.startsWith(prefix));
+};
+/** A staged file left as a Blob on a record of the frozen copy: that database, and the record's id. */
+type HeldBlob = { database: string; id: string };
+
+/** A namespace's notes of its staged files, the one list of an earlier build included. */
+const dropNotes = (ns: string): void => {
+  try { localStorage.removeItem(stagingKey(ns)); for (const key of stagedKeys(ns)) localStorage.removeItem(key); } catch { /* nothing kept */ }
 };
 const isStaged = (file: Partial<HandoffFile>): file is Pick<HandoffFile, "size" | "sha256"> => typeof file.sha256 === "string" && Number.isSafeInteger(file.size);
 /** `Staging.restore` writes the files' records in transactions of this many, and of about this many bytes of small files (held in memory until written). */
@@ -71,8 +78,11 @@ function profileSource(database: string): HandoffSource {
       if (!file.blob && !file.bytes) continue;
       const source = await fileSource(file, database, false, async () => peer).catch(() => null);
       if (!source) continue;
-      // The stored digest when there is one (checked when the file was received or staged), else read and hashed once.
-      let sha = digests.get(file.id) ?? (typeof file.digest === "string" && DIGEST.test(file.digest) ? file.digest : undefined);
+      // The stored digest when there is one (checked when the file was received or staged), else read and hashed once. A
+      // group file's digest is its author's from the announcement on, before any byte came: until its bytes passed it
+      // (`done`), what is stored under it can be another file a member served whole, so it is read and hashed.
+      const checked = !file.group || file.direction === "out" || file.transfer?.state === "done";
+      let sha = digests.get(file.id) ?? (checked && typeof file.digest === "string" && DIGEST.test(file.digest) ? file.digest : undefined);
       if (!sha) { sha = await digestOf(source).catch(() => undefined); if (!sha) continue; }
       digests.set(file.id, sha);
       found.set(file.id, { file: { id: file.id, size: source.size, sha256: sha }, source });
@@ -127,14 +137,25 @@ async function copyFrom(from: FileSource, to: FileBytes, file: HandoffFile): Pro
 /**
  * Copies a file of the frozen copy this page holds (the profile it runs, its database shut, `db` opened as stored) from
  * where the profile keeps it: a file up to `SMALL_FILE_BYTES` is a Blob on its record (a move restores it so), a larger
- * one is in file storage.
+ * one is in file storage. A Blob whose record's checked digest is the file's is not copied (WISP 06 § Installing the
+ * staged state: "Files `B` already held are linked into it, not copied"): `restore` puts that Blob on the staged record.
+ * Copied, every file was written twice and read back once at each move back, the device's whole media history (bug hunt,
+ * 2026-11-04). Resolves to whether it was left where it is.
  */
-async function copyHeldFile(db: IDBDatabase, id: string, to: FileBytes, file: HandoffFile): Promise<void> {
+async function copyHeldFile(db: IDBDatabase, id: string, to: FileBytes, file: HandoffFile): Promise<boolean> {
   const tx = db.transaction(["files", "fileState"], "readonly");
   const [row, state] = await Promise.all([wrap(tx.objectStore("files").get(id)), wrap(tx.objectStore("fileState").get(id))]) as [StoredFile | undefined, Partial<StoredFile> | undefined];
-  const source = row ? await fileSource({ ...row, ...state } as StoredFile, db.name, false, async () => db) : null;
+  const stored = row ? { ...row, ...state } as StoredFile : null;
+  // As `profileSource` takes a stored digest: a group file's is its author's until its bytes passed it.
+  const checked = !!stored && (!stored.group || stored.direction === "out" || stored.transfer?.state === "done");
+  if (stored?.blob && checked && stored.digest === file.sha256 && stored.blob.size === file.size) {
+    await to.remove(file.id).catch(() => {});
+    return true;
+  }
+  const source = stored ? await fileSource(stored, db.name, false, async () => db) : null;
   if (!source) throw new Error("The file is not on this device");
   await copyFrom(source, to, file);
+  return false;
 }
 
 function dropDatabase(name: string): Promise<void> {
@@ -190,9 +211,16 @@ class Staging implements HandoffStaging {
       });
     } catch { return []; }
   }
-  private note(file: HandoffFile): void {
+  /** `held`: the file is not in this namespace's storage but a Blob on that record of the frozen copy. */
+  private note(file: HandoffFile, held?: HeldBlob): void {
     this.adopt();
-    localStorage.setItem(stagedKey(this.ns, file.id), JSON.stringify({ size: file.size, sha256: file.sha256 }));
+    localStorage.setItem(stagedKey(this.ns, file.id), JSON.stringify({ size: file.size, sha256: file.sha256, ...(held ? { held } : {}) }));
+  }
+  private heldBlob(id: string): HeldBlob | null {
+    try {
+      const held = (JSON.parse(localStorage.getItem(stagedKey(this.ns, id)) ?? "null") as { held?: Partial<HeldBlob> } | null)?.held;
+      return typeof held?.database === "string" && typeof held.id === "string" ? { database: held.database, id: held.id } : null;
+    } catch { return null; }
   }
   private forget(id: string): void {
     this.adopt();
@@ -229,13 +257,16 @@ class Staging implements HandoffStaging {
     const db = await openAsStored(databaseName());
     try {
       for (const { fromId, file } of copies) {
-        try { await copyHeldFile(db, fromId, to, file); } catch { continue; }
-        this.note(file);
+        let kept: boolean;
+        try { kept = await copyHeldFile(db, fromId, to, file); } catch { continue; }
+        this.note(file, kept ? { database: db.name, id: fromId } : undefined);
       }
     } finally { db.close(); }
   }
 
   async copyStaged(fromId: string, file: HandoffFile): Promise<void> {
+    const held = this.heldBlob(fromId);
+    if (held) { this.note(file, held); return; }
     const store = await spaceFiles(this.database);
     await copyFile(store, fromId, store, file);
     this.note(file);
@@ -248,14 +279,21 @@ class Staging implements HandoffStaging {
     const store = await spaceFiles(this.database);
     const kind = (await fileBytes()).kind;
     const db = await wrap(indexedDB.open(this.database));
+    // The frozen copies files are left on as Blobs (`copyHeld`), opened as stored once each.
+    const frozen = new Map<string, IDBDatabase>();
+    const kept = new Map(files.map((file) => [file.id, this.heldBlob(file.id)]));
     try {
       for (let at = 0; at < files.length;) {
         // The small files' bytes are read before the transaction opens: one left with nothing asked of it commits.
-        const small = new Map<string, Uint8Array>();
+        const small = new Map<string, Uint8Array | Blob>();
+        const blobs = new Map<string, { file: HandoffFile; id: string }[]>();
         let end = at;
         for (let held = 0; end < files.length && end - at < RESTORE_FILES && held < RESTORE_BYTES; end++) {
           const file = files[end];
           if (file.size > SMALL_FILE_BYTES) continue;
+          const from = kept.get(file.id);
+          // The frozen copy's own Blob, not its bytes: nothing read or written here but its record.
+          if (from) { blobs.set(from.database, blobs.get(from.database) ?? []).get(from.database)!.push({ file, id: from.id }); continue; }
           const bytes = new Uint8Array(file.size);
           for (let done = 0; done < file.size;) {
             const part = await store.read(file.id, done, Math.min(FILE_BYTES_STEP, file.size - done));
@@ -266,6 +304,16 @@ class Staging implements HandoffStaging {
           small.set(file.id, bytes);
           held += file.size;
         }
+        for (const [database, list] of blobs) {
+          if (!frozen.has(database)) frozen.set(database, await openAsStored(database));
+          const rows = frozen.get(database)!.transaction("files", "readonly").objectStore("files");
+          const found = await Promise.all(list.map(({ id }) => wrap(rows.get(id)) as Promise<StoredFile | undefined>));
+          list.forEach(({ file }, i) => {
+            const blob = found[i]?.blob;
+            if (!blob || blob.size !== file.size) throw new Error("The file is not on this device");
+            small.set(file.id, blob);
+          });
+        }
         const tx = db.transaction("files", "readwrite"), records = tx.objectStore("files");
         for (const file of files.slice(at, end)) {
           const read = records.get(file.id);
@@ -273,17 +321,20 @@ class Staging implements HandoffStaging {
             const row = read.result as StoredFile | undefined;
             if (!row) return;
             const { blob: _blob, bytes: _bytes, ...rest } = row;
-            const bytes = small.get(file.id);
+            const bytes = small.get(file.id), type = row.metadata?.mime ?? "";
             records.put(bytes
-              ? { ...rest, blob: new Blob([bytes as BlobPart], { type: row.metadata?.mime ?? "" }), digest: row.digest ?? file.sha256 }
+              ? { ...rest, blob: bytes instanceof Uint8Array ? new Blob([bytes as BlobPart], { type }) : bytes.slice(0, bytes.size, type), digest: row.digest ?? file.sha256 }
               : { ...rest, bytes: kind, digest: row.digest ?? file.sha256 });
           };
         }
         await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onabort = tx.onerror = () => reject(tx.error ?? new Error("The files' records could not be written")); });
         at = end;
       }
-    } finally { db.close(); }
-    for (const file of files) if (file.size <= SMALL_FILE_BYTES) await store.remove(file.id).catch(() => {});
+    } finally {
+      db.close();
+      for (const opened of frozen.values()) opened.close();
+    }
+    for (const file of files) if (file.size <= SMALL_FILE_BYTES && !kept.get(file.id)) await store.remove(file.id).catch(() => {});
   }
 
   async dropRest(): Promise<void> {
@@ -303,7 +354,9 @@ const staging: HandoffStagingHost = {
   async open(database) {
     return new Staging(database ? spaceOf(database) : newSpace());
   },
-  async install(old, staged) { pointProfile(old, staged); },
+  // Installed, the staged namespace is the profile's own: its notes only served a pull that had not finished, and one
+  // key per file would stay outside every profile's prefix for as long as this copy lives (bug hunt, 2026-11-04).
+  async install(old, staged) { pointProfile(old, staged); dropNotes(spaceOf(staged)); },
   async revert(old, staged) { pointProfile(staged, old); },
   async drop(database) {
     const ns = spaceOf(database);
@@ -313,7 +366,7 @@ const staging: HandoffStagingHost = {
     if (await databaseExists(database)) await dropDatabase(database);
     await dropFileSpace(database).catch(() => {});
     dropKeys(ns);
-    try { localStorage.removeItem(stagingKey(ns)); for (const key of stagedKeys(ns)) localStorage.removeItem(key); } catch { /* nothing kept */ }
+    dropNotes(ns);
   },
 };
 

@@ -1,9 +1,9 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import type { NostrContactView } from "@ghostly/browser/nostr/types";
 import { useDialogFocus } from "../../hooks/useDismiss";
-import { dateTime, providerOf, useEngineState } from "../../lib/identities";
+import { dateTime, providerOf, useEngineValue } from "../../lib/identities";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { Deck } from "../deck/Deck";
 import { CardFlip, FlipTurnButton } from "../deck/Flip";
@@ -18,13 +18,14 @@ import { PeerAvatar } from "../Avatar";
 import { AvatarOpener } from "../AvatarViewer";
 import { usePeerAvatar } from "../../hooks/useAvatars";
 import { IdCardFace, IdCardMark } from "./IdCardFace";
-import { IdentityActivity } from "./IdentityActivity";
+import { IdentityActivity, type ChipLink } from "./IdentityActivity";
 import { contactGhostlyCard, GHOSTLY, idCardTone, machineLine, receivedIdCard, type IdCardContent } from "./idCard";
 import { ProviderMark } from "./ProviderMark";
 import { PublicProfileDetails } from "./PublicProfileDetails";
 import "./contact-panel.css";
 import { deckArrows } from "../deck/arrows";
 import { problemLine } from "../../lib/problemText";
+import { fillNames } from "../../lib/fillNodes";
 
 type Entry = { id: typeof GHOSTLY; ghostly: true; card: IdCardContent } | { id: string; ghostly?: false; r: ReceivedIdentityView; card: IdCardContent };
 type Received = Extract<Entry, { r: ReceivedIdentityView }>;
@@ -36,7 +37,8 @@ type Received = Extract<Entry, { r: ReceivedIdentityView }>;
  * and their key in this chat, then what they shared; a click turns a card over to how it was proven, when this app
  * checked it, until when it holds, and Check again. Under the deck, the chosen card's public profile, the people the
  * reader knows that it follows, and its recent posts (IdentityActivity.tsx), when its network has them. The reader's
- * own identities are shared from the composer (+ → Identity).
+ * own identities are shared from the composer (+ → Identity). Keys: beside the chat it is a region of the page (Tab
+ * goes on to the chat, F6 between them, Escape from inside closes it); over the chat, a dialog that keeps Tab inside.
  */
 export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
   peerKey: string; name: string;
@@ -44,12 +46,16 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
   card?: { side: "mine" | "theirs"; id: string };
   onClose: () => void;
 }) {
-  const state = useEngineState();
+  // This contact's link, and whose each chat is with the identities they shared (the names the activity's chips
+  // show): not the whole state, which drew the panel again on every engine state while it stayed open.
+  const link = useEngineValue(state => state?.links.find(l => l.peerPubKeyZ32 === peerKey));
+  const links = useEngineValue(state => (state?.links ?? []).map((l): ChipLink => ({ id: l.id, peerPubKeyZ32: l.peerPubKeyZ32, identities: l.identities && { received: l.identities.received } })));
   const { t, language } = useI18n();
-  const link = state?.links.find(l => l.peerPubKeyZ32 === peerKey);
-  const ref = useRef<HTMLElement>(null);
+  const ref = useRef<HTMLElement>(null), backdrop = useRef<HTMLDivElement>(null);
   const titleId = useId();
-  useDialogFocus(ref, onClose);
+  const beside = useBeside(backdrop);
+  const besideNow = useRef(beside); besideNow.current = beside;
+  useDialogFocus(ref, onClose, undefined, undefined, () => besideNow.current);
   const face = useContactFace(peerKey), sent = usePeerAvatar(peerKey);
   const photo = face?.photo ?? sent;
   const now = Math.floor(Date.now() / 1000);
@@ -63,8 +69,9 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
   ];
 
   return (<>
-    <div className="contact-panel-backdrop" aria-hidden="true" onClick={onClose} />
-    <aside ref={ref} tabIndex={-1} role="dialog" aria-labelledby={titleId} data-testid="chat-identities" className="contact-panel focus:outline-none">
+    <div ref={backdrop} className="contact-panel-backdrop" aria-hidden="true" onClick={onClose} />
+    {/* Beside the chat, a region of the page beside it (Tab goes on to the chat, F6 between them); over it, a dialog. */}
+    <aside ref={ref} tabIndex={-1} role={beside ? undefined : "dialog"} aria-modal={beside ? undefined : true} aria-labelledby={titleId} data-testid="chat-identities" className="contact-panel focus:outline-none">
       <div className="contact-panel-head">
         <div className="flex min-w-0 items-start gap-3">
           {/* Their picture as the chat shows it; with one, a click opens it large (AvatarViewer.tsx). */}
@@ -86,7 +93,7 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
         <section className="contact-panel-section" data-testid="chat-identities-received" aria-label={t("identities.contact.sharedBy", { name })}>
           <h3 className="contact-panel-heading">{t("identities.contact.sharedBy", { name })}</h3>
           {link
-            ? <TheirCards t={t} entries={entries} link={link} links={state?.links ?? []} name={name} nostr={link.nostr ?? []} initial={card?.side === "theirs" ? card.id : undefined} />
+            ? <TheirCards t={t} entries={entries} link={link} links={links} name={name} nostr={link.nostr ?? []} initial={card?.side === "theirs" ? card.id : undefined} />
             : <p className="contact-panel-note" data-testid="chat-identities-none">{t("identities.ghostly.nothingElse", { name })}</p>}
         </section>
         {link?.identities?.error && <p className="contact-panel-note" role="alert" data-testid="chat-identities-link-error">{problemLine(link.identities.error, t)}</p>}
@@ -96,8 +103,27 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
   </>);
 }
 
+/**
+ * Whether the panel sits beside the chat rather than over it: its backdrop is shown only over it (contact-panel.css,
+ * by the chat's column width and the screen's), so this follows the column as it is resized.
+ */
+function useBeside(backdrop: RefObject<HTMLElement | null>) {
+  const [beside, setBeside] = useState(false);
+  useLayoutEffect(() => {
+    const element = backdrop.current, pane = element?.parentElement;
+    if (!element || !pane) return;
+    const check = () => setBeside(getComputedStyle(element).display === "none");
+    check();
+    if (typeof ResizeObserver !== "function") return;
+    const observer = new ResizeObserver(check);
+    observer.observe(pane);
+    return () => observer.disconnect();
+  }, [backdrop]);
+  return beside;
+}
+
 /** The contact's ID cards: a deck, then the chosen card turned over. */
-function TheirCards({ t, entries, link, links, name, nostr, initial }: { t: Translate; entries: Entry[]; link: LinkView; links: readonly LinkView[]; name: string; nostr: NostrContactView[]; initial?: string }) {
+function TheirCards({ t, entries, link, links, name, nostr, initial }: { t: Translate; entries: Entry[]; link: LinkView; links: readonly ChipLink[]; name: string; nostr: NostrContactView[]; initial?: string }) {
   // The card shown first: the one tapped in the timeline, else their first shared identity, else their Ghostly card.
   const [chosen, setChosen] = useState<string | undefined>(initial ?? entries.find(e => !e.ghostly)?.id);
   const { side, flipped, turn, turnBack } = useCardFlip();
@@ -143,7 +169,7 @@ function TheirCards({ t, entries, link, links, name, nostr, initial }: { t: Tran
  * chat in full, to copy, whether it is verified (codes compared), and since when the chat exists.
  */
 function TheirGhostlyBack({ t, card, link, name, turning, onCards }: { t: Translate; card: IdCardContent; link: LinkView; name: string; turning: boolean; onCards: () => void }) {
-  const { copied, copy } = useCopyKey(card.subject);
+  const { copied, failed, copy } = useCopyKey(card.subject);
   return (
     <div className="id-card-back contact-card-back" data-testid="chat-identity-back" data-provider={GHOSTLY} data-status={card.status}>
       <div className="id-card-back-band">
@@ -159,7 +185,7 @@ function TheirGhostlyBack({ t, card, link, name, turning, onCards }: { t: Transl
             <span className="id-card-back-meta">{card.category}</span>
           </span>
         </div>
-        <code className="block break-all select-all rounded-lg bg-black/30 p-2 text-[11px] leading-4 text-white/85" data-testid="chat-identity-key">{card.subject}</code>
+        <code dir="ltr" className="block text-left break-all select-all rounded-lg bg-black/30 p-2 text-[11px] leading-4 text-white/85" data-testid="chat-identity-key">{card.subject}</code>
         <dl className="contact-card-facts">
           <dt>{t("identities.contact.name")}</dt>
           <dd>{t("identities.ghostly.nameAsSaid")}</dd>
@@ -170,6 +196,7 @@ function TheirGhostlyBack({ t, card, link, name, turning, onCards }: { t: Transl
         <div className="flex flex-wrap gap-2">
           <button type="button" className="contact-card-action" data-testid="chat-identity-copy-key" disabled={turning} onClick={copy}>{copied ? t("identities.ghostly.copied") : t("identities.ghostly.copyKey")}</button>
         </div>
+        {failed && <p role="alert" className="id-card-back-note" data-testid="chat-identity-copy-error">{t("identities.add.copyError")}</p>}
       </div>
       <span className="id-card-mrz id-card-back-mrz" aria-hidden="true">{card.mrz ?? machineLine(card.label, card.subject)}</span>
     </div>
@@ -199,24 +226,27 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
           <ProviderMark provider={r.provider} subject={card.bound} />
           <span className="id-card-back-who">
             <span className="id-card-back-name">{card.label}{card.name ? ` · ${card.name}` : ""}</span>
-            <span className="id-card-back-subject" title={card.subject} data-testid="chat-identity-received-subject">{card.short}</span>
+            {/* A domain whole, wrapped: its end names who owns it, and the face shows only that end. */}
+            {r.provider === "domain"
+              ? <span className="id-card-back-subject id-card-back-subject-whole" data-testid="chat-identity-received-subject"><bdi dir="ltr">{card.subject}</bdi></span>
+              : <span className="id-card-back-subject" title={card.subject} data-testid="chat-identity-received-subject">{card.short}</span>}
             <span className="id-card-back-meta">{card.category}</span>
             {/* A name the evidence or a lookup carried, and who wrote it: a holder's own words are not a proof. */}
-            {card.name && <span className="id-card-back-meta" data-testid="chat-identity-received-name-source">{t("identities.contact.nameFrom", { source: card.profile?.found && card.profile.name ? t("identities.contact.theirProfile") : r.display?.source ?? r.verified.display?.source ?? "" })}</span>}
+            {card.name && <span className="id-card-back-meta" data-testid="chat-identity-received-name-source">{fillNames(t("identities.contact.nameFrom"), { source: card.profile?.found && card.profile.name ? t("identities.contact.theirProfile") : r.display?.source ?? r.verified.display?.source ?? "" })}</span>}
           </span>
         </div>
         {card.lookup && <PublicProfileDetails provider={r.provider} profile={card.profile} testId="chat-identity-public-profile" />}
         <dl className="contact-card-facts">
           <dt>{t("identities.contact.proves")}</dt>
-          <dd>{card.attested ? (r.verified.attester ? t("identities.contact.attested", { attester: r.verified.attester }) : t("identities.contact.attestedByProvider")) : t("identities.contact.holderOnly")}</dd>
+          <dd>{card.attested ? (r.verified.attester ? fillNames(t("identities.contact.attested"), { attester: r.verified.attester }) : t("identities.contact.attestedByProvider")) : t("identities.contact.holderOnly")}</dd>
           <dt>{t("identities.contact.how")}</dt>
-          <dd>{r.verified.source}</dd>
+          <dd><bdi>{r.verified.source}</bdi></dd>
           <dt>{t("identities.contact.checked")}</dt>
           <dd data-testid="chat-identity-checked">{r.checkedAt !== r.verifiedAt ? t("identities.contact.checkedAgain", { time: dateTime(r.verifiedAt, t.language), last: dateTime(r.checkedAt, t.language) }) : t("identities.contact.checkedOnce", { time: dateTime(r.verifiedAt, t.language) })}</dd>
           <dt>{t("identities.contact.validity")}</dt>
           <dd>{card.validity}</dd>
           <dt>{t("identities.contact.status")}</dt>
-          <dd data-testid="chat-identity-received-status" data-status={card.status}>{r.status === "unconfirmed" ? (r.error ? t("identities.contact.unconfirmedWhy", { status: card.statusLabel, error: problemLine(r.error, t) }) : t("identities.contact.unconfirmed", { status: card.statusLabel }))
+          <dd data-testid="chat-identity-received-status" data-status={card.status}>{r.status === "unconfirmed" ? (r.error ? fillNames(t("identities.contact.unconfirmedWhy", { status: card.statusLabel }), { error: problemLine(r.error, t) }) : t("identities.contact.unconfirmed", { status: card.statusLabel }))
             : r.status === "revoked" ? t("identities.contact.revoked", { status: card.statusLabel }) : card.statusLabel}</dd>
         </dl>
         <div className="flex flex-wrap gap-2">

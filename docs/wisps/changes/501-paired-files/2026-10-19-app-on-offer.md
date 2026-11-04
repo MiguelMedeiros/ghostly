@@ -1,0 +1,1 @@
+`pf-offer` may carry `app`, the chat app id of the mini-app that sent the file ahead (WISP 1200 § Sending a film ahead). The receiver keeps it with the file and drops a malformed one; consent is unchanged, and an older receiver ignores the key.

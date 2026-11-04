@@ -1,6 +1,6 @@
-import { screen, within } from "@testing-library/react";
-import { useState, type ComponentProps } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, screen, within } from "@testing-library/react";
+import { useEffect, useState, type ComponentProps } from "react";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { CallButtons } from "../../components/CallButtons";
 import { CallOverlay } from "../../components/CallOverlay";
 import { IncomingCallNotification } from "../../components/IncomingCallNotification";
@@ -148,6 +148,29 @@ describe("sharing the screen from inside a call", () => {
     expect(screen.getByTestId("call-sharing")).toHaveAttribute("data-peer", "true");
   });
 
+  // agents#1630: a phone's camera held upright gives a 3:4 picture, 160 px high from 64 px down: the notice at a fixed
+  // 10.5rem landed 48 px into it.
+  it("on a phone, sits below your own picture whatever its shape: a camera held sideways or upright", () => {
+    const width = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 375 });
+    onTestFinished(() => { Object.defineProperty(window, "innerWidth", { configurable: true, value: width }); });
+    overlay({ remoteHasVideo: true, remoteIsScreenSharing: true, isVideoOff: false, localStream: new FakeMediaStream([new FakeTrack("video")]) as unknown as MediaStream });
+    const notice = screen.getByTestId("call-sharing");
+    const video = screen.getByTestId("call-self-view").querySelector("video")!;
+    const shaped = (w: number, h: number) => {
+      Object.defineProperty(video, "videoWidth", { configurable: true, value: w });
+      Object.defineProperty(video, "videoHeight", { configurable: true, value: h });
+      fireEvent.loadedMetadata(video);
+    };
+    // Sideways (4:3): the picture ends at 154 px, the notice starts at 170.
+    shaped(320, 240);
+    expect(notice.style.top).toBe("calc(170px + env(safe-area-inset-top))");
+    // Upright (3:4): it ends at 224, the notice starts at 240.
+    shaped(240, 320);
+    expect(notice.style.top).toBe("calc(240px + env(safe-area-inset-top))");
+    expect(notice.className).not.toMatch(/max-md:top-/);
+  });
+
   it("says nothing about sharing when nobody is", () => {
     overlay({ remoteHasVideo: true, isVideoOff: false });
     expect(screen.queryByTestId("call-sharing")).toBeNull();
@@ -290,6 +313,47 @@ describe("a call for a screen reader and the keys", () => {
     localStorage.removeItem("ghostly_call_mini");
   });
 
+  it("ended from its small window, gives the focus back to the call's button, not to the page", async () => {
+    const { user } = renderApp(<ChatWithCall />);
+    await user.tab();
+    await user.keyboard("{Enter}");
+    await user.tab();
+    expect(screen.getByTestId("call-minimize")).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("call-window")).toHaveAttribute("data-mini", "true");
+
+    screen.getByTestId("call-hang-up").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("call-window")).toBeNull();
+    expect(screen.getByTestId("call-audio")).toHaveFocus();
+  });
+
+  it("started in its small window and ended by the contact with the focus in it, gives the focus back", async () => {
+    localStorage.setItem("ghostly_call_mini", "1");
+    const contact = { hangUp: () => {} };
+    function Call() {
+      const [on, setOn] = useState(false);
+      useEffect(() => { contact.hangUp = () => setOn(false); }, []);
+      return (
+        <>
+          <CallButtons blocked={null} busy={on} onCall={() => setOn(true)} />
+          {on && <CallOverlay callState="connected" localStream={null} remoteStream={null} isMuted={false} isVideoOff canSendVideo remoteHasVideo={false}
+            callStartedAt={Date.now()} peerName="Ana" onHangUp={() => setOn(false)} onToggleMute={vi.fn()} onToggleVideo={vi.fn()} />}
+        </>
+      );
+    }
+    const { user } = renderApp(<Call />);
+    await user.tab();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("call-window")).toHaveAttribute("data-mini", "true");
+    screen.getByTestId("call-mute").focus();
+
+    await act(async () => contact.hangUp());
+    expect(screen.queryByTestId("call-window")).toBeNull();
+    expect(screen.getByTestId("call-audio")).toHaveFocus();
+    localStorage.removeItem("ghostly_call_mini");
+  });
+
   it("says the call's state in words as it moves on, never the running clock", () => {
     const { rerender } = overlay({ callState: "offering" });
     // Calling... is the state line itself, read out as it changes; nothing says it twice.
@@ -324,6 +388,29 @@ describe("a call for a screen reader and the keys", () => {
     expect(screen.getByTestId("call-status")).not.toHaveAttribute("data-reconnecting");
     expect(screen.getByTestId("call-status")).not.toHaveTextContent("Reconnecting...");
     expect(screen.getByTestId("call-state-spoken")).toHaveTextContent(/^Connected$/);
+  });
+});
+
+describe("the call's clock", () => {
+  it("counts minutes and seconds, and hours too past the hour: never 65:00", () => {
+    vi.useFakeTimers();
+    try {
+      const second = 1000, minute = 60 * second, hour = 60 * minute;
+      const read = (since: number) => {
+        const { unmount } = overlay({ callStartedAt: Date.now() - since });
+        act(() => { vi.advanceTimersByTime(second); });
+        const text = screen.getByTestId("call-status").textContent;
+        unmount();
+        return text;
+      };
+      expect(read(4 * second)).toBe("Audio call00:05");
+      expect(read(59 * minute + 58 * second)).toBe("Audio call59:59");
+      expect(read(hour - second)).toBe("Audio call1:00:00");
+      expect(read(hour + 5 * minute - second)).toBe("Audio call1:05:00");
+      expect(read(2 * hour + 3 * minute + 8 * second)).toBe("Audio call2:03:09");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

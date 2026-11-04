@@ -35,15 +35,15 @@ export function Home() {
       <div className="text-center flex flex-col gap-5 animate-fade-in w-full max-w-[388px] px-6 py-6">
         <div className="flex flex-col items-center gap-2">
         <div className="text-accent">
-          <svg className="w-16 h-16 mx-auto" viewBox="0 0 24 24" fill="currentColor">
+          <svg className="w-16 h-16 mx-auto" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
             <path d="M12 2C7.582 2 4 5.582 4 10v8c0 .75.6 1 1 .6l2-1.6 2 1.6c.4.3.8.3 1.2 0L12 17l1.8 1.6c.4.3.8.3 1.2 0l2-1.6 2 1.6c.4.4 1 .15 1-.6v-8c0-4.418-3.582-8-8-8z"/>
             <circle cx="9" cy="9" r="1.5" fill="#111b21"/>
             <circle cx="15" cy="9" r="1.5" fill="#111b21"/>
           </svg>
         </div>
-        <h2 className="text-text-primary text-2xl font-light">
+        <h1 className="text-text-primary text-2xl font-light">
           {t("app.name")}
-        </h2>
+        </h1>
         <p className="text-text-muted text-sm leading-tight">
           {t("home.description")}
         </p>
@@ -75,7 +75,7 @@ export function Home() {
         <button
           onClick={handleCreate}
           disabled={isCreating}
-          className="inline-flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-chat-bg disabled:opacity-50"
+          className="inline-flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-chat-bg disabled:opacity-50 forced-colors:border forced-colors:border-[color:ButtonText]"
         >
           {isCreating ? (
             <>

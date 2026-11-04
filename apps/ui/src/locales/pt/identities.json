@@ -39,12 +39,17 @@
     "continue": "Continuar",
     "continueIn": "Continue na janela do {{provider}}…",
     "continueWith": "Continuar com {{provider}}",
+    "copyError": "Não foi possível copiar. Selecione o texto acima e copie você mesmo.",
+    "copyStep": "Copiar passo {{step}}",
     "dayOne": "1 dia",
     "days": "{{count}} dias",
     "experimental": "Experimental: ainda não testado com todas as ferramentas.",
+    "keepOpen": "Manter aberto",
     "keyAbout": "Só quem tem esta chave pode fazer esta prova.",
     "kinds": "Tipos de identidade",
     "lead": "Opcional. Nada é compartilhado até você escolher um contato em uma conversa.",
+    "leaveBody": "O valor mostrado só funciona com estes passos. Depois de fechá-los, uma nova tentativa gera um novo valor, e o que você publicou terá de ser substituído.",
+    "leaveTitle": "Fechar sem salvar?",
     "linkable": "Compartilhar a mesma identidade com vários contatos permite que eles saibam que é a mesma pessoa.",
     "lookingUp": "Buscando…",
     "none": "Nenhum tipo de identidade pode ser adicionado neste app ainda.",
@@ -68,7 +73,7 @@
   "card": {
     "attestedBy": "Atestada por {{attester}}",
     "attestedByProvider": "Atestada pelo provedor",
-    "checked": "Verificada {{time}}",
+    "checked": "Conferida {{time}}",
     "expired": "Expirada",
     "expiredOn": "Expirou em {{date}}",
     "expiresIn": "Expira em {{count}} dias",
@@ -90,7 +95,7 @@
     "attested": "{{attester}} diz que esta conta fez login: só é tão confiável quanto {{attester}}.",
     "attestedByProvider": "O provedor diz que esta conta fez login: só é tão confiável quanto ele.",
     "backToCards": "Voltar aos cartões de {{name}}",
-    "checked": "Verificada",
+    "checked": "Conferida",
     "checkedAgain": "Neste dispositivo em {{time}}, última vez em {{last}}",
     "checkedOnce": "Neste dispositivo em {{time}}",
     "checking": "Verificando…",
@@ -118,7 +123,7 @@
     "theirProfile": "o perfil público da pessoa",
     "title": "Identidades com {{name}}",
     "unconfirmed": "{{status}}: não pôde ser confirmada",
-    "unconfirmedWhy": "{{status}}: não pôde ser confirmada ({{error}})",
+    "unconfirmedWhy": "{{status}}: {{error}}",
     "validity": "Validade"
   },
   "did": {
@@ -213,7 +218,7 @@
     "removeNote": "Os contatos com quem você compartilhou são avisados de que não está mais compartilhada, e uma revogação é publicada para que vejam mesmo que você nunca se reconecte. Uma cópia que guardaram não pode ser apagada.",
     "renew": "Adicionar de novo",
     "renewHint": "Adicione de novo para renovar; depois remova esta.",
-    "shareHint": "Compartilhe pelas Identidades de uma conversa, um contato de cada vez.",
+    "shareHint": "Compartilhe pelo + de uma conversa, um contato de cada vez.",
     "takeDownFailed": "O que foi publicado não pôde ser retirado. Você pode remover a prova sem isso: os contatos ainda a veem revogada.",
     "title": "Suas"
   },
@@ -351,7 +356,7 @@
     "sourceFound": "Carregado de {{from}} {{time}}. É o que a conta diz sobre si, não faz parte da prova. A consulta revelou a esse servidor o endereço IP deste dispositivo."
   },
   "received": {
-    "checked": "{{category}} · verificada em {{time}}",
+    "checked": "{{category}} · conferida em {{time}}",
     "title": "Dos seus contatos"
   },
   "share": {
@@ -360,11 +365,8 @@
     "checking": "Verificando",
     "notChecked": "Não verificada",
     "notVerified": "Não verificada",
-    "notVerifiedWhy": "Não verificada: {{error}}",
     "revokedMine": "Seu {{what}} foi revogado",
     "revokedTheirs": "O {{what}} de {{contact}} foi revogado",
-    "sharedMineState": "Você compartilhou {{what}} · {{state}}",
-    "sharedTheirsState": "{{contact}} compartilhou {{what}} · {{state}}",
     "stoppedMine": "Você parou de compartilhar {{what}}",
     "stoppedTheirs": "{{contact}} parou de compartilhar {{what}}",
     "waiting": "Aguardando"

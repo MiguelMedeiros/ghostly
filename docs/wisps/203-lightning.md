@@ -67,7 +67,7 @@ Lightning card chosen (**Pay with**, when the network has several), under every 
 
 ## Candidate adapter
 
-Validate the invoice's network, expiry, amount and intended payment context through the payment component, then obtain user authorization. Match an invoice to the authenticated request and reject incompatible asset/amount requirements. Specify explicit behavior for amountless invoices; never silently infer an unlimited amount. Do not send funds on capability advertisement alone.
+Validate the invoice's network, expiry, amount and intended payment context through the payment component, then obtain user authorization. Match an invoice to the authenticated request and reject incompatible asset/amount requirements. An amountless invoice is paid only for an amount the person typed for it, through a component that says it takes one and confirms that amount before anything is spent; otherwise it is refused. Never silently infer an amount. Do not send funds on capability advertisement alone.
 
 An external component executes payment and reports settlement evidence or an unknown outcome. Reconcile unknown results before retry or fallback; an absent `pay-res` is not evidence the payment failed. Only the appropriate payee can report its request settled, and a peer statement remains distinct from wallet-verified settlement.
 

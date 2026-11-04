@@ -29,10 +29,12 @@ function digestOf(size: number): string {
 
 // Node has no storage estimate: this device says it has 40 GiB left for files (`left`, for a test that fills it).
 let left = 40 * 1024 ** 3;
+/** The contact's check of a received file's digest waits for this, as one over a large file takes a while. */
+let checking: Promise<void> | undefined;
 Object.defineProperty(globalThis.navigator, "storage", { value: { estimate: async () => ({ quota: 50 * 1024 ** 3, usage: 50 * 1024 ** 3 - left }) }, configurable: true });
 
 const cleanup: (() => Promise<void>)[] = [];
-afterEach(async () => { left = 40 * 1024 ** 3; for (const step of cleanup.splice(0).reverse()) await step(); });
+afterEach(async () => { left = 40 * 1024 ** 3; checking = undefined; for (const step of cleanup.splice(0).reverse()) await step(); });
 
 /** `files2`: the contact also takes files/2; `largeFiles: false`, an app from before files/3. */
 async function setup({ files2 = false, largeFiles = true } = {}) {
@@ -66,7 +68,7 @@ async function setup({ files2 = false, largeFiles = true } = {}) {
       const disk = received.get(record.id) ?? { hash: createHash("sha256"), length: 0 };
       received.set(record.id, disk);
       return { offset: disk.length, append: async (bytes) => { disk.hash.update(bytes); disk.length += bytes.length; }, flush: async () => {},
-        verify: async (digest) => disk.hash.copy().digest("base64url") === digest, discard: async () => { received.delete(record.id); } };
+        verify: async (digest) => { await checking; return disk.hash.copy().digest("base64url") === digest; }, discard: async () => { received.delete(record.id); } };
     },
     openSource: async (record) => {
       const { size, digest } = sources.get(record.id)!;
@@ -287,6 +289,28 @@ it("a received file that stopped arriving is asked for again, from where it stan
   expect((await db.getMessages(t.id)).filter((m) => m.id === "peer_ask-000001")).toHaveLength(1);
 }, 60_000);
 
+it("a received file is said done only once that is kept: the app gone before, it arrives again after the restart", async () => {
+  const t = await setup();
+  // The page goes away with the done record of the file still on its way to the database: it never lands.
+  let lost = true;
+  const patch = fileStore.patch.bind(fileStore);
+  const spy = vi.spyOn(fileStore, "patch").mockImplementation((id, change) =>
+    lost && change.wire3?.direction === "in" && change.wire3.id === "cut-000001" && change.wire3.state === "done" ? new Promise(() => {}) : patch(id, change));
+  cleanup.push(async () => spy.mockRestore());
+  t.offer("cut-000001", 632);
+  await vi.waitFor(async () => expect((await t.incoming("cut-000001"))?.transfer?.state).toBe("done"));
+  const { fileId } = (await t.incoming("cut-000001"))!;
+  // Long enough for a done said at once to reach the contact.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  expect(t.records.get("out:cut-000001")?.state, "the contact is not told it is done before it is kept").toBe("verifying");
+  lost = false;
+  await t.restartApp();
+  await vi.waitFor(async () => expect((await fileStore.get(fileId))?.wire3?.state).toBe("done"), { timeout: 15_000 });
+  expect(t.records.get("out:cut-000001")?.state).toBe("done");
+  expect(await (await fileBytes()).digest(fileId)).toBe(digestOf(632));
+  expect((await db.getMessages(t.id)).filter((m) => m.id === "peer_cut-000001")).toHaveLength(1);
+}, 60_000);
+
 it("sends a file to a contact with files/3, and cancels one on both sides", async () => {
   const t = await setup();
   const put1 = (wireId: string, size: number) => put(t, wireId, size);
@@ -300,6 +324,20 @@ it("sends a file to a contact with files/3, and cancels one on both sides", asyn
   await vi.waitFor(() => expect(t.node().getState().transfers[cancelled.id]).toMatchObject({ stage: "asking" }));
   t.node().fileAction({ linkId: t.id, fileId: cancelled.id, action: "cancel" });
   await vi.waitFor(() => expect(t.records.get("in:send-0002")).toMatchObject({ state: "cancelled", error: "Cancelled by the sender" }));
+}, 60_000);
+
+it("a sent file whose every byte arrived is too late to cancel: it ends done on both sides, kept there", async () => {
+  const t = await setup();
+  let release!: () => void;
+  checking = new Promise<void>((resolve) => { release = resolve; });
+  const sent = await put(t, "late-00001", 3 * 1024 * 1024 + 5);
+  await vi.waitFor(() => expect(t.records.get("in:late-00001")?.state).toBe("verifying"), { timeout: 30_000 });
+  expect(t.node().getState().transfers[sent.id]).toMatchObject({ state: "transferring", stage: "verifying", direction: "out" });
+  t.node().fileAction({ linkId: t.id, fileId: sent.id, action: "cancel" });
+  release();
+  await vi.waitFor(() => expect(t.node().getState().transfers[sent.id]).toMatchObject({ state: "done", direction: "out" }), { timeout: 20_000 });
+  expect(t.records.get("in:late-00001")?.state).toBe("done");
+  expect(t.received.get("late-00001")?.length).toBe(3 * 1024 * 1024 + 5);
 }, 60_000);
 
 const notFound = () => Object.assign(new Error("The object can not be found here."), { name: "NotFoundError" });
@@ -561,6 +599,27 @@ it("the files that ended in an earlier run are not noted again when the chat con
   const withFour = await restart();
   expect(withFour, "three more finished files cost no read of the history").toBe(withOne);
   expect(await Promise.all(ids.map((id) => completedAt(t, id)))).toEqual(ended);
+}, 120_000);
+
+it("a chat connecting after a restart reads nothing for the files that ended before; a sent one whose receipt never came gets it", async () => {
+  const t = await setup();
+  await put(t, "before-0001", 20_000, 51);
+  await put(t, "before-0002", 20_000, 52);
+  t.offer("before-0003", 20_000);
+  const ids = ["me_51", "me_52", "peer_before-0003"];
+  await vi.waitFor(async () => expect(await Promise.all(ids.map((id) => completedAt(t, id)))).toEqual([expect.any(Number), expect.any(Number), expect.any(Number)]), { timeout: 20_000 });
+  await vi.waitFor(async () => expect((await fileStore.listForLink(t.id)).map((f) => f.wire3?.state)).toEqual(["done", "done", "done"]));
+  const fileIds = (await fileStore.listForLink(t.id)).map((f) => f.id);
+  // The app quit before me_52's receipt was written.
+  await db.patchMessage(t.id, "me_52", () => ({ delivery: "sent" }));
+  const files = vi.spyOn(fileStore, "get"), messages = vi.spyOn(db, "getMessage");
+  cleanup.push(async () => { files.mockRestore(); messages.mockRestore(); });
+  await t.restartApp();
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  const read = [...files.mock.calls.map(([id]) => id), ...messages.mock.calls.map(([, id]) => id)].filter((id) => fileIds.includes(id) || ids.includes(id));
+  files.mockRestore(); messages.mockRestore();
+  expect(new Set(read), "only the file that still owed its receipt is looked up").toEqual(new Set([`${t.id}-out-before-0002`, "me_52"]));
+  expect(await db.getMessage(t.id, "me_52")).toMatchObject({ delivery: "delivered" });
 }, 120_000);
 
 it("the transfers that finished leave the engine's state: after 100 small files each state carries no more of them than after a few", async () => {

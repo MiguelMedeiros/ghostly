@@ -1,5 +1,5 @@
 import { useMemo, useSyncExternalStore } from "react";
-import { engine } from "@ghostly/browser/platform/engine";
+import { engine, type ListChanges } from "@ghostly/browser/platform/engine";
 import type { EngineState, SavedMessage, StoredMessage } from "@ghostly/browser/shared/types";
 
 /*
@@ -51,11 +51,22 @@ const sameIds = (a: ReadonlySet<string>, b: ReadonlySet<string>) => a.size === b
 
 function start(): () => void {
   let ids = chatIds(engine.state);
-  const offMessages = engine.onMessages((linkId: string, messages: StoredMessage[]) => {
+  const offMessages = engine.onMessages((linkId: string, messages: StoredMessage[], changes?: ListChanges) => {
     // Only a chat with a saved message: an edit there shows in the list, a delete takes it out.
-    if (!rows.some((s) => s.message.linkId === linkId)) return;
+    const here = rows.filter((s) => s.message.linkId === linkId);
+    if (!here.length) return;
+    const differs = (s: SavedMessage, m: StoredMessage | undefined) => m?.text !== s.message.text || m?.edit?.at !== s.message.edit?.at;
+    if (changes) {
+      // What changed is all there is to look at: a chat sent only its newest page (the extension's tabs) does not hold
+      // a saved message older than it, and each message coming in would read them all again.
+      const changed = new Map(changes.messages.map((m) => [m.id, m]));
+      if (here.some((s) => changes.deleted.includes(s.message.id) || (changed.has(s.message.id) && differs(s, changed.get(s.message.id))))) soon();
+      return;
+    }
+    // A newest page leaves the older rows out: one missing from it is not gone.
+    const whole = engine.whole(linkId);
     const now = new Map(messages.map((m) => [m.id, m]));
-    if (rows.some((s) => s.message.linkId === linkId && (now.get(s.message.id)?.text !== s.message.text || now.get(s.message.id)?.edit?.at !== s.message.edit?.at))) soon();
+    if (here.some((s) => (whole || now.has(s.message.id)) && differs(s, now.get(s.message.id)))) soon();
   });
   const offState = engine.subscribe(() => {
     const next = chatIds(engine.state);

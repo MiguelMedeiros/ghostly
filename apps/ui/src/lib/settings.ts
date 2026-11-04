@@ -1,5 +1,6 @@
 import { getStorageProfile } from "./storage";
 import { markFirstStart } from "./nameStep";
+import { cleanOwnName } from "./ownName";
 import { sizeIn } from "./sizeText";
 import type { Translate } from "../locales/translate";
 
@@ -44,6 +45,11 @@ export interface AppSettings {
   reduceMotion: boolean;
   chatListDensity: ChatListDensity;
   /**
+   * Where the layout has a side list (a wide window): the list folded to a rail of the chats' pictures, for more room
+   * for the open chat. Kept on this device only; a phone's list is unchanged.
+   */
+  chatListCollapsed: boolean;
+  /**
    * Whether this client may ask, now and then, whether a newer version was
    * published. The question is a request that says this device runs Ghostly,
    * so it is the user's to allow; off, updates are only looked for on demand.
@@ -54,6 +60,11 @@ export interface AppSettings {
    * and sends them with it. Only the sender's app ever contacts the site; off, links go as plain text.
    */
   linkPreviews: boolean;
+  /**
+   * Received messages in another language are shown translated into `language`, on this device (docs/AUTO-TRANSLATE.md):
+   * the default for chats that have not chosen. Off until turned on; only a `VITE_TRANSLATE` Desktop build offers it.
+   */
+  translateMessages: boolean;
   /**
    * Checking this device's other unlocked profiles for new messages (WISP 04 § Checking other profiles): `enabled`
    * absent follows the platform (on for Desktop, off for the web and the extension); `notify` shows a system notice.
@@ -86,8 +97,10 @@ const DEFAULT_SETTINGS: AppSettings = {
   defaultNickname: "",
   reduceMotion: false,
   chatListDensity: "compact",
+  chatListCollapsed: false,
   checkForUpdates: true,
   linkPreviews: true,
+  translateMessages: false,
 };
 
 const LANGUAGES: readonly Language[] = ["en", "pt", "es", "fr", "it", "zh", "ja", "ar"];
@@ -136,9 +149,12 @@ export function loadSettings(): AppSettings {
         ...parsed.notifications,
         cues: { ...DEFAULT_CUES, ...parsed.notifications?.cues },
       },
-      defaultNickname: parsed.defaultNickname ?? DEFAULT_SETTINGS.defaultNickname,
+      // Cleaned as it is saved now: a name kept before, of spaces or zero-width characters only, is no name.
+      defaultNickname: typeof parsed.defaultNickname === "string" ? cleanOwnName(parsed.defaultNickname) : DEFAULT_SETTINGS.defaultNickname,
       chatListDensity: parsed.chatListDensity === "comfortable" ? "comfortable" : "compact",
+      chatListCollapsed: parsed.chatListCollapsed === true,
       linkPreviews: parsed.linkPreviews !== false,
+      translateMessages: parsed.translateMessages === true,
     };
   } catch {
     return { ...DEFAULT_SETTINGS, language: browserLanguage() };

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -116,6 +116,18 @@ describe("app publish", () => {
     expect(readAppBundle(new Uint8Array(readFileSync(join(dir, "app.ghostlyapp"))))).toMatchObject({ ok: true, bundle: { manifest: { sequence: 2 } } });
   }, 60_000);
 
+  it("a bundle published into another --out never holds the one an earlier publish left in the folder", async () => {
+    const { manifest, files } = chess();
+    const dir = appFolder(manifest, files);
+    const key = vectorKey(tmp(), "publisher");
+    ok(await ghostly(["app", "publish", dir, "--key", key]));
+    const out = join(tmp(), "chess.ghostlyapp");
+    const made = ok(await ghostly(["app", "publish", dir, "--key", key, "--out", out])) as { files: string[] };
+    expect(made.files).toEqual([...files.keys()].sort());
+    const read = readAppBundle(new Uint8Array(readFileSync(out)));
+    expect(read.ok && [...read.bundle.files.keys()]).not.toContain("app.ghostlyapp");
+  }, 60_000);
+
   it("makes an owner-only key on first use and never prints it", async () => {
     const { manifest, files } = chess();
     const dir = appFolder(manifest, files);
@@ -166,6 +178,11 @@ describe("app publish", () => {
       ["publisher.key", readFileSync(key, "utf8")],
       ["old/store.pem", `Ghostly store key (WISP 1200). Secret.\n${readFileSync(key, "utf8")}`],
       ["deploy/id_ed25519", `-----BEGIN OPENSSH PRIVATE KEY-----\n${"b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ".repeat(2)}\n-----END OPENSSH PRIVATE KEY-----\n`],
+      // A traditional encrypted PEM (`openssl genrsa -aes256`, `openssl ec -aes256`): its body opens with
+      // "Proc-Type: 4,ENCRYPTED" and "DEK-Info: ...", headers with a space in them.
+      ["deploy/server.key", generateKeyPairSync("ec", { namedCurve: "P-256", publicKeyEncoding: { type: "spki", format: "pem" }, privateKeyEncoding: { type: "sec1", format: "pem", cipher: "aes-256-cbc", passphrase: "hunter2" } }).privateKey],
+      // An OpenPGP secret key (`gpg --export-secret-keys --armor`): a "PRIVATE KEY BLOCK", here with a version header.
+      ["signing/secret.asc", `-----BEGIN PGP PRIVATE KEY BLOCK-----\nVersion: GnuPG v2.4.5\n\n${"lQOYBGVt3n8BCADKz1x9".repeat(4)}\n=Xk2Q\n-----END PGP PRIVATE KEY BLOCK-----\n`],
     ] as const) {
       const leaky = appFolder(manifest, files);
       mkdirSync(dirname(join(leaky, path)), { recursive: true });

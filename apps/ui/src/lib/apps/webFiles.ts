@@ -139,14 +139,24 @@ const randomId = () => randomIds(1)[0]!;
 /** How many picked files a pick turns into links per turn of the thread: a pick of 100,000 lets the page answer between. */
 const PICK_CHUNK = 4096;
 
-/** Whether a path names something hidden: any of its parts starts with a dot. */
-const hidden = (path: string) => path.startsWith(".") || path.includes("/.");
+/**
+ * Whether a path names something hidden: any of its parts starts with a dot. A folder's paths start with its own name,
+ * which the person chose, so only those under it count (`.Films` links its files), as the Desktop's walk.
+ */
+const hidden = (path: string, folder: boolean) => {
+  const under = folder ? path.slice(path.indexOf("/") + 1) : path;
+  return under.startsWith(".") || under.includes("/.");
+};
 
+/** A file's extension in lower case (ASCII letters only, as the Desktop's walk), "" for none. */
 const extensionOf = (path: string) => {
   const name = path.slice(path.lastIndexOf("/") + 1);
   const dot = name.lastIndexOf(".");
-  return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
+  return dot > 0 ? name.slice(dot + 1).replace(/[A-Z]+/g, (letters) => letters.toLowerCase()) : "";
 };
+
+/** Whether `accept` names a file's extension: everything does when it names none. */
+const accepted = (path: string, accept: string[]) => !accept.length || accept.includes(extensionOf(path));
 
 type PermissionHandle = FileSystemHandle & {
   queryPermission?(options: { mode: "read" }): Promise<PermissionState>;
@@ -187,14 +197,18 @@ const factsOf = async (handle: FileSystemFileHandle) => {
   return { size, lastModified };
 };
 
-/** Everything under a folder, its name first in each path, hidden entries left out, at most `limit` files. */
-async function walk(dir: FileSystemDirectoryHandle, path: string, out: PickedFile[], limit: number): Promise<void> {
+/**
+ * The files under a folder that `accept` names (all when it names none), its name first in each path, hidden entries
+ * left out, as the Desktop's walk. A file left out is neither got nor counted: the walk stops one past `limit` kept
+ * files, so a folder past it is refused whole (`too-large`), never cut to the files met first.
+ */
+async function walk(dir: FileSystemDirectoryHandle, path: string, accept: string[], out: PickedFile[], limit: number): Promise<void> {
   for await (const handle of (dir as unknown as { values(): AsyncIterable<FileSystemHandle> }).values()) {
     if (out.length > limit) return;
     if (handle.name.startsWith(".")) continue;
     const at = `${path}/${handle.name}`;
-    if (handle.kind === "directory") await walk(handle as FileSystemDirectoryHandle, at, out, limit);
-    else out.push({ path: at, file: await factsOf(handle as FileSystemFileHandle) });
+    if (handle.kind === "directory") await walk(handle as FileSystemDirectoryHandle, at, accept, out, limit);
+    else if (accepted(handle.name, accept)) out.push({ path: at, file: await factsOf(handle as FileSystemFileHandle) });
   }
 }
 
@@ -210,7 +224,7 @@ export const handlePicker: BrowserPicker = async (folder, accept) => {
     if (folder) {
       const dir = await w.showDirectoryPicker!({ mode: "read" });
       const files: PickedFile[] = [];
-      await walk(dir, dir.name, files, MINI_APP_LIMITS.filesEntries);
+      await walk(dir, dir.name, accept, files, MINI_APP_LIMITS.filesEntries);
       return { files, keep: { dir } };
     }
     const handles = await w.showOpenFilePicker!({ multiple: true, ...(accept.length && { types: [{ accept: { "application/octet-stream": accept.map((e) => `.${e}`) } }] }) });
@@ -284,9 +298,9 @@ const SHEET_SETTLE_MS = 500;
 /**
  * A sheet of the client's own: a title, a note, a second button and a first one whose click does `act`. Modal: Tab
  * and Shift+Tab go round its buttons, never to the app under it. It goes, answering null, when `signal` aborts (its
- * app stopped), or at once when it already has.
+ * app stopped), or at once when it already has. Desktop asks with it too, before the system's dialog (desktopFiles.ts).
  */
-function sheet(parts: { title: string; note?: string; secondary: string; primary: string; testId: string; act: () => Promise<unknown>; signal?: AbortSignal }): Promise<unknown> {
+export function sheet(parts: { title: string; note?: string; secondary: string; primary: string; testId: string; act: () => Promise<unknown>; signal?: AbortSignal }): Promise<unknown> {
   return new Promise((resolve) => {
     if (parts.signal?.aborted) return resolve(null);
     const back = document.createElement("div");
@@ -494,7 +508,7 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
       // In chunks, the thread let go between them: at 100,000 files the links took the page for half a second.
       for (let from = 0; from < picked.files.length; from += PICK_CHUNK) {
         if (from) await yieldThread();
-        const chunk = picked.files.slice(from, from + PICK_CHUNK).filter(({ path }) => !hidden(path) && (!accept.length || accept.includes(extensionOf(path))));
+        const chunk = picked.files.slice(from, from + PICK_CHUNK).filter(({ path }) => !hidden(path, folder) && accepted(path, accept));
         if (linksOf(ref).size + added.length + chunk.length > MINI_APP_LIMITS.filesEntries) throw refusal("too-large", "Too many files for one app");
         const ids = randomIds(chunk.length);
         chunk.forEach(({ path, file, at }, i) => {
@@ -536,6 +550,10 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
         if (signal?.aborted) askedAgain.delete(ref);
       }
       return [...linksOf(ref).values()].map((link) => link.entry);
+    },
+    async entry(ref, id) {
+      await load(ref);
+      return linksOf(ref).get(id)?.entry ?? null;
     },
     async read(ref, id, offset, length) {
       await load(ref);

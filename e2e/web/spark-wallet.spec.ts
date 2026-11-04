@@ -48,14 +48,17 @@ test("Spark on Mainnet: New asks for a Breez API key first, and makes nothing wi
 
 test.describe("on Breez's regtest", { tag: "@network" }, () => {
   test("New makes a Testnet Spark wallet in one click: a sparkrt1 address, a balance, a recovery phrase", { tag: ["@feature:wallet.spark.create", "@feature:wallet.spark.backup", "@feature:wallet.instances.create"] }, async ({ peer }) => {
-    test.setTimeout(3 * 60_000);
+    test.setTimeout(4 * 60_000);
     const alice = await peer("spark-create", { offlineMainnet: true });
     await createWallet(alice, "spark", "testnet", { timeout: 120_000 });
     await openWallet(alice, "spark-testnet");
     await expect(walletCard(alice.page, "spark-testnet").getByTestId("wallet-card-network")).toHaveText("Testnet");
     await expect(balance(alice)).toContainText("Regtest", { timeout: 120_000 });
     await expect(balance(alice)).toHaveText(/^0\s*test sats/);
-    await expect(panel(alice).getByTestId("spark-address")).toContainText(/sparkrt1[a-z0-9]{50,}/);
+    // The balance reads "0 test sats" while the wallet is still "Connecting…": the address is what waits on Breez's
+    // operators answering, so it gets the time the network may take. Once (agents#1458) the runner's DNS failed for
+    // every outside host for ~80 s; Breez connected 57 s into a 60 s wait for the address, too late.
+    await expect(panel(alice).getByTestId("spark-address")).toContainText(/sparkrt1[a-z0-9]{50,}/, { timeout: 120_000 });
     await panel(alice).getByRole("button", { name: "Show" }).click();
     await expect(panel(alice).getByTestId("spark-recovery")).toHaveText(/^(\w+ ){11}\w+$/);
   });

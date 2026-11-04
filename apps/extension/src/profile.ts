@@ -1,4 +1,4 @@
-import { activeProfileId, namespaceOf, registryKey } from "../../ui/src/lib/profiles";
+import { activeProfileId, lastRouteOf, namespaceOf, registryKey } from "../../ui/src/lib/profiles";
 
 /**
  * Local profiles in the extension (WISP 04). Every extension page and the offscreen document share one
@@ -22,6 +22,39 @@ export function openPageProfile(): string {
 }
 /** False once another page switched: this one must not reach the peer, which runs the other profile now. */
 export const pageProfileIsCurrent = (): boolean => pageProfile === null || pageProfile === activeNamespace();
+
+/**
+ * Set by the page that started the peer again (`restartEngine`: Clear all data, the device gate) once the new one
+ * runs. Not a profile's key: it outlives the clear.
+ */
+export const ENGINE_RESTART_KEY = "ghostly_engine_restarted";
+
+/** The other pages hear the mark and start again (`followEngineRestart`); the page that set it reloads by itself. */
+export function markEngineRestart(): void {
+  try { localStorage.setItem(ENGINE_RESTART_KEY, String(Date.now())); } catch { /* storage full or refused: no page hears it */ }
+}
+
+/**
+ * Calls `onRestart` when another page started the peer again. This page held what the old peer told it (a cleared
+ * chat open, a device that is on standby now) and would go on showing it over the new one.
+ */
+export function followEngineRestart(onRestart: () => void): () => void {
+  const restarted = (event: StorageEvent) => {
+    if (event.key === ENGINE_RESTART_KEY && event.newValue !== null) onRestart();
+  };
+  addEventListener("storage", restarted);
+  return () => removeEventListener("storage", restarted);
+}
+
+/**
+ * Starts this page again as the profile in use, on the page that profile was left on, as the tab that switched does
+ * (`switchProfile`). The address this page showed belongs to the profile before the switch: a chat or group of its
+ * own reads as gone from this device in the other one.
+ */
+export function startAsProfileInUse(): void {
+  history.replaceState(null, "", `#${lastRouteOf(activeProfileId())}`);
+  location.reload();
+}
 
 /**
  * Calls `onSwitch` when another page makes a different profile the one in use. A page runs as the profile
