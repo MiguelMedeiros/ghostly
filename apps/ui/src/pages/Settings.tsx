@@ -244,6 +244,17 @@ export function Settings() {
     focusPasswordForm.current = false;
     first.focus();
   }, [showPasswordForm, section, isMobile]); // eslint-disable-line react-hooks/exhaustive-deps -- the refs are read when it is drawn
+  // The form closed (set, changed, removed, Cancel) with the focus in it: the focus goes back to what opened it, not to
+  // the page. Change password once it stays (a change), else the Lock Screen switch (a password set, removed, given up).
+  const lockSwitch = useRef<HTMLButtonElement>(null);
+  const passwordEdit = useRef<HTMLButtonElement>(null);
+  const focusPasswordOpener = useRef<"lock" | "edit" | null>(null);
+  const closePasswordFormTo = (opener: "lock" | "edit") => { focusPasswordOpener.current = opener; setShowPasswordForm(false); };
+  useLayoutEffect(() => {
+    const opener = focusPasswordOpener.current;
+    focusPasswordOpener.current = null;
+    if (opener && focusLost()) (opener === "edit" ? passwordEdit : lockSwitch).current?.focus();
+  }, [showPasswordForm]);
   const [storageInfo, setStorageInfo] = useState({ used: 0, keys: 0 });
   // Whether the browser may clear this device's storage (lib/storagePersistence). Nothing on Desktop: no browser evicts it.
   const { protection, estimate } = useStorageProtection();
@@ -387,7 +398,7 @@ export function Settings() {
       setNewPassword("");
       setConfirmPassword("");
       setCurrentPassword("");
-      setShowPasswordForm(false);
+      closePasswordFormTo(hasPassword ? "edit" : "lock");
       // The lock changed, and a pull would still need a proof that could not be made: said, not hidden.
       if (verifierFailed) notice.show(t("devices.handoff.verifierFailed"));
       else notice.show(hasPassword ? t("settings.passwordChanged") : t("settings.passwordSet"), { tone: "success" });
@@ -417,7 +428,7 @@ export function Settings() {
 
       setLockEnabled(false);
       setCurrentPassword("");
-      setShowPasswordForm(false);
+      closePasswordFormTo("lock");
       notice.show(t("settings.passwordRemoved"), { tone: "success" });
     } finally {
       setPasswordBusy(false);
@@ -430,7 +441,7 @@ export function Settings() {
   const systemSettings = noticeSettings();
   const deniedHint = { macos: "settings.noticesDeniedMac", windows: "settings.noticesDeniedWindows", android: "settings.noticesDeniedSystem", system: "settings.noticesDeniedSystem",
     extension: "settings.noticesDeniedExtension", web: "settings.noticesDenied" } as const;
-  const closePasswordForm = () => { setShowPasswordForm(false); setCurrentPassword(""); setNewPassword(""); setConfirmPassword(""); setPasswordError(null); };
+  const closePasswordForm = () => { closePasswordFormTo(hasPassword ? "edit" : "lock"); setCurrentPassword(""); setNewPassword(""); setConfirmPassword(""); setPasswordError(null); };
   /** One of the password fields, wired to its error: `aria-invalid`, `aria-describedby`, and the line under it. */
   const passwordField = (which: PasswordField, label: string, value: string, change: (value: string) => void) => {
     const error = passwordError?.field === which ? passwordError.text : null;
@@ -682,7 +693,7 @@ export function Settings() {
               {t("settings.lockNow")}
             </Button>
           )}
-          <Switch testId="settings-lock" label={t("settings.lockScreen")} checked={lockOn} onChange={() => void handleLockToggle()} />
+          <Switch ref={lockSwitch} testId="settings-lock" label={t("settings.lockScreen")} checked={lockOn} onChange={() => void handleLockToggle()} />
         </Row>
         {hasPassword && (
           <Row label={t("settings.timeout")}>
@@ -692,7 +703,7 @@ export function Settings() {
         )}
         {hasPassword && (
           <Row label={t("settings.password")}>
-            <Button data-testid="settings-password-edit" aria-expanded={showPasswordForm} onClick={() => (showPasswordForm ? closePasswordForm() : openPasswordForm())}>
+            <Button ref={passwordEdit} data-testid="settings-password-edit" aria-expanded={showPasswordForm} onClick={() => (showPasswordForm ? closePasswordForm() : openPasswordForm())}>
               {showPasswordForm ? t("common.close") : t("settings.passwordEdit")}
             </Button>
           </Row>
