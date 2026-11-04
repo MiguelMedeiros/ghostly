@@ -128,6 +128,11 @@ export interface InstalledApp {
 export interface AddedAppStore {
   key: string;
   url: string;
+  /**
+   * The URL of a newer copy of its index the person took (Update store) while `url` was behind: read too while `url` does
+   * not hold the index held (a commit-pinned `url` never will), dropped once it does.
+   */
+  copyUrl?: string;
   addedAt: number;
   /** A default store of this build. */
   preloaded?: true;
@@ -1130,9 +1135,11 @@ export class Apps {
    * Adds a store the person chose: read at its URL and pinned to its key (`key`, when given, is the key the person saw,
    * and another one is refused). A store already added under that key keeps the URL it is read from and takes only a newer
    * index: a copy of its signed index at another URL, the same one or an older one, never moves it there (it would be
-   * read only there from then on, frozen). The same index is nothing to do, and an older one is refused with the held
-   * store left as it was: a copy the person chose is not a read of the store, so it marks no problem on it. The index the
-   * preview just read at that URL, under that key, is taken as it is (only its expiry again), not downloaded again.
+   * read only there from then on, frozen). A newer one's URL is read too while the store's own URL is behind it (a URL at
+   * a commit always is), so that URL's later indexes still arrive. The same index is nothing to do, and an older one is
+   * refused with the held store left as it was: a copy the person chose is not a read of the store, so it marks no problem
+   * on it. The index the preview just read at that URL, under that key, is taken as it is (only its expiry again), not
+   * downloaded again.
    */
   async addStore({ url, key }: { url: string; key?: string }): Promise<AppStoreSummary> {
     if (key !== undefined && !isAppKey(key)) fail("store-key", "Not a store key");
@@ -1154,7 +1161,12 @@ export class Apps {
       if (decision === "same") return this.summary(held);
       if (decision === "rollback") fail("rollback", `This store's index is older than the one you have (sequence ${held.index.sequence})`);
     }
-    const record: AddedAppStore = held && !held.removed ? held : { key: index.key, url: at, addedAt: this.now(), ...(held?.preloaded && { preloaded: true as const }) };
+    let record: AddedAppStore;
+    if (held && !held.removed) {
+      // A newer index taken from a copy elsewhere: that copy is read too while the store's own URL is behind it.
+      const { copyUrl: _c, ...own } = held;
+      record = at === held.url ? own : { ...own, copyUrl: at };
+    } else record = { key: index.key, url: at, addedAt: this.now(), ...(held?.preloaded && { preloaded: true as const }) };
     await this.putStore(this.withIndex(record, index, digest));
     return this.summary((await this.storeRecord(index.key))!);
   }
@@ -1213,13 +1225,23 @@ export class Apps {
       } catch (error) {
         read = { ok: false, reason: error instanceof AppFetchError ? error.code : "network" };
       }
+      // Its own URL behind the copy of its index the person took (or not answering): that copy's URL is read too.
+      const behind = !read.ok || !!this.withIndex(s, read.store.index, read.store.digest).problem;
+      const copy = s.copyUrl !== undefined && behind ? await this.readStoreAt(s.copyUrl, s.key, s).catch((): null => null) : null;
       // Removed meanwhile: not put back.
       const now = await this.storeRecord(s.key);
       if (!now || now.removed) continue;
       // Judged against the record held now: an index taken meanwhile (Add, at another URL) is not replaced by an older one.
-      const next: AddedAppStore = read.ok ? this.withIndex(now, read.store.index, read.store.digest) : { ...now, problem: read.reason };
+      let next: AddedAppStore = read.ok ? this.withIndex(now, read.store.index, read.store.digest) : { ...now, problem: read.reason };
+      const fromCopy = copy?.ok ? this.withIndex(now, copy.store.index, copy.store.digest) : null;
+      if (next.copyUrl !== undefined && !next.problem) {
+        // Its own URL holds the index held, or a newer one: the copy is not read any more.
+        const { copyUrl: _c, ...own } = next;
+        next = own;
+      } else if (fromCopy && fromCopy.problem !== "rollback" && next.problem !== "equivocation") next = fromCopy;
       // Nothing to keep but when it was read: held here, not written (the whole index would be written with it).
-      const unchanged = now === s && next.index === s.index && next.digest === s.digest && next.problem === s.problem && next.equivocation === s.equivocation;
+      const unchanged = now === s && next.index === s.index && next.digest === s.digest && next.problem === s.problem && next.equivocation === s.equivocation
+        && next.copyUrl === s.copyUrl;
       if (unchanged) (await this.records()).set(s.key, next);
       else await this.putStore(next);
       out.push(this.summary(next));
