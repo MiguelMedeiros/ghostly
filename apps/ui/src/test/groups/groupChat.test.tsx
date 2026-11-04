@@ -278,6 +278,18 @@ describe("GroupChat: joining through a link", () => {
     expect(screen.queryByTestId("group-joining-stale")).not.toBeInTheDocument();
   });
 
+  it("a private group waiting for its members' updates: says so, with the knock left, and never that the link may be old", async () => {
+    openGroup(groupView({ createdAt: Date.now() - 2 * 60_000 + 400, canSend: false,
+      invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "blocked", full: { n: 8, max: 32 } } }));
+    const card = screen.getByTestId("group-joining");
+    expect(card).toHaveTextContent("This group is waiting for updates");
+    expect(card).toHaveTextContent("It takes new members again once everyone in it has an updated Ghostly.");
+    expect(screen.getByTestId("group-joining-live")).toHaveTextContent("This group is waiting for updates");
+    expect(within(card).getByTestId("group-joining-steps").querySelector("li")).toHaveAttribute("data-state", "done");
+    await new Promise(resolve => setTimeout(resolve, 600));
+    expect(screen.queryByTestId("group-joining-stale")).not.toBeInTheDocument();
+  });
+
   it("a knock someone answered is not told the link may be old", () => {
     openGroup(groupView({ createdAt: Date.now() - 10 * 60_000, canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "answered" } }));
     expect(screen.getByTestId("group-joining")).toHaveTextContent("The admin's app saw you knock");

@@ -1,7 +1,7 @@
 import { vi } from "vitest";
 import manifest from "../public/manifest.json";
 import { fire, installFakeChrome, settle, type FakeWorld } from "./fakeChrome";
-import { engineControl, type FakeEngineServer } from "./fakeEngine";
+import { engineControl, resetEngine, type FakeEngineServer } from "./fakeEngine";
 
 /** A peer key and a service a contact shares, as the viewer addresses them. */
 export const PEER = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o";
@@ -13,14 +13,17 @@ export const OTHER_TAG = "ot1uwisza345h769";
 
 /**
  * The extension as Chrome runs it: the service worker loaded, and the offscreen
- * document loaded the first time the worker creates it. Every call starts from
+ * document loaded the first time the worker creates it, which it does as it
+ * loads: `bootExtension` returns once that start is over. `before` sets up the
+ * browser the worker finds (the profile registry, a lock). Every call starts from
  * fresh modules; `@ghostly/browser/engine/server` must be mocked by the test.
  */
-export async function bootExtension(edit?: (manifest: chrome.runtime.Manifest) => void): Promise<FakeWorld> {
+export async function bootExtension(edit?: (manifest: chrome.runtime.Manifest) => void, before?: (world: FakeWorld) => void): Promise<FakeWorld> {
   vi.resetModules();
   const copy = structuredClone(manifest) as chrome.runtime.Manifest;
   edit?.(copy);
   const world = installFakeChrome(copy);
+  before?.(world);
   let documents = 0;
   world.onCreateDocument = async () => {
     // A new document runs its script afresh; the first one shares the boot's fresh modules.
@@ -28,6 +31,7 @@ export async function bootExtension(edit?: (manifest: chrome.runtime.Manifest) =
     await world.load("offscreen", () => import("../src/offscreen.ts"));
   };
   await world.load("background", () => import("../src/background.ts"));
+  await workerStarted(world, 0);
   return world;
 }
 
@@ -35,7 +39,22 @@ export async function bootExtension(edit?: (manifest: chrome.runtime.Manifest) =
 export async function restartServiceWorker(world: FakeWorld): Promise<void> {
   world.restartServiceWorker();
   vi.resetModules();
+  const from = world.calls.length;
   await world.load("background", () => import("../src/background.ts"));
+  await workerStarted(world, from);
+}
+
+/**
+ * Waits for the start of the peer the worker makes as it loads (or for its failure), as an `ensure-engine` would: handed
+ * to the worker's listener directly, so nothing of it shows in `calls`. Only a start the worker made by itself (a
+ * document created, or a running one asked) is waited on: this wait never starts the peer.
+ */
+async function workerStarted(world: FakeWorld, from: number): Promise<void> {
+  await settle();
+  const own = world.calls.slice(from).some(({ api, args }) => api === "offscreen.createDocument" || (api === "runtime.sendMessage" && (args[0] as { type?: string })?.type === "ping"));
+  if (!own) return;
+  const sender = { id: world.chrome.runtime.id, url: world.chrome.runtime.getURL("app.html") };
+  await new Promise((resolve) => fire(world.chrome.runtime.onMessage, { target: "background", type: "ensure-engine" }, sender, resolve));
 }
 
 export function engine(): FakeEngineServer {
@@ -82,6 +101,15 @@ export async function pauseRequest(
 
 export function bodyText(params: Record<string, unknown>): string {
   return Buffer.from(params.body as string, "base64").toString("utf8");
+}
+
+/**
+ * The peer the worker started as it loaded goes away by itself (`endOffscreen`), and what it did with it is forgotten:
+ * for a test of the start that comes next.
+ */
+export function endBootPeer(world: FakeWorld): void {
+  world.endOffscreen();
+  resetEngine();
 }
 
 /** A page makes profile `id` the one in use, as `switchProfile` writes it (apps/ui/src/lib/profiles.ts). */
