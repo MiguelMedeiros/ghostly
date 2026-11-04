@@ -36,11 +36,15 @@ async function startEngine(): Promise<void> {
   await replaceEngine(status.activeId);
 }
 
+/** Peers started one after another for switches made while each one started, before the pages are told to retry. */
+const MAX_REPLACEMENTS = 20;
+
 /** `next`: the id of the profile the new peer runs as, when a switch is what replaces it. */
 async function replaceEngine(next?: string): Promise<void> {
   // A page that switched again while the next peer started (another tab's) waits on this start, and must get the
-  // profile it named, not the one before: that peer goes too. A few times at most, should the registry keep moving.
-  for (let attempt = 0; attempt < 3; attempt++) {
+  // profile it named, not the one before: that peer goes too, as often as the registry moved (only a click moves it).
+  // Should it never settle, the pages hear of it: none is told the peer runs while it runs another profile.
+  for (let attempt = 0; attempt < MAX_REPLACEMENTS; attempt++) {
     // A contact's app open as the profile before is no page of the next one's: its tab closes before that peer answers.
     await closeViewers();
     await clearNotices(next);
@@ -51,6 +55,7 @@ async function replaceEngine(next?: string): Promise<void> {
     if (status.profile === status.active) return;
     next = status.activeId;
   }
+  throw new Error("Switching profiles…");
 }
 
 /** A new peer in place of the running one, which stopped for good ("Clear all data"); after any start in progress. */
