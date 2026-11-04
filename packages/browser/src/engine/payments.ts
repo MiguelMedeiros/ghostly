@@ -121,6 +121,13 @@ export interface DeskLightning {
    * `paid`: the invoice it says it paid, so one a test mint holds for a payer's word (StoredQuote `held`) is let go.
    */
   check?(paid?: string): Promise<void>;
+  /**
+   * What the source wrote down of the Lightning payments of a contact's request (written before the source is asked to
+   * spend, so one cut off by a restart is there): "pending" while one has not ended (settled and reported later,
+   * `onLightningResolved`), "paid" once one went through, undefined when none left the wallet. Absent: the source keeps
+   * no such record (the mints alone: a finished melt leaves none), and a request left pending stays so.
+   */
+  interrupted?(paymentId: string): Promise<"pending" | "paid" | undefined>;
 }
 export const mintLightning = (wallet: CashuWallet, network?: WalletNetwork): DeskLightning => ({
   createInvoice: (amount, paymentId) => wallet.receiveLightning(amount, paymentId, network),
@@ -367,6 +374,7 @@ export class PaymentDesk {
   async start(): Promise<void> {
     const stored = await wrap<StoredPayment[]>((await store(STORES.payments, "readonly")).getAll());
     for (const payment of stored) this.payments.set(payment.id, payment);
+    for (const payment of stored) if (payment.kind === "request" && payment.direction === "in" && payment.lightningPending) await this.settleInterrupted(payment);
     const claims = await wrap<InvoiceClaim[] | undefined>((await store(STORES.settings, "readonly")).get(INVOICE_CLAIMS_KEY));
     this.claims = [...(claims ?? []).filter((c) => !this.claims.some((d) => sameClaim(c, d))), ...this.claims];
   }
@@ -1281,6 +1289,21 @@ export class PaymentDesk {
       this.sayPaid(this.host.getLink(request.linkId), request);
     }
     else await this.save({ ...request, error: "The Lightning payment did not go through" });
+  }
+
+  /**
+   * A contact's request marked as being paid over Lightning when the app was closed: the mark is written before the
+   * source is asked, and only that run's answer cleared it. What the source and the mints wrote down decides: nothing
+   * left the wallet and it can be paid again (and the group is not told it was sent), or it went through.
+   */
+  private async settleInterrupted(request: StoredPayment): Promise<void> {
+    const lightning = this.lightning[paymentNetwork(request)];
+    if (!lightning.interrupted || this.paying.has(`${request.linkId}:${request.id}`)) return;
+    try {
+      if (request.invoice && await this.wallet.meltInFlight?.(request.invoice)) return;
+      const outcome = await lightning.interrupted(request.id);
+      if (outcome !== "pending") await this.onLightningResolved({ paymentId: request.id }, outcome === "paid");
+    } catch { /* not readable right now: it stays pending until the next start */ }
   }
 
   onQuotePaid(quote: StoredQuote): Promise<void> { return this.onLightningPaid(quote); }
