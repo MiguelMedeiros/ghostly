@@ -19,6 +19,7 @@
   "dhtTooLong": "Too long for the DHT ({{bytes}} of {{max}} bytes). Shorten it or go live; your draft is kept.",
   "document": "Document",
   "dropFiles": "Drop to send",
+  "dropReading": "Reading what you dropped…",
   "emoji": "Emoji",
   "emojiCategories": "Emoji categories",
   "emojiFound": "{{count}} emoji",
