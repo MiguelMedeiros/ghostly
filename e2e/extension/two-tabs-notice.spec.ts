@@ -25,9 +25,9 @@ const sendBehind = (page: Page) => page.evaluate(() => {
 /**
  * A call rings in every tab of the extension, which share one peer. A tab in the background posted "Incoming call" as a
  * system notification while the person had the call ringing in the tab in front of them. It posts nothing now while
- * another tab is in sight.
+ * another tab is in sight, and with none in sight, one of the two tabs posts it (each posted its own).
  */
-test("a tab behind the one in sight posts no notification for a call ringing in both", { tag: ["@client:extension", "@client:web", "@feature:extension.engine", "@feature:calls.ring-elsewhere", "@feature:app.attention.notifications"] }, async ({ extensionPeer, webPeer }) => {
+test("a call ringing in two tabs is one notification, and none while one of them is in sight", { tag: ["@client:extension", "@client:web", "@feature:extension.engine", "@feature:calls.ring-elsewhere", "@feature:app.attention.notifications"] }, async ({ extensionPeer, webPeer }) => {
   const [ext, web] = await Promise.all([extensionPeer("two-tabs-notice"), webPeer("two-tabs-notice-contact")]);
   await pair(web, ext);
   await ext.page.evaluate(() => {
@@ -50,7 +50,19 @@ test("a tab behind the one in sight posts no notification for a call ringing in 
   expect(await notes(second.page)).toEqual([]);
   expect(await notes(ext.page)).toEqual([]);
 
-  // The tab in front goes behind too: now nothing of the app is in sight, and the call says so.
+  // The tab in front goes behind too: now nothing of the app is in sight, and the call says so, once for both tabs.
   await sendBehind(ext.page);
-  await expect.poll(async () => [...await notes(ext.page), ...await notes(second.page)], { timeout: 10_000 }).toContain("Incoming call");
+  const both = async () => [...await notes(ext.page), ...await notes(second.page)];
+  await expect.poll(both, { timeout: 10_000 }).toContain("Incoming call");
+  await second.page.waitForTimeout(2_000);
+  expect(await both()).toEqual(["Incoming call"]);
+
+  // The caller gives up and calls again while both tabs are behind: both ring, and the new call is one notification more.
+  await web.page.getByTitle("End call").click();
+  for (const tab of [ext, second]) await expect(tab.page.getByText("Incoming audio call...")).toHaveCount(0, { timeout: 15_000 });
+  await web.page.getByTestId("call-audio").click();
+  for (const tab of [ext, second]) await expect(tab.page.getByText("Incoming audio call...")).toBeVisible({ timeout: 30_000 });
+  await expect.poll(both, { timeout: 10_000 }).toHaveLength(2);
+  await second.page.waitForTimeout(2_000);
+  expect(await both()).toEqual(["Incoming call", "Incoming call"]);
 });

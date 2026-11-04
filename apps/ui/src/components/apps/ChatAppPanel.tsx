@@ -1,8 +1,10 @@
-import { useEffect, useRef, type KeyboardEvent, type RefObject } from "react";
+import { useContext, useEffect, useRef, type KeyboardEvent, type RefObject } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { useIsMobile } from "../../hooks/useIsMobile";
-import { useTabTrap } from "../../hooks/useDismiss";
-import { takedownText } from "../../lib/apps/open";
+import { usePhoneHeader } from "../../hooks/usePhoneHeader";
+import { useBackCloses, useTabTrap } from "../../hooks/useDismiss";
+import { takedownText, useAppOpener } from "../../lib/apps/open";
+import { ChatOnScreen } from "../../lib/chatOnScreen";
 import { chatApp, registerAppSlot, setChatApp, updateChatApp, useChatApp, type AppContact } from "../../lib/apps/running";
 import { PeerAvatar } from "../Avatar";
 import { ChatConnection } from "../ChatConnection";
@@ -26,6 +28,10 @@ const iconProps = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", s
  * gives it back (to what opened it, "Back to Chess" after Back, else the message field). On a phone the panel is
  * modal: Tab stays in it and the chat under it is inert. Escape, with the focus in the panel, goes Back on a phone and
  * for a full-screen app, back beside the chat from full width, and closes it beside the chat.
+ *
+ * The browser's Back (Android's back gesture) with Back here on screen does what Back does: the app hides and the
+ * person stays in the chat, as with a dialog or a sheet (lib/layerHistory.ts). Beside the chat it is part of the page,
+ * and Back leaves the chat as usual.
  */
 export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey, status, callOn }: {
   linkId: string;
@@ -41,7 +47,10 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
 }) {
   const { t } = useI18n();
   const phone = useIsMobile();
+  // A phone held upright: the header's buttons are the chat header's size there (Chat.tsx).
+  const phoneHeader = usePhoneHeader();
   const app = useChatApp(linkId);
+  const appOpener = useAppOpener();
   const box = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLElement>(null);
   const back = useRef<HTMLButtonElement>(null);
@@ -96,6 +105,11 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
 
   // A stopped app (a takedown) has nothing left to stop: Close takes its message away.
   const close = () => { if (app?.stopped) setChatApp(linkId, null); else app?.running.stop(); };
+  // Back to the chat: the app keeps running, "Back to Chess" brings it back; a stopped one has nothing to come back to.
+  const goBack = () => (app?.stopped ? setChatApp(linkId, null) : updateChatApp(linkId, { shown: false }));
+  // Only while its chat is the one on screen: a chat kept loaded off screen (App's `loaded`) leaves Back to the page.
+  const onScreen = useContext(ChatOnScreen);
+  useBackCloses(goBack, shown && withBack && onScreen);
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key !== "Escape" || e.defaultPrevented || !app) return;
     e.preventDefault();
@@ -111,9 +125,9 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
       {/* The header only while the app shows: the chat's own header is the only one otherwise. */}
       {shown && <div className="chat-app-head h-14 header-safe flex items-center gap-2 max-md:gap-1 px-3 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">
         {withBack && (
-          <button ref={back} type="button" data-testid="mini-app-back" onClick={() => (app?.stopped ? setChatApp(linkId, null) : updateChatApp(linkId, { shown: false }))}
+          <button ref={back} type="button" data-testid="mini-app-back" onClick={goBack}
             aria-label={t("apps.view.back")} title={t("apps.view.back")}
-            className="w-9 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0">
+            className={`${phoneHeader ? "w-11 max-[340px]:w-9" : "w-9"} h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0`}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="rtl:-scale-x-100"><path d="M15 19l-7-7 7-7" /></svg>
           </button>
         )}
@@ -132,8 +146,8 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
           </p>
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
-          {/* The chat's connection control, the same as in its header. */}
-          <ChatConnection peerKey={peerKey} myKey={myKey} status={status} testIdPrefix="app-" callOn={callOn} />
+          {/* The chat's connection control, the same as in its header: on a phone held upright, 44 px to tap as there. */}
+          <ChatConnection peerKey={peerKey} myKey={myKey} status={status} testIdPrefix="app-" callOn={callOn} phone={phoneHeader} />
           {!withBack && (
             <button type="button" data-testid="mini-app-wide" aria-pressed={wide} onClick={() => updateChatApp(linkId, { wide: !wide })}
               aria-label={t(wide ? "apps.view.beside" : "apps.view.full")} title={t(wide ? "apps.view.beside" : "apps.view.full")}
@@ -144,8 +158,8 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
             </button>
           )}
           <button type="button" data-testid="mini-app-close" onClick={close} aria-label={t("common.close")} title={t("common.close")}
-            className="p-2 max-md:px-1.5 max-md:py-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
-            <svg {...iconProps}><path d="M18 6 6 18M6 6l12 12" /></svg>
+            className={`${phoneHeader ? "w-11 h-11 flex items-center justify-center" : "p-2 max-md:px-1.5 max-md:py-2.5"} text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`}>
+            <svg {...iconProps} width={phoneHeader ? 20 : 18} height={phoneHeader ? 20 : 18}><path d="M18 6 6 18M6 6l12 12" /></svg>
           </button>
         </div>
       </div>}
@@ -153,6 +167,13 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
       {shown && app?.stopped && <p role="status" data-testid="mini-app-stopped" className="m-0 p-6 text-center text-sm text-text-secondary">
         {takedownText(title, app.stopped, t)}
       </p>}
+      {/* Stopped by the watchdog: it may run fine once started again, and the person decides. */}
+      {shown && app?.stopped?.why === "unresponsive" && appOpener && (
+        <button type="button" data-testid="mini-app-open-again" onClick={() => void appOpener(app.ref, linkId).catch((error: unknown) => console.warn(`[apps] ${title} did not open again`, error))}
+          className="mx-auto min-h-11 rounded px-4 py-1 text-sm font-medium text-accent hover:bg-surface-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+          {t("apps.view.openAgain")}
+        </button>
+      )}
       <div ref={box} data-testid="mini-app-frame" className="chat-app-frame" />
     </section>
   );

@@ -79,6 +79,19 @@ describe("capability record: keys, seal and signature", () => {
     expect(capsDescriptors({ "iroh/1": { id: IROH.id, relay: "http://127.0.0.1.example/" } })["iroh/1"]).not.toHaveProperty("relay");
   });
 
+  it("never seals or keeps a relay with a login, a query or a fragment, and keeps the rest of the record", () => {
+    const { aKeys, bKeys } = pair();
+    for (const relay of ["wss://alice:hunter2@relay.example/", "wss://relay.example/?token=s3cr3t", "wss://relay.example/#s3cr3t"]) {
+      expect(capsDescriptors({ "hyperdht/1": { publicKey: HYPER.publicKey, relayed: true, relay } })["hyperdht/1"]).not.toHaveProperty("relay");
+      // As an older app sealed it: that descriptor is dropped, the record and its Iroh are read.
+      const iroh = capsDescriptors({ "iroh/1": IROH })["iroh/1"]!;
+      const older = { "iroh/1": iroh, "hyperdht/1": { publicKey: capsDescriptors({ "hyperdht/1": HYPER })["hyperdht/1"]!.publicKey, relay } };
+      const record = bKeys.open(packetOf(aKeys, aKeys.seal(content({ descriptors: older }), 1).records));
+      expect(record.descriptors).toEqual({ "iroh/1": iroh });
+      expect(JSON.stringify(record)).not.toMatch(/hunter2|s3cr3t/);
+    }
+  });
+
   it("fits 1,000 bytes; past it drops the name, then the extensions, and fails rather than cut capabilities", () => {
     const { aKeys } = pair();
     const full = aKeys.seal(content({ name: "n".repeat(64) }), 1, createIdentity().pubKeyZ32);

@@ -250,7 +250,8 @@ describe("opened from the build", () => {
     const newer = await store.preview({ card: { ref: REF, url: PINNED_URL, sequence: 2, digest: v2.digest } });
     expect(newer).toMatchObject({ digest: v2.digest, from: PINNED_URL });
     expect(newer.carried).toBeUndefined();
-    expect(net.requests).toEqual([PINNED_URL]);
+    // Its publisher's revocations beside the URL it came from, read before Install.
+    expect(net.requests).toEqual([PINNED_URL, new URL("ghostly-revoke.json", PINNED_URL).href]);
   });
 
   it("installed at the version the list pins, it is marked built-in; a later version, or an app not on the list, is not", async () => {

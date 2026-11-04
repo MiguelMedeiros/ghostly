@@ -13,6 +13,7 @@
     "turnBack": "Cards"
   },
   "delete": "Delete",
+  "deleteChatCallOn": "A call is on in this chat. End it first, then delete the chat.",
   "deleteChatLocal": "This deletes the chat and its history from this device. Your contact’s copy is not deleted.",
   "deleteChatTitle": "Delete chat?",
   "error": "Error",

@@ -70,7 +70,12 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
         if (!long) throw unknownOption(arg, all, parsing);
         name = long;
       }
-      if (name.startsWith("no-") && all[name.slice(3)]?.type === "boolean" && inline === undefined) { setBoolean(name.slice(3), false); continue; }
+      if (name.startsWith("no-") && all[name.slice(3)]?.type === "boolean") {
+        // `--no-pretty=true` was an unknown option whose nearest name was `--no-pretty`, the word typed.
+        if (inline !== undefined) throw new CliError("usage", `--${name} takes no value`);
+        setBoolean(name.slice(3), false);
+        continue;
+      }
       const option = all[name];
       if (!option) throw unknownOption(`--${name}`, all, parsing);
       if (option.type === "boolean") {
@@ -130,6 +135,8 @@ export function nearest(typed: string, words: Iterable<string>): string | undefi
   const most = Math.min(2, Math.floor(typed.length / 3));
   let best: string | undefined, bestDistance = most + 1;
   for (const word of words) {
+    // The distance is at least the lengths' difference: a long text that starts with a dash builds no table per name.
+    if (Math.abs(typed.length - word.length) >= bestDistance) continue;
     const d = distance(typed, word);
     if (d < bestDistance) { best = word; bestDistance = d; }
   }

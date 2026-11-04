@@ -6,20 +6,30 @@ import { JOIN_OPEN_EVENT, DEVICE_LINK_EVENT, deviceLinkOffered } from "../lib/de
 import { useFittedNameField } from "../hooks/useGroupNameField";
 import { nameStepAllowed, nameStepDone, nameStepPending } from "../lib/nameStep";
 import { cleanOwnName, fitsOwnName } from "../lib/ownName";
+import { closedByArrival } from "../lib/layerHistory";
 import { currentProfile } from "../lib/profiles";
+import { touchOnly } from "../lib/touchOnly";
 import { DeviceDialog, field, primaryButton } from "./devices/DeviceDialog";
 
 /**
  * Where the focus goes once the step closes. It opened as the app started, with nothing focused before it, so the
- * dialog gives the focus back to the page's body: New instead, the first thing a new person does, where the page has it
- * (the chat list); else the page's main area (a wide screen). Never away from something that took the focus in the meantime.
+ * dialog gives the focus back to the page's body. Over a chat (an invite link opens one) its message field, or on a
+ * touch screen, where that brings up the keyboard, its back button (a phone's header); else New, the first thing a new
+ * person does, where the page shows it; else the page's main area. Only what is on screen: a phone keeps the chat list,
+ * New in it, mounted but hidden under an open chat, where focus() does nothing. Never away from something that took
+ * the focus in the meantime.
  */
 function focusAfter() {
   const active = document.activeElement;
   if (active && active !== document.body) return;
-  const next = document.querySelector<HTMLElement>("[data-testid='sidebar-new-chat']");
-  if (next) next.focus();
-  else document.querySelector<HTMLElement>("main[tabindex]")?.focus();
+  const places = [...(touchOnly() ? [] : ["textarea.composer-textarea:not([disabled])"]), "[data-testid='chat-back']", "[data-testid='sidebar-new-chat']", "main[tabindex]"];
+  for (const place of places) {
+    for (const next of document.querySelectorAll<HTMLElement>(place)) {
+      if (next.closest("[hidden], [inert]") || !(next.checkVisibility?.() ?? true)) continue;
+      next.focus();
+      if (document.activeElement === next) return;
+    }
+  }
 }
 
 /**
@@ -58,6 +68,9 @@ export function NameStep() {
 
   if (!open) return null;
   const done = () => { nameStepDone(); setOpen(false); requestAnimationFrame(focusAfter); };
+  // A link that reaches this page (another tab's, the installed app's launch) is no answer: it stays over the chat the
+  // link opens, as on a first visit with the link, and Back has an entry to close it again (`useBackCloses`).
+  const close = () => { if (!closedByArrival()) done(); };
   const chosen = cleanOwnName(name);
   const save = () => {
     if (!chosen) return;
@@ -65,7 +78,7 @@ export function NameStep() {
     done();
   };
   return (
-    <DeviceDialog title={t("profile.nameStep.title")} onClose={done} testId="name-step">
+    <DeviceDialog title={t("profile.nameStep.title")} onClose={close} testId="name-step">
       <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); save(); }}>
         <input ref={input} data-testid="name-step-input" aria-label={t("profile.nameStep.title")} className={field} autoFocus
           placeholder={t("profile.nameStep.placeholder")} value={name} onChange={nameField.onChange}

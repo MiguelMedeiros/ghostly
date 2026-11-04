@@ -28,7 +28,8 @@ import { isDeviceCode, offerDeviceLink, readDeviceLink, takeDeviceLinkFromAddres
 import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, decodePart, inviteRouteCode, protocolLinkCode, readInvite } from "./lib/url";
 import { onJoinNotice, showJoinNotice, type JoinNoticeKey } from "./lib/joinNotice";
 import { onChatNotStored, reportChatNotStored } from "./lib/chatNotStored";
-import { groupPath } from "./lib/groups";
+import { LINK_GROUPS_WAITING, groupPath, linkGroupId, linkGroupsWaiting } from "./lib/groups";
+import { useEngineValue } from "./lib/engineState";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useAnchorHome, useAppNavigation } from "./hooks/useAppNavigation";
 import { problemText, type Problem } from "./lib/problemText";
@@ -220,14 +221,19 @@ function ChatNotStoredNotice() {
  * A group's link opened in the app (`#/join/group1/…` or `#/join/group2/…`): it leaves the address at once, like an
  * invite; once the app is unlocked the engine joins and the group opens, saying it waits for the admin's app. A refusal
  * is a notice as JoinDialog shows one (a title, what to do, the engine's English behind the ⓘ), there until closed.
+ * A link to a group not here joins only while few groups joined by links wait to be let in (`LINK_GROUPS_WAITING`),
+ * counted once the engine has loaded its groups.
  */
 function GroupLinkIntake() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const nav = useAppNavigation();
   const { hasUnlocked } = useLockScreen();
+  const groupsLoaded = useEngineValue((state) => !!state?.groupsLoaded);
   const [code, setCode] = useState("");
   const [problem, setProblem] = useState<Problem | null>(null);
+  /** The groups this intake is joining, until the engine answers: links that come together count each other. */
+  const joining = useRef(new Set<string>());
   const t = useT();
   useEffect(() => {
     const found = pathname.match(/^\/join\/(.+)$/)?.[1];
@@ -239,13 +245,22 @@ function GroupLinkIntake() {
     navigate("/", { replace: true });
   }, [pathname, navigate, t]);
   useEffect(() => {
-    if (!code || !hasUnlocked) return;
+    if (!code || !hasUnlocked || !groupsLoaded) return;
     setCode("");
+    const groups = engine.state?.groups ?? [];
+    const id = linkGroupId(code);
+    if (id && !groups.some((group) => group.id === id) && !joining.current.has(id)
+      && new Set([...linkGroupsWaiting(groups), ...joining.current]).size >= LINK_GROUPS_WAITING) {
+      setProblem({ tone: "error", title: t("group.link.tooMany"), next: t("group.link.tooManyNext") });
+      return;
+    }
+    if (id) joining.current.add(id);
     engine.call("joinGroupByLink", { link: code })
       .then(({ groupId }) => nav.conversation(groupPath(groupId)))
-      .catch((cause: unknown) => setProblem(cause instanceof Error ? problemText(cause, t) : { tone: "error", title: t("group.link.broken") }));
+      .catch((cause: unknown) => setProblem(cause instanceof Error ? problemText(cause, t) : { tone: "error", title: t("group.link.broken") }))
+      .finally(() => { if (id) joining.current.delete(id); });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `nav` changes with every location
-  }, [code, hasUnlocked]);
+  }, [code, hasUnlocked, groupsLoaded]);
   return problem ? <ClosableTopNotice problem={problem} testId="group-link-invalid" onClose={() => setProblem(null)} /> : null;
 }
 

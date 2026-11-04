@@ -13,6 +13,7 @@
     "turnBack": "カード"
   },
   "delete": "削除",
+  "deleteChatCallOn": "このチャットで通話中です。先に通話を終了してから、チャットを削除してください。",
   "deleteChatLocal": "この端末のチャットと履歴を削除します。相手側のコピーは削除されません。",
   "deleteChatTitle": "チャットを削除しますか？",
   "error": "エラー",

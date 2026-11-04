@@ -387,7 +387,8 @@ test("a payment from ecash spent somewhere else ends with that reason, and the b
 
   // "Copy backup", and the tokens redeemed outside Ghostly, straight at the mint.
   await alice.page.getByRole("button", { name: "Copy backup" }).click();
-  await expect(alice.page.getByText(/Backup copied/)).toBeVisible();
+  // The visible notice, below the button; a screen-reader status in the same section says the same words.
+  await expect(alice.page.getByTestId("wallet-backup").getByTestId("wallet-notice")).toContainText("Backup copied");
   const tokens = (await alice.page.evaluate(() => navigator.clipboard.readText())).split("\n").filter(Boolean);
   const { Wallet } = await import("@cashu/cashu-ts");
   const elsewhere = new Wallet(mintEndpoint(), { unit: "sat" });

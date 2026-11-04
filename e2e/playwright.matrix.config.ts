@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import { OIDC_TEST_ISSUER } from "./support/oidcIssuer";
 import { ATPROTO_TEST_PLC } from "./support/atproto";
+import { CHROMIUM_SANDBOX } from "./support/chromiumSandbox";
 
 /**
  * The combination matrix (e2e/matrix/): generated scenarios, each one a pair of
@@ -41,6 +42,7 @@ export default defineConfig({
     video: "retain-on-failure",
     actionTimeout: 30_000,
     launchOptions: {
+      chromiumSandbox: CHROMIUM_SANDBOX,
       args: [
         "--disable-features=WebRtcHideLocalIpsWithMdns",
         "--use-fake-device-for-media-stream",

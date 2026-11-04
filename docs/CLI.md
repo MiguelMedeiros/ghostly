@@ -61,7 +61,10 @@ the profile.
 To join someone else's invite: `printf '%s' "$INVITE" | ghostly invite join --label bob` (stdin keeps it out of `ps`
 and the shell's history; `ghostly invite join <ghostly1… or link>` works too, with a warning). With no invite given,
 a join whose stdin stays empty says so on stderr after 2 s and gives up with a usage error after 60 s; `invite join -`
-waits for stdin as long as it takes. The invite is the app's own, so
+waits for stdin as long as it takes. Any command that reads stdin takes at most 16 MiB there, the most a daemon's
+request line holds: more is refused as it comes (`bad_request`), and so is a file a request carries (a card's `--json`,
+`identity complete --evidence-file`, `x401 credential add`). A request whose JSON passes 16 MiB all the same (a text's
+escapes) is refused before it goes to the daemon. The invite is the app's own, so
 the other side can be the web app, the extension, the Desktop or another `ghostly`. A one-shot (no daemon) waits up
 to 60 s for the inviter, then answers `"paired":true|false` and the `stage`; when it did not pair, stderr says the next
 step (keep the profile running with `ghostly daemon --detach`, then `ghostly chat wait bob --until paired`).
@@ -338,6 +341,8 @@ text to speech) on this socket. Clone it; its `AGENTS.md` takes an AI agent thro
 
 The audio contract, one Unix socket per call:
 
+- **Token.** A program's first bytes are the call's `audio.token` and a line feed. Required on Windows (a named
+  pipe there): before it, a connection hears nothing and replaces no program.
 - **Format.** Raw PCM, no framing: s16le, mono, at the call's rate (48000 by default; 24000, 16000, 12000 or 8000
   with `--rate`).
 - **From the call.** The contact's voice in 20 ms frames, as they are decoded.

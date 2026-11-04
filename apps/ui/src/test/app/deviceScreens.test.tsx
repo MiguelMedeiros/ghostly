@@ -172,6 +172,15 @@ describe("Profile, Devices", () => {
     await waitFor(() => expect(engine.callsTo("deviceHandoffPush")).toEqual([{ key: PHONE }]));
   });
 
+  it("a wrong password's row says the device's name after it was renamed", async () => {
+    const { engine } = renderApp(<DevicesSection />);
+    // The handoff view keeps the name the device had when the move failed; the set has its new one.
+    engine.on("deviceSet", () => set({ devices: set().devices.map((device) => (device.key === PHONE ? { ...device, name: "Pixel" } : device)) }));
+    engine.on("deviceHandoffView", () => ({ role: "giver", device: "iPhone", key: PHONE, step: "failed", bytes: 0, total: 0, failure: "password" }) satisfies HandoffView);
+    const row = await screen.findByTestId("handoff-wrong-password");
+    await waitFor(() => expect(row).toHaveTextContent("Pixel tried to move this profile with a wrong password." + "Let Pixel try again"));
+  });
+
   it("a move under way whose dialog was closed: its steps and Cancel stay in the section, and no second Move to is offered", async () => {
     const { user, engine } = renderApp(<DevicesSection />);
     engine.on("deviceSet", () => set());
@@ -345,6 +354,11 @@ describe("the handoff's progress", () => {
     expect(screen.queryByTestId("handoff-settle-text")).toBeNull();
     await user.click(screen.getByTestId("handoff-settle-info"));
     expect(screen.getByTestId("handoff-settle-text")).toHaveTextContent("Ghostly waits to be sure no other device took over at the same moment.");
+    expect(screen.queryByTestId("handoff-cancel")).toBeNull();
+  });
+
+  it("offers no Cancel at Checking: the other device may have let the profile go already", () => {
+    renderApp(<HandoffProgress view={view({ step: "checking" })} onCancel={() => {}} />);
     expect(screen.queryByTestId("handoff-cancel")).toBeNull();
   });
 
@@ -723,6 +737,18 @@ describe("a device's name in a right-to-left language", () => {
     const rows = await screen.findAllByTestId("device-row");
     expect(names(rows[0]!)).toEqual(["MacBook"]);
     expect(names(rows[1]!)).toEqual(["Pixel-of-a-very-", "Pixel-of-a-very-"]);
+  });
+
+  it("keeps its own direction on the Removed row", async () => {
+    const { user, engine } = renderApp(<DevicesSection />, { language: "ar" });
+    const tablet = { key: TABLET, name: "Tablet (2)", slot: 1, self: false, active: false, status: "live" as const };
+    engine.on("deviceSet", () => set({ devices: [set().devices[0]!, tablet] }));
+    engine.on("deviceHandoffView", () => null);
+    engine.on("deviceRemove", () => set({ devices: [set().devices[0]!] }));
+    await user.click(await screen.findByTestId("device-menu"));
+    await user.click(screen.getByTestId("device-remove-open"));
+    await user.click(screen.getByTestId("device-remove-go"));
+    expect(names(await screen.findByTestId("device-removed"))).toEqual(["Tablet (2)"]);
   });
 
   it("keeps its own direction in the takeover's title, hint and the name to type", () => {

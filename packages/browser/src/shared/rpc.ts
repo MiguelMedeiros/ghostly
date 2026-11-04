@@ -272,6 +272,8 @@ export interface EngineApi {
   walletRemoveMint(params: { url: string; acceptLoss?: boolean }): void;
   /** A Lightning invoice from the active source (`via: "cashu"`: from the mints, landing as ecash). */
   walletReceiveLightning(params: { amount: number; via?: "cashu"; network?:WalletNetwork; card?: string }): { quote: string; invoice: string; expiresAt: number | null; paymentHash?: string; source: string };
+  /** The screen shows this invoice of ours: it is asked about every few seconds for a while (agents#2447). Say it again while it shows. */
+  walletWatchInvoice(params: { invoice: string; network?: WalletNetwork }): void;
   walletQuoteInvoice(params: { invoice: string; via?: "cashu"; network?:WalletNetwork; card?: string; amount?: number }): { quote: string; mint: string; amount: number; feeReserve: number; source?: string };
   /** `note`: what the payment was for, kept with the wallet's own record of it (a Lightning address, for one). */
   /** `confirmedReal`: required to pay a quote of a Mainnet wallet (real money), refused without it. */
@@ -523,6 +525,12 @@ export interface EngineApi {
    * start with `remove-<reason>:`.
    */
   deviceRemove(params: { key: string }): import("../devices/links").DeviceSetView;
+  /**
+   * Rename (WISP 06 § User experience), on the active device: the device with this signing key gets this name in the
+   * set's next record, which every device reads. The name is trimmed; one the record would change (empty, over 16 bytes,
+   * a control, invisible or direction-changing character) is refused. Errors start with `rename-<reason>:`.
+   */
+  deviceRename(params: { key: string; name: string }): import("../devices/links").DeviceSetView;
   /** "New device secret": the set moves to a new device-set secret with nobody removed. */
   deviceNewSecret(): import("../devices/links").DeviceSetView;
   /** The offer of a new device secret after a takeover, answered without making one. */

@@ -5,7 +5,7 @@ import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, type OptionSpec, type Parsed } from "./args";
 import { connectDaemon, DaemonClient, isNotTheDaemon } from "./client";
 import { COMMANDS, idSlot, noMoreThan, positionals, takesText, TEXT_COMMANDS } from "./commands";
-import { here, inRange, since as sinceOf, timeout, translate } from "./commands/shared";
+import { here, inRange, INPUT_BYTES, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS } from "./engineMethods";
 import { asCliError, CliError, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
@@ -374,9 +374,21 @@ export async function oneShotJoinWait(s: Pick<Session, "call">, result: Record<s
   return { answer, note: `Not paired yet: the inviter's app is offline. It pairs when both are online: keep this profile running (ghostly daemon --detach), then ghostly chat wait ${ref} --until paired` };
 }
 
+/**
+ * Stdin up to `INPUT_BYTES` (commands/shared.ts, as `readInput` reads it where a command reads it at once); more is refused as it comes. It was read to its end first: `send bob --stdin < big.log`
+ * with 1 GiB took 3 GB and answered V8's "Cannot create a string longer than 0x1fffffe8 characters", 128 MiB to
+ * `settings set nick -` ran the CLI out of memory, an endless pipe never ended, and past 16 MiB a daemon cut the line,
+ * answered "The daemon went away".
+ */
 async function readStdin(onData?: () => void): Promise<string> {
   const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) { onData?.(); chunks.push(chunk as Buffer); }
+  let bytes = 0;
+  for await (const chunk of process.stdin) {
+    onData?.();
+    bytes += (chunk as Buffer).length;
+    if (bytes > INPUT_BYTES) throw new CliError("bad_request", STDIN_TOO_BIG);
+    chunks.push(chunk as Buffer);
+  }
   return Buffer.concat(chunks).toString("utf8");
 }
 
@@ -1313,15 +1325,15 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
   const pipedEvidence = command.method === "identity.complete" && !params.evidenceFile && !params.stdin && process.stdin.isTTY !== true;
   if (command.method === "identity.complete") {
     if (params.evidenceFile) {
-      try { params.evidence = readFileSync(params.evidenceFile as string, "utf8"); } catch (error) { throw localFileError(error, params.evidenceFile as string) ?? error; }
+      try { params.evidence = readInput(params.evidenceFile as string); } catch (error) { throw localFileError(error, params.evidenceFile as string) ?? error; }
     }
     else if (params.stdin) params.evidence = await readStdin();
     delete params.evidenceFile; delete params.stdin;
   }
   if (command.method === "x401.credential.add") {
-    try { params.credential = params.file === "-" ? await readStdin() : readFileSync(params.file as string, "utf8"); }
+    try { params.credential = params.file === "-" ? await readStdin() : readInput(params.file as string); }
     // A file not there, a folder, one not allowed: said as every other file the CLI reads.
-    catch (error) { throw localFileError(error, params.file as string) ?? new CliError("usage", `Cannot read the credential: ${error instanceof Error ? error.message : String(error)}`); }
+    catch (error) { throw (error instanceof CliError && error) || localFileError(error, params.file as string) || new CliError("usage", `Cannot read the credential: ${error instanceof Error ? error.message : String(error)}`); }
     // Nothing read is said of the file or stdin given, not as the API's missing `credential`; nothing on stdin as a
     // join or a redeem says it, a usage error.
     if (!params.credential && params.file === "-") throw new CliError("usage", "Missing <file|->: give the SD-JWT VC on stdin (… | ghostly x401 credential add -) or as a file");
@@ -1367,12 +1379,14 @@ async function callPipeCommand(argv: string[]): Promise<void> {
   const ref = parsed.positionals.join(" ") || undefined;
   const client = await connectDaemon(g.paths);
   if (!client) throw new CliError("unavailable", `No daemon runs profile ${g.profile}: calls need one (ghostly daemon --detach)`);
-  let call: { call: string; audio: { socket: string; rate: number } | null };
+  let call: { call: string; audio: { socket: string; token: string; rate: number } | null };
   try { call = await client.call("call.get", ref ? { call: ref } : {}, { timeoutMs: ANSWER_MS }) as typeof call; } finally { client.close(); }
   const audio = call.audio;
   if (!audio) throw new CliError("unavailable", "That call has no audio yet: answer it first");
   const socket = connect(audio.socket);
   await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
+  // The call's token first: until it comes, the socket is nobody's (WISP 1100 § Calls).
+  socket.write(`${audio.token}\n`);
   process.stderr.write(`ghostly: call ${call.call}: s16le mono ${audio.rate} Hz on stdin/stdout\n`);
   // A clip that ends (`ffmpeg -t 3 … | ghostly call pipe`) is queued and played, and the contact's audio goes on
   // coming: the end of stdin never closes the socket, whose daemon side would close the call's audio with it.
@@ -1386,15 +1400,35 @@ async function callPipeCommand(argv: string[]): Promise<void> {
 
 /**
  * The command's words when the line asks for help (`help <words>`, or `--help`/`--help=true`/`-h` before any `--`), else
- * null. `--help=false` asks for none: the command runs.
+ * null. `--help=false` asks for none: the command runs. A `-h` or `--help` that is an option's value, as the parser
+ * reads it (`profile set --name --help`, `edit … --text "$NEW"`), asks for none either: it printed the help with exit 0
+ * and changed nothing.
  */
 function helpAsked(argv: readonly string[]): string[] | null {
   const end = argv.indexOf("--");
   const head = end === -1 ? argv : argv.slice(0, end);
   const words = (list: readonly string[]) => { const out: string[] = []; for (const word of list) { if (word.startsWith("-")) break; out.push(word); } return out; };
   if (head[0] === "help") return words(head.slice(1));
-  if (head.some((word) => word === "--help" || word === "--help=true" || word === "-h")) return words(head);
+  const options = optionsOf(words(head));
+  for (let i = 0; i < head.length; i++) {
+    const word = head[i];
+    if (word === "--help" || word === "--help=true" || word === "-h") return words(head);
+    const option = word.startsWith("--") ? (word.includes("=") ? undefined : options[word.slice(2)]) : word.length === 2 && word.startsWith("-") ? Object.values(options).find((o) => o.short === word.slice(1)) : undefined;
+    if (!option || option.type === "boolean") continue;
+    if (option.optionalValue && !(i + 1 < head.length && head[i + 1] !== "" && Number.isFinite(Number(head[i + 1])))) continue;
+    i++;
+  }
   return null;
+}
+
+/** The options of the command `words` name (its longest command), with the global ones: what takes a value on its line. */
+function optionsOf(words: readonly string[]): Record<string, OptionSpec> {
+  for (let n = words.length; n > 0; n--) {
+    const asked = words.slice(0, n).join(" ");
+    const row = helpRows().find((r) => commandWords(r.usage).join(" ") === asked);
+    if (row) return { ...GLOBAL_OPTIONS, ...row.options };
+  }
+  return GLOBAL_OPTIONS;
 }
 
 /** No profile yet in the Ghostly folder these global options name: `ghostly`'s first run there. */

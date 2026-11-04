@@ -11,7 +11,9 @@
  * error the app stays on screen through is the app's own error screen's, and is forgotten. "Copy details" holds the
  * error, the browser's version and which APIs are there: no address fragment, no storage, nothing of a chat or a key.
  * The "Starting Ghostly…" first paint index.html puts in #root (#boot-shell) is not the app: with only it there the
- * page counts as empty, and the guard gives it the browser's language.
+ * page counts as empty, and the guard gives it the language the app will draw in (the profile's, or the browser's for a
+ * new one). As it runs, before anything is drawn, it puts the person's theme on <html>, so the first paint is in their
+ * colours.
  *
  * A file of its own, not inline: the site's Content-Security-Policy allows scripts from this origin only.
  */
@@ -44,10 +46,10 @@
   var poll = null;
   var observer = null;
 
+  /** The guard's words in the language the app will draw in (`appLanguage`), English for one it has no words for. */
   function language() {
-    var tag = "";
-    try { tag = String(navigator.language || "").slice(0, 2).toLowerCase(); } catch (e) { /* English */ }
-    return TEXT[tag] ? tag : "en";
+    var tag = appLanguage(TEXT);
+    return TEXT.hasOwnProperty(tag) ? tag : "en";
   }
 
   /** Text that may come from anywhere (an error's message): no invite, no long key-like run, no address fragment. */
@@ -113,7 +115,7 @@
     return !(root.childElementCount === 1 && root.firstElementChild && root.firstElementChild.id === "boot-shell");
   }
 
-  /** The first paint's words in the browser's language, once the page has been read (before the bundle runs). */
+  /** The first paint's words in the app's language, once the page has been read (before the bundle runs). */
   function speakShell() {
     var shell = document.getElementById("boot-shell");
     var words = shell && shell.getElementsByTagName("p")[0];
@@ -276,13 +278,14 @@
   }
 
   /**
-   * The language the app will start in, as apps/ui/src/lib/settings.ts picks it: the one the default profile saved,
-   * or for a new profile the first of the browser's languages the app speaks. English is in the entry. Another
-   * profile chosen here may read in another language: then this file was asked for in vain, and the app asks for its own.
+   * The language the app will start in, as apps/ui/src/lib/settings.ts picks it: the one the profile the page starts as
+   * saved (`settingsKey`, a handoff's space included), or for a new profile the first of the browser's languages the app
+   * speaks. English is in the entry. Another profile chosen on the way in may read in another language: then this file
+   * was asked for in vain, and the app asks for its own.
    */
   function appLanguage(files) {
     try {
-      var saved = JSON.parse(localStorage.getItem("ghostly_app_settings") || "null");
+      var saved = JSON.parse(localStorage.getItem(settingsKey()) || "null");
       if (saved && typeof saved.language === "string") return saved.language;
     } catch (e) { /* no storage: a new profile */ }
     var tags = [];
@@ -314,6 +317,60 @@
     } catch (e) { /* the app loads it itself */ }
   }
 
+  /** The header colour of each scheme and colour theme (index.css's --theme-panel-header): the browser's bar. */
+  var HEADER = {
+    dark: { classic: "#202c33", monochrome: "#1a1a1a", cyan: "#0c1929", purple: "#1a1625" },
+    light: { classic: "#f0f2f5", monochrome: "#f5f5f5", cyan: "#ecfeff", purple: "#faf5ff" }
+  };
+
+  /**
+   * Where the profile the page will start as keeps its settings, as apps/ui/src/lib/profiles.ts finds it: the one the
+   * registry chose, in the space a handoff moved it to, or the default profile's.
+   */
+  function settingsKey() {
+    var space = "";
+    try {
+      var registry = JSON.parse(localStorage.getItem("ghostly_profiles") || "null");
+      var profiles = registry && registry.profiles instanceof Array ? registry.profiles : [];
+      var active = registry && typeof registry.active === "string" && /^[a-z0-9]{10}$/.test(registry.active) ? registry.active : "";
+      var found = !active;
+      for (var i = 0; i < profiles.length; i++) if (profiles[i] && profiles[i].id === active) found = true;
+      if (!found) active = "";
+      space = active;
+      for (var j = 0; j < profiles.length; j++) {
+        var entry = profiles[j];
+        if (entry && entry.id === active && typeof entry.space === "string" && /^[A-Za-z0-9_.-]{1,100}$/.test(entry.space)) space = entry.space;
+      }
+    } catch (e) { /* the default profile */ }
+    return space ? "ghostly_" + space + "_app_settings" : "ghostly_app_settings";
+  }
+
+  /**
+   * The person's scheme and colour theme on <html> before the first paint, as ThemeContext sets them once React runs:
+   * without them index.css's bare :root (Classic dark) drew the page, and a light theme flashed dark on every load.
+   * A new profile, or settings it cannot read, gets the app's defaults (apps/ui/src/lib/settings.ts).
+   */
+  function paintTheme() {
+    var scheme = "dark";
+    var theme = "cyan";
+    try {
+      var saved = JSON.parse(localStorage.getItem(settingsKey()) || "null");
+      var chosen = saved && (saved.colorScheme || saved.theme);
+      if (chosen === "light" || chosen === "dark") scheme = chosen;
+      else if (chosen === "system") scheme = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      if (saved && HEADER.dark.hasOwnProperty(saved.colorTheme)) theme = saved.colorTheme;
+    } catch (e) { /* the defaults */ }
+    try {
+      var root = document.documentElement;
+      root.setAttribute("data-theme", scheme);
+      root.setAttribute("data-color-theme", theme);
+      root.style.colorScheme = scheme;
+      var meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute("content", HEADER[scheme][theme]);
+    } catch (e) { /* the app sets them */ }
+  }
+
+  paintTheme();
   preloadLanguage();
 
   if (document.readyState === "loading") {

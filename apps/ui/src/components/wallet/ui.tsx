@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { PayExternally } from "../PayExternally";
 import { focusInPlace } from "../../lib/focus";
+import { radioGroupKeys, radioTabStop } from "../../lib/radioGroup";
 import { useOptionalI18n, useT } from "../../contexts/I18nContext";
 import { useAmountText } from "../../hooks/useAmountText";
 
@@ -10,13 +11,29 @@ export { Section, Row, Block } from "../layout/Section";
 import { Notice } from "../ui/Notice";
 export { Notice };
 
-const switchTrack = (checked: boolean) => `relative w-12 h-6 rounded-full transition-colors shrink-0 ${checked ? "bg-accent" : "bg-switch-off"}`;
-const SwitchKnob = ({ checked }: { checked: boolean }) => <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${checked ? "translate-x-6" : "translate-x-0"}`} />;
+/**
+ * Forced colors (Windows high contrast) replace every background with the page's, so a track and knob drawn by colour
+ * alone vanish there. In that mode only, both are drawn in system colours: an outlined track with a ButtonText knob when
+ * off, a Highlight track with a HighlightText knob when on. The knob moves in by the border's pixel so it stays centred.
+ */
+const switchTrack = (checked: boolean) => `relative w-12 h-6 rounded-full transition-colors shrink-0 ${checked ? "bg-accent" : "bg-switch-off"} forced-colors:forced-color-adjust-none forced-colors:border forced-colors:border-[color:ButtonText] ${checked ? "forced-colors:bg-[color:Highlight]" : "forced-colors:bg-[color:Canvas]"}`;
+const SwitchKnob = ({ checked }: { checked: boolean }) => <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${checked ? "translate-x-6" : "translate-x-0"} forced-colors:top-[3px] forced-colors:left-[3px] ${checked ? "forced-colors:bg-[color:HighlightText]" : "forced-colors:bg-[color:ButtonText]"}`} />;
 
-export function Switch({ checked, onChange, label, disabled, testId }: { checked: boolean; onChange: (next: boolean) => void; label: string; disabled?: boolean; testId?: string }) {
+/**
+ * The chosen option of a row of choices in forced colors, where its `bg-accent` is replaced by the page's background
+ * and it would look like the others: system Highlight behind HighlightText, as a list's selected item.
+ */
+export const chosenInForcedColors = "forced-colors:forced-color-adjust-none forced-colors:bg-[color:Highlight] forced-colors:text-[color:HighlightText]";
+
+/**
+ * An on/off switch. `unavailable`: it cannot be turned on here for now (`aria-disabled`, still reachable by the keys so
+ * its reason is read), with that reason in the element `describedBy` names.
+ */
+export function Switch({ checked, onChange, label, disabled, unavailable, describedBy, testId, ref }: { checked: boolean; onChange: (next: boolean) => void; label: string; disabled?: boolean; unavailable?: boolean; describedBy?: string; testId?: string; ref?: React.Ref<HTMLButtonElement> }) {
   return (
-    <button type="button" role="switch" data-testid={testId} aria-checked={checked} aria-label={label} disabled={disabled} onClick={() => onChange(!checked)}
-      className={`${switchTrack(checked)} cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed before:absolute before:-inset-2 before:content-['']`}>
+    <button ref={ref} type="button" role="switch" data-testid={testId} aria-checked={checked} aria-label={label} aria-disabled={unavailable || undefined} aria-describedby={describedBy} disabled={disabled}
+      onClick={() => { if (!unavailable) onChange(!checked); }}
+      className={`${switchTrack(checked)} cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:cursor-not-allowed before:absolute before:-inset-2 before:content-['']`}>
       <SwitchKnob checked={checked} />
     </button>
   );
@@ -34,13 +51,18 @@ export function SwitchLook({ checked, className = "", testId }: { checked: boole
   );
 }
 
-/** One choice among a few. `compact`: the smaller one for a page header. Wraps when the options do not fit. */
+/**
+ * One choice among a few. `compact`: the smaller one for a page header. Wraps when the options do not fit. A radio
+ * group: one Tab stop (the chosen option), the arrows, Home and End move; Space or Enter chooses, since choosing may be
+ * an action (a wallet's network replaces the wallet).
+ */
 export function Segmented<T extends string>({ options, value, onChange, label, disabled, compact }: { options: { value: T; label: string }[]; value: T; onChange: (next: T) => void; label: string; disabled?: boolean; compact?: boolean }) {
+  const stop = radioTabStop(options.map(option => ({ checked: value === option.value, disabled: !!disabled && value !== option.value })));
   return (
-    <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1 max-w-full">
-      {options.map((option) => (
-        <button key={option.value} type="button" role="radio" aria-checked={value === option.value} disabled={disabled && value !== option.value} onClick={() => { if (option.value !== value) onChange(option.value); }}
-          className={`${compact ? "px-2.5 min-h-8 text-[13px]" : "px-3 min-h-8 text-sm"} whitespace-nowrap rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${value === option.value ? "bg-accent text-on-accent font-medium" : "text-text-secondary hover:text-text-primary"}`}>
+    <div role="radiogroup" aria-label={label} onKeyDown={radioGroupKeys} className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1 max-w-full">
+      {options.map((option, i) => (
+        <button key={option.value} type="button" role="radio" aria-checked={value === option.value} tabIndex={i === stop ? 0 : -1} disabled={disabled && value !== option.value} onClick={() => { if (option.value !== value) onChange(option.value); }}
+          className={`${compact ? "px-2.5 min-h-8 text-[13px]" : "px-3 min-h-8 text-sm"} whitespace-nowrap rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${value === option.value ? `bg-accent text-on-accent font-medium ${chosenInForcedColors}` : "text-text-secondary hover:text-text-primary"}`}>
           {option.label}
         </button>
       ))}
@@ -49,9 +71,10 @@ export function Segmented<T extends string>({ options, value, onChange, label, d
 }
 
 const BUTTON = {
-  primary: "bg-accent text-on-accent hover:bg-accent-hover font-semibold",
+  // A border in forced colors only: there the fill is gone, and the button would read as bare text beside the others.
+  primary: "bg-accent text-on-accent hover:bg-accent-hover font-semibold forced-colors:border forced-colors:border-[color:ButtonText]",
   secondary: "bg-surface-alt text-text-primary hover:bg-surface-hover border border-border",
-  danger: "bg-transparent text-danger hover:bg-danger/10 border border-border",
+  danger: "bg-transparent text-danger-ink hover:bg-danger/10 border border-border",
 } as const;
 /**
  * `loading`: the click is being worked on. The button keeps its words, shows a turning ring before them, is busy for a

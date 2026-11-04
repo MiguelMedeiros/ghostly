@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CueChat } from "../lib/cues";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
@@ -33,7 +33,7 @@ import { ChatFolderMenu, FolderMenuItem } from "../components/chat/ChatFolderMen
 import { groupChat } from "../lib/chatMute";
 import { forgetSentOriginal } from "../lib/sentOriginals";
 import { useI18n, type Translate } from "../contexts/I18nContext";
-import { GroupInvitationCard } from "../components/GroupInvitation";
+import { GroupInvitationCard, focusPastRow, rowAfter } from "../components/GroupInvitation";
 import { authorName, forgetGroupLocal, groupPath, groupReadAt, groupStatusText, groupUnreadAt, markGroupRead, memberName, memberPhoto } from "../lib/groups";
 import { NowPlayingChat, stopPlayingFrom } from "../lib/nowPlaying";
 import { clearChatNotification } from "../lib/notifications";
@@ -53,7 +53,8 @@ import { GroupTypingText, type GroupTyper } from "../components/TypingIndicator"
 import { navOnly } from "../lib/navigation";
 import { mentionViews, type MentionCandidate } from "../lib/parse/mentions";
 import { COMMUNITY_LIMITS, GROUP_FILE_LIMITS, GROUP_LIMITS, isPlayableVideoType, mayPin, replySnippet, type GroupMention, type RoutineCard, type VoiceMeta } from "@ghostly/core";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
+import { useEngineValue } from "../lib/engineState";
 import { formatFileSize } from "../lib/format";
 import { videoMetaOf } from "../lib/videoPoster";
 import { messageSnippet, quoteFor, replyIndexer, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
@@ -74,8 +75,8 @@ import { working } from "../lib/focus";
 import { setSaved, useSavedIn } from "../hooks/useSavedMessages";
 import { Spinner } from "../components/wallet/ui";
 
-const subscribe = (listener: () => void) => engine.subscribe(listener);
-const snapshot = () => engine.state;
+/** This device's payments the page's bubbles are about, by id: what it reads of the engine's. */
+type Payments = Partial<EngineState["payments"]>;
 
 /** A roster's names as the history's rows read them: built once per roster, not once per message. */
 interface RosterNames {
@@ -134,8 +135,8 @@ function mentionCandidates(group: GroupView, t: Translate): MentionCandidate[] {
 }
 
 /** The group note a payment of this device is part of: a request's own, or the request a payment answers (by its id on the wire). */
-function noteIdOf(state: EngineState, paymentId: string): string {
-  const payment = state.payments[paymentId];
+function noteIdOf(payments: Payments, paymentId: string): string {
+  const payment = payments[paymentId];
   return paymentWireId(payment?.kind === "payment" && payment.requestId ? payment.requestId : paymentId);
 }
 
@@ -143,11 +144,11 @@ function noteIdOf(state: EngineState, paymentId: string): string {
  * The note that captions a payment bubble: the one about that bubble's own payment, which the member who started it
  * says (the payee of a request, the payer of a payment), never a note of another member that reuses its id.
  */
-function captionOf(state: EngineState, notes: ReadonlyMap<string, GroupPayNote>, message: StoredMessage, myKey: string | undefined): GroupPayNote | undefined {
-  const payment = state.payments[message.paymentId!];
+function captionOf(payments: Payments, notes: ReadonlyMap<string, GroupPayNote>, message: StoredMessage, myKey: string | undefined): GroupPayNote | undefined {
+  const payment = payments[message.paymentId!];
   // Said once, under the request (or the payment) itself: not again under a payment that answers it.
   if (payment?.kind === "payment" && payment.requestId) return undefined;
-  const note = notes.get(noteIdOf(state, message.paymentId!));
+  const note = notes.get(noteIdOf(payments, message.paymentId!));
   const starter = message.sender === "me" ? myKey : message.member;
   return note && starter && (note.kind === "request" ? note.to : note.from) === starter ? note : undefined;
 }
@@ -278,6 +279,11 @@ const JUST_JOINED_MS = 5 * 60_000;
  * nobody, and nothing tells the joiner so: WISP 902), or every app that could answer is closed. The joiner is told both.
  */
 const LONG_KNOCK_MS = 2 * 60_000;
+/**
+ * Let into a community this long and still no welcome: it was lost, and if the link was replaced before the next knock,
+ * no member reads the old link's knocks to say it again. The joiner keeps knocking, but is told to ask for the current link.
+ */
+const LONG_ADMITTED_MS = 5 * 60_000;
 const NO_MESSAGES: StoredMessage[] = [];
 const NO_ROWS: readonly ChatMessage[] = [];
 
@@ -295,15 +301,24 @@ function usePast(since: number | undefined, ms: number): boolean {
   return past;
 }
 const JOIN_ORDER: JoinStep[] = ["knocking", "knocked", "answered", "admitted", "in"];
+/** A step at a stage: done once reached, current while it is the next one, else still to come. Full: the knock is there. */
+function joinStepState(at: GroupJoinStage, step: JoinStep): "done" | "current" | "todo" {
+  const stage = at === "full" ? "knocked" : at;
+  if (JOIN_ORDER.indexOf(stage) >= JOIN_ORDER.indexOf(step)) return "done";
+  return JOIN_ORDER[JOIN_ORDER.indexOf(step) - 1] === stage ? "current" : "todo";
+}
 
-function joiningText(stage: GroupJoinStage, name: string, community: boolean, t: Translate): { title: string; body: string } {
+function joiningText(stage: GroupJoinStage, name: string, community: boolean, t: Translate, full?: { n: number; max: number }, admittedLong = false, othersKnocked = false): { title: string; body: string } {
   const waiting = t("group.join.waiting");
   if (stage === "replaced") return { title: t("group.join.replaced"), body: t("group.join.replacedBody") };
+  // A member's app answered that there is no room yet (`group-full`): the link works, and asking for a new one won't help.
+  if (stage === "full" && full) return { title: t("group.join.full"), body: t("group.join.fullBody", { n: full.n, max: full.max }) };
   if (stage === "admitted") return { title: name ? t("group.join.joiningName", { name }) : t("group.join.joiningGroup"),
-    body: community ? t("group.join.admittedCommunity") : t("group.join.admitted") };
+    body: !community ? t("group.join.admitted") : admittedLong ? t("group.join.admittedStuck") : t("group.join.admittedCommunity") };
   if (stage === "answered") return { title: community ? t("group.join.answeredTitleCommunity") : waiting,
     body: community ? t("group.join.answeredCommunity") : t("group.join.answered") };
-  if (stage === "knocked") return { title: waiting, body: community ? t("group.join.knockedCommunity") : t("group.join.knocked") };
+  // Others knocked just before: the admin's app may be letting them in, not closed.
+  if (stage === "knocked") return { title: waiting, body: community ? t("group.join.knockedCommunity") : othersKnocked ? t("group.join.knockedBusy") : t("group.join.knocked") };
   return { title: waiting, body: community ? t("group.join.knockingCommunity") : t("group.join.knocking") };
 }
 
@@ -313,16 +328,20 @@ export function GroupChat() {
   const navigate = useNavigate();
   const nav = useAppNavigation();
   const { t } = useI18n();
-  const state = useSyncExternalStore(subscribe, snapshot);
+  // What the page shows of the engine's state, each compared by content (lib/engineState): the whole state drew the
+  // open group, its header and its rows' authors on every change, up to 20 a second while a file moves.
+  const started = useEngineValue(state => !!state);
+  const rosterGroup = useEngineValue(state => state?.groups.find(g => g.id === groupId));
+  // Of the 1:1 chats, what names and pictures members who are contacts: not each link's whole state.
+  const links = useEngineValue(state => state?.links.map(({ id, peerPubKeyZ32, peerAvatar }) => ({ id, peerPubKeyZ32, peerAvatar })));
   // Members who are contacts go by the identity they are shown as, if one was chosen (identities/contactFace.ts).
   const faceOf = useContactFaces();
-  const rosterGroup = state?.groups.find(g => g.id === groupId);
   // A member's nickname from that contact's chat, read only for members who are contacts and parsed again only when the
   // chat changed: every engine state comes through here, and a read of every chat each time grew with the chat list.
   const group = useMemo(() => {
     if (!rosterGroup) return undefined;
-    return withContactFaces(rosterGroup, state?.links, faceOf, peerKey => chatNamesForPeer(peerKey)?.label);
-  }, [rosterGroup, state?.links, faceOf]);
+    return withContactFaces(rosterGroup, links, faceOf, peerKey => chatNamesForPeer(peerKey)?.label);
+  }, [rosterGroup, links, faceOf]);
   // The history of this group only: the page stays mounted from one group to the next, and for the render that changes
   // groups the last one's messages would still be here (the timeline would open on them, and never find where this
   // group was left). Until this group's own list comes, what the engine last sent for it.
@@ -384,6 +403,8 @@ export function GroupChat() {
   openGroupId.current = groupId;
   const setError = (problem: Problem | null) => { if (openGroupId.current === groupId) setRefused(problem && { groupId, problem }); };
   const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null), shareRef = useRef<HTMLButtonElement>(null);
+  // Where the Share dialog gives the focus back: Share, or the ⋮ once the link went off and took Share with it.
+  const shareBack = useMemo(() => ({ get current() { return shareRef.current ?? optionsRef.current; } }), []);
   const { settings } = useSettings();
   // Forward, and Select then Forward (WISP 400 § Forwards): a group's texts, to chats and other groups.
   // The group is a new object on every state of the engine (up to 20 a second): the names, and so the rows, are made
@@ -397,7 +418,7 @@ export function GroupChat() {
   const shown = useMemo(() => names ? pickShown(messages) : NO_ROWS, [names, pickShown, messages]);
   const forwarding = useForwarding(group ? `group:${groupId}` : undefined, shown);
   // Members learn my name on the edges, as a contact does on a chat: the engine must know it here too.
-  const engineNick = state?.settings.nick;
+  const engineNick = useEngineValue(state => state?.settings.nick);
   useEffect(() => {
     const nick = settings.defaultNickname;
     if (engineNick !== undefined && engineNick !== nick) void engine.call("updateSettings", { settings: { nick } }).catch(() => {});
@@ -432,6 +453,14 @@ export function GroupChat() {
   const playingChat = useMemo(() => ({ path: groupPath(groupId), name: groupName }), [groupId, groupName]);
   // Left or deleted here: what this device keeps of it goes, and so does what plays from it (no bar naming it after).
   const goneHere = () => { forgetGroupLocal(groupId); stopPlayingFrom(groupPath(groupId), true); };
+  // Cancel joining on a first join's card: the group's row goes and home shows. The focus goes to the list's next row,
+  // or New, as a Decline's does (on a phone, once the list shows); it was left on the page's body.
+  const cancelJoin = () => {
+    const next = rowAfter(groupId), pressed = document.activeElement;
+    void engine.call("forgetGroup", { groupId }).then(() => forgetGroupLocal(groupId), () => {});
+    nav.home();
+    focusPastRow(next, pressed);
+  };
   // A bot's routines in a row: one row, opened on a tap (WISP 405 · Status Cards), whichever of its rows are in the page.
   const [readStacks] = useState(() => routineStacksReader<StoredMessage, StoredMessage>(m => m));
   const stacks = useMemo(() => readStacks(messages), [readStacks, messages]);
@@ -453,13 +482,22 @@ export function GroupChat() {
   const [pickScrollRow] = useState(() => rowPicker<StoredMessage, ScrollRow>(m => m.event || m.groupPay ? undefined : { id: m.id, mine: m.sender === "me" }));
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the window's edges: see above
   const scrollRows = useMemo(() => pickScrollRow(messages).slice(), [pickScrollRow, messages, rowWindow.from, rowWindow.to]);
-  // The rows a page's every draw looks at (it draws on each engine state, up to 20 a second), found in the rows that
-  // changed: the payments' notes, this device's own payment bubbles, and my own "You joined" lines.
+  // The rows a page's every draw looks at, found in the rows that changed: the payments' notes, this device's own
+  // payment bubbles, and my own "You joined" lines.
   const [pickNote] = useState(() => rowPicker<StoredMessage, GroupPayNote>(m => m.groupPay));
   const noteRows = useMemo(() => pickNote(messages), [pickNote, messages]);
   const notes = useMemo(() => new Map(noteRows.map(note => [note.id, note])), [noteRows]);
   const [pickPaymentRow] = useState(() => rowPicker<StoredMessage, StoredMessage>(m => m.paymentId && !m.groupPay ? m : undefined));
   const paymentRows = useMemo(() => pickPaymentRow(messages), [pickPaymentRow, messages]);
+  // Their payments, and the contact each went to or came from (over a member's edge): not every payment of the device.
+  const payments = useEngineValue(state => Object.fromEntries(paymentRows.map(m => [m.paymentId!, state?.payments[m.paymentId!]]))) as Payments;
+  const paymentPeers = useEngineValue(state => Object.fromEntries(paymentRows.map(m => {
+    const linkId = state?.payments[m.paymentId!]?.linkId;
+    return [m.paymentId!, state?.edges?.find(l => l.id === linkId)?.peerPubKeyZ32 ?? ""];
+  })));
+  // Getting in takes a group link: an app with no transport for one (no WebRTC, no native transport) is never let in,
+  // so it says so rather than "you are in in a moment" (as the group's connection does, GroupConnection).
+  const noLinks = useEngineValue(state => state?.transport.groupLinks === false);
   const [pickMyJoin] = useState(() => rowPicker<StoredMessage, number>(m => m.event === "joined" && !m.member ? m.timestamp : undefined));
   const myJoins = useMemo(() => pickMyJoin(messages), [pickMyJoin, messages]);
   const jump = useChatScroll({ rows: scrollRows, chat: groupId, window: rowWindow });
@@ -500,7 +538,7 @@ export function GroupChat() {
 
   // Files and voice messages (WISP 503): the 1:1 composer's, within the group's limit. The first thing sent after
   // Reply carries it, as a text does.
-  const platform = useServicesPlatform();
+  const platform = servicesPlatform;
   const sendFile = useCallback(async (source: File, voice?: VoiceMeta): Promise<string | null> => {
     if (!platform?.sendGroupFile) return null;
     if (source.size > GROUP_FILE_LIMITS.maxBytes) return t("chat.fileTooLarge", { size: formatFileSize(GROUP_FILE_LIMITS.maxBytes) });
@@ -531,6 +569,8 @@ export function GroupChat() {
   const knock = rosterGroup?.invitation?.viaLink ? rosterGroup.invitation.stage ?? (rosterGroup.invitation.admin ? "admitted" : "knocked") : undefined;
   // Timed from the knock: a group kept here, knocking to get back in, was created long before it.
   const knockedLong = usePast(knock === "knocked" ? rosterGroup!.invitation!.since ?? rosterGroup!.createdAt : undefined, LONG_KNOCK_MS);
+  // Let into a community and still no keys a while on: the welcome was lost, and maybe the link replaced since.
+  const admittedLong = usePast(knock === "admitted" ? rosterGroup!.invitation!.admittedAt : undefined, LONG_ADMITTED_MS);
   // Saved messages: kept on this device, never sent; the Saved view lists them. A hook: before the returns below.
   const savedHere = useSavedIn(`group:${groupId}`);
   // The composer turned off under the focus (removed, left on another device, the group forked): the field goes disabled
@@ -549,7 +589,7 @@ export function GroupChat() {
     if (at && at !== document.body && !at.closest("[data-composer]")) return;
     (noticeRef.current ?? optionsRef.current)?.focus();
   }, [canSend, active]);
-  if (!state) return null;
+  if (!started) return null;
   const back = <button onClick={nav.up} className="md:hidden w-11 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0" title={t("common.back")} aria-label={t("common.back")} data-testid="chat-back">
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="rtl:-scale-x-100"><path d="M15 19l-7-7 7-7" /></svg>
   </button>;
@@ -571,15 +611,15 @@ export function GroupChat() {
   const reachable = others.filter(m => m.online).length;
   // Payments: this device's own bubbles (from the desk, over an edge) and the notes the group shares about them.
   // A note is left out of the timeline only when one of these bubbles is about it: its own caption, or a payment answering it.
-  const ownNotes = new Set(paymentRows.filter(m => captionOf(state, notes, m, group.myKey) || state.payments[m.paymentId!]?.requestId)
-    .map(m => noteIdOf(state, m.paymentId!)));
+  const ownNotes = new Set(paymentRows.filter(m => captionOf(payments, notes, m, group.myKey) || payments[m.paymentId!]?.requestId)
+    .map(m => noteIdOf(payments, m.paymentId!)));
   // Who wrote each member's message (their colour, their picture once per run): see `authorsOf`.
   // A bot's routines folded into one row count as one message of the run (the rest are under it, drawn when it opens).
-  const authors = authorsFor(messages, stackHeads, group, ownNotes, key => memberPhoto(group, { key, me: false }, state.links, faceOf));
+  const authors = authorsFor(messages, stackHeads, group, ownNotes, key => memberPhoto(group, { key, me: false }, links, faceOf));
   /** A member's face in the Tasks panel, as their messages show it (`authorsOf`); none for my own cards ("me"). */
   const memberFace = (key: string): MemberFaceOf | undefined => key === "me" ? undefined : {
     key, name: group.members.find(x => x.key === key)?.nick || group.formerNames?.[key] || "",
-    picture: memberPhoto(group, { key, me: false }, state.links, faceOf),
+    picture: memberPhoto(group, { key, me: false }, links, faceOf),
   };
   /** `inStack`: a message inside a folded row, as that row's writer, its picture beside the stack's last one. */
   const authorProps = (m: StoredMessage, inStack?: MessageAuthor) => {
@@ -588,7 +628,12 @@ export function GroupChat() {
     const inRoster = group.members.some(x => x.key === author.key);
     return { author, ...(inRoster && { onOpenAuthor: () => { setFocusMember(author.key); setShowMembers(true); } }) };
   };
-  const peerOf = (paymentId: string) => { const linkId = state.payments[paymentId]?.linkId; return state.edges?.find(l => l.id === linkId)?.peerPubKeyZ32 ?? ""; };
+  /** The contact who wrote a member's message, when they are one: told when an invoice in it is paid from its card. */
+  const payeeOf = (m: StoredMessage) => {
+    const linkId = m.member ? Object.keys(group.memberLinks).find(id => group.memberLinks[id] === m.member) : undefined;
+    return linkId ? links?.find(l => l.id === linkId)?.peerPubKeyZ32 : undefined;
+  };
+  const peerOf = (paymentId: string) => paymentPeers[paymentId] ?? "";
   // A row of the timeline: an event, a payment's note, or a message.
   const row = (m: StoredMessage, inStack?: MessageAuthor) => m.event
     ? <div key={m.id} data-testid="group-event" className="flex justify-center mb-3.5 px-6"><span className="rounded-lg bg-surface-alt/90 px-3 py-1.5 text-center text-[11px] text-text-muted">{eventText(m, group, t)}</span></div>
@@ -596,10 +641,10 @@ export function GroupChat() {
     : m.groupPay ? (ownNotes.has(m.groupPay.id) ? null : <GroupPaymentNote key={m.id} note={m.groupPay} group={group} />)
     : m.paymentId ? <div key={m.id} data-testid="group-payment">
       <MessageBubble message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} peerPubKey={peerOf(m.paymentId)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} {...authorProps(m, inStack)} />
-      {(() => { const note = captionOf(state, notes, m, group.myKey); return note && <GroupPaymentCaption note={note} group={group} />; })()}
+      {(() => { const note = captionOf(payments, notes, m, group.myKey); return note && <GroupPaymentCaption note={note} group={group} />; })()}
     </div>
     // No `peerAck`: a group has no receipts (WISP 902), so a message of mine is sent, one tick, never "Delivered".
-    : <MessageBubble key={m.id} message={shownOf(m)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} highlight={search.highlight(m.id)} {...authorProps(m, inStack)}
+    : <MessageBubble key={m.id} message={shownOf(m)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} highlight={search.highlight(m.id)} {...authorProps(m, inStack)} payee={payeeOf(m)}
       onReply={replyTarget(m, true) ? () => { setEditing(null); setReplyingTo(m); } : undefined} quote={quoteOf(m)}
       buttons={group.canSend ? buttonsOf.get(m.id) : undefined} compactPress={presses.has(m.id)}
       onEdit={canEditInGroup(m) && !m.card && group.canSend ? () => { setReplyingTo(null); setEditing(m); } : undefined}
@@ -626,12 +671,17 @@ export function GroupChat() {
   const linkUnanswered = !!group.invitation?.viaLink && !!group.invitation.unanswered;
   // The link was replaced since it was shared: nothing more happens here, only the current link gets in.
   const linkReplaced = stage === "replaced";
-  // Getting in takes a group link: an app with no transport for one (no WebRTC, no native transport) is never let in,
-  // so it says so rather than "you are in in a moment" (as the group's connection does, GroupConnection).
-  const noLinks = state?.transport.groupLinks === false;
   const joining = noLinks ? { title: t("group.connection.noWebrtc"), body: t("group.connection.noWebrtcHint") }
     : linkUnanswered ? { title: t("group.join.unanswered"), body: t("group.join.unansweredBody") }
-    : joiningText(stage, group.name, group.profile === "community", t);
+    : joiningText(stage, group.name, group.profile === "community", t, group.invitation?.full, admittedLong, !!group.invitation?.othersKnocked);
+  // The joining card's one live line: what changed, not the card. The five-minute line when let in and still no keys,
+  // the two-minute hint while it shows; else at a dead
+  // end (no transport, unanswered, replaced) its title; else the last step reached, or the title before the first.
+  // Others waiting too (a community's queue, a private group's fresh knocks): the group is busy, not the link dead.
+  const staleText = waitingWith > 0 || group.invitation?.othersKnocked ? t("group.join.staleBusy") : t("group.join.stale");
+  const lastReached = joinSteps(group.profile === "community", t).filter(step => joinStepState(stage, step.stage) === "done").pop();
+  const joinAnnouncement = noLinks || linkUnanswered || linkReplaced || stage === "full" ? joining.title
+    : admittedLong ? joining.body : knockedLong ? staleText : lastReached?.label ?? joining.title;
   // Just in (my own "You joined" line is recent), and no member reached yet: the edges are being set up.
   const justJoined = myJoins.some(at => Date.now() - at < JUST_JOINED_MS);
   const connecting = group.status === "active" && others.length > 0 && reachable === 0 && justJoined;
@@ -684,8 +734,9 @@ export function GroupChat() {
           </button>}
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-1.5">
-              {/* In its own direction: a Latin name in Arabic is cut at its end, as in English, not at its start. */}
-              <p dir="auto" className="text-[15px] m-0 leading-tight truncate text-text-primary" data-testid="group-name">{group.name || t("group.chat.unnamed")}</p>
+              {/* In its own direction: a Latin name in Arabic is cut at its end, as in English, not at its start. The
+                  screen's heading, as a menu page's title is (layout/Page.tsx). */}
+              <h1 dir="auto" className="text-[15px] font-normal m-0 leading-tight truncate text-text-primary" data-testid="group-name">{group.name || t("group.chat.unnamed")}</h1>
             </div>
             {invited ? <p data-testid="group-members" className="m-0 max-w-full text-xs text-text-muted truncate">{subtitle}</p>
             : <button onClick={() => setShowMembers(true)} data-testid="group-members" className="block max-w-full text-xs text-text-muted truncate hover:text-accent cursor-pointer max-md:min-h-6">
@@ -742,7 +793,7 @@ export function GroupChat() {
         {/* Knocking again: how far the knock got, and a way to stop asking that keeps the group here (a decline, not a delete). */}
         {knockingAgain ? <div className={`flex items-center justify-between gap-3${error ? " mt-2" : ""}`}>
           <p className="min-w-0"><span className="block font-medium text-text-primary">{joining.title}</span>{joining.body}
-            {knockedLong && !linkUnanswered && <span data-testid="group-joining-stale" className="mt-1 block">{waitingWith > 0 ? t("group.join.staleBusy") : t("group.join.stale")}</span>}</p>
+            {knockedLong && !linkUnanswered && <span data-testid="group-joining-stale" className="mt-1 block">{staleText}</span>}</p>
           {linkUnanswered && <button data-testid="group-link-retry" onClick={() => void act(() => engine.call("acceptGroupInvitation", { groupId }))}
             className="min-h-11 shrink-0 rounded-lg bg-accent px-3 text-xs font-semibold text-panel-header hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent">{t("group.join.tryAgain")}</button>}
           {/* The line goes with the knock it ends: the focus goes to the group's ⋮, which stays. */}
@@ -756,7 +807,9 @@ export function GroupChat() {
       {invited && !invitedFresh && <GroupInvitationCard group={group} compact returnFocus={optionsRef} />}
       {invitedFresh ? <GroupInvitationCard group={group} returnFocus={optionsRef} />
       : joiningByLink ? <div className="flex flex-1 items-center justify-center overflow-y-auto chat-wallpaper px-4">
-        <div role="status" data-testid="group-joining" className="w-full max-w-sm rounded-2xl border border-border bg-sidebar-bg/95 p-6 text-center shadow-xl">
+        {/* Not a live region as a whole: it re-read every step and Cancel joining at each change. The one short line
+            under the steps says what changed, and each step says its own state (as the pairing scene's do). */}
+        <div data-testid="group-joining" className="w-full max-w-sm rounded-2xl border border-border bg-sidebar-bg/95 p-6 text-center shadow-xl">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-accent/15 text-accent">
             <svg className={noLinks || linkUnanswered || linkReplaced ? undefined : "animate-spin"} width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56" /></svg>
           </div>
@@ -764,21 +817,25 @@ export function GroupChat() {
           <p className="mt-2 text-sm leading-relaxed text-text-muted">{joining.body}</p>
           {!linkReplaced && <ol data-testid="group-joining-steps" data-stage={stage} className="mx-auto mt-4 w-fit space-y-1.5 text-left text-xs">
             {joinSteps(group.profile === "community", t).map(step => {
-              const done = JOIN_ORDER.indexOf(stage) >= JOIN_ORDER.indexOf(step.stage);
-              const current = !done && JOIN_ORDER[JOIN_ORDER.indexOf(step.stage) - 1] === stage;
-              return <li key={step.stage} data-state={done ? "done" : current ? "current" : "todo"} className={`flex items-center gap-2 ${done ? "text-text-primary" : current ? "text-accent" : "text-text-muted"}`}>
+              const state = joinStepState(stage, step.stage);
+              const done = state === "done", current = state === "current";
+              return <li key={step.stage} data-state={state} aria-current={current ? "step" : undefined} className={`flex items-center gap-2 ${done ? "text-text-primary" : current ? "text-accent" : "text-text-muted"}`}>
                 <span aria-hidden="true" className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] ${done ? "bg-accent text-on-accent" : current ? "border border-accent" : "border border-border"}`}>{done ? "✓" : ""}</span>
                 {step.label}
+                {done && <span className="sr-only"> ({t("pairing.done")})</span>}
               </li>;
             })}
           </ol>}
+          {/* Said once per change, politely: the step just reached (the title before any, or at a dead end), or the
+              two-minute hint. Hidden: the same words are on the card, and only this line changes. */}
+          <p role="status" data-testid="group-joining-live" className="sr-only">{joinAnnouncement}</p>
           {/* Others knocking too: a wait behind them, said as soon as it is known (a community lets people in a few at a time). */}
           {waitingWith > 0 && (stage === "knocking" || stage === "knocked") && <p data-testid="group-joining-queue" className="mt-4 text-xs leading-relaxed text-text-muted">
             {waitingWith === 1 ? t("group.join.queueOne") : t("group.join.queueCount", { count: waitingWith })}</p>}
-          {knockedLong && !linkUnanswered && <p data-testid="group-joining-stale" className="mt-4 text-xs leading-relaxed text-text-muted">{waitingWith > 0 ? t("group.join.staleBusy") : t("group.join.stale")}</p>}
+          {knockedLong && !linkUnanswered && <p data-testid="group-joining-stale" className="mt-4 text-xs leading-relaxed text-text-muted">{staleText}</p>}
           {linkUnanswered && <button data-testid="group-link-retry" onClick={() => void act(() => engine.call("acceptGroupInvitation", { groupId }))}
             className="mt-4 block w-full min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-panel-header hover:bg-accent-hover">{t("group.join.tryAgain")}</button>}
-          <button onClick={() => { void engine.call("forgetGroup", { groupId }).then(() => forgetGroupLocal(groupId), () => {}); nav.home(); }} data-testid="group-joining-cancel"
+          <button onClick={cancelJoin} data-testid="group-joining-cancel"
             className="mt-4 rounded px-2 py-1 text-xs text-text-muted hover:bg-danger/10 hover:text-danger max-md:min-h-11 max-md:px-3">{t("group.join.cancel")}</button>
         </div>
       </div> : <div className="relative flex-1 min-h-0 flex flex-col">
@@ -825,7 +882,7 @@ export function GroupChat() {
 
       {showMembers && <GroupMembersDialog group={group} focusKey={focusMember} returnFocus={optionsRef} onClose={() => { setShowMembers(false); setFocusMember(undefined); }} />}
       {viewingPicture && group.picture && <AvatarViewer src={group.picture} name={group.name || t("group.chat.unnamed")} returnFocus={avatarButton} onClose={() => setViewingPicture(false)} />}
-      {sharing && (group.entryLink || shareShown) && <GroupShareDialog group={group} created={sharing === "created"} returnFocus={shareRef} onClose={closeShare} />}
+      {sharing && (group.entryLink || shareShown) && <GroupShareDialog group={group} created={sharing === "created"} returnFocus={shareBack} onClose={closeShare} />}
       {confirmLeave && <LeaveGroupDialog group={group} returnFocus={optionsRef} onClose={() => setConfirmLeave(false)}
         onConfirm={async () => { await engine.call("leaveGroup", { groupId }); goneHere(); setConfirmLeave(false); nav.home(); }} />}
       {/* Deleting an active group, private or community, leaves it: said so, and refused as Leave is while nobody could

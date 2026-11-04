@@ -111,13 +111,17 @@
   "join": {
     "admitted": "La app del admin respondió: recibiendo las claves del grupo. Entrarás en un momento.",
     "admittedCommunity": "La app de un miembro respondió: recibiendo las claves del grupo. Entrarás en un momento.",
+    "admittedStuck": "Ningún miembro pudo terminar de dejarte entrar. Pide el enlace actual a alguien del grupo.",
     "answered": "La app del admin vio tu llamada y se está conectando contigo. Entrarás en un momento.",
     "answeredCommunity": "La app de un miembro vio tu llamada y se está conectando contigo. Entrarás en un momento.",
     "answeredTitleCommunity": "Un miembro te está dejando entrar",
     "cancel": "Cancelar la unión",
+    "full": "Este grupo está lleno",
+    "fullBody": "Tiene {{n}} de {{max}} miembros. Entras cuando alguien salga: deja la app abierta.",
     "joiningGroup": "Uniéndote al grupo…",
     "joiningName": "Uniéndote a {{name}}…",
     "knocked": "Ocurre cuando la app del admin esté abierta. Puedes salir de esta página.",
+    "knockedBusy": "Otras personas también llamaron, así que la app del admin puede estar ocupada dejándolas entrar. Puedes salir de esta página.",
     "knockedCommunity": "Ocurre cuando la app de un miembro esté abierta. Puedes salir de esta página.",
     "knocking": "Dejando una llamada donde la app del admin la busca…",
     "knockingCommunity": "Dejando una llamada donde las apps del grupo la buscan…",
@@ -176,6 +180,7 @@
     "note": "Quien abra este enlace se une, sin ser tu contacto ni decir quién es. Entra mientras tu app esté abierta, hasta {{count}} miembros.",
     "noteCommunity": "Quien abra este enlace se une, sin ser contacto de nadie ni decir quién es. La app de cualquier miembro le deja entrar, así que funciona aunque no estés; hasta {{count}} miembros. Eliminar a alguien no le impide volver a abrir el enlace: para eso el admin crea uno nuevo.",
     "off": "El enlace está desactivado: nadie puede unirse con él, y el enlace compartido antes no volverá a funcionar. Al activarlo se crea un enlace nuevo para compartir.",
+    "offMember": "El admin desactivó el enlace: nadie puede unirse con él, y el enlace compartido antes no volverá a funcionar. Solo el admin puede crear uno nuevo.",
     "qrTitle": "Código QR del enlace del grupo",
     "reset": "Nuevo enlace",
     "resetBody": "El enlace compartido hasta ahora deja de funcionar para siempre: quien lo tiene y aún no se ha unido ya no puede entrar con él. Los miembros siguen en el grupo.",
@@ -187,7 +192,9 @@
     "shareTitleUnnamed": "Únete a un grupo en Ghostly",
     "shared": "Compartido",
     "showQr": "Mostrar QR",
-    "title": "Enlace del grupo"
+    "title": "Enlace del grupo",
+    "tooMany": "Demasiados enlaces de grupo abiertos",
+    "tooManyNext": "Elimina un grupo que aún espera para entrar o pega el enlace en Unirse."
   },
   "makeAdmin": {
     "body": "Dejarás de ser el admin. Solo {{name}} podrá renombrar el grupo, cambiar su foto y su enlace, invitar o eliminar miembros, y devolverte el rol.",

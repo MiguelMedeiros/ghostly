@@ -61,15 +61,15 @@ export async function pinnedRow(host: PinsHost, chat: string, id: string): Promi
  */
 export async function myPin(host: PinsHost, chat: string, messageId: unknown, remove: boolean, current: WirePin | undefined, now = Date.now()): Promise<StoredPin | { error: string }> {
   const n = nextPinNumber(current?.n, now);
-  if (remove) return current?.id ? { id: "", n, by: "me", at: now } : { error: "Nothing is pinned in this chat" };
-  if (typeof messageId !== "string" || !messageId) return { error: "No message to pin" };
   const group = isGroup(chat);
+  if (remove) return current?.id ? { id: "", n, by: "me", at: now } : { error: `Nothing is pinned in this ${group ? "group" : "chat"}` };
+  if (typeof messageId !== "string" || !messageId) return { error: "No message to pin" };
   // By its row's id, read alone, else by the id both sides know (as the pages may name it): the chat read whole only
   // when neither finds it.
   const target = host.message
     ? (await host.message(chat, messageId)) ?? await pinnedRow(host, chat, messageId)
     : (await host.messages(chat)).find(m => m.id === messageId) ?? await pinnedRow(host, chat, messageId);
   const id = target && replyRef(target, group);
-  if (!target || !id) return { error: "That message is not in this chat, or cannot be pinned" };
+  if (!target || !id) return { error: `That message is not in this ${group ? "group" : "chat"}, or cannot be pinned` };
   return { id, n, by: "me", at: now, messageId: target.id };
 }

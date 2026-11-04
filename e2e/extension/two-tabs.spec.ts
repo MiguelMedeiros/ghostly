@@ -83,3 +83,30 @@ test("a call answered or declined in one tab stops ringing in the other", { tag:
   await expect(ringing(ext)).toHaveCount(0, { timeout: 15_000 });
   for (const tab of [ext, second]) await expect(chat(tab).getByText(/Missed audio call/)).toHaveCount(0);
 });
+
+/**
+ * Both tabs rang a call, each its own ring at once, out of step. One plays it now (it holds the `ghostly-ring:` lock),
+ * the other waits, and takes over once the first stops ringing (closed, or its chat).
+ */
+test("a call ringing in two tabs rings in one of them", { tag: ["@client:extension", "@client:web", "@feature:extension.engine", "@feature:calls.ring-elsewhere", "@feature:app.attention.sounds"] }, async ({ extensionPeer, webPeer }) => {
+  const [ext, web] = await Promise.all([extensionPeer("two-tabs-ring"), webPeer("two-tabs-ring-contact")]);
+  await pair(web, ext);
+  const second = { ...ext, page: await ext.context.newPage() };
+  await second.page.goto(ext.page.url());
+  await expect(chat(second)).toBeVisible({ timeout: 30_000 });
+  // A click in each tab starts its audio: both can ring.
+  for (const tab of [ext, second]) await chat(tab).click({ position: { x: 5, y: 5 } });
+  const ringLocks = () => ext.page.evaluate(async () => {
+    const { held = [], pending = [] } = await navigator.locks.query();
+    const ring = (locks: LockInfo[]) => locks.filter((lock) => lock.name === "ghostly-ring:ring").length;
+    return { held: ring(held), pending: ring(pending) };
+  });
+
+  await web.page.getByTestId("call-audio").click();
+  for (const tab of [ext, second]) await expect(tab.page.getByText("Incoming audio call...")).toBeVisible({ timeout: 30_000 });
+  await expect.poll(ringLocks, { timeout: 10_000 }).toEqual({ held: 1, pending: 1 });
+
+  await web.page.getByTitle("End call").click();
+  for (const tab of [ext, second]) await expect(tab.page.getByText("Incoming audio call...")).toHaveCount(0, { timeout: 15_000 });
+  await expect.poll(ringLocks, { timeout: 10_000 }).toEqual({ held: 0, pending: 0 });
+});

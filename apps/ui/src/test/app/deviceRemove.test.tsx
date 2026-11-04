@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import type { WalletView } from "@ghostly/browser/shared/types";
 import { DevicesSection } from "../../components/devices/DevicesSection";
@@ -57,6 +57,33 @@ describe("Remove, on the active device", () => {
     await waitFor(() => expect(screen.getAllByTestId("device-row")).toHaveLength(2), { timeout: 3_000 });
     await waitFor(() => expect(removed).toHaveFocus());
     expect(removed).toHaveTextContent("Tablet");
+  });
+
+  it("the removed device's row goes in the same render as its Removed row comes, not at the next read of the set", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "setTimeout"] });
+    try {
+      const { engine } = renderApp(<DevicesSection />);
+      let devices = activeSet().devices;
+      engine.on("deviceSet", () => activeSet({ devices }));
+      engine.on("deviceRemove", () => { devices = devices.slice(0, 2); return activeSet({ devices }); });
+      const later = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+      await later(0);
+      const tablet = screen.getAllByTestId("device-row")[2];
+      expect(within(tablet).getByTestId("device-move")).toHaveTextContent("Move to Tablet");
+      act(() => within(tablet).getByTestId("device-menu").click());
+      act(() => screen.getByTestId("device-remove-open").click());
+      act(() => screen.getByTestId("device-remove-go").click());
+      // deviceRemove answered; the 3-second read of the set has not come yet.
+      await later(0);
+      expect(screen.getByTestId("device-removed")).toHaveTextContent("Tablet");
+      expect(screen.getAllByTestId("device-row").map((row) => row.textContent)).not.toContainEqual(expect.stringContaining("Tablet"));
+      expect(screen.queryAllByTestId("device-move")).toHaveLength(0);
+      expect(screen.getAllByTestId("device-menu")).toHaveLength(1);
+      // The next read says the same: still one Removed row and no Tablet row.
+      await later(3_000);
+      expect(screen.getAllByTestId("device-row")).toHaveLength(2);
+      expect(screen.getAllByTestId("device-removed")).toHaveLength(1);
+    } finally { vi.useRealTimers(); }
   });
 
   it("says why it could not, and changes nothing", async () => {
@@ -207,6 +234,31 @@ describe("the standby screen after a removal", () => {
     expect(screen.getByTestId("device-standby-title")).toHaveTextContent("This device was removed");
     expect(screen.getByTestId("device-standby")).toHaveTextContent("Add it again from Desktop.");
     expect(screen.getByTestId("device-standby-reenroll")).toHaveTextContent("Add this device to my profile");
+  });
+
+  it("removed while its screen is open: the keyboard focus on Use here goes to Add this device, not to the page", async () => {
+    const { rerender } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "Desktop" }} />);
+    act(() => screen.getByTestId("handoff-use-here").focus());
+    rerender(<DeviceStandby gate={{ state: "removed", activeDevice: "Desktop" }} />);
+    expect(screen.queryByTestId("handoff-use-here")).toBeNull();
+    await waitFor(() => expect(screen.getByTestId("device-standby-reenroll")).toHaveFocus());
+  });
+
+  it("removed while the Use here dialog is open: the focus in its password goes to Add this device", async () => {
+    const { user, rerender } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "Desktop" }} />);
+    await user.click(screen.getByTestId("handoff-use-here"));
+    const dialog = screen.getByTestId("handoff-use-here-dialog");
+    const field = dialog.querySelector<HTMLElement>("input") ?? within(dialog).getAllByRole("button")[0]!;
+    act(() => field.focus());
+    rerender(<DeviceStandby gate={{ state: "removed", activeDevice: "Desktop" }} />);
+    expect(screen.queryByTestId("handoff-use-here-dialog")).toBeNull();
+    await waitFor(() => expect(screen.getByTestId("device-standby-reenroll")).toHaveFocus());
+  });
+
+  it("a screen that opens already removed leaves the focus where it is", async () => {
+    renderApp(<DeviceStandby gate={{ state: "removed", activeDevice: "Desktop" }} />);
+    await act(async () => {});
+    expect(screen.getByTestId("device-standby-reenroll")).not.toHaveFocus();
   });
 });
 

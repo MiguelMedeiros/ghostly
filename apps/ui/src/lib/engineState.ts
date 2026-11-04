@@ -7,6 +7,10 @@ const snapshot = () => engine.state;
 /** The engine's state, re-rendered on every change. What draws identities uses the one in `./identities`. */
 export const useEngineState = () => useSyncExternalStore(subscribe, snapshot);
 
+/** Each 1:1 chat's link id and contact key, for `useEngineValue`: what maps a chat's cards to its contact. */
+export const chatKeys = (state: typeof engine.state): [id: string, peerKey: string | undefined][] =>
+  (state?.links ?? []).map((link) => [link.id, link.peerPubKeyZ32]);
+
 /**
  * What `select` reads of the engine's state, drawn again only when that changes by content: the engine sends its whole
  * state anew on every change (up to 20 a second while a file moves), so what reads one part of it would draw on each.

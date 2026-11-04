@@ -441,7 +441,16 @@ export function normalizeRelayUrl(input: string): string | null {
 export function relayUrlProblem(input: string): string | null {
   const line = input.trim();
   if (normalizeRelayUrl(line)) return null;
-  return /^(?:[a-z][a-z\d+.-]*:\/\/)?[^\s/:]+\.[^\s]+$/i.test(line) ? `Use an https:// relay address: ${line}` : `Not a relay address: ${line}`;
+  const meant = looksLikeHost(line) || looksLikeHost(line.replace(/^[a-z][a-z\d+.-]*:\/\//i, ""));
+  return meant ? `Use an https:// relay address: ${line}` : `Not a relay address: ${line}`;
+}
+
+/** No space, and a dot after the first character, before the last one and before any `/` or `:`; linear, for a long pasted line. */
+function looksLikeHost(text: string): boolean {
+  if (/\s/.test(text)) return false;
+  const slash = text.search(/[/:]/);
+  const dot = text.indexOf(".", 1);
+  return dot > 0 && dot < text.length - 1 && (slash < 0 || dot < slash);
 }
 
 /** A relay the breaker leaves alone for failing (`RelayBreaker`): nothing was asked of it now. */

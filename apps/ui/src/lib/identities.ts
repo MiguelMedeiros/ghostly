@@ -47,7 +47,7 @@ setOwnDidSource(() => engine.state?.did?.id);
  * Calls `onNew` with a proof that was not there on the last render: one just added comes up in a deck of ID cards, so
  * the person sees what they made. Nothing on the first state (what the profile already had).
  */
-export function useNewProof(state: typeof engine.state | undefined, onNew: (id: string) => void) {
+export function useNewProof(state: { identityProofs?: readonly { id: string }[] } | null | undefined, onNew: (id: string) => void) {
   const ids = state ? (state.identityProofs ?? []).map(p => p.id).join(" ") : null;
   const known = useRef<string[] | null>(null);
   const callback = useRef(onNew); callback.current = onNew;

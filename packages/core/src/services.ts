@@ -61,7 +61,7 @@ export function serviceIdFromName(name: string, taken: Iterable<string> = []): s
       .toLowerCase()
       .normalize("NFKD")
       .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
+      .replace(/^-|-$/g, "")
       .slice(0, 24) || "service";
   let id = base;
   for (let n = 2; used.has(id) || LEGACY_SERVICES.some((s) => s.id === id); n++) id = `${base}-${n}`;

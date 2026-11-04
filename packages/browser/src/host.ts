@@ -75,8 +75,16 @@ export interface BrowserHost {
    * which the desktop app has Rust ask about in a native dialog.
    */
   requestLocalAccess(originPattern: string, origin: string): Promise<boolean>;
-  /** The profile no longer shares any app at `origin` (desktop: off Rust's list of addresses it may reach). */
+  /**
+   * The profile no longer shares any app at `origin` (desktop: off Rust's list of addresses it may reach; the extension
+   * gives Chrome back `localAccessPattern(origin)` once no profile shares an app at that host, on any port).
+   */
   forgetLocalAccess?(origin: string): Promise<void>;
+  /**
+   * A profile's shared apps all went at once ("Clear all data", a profile deleted): the host gives back the local
+   * access no profile on this device still needs. The extension's host permissions are every profile's at once.
+   */
+  releaseUnusedLocalAccess?(): Promise<void>;
   /** `tag` (`viewerTag` of this side's key for the chat) goes in the app's origin, so each profile's storage for it is its own. */
   openService(peerPubKeyZ32: string, serviceId: string, tag: string): Promise<void>;
   /**
@@ -142,6 +150,12 @@ export interface BrowserHost {
    * freezes an app out of sight otherwise.
    */
   keepAwake?(on: boolean, files: boolean): Promise<boolean>;
+  /**
+   * Keeps the app out of the system's app switcher picture while the app lock is on (`on`), or lets it be taken again:
+   * the Android app, whose switcher takes its picture before the page hears it is going, so the lock's cover comes too
+   * late for it. Left out where the page's cover is enough.
+   */
+  hideFromSwitcher?(on: boolean): Promise<void>;
 }
 
 /** One approval's cookie session, outside the page: its cookies never reach the page, and `close` forgets them. */
@@ -173,6 +187,20 @@ export function setBrowserHost(host: BrowserHost): void {
 export function getBrowserHost(): BrowserHost {
   if (!current) throw new Error("No browser host configured");
   return current;
+}
+
+/**
+ * The extension's host permission for a local origin (`http://127.0.0.1:3400` is `http://127.0.0.1/*`): one host on
+ * every port, as Chrome takes it. What `requestLocalAccess` asks for, and what the extension later gives back.
+ */
+export function localAccessPattern(origin: string): string {
+  const url = new URL(origin);
+  return `${url.protocol}//${url.hostname}/*`;
+}
+
+/** `releaseUnusedLocalAccess` of the host, where it has one: never throws. */
+export async function releaseUnusedLocalAccessOf(): Promise<void> {
+  await current?.releaseUnusedLocalAccess?.().catch(() => {});
 }
 
 /** `forgetServices` of the host, where it has one: never throws (no host, or one that failed, holds nothing up). */

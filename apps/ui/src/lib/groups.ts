@@ -124,6 +124,19 @@ export const edgeDot = (member: GroupMemberView) => member.me || member.edge?.st
  */
 export const invitationRow = (group: Pick<GroupView, "invitation" | "status">): boolean => !!group.invitation && !(group.invitation.viaLink && group.status);
 
+/**
+ * How many groups joined by a link may wait to be let in while a link in the app's address still joins one (WISP 902
+ * § The group's link): opening a link is not an act of the person's. Join's paste is not held back.
+ */
+export const LINK_GROUPS_WAITING = 3;
+
+/** The groups joined by a link that are not in yet: knocking, or given up on and kept until deleted. */
+export const linkGroupsWaiting = (groups: readonly Pick<GroupView, "id" | "invitation" | "status">[]): string[] =>
+  groups.filter(group => group.invitation?.viaLink && !group.status).map(group => group.id);
+
+/** The group a link names (`group1/…`, `group2/…`), or null when it is no group's link. */
+export const linkGroupId = (link: string): string | null => decodeGroupEntryLink(link)?.g ?? decodeCommunityLink(link)?.g ?? null;
+
 /** Where a private group lives in the app: by its id. */
 export function groupPath(groupId: string): string {
   return `/group/${encodeURIComponent(groupId)}`;

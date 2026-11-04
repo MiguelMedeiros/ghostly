@@ -26,7 +26,8 @@
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="Ghostly: two friendly ghosts, Boo and Casper, talking peer to peer" />
     <meta name="twitter:card" content="summary_large_image" />
-    <!-- What the page says when the app cannot start (public/boot-guard.js): a plain script, before the bundle. -->
+    <!-- What the page says when the app cannot start (public/boot-guard.js): a plain script, before the bundle. It
+         also puts the saved theme on <html> and in the theme-color above, before the first paint. -->
     <script src="/boot-guard.js"></script>
     <!-- The first paint (#boot-shell below), styled here because it must draw before any file of the app arrives.
          Over the page's own background, so a warm start that draws the app in a moment shows nothing new; its ghost
