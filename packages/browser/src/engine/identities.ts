@@ -58,6 +58,8 @@ const REVOCATIONS_CHECKED_AT = "identityRevocationsCheckedAt";
 const REPUBLISH_MS = 60 * 60_000;
 /** How often the contacts' proofs are looked up for a revocation (and once shortly after start). */
 const REVOCATION_CHECK_MS = 12 * 60 * 60_000;
+/** A lookup that could not run (offline, no relay answered) is tried again after this, doubled each time, up to the 12 h. */
+const REVOCATION_RETRY_MS = 5 * 60_000;
 /**
  * After a contact withdraws a proof, how long to wait before each lookup for its revocation (WISP 300: removing a proof withdraws it from
  * every chat and revokes it). The notice goes out before the revocation is published, so not at once; each try backs
@@ -79,6 +81,15 @@ export class IdentityProofs {
   private proofs: StoredIdentityProof[] = [];
   private revocations: Revocation[] = [];
   private revocationsCheckedAt = 0;
+  /** Revocation lookups in a row that could not run: the next waits `REVOCATION_RETRY_MS` doubled this many times less one. */
+  private lookupsMissed = 0;
+  /** Lookups whose Pkarr read could not run since the start (offline, the relays failed it). */
+  private lookupFailures = 0;
+  private lookupTimer: ReturnType<typeof setTimeout> | undefined;
+  private looking = false;
+  /** Revocations not published because the app was offline: published when the network comes back (`networkBack`). */
+  private unpublished = new Set<string>();
+  private running = false;
   /** "Clear all data" (`revokeAll`): a revocation lookup or a proof's save still on its way writes nothing. */
   private ended = false;
   /** Unsealed proof-key seeds, by proof id, for this run only. */
@@ -110,6 +121,7 @@ export class IdentityProofs {
   }
   /** Background work: republish revocations, look up the contacts' proofs for revocations. */
   start(): void {
+    this.running = true;
     const every = (ms: number, first: number, work: () => Promise<void>) => {
       const tick = () => { void work().catch(() => {}).finally(() => { this.timers.push(setTimeout(tick, ms)); }); };
       this.timers.push(setTimeout(tick, first));
@@ -118,12 +130,40 @@ export class IdentityProofs {
     // 60 s after the start, unless the last lookup (from an earlier run) was less than 12 h ago: then when those are up.
     // A clock set back since then waits 12 h at most.
     const due = Math.min(REVOCATION_CHECK_MS, this.revocationsCheckedAt + REVOCATION_CHECK_MS - Date.now());
-    every(REVOCATION_CHECK_MS, Math.max(60_000, due), () => this.checkRevocations());
+    this.lookUpIn(Math.max(60_000, due));
     this.unlisten ??= whenDataKeyDropped(() => this.forgetSeeds());
   }
+  /** The network is back: a revocation lookup that could not run, and a revocation not published offline, go now. */
+  networkBack(): void {
+    if (!this.running || this.ended) return;
+    if (this.lookupsMissed > 0) this.lookUpIn(0);
+    for (const r of this.revocations) if (this.unpublished.has(r.id) && r.expiresAt > now()) void this.publishRevocation(r).catch(() => {});
+  }
+  private lookUpIn(ms: number): void {
+    if (this.lookupTimer) clearTimeout(this.lookupTimer);
+    const timer = this.lookupTimer = setTimeout(() => {
+      this.timers = this.timers.filter(t => t !== timer);
+      this.lookupTimer = undefined;
+      void this.lookUp();
+    }, ms);
+    this.timers.push(timer);
+  }
+  /** A lookup done waits 12 h for the next; one that could not run is tried again sooner, backing off. */
+  private async lookUp(): Promise<void> {
+    // One still on its way plans the next itself.
+    if (this.looking) return;
+    this.looking = true;
+    const done = await this.checkRevocations().catch(() => false);
+    this.looking = false;
+    if (!this.running) return;
+    this.lookupsMissed = done ? 0 : this.lookupsMissed + 1;
+    this.lookUpIn(done ? REVOCATION_CHECK_MS : Math.min(REVOCATION_CHECK_MS, REVOCATION_RETRY_MS * 2 ** (this.lookupsMissed - 1)));
+  }
   stop(): void {
+    this.running = false;
     for (const t of this.timers) clearTimeout(t);
     this.timers = [];
+    this.lookupTimer = undefined;
     this.unlisten?.();
     this.unlisten = undefined;
     this.forgetSeeds();
@@ -181,9 +221,10 @@ export class IdentityProofs {
       throw e;
     }
   };
+  /** The exchange reads a lookup that failed as "not revoked": counted here, so the 12 h lookup is not noted as done. */
   private revoked = async (statement: IdentityStatement): Promise<boolean> => {
-    if (!this.host.online()) return false;
-    const records = await this.host.resolve(statement.binding.key);
+    if (!this.host.online()) { this.lookupFailures++; return false; }
+    const records = await this.host.resolve(statement.binding.key).catch((e: unknown) => { this.lookupFailures++; throw e; });
     return !!records && revokesIdentity(records, statement.id);
   };
 
@@ -281,7 +322,8 @@ export class IdentityProofs {
   }
 
   private async publishRevocation(r: Revocation): Promise<void> {
-    if (!this.host.online()) return;
+    if (!this.host.online()) { this.unpublished.add(r.id); return; }
+    this.unpublished.delete(r.id);
     await this.host.publish(await this.seedOf(r.id, r.seed), [{ label: IDENTITY_REVOCATION_LABEL, value: identityRevocationValue(r.id, r.revokedAt) }]);
   }
   private async republish(): Promise<void> {
@@ -295,20 +337,22 @@ export class IdentityProofs {
   /**
    * Looks up the contacts' proofs for a revocation (the Pkarr record only, not the provider): the ones standing, and the
    * ones withdrawn, which a removal also revokes. Not a proof already revoked, nor one past its expiry: its owner
-   * publishes the revocation only until then.
+   * publishes the revocation only until then. True when every lookup was answered: only then is its time noted.
    */
-  async checkRevocations(): Promise<void> {
-    if (!this.host.online()) return;
+  async checkRevocations(): Promise<boolean> {
+    if (!this.host.online()) return false;
+    const failures = this.lookupFailures;
     for (const linkId of this.host.linkIds()) {
       for (const r of this.host.ledger(linkId)?.received ?? []) {
-        if (this.ended) return;
+        if (this.ended) return false;
         if (this.revocable(r)) await this.exchange(linkId)?.recheck(r.id, { revocationOnly: true }).catch(() => {});
       }
     }
     // "Clear all data" came meanwhile: the profile it was for is gone, and its time must not land in the cleared one.
-    if (this.ended) return;
+    if (this.ended || this.lookupFailures !== failures) return false;
     this.revocationsCheckedAt = Date.now();
     await transact([STORES.settings], stores => { stores[STORES.settings].put(this.revocationsCheckedAt, REVOCATIONS_CHECKED_AT); });
+    return true;
   }
   private revocable(r: ReceivedIdentity): boolean {
     return r.status !== "revoked" && Math.min(r.binding.expiresAt, r.verified.expiresAt ?? Infinity) > now();
