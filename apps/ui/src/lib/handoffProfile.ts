@@ -19,7 +19,7 @@ import { dropWalletStorageOf } from "./profileData";
  *
  * A staging namespace notes which files it holds whole and checked under keys of its own outside every profile's
  * prefix (`ghostly-staging:<ns>:<file id>`, one per file), so a pull that stopped goes on without sending them again,
- * and nothing of it is ever taken for a profile's own key. One key per file: a file that begins or finishes writes
+ * and nothing of it is ever taken for a profile's own key. They go when the namespace is installed or dropped. One key per file: a file that begins or finishes writes
  * its own few bytes. As one list, read and written whole twice per file, the n-th file moved about 400 × n characters
  * through the page's storage: 0.77 GB for a profile of 2,000 files.
  */
@@ -34,6 +34,11 @@ const stagedKeys = (ns: string): string[] => {
 };
 /** A staged file left as a Blob on a record of the frozen copy: that database, and the record's id. */
 type HeldBlob = { database: string; id: string };
+
+/** A namespace's notes of its staged files, the one list of an earlier build included. */
+const dropNotes = (ns: string): void => {
+  try { localStorage.removeItem(stagingKey(ns)); for (const key of stagedKeys(ns)) localStorage.removeItem(key); } catch { /* nothing kept */ }
+};
 const isStaged = (file: Partial<HandoffFile>): file is Pick<HandoffFile, "size" | "sha256"> => typeof file.sha256 === "string" && Number.isSafeInteger(file.size);
 /** `Staging.restore` writes the files' records in transactions of this many, and of about this many bytes of small files (held in memory until written). */
 const RESTORE_FILES = 200, RESTORE_BYTES = 32 * 1024 * 1024;
@@ -349,7 +354,9 @@ const staging: HandoffStagingHost = {
   async open(database) {
     return new Staging(database ? spaceOf(database) : newSpace());
   },
-  async install(old, staged) { pointProfile(old, staged); },
+  // Installed, the staged namespace is the profile's own: its notes only served a pull that had not finished, and one
+  // key per file would stay outside every profile's prefix for as long as this copy lives (bug hunt, 2026-11-04).
+  async install(old, staged) { pointProfile(old, staged); dropNotes(spaceOf(staged)); },
   async revert(old, staged) { pointProfile(staged, old); },
   async drop(database) {
     const ns = spaceOf(database);
@@ -359,7 +366,7 @@ const staging: HandoffStagingHost = {
     if (await databaseExists(database)) await dropDatabase(database);
     await dropFileSpace(database).catch(() => {});
     dropKeys(ns);
-    try { localStorage.removeItem(stagingKey(ns)); for (const key of stagedKeys(ns)) localStorage.removeItem(key); } catch { /* nothing kept */ }
+    dropNotes(ns);
   },
 };
 

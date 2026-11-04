@@ -17,9 +17,13 @@ import { renderApp } from "../render";
 const onSend = vi.fn<(text: string) => Promise<string | null>>();
 const onSendFile = vi.fn<(file: File) => Promise<string | null>>();
 
+function column(extra: Partial<Parameters<typeof MessageInput>[0]> = {}) {
+  return <LockScreenProvider><div data-file-drop data-testid="column"><p data-testid="messages">messages</p>
+    <MessageInput onSend={onSend} onSendFile={onSendFile} {...extra} /></div></LockScreenProvider>;
+}
+
 function composer() {
-  return renderApp(<LockScreenProvider><div data-file-drop data-testid="column"><p data-testid="messages">messages</p>
-    <MessageInput onSend={onSend} onSendFile={onSendFile} /></div></LockScreenProvider>);
+  return renderApp(column());
 }
 
 const field = () => screen.getByPlaceholderText<HTMLTextAreaElement>("Message…");
@@ -108,6 +112,18 @@ describe("files dragged in from another app that the webview names by address on
     await act(() => new Promise((done) => setTimeout(done)));
     expect(fireEvent.drop(field(), named())).toBe(true);
     expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it("a read that ends after an edit began says its files could not be added, not nothing", async () => {
+    let end!: () => void;
+    read.mockImplementationOnce(() => new Promise((done) => { end = () => done([held("relatório final.txt", "olá")]); }));
+    const { rerender } = composer();
+    act(() => over(true));
+    expect(fireEvent.drop(screen.getByTestId("messages"), named())).toBe(false);
+    rerender(column({ edit: { key: "m1", text: "boo", snippet: "boo", onSave: vi.fn(async () => null), onClose: vi.fn() } }));
+    await act(async () => end());
+    expect(await screen.findByRole("alert")).toHaveTextContent("What you dropped could not be added just now. Drop it again when you are done here.");
+    expect(screen.queryByTestId("attachment-sheet")).toBeNull();
   });
 
   it("a link dragged in (the platform says no files) is left as before: no veil, its text into the field", () => {
