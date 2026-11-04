@@ -475,6 +475,11 @@ export interface CommunitySessionHooks {
    * Undefined for anything else. Asked once the frame is read, before the `app` hook.
    */
   lasting?(message: CommunityIncomingApp): string | undefined;
+  /**
+   * Whether an application frame (mine or a member's) is only a hint (a `group-have`, WISP 503): relayed live like any
+   * frame, but never kept, so it takes no place among those a member back from away gets.
+   */
+  fleeting?(frame: Record<string, unknown>): boolean;
   /** An application frame for the group (see `sendApp`). */
   app?(message: CommunityIncomingApp): Promise<void> | void;
   /** A payload another member sealed to me (see `sendPair`). Payloads to others are carried, never opened. */
@@ -1628,14 +1633,21 @@ export class CommunitySession {
   /**
    * An application frame to everyone in the group (a note about a payment, a request anyone may pay): sealed to
    * the epoch like text, signed, kept and caught up like text, and handed to the other members' `app` hook
-   * instead of their history.
+   * instead of their history. A fleeting one (`CommunitySessionHooks.fleeting`) is only said to those up now.
    */
   sendApp(frame: Record<string, unknown>, nick?: string, now = Date.now()): Promise<{ id: string } | { error: string }> {
     return this.serialize(async () => {
       if (!this.isMember) return { error: this.state.statusReason ?? "You are not in this group" };
       if (!isObject(frame) || utf8Encode(JSON.stringify(frame)).length > COMMUNITY_LIMITS.appBytes) return { error: "Too large for the group" };
-      const sent = await this.sendPayload(() => ({ x: frame }), nick, now);
+      const fleeting = this.hooks.fleeting?.(frame) === true;
+      const sent = await this.sendPayload(() => ({ x: frame }), nick, now, !fleeting);
       if ("error" in sent) return sent;
+      if (fleeting) {
+        // Its sequence number is spent: saved before it goes, so it is never sealed twice.
+        await this.persist();
+        this.hooks.broadcast(sent.frame);
+        return { id: sent.id };
+      }
       this.keepLasting({ id: sent.id, sender: this.myKey, epoch: sent.frame.e, timestamp: sent.frame.ts, frame }, sent.frame);
       await this.say(sent.frame);
       return { id: sent.id };
@@ -1704,7 +1716,7 @@ export class CommunitySession {
   }
 
   /** Seals, signs and keeps a frame under the current epoch (the caller holds the queue, persists and broadcasts). */
-  private async sendPayload(body: (header: Pick<CommunityMessageFrame, "g" | "e" | "h" | "s" | "n" | "ts">) => Record<string, unknown>, nick: string | undefined, now: number): Promise<{ id: string; frame: CommunityMessageFrame } | { error: string }> {
+  private async sendPayload(body: (header: Pick<CommunityMessageFrame, "g" | "e" | "h" | "s" | "n" | "ts">) => Record<string, unknown>, nick: string | undefined, now: number, kept = true): Promise<{ id: string; frame: CommunityMessageFrame } | { error: string }> {
     const h = this.topHash, secret = this.state.secrets[h];
     if (!secret) return { error: "This epoch's key has not arrived yet. Wait for a member to catch you up." };
     if (this.state.seqH !== h) { this.state.seq = 0; this.state.seqH = h; }
@@ -1719,7 +1731,7 @@ export class CommunitySession {
     const unsigned = { ...header, nn, c };
     const frame: CommunityMessageFrame = { t: "group-msg", v: 2, ...unsigned, sig: toBase64Url(sign(messageSigned(unsigned), this.identity.seed)) };
     this.markSeen(frame);
-    this.keep(frame);
+    if (kept) this.keep(frame);
     return { id: communityMessageId(this.myKey, header.e, header.h, n), frame };
   }
 
@@ -2077,7 +2089,7 @@ export class CommunitySession {
     if ([text !== undefined, isObject(parsed.x), isObject(parsed.p)].filter(Boolean).length !== 1) return false;
     const nick = typeof parsed.nick === "string" ? sanitizeNick(parsed.nick) : undefined;
     if (nick && this.state.nicks[raw.s] !== nick) { this.state.nicks[raw.s] = nick; this.hooks.changed(); }
-    let onRow: boolean | void = false;
+    let onRow: boolean | void = false, fleeting = false;
     if (text !== undefined) {
       const mentions = validMentions(parsed.m, text, false);
       // A reply that does not hold is left out, never the text.
@@ -2091,7 +2103,8 @@ export class CommunitySession {
     }
     else if (isObject(parsed.x)) {
       const app = { id, sender: raw.s, epoch: raw.e, timestamp: raw.ts, frame: parsed.x };
-      this.keepLasting(app, raw);
+      fleeting = this.hooks.fleeting?.(parsed.x) === true;
+      if (!fleeting) this.keepLasting(app, raw);
       await this.hooks.app?.(app);
     }
     else {
@@ -2109,7 +2122,8 @@ export class CommunitySession {
     // The first one, should it come too (from a member who carried it): a duplicate. Only under a commit I know: a
     // place naming none would be a new entry in `seen` per frame, never pruned before the window passes it.
     if (original && firstAt) this.markSeen({ ...raw, ...original });
-    this.keep(raw);
+    // A hint (`hooks.fleeting`) is passed on, never kept.
+    if (!fleeting) this.keep(raw);
     if (onRow === true) this.onRows.set(storeKey(raw), id);
     // The message itself is stored already; what changed here (seen, store) is saved in a batch.
     this.persistSoon();

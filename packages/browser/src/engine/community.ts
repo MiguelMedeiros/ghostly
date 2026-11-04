@@ -2086,6 +2086,9 @@ export class Communities {
       // The admin's pin is the group's state, said once: kept past the store and handed to whoever was away however
       // much was said since, an unpin too (WISP 903, agents#1095). Only the admin's: no one else's pin is taken.
       lasting: m => m.frame.t === COMMUNITY_PIN_FRAME && m.sender === session.admin ? COMMUNITY_PIN_FRAME : undefined,
+      // Who holds a file is a hint (WISP 503: no file is given up for lack of one): kept, every holder of every photo
+      // would push the oldest texts out of what a member back from away gets.
+      fleeting: frame => frame.t === GROUP_HAVE_FRAME,
       pair: m => this.deliver(id, () => this.host.communityPair?.(id, m.sender, m.payload)),
       changed: () => { void this.membershipChanged(id); },
       metaChanged: (by, change, at) => {

@@ -1797,6 +1797,27 @@ describe("a file in a community", { timeout: 120_000 }, () => {
     }
   });
 
+  it("each holder's group-have goes to the group but takes no place in what a member back from away gets", async () => {
+    const t = new FilesWorld();
+    const admin = t.add("admin");
+    const id = await admin.groups.create("Open door");
+    const link = await admin.groups.enableLink(id);
+    const others = Array.from({ length: 4 }, (_, i) => t.add(`p${i}`));
+    for (const p of others) await p.groups.joinByLink(`https://app.ghostly.tools/#/join/${link}`);
+    await t.world.until(() => others.every(p => t.world.member(p, id)), 10 * 60_000);
+    await t.world.run(30_000);
+    const everyone = [admin, ...others], [author] = others, holders = everyone.filter(p => p !== author);
+    const session = (p: Peer) => p.groups.communities.session(id)!;
+    const stored = new Map(everyone.map(p => [p, session(p).state.store.length]));
+    const said = new Map(everyone.map(p => [p, session(p).state.seq]));
+    const { messageId } = await t.send(author, id, pattern(40_000, 7), { name: "photo.jpg", mime: "image/jpeg" });
+    await t.world.until(() => everyone.every(p => t.done(p, id, messageId)), 5 * 60_000);
+    // Past a minute: every holder said it holds the file (one more frame of its own), and no one kept that frame.
+    await t.world.run(2 * 60_000);
+    for (const p of holders) expect(session(p).state.seq).toBeGreaterThan(said.get(p)!);
+    for (const p of everyone) expect(session(p).state.store.length - stored.get(p)!).toBe(1);
+  });
+
   it("a member who leaves keeps none of the community's files, and none is left after the app starts again", async () => {
     const t = new FilesWorld();
     const admin = t.add("admin");
