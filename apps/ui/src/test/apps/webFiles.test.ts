@@ -174,6 +174,23 @@ describe("picking", () => {
     expect((await host.pick("other/app", "Other", { folder: true, accept: [] })).map((e) => e.path)).toEqual(["Films/Up.mp4", "Films/Up.SRT", "Films/notes.txt"]);
   });
 
+  it("a picked folder whose own name starts with a dot links its files, as the Desktop's walk: hidden is what is under it", async () => {
+    const picked: PickedFile[] = [".Films/Up.mp4", ".Films/.DS_Store", ".Films/.trash/old.mp4", ".Films/S1/E01.mp4"].map((path) => ({ path, file: file("x") }));
+    const host = webLinkedFiles({ text: () => text, ask: async () => ({ files: picked }) });
+    expect((await host.pick(REF, "Cinema", { folder: true, accept: [] })).map((e) => e.path)).toEqual([".Films/Up.mp4", ".Films/S1/E01.mp4"]);
+    // Through the handle picker's walk too.
+    vi.stubGlobal("showDirectoryPicker", async () => fakeDir(".Films", { "Up.mp4": "a", ".hidden.mp4": "b", S1: { "E01.mp4": "c" } }, { permission: "granted", asked: 0 }));
+    try {
+      const walked = webLinkedFiles({ text: () => text, ask: (_app, folder, accept) => handlePicker(folder, accept) });
+      expect((await walked.pick(REF, "Cinema", { folder: true, accept: [] })).map((e) => e.path)).toEqual([".Films/Up.mp4", ".Films/S1/E01.mp4"]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    // A file picked on its own is still hidden by its own name, as the Desktop's `picked_files`.
+    const files = webLinkedFiles({ text: () => text, ask: async () => ({ files: [".bashrc", "Up.mp4"].map((path) => ({ path, file: file("x") })) }) });
+    expect((await files.pick(REF, "Cinema", { folder: false, accept: [] })).map((e) => e.path)).toEqual(["Up.mp4"]);
+  });
+
   it("keeps links per app, and never more than the limit", async () => {
     const host = webLinkedFiles({ text: () => text, ask: async () => ({ files: [{ path: "a.mp4", file: file("a") }] }) });
     await host.pick(REF, "Cinema", { folder: false, accept: [] });
