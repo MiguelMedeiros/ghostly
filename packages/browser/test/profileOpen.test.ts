@@ -75,6 +75,19 @@ describe("a profile database that does not open", () => {
     expect((await now("profile-blocked")).settings).toEqual({ nick: "Kept" });
   });
 
+  it("an open the browser never answers (no success, error, blocked or upgrade): said as a failure after a wait, instead of pending for good", async () => {
+    const idb = await fresh("profile-silent");
+    const request = { result: { close: vi.fn() } } as { result: { close: () => void }; onsuccess?: () => void };
+    vi.stubGlobal("indexedDB", { open: () => request });
+    idb.OPEN_TIMINGS.silentMs = 40;
+    const error = await idb.openDb().then(() => null, (e: unknown) => e);
+    expect(error).toBeInstanceOf(idb.ProfileOpenError);
+    expect((error as InstanceType<typeof idb.ProfileOpenError>).failure).toMatchObject({ reason: "failed", supportedVersion: idb.DB_VERSION, detail: expect.stringContaining("did not answer") });
+    // It answers after all: nobody uses that connection, and it must not hold the database against the next start.
+    request.onsuccess?.();
+    expect(request.result.close).toHaveBeenCalledOnce();
+  });
+
   it("no space, storage not allowed, or no reason given: each is said as what it is, with the system's own words", async () => {
     const refusing = (error: unknown, thrown = false) => ({
       open() {
