@@ -474,8 +474,10 @@ export class Outbox {
    */
   private async check(id: string): Promise<void> {
     if (this.stopped) return;
-    // A look since its check came due took it up: it gave it the next one, or sent it.
-    if (this.waiting.get(id)?.timer || this.receipts.has(id)) return;
+    // A look since its check came due took it up: it gave it the next one, or sent it. One this outbox no longer holds
+    // (delivered, failed or handed over meanwhile) has nothing to check: a timer that fired during the look a contact
+    // back to n queued texts began read the chat's whole history for each text that look had delivered.
+    if (!this.waiting.has(id) || this.waiting.get(id)?.timer || this.receipts.has(id)) return;
     const messages = await this.store.read(), message = messages.find(m => m.id === id);
     if (!message || !(toGo(message) || this.file(message))) { await this.attempt(id); return; }
     const soon = this.now() + this.policy.backoffMs[0], taken: string[] = [];
