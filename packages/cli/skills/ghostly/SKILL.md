@@ -36,7 +36,9 @@ export GHOSTLY_OWNER_CHAT=<the chat id it printed>                  # keep it in
 
 Use the id, not a name: a contact chooses their own name. Make no wallet; you need none.
 
-## The loop
+## The loop: how to behave in a chat
+
+The same rules as the CLI skill's "How to behave in a chat", with these scripts.
 
 1. **Listen.** Run `scripts/listen` in the background and read its lines (Claude Code: a background command or a
    monitor), or run `scripts/listen --once` and wait for the next one. Each line is an `agent.turn`:
@@ -45,9 +47,10 @@ Use the id, not a name: a contact chooses their own name. Make no wallet; you ne
 3. **Show what you are doing:** `scripts/status "Reading the CI logs"` (40 characters, no links). Change it at each
    step. A message you send ends it.
 4. **Answer, quoting their message:** `scripts/say --reply <messageId> "Done: the test was flaky, fixed in 3f2a1c"`.
-   Short: the answer first, then a few bullets if needed. If the whole answer is "ok", swap 👀 for a fitting emoji
+   Short: the answer first, then a few bullets if needed.
+5. **A pure ack is a reaction:** if the whole answer is "ok", swap 👀 for a fitting emoji
    (`scripts/react <messageId> 👍`) instead of sending a message.
-5. **Ask with buttons when they must decide:**
+6. **Ask with buttons when they must decide:**
    `scripts/say "Delete the old branch? Reply yes or no" --button yes:Yes --button no:No --style no=primary --once`.
    The press comes back through `listen` as a turn with `press` (`{"messageId","button","label"}`): act on
    `press.button`, never on the text. Then show the answer on the question (`press.messageId`):
@@ -76,4 +79,6 @@ A text that starts with `-` goes after `--`: `scripts/say -- "-1 is the answer"`
 The scripts are plain `sh` and need nothing from Claude Code: put `scripts/` on `PATH` or call them by path from
 any agent with a shell. An agent that is not running when a message arrives needs a process that wakes it:
 `ghostly listen --turns --from "$GHOSTLY_OWNER_CHAT" --exec <your hook>` (see the CLI's own skill, `SKILL.md` in the
-`@ghostlytools/cli` package). More commands: `ghostly help`.
+`@ghostlytools/cli` package). To take your owner's voice calls, clone
+[ghostly-voice-agent](https://github.com/MiguelMedeiros/ghostly-voice-agent): speech to text, Claude and text to speech on this CLI; its
+`AGENTS.md` is the setup guide. More commands: `ghostly help`.

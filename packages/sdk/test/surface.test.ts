@@ -5,6 +5,7 @@ import * as testing from "../src/testing";
 import * as core from "../src/core";
 import * as app from "../src/app";
 import { readFileSync } from "node:fs";
+import type { MiniAppApi, MiniAppRequestType } from "../src/app";
 // covers: sdk.package
 
 /** The public surface, by name: a name that leaves here is a breaking change (docs/SDK.md, "Versioning"). */
@@ -58,5 +59,16 @@ describe("@ghostlytools/sdk", () => {
     expect(app.miniAppErrorCode(new Error("peer closed"))).toBeNull();
     expect(app.miniAppErrorCode("offline")).toBeNull();
     expect(app.MINI_APP_LIMITS.chatDataBytes).toBe(32 * 1024);
+  });
+  it("types the read lane: serving a kept file, and reading what the contact serves, one ar-get at a time", () => {
+    expect(app.miniAppErrorCode(new Error("not-served"))).toBe("not-served");
+    // One remote.read is one ar-get of app-ranges/1 (WISP 1200 § A read lane to the contact).
+    expect(app.MINI_APP_LIMITS.remoteReadBytes).toBe(core.APP_RANGE_LIMITS.requestBytes);
+    const types: MiniAppRequestType[] = ["files.serve", "files.unserve", "remote.read", "remote.stat"];
+    expect(types).toHaveLength(4);
+    // `remote` is optional: an app tests for it, as for `files`.
+    const reads = async (ghostly: MiniAppApi, serveId: string) => ghostly.remote ? (await ghostly.remote.read(serveId, { offset: 0, length: 1 })).byteLength + (await ghostly.remote.stat(serveId)).size : -1;
+    const serves = async (ghostly: MiniAppApi, id: string) => { const serveId = await ghostly.files!.serve(id); await ghostly.files!.unserve(serveId); return serveId; };
+    expect([typeof reads, typeof serves]).toEqual(["function", "function"]);
   });
 });

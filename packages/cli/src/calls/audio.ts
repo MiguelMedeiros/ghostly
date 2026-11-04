@@ -16,6 +16,8 @@ export interface OpusCodec {
   encode(pcm: Buffer, frameSize: number): Buffer;
   decode(packet: Buffer): Buffer;
   delete?(): void;
+  /** In-band FEC on or off (`opusCodec`): off for silence, whose packet then settles (`CallAudio.settle`). */
+  fec?(on: boolean): void;
 }
 
 /** The call's audio lane: RTP packets out, and every packet (RTP and RTCP) that comes in. */
@@ -68,6 +70,8 @@ export class CallAudio {
   private lastQuiet: Buffer | null = null;
   private same = 0;
   private quiet: Buffer | null = null;
+  /** Whether the encoder's FEC is on (`OpusCodec.fec`); unknown until the first frame. */
+  private fecOn: boolean | undefined;
   private stopped = false;
   /** Frames sent and received, for `call list`. */
   sent = 0;
@@ -114,6 +118,9 @@ export class CallAudio {
     let payload: Buffer;
     if (still && this.quiet) payload = this.quiet;
     else {
+      // FEC carries the frame before in each packet, for the contact's app to rebuild a lost one (agents#1741): for
+      // sound only. Silence is concealed as well as rebuilt, and with FEC its packet never repeats, so it never settled.
+      if (this.fecOn !== !still) { this.fecOn = !still; try { this.options.encoder.fec?.(!still); } catch { /* as it was */ } }
       try { payload = this.options.encoder.encode(frame, this.samples); } catch { return; }
       this.settle(still, payload);
     }

@@ -264,6 +264,8 @@ export interface BoardOptions {
   now?: number;
   /** Finished tasks older than a day too. */
   older?: boolean;
+  /** When the person last cleared the finished tasks on this device: a finished task last changed by then is left out. */
+  clearedAt?: number;
   /** A status in the interface's language, so the filter finds "running" as the person reads it. */
   statusWord?: (status: TaskStatus) => string;
 }
@@ -278,6 +280,8 @@ export interface BoardModel {
   groups: BoardGroup[];
   /** The tags to filter by, the most used first. */
   tags: string[];
+  /** Finished tasks a clear would hide now (parts included), whatever the filters: none, no "Clear finished". */
+  finished: number;
 }
 
 /**
@@ -287,15 +291,19 @@ export interface BoardModel {
  * By bot or by chat: a column per bot or chat that has a task, those with more going first, their tasks going first;
  * by chat, a task sent to several chats is in the column of each, and opens there.
  * A finished task (done, failed, cancelled) last changed more than a day ago is counted in `old` and left out,
- * unless `older` asks for them.
+ * unless `older` asks for them. One last changed by `clearedAt` is not on the board at all: the person cleared it.
  */
-export function boardModel(tasks: readonly BoardTask[], { grouping = "status", filter = "", tag, now = Date.now(), older = false, statusWord = (s) => s }: BoardOptions = {}): BoardModel {
+export function boardModel(tasks: readonly BoardTask[], { grouping = "status", filter = "", tag, now = Date.now(), older = false, clearedAt, statusWord = (s) => s }: BoardOptions = {}): BoardModel {
   const q = foldText(filter.trim());
   const whole = (task: BoardTask) => [task, ...(task.parts ?? [])];
   const matches = (task: BoardTask) => (!q || haystack(task, statusWord).includes(q)) && (!tag || !!task.card.tags?.includes(tag));
-  const kept = stackTasks(tasks).filter((task) => whole(task).some(matches));
-  // A finished task is old by the last change of it or of its parts, and never while a part is still going.
-  const old = (task: BoardTask) => whole(task).every((t) => !isActiveTask(t.card)) && now - Math.max(...whole(task).map((t) => t.at)) > RECENT_MS;
+  // A finished task goes by the last change of it or of its parts, and is never finished while a part is still going.
+  const finished = (task: BoardTask) => whole(task).every((t) => !isActiveTask(t.card));
+  const changed = (task: BoardTask) => Math.max(...whole(task).map((t) => t.at));
+  const stacks = stackTasks(tasks);
+  const standing = clearedAt === undefined ? stacks : stacks.filter((task) => !finished(task) || changed(task) > clearedAt);
+  const kept = standing.filter((task) => whole(task).some(matches));
+  const old = (task: BoardTask) => finished(task) && now - changed(task) > RECENT_MS;
   const group = (id: string, list: BoardTask[], label?: string): BoardGroup => {
     const recent = list.filter((task) => !old(task));
     const shown = older ? list : recent;
@@ -322,7 +330,9 @@ export function boardModel(tasks: readonly BoardTask[], { grouping = "status", f
       // A bot or chat with only old finished tasks keeps its column (its "Show older" is there), after the others.
       .sort((a, b) => b.active - a.active || b.tasks.length - a.tasks.length || (b.tasks[0]?.at ?? 0) - (a.tasks[0]?.at ?? 0) || (a.label ?? "").localeCompare(b.label ?? ""));
   }
-  return { active: tasks.filter((task) => isActiveTask(task.card)).length, total: tasks.length, shown: kept.length, groups, tags: boardTags(tasks) };
+  const total = standing.flatMap(whole).length;
+  return { active: tasks.filter((task) => isActiveTask(task.card)).length, total, shown: kept.length, groups, tags: boardTags(standing.flatMap(whole)),
+    finished: standing.filter(finished).flatMap(whole).length };
 }
 
 /** "2 of 5" for a task that counts its steps, "40%" for one that gives a percent; undefined when it says neither. */

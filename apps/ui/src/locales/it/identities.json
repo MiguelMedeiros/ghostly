@@ -14,7 +14,7 @@
     "mutual": "Segue {{name}}, e {{name}} segue questo account",
     "notShown": "Non mostrata.",
     "notShownWhy": "Non mostrata: {{reason}}.",
-    "off": "I profili pubblici sono disattivati (Impostazioni → Sicurezza).",
+    "off": "I profili pubblici sono disattivati (Opzioni → Sicurezza).",
     "open": "Apri",
     "openIn": "Apri su {{network}}",
     "openPostIn": "Apri questo post su {{network}}",
@@ -39,12 +39,17 @@
     "continue": "Continua",
     "continueIn": "Continua nella finestra di {{provider}}…",
     "continueWith": "Continua con {{provider}}",
+    "copyError": "Impossibile copiare. Seleziona il testo qui sopra e copialo tu.",
+    "copyStep": "Copia passaggio {{step}}",
     "dayOne": "1 giorno",
     "days": "{{count}} giorni",
     "experimental": "Sperimentale: non ancora testato con tutti gli strumenti.",
+    "keepOpen": "Tieni aperto",
     "keyAbout": "Solo chi possiede questa chiave può creare questa prova.",
     "kinds": "Tipi di identità",
     "lead": "Facoltativo. Non viene condiviso nulla finché non scegli un contatto in una chat.",
+    "leaveBody": "Il valore mostrato funziona solo con questi passaggi. Una volta chiusi, un nuovo tentativo dà un nuovo valore, e quello che hai pubblicato andrà sostituito.",
+    "leaveTitle": "Chiudere senza salvare?",
     "linkable": "Condividere la stessa identità con più contatti permette loro di sapere che si tratta della stessa persona.",
     "lookingUp": "Ricerca in corso…",
     "none": "In questa app non si può ancora aggiungere nessun tipo di identità.",
@@ -68,7 +73,7 @@
   "card": {
     "attestedBy": "Attestata da {{attester}}",
     "attestedByProvider": "Attestata dal provider",
-    "checked": "Verificata {{time}}",
+    "checked": "Controllata {{time}}",
     "expired": "Scaduta",
     "expiredOn": "Scaduta il {{date}}",
     "expiresIn": "Scade tra {{count}} giorni",
@@ -90,7 +95,7 @@
     "attested": "{{attester}} dice che questo account ha effettuato l'accesso: affidabile solo quanto {{attester}}.",
     "attestedByProvider": "Il provider dice che questo account ha effettuato l'accesso: affidabile solo quanto il provider.",
     "backToCards": "Torna alle carte di {{name}}",
-    "checked": "Verificata",
+    "checked": "Controllata",
     "checkedAgain": "Su questo dispositivo il {{time}}, l'ultima volta il {{last}}",
     "checkedOnce": "Su questo dispositivo il {{time}}",
     "checking": "Verifica…",
@@ -118,7 +123,7 @@
     "theirProfile": "il suo profilo pubblico",
     "title": "Identità con {{name}}",
     "unconfirmed": "{{status}}: non è stato possibile confermarla",
-    "unconfirmedWhy": "{{status}}: non è stato possibile confermarla ({{error}})",
+    "unconfirmedWhy": "{{status}}: {{error}}",
     "validity": "Validità"
   },
   "did": {
@@ -213,7 +218,7 @@
     "removeNote": "I contatti con cui l'hai condivisa vengono avvisati che non è più condivisa, e viene pubblicata una revoca così la vedono anche se non ti riconnetti mai. Una copia che hanno conservato non può essere cancellata.",
     "renew": "Aggiungila di nuovo",
     "renewHint": "Aggiungila di nuovo per rinnovarla; poi rimuovi questa.",
-    "shareHint": "Condividila dalle Identità di una chat, un contatto alla volta.",
+    "shareHint": "Condividila dal + di una chat, un contatto alla volta.",
     "takeDownFailed": "Ciò che ha pubblicato non è stato rimosso. Puoi rimuovere la prova senza: i contatti la vedranno comunque revocata.",
     "title": "Le tue"
   },
@@ -351,7 +356,7 @@
     "sourceFound": "Caricato da {{from}} {{time}}. È ciò che l'account dice di sé, non fa parte della prova. La richiesta ha rivelato a quel server l'indirizzo IP di questo dispositivo."
   },
   "received": {
-    "checked": "{{category}} · verificata il {{time}}",
+    "checked": "{{category}} · controllata il {{time}}",
     "title": "Dai tuoi contatti"
   },
   "share": {
@@ -360,11 +365,8 @@
     "checking": "Verifica",
     "notChecked": "Non verificata",
     "notVerified": "Non verificata",
-    "notVerifiedWhy": "Non verificata: {{error}}",
     "revokedMine": "Il tuo {{what}} è stato revocato",
     "revokedTheirs": "Il {{what}} di {{contact}} è stato revocato",
-    "sharedMineState": "Hai condiviso {{what}} · {{state}}",
-    "sharedTheirsState": "{{contact}} ha condiviso {{what}} · {{state}}",
     "stoppedMine": "Hai smesso di condividere {{what}}",
     "stoppedTheirs": "{{contact}} ha smesso di condividere {{what}}",
     "waiting": "In attesa"

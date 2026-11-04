@@ -73,8 +73,12 @@ test.describe("wallet", () => {
     await paymentCard(bob.page, "cashu-testnet").click();
     await bob.page.getByTestId("payment-amount").fill("10");
     await bob.page.getByTestId("payment-request").click();
-    await alice.page.getByTestId("payment-pay").click();
+    // From the keyboard: Review payment stays focused while it works (it is disabled once the review is open), and the
+    // review takes the keys from it, not the page.
+    await alice.page.getByTestId("payment-pay").focus();
+    await alice.page.keyboard.press("Enter");
     const requestReview = chat(alice).getByTestId("payment-review");
+    await expect(requestReview.getByRole("heading")).toBeFocused();
     await expect(requestReview.getByTestId("review-rail")).toHaveText("Cashu");
     await expect(requestReview).toHaveAttribute("data-network", "testnet");
     await requestReview.getByRole("button", { name: "Approve payment" }).click();
@@ -144,11 +148,15 @@ test.describe("wallet", () => {
     await expect(card.locator("svg").first()).toBeVisible();
     await expect(chat(bob).getByTestId("invoice-bubble").last().getByTestId("invoice-pay"), "nobody pays their own invoice").toHaveCount(0);
 
-    await card.getByTestId("invoice-pay").click();
+    // From the keyboard: each button keeps the keys while it works, and each step that comes takes them.
+    await card.getByTestId("invoice-pay").focus();
+    await alice.page.keyboard.press("Enter");
     // The wallet quotes it, fee reserve included, before anything is paid. The test mint marks its own
     // invoices paid, so it answers this one is already paid: the card has to say so without spending anything.
-    await card.getByTestId("invoice-confirm").click();
+    await expect(card.getByTestId("invoice-confirm")).toBeFocused();
+    await alice.page.keyboard.press("Enter");
     await expect(card.getByTestId("invoice-paid")).toBeVisible();
+    await expect(card.getByTestId("invoice-paid")).toBeFocused();
   });
 
   test("an ecash token pasted into the chat can be redeemed", { tag: ["@feature:payments.cashu.token-card"] }, async ({ peer }) => {
@@ -181,8 +189,11 @@ test.describe("wallet", () => {
     await expect(card).toContainText("lunch");
     const before = await balance(alice);
     await openChat(alice);
-    await card.getByTestId("token-redeem").click();
+    await card.getByTestId("token-redeem").focus();
+    await alice.page.keyboard.press("Enter");
     await expect(card.getByTestId("token-redeemed")).toBeVisible();
+    // Redeem kept the keys while the mint worked, and Redeemed took them.
+    await expect(card.getByTestId("token-redeemed")).toBeFocused();
     await expect.poll(() => balance(alice), "redeeming adds the sats, minus the mint's fee").toBeGreaterThan(before);
     expect(await balance(alice)).toBeLessThanOrEqual(before + 7);
   });

@@ -273,6 +273,49 @@ describe("calls on a paired session (calls/1)", () => {
     expect(a.link.sessionOffers.peer).toBeNull();
     await expect(a.link.setCallSignal(hangUp())).rejects.toThrow("Calls need a live connection");
   });
+
+  it("hands the transport the call's hang-up, for it to say should the page be gone as the app exits (a logout)", async () => {
+    // The Desktop's native channel keeps what it is handed and Rust sends it as the app exits: a logout ends WebKit's
+    // processes with the app, and the contact's call stalled, then failed 16 s later.
+    let side!: FrameChannel;
+    const held: (string | null)[] = [];
+    const { a, b } = pair();
+    const connect = a.endpoint.connect;
+    a.endpoint.connect = async descriptor => {
+      const bound = await connect(descriptor);
+      side = bound.channel;
+      side.parting = frame => { held.push(frame); };
+      return bound;
+    };
+    await live(a, b);
+    await vi.waitFor(() => expect(a.link.supportsCalls && b.link.supportsCalls).toBe(true));
+    // No call: nothing to say.
+    expect(held.filter(Boolean)).toEqual([]);
+
+    const o = offer();
+    await a.link.setCallSignal(o);
+    await vi.waitFor(() => expect(b.calls).toEqual([o]));
+    const parting = { t: "paired-call", s: JSON.stringify({ t: "h", ts: JSON.parse(o).ts + 1 }) };
+    expect(held.at(-1)).toBe(JSON.stringify(parting));
+    await b.link.setCallSignal(answer());
+    await vi.waitFor(() => expect(a.calls).toHaveLength(1));
+    expect(held.at(-1)).toBe(JSON.stringify(parting));
+
+    // The page is gone: the transport says it, and the contact hears the call end.
+    side.send(held.at(-1)!);
+    await vi.waitFor(() => expect(b.calls).toEqual([o, parting.s]));
+
+    // A call this side hung up itself leaves nothing to say; nor does its goodbye.
+    const again = offer();
+    await a.link.setCallSignal(again);
+    expect(JSON.parse(JSON.parse(held.at(-1)!).s)).toEqual({ t: "h", ts: JSON.parse(again).ts + 1 });
+    await a.link.setCallSignal(hangUp());
+    expect(held.at(-1)).toBeNull();
+    await a.link.setCallSignal(offer());
+    expect(held.at(-1)).not.toBeNull();
+    a.link.depart({ quitting: true });
+    expect(held.at(-1)).toBeNull();
+  });
 });
 
 describe("a live session giving its native listener to a chat in use", () => {
@@ -340,6 +383,28 @@ describe("a live session giving its native listener to a chat in use", () => {
     expect(a.link.canYieldEndpoint("iroh/1", IDLE)).toBe(true);
   });
 
+  it("a file sent on a live session says nothing about transports; a retry still does", async () => {
+    const policies: string[] = [];
+    const sink = { write: async () => {}, close: async () => {}, abort: () => {} };
+    const { a, b } = pair({
+      a: { events: { onFileIncoming: () => sink } }, b: { events: { onFileIncoming: () => sink } },
+      drop: { a: (data) => { if (data.includes(`"t":"paired-policy"`)) policies.push(data); return false; } },
+    });
+    await live(a, b);
+    await vi.waitFor(() => expect(a.link.supportsFiles).toBe(true));
+    const before = policies.length;
+    // Each file sent used to send the transport policy again: a dozen in a minute used up the contact's 10
+    // (POLICY_RECEIVE_LIMIT), and a transport choice made then waited for it.
+    async function* bytes() { yield new Uint8Array(8); }
+    for (let i = 0; i < 12; i++) {
+      await a.link.sendFile({ id: String(i).padStart(22, "f"), name: `${i}.bin`, size: 8, mime: "application/octet-stream", timestamp: Date.now() }, bytes());
+    }
+    expect(policies.length - before).toBe(0);
+    // The person's retry is still one.
+    await a.link.connect();
+    await vi.waitFor(() => expect(policies.length - before).toBe(1));
+  });
+
   it("a call is on from an answer either side gave until a hang-up or a clear; an offer nobody answers rings only so long", () => {
     let now = 1_000_000;
     const calls = new PairedCalls(() => now);
@@ -394,6 +459,21 @@ describe("shared apps on a paired session (services/1)", () => {
     expect((await a.link.request("private", { method: "GET", path: "/" })).status).toBe(404);
   });
 
+  it("a request on a live session says nothing about transports: a page's every file used to send the transport policy again", async () => {
+    const policies: string[] = [];
+    const { a, b } = pair({
+      b: hosting(async () => ({ status: 200, headers: [], body: [new TextEncoder().encode("ok")] })),
+      drop: { a: (data) => { if (data.includes(`"t":"paired-policy"`)) policies.push(data); return false; } },
+    });
+    await live(a, b);
+    await vi.waitFor(() => expect(a.presenceServices()).toEqual(["atlas"]));
+    const before = policies.length;
+    // A shared app's page and its files: one request each. The contact reads 10 policies a minute (POLICY_RECEIVE_LIMIT),
+    // so these used up its budget, and a transport choice made in that minute waited for it.
+    for (let i = 0; i < 12; i++) expect((await a.link.request("atlas", { method: "GET", path: `/file${i}.js` })).status).toBe(200);
+    expect(policies.length - before).toBe(0);
+  });
+
   it("travels over none of it when the contact does not offer services/1 (the web app)", async () => {
     const localFetch = vi.fn<LocalFetch>(async () => ({ status: 200, headers: [], body: [] }));
     const { a, b } = pair({ a: { servicesSupport: false }, b: hosting(localFetch) });
@@ -415,6 +495,24 @@ describe("shared apps on a paired session (services/1)", () => {
     expect(a.presenceServices()).toEqual([]);
     expect(a.link.supportsServices).toBe(false);
     expect(localFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("paying a contact on a live session", () => {
+  it("each payment step says nothing about transports", async () => {
+    const policies: string[] = [];
+    const { a, b } = pair({ drop: { a: (data) => { if (data.includes(`"t":"paired-policy"`)) policies.push(data); return false; } } });
+    await live(a, b);
+    await vi.waitFor(() => expect(a.link.supportsPayments).toBe(true));
+    const before = policies.length;
+    // An ask, a request and a payment: each used to send the transport policy again, out of the contact's 10 a minute.
+    const amount = { value: "100", asset: "sat" };
+    for (let i = 0; i < 4; i++) {
+      await a.link.sendPaymentAsk({ id: `ask${i}`, timestamp: Date.now(), amount, method: "bitcoin", network: "testnet" });
+      await a.link.sendPaymentRequest({ id: `req${i}`, timestamp: Date.now(), amount, endpoints: [], network: "testnet" });
+      await a.link.sendPayment({ id: `pay${i}`, timestamp: Date.now(), amount, endpoint: ["bitcoin", "tb1q"] });
+    }
+    expect(policies.length - before).toBe(0);
   });
 });
 

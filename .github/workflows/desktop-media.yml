@@ -15,6 +15,7 @@ on:
     paths:
       - "apps/desktop/src/file_stream.rs"
       - "apps/desktop/src/file_store.rs"
+      - "apps/desktop/src/forget_origins.rs"
       - "apps/desktop/tauri.conf.json"
       - "packages/browser/src/shared/fileBytesNative.ts"
       - "apps/ui/src/components/video/**"
@@ -33,6 +34,11 @@ permissions:
 concurrency:
   group: desktop-media-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
+
+env:
+  # GitHub's ubuntu-24.04 runners refuse the unprivileged user namespaces Chromium's sandbox needs ("Chromium sandboxing
+  # failed!"): the e2e and site checks launch it without here, as before; our own machines keep it on (e2e/support/chromiumSandbox.ts).
+  E2E_CHROMIUM_SANDBOX: "0"
 
 jobs:
   # A draft gets CI's fast tier only (ci.yml, `changes`): this builds once the pull request leaves draft
@@ -152,6 +158,15 @@ jobs:
       - name: Play a 100 MB video from the stored file (Windows)
         if: runner.os == 'Windows'
         run: npx playwright test -c e2e/playwright.desktop.config.ts video-stream
+
+      # What a contact's app kept, forgotten through WebView2 (apps/desktop/src/forget_origins.rs): read back empty, and
+      # no file left named after its origin. No machine of ours runs Windows, so this is where it is checked.
+      - name: A contact's app's storage is forgotten (Windows)
+        if: runner.os == 'Windows' && !cancelled()
+        # The test binary opens real windows: it needs the app's manifest too (apps/desktop/build.rs).
+        env:
+          GHOSTLY_WINDOWS_TEST_MANIFEST: "1"
+        run: cargo test --manifest-path apps/desktop/Cargo.toml --lib forget_origins::display_tests -- --ignored --nocapture
 
       - name: Upload report
         if: ${{ !cancelled() }}

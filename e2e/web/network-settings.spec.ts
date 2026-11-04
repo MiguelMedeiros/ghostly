@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { chat, connect, expect, link, test, type Peer } from "../support/fixtures";
 
-const DEFAULT_RELAYS = "https://pkarr.pubky.org\nhttps://pkarr.pubky.app";
+const DEFAULT_RELAYS = "https://pkarr.pubky.org\nhttps://pkarr.pubky.app\nhttps://pkarr.miguelmedeiros.dev";
 
 /** The network section of Settings: relays, TURN address, username and credential. */
 function network(page: Page) {
@@ -70,6 +70,7 @@ test("relays: only http(s) addresses are kept, normalized and without duplicates
   const { page } = alice;
   await page.goto("/#/settings/network");
   const form = network(page);
+  // A line that is not an http(s) relay, next to ones that are: the list is refused whole, nothing is saved (#4539).
   await form.relays.fill(
     [
       "javascript:alert(1)",
@@ -78,9 +79,15 @@ test("relays: only http(s) addresses are kept, normalized and without duplicates
       "data:text/plain,relay",
       "https://relay.example.org/pkarr/",
       "https://relay.example.org/pkarr",
-      "relay.example.org",
     ].join("\n"),
   );
+  await form.save.click();
+  await expect(form.relays).toHaveAttribute("aria-invalid", "true");
+  await expect(page.getByText("Saved", { exact: true })).toHaveCount(0);
+  await page.reload();
+  await expect(form.relays).toHaveValue(DEFAULT_RELAYS);
+  // The good lines alone: kept normalized and without duplicates.
+  await form.relays.fill(["https://relay.example.org/pkarr/", "https://relay.example.org/pkarr"].join("\n"));
   await save(page);
   await page.reload();
   await expect(form.relays).toHaveValue("https://relay.example.org/pkarr");

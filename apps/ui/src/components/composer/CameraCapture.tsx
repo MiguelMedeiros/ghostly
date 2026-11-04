@@ -2,19 +2,18 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
-import { preferredDevice } from "../../lib/mediaDevices";
+import { cameraListed, captureCamera, preferredDevice } from "../../lib/mediaDevices";
 
 /**
  * Whether this device has a camera to take a photo with. Browsers list their devices before any permission
- * (without names), so this asks nothing; where it cannot tell, there is no Camera row.
+ * (without names), so this asks nothing; where it cannot tell, there is no Camera row. On Linux Desktop the cameras
+ * are the native ones Settings previews: the page's own is always refused there.
  */
 export function useHasCamera(): boolean {
   const [has, setHas] = useState(false);
   useEffect(() => {
     let live = true;
-    const devices = navigator.mediaDevices;
-    if (!devices?.getUserMedia || !devices.enumerateDevices) return;
-    devices.enumerateDevices().then((list) => { if (live) setHas(list.some((d) => d.kind === "videoinput")); }, () => {});
+    cameraListed().then((listed) => { if (live) setHas(listed); }, () => {});
     return () => { live = false; };
   }, []);
   return has;
@@ -41,7 +40,7 @@ export function CameraCapture({ onSend, onClose }: { onSend: (file: File) => voi
     if (photo) return;
     let live = true;
     // The camera chosen in Settings → Audio & video, or the default when it is not connected.
-    navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, deviceId: preferredDevice("videoinput") }, audio: false }).then((s) => {
+    captureCamera({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, deviceId: preferredDevice("videoinput") }, audio: false }).then((s) => {
       if (!live) { s.getTracks().forEach((track) => track.stop()); return; }
       stream.current = s;
       if (video.current) { video.current.srcObject = s; void video.current.play().catch(() => {}); }
@@ -69,17 +68,17 @@ export function CameraCapture({ onSend, onClose }: { onSend: (file: File) => voi
   return createPortal(
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 animate-fade-in" {...backdrop}>
       <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t("composer.camera")} data-testid="camera-capture"
-        className="focus:outline-none w-full max-w-xl bg-panel-header border border-border rounded-2xl shadow-2xl overflow-hidden">
-        <div className="relative aspect-video bg-black">
+        className="focus:outline-none w-full max-w-xl max-h-full flex flex-col bg-panel-header border border-border rounded-2xl shadow-2xl overflow-hidden">
+        <div className="relative aspect-video min-h-0 bg-black">
           {failed ? <p role="alert" className="absolute inset-0 flex items-center justify-center text-sm text-white/80 p-6 text-center">{t("composer.cameraFailed")}</p>
             : photo ? <img src={photo.url} alt="" className="w-full h-full object-contain" data-testid="camera-photo" />
-            : <video ref={video} muted playsInline className="w-full h-full object-cover -scale-x-100" data-testid="camera-video" />}
+            : <video ref={video} muted playsInline className="w-full h-full object-contain -scale-x-100" data-testid="camera-video" />}
           <button type="button" onClick={onClose} aria-label={t("composer.closeCamera")} title={t("composer.closeCamera")}
             className="absolute top-2 end-2 w-9 h-9 rounded-full bg-black/50 text-white flex items-center justify-center cursor-pointer">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
           </button>
         </div>
-        <div className="flex items-center justify-center gap-3 p-3">
+        <div className="shrink-0 flex items-center justify-center gap-3 p-3">
           {photo ? <>
             <button type="button" data-testid="camera-retake" onClick={() => setPhoto(null)} className={`${button} bg-surface-alt text-text-primary border border-border`}>{t("composer.retake")}</button>
             <button type="button" data-testid="camera-send" onClick={send} className={`${button} bg-accent text-on-accent hover:bg-accent-hover`}>{t("composer.sendPhoto")}</button>

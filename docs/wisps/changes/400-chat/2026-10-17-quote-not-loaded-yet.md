@@ -1,0 +1,1 @@
+Replies get a fifth case, not loaded yet. Right after the app starts on a long chat, its stored copy holds only the last messages until the engine's history is in. An original among the older ones is not deleted, so its quote shows the wire's line and a tap does nothing. Once the history is in, the original is found, or the usual cases apply. Nothing on the wire changes.

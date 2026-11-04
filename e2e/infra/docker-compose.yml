@@ -361,6 +361,33 @@ services:
       CDK_MINTD_MINT_NAME: Ghostly test mint
       CDK_MINTD_INPUT_FEE_PPK: "100"
     ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47090:3338"]
+  # The same mint on a real Lightning node, with a peer to pay and be paid by. The fake backend hard-codes NUT-05
+  # `amountless: false`, so only this one can pay an invoice with no amount. Its seed: e2e/support/mint-lnd-regtest.
+  mint-lnd:
+    <<: *lnd
+    container_name: ghostly-e2e-mint-lnd
+    command: ["--alias=ghostly-mint", "--tlsextradomain=mint-lnd"]
+    volumes: ["mint-lnd:/root/.lnd"]
+  mint-lnd-peer:
+    <<: *lnd
+    container_name: ghostly-e2e-mint-lnd-peer
+    command: ["--alias=ghostly-mint-peer", "--tlsextradomain=mint-lnd-peer"]
+  mint-on-lnd:
+    image: cashubtc/mintd:0.17.7
+    container_name: ghostly-e2e-mint-on-lnd
+    restart: on-failure
+    environment:
+      CDK_MINTD_LN_BACKEND: lnd
+      CDK_MINTD_LND_ADDRESS: https://mint-lnd:10009
+      CDK_MINTD_LND_CERT_FILE: /lnd/tls.cert
+      CDK_MINTD_LND_MACAROON_FILE: /lnd/data/chain/bitcoin/regtest/admin.macaroon
+      CDK_MINTD_LISTEN_HOST: 0.0.0.0
+      CDK_MINTD_LISTEN_PORT: "3338"
+      CDK_MINTD_MNEMONIC: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+      CDK_MINTD_MINT_NAME: Ghostly test mint on LND
+    volumes: ["mint-lnd:/lnd:ro"]
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47098:3338"]
+    depends_on: { mint-lnd: { condition: service_healthy } }
 
   # ── HyperDHT for browsers: the relay (infra/services/hyperdht-relay) on a HyperDHT network of its own ─────
   # The relay and a three-node HyperDHT network run in one process on the container's loopback, so the suites'
@@ -447,3 +474,4 @@ volumes:
   fedimintd:
   fedimint-lnd:
   fedimint-gateway:
+  mint-lnd:

@@ -43,6 +43,12 @@ export const ESCAPES = [
 
 export type Escape = (typeof ESCAPES)[number];
 
+/** Ways at the page's session history, which the frame shares: entries added, or the page moved back. Each in an app of its own. */
+export const HISTORY_WAYS = [
+  "history-push", "history-replace", "history-go", "history-back", "history-push-go", "history-forward", "history-hash",
+  "history-link-hash", "history-assign-hash", "navigation-api",
+] as const;
+
 export interface ProbeTargets {
   /** The HTTP listener, `http://127.0.0.1:<port>`. */
   http: string;
@@ -348,17 +354,53 @@ function fileFloodApp() {
     let ok = 0;
     const refused: string[] = [];
     for (let second = 0; second < 3; second++) {
-      const started = Date.now();
       const answers = await Promise.allSettled(Array.from({ length: 50 }, () => G.file("big.bin")));
       for (const a of answers as any[]) { if (a.status === "fulfilled") ok++; else refused.push(a.reason.message); }
-      await new Promise((r) => setTimeout(r, Math.max(0, 1050 - (Date.now() - started))));
+      // The host counts a second from when it starts a read, which can be well after the app asked on a loaded host:
+      // waited from the last answer, every read it counted is over a second old when the next 50 go.
+      await new Promise((r) => setTimeout(r, 1050));
     }
     await G.storage.set("report", { ok, refused: [...new Set(refused)] });
   })();
 }
+/**
+ * Once it has said it is ready, answers nothing for P.ms (0: never again): one synchronous loop, as a chess engine
+ * thinking on its own thread, an image filter, or a `while (true) {}` would.
+ */
+function hangApp(P: any) {
+  const G: any = (window as any).ghostly;
+  G.storage.set("ready", true).then(() => setTimeout(() => {
+    const end = P.ms > 0 ? Date.now() + P.ms : Infinity;
+    while (Date.now() < end) { /* busy */ }
+  }, 100));
+}
+/** The session history: the way named in P.way, five times where it adds an entry. */
+function historyProbe(P: any) {
+  const G: any = (window as any).ghostly;
+  const H: any = history;
+  const N: any = (window as any).navigation;
+  const times = (n: number, act: (i: number) => void) => { for (let i = 1; i <= n; i++) act(i); };
+  const ways: Record<string, () => void> = {
+    "history-push": () => times(5, (i) => H.pushState({ i }, "", "#evil-" + i)),
+    "history-replace": () => H.replaceState({ evil: true }, "", "#evil"),
+    "history-go": () => H.go(-2),
+    "history-back": () => { H.back(); H.back(); },
+    "history-push-go": () => { times(5, (i) => H.pushState({ i }, "", "#evil-" + i)); setTimeout(() => H.go(-7), 500); },
+    "history-forward": () => H.forward(),
+    "history-hash": () => times(5, (i) => { location.hash = "evil-" + i; }),
+    "history-link-hash": () => times(5, (i) => { const a = document.createElement("a"); a.href = "#evil-link-" + i; a.click(); }),
+    "history-assign-hash": () => times(5, (i) => { location.assign("#evil-assign-" + i); }),
+    "navigation-api": () => { N.navigate("#evil-navigation"); N.back(); N.traverseTo(N.entries()[0].key); },
+  };
+  G.storage.set("started", true).then(() => setTimeout(() => {
+    let outcome = "called";
+    try { ways[P.way]!(); } catch (e: any) { outcome = "threw: " + (e && e.name); }
+    G.storage.set("outcome", outcome).catch(() => {});
+  }, 100));
+}
 /* eslint-enable */
 
-const SOURCES = { net: netProbes, escape: escapeProbe, victim: victimApp, flood: floodApp, storm: stormApp, fileFlood: fileFloodApp, internet: internetApp, talker: talkerApp, eavesdropper: eavesdropperApp } as const;
+const SOURCES = { net: netProbes, escape: escapeProbe, history: historyProbe, victim: victimApp, flood: floodApp, storm: stormApp, fileFlood: fileFloodApp, hang: hangApp, internet: internetApp, talker: talkerApp, eavesdropper: eavesdropperApp } as const;
 
 /** An app's entry: the probe's source, given its targets. */
 export function appEntry(kind: keyof typeof SOURCES, targets: object = {}): string {

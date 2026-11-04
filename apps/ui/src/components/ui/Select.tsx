@@ -1,5 +1,6 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
+import { safeAreaInsets } from "../../hooks/useFloatingBox";
 
 export interface SelectOption<V extends string = string> {
   value: V;
@@ -31,6 +32,8 @@ export interface SelectProps<V extends string = string> {
   "aria-labelledby"?: string;
   "aria-describedby"?: string;
   "data-testid"?: string;
+  /** The button: for a step that takes the place of the focused control to give the select the focus. */
+  ref?: Ref<HTMLButtonElement>;
 }
 
 // The list goes to the top layer where the popover API exists (above dialogs, out of any overflow or transform);
@@ -51,13 +54,18 @@ type Place = { left: number; width: number; maxHeight: number } & ({ top: number
  */
 export function Select<V extends string = string>({
   value, options, onChange, placeholder = "", id, name, disabled = false, size = "md", fit = false,
-  "aria-label": ariaLabel, "aria-labelledby": labelledBy, "aria-describedby": describedBy, "data-testid": testId,
+  "aria-label": ariaLabel, "aria-labelledby": labelledBy, "aria-describedby": describedBy, "data-testid": testId, ref,
 }: SelectProps<V>) {
   const uid = useId();
   const triggerId = id ?? `${uid}select`;
   const listId = `${uid}list`;
   const optionId = (i: number) => `${uid}option-${i}`;
   const trigger = useRef<HTMLButtonElement>(null);
+  const setTrigger = useCallback((el: HTMLButtonElement | null) => {
+    trigger.current = el;
+    if (typeof ref === "function") ref(el);
+    else if (ref) ref.current = el;
+  }, [ref]);
   const list = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
@@ -149,11 +157,15 @@ export function Select<V extends string = string>({
       const r = button.getBoundingClientRect();
       const vw = window.visualViewport?.width ?? window.innerWidth;
       const vh = window.visualViewport?.height ?? window.innerHeight;
-      const width = Math.min(Math.max(r.width, MIN_WIDTH), vw - 2 * EDGE);
+      // Clear of a phone's notch, status bar and home indicator too (the keyboard, when up, covers the last).
+      const inset = safeAreaInsets();
+      const minX = inset.left + EDGE, maxX = vw - inset.right - EDGE;
+      const minY = inset.top + EDGE, maxY = vh - Math.max(0, inset.bottom - (window.innerHeight - vh)) - EDGE;
+      const width = Math.min(Math.max(r.width, MIN_WIDTH), maxX - minX);
       const rtl = getComputedStyle(button).direction === "rtl";
-      const left = Math.min(Math.max(rtl ? r.right - width : r.left, EDGE), vw - EDGE - width);
-      const below = vh - r.bottom - EDGE - 4;
-      const above = r.top - EDGE - 4;
+      const left = Math.min(Math.max(rtl ? r.right - width : r.left, minX), maxX - width);
+      const below = maxY - r.bottom - 4;
+      const above = r.top - minY - 4;
       const wanted = Math.min(list.current.scrollHeight, MAX_HEIGHT);
       setPlace(below >= wanted || below >= above
         ? { left, width, top: r.bottom + 4, maxHeight: Math.max(Math.min(MAX_HEIGHT, below), 0) }
@@ -200,7 +212,7 @@ export function Select<V extends string = string>({
   return (
     <>
       <button
-        ref={trigger}
+        ref={setTrigger}
         type="button"
         id={triggerId}
         role="combobox"
@@ -219,11 +231,14 @@ export function Select<V extends string = string>({
         onKeyDown={onKeyDown}
         // Space would click the button again on release in some browsers, reopening what Space just closed.
         onKeyUp={e => { if (e.key === " ") e.preventDefault(); }}
-        className={`${fit ? "inline-flex w-auto" : "flex w-full"} min-w-0 max-w-full items-center gap-2 rounded-lg border border-border bg-input-bg text-start text-text-primary transition-colors hover:border-border-bright focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border ${open ? "border-border-bright" : ""} ${small ? "min-h-8 px-2 py-1 text-xs" : "min-h-10 px-3 py-2 text-sm max-md:min-h-11"}`}
+        className={`${fit ? "inline-flex w-auto" : "flex w-full"} min-w-0 max-w-full items-center gap-2 rounded-lg border border-border bg-input-bg text-start text-text-primary transition-colors hover:border-border-bright focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border ${open ? "border-border-bright" : ""} ${small ? "min-h-8 px-2 py-1 text-xs max-md:min-h-11" : "min-h-10 px-3 py-2 text-sm max-md:min-h-11"}`}
       >
         {current?.icon && <span aria-hidden="true" className="flex shrink-0 items-center">{current.icon}</span>}
-        <span className="min-w-0 flex-1 truncate">
-          {current ? <>{current.label}{current.description && <> <span className="ms-1 text-xs text-text-muted">{current.description}</span></>}</> : <span className="text-text-muted">{placeholder}</span>}
+        {/* A label is often not the app's words (a microphone's, a mint's, a card's name): laid out by its own letters, so
+            a Latin one cut in Arabic keeps its start, and as wide as it is, so a short one stays at the line's start. */}
+        <span className="flex min-w-0 flex-1">
+          {current ? <span dir="auto" className="min-w-0 truncate">{current.label}{current.description && <> <span className="ms-1 text-xs text-text-muted">{current.description}</span></>}</span>
+            : <span className="min-w-0 truncate text-text-muted">{placeholder}</span>}
         </span>
         <svg aria-hidden="true" width={small ? 12 : 14} height={small ? 12 : 14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
           className={`shrink-0 text-text-muted transition-transform ${open ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6" /></svg>
@@ -263,9 +278,9 @@ export function Select<V extends string = string>({
               className="flex min-h-10 cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-1.5 data-[active]:bg-surface-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-40 max-md:min-h-11"
             >
               {o.icon && <span aria-hidden="true" className="flex shrink-0 items-center">{o.icon}</span>}
-              <span className="min-w-0 flex-1">
-                <span id={`${optionId(i)}-label`} className="block truncate">{o.label}</span>
-                {o.description && <span id={`${optionId(i)}-description`} className="block truncate text-xs text-text-muted">{o.description}</span>}
+              <span className="flex min-w-0 flex-1 flex-col items-start">
+                <span id={`${optionId(i)}-label`} dir="auto" className="max-w-full truncate">{o.label}</span>
+                {o.description && <span id={`${optionId(i)}-description`} dir="auto" className="max-w-full truncate text-xs text-text-muted">{o.description}</span>}
               </span>
               <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
                 className={`shrink-0 text-accent ${i === selected ? "" : "invisible"}`}><path d="M20 6 9 17l-5-5" /></svg>

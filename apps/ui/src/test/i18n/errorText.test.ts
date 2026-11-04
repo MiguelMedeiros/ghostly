@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 import { ENGINE_ERRORS, engineText, type EngineErrorCode } from "@ghostly/core";
 import { ERROR_RULES, errorText, knownErrorParts, rawError } from "../../lib/errorText";
 import { english } from "../../lib/english";
+import { failedReason, failedStatus } from "../../lib/fileStatus";
 import { problemText } from "../../lib/problemText";
+import type { TranslationKey } from "../../contexts/I18nContext";
 import { translateWith } from "../../locales/translate";
 import { LANGUAGES, LOCALES } from "./locales";
 
@@ -135,6 +137,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Not from Android's main thread", "apps/desktop/src/android.rs"],
   ["Ghostly is starting…", `${BROWSER}/platform/engine.ts`],
   ["Lost the Ghostly peer", `${BROWSER}/platform/engine.ts`],
+  ["This device has no room left to save this", `${BROWSER}/shared/idb.ts`],
   ["Ghostly is still starting. Try again in a moment.", `${BROWSER}/platform/services.ts`],
   ["Ghostly needs your permission to reach that local address", `${BROWSER}/platform/services.ts`],
   ["Pick a Lightning card first", `${BROWSER}/platform/services.ts`],
@@ -142,6 +145,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Connect to an updated peer to send files", `${BROWSER}/platform/services.ts`],
   ["Connect to an updated peer first", `${BROWSER}/platform/services.ts`],
   ["That recording cannot be sent as a voice message", `${BROWSER}/platform/services.ts`],
+  ["This picture cannot be sent: Ghostly could not remove the details saved in it, like where it was taken", `${CORE}/pictureMetadata.ts`],
+  ["This video cannot be sent: Ghostly could not remove the details saved in it, like where it was recorded", `${CORE}/videoMetadata.ts`],
   ["This file cannot be retried", `${BROWSER}/platform/services.ts`],
   ["This file is no longer here", `${BROWSER}/platform/services.ts`],
   // A large file whose copy into this device failed before it was sent: nothing stored, the file is picked again.
@@ -162,6 +167,17 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Could not store the file: This device has no space left for the file", `${CORE}/chatFiles.ts`, "Could not store the file: "],
   ["Could not store the file: The stored copy is gone", `${CORE}/chatFiles.ts`, "Could not store the file: "],
   ["Your contact could not take this file", `${CORE}/chatFiles.ts`],
+  ["Cancelled by the sender", `${CORE}/chatFiles.ts`],
+  // A 1:1 file declined or cancelled, by the contact (chatFiles.ts `refusalText`) or here: the bubble's ⓘ says who.
+  ["Declined by your contact", `${CORE}/chatFiles.ts`],
+  ["Cancelled by your contact", `${CORE}/chatFiles.ts`],
+  ["You declined it", `${CORE}/chatFiles.ts`],
+  ["You cancelled it", `${CORE}/chatFiles.ts`],
+  // A file said on the DHT floor that ended here before it came (engine/fileDesk.ts `floorRefusal`, `sweep`).
+  ["No room on this device for this file", `${BROWSER}/engine/fileDesk.ts`],
+  ["Too many files are waiting here", `${BROWSER}/engine/fileDesk.ts`],
+  ["It was refused here", `${BROWSER}/engine/fileDesk.ts`],
+  ["It did not come within a week", `${BROWSER}/engine/fileDesk.ts`],
   ["That file is too large (max 64 MB).", `${BROWSER}/platform/services.ts`, "That file is too large (max "],
   // A file forwarded that is still arriving here, or whose bytes are gone (a copy of mine that failed, "Not sent").
   ["The file has not arrived yet", `${BROWSER}/engine/forwards.ts`],
@@ -181,6 +197,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Ecash from mint.example is not accepted", `${BROWSER}/engine/wallet.ts`, " is not accepted"],
   ["Add a mint in Settings first", `${BROWSER}/engine/wallet.ts`],
   ["Not enough sats in your wallet", CODES],
+  ["Not enough sats in your wallet: 690 sats leave room for the fee", CODES, ": {amount} sats leave room for the fee"],
+  ["None of your mints can pay an invoice with no amount", CODES],
   ["The Lightning payment did not go through. The sats are back in your wallet.", `${BROWSER}/engine/wallet.ts`, "The sats are back in your wallet."],
   ["The Lightning payment did not go through. The sats are back in your wallet, less 2 sats the mint kept as its fee.", `${BROWSER}/engine/wallet.ts`, "The sats are back in your wallet, less "],
   // Never alone: the start of the two above, said on its own before what came back.
@@ -271,8 +289,10 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Go online to join a group", `${BROWSER}/engine/node.ts`],
   ["Only the admin can change the members of this group", `${CORE}/groupSession.ts`],
   ["Only the admin can renew the group's secret", `${CORE}/groupSession.ts`],
+  ["Only the admin can hand the admin role over", `${CORE}/groupSession.ts`],
   ["Only the admin can do that", `${CORE}/groupCommunity.ts`],
   ["Make someone else the admin before leaving", `${CORE}/groupSession.ts`],
+  ["This member has left the group. Make someone else the admin.", `${CORE}/groupCommunity.ts`],
   ["Only the admin can change the group's picture", `${CORE}/groupSession.ts`],
   ["Only the admin can rename the group", `${CORE}/groupSession.ts`],
   ["Only the admin can choose the group's hubs", `${CORE}/groupSession.ts`],
@@ -404,6 +424,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["The clipboard's picture is damaged", "apps/desktop/src/clipboard.rs"],
   ["Clipboard unavailable", "apps/desktop/src/clipboard.rs"],
   ["That paste is gone. Paste it again.", "apps/desktop/src/clipboard.rs"],
+  ["That is too large to drop. Send it with + → Document.", "apps/ui/src/lib/pastedFiles.ts"],
+  ["That drop is gone. Drop it again.", "apps/ui/src/lib/pastedFiles.ts"],
   ["Could not read the pasted file: Permission denied (os error 13)", "apps/desktop/src/clipboard.rs", "Could not read the pasted file: {e}"],
   ["Could not read the file: The file changed while it was being copied", `${CORE}/chatFiles.ts`, "Could not read the file: "],
   ["This browser cannot wake Ghostly while it is closed.", "apps/ui/src/lib/wakePush.ts"],
@@ -449,13 +471,68 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["https://example.com/.well-known/ghostly.json was not found", `${BROWSER}/proofs/domain.ts`, " was not found`"],
   ["https://example.com/.well-known/ghostly/ab12.json was not found: it was deleted, or not uploaded yet", `${BROWSER}/proofs/providers/did.ts`, " was not found: it was deleted, or not uploaded yet"],
   ["https://example.com/.well-known/ghostly.json names no Ghostly proof", `${BROWSER}/proofs/domain.ts`, " names no Ghostly proof`"],
+  // A domain proof the record, file, resolver or host refused (agents#2541).
+  ["The TXT record at _ghostly.example.com is for another proof of this key", `${BROWSER}/proofs/domain.ts`, "`${where} is for another proof of this key`"],
+  ["The TXT record at _ghostly.example.com names another Ghostly key: this proof was replaced or removed", `${BROWSER}/proofs/domain.ts`, "`${where} names another Ghostly key: this proof was replaced or removed`"],
+  ["https://example.com/.well-known/ghostly.json is for another proof of this key", `${BROWSER}/proofs/domain.ts`, "`${where} is for another proof of this key`"],
+  ["https://example.com/.well-known/ghostly.json names another Ghostly key: this proof was replaced or removed", `${BROWSER}/proofs/domain.ts`, "`${where} names another Ghostly key: this proof was replaced or removed`"],
+  ["https://example.com/.well-known/ghostly.json is not a valid Ghostly file", `${BROWSER}/proofs/domain.ts`, " is not a valid ${method === 'nip05' ? 'NIP-05' : 'Ghostly'} file`"],
+  ["example.com could not be reached. The file must be served at exactly this address, without a redirect, with the header Access-Control-Allow-Origin: *", `${BROWSER}/proofs/domain.ts`, "`${domain} could not be reached. The file must be served at exactly this address, without a redirect, with the header Access-Control-Allow-Origin: *`"],
+  ["Quad9 could not be reached", `${BROWSER}/proofs/domain.ts`, "`${resolver.name} could not be reached`"],
+  ["Quad9 refused the lookup", `${BROWSER}/proofs/domain.ts`, "`${resolver.name} refused the lookup`"],
+  ["example.com has no address", `${BROWSER}/proofs/domain.ts`, "`${domain} has no address`"],
+  ["example.com points to a private network address, so it was not contacted", `${BROWSER}/proofs/domain.ts`, "`${domain} points to a private network address, so it was not contacted`"],
   ["GitHub: octo-cat does not list the key that signed (SHA256:abc)", `${BROWSER}/proofs/providers/ssh.ts`, " does not list the key that signed ("],
+  // What the Add dialog's field refuses (agents#2222).
+  ["Enter a domain name, like example.com", `${CORE}/domainProofs.ts`],
+  ["Enter only the domain name, without a path or port", `${CORE}/domainProofs.ts`],
+  ["That is not a valid domain name", `${CORE}/domainProofs.ts`],
+  ["That domain name is too long", `${CORE}/domainProofs.ts`],
+  ["Use a full domain name, like example.com", `${CORE}/domainProofs.ts`],
+  ["Use a domain name, not an IP address", `${CORE}/domainProofs.ts`],
+  ["That name only works on private networks", `${CORE}/domainProofs.ts`],
+  ["Enter a Bitcoin address", `${BROWSER}/proofs/providers/bitcoin.ts`],
+  ["Ghostly can check proofs for single-key addresses only (bc1q…, bc1p…, 3…, 1…), not multisig or script addresses", `${BROWSER}/proofs/providers/bitcoin.ts`],
+  ["Paste the signature your wallet made", `${BROWSER}/proofs/providers/bitcoin.ts`],
+  ["That is not a Bitcoin message signature: paste the whole signature, as the wallet shows it", `${BROWSER}/proofs/providers/bitcoin.ts`],
+  ["That is not a Bitcoin message signature", `${BROWSER}/proofs/providers/bitcoin.ts`],
+  ["The signature is not valid base64", `${CORE}/bip322.ts`],
+  ["Enter a DID, like did:key:z6Mk… or did:web:example.com", `${CORE}/did.ts`],
+  ["That DID is too long (at most 512 characters)", `${CORE}/did.ts`, "That DID is too long (at most ${DID_MAX_LENGTH} characters)"],
+  ["Enter the DID alone, without a #fragment, ?query or /path", `${CORE}/did.ts`],
+  ["That is not a DID: it looks like did:<method>:<identifier>", `${CORE}/did.ts`],
+  ["Write the method in lowercase: did:key:…", `${CORE}/did.ts`, "Write the method in lowercase: did:${method.toLowerCase()}:…"],
+  ["did:plc is not supported yet. Ghostly checks did:key, did:jwk, did:dht and did:web.", `${CORE}/did.ts`, "is not supported yet. Ghostly checks ${METHOD_LIST}."],
+  ["A DID has no spaces or other special characters", `${CORE}/did.ts`],
+  ["A did:dht identifier is 52 z-base-32 characters", `${CORE}/did.ts`],
+  ["That did:key is not an Ed25519, secp256k1 or P-256 key Ghostly can read", `${CORE}/did.ts`],
+  ["That did:key is an X25519 encryption key: it cannot sign", `${CORE}/did.ts`],
+  ["That did:jwk does not hold a JSON Web Key", `${CORE}/did.ts`],
+  ["That did:jwk contains a private key. Never share it: make a new key", `${CORE}/did.ts`],
+  ["That did:jwk is not an Ed25519, secp256k1 or P-256 key", `${CORE}/did.ts`],
   ["Enter at least one relay address (https://…)", `${BROWSER}/engine/node.ts`],
   ["Enter at least one relay address (wss://…)", `${BROWSER}/nostr/relay.ts`],
+  ["Add a TURN server first", `${BROWSER}/engine/node.ts`],
+  ["Hide my IP from contacts needs a TURN server. Turn it off first", `${BROWSER}/engine/node.ts`],
   ["Use an https:// relay address: http://relay.example.org/", `${BROWSER}/platform/irohWeb.ts`, "Use an https:// relay address: ${value}"],
   ["Use an https:// relay address: http://push.example.org/", `${BROWSER}/shared/pushRelay.ts`, "Use an https:// relay address: ${url}"],
   ["Not a relay address: https://relay.example.org/?key=1", `${BROWSER}/platform/irohWeb.ts`, "Not a relay address: ${value}"],
   ["Not a relay address: ftp//x", `${BROWSER}/nostr/relay.ts`, "Not a relay address: ${value.slice(0, 40)}"],
+  ["Use an https:// relay address: wss://relay.example.org", `${CORE}/relay.ts`, "`Use an https:// relay address: ${line}`"],
+  ["Not a relay address: not a url", `${CORE}/relay.ts`, "`Not a relay address: ${line}`"],
+  // What Settings, Network refuses before Save, and the engine on it (agents#2373).
+  ["Enter a relay address (wss://…)", `${BROWSER}/shared/hyperdhtRelay.ts`],
+  ["Use a wss:// relay address", `${BROWSER}/shared/hyperdhtRelay.ts`],
+  ["Not a relay address: wss://relay.example.org/?key=1", `${BROWSER}/shared/hyperdhtRelay.ts`, "Not a relay address: ${url}"],
+  ["Enter a relay address (https://…)", `${BROWSER}/shared/pushRelay.ts`],
+  ["Leave the user and password out of the address", `${BROWSER}/shared/pushRelay.ts`],
+  ["Use at most five Iroh relays", `${BROWSER}/engine/node.ts`],
+  ["Enter the TURN server address", `${BROWSER}/shared/ice.ts`],
+  ["“https://turn.example.org” is not a TURN or STUN address (turn:host:port)", `${BROWSER}/shared/ice.ts`, "” is not a TURN or STUN address (turn:host:port)"],
+  ["A TURN server needs its username and credential", `${BROWSER}/shared/ice.ts`],
+  ["No relay answered", `${BROWSER}/engine/nostrSocial.ts`, "throw new Error(\"No relay answered\")"],
+  ["No relay answered", `${BROWSER}/profiles/activity.ts`, "throw new Error(\"No relay answered\")"],
+  ["No relay answered", `${BROWSER}/profiles/readers.ts`, "throw new Error(\"No relay answered\")"],
   // Held items for an away contact (WISP 404): a message's line, and the chat's hold line and dialog.
   ["An item held for an away contact is at most 8 MB.", `${BROWSER}/engine/hold.ts`, "An item held for an away contact is at most "],
   ["Held messages need S3 storage (Profile → Backups) and a pinned contact.", `${BROWSER}/engine/hold.ts`],
@@ -468,8 +545,10 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Your contact's app refused this item: it could not be verified as yours, or was too large for it. Retry to hold it again.", `${BROWSER}/engine/hold.ts`],
   ["Could not read the contact's pointer: Failed to fetch", `${BROWSER}/engine/hold.ts`, "Could not read the contact's pointer: "],
   ["The contact holds items for you, but their address expired. They are handed out again when the contact is next online.", `${BROWSER}/engine/hold.ts`],
+  ["Hide my IP from contacts is on: what your contact held for you waits on their storage until you turn it off.", `${BROWSER}/engine/hold.ts`],
   ["Refused what the contact's storage offered: The manifest is malformed", `${BROWSER}/engine/hold.ts`, "Refused what the contact's storage offered: "],
   ["Could not pick up held items: The storage answered 403", `${BROWSER}/engine/hold.ts`, "Could not pick up held items: "],
+  ["Could not pick up held items: the contact's app sealed them for the device this profile was on before. They come once it seals them again for this one.", `${BROWSER}/engine/hold.ts`],
   ["Refused a held item from the contact: The held item is larger than allowed", `${BROWSER}/engine/hold.ts`, "Refused a held item from the contact: "],
   ["Picked up, but could not acknowledge: The storage answered 403", `${BROWSER}/engine/hold.ts`, "Picked up, but could not acknowledge: "],
 ];
@@ -497,6 +576,19 @@ describe("errors in the app's language", () => {
     expect(errorText("Could not create the Mainnet Cashu wallet: Could not reach mint.example. Check the address: it should be a Cashu mint. Nothing was saved; try again.", pt))
       .toBe("Não foi possível criar a carteira Mainnet Cashu. Sem acesso a mint.example. Confira o endereço: deve ser um mint Cashu. Nada foi salvo. Tente de novo.");
     expect(errorText("Could not connect to BDK: the Esplora server at esplora.example did not answer in 10 s", pt)).toBe("Não foi possível conectar a BDK. O servidor Esplora em esplora.example não respondeu em 10 s");
+  });
+
+  // agents#1593: the members a group waits on were pasted as the engine listed them, in English, in every language.
+  it("the members a group waits on to grow past 8 are listed in the language: unnamed ones, the list, and how many more", () => {
+    const text = "A group grows past 8 only when everyone is on an updated Ghostly. Not seen updated yet: Ana, Bruno, Member q5zt8m3x and 2 more.";
+    const pt = errorText(text, translators.pt), ja = errorText(text, translators.ja), en = errorText(text, english);
+    expect(pt).toContain("Ana, Bruno, Membro q5zt8m3x e mais 2");
+    expect(ja).toContain("他 2 人");
+    expect(ja).not.toContain("Member");
+    for (const said of [pt, ja]) expect(said).not.toMatch(/ and \d+ more/);
+    expect(en).toContain("Ana, Bruno, Member q5zt8m3x, and 2 more");
+    // Fewer than four: no tail, and one name alone is just that name.
+    expect(errorText("A group grows past 8 only when everyone is on an updated Ghostly. Not seen updated yet: Member abcdefgh.", translators.fr)).toContain("Membre abcdefgh");
   });
 
   it("a paste the app's clipboard refused says what to do next, in the language", () => {
@@ -549,6 +641,46 @@ describe("errors in the app's language", () => {
     expect(knownErrorParts(changed, pt)).toEqual({ title: "Não foi possível ler o arquivo", next: "Envie de novo ou escolha o arquivo outra vez.", detail: changed });
   });
 
+  it.each(LANGUAGES)("a HyperDHT relay the web's listener could not use says what to do next in %s: check it in Settings, or ask whoever runs it", (language) => {
+    const t = translators[language];
+    // A browser sees no status on a refused WebSocket: a relay that leaves this app's origin out reads "unreachable" too.
+    expect(knownErrorParts("Could not reach the HyperDHT relay", t)).toEqual({ title: t("errors.transport.hyperdhtUnreachable"), next: t("errors.transport.hyperdhtUnreachableNext") });
+    expect(knownErrorParts("The HyperDHT relay did not answer", t)).toEqual({ title: t("errors.transport.hyperdhtSilent"), next: t("errors.transport.hyperdhtCheckNext") });
+    expect(knownErrorParts("The HyperDHT relay closed the connection", t)).toEqual({ title: t("errors.transport.hyperdhtClosed"), next: t("errors.transport.hyperdhtCheckNext") });
+    expect(knownErrorParts("The HyperDHT relay did not let this chat listen", t)).toEqual({ title: t("errors.transport.hyperdhtRefused"), next: t("errors.transport.hyperdhtRefusedNext") });
+    for (const key of ["hyperdhtUnreachableNext", "hyperdhtCheckNext", "hyperdhtRefusedNext"] as const) expect(t(`errors.transport.${key}`)).not.toBe(`errors.transport.${key}`);
+  });
+
+  it.each(LANGUAGES)("a file said on the floor that ended here says why and what to do in %s, never the engine's English", (language) => {
+    const t = translators[language];
+    const file = { id: "L-in-abc", name: "x.bin", size: 30_000, mime: "application/octet-stream" };
+    // As fileDesk.ts `withdrawn` keeps it: failed, with no direction.
+    const bubble = (error: string) => {
+      const transfer = { state: "failed", transferred: 0, size: 30_000, error } as const;
+      return { status: failedStatus(file, transfer, t), info: failedReason(transfer, t) };
+    };
+    expect(bubble("No room on this device for this file")).toEqual({ status: t("errors.files.noRoomHere"), info: { text: t("errors.files.floor.noRoomNext") } });
+    expect(bubble("Too many files are waiting here")).toEqual({ status: t("errors.files.floor.tooMany"), info: { text: t("errors.files.floor.tooManyNext") } });
+    expect(bubble("It was refused here")).toEqual({ status: t("errors.files.floor.refused"), info: { text: t("errors.files.askAgain") } });
+    expect(bubble("It did not come within a week")).toEqual({ status: t("errors.files.floor.notInAWeek"), info: { text: t("errors.files.askAgain") } });
+    expect(bubble("Cancelled by the sender")).toEqual({ status: t("chat.file.cancelled"), info: { text: t("errors.files.askAgain") } });
+  });
+
+  it.each(LANGUAGES)("a 1:1 file declined or cancelled says who did it behind its ⓘ in %s, never the engine's English", (language) => {
+    const t = translators[language];
+    const file = { id: "L-out-abc", name: "x.bin", size: 30_000, mime: "application/octet-stream" };
+    const bubble = (error: string, direction: "in" | "out") => {
+      const transfer = { state: "failed", direction, transferred: 0, size: 30_000, error } as const;
+      return { status: failedStatus(file, transfer, t), info: failedReason(transfer, t) };
+    };
+    expect(bubble("Declined by your contact", "out")).toEqual({ status: t("chat.file.declined"), info: { text: t("errors.files.declinedThere") } });
+    expect(bubble("Cancelled by your contact", "out")).toEqual({ status: t("chat.file.cancelled"), info: { text: t("errors.files.cancelledThere") } });
+    expect(bubble("You declined it", "in")).toEqual({ status: t("chat.file.declined"), info: { text: t("errors.files.declinedHere") } });
+    expect(bubble("You cancelled it", "in")).toEqual({ status: t("chat.file.cancelled"), info: { text: t("errors.files.cancelledHere") } });
+    expect(bubble("You cancelled it", "out")).toEqual({ status: t("chat.file.cancelled"), info: { text: t("errors.files.cancelledHere") } });
+    for (const key of ["declinedThere", "cancelledThere", "declinedHere", "cancelledHere"] as const) expect(t(`errors.files.${key}`)).not.toBe(`errors.files.${key}`);
+  });
+
   it("a group's file every holder served damaged says so, and that the group is asked again, not a contact", () => {
     const damaged = "Every copy of this file arrived damaged and was deleted. Ask for it again later.";
     expect(knownErrorParts(damaged, translators.pt)).toEqual({ title: "O arquivo chegou danificado", next: "Peça de novo ao grupo mais tarde." });
@@ -567,6 +699,12 @@ describe("errors in the app's language", () => {
     const refused = new Error("Ghostly could not check which device is active yet. This works once it can.");
     expect(knownErrorParts(refused, translators.pt)).toEqual({ title: "Não foi possível verificar qual dispositivo está ativo", next: "Isso volta a funcionar quando a verificação der certo. Confira sua conexão." });
     expect(knownErrorParts(refused, english)).toEqual({ title: "Can't check which device is active", next: "This works once the check does. Check your connection." });
+  });
+
+  it("a write the device had no room for says so and that nothing was saved, in the language, not an empty error", () => {
+    const full = Object.assign(new Error("This device has no room left to save this"), { name: "QuotaExceededError" });
+    expect(knownErrorParts(full, english)).toEqual({ title: "No room left on this device", next: "Nothing was saved. Free some space, then try again." });
+    expect(knownErrorParts(full, translators.pt)).toEqual({ title: "Não há mais espaço neste dispositivo", next: "Nada foi salvo. Libere espaço e tente de novo." });
   });
 
   it("an Invite or a Remove on a device where managing the group is off points at the group's Turn on, in the language", () => {
@@ -599,6 +737,44 @@ describe("errors in the app's language", () => {
     expect(errorText(new TypeError("Importing a module script failed."), english)).toBe("Part of Ghostly did not load. Check your connection, then try again. If it still fails, reload Ghostly.");
   });
 
+  it("what the Add dialog's field refuses reads in the language, with the names it quotes kept (agents#2222)", () => {
+    const ar = translators.ar;
+    expect(errorText("The signature is not valid base64", ar)).toBe("التوقيع ليس base64 صالحًا");
+    expect(errorText("did:plc is not supported yet. Ghostly checks did:key, did:jwk, did:dht and did:web.", ar)).toBe("did:plc غير مدعوم بعد. يتحقق Ghostly من did:key, did:jwk, did:dht and did:web.");
+    expect(errorText("That did:key is not an Ed25519, secp256k1 or P-256 key Ghostly can read", translators.pt)).toBe("Esse did:key não é uma chave Ed25519, secp256k1 ou P-256 que o Ghostly consiga ler");
+    expect(errorText("That DID is too long (at most 512 characters)", translators.ja)).toBe("この DID は長すぎます（最大 512 文字）");
+    expect(problemText(new Error("That did:jwk contains a private key. Never share it: make a new key"), translators.pt)).toMatchObject({ title: "Esse did:jwk contém uma chave privada", next: "Nunca a compartilhe: crie uma chave nova." });
+    // In English, the same words as before.
+    expect(errorText("That is not a valid domain name", english)).toBe("That is not a valid domain name");
+  });
+
+  // agents#2541: these were "Something went wrong", or the English title, in every language.
+  it.each(LANGUAGES)("a domain proof the record, file, resolver or host refused says why and what to do in %s, the English behind the ⓘ", (language) => {
+    const t = translators[language];
+    const cases: [string, TranslationKey, TranslationKey, Record<string, string>?][] = [
+      ["The TXT record at _ghostly.example.com is for another proof of this key", "errors.proof.dnsOtherProof", "errors.proof.dnsValueNext"],
+      ["The TXT record at _ghostly.example.com names another Ghostly key: this proof was replaced or removed", "errors.proof.dnsOtherKey", "errors.proof.dnsValueNext"],
+      ["https://example.com/.well-known/ghostly.json is for another proof of this key", "errors.proof.fileOtherProof", "errors.proof.fileValueNext"],
+      ["https://example.com/.well-known/ghostly.json names another Ghostly key: this proof was replaced or removed", "errors.proof.fileOtherKey", "errors.proof.fileValueNext"],
+      ["https://example.com/.well-known/ghostly.json is not a valid Ghostly file", "errors.proof.fileInvalid", "errors.proof.fileInvalidNext", { kind: "Ghostly" }],
+      ["https://example.com/.well-known/nostr.json is not a valid NIP-05 file", "errors.proof.fileInvalid", "errors.proof.fileInvalidNext", { kind: "NIP-05" }],
+      ["example.com could not be reached. The file must be served at exactly this address, without a redirect, with the header Access-Control-Allow-Origin: *", "errors.proof.hostUnreachable", "errors.proof.hostUnreachableNext", { domain: "example.com" }],
+      ["Quad9 could not be reached", "errors.proof.resolverUnreachable", "errors.proof.resolverNext"],
+      ["Quad9 refused the lookup", "errors.proof.resolverRefused", "errors.proof.resolverNext"],
+      ["example.com has no address", "errors.proof.noAddress", "errors.proof.noAddressNext", { domain: "example.com" }],
+      ["example.com points to a private network address, so it was not contacted", "errors.proof.privateAddress", "errors.proof.privateAddressNext", { domain: "example.com" }],
+    ];
+    for (const [raw, key, next, values] of cases) {
+      expect(problemText(new Error(raw), t), raw).toEqual({ tone: "error", title: t(key, values), next: t(next, values), detail: raw });
+    }
+    // The lookup that ran out of time on the last resolver tried says that none answered, not that one's name.
+    for (const resolver of ["Quad9", "Cloudflare", "Google"]) {
+      const said = problemText(new Error(`${resolver} could not be reached`), t);
+      expect(said.title).toBe(t("errors.proof.resolverUnreachable"));
+      expect(`${said.title} ${said.next}`).not.toContain(resolver);
+    }
+  });
+
   it("each rule has a sample, so none stops matching unseen", () => {
     const covered = new Set(SAMPLES.map(([text]) => matched(text)));
     expect(ERROR_RULES.filter((rule) => !covered.has(rule)).map((rule) => String(rule.match))).toEqual([]);
@@ -608,7 +784,10 @@ describe("errors in the app's language", () => {
     const pt = translators.pt;
     expect(errorText("No mint could create an invoice: mint.example did not answer", pt)).toBe("Nenhum mint conseguiu criar uma fatura. mint.example não respondeu");
     expect(errorText("The Lightning payment did not go through. The sats are back in your wallet, less 2 sats the mint kept as its fee.", pt))
-      .toBe("O pagamento Lightning não foi concluído. Os sats voltaram, menos 2 sats que ficaram com o mint.");
+      .toBe("O pagamento Lightning não foi concluído. Os sats voltaram; o mint ficou com 2.");
+    for (const translate of Object.values(translators)) {
+      expect(errorText("Invoice already paid The sats are back in your wallet, less 1 sat the mint kept as its fee.", translate)).not.toMatch(/\b1 sats/);
+    }
     expect(errorText("Refused: Already paid by another member of the group. 1200 sats came back; the mint kept 2 as its fee.", pt))
       .toBe("O pagamento foi recusado. Já foi pago por outro membro do grupo. 1.200 sats voltaram; o mint ficou com 2.");
     expect(errorText("You sent many files to this group just now. Wait 7 minutes.", pt)).toBe("Você enviou muitos arquivos a este grupo agora há pouco. Espere 7 minutos e envie de novo.");
@@ -627,7 +806,7 @@ describe("errors in the app's language", () => {
 });
 
 describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
-  const SAMPLE: Record<string, string> = { wallet: "Bark", device: "Desktop", host: "mint.example.com", domain: "shop.example", chain: "mutinynet", network: "Testnet", amount: "1,000", fee: "1200", min: "5", max: "500" };
+  const SAMPLE: Record<string, string> = { wallet: "Bark", device: "Desktop", host: "mint.example.com", domain: "shop.example", chain: "mutinynet", network: "Testnet", amount: "1,000", fee: "1200", min: "5", max: "500", reason: "Lightning payment failed: no route" };
   const texts = (Object.keys(ENGINE_ERRORS) as EngineErrorCode[]).map((code) => [code, engineText(code, Object.fromEntries([...ENGINE_ERRORS[code].matchAll(/\{(\w+)\}/g)].map(([, name]) => [name, SAMPLE[name]])))] as const);
 
   it.each(LANGUAGES.filter((l) => l !== "en"))("every one reads in %s, by a rule or by its code", (language) => {
@@ -651,6 +830,18 @@ describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
     expect(errorText(new Error("The fee exceeds your limit"), pt)).toBe("A taxa passa do seu limite");
     expect(errorText("Error: Unknown payment intent", pt)).toBe("Pagamento desconhecido");
     expect(errorText("Outcome unknown. Check the existing payment; do not send another.", translators.fr)).toContain("Résultat inconnu");
+  });
+
+  it("a mint's refusal of a Lightning payment says, in the language, that no sats left; its own words go behind the ⓘ (agents#2253)", () => {
+    const raw = engineText("lightningRefused", { reason: "Lightning payment failed: no route" });
+    expect(problemText(new Error(raw), translators.pt)).toEqual({ tone: "error", title: "A mint recusou este pagamento Lightning", next: "Nenhum sat saiu da sua carteira. Pode tentar de novo com segurança.", detail: raw });
+    expect(problemText(new Error(raw), english)).toEqual({ tone: "error", title: "The mint refused this Lightning payment", next: "No sats left your wallet. It's safe to try again.", detail: raw });
+    for (const language of LANGUAGES) expect(errorText(raw, translators[language]), language).not.toContain("no route");
+  });
+
+  it("a contact with no wallet, or none of its ways on, reads as the chat's payment line says it", () => {
+    expect(errorText("Your contact has no wallet yet: they need one to pay or be paid", translators.pt)).toBe("Seu contato ainda não tem carteira");
+    expect(errorText("Your contact has payments off in this chat, or needs an updated Ghostly", english)).toBe(english("chat.payments.offOrOld"));
   });
 
   it("the values stay, and amounts are written the app's way", () => {

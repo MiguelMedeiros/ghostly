@@ -3,6 +3,7 @@ import { useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { LinkView, ServiceView } from "@ghostly/browser/shared/types";
 import { ChatServicesDialog } from "../../components/ChatServicesDialog";
+import { PeerServices } from "../../components/PeerServices";
 import { MessageInput } from "../../components/MessageInput";
 import { composerServices } from "../../components/composer/servicesRow";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
@@ -150,5 +151,54 @@ describe("the composer's Shared services row", () => {
     const row = await openPlus(view.user);
     await waitFor(() => expect(row).toHaveTextContent(/^Serviços compartilhados$/));
     expect(row).toHaveAttribute("title", "1 compartilhado(s) nesta conversa");
+  });
+});
+
+// agents#1629: a 48-character app name put its Open button 25 px past the strip's edge on a 320 px phone in Arabic.
+describe("the chat's apps strip", () => {
+  it("an app with a long name opens from a button no wider than the strip, its name cut with an ellipsis and whole in the title", async () => {
+    const name = "Family photo album and shared calendar for every";
+    fakeEngine.update({ links: [live({ peerServices: [{ id: "album", type: "http", name }] })] });
+    renderApp(<PeerServices peerPubKey="peer" onManage={() => {}} />);
+    const open = await screen.findByTestId("open-service");
+    expect(open.className).toMatch(/\bmax-w-full\b/);
+    expect(open.className).toMatch(/\bmin-w-0\b/);
+    expect(open.className).not.toMatch(/\bshrink-0\b/);
+    const label = within(open).getByTestId("open-service-name");
+    expect(label).toHaveTextContent(name);
+    expect(label.className).toMatch(/\btruncate\b/);
+    expect(label).toHaveAttribute("dir", "auto");
+    expect(open.getAttribute("title")).toContain(name);
+  });
+});
+
+describe("Open on a contact's app that refuses", () => {
+  const openService = fakeEngine.openService;
+  // The web's refusal while a call is on screen; on Desktop, a window that cannot open.
+  const refuse = () => { fakeEngine.openService = async () => { throw new Error("A call is on. End it to open Demo."); }; };
+  afterEach(() => { fakeEngine.openService = openService; });
+
+  it("the chat's Services dialog says why under the app's row, announced, and a new press clears it", async () => {
+    localApps(true);
+    refuse();
+    const view = renderApp(<ChatServicesDialog peerPubKey="peer" name="Ana" onClose={() => {}} />);
+    act(() => view.engine.update({ links: [live({ peerServices: [{ id: "demo", type: "http", name: "Demo" }, { id: "wiki", type: "http", name: "Wiki" }] })] }));
+    const [demo, wiki] = screen.getAllByTestId("chat-service-from");
+    await view.user.click(within(demo!).getByTestId("chat-service-open"));
+    expect(await within(demo!).findByRole("alert")).toHaveTextContent("A call is on. End it to open Demo.");
+    expect(within(wiki!).queryByRole("alert")).not.toBeInTheDocument();
+
+    fakeEngine.openService = openService;
+    await view.user.click(within(demo!).getByTestId("chat-service-open"));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
+  it("the chat's apps strip announces its line", async () => {
+    refuse();
+    localApps(true);
+    const view = renderApp(<PeerServices peerPubKey="peer" onManage={() => {}} />);
+    act(() => view.engine.update({ links: [live({ peerServices: [{ id: "demo", type: "http", name: "Demo" }] })] }));
+    await view.user.click(await screen.findByTestId("open-service"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("A call is on. End it to open Demo.");
   });
 });

@@ -2,12 +2,14 @@ import { useLocation } from "react-router-dom";
 import { useI18n } from "../contexts/I18nContext";
 import { useIdentityAttention } from "../lib/identities";
 import { IdentitiesIcon } from "./identities/IdentitiesIcon";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
 import { useMyAvatar } from "../hooks/useAvatars";
 import { ProfileBadge } from "./ProfileBadge";
 import { ProfileSwitcherMenu } from "./ProfileSwitcher";
 import { SWITCHER_SHORTCUT, useLongPress, useProfileGlances, useProfileSwitcher } from "../hooks/useProfileSwitcher";
 import { useAppNavigation } from "../hooks/useAppNavigation";
+import { HOME, isChatListPage } from "../lib/navigation";
 import { unseenSatsLabel, useUnseenSats } from "../hooks/useUnseenSats";
 import { UnseenSatsDot } from "./UnseenSatsDot";
 import { useBackupDue } from "../hooks/useBackupDue";
@@ -78,7 +80,8 @@ export function MobileTabBar() {
   const { pathname } = useLocation();
   const { t } = useI18n();
   const identityAttention = useIdentityAttention();
-  const canSwitch = !!useServicesPlatform()?.features.profiles;
+  // Drawn again when it changes, not on every engine state: the tab bar is always on screen.
+  const canSwitch = usePlatformValue(() => !!servicesPlatform?.features.profiles);
   const switcher = useProfileSwitcher(canSwitch);
   const glances = useProfileGlances();
   const longPress = useLongPress(switcher.show);
@@ -94,7 +97,8 @@ export function MobileTabBar() {
     <>
       <nav className="mobile-tabs shrink-0 flex bg-panel-header border-t border-border pb-safe" data-testid="mobile-tabs">
         {tabs.map((tab) => {
-          const active = pathname === tab.path || pathname.startsWith(`${tab.path}/`);
+          // Saved messages and Tasks are opened from the chat list: Chats is where they are.
+          const active = pathname === tab.path || pathname.startsWith(`${tab.path}/`) || (tab.path === HOME && isChatListPage(pathname));
           const dot = tab.path === "/identities" && identityAttention;
           const account = tab.path === "/settings" && canSwitch;
           const fresh = account && glances.othersFresh > 0;
@@ -125,7 +129,9 @@ export function MobileTabBar() {
                   </span>
                 )}
               </span>
-              <span className="max-w-full truncate text-[11px] max-[359px]:text-[10px] font-medium leading-none">{t(tab.label)}</span>
+              {/* The ellipsis hides overflow, and a one-font-size line is shorter than Japanese, Chinese and Arabic ink:
+                  room above and below it inside that clip, given back by the margin, so nothing moves. */}
+              <span className="max-w-full truncate text-[0.6875rem] max-[359px]:text-[0.625rem] font-medium leading-none py-1 -my-1">{t(tab.label)}</span>
             </button>
           );
         })}

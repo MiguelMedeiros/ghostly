@@ -4,7 +4,7 @@ import type { MessageReply } from "@ghostly/browser/shared/types";
 import { revealMessage } from "../hooks/useRowWindow";
 import { reducedMotion } from "./motion";
 import { filePreview } from "./chatList";
-import { cardLine, showsCard } from "./statusCards";
+import { appCardLine, cardLine, showsCard } from "./statusCards";
 import type { ChatFile, ChatMessage } from "./types";
 import { englishT, type Translate } from "../locales/translate";
 
@@ -17,8 +17,10 @@ import { englishT, type Translate } from "../locales/translate";
  * - `deleted`: it was here when the reply came, and is gone.
  * - `unverified`: it is not here; the line is only what the replier's app said.
  * - `missing`: it is not here, and nothing came with the reply but its id (a reply over the DHT).
+ * - `loading`: it is not here yet: the chat's older messages have not come in (just started, the engine's history not
+ *   in). The line is what the reply carries until they do.
  */
-export type QuoteState = "found" | "deleted" | "unverified" | "missing";
+export type QuoteState = "found" | "deleted" | "unverified" | "missing" | "loading";
 
 export interface QuoteView {
   state: QuoteState;
@@ -43,20 +45,56 @@ export type Quotable = ReplyTarget & { sender: string; text: string; member?: st
  */
 export function messageSnippet(message: { text: string; card?: StatusCard; file?: ChatFile }, t: Translate = englishT): string {
   if (showsCard(message.card)) return replySnippet(cardLine(message.card));
-  return replySnippet(filePreview(message.file, t) ?? message.text);
+  return replySnippet(appCardLine(message.card, t) ?? filePreview(message.file, t) ?? message.text);
 }
 
-/** A chat's messages by their id here and by the id a reply names (`replyRef`). */
-export interface ReplyIndex { byId: Map<string, Quotable>; byRef: Map<string, Quotable> }
+/**
+ * A chat's messages by their id here and by the id a reply names (`replyRef`). `partial`: its older messages are not
+ * all here yet (a session read without them, `older` in lib/storage), so one missing may only be not loaded.
+ */
+export interface ReplyIndex { byId: Map<string, Quotable>; byRef: Map<string, Quotable>; partial?: boolean }
 
-export function replyIndex(messages: readonly Quotable[], group = false): ReplyIndex {
+export function replyIndex(messages: readonly Quotable[], group = false, partial = false): ReplyIndex {
   const byId = new Map<string, Quotable>(), byRef = new Map<string, Quotable>();
   for (const message of messages) {
     byId.set(message.id, message);
     const ref = replyRef(message, group);
     if (ref && !byRef.has(ref)) byRef.set(ref, message);
   }
-  return { byId, byRef };
+  return { byId, byRef, ...(partial && { partial }) };
+}
+
+/**
+ * `replyIndex` for one chat's list as it changes, for the page that shows it (it gets a new list with each message). Its
+ * rows keep their objects from one list to the next, but for the newest ones (`withWhole` in lib/storage), so only the
+ * rows from the first that differs are read: a message arriving in a chat of thousands costs what it does in a short
+ * one. So does a text I just sent taking its wire id in its row's place (`me_<time>`, which no reply can name, becomes
+ * `me_<wire id>`). Any other list with a row gone, moved or named otherwise is read whole. An index it gave before
+ * shares its maps and sees the rows that came since: it is for the list being drawn.
+ */
+export function replyIndexer(group = false): (messages: readonly Quotable[], partial?: boolean) => ReplyIndex {
+  let list: readonly Quotable[] = [];
+  let maps: ReplyIndex = { byId: new Map(), byRef: new Map() };
+  return (messages, partial = false) => {
+    let same = 0;
+    while (same < list.length && list[same] === messages[same]) same++;
+    let kept = messages.length >= list.length;
+    for (let i = same; kept && i < list.length; i++) {
+      const was = list[i], now = messages[i], ref = replyRef(now, group);
+      kept = was.id === now.id ? replyRef(was, group) === ref : !replyRef(was, group) && !maps.byId.has(now.id) && !(ref && maps.byRef.has(ref));
+    }
+    if (kept) {
+      for (let i = same; i < messages.length; i++) {
+        const message = messages[i], was = list[i], ref = replyRef(message, group), inPlace = was?.id === message.id;
+        if (was && !inPlace) maps.byId.delete(was.id);
+        maps.byId.set(message.id, message);
+        // The first row with a ref holds it, as `replyIndex` has it: a row in its place takes over only what it held.
+        if (ref && (inPlace ? maps.byRef.get(ref) === was : !maps.byRef.has(ref))) maps.byRef.set(ref, message);
+      }
+    } else maps = replyIndex(messages, group);
+    list = messages;
+    return { byId: maps.byId, byRef: maps.byRef, ...(partial && { partial }) };
+  };
 }
 
 /** The id a reply to this message names; none when it cannot be replied to (a notice, a group payment line). */
@@ -88,9 +126,10 @@ export function quoteFor(reply: MessageReply, index: ReplyIndex, nameOf: NameOf,
     return { state: "found", name: nameOf(from, original.member ?? reply.member), snippet, mine: from === "me", targetId: original.id, ...(member && { member }) };
   }
   const name = reply.from ? nameOf(reply.from, reply.member) : undefined;
-  const state: QuoteState = reply.messageId ? "deleted" : reply.snippet ? "unverified" : "missing";
+  // Not deleted while the older messages are still on their way: it may be among them.
+  const state: QuoteState = index.partial ? "loading" : reply.messageId ? "deleted" : reply.snippet ? "unverified" : "missing";
   const member = reply.from === "peer" ? reply.member : undefined;
-  return { state, name, snippet: state === "unverified" ? reply.snippet : "", mine: reply.from === "me", ...(member && { member }) };
+  return { state, name, snippet: state === "unverified" || state === "loading" ? reply.snippet : "", mine: reply.from === "me", ...(member && { member }) };
 }
 
 /** How long a message a quote jumped to stays marked. */

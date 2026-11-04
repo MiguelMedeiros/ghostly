@@ -148,7 +148,7 @@ The text is sent as typed. Everything below happens on display, and nothing is r
 
 ## Message details
 
-Double click, or the message's ⋮ → **Details** (#240, `apps/ui/src/components/MessageDetailsPanel.tsx`). On a phone, a long press opens the reaction bar with Details under it (#354). Sections cover identity, path, timing, wire, crypto and delivery, plus file, voice, payment, DHT, group or call when they apply. "Copy all as JSON". Keys are never shown.
+Ctrl+double click (⌘+double click on a Mac), or the message's ⋮ → **Details**; a plain double or triple click selects the words (#240, `apps/ui/src/components/MessageDetailsPanel.tsx`). On a phone, a long press opens the reaction bar with Details under it (#354). Sections cover identity, path, timing, wire, crypto and delivery, plus file, voice, payment, DHT, group or call when they apply. "Copy all as JSON". Keys are never shown.
 
 ## Files
 
@@ -215,7 +215,7 @@ From 1.2, in private groups and communities ([WISP 503 Group Files](wisps/503-gr
 - The composer takes files, pictures, videos and voice messages as a chat's does (+ → Document, Media, Camera, paste, drop, the microphone), a reply included. Up to 100 MiB a file, a voice message up to 15 minutes.
 - Everyone sees the bubble at once, under the sender's name. The bytes do not go through the group: each member's app fetches them from a member who has the file, over a link between the two, and checks them against the sender's digest. Whoever stored the file serves it, so a member who was away gets it from anyone who is there, not only from the sender.
 - Voice messages, and files up to 8 MiB, download by themselves until what came that way from a group adds up to 256 MiB on the device. Larger ones show their size and **Download**. Settings → Data & storage → **Download automatically in groups** is Off, Wi-Fi only (where the browser can tell) or Always (the default), per device; nothing about it is sent to the group.
-- A file that cannot come yet says why: "Asking a member who has it…", "Nobody you are connected to has this file yet" (it comes by itself when one is online), "Busy, trying again soon", or "Arrived damaged" with **Ask again**. One that stops mid-way goes on from what already came.
+- A file that cannot come yet says why: "Asking a member who has it…", "Nobody you are connected to has this file yet" (it comes by itself when one is online), "Not with your connections yet" (a group of more than 16 on hubs, where none of your connections has it and the sender is not one of them: it comes once one of them downloads it), "Busy, trying again soon", or "Arrived damaged" with **Ask again**. One that stops mid-way goes on from what already came.
 - Forward and Share to list groups for files too.
 - An app from before 1.2 shows a line that names the file and says to update. Hubs carry the announcement, never the bytes.
 - No calls in groups.

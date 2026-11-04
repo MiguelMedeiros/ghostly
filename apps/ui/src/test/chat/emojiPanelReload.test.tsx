@@ -24,11 +24,21 @@ it("once Try again failed, the emoji panel offers Reload, also when opened again
   const button = await screen.findByRole("button", { name: "Reload" });
   expect(screen.getByTestId("emoji-trouble")).toBeInTheDocument();
 
-  // No connection: a reload would leave the browser's own error page, so the panel stays.
+  // No connection: a reload would leave the browser's own error page, so the panel stays, and says why.
   await user.click(button);
   await waitFor(() => expect(fetched).toHaveBeenCalledWith(location.pathname, { method: "HEAD", cache: "no-store" }));
   await waitFor(() => expect(button).not.toHaveAttribute("aria-disabled"));
   expect(reload).not.toHaveBeenCalled();
+  expect(screen.getByTestId("emoji-reload-unreachable")).toHaveTextContent("Can't reach Ghostly's server. Check your connection, then reload.");
+  expect(screen.getByTestId("emoji-reload-unreachable")).toHaveAttribute("role", "status");
+  expect(button).toHaveFocus();
+
+  // A server that answers, but not with the page, is out of reach as well.
+  fetched.mockResolvedValueOnce(new Response(null, { status: 503 }));
+  await user.click(button);
+  await waitFor(() => expect(button).not.toHaveAttribute("aria-disabled"));
+  expect(reload).not.toHaveBeenCalled();
+  expect(screen.getByTestId("emoji-reload-unreachable")).toBeInTheDocument();
 
   // The panel closed and opened again: still the failed file, still Reload.
   unmount();

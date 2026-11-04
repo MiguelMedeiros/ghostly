@@ -19,12 +19,19 @@ afterEach(() => { vi.useRealTimers(); });
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-interface Member { name: string; session: CommunitySession; online: boolean }
+interface Member { name: string; session: CommunitySession; online: boolean; texts: string[] }
 
-/** Members on one network: what someone broadcasts reaches every online member (as the hubs' flood does). */
+/**
+ * Members on one network: what someone broadcasts reaches every online member (as the hubs' flood does). `paced`:
+ * catch-up answers go a slice at a time, each once `step` says the member's app handled what came so far.
+ */
 class Net {
   readonly members = new Map<string, Member>();
+  now = 1_000_000;
   private pending: Promise<unknown>[] = [];
+  private waitingHandled: (() => void)[] = [];
+
+  constructor(private readonly paced = false) {}
 
   private hooks(name: string): CommunitySessionHooks {
     const deliver = (to: Member | undefined, frame: CommunityFrame) => {
@@ -37,13 +44,22 @@ class Net {
       broadcast: frame => { for (const m of this.members.values()) deliver(m, frame); },
       direct: (to, frame) => deliver(this.byKey(to), frame),
       addressed: (to, frame) => deliver(this.byKey(to), frame),
-      message: () => {},
+      message: m => { this.members.get(name)!.texts.push(m.text); },
       changed: () => {},
+      ...(this.paced && {
+        clock: () => this.now,
+        handled: () => new Promise<boolean>(resolve => { this.waitingHandled.push(() => resolve(true)); }),
+      }),
     };
+  }
+  /** Every member's app handled what came so far: answers going out send their next slice. */
+  async step(): Promise<void> {
+    for (const resolve of this.waitingHandled.splice(0)) resolve();
+    await this.settle();
   }
   byKey(key: string): Member | undefined { for (const m of this.members.values()) if (m.session.myKey === key) return m; return undefined; }
   private add(name: string, state: CommunityState): Member {
-    const member: Member = { name, session: null as unknown as CommunitySession, online: true };
+    const member: Member = { name, session: null as unknown as CommunitySession, online: true, texts: [] };
     this.members.set(name, member);
     member.session = new CommunitySession(state, this.hooks(name));
     return member;
@@ -58,7 +74,12 @@ class Net {
     return this.add(name, joined.state);
   }
   async settle(): Promise<void> {
-    for (let i = 0; i < 200; i++) { const batch = this.pending.splice(0); if (!batch.length) break; await Promise.all(batch); }
+    for (let i = 0; i < 400; i++) {
+      const batch = this.pending.splice(0);
+      // A slice released by `step` goes after a few microtasks: one macrotask lets it.
+      if (!batch.length) { await sleep(0); if (!this.pending.length) break; continue; }
+      await Promise.all(batch);
+    }
   }
 }
 
@@ -141,7 +162,7 @@ describe("a community member's catch-up answer goes a slice at a time", { timeou
     expect(sent).toHaveLength(2 * 16);
   });
 
-  it("each slice of 16 goes once the member's app handled the one before the last, in the answer's order; a newer answer takes the place of the rest", async () => {
+  it("each slice of 16 goes once the member's app handled the one before the last, in the answer's order; a newer answer goes after the rest, without the frames still queued", async () => {
     const { alice, bob, sync } = await awayCommunity(300, 20);
     // The answer as it went before: all at once.
     const whole = (await answer(alice, bob.session.myKey, sync)).sent.map(said);
@@ -159,22 +180,55 @@ describe("a community member's catch-up answer goes a slice at a time", { timeou
     waits.shift()!();
     await vi.waitFor(() => expect(sent).toHaveLength(3 * slice));
     expect(sent.map(said)).toEqual(whole.slice(0, 3 * slice));
-    // Bob's sync again a while later (its edge opened again): the new answer takes the place of what is left of the first.
+    // Bob's sync again a while later (its edge opened again): the new answer goes after what is left of the first,
+    // without the messages, commits and secrets still queued there, nor the second and third slices', which Bob's app
+    // has not handled yet; the first slice's, handled, go again, and so do the frames sealed or asked afresh.
     now += 10_000;
     await session.handle(bob.session.myKey, clone(sync));
     expect(sent).toHaveLength(3 * slice);
-    while (sent.length < 3 * slice + whole.length) {
+    const again = whole.filter((w, i) => i < slice || !/^group-(msg|commit|secret):/.test(w));
+    while (sent.length < whole.length + again.length) {
       await vi.waitFor(() => expect(waits.length).toBeGreaterThan(0));
       waits.shift()!();
       await sleep(0);
     }
-    expect(sent.map(said)).toEqual([...whole.slice(0, 3 * slice), ...whole]);
+    expect(sent.map(said)).toEqual([...whole, ...again]);
     // Commits and secrets before the frames that need them, as before.
     const [lastNeeded, firstMessage] = needsFirst(whole.map(w => w.split(":")[0]));
     expect(lastNeeded).toBeLessThan(firstMessage);
-    // Nothing is asked after the last slice: the one before it is the only question left.
+    // The last two slices' questions are what is left, and once answered nothing more is asked.
     await sleep(20);
-    expect(waits.length).toBeLessThanOrEqual(1);
+    expect(waits.length).toBeLessThanOrEqual(2);
+    for (const done of waits.splice(0)) done();
+    await sleep(20);
+    expect(waits).toHaveLength(0);
+  });
+
+  it("a member that asks again while my answer still waits in its app is not sent those messages, commits and secrets again; once handled, still missing ones go again", async () => {
+    // Bob's app handles 1 or 2 frames a second and asks again every 5-30 s: each answer went to the queue behind the
+    // last, and 200 missed messages went to it 29-104 times more (318 commits as 610 frames).
+    const { alice, bob, sync } = await awayCommunity(4, 20);
+    let now = Date.now();
+    const waits: ((told: boolean | "late") => void)[] = [];
+    const { session, sent } = await answer(alice, bob.session.myKey, sync, {
+      clock: () => now,
+      handled: () => new Promise<boolean | "late">(resolve => waits.push(resolve)),
+    });
+    const keyed = (frames: CommunityFrame[]) => frames.map(said).filter(w => /^group-(msg|commit|secret):/.test(w));
+    const first = keyed(sent.splice(0));
+    expect(first).toHaveLength(4 + 21 + 1);
+    // Asked again, the answer still in Bob's app (its pong late): none of those again.
+    waits.shift()!("late");
+    await sleep(0);
+    now += 10_000;
+    await session.handle(bob.session.myKey, clone(sync));
+    expect(keyed(sent.splice(0))).toEqual([]);
+    // Bob's app handled them and still lacks them (lost on the way): the next sync has them again.
+    for (const done of waits.splice(0)) done(true);
+    await sleep(0);
+    now += 10_000;
+    await session.handle(bob.session.myKey, clone(sync));
+    expect(keyed(sent)).toEqual(first);
   });
 
   it("an app that cannot say waits a pause between slices; an edge that takes no frame ends the answer", async () => {
@@ -225,4 +279,43 @@ describe("a community member's catch-up answer goes a slice at a time", { timeou
     expect(paced.mostWaiting).toBeLessThanOrEqual(2 * slice);
     expect(atOnce.mostWaiting).toBeGreaterThan(64);
   });
+
+  /*
+   * The asker's `have` is one high number per author and epoch, and a live frame raises it. A second sync while the
+   * answer still held that author's older frames was answered without them (at or below that number), and the newer
+   * answer took the place of the rest of the first: they were lost for good (no later sync asks for them).
+   */
+  for (const second of ["the member's next sync", "the hub's tick (the member answers with its sync)"]) {
+    it(`a live frame of an author while the answer still goes, then ${second}: every missed message still comes`, async () => {
+      const net = new Net(true);
+      const alice = net.create("Alice");
+      const bob = await net.admit(alice, "Bob");
+      const carol = await net.admit(alice, "Carol");
+      await net.settle();
+      bob.online = false;
+      for (let i = 0; i < 200; i++) {
+        const sent = await carol.session.sendText(`Carol ${i}`, "Carol", net.now++);
+        if ("error" in sent) throw new Error(sent.error);
+        await net.settle();
+      }
+      bob.online = true;
+      await alice.session.handle(bob.session.myKey, clone(bob.session.syncFrame(alice.session.myKey)));
+      await net.settle();
+      for (let i = 0; i < 2; i++) { net.now += 500; await net.step(); }
+      const before = bob.texts.length;
+      expect(before).toBeLessThan(200);
+      const live = await carol.session.sendText("Carol live", "Carol", net.now++);
+      if ("error" in live) throw new Error(live.error);
+      await net.settle();
+      net.now += 6_000;
+      if (second.startsWith("the hub")) alice.session.catchUp(bob.session.myKey);
+      else bob.session.catchUp(alice.session.myKey);
+      await net.settle();
+      for (let i = 0; i < 100; i++) { net.now += 500; await net.step(); }
+      const missing = Array.from({ length: 200 }, (_, i) => `Carol ${i}`).filter(t => !bob.texts.includes(t));
+      expect({ missing: missing.length, live: bob.texts.includes("Carol live") }).toEqual({ missing: 0, live: true });
+      // Each once.
+      expect(new Set(bob.texts).size).toBe(bob.texts.length);
+    });
+  }
 });

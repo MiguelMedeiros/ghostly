@@ -76,6 +76,44 @@ test("a message's menu and its delete confirmation are whole and on top, beside 
   }
 });
 
+test("a right-click on a message opens its ⋮ menu at the pointer, with the same rows; on a link the browser keeps its own", { tag: ["@feature:app.menus"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("menu-right-alice"), peer("menu-right-bob")]);
+  await link(alice, bob);
+  await connect(alice, bob);
+  await say(bob, "right-click me");
+  await say(bob, "see https://example.com/page");
+  const { page } = alice;
+  await page.setViewportSize(WIDE);
+  await expect(chat(alice).getByText("right-click me")).toBeVisible();
+  // Whether the page took the last right-click from the browser, read once every listener under the window heard it.
+  await page.evaluate(() => addEventListener("contextmenu", (e) => { (window as unknown as { refused?: boolean }).refused = e.defaultPrevented; }));
+  const refused = () => page.evaluate(() => (window as unknown as { refused?: boolean }).refused);
+
+  const message = row(page, "right-click me");
+  await message.hover();
+  await message.getByTestId("message-options").click();
+  const menu = page.getByTestId("message-menu");
+  const fromDots = await menu.getByRole("button").allTextContents();
+  await close(page, menu);
+
+  const text = message.getByText("right-click me");
+  const box = (await text.boundingBox())!;
+  await text.click({ button: "right", position: { x: 10, y: box.height / 2 } });
+  await whole(menu, false, "a right-click's menu");
+  expect(await menu.getByRole("button").allTextContents()).toEqual(fromDots);
+  expect(await refused()).toBe(true);
+  const at = (await menu.boundingBox())!;
+  expect(Math.abs(at.x - (box.x + 10)), "the menu starts at the pointer").toBeLessThan(2);
+  await expect(menu.getByRole("button").first()).toBeFocused();
+  // A row chosen from it does what the ⋮'s row does.
+  await menu.getByTestId("message-reply").click();
+  await expect(page.getByTestId("composer-reply").getByTestId("reply-quote-snippet")).toHaveText("right-click me");
+
+  await row(page, "see https://example.com").getByRole("link").click({ button: "right" });
+  expect(await refused()).toBe(false);
+  await expect(menu).toHaveCount(0);
+});
+
 test("in a group too, a message's menu is whole and on top", { tag: ["@feature:chat.paired.message-details", "@feature:app.menus"] }, async ({ peer }) => {
   const alice = await peer("menu-group-alice");
   const { page } = alice;

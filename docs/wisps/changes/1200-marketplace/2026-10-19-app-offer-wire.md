@@ -1,0 +1,1 @@
+Sending ahead's `app` on `pf-offer` is fixed: a chat app id of 22 base64url characters, on `files/3` only; a receiver drops a malformed one and takes the file as any file. Nothing offers a file from an app yet.

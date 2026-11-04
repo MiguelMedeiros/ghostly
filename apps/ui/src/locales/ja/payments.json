@@ -25,6 +25,7 @@
   },
   "bubble": {
     "amountSats": "{{amount}} sats",
+    "amountSats_one": "{{amount}} sat",
     "approve": "支払いを承認",
     "balance": "{{amount}} {{unit}}",
     "bitcoinOnchain": "Bitcoin オンチェーン",
@@ -183,6 +184,9 @@
     "maxFee": "許容する最大手数料（{{unit}}）",
     "maxFeeAria": "最大手数料（{{unit}}）",
     "millisats": "{{amount}} millisats",
+    "moneroInfo": "Ghostly には Monero ウォレットがありません。「支払う」でこのリンクをこの端末の Monero ウォレットで開き、そこで確認して送金します。",
+    "moneroLabel": "Monero",
+    "moneroPayTitle": "この端末の Monero ウォレットを開きます",
     "networkNotStated": "ネットワーク不明",
     "noWallet": {
       "mainnet": "この本物のお金を支払える Mainnet の {{wallet}} ウォレットがありません。",
@@ -250,6 +254,7 @@
     "youObject": "あなた"
   },
   "invoice": {
+    "alreadySpent": "使用済み",
     "anyAmount": "金額自由",
     "checking": "確認中…",
     "confirmWhat": "{{amount}} sats（手数料は最大 {{fee}}）",
@@ -288,6 +293,7 @@
     "qrTooLong": "QR コードには長すぎます。コピーしてください。",
     "redeem": "受け取る",
     "redeemed": "受け取り済み ✓",
+    "redeemedFee": "受け取り済み ✓（mint が手数料として {{fee}} を差し引きました）",
     "redeeming": "受け取り中…"
   },
   "mode": {

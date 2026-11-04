@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import type { Locator, Page } from "@playwright/test";
 import { chat, expect, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
+import { CHROMIUM_SANDBOX } from "../support/chromiumSandbox";
 
 /**
  * Chromium's fake microphone plays this file on a loop: two seconds of a 220 Hz voice-like tone in
@@ -11,6 +12,7 @@ const SAMPLE = fileURLToPath(new URL("../support/voice-sample.wav", import.meta.
 
 test.use({
   launchOptions: {
+    chromiumSandbox: CHROMIUM_SANDBOX,
     args: [
       "--disable-features=WebRtcHideLocalIpsWithMdns",
       "--use-fake-device-for-media-stream",
@@ -69,6 +71,15 @@ const watchAudio = (page: Page) =>
 /** The rate and pitch setting of every media element played since `watchAudio`. */
 const audioRates = (page: Page) =>
   page.evaluate(() => ((window as unknown as { voiceAudio?: HTMLMediaElement[] }).voiceAudio ?? []).map((audio) => ({ rate: audio.playbackRate, preservesPitch: audio.preservesPitch })));
+
+/** Shift+Tab until the button with this test id has the focus, as a keyboard user reaches it. */
+async function tabBackTo(page: Page, testId: string) {
+  for (let step = 0; step < 8; step++) {
+    await page.keyboard.press("Shift+Tab");
+    if (await page.getByTestId(testId).evaluate((button) => button === document.activeElement)) return;
+  }
+  throw new Error(`Shift+Tab never reached ${testId}`);
+}
 
 /** How many different bar heights a waveform has: a flat line has one. */
 const shapes = (bubble: Locator) =>
@@ -253,6 +264,19 @@ test("voice messages: hands-free with a click, pause and preview, Enter, Esc; th
   await expect(page.getByTestId("voice-bar")).toHaveAttribute("data-mode", "locked");
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("voice-bar")).toHaveCount(0);
+
+  // From the keyboard, Enter on Pause pauses and Enter on the bin throws it away: both sent it (Enter sent from anywhere).
+  await mic(page).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("voice-bar")).toHaveAttribute("data-phase", "recording");
+  await tabBackTo(page, "voice-pause");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("voice-bar")).toHaveAttribute("data-phase", "paused");
+  await tabBackTo(page, "voice-delete");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("voice-bar")).toHaveCount(0);
+  // The focus goes to the mic, not to the page with the bin that held it.
+  await expect(mic(page)).toBeFocused();
 
   // One held, then one hands-free with a pause, a listen and more: two in a row from Alice.
   await hold(page, 1_600);

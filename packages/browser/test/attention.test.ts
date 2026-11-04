@@ -38,8 +38,11 @@ describe("messageAttention", () => {
   it("files, payments, join notices and texts with nothing to show are quiet", () => {
     expect(messageAttention("message", row({ file: { id: "f" } as StoredMessage["file"] }), at())).toBeNull();
     expect(messageAttention("message", row({ paymentId: "p" }), at())).toBeNull();
-    expect(messageAttention("message", row({ text: "👋 Ana joined" }), at())).toBeNull();
-    expect(messageAttention("message", row({ text: "👋 joined" }), at())).toBeNull();
+    expect(messageAttention("message", row({ text: "👋 Ana joined", joinLine: true }), at())).toBeNull();
+    expect(messageAttention("message", row({ text: "👋 joined", joinLine: true }), at())).toBeNull();
+    // Mine by its words; a contact's row in those words that is not the chat's joined line is a message.
+    expect(messageAttention("sent", row({ sender: "me", id: "me_1", text: "👋 Bo joined" }), at())).toBeNull();
+    expect(messageAttention("message", row({ text: "👋 Ana joined" }), at())).toMatchObject({ type: "message" });
     expect(messageAttention("message", row({ text: "" }), at())).toBeNull();
     expect(messageAttention("message", row({ text: " \n " }), at())).toBeNull();
   });

@@ -4,8 +4,21 @@ import { PICK_AFTER_CANCEL_MS } from "../../lib/apps/broker";
 import { desktopLinkedFiles } from "../../lib/apps/desktopFiles";
 import { APP_CLOSED_EVENT, APP_REQUEST_EVENT, desktopOpener } from "../../lib/apps/desktopOpener";
 import { memoryHost } from "../../lib/apps/memoryHost";
+import type { PickSheetText } from "../../lib/apps/webFiles";
 
 // covers: apps.linked-files
+
+const text: PickSheetText = {
+  ask: (app, folder) => `${app} asks to read ${folder ? "a folder" : "files"}`,
+  choose: (folder) => (folder ? "Choose a folder" : "Choose files"),
+  note: (app) => `Nothing is copied: ${app} reads what you pick.`,
+  cancel: "Cancel",
+  askAgain: (app, name) => `${app} asks to read ${name} again`,
+  allow: "Allow",
+  notNow: "Not now",
+};
+/** The person clicks the sheet's button at once. */
+const clicks = { ask: (_app: string, _folder: boolean, open: () => Promise<MiniAppLinkedFile[]>) => open() };
 
 /** Linked files on Desktop: the host's commands, with the profile's space, and its refusals as errors the broker reads. */
 describe("desktop linked files", () => {
@@ -18,7 +31,7 @@ describe("desktop linked files", () => {
       linked_files_forget: undefined,
     };
     const invoke = async <T,>(command: string, args?: Record<string, unknown>) => { calls.push([command, args]); return answers[command] as T; };
-    const host = desktopLinkedFiles(invoke, () => "ghostly_ab", (app, folder) => `${app} asks to read ${folder ? "a folder" : "files"}`);
+    const host = desktopLinkedFiles(invoke, () => "ghostly_ab", () => text, clicks);
     expect(await host.pick("key/cinema", "Cinema", { folder: true, accept: ["mp4"] })).toHaveLength(1);
     expect(await host.read("key/cinema", "a".repeat(22), 5, 10)).toEqual(new Uint8Array([1, 2, 3]));
     await host.list("key/cinema", "Cinema");
@@ -31,9 +44,91 @@ describe("desktop linked files", () => {
     ]);
   });
 
+  it("serve's lookup asks the host for its one link, not the app's whole library", async () => {
+    // files.serve found its link in linked_files_list: with 100 000 links, every file looked at on disk and about 15 MB
+    // of JSON to the page and of the app's reads that second.
+    const link = { id: "a".repeat(22), path: "Films/Up.mp4", size: 3, modified: 1, available: true };
+    const calls: [string, Record<string, unknown> | undefined][] = [];
+    const invoke = async <T,>(command: string, args?: Record<string, unknown>) => {
+      calls.push([command, args]);
+      return (command === "linked_files_entry" ? (args?.id === link.id ? link : null) : []) as T;
+    };
+    const host = desktopLinkedFiles(invoke, () => "ghostly_ab", () => text, clicks);
+    expect(await host.entry!("key/cinema", link.id)).toEqual(link);
+    expect(await host.entry!("key/cinema", "z".repeat(22))).toBeNull();
+    expect(calls).toEqual([
+      ["linked_files_entry", { space: "ghostly_ab", appRef: "key/cinema", id: link.id }],
+      ["linked_files_entry", { space: "ghostly_ab", appRef: "key/cinema", id: "z".repeat(22) }],
+    ]);
+  });
+
   it("passes the host's refusals on as errors", async () => {
-    const host = desktopLinkedFiles(async () => { throw "cancelled: Nothing was picked"; }, () => "ghostly", () => "");
+    const host = desktopLinkedFiles(async () => { throw "cancelled: Nothing was picked"; }, () => "ghostly", () => text, clicks);
     await expect(host.pick("key/cinema", "Cinema", { folder: true, accept: [] })).rejects.toThrow(/^cancelled: /);
+  });
+});
+
+/** WISP 1200: the client shows the request, and the system's dialog opens only on the person's click in it. */
+describe("desktop files.pick asks in the client first", () => {
+  const sheetHost = (answer: unknown = []) => {
+    const calls: string[] = [];
+    const invoke = async <T,>(command: string) => { calls.push(command); return (command === "linked_files_pick" ? answer : undefined) as T; };
+    let clock = 1_000;
+    const host = desktopLinkedFiles(invoke, () => "ghostly_ab", () => text, { now: () => clock });
+    const shown = () => document.querySelector<HTMLElement>("[data-testid=app-files-sheet]");
+    const button = (id: string) => document.querySelector<HTMLButtonElement>(`[data-testid=${id}]`)!;
+    return { host, calls, shown, button, picks: () => calls.filter((c) => c === "linked_files_pick").length, pass: (ms: number) => { clock += ms; } };
+  };
+
+  it("shows the sheet, brings the Ghostly window forward, and opens the dialog only on the click on its button", async () => {
+    const picked = [{ id: "a".repeat(22), path: "Films/Up.mp4", size: 3, modified: 1, available: true }];
+    const { host, calls, shown, button, picks } = sheetHost(picked);
+    const pick = host.pick("key/cinema", "Cinema", { folder: true, accept: [] });
+    await vi.waitFor(() => expect(shown()).not.toBeNull());
+    expect(shown()!.textContent).toContain("Cinema asks to read a folder");
+    await vi.waitFor(() => expect(calls).toContain("plugin:window|set_focus"));
+    expect(picks()).toBe(0);
+    // Its button works only a moment after it shows: a key the person was already typing is no click.
+    expect(button("app-files-choose").disabled).toBe(true);
+    await vi.waitFor(() => expect(button("app-files-choose").disabled).toBe(false));
+    expect(picks()).toBe(0);
+    button("app-files-choose").click();
+    expect(await pick).toEqual(picked);
+    expect(picks()).toBe(1);
+    expect(shown()).toBeNull();
+  });
+
+  it("Cancel opens no dialog, and the app waits PICK_AFTER_CANCEL_MS to ask again", async () => {
+    const { host, shown, button, picks, pass } = sheetHost();
+    const pick = host.pick("key/cinema", "Cinema", { folder: false, accept: [] });
+    await vi.waitFor(() => expect(shown()).not.toBeNull());
+    button("app-files-cancel").click();
+    await expect(pick).rejects.toThrow(/^cancelled: /);
+    await expect(host.pick("key/cinema", "Cinema", { folder: false, accept: [] })).rejects.toThrow(/^too-fast: /);
+    expect(shown()).toBeNull();
+    pass(PICK_AFTER_CANCEL_MS);
+    const again = host.pick("key/cinema", "Cinema", { folder: false, accept: [] });
+    await vi.waitFor(() => expect(shown()).not.toBeNull());
+    button("app-files-cancel").click();
+    await expect(again).rejects.toThrow(/^cancelled: /);
+    expect(picks()).toBe(0);
+  });
+
+  it("the sheet goes with its app, opening nothing", async () => {
+    const { host, calls, shown, picks } = sheetHost();
+    const stop = new AbortController();
+    const pick = host.pick("key/cinema", "Cinema", { folder: true, accept: [] }, stop.signal);
+    await vi.waitFor(() => expect(shown()).not.toBeNull());
+    stop.abort();
+    await expect(pick).rejects.toThrow(/^cancelled: /);
+    expect(shown()).toBeNull();
+    expect(picks()).toBe(0);
+    expect(calls).not.toContain("linked_files_pick_cancel");
+    // An app that stopped is no app asking again: it may pick at once.
+    const again = host.pick("key/cinema", "Cinema", { folder: true, accept: [] });
+    await vi.waitFor(() => expect(shown()).not.toBeNull());
+    shown()!.querySelector<HTMLButtonElement>("[data-testid=app-files-cancel]")!.click();
+    await expect(again).rejects.toThrow(/^cancelled: /);
   });
 });
 
@@ -57,6 +152,7 @@ function desktop() {
   const invoke = (async (command: string, args: Record<string, unknown> = {}) => {
     calls.push({ command, args });
     if (command === "app_open") return `app-${++labels}`;
+    if (command === "app_focused") return true;
     if (command === "linked_files_pick_cancel") { cleared++; return undefined; }
     if (command === "linked_files_pick") {
       const begun = cleared;
@@ -77,7 +173,7 @@ function desktop() {
     return undefined;
   }) as <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
   const listen = async <T,>(event: string, handler: (event: { payload: T }) => void) => { handlers.set(event, handler as (event: { payload: unknown }) => void); return () => {}; };
-  const linkedFiles = desktopLinkedFiles(invoke, () => "ghostly_ab", (app, folder) => `${app} asks to read ${folder ? "a folder" : "files"}`, () => clock);
+  const linkedFiles = desktopLinkedFiles(invoke, () => "ghostly_ab", () => text, { now: () => clock, ...clicks });
   const open = desktopOpener({ apps: () => host, invoke, listen, nameIn: () => undefined, view: { theme: () => "dark", locale: () => "en" }, startTimeoutMs: 60_000, linkedFiles });
   const request = (label: string, message: unknown) => handlers.get(APP_REQUEST_EVENT)!({ payload: { label, request: message } });
   const posts = (label: string) => calls.filter((c) => c.command === "app_post" && c.args.label === label).map((c) => c.args.message as Record<string, unknown>);

@@ -37,4 +37,13 @@ describe("settings set", () => {
     expect(result.stderr).toContain("ghostly: The CLI reaches TURN over UDP only: it does not use turns:turn.example:5349");
     expect(set).toEqual(ok(await ghostly(["--home", dir, "settings", "get"])));
   });
+
+  it("refuses a HyperDHT relay with a login or a token, which every contact would be told, and keeps none", { timeout: 60_000 }, async () => {
+    const dir = home("settings-hyperdht-relay");
+    for (const bad of ["wss://alice:hunter2@relay.example", "wss://relay.example/?token=s3cr3t", "wss://relay.example/#s3cr3t"]) {
+      expect(error(await ghostly(["--home", dir, "settings", "set", "hyperdhtRelay", bad]), "bad_request", 1).message).toBe(`hyperdhtRelay: not a relay address: ${bad}`);
+    }
+    expect(ok(await ghostly(["--home", dir, "settings", "get"])).hyperdhtRelay).toBeUndefined();
+    expect(ok(await ghostly(["--home", dir, "settings", "set", "hyperdhtRelay", "wss://relay.example"])).hyperdhtRelay).toBe("wss://relay.example");
+  });
 });

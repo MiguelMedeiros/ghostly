@@ -8,13 +8,15 @@
   },
   "dependencies": {
     "@atproto/crypto": "0.5.7",
-    "@atproto/pds": "0.5.38",
+    "@atproto/pds": "0.5.52",
     "@did-plc/server": "0.0.1"
   },
   "overrides": {
     "@opentelemetry/auto-instrumentations-node": "0.79.0",
     "@opentelemetry/propagator-jaeger": "2.12.0",
+    "glob": "14.0.2",
     "kysely": "0.29.6",
-    "nodemailer": "10.0.16"
+    "minimatch": "11.0.3",
+    "nodemailer": "10.1.4"
   }
 }

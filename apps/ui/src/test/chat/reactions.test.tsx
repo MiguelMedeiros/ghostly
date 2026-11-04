@@ -58,6 +58,34 @@ describe("the quick bar", () => {
     expect(screen.queryByTestId("reaction-picker")).not.toBeInTheDocument();
   });
 
+  it("a bubble taller than the list: the bar and the + panel open at the React button, inside the list", async () => {
+    // The list from 60 to 700, scrolled to the middle of a bubble running from far above it to far below; the React
+    // button in sight beside it. From the bubble's edges the bar opened 2000px above the list, out of sight.
+    const list = { left: 400, right: 1000, top: 60, bottom: 700 };
+    const sizes: Record<string, { width: number; height: number }> = { "reaction-bar": { width: 300, height: 44 }, "reaction-picker": { width: 320, height: 360 } };
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const size = sizes[this.dataset.testid ?? ""];
+      const box = size ? { left: 0, right: size.width, top: 0, bottom: size.height }
+        : "messageList" in this.dataset ? list
+        : "messageBubble" in this.dataset ? { left: 420, right: 860, top: -2000, bottom: 3000 }
+        : this.firstElementChild?.getAttribute("data-testid") === "message-react-action" ? { left: 868, right: 892, top: 380, bottom: 404 }
+        : { left: 0, right: 0, top: 0, bottom: 0 };
+      return { ...box, x: box.left, y: box.top, width: box.right - box.left, height: box.bottom - box.top, toJSON: () => box } as DOMRect;
+    });
+    const { user } = renderApp(<div data-message-list><MessageBubble message={message()} peerPubKey="peer" onReact={() => {}} reactionName={names} /></div>);
+    await user.click(screen.getByTestId("message-react-action"));
+    const bar = screen.getByTestId("reaction-bar");
+    // Over the button (room there), its end on the button's end, towards the bubble.
+    expect(bar.style.top).toBe(`${380 - 4 - 44}px`);
+    expect(bar.style.left).toBe(`${892 - 300}px`);
+    await user.click(screen.getByTestId("reaction-more"));
+    const picker = screen.getByTestId("reaction-picker");
+    // Too tall for either side of the button: on the roomier one (above), as tall as its room, still in the list.
+    const room = 380 - 4 - list.top - 8;
+    expect(picker.style.maxHeight).toBe(`${room}px`);
+    expect(picker.style.top).toBe(`${list.top + 8}px`);
+  });
+
   it("its ⋮ says React, after Reply", async () => {
     const onReact = vi.fn();
     const { user } = renderApp(<MessageBubble message={message()} peerPubKey="peer" onReply={() => {}} onReact={onReact} reactionName={names} />);
@@ -69,6 +97,69 @@ describe("the quick bar", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByTestId("reaction-bar")).not.toBeInTheDocument();
     expect(onReact).not.toHaveBeenCalled();
+  });
+
+  it("from the keyboard, the bar takes the focus: Left/Right move between the six and +, Enter picks, Escape gives it back", async () => {
+    const onReact = vi.fn();
+    const { user } = renderApp(<MessageBubble message={message()} peerPubKey="peer" onReact={onReact} reactionName={names} />);
+    const react = screen.getByTestId("message-react-action");
+    react.focus();
+    await user.keyboard("{Enter}");
+    const quick = screen.getAllByTestId("reaction-quick");
+    expect(quick[0]).toHaveFocus();
+    // One stop for Tab: the others are reached with the arrows.
+    expect(quick.map(b => b.tabIndex)).toEqual([0, -1, -1, -1, -1, -1]);
+    await user.keyboard("{ArrowLeft}");
+    expect(screen.getByTestId("reaction-more")).toHaveFocus();
+    await user.keyboard("{ArrowRight}{ArrowRight}");
+    expect(quick[1]).toHaveFocus();
+    expect(quick[1].tabIndex).toBe(0);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("reaction-bar")).not.toBeInTheDocument();
+    expect(react).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await user.keyboard("{ArrowRight}{Enter}");
+    expect(onReact).toHaveBeenCalledWith("❤️");
+    expect(screen.queryByTestId("reaction-bar")).not.toBeInTheDocument();
+  });
+
+  it("from the keyboard, the one I chose takes the focus", async () => {
+    const { user } = renderApp(<MessageBubble message={message({ reactions: { me: r("😂") } })} peerPubKey="peer" onReact={() => {}} reactionName={names} />);
+    screen.getByTestId("message-react-action").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getAllByTestId("reaction-quick").find(b => b.dataset.emoji === "😂")).toHaveFocus();
+  });
+
+  it("⋮ → React from the keyboard puts the focus on the bar, not back on ⋮", async () => {
+    const onReact = vi.fn();
+    const { user } = renderApp(<MessageBubble message={message()} peerPubKey="peer" onReply={() => {}} onReact={onReact} reactionName={names} />);
+    screen.getByTestId("message-options").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("message-reply")).toHaveFocus();
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(screen.getAllByTestId("reaction-quick")[0]).toHaveFocus();
+    await user.keyboard("{ArrowRight}{ArrowRight}{Enter}");
+    expect(onReact).toHaveBeenCalledWith("😂");
+  });
+
+  it("a finger held on the message: Up/Down move between the emoji and the rows under them", () => {
+    vi.useFakeTimers();
+    const { container } = renderApp(<MessageBubble message={message()} peerPubKey="peer" onReact={() => {}} reactionName={names} />);
+    const row = container.querySelector<HTMLElement>("[data-message-row]")!;
+    fireEvent.pointerDown(row, { pointerType: "touch", button: 0, clientX: 20, clientY: 20, pointerId: 1 });
+    act(() => { vi.advanceTimersByTime(600); });
+    fireEvent.pointerUp(row, { pointerType: "touch", clientX: 20, clientY: 20, pointerId: 1 });
+    const bar = screen.getByTestId("reaction-bar");
+    expect(screen.getAllByTestId("reaction-quick")[0]).toHaveFocus();
+    const key = (k: string) => fireEvent.keyDown(document.activeElement!, { key: k });
+    key("ArrowRight");
+    key("ArrowDown");
+    expect(within(bar).getByTestId("reaction-bar-copy")).toHaveFocus();
+    key("ArrowDown");
+    expect(within(bar).getByTestId("reaction-bar-details")).toHaveFocus();
+    key("ArrowDown");
+    // Back in the row of emoji, on the one left there.
+    expect(screen.getAllByTestId("reaction-quick")[1]).toHaveFocus();
   });
 
   it("a finger held on the message opens the bar, with the details one tap under it", () => {
@@ -97,6 +188,59 @@ describe("the quick bar", () => {
     fireEvent.click(screen.getByTestId("reaction-bar-copy"));
     expect(writeText).toHaveBeenCalledWith("lunch at noon?");
     expect(screen.queryByTestId("reaction-bar")).not.toBeInTheDocument();
+  });
+
+  const pressCopy = (container: HTMLElement) => {
+    const row = container.querySelector<HTMLElement>("[data-message-row]")!;
+    fireEvent.pointerDown(row, { pointerType: "touch", button: 0, clientX: 20, clientY: 20, pointerId: 1 });
+    act(() => { vi.advanceTimersByTime(600); });
+    fireEvent.pointerUp(row, { pointerType: "touch", clientX: 20, clientY: 20, pointerId: 1 });
+    fireEvent.click(screen.getByTestId("reaction-bar-copy"));
+  };
+
+  it("the bar's Copy says Copied once the text is on the clipboard, and the focus goes back to the message", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    const { container } = renderApp(<MessageBubble message={message()} peerPubKey="peer" onReact={() => {}} reactionName={names} />);
+    pressCopy(container);
+    await act(async () => {});
+    expect(screen.getByTestId("message-copied")).toHaveAttribute("role", "status");
+    expect(screen.queryByTestId("message-copy-error")).not.toBeInTheDocument();
+    expect(screen.getByTestId("message-options")).toHaveFocus();
+    act(() => { vi.advanceTimersByTime(1600); });
+    expect(screen.queryByTestId("message-copied")).not.toBeInTheDocument();
+  });
+
+  it("a refused copy says so, with the text in a field to select by hand", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new DOMException("denied", "NotAllowedError"));
+    // The test DOM has no execCommand: the old route is refused too.
+    const { container } = renderApp(<MessageBubble message={message()} peerPubKey="peer" onReact={() => {}} reactionName={names} />);
+    pressCopy(container);
+    await act(async () => {});
+    expect(screen.getByTestId("message-copy-error")).toHaveAttribute("role", "alert");
+    expect(screen.getByTestId("message-copy-text")).toHaveValue("lunch at noon?");
+    expect(screen.queryByTestId("message-copied")).not.toBeInTheDocument();
+    expect(screen.getByTestId("message-options")).toHaveFocus();
+    // A long press on the field is the system's selection, not the quick bar again.
+    fireEvent.pointerDown(screen.getByTestId("message-copy-text"), { pointerType: "touch", button: 0, clientX: 20, clientY: 20, pointerId: 2 });
+    act(() => { vi.advanceTimersByTime(600); });
+    expect(screen.queryByTestId("reaction-bar")).not.toBeInTheDocument();
+  });
+
+  it("a refused copy's note stays until the person closes it, and the focus goes back to the message", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new DOMException("denied", "NotAllowedError"));
+    const { container } = renderApp(<MessageBubble message={message()} peerPubKey="peer" onReact={() => {}} reactionName={names} />);
+    pressCopy(container);
+    await act(async () => {});
+    // Time to select the text and copy it by hand: it does not go by itself.
+    act(() => { vi.advanceTimersByTime(10 * 60_000); });
+    expect(screen.getByTestId("message-copy-text")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByTestId("message-copy-error")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("message-copy-text")).not.toBeInTheDocument();
+    expect(screen.getByTestId("message-options")).toHaveFocus();
   });
 
   it("the React button's bar (a pointer) has no Copy: the text is selectable there", async () => {
@@ -159,6 +303,19 @@ describe("chips under the bubble", () => {
     fireEvent.pointerUp(chip, { pointerType: "touch", pointerId: 3 });
     fireEvent.click(chip);
     expect(onReact).toHaveBeenCalledWith("👍");
+  });
+
+  // Who reacted was joined with ", " in every language: "أنت, Bo" read as English punctuation in a translated line.
+  it.each([
+    ["ar", "Alice وBo"],
+    ["ja", "Alice、Bo"],
+    ["en", "Alice, Bo"],
+  ] as const)("lists who reacted the way %s lists them", async (language, who) => {
+    renderApp(<MessageBubble message={message({ reactions: { peer: r("👍"), k1: r("👍", 2) } })} peerPubKey="peer" onReact={() => {}} reactionName={names} />, { language });
+    const chip = await screen.findByTestId("reaction-chip");
+    expect(chip).toHaveAccessibleName(new RegExp(`${who}$`));
+    fireEvent.pointerEnter(chip, { pointerType: "mouse" });
+    expect(await screen.findByTestId("reaction-who")).toHaveTextContent(who);
   });
 });
 

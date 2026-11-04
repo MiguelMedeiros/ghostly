@@ -1,7 +1,9 @@
 import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { ReloadButton } from "../ui/ReloadButton";
+import { SearchStatus } from "../ui/SearchStatus";
 import { emojiCategories, emojiFailedAgain, emojiLoaded, emojiOf, loadEmoji, recentEmoji, rememberEmoji, searchEmoji, setSkinTone, skinTone, withSkin } from "../../lib/emoji";
+import { radioGroupKeys } from "../../lib/radioGroup";
 import { EMOJI_CATEGORY_ICONS } from "./icons";
 import { CategoryBar, PanelSearch } from "./PanelParts";
 
@@ -21,22 +23,25 @@ type EmojiTabProps = { onPick: (emoji: string) => void; autoFocus?: boolean };
 /**
  * The panel's emoji, once their data set is here (`loadEmoji`: the first panel shown loads it, not the first screen).
  * While it comes the tab is empty and busy; a load that failed says so, with Try again, and Reload once it failed again.
+ * Try again keeps that notice up, busy, while it loads, so a focused Try again keeps the focus.
  */
 export function EmojiTab(props: EmojiTabProps) {
   const { t } = useI18n();
-  const [state, setState] = useState<"ready" | "loading" | "failed">(() => (emojiLoaded() ? "ready" : "loading"));
+  const [state, setState] = useState<"ready" | "loading" | "failed" | "retrying">(() => (emojiLoaded() ? "ready" : "loading"));
   useEffect(() => {
-    if (state !== "loading") return;
+    if (state !== "loading" && state !== "retrying") return;
     let live = true;
     loadEmoji().then(() => { if (live) setState("ready"); }, () => { if (live) setState("failed"); });
     return () => { live = false; };
   }, [state]);
   if (state === "ready") return <LoadedEmojiTab {...props} />;
+  const busy = state === "loading" || state === "retrying";
   return (
-    <div className="expression-tab" data-testid="emoji-tab" aria-busy={state === "loading" || undefined}>
-      {state === "failed" && <div className="expression-trouble" data-testid="emoji-trouble" role="status">
+    <div className="expression-tab" data-testid="emoji-tab" aria-busy={busy || undefined}>
+      {(state === "failed" || state === "retrying") && <div className="expression-trouble" data-testid="emoji-trouble" role="status">
         <p>{t("composer.emojiNotLoading")}</p>
-        <button type="button" className="expression-retry" data-testid="emoji-retry" onClick={() => setState("loading")}>{t("composer.retry")}</button>
+        <button type="button" className="expression-retry" data-testid="emoji-retry" aria-busy={busy || undefined}
+          onClick={() => { if (!busy) setState("retrying"); }}>{t("composer.retry")}</button>
         {emojiFailedAgain() && <ReloadButton testId="emoji-reload" className="expression-retry" />}
       </div>}
     </div>
@@ -130,8 +135,9 @@ function LoadedEmojiTab({ onPick, autoFocus }: EmojiTabProps) {
         after={<div className="relative">
           <button type="button" data-testid="emoji-skin" aria-label={t("composer.skinTone")} title={t("composer.skinTone")} aria-expanded={choosingSkin}
             onClick={() => setChoosingSkin((v) => !v)} className="expression-skin">{TONES[skin]}</button>
-          {choosingSkin && <div role="radiogroup" aria-label={t("composer.skinTone")} className="expression-skins" data-testid="emoji-skins">
-            {TONES.map((tone, i) => <button key={tone} type="button" role="radio" aria-checked={i === skin} aria-label={tone} data-testid={`emoji-skin-${i}`}
+          {/* Choosing closes the row, so the arrows only move; Space or Enter chooses. */}
+          {choosingSkin && <div role="radiogroup" aria-label={t("composer.skinTone")} className="expression-skins" data-testid="emoji-skins" onKeyDown={radioGroupKeys}>
+            {TONES.map((tone, i) => <button key={tone} type="button" role="radio" aria-checked={i === skin} aria-label={tone} data-testid={`emoji-skin-${i}`} tabIndex={i === skin ? 0 : -1}
               onClick={() => { setSkin(i); setSkinTone(i); setChoosingSkin(false); }}>{tone}</button>)}
           </div>}
         </div>} />
@@ -140,6 +146,7 @@ function LoadedEmojiTab({ onPick, autoFocus }: EmojiTabProps) {
         {shown.map((section, i) => <EmojiSection key={section.id} section={section} first={i === 0} />)}
         {results && !results.cells.length && <p className="expression-empty">{t("composer.noEmoji")}</p>}
       </div>
+      <SearchStatus testId="emoji-found" text={!results ? "" : results.cells.length ? t("composer.emojiFound", { count: results.cells.length }) : t("composer.noEmoji")} />
     </div>
   );
 }

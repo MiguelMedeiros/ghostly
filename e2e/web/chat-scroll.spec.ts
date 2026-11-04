@@ -1,5 +1,5 @@
 import { createLink } from "@ghostly/core";
-import { chat, connect, expect, link, say, test, WAYBACK, type Peer } from "../support/fixtures";
+import { chat, connect, expect, GIF, link, say, test, WAYBACK, type Peer } from "../support/fixtures";
 
 /**
  * Scrolled up in a chat, the contact's new messages do not move the view: Bob keeps reading where he was and a "↓ 3 new"
@@ -71,7 +71,9 @@ test("scrolled up, new messages keep the view and a pill counts them", { tag: ["
  */
 
 /** A picture 320 × 240, served late: it lays out after the chat has opened at its bottom. */
-const PICTURE = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240"><rect width="320" height="240" fill="#7c5cff"/></svg>`;
+const PICTURE = Buffer.from(GIF);
+PICTURE.writeUInt16LE(320, 6);
+PICTURE.writeUInt16LE(240, 8);
 
 test("a long chat with pictures and videos opens again on its last message", { tag: ["@feature:chat.scroll"] }, async ({ peer }) => {
   test.setTimeout(2 * 60_000);
@@ -79,7 +81,7 @@ test("a long chat with pictures and videos opens again on its last message", { t
   let served = 0;
   await bob.context.route(WAYBACK, async route => {
     await new Promise(done => setTimeout(done, 150 + (served++ % 5) * 120));
-    await route.fulfill({ status: 200, contentType: "image/svg+xml", body: PICTURE });
+    await route.fulfill({ status: 200, contentType: "image/gif", body: PICTURE });
   });
 
   const chats = [createLink().mine, createLink().mine];
@@ -118,7 +120,7 @@ test("a long chat with pictures and videos opens again on its last message", { t
     await atBottom();
     await expect(last).toBeInViewport({ ratio: 1 });
     // Every picture near the bottom has come in and laid out, and the view is still on the last message.
-    await expect.poll(() => chat(bob).locator("img[src*='web.archive.org']").evaluateAll(imgs =>
+    await expect.poll(() => chat(bob).getByTestId("picture-link").evaluateAll(imgs =>
       imgs.filter(img => img.getBoundingClientRect().bottom > 0 && !(img as HTMLImageElement).complete).length)).toBe(0);
     await atBottom();
   }

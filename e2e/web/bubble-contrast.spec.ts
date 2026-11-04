@@ -5,6 +5,7 @@ import { chat, expect, say, test, useTestnet, type Peer } from "../support/fixtu
 import { pair } from "../support/paired";
 import { composerRow } from "../support/composer";
 import { paymentCard } from "../support/payments";
+import { CHROMIUM_SANDBOX } from "../support/chromiumSandbox";
 
 /**
  * Message bubbles take their colours from the theme: a sent and a received bubble in every colour theme, light
@@ -16,6 +17,7 @@ import { paymentCard } from "../support/payments";
 const SAMPLE = fileURLToPath(new URL("../support/voice-sample.wav", import.meta.url));
 test.use({
   launchOptions: {
+    chromiumSandbox: CHROMIUM_SANDBOX,
     args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", `--use-file-for-fake-audio-capture=${SAMPLE}`],
   },
 });

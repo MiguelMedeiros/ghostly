@@ -46,6 +46,8 @@ const { callRtcConfig } = await import("@ghostly/core");
 const { chooseDevice } = await import("../../lib/mediaDevices");
 const { callLevels } = await import("../../lib/voiceLevels");
 
+/** The AudioContexts the page made, and what was asked of each. */
+const contexts: { state: AudioContextState; calls: string[] }[] = [];
 const commands = () => tauri.invoke.mock.calls.map(([command]) => command);
 const json = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).buffer;
 
@@ -57,9 +59,15 @@ beforeEach(() => {
   vi.stubGlobal("MediaStream", FakeMediaStream);
   // The microphone's stand-in is a silent AudioContext track whose `enabled` is the browser's own.
   vi.stubGlobal("MediaStreamTrack", class { get enabled() { return (this as { on?: boolean }).on ?? true; } set enabled(on: boolean) { (this as { on?: boolean }).on = on; } });
+  contexts.length = 0;
   vi.stubGlobal("AudioContext", class {
+    state: AudioContextState = "running";
+    readonly calls: string[] = [];
+    constructor() { contexts.push(this); }
     createMediaStreamDestination() { return { stream: new FakeMediaStream([new FakeTrack("audio")]) }; }
-    close() { return Promise.resolve(); }
+    suspend() { this.calls.push("suspend"); this.state = "suspended"; return Promise.resolve(); }
+    resume() { this.calls.push("resume"); this.state = "running"; return Promise.resolve(); }
+    close() { this.calls.push("close"); this.state = "closed"; return Promise.resolve(); }
   });
   // The pictures are canvases filmed by captureStream(), which happy-dom does not have.
   HTMLCanvasElement.prototype.captureStream = function () { return new FakeMediaStream([new FakeTrack("video")]) as unknown as MediaStream; };
@@ -362,6 +370,18 @@ describe("the RTCPeerConnection stand-in", () => {
     expect(callLevels(null)).toBeUndefined();
   });
 
+  it("lets the system's audio output go for the microphone's stand-in: its context is suspended at once, and closed with it", async () => {
+    // A running context keeps an output stream open with nothing in it: 4-6% of a core in WebKitGTK, all call long.
+    const [track] = (await nativeCallMedia().getUserMedia({ audio: true })).getAudioTracks();
+    expect(contexts.map((context) => context.calls)).toEqual([["suspend"]]);
+    expect(contexts[0].state).toBe("suspended");
+    // Muting is the track's `enabled`, not its sound: the context is never woken for it.
+    track.enabled = false;
+    track.enabled = true;
+    track.stop();
+    expect(contexts[0].calls).toEqual(["suspend", "close"]);
+  });
+
   it("mutes the microphone in Rust once the call has started", async () => {
     const pc = new NativePeerConnection({});
     await pc.mute(true);
@@ -369,6 +389,75 @@ describe("the RTCPeerConnection stand-in", () => {
     await pc.createOffer();
     await pc.mute(true);
     expect(tauri.invoke).toHaveBeenCalledWith("native_call_mute", { id: pc.id, muted: true });
+  });
+
+  it("ends the microphone's stand-in when Rust says the microphone failed mid-call: the call's device check falls back from it", async () => {
+    const pc = new NativePeerConnection({});
+    const ice = vi.fn();
+    pc.oniceconnectionstatechange = ice;
+    const [microphone] = (await nativeCallMedia().getUserMedia({ audio: true })).getAudioTracks();
+    pc.addTrack(microphone);
+    await pc.createOffer();
+    const ended = vi.fn();
+    microphone.addEventListener("ended", ended);
+    tauri.channels[0].onmessage(json({ ended: "microphone" }));
+    expect(microphone.readyState).toBe("ended");
+    expect(ended).toHaveBeenCalledTimes(1);
+    expect(contexts[0].calls).toEqual(["suspend", "close"]);
+    // Told once, as a browser ends a track once; and no ICE state.
+    tauri.channels[0].onmessage(json({ ended: "microphone" }));
+    expect(ended).toHaveBeenCalledTimes(1);
+    expect(ice).not.toHaveBeenCalled();
+  });
+
+  it("ends the microphone Rust still sends when it fails while another one opens, not the one picked", async () => {
+    let opened!: () => void;
+    tauri.invoke.mockImplementation(async (command, args) => {
+      if (command === "native_call_offer") return { sdp: "sdp", microphone: "Mic A" };
+      // Rust waits for the new microphone's first sound (up to 2 s) before it sends it in place of the old one.
+      if (command === "native_call_microphone") { await new Promise<void>((done) => { opened = done; }); return args?.device ?? null; }
+      return undefined;
+    });
+    const media = nativeCallMedia();
+    const pc = new NativePeerConnection({});
+    const [audio] = pc.getTransceivers();
+    const before = (await media.getUserMedia({ audio: { deviceId: { exact: "Mic A" } } })).getAudioTracks()[0];
+    pc.addTrack(before);
+    await pc.createOffer();
+    const picked = (await media.getUserMedia({ audio: { deviceId: { exact: "Mic B" } } })).getAudioTracks()[0];
+    const switching = audio.sender.replaceTrack(picked);
+    await vi.waitFor(() => expect(opened).toBeTypeOf("function"));
+    // Mic A, still the one sent, fails meanwhile.
+    tauri.channels[0].onmessage(json({ ended: "microphone" }));
+    expect(picked.readyState, "Mic B is not the one that failed").toBe("live");
+    expect(before.readyState).toBe("ended");
+    opened();
+    await switching;
+    // Now Mic B is the one sent: its own failure ends it.
+    tauri.channels[0].onmessage(json({ ended: "microphone" }));
+    expect(picked.readyState).toBe("ended");
+  });
+
+  it("ends the camera's track when Rust says the camera failed, and closes it in Rust", async () => {
+    tauri.invoke.mockImplementation(async (command) => (command === "native_camera_open" ? { camera: 7, device: "Webcam" } : undefined));
+    const decoded = vi.fn(async () => ({ width: 640, height: 480, close() {} }));
+    vi.stubGlobal("createImageBitmap", decoded);
+    const [camera] = (await nativeCallMedia().getUserMedia({ video: { deviceId: "Webcam" } })).getVideoTracks();
+    const ended = vi.fn();
+    camera.addEventListener("ended", ended);
+    const frames = tauri.channels[0];
+    frames.onmessage(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]).buffer);
+    await vi.waitFor(() => expect(decoded).toHaveBeenCalledTimes(1));
+    expect(camera.readyState).toBe("live");
+    frames.onmessage(json({ ended: "camera" }));
+    expect(camera.readyState).toBe("ended");
+    expect(ended).toHaveBeenCalledTimes(1);
+    expect(tauri.invoke).toHaveBeenCalledWith("native_camera_close", { camera: 7 });
+    // Not a picture to decode, and told once.
+    frames.onmessage(json({ ended: "camera" }));
+    await new Promise((done) => setTimeout(done, 10));
+    expect(decoded).toHaveBeenCalledTimes(1);
+    expect(ended).toHaveBeenCalledTimes(1);
   });
 
   it("closes the call in Rust, once, and relays nothing after", async () => {
@@ -479,6 +568,42 @@ describe("the devices, which are GStreamer's and known by name", () => {
     // The new track mutes this call.
     next.enabled = true;
     await vi.waitFor(() => expect(tauri.invoke).toHaveBeenCalledWith("native_call_mute", { id: pc.id, muted: false }));
+  });
+
+  it.each(["native_call_offer", "native_call_answer"])("a camera, microphone or speaker picked while Rust starts the call (%s) goes to the call once it has", async (describe) => {
+    let described!: () => void;
+    tauri.invoke.mockImplementation(async (command, args) => {
+      if (command === "native_camera_open") return { camera: 7, device: args?.device ?? null };
+      if (command === "native_call_microphone") return args?.device ?? null;
+      // Rust gathers its candidates first (up to a few seconds): the person turns the camera on meanwhile.
+      if (command === describe) { await new Promise<void>((done) => { described = done; }); return { sdp: "sdp", microphone: null }; }
+      return undefined;
+    });
+    const media = nativeCallMedia();
+    const pc = new NativePeerConnection({});
+    const [audio, video] = pc.getTransceivers();
+    pc.addTrack((await media.getUserMedia({ audio: true })).getAudioTracks()[0]);
+    if (describe === "native_call_answer") await pc.setRemoteDescription({ type: "offer", sdp: "their offer" });
+    const describing = describe === "native_call_offer" ? pc.createOffer() : pc.createAnswer();
+    await vi.waitFor(() => expect(described).toBeTypeOf("function"));
+    const spoken: string[] = [];
+    tauri.invoke.mockClear();
+
+    await video.sender.replaceTrack((await media.getUserMedia({ video: true })).getVideoTracks()[0]);
+    const headset = (await media.getUserMedia({ audio: { deviceId: { exact: "Headset" } } })).getAudioTracks()[0];
+    await audio.sender.replaceTrack(headset);
+    nativeDevices.playCallOn("Headphones");
+    await new Promise((done) => setTimeout(done, 0));
+    for (const [command, args] of tauri.invoke.mock.calls) if (args?.id === pc.id) spoken.push(command);
+    described();
+    await describing;
+
+    expect(spoken, "nothing for a call Rust does not have yet").toEqual([]);
+    expect(tauri.invoke).toHaveBeenCalledWith("native_call_camera", { id: pc.id, camera: 7 });
+    expect(tauri.invoke).toHaveBeenCalledWith("native_call_microphone", { id: pc.id, device: "Headset" });
+    expect(tauri.invoke).toHaveBeenCalledWith("native_call_speaker", { id: pc.id, device: "Headphones" });
+    expect(headset.getSettings().deviceId).toBe("Headset");
+    pc.close();
   });
 
   it("meters a microphone in Rust for Settings, by name, until stopped", async () => {

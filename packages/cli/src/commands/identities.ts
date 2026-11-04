@@ -6,7 +6,7 @@ export const commands: Record<string, Command> = {
   "identity cancel": { method: "identity.cancel", usage: "identity cancel <draft>", summary: "Drop a proof not finished", args: ["draft"], params: (_, a) => ({ draft: a.draft }) },
   "identity complete": {
     method: "identity.complete", usage: "identity complete <draft> [--evidence-file f | --stdin]", summary: "Finish a proof: what the tool printed, or nothing for a published record",
-    args: ["draft"], options: { "evidence-file": { type: "string", description: "The tool's output, from this file" }, stdin: { type: "boolean", description: "The tool's output, from stdin" } },
+    args: ["draft"], options: { "evidence-file": { type: "string", description: "The tool's output, from this file" }, stdin: { type: "boolean", description: "The tool's output, from stdin (piped to it without the flag is read too)" } },
     params: ({ options }, a) => {
       if (options["evidence-file"] !== undefined && options.stdin === true) throw new CliError("usage", "--evidence-file or --stdin, not both");
       return { draft: a.draft, evidenceFile: here(options["evidence-file"]), stdin: options.stdin === true };
@@ -21,8 +21,8 @@ export const commands: Record<string, Command> = {
   "identity withdraw": { method: "identity.withdraw", usage: "identity withdraw <chat> <id>", summary: "Withdraw a proof from a contact", args: ["chat", "id"], params: (_, a) => ({ chat: a.chat, id: a.id }) },
   "x401 credential add": {
     method: "x401.credential.add", usage: "x401 credential add <file|-> [--label <name>]", summary: "Keep an issued SD-JWT VC bound to a key from x401 key new (a file, or - for stdin)",
-    args: ["file"], options: { label: { type: "string", description: "Your name for it, up to 80 characters on one line (default: its type)" } },
-    params: ({ options }, a) => ({ file: a.file === "-" ? "-" : here(a.file), label: options.label }),
+    args: ["path"], options: { label: { type: "string", description: "Your name for it, up to 80 characters on one line (default: its type)" } },
+    params: ({ options }, a) => ({ file: a.path === "-" ? "-" : here(a.path), label: options.label }),
   },
   "x401 credential list": {
     method: "x401.credential.list", usage: "x401 credential list [--show-secret]", summary: "This profile's x401 credentials: issuer, type, claim paths",

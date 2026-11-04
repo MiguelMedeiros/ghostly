@@ -9,7 +9,7 @@ import { ghostly, home, ok } from "./support/cli";
 describe("a one-shot command's write is there for the next command", () => {
   it("lists the service `service add` answered, on a profile with no chat", { timeout: 60_000 }, async () => {
     const dir = home("one-shot-service");
-    expect(ok(await ghostly(["--home", dir, "service", "add", "web", "http://127.0.0.1:5101"])).serviceId).toBe("web");
+    expect(ok(await ghostly(["--home", dir, "service", "add", "web", "http://127.0.0.1:5101"])).service).toBe("web");
     const listed = ok(await ghostly(["--home", dir, "service", "list"])).services as { id: string }[];
     expect(listed.map((service) => service.id)).toEqual(["web"]);
   });

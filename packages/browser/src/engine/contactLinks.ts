@@ -4,7 +4,7 @@ import {
 } from "@ghostly/core";
 import { STORES, store, wrap } from "../shared/idb";
 import type { ContactLinkView, ContactRequestView } from "../shared/types";
-import { newDeviceKey, sealSeed, unsealSeed } from "./paymentAdapters/persistence";
+import { openSecret, sealSecret } from "./dataKey";
 import type { SealedProofKey } from "./identities";
 
 /**
@@ -23,6 +23,8 @@ interface StoredLink {
   linkKeyZ32: string;
   createdAt: number;
 }
+/** Where a link's seed belongs: by its key, so it still opens once the link is retired. */
+const seedAt = (linkKeyZ32: string) => ({ store: STORES.settings, key: linkKeyZ32, field: "contactLink.seed" });
 
 /** A request in Requests: what the asker sent, under its asker key. */
 interface StoredRequest extends ContactRequest {
@@ -164,7 +166,6 @@ export class ContactLinks {
 
   private async make(): Promise<ContactLinkView> {
     const made = createContactLink();
-    const deviceKey = newDeviceKey();
     const now = Date.now();
     const retired = this.retire(now);
     // What waits in Requests stays: each request is under its asker's key and accepted by joining its invite, so nothing
@@ -173,7 +174,7 @@ export class ContactLinks {
     const requests = this.stored.current?.requests?.filter(r => waiting.some(w => w.key === r.key)) ?? [];
     const inbox = { ...newInbox(now), waiting, state: waiting.length >= MAX_WAITING ? "busy" as const : "open" as const };
     await this.save({
-      current: { seed: { sealed: await sealSeed(made.seedB64, deviceKey), deviceKey }, linkKeyZ32: made.linkKeyZ32, createdAt: now, inbox, ...(requests.length ? { requests } : {}) },
+      current: { seed: await sealSecret(made.seedB64, seedAt(made.linkKeyZ32)), linkKeyZ32: made.linkKeyZ32, createdAt: now, inbox, ...(requests.length ? { requests } : {}) },
       retired,
     });
     this.host.emit();
@@ -316,7 +317,7 @@ export class ContactLinks {
   }
 
   private async identity(link: StoredLink): Promise<Identity> {
-    return identityFromSeedB64(await unsealSeed(link.seed.sealed, link.seed.deviceKey));
+    return identityFromSeedB64(await openSecret(link.seed, seedAt(link.linkKeyZ32)));
   }
 
   /**

@@ -31,7 +31,7 @@ function fakeFetch(invoice: (amountSat: number) => string) {
 
 function service(fetch: typeof globalThis.fetch, network: "mainnet" | "testnet", fake = new FakeLightningProvider({ balance: 10_000 })) {
   const events = { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() } satisfies LightningEvents;
-  const cashu = { view: async () => ({ balance: 7, mints: [], history: [], feesPaid: 0 }) } as unknown as CashuWallet;
+  const cashu = { balance: async () => 7 } as unknown as CashuWallet;
   const descriptor = { ...fakeLightning, create: async () => fake };
   return { fake, lightning: new LightningService(network, () => [cashuMint, descriptor], () => ({ platform: "web", cashu }), events, CASHU_MINT_SOURCE, { fetch }) };
 }

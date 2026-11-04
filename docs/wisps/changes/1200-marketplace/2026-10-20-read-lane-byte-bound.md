@@ -1,0 +1,1 @@
+Read lane limits: the side that serves takes at most 32 MiB of requests a second from one contact, its apps together, counted as each request is taken, so one the asker cancels counts as the read it started; one past it is `busy`. Twice the asking app's own 16 MiB a second, so an app reading as fast as its budget lets it never meets it.

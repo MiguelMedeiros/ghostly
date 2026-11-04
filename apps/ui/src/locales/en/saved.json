@@ -1,0 +1,12 @@
+{
+  "empty": "No saved messages",
+  "emptyHint": "Save a message from its ⋮ menu to find it here. Saved messages stay on this device.",
+  "noText": "Message",
+  "rowLabel": "Saved messages, {{count}}",
+  "rowName": "{{chat}}, {{time}}: {{text}}",
+  "rowNameBy": "{{chat}}, {{author}}, {{time}}: {{text}}",
+  "save": "Save",
+  "title": "Saved messages",
+  "unsave": "Unsave",
+  "you": "You"
+}

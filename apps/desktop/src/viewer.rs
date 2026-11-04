@@ -24,13 +24,22 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tokio::sync::oneshot;
 
 pub const SCHEME: &str = "ghostly-svc";
-const REQUEST_EVENT: &str = "ghostly-svc-request";
+pub(crate) const REQUEST_EVENT: &str = "ghostly-svc-request";
 #[cfg(not(test))]
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 /// Short here so a test that expects a request to be refused fails at once when
 /// the refusal is missing, instead of waiting out the real timeout.
 #[cfg(test)]
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// Added to every answer a contact's app gets served, after the contact's own
+/// policies: a WebView enforces every policy it is sent, so the contact's own
+/// cannot widen it. Its scripts, forms, pictures, frames and the rest reach its
+/// own origin and public https sites (and inline, data: and blob: content),
+/// never plain http, so not a service on this machine or the local network,
+/// which WebKitGTK has no guard of its own against. The same value as
+/// `OPENED_SERVICE_CSP` in `packages/cli/src/services.ts` (`service open`).
+const SERVICE_CSP: &str = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https: wss:; form-action 'self' https:";
 
 #[derive(Default)]
 pub struct ViewerState {
@@ -88,14 +97,14 @@ fn unreachable_text(said: Option<String>) -> String {
         .unwrap_or_else(|| UNREACHABLE.to_string())
 }
 
-fn is_label_safe(value: &str) -> bool {
+pub(crate) fn is_label_safe(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
         && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 /// A chat's tag as `viewerTag` makes it: 16 characters of z-base-32.
-fn is_tag(value: &str) -> bool {
+pub(crate) fn is_tag(value: &str) -> bool {
     value.len() == 16
         && value
             .chars()
@@ -137,20 +146,67 @@ fn may_navigate(url: &url::Url, site: &str, service: &str) -> bool {
 
 /// The address a link the app opens in a new window (`target="_blank"`) goes to in the system browser, the way
 /// the Ghostly window opens links since #415: a plain http(s) link to another site (`commands::is_web_link`).
-/// None for the app's own origin, which has no second window, and for anything that is not a web link.
+/// None for the app's own origin, which has no second window, for anything that is not a web link, and for a
+/// site on this machine or the local network (`is_local_host`).
 fn external_target(url: &url::Url, site: &str, service: &str) -> Option<String> {
-    if !matches!(url.scheme(), "http" | "https") || may_navigate(url, site, service) {
+    if !matches!(url.scheme(), "http" | "https")
+        || may_navigate(url, site, service)
+        || is_local_host(url)
+    {
         return None;
     }
     crate::commands::is_web_link(url.as_str()).then(|| url.as_str().to_string())
+}
+
+/// Whether a link names this machine or the local network: an address that is not public (loopback, private,
+/// link-local, …), `localhost` and its subdomains, an mDNS `.local` name, or a name of one label (`router`, `nas`)
+/// that only a local resolver answers. The contact's page runs on the contact's side; opening such a link in the
+/// person's browser sends it with the browser's cookies, past the browser's own guard for local addresses
+/// (WebView2 opens one from script, with no click). A public name that resolves to a local address is not caught here.
+fn is_local_host(url: &url::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Ipv4(ip)) => !crate::link_preview::is_public(ip.into()),
+        Some(url::Host::Ipv6(ip)) => !crate::link_preview::is_public(ip.into()),
+        Some(url::Host::Domain(name)) => {
+            let name = name.trim_end_matches('.').to_ascii_lowercase();
+            !name.contains('.')
+                || name.ends_with(".localhost")
+                || name.ends_with(".local")
+                || name.ends_with(".internal")
+                || name.ends_with(".home.arpa")
+        }
+        None => true,
+    }
 }
 
 /// Least time between two links a viewer window opens outside. A browser opens a new window only on a click, but
 /// WebView2 lets a page open one from script; this keeps an app from filling the browser with tabs.
 const EXTERNAL_LINK_SPACING: Duration = Duration::from_secs(2);
 
+/// Most links one viewer window opens outside in its life: past them, a page that keeps opening tabs opens no more.
+const EXTERNAL_LINKS_PER_WINDOW: u32 = 20;
+
 fn may_open_now(last: Option<std::time::Instant>, now: std::time::Instant) -> bool {
     last.is_none_or(|last| now.saturating_duration_since(last) >= EXTERNAL_LINK_SPACING)
+}
+
+/// The links a viewer window opened outside: when the last one went, and how many did.
+#[derive(Default)]
+struct OpenedOutside {
+    last: Option<std::time::Instant>,
+    count: u32,
+}
+
+impl OpenedOutside {
+    /// Whether one more may open now; counted when it may.
+    fn take(&mut self, now: std::time::Instant) -> bool {
+        if self.count >= EXTERNAL_LINKS_PER_WINDOW || !may_open_now(self.last, now) {
+            return false;
+        }
+        self.last = Some(now);
+        self.count += 1;
+        true
+    }
 }
 
 /// Whether a download a page asks for may start: never, in a window that shows a contact's page or an
@@ -194,8 +250,15 @@ pub fn open<R: tauri::Runtime>(
         .parse()
         .map_err(|e| format!("URL: {}", e))?;
     let (link_site, link_service) = (site.clone(), service.clone());
-    let last_link = Mutex::new(None);
-    WebviewWindowBuilder::new(app, &label, WebviewUrl::CustomProtocol(url))
+    let opened_outside = Mutex::new(OpenedOutside::default());
+    #[allow(unused_mut)]
+    let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::CustomProtocol(url));
+    // On Windows the app keeps its storage in a WebView2 profile of its own, gone whole once it is forgotten.
+    #[cfg(windows)]
+    if let Some(folder) = crate::forget_origins::app_folder(app, &format!("{service}.{site}")) {
+        builder = builder.data_directory(folder);
+    }
+    builder
         .title(format!("{} — Ghostly", title))
         // The window itself never leaves its origin: a plain link to another site, a script or a frame that
         // goes there is refused, with no click to tell them apart.
@@ -204,10 +267,8 @@ pub fn open<R: tauri::Runtime>(
         // is ever made here.
         .on_new_window(move |to, _| {
             if let Some(target) = external_target(&to, &link_site, &link_service) {
-                let now = std::time::Instant::now();
-                if let Ok(mut last) = last_link.lock() {
-                    if may_open_now(*last, now) {
-                        *last = Some(now);
+                if let Ok(mut opened) = opened_outside.lock() {
+                    if opened.take(std::time::Instant::now()) {
                         let _ = crate::commands::launch(&target);
                     }
                 }
@@ -243,6 +304,11 @@ pub async fn handle<R: tauri::Runtime>(
     label: String,
     request: Request<Vec<u8>>,
 ) -> Response<Vec<u8>> {
+    // A hidden window clearing an origin (`forget_origins`): served the app's cleaning page, never the contact's.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if let Some(response) = crate::forget_origins::serve(&app, &label, &request) {
+        return response;
+    }
     let state = app.state::<ViewerState>();
     let Some(Bound {
         peer,
@@ -310,9 +376,18 @@ pub async fn handle<R: tauri::Runtime>(
     };
 
     let mut response = Response::builder().status(answer.status);
+    // One header, its policies joined by commas: on macOS wry keeps only the
+    // last of two headers with the same name.
+    let mut policies = Vec::new();
     for (name, value) in &answer.headers {
-        response = response.header(name.as_str(), value.as_str());
+        if name.eq_ignore_ascii_case("content-security-policy") {
+            policies.push(value.as_str());
+        } else {
+            response = response.header(name.as_str(), value.as_str());
+        }
     }
+    policies.push(SERVICE_CSP);
+    response = response.header("content-security-policy", policies.join(", "));
     response
         .body(STANDARD.decode(answer.body_b64).unwrap_or_default())
         .unwrap_or_else(|_| {
@@ -343,6 +418,38 @@ pub fn close_all<R: tauri::Runtime>(app: &AppHandle<R>) {
             let _ = window.close();
         }
     }
+}
+
+/// The windows showing one of `hosts` (`<service>.<peer>.<tag>`) close, their bindings dropped first as in
+/// `close_all`: what their app kept there is being forgotten (`forget_origins`).
+pub fn close_showing<R: tauri::Runtime>(app: &AppHandle<R>, hosts: &[String]) {
+    let Some(state) = app.try_state::<ViewerState>() else {
+        return;
+    };
+    for label in forget_showing(&state, hosts) {
+        if let Some(window) = app.get_webview_window(&label) {
+            let _ = window.close();
+        }
+    }
+}
+
+/// Drops the bindings of the windows showing one of `hosts`, and names those windows.
+fn forget_showing(state: &ViewerState, hosts: &[String]) -> Vec<String> {
+    let Ok(mut windows) = state.windows.lock() else {
+        return Vec::new();
+    };
+    let labels: Vec<String> = windows
+        .iter()
+        .filter(|(_, bound)| {
+            let own = format!("{}.{}", bound.service, bound.site);
+            hosts.iter().any(|host| host.eq_ignore_ascii_case(&own))
+        })
+        .map(|(label, _)| label.clone())
+        .collect();
+    for label in &labels {
+        windows.remove(label);
+    }
+    labels
 }
 
 /// Drops every binding and every request still waiting, and names the windows.
@@ -529,6 +636,50 @@ mod tests {
         ] {
             assert_eq!(outside(&kept), None, "{kept}");
         }
+    }
+
+    #[test]
+    fn a_new_window_link_to_this_machine_or_the_local_network_opens_nowhere() {
+        for local in [
+            "http://127.0.0.1:8080/admin",
+            "http://127.1/",
+            "http://2130706433/",
+            "http://0.0.0.0:3000/",
+            "http://[::1]:9000/",
+            "http://[::ffff:127.0.0.1]/",
+            "http://[fe80::1]/",
+            "http://[fd00::1]/",
+            "http://192.168.1.1/cgi-bin/reboot",
+            "https://10.0.0.5/",
+            "http://172.16.0.1/",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://100.81.12.32/",
+            "http://localhost:5173/",
+            "http://LOCALHOST./",
+            "http://0123456789abcdef0123456789abcdef.localhost:4000/",
+            "http://printer.local/",
+            "http://router/",
+            "http://metadata.google.internal/",
+            "http://nas.home.arpa/",
+        ] {
+            assert_eq!(outside(local), None, "{local}");
+        }
+        assert!(outside("https://8.8.8.8/").is_some());
+        assert!(outside("https://example.com/").is_some());
+    }
+
+    #[test]
+    fn a_window_opens_at_most_twenty_links_outside_in_its_life() {
+        let mut opened = OpenedOutside::default();
+        let start = std::time::Instant::now();
+        for n in 0..EXTERNAL_LINKS_PER_WINDOW {
+            assert!(opened.take(start + EXTERNAL_LINK_SPACING * n), "{n}");
+        }
+        assert!(!opened.take(start + EXTERNAL_LINK_SPACING * 100));
+        // And the spacing still holds before the cap.
+        let mut fresh = OpenedOutside::default();
+        assert!(fresh.take(start));
+        assert!(!fresh.take(start + Duration::from_millis(1999)));
     }
 
     #[test]
@@ -761,13 +912,28 @@ mod routing_tests {
             carried["id"].as_u64().unwrap(),
             ServiceResponse {
                 status: 201,
-                headers: vec![("x-served-by".into(), "atlas".into())],
+                headers: vec![
+                    ("x-served-by".into(), "atlas".into()),
+                    ("Content-Security-Policy".into(), "default-src *".into()),
+                    ("content-security-policy".into(), "img-src *".into()),
+                ],
                 body_b64: STANDARD.encode(b"created"),
             },
         );
         let response = tauri::async_runtime::block_on(pending).unwrap();
         assert_eq!(response.status(), StatusCode::CREATED);
         assert_eq!(response.headers()["x-served-by"], "atlas");
+        // The contact's policies stay, and Ghostly's comes after them: all are enforced.
+        let policies: Vec<_> = response
+            .headers()
+            .get_all("content-security-policy")
+            .iter()
+            .map(|value| value.to_str().unwrap())
+            .collect();
+        assert_eq!(
+            policies,
+            [format!("default-src *, img-src *, {SERVICE_CSP}")]
+        );
         assert_eq!(response.body(), b"created");
         assert!(app
             .state::<ViewerState>()
@@ -775,6 +941,14 @@ mod routing_tests {
             .lock()
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn the_policy_is_the_one_service_open_adds() {
+        let cli = include_str!("../../../packages/cli/src/services.ts");
+        assert!(cli.contains(&format!(
+            "export const OPENED_SERVICE_CSP = \"{SERVICE_CSP}\";"
+        )));
     }
 
     #[test]
@@ -874,6 +1048,35 @@ mod routing_tests {
             assert_eq!(response.status(), StatusCode::FORBIDDEN, "{label}");
         }
         assert!(asked.try_recv().is_err(), "nothing reached the main window");
+    }
+
+    #[test]
+    fn forgetting_an_origin_closes_the_windows_showing_it_and_no_other() {
+        let app = app();
+        for service in ["atlas", "notes", "atlas"] {
+            open(
+                app.handle(),
+                PEER.into(),
+                service.into(),
+                TAG.into(),
+                "t".into(),
+                None,
+            )
+            .unwrap();
+        }
+        close_showing(app.handle(), &[format!("ATLAS.{PEER}.{TAG}")]);
+        let bound = app.state::<ViewerState>().windows.lock().unwrap().clone();
+        assert_eq!(bound.keys().collect::<Vec<_>>(), ["svc-1"]);
+        assert_eq!(bound["svc-1"].service, "notes");
+        // Its next request is refused: it never reaches the page.
+        let asked = requests(&app);
+        let response = tauri::async_runtime::block_on(handle(
+            app.handle().clone(),
+            "svc-0".into(),
+            request("GET", &format!("{SCHEME}://atlas.{PEER}.{TAG}/"), b""),
+        ));
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert!(asked.try_recv().is_err());
     }
 
     #[test]

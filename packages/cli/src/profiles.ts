@@ -1,8 +1,10 @@
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { closeSync, existsSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync, type Stats } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { CliError } from "./errors";
+import { runtimePath } from "./privateFolder";
 
 /**
  * Profiles on disk (WISP 1100 § Profiles and files): `<home>/profiles/<name>/`, 0700, one engine store each.
@@ -17,7 +19,23 @@ const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
  */
 export function ghostlyHome(option?: string): string {
   if (option === "") throw new CliError("usage", "--home needs a folder");
-  return resolve(option ?? (process.env.GHOSTLY_HOME || join(homedir(), ".ghostly")));
+  return userPath(option ?? (process.env.GHOSTLY_HOME || join(homedir(), ".ghostly")), true);
+}
+
+/**
+ * A path the CLI was given, made absolute. A `~` the shell left alone (`--home=~/bots`, a quoted variable, a unit
+ * file's `Environment=` line) is the user's home, as the shell reads it: it was a folder named `~` in the current one.
+ * `~user/…` is a usage error, not a guess at another user's home, unless it is there under this folder. Any other name
+ * that starts with `~` is a file here, as the shell and every other tool read it (`~notes.txt`, Office's
+ * `~$report.docx`, a new `~cursor`): all of them were refused (agents#1604). `home`: the profiles' folder, where a bare
+ * `~bob` that is not there is refused too, as a new profile would be made in a folder of that name.
+ */
+export function userPath(path: string, home = false): string {
+  if (path === "~" || path.startsWith("~/")) return join(homedir(), path.slice(1));
+  if (path.startsWith("~") && (home || path.includes("/")) && !existsSync(resolve(path))) {
+    throw new CliError("usage", `${path}: ~user is not read here: write the ${home || path.endsWith("/") ? "folder" : "path"} in full`);
+  }
+  return resolve(path);
 }
 
 export function checkProfileName(name: string): string {
@@ -59,21 +77,43 @@ export interface ProfilePaths { name: string; dir: string; db: string; socket: s
 export function profilePaths(home: string, name: string): ProfilePaths {
   const dir = profileDir(home, name);
   return {
-    name, dir, db: join(dir, "db"), socket: socketPath(dir), lock: join(dir, "daemon.lock"),
+    name, dir, db: join(dir, "db"), socket: socketPath(dir), lock: lockPath(dir),
     events: join(dir, "events.jsonl"), files: join(dir, "files"), log: join(dir, "daemon.log"),
   };
 }
 
+/** The file that says which process holds the profile (`acquireLock`). */
+export function lockPath(dir: string): string {
+  return join(dir, "daemon.lock");
+}
+
+/** The file in which a daemon says it is starting: its pid, from the lock it took until its socket listens. */
+export function startingPath(dir: string): string {
+  return join(dir, "daemon.starting");
+}
+
+/**
+ * The pid of the profile's daemon while it starts (its engine, before its socket listens): the lock's holder, when it
+ * marked its start. Null otherwise: nobody holds the profile, a one-shot command does, or the mark is a dead daemon's.
+ */
+export function startingDaemon(paths: ProfilePaths): number | null {
+  let pid: number;
+  try { pid = Number(readFileSync(startingPath(paths.dir), "utf8").trim()); } catch { return null; }
+  // Alive, and this profile's: the lock's holder is.
+  return Number.isInteger(pid) && pid > 0 && pid === lockOwner(paths) ? pid : null;
+}
+
 /**
  * The daemon's socket: in the profile's folder, unless that path is longer than a Unix socket may be (104 bytes on
- * macOS); then in a folder of /tmp named after the profile's, which the daemon makes owner-only and checks before
- * use (`privateFolder`), and whose socket a client connects to only when it is this user's (`ownSocket`).
+ * macOS); then in a folder of the user's runtime folder named after the profile's (`runtimePath`), which the daemon
+ * makes owner-only and checks before use (`privateFolder`), and whose socket a client connects to only when it is this
+ * user's (`ownSocket`).
  */
 function socketPath(dir: string): string {
   const inside = join(dir, "daemon.sock");
   if (process.platform === "win32") return `\\\\.\\pipe\\ghostly-${createHash("sha256").update(dir).digest("hex").slice(0, 24)}`;
   if (Buffer.byteLength(inside) <= 100) return inside;
-  return join("/tmp", `ghostly-${createHash("sha256").update(dir).digest("hex").slice(0, 24)}`, "daemon.sock");
+  return runtimePath("ghostly", dir, "daemon.sock");
 }
 
 function ensureFolder(path: string): void {
@@ -114,33 +154,154 @@ export function selectProfile(home: string, name: string): void {
 /**
  * One process per profile: the daemon or a one-shot command. The lock holds the owner's pid; a lock whose
  * process is gone is taken over.
+ *
+ * The lock is a link to a file that already holds the pid, so it never exists empty (agents#1642): one made by
+ * `openSync` + `writeSync` was empty for a moment, and another process read that as nobody's and removed it under its
+ * owner. An empty lock younger than `EMPTY_LOCK_GRACE_MS` is still an older release's being written: busy. A stale
+ * lock is moved aside before it is removed, and only when what was moved is the file judged stale: one that vanished,
+ * or that another process made since, is no longer removed.
+ *
+ * The lock stays the bare pid, as older releases read it; beside it, `<lock>.<pid>.start` holds when that process
+ * started (`processStart`). A lock left by a process that died without releasing it (kill -9, Ctrl-C of a one-shot, a
+ * reboot) whose pid now belongs to another process is then stale too: it held the profile for good, every command busy
+ * until someone found the file. It is written before the lock is placed, so a lock of this release never lacks it for
+ * a moment; one without it (an older release's) is held while its pid is alive, as before.
  */
 export function acquireLock(paths: ProfilePaths): () => void {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const fd = openSync(paths.lock, "wx", 0o600);
-      writeSync(fd, String(process.pid));
-      closeSync(fd);
-      let released = false;
-      return () => {
-        if (released) return;
-        released = true;
-        try { if (readFileSync(paths.lock, "utf8").trim() === String(process.pid)) rmSync(paths.lock, { force: true }); } catch { /* gone already */ }
-      };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  const mine = String(process.pid);
+  const draft = `${paths.lock}.${mine}`;
+  const start = startPath(paths.lock, process.pid);
+  const started = processStart(process.pid);
+  let placed = false;
+  writeFileSync(draft, mine, { mode: 0o600 });
+  if (started !== null) writeFileSync(start, started, { mode: 0o600 });
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (placeLock(draft, paths.lock, mine)) {
+        placed = true;
+        heldHere.add(paths.lock);
+        let released = false;
+        return () => {
+          if (released) return;
+          released = true;
+          heldHere.delete(paths.lock);
+          try { if (readFileSync(paths.lock, "utf8").trim() === mine) rmSync(paths.lock, { force: true }); } catch { /* gone already */ }
+          rmSync(start, { force: true });
+        };
+      }
+      let seen: Stats;
+      try { seen = lstatSync(paths.lock); } catch { continue; }
       const owner = lockOwner(paths);
       if (owner !== null) throw new CliError("busy", `Profile ${paths.name} is in use by process ${owner}`, { pid: owner });
-      rmSync(paths.lock, { force: true });
+      if (seen.size === 0 && Date.now() - seen.mtimeMs < EMPTY_LOCK_GRACE_MS) break;
+      removeStaleLock(paths.lock, seen);
     }
+  } finally {
+    rmSync(draft, { force: true });
+    if (!placed) rmSync(start, { force: true });
   }
   throw new CliError("busy", `Profile ${paths.name} is in use`);
 }
 
-/** The pid holding the profile, or null when nobody (or a process that is gone) does. */
+/** The locks this process holds: a lock naming this pid that is not one of them is a dead holder's whose pid it has now. */
+const heldHere = new Set<string>();
+
+function startPath(lock: string, pid: number): string {
+  return `${lock}.${pid}.start`;
+}
+
+/**
+ * When the process `pid` started, as a text that is the same for as long as it runs and another for the next process
+ * given that pid; null where it cannot be read (Windows, a `/proc` that hides others' processes, no `ps`). On Linux the
+ * boot's id and `/proc/<pid>/stat`'s start time (clock ticks since boot); elsewhere `ps -o lstart=`.
+ */
+export function processStart(pid: number): string | null {
+  try {
+    if (process.platform === "linux") {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+      // Fields after the command, which may hold spaces and parentheses: the start time is field 22.
+      const ticks = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
+      if (!ticks || !/^\d+$/.test(ticks)) return null;
+      return `${readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim()} ${ticks}`;
+    }
+    if (process.platform === "win32") return null;
+    const lstart = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 2_000, env: { ...process.env, LC_ALL: "C" },
+    }).trim();
+    return lstart || null;
+  } catch {
+    return null;
+  }
+}
+
+/** How long an empty lock is taken for one an older release is still writing its pid into. */
+const EMPTY_LOCK_GRACE_MS = 1_000;
+
+/**
+ * Links `draft` (which holds `mine`) as the lock; false when there is a lock already. Where the file system has no
+ * hard links, the lock is made in place, as before.
+ */
+function placeLock(draft: string, lock: string, mine: string): boolean {
+  try {
+    linkSync(draft, lock);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "EEXIST") return false;
+    if (!["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS"].includes(code ?? "")) throw error;
+  }
+  let fd: number;
+  try { fd = openSync(lock, "wx", 0o600); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw error;
+  }
+  writeSync(fd, mine);
+  closeSync(fd);
+  return true;
+}
+
+/**
+ * Removes the lock judged stale (`seen`): it is moved aside first, and removed only when what was moved is that same
+ * file and holds no live pid (a freed inode is soon reused). A lock another process made in the meantime is put back.
+ */
+function removeStaleLock(lock: string, seen: Stats): void {
+  const aside = `${lock}.stale.${process.pid}`;
+  try { renameSync(lock, aside); } catch { return; }
+  try {
+    const moved = lstatSync(aside);
+    if (moved.ino === seen.ino && moved.dev === seen.dev && holder(aside, lock) === null && moved.size === seen.size) {
+      const pid = lockPid(aside);
+      if (pid !== null && pid !== process.pid) rmSync(startPath(lock, pid), { force: true });
+      return;
+    }
+    try { linkSync(aside, lock); } catch { /* another lock is there already */ }
+  } finally {
+    rmSync(aside, { force: true });
+  }
+}
+
+/**
+ * The pid holding the profile, or null when nobody does: the lock's process is gone, or its pid is another process's
+ * now (it started at another time than the lock's holder, or it is this process, which does not hold the lock).
+ */
 export function lockOwner(paths: ProfilePaths): number | null {
+  return holder(paths.lock, paths.lock);
+}
+
+function lockPid(file: string): number | null {
   let pid: number;
-  try { pid = Number(readFileSync(paths.lock, "utf8").trim()); } catch { return null; }
-  if (!Number.isInteger(pid) || pid <= 0) return null;
-  try { process.kill(pid, 0); return pid; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM" ? pid : null; }
+  try { pid = Number(readFileSync(file, "utf8").trim()); } catch { return null; }
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
+/** `file`: the lock, or the stale one moved aside; `lock`: the lock's own path, beside which its start is. */
+function holder(file: string, lock: string): number | null {
+  const pid = lockPid(file);
+  if (pid === null) return null;
+  if (pid === process.pid) return heldHere.has(lock) ? pid : null;
+  try { process.kill(pid, 0); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "EPERM") return null; }
+  let recorded: string;
+  try { recorded = readFileSync(startPath(lock, pid), "utf8").trim(); } catch { return pid; }
+  const now = processStart(pid);
+  return recorded && now !== null && now !== recorded ? null : pid;
 }

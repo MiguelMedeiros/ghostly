@@ -66,6 +66,24 @@ describe("a Desktop viewer window's answer", () => {
     expect(page(response)).toBe(t("errors.extension.openService"));
   });
 
+  it("says the contact's machine answering for their app (`x-ghostly-error`) in the profile's language, from this side", async () => {
+    const said = new Set<string>();
+    for (const language of LANGUAGES) {
+      const t = translatorFor(language);
+      const server = {
+        ready: Promise.resolve(),
+        node: { request: async () => ({ status: 502, headers: [["content-type", "text/plain; charset=utf-8"], ["x-ghostly-error", "unreachable"]], bytes: async () => new TextEncoder().encode("The local service is not reachable.\n") }) },
+      } as unknown as Parameters<typeof answerServiceWindow>[0];
+      const response = await answerServiceWindow(server, request, t, "Demo");
+      expect(response.status).toBe(502);
+      expect(response.headers).toEqual([["content-type", "text/plain; charset=utf-8"]]);
+      expect(page(response)).toBe(t("services.window.notAnswering", { app: "Demo" }));
+      expect(page(response)).toContain("Demo");
+      said.add(page(response));
+    }
+    expect(said.size).toBe(LANGUAGES.length);
+  });
+
   it("drops a header whose value carries CR, LF or NUL or whose name is no token, and keeps cookies on the window's origin", async () => {
     const response = await answerServiceWindow(
       contactAnswering([

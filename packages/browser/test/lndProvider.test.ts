@@ -188,7 +188,7 @@ describe("the LND provider", () => {
   it("goes through the Lightning journal: a lost answer is reconciled by hash and never paid twice", async () => {
     const node = new FakeLndNode();
     const events = { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() };
-    const cashu = { view: async () => ({ balance: 0, mints: [], history: [], feesPaid: 0 }) } as unknown as CashuWallet;
+    const cashu = { balance: async () => 0 } as unknown as CashuWallet;
     const descriptor = { ...lnd, create: async () => new LndLightning(node.transport(), full) };
     const service = new LightningService("testnet", () => [cashuMint, descriptor], () => ({ platform: "web", cashu }), events, CASHU_MINT_SOURCE);
     await service.start();
@@ -264,9 +264,30 @@ describe("reaching LND", () => {
     const fetch = vi.fn(async () => new Response('{"chains":[{"chain":"bitcoin","network":"regtest"}]}'));
     vi.stubGlobal("fetch", fetch);
     invoke.mockClear();
-    await (await lnd.create(settings, host("web"))).info().catch(() => {});
+    await (await lnd.create({ ...settings, secrets: { macaroon: SCOPED } }, host("web"))).info().catch(() => {});
     expect(invoke).not.toHaveBeenCalled();
     expect(fetch).toHaveBeenCalled();
+  });
+
+  it("refuses a certificate it cannot pin, before the macaroon goes anywhere", async () => {
+    const fetch = vi.fn(async () => new Response('{"chains":[{"chain":"bitcoin","network":"regtest"}]}'));
+    vi.stubGlobal("fetch", fetch);
+    const settings = { config: { url: "https://n:8080" }, secrets: { macaroon: SCOPED, certificate: PEM } };
+    const host = (platform: ProviderHost["platform"]): ProviderHost => ({ platform, mode: "testnet", cashu: {} as CashuWallet, signal: new AbortController().signal });
+    // web and extension, the CLI (a "web" host in Node), and a desktop host without its Tauri command
+    for (const platform of ["web", "extension", "desktop"] as const) {
+      const refused = await lnd.create(settings, host(platform)).then(() => undefined, (error: unknown) => error);
+      expect(refused).toMatchObject({ name: "SourceConfigError", message: expect.stringContaining("Only the desktop app can pin") });
+    }
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("fetch outside a page: an unreachable node is not blamed on CORS", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("fetch failed"); }));
+    vi.stubGlobal("location", undefined);
+    const refused = fetchTransport("https://n:8080", "ab").request({ method: "GET", path: "/v1/getinfo", timeoutMs: 1000 });
+    await expect(refused).rejects.toThrow("certificate is one this device trusts");
+    await expect(refused).rejects.not.toThrow("restcors");
   });
 
   it("knows when a payment stream is over", () => {

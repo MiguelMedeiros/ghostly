@@ -85,6 +85,24 @@ export interface MiniAppApi {
     read(id: string, range: { offset: number; length: number }): Promise<ArrayBuffer>;
     /** Drops one link, or every link with "all". The file itself is never touched. */
     forget(id: string): Promise<void>;
+    /**
+     * Lets the same app on the contact's side read one kept file (the `chat` permission too, in a chat open on both
+     * sides): answers a serve id for the app to tell its contact in its own `chat.send`. It lasts until `unserve`, this
+     * side or the contact closes the app, or the session ends.
+     */
+    serve(id: string): Promise<string>;
+    /** Ends one serve. A serve id that is no longer served is no error. */
+    unserve(serveId: string): Promise<void>;
+  };
+  /**
+   * Files the contact's app serves in this chat (the `chat` permission): absent in a client that has no read lane, so
+   * an app tests for it and keeps its own way for such a contact.
+   */
+  remote?: {
+    /** At most `MINI_APP_LIMITS.remoteReadBytes` from `offset`; fewer at the end of the file. */
+    read(serveId: string, range: { offset: number; length: number }): Promise<ArrayBuffer>;
+    /** The served file's size in bytes. */
+    stat(serveId: string): Promise<{ size: number }>;
   };
   /** Ends the app. */
   close(): Promise<void>;
@@ -103,6 +121,10 @@ export type MiniAppRequestType =
   | "files.list"
   | "files.read"
   | "files.forget"
+  | "files.serve"
+  | "files.unserve"
+  | "remote.read"
+  | "remote.stat"
   | "close";
 
 /** A request from the app: `{id, type, args}`. The broker refuses an unknown `type`. */
@@ -122,18 +144,23 @@ export interface MiniAppRequest {
  * - `bad-path`: a `file` path that is not a string of 1 to 1024 characters.
  * - `bad-request`: a request that is not `{id, type, args}` with JSON arguments, or whose arguments are not the call's.
  * - `cancelled`: `files.pick` that the person closed without picking anything.
- * - `changed`: `files.read` of a file whose size or date changed since it was picked: it is picked again to be read.
+ * - `changed`: `files.read` (or the contact's `remote.read` of it) of a file whose size or date changed since it was
+ *   picked: it is picked again to be read.
  * - `failed`: anything else; the client's own words never reach the app.
  * - `full`: a storage write would take the scope past 5 MiB (each key counts 128 bytes, its own bytes eight times and
  *   its value's), so the app can make room.
- * - `gone`: `files.read` of a file that is no longer there, or that the client cannot read now (`available` false), or
- *   of an id it does not keep.
+ * - `gone`: `files.read` (or the contact's `remote.read` of it) of a file that is no longer there, or that the client
+ *   cannot read now (`available` false), or of an id it does not keep; `files.serve` of such an id.
  * - `no-file`: the bundle has no such file.
  * - `not-allowed`: `chat.send` without the `chat` permission, or with the app opened alone; `files.*` without the
- *   `files` permission, or in a client that cannot keep links.
+ *   `files` permission, or in a client that cannot keep links; `files.serve` also without `chat` or with the app opened
+ *   alone, and `remote.*` without `chat` or with the app opened alone.
  * - `not-open`: `chat.send` before this side's chat has the app open.
- * - `offline`: `chat.send` while the chat's session is not live. Nothing is kept to send later.
- * - `peer-closed`: `chat.send` while the contact has not opened the app (or its client does not offer `apps/1`).
+ * - `not-served`: `remote.read` or `remote.stat` of a serve id the contact does not serve now (never, or no longer).
+ * - `offline`: `chat.send`, `files.serve`, `remote.read` or `remote.stat` while the chat's session is not live.
+ *   Nothing is kept to send later.
+ * - `peer-closed`: `chat.send` or `files.serve` while the contact has not opened the app (or its client does not offer
+ *   `apps/1`, or for `files.serve` and `remote.*` the read lane, `app-ranges/1`).
  * - `stopped`: a store removed or the publisher revoked the version running.
  * - `too-fast`: past 50 requests a second, past 48 `chat.send` frames a second, or a `chat.send` while the chat's
  *   connection is still sending earlier ones (back off and send again).
@@ -143,7 +170,7 @@ export interface MiniAppRequest {
  * A later client may add a code: treat one you do not know as `failed`.
  */
 export const MINI_APP_ERROR_CODES = [
-  "bad-key", "bad-path", "bad-request", "cancelled", "changed", "failed", "full", "gone", "no-file", "not-allowed", "not-open", "offline",
+  "bad-key", "bad-path", "bad-request", "cancelled", "changed", "failed", "full", "gone", "no-file", "not-allowed", "not-open", "not-served", "offline",
   "peer-closed", "stopped", "too-fast", "too-large", "unknown-type",
 ] as const;
 export type MiniAppErrorCode = typeof MINI_APP_ERROR_CODES[number];
@@ -177,13 +204,15 @@ export const MINI_APP_LIMITS = {
   /** Requests per second, per app. */
   requestsPerSecond: 50,
   /**
-   * Bytes of `file`, `files.read` and `files.list` answers per second, per app, counted together: a whole bundle's
+   * Bytes of `file`, `files.read`, `files.list` and `remote.read` answers per second, per app, counted together: a whole bundle's
    * worth. A request that starts under it is answered whole; past it the request is refused with `too-fast` until the
    * second has gone.
    */
   fileBytesPerSecond: 16 * 1024 * 1024,
   /** One `files.read`, at most. */
   filesReadBytes: 1024 * 1024,
+  /** One `remote.read`, at most: one `ar-get` of the read lane. */
+  remoteReadBytes: 1024 * 1024,
   /** The links an app keeps, at most: a pick that would pass it is refused with `too-large`. */
   filesEntries: 100_000,
   /** Extensions a `files.pick` may name in `accept`, each 1 to 16 characters of `a-z` and `0-9`. */

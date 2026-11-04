@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createIdentity, identityFromSeedB64, type Identity } from "../src/identity";
-import { BACKGROUND_REQUESTS_PER_MINUTE, DEFAULT_RELAYS, RelayTransport } from "../src/relay";
+import { BACKGROUND_REQUESTS_PER_MINUTE, DEFAULT_RELAYS, RELAY_REQUESTS_PER_MINUTE, RelayTransport } from "../src/relay";
 import { fromBase64Url } from "../src/bytes";
 import { buildLinkRecords, emptyLinkRecords } from "../src/records";
 import { createLink, type LinkParams } from "../src/invite";
@@ -14,6 +14,7 @@ import {
   PRESENCE_WINDOW,
   presenceSeenAt,
   RELAY_POLL_INTERVALS,
+  SIGNAL_OUT_READS,
   STALLED_LOOK_MS,
   WATCH_PEER_MS,
   DEPARTED_READ_MS,
@@ -328,6 +329,36 @@ describe("LinkSession presence and signals", () => {
     await a.s.stop(false);
   });
 
+  it("a background write the budget holds back for a while goes again when its share frees, not every 4 s; a chat's write keeps its turn", async () => {
+    // An idle admin's daemon built and signed 1,041 packets in 9 minutes that the budget refused again (bug hunt, 2026-10-19).
+    const { a, b } = pair({ getServices: () => [] }, { getServices: () => [] });
+    a.s.start();
+    b.s.start();
+    await settle();
+    const lastPublish = () => (a.transport.publish.mock.lastCall as unknown[] | undefined)?.[2];
+    a.s.setDataLinkOpen(true);
+    a.transport.failPublish = new DiscoveryBudgetError(30_000);
+    await vi.advanceTimersByTimeAsync(PRESENCE_HEARTBEAT);
+    expect(lastPublish()).toEqual({ background: true });
+    const held = a.transport.publish.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(a.transport.publish.mock.calls.length).toBe(held);
+    // Its share frees: it goes.
+    a.transport.failPublish = null;
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(a.transport.publish.mock.calls.length).toBe(held + 1);
+    expect(lastPublish()).toEqual({ background: true });
+    // A chat's write held back the same way tries again within 4 s, which keeps it first in line (`WRITE_FIRST_MS`).
+    a.transport.failPublish = new DiscoveryBudgetError(30_000);
+    expect(await a.s.sendMessage("held")).toBeNull();
+    expect(lastPublish()).toBeUndefined();
+    const chat = a.transport.publish.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(a.transport.publish.mock.calls.length).toBeGreaterThan(chat);
+    a.transport.failPublish = null;
+    await a.s.stop(false);
+  });
+
   it("raises each call and RTC signal once, not on every poll", async () => {
     const { a, b } = pair();
     b.s.start();
@@ -527,7 +558,7 @@ describe("LinkSession presence and signals", () => {
     await expect(a.s.setRtcSignal(null, true)).rejects.toThrow("relay down");
   });
 
-  it("marks as signaling the publish of a new offer or answer and the fast reads for the answer to its offer, nothing else", async () => {
+  it("marks as signaling the publish of a new offer or answer, the fast reads for the answer to its offer and the first ones after its answer, nothing else", async () => {
     const { a } = pair({ getServices: () => [] });
     a.s.start();
     await settle();
@@ -550,6 +581,20 @@ describe("LinkSession presence and signals", () => {
     a.s.pollNow();
     await settle();
     expect(lastRead()).toMatchObject({ urgent: true });
+    expect(lastRead()).not.toHaveProperty("signal");
+    // An answer: its first fast reads are signaling (the offerer may have given up the offer it answered and made another).
+    await a.s.setRtcSignal('{"t":"a"}');
+    expect(lastPublish()).toEqual({ signal: true });
+    // (The first read is the one a new signal makes at once.)
+    await settle();
+    expect(lastRead()).toMatchObject({ urgent: true, signal: true });
+    for (let i = 1; i < SIGNAL_OUT_READS; i++) {
+      a.s.pollNow();
+      await settle();
+      expect(lastRead()).toMatchObject({ urgent: true, signal: true });
+    }
+    a.s.pollNow();
+    await settle();
     expect(lastRead()).not.toHaveProperty("signal");
     await a.s.stop(false);
   });
@@ -707,9 +752,10 @@ describe("LinkSession poll pacing", () => {
     await vi.advanceTimersByTimeAsync(15_000);
     const reads = requests.filter((r) => r.method === "GET").length;
     await expect(relays.publish(createIdentity(), [{ label: "_ts", value: "1" }])).resolves.toBeUndefined();
-    expect(requests.filter((r) => r.method === "PUT").map((r) => r.at)).toEqual([15_000, 15_000]);
-    // The chats' reads took the background share of each relay's minute, not the minute.
-    expect(reads).toBe(2 * BACKGROUND_REQUESTS_PER_MINUTE);
+    expect(requests.filter((r) => r.method === "PUT").map((r) => r.at)).toEqual(DEFAULT_RELAYS.map(() => 15_000));
+    // The chats' reads took the background share of each relay's minute, not the minute: 20 on a relay of 30 or 60,
+    // two thirds of pkarr.miguelmedeiros.dev's 5, so its write still went out there.
+    expect(reads).toBe(2 * BACKGROUND_REQUESTS_PER_MINUTE + Math.ceil(RELAY_REQUESTS_PER_MINUTE["https://pkarr.miguelmedeiros.dev"] * 2 / 3));
     for (const chat of chats) await chat.stop(false);
   });
 
@@ -868,6 +914,38 @@ describe("LinkSession poll pacing", () => {
     expect(a.s.peerPresence.online).toBe(true);
     // Answered: from then on a read is the contact's like any other.
     a.s.pollNow();
+    await settle();
+    expect(last()?.resume).toBeUndefined();
+    await a.s.stop(false);
+    await b.s.stop(false);
+  });
+
+  // agents#1740: the edge to a member a hub just let in polled as plain fast reads, which the hub's admissions in a row
+  // had spent: 22-39 s before the newcomer could send, receive or leave.
+  it("an awaited peer's reads go as a resume's (the relays' floor) until its packet is read", async () => {
+    const { a, b } = pair({}, { getServices: () => [] });
+    a.s.start();
+    await settle();
+    const last = () => (a.transport.resolve.mock.calls.at(-1) as unknown[] | undefined)?.[1] as { resume?: boolean } | undefined;
+    expect(last()?.resume).toBeUndefined();
+    a.s.expectPeer(true);
+    await settle();
+    expect(last()?.resume).toBe(true);
+    // Not there yet: still awaited.
+    a.s.pollNow();
+    await settle();
+    expect(last()?.resume).toBe(true);
+    // Its packet read: a read like any other.
+    b.s.start();
+    await settle();
+    a.s.pollNow();
+    await settle();
+    expect(a.s.peerPresence.online).toBe(true);
+    a.s.pollNow();
+    await settle();
+    expect(last()?.resume).toBeUndefined();
+    // A plain expectPeer (an entry session, a chat) never says so.
+    a.s.expectPeer();
     await settle();
     expect(last()?.resume).toBeUndefined();
     await a.s.stop(false);

@@ -1,9 +1,9 @@
-import { appendFileSync, closeSync, existsSync, fstatSync, openSync, readSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import type { AppFrameEvent } from "@ghostly/core";
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { EngineEvent, RpcResponse } from "@ghostly/browser/shared/rpc";
 import type { EngineState, GroupView, LinkView, PinView, StoredMessage } from "@ghostly/browser/shared/types";
-import { chatJson, chatMessageJson, groupJson, groupMessageJson } from "./views";
+import { chatJson, chatMessageJson, groupJson, groupMessageJson, type MessageJson } from "./views";
 import { paymentJson } from "./wallets";
 
 /**
@@ -18,6 +18,11 @@ export const JOURNAL_KEEP = 10_000;
 export const JOURNAL_KEEP_BYTES = 16 * 1024 * 1024;
 /** A journal past this is trimmed, and only this much of its end is ever read. */
 export const JOURNAL_MAX_BYTES = 2 * JOURNAL_KEEP_BYTES;
+/**
+ * Up to this many ids removed at once, the journal's bytes are searched for each (`forget`); more are matched against
+ * each line once, read whole: 2,000 ids searched line by line held a daemon 12 s on a journal of 10,000 events.
+ */
+const FORGET_SEARCHED_IDS = 16;
 const SEEN_DB = "ghostly-cli";
 const SEEN = "seen";
 
@@ -33,7 +38,10 @@ const SWEEP_EVERY_MS = 6 * 3_600_000;
 /** How long a `file.*` event waits for the message that carries its file. */
 export const FILE_MESSAGE_WAIT_MS = 2_000;
 
-/** The notice an app sends when a chat first goes live (apps/ui/src/hooks/useChat.ts): shown as a line, not a message. */
+/**
+ * The notice an app sends when a chat first goes live (apps/ui/src/hooks/useChat.ts): shown as a line, not a message.
+ * The contact's only on the row the engine took as their joined line (`StoredMessage.joinLine`).
+ */
 export const JOIN_NOTICE = /^👋 (?:(.+) )?joined$/;
 
 type Listener = (event: GhostlyEvent) => void;
@@ -49,6 +57,13 @@ interface GroupShape { status: string | null; members: string[]; typing: Record<
  */
 export class EventHub {
   private seq = 0;
+  /**
+   * The last seq the journal dropped (a trim, a journal set aside), kept in `<journal>.dropped`: a replay from before it
+   * starts with `events.gap`. What the person removed (`forget`) leaves holes after it, which are none.
+   */
+  private dropped = 0;
+  /** Whether `<journal>.dropped` is written: before `forget` first takes a journal's first events, it must be. */
+  private marked = false;
   private journalLines = 0;
   private journalBytes = 0;
   private readonly listeners = new Set<Listener>();
@@ -87,20 +102,24 @@ export class EventHub {
   async open(): Promise<void> {
     // A journal that cannot be read never keeps the profile from opening: it is set aside and a new one begins.
     try {
+      const dropped = readDropped(this.journalPath + ".dropped");
       if (existsSync(this.journalPath)) {
-        const { lines, size } = journalTail(this.journalPath);
-        this.journalLines = lines.length;
+        const { seq, first, lines, size } = journalEnd(this.journalPath);
+        this.journalLines = lines;
         this.journalBytes = size;
-        for (let i = lines.length - 1; i >= 0; i--) {
-          try { this.seq = (JSON.parse(lines[i]) as GhostlyEvent).seq; break; } catch { /* a torn last line */ }
-        }
-        if (size > JOURNAL_MAX_BYTES || lines.length > JOURNAL_KEEP * 2) this.trimJournal();
-      }
+        this.seq = seq;
+        // No mark (the journal never lost its first events since it had one, or it is from before marks): what is
+        // missing before its first event counts as dropped.
+        this.dropped = dropped ?? (first === undefined ? seq : first - 1);
+        this.marked = dropped !== undefined;
+        if (size > JOURNAL_MAX_BYTES || lines > JOURNAL_KEEP * 2) this.trimJournal();
+      } else if (dropped !== undefined) rmSync(this.journalPath + ".dropped", { force: true });
     } catch (error) {
       process.stderr.write(`ghostly: the event journal could not be read, a new one begins: ${error instanceof Error ? error.message : String(error)}\n`);
       try { renameSync(this.journalPath, this.journalPath + ".unreadable"); } catch { /* best effort */ }
       this.journalLines = 0;
       this.journalBytes = 0;
+      this.markDropped(this.seq);
     }
     this.db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(this.seenDb, 1);
@@ -211,15 +230,29 @@ export class EventHub {
   /** A frame of a contact's mini-app (apps/1), as the engine gives it: the app named by its chat app id. */
   onAppFrame(listener: (chat: string, frame: AppFrameEvent) => void): () => void { this.appListeners.add(listener); return () => this.appListeners.delete(listener); }
 
-  /** Events after `since` still in the journal; a gap event first when older ones were dropped. */
+  /**
+   * Events after `since` still in the journal; a gap event first when older ones were dropped (`dropped`). The events of
+   * what the person removed (`forget`) are no gap: they are not here on purpose.
+   */
   replay(since: number): GhostlyEvent[] {
     if (!existsSync(this.journalPath) || since >= this.seq) return [];
     const out: GhostlyEvent[] = [];
     for (const line of journalTail(this.journalPath).lines) {
       try { const event = JSON.parse(line) as GhostlyEvent; if (event.seq > since) out.push(event); } catch { /* torn */ }
     }
-    if (out.length && out[0].seq > since + 1) out.unshift({ seq: since, id: `events.gap:${since}:${out[0].seq}`, type: "events.gap", at: this.now(), from: since + 1, to: out[0].seq - 1 });
+    if (out.length && out[0].seq > since + 1 && since < this.dropped)
+      out.unshift({ seq: since, id: `events.gap:${since}:${out[0].seq}`, type: "events.gap", at: this.now(), from: since + 1, to: Math.min(this.dropped, out[0].seq - 1) });
     return out;
+  }
+
+  /**
+   * Notes that the journal no longer holds the events up to `seq`. Written before the journal is: a stop in between
+   * leaves the mark ahead of the journal (a gap said where none was), never behind it (a gap not said).
+   */
+  private markDropped(seq: number): void {
+    this.dropped = seq;
+    try { writeFileSync(this.journalPath + ".dropped", String(seq), { mode: 0o600 }); this.marked = true; }
+    catch (error) { process.stderr.write(`ghostly: event journal error: ${error instanceof Error ? error.message : String(error)}\n`); }
   }
 
   get lastSeq(): number { return this.seq; }
@@ -264,6 +297,8 @@ export class EventHub {
     let start = lines.length, bytes = 0;
     while (start > 0 && bytes + Buffer.byteLength(lines[start - 1]) + 1 <= JOURNAL_KEEP_BYTES) bytes += Buffer.byteLength(lines[--start]) + 1;
     const kept = lines.slice(start);
+    const first = firstSeq(kept);
+    this.markDropped(Math.max(this.dropped, first === undefined ? this.seq : first - 1));
     writeFileSync(this.journalPath + ".tmp", kept.length ? kept.join("\n") + "\n" : "", { mode: 0o600 });
     renameSync(this.journalPath + ".tmp", this.journalPath);
     this.journalLines = kept.length;
@@ -273,23 +308,45 @@ export class EventHub {
   /**
    * What was removed here leaves the journal too: the journal is written again without the events that name it (a
    * line that names it and cannot be read goes as well), and a journal set aside as unreadable, which cannot be sorted,
-   * is deleted. `ids`: what was removed (a message's id, a chat's or a group's); `gone`: whether an event is of it.
+   * is deleted. `ids`: what was removed (a message's id, a chat's or a group's); `gone`: whether an event is of it;
+   * `unquote`: an event that stays, written again without what it quotes of the removed (a reply's event), else none.
    */
-  private forget(ids: readonly string[], gone: (event: GhostlyEvent) => boolean): void {
+  private forget(ids: readonly string[], gone: (event: GhostlyEvent) => boolean, unquote: (event: GhostlyEvent) => GhostlyEvent | undefined = () => undefined): void {
     if (!ids.length) return;
     try {
       rmSync(this.journalPath + ".unreadable", { force: true });
       if (!existsSync(this.journalPath)) return;
-      const lines = journalTail(this.journalPath).lines;
-      const kept = lines.filter((line) => {
-        if (!ids.some((id) => line.includes(JSON.stringify(id)))) return true;
-        try { return !gone(JSON.parse(line) as GhostlyEvent); } catch { return false; }
+      const { bytes, start } = journalWindow(this.journalPath);
+      // A few ids: looked for in the bytes, and only the lines from the first one that names one are read (a message
+      // deleted is most often a recent one, its events at the end). None named: nothing to write. Many (a chat removed
+      // with its history, a long change): every line is read once, against all of them at once.
+      const needles = ids.map((id) => JSON.stringify(id)), few = ids.length <= FORGET_SEARCHED_IDS;
+      const names = (line: string) => needles.some((needle) => line.includes(needle));
+      let from = few ? bytes.length : start;
+      if (few) for (const needle of needles) { const at = bytes.indexOf(needle, start); if (at !== -1 && at < from) from = at; }
+      if (from === bytes.length) return;
+      from = Math.max(start, bytes.lastIndexOf(10, from) + 1);
+      const lines = bytes.toString("utf8", from).split("\n").filter(Boolean);
+      let changed = false;
+      const kept = lines.flatMap((line) => {
+        if (few && !names(line)) return [line];
+        let event: GhostlyEvent;
+        // A line that names one and cannot be read goes.
+        try { event = JSON.parse(line) as GhostlyEvent; } catch { if (!few && !names(line)) return [line]; changed = true; return []; }
+        if (gone(event)) { changed = true; return []; }
+        const written = unquote(event);
+        if (!written) return [line];
+        changed = true;
+        return [JSON.stringify(written)];
       });
-      if (kept.length === lines.length) return;
-      writeFileSync(this.journalPath + ".tmp", kept.length ? kept.join("\n") + "\n" : "", { mode: 0o600 });
+      if (!changed) return;
+      // Without a mark, the next start would take the events removed at the journal's start for dropped ones.
+      if (!this.marked) this.markDropped(this.dropped);
+      const tail = kept.length ? kept.join("\n") + "\n" : "";
+      writeFileSync(this.journalPath + ".tmp", Buffer.concat([bytes.subarray(start, from), Buffer.from(tail)]), { mode: 0o600 });
       renameSync(this.journalPath + ".tmp", this.journalPath);
-      this.journalLines = kept.length;
-      this.journalBytes = kept.reduce((bytes, line) => bytes + Buffer.byteLength(line) + 1, 0);
+      this.journalLines -= lines.length - kept.length;
+      this.journalBytes = from - start + Buffer.byteLength(tail);
     } catch (error) {
       process.stderr.write(`ghostly: event journal error: ${error instanceof Error ? error.message : String(error)}\n`);
     }
@@ -352,7 +409,8 @@ export class EventHub {
       if (!quiet) this.emit("chat.removed", `chat.removed:${id}`, { chat: id });
     }
     // A chat removed deletes its history here: its events go too, but for its removal.
-    this.forget(removedChats, (event) => removedChats.includes(event.chat as string) && event.type !== "chat.removed");
+    const chatsGone = new Set(removedChats);
+    this.forget(removedChats, (event) => chatsGone.has(event.chat as string) && event.type !== "chat.removed");
     const groups = new Map(state.groups.map((group) => [group.id, group]));
     for (const [id, group] of groups) {
       const shape = groupShape(group), before = this.groups.get(id);
@@ -380,7 +438,8 @@ export class EventHub {
       if (!quiet) this.emit("group.removed", `group.removed:${id}`, { group: id });
     }
     // A group left or forgotten: the same.
-    this.forget(removedGroups, (event) => removedGroups.includes(event.group as string) && event.type !== "group.removed");
+    const groupsGone = new Set(removedGroups);
+    this.forget(removedGroups, (event) => groupsGone.has(event.group as string) && event.type !== "group.removed");
     for (const [id, payment] of Object.entries(state.payments ?? {})) {
       const shape = `${payment.state}|${payment.error ?? ""}|${payment.closed ? 1 : 0}`, before = this.payments.get(id);
       this.payments.set(id, shape);
@@ -394,8 +453,11 @@ export class EventHub {
         const key = `${link.id}:${identity.id}`, shape = identity.status, before = this.received.get(key);
         this.received.set(key, shape);
         if (quiet || before === shape) continue;
-        this.emit(before === undefined ? "identity.received" : "identity.status", `identity.${before === undefined ? "received" : "status"}:${key}:${shape}`, {
-          chat: link.id, identity: { id: identity.id, provider: identity.provider, subject: identity.subject, status: identity.status, verified: identity.verified },
+        // A proof can come back to a status it had (a record removed and restored, a re-share after a withdraw): each
+        // change is a new fact, so its id carries the time and the sequence, as a typing change does.
+        const id = before === undefined ? `identity.received:${key}:${shape}` : `identity.status:${key}:${shape}:${this.now()}:${this.seq + 1}`;
+        this.emit(before === undefined ? "identity.received" : "identity.status", id, {
+          chat: link.id, identity: { id: identity.id, provider: identity.provider, subject: identity.subject, status: identity.status, verified: identity.verified, error: identity.error ?? null },
         });
       }
     }
@@ -530,7 +592,9 @@ export class EventHub {
           const type = message.event ? "group.event" : message.sender === "peer" ? "group.message" : "group.sent";
           this.emit(type, `${type}:${group}:${message.id}`, { group, message: json() });
         } else {
-          const notice = JOIN_NOTICE.exec(message.text);
+          // The contact's joined line is the row the engine took as it (`joinLine`), as the app draws it: any other row of
+          // theirs in those words is a message. Mine by the words.
+          const notice = (message.sender === "me" || message.joinLine) ? JOIN_NOTICE.exec(message.text) : null;
           const type = notice ? (message.sender === "peer" ? "chat.joined" : "chat.announced") : message.sender === "peer" ? "message.received" : "message.sent";
           this.emit(type, `${type}:${chat}:${message.id}`, { chat, message: json(), ...(notice ? { name: notice[1] ?? null } : {}) });
         }
@@ -568,11 +632,18 @@ export class EventHub {
     }
     if (changes.length) this.persist(chat, changes);
     // A message deleted here leaves the journal with its texts, its edits, its reactions, its presses and its files:
-    // its deletion stays. A group's history gone whole (left, forgotten) takes every message event of the group.
-    const whole = !!group && !deleted && messages.length === 0 && gone.length > 0;
-    this.forget(whole ? [group] : gone, (event) => (group ? event.group === group : event.chat === chat) && !event.type.endsWith(".deleted") && (whole
+    // its deletion stays. A group's history gone whole (left, forgotten) takes every message event of the group. A
+    // reply to it stays, its quote as history gives it ("Original message deleted"): no text of the original.
+    const whole = !!group && !deleted && messages.length === 0 && gone.length > 0, goneIds = new Set(gone);
+    const here = (event: GhostlyEvent) => (group ? event.group === group : event.chat === chat);
+    this.forget(whole ? [group] : gone, (event) => here(event) && !event.type.endsWith(".deleted") && (whole
       ? "message" in event || "messageId" in event || "replyId" in event
-      : gone.includes(event.messageId as string) || gone.includes((event.message as { id?: string } | undefined)?.id as string) || gone.includes(event.replyId as string)));
+      : goneIds.has(event.messageId as string) || goneIds.has((event.message as { id?: string } | undefined)?.id as string) || goneIds.has(event.replyId as string)),
+    (event) => {
+      const message = event.message as MessageJson | undefined;
+      if (whole || !here(event) || !message?.replyTo || !goneIds.has(message.replyTo.id) || message.replyTo.deleted) return;
+      return { ...event, message: { ...message, replyTo: { ...message.replyTo, snippet: "", found: false, deleted: true } } };
+    });
     // After the message's own event: what waited for it goes now.
     for (const [fileId, messageId] of files) this.flushFile(fileId, messageId);
   }
@@ -724,6 +795,59 @@ function groupShape(group: GroupView): GroupShape {
  * a journal grown past what a string can hold (or a trim's bound) is still read, and in bounded time.
  */
 function journalTail(path: string): { lines: string[]; size: number } {
+  const { bytes, start, size } = journalWindow(path);
+  return { lines: bytes.toString("utf8", start).split("\n").filter(Boolean), size };
+}
+
+/**
+ * What opening needs of the journal: its last seq, its number of lines (as `journalTail` counts them) and its size. The
+ * lines are counted by their bytes and only the last whole one is made into text.
+ */
+function journalEnd(path: string): { seq: number; first: number | undefined; lines: number; size: number } {
+  const { bytes, start, size } = journalWindow(path);
+  let lines = 0;
+  for (let from = start; from < bytes.length;) {
+    const end = bytes.indexOf(0x0a, from);
+    const stop = end === -1 ? bytes.length : end;
+    if (stop > from) lines++;
+    from = stop + 1;
+  }
+  let first: number | undefined;
+  for (let from = start; from < bytes.length && first === undefined;) {
+    const end = bytes.indexOf(0x0a, from);
+    const stop = end === -1 ? bytes.length : end;
+    if (stop > from) first = firstSeq([bytes.toString("utf8", from, stop)]);
+    from = stop + 1;
+  }
+  let seq = 0;
+  for (let stop = bytes.length; stop > start;) {
+    const from = Math.max(start, bytes.lastIndexOf(0x0a, stop - 1) + 1);
+    if (from < stop) {
+      try { seq = (JSON.parse(bytes.toString("utf8", from, stop)) as GhostlyEvent).seq; break; } catch { /* a torn last line */ }
+    }
+    stop = from - 1;
+  }
+  return { seq, first, lines, size };
+}
+
+/** The seq of the first of these lines that can be read. */
+function firstSeq(lines: readonly string[]): number | undefined {
+  for (const line of lines) {
+    try { const { seq } = JSON.parse(line) as GhostlyEvent; if (typeof seq === "number") return seq; } catch { /* torn */ }
+  }
+  return undefined;
+}
+
+/** The journal's dropped mark (`EventHub.dropped`), or undefined when there is none (a journal from before it). */
+function readDropped(path: string): number | undefined {
+  try {
+    const seq = Number(readFileSync(path, "utf8").trim());
+    return Number.isSafeInteger(seq) && seq >= 0 ? seq : undefined;
+  } catch { return undefined; }
+}
+
+/** The bytes of the journal's last `JOURNAL_MAX_BYTES`, `start` where its first whole line begins in them, and its size. */
+function journalWindow(path: string): { bytes: Buffer; start: number; size: number } {
   const fd = openSync(path, "r");
   try {
     const size = fstatSync(fd).size;
@@ -736,9 +860,9 @@ function journalTail(path: string): { lines: string[]; size: number } {
       if (!n) break;
       read += n;
     }
-    const lines = buffer.toString("utf8", 0, read).split("\n");
-    if (from > 0) lines.shift();
-    return { lines: lines.filter(Boolean), size };
+    const bytes = buffer.subarray(0, read);
+    // The line cut by the window is not whole: it is left out.
+    return { bytes, start: from > 0 ? bytes.indexOf(10) + 1 || bytes.length : 0, size };
   } finally {
     closeSync(fd);
   }

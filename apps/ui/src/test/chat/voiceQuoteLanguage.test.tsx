@@ -31,6 +31,17 @@ describe("a voice message or a video quoted or pinned, in Portuguese", () => {
     expect(messageSnippet(voice)).toBe("🎤 Voice message (0:07)");
   });
 
+  it("an app card is quoted and pinned as the card names it, in the reader's language, not its English fallback and link", () => {
+    const url = "https://raw.githubusercontent.com/ana/chess/HEAD/chess.ghostlyapp";
+    const app: ChatMessage = { id: `peer_${"A".repeat(22)}`, text: `🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\n${url}`, sender: "peer", timestamp: 1_700_000_002_000,
+      card: { kind: "app", id: "a".repeat(22), ref: "r".repeat(52), digest: "d".repeat(43), sequence: 1, title: "Chess", version: "1.2.0", url, opened: true } };
+    const zh = translateWith(locales.zh, "zh");
+    expect(messageSnippet(app, zh)).toBe("🧩 应用：Chess 1.2.0");
+    expect(quoteFor({ id: "A".repeat(22), snippet: "", from: "peer", messageId: app.id }, replyIndex([app]), () => "Ana", zh).snippet).toBe("🧩 应用：Chess 1.2.0");
+    renderApp(<PinnedBar pin={{ id: "A".repeat(22), messageId: app.id } as never} index={replyIndex([app])} />, { language: "zh" });
+    expect(screen.getByTestId("pinned-snippet")).toHaveTextContent(/^🧩 应用：Chess 1\.2\.0$/);
+  });
+
   it("the pinned bar says it in the reader's language", () => {
     renderApp(<PinnedBar pin={{ id: WIRE, messageId: voice.id } as never} index={replyIndex([voice])} />, { language: "pt" });
     expect(screen.getByTestId("pinned-snippet")).toHaveTextContent("🎤 Mensagem de voz (0:07)");

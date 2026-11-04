@@ -1,0 +1,1 @@
+What moves in a handoff now lists a chat's ratchet state ([4xx · Forward Secrecy](../../4xx-ratchet.md), a draft): it never moves, the new active device starts a new session with each contact, and the device that goes to standby drops its copy.

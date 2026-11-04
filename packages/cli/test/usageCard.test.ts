@@ -60,10 +60,46 @@ describe("usage send", () => {
     });
     expect(params(["--all", "--left", "5"])).toMatchObject({ chat: undefined, all: true, card: { left: 5 } });
     expect(() => params(["--left", "5"])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/Name a chat or group, or give --all/) }));
+    // Both, as neither: a usage error (exit 2) before the profile opens, not the API's bad_request (exit 1).
+    expect(() => params(["Miguel", "--all", "--left", "5"])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/not both/) }));
     expect(() => params(["Miguel", "--also", "week"])).toThrow(/--also takes window=percent/);
     expect(() => params(["Miguel", "--resets", "soon"])).toThrow(/--resets takes a time/);
     expect(() => params(["Miguel", "--left", "50", "--resets", "1791849403"])).toThrow(expect.objectContaining({ code: "usage", message: "--resets takes milliseconds, not seconds: 1791849403000" }));
     expect(() => params(["Miguel", "--left", "50", "--also", "week=80@1791849403"])).toThrow(/--also takes milliseconds, not seconds/);
+  });
+
+  it("reads --resets and --also's time with no zone as local time, a bare date as local midnight (agents#2355)", () => {
+    const zone = process.env.TZ;
+    try {
+      process.env.TZ = "America/Sao_Paulo";
+      // Before, 2026-11-03 was UTC midnight: the card said the window resets at 21:00 the day before.
+      expect(params(["Miguel", "--left", "50", "--resets", "2026-11-03", "--also", "week=80@2026-11-03", "--also", "opus=40@2026-11-03 09:00", "--also", "day=10@2026-11-03Z"]).card).toMatchObject({
+        resetsAt: Date.UTC(2026, 10, 3, 3),
+        windows: [{ window: "week", resetsAt: Date.UTC(2026, 10, 3, 3) }, { window: "opus", resetsAt: Date.UTC(2026, 10, 3, 12) }, { window: "day", resetsAt: Date.UTC(2026, 10, 3) }],
+      });
+    } finally {
+      if (zone === undefined) delete process.env.TZ; else process.env.TZ = zone;
+    }
+    for (const flag of ["resets", "also"] as const) expect(COMMANDS["usage send"]!.options![flag].description).toMatch(/no zone: local time/);
+  });
+
+  it("refuses a day the month does not have in --resets and --also, where the card showed the next month's first day", () => {
+    expect(() => params(["Miguel", "--left", "40", "--resets", "2026-04-31"])).toThrow(expect.objectContaining({ code: "usage", message: "--resets takes a day the month has (2026-04 has 30), not \"2026-04-31\"" }));
+    expect(() => params(["Miguel", "--left", "40", "--also", "week=80@2026-02-30"])).toThrow(expect.objectContaining({ code: "usage", message: "--also takes a day the month has (2026-02 has 28), not \"2026-02-30\"" }));
+  });
+
+  it("refuses a --resets or --also time more than a year ahead as a usage error (exit 2) that names the flag and the last time it takes", () => {
+    const zone = process.env.TZ;
+    try {
+      process.env.TZ = "UTC";
+      vi.useFakeTimers({ toFake: ["Date"], now: Date.UTC(2026, 10, 4, 11, 30, 20) });
+      // Before, bad_request (exit 1): "Status card: resetsAt is a time in milliseconds, within a year", and windows[0].resetsAt.
+      expect(() => params(["Miguel", "--left", "40", "--resets", "2028-01-01"])).toThrow(expect.objectContaining({ code: "usage", message: "--resets takes a time within a year from now (until 2027-11-05 11:30), not \"2028-01-01\"" }));
+      expect(() => params(["Miguel", "--left", "40", "--also", "week=80@2028-01-01"])).toThrow(expect.objectContaining({ code: "usage", message: "--also takes a time within a year from now (until 2027-11-05 11:30), not \"2028-01-01\"" }));
+      expect(params(["Miguel", "--left", "40", "--resets", "2027-11-05 11:30", "--also", "week=80@2026-11-01"]).card).toMatchObject({ resetsAt: Date.UTC(2027, 10, 5, 11, 30), windows: [{ resetsAt: Date.UTC(2026, 10, 1) }] });
+    } finally {
+      if (zone === undefined) delete process.env.TZ; else process.env.TZ = zone;
+    }
   });
 
   it("refuses a report that says no quota as a usage error (exit 2) that names the flag, not the card's field", () => {
@@ -74,10 +110,30 @@ describe("usage send", () => {
     usage(["Alice", "--limit", "50"], /^--limit goes with --used: ghostly usage send/);
     usage(["Alice", "--limit", "50", "--left", "40"], /^--left or --used with --limit, not both$/);
     usage(["Alice", "--left", "140"], /^--left takes a percent from 0 to 100, not 140$/);
+    // Before, these reached the card's check: bad_request (exit 1), "Status card: limit is a whole number from 1".
+    usage(["Alice", "--used", "5", "--limit", "0"], /^--limit takes a whole number from 1 to 1000000000, not 0$/);
+    usage(["Alice", "--used", "1.5", "--limit", "3"], /^--used takes a whole number from 0 to 1000000000, not 1.5$/);
+    usage(["Alice", "--used", "-1", "--limit", "3"], /^--used takes a whole number from 0 to 1000000000, not -1$/);
+    usage(["Alice", "--used", "6", "--limit", "3"], /^--used takes at most --limit \(3\), not 6$/);
+    expect(params(["Alice", "--used", "3", "--limit", "3"]).card).toEqual({ used: 3, limit: 3 });
+    expect(params(["Alice", "--used", "0", "--limit", "1"]).card).toEqual({ used: 0, limit: 1 });
     // --json may give them, and the two ways to say it stand.
     expect(params(["Alice", "--json", '{"left":40}']).card).toEqual({ left: 40 });
     expect(params(["Alice", "--used", "5", "--limit", "50"]).card).toEqual({ used: 5, limit: 50 });
     expect(params(["Alice", "--left", "0"]).card).toEqual({ left: 0 });
+  });
+
+  it("refuses a text too long or blank as a usage error (exit 2) that names the flag, not the card's field", () => {
+    const usage = (argv: string[], message: RegExp) => expect(() => params(argv)).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(message) }));
+    // Before: bad_request (exit 1), "Status card: label is at most 24 characters".
+    usage(["Alice", "--left", "50", "--label", "l".repeat(30)], /^--label takes at most 24 characters, not 30$/);
+    usage(["Alice", "--left", "50", "--account", "a".repeat(25)], /^--account takes at most 24 characters, not 25$/);
+    usage(["Alice", "--left", "50", "--window", "w".repeat(17)], /^--window takes at most 16 characters, not 17$/);
+    usage(["Alice", "--left", "50", "--label", " "], /^--label takes text, not " "$/);
+    usage(["Alice", "--left", "50", "--also", `${"w".repeat(20)}=80`], /^--also's window takes at most 16 characters, not 20$/);
+    usage(["Alice", "--left", "50", "--also", "week=150"], /^--also takes a percent from 0 to 100, not 150$/);
+    usage(["Alice", "--left", "50", "--also", "a=1", "--also", "b=1", "--also", "c=1", "--also", "d=1"], /^--also is given at most 3 times, not 4$/);
+    expect(params(["Alice", "--json", `{"left":40,"label":"${"l".repeat(30)}"}`]).card).toMatchObject({ label: "l".repeat(30) });
   });
 
   it("sends the card once, then edits that one message with each report: one card per chat, whole reports", async () => {
