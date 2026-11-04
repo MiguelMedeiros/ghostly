@@ -290,6 +290,19 @@ export const NATIVE_HOLD_MS = 2 * 60_000;
  */
 export const PAIRED_TAKES_MS = 10 * 60_000;
 /**
+ * A 1:1 chat whose contact has not been seen this long (no packet that says it is online, no session, no text either
+ * way, not on screen) lets its HyperDHT listener go: hyperdht keeps an announced listener reachable by pinging three DHT
+ * nodes every 3 s, about 62 requests a minute, for a contact who is not there to dial it. It listens again as soon as
+ * the contact is seen online (its next packet read: half a minute at most at the background pace), a text goes either
+ * way, or the chat is opened; its transport key is kept. A contact gone a little while (an app restarted, a
+ * laptop asleep for a few minutes) finds it as before.
+ */
+export const NATIVE_GONE_MS = 10 * 60_000;
+/** How often the chats are looked at for that (`releaseGoneListeners`). */
+const NATIVE_GONE_CHECK_MS = 15_000;
+/** The transport that lets a gone contact's listener go: the one whose waiting costs the network (`NATIVE_GONE_MS`). */
+const GONE_TRANSPORT: NativeTransport = "hyperdht/1";
+/**
  * A group not on screen keeps one edge (`groupEdgesByRank`): when its listener has been up this long and the member
  * has not answered (no session, and its packet says it holds no listener here, or it is away), the group keeps the
  * next one instead (WISP 902 § Transports).
@@ -399,6 +412,13 @@ interface LiveLink {
   nativeTakenAt?: Partial<Record<NativeTransport, number>>;
   /** A group's edge: when its native listener last came up, by transport (`groupAnchorsAnswered`). */
   nativeUpAt?: Partial<Record<NativeTransport, number>>;
+  /**
+   * A 1:1 chat: when its contact was last seen online in this run (a packet that said so, read here), or when the chat
+   * started in this run before that (`contactGone`).
+   */
+  onlineSeenAt?: number;
+  /** A 1:1 chat whose HyperDHT listener was let go because its contact is gone (`releaseGoneListeners`), until it listens again. */
+  goneListener?: boolean;
   /** A group's edge: when the member's packet last said, in this run, which transports its app runs here (`_tr`). */
   peerSaidAt?: number;
   /** The mini-apps this side has open in this chat (chat app id to version), for this run (`apps/1`, WISP 1200). */
@@ -564,6 +584,7 @@ function newLiveLink(stored: StoredLink, lastMessageAt: number, files = emptyLin
     status: "offline",
     dataLink: "idle",
     presence: { online: false, lastPacketAt: 0, services: null },
+    onlineSeenAt: Date.now(),
     lastMessageAt,
     peerAck: 0,
     lastSyncAt: 0,
@@ -8439,6 +8460,11 @@ export class GhostlyNode implements EngineImplementation {
           // Every read of the contact's packet says its presence: one that finds it as before shows nothing new.
           let same = samePresence(live.presence, presence);
           live.presence = presence;
+          if (presence.online) {
+            live.onlineSeenAt = Date.now();
+            // Back: the listener let go while it was away listens again (`releaseGoneListeners`).
+            if (live.goneListener) this.listenAgain(live);
+          }
           // A legacy contact's name is in its record; a paired one's comes only from `onPeerNick`.
           if (!stored.profile && presence.nick && presence.nick !== live.stored.peerNick) {
             live.stored = { ...live.stored, peerNick: presence.nick };
@@ -9022,6 +9048,9 @@ export class GhostlyNode implements EngineImplementation {
     // Nor one other than the transport chosen for its group (`groupNatives`).
     if (group && !this.groupNatives(live.stored).includes(key)) return false;
     if (link.availableTransports.includes(key)) return false;
+    // Nor a HyperDHT listener for a contact who is gone (`releaseGoneListeners`), unless the chat is in use.
+    if (key === GONE_TRANSPORT && !inUse && this.contactGone(live, Date.now())) { live.goneListener = true; return false; }
+    if (key === GONE_TRANSPORT) live.goneListener = false;
     live.transportErrors ??= {};
     try {
       // The native SDKs each allow eight listeners, Iroh's browser build sixteen (`nativeSlots`). They go to the chats
@@ -9194,6 +9223,43 @@ export class GhostlyNode implements EngineImplementation {
 
   /** Group links waiting for a free native slot (`ensureNativeEndpoints`), by link id. */
   private readonly groupNativeWaiting = new Set<string>();
+  /**
+   * Whether a 1:1 chat's contact is gone: no packet read in this run that says it is online for `NATIVE_GONE_MS` (since
+   * the chat started, before the first), and the chat neither live, nor on screen, nor used in that time (a text either
+   * way, opened), nor paired in this run and not live yet.
+   */
+  private contactGone(live: LiveLink, now: number): boolean {
+    if (live.stored.group || live.presence.online || live.link?.isDataLinkOpen || live.pairedAt !== undefined) return false;
+    if (live.stored.id === this.activeLinkId) return false;
+    const seen = Math.max(live.onlineSeenAt ?? 0, this.openedAt.get(live.stored.id) ?? 0, live.lastMessageAt);
+    return now - seen >= NATIVE_GONE_MS;
+  }
+  private goneCheckAt = 0;
+  /**
+   * Every `NATIVE_GONE_CHECK_MS`, the 1:1 chats whose contact is gone (`contactGone`) let their HyperDHT listener go, as
+   * one whose slot another chat takes does (its record then says it runs none). Not one dialling or switching
+   * (`canReleaseEndpoint`).
+   */
+  private releaseGoneListeners(): void {
+    const now = Date.now();
+    if (!this.nativeFactories[GONE_TRANSPORT] || now < this.goneCheckAt) return;
+    this.goneCheckAt = now + NATIVE_GONE_CHECK_MS;
+    for (const live of this.links.values()) {
+      const link = live.link;
+      if (!link || !link.availableTransports.includes(GONE_TRANSPORT) || !this.contactGone(live, now) || !link.canReleaseEndpoint(GONE_TRANSPORT)) continue;
+      live.goneListener = true;
+      traceLink(live.myPubKeyZ32, "native-gone", { transport: GONE_TRANSPORT, seen: now - (live.onlineSeenAt ?? 0) });
+      void link.releaseEndpoint(GONE_TRANSPORT).then(() => this.emitState(), () => {});
+    }
+  }
+  /** The contact of a chat whose HyperDHT listener was let go is back (`releaseGoneListeners`): it listens again. */
+  private listenAgain(live: LiveLink): void {
+    const link = live.link;
+    live.goneListener = false;
+    if (this.shuttingDown || !link || link.availableTransports.includes(GONE_TRANSPORT) || !this.keepsNativeEndpoints(live.stored.id, live.stored)) return;
+    void this.ensureNativeEndpoints(live.stored.id);
+  }
+
   private groupNativeRetryAt = 0;
   /** Chats and group links whose native listener failed to start, by link id: when each tries again, and how long it waited last. */
   private readonly nativeFailed = new Map<string, { at: number; wait: number }>();
@@ -9206,6 +9272,7 @@ export class GhostlyNode implements EngineImplementation {
   private retryNative(): void {
     this.groupAnchorsAnswered();
     this.moveNative();
+    this.releaseGoneListeners();
     const now = Date.now();
     for (const [linkId, failed] of this.nativeFailed) {
       if (now < failed.at || this.nativeRetrying.has(linkId)) continue;
