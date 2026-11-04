@@ -124,6 +124,17 @@ export async function readLightningJournal(): Promise<LightningOp[]> {
   }
   return (await read.ops).map((op) => ({ ...op }));
 }
+
+/**
+ * What the journal says of the payments of one chat request (`DeskLightning.interrupted`): "pending" while one has not
+ * ended (sending, pending, unknown: its card settles it and says so), "paid" once one went through, undefined when
+ * none left the wallet (none journaled, or only failed ones).
+ */
+export async function journaledPayment(paymentId: string): Promise<"pending" | "paid" | undefined> {
+  const ops = (await readLightningJournal()).filter((op) => op.direction === "out" && op.paymentId === paymentId);
+  if (ops.some((op) => op.state === "sending" || op.state === "pending" || op.state === "unknown")) return "pending";
+  return ops.some((op) => op.state === "paid") ? "paid" : undefined;
+}
 const OUT_POLL_MS = 15_000;
 const RECENT = 20;
 /** Resolved Lightning addresses are kept this long for the amount to be chosen; this many at most. */
