@@ -19,6 +19,7 @@
   "dhtTooLong": "Trop long pour la DHT ({{bytes}} sur {{max}} octets). Raccourcissez ou passez en direct ; le brouillon est gardé.",
   "document": "Document",
   "dropFiles": "Déposez pour envoyer",
+  "dropReading": "Lecture de ce que vous avez déposé…",
   "emoji": "Emoji",
   "emojiCategories": "Catégories d'emoji",
   "emojiFound": "{{count}} emojis",

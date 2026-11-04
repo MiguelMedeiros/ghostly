@@ -19,6 +19,7 @@
   "dhtTooLong": "DHT には長すぎます（{{bytes}} / {{max}} バイト）。短くするかライブ接続にしてください。下書きは残ります。",
   "document": "書類",
   "dropFiles": "ドロップして送信",
+  "dropReading": "ドロップした内容を読み込んでいます…",
   "emoji": "絵文字",
   "emojiCategories": "絵文字のカテゴリ",
   "emojiFound": "{{count}} 件の絵文字",
