@@ -159,6 +159,9 @@
     "clipboardUnavailableNext": "Attach it with +.",
     "declinedHere": "You declined it. If you want it, ask your contact to send it again.",
     "declinedThere": "Your contact declined it.",
+    "dropGone": "That drop is gone",
+    "dropGoneNext": "Drop it again.",
+    "dropTooLarge": "That is too large to drop. Send it with + → Document.",
     "dropUnreadable": "Could not add those files. Send them with + → Document.",
     "floor": {
       "noRoomNext": "Free some space, then ask your contact to send it again.",

@@ -159,6 +159,9 @@
     "clipboardUnavailableNext": "Allegalo con +.",
     "declinedHere": "L'hai rifiutato. Se lo vuoi, chiedi al tuo contatto di inviarlo di nuovo.",
     "declinedThere": "Il tuo contatto l'ha rifiutato.",
+    "dropGone": "I file rilasciati non sono più disponibili",
+    "dropGoneNext": "Rilasciali di nuovo.",
+    "dropTooLarge": "È troppo grande da rilasciare qui. Invialo con + → Documento.",
     "dropUnreadable": "Impossibile aggiungere questi file. Inviali con + → Documento.",
     "floor": {
       "noRoomNext": "Libera spazio, poi chiedi al tuo contatto di inviarlo di nuovo.",

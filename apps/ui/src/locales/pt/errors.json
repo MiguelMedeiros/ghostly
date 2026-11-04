@@ -159,6 +159,9 @@
     "clipboardUnavailableNext": "Anexe com +.",
     "declinedHere": "Você recusou. Se quiser o arquivo, peça ao seu contato para enviar de novo.",
     "declinedThere": "Seu contato recusou.",
+    "dropGone": "Esses arquivos soltos expiraram",
+    "dropGoneNext": "Solte de novo.",
+    "dropTooLarge": "Isso é grande demais para soltar aqui. Envie com + → Documento.",
     "dropUnreadable": "Não foi possível adicionar esses arquivos. Envie-os com + → Documento.",
     "floor": {
       "noRoomNext": "Libere espaço e peça ao seu contato para enviar de novo.",
