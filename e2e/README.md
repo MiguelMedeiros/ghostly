@@ -20,6 +20,11 @@ skip (`deployedBuild` in support/fixtures.ts; a URL on this machine is the suite
 
 Locally Playwright runs `E2E_WORKERS` workers (default 2, so parallel sessions on one machine leave each other room); CI runs 2.
 
+Chromium runs with its sandbox on (`chromiumSandbox: true`, support/chromiumSandbox.ts; Playwright's default is off). A spec
+that sets its own `launchOptions` replaces the config's, so it carries `chromiumSandbox: CHROMIUM_SANDBOX` too. Where the
+machine has no sandbox to give (a container running as root, a kernel without unprivileged user namespaces), Chromium
+won't start: run with `E2E_CHROMIUM_SANDBOX=0`.
+
 ## Everything, gated suites included
 
 ```bash
