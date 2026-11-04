@@ -190,8 +190,12 @@
   "forward": {
     "forward": "Transférer",
     "forwarded": "Transféré",
+    "limit": "Vous pouvez transférer à {{count}} conversations à la fois",
+    "limit_one": "Vous pouvez transférer à {{count}} conversation à la fois",
     "many": "Transféré de nombreuses fois",
     "messages": "{{count}} messages",
+    "more": "{{count}} autres",
+    "more_one": "{{count}} autre",
     "noChats": "Aucune discussion pour l’instant",
     "noMatch": "Aucune discussion de ce nom",
     "partial": "{{sent}} sur {{count}} envoyés",
