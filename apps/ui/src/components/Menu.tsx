@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { useOutsideDismiss } from "../hooks/useDismiss";
+import { useOutsideDismiss, useTabTrap } from "../hooks/useDismiss";
 import { useIsMobile } from "../hooks/useIsMobile";
 import type { MenuPoint } from "../lib/contextMenu";
 
@@ -64,6 +64,9 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
   const phone = useIsMobile();
   const ref = useRef<HTMLDivElement>(null);
   useOutsideDismiss(ref, open, onClose, anchorRef);
+  // A phone's sheet covers the page with its backdrop, as a dialog does: Tab and Shift+Tab go round its rows. They went
+  // on to the page behind it, the sheet still open (the composer's + there opened a second sheet over it).
+  useTabTrap(ref, open && phone);
   const [place, setPlace] = useState<{ shift: number; up: boolean; room?: number }>({ shift: 0, up: prefer === "up" });
   const [fixed, setFixed] = useState<{ left: number; top: number; room?: number }>();
 
@@ -239,7 +242,7 @@ export function MenuItem({ icon, children, hint, onClick, danger, disabled, titl
     <button type="button" data-testid={testId} data-menu-item onClick={onClick} disabled={disabled} title={title} {...data}
       {...(checked === undefined ? {} : { role: "checkbox", "aria-checked": checked })}
       onPointerEnter={e => fitTitle(e.currentTarget)} onFocus={e => fitTitle(e.currentTarget)}
-      className={`flex w-full min-w-0 items-center whitespace-nowrap px-3 py-2 text-start text-sm transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none disabled:cursor-not-allowed max-md:min-h-12 max-md:rounded-lg ${hint ? "gap-3" : "gap-2"} ${danger ? "text-danger" : hint ? "text-text-primary" : "text-text-secondary hover:text-text-primary"} ${className}`}>
+      className={`flex w-full min-w-0 items-center whitespace-nowrap px-3 py-2 text-start text-sm transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none disabled:cursor-not-allowed max-md:min-h-12 max-md:rounded-lg ${hint ? "gap-3" : "gap-2"} ${danger ? "text-danger-ink" : hint ? "text-text-primary" : "text-text-secondary hover:text-text-primary"} ${className}`}>
       {icon && <span aria-hidden="true" data-menu-icon className={`flex shrink-0 ${hint ? "text-accent" : ""}`}>{icon}</span>}
       {hint
         ? <span className="min-w-0"><span data-menu-text className="block truncate">{children}</span><span data-menu-text className="block truncate text-xs text-text-muted">{hint}</span></span>

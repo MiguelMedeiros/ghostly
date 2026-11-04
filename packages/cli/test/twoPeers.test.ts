@@ -819,7 +819,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const sha = (path: string) => createHash("sha256").update(readFileSync(path)).digest("hex");
     const listen = await listenTo(alice, "--type", "message.received", "--type", "file.done");
     const text = ok(await as(bob, "send", "alice", "pass **this** on", "--wait", "delivered")).messageId as string;
-    const picture = join(bob, "ghost.png");
+    const picture = join(bob, "ghost.bin");
     writeFileSync(picture, randomBytes(120_000));
     ok(await as(bob, "file", "send", "alice", picture));
     const got = await listen.waitFor((e) => e.type === "message.received" && !!(e.message as { file?: unknown }).file);
@@ -836,12 +836,12 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(forwarded).toMatchObject({ from: chatA, results: [{ to: chatA, kind: "chat", messageIds: [expect.any(String), expect.any(String)], error: null }] });
     const again = await watch.waitFor((e) => e.type === "message.received" && !!(e.message as { file?: unknown }).file, 60_000);
     const copy = again.message as { id: string; forwarded?: number; file: { id: string; name: string } };
-    expect(copy).toMatchObject({ forwarded: 1, file: { name: "ghost.png" } });
+    expect(copy).toMatchObject({ forwarded: 1, file: { name: "ghost.bin" } });
     await watch.waitFor((e) => e.type === "file.done" && e.file === copy.file.id, 60_000);
     await watch.stop();
     const rows = ok(await as(bob, "chat", "history", "alice", "--limit", "5")).messages as { text: string; from: string; forwarded?: number }[];
     expect(rows.find((m) => m.from === "peer" && m.text === "pass **this** on")).toMatchObject({ forwarded: 1 });
-    const saved = ok(await as(bob, "file", "save", copy.file.id, "--path", join(bob, "ghost-forwarded.png")));
+    const saved = ok(await as(bob, "file", "save", copy.file.id, "--path", join(bob, "ghost-forwarded.bin")));
     expect(sha(saved.path as string)).toBe(sha(picture));
 
     // Into the group: the text goes, and the file as a new announcement of Alice's (WISP 503); a message not in the chat is not found.
@@ -854,10 +854,10 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     // Her own copy is its first holder: Bob's app fetches it from hers, the same bytes.
     const filesIn = await listenTo(bob, "--type", "group.message");
     expect(ok(await as(alice, "forward", "bob", fileMessage.id, "--to", "Bot crew", "--wait", "sent"))).toMatchObject({ results: [{ kind: "group", error: null }] });
-    const filed = await filesIn.waitFor((e) => e.type === "group.message" && (e.message as { file?: { name?: string } }).file?.name === "ghost.png", 60_000);
+    const filed = await filesIn.waitFor((e) => e.type === "group.message" && (e.message as { file?: { name?: string } }).file?.name === "ghost.bin", 60_000);
     await filesIn.stop();
     const inGroupFile = (filed.message as { file: { id: string } }).file.id;
-    const fetched = ok(await as(bob, "file", "save", inGroupFile, "--path", join(bob, "ghost-in-group.png"), "--wait", "--timeout", "120"));
+    const fetched = ok(await as(bob, "file", "save", inGroupFile, "--path", join(bob, "ghost-in-group.bin"), "--wait", "--timeout", "120"));
     expect(sha(fetched.path as string)).toBe(sha(picture));
     error(await as(alice, "forward", "bob", "no-such-message", "--to", "bob"), "not_found", 3);
     error(await as(alice, "forward", "bob", theirs.id), "usage", 2);
@@ -972,5 +972,22 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     let mine = await card();
     for (const until = Date.now() + 10_000; mine.card?.status !== "done" && Date.now() < until; mine = await card()) await new Promise((r) => setTimeout(r, 250));
     expect(mine).toMatchObject({ from: "peer", card: { kind: "task", id: "one-shot-task", title: "From a one-shot", status: "done" } });
+  });
+
+  it("file send as a one-shot stays until the contact has the whole file, saved byte for byte", async () => {
+    // Before, it answered in about 0.3 s with the file staged and left with it unsent: Bob had no file, not even its
+    // message, until a later command of Alice's stayed online long enough.
+    const sha = (path: string) => createHash("sha256").update(readFileSync(path)).digest("hex");
+    const path = join(alice, "from-a-one-shot.bin");
+    writeFileSync(path, randomBytes(2 * 1024 * 1024));
+    expect(ok(await as(alice, "file", "send", "bob", path))).toMatchObject({ file: { name: "from-a-one-shot.bin", size: 2 * 1024 * 1024 } });
+    // Alice's process is gone: nothing else carries the file. Bob stores the last bytes as Alice hears they arrived.
+    const theirs = async () => (ok(await as(bob, "file", "list", "alice")).files as { file: { id: string; name: string }; transfer: { state: string } | null }[])
+      .find((f) => f.file.name === "from-a-one-shot.bin");
+    let file = await theirs();
+    for (const until = Date.now() + 10_000; file?.transfer?.state !== "done" && Date.now() < until; file = await theirs()) await new Promise((r) => setTimeout(r, 250));
+    expect(file?.transfer).toMatchObject({ state: "done" });
+    const saved = ok(await as(bob, "file", "save", file!.file.id, "--path", join(bob, "from-a-one-shot.bin")));
+    expect(sha(saved.path as string)).toBe(sha(path));
   });
 });

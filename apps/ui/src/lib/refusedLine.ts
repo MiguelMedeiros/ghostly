@@ -1,6 +1,6 @@
-import { paymentRefusal } from "@ghostly/browser/shared/refusals";
 import type { PaymentRefusedNotice } from "@ghostly/browser/shared/types";
 import type { Translate } from "../locales/translate";
+import type { ChatMessage } from "./types";
 import { formatAmount } from "./amount";
 import { problemLine } from "./problemText";
 
@@ -22,8 +22,17 @@ export function refusedLine(notice: PaymentRefusedNotice, t: Translate): string 
   return t(test ? "chat.refused.testSats" : "chat.refused.sats", { amount, reason });
 }
 
+/**
+ * The refused payment a chat row is: the app's line the mirror made it from the engine's row (`toChatMessage`, which
+ * tells it from a contact's text under the same id and words). Never read from the row's id and words here: a row the
+ * chat holds as the contact's is theirs.
+ */
+export function shownRefusal(row: Pick<ChatMessage, "sender" | "notice">): PaymentRefusedNotice | undefined {
+  return row.sender === "system" && row.notice?.type === "paymentRefused" ? row.notice : undefined;
+}
+
 /** The refusal line a chat row is, in the person's language; undefined when the row is not one. */
-export function refusedRowText(row: { id: string; text: string; notice?: unknown }, t: Translate): string | undefined {
-  const notice = paymentRefusal(row);
+export function refusedRowText(row: Pick<ChatMessage, "sender" | "notice">, t: Translate): string | undefined {
+  const notice = shownRefusal(row);
   return notice && refusedLine(notice, t);
 }

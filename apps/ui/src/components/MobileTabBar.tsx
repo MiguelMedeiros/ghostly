@@ -129,7 +129,9 @@ export function MobileTabBar() {
                   </span>
                 )}
               </span>
-              <span className="max-w-full truncate text-[0.6875rem] max-[359px]:text-[0.625rem] font-medium leading-none">{t(tab.label)}</span>
+              {/* The ellipsis hides overflow, and a one-font-size line is shorter than Japanese, Chinese and Arabic ink:
+                  room above and below it inside that clip, given back by the margin, so nothing moves. */}
+              <span className="max-w-full truncate text-[0.6875rem] max-[359px]:text-[0.625rem] font-medium leading-none py-1 -my-1">{t(tab.label)}</span>
             </button>
           );
         })}

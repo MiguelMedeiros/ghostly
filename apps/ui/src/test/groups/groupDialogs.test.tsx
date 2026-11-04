@@ -175,6 +175,17 @@ describe("GroupMembersDialog", () => {
     expect(within(panel).queryByTestId("group-link-disable")).not.toBeInTheDocument();
   });
 
+  it("gives a community member's focus to the list when the admin turns the link off under it, with the panel", () => {
+    const link = encodeCommunityLink({ g: "AbCdEfGhIjKlMnOpQrStUv", host: createIdentity().pubKeyZ32 });
+    const group = groupView({ status: "active", isAdmin: false, profile: "community", entryLink: link, members: [member({ key: ME, me: true, online: true }), member({ key: ALICE, nick: "Alice", role: "admin" })] });
+    members_(group);
+    screen.getByTestId("group-link-copy").focus();
+    act(() => fakeEngine.update({ groups: [{ ...group, entryLink: undefined }] }));
+    expect(screen.queryByTestId("group-link")).not.toBeInTheDocument();
+    // It fell to the page, out of the open dialog.
+    expect(screen.getByTestId("group-member-list")).toHaveFocus();
+  });
+
   it("says, while the group's link works, that whoever is removed can join again with it until a new link", async () => {
     for (const profile of ["mesh", "community"] as const) {
       const { user, unmount } = members_(groupView({ status: "active", isAdmin: true, profile, members, entryLink: "https://app.ghostly.tools/#/join/group2/g/k" }));
@@ -393,6 +404,14 @@ describe("GroupLinkPanel", () => {
     expect(screen.getByTestId("group-link")).toHaveTextContent("The link is off: nobody can join with it, and the link shared before will not work again. Turning it on makes a new link to share.");
     await user.click(screen.getByRole("button", { name: "Turn on the link" }));
     expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: id }]);
+  });
+
+  it("tells a community member the admin turned the link off, with nothing to turn it on", () => {
+    // The member's Share dialog stays open while the admin turns the link off: turning it on is the admin's alone.
+    renderApp(<GroupLinkPanel group={groupView({ id, status: "active", profile: "community", isAdmin: false, members })} large />);
+    expect(screen.getByTestId("group-link")).toHaveAttribute("data-state", "off");
+    expect(screen.getByTestId("group-link")).toHaveTextContent("The admin turned the link off: nobody can join with it, and the link shared before will not work again. Only the admin can make a new one.");
+    expect(screen.queryByTestId("group-link-enable")).not.toBeInTheDocument();
   });
 
   it("cannot create a link for a full group", () => {

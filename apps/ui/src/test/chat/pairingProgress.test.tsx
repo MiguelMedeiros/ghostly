@@ -19,8 +19,8 @@ import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
 // The sounds module plays through Web Audio, which happy-dom has not: the test hears what is asked of it.
-const { playSound } = vi.hoisted(() => ({ playSound: vi.fn((_name: string) => () => {}) }));
-vi.mock("../../lib/sounds", async (importOriginal) => ({ ...(await importOriginal<typeof import("../../lib/sounds")>()), playSound }));
+const { playSound, warmSound } = vi.hoisted(() => ({ playSound: vi.fn((_name: string) => () => {}), warmSound: vi.fn((_name: string) => {}) }));
+vi.mock("../../lib/sounds", async (importOriginal) => ({ ...(await importOriginal<typeof import("../../lib/sounds")>()), playSound, warmSound }));
 
 // covers: chat.paired.pairing-progress, chat.one-chat, app.attention.sounds
 
@@ -54,7 +54,7 @@ const label = () => screen.getByTestId("pairing-stage-label").textContent;
 const currentStep = () => screen.getByTestId("pairing-steps").querySelector("[aria-current=step]")?.getAttribute("data-step");
 const scene = () => screen.queryByTestId("pairing-scene");
 
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); playSound.mockClear(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); playSound.mockClear(); warmSound.mockClear(); });
 
 describe("the stage, read off today's link fields", () => {
   it.each<[string, Partial<LinkView> | undefined, "inviter" | "joiner", string]>([
@@ -628,6 +628,34 @@ describe("the connected sound", () => {
     show(live, engine);
     expect(scene()).toHaveAttribute("data-stage", "live");
     expect(sounds()).toEqual(["connected"]);
+  });
+
+  // Fetched and decoded the first time it played, the sound came 20 to 40 ms after the scene went live, and over 100 ms
+  // on a loaded machine: its file is fetched while the scene waits, so it starts with the moment.
+  it("is fetched ahead while the scene waits, not for a contact already paired, nor with sounds off or muted", () => {
+    const warmed = () => warmSound.mock.calls.map(([name]) => name);
+    const waiting = renderApp(<Pairing inviter />);
+    show(published, waiting.engine);
+    expect(sounds()).toEqual([]);
+    expect(new Set(warmed())).toEqual(new Set(["connected"]));
+    waiting.unmount();
+    warmSound.mockClear();
+    fakeEngine.reset();
+    fakeEngine.update({ links: [linkView({ createdAt: Date.now() - 86_400_000, ...connecting, peerParticipationKey: "p" })] });
+    const paired = renderApp(<Pairing inviter={false} />);
+    show({ ...fresh, peerParticipationKey: "p" }, paired.engine);
+    paired.unmount();
+    fakeEngine.reset();
+    const muted = renderApp(<Pairing inviter muted />);
+    show(published, muted.engine);
+    muted.unmount();
+    fakeEngine.reset();
+    saveSettings({ ...loadSettings(), notifications: { ...loadSettings().notifications, soundEnabled: false } });
+    const off = renderApp(<Pairing inviter />);
+    show(published, off.engine);
+    off.unmount();
+    saveSettings({ ...loadSettings(), notifications: { ...loadSettings().notifications, soundEnabled: true } });
+    expect(warmed()).toEqual([]);
   });
 
   it("not again when the first pairing drops and comes back, during the moment or after it", () => {

@@ -104,4 +104,13 @@ describe("file actions on an ended 1:1 transfer", () => {
       expect(node.fileAction).not.toHaveBeenCalled();
     }
   });
+
+  it("pause of a sent file that arrived whole, offered again, is refused: paused, it could be cancelled", async () => {
+    const whole = { state: "transferring", transferred: 12_582_912, size: 12_582_912, direction: "out" } as const;
+    for (const view of [whole, { ...whole, stage: "waiting" }] as FileTransferView[]) {
+      const { ctx, node } = world({ [OUT]: view });
+      await expect(callApi(ctx, "file.action", { file: OUT, action: "pause" })).rejects.toMatchObject({ code: "refused", message: "Too late to pause: it arrived whole, and the contact keeps it" });
+      expect(node.fileAction).not.toHaveBeenCalled();
+    }
+  });
 });

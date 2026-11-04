@@ -20,6 +20,7 @@
   "remove": "移除",
   "removeNamed": "移除 {{app}}",
   "requestCount": "· {{count}} 次请求",
+  "requestCount_one": "· {{count}} 次请求",
   "share": "共享",
   "shareLocal": "共享本地服务",
   "shareNamed": "共享 {{app}}",

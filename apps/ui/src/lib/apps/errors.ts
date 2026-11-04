@@ -8,6 +8,7 @@ import { problemLine } from "../problemText";
 const KEYS: Record<string, TranslationKey> = {
   host: "apps.errors.host",
   "github-link": "apps.errors.githubLink",
+  "private-link": "apps.errors.privateLink",
   offline: "apps.errors.offline",
   status: "apps.errors.status",
   network: "apps.errors.network",

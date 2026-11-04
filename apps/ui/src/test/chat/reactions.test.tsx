@@ -190,6 +190,59 @@ describe("the quick bar", () => {
     expect(screen.queryByTestId("reaction-bar")).not.toBeInTheDocument();
   });
 
+  const pressCopy = (container: HTMLElement) => {
+    const row = container.querySelector<HTMLElement>("[data-message-row]")!;
+    fireEvent.pointerDown(row, { pointerType: "touch", button: 0, clientX: 20, clientY: 20, pointerId: 1 });
+    act(() => { vi.advanceTimersByTime(600); });
+    fireEvent.pointerUp(row, { pointerType: "touch", clientX: 20, clientY: 20, pointerId: 1 });
+    fireEvent.click(screen.getByTestId("reaction-bar-copy"));
+  };
+
+  it("the bar's Copy says Copied once the text is on the clipboard, and the focus goes back to the message", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    const { container } = renderApp(<MessageBubble message={message()} peerPubKey="peer" onReact={() => {}} reactionName={names} />);
+    pressCopy(container);
+    await act(async () => {});
+    expect(screen.getByTestId("message-copied")).toHaveAttribute("role", "status");
+    expect(screen.queryByTestId("message-copy-error")).not.toBeInTheDocument();
+    expect(screen.getByTestId("message-options")).toHaveFocus();
+    act(() => { vi.advanceTimersByTime(1600); });
+    expect(screen.queryByTestId("message-copied")).not.toBeInTheDocument();
+  });
+
+  it("a refused copy says so, with the text in a field to select by hand", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new DOMException("denied", "NotAllowedError"));
+    // The test DOM has no execCommand: the old route is refused too.
+    const { container } = renderApp(<MessageBubble message={message()} peerPubKey="peer" onReact={() => {}} reactionName={names} />);
+    pressCopy(container);
+    await act(async () => {});
+    expect(screen.getByTestId("message-copy-error")).toHaveAttribute("role", "alert");
+    expect(screen.getByTestId("message-copy-text")).toHaveValue("lunch at noon?");
+    expect(screen.queryByTestId("message-copied")).not.toBeInTheDocument();
+    expect(screen.getByTestId("message-options")).toHaveFocus();
+    // A long press on the field is the system's selection, not the quick bar again.
+    fireEvent.pointerDown(screen.getByTestId("message-copy-text"), { pointerType: "touch", button: 0, clientX: 20, clientY: 20, pointerId: 2 });
+    act(() => { vi.advanceTimersByTime(600); });
+    expect(screen.queryByTestId("reaction-bar")).not.toBeInTheDocument();
+  });
+
+  it("a refused copy's note stays until the person closes it, and the focus goes back to the message", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new DOMException("denied", "NotAllowedError"));
+    const { container } = renderApp(<MessageBubble message={message()} peerPubKey="peer" onReact={() => {}} reactionName={names} />);
+    pressCopy(container);
+    await act(async () => {});
+    // Time to select the text and copy it by hand: it does not go by itself.
+    act(() => { vi.advanceTimersByTime(10 * 60_000); });
+    expect(screen.getByTestId("message-copy-text")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByTestId("message-copy-error")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("message-copy-text")).not.toBeInTheDocument();
+    expect(screen.getByTestId("message-options")).toHaveFocus();
+  });
+
   it("the React button's bar (a pointer) has no Copy: the text is selectable there", async () => {
     const { user } = renderApp(<MessageBubble message={message()} peerPubKey="peer" onReact={() => {}} reactionName={names} />);
     await user.click(screen.getByTestId("message-react-action"));

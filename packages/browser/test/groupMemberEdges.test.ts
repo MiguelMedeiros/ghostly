@@ -353,6 +353,21 @@ describe("a profile no longer in a private group", () => {
     vi.restoreAllMocks();
     expect(inner.groups.view(groupId)?.pin).toBeUndefined();
   }, 30_000);
+
+  it("is refused an edit and a delete for everyone with the group's reason, and the message stays as it was", async () => {
+    const { node, inner, groupId } = await adminOf([]);
+    const chat = `group:${groupId}`;
+    const said = await node.sendGroupMessage({ groupId, text: "before" });
+    const messageId = (said as { messageId: string }).messageId;
+    const view = inner.groups.view(groupId)!;
+    vi.spyOn(inner.groups, "view").mockImplementation(id => id === groupId ? { ...view, status: "removed", statusReason: "You were removed from this group", canSend: false } : undefined);
+    expect(await node.editMessage({ linkId: chat, messageId, text: "after" })).toEqual({ error: "You were removed from this group", refused: true });
+    expect(await node.removeMessage({ linkId: chat, messageId })).toEqual({ error: "You were removed from this group", refused: true });
+    vi.restoreAllMocks();
+    const kept = await node.getMessage(chat, messageId);
+    expect(kept?.text).toBe("before");
+    expect(kept?.removed).toBeFalsy();
+  }, 30_000);
 });
 
 describe("a hub and an edge to someone out of the roster", () => {

@@ -459,6 +459,18 @@ describe("with the apps flag on", () => {
     expect(tried).toEqual(["app"]);
   });
 
+  it("a link with a query (a private repository's file, with its token) says to publish the app in a public repository, and is not read as a store", async () => {
+    const tried: string[] = [];
+    const refused = "private-link: This link carries a query or a fragment";
+    fakeEngine.on("appPreview", () => { tried.push("app"); throw new Error(refused); })
+      .on("appStorePreview", () => { tried.push("store"); throw new Error(refused); });
+    const { user } = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={() => {}} />);
+    await user.type(screen.getByTestId("apps-add-url"), "https://raw.githubusercontent.com/ana/chess/main/dist?token=GHSAT0");
+    await user.click(screen.getByTestId("apps-add-check"));
+    expect(await screen.findByTestId("apps-add-error")).toHaveTextContent("Publish the app in a public repository and paste that link.");
+    expect(tried).toEqual(["app"]);
+  });
+
   it("Add: a host answering 500 says try again later; a store link holding no valid store says so, its refusal behind the ⓘ", async () => {
     fakeEngine.on("appStorePreview", () => { throw new Error("status: The host answered 500"); });
     const first = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={() => {}} />);
@@ -706,6 +718,23 @@ describe("with the apps flag on", () => {
     expect(details).toHaveAccessibleName(shownInName(details));
   });
 
+  it("names each row's buttons with its app or store, so a screen reader tells two stores' Removes apart", async () => {
+    const UNREAD = "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json";
+    fakeEngine.on("appList", () => [installed()]).on("appCheckUpdates", () => []).on("appStoreList", () => [
+      { key: "u", fingerprint: "abcd efgh ijkl mnop", url: UNREAD, preloaded: true, sequence: 0, expired: false, apps: [], removed: [] },
+      { key: "s", fingerprint: "qrst uvwx yz12 3456", url: "https://example.com/hunt.json", preloaded: false, name: "Hunt", kind: "curated", sequence: 1,
+        expires: 2_000_000_000, expired: false, fetchedAt: 1, apps: [{ ref: `${KEY}/snake`, sequence: 1, digest: DIGEST, urls: [URL_], title: "Snake", tagline: "Eat, grow." }], removed: [] },
+    ]);
+    renderApp(<Apps />, { route: "/apps" });
+    expect(await screen.findByTestId("installed-app-open")).toHaveAccessibleName("Open Chess");
+    const [unread, hunt] = await screen.findAllByTestId("app-store");
+    expect(within(unread!).getByTestId("app-store-refresh")).toHaveAccessibleName(`Read ${UNREAD}`);
+    expect(within(unread!).getByTestId("app-store-remove")).toHaveAccessibleName(`Remove ${UNREAD}`);
+    expect(within(hunt!).getByTestId("app-store-refresh")).toHaveAccessibleName("Refresh Hunt");
+    expect(within(hunt!).getByTestId("app-store-remove")).toHaveAccessibleName("Remove Hunt");
+    expect(within(hunt!).getByTestId("app-listing-install")).toHaveAccessibleName("Install Snake");
+  });
+
   it("the focus goes to Add once an uninstalled app's row or a removed store's block is gone, not lost on the page", async () => {
     let apps = [installed()];
     let stores = [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
@@ -860,7 +889,7 @@ describe("with the apps flag on", () => {
     // A new profile: the official store and its one app, whose Install is there to press.
     const only = await screen.findByTestId("app-store");
     expect(within(only).getByTestId("app-listing-install")).toBeInTheDocument();
-    const name = within(only).getByRole("button", { name: /Ghostly Store/ });
+    const name = within(only).getByRole("button", { name: /^Ghostly Store/ });
     expect(name).toHaveAttribute("aria-expanded", "true");
     expect(within(name).getByTestId("app-store-chevron")).toBeInTheDocument();
     // Closed by the person, it stays closed; and opens again.
@@ -876,7 +905,7 @@ describe("with the apps flag on", () => {
     const [few, many, unread] = await screen.findAllByTestId("app-store");
     expect(within(few).getAllByTestId("app-listing")).toHaveLength(1);
     expect(within(many).queryByTestId("app-listing")).not.toBeInTheDocument();
-    const opener = within(many).getByRole("button", { name: /Big/ });
+    const opener = within(many).getByRole("button", { name: /^Big/ });
     expect(opener).toHaveAttribute("aria-expanded", "false");
     expect(within(opener).getByTestId("app-store-chevron")).toBeInTheDocument();
     await user.click(opener);
@@ -938,6 +967,28 @@ describe("with the apps flag on", () => {
     expect(screen.queryByTestId("app-store-more")).not.toBeInTheDocument();
     expect(rows()[100]).toHaveFocus();
     expect(document.body).not.toHaveFocus();
+  });
+
+  it("a search goes away with its box: a store read again with 50 listings or fewer shows them all, and comes back with an empty box", async () => {
+    let n = 60;
+    const stores = (): AppStoreSummary[] => [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
+      name: "Big", kind: "indexed", sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1,
+      apps: Array.from({ length: n }, (_, i) => ({ ref: `${KEY}/app${i}`, sequence: 1, digest: DIGEST, urls: [URL_], title: `App ${i}`, tagline: `Tagline ${i}` })), removed: [] }];
+    fakeEngine.on("appList", () => []).on("appCheckUpdates", () => []).on("appStoreList", stores)
+      .on("appStoreRefresh", () => { n = n === 60 ? 40 : 60; return stores(); });
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    await screen.findByTestId("app-store-listing");
+    const rows = () => within(screen.getByTestId("app-store-listing")).queryAllByTestId("app-listing");
+    await user.type(screen.getByTestId("app-store-filter"), "App 5");
+    expect(rows()).toHaveLength(11);
+
+    await user.click(screen.getByTestId("app-store-refresh"));
+    await waitFor(() => expect(screen.queryByTestId("app-store-filter")).not.toBeInTheDocument());
+    expect(rows()).toHaveLength(40);
+
+    await user.click(screen.getByTestId("app-store-refresh"));
+    expect(await screen.findByTestId("app-store-filter")).toHaveValue("");
+    expect(rows()).toHaveLength(50);
   });
 
   it("gives the card's title its own direction", async () => {
@@ -1099,11 +1150,38 @@ describe("an app that comes with Ghostly (WISP 1200 § Built-in apps)", () => {
     expect(within(details).getByTestId("app-store-line")).toHaveTextContent("Not in any of your stores");
   });
 
-  it("Remove takes it off the list for good, and the focus goes to Add", async () => {
+  it("Remove asks first, as a store's Remove does: Cancel and Escape keep it and give the focus back to Remove", async () => {
+    engineWith({ installed: false, removed: false });
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    const remove = within(await screen.findByTestId("built-in-app")).getByRole("button", { name: "Remove Chess" });
+    remove.focus();
+    await user.keyboard("{Enter}");
+    // One press removes nothing: the question takes the place of the buttons, and Enter again does not remove.
+    const question = screen.getByTestId("built-in-app-remove-question");
+    expect(question).toHaveTextContent("Remove Chess?");
+    expect(question).toHaveTextContent("not be offered again");
+    expect(question).toHaveTextContent("from a store");
+    expect(screen.queryByTestId("built-in-app-open")).not.toBeInTheDocument();
+    expect(within(question).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("built-in-app-remove-question")).not.toBeInTheDocument();
+    expect(screen.getByTestId("built-in-app-remove")).toHaveFocus();
+
+    await user.keyboard("{Enter}");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("built-in-app-remove-question")).not.toBeInTheDocument();
+    expect(screen.getByTestId("built-in-app-remove")).toHaveFocus();
+    expect(fakeEngine.callsTo("appUninstall")).toEqual([]);
+    expect(screen.getByTestId("built-in-app")).toBeInTheDocument();
+  });
+
+  it("Remove, then Remove in its question, takes it off the list for good, and the focus goes to Add", async () => {
     engineWith({ installed: false, removed: false });
     const { user } = renderApp(<Apps />, { route: "/apps" });
     const row = await screen.findByTestId("built-in-app");
     await user.click(within(row).getByRole("button", { name: "Remove Chess" }));
+    expect(fakeEngine.callsTo("appUninstall")).toEqual([]);
+    await user.click(screen.getByTestId("built-in-app-remove-confirm"));
     await waitFor(() => expect(fakeEngine.callsTo("appUninstall")).toEqual([{ ref: REF }]));
     await waitFor(() => expect(screen.queryByTestId("built-in-app")).not.toBeInTheDocument());
     expect(await screen.findByTestId("apps-none")).toBeInTheDocument();

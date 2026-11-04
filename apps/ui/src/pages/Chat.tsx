@@ -5,6 +5,8 @@ import { AvatarOpener } from "../components/AvatarViewer";
 import { useBackdropDismiss, useDialogFocus } from "../hooks/useDismiss";
 import { useComposition } from "../hooks/useComposition";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
+import { setChatOnCall } from "../lib/chatsOnCall";
+import { setCallNoPath, useCallNoPath } from "../lib/callNoPath";
 import { createPortal } from "react-dom";
 import { ChatHoldDialog, ChatHoldLine } from "../components/ChatHoldDialog";
 import { ContactIdentitiesPanel } from "../components/identities/ContactIdentitiesPanel";
@@ -27,6 +29,7 @@ import { openOnArrow } from "../lib/menuButton";
 import { useI18n } from "../contexts/I18nContext";
 import { InviteCard } from "../components/InviteCard";
 import { LinkQrDialog } from "../components/chat/LinkQrDialog";
+import { CallNoPathNotice } from "../components/CallNoPathNotice";
 import { ChatConnection } from "../components/ChatConnection";
 import { focus } from "../lib/connection";
 import { PairingScene } from "../components/pairing/PairingScene";
@@ -65,7 +68,7 @@ import { formatFileSize } from "../lib/format";
 import { playSound, startRinging } from "../lib/sounds";
 import { CueChat } from "../lib/cues";
 import { NowPlayingChat, pauseForCall, stopPlayingFrom } from "../lib/nowPlaying";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
 import {
   isSessionPinned,
   setSessionPinned,
@@ -83,7 +86,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { fileMessageText, inviteQrSegments, isPlayableVideoType, PAIRED_CALL_CANDIDATES, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
 import { videoMetaOf } from "../lib/videoPoster";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
-import type { WalletNetwork } from "../lib/platform";
+import { servicesPlatform, type WalletNetwork } from "../lib/platform";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
 import { TranslateMenu, TranslateMenuItem } from "../components/ChatTranslate";
@@ -279,7 +282,15 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     uncountMissedCall(line);
   }, [deleteMessage, uncountMissedCall]);
 
-  const platform = useServicesPlatform();
+  const platform = servicesPlatform;
+  // What this page reads of the platform and the engine's settings as it draws, compared by content: drawn again when
+  // that changes, not on every engine state (up to 20 a second while a file moves), which drew the open chat and every
+  // chat kept loaded off screen for its call or mini-app each time.
+  usePlatformValue(() => {
+    const peerKey = params?.peerPubKeyB64 ?? "";
+    const settings = engine.state?.settings;
+    return [platform?.getPeer(peerKey), platform?.wallet?.getState(), platform?.getSharedServices(), settings?.online, settings?.iceServers, settings?.relayOnly];
+  });
   const webrtc = useWebRTC({
     incomingCallSignal,
     callHandledElsewhere,
@@ -315,8 +326,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // Out of sight, a ringing call is a system notification too: one for every tab that rings it (its offer's time).
   const incomingOfferTs = useMemo(() => (incomingCallSignal ? parseCallSignal(incomingCallSignal)?.ts : undefined), [incomingCallSignal]);
   useIncomingCallNotice(callState === "incoming" && callRings(sessionId), sessionId, t("pwa.wakeCall"), incomingOfferTs);
+  // The no-path note outlives this page (lib/callNoPath.ts): a chat off screen is let go once its call ends. It goes
+  // when closed, or when the chat's next call starts.
+  useEffect(() => { if (webrtc.noPath) setCallNoPath(sessionId, true); }, [webrtc.noPath, sessionId]);
+  useEffect(() => { if (callState === "offering" || callState === "incoming") setCallNoPath(sessionId, false); }, [callState, sessionId]);
+  const noPathShown = useCallNoPath(sessionId);
 
-  useEffect(() => () => onCallChange(sessionId, false), [onCallChange, sessionId]);
+  useEffect(() => () => { onCallChange(sessionId, false); setChatOnCall(sessionId, false); }, [onCallChange, sessionId]);
 
   const incomingHasVideo = (() => {
     if (!incomingCallSignal) return false;
@@ -647,9 +663,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // A chat on a call is kept loaded by `App` wherever the person goes next,
   // so the call itself — and the signaling that ends it — survives the trip.
   // So is one waking its contact for a call: the wait, and the call it places, go on there too.
+  // Nor is it deleted under its call, from here or from the chat list (lib/chatsOnCall.ts).
+  const onCall = callState !== "idle" || wakeCall.waking;
   useEffect(() => {
-    onCallChange(sessionId, callState !== "idle" || wakeCall.waking);
-  }, [onCallChange, sessionId, callState, wakeCall.waking]);
+    onCallChange(sessionId, onCall);
+    setChatOnCall(sessionId, onCall);
+  }, [onCallChange, sessionId, onCall]);
 
   // What the contact last said on the session wins over a name read out of an older message.
   const contactNick = profileNick !== undefined ? profileNick : peerNick;
@@ -702,6 +721,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   if (holdForUnlock) return null;
 
   const handleDelete = () => {
+    if (onCall) return;
     if (confirmDelete) {
       deleteSession(params.sessionId);
       setChatFolder(params.sessionId, undefined);
@@ -792,6 +812,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           <span className="block font-medium">{t(MEDIA_PROBLEM_TEXT[webrtc.mediaProblem][0])}</span>
           <span className="block text-text-secondary">{t(webrtc.mediaProblem === "denied" && mediaDeniedText() === "settings.media.deniedIos" ? "settings.media.deniedIos" : MEDIA_PROBLEM_TEXT[webrtc.mediaProblem][1])}</span>
         </div>
+      )}
+      {/* Our call found no path to the contact (a VPN or firewall that blocks UDP, on either side): where a TURN server
+          is set, and the guide. */}
+      {(webrtc.noPath || noPathShown) && !webrtc.mediaProblem && (
+        <CallNoPathNotice iceServers={engine.state?.settings.iceServers} onClose={() => { webrtc.dismissNoPath(); setCallNoPath(sessionId, false); }} />
       )}
       {/* The system paused our microphone in a call (an iPhone's Home Screen app while the screen is locked): the
           contact hears nothing until Ghostly is back on screen, and the call is still on. */}
@@ -1257,7 +1282,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         <ChatHoldDialog peer={chatPeer} name={shownName} onClose={() => setShowHold(false)}
           onSave={(enabled) => platform.setChatHold(params.peerPubKeyB64, enabled)} />
       )}
-      {confirmDelete && <DeleteChatDialog name={`${shownName} · ${truncatedPeerKey}`} onClose={()=>setConfirmDelete(false)} onConfirm={handleDelete} />}
+      {confirmDelete && <DeleteChatDialog name={`${shownName} · ${truncatedPeerKey}`} onClose={()=>setConfirmDelete(false)} onConfirm={handleDelete} callOn={onCall} />}
       {showTechInfo && techInfo && (
         <TechInfoDialog onClose={() => setShowTechInfo(false)} returnFocus={optionsRef}>
         <div className="p-4 space-y-4 text-sm">

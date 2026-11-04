@@ -26,6 +26,7 @@ mod crypto;
 mod device_state;
 mod diagnostics;
 mod downloads;
+mod dropped_files;
 // The macOS end-to-end tests' way into the page (debug builds with `--features e2e-driver` only).
 #[cfg(any(test, feature = "e2e-driver"))]
 #[cfg_attr(not(feature = "e2e-driver"), allow(dead_code))]
@@ -143,6 +144,7 @@ macro_rules! commands {
             commands::generate_enc_key,
             commands::get_profile,
             commands::get_public_key,
+            commands::hide_from_switcher,
             commands::link_preview_fetch,
             commands::lnd_request,
             commands::local_fetch,
@@ -175,6 +177,7 @@ macro_rules! commands {
             commands::webkit_version,
             device_state::device_state_read,
             device_state::device_state_write,
+            dropped_files::read_dropped_files,
             file_store::file_bytes_append,
             file_store::file_bytes_close,
             file_store::file_bytes_digest,
@@ -355,6 +358,7 @@ pub fn run() {
         .manage(clipboard_source())
         .manage(paste_source())
         .manage(clipboard::PasteShelf::default())
+        .manage(dropped_files::DroppedFiles::default())
         .setup(|app| {
             // The app's log, where the peer and the Pkarr client say how a link is doing.
             if let Ok(dir) = app.path().app_log_dir() {
@@ -388,6 +392,8 @@ pub fn run() {
                 microphone::install(&main);
                 // A file is saved through the app's own Save only, never by the WebView's own menu.
                 downloads::install(&main);
+                // A file dragged in from a file manager reaches the chat (WebKitGTK hands the page its address only).
+                dropped_files::install(&main);
             }
             #[cfg(feature = "e2e-driver")]
             {
@@ -488,6 +494,10 @@ fn page_started<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(links) = app.try_state::<linked_files::LinkedFiles>() {
         links.page_started();
     }
+    // The cookie jars of its Pubky approvals, which it can no longer close (`pubky_session::page_started`).
+    pubky_session::page_started();
+    // Its cameras, microphone meters and calls (Linux): stopped, and its device watch no longer told.
+    native_call::page_started();
 }
 
 /// How long the page gets to say goodbye to its contacts before an exit it can be told about goes on.
@@ -1179,6 +1189,24 @@ mod tests {
         page_started(app.handle());
         assert_eq!(serve(), tauri::http::StatusCode::NOT_FOUND);
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// The Pubky sessions of the page before this one, which it never closed, are forgotten: their ids were its own.
+    #[test]
+    fn a_new_page_forgets_the_pubky_sessions_the_page_before_left_open() {
+        let app = app();
+        // A session is open once its first request is in; a bad address is refused before that.
+        tauri::async_runtime::block_on(pubky_session::fetch(
+            "session-000000000001".into(),
+            "http://127.0.0.1:9/session".into(),
+            "GET".into(),
+            vec![],
+            None,
+        ))
+        .ok();
+        assert_eq!(pubky_session::open_sessions(), 1);
+        page_started(app.handle());
+        assert_eq!(pubky_session::open_sessions(), 0);
     }
 
     /// The Ghostly window closed on Linux or Windows ends the app. By the exit, Tauri has dropped the window and its

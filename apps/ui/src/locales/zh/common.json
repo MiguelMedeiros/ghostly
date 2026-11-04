@@ -13,6 +13,7 @@
     "turnBack": "卡片"
   },
   "delete": "删除",
+  "deleteChatCallOn": "此聊天中有通话。请先结束通话，再删除聊天。",
   "deleteChatLocal": "这将删除此设备上的聊天及其记录，不会删除联系人的副本。",
   "deleteChatTitle": "删除聊天？",
   "error": "错误",

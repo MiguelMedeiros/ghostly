@@ -74,11 +74,19 @@
     "exitReal": "إذا اختفى الخادم، فلا يزال بالإمكان استعادة العملات على السلسلة قبل انتهاء صلاحيتها (خروج أحادي الجانب، بدفع رسوم على السلسلة)، لكن Ghostly لا يملك زرًا لذلك بعد، لذا أبقِ المبالغ صغيرة.",
     "exiting": "{{amount}} {{unit}} في طريقها عائدة إلى السلسلة (خروج أحادي الجانب)",
     "expiry": {
-      "lifetime": "تدوم العملات نحو {{count}} يومًا على هذا الخادم. ",
+      "lifetime": "تدوم العملات نحو {{count}} أيام على هذا الخادم. ",
       "lifetimeOne": "تدوم العملات نحو يوم واحد على هذا الخادم. ",
-      "next": " تنتهي صلاحية التالية بعد نحو {{count}} يومًا.",
+      "lifetime_many": "تدوم العملات نحو {{count}} يومًا على هذا الخادم. ",
+      "lifetime_one": "تدوم العملات نحو يوم واحد على هذا الخادم. ",
+      "lifetime_other": "تدوم العملات نحو {{count}} يوم على هذا الخادم. ",
+      "lifetime_two": "تدوم العملات نحو يومين على هذا الخادم. ",
+      "next": " تنتهي صلاحية التالية بعد نحو {{count}} أيام.",
       "nextOne": " تنتهي صلاحية التالية بعد نحو يوم واحد.",
       "nextSoon": " تنتهي صلاحية التالية خلال أقل من يوم.",
+      "next_many": " تنتهي صلاحية التالية بعد نحو {{count}} يومًا.",
+      "next_one": " تنتهي صلاحية التالية بعد نحو يوم واحد.",
+      "next_other": " تنتهي صلاحية التالية بعد نحو {{count}} يوم.",
+      "next_two": " تنتهي صلاحية التالية بعد نحو يومين.",
       "renews": "يجدّدها Ghostly قرب انتهاء صلاحيتها ما دام مفتوحًا، لذا افتحه قبل ذلك.",
       "schedule": "تنتهي صلاحية العملات وفق جدول يحدده الخادم. "
     },
@@ -124,7 +132,11 @@
     "retrying": "{{error}} · تُعاد المحاولة تلقائيًا",
     "reviewNote": "تُبنى المعاملة وتُوقَّع لمراجعتك، ولا يُبث شيء قبل موافقتك.",
     "tx": {
-      "confirmed": "{{sign}}{{amount}} · {{count}} تأكيد",
+      "confirmed": "{{sign}}{{amount}} · {{count}} تأكيدات",
+      "confirmed_many": "{{sign}}{{amount}} · {{count}} تأكيدًا",
+      "confirmed_one": "{{sign}}{{amount}} · تأكيد واحد",
+      "confirmed_other": "{{sign}}{{amount}} · {{count}} تأكيد",
+      "confirmed_two": "{{sign}}{{amount}} · تأكيدان",
       "unconfirmed": "{{sign}}{{amount}} · غير مؤكدة"
     },
     "unconfirmed": "{{amount}} {{unit}} غير مؤكدة"
@@ -151,6 +163,10 @@
       "federationEcash": "ecash الاتحادات",
       "federationOne": "اتحاد واحد",
       "federations": "{{count}} اتحادات",
+      "federations_many": "{{count}} اتحادًا",
+      "federations_one": "اتحاد واحد",
+      "federations_other": "{{count}} اتحاد",
+      "federations_two": "اتحادان",
       "lightningCashu": "فواتير عبر Cashu",
       "lightningVia": "عبر {{name}}",
       "onchain": "على السلسلة",
@@ -233,7 +249,7 @@
     "settings": "الإعدادات",
     "testBalance": "{{amount}} sats تجريبية (بلا قيمة)",
     "testBalance_one": "{{amount}} sat تجريبي (بلا قيمة)",
-    "testMintInvoice": "بانتظار الدفع… دور السك التجريبية تعلّم كل فاتورة مدفوعة من تلقاء نفسها، لذا لا تُحتسب هذه الفاتورة إلا حين تدفعها جهة اتصال في محادثة. للحصول على sats تجريبية الآن، استخدم «احصل على عملات تجريبية» أعلاه.",
+    "testMintInvoice": "بانتظار الدفع… دور السك التجريبية تعلّم كل فاتورة مدفوعة من تلقاء نفسها، لذا شارك هذه الفاتورة في محادثة فردية: لا تُحتسب إلا حين تدفعها جهة اتصال هناك. للحصول على sats تجريبية الآن، استخدم «احصل على عملات تجريبية» أعلاه.",
     "tokenHint": "وصلك رمز ecash بدلًا من ذلك؟ الصقه في «إرسال».",
     "tokenRedeemedFee": "استُرد {{amount}} sats (واحتفظت الـ mint بـ {{fee}} رسمًا لها).",
     "tokenRedeemedFeeTest": "استُرد {{amount}} sats تجريبية (واحتفظت الـ mint بـ {{fee}} رسمًا لها).",
@@ -261,6 +277,9 @@
   "fedimint": {
     "about": "الاتحاد مجموعة من الحرّاس يحفظون البيتكوين معًا ويصدرون مقابلها ecash. الانضمام إلى اتحاد يعني أن تأتمنهم على ما تحفظه لديهم. الصق رمز الدعوة الخاص به (fed1…).",
     "across": "{{amount}} {{unit}} موزعة على {{count}} اتحادات. ecash اتحاد ما ليس ecash لاتحاد آخر.",
+    "across_many": "{{amount}} {{unit}} موزعة على {{count}} اتحادًا. ecash اتحاد ما ليس ecash لاتحاد آخر.",
+    "across_other": "{{amount}} {{unit}} موزعة على {{count}} اتحاد. ecash اتحاد ما ليس ecash لاتحاد آخر.",
+    "across_two": "{{amount}} {{unit}} موزعة على اتحادين. ecash اتحاد ما ليس ecash لاتحاد آخر.",
     "alreadyRedeemed": "استردّها شخص ما بالفعل.",
     "amountFee": "{{amount}} (رسوم {{fee}})",
     "asNotes": "{{amount}} sats على شكل أوراق",
@@ -296,6 +315,10 @@
     "fromBackupHintJoined": "فقط في محفظة Fedimint ليس فيها اتحاد بعد",
     "guardians": "{{count}} حرّاس · الإجماع v{{version}}",
     "guardiansOne": "حارس واحد · الإجماع v{{version}}",
+    "guardians_many": "{{count}} حارسًا · الإجماع v{{version}}",
+    "guardians_one": "حارس واحد · الإجماع v{{version}}",
+    "guardians_other": "{{count}} حارس · الإجماع v{{version}}",
+    "guardians_two": "حارسان · الإجماع v{{version}}",
     "hide": "إخفاء",
     "inviteInput": "رمز دعوة الاتحاد",
     "invitesInput": "رموز الدعوة المراد استعادتها",
@@ -434,7 +457,11 @@
   },
   "networks": {
     "tab": "{{money}}، {{network}}، {{count}} محافظ",
-    "tabOne": "{{money}}، {{network}}، محفظة واحدة"
+    "tabOne": "{{money}}، {{network}}، محفظة واحدة",
+    "tab_many": "{{money}}، {{network}}، {{count}} محفظة",
+    "tab_one": "{{money}}، {{network}}، محفظة واحدة",
+    "tab_other": "{{money}}، {{network}}، {{count}} محفظة",
+    "tab_two": "{{money}}، {{network}}، محفظتان"
   },
   "new": {
     "about": {
@@ -676,6 +703,111 @@
       "onchainTestnet": "لا يتوفر هنا بعد أي مزوّد Bitcoin على السلسلة في Testnet."
     },
     "optional": "(اختياري)",
+    "providers": {
+      "bdk": {
+        "description": "محفظة Bitcoin داخل هذا التطبيق (bitcoindevkit): أنت تحتفظ بالمفاتيح، وخادم Esplora يخبرها بالسلسلة. شبكات الاختبار فقط حاليًا.",
+        "fields": {
+          "esplora": {
+            "help": "فارغ: الخوادم العامة لـ Signet (blockstream.info وmempool.space) أو Mutinynet (mutinynet.com)، أيها يجيب. تحتاج Regtest إلى خادمك الخاص، ويجب أن يسمح بأصل هذا التطبيق (CORS).",
+            "label": "خادم Esplora",
+            "placeholder": "فارغ: خادم عام للشبكة",
+            "suggestions": {
+              "http_127_0_0_1_47002": "هذا الحاسوب: بيئة regtest لاختبارات e2e (npm run e2e:infra:up)"
+            }
+          },
+          "mnemonic": {
+            "help": "BIP39، بالإنجليزية. اترك Ghostly ينشئ محفظة جديدة، أو اكتب عبارتك لاستعادة محفظتك.",
+            "label": "عبارة الاسترداد",
+            "placeholder": "اثنتا عشرة أو أربع وعشرون كلمة"
+          },
+          "network": {
+            "label": "الشبكة"
+          },
+          "script": {
+            "label": "العناوين",
+            "options": {
+              "bip84": "SegWit الأصلي (BIP84، bc1q…)"
+            }
+          }
+        }
+      },
+      "bitcoind": {
+        "description": "محفظة على عقدة Bitcoin Core الخاصة بك، عبر RPC الخاص بها. عقدتك تحتفظ بالمفاتيح وتوقّع. تحتاج إلى تطبيق سطح المكتب.",
+        "fields": {
+          "password": {
+            "help": "rpcpassword، أو محتوى ملف ‎.cookie الخاص بالعقدة (يتغير عند إعادة تشغيل bitcoind).",
+            "label": "كلمة مرور RPC أو cookie"
+          },
+          "url": {
+            "help": "قيمتا rpcbind وrpcport لعقدتك: 8332 لـ mainnet، و38332 لـ signet، و48332 لـ testnet4، و18443 لـ regtest.",
+            "label": "عنوان RPC"
+          },
+          "user": {
+            "help": "اتركه فارغًا للصق ملف ‎.cookie أدناه.",
+            "label": "مستخدم RPC"
+          },
+          "wallet": {
+            "help": "محفظة محمّلة في العقدة (bitcoin-cli listwallets). فارغ: محفظتها الافتراضية.",
+            "label": "اسم المحفظة"
+          }
+        }
+      },
+      "breez": {
+        "description": "محفظة Lightning ذاتية الحفظ على Spark، عبر Breez SDK. عبارة استردادها مختومة على هذا الجهاز، وأنت تحتفظ بالـ sats."
+      },
+      "cashu-mint": {
+        "description": "تُدفع الفواتير إلى رصيد Cashu الخاص بك ومنه. الـ mints تحتفظ بالـ sats."
+      },
+      "core-lightning": {
+        "description": "عقدة Core Lightning الخاصة بك، عبر Commando باستخدام rune. عقدتك تحتفظ بالـ sats. لا يصل إليها تطبيق الويب إلا عبر wss://.",
+        "fields": {
+          "nodeId": {
+            "help": "lightning-cli getinfo → id. يُصادَق الاتصال بناءً عليه.",
+            "label": "معرّف العقدة",
+            "placeholder": "02… أو 03… (66 حرفًا ست عشريًا)"
+          },
+          "rune": {
+            "help": "لا تستخدم أبدًا rune غير مقيّدة. أنشئ واحدة بالأمر: {{command}}",
+            "placeholder": "rune مقيّدة بطرق Ghostly"
+          },
+          "url": {
+            "help": "مستمع bind-addr=ws:… الخاص بالعقدة، خلف وكيل wss:// لتطبيق الويب؛ ws:// إلى هذا الجهاز فقط.",
+            "label": "عنوان WebSocket"
+          }
+        }
+      },
+      "fedimint": {
+        "description": "اتحاد انضممت إليه (المحفظة ← Fedimint): تُدفع الفواتير إلى عملة ecash الخاصة به ومنها، عبر بوابته. حُرّاسه يحتفظون بالـ sats."
+      },
+      "lnd": {
+        "description": "عقدة LND الخاصة بك، عبر واجهة REST API الخاصة بها. عقدتك تحتفظ بالـ sats.",
+        "fields": {
+          "certificate": {
+            "help": "سطح المكتب فقط: ملف tls.cert الخاص بالعقدة، مثبّت (يجب أن تقدّم العقدة هذه الشهادة بالضبط). اتركه فارغًا لشهادة من جهة إصدار عامة؛ وفي أي مكان آخر يجب أن يبقى فارغًا.",
+            "label": "شهادة TLS"
+          },
+          "macaroon": {
+            "help": "لا تستخدم أبدًا macaroon المسؤول: أنشئ واحدًا بالأمر {{command}} (invoices:… فقط للاستلام فقط)."
+          },
+          "url": {
+            "help": "منفذ REST الخاص بـ LND (restlisten، و8080 افتراضيًا). في المتصفح يجب أن تسمح العقدة لهذا التطبيق عبر restcors وأن تكون لها شهادة يثق بها المتصفح؛ أما تطبيق سطح المكتب فلا يحتاج إلى أي منهما.",
+            "label": "عنوان REST"
+          }
+        }
+      },
+      "nwc": {
+        "description": "محفظة تتصل بها عبر NWC URI الخاص بها (Alby Hub، أو خدمة NWC لعقدة، أو محفظة مستضافة). تلك المحفظة تحتفظ بالـ sats وتحدد حد الرسوم الخاص بها: كونها حافظة أم لا يعتمد على المحفظة.",
+        "fields": {
+          "uri": {
+            "help": "من اتصالات التطبيقات في محفظتك. اسمح بإنشاء الفواتير ودفعها والبحث عنها، وبقراءة الرصيد.",
+            "label": "URI الاتصال"
+          }
+        }
+      },
+      "webln": {
+        "description": "محفظة Lightning في هذا المتصفح (Alby وغيرها). تلك المحفظة تحتفظ بالـ sats وتسألك قبل أن تدفع."
+      }
+    },
     "reconfigured": "يستخدم {{name}} الآن ذلك الخادم.",
     "reconfiguredUnnamed": "يستخدم المصدر الآن ذلك الخادم.",
     "remove": "إزالة",
@@ -801,6 +933,14 @@
     "confirmed": "مؤكدة",
     "decimals": "{{count}} منازل عشرية",
     "decimalsFreeze": "{{count}} منازل عشرية · يمكن لـ Tether تجميد USDT",
+    "decimalsFreeze_many": "{{count}} منزلة عشرية · يمكن لـ Tether تجميد USDT",
+    "decimalsFreeze_one": "منزلة عشرية واحدة · يمكن لـ Tether تجميد USDT",
+    "decimalsFreeze_other": "{{count}} منزلة عشرية · يمكن لـ Tether تجميد USDT",
+    "decimalsFreeze_two": "منزلتان عشريتان · يمكن لـ Tether تجميد USDT",
+    "decimals_many": "{{count}} منزلة عشرية",
+    "decimals_one": "منزلة عشرية واحدة",
+    "decimals_other": "{{count}} منزلة عشرية",
+    "decimals_two": "منزلتان عشريتان",
     "feeLimit": "حد رسوم الشبكة",
     "gas": "{{amount}} ETH لرسوم الشبكة",
     "gasInput": "الحد الأقصى للغاز بالـ ETH",

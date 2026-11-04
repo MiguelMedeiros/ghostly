@@ -10,7 +10,7 @@ import type { BrowserHost } from "./host";
  * its pages.)
  */
 export interface InPageHostOptions
-  extends Pick<BrowserHost, "version" | "notice" | "updates" | "appRunner" | "appNetRunner" | "appRunnerServed" | "features" | "requestLocalAccess" | "forgetLocalAccess" | "openService" | "forgetServices" | "oidc" | "atproto" | "openPaymentLink" | "fullscreenWindow" | "shareText" | "readClipboardText" | "readClipboardFiles" | "openPubkyPassport" | "pubkyCookieSession" | "callMedia" | "keepAwake"> {
+  extends Pick<BrowserHost, "version" | "notice" | "updates" | "appRunner" | "appNetRunner" | "appRunnerServed" | "features" | "requestLocalAccess" | "forgetLocalAccess" | "openService" | "forgetServices" | "oidc" | "atproto" | "openPaymentLink" | "fullscreenWindow" | "shareText" | "readClipboardText" | "readClipboardFiles" | "openPubkyPassport" | "pubkyCookieSession" | "callMedia" | "keepAwake" | "hideFromSwitcher"> {
   node?: NodeOptions;
   /** Called once the peer exists, e.g. to let something outside the page reach it. Never on a standby: no engine runs there. */
   onServer?: (server: EngineServer) => void;
@@ -39,6 +39,7 @@ export function createInPageHost(options: InPageHostOptions): BrowserHost & { an
     shareText: options.shareText,
     readClipboardText: options.readClipboardText,
     keepAwake: options.keepAwake,
+    hideFromSwitcher: options.hideFromSwitcher,
     readClipboardFiles: options.readClipboardFiles,
     openPubkyPassport: options.openPubkyPassport,
     pubkyCookieSession: options.pubkyCookieSession,

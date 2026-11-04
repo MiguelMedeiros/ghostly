@@ -57,4 +57,18 @@ describe("the first gesture", () => {
     stop();
     expect(names()).toEqual(["message", "ring", "sent"]);
   });
+
+  it("lets a sound coming soon be fetched ahead, once, and its play then fetches nothing; before a gesture, nothing", async () => {
+    sounds.warmSound("connected");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(names()).toEqual([]);
+    document.dispatchEvent(new Event("pointerdown"));
+    sounds.warmSound("connected");
+    sounds.warmSound("connected");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(names()).toEqual(["connected", "message", "sent"]);
+    sounds.playSound("connected");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(names()).toEqual(["connected", "message", "sent"]);
+  });
 });

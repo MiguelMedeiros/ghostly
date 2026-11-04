@@ -83,6 +83,25 @@ describe("usage send", () => {
     for (const flag of ["resets", "also"] as const) expect(COMMANDS["usage send"]!.options![flag].description).toMatch(/no zone: local time/);
   });
 
+  it("refuses a day the month does not have in --resets and --also, where the card showed the next month's first day", () => {
+    expect(() => params(["Miguel", "--left", "40", "--resets", "2026-04-31"])).toThrow(expect.objectContaining({ code: "usage", message: "--resets takes a day the month has (2026-04 has 30), not \"2026-04-31\"" }));
+    expect(() => params(["Miguel", "--left", "40", "--also", "week=80@2026-02-30"])).toThrow(expect.objectContaining({ code: "usage", message: "--also takes a day the month has (2026-02 has 28), not \"2026-02-30\"" }));
+  });
+
+  it("refuses a --resets or --also time more than a year ahead as a usage error (exit 2) that names the flag and the last time it takes", () => {
+    const zone = process.env.TZ;
+    try {
+      process.env.TZ = "UTC";
+      vi.useFakeTimers({ toFake: ["Date"], now: Date.UTC(2026, 10, 4, 11, 30, 20) });
+      // Before, bad_request (exit 1): "Status card: resetsAt is a time in milliseconds, within a year", and windows[0].resetsAt.
+      expect(() => params(["Miguel", "--left", "40", "--resets", "2028-01-01"])).toThrow(expect.objectContaining({ code: "usage", message: "--resets takes a time within a year from now (until 2027-11-05 11:30), not \"2028-01-01\"" }));
+      expect(() => params(["Miguel", "--left", "40", "--also", "week=80@2028-01-01"])).toThrow(expect.objectContaining({ code: "usage", message: "--also takes a time within a year from now (until 2027-11-05 11:30), not \"2028-01-01\"" }));
+      expect(params(["Miguel", "--left", "40", "--resets", "2027-11-05 11:30", "--also", "week=80@2026-11-01"]).card).toMatchObject({ resetsAt: Date.UTC(2027, 10, 5, 11, 30), windows: [{ resetsAt: Date.UTC(2026, 10, 1) }] });
+    } finally {
+      if (zone === undefined) delete process.env.TZ; else process.env.TZ = zone;
+    }
+  });
+
   it("refuses a report that says no quota as a usage error (exit 2) that names the flag, not the card's field", () => {
     const usage = (argv: string[], message: RegExp) => expect(() => params(argv)).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(message) }));
     usage(["Alice"], /^--left is needed \(or --used with --limit\): ghostly usage send/);
@@ -91,6 +110,13 @@ describe("usage send", () => {
     usage(["Alice", "--limit", "50"], /^--limit goes with --used: ghostly usage send/);
     usage(["Alice", "--limit", "50", "--left", "40"], /^--left or --used with --limit, not both$/);
     usage(["Alice", "--left", "140"], /^--left takes a percent from 0 to 100, not 140$/);
+    // Before, these reached the card's check: bad_request (exit 1), "Status card: limit is a whole number from 1".
+    usage(["Alice", "--used", "5", "--limit", "0"], /^--limit takes a whole number from 1 to 1000000000, not 0$/);
+    usage(["Alice", "--used", "1.5", "--limit", "3"], /^--used takes a whole number from 0 to 1000000000, not 1.5$/);
+    usage(["Alice", "--used", "-1", "--limit", "3"], /^--used takes a whole number from 0 to 1000000000, not -1$/);
+    usage(["Alice", "--used", "6", "--limit", "3"], /^--used takes at most --limit \(3\), not 6$/);
+    expect(params(["Alice", "--used", "3", "--limit", "3"]).card).toEqual({ used: 3, limit: 3 });
+    expect(params(["Alice", "--used", "0", "--limit", "1"]).card).toEqual({ used: 0, limit: 1 });
     // --json may give them, and the two ways to say it stand.
     expect(params(["Alice", "--json", '{"left":40}']).card).toEqual({ left: 40 });
     expect(params(["Alice", "--used", "5", "--limit", "50"]).card).toEqual({ used: 5, limit: 50 });

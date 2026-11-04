@@ -1375,6 +1375,21 @@ describe("text in a chat", () => {
     expect(history).toHaveBeenCalled();
   });
 
+  it("forty texts asked for at once, as a bot's workers do, read the rows on their way, not the chat's whole history", async () => {
+    const chat = row();
+    const { node, events: pages, linkOf } = await started(chat);
+    // As the CLI and the web app host it: the pages hear the rows that changed, not the whole history.
+    Object.assign(pages, { onMessageChanges: vi.fn() });
+    await node.sendMessage({ linkId: chat.id, text: "first", timestamp: 1 });
+    const history = vi.spyOn(db, "getMessages");
+    const texts =Array.from({ length: 40 }, (_, i) => `m${i}`);
+    const sends = await Promise.all(texts.map((text, i) => node.sendMessage({ linkId: chat.id, text, timestamp: 2 + i })));
+    expect(sends.every(sent => sent.error === null)).toBe(true);
+    // Past the sixteenth on its way (or awaiting its receipt), each one's turn read the history.
+    expect(history).not.toHaveBeenCalled();
+    expect(linkOf(chat.id).sendMessage.mock.calls.map(([text]) => text)).toEqual(["first", ...texts]);
+  });
+
   it("a receipt for a file said on the DHT floor finds it without reading the chat's whole history again", async () => {
     const chat = row();
     const { node, events: pages, linkOf } = await started(chat);
@@ -2397,6 +2412,29 @@ describe("private groups through the engine", () => {
       await vi.waitFor(() => expect(waiting()).toHaveLength(1));
       expect(onIroh(edgeIds)).toHaveLength(8);
       expect(onIroh(chats.map((c) => c.id))).toHaveLength(8);
+    });
+
+    it("on Iroh relays that are not n0's the browser build holds 64 Iroh listeners, 32 of them at most for 1:1 chats", async () => {
+      // A relay of the person's own (Settings, Network): a lab relay held 128 per app, n0's refused bursts of sixteen.
+      const chats = Array.from({ length: 34 }, () => row({ pairedPeerKey: createIdentity().pubKeyZ32 }));
+      for (const r of chats) await db.putLink(r);
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      irohWeb.start.mockImplementation(async () => endpoint());
+      await db.putSettings({ ...(await db.getSettings()), hyperdhtRelay: "", irohRelays: ["https://relay.example.com/"] });
+      const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() };
+      const node = new GhostlyNode(events, { automaticWallets: false, transport: fixture, irohWeb: true });
+      nodes.push(node);
+      await node.start();
+      const onIroh = (ids: string[]) => ids.filter((id) => edgeOf(id).availableTransports.includes("iroh/1"));
+      await vi.waitFor(() => expect(onIroh(chats.map((c) => c.id))).toHaveLength(32), { timeout: 3_000 });
+      await node["nativeQueues"].get("iroh/1");
+      expect(onIroh(chats.map((c) => c.id))).toHaveLength(32);
+      for (const [, options] of irohWeb.start.mock.calls) expect(options).toEqual({ relays: ["https://relay.example.com/"] });
+      // With no WebRTC, its groups may have the 60 the four kept for chats leave.
+      const { groupId } = await node.createGroup({ name: "Team" });
+      vi.unstubAllGlobals();
+      expect((node["groups"]["host"] as { peerRoom(groupId: string): number | undefined }).peerRoom(groupId)).toBe(60);
     });
 
     it("group links hold at most half the native slots, a chat takes one back from an idle group link, and a link with none says it waits", async () => {

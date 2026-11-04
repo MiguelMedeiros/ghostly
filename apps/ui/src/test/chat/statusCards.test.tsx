@@ -102,6 +102,13 @@ describe("a task card in the chat", () => {
     expect(screen.getByTestId("status-card-status")).toHaveTextContent("متوقفة");
   });
 
+  it("in Arabic, says its steps as a count with no noun after the number (\"خطوات\" is wrong for 1, 2 and 11 up)", () => {
+    renderApp(<MessageBubble message={message(card({ done: 3, total: 12 }))} peerPubKey="peer" />, { language: "ar" });
+    const shown = screen.getByTestId("status-card");
+    expect(shown).toHaveTextContent("الخطوات: 3/12");
+    expect(shown).not.toHaveTextContent(/\d+ خطوات/);
+  });
+
   it("says when it started (opened) and was updated (its foot) as a label and a time in Japanese and Chinese, \"just now\" included", async () => {
     const times = { startedAt: Date.now() - 3 * 60_000, updatedAt: Date.now() };
     const edit = { at: Date.now(), versions: [] } as unknown as ChatMessage["edit"];
@@ -597,7 +604,7 @@ describe("the Tasks panel under a bot room's load", () => {
   it("reads right to left in Arabic", async () => {
     const { user } = renderApp(<TasksButton rows={load()} nameOf={nameOf} />, { language: "ar" });
     await user.click(screen.getByTestId("chat-tasks"));
-    expect(screen.getByTestId("chat-tasks-summary")).toHaveTextContent("3 نشطة · 14 روتينات");
+    expect(screen.getByTestId("chat-tasks-summary")).toHaveTextContent("3 نشطة · 14 روتينًا");
     expect(screen.getByTestId("chat-tasks-close")).toHaveAccessibleName("إغلاق");
   });
 });

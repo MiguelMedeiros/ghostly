@@ -85,8 +85,9 @@ function Shell({ label, network, chain, amount, testId, lines, detail, qr, child
         <MoneyNetworkTag network={network} chain={chain} />
       </div>
       <p className="m-0 mt-1 leading-tight">{amount}</p>
+      {/* A label or description is text someone else wrote, in any script: laid out by its own direction, as the invoice's card does. */}
       {lines.filter(Boolean).map((line) => (
-        <p key={line} className="text-[12.5px] leading-snug m-0 mt-1 wrap-break-word text-text-primary/80">{line}</p>
+        <p key={line} dir="auto" className="text-[12.5px] leading-snug m-0 mt-1 wrap-break-word text-text-primary/80">{line}</p>
       ))}
       <p className="font-mono text-[11.5px] leading-snug m-0 mt-1.5 break-all text-text-primary/80" data-testid="money-detail">{detail}</p>
       {!fits && <p className="text-[12.5px] leading-snug m-0 mt-1 text-text-primary/65" data-testid="qr-too-long">{t("payments.invoice.qrTooLong")}</p>}
@@ -108,7 +109,9 @@ function Amount({ sats, network }: { sats?: number; network: WalletNetwork }) {
   if (sats === undefined) return <span className="text-[15px] font-semibold">{t("payments.invoice.anyAmount")}</span>;
   return (
     <>
-      <span className="text-[22px] font-semibold" data-testid="money-amount">{formatAmount(sats, t.language)}</span>
+      {/* Only the number isolated, as the invoice's card does: in a right-to-left page a bare number was one run with the
+          unit's Latin word ("sats تجريبية" read "sats 12,345 تجريبية"). The unit stays in the line's direction. */}
+      <bdi className="text-[22px] font-semibold" data-testid="money-amount">{formatAmount(sats, t.language)}</bdi>
       <span className="text-text-primary/65 text-xs ms-1">{satsIn(t, network, sats)}</span>
     </>
   );
@@ -220,7 +223,7 @@ function PayStep({ wallet, fixedAmount, unit, defaultFee, feeUnit, parse, prepar
         </button>
         <button className={quiet} disabled={busy} onClick={() => setOpen(false)}>{t("common.cancel")}</button>
       </div>
-      {error && <Notice problem={error} testId="money-pay-error" className="text-xs m-0" ink />}
+      {error && <Notice problem={error} testId="money-pay-error" className="text-xs m-0" />}
     </div>
   );
 }
@@ -354,7 +357,7 @@ function UsdtCard({ request, mine, off }: { request: UsdtRequest; mine: boolean;
   const usdt = view?.usdt;
   const decimals = usdt?.decimals ?? 6;
   const amount = request.amount !== undefined
-    ? <><span className="text-[22px] font-semibold" data-testid="money-amount">{formatTokenAmount(request.amount.toString(), decimals, t.language)}</span><span className="text-text-primary/65 text-xs ms-1">{network === "mainnet" ? "USDT" : t("payments.formats.testUsdt")}</span></>
+    ? <><bdi className="text-[22px] font-semibold" data-testid="money-amount">{formatTokenAmount(request.amount.toString(), decimals, t.language)}</bdi><span className="text-text-primary/65 text-xs ms-1">{network === "mainnet" ? "USDT" : t("payments.formats.testUsdt")}</span></>
     : <span className="text-[15px] font-semibold">{t("payments.invoice.anyAmount")}</span>;
   let status: React.ReactNode = null;
   if (!network) {
@@ -397,7 +400,7 @@ function UsdtCard({ request, mine, off }: { request: UsdtRequest; mine: boolean;
 
 /**
  * A Monero address or `monero:` link. No Monero wallet here: Pay hands the link to the person's own wallet app (a
- * plain link on the web, the system's opener on Desktop and Android), and the ⓘ says so.
+ * plain link on the web, the system's opener on Desktop and Android), and the ⓘ says so. My own card has neither.
  */
 function MoneroCard({ request, mine }: { request: MoneroRequest; mine: boolean }) {
   const { t } = useI18n();
@@ -405,7 +408,7 @@ function MoneroCard({ request, mine }: { request: MoneroRequest; mine: boolean }
   const [info, setInfo] = useState(false);
   const infoId = useId();
   const amount = request.amount !== undefined
-    ? <><span className="text-[22px] font-semibold" data-testid="money-amount">{formatTokenAmount(request.amount.toString(), 12, t.language)}</span><span className="text-text-primary/65 text-xs ms-1">XMR</span></>
+    ? <><bdi className="text-[22px] font-semibold" data-testid="money-amount">{formatTokenAmount(request.amount.toString(), 12, t.language)}</bdi><span className="text-text-primary/65 text-xs ms-1">XMR</span></>
     : <span className="text-[15px] font-semibold">{t("payments.invoice.anyAmount")}</span>;
   return (
     <Shell
@@ -414,8 +417,8 @@ function MoneroCard({ request, mine }: { request: MoneroRequest; mine: boolean }
     >
       {!mine && <OpenInWallet className={`${button} no-underline`} uri={request.uri} title={t("payments.formats.moneroPayTitle")} testId="monero-pay">{t("payments.invoice.pay")}</OpenInWallet>}
       <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("payments.formats.copyAddress")}</button>
-      <InfoButton open={info} onToggle={() => setInfo(!info)} controls={infoId} testId="monero-info" className="self-center" />
-      {info && <p id={infoId} className="basis-full order-last text-[12px] leading-snug m-0 text-text-primary/80" data-testid="monero-info-text">{t("payments.formats.moneroInfo")}</p>}
+      {!mine && <InfoButton open={info} onToggle={() => setInfo(!info)} controls={infoId} testId="monero-info" className="self-center" />}
+      {!mine && info && <p id={infoId} className="basis-full order-last text-[12px] leading-snug m-0 text-text-primary/80" data-testid="monero-info-text">{t("payments.formats.moneroInfo")}</p>}
       {failed && <MoneyCopyRefused value={request.address} />}
     </Shell>
   );

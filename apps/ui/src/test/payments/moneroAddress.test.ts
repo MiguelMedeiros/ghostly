@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { findMoney } from "../../lib/money";
 import { previewText } from "../../lib/chatList";
+import { loadLocale, translatorFor } from "../../locales";
 import { decodeMoneroAddress, findMoneroAddress, moneroBase58Decode, xmrToPiconero } from "../../lib/parse/money-monero";
 import {
   BC1Q, XMR_INTEGRATED, XMR_MAINNET, XMR_STAGENET, XMR_STAGENET_INTEGRATED, XMR_STAGENET_SUBADDRESS, XMR_SUBADDRESS,
@@ -72,6 +73,21 @@ describe("Monero in a message", () => {
     expect(found.request.uri).toMatch(/^monero:[A-Za-z0-9?=&%.:_-]+$/);
   });
 
+  it("cuts a link's name and description at 140 characters, so the link it hands on stays one Desktop and the extension open", () => {
+    // Written raw, each character comes back as 9 in the link: 500 of them alone would be past Desktop's 4,096.
+    const long = "家賃".repeat(250), quoted = "(Rent)".repeat(280);
+    for (const text of [`monero:${XMR_INTEGRATED}?tx_amount=123456789012345.123456789012&recipient_name=${long}&tx_description=${long}`, `monero:${XMR_MAINNET}?recipient_name=${quoted}&tx_description=${quoted}`]) {
+      const request = findMoneroAddress(text)!.request;
+      expect([...request.recipientName!]).toHaveLength(140);
+      expect([...request.description!]).toHaveLength(140);
+      expect(request.uri.length).toBeLessThanOrEqual(4096);
+      expect(request.uri).toMatch(/^monero:[A-Za-z0-9?=&%.:_-]{1,4096}$/);
+    }
+    // A cut never leaves half of a character pair (encodeURIComponent would throw on it).
+    const emoji = findMoneroAddress(`monero:${XMR_MAINNET}?tx_description=a${"👻".repeat(200)}`)!.request;
+    expect(emoji.description).toBe(`a${"👻".repeat(139)}`);
+  });
+
   it("says a stagenet link is test money", () => {
     expect(findMoneroAddress(`MONERO:${XMR_STAGENET_INTEGRATED}`)?.request).toMatchObject({ chain: "stagenet", network: "testnet", kind: "integrated" });
   });
@@ -96,5 +112,12 @@ describe("Monero in a message", () => {
     expect(findMoney(`${BC1Q} or ${XMR_MAINNET}`)).toMatchObject({ type: "onchain" });
     expect(previewText(XMR_MAINNET)).toBe("Monero address · Real money");
     expect(previewText(XMR_STAGENET)).toBe("Monero address · Test money");
+  });
+
+  it("says a monero: link's amount in the chat list, in XMR as the card writes it", async () => {
+    expect(previewText(`monero:${XMR_STAGENET}?tx_amount=1234.5`)).toBe("Monero address · Test money · 1,234.5 XMR");
+    expect(previewText(`monero:${XMR_MAINNET}?tx_amount=0.000000000001`)).toBe("Monero address · Real money · 0.000000000001 XMR");
+    await loadLocale("pt");
+    expect(previewText(`monero:${XMR_STAGENET}?tx_amount=1234.5`, translatorFor("pt"))).toBe("Endereço Monero · Dinheiro de teste · 1.234,5 XMR");
   });
 });

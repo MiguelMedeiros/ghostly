@@ -139,6 +139,22 @@ describe("GroupShareDialog", () => {
     expect(document.activeElement).toBe(share);
   });
 
+  it("keeps a community member's focus in the dialog when the admin turns the link off under it, then gives it to the ⋮, Share gone", async () => {
+    const member = admin({ isAdmin: false, profile: "community", entryLink: LINK, members: [{ ...me, role: "member" }] });
+    const { user } = openGroup(member);
+    await user.click(screen.getByTestId("group-share"));
+    const dialog = screen.getByTestId("group-share-dialog");
+    expect(within(dialog).getByTestId("group-link-share")).toHaveFocus();
+    act(() => fakeEngine.update({ groups: [{ ...member, entryLink: undefined }] }));
+    expect(within(dialog).getByTestId("group-link")).toHaveAttribute("data-state", "off");
+    expect(screen.queryByTestId("group-share")).not.toBeInTheDocument();
+    // Both fell to the page: Share went with the panel's swap, and the header's Share Done would give it back to.
+    expect(screen.getByTestId("group-share-done")).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("group-share-dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-options")).toHaveFocus();
+  });
+
   it("leaves the focus in the group when a new group's link is put away: on what had it, else on Share", async () => {
     const { user } = openGroup(admin({ entryLink: LINK }), { share: "created" });
     await user.click(await screen.findByRole("button", { name: "Go to the group" }));

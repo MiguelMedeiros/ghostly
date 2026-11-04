@@ -68,12 +68,14 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
         } catch (e) {
           if (!current()) return;
           // No app there (a 404, or not a bundle): it may be a store. A link to a host off the list stops here.
-          if (/\.ghostlyapp(?:[?#].*)?$/i.test(link) || appErrorCode(e) === "host" || appErrorCode(e) === "github-link") { setError(appErrorView(e, t)); return; }
+          if (/\.ghostlyapp(?:[?#].*)?$/i.test(link) || ["host", "github-link", "private-link"].includes(appErrorCode(e) ?? "")) { setError(appErrorView(e, t)); return; }
         }
       }
       // Read as a store from here: one refused is a link that holds no valid store, not an app refused.
       const found = await engine.call("appStorePreview", { url: link });
       if (current()) setStore(found);
+      // The preview marked the held store (two lists under one number): the Apps page reads its stores again to show it.
+      if (found.held?.equivocation) onStoreAdded();
     } catch (e) { if (current()) setError(appStoreErrorView(e, t)); } finally { if (current()) setBusy(false); }
   };
 
@@ -89,6 +91,15 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
     try { await engine.call("appStoreAdd", { url: store.url, key: store.key }); onStoreAdded(); onClose(); }
     catch (e) { setError(appStoreErrorView(e, t)); } finally { setBusy(false); }
   };
+
+  // A store the person has already (by its key): Add takes only a newer index of it, so only that is offered. Another
+  // index under the held sequence is not the one held: the store signed two lists (the engine marked it on the store).
+  const held = store?.held;
+  const heldLine = !store || !held ? null
+    : held.sequence === undefined || store.sequence > held.sequence ? t("apps.add.storeNewer")
+    : store.sequence < held.sequence ? t("apps.add.storeOlder")
+    : held.equivocation ? t("apps.add.storeEquivocation") : t("apps.add.storeHeld");
+  const offered = !!store && (!held || held.sequence === undefined || store.sequence > held.sequence);
 
   if (app) return <AppInstallDialog source={{ url: app.url }} fetched={app.preview} onClose={onClose} onInstalled={onInstalled} />;
   return (
@@ -122,11 +133,13 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
               {store.description && <p dir="auto" className="text-xs text-text-secondary whitespace-pre-line [overflow-wrap:anywhere]">{store.description}</p>}
               {store.expired && <p className="text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires, t.language) })}</p>}
             </div>
-            <Notice>{t("apps.add.storeReads", { host: hostOf(store.url) })}</Notice>
+            {heldLine && <Notice testId="apps-add-store-held" tone={held?.equivocation ? "warning" : undefined}>{heldLine}</Notice>}
+            {/* A store held is still read from its own link: this one is not where it is read from. */}
+            {!held && <Notice>{t("apps.add.storeReads", { host: hostOf(store.url) })}</Notice>}
             {/* Wraps rather than push Cancel off the screen (a phone at a large text size), as the install screen's. */}
             <div className="flex flex-wrap justify-end gap-2">
-              <Button ref={storeCancel} onClick={onClose}>{t("common.cancel")}</Button>
-              <Button variant="primary" data-testid="apps-add-store-confirm" loading={busy} onClick={() => void addStore()}>{t("apps.add.addStore")}</Button>
+              <Button ref={storeCancel} onClick={onClose}>{offered ? t("common.cancel") : t("common.close")}</Button>
+              {offered && <Button variant="primary" data-testid="apps-add-store-confirm" loading={busy} onClick={() => void addStore()}>{held ? t("apps.add.updateStore") : t("apps.add.addStore")}</Button>}
             </div>
           </div>
         )}

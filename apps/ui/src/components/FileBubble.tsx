@@ -4,7 +4,7 @@ import { useFocusKept } from "../hooks/useFocusKept";
 import { useTransfer } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
 import { downloadFile } from "../lib/fileDownload";
-import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, sentWhole, stalledAction, statusSize } from "../lib/fileStatus";
+import { canRetryFile, failedReason, fileHeld, filePercent, fileStatus, groupFileHint, isGroupFile, sentWhole, stalledAction, statusSize } from "../lib/fileStatus";
 import { knownPictureSize, pictureBox, PLACEHOLDER_BOX, rememberPictureSize, sameShape } from "../lib/pictureBox";
 import { forgetPicture, readPicture, type HeldPicture } from "../lib/pictureReads";
 import type { FileAction } from "../lib/platform";
@@ -173,8 +173,8 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   const controls = moving && !!transfer.direction && !!platform?.fileAction;
   const offered = controls && transfer.direction === "in" && transfer.stage === "asking";
   const pausedHere = moving && transfer.stage === "paused" && transfer.pausedBy !== "peer";
-  const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking";
-  // Sent whole: too late to cancel, the contact keeps it.
+  // Sent whole: too late to pause or cancel, the contact keeps it.
+  const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking" && !sentWhole(transfer);
   const canCancel = controls && !sentWhole(transfer);
   const canRetry = canRetryFile(file, transfer, platform);
   const stuck = platform?.fileAction ? stalledAction(transfer, t) : null;
@@ -294,7 +294,11 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
       )}
       {(reason || hint) && why && <WhyText id={whyId} testId="file-why-text" english={reason?.english}>{reason?.text ?? hint}</WhyText>}
       {moving && transfer.stage !== "asking" && (
-        <div className="h-1 mx-2 mb-1 rounded-full bg-black/20 overflow-hidden" data-testid="file-progress">
+        // A progress bar to a screen reader too, named by its file, read as the status says it ("62% of 4.2 GB").
+        // Not live: what is said as it goes is each step it takes (MessageAnnouncer), never each percent.
+        <div className="h-1 mx-2 mb-1 rounded-full bg-black/20 overflow-hidden" data-testid="file-progress"
+          role="progressbar" aria-label={file.name} aria-valuemin={0} aria-valuemax={100} aria-valuenow={filePercent(transfer)}
+          aria-valuetext={t("chat.file.of", { done: `${filePercent(transfer)}%`, size: statusSize(file.size) })}>
           <div
             className={`h-full origin-left rtl:origin-right ${transfer.stage === "paused" || transfer.stage === "waiting" ? "bg-text-primary/40" : "bg-accent"}`}
             style={{ transform: `scaleX(${Math.min(1, transfer.transferred / Math.max(1, transfer.size))})` }}

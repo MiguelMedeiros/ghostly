@@ -11,8 +11,9 @@
  * error the app stays on screen through is the app's own error screen's, and is forgotten. "Copy details" holds the
  * error, the browser's version and which APIs are there: no address fragment, no storage, nothing of a chat or a key.
  * The "Starting Ghostly…" first paint index.html puts in #root (#boot-shell) is not the app: with only it there the
- * page counts as empty, and the guard gives it the browser's language. As it runs, before anything is drawn, it puts
- * the person's theme on <html>, so the first paint is in their colours.
+ * page counts as empty, and the guard gives it the language the app will draw in (the profile's, or the browser's for a
+ * new one). As it runs, before anything is drawn, it puts the person's theme on <html>, so the first paint is in their
+ * colours.
  *
  * A file of its own, not inline: the site's Content-Security-Policy allows scripts from this origin only.
  */
@@ -45,10 +46,10 @@
   var poll = null;
   var observer = null;
 
+  /** The guard's words in the language the app will draw in (`appLanguage`), English for one it has no words for. */
   function language() {
-    var tag = "";
-    try { tag = String(navigator.language || "").slice(0, 2).toLowerCase(); } catch (e) { /* English */ }
-    return TEXT[tag] ? tag : "en";
+    var tag = appLanguage(TEXT);
+    return TEXT.hasOwnProperty(tag) ? tag : "en";
   }
 
   /** Text that may come from anywhere (an error's message): no invite, no long key-like run, no address fragment. */
@@ -114,7 +115,7 @@
     return !(root.childElementCount === 1 && root.firstElementChild && root.firstElementChild.id === "boot-shell");
   }
 
-  /** The first paint's words in the browser's language, once the page has been read (before the bundle runs). */
+  /** The first paint's words in the app's language, once the page has been read (before the bundle runs). */
   function speakShell() {
     var shell = document.getElementById("boot-shell");
     var words = shell && shell.getElementsByTagName("p")[0];

@@ -38,7 +38,7 @@ Every transport runs the same authenticated chat session ([WISP 401](wisps/401-p
 
 - **Desktop:** native Iroh (`native/transports/`, `apps/desktop/src/paired_transport.rs`), homed on the Iroh relays of Settings, Network when some are set, else on n0's four public relays plus Ghostly's own, `https://iroh.miguelmedeiros.dev/` (`default_relays` in `native/transports/src/iroh_transport.rs`). Iroh homes on the one with the lowest latency it measures, so the others are the fallback. Ghostly's relay sits behind a Cloudflare tunnel: relaying works, its QUIC address discovery does not, so it is listed without it. `GHOSTLY_IROH_RELAYS` (comma-separated URLs) replaces these where no relay is set (tests, a self-hosted `iroh-relay`).
 - **Web and extension** ([#225](https://github.com/MiguelMedeiros/ghostly/pull/225)): the same Iroh 1.3 built for browsers (`native/transports/iroh-web`, shipped as `packages/iroh-web`). A page cannot send UDP, so every packet goes through an Iroh relay. The QUIC/TLS session is still end to end.
-- Default Iroh relays (`DEFAULT_IROH_RELAYS` in `packages/browser/src/platform/irohWeb.ts`), editable in Settings, Network (up to four). The web app, the extension and Desktop (#1193) all take that list, so a page and a Desktop on a self-hosted relay share it; a standby Desktop ([WISP 06](wisps/06-devices.md)) uses the copy in its device record:
+- Default Iroh relays (`DEFAULT_IROH_RELAYS` in `packages/browser/src/platform/irohWeb.ts`), editable in Settings, Network (up to five, the most the browser build's wasm and the Desktop take): n0's four below, then Ghostly's own, `https://iroh.miguelmedeiros.dev/`, always without the trailing dot (the Cloudflare tunnel in front of it answers the dotted name with 404). Iroh homes on the one with the lowest latency it measures, so the others are the fallback. The web app, the extension and Desktop (#1193) all take that list, so a page and a Desktop on a self-hosted relay share it; a standby Desktop ([WISP 06](wisps/06-devices.md)) uses the copy in its device record:
   - `https://use1-1.relay.n0.iroh.link/`
   - `https://euc1-1.relay.n0.iroh.link/`
   - `https://aps1-1.relay.n0.iroh.link/`
@@ -50,7 +50,7 @@ Every transport runs the same authenticated chat session ([WISP 401](wisps/401-p
 
 ### HyperDHT
 
-- **Desktop** ([#187](https://github.com/MiguelMedeiros/ghostly/pull/187)): `hyperdht` 6.34 runs in a Node sidecar (`apps/desktop/native-runtime`, bundled with the app). One sidecar per app, started on first use, stopped with the last chat, and it exits with the app.
+- **Desktop** ([#187](https://github.com/MiguelMedeiros/ghostly/pull/187)): `hyperdht` 6.34 runs in a Node sidecar (`apps/desktop/native-runtime`, bundled with the app). One sidecar per app, started on first use, stopped with the last chat, and it exits with the app. Its chats share one HyperDHT node (one UDP socket), as the CLI's do, and a chat's listener is announced only while the chat is not live on it ([WISP 103](wisps/103-hyperdht.md)).
 - **Web and extension** ([#231](https://github.com/MiguelMedeiros/ghostly/pull/231)): through a HyperDHT relay (Holepunch's `@hyperswarm/dht-relay`, fixed in `infra/services/hyperdht-relay`). Always non-custodial: the browser keeps its keys and runs the Noise handshake and the encrypted stream. The relay forwards ciphertext and sees the browser's address, the per-chat keys and timing.
 - **Off by default:** `DEFAULT_HYPERDHT_RELAY` is empty and no public Ghostly relay is run. Set a `wss://` relay in Settings, Network to turn it on.
 

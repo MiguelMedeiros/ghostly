@@ -3,6 +3,7 @@ import { VOICE_LIMITS, formatVoiceDuration, type VoiceMeta } from "@ghostly/core
 import { mediaDeniedText, toChosenSpeaker } from "../../lib/mediaDevices";
 import { MICROPHONE_MESSAGES, MicrophoneError, VoiceRecorder, canRecordVoice, type MicrophoneProblem } from "../../lib/voiceRecorder";
 import { useT, type Translate } from "../../contexts/I18nContext";
+import { useIsLocked } from "../../contexts/LockScreenContext";
 
 /** The microphone's own problems, in the person's language; a browser's words about it stay as they are. */
 function microphoneText(t: Translate, problem: MicrophoneProblem): string {
@@ -76,6 +77,9 @@ const PauseIcon = ({ size = 18 }: { size?: number }) => (
  */
 export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, onActiveChange }: Props) {
   const t = useT();
+  const isLocked = useIsLocked();
+  const lockedRef = useRef(isLocked);
+  lockedRef.current = isLocked;
   const [mode, setMode] = useState<Mode>("idle");
   const [phase, setPhase] = useState<Phase>("starting");
   const [elapsed, setElapsed] = useState(0);
@@ -287,11 +291,20 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     if (pressedRef.current && document.activeElement !== pressedRef.current) pressedRef.current = null;
   };
 
-  // Esc discards, Enter sends: wherever focus is while recording. Asking "discard?", Esc keeps.
+  // The app locking (the time away, say, while a long message is recorded hands-free) stops the recording at once and
+  // gives the microphone back. What was recorded is thrown away, never sent: a recording keeps no draft to come back to.
+  useEffect(() => {
+    if (isLocked && recorderRef.current && !sendingRef.current) cancel();
+  }, [isLocked, cancel]);
+
+  // Esc discards, Enter sends: wherever focus is while recording. Asking "discard?", Esc keeps. Not the keys of the
+  // lock screen, nor of another dialog over the page (the lock screen is one): those keys are theirs.
   useEffect(() => {
     if (mode === "idle") return;
     const onKey = (event: globalThis.KeyboardEvent) => {
-      if (sendingRef.current) return;
+      if (sendingRef.current || lockedRef.current) return;
+      const dialog = event.target instanceof Element ? event.target.closest("dialog") : null;
+      if (dialog && !dialog.contains(buttonRef.current)) return;
       if (confirmingRef.current) {
         if (event.key === "Escape") { event.preventDefault(); keep(); }
         return;

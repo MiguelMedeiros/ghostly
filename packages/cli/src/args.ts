@@ -70,7 +70,12 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
         if (!long) throw unknownOption(arg, all, parsing);
         name = long;
       }
-      if (name.startsWith("no-") && all[name.slice(3)]?.type === "boolean" && inline === undefined) { setBoolean(name.slice(3), false); continue; }
+      if (name.startsWith("no-") && all[name.slice(3)]?.type === "boolean") {
+        // `--no-pretty=true` was an unknown option whose nearest name was `--no-pretty`, the word typed.
+        if (inline !== undefined) throw new CliError("usage", `--${name} takes no value`);
+        setBoolean(name.slice(3), false);
+        continue;
+      }
       const option = all[name];
       if (!option) throw unknownOption(`--${name}`, all, parsing);
       if (option.type === "boolean") {

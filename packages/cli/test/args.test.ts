@@ -27,6 +27,11 @@ describe("the argument parser", () => {
     expect(() => parseArgs(["alice", "--stdn"], send.options, idSlot(send))).toThrow(/Unknown option --stdn/);
     expect(() => parseArgs(["abc", "-oops"], COMMANDS["chat rename"].options ?? {}, idSlot(COMMANDS["chat rename"]))).toThrow(/Unknown option -oops/);
     expect(() => parseArgs(["-oops"], COMMANDS["group create"].options!, idSlot(COMMANDS["group create"]))).toThrow(/Unknown option -oops/);
+    // A path is not an id: a mistyped flag in its place is refused with the one meant, not taken as the file.
+    const credential = COMMANDS["x401 credential add"];
+    for (const argv of [["--lable", "work"], ["--lable"]]) {
+      expect(() => parseArgs(argv, credential.options!, idSlot(credential)), argv.join(" ")).toThrow(/Unknown option --lable \(did you mean --label\?\)/);
+    }
   });
 
   it("takes a draft that starts with a dash (identity complete, the #357 failure)", () => {
@@ -107,6 +112,15 @@ describe("the argument parser", () => {
     expect(() => parseArgs(["bob", "--frobnicate"], history.options!, idSlot(history))).toThrow(new CliError("usage", "Unknown option --frobnicate"));
     // Two edits in a short word are another word: `--nope` is not `--home`.
     expect(() => parseArgs(["--nope"], {})).toThrow(new CliError("usage", "Unknown option --nope"));
+  });
+
+  // Before, `--no-pretty=true` was "Unknown option --no-pretty (did you mean --no-pretty?)": the word typed itself.
+  it("answers a boolean's --no- form with a value as --pretty=maybe is answered", () => {
+    const send = TEXT_COMMANDS.send;
+    for (const [arg, name] of [["--no-pretty=true", "no-pretty"], ["--no-pretty=", "no-pretty"], ["--no-force=false", "no-force"]]) {
+      expect(() => parseArgs(["bob", "hi", arg], send.options, idSlot(send), { command: "send", text: true }), arg).toThrow(new CliError("usage", `--${name} takes no value`));
+    }
+    expect(() => parseArgs(["--pretty=maybe"], {})).toThrow(new CliError("usage", "--pretty takes no value"));
   });
 
   // A word whose length is more than 2 away from a name's is more than 2 edits away from it: no distance is worked out.
@@ -535,7 +549,7 @@ describe("errors", () => {
   it("say a group refusal as refused, and an invite into a community as a wrong request", () => {
     for (const message of [
       "Only the admin can rename the group", "Only the admin can change the members of this group", "Only the admin can renew the group's secret",
-      "Only the admin can share a link to the group", "Only the admin can invite", "Only the admin can choose the group's hubs",
+      "Only the admin can hand the admin role over", "Only the admin can share a link to the group", "Only the admin can invite", "Only the admin can choose the group's hubs",
       "Only the admin can change the group's picture", "Only the admin can replace or turn off the group's link", "Only the admin can do that",
       "No invitation to accept", "No invitation to decline",
       // A removed member's (or a former admin's) group rename, rotate, remove, admin, hub or picture.

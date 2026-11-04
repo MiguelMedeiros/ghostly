@@ -37,7 +37,7 @@ describe("installable", () => {
 
 describe("a link to the app, shared", () => {
   /** The `content` of the page's meta tag with this name or property, or undefined. */
-  const meta = (key: string) => new RegExp(`<meta (?:name|property)="${key.replace(/[:.]/g, "\\$&")}" content="([^"]*)" />`).exec(html)?.[1];
+  const meta = (key: string) => new RegExp(`<meta (?:name|property)="${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}" content="([^"]*)" />`).exec(html)?.[1];
 
   it("shows the app's description and the website's share card, not a bare \"Ghostly\"", () => {
     expect(meta("description")).toBe(manifest.description);

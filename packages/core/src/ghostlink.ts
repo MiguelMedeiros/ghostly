@@ -1797,6 +1797,15 @@ export class GhostLink {
     });
   }
 
+  /**
+   * `connect` for what only needs the link (a request, a file, a payment step): on a live session it does nothing, where
+   * `connect` is a retry that says this side's transport policy again, and the contact reads 10 a minute
+   * (POLICY_RECEIVE_LIMIT). A shared app's every file, each file sent and each payment step used to spend one.
+   */
+  private open(): Promise<void> {
+    return this.paired?.state.status === "ready" && !this.streamBlocked ? Promise.resolve() : this.connect();
+  }
+
   /** Closes what a switch replaced once the contact has had time to move too. */
   private retire(old: FrameChannel, also: () => void, rtc = false): void {
     if (this.retiring.has(old)) return;
@@ -2300,6 +2309,12 @@ export class GhostLink {
     }
     if (!this.channel) this.maybeAutoConnect(this.presence);
   }
+  /**
+   * This side's listener on `transport` is up again after it was let go while the contact was away (the engine's
+   * `releaseGoneListeners`), and the contact is back: it is dialled once now, whichever side's turn it is, as after a
+   * restart. The contact's own dials found no listener here meanwhile, and wait out their backoff (half a minute).
+   */
+  knockOnReturn(transport: NativeTransport): void { void this.knock(transport); }
   /** The knock under way (`knock`): its transport, its attempt, and whether it was knocked again (`knockAgain`). */
   private knocking: { transport: NativeTransport; epoch: number; again: boolean } | null = null;
   /**
@@ -3009,7 +3024,7 @@ export class GhostLink {
   /** Issues an HTTP request to a service the peer advertises. */
   async request(serviceId: string, request: ClientRequest): Promise<ClientResponse> {
     if (this.options.params.profile) {
-      await this.connect();
+      await this.open();
       if (!this.supportsServices) throw new GhostlyHttpError("unavailable", this.isDataLinkOpen
         ? "Your contact's app cannot share services in this chat, or needs an updated Ghostly" : "Shared services need a live connection");
       if (!this.pairedHttp) throw new GhostlyHttpError("closed", "Data link is closed");
@@ -3076,7 +3091,7 @@ export class GhostLink {
 
   /** Sends a file over the data link, opening it first if needed. Files never travel through Pkarr. */
   async sendFile(file: FileInfo, source: AsyncIterable<Uint8Array>): Promise<void> {
-    await this.connect();
+    await this.open();
     if (this.options.params.profile) {
       if (!this.supportsFiles || !this.pairedFiles) throw new Error("This contact does not support files. Both peers need an updated Ghostly.");
       return this.pairedFiles.send(file, source);
@@ -3922,7 +3937,7 @@ export class GhostLink {
     if (!PAYMENT_METHODS.some(m => this.paymentEnabled(m))) throw new Error("Payments are turned off in this chat.");
     // Said at once: before, the dial below waited out its 90 s for an app that had said it was going.
     if (this.contactAway) throw engineError("contactAway");
-    await this.connect();
+    await this.open();
     if (this.supportsPayments) return;
     // As the app's chat says it: networks that name no wallet are a contact that offers no way until it makes one.
     const networks = this.peerNetworks;

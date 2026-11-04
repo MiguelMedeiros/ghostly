@@ -224,6 +224,30 @@ describe("[text](url) links", () => {
     expect(link("[paypal\ua4f8com](https://evil.example/login)")).toMatchObject({ data: { showUrl: true } });
   });
 
+  it.each([
+    0x034f, 0x115f, 0x1160, 0x3164, 0xffa0, 0xfe00, 0xfe0f, 0xe0100, 0xe01ef, 0xe0000, 0xe0020, 0xe007f,
+    0x17b4, 0x17b5, 0x180b, 0x180e, 0x180f, 0x2028, 0x2029, 0xfff9, 0xfffb, 0x1bca0, 0x1bca3, 0x1d173, 0x1d17a,
+  ].map((code) => [code.toString(16), code]))("treats U+%s, which draws as nothing, as hidden", (_, code) => {
+    expect(labelMisleads(`paypal${String.fromCodePoint(code as number)}.com`, "https://evil.example/")).toBe(true);
+  });
+
+  it("shows the address when a character that draws as nothing splits the text's host", () => {
+    expect(link("[paypal\u034f.com](https://evil.example/)")).toMatchObject({ data: { showUrl: true } });
+  });
+
+  it("shows the text when its only hidden characters are an emoji's own", () => {
+    for (const label of [
+      "Donate \u2764\ufe0f", "\u2600\ufe0f Sunny day", "\u2714\ufe0f Done", "\u26a0\ufe0f Read this", "1\ufe0f\u20e3 First step",
+      "#\ufe0f\u20e3 Tag", "\u260e\ufe0e Call", "\u{1f468}\u200d\u{1f469}\u200d\u{1f467} Family", "\u{1f3f3}\ufe0f\u200d\u{1f308} Pride",
+      "\u{1f469}\u{1f3fd}\u200d\u{1f4bb} Code", "\u{1f3f4}\u{e0067}\u{e0062}\u{e0073}\u{e0063}\u{e0074}\u{e007f} Scotland",
+    ]) expect(labelMisleads(label, "https://ghostly.tools/donate"), label).toBe(false);
+    expect(link("[Donate \u2764\ufe0f](https://ghostly.tools/donate)")).toMatchObject({ data: { showUrl: false } });
+    // The same characters anywhere else still count.
+    for (const label of ["paypal\ufe0f.com", "paypal\u200d.com", "\u2764\ufe0f\ufe0f paypal", "\u2764\u200d paypal","paypal\u{e0063}.com"]) {
+      expect(labelMisleads(label, "https://evil.example/"), label).toBe(true);
+    }
+  });
+
   it("leaves file names alone", () => {
     for (const label of ["report.pdf", "Node.js", "package.json", "docs/CHAT.md", "src/lib/parse/blocks.ts", "scripts/run.sh"]) {
       expect(labelMisleads(label, "https://github.com/MiguelMedeiros/ghostly")).toBe(false);

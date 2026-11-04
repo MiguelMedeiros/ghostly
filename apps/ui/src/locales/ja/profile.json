@@ -130,6 +130,7 @@
   "name": "名前",
   "nameInChats": "チャットでの名前",
   "nameLabel": "プロフィール名",
+  "nameSaved": "名前を保存しました",
   "nameStep": {
     "placeholder": "あなたの名前",
     "save": "続ける",

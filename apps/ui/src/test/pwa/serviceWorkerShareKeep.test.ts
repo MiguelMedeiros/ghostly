@@ -15,13 +15,14 @@ afterEach(() => {
 
 type Message = { data: unknown; source: { id: string; postMessage(message: unknown): void } | null; waitUntil(promise: Promise<unknown>): void };
 
-async function startWorker(scope = "https://app.ghostly.tools/") {
+async function startWorker(scope = "https://app.ghostly.tools/", windows: { id: string }[] = []) {
   const listeners = new Map<string, (event: Message) => void>();
   vi.stubGlobal("__SW_BUILD__", "test-1");
   vi.stubGlobal("__SW_PRECACHE__", []);
   vi.stubGlobal("self", {
     location: new URL("https://app.ghostly.tools/sw.js"),
     registration: { scope },
+    clients: { matchAll: async () => windows },
     addEventListener: (type: string, listener: (event: Message) => void) => { listeners.set(type, listener); },
   });
   await import("../../../../web/src/sw/sw");
@@ -61,4 +62,43 @@ it("a profile's push worker holds nothing", async () => {
   const next = page("b");
   worker.say({ type: "share-ready" }, next);
   expect(next.heard).toEqual([{ type: "share-none" }]);
+});
+
+it("a share forwarded goes to one window: the app's page of the same profile focused last, never another profile's", async () => {
+  const work = page("work");
+  const older = page("home-older");
+  const home = page("home");
+  const opened = page("opened");
+  const worker = await startWorker(undefined, [work, older, home, opened]);
+  worker.say({ type: "share-here", profile: "home" }, older);
+  worker.say({ type: "share-here", profile: "home" }, home);
+  worker.say({ type: "share-here", profile: "work" }, work);
+  const item = { title: "", text: "for Ana", url: "", files: [] };
+  worker.say({ type: "share-keep", item }, opened);
+
+  worker.say({ type: "share-forward", profile: "home" }, opened);
+  await Promise.all(worker.waits.slice(1));
+  expect(home.heard).toEqual([{ type: "share", item }]);
+  expect(older.heard).toEqual([]);
+  expect(work.heard).toEqual([]);
+  expect(opened.heard).toEqual([]);
+});
+
+it("no page of the profile to forward it to: it waits, and goes to the first of that profile that says it is there", async () => {
+  const work = page("work");
+  const opened = page("opened");
+  const home = page("home");
+  const worker = await startWorker(undefined, [work, opened, home]);
+  worker.say({ type: "share-here", profile: "work" }, work);
+  const item = { title: "", text: "for Ana", url: "", files: [] };
+  worker.say({ type: "share-keep", item }, opened);
+  worker.say({ type: "share-forward", profile: "home" }, opened);
+  await Promise.all(worker.waits.slice(1));
+  expect(work.heard).toEqual([]);
+
+  // The worker stopped and started again meanwhile, or the profile's page was not there yet: it says so when it is.
+  worker.say({ type: "share-here", profile: "work" }, work);
+  expect(work.heard).toEqual([]);
+  worker.say({ type: "share-here", profile: "home" }, home);
+  expect(home.heard).toEqual([{ type: "share", item }]);
 });

@@ -1,6 +1,6 @@
-import { receiveShare, type IncomingShare } from "../../../ui/src/lib/incomingShare";
+import { incomingShare, receiveShare, type IncomingShare } from "../../../ui/src/lib/incomingShare";
 import { activeProfileId, listProfiles, switchProfile } from "../../../ui/src/lib/profiles";
-import type { FromWorker, ToWorker } from "../sw/messages";
+import type { FromWorker, ToWorker, WindowSays } from "../sw/messages";
 
 /*
  * The page's side of the service worker (`src/sw/sw.ts`): registering it, putting a new version in place when
@@ -157,15 +157,14 @@ export function openedForShare(): boolean {
 
 /**
  * What the worker tells this page, now and later. Shares: a share made while this tab is the app arrives here from
- * another tab that opened for it, and each goes to the "Share to…" picker. A wake-up notification tapped: its chat.
- * A file of this build gone from the server: the app's update check runs now (`onBuildGone`).
+ * another tab that opened for it, and each goes to the "Share to…" picker. A file of this build gone from the server:
+ * the app's update check runs now (`onBuildGone`). A wake-up notification tapped: `listenForTaps`.
  */
 export function listenForShares(): void {
   const workers = container();
   if (!workers) return;
   workers.addEventListener("message", (event: MessageEvent<FromWorker>) => {
     const message = event.data;
-    if (message?.type === "open-chat") { openChat(message.path, message.profile); return; }
     if (message?.type === "build-gone") { noteBuildGone(); return; }
     if (message?.type !== "share" || !message.item) return;
     const { item } = message;
@@ -175,8 +174,40 @@ export function listenForShares(): void {
       tell(workers.controller, { type: "share-keep", item });
       return true;
     };
-    receiveShare({ ...(item as IncomingShare), carry });
-    if (!openedForShare()) window.location.hash = "#/shared";
+    // Any website can post to the share target: a share waits behind one already in the picker, never in its place,
+    // and only one that is shown at once opens the picker.
+    const shown = !!incomingShare();
+    receiveShare({ ...(item as IncomingShare), carry }, { queue: true });
+    if (!shown && incomingShare() && !openedForShare()) window.location.hash = "#/shared";
+  });
+  workers.startMessages();
+  // This page takes the shares forwarded to its profile: the worker gives one to the page of the profile in front last.
+  const here = () => tellReady({ type: "share-here", profile: activeProfileId() });
+  here();
+  addEventListener("focus", here);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") here(); });
+}
+
+/** Tells the active worker, once there is one, even before it controls this page. */
+function tellReady(message: ToWorker): void {
+  const workers = container();
+  void workers?.ready.then((registration) => tell(workers.controller ?? registration.active, message)).catch(() => {});
+}
+
+/**
+ * A wake-up notification tapped, heard from the moment the page loads, whether it runs the app or waits behind another
+ * tab. The push worker first asks every window what it runs (`open-ask`), to tell the one that holds the notice's
+ * profile's peer to open the chat (`open-chat`). One that waits gets it only when no window answered for that profile
+ * (a new window it opened, or pages of an older build): of its own profile, the chat is where it starts once it takes
+ * over; of another, it runs nothing, so it switches. `peer`: whether this page holds its profile's peer yet.
+ */
+export function listenForTaps(peer: () => boolean): void {
+  const workers = container();
+  if (!workers) return;
+  workers.addEventListener("message", (event: MessageEvent<FromWorker>) => {
+    const message = event.data;
+    if (message?.type === "open-ask") { event.ports[0]?.postMessage({ profile: activeProfileId(), peer: peer() } satisfies WindowSays); return; }
+    if (message?.type === "open-chat") openChat(message.path, message.profile);
   });
   workers.startMessages();
 }
@@ -200,15 +231,15 @@ export function openChat(path: string, profile: string): void {
 export function askForShare(): void {
   const workers = container();
   if (!workers || !openedForShare()) return;
-  void workers.ready.then((registration) => tell(workers.controller ?? registration.active, { type: "share-ready" })).catch(() => {});
+  tellReady({ type: "share-ready" });
 }
 
 /** How long a tab opened for a share waits for the peer's lock before it hands the share to the tab that holds it. */
 export const SHARE_FORWARD_AFTER_MS = 3000;
 
-/** Another tab holds the peer: the worker hands the share to that one instead. */
+/** Another tab of this profile holds the peer: the worker hands the share to that one instead, and to no other. */
 export function forwardShare(): void {
   const workers = container();
   if (!workers || !openedForShare()) return;
-  void workers.ready.then((registration) => tell(workers.controller ?? registration.active, { type: "share-forward" })).catch(() => {});
+  tellReady({ type: "share-forward", profile: activeProfileId() });
 }

@@ -224,6 +224,37 @@ describe("a received reply in a long history", () => {
     expect(await replyFor(node, linkId, fileWire)).toMatchObject({ id: fileWire, messageId: `me_${at}` });
     expect(t.whole()).toBe(0);
   });
+
+  it("in a chat, replies to the contact's file or to messages not here read the whole history once in a run, not each", async () => {
+    const t = await setup();
+    const wire = (i: number) => `${"W".repeat(20)}${String(i).padStart(2, "0")}`, at = 1_700_000_001_000;
+    for (const row of history(t.id, i => ({ id: `peer_${wire(i)}`, wireId: wire(i) }))) await db.putMessage(row);
+    // The contact's file sent over files/2: its row goes by the sender's time, a reply names it by its wire id.
+    const photo = (id: string, fileWire: string, timestamp: number): StoredMessage => ({ linkId: t.id, id, wireId: fileWire, text: "📎 photo.jpg", sender: "peer", timestamp, via: "datalink",
+      file: { id: `${t.id}-in-${fileWire}`, name: "photo.jpg", size: 5, mime: "image/jpeg" } });
+    await db.putMessage(photo(`peer_${at}`, "F".repeat(22), at));
+    const whole = vi.spyOn(db, "getMessages");
+    cleanup.push(async () => whole.mockRestore());
+    const reads = () => whole.mock.calls.filter(([chat]) => chat === t.id).length;
+    const store = (t.node as unknown as { storeMessage(m: StoredMessage): Promise<void> }).storeMessage.bind(t.node);
+    const reply = (k: number, to: string) => store({ linkId: t.id, id: `peer_${"R".repeat(20)}${String(k).padStart(2, "0")}`, text: `re ${k}`, sender: "peer", timestamp: Date.now(), via: "datalink",
+      replyTo: receivedPairedReply({ i: to, s: "a line", f: "sender" }) });
+    // What storing a row costs here besides its original (this page takes whole histories): replies to texts, keyed reads.
+    for (let k = 20; k < 31; k++) await reply(k, wire(k));
+    const keyed = reads();
+    for (let k = 0; k < 5; k++) await reply(k, "F".repeat(22));
+    for (let k = 5; k < 10; k++) await reply(k, `${"N".repeat(20)}${String(k).padStart(2, "0")}`);
+    // A file that came after that read is found too.
+    await store(photo(`peer_${at + 1}`, "G".repeat(22), at + 1));
+    await reply(10, "G".repeat(22));
+    const row = (k: number) => db.getMessage(t.id, `peer_${"R".repeat(20)}${String(k).padStart(2, "0")}`);
+    expect((await row(0))?.replyTo).toEqual({ id: "F".repeat(22), snippet: "📎 photo.jpg", from: "peer", messageId: `peer_${at}` });
+    expect((await row(4))?.replyTo).toMatchObject({ messageId: `peer_${at}` });
+    expect((await row(9))?.replyTo).toEqual({ id: `${"N".repeat(20)}09`, snippet: "a line", from: "peer" });
+    expect((await row(10))?.replyTo).toMatchObject({ messageId: `peer_${at + 1}` });
+    // 11 replies and a file, as 11 replies to texts plus the file's row cost, and one read of the chat in a run.
+    expect(reads() - 2 * keyed).toBeLessThanOrEqual(2);
+  });
 });
 
 describe("what a reply names", () => {

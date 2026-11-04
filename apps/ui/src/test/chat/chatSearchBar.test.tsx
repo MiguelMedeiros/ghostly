@@ -15,7 +15,7 @@ vi.mock("../../components/rich/RichText", async (importOriginal) => {
   const real = await importOriginal<typeof import("../../components/rich/RichText")>();
   return { ...real, RichText: (props: Parameters<typeof real.RichText>[0]) => { draws.text++; return real.RichText(props); } };
 });
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const PEER = "peer".padEnd(52, "p");
 const COUNT = 300;
@@ -148,6 +148,26 @@ describe("search inside a chat", () => {
     const event = new KeyboardEvent("keydown", { key: "f", ctrlKey: true, cancelable: true });
     act(() => { window.dispatchEvent(event); });
     expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("leaves Ctrl+F to the open dialog: no search opens behind it and the focus stays in it", async () => {
+    openChat(true, short());
+    await screen.findByText(`Message ${COUNT - 1}`);
+    // A panel that says it is modal (Technical info, Send files, Tasks), and a <dialog> (a question, the lock screen).
+    for (const tag of ["div", "dialog"] as const) {
+      const dialog = document.body.appendChild(document.createElement(tag));
+      if (dialog instanceof HTMLDialogElement) dialog.open = true;
+      else { dialog.setAttribute("role", "dialog"); dialog.setAttribute("aria-modal", "true"); }
+      const input = dialog.appendChild(document.createElement("input"));
+      input.focus();
+      const event = new KeyboardEvent("keydown", { key: "f", ctrlKey: true, cancelable: true });
+      act(() => { window.dispatchEvent(event); });
+      await settle();
+      expect(event.defaultPrevented).toBe(false);
+      expect(screen.queryByTestId("chat-search")).toBeNull();
+      expect(document.activeElement).toBe(input);
+      dialog.remove();
+    }
   });
 
   it("counts the matches, marks them and goes to the newest; Enter goes older, Shift+Enter newer, round", async () => {
