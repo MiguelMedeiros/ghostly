@@ -1286,15 +1286,17 @@ export class GroupSession {
     if (frame.v <= (this.state.names?.[frame.k]?.v ?? 0)) return;
     const secret = this.secret(frame.e);
     if (!secret) return;
-    let taken = this.namesTaken.get(frame.k);
-    if (!taken) this.namesTaken.set(frame.k, taken = new RateWindow(GROUP_LIMITS.namesPerMember, GROUP_LIMITS.syncWindowMs, () => this.clock()));
-    if (!taken.take()) return;
     const plain = decryptText(epochKeys(secret, this.id, frame.e).message, nameAad(frame), frame.nn, frame.c);
     if (plain === null) return;
     let body: { nm?: unknown; sig?: unknown };
     try { body = JSON.parse(plain) as typeof body; } catch { return; }
     if (!body || typeof body !== "object" || typeof body.nm !== "string" || sanitizeNick(body.nm) !== body.nm || !isSignature(body.sig)) return;
     try { if (!verify(fromBase64Url(body.sig), nameSigned(this.id, frame.k, frame.v, body.nm), publicKeyFromZ32(frame.k))) return; } catch { return; }
+    // Counted once the member's signature holds: any member can seal a record of another, and one that fails would
+    // otherwise take that member's places and keep its own records out.
+    let taken = this.namesTaken.get(frame.k);
+    if (!taken) this.namesTaken.set(frame.k, taken = new RateWindow(GROUP_LIMITS.namesPerMember, GROUP_LIMITS.syncWindowMs, () => this.clock()));
+    if (!taken.take()) return;
     (this.state.names ??= {})[frame.k] = { v: frame.v, nm: body.nm, sig: body.sig };
     if (frame.v > (this.nickAt.get(frame.k) ?? 0)) {
       this.nickAt.set(frame.k, frame.v);
