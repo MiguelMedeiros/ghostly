@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { useOutsideDismiss } from "../hooks/useDismiss";
+import { useOutsideDismiss, useTabTrap } from "../hooks/useDismiss";
 import { useIsMobile } from "../hooks/useIsMobile";
 import type { MenuPoint } from "../lib/contextMenu";
 
@@ -64,6 +64,9 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
   const phone = useIsMobile();
   const ref = useRef<HTMLDivElement>(null);
   useOutsideDismiss(ref, open, onClose, anchorRef);
+  // A phone's sheet covers the page with its backdrop, as a dialog does: Tab and Shift+Tab go round its rows. They went
+  // on to the page behind it, the sheet still open (the composer's + there opened a second sheet over it).
+  useTabTrap(ref, open && phone);
   const [place, setPlace] = useState<{ shift: number; up: boolean; room?: number }>({ shift: 0, up: prefer === "up" });
   const [fixed, setFixed] = useState<{ left: number; top: number; room?: number }>();
 

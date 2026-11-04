@@ -682,6 +682,8 @@ export class CommunitySession {
   private pendingMeta: { from: string; frame: unknown } | undefined;
   /** The store's frames the app holds with their messages (`storeKey` → message id): in memory here, not in what is saved. */
   private readonly onRows = new Map<string, string>();
+  /** The oldest epoch whose seen marks are kept, as of the last `pruneSeen`. In memory only. */
+  private seenFrom = -1;
 
   /** `rows`: the frames the app holds with the messages it stored (`CommunityIncomingMessage.frame`). They join the store. */
   constructor(state: CommunityState, private readonly hooks: CommunitySessionHooks, rows: readonly { id: string; frame: CommunityMessageFrame }[] = []) {
@@ -701,6 +703,7 @@ export class CommunitySession {
         : frame.t === "group-secret" ? `secret:${frame.h}` : undefined,
     });
     this.rebuild();
+    this.pruneSeen();
     // A branch kept under the older rule (longest first) may be the better one now: it keeps an admin change mine dropped.
     if ((state.status === "active" || state.status === "lost") && this.bestBranch().tip !== this.topHash) void this.serialize(() => this.chooseBranch());
   }
@@ -1331,6 +1334,23 @@ export class CommunitySession {
       if (!keep.has(h)) { this.known.delete(h); this.rosters.delete(h); void c; }
     }
     this.pruneSecrets();
+    this.pruneSeen();
+  }
+
+  /**
+   * Seen marks of epochs older than the window go, every sender's, once the branch I follow moves past them: as
+   * `markSeen` drops the sender's it marks. Before, only that sender's went, so a member who left or went quiet kept
+   * an entry for every epoch it wrote in, and its window of numbers, for the life of the group (agents#2904). Those
+   * within the window stay, a leaver's too: what it wrote before its leave is still taken up to its mark there.
+   */
+  private pruneSeen(): void {
+    const from = this.epoch - COMMUNITY_LIMITS.window;
+    if (from === this.seenFrom) return;
+    this.seenFrom = from;
+    for (const [sender, bySender] of Object.entries(this.state.seen)) {
+      for (const key of Object.keys(bySender)) if (Number(key.split(":")[0]) < from) delete bySender[key];
+      if (!Object.keys(bySender).length) delete this.state.seen[sender];
+    }
   }
 
   private pruneSecrets(): void {

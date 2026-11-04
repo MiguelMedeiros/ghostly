@@ -420,6 +420,32 @@ describe("removing a proof and its revocation", () => {
     engines.b.stop();
   });
 
+  it("a proof removed while the contact is still checking it: the contact keeps it withdrawn, not verified, then finds it revoked", async () => {
+    const { engines, state, resolved, pkarr } = pair();
+    await clearStorage();
+    await engines.a.load(); await engines.b.load();
+    let checking!: () => void, release!: () => void;
+    const entered = new Promise<void>(resolve => { checking = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    state.providers.b = [{ ...fakeKey, verify: async (statement, evidence, ctx) => { checking(); await gate; return fakeKey.verify(statement, evidence, ctx); } }];
+    const { id } = await prove(engines.a);
+    await engines.a.share({ linkId: "chat", id });
+    await entered;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    resolved.length = 0;
+    await engines.a.remove({ id });
+    // The relays do not return the owner's revocation yet when the check looks it up.
+    const published = [...pkarr];
+    pkarr.clear();
+    release();
+    await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received.map(r => r.status)).toEqual(["withdrawn"]));
+    for (const [key, records] of published) pkarr.set(key, records);
+    await vi.advanceTimersByTimeAsync(20_000);
+    await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received[0].status).toBe("revoked"));
+    expect(resolved.length, "its revocation looked up after the withdraw").toBeGreaterThan(0);
+    engines.b.stop();
+  });
+
   it("a proof only withdrawn from this chat (still in the owner's profile) stays withdrawn, after a few lookups that back off", async () => {
     const { engines, resolved, id } = await shared();
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -435,6 +461,22 @@ describe("removing a proof and its revocation", () => {
     expect(engines.b.linkView("chat", true)!.received[0].status).toBe("withdrawn");
     engines.b.stop();
   });
+
+  it("a chat whose connection drops while its withdrawal is written does not stop the removal: the contact is told on reconnect", async () => {
+    const { engines, ledgers, state, pkarr, id, binding } = await shared();
+    // The chat's link closes right after A's ledger write, before the withdraw frame is sent.
+    let a = ledgers.a;
+    Object.defineProperty(ledgers, "a", { get: () => a, set: (next: IdentityLedger) => { a = next; state.connected = false; } });
+    await engines.a.remove({ id });
+    expect(engines.a.views()).toEqual([]);
+    expect(ledgers.a.shared.find(s => s.id === id)?.status).toBe("withdrawal-pending");
+    expect(await stored<{ id: string }[]>("identityRevocations")).toEqual([expect.objectContaining({ id, key: binding.key })]);
+    await vi.waitFor(() => expect(pkarr.get(binding.key)?.[0]).toMatchObject({ label: "_ghostly-revoked", value: expect.stringContaining(id) }));
+    engines.a.closed("chat");
+    state.connected = true;
+    engines.a.ready("chat");
+    await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === id)?.status).toBe("withdrawn"));
+  });
 });
 
 describe("per chat", () => {
@@ -449,6 +491,24 @@ describe("per chat", () => {
     await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === id)?.status).toBe("withdrawn"));
     expect(engines.b.linkView("chat", true)!.received[0].status).toBe("withdrawn");
     expect(engines.a.views()[0].sharedWith).toBe(0);
+  });
+
+  it("two proofs of the same identity shared in one chat: the profile counts only the one the contact keeps, and removing it leaves both sides with none", async () => {
+    const { engines, ledgers, id: older } = await shared();
+    const { id: newer } = await prove(engines.a);
+    expect(engines.a.views().map(v => v.subject)).toEqual([fakeKeySubject(), fakeKeySubject()]);
+    await engines.a.share({ linkId: "chat", id: newer });
+    await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === newer)?.status).toBe("accepted"));
+    expect(engines.b.linkView("chat", true)!.received.map(r => r.id)).toEqual([newer]);
+    const sharedWith = () => Object.fromEntries(engines.a.views().map(v => [v.id, v.sharedWith]));
+    expect(sharedWith()).toEqual({ [older]: 0, [newer]: 1 });
+    await engines.a.remove({ id: newer });
+    await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received.map(r => `${r.id}:${r.status}`)).toEqual([`${newer}:withdrawn`]));
+    expect(sharedWith()).toEqual({ [older]: 0 });
+    // Shared again by hand, the older one is what the contact holds.
+    await engines.a.share({ linkId: "chat", id: older });
+    await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received.find(r => r.id === older)?.status).toBe("verified"));
+    expect(sharedWith()).toEqual({ [older]: 1 });
   });
 
   it("a recheck is refused offline, and a proof that no longer verifies shows unconfirmed with the reason", async () => {

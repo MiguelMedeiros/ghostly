@@ -42,6 +42,62 @@ describe("the website gate", () => {
     for (const file of files) expect(covers(WEBSITE_INPUTS, file), file).toBe(true);
     for (const folder of folders) expect(covers(WEBSITE_INPUTS, `${folder}/any.md`), `${folder}/`).toBe(true);
   });
+
+  it("covers every repository file and folder the site's code opens from a folder: its tests, browser checks and build", () => {
+    // `resolve(__dirname, "../../../docs/…")` in a browser check, `join(root, "package.json")` in a test: a path joined
+    // to the file's own folder, or to a folder the file declares from it (`const root = fileURLToPath(new URL("../../../",
+    // import.meta.url))`, `const root = join(website, "../..")`). Its leading literals name the file or folder.
+    const site = "apps/website";
+    const code: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(join(root, dir), { withFileTypes: true })) {
+        const path = `${dir}/${entry.name}`;
+        if (["node_modules", ".next", "public", "test-results"].includes(entry.name) || path === `${site}/scripts/capture`) continue;
+        if (entry.isDirectory()) walk(path);
+        else if (/\.(ts|tsx|mts|js|mjs)$/.test(entry.name)) code.push(path);
+      }
+    };
+    walk(site);
+    const named: { file: string; path: string }[] = [];
+    const here = "dirname(fileURLToPath(import.meta.url))";
+    for (const file of code) {
+      const source = readFileSync(join(root, file), "utf8");
+      const folders = new Map([["__dirname", posix.dirname(file)], ["import.meta.dirname", posix.dirname(file)], [here, posix.dirname(file)]]);
+      /** The repository path an expression names, when it is a declared folder or one joined from it by literals. */
+      const at = (expr: string): string | undefined => {
+        const url = /^fileURLToPath\(new URL\("([^"]*)", import\.meta\.url\)\)$/.exec(expr);
+        if (url) return posix.join(posix.dirname(file), url[1]);
+        const joined = /^(?:join|resolve)\((.+?)((?:,\s*["'`][^"'`$]*["'`])+)\)$/.exec(expr);
+        const from = joined ? folders.get(joined[1].trim()) : folders.get(expr);
+        return joined && from !== undefined ? posix.join(from, ...[...joined[2].matchAll(/["'`]([^"'`]*)["'`]/g)].map((m) => m[1])) : from;
+      };
+      for (const m of source.matchAll(/^(?:export )?const (\w+) = (.+);$/gm)) {
+        const path = at(m[2]);
+        if (path !== undefined) folders.set(m[1], path);
+      }
+      for (const m of source.matchAll(/\b(?:join|resolve)\(\s*([\w.]+|dirname\(fileURLToPath\(import\.meta\.url\)\))((?:\s*,\s*["'`][^"'`$]*["'`])+)/g)) {
+        const from = folders.get(m[1]);
+        if (from !== undefined) named.push({ file, path: posix.join(from, ...[...m[2].matchAll(/["'`]([^"'`]*)["'`]/g)].map((l) => l[1])).replace(/\/$/, "") });
+      }
+    }
+    // Not the site itself, nor the root or apps/ it starts from. The deck's and the store readers' folders are read file
+    // by file (above).
+    const byFile = ["apps/ui/src/components", "packages/core/src"];
+    const outside = named.filter(({ path }) => path !== "." && !path.startsWith("../") && !`${site}/`.startsWith(`${path}/`) && !path.startsWith(`${site}/`) && !byFile.includes(path));
+    expect(outside).toEqual(
+      expect.arrayContaining([
+        { file: `${site}/e2e/launch-checklist.spec.ts`, path: "docs/assets/social-preview.png" },
+        { file: `${site}/e2e/agents-page.spec.ts`, path: "docs/AI-AGENTS.md" },
+        { file: `${site}/e2e/single-source.spec.ts`, path: "docs/wisps" },
+        { file: `${site}/scripts/shots-version.test.mjs`, path: "package.json" },
+      ]),
+    );
+    const uncovered = outside.filter(({ path }) => {
+      const kind = (() => { try { return statSync(join(root, path)).isDirectory() ? "folder" : "file"; } catch { return null; } })();
+      return !covers(WEBSITE_INPUTS, kind === "file" ? path : `${path}/any`);
+    });
+    expect(uncovered).toEqual([]);
+  });
 });
 
 describe("the packages gate", () => {
@@ -128,6 +184,12 @@ describe("plan", () => {
   it("a site change runs the website and skips the Desktop jobs", () => {
     expect(plan(["apps/website/app/page.tsx", "apps/website/e2e/bubbles.spec.ts"], ready)).toMatchObject({ website: true, app: false });
     expect(plan(["docs/wisps/101-webrtc.md"], ready)).toMatchObject({ website: true, app: false });
+  });
+
+  it("a file outside the site that its checks read runs them: the social preview, the root version", () => {
+    // launch-checklist.spec.ts checks the preview's size; shots-version.test.mjs the root package.json's version.
+    expect(plan(["docs/assets/social-preview.png"], ready)).toMatchObject({ website: true, website_e2e: true });
+    expect(plan(["package.json"], ready)).toMatchObject({ website: true, website_e2e: true, app: true, packages: true });
   });
 
   it("a document the site does not publish runs neither", () => {

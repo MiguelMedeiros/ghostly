@@ -190,6 +190,9 @@
   "forward": {
     "forward": "Transférer",
     "forwarded": "Transféré",
+    "found": "{{count}} discussions",
+    "found_one": "{{count}} discussion",
+    "found_other": "{{count}} discussions",
     "limit": "Vous pouvez transférer à {{count}} conversations à la fois",
     "limit_one": "Vous pouvez transférer à {{count}} conversation à la fois",
     "many": "Transféré de nombreuses fois",

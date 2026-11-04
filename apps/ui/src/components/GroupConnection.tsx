@@ -1,4 +1,4 @@
-import { useId, useRef, useState, useSyncExternalStore } from "react";
+import { useId, useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupEdgeView, GroupView } from "@ghostly/browser/shared/types";
 import { useOutsideDismiss } from "../hooks/useDismiss";
@@ -11,9 +11,8 @@ import { rawError } from "../lib/errorText";
 import { problemText, relayCause, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { useOnline } from "../hooks/useOnline";
-
-const subscribe = (listener: () => void) => engine.subscribe(listener);
-const snapshot = () => engine.state;
+import { useEngineValue } from "../lib/engineState";
+import { useMinuteClock } from "../hooks/useMinuteClock";
 
 /** Some members reachable, not all: the connected icon with a warning dot. */
 type GroupKind = ConnectionKind | "partial";
@@ -24,9 +23,10 @@ type GroupKind = ConnectionKind | "partial";
  */
 export function GroupConnection({ group }: { group: GroupView }) {
   const { t, language } = useI18n();
-  const state = useSyncExternalStore(subscribe, snapshot);
+  // What it shows of the engine's state, compared by content: the whole state drew the group's header on every change.
+  const { ghostlyOnline, groupLinks } = useEngineValue(state => ({ ghostlyOnline: state?.settings.online ?? true, groupLinks: state?.transport.groupLinks }));
   // Offline either way: Ghostly's own switch, or a device with no network.
-  const deviceOnline = useOnline(), online = (state?.settings.online ?? true) && deviceOnline;
+  const deviceOnline = useOnline(), online = ghostlyOnline && deviceOnline;
   const [menuOpen, setMenuOpen] = useState(false);
   const [tip, setTip] = useState(false);
   const [busy, setBusy] = useState("");
@@ -48,7 +48,7 @@ export function GroupConnection({ group }: { group: GroupView }) {
   const reconnecting = linked.filter(m => !m.viaHub && edgeReconnects(m.edge)).length;
   // Group links go over WebRTC, or a native transport where one side has none: an app with neither reaches no member,
   // however long it tries. (Ghostly Desktop on Linux has no WebRTC, and runs Iroh and HyperDHT.)
-  const noLinks = state?.transport.groupLinks === false && others.length > 0;
+  const noLinks = groupLinks === false && others.length > 0;
   const kind: GroupKind = !online ? "offline" : others.length === 0 ? "waiting" : noLinks ? "failure"
     : community ? (reachable > 0 ? "connected" : failing ? "failure" : "waiting")
     : reachable === others.length ? "connected" : reachable > 0 ? "partial" : failing ? "failure" : "waiting";
@@ -71,6 +71,8 @@ export function GroupConnection({ group }: { group: GroupView }) {
     setBusy(linkId); setError("");
     try { await engine.call("connect", { linkId }); } catch (e) { setError(e instanceof Error ? rawError(e) || t("group.connection.reconnectFailed") : t("group.connection.reconnectFailed")); } finally { setBusy(""); }
   };
+  // "last seen 5 min ago" moves on with the clock once a minute, not with the engine's states (it draws on what it shows only).
+  useMinuteClock(root);
   const now = Date.now();
   return <div ref={root} className="relative shrink-0" data-testid="group-connection" data-open={menuOpen || undefined} onKeyDown={e => {
     if (e.key !== "Escape") return;

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { generateVapidKeys, type VapidKeys } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import { databaseName } from "@ghostly/browser/shared/idb";
@@ -6,6 +6,7 @@ import { activeProfileId } from "./profiles";
 import { MUTE_EVENT, chatOfLink, groupChat, mutedUntil } from "./chatMute";
 import { groupPath } from "./groups";
 import { chatPath } from "./url";
+import { useEngineValue } from "./engineState";
 
 /*
  * Wake-up push, the receiving side (WISP 401 § Wake-up push): this profile's browser push subscription, which the
@@ -119,16 +120,15 @@ export function useNoPushService(): boolean {
 }
 
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
-const engineSnapshot = () => engine.state;
 
 /**
  * Whether this device is woken now (it shared a subscription of its own), as the engine has it. In a profile on several
  * devices a subscription that is another device's (the phone's, given to contacts while this desktop is active) is not
- * this device's: the switch is off here (WISP 06 § Push and the phone).
+ * this device's: the switch is off here (WISP 06 § Push and the phone). Drawn again only when the answer changes, not
+ * on every state of the engine.
  */
 export function useWakeOn(): boolean {
-  const state = useSyncExternalStore(subscribeEngine, engineSnapshot);
-  return !!state?.settings.wake && state.wakeOwner !== "away";
+  return useSyncExternalStore(subscribeEngine, wakeIsOn);
 }
 
 /** Whether this device is woken now, as the engine has it (`useWakeOn`, read once). */
@@ -226,22 +226,21 @@ export function rotateWake(): Promise<void> {
  * app was closed: made again when notifications are still allowed, else wake-ups are turned off.
  */
 export function useWakeTableSync(text: WakeWords): void {
-  const state = useSyncExternalStore(subscribeEngine, engineSnapshot);
-  const wake = state?.settings.wake;
-  const owner = state?.wakeOwner;
-  const links = state?.links;
-  const groups = state?.groups;
+  // What the table is made of, as one string, and the subscription, compared by content. The engine builds `links` and
+  // `groups` anew in every state (up to one every 50 ms while someone types or a file moves), so the arrays themselves
+  // say nothing about a change: written on them, the table was a database transaction per state, and read whole, they
+  // drew the app's shell (and every chat it holds) on each.
+  const { wake, owner, rotateAsked, held } = useEngineValue((state) => ({
+    wake: state?.settings.wake,
+    owner: state?.wakeOwner,
+    rotateAsked: !!state?.settings.wakeRotate,
+    held: state?.links && JSON.stringify([
+      state.links.map((link) => [link.id, link.peerPubKeyZ32, link.wakeToken, !!link.wakeMuted]),
+      (state.groups ?? []).filter((group) => group.profile === "mesh").map((group) => [group.id, group.wakeTokens, !!group.wakeMuted]),
+    ]),
+  }));
   const words = JSON.stringify({ ...text, db: databaseName() });
-  // What the table is made of, as one string. The engine builds `links` and `groups` anew in every state (up to one
-  // every 50 ms while someone types or a file moves), so the arrays themselves say nothing about a change: written on
-  // them, the table was a database transaction per state.
   const on = !!wake;
-  const held = links && JSON.stringify([
-    links.map((link) => [link.id, link.peerPubKeyZ32, link.wakeToken, !!link.wakeMuted]),
-    (groups ?? []).filter((group) => group.profile === "mesh").map((group) => [group.id, group.wakeTokens, !!group.wakeMuted]),
-  ]);
-  const latest = useRef({ links, groups });
-  latest.current = { links, groups };
   useEffect(() => {
     const push = pushPlatform();
     if (!push || !held) return;
@@ -249,7 +248,8 @@ export function useWakeTableSync(text: WakeWords): void {
     let muteEnds: ReturnType<typeof setTimeout> | undefined;
     const write = () => {
       clearTimeout(muteEnds);
-      const { links, groups } = latest.current;
+      // The engine's chats as they are now.
+      const links = engine.state?.links, groups = engine.state?.groups;
       if (!links) return;
       const entries: WakeTableEntry[] = [];
       let soonest = Infinity;
@@ -292,7 +292,7 @@ export function useWakeTableSync(text: WakeWords): void {
   // A contact that held the subscription was deleted or muted: a new one (new endpoint, new key pair, new tokens for
   // the others), and the old one ends at the push service, so that contact can no longer wake this app. Not for
   // another device's subscription, which that device replaces.
-  const rotate = !!state?.settings.wakeRotate && !!wake && owner !== "away";
+  const rotate = rotateAsked && !!wake && owner !== "away";
   useEffect(() => {
     if (rotate) void rotateWake();
   }, [rotate]);

@@ -419,6 +419,14 @@ const MAX_PENDING_ENTRIES = 4;
 const ENTRY_TIMEOUT_MS = 3 * 60_000;
 /** A joiner refused (its app cannot follow the group) is not answered again for this long. */
 const REFUSED_FOR_MS = 10 * 60_000;
+/**
+ * A full group's admin answers a knock with `group-full` (WISP 902 § A full group): the same joiner at most this often
+ * while there is no room, its side of the entry session closed `FULL_LINGER_MS` after. The joiner shows it is full for
+ * `FULL_SAID_MS` after the last one (one answer missed included), then waits as before.
+ */
+const FULL_TELL_MS = 5 * 60_000;
+const FULL_LINGER_MS = 5_000;
+const FULL_SAID_MS = 2 * FULL_TELL_MS + 60_000;
 /** Messages deleted for everyone a group remembers, so a copy that comes again stays gone: as many as a chat's deleted ids. */
 export const MAX_REMOVED_IDS = 500;
 
@@ -454,6 +462,13 @@ const ENTRY_RELEASE_MS = 2_000;
 const REMOVED_LINGER_MS = 15_000;
 /** How long the tombstone of a group I left waits for the admin to hear it. */
 const LEFT_KEPT_MS = 7 * 24 * 60 * 60_000;
+/**
+ * A tombstone the role reached (a hand-over that crossed my leave) hands it on this long after: a leave its giver said
+ * right after its `role` commit (an admin's leave does) is heard first, so the role does not go back to a leaver.
+ */
+const LEFT_HAND_ON_MS = 1_000;
+/** The commits of my chain since my leave said to the admin my leave follows, before the leave (it may lack them). */
+const LEFT_COMMITS = 16;
 /** Admin side: how long a contact invited over its chat is waited for. After, it holds no place and may be invited again. */
 const INVITED_KEPT_MS = LEFT_KEPT_MS;
 /** How long the admin keeps the edge to a member it removed while that member was away, to tell it (`StoredGroup.farewells`). */
@@ -591,6 +606,12 @@ export class Groups {
   private readonly refused = new Map<string, number>();
   /** Admin side: entry sessions of a member key that timed out in a row, and when the last did. */
   private readonly entryTimeouts = new Map<string, { count: number; at: number }>();
+  /** Admin side: joiners told the group has no room (`group-full`), per group: member key → when. */
+  private readonly fullTold = new Map<string, Map<string, number>>();
+  /** Admin side: entry sessions a `group-full` went over, closed at `until`. */
+  private readonly fullClosing = new Map<string, { groupId: string; until: number }>();
+  /** Joiner side: the last `group-full` the admin's app answered with, and when. */
+  private readonly toldFull = new Map<string, { n: number; max: number; update: boolean; at: number }>();
   private readonly lastPoll = new Map<string, number>();
   /** Admin side: when a link nobody is using was last read. Those links share one `pollMs` between them, read in turn. */
   private lastQuietPoll = 0;
@@ -834,11 +855,12 @@ export class Groups {
     const base = { id: group.id, profile: "mesh" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...peerMessageAt(this.lastPeerMessageAt, group.id), ...mentionAt(this.lastMentionAt, group.id), invited: [...(this.invited.get(group.id) ?? [])],
       memberLinks: Object.fromEntries(contacts.map(([key, linkId]) => [linkId, key])) };
     if (!session) {
-      const invitation = group.invitation!;
+      const invitation = group.invitation!, full = invitation.entry && !invitation.admin ? this.fullSaid(group.id) : undefined;
       return { ...base, name: groupName(invitation.name) ?? "", isAdmin: false, members: [], canSend: false, ...(group.formerNames ? { formerNames: group.formerNames } : {}),
         invitation: { linkId: invitation.linkId, contact: this.host.contactName(invitation.linkId) ?? "", admin: invitation.admin, members: Math.min(Math.max(invitation.n, 0), GROUP_MEMBER_CAP.max), accepted: !!invitation.seedB64,
           ...(this.acceptSaid.get(group.id)?.unanswered ? { unanswered: true } : {}), ...(invitation.takenBack ? { takenBack: true } : {}),
           ...(invitation.entry ? { viaLink: true, stage: this.joinStage(group), ...(this.gaveUp.has(group.id) && { unanswered: true }),
+            ...(full && { full: { n: full.n, max: full.max } }),
             ...(this.othersKnocked.has(group.id) && { othersKnocked: true }) } : {}) } };
     }
     const nicks = session.state.nicks;
@@ -1171,6 +1193,24 @@ export class Groups {
   }
 
   /**
+   * Whom the role goes on to from a member it reached while its leave was under way (WISP 902 § Admission and
+   * departure, "A role that reaches a leave"): `by`, who handed it to me, while it stays; else the first other member
+   * whose edge is up, else the first in the roster. Never one whose leave I heard, nor one I handed the role to
+   * myself (an admin who left): with two leavers the role would go back and forth between them.
+   */
+  private nextAdmin(groupId: string, session: GroupSession, by?: string): string | undefined {
+    const heard = this.leavesHeard.get(groupId), handed = new Set(session.state.chain.filter(c => c.k === "role" && c.by === session.myKey).map(c => c.s));
+    const eligible = session.others.filter(key => !heard?.has(key) && !handed.has(key));
+    if (by && eligible.includes(by)) return by;
+    const edges = this.host.edges(groupId);
+    return eligible.find(key => { const edge = edges.get(key); return !!edge && this.host.linkReady(edge); }) ?? eligible[0];
+  }
+  /** Members whose leave reached my tombstone of their group: the role a hand-over gave me does not go on to them. */
+  private readonly leavesHeard = new Map<string, Set<string>>();
+  /** Tombstones the role reached, and when they hand it on (`LEFT_HAND_ON_MS`). */
+  private readonly handOnAt = new Map<string, number>();
+
+  /**
    * Leaves, and the group is gone from this device at once: its row, its history, its files and every
    * edge but the one to the admin, which stays until the admin's commit removing me comes back (or a
    * week passes), so a leave said while the admin was away still reaches it. An admin with other
@@ -1220,14 +1260,17 @@ export class Groups {
       await this.hubs.stepDown(groupId, session, this.now());
       if (bye) for (const [key, edge] of this.host.edges(groupId)) if (!hubs.includes(key) && this.host.linkReady(edge)) { try { this.host.sendOnLink(edge, bye); } catch { /* closing */ } }
     }
-    await session.leave();
+    await session.leave(() => this.nextAdmin(groupId, session, session.top.k === "role" && session.top.s === session.myKey ? session.top.by : undefined));
+    // The role reached me while this leave was under way, and went on as it is handed above: my leave goes to that admin.
+    const holder = session.admin, handed = !next && session.top.k === "role" && session.top.by === session.myKey ? holder : undefined;
+    if (holder && holder !== admin && holder !== session.myKey && group.left) { group.left = { ...group.left, admin: holder }; await this.store.putGroup(group); }
     if (bye) for (const key of hubs) { const edge = this.host.edges(groupId).get(key); if (edge && this.host.linkReady(edge)) { try { this.host.sendOnLink(edge, bye); } catch { /* when it opens again */ } } }
     // The admin may be off; its contact chat, if that is how I got here, hears it too.
-    const contact = group.contacts?.[admin];
+    const contact = group.contacts?.[group.left?.admin ?? admin];
     if (contact) { try { this.host.sendOnLink(contact, { t: "group-leave", g: groupId }); } catch { /* the edge already carried it, or nobody is there */ } }
     this.reconcileEdges(groupId);
     this.host.emit();
-    return next;
+    return next ?? handed;
   }
 
   /**
@@ -1445,12 +1488,16 @@ export class Groups {
     const owed = invitation && this.sayDecline(groupId, invitation.linkId);
     this.sessions.delete(groupId);
     this.stored.delete(groupId);
+    this.leavesHeard.delete(groupId);
+    this.handOnAt.delete(groupId);
     this.takeBack(groupId);
     this.acceptSaid.delete(groupId);
     this.entryHosts.delete(groupId);
     this.lastRoster.delete(groupId);
     this.lastTold.delete(groupId);
     this.pendingEntries.delete(groupId);
+    this.fullTold.delete(groupId);
+    this.toldFull.delete(groupId);
     this.framesKept.delete(groupId);
     this.knocked.delete(groupId);
     this.othersKnocked.delete(groupId);
@@ -1587,7 +1634,10 @@ export class Groups {
       const quiet: string[] = [];
       for (const group of [...this.stored.values()]) {
         if (group.left) {
-          if (now - group.left.at > LEFT_KEPT_MS) await this.forget(group.id);
+          if (now - group.left.at > LEFT_KEPT_MS) { await this.forget(group.id); continue; }
+          // The role reached my tombstone (a hand-over that crossed my leave): it goes on, after a restart too.
+          const session = this.sessions.get(group.id);
+          if (session?.status === "left" && session.admin === session.myKey && now >= (this.handOnAt.get(group.id) ?? 0)) await this.handOn(group.id);
           continue;
         }
         if (group.declined) { await this.declineOwed(group, now); if (!group.state && !group.invitation) continue; }
@@ -1621,8 +1671,9 @@ export class Groups {
           const linkId = this.host.entries(group.id).get(key);
           if (linkId) await this.host.closeEdge(linkId);
         }
-        // With every entry session taken, or no room, a knock read now could open nothing: its requests go to the edges.
-        const busy = (pending?.size ?? 0) >= MAX_PENDING_ENTRIES || session.roster.length + (pending?.size ?? 0) >= GROUP_MEMBER_CAP.max;
+        // With every entry session taken, a knock read now could open nothing: its requests go to the edges. A group with
+        // no room reads them all the same, to tell a knocking joiner so (`group-full`).
+        const busy = (pending?.size ?? 0) >= MAX_PENDING_ENTRIES;
         const since = now - (this.lastPoll.get(group.id) ?? 0);
         if (busy) continue;
         // A read the relays' budget held back is no reading: none while the hold lasts, and one as soon as it ends.
@@ -1640,6 +1691,10 @@ export class Groups {
         }
       }
       for (const [key, until] of this.refused) if (until <= now) this.refused.delete(key);
+      for (const [linkId, { groupId, until }] of this.fullClosing) if (now >= until || !this.host.linkReady(linkId)) {
+        this.fullClosing.delete(linkId);
+        if ([...this.host.entries(groupId).values()].includes(linkId)) await this.host.closeEdge(linkId);
+      }
       for (const [key, { at }] of this.entryTimeouts) if (now - at > 60 * 60_000) this.entryTimeouts.delete(key);
       for (const [groupId, kept] of this.lingering) if (now >= kept.until) await this.endLinger(groupId);
       this.meshTick(now);
@@ -1697,6 +1752,18 @@ export class Groups {
     if (this.isCommunity(groupId)) { this.communities.entryReady(groupId, linkId, peer); return; }
     const session = this.sessions.get(groupId), group = this.stored.get(groupId);
     if (!session?.isAdmin || !group || !this.pendingEntries.get(groupId)?.has(peer)) return;
+    // No room (WISP 902 § A full group): the joiner is told so, and knocks on at its slow pace until there is.
+    const full = rosterHas(session.roster, peer) ? null : this.noRoom(group, session, peer);
+    if (full) {
+      try { this.host.sendOnLink(linkId, { t: "group-full", g: groupId, n: full.n, max: GROUP_MEMBER_CAP.max, ...(full.update && { why: "update" }) }); traceJoin(groupId, "full.sent"); } catch { /* it closed */ }
+      const now = this.now();
+      this.pendingEntries.get(groupId)?.delete(peer);
+      let told = this.fullTold.get(groupId);
+      if (!told) this.fullTold.set(groupId, (told = new Map()));
+      told.set(peer, now);
+      this.fullClosing.set(linkId, { groupId, until: now + FULL_LINGER_MS });
+      return;
+    }
     // An app that takes only eight cannot follow a larger roster: it is not let in past eight (and not answered for a while).
     if (!rosterHas(session.roster, peer) && this.growthBlocked(group, session, session.roster.length + 1, linkId)) {
       this.pendingEntries.get(groupId)?.delete(peer);
@@ -1747,8 +1814,16 @@ export class Groups {
   private joinStage(group: StoredGroup): GroupJoinStage {
     const invitation = group.invitation!;
     if (invitation.admin) return "admitted";
+    const full = this.fullSaid(group.id);
+    if (full) return full.update ? "blocked" : "full";
     if (this.host.linkReady(invitation.linkId) || this.host.linkSeen?.(invitation.linkId)) return "answered";
     return this.knocked.has(group.id) ? "knocked" : "knocking";
+  }
+
+  /** The admin's app said lately that the group has no room (`group-full`): how full, as it said, and whether it waits for updates. */
+  private fullSaid(groupId: string): { n: number; max: number; update: boolean } | undefined {
+    const told = this.toldFull.get(groupId);
+    return told && this.now() - told.at < FULL_SAID_MS ? { n: told.n, max: told.max, update: told.update } : undefined;
   }
 
   private entryOf(group: StoredGroup): { link: GroupEntryLink; seedB64: string } | undefined {
@@ -1833,6 +1908,17 @@ export class Groups {
   }
 
   /**
+   * Let in: my knock leaves the link's record. Left there until it aged out, the next joiner read it as someone still
+   * waiting, and was told the admin's app may be busy letting them in. Once, in the background; if it fails, it ages out.
+   */
+  private async unknock(link: GroupEntryLink, seedB64: string): Promise<void> {
+    const me = identityFromSeedB64(seedB64).pubKeyZ32, identity = knockIdentity(link);
+    const knocks = readKnocks(link, (await this.host.resolve(identity.pubKeyZ32, true)) ?? []);
+    if (!knocks.some(k => k.key === me)) return;
+    await this.host.publish(identity, knockRecords(link, knocks.filter(k => k.key !== me)), true);
+  }
+
+  /**
    * Reads the link's knocks, and counts the read only if the relays answered it. One their budget held back answered
    * the record as last read: taken for a reading, the knock that came meanwhile waited for the next turn, and a burst's
    * tenth joiner waited ~40 s with the admin's app open. The link keeps its place and is read once the hold ends.
@@ -1857,6 +1943,8 @@ export class Groups {
     traceJoin(group.id, "knocks.read", { ms: Date.now() - started, knocks: knocks.length, ...(held !== undefined && { held }) });
     let pending = this.pendingEntries.get(group.id);
     let ever: Set<string> | undefined;
+    const told = this.fullTold.get(group.id);
+    for (const [key, at] of told ?? []) if (now - at >= FULL_TELL_MS) told?.delete(key);
     for (const { key, ts } of knocks) {
       // A member let in whose welcome never reached it knocks again: its session opens again for the welcome (`rewelcome`).
       const again = this.unwelcomed(group, session, key);
@@ -1868,12 +1956,14 @@ export class Groups {
       if (!again && (ever ??= everMembers(session)).has(key)) continue;
       // Sent its welcome again lately: its knock opens no session (and keeps the link's reads at their pace) until it may be again.
       if (again && this.rewelcomedLately(group.id, key)) continue;
-      const entryIds = new Set(this.host.entries(group.id).values());
-      const contactsInvited = [...this.invited.get(group.id) ?? []].filter(id => !entryIds.has(id)).length;
-      const size = session.roster.length + contactsInvited + (pending?.size ?? 0);
-      // Full, or past eight while a member's app takes only eight (the newcomer's own app is checked on its entry session).
+      if ((pending?.size ?? 0) >= MAX_PENDING_ENTRIES) break;
+      // No room: the session opens all the same, to say so (`entryReady`), at most every `FULL_TELL_MS` per joiner, and
+      // not while the one that said it is still closing (opened again, it would come up with nothing said on it).
       // A member let in already takes no new place.
-      if ((pending?.size ?? 0) >= MAX_PENDING_ENTRIES || (!again && (size >= GROUP_MEMBER_CAP.max || this.growthBlocked(group, session, size + 1)))) break;
+      if (!again && this.noRoom(group, session)) {
+        const linkId = this.host.entries(group.id).get(key);
+        if (this.fullTold.get(group.id)?.has(key) || (linkId && this.fullClosing.has(linkId))) continue;
+      }
       if (!pending) this.pendingEntries.set(group.id, (pending = new Map()));
       pending.set(key, now);
       this.warmUntil.set(group.id, now + this.timings.warmMs);
@@ -1881,6 +1971,20 @@ export class Groups {
       try { await this.host.openEntry(entry.link, "host", entry.seedB64, key); } catch { pending.delete(key); }
     }
     return held;
+  }
+
+  /**
+   * Why the group has no room for one more joiner, or null: full (those invited and those being let in counted, `except`
+   * the joiner asked about), or past eight while a member's app takes only eight (`update`; the newcomer's own app is
+   * checked on its entry session). `n`: the members it has.
+   */
+  private noRoom(group: StoredGroup, session: GroupSession, except?: string): { n: number; update: boolean } | null {
+    const entryIds = new Set(this.host.entries(group.id).values());
+    const contactsInvited = [...this.invited.get(group.id) ?? []].filter(id => !entryIds.has(id)).length;
+    const pending = [...this.pendingEntries.get(group.id)?.keys() ?? []].filter(key => key !== except).length;
+    const size = session.roster.length + contactsInvited + pending;
+    if (size >= GROUP_MEMBER_CAP.max) return { n: session.roster.length, update: false };
+    return this.growthBlocked(group, session, size + 1) ? { n: session.roster.length, update: true } : null;
   }
 
   /** The admin's entry session this link is, and whom it is pinned to. */
@@ -1909,6 +2013,7 @@ export class Groups {
           existing.invitation = { ...existing.invitation, name: groupName(frame.name) ?? "Group", admin: frame.admin, pieces: [],
             ...invitationClaims(frame) };
           await this.store.putGroup(existing);
+          this.toldFull.delete(g);
           traceJoin(g, "invite.received");
           this.host.sendOnLink(linkId, { t: "group-accept", g, key: identityFromSeedB64(existing.invitation.seedB64!).pubKeyZ32 });
           this.host.emit();
@@ -1953,6 +2058,16 @@ export class Groups {
         this.stored.set(g, invitation);
         this.acceptSaid.delete(g);
         await this.store.putGroup(invitation);
+        this.host.emit();
+        return;
+      }
+      case "group-full": {
+        // No room yet, from the admin's side of my entry session: the knock goes on at its slow pace, and the page says why it waits.
+        const invitation = this.stored.get(g)?.invitation, { n, max } = frame;
+        if (!invitation?.entry || this.stored.get(g)!.state || invitation.linkId !== linkId || invitation.admin) return;
+        if (!Number.isSafeInteger(n) || !Number.isSafeInteger(max) || (max as number) < 1 || (n as number) < 0) return;
+        this.toldFull.set(g, { n: n as number, max: max as number, update: frame.why === "update", at: this.now() });
+        traceJoin(g, "full.received");
         this.host.emit();
         return;
       }
@@ -2084,6 +2199,7 @@ export class Groups {
         await this.event(g, "joined", group.invitation.genesis ? "You joined again" : `You joined. ${GROUP_READ_NOTE}`, Date.now(), joined.state.chain.length - 1);
         if (viaLink) traceJoin(g, "welcome.received");
         if (viaLink) {
+          if (this.lastKnock.has(g)) void this.unknock({ g, host: group.invitation.entry! }, group.invitation.seedB64).catch(() => {});
           this.lastKnock.delete(g); this.knocked.delete(g); this.othersKnocked.delete(g); this.knockingSince.delete(g);
           // The entry session reaches the admin, which reaches every member: while it is kept (above), the edges about
           // to open signal through it too (WISP 902 § Signaling through members).
@@ -2140,8 +2256,9 @@ export class Groups {
     if (this.isCommunity(groupId)) return this.communities.handleEdgeFrame(groupId, peerKey, frame);
     const left = this.stored.get(groupId)?.left;
     if (left) {
-      // Only one thing matters to a group I left: the admin's commit that removes me.
+      // What matters to a group I left: the admin's commit that removes me, and the role on its way to whoever will.
       if (this.removesMe(groupId, peerKey, frame)) await this.leaveConfirmed(groupId);
+      else await this.afterLeave(groupId, peerKey, frame);
       return;
     }
     const session = this.sessions.get(groupId);
@@ -2225,6 +2342,67 @@ export class Groups {
     return session?.status === "active" && this.hubs.enabled ? session.signReaction(reaction) : {};
   }
 
+  /**
+   * A group I left, and a frame from the admin my leave is owed to, or a hub carrying my leave (WISP 902 § Admission and
+   * departure, "A role that reaches a leave"). A member's leave: the role does not go on to it. The next commit of my
+   * chain, while it keeps me: kept, so my leave follows the role to whoever holds it now, and said to that admin; one
+   * that makes me the admin goes on at the next tick (`handOn`). Taken in full while my leave is still under way: the
+   * leave then hands the role on itself.
+   */
+  private async afterLeave(groupId: string, from: string, raw: unknown): Promise<void> {
+    const group = this.stored.get(groupId), left = group?.left, session = this.sessions.get(groupId);
+    if (!group || !left || !session || (from !== left.admin && !left.hubs?.includes(from)) || !raw || typeof raw !== "object") return;
+    const t = (raw as { t?: unknown }).t;
+    if (t === "group-leave" && from !== session.myKey) {
+      let heard = this.leavesHeard.get(groupId);
+      if (!heard) this.leavesHeard.set(groupId, (heard = new Set()));
+      heard.add(from);
+      return;
+    }
+    if (t !== "group-commit") return;
+    // My leave may still be under way, its turn in the session's queue before or after this commit's.
+    if (session.status === "active") await session.handle(from, raw);
+    if (session.status !== "left" || !(await session.followAfterLeave(raw))) return;
+    if (session.admin === session.myKey) { this.handOnAt.set(groupId, this.now() + LEFT_HAND_ON_MS); return; }
+    await this.leaveFollows(groupId);
+  }
+
+  /** My tombstone's chain moved: my leave goes to the admin it names now, over our edge when it is up (and when it opens). */
+  private async leaveFollows(groupId: string): Promise<void> {
+    const group = this.stored.get(groupId), left = group?.left, session = this.sessions.get(groupId);
+    const admin = session?.admin;
+    if (!group || !left || !session || !admin || admin === session.myKey) return;
+    if (admin !== left.admin) {
+      group.left = { ...left, admin };
+      await this.store.putGroup(group);
+      this.reconcileEdges(groupId);
+    }
+    const edge = this.host.edges(groupId).get(admin);
+    if (edge && this.host.linkReady(edge)) { try { this.sayLeave(groupId, session, group, edge); } catch { /* when it opens again */ } }
+    const contact = group.contacts?.[admin];
+    if (contact) { try { this.host.sendOnLink(contact, { t: "group-leave", g: groupId }); } catch { /* the edge carries it */ } }
+  }
+
+  /**
+   * My leave, to the admin it is owed to: first the commits of my chain since I left, which that admin may lack (the
+   * role came to it from a leaver, whose edge with it is the only one up), then the leave.
+   */
+  private sayLeave(groupId: string, session: GroupSession, group: StoredGroup, linkId: string): void {
+    const since = group.left?.bye?.e ?? session.epoch;
+    for (let e = Math.max(since + 1, session.epoch - LEFT_COMMITS + 1); e <= session.epoch; e++) this.host.sendOnLink(linkId, farewellCommit(groupId, session, e));
+    this.host.sendOnLink(linkId, { t: "group-leave", g: groupId });
+  }
+
+  /** A tombstone the role reached: it goes on (`nextAdmin`), and my leave with it. */
+  private async handOn(groupId: string): Promise<void> {
+    const session = this.sessions.get(groupId);
+    if (!session || session.status !== "left" || session.admin !== session.myKey) { this.handOnAt.delete(groupId); return; }
+    try { if (!(await session.handOnAfterLeave(by => this.nextAdmin(groupId, session, by)))) return; }
+    catch { return; /* admin work off here, or its turn unconfirmed: tried again at the next tick */ }
+    this.handOnAt.delete(groupId);
+    await this.leaveFollows(groupId);
+  }
+
   /** A validly signed commit, by the admin I told, that takes me out of the roster. */
   private removesMe(groupId: string, from: string, raw: unknown): boolean {
     const group = this.stored.get(groupId), session = this.sessions.get(groupId);
@@ -2240,7 +2418,8 @@ export class Groups {
     const left = this.stored.get(groupId)?.left;
     if (left) {
       // The admin was away when I left: now it hears it (and a hub carries it, signed, to an admin I have no edge with).
-      if (peerKey === left.admin) { try { this.host.sendOnLink(linkId, { t: "group-leave", g: groupId }); } catch { /* next time it opens */ } }
+      const session = this.sessions.get(groupId), group = this.stored.get(groupId)!;
+      if (peerKey === left.admin) { try { if (session) this.sayLeave(groupId, session, group, linkId); else this.host.sendOnLink(linkId, { t: "group-leave", g: groupId }); } catch { /* next time it opens */ } }
       else if (left.bye && left.hubs?.includes(peerKey)) { try { this.host.sendOnLink(linkId, left.bye); } catch { /* next time it opens */ } }
       return;
     }

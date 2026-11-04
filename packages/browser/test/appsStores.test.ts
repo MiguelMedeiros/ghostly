@@ -267,6 +267,27 @@ describe("no request with nothing installed", () => {
     store.stop();
   });
 
+  it("a check marked ahead of the clock (the clock went back since) is not fresh: the check after start runs, and marks it now", async () => {
+    const v1 = await bundle({ sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v1.bytes);
+    // Checked while the device's clock ran a year ahead.
+    const ahead = Date.now() + 365 * 24 * 60 * 60 * 1000;
+    const first = apps(net, { now: () => ahead });
+    await first.preview({ url: BUNDLE_URL });
+    await first.install({ digest: v1.digest, grant: ["chat"] });
+    await first.checkUpdates();
+    expect(await first.list()).toMatchObject([{ checkedAt: ahead }]);
+    net.fetch.mockClear();
+    clock();
+    const store = apps(net, { now: () => Date.now() });
+    await store.start();
+    await pass(APP_CHECK_TIMINGS.afterStartMs);
+    expect(net.fetch, "the check after start").toHaveBeenCalled();
+    const [app] = await store.list();
+    expect(app!.checkedAt, "marked at the clock's time, so the next start judges it").toBeLessThanOrEqual(Date.now());
+    store.stop();
+  });
+
   it("the scheduled check waits while the network is off", async () => {
     const v1 = await bundle({ sources: [BUNDLE_URL] });
     net.put(BUNDLE_URL, v1.bytes);
