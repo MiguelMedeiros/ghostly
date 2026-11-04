@@ -144,6 +144,32 @@ it("a chat whose contact is gone lets its HyperDHT listener go, and listens agai
   expect(NATIVE_GONE_MS).toBe(GONE_MS);
 });
 
+it("while the contact's packet cannot be read, a gone contact's chat listens again and dials it, and lets go once a read works", async () => {
+  // The Pkarr relays went down after the listener was let go, and the contact came back over the HyperDHT: its start
+  // dial found no listener here, and no read can say it is online. A relay unreachable that long kept the chat offline
+  // for the whole outage, both apps up on the HyperDHT.
+  const [gone, other] = [chat(), chat()];
+  const { node, linkOf } = await started(gone, other);
+  later(node, GONE_MS + 1_000);
+  await vi.waitFor(() => { for (const c of [gone, other]) expect(linkOf(c.id).availableTransports).not.toContain("hyperdht/1"); });
+
+  // Only publishing failing says nothing of the contact: the listener stays let go.
+  linkOf(other.id).options.events.onDiscoveryError("Could not publish discovery: No Pkarr relay reachable");
+  linkOf(gone.id).options.events.onDiscoveryError("Could not read discovery: No Pkarr relay reachable");
+  await vi.waitFor(() => expect(linkOf(gone.id).availableTransports).toContain("hyperdht/1"));
+  expect(linkOf(gone.id).knockOnReturn.mock.calls).toEqual([["hyperdht/1"]]);
+  expect(linkOf(other.id).availableTransports).not.toContain("hyperdht/1");
+
+  // Held while reads keep failing: the contact may be there, only out of sight.
+  later(node, 16_000);
+  later(node, 16_000);
+  expect(linkOf(gone.id).releaseEndpoint.mock.calls).toEqual([["hyperdht/1"]]);
+  // A read works again and the contact is still not online: the next look lets it go.
+  linkOf(gone.id).options.events.onDiscoveryError(null);
+  later(node, 16_000);
+  await vi.waitFor(() => expect(linkOf(gone.id).availableTransports).not.toContain("hyperdht/1"));
+});
+
 it("a gone contact's chat listens again when it is opened or a text comes in over the DHT, and never lets go one dialling", async () => {
   const [opened, written, busy] = [chat(), chat(), chat()];
   const { node, linkOf } = await started(opened, written, busy);
