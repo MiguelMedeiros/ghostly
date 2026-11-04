@@ -285,6 +285,20 @@ describe("the forced takeover on the standby screen", () => {
     expect(screen.queryByTestId("takeover-open")).toBeNull();
   });
 
+  it("the active device renamed while the screen is open: the dialog asks for the new name, the one the engine checks", async () => {
+    let name = "Phone";
+    const { user, engine, rerender } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: name }} />);
+    engine.on("deviceTakeoverInfo", () => ({ offered: true, device: name, copy: "frozen", password: true }));
+    expect(await screen.findByTestId("takeover-open")).toBeInTheDocument();
+    name = "Pixel";
+    rerender(<DeviceStandby gate={{ state: "standby", activeDevice: name }} />);
+    expect(screen.getByTestId("device-standby-title")).toHaveTextContent("Active on Pixel");
+    await user.click(screen.getByTestId("takeover-open"));
+    await waitFor(() => expect(screen.getByTestId("takeover-dialog")).toHaveTextContent("Take over without Pixel?"));
+    expect(screen.getByTestId("takeover-dialog")).toHaveTextContent("This will make Pixel stop.");
+    expect(screen.getByTestId("takeover-name")).toHaveAttribute("placeholder", "Pixel");
+  });
+
   it("a copy restored from a backup says where the profile is active and offers Take over, with no password", async () => {
     const { user, engine } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />);
     engine.on("deviceTakeoverInfo", () => ({ offered: true, device: "MacBook", copy: "restored", password: false }));
