@@ -131,9 +131,16 @@ export function useWakeOn(): boolean {
   return !!state?.settings.wake && state.wakeOwner !== "away";
 }
 
+/** Whether this device is woken now, as the engine has it (`useWakeOn`, read once). */
+export function wakeIsOn(): boolean {
+  return !!engine.state?.settings.wake && engine.state.wakeOwner !== "away";
+}
+
 /**
  * Turns wake-ups on (a new subscription and key pair, so a new token for every chat) or off. Throws a sentence to show;
- * a browser with no push service is kept as such (`noPushService`) before it throws.
+ * a browser with no push service is kept as such (`noPushService`) before it throws. A new one refused while they were
+ * on (New token) may come after the old one ended (a browser takes no second key while one is held): wake-ups are
+ * then turned off, as contacts could no longer wake this app anyway.
  */
 export async function setWake(on: boolean): Promise<void> {
   const push = pushPlatform();
@@ -145,6 +152,7 @@ export async function setWake(on: boolean): Promise<void> {
     await push.unsubscribe(profile);
     return;
   }
+  const old = wakeIsOn() ? engine.state?.settings.wake?.endpoint : undefined;
   const vapid = generateVapidKeys();
   let keys: PushKeys;
   try {
@@ -153,6 +161,9 @@ export async function setWake(on: boolean): Promise<void> {
     // Kept as the last try found it: a refusal of another kind (notifications turned off) says nothing of the service.
     const none = isNoPushService(error);
     if (none !== noPushService()) rememberNoPushService(none);
+    if (old && (await push.current(profile).catch(() => null))?.endpoint !== old) {
+      await engine.call("setWakeSubscription", { subscription: null }).catch(() => {});
+    }
     throw error;
   }
   if (noPushService()) rememberNoPushService(false);

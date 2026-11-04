@@ -8,7 +8,7 @@ import { updateFailure } from "../lib/updateFailure";
 import { canInstall, isAppleMobile, isMacSafari, startInstall, useInstallState } from "../lib/installPrompt";
 import { browserPrompts, reconsiderPersist, requestPersist, useStorageProtection } from "../lib/storagePersistence";
 import { storageBreakdown, useDesktopStorage } from "../lib/desktopStorage";
-import { isNoPushService, noPushService, pushPlatform, pushUnavailable, setWake, useNoPushService, useWakeOn } from "../lib/wakePush";
+import { isNoPushService, noPushService, pushPlatform, pushUnavailable, setWake, useNoPushService, useWakeOn, wakeIsOn } from "../lib/wakePush";
 import { noticePlace, noticeSettings, notificationPermission, openNoticeSettings, requestNotifications, type NoticePermission } from "../lib/notifications";
 import { getVersion } from "@tauri-apps/api/app";
 import { NetworkSettings } from "../components/NetworkSettings";
@@ -127,9 +127,9 @@ export function Settings() {
     setWakeBusy(true);
     setWakeError("");
     try { await setWake(on); } catch (e) {
-      // No push service: kept for the browser, the row says so itself for as long as it is (a line of this page's only
-      // when the browser's storage refused to keep it).
-      if (on && isNoPushService(e)) { if (!noPushService()) setWakeError(t("pwa.wakeNoPushService")); } else setWakeError(problemLine(e, t));
+      // No push service: kept for the browser, the row says so itself for as long as it is and wake-ups are off (a line
+      // of this page's when the browser's storage refused to keep it, or a refused New token left them on).
+      if (on && isNoPushService(e)) { if (!noPushService() || wakeIsOn()) setWakeError(t("pwa.wakeNoPushService")); } else setWakeError(problemLine(e, t));
     } finally { setWakeBusy(false); }
   };
   const isMobile = useIsMobile();
