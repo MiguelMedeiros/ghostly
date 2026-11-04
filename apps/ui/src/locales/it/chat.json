@@ -190,8 +190,12 @@
   "forward": {
     "forward": "Inoltra",
     "forwarded": "Inoltrato",
+    "limit": "Puoi inoltrare a {{count}} chat alla volta",
+    "limit_one": "Puoi inoltrare a {{count}} chat alla volta",
     "many": "Inoltrato molte volte",
     "messages": "{{count}} messaggi",
+    "more": "altre {{count}}",
+    "more_one": "un'altra",
     "noChats": "Ancora nessuna chat",
     "noMatch": "Nessuna chat con questo nome",
     "partial": "{{sent}} di {{count}} inviati",
