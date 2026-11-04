@@ -142,7 +142,7 @@ import { MAX_ALLOWED_TOKENS, forkTimes } from "../devices/state";
 import { awayFrom, setAwayWallets, setSingleWriterGate, refuseAway } from "./paymentAdapters/away";
 import { breezDatabaseInUse } from "./paymentAdapters/providers/breezDatabases";
 import { normalizePhrase } from "./paymentAdapters/providers/recoveryPhrase";
-import { lightningPaying } from "./paymentAdapters/providers/lightningService";
+import { journaledPayment, lightningPaying } from "./paymentAdapters/providers/lightningService";
 import { COUNTER_RAISE_KEY, GROUP_ADMIN_OFF_KEY, PENDING_RAISE_KEY, applyCounterRaise, isCounterRaise, isGroupAdminOff, isPendingRaise, type PendingRaise } from "../devices/raise";
 import { blobDigest, fileBytes, fileBytesOf } from "../shared/fileBytes";
 import { isRefusalId } from "../shared/refusals";
@@ -1257,6 +1257,8 @@ export class GhostlyNode implements EngineImplementation {
     // "I paid": the source, the mints and the federations are asked now; the request is paid only once one of them saw it.
     // A test mint's invoice waits for that word (StoredQuote `held`): the one the contact says it paid is let go.
     check: async (paid?: string) => { await Promise.all([this.lightnings[network].reconcile(), paid ? this.wallet.vouch(paid) : this.wallet.checkQuotes(), this.fedimintWallets[network].checkReceives()]); },
+    // Every card journals a payment before its source is asked to spend: a restart reads what became of it there.
+    interrupted: journaledPayment,
   })), this.bitcoins, this.fedimintWallets, perNetwork((network) => ({
     ready: () => !!this.sparkWallets[network].adapter,
     requestTarget: (amount: number, memo?: string) => this.sparkWallets[network].target(amount, memo),
