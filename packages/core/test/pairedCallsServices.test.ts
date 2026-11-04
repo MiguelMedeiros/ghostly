@@ -383,6 +383,28 @@ describe("a live session giving its native listener to a chat in use", () => {
     expect(a.link.canYieldEndpoint("iroh/1", IDLE)).toBe(true);
   });
 
+  it("a file sent on a live session says nothing about transports; a retry still does", async () => {
+    const policies: string[] = [];
+    const sink = { write: async () => {}, close: async () => {}, abort: () => {} };
+    const { a, b } = pair({
+      a: { events: { onFileIncoming: () => sink } }, b: { events: { onFileIncoming: () => sink } },
+      drop: { a: (data) => { if (data.includes(`"t":"paired-policy"`)) policies.push(data); return false; } },
+    });
+    await live(a, b);
+    await vi.waitFor(() => expect(a.link.supportsFiles).toBe(true));
+    const before = policies.length;
+    // Each file sent used to send the transport policy again: a dozen in a minute used up the contact's 10
+    // (POLICY_RECEIVE_LIMIT), and a transport choice made then waited for it.
+    async function* bytes() { yield new Uint8Array(8); }
+    for (let i = 0; i < 12; i++) {
+      await a.link.sendFile({ id: String(i).padStart(22, "f"), name: `${i}.bin`, size: 8, mime: "application/octet-stream", timestamp: Date.now() }, bytes());
+    }
+    expect(policies.length - before).toBe(0);
+    // The person's retry is still one.
+    await a.link.connect();
+    await vi.waitFor(() => expect(policies.length - before).toBe(1));
+  });
+
   it("a call is on from an answer either side gave until a hang-up or a clear; an offer nobody answers rings only so long", () => {
     let now = 1_000_000;
     const calls = new PairedCalls(() => now);
@@ -473,6 +495,24 @@ describe("shared apps on a paired session (services/1)", () => {
     expect(a.presenceServices()).toEqual([]);
     expect(a.link.supportsServices).toBe(false);
     expect(localFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("paying a contact on a live session", () => {
+  it("each payment step says nothing about transports", async () => {
+    const policies: string[] = [];
+    const { a, b } = pair({ drop: { a: (data) => { if (data.includes(`"t":"paired-policy"`)) policies.push(data); return false; } } });
+    await live(a, b);
+    await vi.waitFor(() => expect(a.link.supportsPayments).toBe(true));
+    const before = policies.length;
+    // An ask, a request and a payment: each used to send the transport policy again, out of the contact's 10 a minute.
+    const amount = { value: "100", asset: "sat" };
+    for (let i = 0; i < 4; i++) {
+      await a.link.sendPaymentAsk({ id: `ask${i}`, timestamp: Date.now(), amount, method: "bitcoin", network: "testnet" });
+      await a.link.sendPaymentRequest({ id: `req${i}`, timestamp: Date.now(), amount, endpoints: [], network: "testnet" });
+      await a.link.sendPayment({ id: `pay${i}`, timestamp: Date.now(), amount, endpoint: ["bitcoin", "tb1q"] });
+    }
+    expect(policies.length - before).toBe(0);
   });
 });
 
