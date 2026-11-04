@@ -2,7 +2,7 @@ import { act, createEvent, fireEvent, screen, waitFor, within } from "@testing-l
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
-import { followPlatformDrags, guardFileDrops, resetPlatformDrags } from "../../lib/pastedFiles";
+import { followPlatformDrags, guardFileDrops, PLATFORM_PASTE_MAX, resetPlatformDrags } from "../../lib/pastedFiles";
 import type { ClipboardFile } from "@ghostly/browser/host";
 import { renderApp } from "../render";
 
@@ -112,6 +112,27 @@ describe("files dragged in from another app that the webview names by address on
     await act(() => new Promise((done) => setTimeout(done)));
     expect(fireEvent.drop(field(), named())).toBe(true);
     expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it("a drop over the read limit, or whose files are gone, says so in a drop's words: nothing was pasted", async () => {
+    const huge: ClipboardFile = { name: "film.mkv", size: PLATFORM_PASTE_MAX + 1, mime: null, read: vi.fn(), done: vi.fn() };
+    read.mockResolvedValueOnce([huge]);
+    composer();
+    act(() => over(true));
+    expect(fireEvent.drop(screen.getByTestId("messages"), named())).toBe(false);
+    expect(await screen.findByRole("alert")).toHaveTextContent("That is too large to drop. Send it with + → Document.");
+    expect(huge.read).not.toHaveBeenCalled();
+    expect(huge.done).toHaveBeenCalled();
+    expect(screen.queryByTestId("attachment-sheet")).toBeNull();
+    await act(() => new Promise((done) => setTimeout(done)));
+
+    // Rust let the drop's files go before the page read them (its shelf's own words name a paste).
+    const gone: ClipboardFile = { name: "a.txt", size: 3, mime: null, read: vi.fn(async () => { throw "That paste is gone. Paste it again."; }), done: vi.fn() };
+    read.mockResolvedValueOnce([gone]);
+    act(() => over(true));
+    expect(fireEvent.drop(screen.getByTestId("messages"), named())).toBe(false);
+    await waitFor(() => expect(screen.getAllByRole("alert").map((alert) => alert.textContent)).toContainEqual(expect.stringContaining("That drop is gone. Drop it again.")));
+    expect(screen.queryByTestId("attachment-sheet")).toBeNull();
   });
 
   it("a read that ends after an edit began says its files could not be added, not nothing", async () => {
