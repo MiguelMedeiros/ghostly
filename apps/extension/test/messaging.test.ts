@@ -59,6 +59,8 @@ describe("the service worker keeps one peer", () => {
   it("opens the tab on a first install even when the peer does not start, so the page can say why", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     try {
+      // The document the worker made as it loaded went away, and the next one's script never listens.
+      world.endOffscreen();
       world.onCreateDocument = async () => {};
       fire(world.chrome.runtime.onInstalled, { reason: "install" });
       await vi.advanceTimersByTimeAsync(100 * 50 + 1000);
@@ -71,7 +73,8 @@ describe("the service worker keeps one peer", () => {
   it("says so when the peer never answers", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     try {
-      // The document is created but its script never listens.
+      // The document the worker made as it loaded went away; the next one is created but its script never listens.
+      world.endOffscreen();
       world.onCreateDocument = async () => {};
       const reply = send({ target: "background", type: "ensure-engine" });
       await vi.advanceTimersByTimeAsync(100 * 50 + 1000);
@@ -83,6 +86,8 @@ describe("the service worker keeps one peer", () => {
 
   it("waits for the peer to be ready before saying the engine is there", async () => {
     let ready!: () => void;
+    // The peer the worker started as it loaded went away; the next one is slow to be ready.
+    world.endOffscreen();
     engineControl().ready = new Promise<void>((resolve) => (ready = resolve));
     let answered = false;
     const reply = send({ target: "background", type: "ensure-engine" }).then((r) => ((answered = true), r));
@@ -103,9 +108,9 @@ describe("messages nobody should act on", () => {
     ["a string", "ensure-engine"],
     ["a number", 42],
   ])("%s gets no answer and does nothing", async (_, message) => {
+    const before = world.calls.length;
     await expect(send(message)).rejects.toThrow("message port closed");
-    expect(world.callsTo("offscreen.createDocument")).toEqual([]);
-    expect(world.callsTo("tabs.create")).toEqual([]);
+    expect(world.calls.slice(before).map((c) => c.api)).toEqual(["runtime.sendMessage"]);
   });
 
   it("nothing outside the extension is heard: no external listeners at all", async () => {
@@ -166,7 +171,10 @@ describe("the page and the peer talk over the 'ui' port", () => {
       () => (disconnected = true),
     );
     const server = engine();
-    expect(world.callsTo("runtime.sendMessage")[0]).toEqual([{ target: "background", type: "ensure-engine" }]);
+    // The worker's own pings came first, as it loaded.
+    const ensured = world.calls.findIndex((c) => c.api === "runtime.sendMessage" && (c.args[0] as { type?: string }).type === "ensure-engine");
+    expect(ensured).toBeGreaterThanOrEqual(0);
+    expect(ensured).toBeLessThan(world.calls.findIndex((c) => c.api === "runtime.connect"));
     expect(server.attached).toHaveLength(1);
 
     connection.send({ id: 1, method: "getState", params: [] } as never);
@@ -221,6 +229,7 @@ describe("the page and the peer talk over the 'ui' port", () => {
   it("fails the page's connect when the peer cannot start", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     try {
+      world.endOffscreen();
       world.onCreateDocument = async () => {};
       const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
       const connecting = extensionHost.connect(() => {}, () => {});
@@ -524,6 +533,8 @@ describe("the debugger stays on the tabs the worker opened", () => {
     ["a web page claiming the extension's id", { id: "nbedaagicniejlmfcncndfjcejaidbcf", url: "https://evil.example/" }],
     ["a sender with no url", { id: "nbedaagicniejlmfcncndfjcejaidbcf" }],
   ])("does not hear %s", async (_, sender) => {
+    // The peer the worker started as it loaded went away: a stranger's ensure-engine does not bring it back.
+    world.endOffscreen();
     for (const message of [
       { target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG },
       { target: "background", type: "open-payment-link", uri: "lightning:lnbc1" },
@@ -533,7 +544,8 @@ describe("the debugger stays on the tabs the worker opened", () => {
     }
     expect(world.callsTo("tabs.create")).toEqual([]);
     expect(world.callsTo("debugger.attach")).toEqual([]);
-    expect(world.callsTo("offscreen.createDocument")).toEqual([]);
+    expect(world.callsTo("offscreen.createDocument")).toHaveLength(1);
+    expect(world.offscreenDocument).toBe(false);
   });
 });
 

@@ -24,7 +24,8 @@ afterEach(() => {
 
 describe("what the extension may do, as the manifest declares it", () => {
   it("asks only for what the peer needs up front", () => {
-    expect(manifest.permissions).toEqual(["offscreen", "storage", "debugger"]);
+    // `alarms` wakes the worker to bring the peer back (background.ts); Chrome shows no warning for it.
+    expect(manifest.permissions).toEqual(["offscreen", "storage", "debugger", "alarms"]);
     expect(manifest.optional_permissions).toEqual(["notifications", "identity"]);
     expect(manifest).not.toHaveProperty("host_permissions");
   });

@@ -1481,7 +1481,8 @@ export class GhostlyNode implements EngineImplementation {
     settings: () => this.settings.nostr,
     online: () => this.networkOn,
     emit: () => this.emitState(),
-    ownSubjects: () => this.identities.views().filter(p => p.provider === "nostr").map(p => p.subject),
+    // Asked for each chat's view in every engine state: the proofs' own subjects, not their views (which count every chat).
+    ownSubjects: () => this.identities.subjects("nostr"),
     contactSubjects: linkId => {
       const live = this.links.get(linkId), stored = live?.stored;
       if (!stored?.profile || !stored.identities) return [];
@@ -1597,6 +1598,7 @@ export class GhostlyNode implements EngineImplementation {
     messages: chat => db.getMessages(chat),
     message: (chat, id) => db.getMessage(chat, id),
     rows: (chat, id) => this.rowsNamed(chat, id),
+    unkeyed: chat => { const live = this.links.get(chat); return live && !live.stored.group ? this.unkeyedRowsOf(live) : undefined; },
   };
   private readonly reactions = new Reactions({
     messages: chat => db.getMessages(chat),
@@ -8572,7 +8574,11 @@ export class GhostlyNode implements EngineImplementation {
         // A new session: everything not confirmed is said again on it.
         onReactionsSupport: supported => { this.reactionsSent.delete(linkId); if (supported) this.flushReactions(linkId); },
         // A pin is always taken (shown, or older than the one shown), so always confirmed.
-        onPin: async pin => { await this.keepLinkPin(linkId, await this.pinCame(linkId, "peer", pin)); return true; },
+        // One that would not be kept (`keepLinkPin`'s rule) reads no row; confirmed all the same, so it is not said again.
+        onPin: async pin => {
+          if (pinIsNewer(this.links.get(linkId)?.stored.pin, pin)) await this.keepLinkPin(linkId, await this.pinCame(linkId, "peer", pin));
+          return true;
+        },
         onPinReceipt: n => this.pinReceipt(linkId, n),
         onPinSupport: supported => { if (supported) this.flushPin(linkId); },
         onAppFrame: this.appsOn ? event => this.events.onAppFrame?.(linkId, event) : undefined,

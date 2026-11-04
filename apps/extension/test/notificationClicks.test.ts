@@ -201,6 +201,31 @@ describe("a new peer: the chats of the one before are not this one's", () => {
   });
 });
 
+describe("a deleted profile: its \"New messages in\" notifications go with it", () => {
+  const noticeKeys = () => [...world.session.keys()].filter((key) => key.startsWith("notice:"));
+  const clearPeek = async (profile: string) => {
+    const peek = await world.load("page", () => import("../../ui/src/lib/profilePeek"));
+    await world.load("page", async () => peek.clearPeek(profile));
+    await settle();
+  };
+
+  it("shown from the page that deletes it, and from one before it reloaded; another profile's and a chat's stay", async () => {
+    const page = await openPage();
+    const before = await notify(page.lib, "peek-gone-1", "profile:gone000000");
+    await closePage(page.tabId, true);
+    const next = await openPage();
+    const now = await notify(next.lib, "peek-gone-2", "profile:gone000000");
+    const other = await notify(next.lib, "peek-other-1", "profile:other00000");
+    const message = await notify(next.lib, "message:link-a:m1", "chat-a");
+
+    // As `deleteProfile` does, before the profile leaves the registry.
+    await clearPeek("gone000000");
+    expect([before, now].filter((id) => world.notices.has(id))).toEqual([]);
+    expect([...world.notices.keys()].sort()).toEqual([other, message].sort());
+    expect(noticeKeys().sort()).toEqual([`notice:${other}`, `notice:${message}`].sort());
+  });
+});
+
 describe("a click on a notification whose page is open", () => {
   it("that page opens its chat; the worker moves no tab", async () => {
     const page = await openPage();
