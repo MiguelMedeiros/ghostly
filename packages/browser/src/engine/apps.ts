@@ -63,6 +63,11 @@ export const APP_CHECK_TIMINGS = {
 } as const;
 /** Apps the update check reads at once (their publishers' files, their sources' peeks): all on the same two hosts. */
 const APP_CHECK_PARALLEL = 6;
+/**
+ * Stores a refresh reads at once: each read is two requests (its index and `.sig`), and a store behind the copy the
+ * person took reads that copy beside them, so about as many requests as the update check's apps.
+ */
+const STORE_READ_PARALLEL = 4;
 
 /** Revocations are checked this long at a time before the page's thread is let go. */
 const REVOCATIONS_SLICE_MS = 10;
@@ -319,6 +324,24 @@ export interface AppsHost {
  * publisher's, read beside it when it was fetched (Install refuses a version they stop, and the record starts with them).
  */
 interface Staged { bundle: AppBundle; bytes: Uint8Array; from: string; store?: string; revocations: SignedAppRevocation[]; at: number }
+
+/**
+ * `run` on every item, at most `limit` at a time (the next one starts when one ends): one promise per item, in the
+ * items' order, whatever order they end in.
+ */
+function pooled<T, R>(items: readonly T[], limit: number, run: (item: T) => Promise<R>): Promise<R>[] {
+  const ends: { resolve: (value: R) => void; reject: (error: unknown) => void }[] = [];
+  const out = items.map((_, i) => new Promise<R>((resolve, reject) => { ends[i] = { resolve, reject }; }));
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      try { ends[i]!.resolve(await run(items[i]!)); } catch (error) { ends[i]!.reject(error); }
+    }
+  };
+  for (let w = 0; w < Math.min(limit, items.length); w++) void worker();
+  return out;
+}
 
 /**
  * A listing's URLs this client reads, in order, a jsDelivr copy first: one this client reads names a full commit, so it
@@ -1020,9 +1043,12 @@ export class Apps {
    * listings and 4096 revocations, each of these a signature check), and a revocation checked in an earlier read, of
    * this store or another, a preview included, is not checked again.
    */
-  private async readStoreAt(url: string, heldKey?: string, held?: Pick<AddedAppStore, "index" | "digest">, behind?: { index: AppStoreIndex; digest: string }): Promise<AppStoreRead> {
-    // Read side by side; the first of the two that fails stops the other, whose bytes nobody would use.
+  private async readStoreAt(url: string, heldKey?: string, held?: Pick<AddedAppStore, "index" | "digest">, behind?: { index: AppStoreIndex; digest: string }, unneeded?: AbortSignal): Promise<AppStoreRead> {
+    // Read side by side; the first of the two that fails stops the other, whose bytes nobody would use. `unneeded`
+    // stops both (a copy read beside a store's own URL, which turned out to hold the index).
     const stop = new AbortController();
+    if (unneeded?.aborted) stop.abort();
+    unneeded?.addEventListener("abort", () => { stop.abort(); }, { once: true });
     const read = (at: string, maxBytes: number) => this.host.fetch(at, { maxBytes, revalidate: true, signal: stop.signal }).catch((error: unknown) => { stop.abort(); throw error; });
     const [indexBytes, sigBytes] = await Promise.all([
       read(url, APP_FETCH_LIMITS.storeIndexBytes),
@@ -1199,7 +1225,12 @@ export class Apps {
       case "new": case "update": { const { equivocation: _e, ...clean } = rest; return { ...clean, index, digest, fetchedAt: this.now() }; }
       case "same": return { ...rest, fetchedAt: this.now() };
       case "rollback": return { ...rest, problem: "rollback" };
-      case "equivocation": return { ...rest, equivocation: { sequence: index.sequence, digest, at: this.now() }, problem: "equivocation" };
+      case "equivocation": {
+        // The same other index read again keeps its mark, and when it was first seen: the record is not written again.
+        const was = rest.equivocation;
+        const equivocation = was?.sequence === index.sequence && was.digest === digest ? was : { sequence: index.sequence, digest, at: this.now() };
+        return { ...rest, equivocation, problem: "equivocation" };
+      }
       default: return { ...rest, problem: "store-key" };
     }
   }
@@ -1237,20 +1268,12 @@ export class Apps {
   async refreshStores({ key }: { key?: string } = {}): Promise<AppStoreSummary[]> {
     const stores = (await this.stores()).filter((s) => key === undefined || s.key === key);
     if (key !== undefined && !stores.length) fail("no-store", "No such store");
+    // Read a few at a time (each waits on its host), then taken one by one in the stores' order, as each read ends:
+    // the same writes, in the same order, as when each store was read only after the one before.
+    const reads = pooled(stores, STORE_READ_PARALLEL, (s) => this.readStore(s));
     const out: AppStoreSummary[] = [];
-    for (const s of stores) {
-      let read: AppStoreRead | { ok: false; reason: string };
-      try {
-        const last = this.behindReads.get(s.key);
-        read = await this.readStoreAt(s.url, s.key, s, last?.url === s.url ? last : undefined);
-      } catch (error) {
-        read = { ok: false, reason: error instanceof AppFetchError ? error.code : "network" };
-      }
-      // Its own URL behind the copy of its index the person took (or not answering): that copy's URL is read too.
-      const behind = !read.ok || !!this.withIndex(s, read.store.index, read.store.digest).problem;
-      if (read.ok && behind) this.behindReads.set(s.key, { url: s.url, index: read.store.index, digest: read.store.digest });
-      else this.behindReads.delete(s.key);
-      const copy = s.copyUrl !== undefined && behind ? await this.readStoreAt(s.copyUrl, s.key, s).catch((): null => null) : null;
+    for (const [i, s] of stores.entries()) {
+      const { read, copy } = await reads[i]!;
       // Removed meanwhile: not put back.
       const now = await this.storeRecord(s.key);
       if (!now || now.removed) continue;
@@ -1270,6 +1293,32 @@ export class Apps {
       out.push(this.summary(next));
     }
     return out;
+  }
+
+  /**
+   * One store's reads for `refreshStores`; never throws. Its own URL, and the copy its index was taken from (`copyUrl`)
+   * when the own URL is behind it (or not answering). That copy is read beside the own URL when that URL was behind at
+   * its last read (`behindReads`: one at a commit stays so), and stopped when it turns out not to be; otherwise only
+   * once the own URL showed it.
+   */
+  private async readStore(s: AddedAppStore): Promise<{ read: AppStoreRead | { ok: false; reason: string }; copy: AppStoreRead | null }> {
+    const last = this.behindReads.get(s.key);
+    const lastBehind = last?.url === s.url ? last : undefined;
+    const unneeded = new AbortController();
+    const readCopy = (at: string) => this.readStoreAt(at, s.key, s, undefined, unneeded.signal).catch((): null => null);
+    const early = s.copyUrl !== undefined && lastBehind ? readCopy(s.copyUrl) : null;
+    let read: AppStoreRead | { ok: false; reason: string };
+    try {
+      read = await this.readStoreAt(s.url, s.key, s, lastBehind);
+    } catch (error) {
+      read = { ok: false, reason: error instanceof AppFetchError ? error.code : "network" };
+    }
+    // Its own URL behind the copy of its index the person took (or not answering): that copy's read is used.
+    const behind = !read.ok || !!this.withIndex(s, read.store.index, read.store.digest).problem;
+    if (read.ok && behind) this.behindReads.set(s.key, { url: s.url, index: read.store.index, digest: read.store.digest });
+    else this.behindReads.delete(s.key);
+    if (!behind) unneeded.abort();
+    return { read, copy: behind && s.copyUrl !== undefined ? await (early ?? readCopy(s.copyUrl)) : null };
   }
 
   // ---------- install ----------
@@ -1318,10 +1367,13 @@ export class Apps {
     } else fail("bad-source", "No app to fetch");
     if (!urls.length) fail("host", "This listing has no URL Ghostly reads from");
 
+    // The install screen opened again on the version it showed (a listing, a card naming its digest): the bundle read and
+    // checked from that URL within `STAGED.ms` is taken as it is, and only its revocations are read again.
+    const kept = expect?.digest !== undefined ? this.staged.get(expect.digest) : undefined;
     let last: unknown = null;
     for (const url of urls) {
       try {
-        const { bundle, bytes } = await this.fetchBundle(url);
+        const { bundle, bytes } = kept && kept.from === url && this.now() - kept.at <= STAGED.ms ? kept : await this.fetchBundle(url);
         const version = versionOf(bundle.manifest, bundle.digest);
         if (expect) {
           if (version.ref !== expect.ref) fail("other-app", "The URL holds another app");
@@ -1533,10 +1585,7 @@ export class Apps {
     // check took the app count times the round trip. The results stay in the installed order. An app whose check fails
     // (a bundle write refused on a full disk) is left out, as one uninstalled meanwhile is: a throw would end the check
     // while the other workers still run, and the next check would start beside them.
-    const out: (AppCheckResult | null)[] = [];
-    let next = 0;
-    const worker = async () => { while (next < apps.length) { const i = next++; out[i] = await this.checkApp(apps[i]!, stores).catch(() => null); } };
-    await Promise.all(Array.from({ length: Math.min(APP_CHECK_PARALLEL, apps.length) }, worker));
+    const out = await Promise.all(pooled(apps, APP_CHECK_PARALLEL, (app) => this.checkApp(app, stores).catch(() => null)));
     return out.filter((r) => r !== null);
   }
 

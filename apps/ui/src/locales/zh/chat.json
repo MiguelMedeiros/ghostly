@@ -190,6 +190,9 @@
   "forward": {
     "forward": "转发",
     "forwarded": "已转发",
+    "found": "{{count}} 个聊天",
+    "found_one": "{{count}} 个聊天",
+    "found_other": "{{count}} 个聊天",
     "limit": "一次最多可转发到{{count}}个聊天",
     "limit_one": "一次最多可转发到{{count}}个聊天",
     "many": "已多次转发",

@@ -27,7 +27,7 @@ import type { FileTransferState } from "../../../../apps/ui/src/lib/platform";
 import { getPrefix } from "../../../../apps/ui/src/lib/storage";
 import { DEFAULT_HYPERDHT_RELAY } from "../shared/hyperdhtRelay";
 import { TEST_MINT, TEST_MINTS } from "../shared/mints";
-import { getBrowserHost } from "../host";
+import { getBrowserHost, localAccessPattern } from "../host";
 import { engine } from "./engine";
 import { engineApps } from "./apps";
 
@@ -291,9 +291,8 @@ export const servicesPlatform: ServicesPlatform | null = {
 
   async shareService(name, target) {
     const { origin } = parseLocalTarget(target);
-    const url = new URL(origin);
     // Where the platform asks the user, it only does so from a user gesture: this has to come first.
-    const granted = await getBrowserHost().requestLocalAccess(`${url.protocol}//${url.hostname}/*`, origin);
+    const granted = await getBrowserHost().requestLocalAccess(localAccessPattern(origin), origin);
     if (!granted) throw new Error("Ghostly needs your permission to reach that local address");
     await engine.call("addService", { name, target });
   },
@@ -302,7 +301,8 @@ export const servicesPlatform: ServicesPlatform | null = {
     const services = engine.state?.services ?? [];
     const origin = originOf(services.find((s) => s.id === serviceId)?.target);
     await engine.call("removeService", { serviceId });
-    // The last app at that address: the host may stop reaching it (desktop: Rust's list).
+    // The last app at that address: the host may stop reaching it (desktop: Rust's list; the extension first checks
+    // the host's other ports and its other profiles, which share one permission for it).
     if (origin && !services.some((s) => s.id !== serviceId && originOf(s.target) === origin)) {
       await getBrowserHost().forgetLocalAccess?.(origin).catch(() => {});
     }

@@ -16,7 +16,7 @@ import { InfoLine } from "../devices/DeviceDialog";
  * Copy and a QR code, whether it is published, and a switch per identity that lists it in the document for
  * everyone to see. Every switch starts off; chats never need any of this.
  */
-export function PublicDid({ state }: { state: EngineState }) {
+export function PublicDid({ state }: { state: Pick<EngineState, "did" | "identityProofs"> & { settings: Pick<EngineState["settings"], "online"> } }) {
   const { t } = useI18n();
   const did = state.did;
   const { copied, failed, copy } = useCopyKey(did?.id ?? "");

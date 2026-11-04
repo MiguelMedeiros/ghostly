@@ -327,14 +327,20 @@ test("a full-screen app opened from a chat on a phone covers the screen, with Ba
   await expect(ana.page.getByTestId("mini-app-resume")).toHaveText("Back to Browser");
 });
 
-test("taps and keys in an app keep the lock away while the person plays it; left alone, it locks", { tag: ["@feature:apps.view", "@feature:settings.lock.idle"] }, async ({ peer }) => {
-  const store = await testStore({ view: "full", title: "Notes", tagline: "A page to write on", entry: "<!doctype html><meta charset=utf-8><title>Notes</title><body><textarea data-testid=notes></textarea>" });
+/**
+ * Ana with Lock after 1 minute, in a full-screen app opened alone; with `clock`, on a clock the test drives (the page's
+ * and the app's frame's).
+ */
+async function inAppWithLock(peer: (name: string) => Promise<Peer>, entry: string, clock = true) {
+  const store = await testStore({ view: "full", title: "Notes", tagline: "A page to write on", entry });
   const ana = await peer("ana");
   await serveStore(ana.context, store);
   await install(ana, store);
   // From here the test drives the clock of the page and of the app's frame: the person plays longer than the lock time.
-  await ana.page.clock.install();
-  await ana.page.reload();
+  if (clock) {
+    await ana.page.clock.install();
+    await ana.page.reload();
+  }
   // Lock after 1 minute.
   await ana.page.goto("/#/settings");
   await ana.page.getByRole("switch", { name: "Lock Screen" }).click();
@@ -351,7 +357,14 @@ test("taps and keys in an app keep the lock away while the person plays it; left
   await expect(app).toHaveAttribute("data-place", "alone");
   const notes = app.frameLocator("iframe").getByTestId("notes");
   // The runner's start waits on timers of its own.
-  await expect.poll(async () => { await ana.page.clock.runFor(100); return notes.isVisible(); }).toBe(true);
+  await expect.poll(async () => { if (clock) await ana.page.clock.runFor(100); return notes.isVisible(); }).toBe(true);
+  return { ana, app, notes };
+}
+
+const NOTES = "<!doctype html><meta charset=utf-8><title>Notes</title><body><textarea data-testid=notes></textarea>";
+
+test("taps and keys in an app keep the lock away while the person plays it; left alone, it locks", { tag: ["@feature:apps.view", "@feature:settings.lock.idle"] }, async ({ peer }) => {
+  const { ana, app, notes } = await inAppWithLock(peer, NOTES);
 
   // Two minutes of play, twice the lock time, in the app alone: the Ghostly page around it hears none of it.
   for (const move of ["e4", "Nf3", "Bc4"]) {
@@ -365,5 +378,27 @@ test("taps and keys in an app keep the lock away while the person plays it; left
   // Left alone, the lock comes, and the app stops with it.
   await ana.page.clock.runFor(65_000);
   await expect(ana.page.getByText("Ghostly is locked")).toBeVisible();
+  await expect(app).toHaveCount(0);
+});
+
+test("an app that says `activity` by itself does not keep the lock away once the person has left it", { tag: ["@feature:apps.view", "@feature:settings.lock.idle"] }, async ({ peer }) => {
+  // On the real clock, a minute of it: the test's own calls into the page (the clock's runFor included) count as the
+  // person's activation of it, so nothing is asked of the page while the person is away.
+  test.setTimeout(240_000);
+  // The app takes the runner's port from its first call (it runs in the runner's realm) and says `activity` on it every
+  // 3 seconds, input or not.
+  const { ana, app, notes } = await inAppWithLock(peer, `${NOTES}<script>
+    const post = MessagePort.prototype.postMessage;
+    let port = null;
+    MessagePort.prototype.postMessage = function (...args) { port = this; return post.apply(this, args); };
+    void ghostly.context().catch(() => {});
+    let id = 1e6;
+    setInterval(() => { if (port) post.call(port, { id: id++, type: "activity", args: [] }); }, 3000);
+  </script>`, false);
+  await notes.click();
+  await notes.pressSequentially("e4");
+  // The person walks away with the app in front, past the lock time.
+  await ana.page.waitForTimeout(75_000);
+  await expect(ana.page.getByText("Ghostly is locked")).toBeVisible({ timeout: 1000 });
   await expect(app).toHaveCount(0);
 });

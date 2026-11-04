@@ -142,7 +142,7 @@ import { MAX_ALLOWED_TOKENS, forkTimes } from "../devices/state";
 import { awayFrom, setAwayWallets, setSingleWriterGate, refuseAway } from "./paymentAdapters/away";
 import { breezDatabaseInUse } from "./paymentAdapters/providers/breezDatabases";
 import { normalizePhrase } from "./paymentAdapters/providers/recoveryPhrase";
-import { lightningPaying } from "./paymentAdapters/providers/lightningService";
+import { journaledPayment, lightningPaying } from "./paymentAdapters/providers/lightningService";
 import { COUNTER_RAISE_KEY, GROUP_ADMIN_OFF_KEY, PENDING_RAISE_KEY, applyCounterRaise, isCounterRaise, isGroupAdminOff, isPendingRaise, type PendingRaise } from "../devices/raise";
 import { blobDigest, fileBytes, fileBytesOf } from "../shared/fileBytes";
 import { isRefusalId } from "../shared/refusals";
@@ -237,6 +237,17 @@ import { DEFAULT_IROH_RELAYS, MAX_IROH_RELAYS, createIrohWebEndpoint, irohRelayP
  * they all came back in the same instant, more listens than its one HyperDHT node sends out in time.
  */
 const RELAY_RETRY_MS = 30_000;
+/**
+ * A chat's relayed HyperDHT listener went with the relay connection (`relayHolds`): for this long the chat keeps first
+ * claim on a listener, and another chat does not take the slot it held. A socket closed with no close reaching the relay
+ * (a network switch, a NAT that forgot it) leaves the old connection holding the chat's key until the relay's ping drops
+ * it, 30 to 60 s (55 s measured), and the relay refuses the key to the new connection meanwhile: chats with free keys
+ * took every slot, and the chats used most stayed without a listener until each was used again. The relay's worst ping
+ * drop plus a margin.
+ */
+const RELAY_HOLD_MS = 90_000;
+/** How often such a chat tries to listen again within that time, while the relay still refuses its key. */
+const RELAY_HOLD_RETRY_MS = 10_000;
 /** Native listeners an app may hold per transport (the Desktop's Rust Iroh allows eight, `paired_transport.rs`). */
 const NATIVE_SLOTS = 8;
 /**
@@ -1254,9 +1265,12 @@ export class GhostlyNode implements EngineImplementation {
     createInvoice: async (amount: number, paymentId: string, card?: string) => (await this.lightningCard(network, card)).createInvoice(amount, { paymentId }),
     quote: async (invoice: string, card?: string) => { const quote = await (await this.lightningCard(network, card)).quote(invoice); return { ...quote, mint: quote.source === CASHU_MINT_SOURCE ? quote.mint : undefined }; },
     pay: (quote: { quote: string }, note: string, paymentId: string) => this.lightningQuote(network, quote.quote).pay(quote.quote, { note, paymentId }),
-    // "I paid": the source, the mints and the federations are asked now; the request is paid only once one of them saw it.
-    // A test mint's invoice waits for that word (StoredQuote `held`): the one the contact says it paid is let go.
-    check: async (paid?: string) => { await Promise.all([this.lightnings[network].reconcile(), paid ? this.wallet.vouch(paid) : this.wallet.checkQuotes(), this.fedimintWallets[network].checkReceives()]); },
+    // "I paid": the source and the mints are asked now about this invoice alone (the others keep their pace), and the
+    // federations; the request is paid only once one of them saw it. A test mint's invoice waits for that word
+    // (StoredQuote `held`): it is let go when the contact named it.
+    check: async (invoice: string, named: boolean) => { await Promise.all([this.lightnings[network].check(invoice), this.wallet.vouch(invoice, named), this.fedimintWallets[network].checkReceives()]); },
+    // Every card journals a payment before its source is asked to spend: a restart reads what became of it there.
+    interrupted: journaledPayment,
   })), this.bitcoins, this.fedimintWallets, perNetwork((network) => ({
     ready: () => !!this.sparkWallets[network].adapter,
     requestTarget: (amount: number, memo?: string) => this.sparkWallets[network].target(amount, memo),
@@ -2441,6 +2455,7 @@ export class GhostlyNode implements EngineImplementation {
       this.startGroupEntries();
       this.prepareSpare(STARTUP_QUIET_MS);
       void this.did.publishNow().catch(() => {});
+      this.identities.networkBack();
     }
     this.emitState();
     if (failure) throw failure;
@@ -4207,6 +4222,7 @@ export class GhostlyNode implements EngineImplementation {
       outbox = new Outbox({
         read: () => db.getMessages(linkId),
         get: id => db.getMessage(linkId, id),
+        getMany: ids => db.getMessagesById(linkId, ids),
         update: async (id, delivery, error, extra) => {
           // A receipt marks the row and notes its time in one write. As `db.updateDelivery`: a row with no delivery
           // state gets none, and one already delivered keeps its mark and the time of its first receipt.
@@ -4382,9 +4398,13 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * The message of mine that carries a payment or a request, read by its id: `me_<the time the desk keeps for it>`.
    * The chat's history is read only when that row does not carry it, so it costs the same in a long chat as in a short one.
+   * A contact's request or payment is never on a message of mine: nothing is read for it (the payee says a paid request
+   * is paid again at each reconnect, `PaymentDesk.replay`).
    */
   private async paymentMessage(linkId: string, paymentId: string): Promise<StoredMessage | undefined> {
-    const at = this.desk.payment(paymentId)?.createdAt;
+    const payment = this.desk.payment(paymentId);
+    if (payment?.direction === "in") return undefined;
+    const at = payment?.createdAt;
     const message = at === undefined ? undefined : await db.getMessage(linkId, `me_${at}`);
     if (message?.sender === "me" && message.paymentId === paymentId) return message;
     return (await db.getMessages(linkId)).find(m => m.sender === "me" && m.paymentId === paymentId);
@@ -6848,6 +6868,7 @@ export class GhostlyNode implements EngineImplementation {
       this.startGroupEntries();
       this.prepareSpare(STARTUP_QUIET_MS);
       void this.did.publishNow().catch(() => {});
+      this.identities.networkBack();
       // As at a start online: the links to the other devices, on the good read just made.
       if (!this.options.singleDevice && knownDeviceGate()?.state === "active") void this.startDeviceSet({ justRead: true }).catch(() => {});
     } else if (wasOnline && this.networkOn && relayOnlyChanged) await this.restartLinksForRelayOnly();
@@ -8807,11 +8828,23 @@ export class GhostlyNode implements EngineImplementation {
     if (!this.relaysHyperdht || !this.hyperdhtRelay || this.relayRetry || this.shuttingDown) return;
     this.relayRetry = setTimeout(() => {
       this.relayRetry = null;
-      for (const [linkId, live] of this.links) {
+      // The chats whose listener went with the relay connection first (`relayHolds`): they start first in the queue.
+      const held = (linkId: string) => this.relayHeld(linkId, Date.now());
+      const ids = [...this.links.keys()].sort((a, b) => Number(held(b)) - Number(held(a)));
+      for (const linkId of ids) {
+        const live = this.links.get(linkId)!;
         if (live.link && live.stored.profile && (!live.stored.group || this.keepsGroupNative(live.stored)) && live.stored.deliveryMode !== "dht" && !live.link.availableTransports.includes("hyperdht/1")
           && this.keepsNativeEndpoints(linkId, live.stored)) void this.ensureNativeEndpoints(linkId);
       }
     }, RELAY_RETRY_MS / 2 + Math.random() * RELAY_RETRY_MS);
+  }
+
+  /** Chats whose relayed HyperDHT listener went with the relay connection, by link id: until when they keep first claim on a slot. */
+  private readonly relayHolds = new Map<string, number>();
+  private relayHeld(linkId: string, now: number): boolean {
+    const until = this.relayHolds.get(linkId);
+    if (until !== undefined && now >= until) this.relayHolds.delete(linkId);
+    return until !== undefined && now < until;
   }
 
   /** A new relay (or none): chats give up their endpoints on the old one, as soon as none of them carries a session. */
@@ -9015,7 +9048,10 @@ export class GhostlyNode implements EngineImplementation {
       // tries again later. Started once, it stayed without it for as long as the app ran, unless its chat was opened
       // on screen: a CLI daemon's chats never were, and a contact with no WebRTC could not dial them any more.
       if ((group ? this.keepsGroupNative(live.stored) : this.keepsNativeEndpoints(linkId, live.stored)) && full.includes("failed")) {
-        const wait = Math.min(Math.max(NATIVE_RETRY_MS, (this.nativeFailed.get(linkId)?.wait ?? 0) * 2), NATIVE_FAILED_MAX_MS);
+        // One whose listener went with the relay connection tries every few seconds while it keeps its claim: the relay
+        // lets its key go any time within that.
+        const wait = this.relayHeld(linkId, Date.now()) ? RELAY_HOLD_RETRY_MS
+          : Math.min(Math.max(NATIVE_RETRY_MS, (this.nativeFailed.get(linkId)?.wait ?? 0) * 2), NATIVE_FAILED_MAX_MS);
         this.nativeFailed.set(linkId, { at: Date.now() + wait, wait });
       } else this.nativeFailed.delete(linkId);
       this.emitState();
@@ -9122,6 +9158,19 @@ export class GhostlyNode implements EngineImplementation {
       const extra = (other: LiveLink) => !!other.stored.group && !other.stored.groupEntry && !onScreen(other) && anchorOf(other.stored.group) !== other
         && !this.chosenByPeer(other, key);
       const full = owners.length >= slots, entry = !!live.stored.groupEntry;
+      // The slots of chats whose listener went with the relay connection stay theirs for a while (`relayHolds`): another
+      // chat takes a free one only past them, unless it is in use, which may take a held one anyway.
+      const claiming = key === "hyperdht/1" && this.relayHeld(linkId, now);
+      const reserved = key !== "hyperdht/1" || inUse || this.activeLinkId === linkId ? 0 : [...this.relayHolds.keys()].filter(id => {
+        const other = this.links.get(id)?.link;
+        return id !== linkId && this.relayHeld(id, now) && !!other && !other.availableTransports.includes(key);
+      }).length;
+      const free = slots - owners.length, chatFree = this.chatNativeSlots(key) - (owners.length - groups);
+      if (reserved && free > 0 && (group || chatFree > 0) && (free <= reserved || (!group && chatFree <= reserved))) {
+        traceLink(live.myPubKeyZ32, "native-held-for-relay", { transport: key, reserved, group });
+        if (group) return "no-slot";
+        throw new Error("All native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.");
+      }
       // Such an edge takes a free listener only once its group's one has one, and within what 1:1 chats leave (all but
       // four); it never takes one that is held. An entry session (a join) takes a free one within that room, as before.
       // One that finds none waits for a slot.
@@ -9165,6 +9214,9 @@ export class GhostlyNode implements EngineImplementation {
         } else if (!victim) {
           traceLink(live.myPubKeyZ32, "native-no-slot", { transport: key, active: this.activeLinkId === linkId, group });
           if (group) return "no-slot";
+          // Only waiting to get back the listener that went with the relay connection: it tries again in a moment,
+          // and keeps saying why it went (the relay's answer), not that the slots are in use.
+          if (claiming) return "failed";
           // Each busy for now (dialling, switching, carrying a session): the chat on screen asks again in a moment.
           if (this.activeLinkId === linkId) this.retryActiveSlot(linkId);
           throw new Error("All native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.");
@@ -9191,6 +9243,16 @@ export class GhostlyNode implements EngineImplementation {
       if (!endpoint) { void starting.then((late) => late.close(), () => {}); return false; }
       if (this.shuttingDown || live.stored.deliveryMode === "dht" || live.link !== link || !this.links.has(linkId) || link.takenFromUs) { await endpoint.close(); return false; }
       link.registerEndpoint(endpoint);
+      this.relayHolds.delete(linkId);
+      // A relayed listener that goes with the relay connection (not one let go here, whose close says nothing): the chat
+      // keeps first claim on a slot while the relay may still hold its key on the old connection.
+      if (key === "hyperdht/1" && this.relaysHyperdht) {
+        const gone = endpoint.onUnavailable;
+        endpoint.onUnavailable = () => {
+          if (this.links.get(linkId)?.link === link) this.relayHolds.set(linkId, Date.now() + RELAY_HOLD_MS);
+          gone?.();
+        };
+      }
       // Back after it was let go for a contact who was gone: the contact is dialled now (`knockOnReturn`).
       if (key === GONE_TRANSPORT && live.goneListener) { live.goneListener = false; link.knockOnReturn(key); }
       if (group) live.nativeUpAt = { ...live.nativeUpAt, [key]: Date.now() };

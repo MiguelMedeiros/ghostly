@@ -190,6 +190,9 @@
   "forward": {
     "forward": "Encaminhar",
     "forwarded": "Encaminhada",
+    "found": "{{count}} conversas",
+    "found_one": "{{count}} conversa",
+    "found_other": "{{count}} conversas",
     "limit": "Você pode encaminhar para {{count}} conversas por vez",
     "limit_one": "Você pode encaminhar para {{count}} conversa por vez",
     "many": "Encaminhada muitas vezes",

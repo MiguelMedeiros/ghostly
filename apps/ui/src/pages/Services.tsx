@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
-import { listSessions } from "../lib/storage";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
+import { useStoredSessions } from "../hooks/useStoredSessions";
+import { listShownSessions } from "../lib/storage";
+import { sameValue } from "../lib/sameValue";
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
-import type { SharedService } from "../lib/platform";
+import { servicesPlatform, type SharedService } from "../lib/platform";
 import { Block, Button, Notice, Row, Section, Switch, SwitchLook, input } from "../components/wallet/ui";
 import { ButtonGroup, FieldGrid, Page } from "../components/layout";
 import { externalLinkProps } from "../lib/externalLink";
@@ -11,31 +13,45 @@ import { problemLine } from "../lib/problemText";
 
 const GLOBE = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>;
 
+/**
+ * The chats' keys and names, through the page's one cache of the stored chats: a chat's stored copy, messages and all,
+ * is parsed only when it changed, not on every draw.
+ */
+const storedContacts = () => listShownSessions().map((s) => ({ key: s.peerPubKeyB64, label: s.label, nick: s.nick }));
+
 /** Everyone this device has a chat with, by the key services are granted to. */
 function useContacts() {
   const { t } = useI18n();
-  return listSessions().map((s) => ({ key: s.peerPubKeyB64, name: s.label || s.nick || t("common.unnamedContact", { key: contactTag(s.peerPubKeyB64) }), short: publicKeyLabel(s.peerPubKeyB64) }));
+  return useStoredSessions(storedContacts, sameValue).map((s) => ({ key: s.key, name: s.label || s.nick || t("common.unnamedContact", { key: contactTag(s.key) }), short: publicKeyLabel(s.key) }));
 }
+
+/** What the page shows of the platform: drawn again when that changes, not on every engine state. */
+const shown = () => servicesPlatform && {
+  online: servicesPlatform.isOnline(),
+  services: servicesPlatform.getSharedServices(),
+  canShare: servicesPlatform.features.shareLocalServices,
+};
 
 /**
  * Services, as a page beside the chat list like Settings and the wallet: the local web apps this
  * device shares and exactly who can reach each one, and the apps contacts share back.
  */
 export function Services() {
-  const platform = useServicesPlatform();
+  const platform = servicesPlatform;
   const { t } = useI18n();
   const contacts = useContacts();
+  const view = usePlatformValue(shown);
+  // The apps each listed contact shares back.
+  const theirApps = usePlatformValue(() => contacts.map((c) => (servicesPlatform?.getPeer(c.key)?.services ?? []).filter((s) => s.type === "http")));
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState(""), [target, setTarget] = useState("");
   const [error, setError] = useState("");
   const [openError, setOpenError] = useState("");
-  if (!platform) return null;
+  if (!platform || !view) return null;
 
-  const online = platform.isOnline();
-  const services = platform.getSharedServices();
-  const canShare = platform.features.shareLocalServices;
+  const { online, services, canShare } = view;
   const fromContacts = contacts
-    .map((c) => ({ ...c, apps: (platform.getPeer(c.key)?.services ?? []).filter((s) => s.type === "http") }))
+    .map((c, i) => ({ ...c, apps: theirApps[i] ?? [] }))
     .filter((c) => c.apps.length > 0);
 
   const share = async () => {
@@ -114,7 +130,7 @@ export function Services() {
 }
 
 function ServiceCard({ service, online, contacts }: { service: SharedService; online: boolean; contacts: { key: string; name: string; short: string }[] }) {
-  const platform = useServicesPlatform()!;
+  const platform = servicesPlatform!;
   const { t } = useI18n();
   const [showPeople, setShowPeople] = useState(false);
   const granted = service.sharedWith ?? [];

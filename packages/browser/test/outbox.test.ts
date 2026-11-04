@@ -577,6 +577,41 @@ describe("a chat with many queued messages and the contact away", () => {
     await vi.advanceTimersByTimeAsync(10);
     await stopped;
   });
+
+  it("a contact back just before the first check: the checks that come due during the catch-up read nothing for texts already delivered", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    let ready = false;
+    const n = 60, rows: StoredMessage[] = Array.from({ length: n }, (_, i) => {
+      const wireId = `w${String(i).padStart(21, "0")}`;
+      return { linkId: "many", id: `me_${wireId}`, wireId, text: `m${i}`, sender: "me", timestamp: i + 1, via: "datalink", delivery: "waiting" };
+    });
+    // Each store call takes as long as an IndexedDB transaction on a long chat: the catch-up spans the first check.
+    const tick = () => new Promise(resolve => setTimeout(resolve, 10));
+    const read = vi.fn(async () => { await tick(); return rows.map(row => ({ ...row })); });
+    const store = { read, get: async (id: string) => { await tick(); const row = rows.find(r => r.id === id); return row && { ...row }; },
+      update: async (id: string, delivery: NonNullable<StoredMessage["delivery"]>, error?: string, extra?: Partial<Pick<StoredMessage, "via" | "resendUntil">>) => {
+        await tick();
+        const row = rows.find(r => r.id === id);
+        if (row && row.delivery !== "delivered") Object.assign(row, extra, { delivery, deliveryError: error });
+      } };
+    const send = vi.fn(async (m: StoredMessage) => { setTimeout(() => void box.received(m.wireId!), 2); return null; });
+    const box = new Outbox(store, send, 20_000, undefined, { resender: { ready: () => ready } });
+    const recovered = box.recover(rows.map(row => ({ ...row })));
+    await vi.advanceTimersByTimeAsync(10);
+    await recovered;
+    // The contact comes back half a second before each text's first check.
+    await vi.advanceTimersByTimeAsync(RESEND_POLICY.backoffMs[0] - 500);
+    read.mockClear();
+    ready = true;
+    void box.flush({ reopened: true });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(rows.every(r => r.delivery === "delivered")).toBe(true);
+    expect(send).toHaveBeenCalledTimes(n);
+    expect(read.mock.calls.length, "whole-chat reads for the whole catch-up").toBeLessThanOrEqual(2);
+    const stopped = box.stop();
+    await vi.advanceTimersByTimeAsync(10);
+    await stopped;
+  });
 });
 
 describe("a session that opens (agents#2468)", () => {

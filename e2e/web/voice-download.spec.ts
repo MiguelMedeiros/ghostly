@@ -5,12 +5,14 @@ import { mp3Info } from "../../apps/ui/src/test/voice/mp3Info";
 import { chat, expect, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { decodeInPage } from "../support/voice-media.mjs";
+import { CHROMIUM_SANDBOX } from "../support/chromiumSandbox";
 
 /** The same fake microphone as voice-messages.spec.ts: a voice-like tone on a loop. */
 const SAMPLE = fileURLToPath(new URL("../support/voice-sample.wav", import.meta.url));
 
 test.use({
   launchOptions: {
+    chromiumSandbox: CHROMIUM_SANDBOX,
     args: [
       "--disable-features=WebRtcHideLocalIpsWithMdns",
       "--use-fake-device-for-media-stream",

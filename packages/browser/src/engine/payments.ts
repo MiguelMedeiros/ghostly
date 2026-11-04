@@ -117,10 +117,17 @@ export interface DeskLightning {
   /** True once paid, false while pending. Throws only when the sats did not go out. */
   pay(quote: { quote: string; mint?: string }, note: string, paymentId: string): Promise<boolean>;
   /**
-   * Asks the source (and the mints) about our open invoices now: a contact said it paid one from another wallet.
-   * `paid`: the invoice it says it paid, so one a test mint holds for a payer's word (StoredQuote `held`) is let go.
+   * Asks the source (and the mints) about this invoice of ours now, and no other: a contact said it paid its request.
+   * `named`: the contact named this invoice, so one a test mint holds for a payer's word (StoredQuote `held`) is let go.
    */
-  check?(paid?: string): Promise<void>;
+  check?(invoice: string, named: boolean): Promise<void>;
+  /**
+   * What the source wrote down of the Lightning payments of a contact's request (written before the source is asked to
+   * spend, so one cut off by a restart is there): "pending" while one has not ended (settled and reported later,
+   * `onLightningResolved`), "paid" once one went through, undefined when none left the wallet. Absent: the source keeps
+   * no such record (the mints alone: a finished melt leaves none), and a request left pending stays so.
+   */
+  interrupted?(paymentId: string): Promise<"pending" | "paid" | undefined>;
 }
 export const mintLightning = (wallet: CashuWallet, network?: WalletNetwork): DeskLightning => ({
   createInvoice: (amount, paymentId) => wallet.receiveLightning(amount, paymentId, network),
@@ -297,6 +304,11 @@ export const INVOICE_LOOKS_PER_CHAT = 5;
  */
 export const RAIL_LOOK_MS = 10_000;
 /**
+ * Whether `at` was less than `ms` ago, for the desk's paces. A time later than now (the device clock went back) is long
+ * ago: otherwise a pace stays shut for as long as the clock went back.
+ */
+const within = (now: number, at: number | undefined, ms: number): boolean => at !== undefined && at <= now && now - at < ms;
+/**
  * How long a receipt of ours (an on-chain, Ark, Bark, Spark or USDT payment already made) the payee has not confirmed
  * goes again at every reconnect (`receiptOwed`): a week. After that, once per run of the app.
  */
@@ -367,6 +379,7 @@ export class PaymentDesk {
   async start(): Promise<void> {
     const stored = await wrap<StoredPayment[]>((await store(STORES.payments, "readonly")).getAll());
     for (const payment of stored) this.payments.set(payment.id, payment);
+    for (const payment of stored) if (payment.kind === "request" && payment.direction === "in" && payment.lightningPending) await this.settleInterrupted(payment);
     const claims = await wrap<InvoiceClaim[] | undefined>((await store(STORES.settings, "readonly")).get(INVOICE_CLAIMS_KEY));
     this.claims = [...(claims ?? []).filter((c) => !this.claims.some((d) => sameClaim(c, d))), ...this.claims];
   }
@@ -815,7 +828,7 @@ export class PaymentDesk {
     const link = this.host.getLink(linkId);
     if (!link) return;
     const now = Date.now();
-    if (now - (this.lastAskFrom.get(linkId) ?? 0) < 3_000) return;
+    if (within(now, this.lastAskFrom.get(linkId), 3_000)) return;
     this.lastAskFrom.set(linkId, now);
     const open = [...this.payments.values()].filter((p) => p.linkId === linkId && p.kind === "request" && p.direction === "out" && p.state === "pending" && p.ask).length;
     if (open >= 5 || !/^[1-9]\d{0,15}$/.test(ask.amount.value)) return;
@@ -1206,7 +1219,7 @@ export class PaymentDesk {
       : request.invoice ? [ENDPOINT.bolt11, request.invoice] : undefined;
     if (!endpoint) throw new Error("This request cannot be paid from another wallet");
     const now = Date.now();
-    if (now - (this.lastCheck.get(request.id) ?? 0) < 5_000) return;
+    if (within(now, this.lastCheck.get(request.id), 5_000)) return;
     this.lastCheck.set(request.id, now);
     const link = this.requireLink(params.linkId);
     await this.sendTo(link, { id: newId(), timestamp: now, requestId: request.id, amount: { value: String(request.amount), asset: UNIT }, endpoint });
@@ -1230,11 +1243,11 @@ export class PaymentDesk {
     // A Lightning look is at this request's invoice; any other looks at every open request of its rail, so one
     // look per rail, whatever the request or chat, and no sooner than the wallet's own refresh.
     const [key, every] = rail === "lightning" ? [request.id, 3_000] : [rail, RAIL_LOOK_MS];
-    if (now - (this.lastCheckFrom.get(key) ?? 0) < every) return;
+    if (within(now, this.lastCheckFrom.get(key), every)) return;
     this.lastCheckFrom.set(key, now);
     try {
-      // The invoice it says it paid, when it is this request's: the only one a contact can speak for.
-      if (rail === "lightning") await this.lightning[paymentNetwork(request)].check?.(payment.endpoint[1].trim().toLowerCase() === request.invoice?.toLowerCase() ? request.invoice : undefined);
+      // This request's invoice alone is asked about; it is let go only when the contact named it, the one it can speak for.
+      if (rail === "lightning") { if (request.invoice) await this.lightning[paymentNetwork(request)].check?.(request.invoice, payment.endpoint[1].trim().toLowerCase() === request.invoice.toLowerCase()); }
       else if (rail === "bitcoin") await this.reconcileBitcoinReceipts();
       else if (rail === "bark") await this.reconcileBarkReceipts();
       else if (rail === "spark") await this.reconcileSparkReceipts();
@@ -1255,15 +1268,15 @@ export class PaymentDesk {
     const now = Date.now();
     const wanted = invoice.trim().toLowerCase();
     const key = `${linkId}:${wanted}`;
-    if (now - (this.lastInvoiceCheck.get(key) ?? 0) < 3_000) return;
-    const looks = (this.invoiceLooks.get(linkId) ?? []).filter((at) => now - at < 3_000);
+    if (within(now, this.lastInvoiceCheck.get(key), 3_000)) return;
+    const looks = (this.invoiceLooks.get(linkId) ?? []).filter((at) => within(now, at, 3_000));
     if (looks.length >= INVOICE_LOOKS_PER_CHAT) { this.invoiceLooks.set(linkId, looks); return; }
     this.invoiceLooks.set(linkId, [...looks, now]);
     // Oldest first (each key is set again only once it went, at the end): the ones gone are at the front.
-    for (const [seen, at] of this.lastInvoiceCheck) { if (now - at < 3_000) break; this.lastInvoiceCheck.delete(seen); }
+    for (const [seen, at] of this.lastInvoiceCheck) { if (within(now, at, 3_000)) break; this.lastInvoiceCheck.delete(seen); }
     this.lastInvoiceCheck.delete(key);
     this.lastInvoiceCheck.set(key, now);
-    for (const [chat, times] of this.invoiceLooks) if (chat !== linkId && times.every((at) => now - at >= 3_000)) this.invoiceLooks.delete(chat);
+    for (const [chat, times] of this.invoiceLooks) if (chat !== linkId && times.every((at) => !within(now, at, 3_000))) this.invoiceLooks.delete(chat);
     try {
       const quote = (await this.wallet.quotes()).find((q) => q.held && !q.paymentId && q.invoice.toLowerCase() === wanted);
       if (quote) await this.wallet.vouch(quote.invoice);
@@ -1281,6 +1294,21 @@ export class PaymentDesk {
       this.sayPaid(this.host.getLink(request.linkId), request);
     }
     else await this.save({ ...request, error: "The Lightning payment did not go through" });
+  }
+
+  /**
+   * A contact's request marked as being paid over Lightning when the app was closed: the mark is written before the
+   * source is asked, and only that run's answer cleared it. What the source and the mints wrote down decides: nothing
+   * left the wallet and it can be paid again (and the group is not told it was sent), or it went through.
+   */
+  private async settleInterrupted(request: StoredPayment): Promise<void> {
+    const lightning = this.lightning[paymentNetwork(request)];
+    if (!lightning.interrupted || this.paying.has(`${request.linkId}:${request.id}`)) return;
+    try {
+      if (request.invoice && await this.wallet.meltInFlight?.(request.invoice)) return;
+      const outcome = await lightning.interrupted(request.id);
+      if (outcome !== "pending") await this.onLightningResolved({ paymentId: request.id }, outcome === "paid");
+    } catch { /* not readable right now: it stays pending until the next start */ }
   }
 
   onQuotePaid(quote: StoredQuote): Promise<void> { return this.onLightningPaid(quote); }
@@ -1898,6 +1926,10 @@ export class PaymentDesk {
         else if(payment.kind==="payment" && payment.txid && payment.state==="settled" && this.receiptOwed(payment))await this.sendTo(link, {id:payment.id,timestamp:payment.createdAt,requestId:payment.requestId,amount:{value:String(payment.amount),asset:UNIT},endpoint:[ENDPOINT.arkade,JSON.stringify({txid:payment.txid})]});
         continue;
       }
+      // A request of ours our wallet saw paid is said so again while fresh (as a receipt is, `receiptOwed`): the answer
+      // `settleRequest` sent is dropped with the chat down, and a request paid over Lightning has no token or receipt the
+      // payer says again, so its copy would stay open with a Pay button that pays it twice.
+      if (payment.kind === "request" && payment.state === "settled" && payment.invoice && !payment.group && Date.now() - payment.createdAt < RECEIPT_FRESH_MS) { link.sendPaymentResult({ id: payment.id, ok: true }); continue; }
       if(payment.state !== "pending")continue;
       if (payment.kind === "payment" && payment.token) await this.sendTo(link, {
         id: payment.id, timestamp: payment.createdAt, requestId: payment.requestId,
