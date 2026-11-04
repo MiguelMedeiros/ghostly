@@ -1065,8 +1065,8 @@ export class CommunitySession {
     return counts;
   }
 
-  /** What each of two branches holds after their common parent: whether it has an admin change, and its first commit. */
-  private parting(a: Branch, b: Branch, counts: number[]): { parent: number; admin: [boolean, boolean]; first: [string, string] } {
+  /** What each of two branches holds after their common parent: whether it has an admin change, its first commit, and its hand-overs. */
+  private parting(a: Branch, b: Branch, counts: number[]): { parent: number; admin: [boolean, boolean]; first: [string, string]; roles: [string[], string[]] } {
     const m = Math.min(a.fork, b.fork);
     // Off the same main commit, the side paths may share their start too.
     let shared = 0;
@@ -1076,21 +1076,49 @@ export class CommunitySession {
       const path = x.path.slice(shared);
       const admin = counts[x.fork] - counts[m] > 0 || path.some(h => ADMIN_ONLY.has(this.known.get(h)!.k));
       const first = x.fork > m ? communityCommitHash(this.state.chain[m + 1]) : path[0] ?? "";
-      return { admin, first };
+      // Its hand-overs: admin changes, so none on a side without one.
+      const roles = !admin ? [] : [
+        ...this.state.chain.slice(m + 1, x.fork + 1).filter(c => c.k === "role").map(c => communityCommitHash(c)),
+        ...path.filter(h => this.known.get(h)!.k === "role"),
+      ];
+      return { admin, first, roles };
     };
     const sa = side(a), sb = side(b);
-    return { parent, admin: [sa.admin, sb.admin], first: [sa.first, sb.first] };
+    return { parent, admin: [sa.admin, sb.admin], first: [sa.first, sb.first], roles: [sa.roles, sb.roles] };
   }
 
   /**
-   * Is branch `a` better than branch `b`? After their common parent: the one that keeps an admin
-   * change first, however short and however far back it parts; then the longer; then, parting within
-   * the window, the lower hash of the first commit. Both holding admin changes means the admin signed
-   * two histories: `b` stays (a fresh one halts the group, see `receiveCommit`).
+   * Whether a hand-over (`h`, a `role`) went to a member whose leave of that admission I know on a branch that does not
+   * hold the hand-over: signed on a view from before the leave, it would leave the role with someone gone for good (a
+   * leave never names the admin).
+   */
+  private handedToLeaver(h: string): boolean {
+    const role = this.known.get(h)!, at = this.mainIndex.get(h), fork = this.branch(h)?.fork;
+    if (fork === undefined) return false;
+    // The main branch past a side hand-over's fork, and the side: commits before it are its own history.
+    const others = [...(at === undefined ? this.state.chain.slice(fork + 1) : []), ...this.state.side];
+    return others.some(c => {
+      if (c.k !== "leave" || c.s !== role.s) return false;
+      // Not one after the hand-over (the role went on, then that member left).
+      const b = this.branch(communityCommitHash(c));
+      if (!b || (at !== undefined ? b.fork >= at : b.path.includes(h))) return false;
+      return leaveStands(c, this.ancestry(role.p));
+    });
+  }
+
+  /**
+   * Is branch `a` better than branch `b`? After their common parent: first, the one that does not hand the
+   * role to a member who left (`handedToLeaver`); then the one that keeps an admin change, however short
+   * and however far back it parts; then the longer; then, parting within the window, the lower hash of the
+   * first commit. Both holding admin changes means the admin signed two histories: `b` stays (a fresh one
+   * halts the group, see `receiveCommit`).
    */
   private better(a: Branch, b: Branch, counts: number[]): boolean {
     if (a.tip === b.tip) return false;
-    const { parent, admin, first } = this.parting(a, b, counts);
+    const { parent, admin, first, roles } = this.parting(a, b, counts);
+    // A hand-over on a view from before the new admin's leave: that branch loses, or the group keeps an admin who is gone.
+    const toLeaver = roles.map(r => r.some(h => this.handedToLeaver(h)));
+    if (toLeaver[0] !== toLeaver[1]) return toLeaver[1];
     if (admin[0] !== admin[1]) return admin[0];
     if (admin[0]) return false;
     const ea = this.known.get(a.tip)!.e, eb = this.known.get(b.tip)!.e;
@@ -1160,7 +1188,8 @@ export class CommunitySession {
       // The admin's change on a branch parting from one that holds another admin change: two histories. From a former
       // admin (my branch holds its hand-over), refused as above; from the admin of my tip, the group halts.
       if (ADMIN_ONLY.has(commit.k) && admin[1]) {
-        if (commit.by !== this.admin) { this.known.delete(h); this.rosters.delete(h); return false; }
+        // A hand-over to a member who left never wins either (`better`): the admin went on without it, not a second history.
+        if (commit.by !== this.admin || (commit.k === "role" && this.handedToLeaver(h))) { this.known.delete(h); this.rosters.delete(h); return false; }
         await this.fork(`The admin signed changes on two branches after epoch ${this.state.chain[branch.fork].e}`);
         return true;
       }
