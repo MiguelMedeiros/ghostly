@@ -5,8 +5,10 @@
  * each track's media header (`mvhd`, `tkhd`, `mdhd`) say when it was recorded, to the second, and a camera's timecode
  * track the time of day. The sender removes them before the file is stored and its digest computed, without decoding
  * or re-encoding a frame: each such box becomes a `free` box of the same size, zeroed, the headers' creation and
- * modification times are zeroed (0 is "unknown"), and each metadata and timecode track's samples are zeroed where they
- * are, so no offset in the file moves and it plays as it did. Only the boxes' headers, `moov` and `moof` are read; the
+ * modification times are zeroed (0 is "unknown"), the space already left in it (`free`, `skip`, `wide`: what an edit in
+ * place left behind, a recorder's GPS log) is zeroed after its header, so are the names of its handlers and of the
+ * compressor that made its frames, and each metadata and timecode track's samples are zeroed where they are, so no
+ * offset in the file moves and it plays as it did. Only the boxes' headers, `moov` and `moof` are read; the
  * media goes untouched.
  *
  * Fail-closed: a file that is an MP4 or QuickTime video, by its bytes or by its type, and whose metadata cannot be
@@ -30,23 +32,33 @@ export const NO_VIDEO_METADATA = "This video cannot be sent: Ghostly could not r
 /** The types of the videos stripped here: a file of one of them whose bytes are not one is refused. */
 const STRIPPED_TYPES = new Set(["video/mp4", "video/quicktime", "video/x-m4v", "video/3gpp", "video/3gpp2"]);
 
-/** The first box of an MP4 (`ftyp`) or of a QuickTime file written without one. */
-const FIRST_BOXES = new Set(["ftyp", "moov", "mdat", "wide", "free", "skip"]);
+/**
+ * The first box of an MP4 (`ftyp`), of a QuickTime file written without one, or of one a tool or a preview was put
+ * before (`uuid`, `pnot`): a file that starts with one is a movie, refused when it is not one.
+ */
+const FIRST_BOXES = new Set(["ftyp", "moov", "mdat", "wide", "free", "skip", "uuid", "pnot", "PICT"]);
 
 /** Boxes that hold metadata wherever they are: emptied into `free`. */
 const METADATA = new Set(["udta", "meta", "uuid"]);
 /**
+ * Space left in a file (padding, or an old `moov` or `udta` an edit in place left behind), and what a recorder puts
+ * there (a dashcam's GPS log, a thumbnail): kept where it is, its body zeroed.
+ */
+const SPACE = new Set(["free", "skip", "wide"]);
+/**
  * At the top: what makes the movie, kept (`moov` and `moof` looked into); a preview picture, an event message, the
  * wall-clock time a fragment was made (`prft`), emptied.
  */
-const TOP_KEEPS = new Set(["ftyp", "styp", "moov", "mdat", "moof", "mfra", "sidx", "ssix", "pdin", "free", "skip", "wide"]);
+const TOP_KEEPS = new Set(["ftyp", "styp", "moov", "mdat", "moof", "mfra", "sidx", "ssix", "pdin", ...SPACE]);
 const TOP_EMPTIED = new Set([...METADATA, "pnot", "PICT", "emsg", "Xtra", "prft"]);
-const MOOV_KEEPS = new Set(["mvhd", "trak", "mvex", "iods", "ctab", "free", "skip", "wide"]);
-const TRAK_KEEPS = new Set(["tkhd", "edts", "mdia", "tref", "tapt", "load", "txas", "matt", "free", "skip", "wide"]);
+const MOOV_KEEPS = new Set(["mvhd", "trak", "mvex", "iods", "ctab", ...SPACE]);
+const TRAK_KEEPS = new Set(["tkhd", "edts", "mdia", "tref", "tapt", "load", "txas", "matt", ...SPACE]);
 /** Boxes looked into below a track (and in a fragment) for the metadata boxes in them. */
 const CONTAINERS = new Set(["mdia", "minf", "dinf", "stbl", "edts", "mvex", "traf"]);
 /** Track handlers kept as they are: picture, sound, text and subtitles, timecode, hints. `meta` tracks have their samples zeroed, `tmcd` ones too. */
 const HANDLERS = new Set(["vide", "soun", "text", "sbtl", "subt", "clcp", "tmcd", "hint", "auxv", "pict", "sdsm", "odsm", "subp"]);
+/** The handlers whose sample descriptions are a visual one's, a compressor's name in each. */
+const VISUAL = new Set(["vide", "auxv", "pict"]);
 
 /** Zeros put in a Blob a part at a time. */
 const ZEROS = new Uint8Array(1024 * 1024);
@@ -93,11 +105,30 @@ function empty(b: Uint8Array, box: Box): void {
   b.fill(0, box.start + (u32be(b, box.start) === 1 ? 16 : 8), box.end);
 }
 
-/** Every metadata box in a container's children (and in theirs, for the containers below a track) emptied. */
+/**
+ * Every metadata box in a container's children (and in theirs, for the containers below a track) emptied, every
+ * free space's body zeroed, and every handler's name (an `hdlr`'s after its 24 bytes of fields: "Core Media Video",
+ * an encoder's or an app's) zeroed in place, its type kept.
+ */
 function emptyWithin(b: Uint8Array, start: number, end: number): void {
   for (const box of boxes(b, start, end)) {
     if (METADATA.has(box.type)) empty(b, box);
+    else if (SPACE.has(box.type)) b.fill(0, box.body, box.end);
+    else if (box.type === "hdlr") b.fill(0, Math.min(box.body + 24, box.end), box.end);
     else if (CONTAINERS.has(box.type)) emptyWithin(b, box.body, box.end);
+  }
+}
+
+/**
+ * A visual track's sample descriptions with the name of the compressor that made them zeroed (32 bytes at 42 of each
+ * entry's body, MP4's `compressorname` and QuickTime's alike: an encoder's version, a camera's).
+ */
+function zeroCompressorNames(b: Uint8Array, stbl: Box): void {
+  const stsd = child(b, stbl, "stsd");
+  check(!!stsd && stsd.body + 8 <= stsd.end);
+  for (const entry of boxes(b, stsd.body + 8, stsd.end)) {
+    check(entry.body + 74 <= entry.end);
+    b.fill(0, entry.body + 42, entry.body + 74);
   }
 }
 
@@ -192,6 +223,7 @@ function stripMoov(b: Uint8Array): { video: boolean; fragmented: boolean; metada
   for (const box of boxes(b, header(b, 0, b.length).body, b.length)) {
     if (METADATA.has(box.type)) { empty(b, box); continue; }
     check(MOOV_KEEPS.has(box.type));
+    if (SPACE.has(box.type)) b.fill(0, box.body, box.end);
     if (box.type === "mvhd") zeroTimes(b, box);
     if (box.type === "mvex") { fragmented = true; emptyWithin(b, box.body, box.end); }
     if (box.type !== "trak") continue;
@@ -219,6 +251,7 @@ function stripMoov(b: Uint8Array): { video: boolean; fragmented: boolean; metada
       for (const range of sampleRanges(b, stbl)) zeroed.push(range);
     } else check(HANDLERS.has(handler));
     if (handler === "vide") video = true;
+    if (VISUAL.has(handler)) zeroCompressorNames(b, stbl);
     emptyWithin(b, box.body, box.end);
   }
   return { video, fragmented, metadata, zeroed };
@@ -247,9 +280,16 @@ async function whole(source: VideoSource, box: Box): Promise<Uint8Array> {
   return bytes;
 }
 
-/** An MP4 or QuickTime file, by its first box: an HEIF picture is pictureMetadata.ts's. */
-function isVideoContainer(head: Uint8Array, mime: string): boolean {
-  return head.length >= 8 && FIRST_BOXES.has(text(head, 4, 4)) && !isStrippedPicture(head, mime);
+/**
+ * What a file is by its first box: a movie (`FIRST_BOXES`), a file of boxes that is one when it holds a `moov` (any
+ * other box found at the top of a movie: a stream's segment holds none), or another file. An HEIF picture is
+ * pictureMetadata.ts's.
+ */
+function containerOf(head: Uint8Array, mime: string): "movie" | "boxes" | undefined {
+  const first = head.length >= 8 ? text(head, 4, 4) : "";
+  if (isStrippedPicture(head, mime)) return undefined;
+  if (FIRST_BOXES.has(first)) return "movie";
+  return TOP_KEEPS.has(first) || TOP_EMPTIED.has(first) ? "boxes" : undefined;
 }
 
 /**
@@ -280,7 +320,8 @@ export async function withoutVideoMetadata(source: Blob, mime: string): Promise<
 export async function videoMetadataPatches(source: VideoSource, mime: string): Promise<VideoPatch[] | undefined> {
   const head = await source.read(0, VIDEO_METADATA_LIMITS.headBytes);
   const typed = STRIPPED_TYPES.has(mime.split(";")[0]!.trim().toLowerCase());
-  if (!isVideoContainer(head, mime)) {
+  const container = containerOf(head, mime);
+  if (!container) {
     if (typed && !isStrippedPicture(head, mime)) throw new Error(NO_VIDEO_METADATA);
     return undefined;
   }
@@ -303,6 +344,7 @@ export async function videoMetadataPatches(source: VideoSource, mime: string): P
     at = box.end;
   }
   const moovs = top.filter((box) => box.type === "moov");
+  if (!moovs.length && container === "boxes" && !typed) return undefined;
   check(moovs.length === 1);
 
   const moov = await whole(source, moovs[0]!);
@@ -317,6 +359,9 @@ export async function videoMetadataPatches(source: VideoSource, mime: string): P
       const moof = await whole(source, box);
       emptyWithin(moof, box.body - box.start, moof.length);
       patches.push({ start: box.start, end: box.end, bytes: moof });
+    } else if (SPACE.has(box.type)) {
+      // Its header kept, its body zeros.
+      if (box.body < box.end) patches.push({ start: box.body, end: box.end });
     } else if (TOP_EMPTIED.has(box.type)) {
       // Its header made `free`, its body zeros.
       const head = await source.read(box.start, box.body - box.start);

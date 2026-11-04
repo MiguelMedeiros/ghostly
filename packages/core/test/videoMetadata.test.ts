@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { BlobSource, BufferTarget, Conversion, EncodedPacketSink, Input, MP4, MovOutputFormat, Mp4OutputFormat, Output, QTFF } from "mediabunny";
 import { NO_VIDEO_METADATA, withoutVideoMetadata } from "../src/videoMetadata";
-import { H264_MP4, PLACE, box, hasPlace, headerTimes, metadataTrack, withMovie, xyzUdta } from "./support/videoFixtures";
+import { H264_MP4, PLACE, box, hasPlace, headerTimes, metadataTrack, withFirst, withMovie, withTrack, xyzUdta } from "./support/videoFixtures";
 // covers: files.video.metadata
 
 const bytesOf = async (blob: Blob) => new Uint8Array(await blob.arrayBuffer());
@@ -111,6 +111,64 @@ describe("withoutVideoMetadata", () => {
     expect(sent.subarray(H264_MP4.length + 4, H264_MP4.length + 8).toString("latin1")).toBe("free");
   });
 
+  it("free, skip and wide boxes already in the file go as zeros after their header, at the top, in moov and in a track", async () => {
+    const held = (type: string) => box(type, Buffer.from(`old udta: ${PLACE} iPhone 17 Pro`, "latin1"));
+    for (const type of ["free", "skip", "wide"]) {
+      const files = [
+        Buffer.concat([H264_MP4, held(type)]),
+        withMovie(H264_MP4, [held(type)]),
+        withTrack(H264_MP4, [held(type)]),
+        Buffer.concat([await repack(false, "fragmented"), held(type)]),
+      ];
+      for (const video of files) {
+        expect(hasPlace(video)).toBe(true);
+        const out = Buffer.from(await bytesOf((await withoutVideoMetadata(new Blob([video]), "video/mp4"))!));
+        expect(hasPlace(out), type).toBe(false);
+        expect(out.length).toBe(video.length);
+        // The box stays where it was, its type kept, its body zeros.
+        const at = video.indexOf(held(type));
+        expect(out.subarray(at, at + 8).equals(held(type).subarray(0, 8))).toBe(true);
+        expect(out.subarray(at + 8, at + held(type).length).every((b) => b === 0)).toBe(true);
+        expect(await played(out)).toEqual(await played(video));
+      }
+    }
+  });
+
+  it("the names in a track's handler (hdlr) and its encoder's in the sample description (compressorname) go, the handler type kept", async () => {
+    for (const video of [H264_MP4, await repack(true)]) {
+      const out = Buffer.from(await bytesOf((await withoutVideoMetadata(new Blob([video as BlobPart]), "video/quicktime"))!));
+      for (const name of ["VideoHandler", "Lavc62.11.100 libx264", "Core Media", "Handler"]) expect(out.includes(Buffer.from(name, "latin1")), name).toBe(false);
+      expect(out.length).toBe(video.length);
+      expect(await played(out)).toEqual(await played(video));
+      const input = new Input({ source: new BlobSource(new Blob([out as BlobPart])), formats: [MP4, QTFF] });
+      expect((await input.getPrimaryVideoTrack())?.type).toBe("video");
+    }
+    expect(H264_MP4.includes(Buffer.from("VideoHandler", "latin1")) && H264_MP4.includes(Buffer.from("Lavc62.11.100 libx264", "latin1"))).toBe(true);
+  });
+
+  it("a movie whose first box is a uuid, a preview (pnot, PICT) or a udta is stripped, by its bytes too", async () => {
+    const tool = box("uuid", Buffer.from("0123456789abcdef", "latin1"), Buffer.from(PLACE, "latin1"));
+    const preview = Buffer.concat([box("pnot", Buffer.from("e8a1b2c3", "hex"), Buffer.alloc(2), Buffer.from("PICT", "latin1"), Buffer.from([0, 1])), box("PICT", Buffer.from(PLACE, "latin1"))]);
+    // The movie as it goes without them, they made `free` boxes of their sizes, zeroed.
+    const stripped = Buffer.from(await bytesOf((await withoutVideoMetadata(new Blob([H264_MP4]), "video/mp4"))!));
+    const freed = (first: Buffer) => {
+      const out = Buffer.alloc(first.length);
+      for (let at = 0; at < first.length; at += first.readUInt32BE(at)) {
+        out.writeUInt32BE(first.readUInt32BE(at), at);
+        out.write("free", at + 4, "latin1");
+      }
+      return out;
+    };
+    for (const first of [tool, preview, xyzUdta()]) {
+      const video = withFirst(H264_MP4, first);
+      for (const mime of ["", "application/octet-stream", "video/mp4", "video/quicktime"]) {
+        const out = Buffer.from(await bytesOf((await withoutVideoMetadata(new Blob([video]), mime))!));
+        expect(hasPlace(out), mime).toBe(false);
+        expect(out.equals(withFirst(stripped, freed(first)))).toBe(true);
+      }
+    }
+  });
+
   it("a file typed as one without a type, or one in any other name, is stripped by its bytes", async () => {
     const mp4 = withMovie(H264_MP4, [xyzUdta()]);
     for (const mime of ["", "application/octet-stream", "video/webm"]) expect(hasPlace(await bytesOf((await withoutVideoMetadata(new Blob([mp4]), mime))!))).toBe(false);
@@ -162,6 +220,9 @@ describe("withoutVideoMetadata", () => {
     expect(await withoutVideoMetadata(new Blob([`hello ${PLACE}`]), "text/plain")).toBeUndefined();
     const heic = box("ftyp", Buffer.from("heic\0\0\0\0mif1heic", "latin1"));
     expect(await withoutVideoMetadata(new Blob([heic]), "image/heic")).toBeUndefined();
+    // A stream's segment without a movie header, untyped.
+    const segment = Buffer.concat([box("styp", Buffer.from("msdh\0\0\0\0msdhmsix", "latin1")), box("moof", box("mfhd", Buffer.alloc(8))), box("mdat", Buffer.from("data", "latin1"))]);
+    expect(await withoutVideoMetadata(new Blob([segment]), "")).toBeUndefined();
     // An M4A: a movie with a sound track alone, its tags kept.
     const head = box("ftyp", Buffer.from("M4A \0\0\0\0M4A isom", "latin1"));
     const moov = (offset: number) => box("moov", box("mvhd", Buffer.alloc(100)), metadataTrack(offset, 4, "soun"), xyzUdta());
