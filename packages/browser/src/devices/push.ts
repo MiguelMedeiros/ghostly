@@ -206,7 +206,7 @@ export async function postPush(request: PushRequest, options: { pushSend?: (requ
     // Only the push service's status, as the relay reports it, counts: any other answer (a wrong address, a proxy with no
     // route, a captive portal, the relay's own refusal) is the relay failing, never "gone" or "sent".
     const answer = response.ok ? await response.json().catch(() => null) as { status?: unknown } | null : null;
-    if (typeof answer?.status !== "number") throw new Error(`The push relay did not forward it (HTTP ${response.status})`, { cause: error });
+    if (typeof answer?.status !== "number") throw Object.assign(new Error(`The push relay did not forward it (HTTP ${response.status})`), { cause: error });
     return answer.status;
   }
 }
