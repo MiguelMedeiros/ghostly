@@ -1199,7 +1199,12 @@ export class Apps {
       case "new": case "update": { const { equivocation: _e, ...clean } = rest; return { ...clean, index, digest, fetchedAt: this.now() }; }
       case "same": return { ...rest, fetchedAt: this.now() };
       case "rollback": return { ...rest, problem: "rollback" };
-      case "equivocation": return { ...rest, equivocation: { sequence: index.sequence, digest, at: this.now() }, problem: "equivocation" };
+      case "equivocation": {
+        // The same other index read again keeps its mark, and when it was first seen: the record is not written again.
+        const was = rest.equivocation;
+        const equivocation = was?.sequence === index.sequence && was.digest === digest ? was : { sequence: index.sequence, digest, at: this.now() };
+        return { ...rest, equivocation, problem: "equivocation" };
+      }
       default: return { ...rest, problem: "store-key" };
     }
   }
