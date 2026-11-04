@@ -59,6 +59,17 @@ describe("the payer says it paid from another wallet", () => {
     await desk.checkPayment({ linkId: "l", paymentId: "r2" });
     expect(sent).toHaveLength(1);
   });
+  it("after the device clock goes back an hour, the next \"I paid\" is sent, not an hour later", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: 10 * 3_600_000 });
+    try {
+      const { desk, sent } = setup([incoming({ invoice: INVOICE })]);
+      await desk.start();
+      await desk.checkPayment({ linkId: "l", paymentId: "r1" });
+      vi.setSystemTime(9 * 3_600_000 + 60_000);
+      await desk.checkPayment({ linkId: "l", paymentId: "r1" });
+      expect(sent).toHaveLength(2);
+    } finally { vi.useRealTimers(); }
+  });
   it("refuses for a request nothing else can pay, or that is not ours to pay", async () => {
     const { desk } = setup([incoming({ mints: ["https://mint.example"] }), outgoing({ id: "r2", invoice: INVOICE })]);
     await desk.start();
@@ -152,6 +163,20 @@ describe("the payee is asked to look", () => {
       // Another rail is its own wallet: its first check is looked at.
       await desk.onPayment("l", { ...check([ENDPOINT.bitcoin, JSON.stringify({ check: true })], "b1"), id: "cb" });
       expect(bitcoin.received).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
+  it("after the device clock goes back an hour, the contact's next check is looked at, not an hour later", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: 10 * 3_600_000 });
+    try {
+      const { desk, lightning, arkAdapter } = setup([outgoing({ invoice: INVOICE }), outgoing({ id: "r2", target: ark("tark1r2") })]);
+      await desk.start();
+      await desk.onPayment("l", check([ENDPOINT.bolt11, INVOICE]));
+      await desk.onPayment("l", { ...check([ENDPOINT.arkade, JSON.stringify({ check: true })], "r2"), id: "c2" });
+      vi.setSystemTime(9 * 3_600_000 + 60_000);
+      await desk.onPayment("l", { ...check([ENDPOINT.bolt11, INVOICE]), id: "c3" });
+      await desk.onPayment("l", { ...check([ENDPOINT.arkade, JSON.stringify({ check: true })], "r2"), id: "c4" });
+      expect(lightning.check, "Lightning").toHaveBeenCalledTimes(2);
+      expect(arkAdapter.received, "Ark").toHaveBeenCalledTimes(2);
     } finally { vi.useRealTimers(); }
   });
   it("on-chain: the source is asked for a confirmed receive on the request's address, and the contact is told once it is there", async () => {
@@ -286,6 +311,22 @@ describe("a test mint's invoice waits for the payer's word", () => {
       await payee.onPayment("m", said("lnbc-other"));
       expect(reads() - before).toBe(INVOICE_LOOKS_PER_CHAT + 1);
       vi.advanceTimersByTime(3_000);
+      await payee.onPayment("l", said(a));
+      expect(wallet.vouch).toHaveBeenCalledExactlyOnceWith(a);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("after the device clock goes back an hour, the payee lets go of an invoice the contact says it paid, not an hour later", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: 10 * 3_600_000 });
+    try {
+      const a = fakeInvoice(25, new Uint8Array(32).fill(7));
+      const quotes: StoredQuote[] = [{ quote: "qa", mint: "https://testnut.cashu.space", amount: 25, invoice: a, createdAt: 0, expiresAt: null, held: true }];
+      const wallet = { quotes: vi.fn(async () => quotes), vouch: vi.fn(async () => true) };
+      const { desk: payee } = setup([], { wallet: wallet as unknown as Partial<CashuWallet> });
+      await payee.start();
+      const said = (invoice: string) => ({ id: invoice.slice(-8), timestamp: 1, amount: { value: "1", asset: "sat" }, endpoint: [ENDPOINT.bolt11, invoice] as [string, string] });
+      for (let i = 0; i < INVOICE_LOOKS_PER_CHAT; i++) await payee.onPayment("l", said(`lnbc${i}`));
+      vi.setSystemTime(9 * 3_600_000 + 60_000);
       await payee.onPayment("l", said(a));
       expect(wallet.vouch).toHaveBeenCalledExactlyOnceWith(a);
     } finally { vi.useRealTimers(); }
