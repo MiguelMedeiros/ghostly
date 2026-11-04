@@ -731,6 +731,8 @@ export interface GhostLinkOptions {
   avatar?: string;
   lastSeenTimestamp?: number;
   pollIntervals?: PollIntervals;
+  /** A contact that left a live session is read no slower than the idle pace this long (a CLI daemon's, `DAEMON_WATCH_PEER_IDLE_MS`). */
+  watchPeerIdleMs?: number;
   /**
    * The transport this chat was live on when the app last ran (it quit, or crashed, with the session up). The contact is
    * probably still there, holding a session that is dead now: that transport is dialled first, and a native one is
@@ -4759,10 +4761,11 @@ export class GhostLink {
     if (this.stopped || this.leaving || this.yielding) return;
     traceLink(this.myPubKeyZ32, "peer-lost", { why });
     if (Date.now() < this.wokeUntil) { this.wokeUntil = 0; this.resumeAfterAbsence(); }
-    this.lostUntil = Date.now() + WATCH_PEER_MS;
+    const idleMs = this.options.watchPeerIdleMs ?? 0;
+    this.lostUntil = Date.now() + Math.max(WATCH_PEER_MS, idleMs);
     this.autoConnectFailures = 0;
     this.lastAutoConnectAt = 0;
-    this.session.watchPeer();
+    this.session.watchPeer(idleMs);
     this.maybeAutoConnect(this.presence);
   }
 
