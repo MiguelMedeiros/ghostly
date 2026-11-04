@@ -1481,7 +1481,8 @@ export class GhostlyNode implements EngineImplementation {
     settings: () => this.settings.nostr,
     online: () => this.networkOn,
     emit: () => this.emitState(),
-    ownSubjects: () => this.identities.views().filter(p => p.provider === "nostr").map(p => p.subject),
+    // Asked for each chat's view in every engine state: the proofs' own subjects, not their views (which count every chat).
+    ownSubjects: () => this.identities.subjects("nostr"),
     contactSubjects: linkId => {
       const live = this.links.get(linkId), stored = live?.stored;
       if (!stored?.profile || !stored.identities) return [];
