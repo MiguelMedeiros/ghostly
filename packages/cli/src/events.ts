@@ -38,7 +38,10 @@ const SWEEP_EVERY_MS = 6 * 3_600_000;
 /** How long a `file.*` event waits for the message that carries its file. */
 export const FILE_MESSAGE_WAIT_MS = 2_000;
 
-/** The notice an app sends when a chat first goes live (apps/ui/src/hooks/useChat.ts): shown as a line, not a message. */
+/**
+ * The notice an app sends when a chat first goes live (apps/ui/src/hooks/useChat.ts): shown as a line, not a message.
+ * The contact's only on the row the engine took as their joined line (`StoredMessage.joinLine`).
+ */
 export const JOIN_NOTICE = /^👋 (?:(.+) )?joined$/;
 
 type Listener = (event: GhostlyEvent) => void;
@@ -558,7 +561,9 @@ export class EventHub {
           const type = message.event ? "group.event" : message.sender === "peer" ? "group.message" : "group.sent";
           this.emit(type, `${type}:${group}:${message.id}`, { group, message: json() });
         } else {
-          const notice = JOIN_NOTICE.exec(message.text);
+          // The contact's joined line is the row the engine took as it (`joinLine`), as the app draws it: any other row of
+          // theirs in those words is a message. Mine by the words.
+          const notice = (message.sender === "me" || message.joinLine) ? JOIN_NOTICE.exec(message.text) : null;
           const type = notice ? (message.sender === "peer" ? "chat.joined" : "chat.announced") : message.sender === "peer" ? "message.received" : "message.sent";
           this.emit(type, `${type}:${chat}:${message.id}`, { chat, message: json(), ...(notice ? { name: notice[1] ?? null } : {}) });
         }
