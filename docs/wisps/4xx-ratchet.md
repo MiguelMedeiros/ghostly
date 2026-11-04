@@ -128,7 +128,7 @@ Replays are refused by the paths, not by the ratchet: a floor envelope must carr
 - **Bundle.** A ratcheted item is `"GHLD" || 0x02 || sealed`, the plaintext being the version-1 bundle's own plaintext (`u32be(len(header)) || header || body`), with the same signed header. An app before this profile refuses version 2 as "from a newer Ghostly", and is never sent one.
 - **What stays as today.** The manifest (a bundle of kind `manifest`, rewritten every time the sender re-signs its addresses) and the `_hold` pointer keep `sealKey`. They say which items are held, their sizes, sequences and read addresses, not what the items hold. A manifest of version 1 is always read.
 - **Order.** The sender seals, saves the state, uploads, then rewrites the manifest: a retry after a crash seals the item again with a new key.
-- **A contact that started anew.** Items the contact had not picked up were sealed in a session it no longer has. The sender SHOULD seal them again in the new session (same sequence and id) when it reads an item of that session, so they are not lost.
+- **A contact that started anew.** Items the contact had not picked up were sealed in a session it no longer has. The sender MUST seal them again, under the same sequence, id and object name, in the session it seals with once that is another than the one they went in (the contact's new session became current, [Sessions](#sessions)), and rewrite the manifest; an item held or retried meanwhile goes up after them. The reader MUST NOT refuse or acknowledge an item that does not open when its header names a session it has no state of and did not retire: its pickup stops there, in sequence order, reads that item again once the manifest is rewritten (not before), and passes it once it expires. Until revision 2026-11-02 the sender sealed again only on reading a held item of the new session, and the reader refused such an item: the sender then deleted it and told its person the item "could not be verified as yours", and a retry went in the same session and was refused again. An item under a made-up session waits the same way; that gives the storage nothing it lacks, since it can hold the pickup by not answering. An item that does not open under a session the reader has, or a retired one, is refused as before.
 
 ## Downgrade
 
@@ -143,13 +143,19 @@ Before a lane is heard, the contact's own signed record decides, as for any capa
 
 Ratchet state is state of one device. It MUST NOT be in a profile backup ([05](05-backups.md)), MUST NOT be derived from the seed, and MUST NOT travel in a handoff to another device ([06](06-devices.md)); an app restored from a backup or taking a profile over starts a new session with each contact on its first item.
 
-Plainly: **what was sent over the DHT or held cannot be opened again from the seed**, by anyone, the owner included. What a restore brings back of a chat is the history the backup holds, already opened. Items held for this side before a restore and not picked up are lost unless the sender seals them again ([Held items](#held-items)). A floor text in flight is sent again by the outbox under its stable id, in the new session.
+Plainly: **what was sent over the DHT or held cannot be opened again from the seed**, by anyone, the owner included. What a restore brings back of a chat is the history the backup holds, already opened. Items held for this side before a restore or a move and not picked up wait unopened until the sender seals them again in the new session ([Held items](#held-items)), which it does once the new device's first floor envelope (a keep-alive goes within minutes) made that session current there. A floor text in flight is sent again by the outbox under its stable id, in the new session.
+
+## Old keys on the disk
+
+A store SHOULD NOT keep a used ratchet state on the disk for long. The CLI appends each saved state to its journal, and folds a journal that holds one once its snapshot is an hour old, at a write, a close or a start. So while a profile is in use, what a copy of its folder can open again is what was opened in about the last hour. A profile no longer in use keeps its last hour of states until it next starts.
+
+No app can promise more than its storage gives. A fold removes a file and does not scrub the blocks it was on, on an SSD or a journaling file system. The web app, Desktop and the extension keep the state in the browser's IndexedDB, whose log and compaction they do not control, so how long an old state lasts there is the browser's.
 
 ## Security
 
 What it gives:
 
-- **Forward secrecy per message** on both lanes, once the turn has passed both ways in a session: a floor envelope or held item, once opened and its key dropped, cannot be opened again with anything the device keeps, nor with a participation key stolen later.
+- **Forward secrecy per message** on both lanes, once the turn has passed both ways in a session: a floor envelope or held item, once opened and its key dropped from the state, cannot be opened again with the state or with a participation key stolen later. How soon a dropped key also leaves the disk is the store's ([Old keys on the disk](#old-keys-on-the-disk)).
 - **Recovery after a compromise:** someone who copied a device's ratchet state and stays passive reads what comes until the turn passes twice; each step mixes a new X25519 secret they do not have.
 
 What it does not give:

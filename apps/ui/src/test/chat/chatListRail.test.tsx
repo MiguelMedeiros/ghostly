@@ -2,9 +2,11 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readStatusCard, type TaskCard } from "@ghostly/core";
-import type { CardIndexRow, SavedMessage } from "@ghostly/browser/shared/types";
+import type { CardIndexRow, GroupView, SavedMessage } from "@ghostly/browser/shared/types";
 import { Sidebar } from "../../components/Sidebar";
 import { UpdateProvider } from "../../contexts/UpdateContext";
+import { groupChat, setChatMute, setMentionsNotify } from "../../lib/chatMute";
+import { markGroupRead } from "../../lib/groups";
 import { loadSettings } from "../../lib/settings";
 import { saveSession } from "../../lib/storage";
 import type { ChatMessage, ChatSession } from "../../lib/types";
@@ -135,6 +137,34 @@ describe("the rail", () => {
     field.remove();
   });
 
+  it("stays as it is with Alt+Shift+L while a dialog is open, so the dialog gives the focus back to its opener", async () => {
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ chatListCollapsed: true }));
+    saveSession(chat("a", { nick: "Ana" }));
+    const { user } = list();
+    const join = within(screen.getByTestId("chat-rail-actions")).getByRole("button", { name: "Join chat" });
+    await user.click(join);
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.keyDown(dialog, { code: "KeyL", key: "L", altKey: true, shiftKey: true });
+    expect(screen.getByTestId("chat-rail")).toBeInTheDocument();
+    expect(stored()).toBe(true);
+    await user.click(within(dialog).getByRole("button", { name: "Close join" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(join).toHaveFocus();
+  });
+
+  it("stays as it is with Alt+Shift+L behind the lock screen", () => {
+    saveSession(chat("a", { nick: "Ana" }));
+    list();
+    // The lock screen: a modal panel over the whole app (LockScreen.tsx).
+    const lock = document.body.appendChild(Object.assign(document.createElement("div"), { role: "dialog" }));
+    lock.setAttribute("aria-modal", "true");
+    try {
+      fireEvent.keyDown(window, { code: "KeyL", key: "L", altKey: true, shiftKey: true });
+      expect(screen.queryByTestId("chat-rail")).not.toBeInTheDocument();
+      expect(stored()).not.toBe(true);
+    } finally { lock.remove(); }
+  });
+
   it("says its buttons in the app's language", async () => {
     saveSession(chat("a", { nick: "Ana", messages: [message({})] }));
     const { user } = renderApp(<UpdateProvider><Sidebar /></UpdateProvider>, { language: "pt" });
@@ -197,6 +227,47 @@ describe("the rail's top", () => {
     localStorage.setItem("ghostly_app_settings", JSON.stringify({ chatListCollapsed: true, language: "pt" }));
     renderApp(<UpdateProvider><Sidebar /></UpdateProvider>);
     expect(within(actions()).getAllByRole("button").map(b => b.getAttribute("aria-label"))).toEqual(["Nova conversa", "Entrar"]);
+  });
+});
+
+describe("a group on the rail", () => {
+  const folded = (groups: GroupView[]) => {
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ chatListCollapsed: true }));
+    act(() => fakeEngine.update({ groups }));
+    return list();
+  };
+  const group = () => within(rail()).getByTestId("chat-rail-group");
+
+  it("marks an unread mention with its @, in the accent in a muted group unless mentions are kept quiet too", () => {
+    markGroupRead("g1", NOW - 10);
+    setChatMute(groupChat("g1"), "forever");
+    const view = folded([groupView({ id: "g1", name: "Climbing", status: "active", lastMessageAt: NOW, lastMentionAt: NOW - 5 })]);
+    expect(group()).toHaveAccessibleName("Climbing, you were mentioned");
+    expect(within(group()).getByTestId("chat-rail-mention")).toHaveTextContent("@");
+    expect(within(group()).getByTestId("chat-rail-mention")).not.toHaveAttribute("data-muted");
+    expect(within(group()).queryByTestId("chat-rail-unread")).not.toBeInTheDocument();
+    view.unmount();
+    setMentionsNotify(groupChat("g1"), false);
+    const quiet = folded([groupView({ id: "g1", name: "Climbing", status: "active", lastMessageAt: NOW, lastMentionAt: NOW - 5 })]);
+    expect(within(group()).getByTestId("chat-rail-mention")).toHaveAttribute("data-muted", "true");
+    quiet.unmount();
+    // The mention read, newer messages not: the plain dot again.
+    markGroupRead("g1", NOW - 1);
+    folded([groupView({ id: "g1", name: "Climbing", status: "active", lastMessageAt: NOW, lastMentionAt: NOW - 5 })]);
+    expect(group()).toHaveAccessibleName("Climbing, unread messages");
+    expect(within(group()).getByTestId("chat-rail-unread")).toBeInTheDocument();
+    expect(within(group()).queryByTestId("chat-rail-mention")).not.toBeInTheDocument();
+  });
+
+  it("marks an invitation, and says what it waits for as its row does", () => {
+    const view = folded([groupView({ id: "g1", name: "Climbing", canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: "a".padEnd(52, "y"), members: 3, accepted: false } })]);
+    expect(group()).toHaveAccessibleName("Climbing, Invited by Alice · 3 members");
+    expect(within(group()).getByTestId("chat-rail-invitation")).not.toHaveAttribute("data-muted");
+    view.unmount();
+    // Accepted, the admin's app not answered yet: nothing for me to do, so the mark is grey.
+    folded([groupView({ id: "g1", name: "Climbing", canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: "a".padEnd(52, "y"), members: 3, accepted: true } })]);
+    expect(group()).toHaveAccessibleName("Climbing, Joining…");
+    expect(within(group()).getByTestId("chat-rail-invitation")).toHaveAttribute("data-muted", "true");
   });
 });
 

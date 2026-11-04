@@ -112,10 +112,14 @@ test("the inviter's invite card leaves once the joiner knocks, and the scene alo
   });
 
   const invite = await copyInvite(alice.page);
+  // The keyboard is still on its Copy when the contact arrives.
+  await alice.page.getByTestId("invite-card").getByRole("button", { name: "Copy invite" }).focus();
   await bob.page.getByRole("button", { name: "Join chat", exact: true }).first().click();
   await pasteInvite(bob.page, invite);
 
   await expect(alice.page.getByTestId("invite-card")).toHaveCount(0);
+  // The focus went to the message field with it, not to the top of the page.
+  await expect(alice.page.getByPlaceholder("Message…")).toBeFocused();
   // It left while the scene was still on, before the chat took over: the contact had arrived, not the chat gone live.
   const leftAt = await alice.page.evaluate(() => (window as unknown as { qaInviteLeftAt?: string | null }).qaInviteLeftAt);
   // An inviter whose contact does not knock knocks itself, so its scene can be at knocking too.
@@ -138,7 +142,7 @@ test("with reduced motion the scene is a still picture of the stage", { tag: ["@
   expect(new Set(motion)).toEqual(new Set(["none"]));
   // Words and steps say it all without motion.
   await expect(alice.page.getByTestId("pairing-stage-label")).toHaveText("Waiting for your contact to open the invite");
-  await expect(alice.page.getByTestId("pairing-announcement")).toHaveText("Waiting for your contact to open the invite");
+  await expect(alice.page.getByTestId("pairing-stage-label")).toHaveAttribute("aria-live", "polite");
 });
 
 /** Every sound the page starts (its length, and when), and when the scene first shows its live stage. */
@@ -182,7 +186,9 @@ test("the connected moment is heard once on each side, together with the scene g
     // connected.mp3 (0.88 s), decoded and played: the synthesized fallback has no buffer.
     expect(connected.duration).toBeGreaterThan(0.8);
     expect(connected.duration).toBeLessThan(1);
-    // Asked for in the same change that starts the connected moment: within a few frames of the live scene.
+    // Asked for in the same change that starts the connected moment, its file fetched while the scene waited: it starts
+    // a few microtasks after the live scene, on this page's own clock (under 7 ms on two loaded cores). Fetched and
+    // decoded only then, it came 20 to 40 ms after, and over 100 ms on a loaded machine.
     expect(liveAt).not.toBeNull();
     expect(Math.abs(connected.at - liveAt!)).toBeLessThan(100);
   }

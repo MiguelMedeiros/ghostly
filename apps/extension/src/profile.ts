@@ -1,4 +1,4 @@
-import { activeProfileId, namespaceOf, registryKey } from "../../ui/src/lib/profiles";
+import { activeProfileId, lastRouteOf, namespaceOf, registryKey } from "../../ui/src/lib/profiles";
 
 /**
  * Local profiles in the extension (WISP 04). Every extension page and the offscreen document share one
@@ -44,6 +44,16 @@ export function followEngineRestart(onRestart: () => void): () => void {
   };
   addEventListener("storage", restarted);
   return () => removeEventListener("storage", restarted);
+}
+
+/**
+ * Starts this page again as the profile in use, on the page that profile was left on, as the tab that switched does
+ * (`switchProfile`). The address this page showed belongs to the profile before the switch: a chat or group of its
+ * own reads as gone from this device in the other one.
+ */
+export function startAsProfileInUse(): void {
+  history.replaceState(null, "", `#${lastRouteOf(activeProfileId())}`);
+  location.reload();
 }
 
 /**

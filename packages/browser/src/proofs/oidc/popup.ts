@@ -53,6 +53,8 @@ export function popupWindow(origin = location.origin): OidcWindow {
     redirectUri: `${origin}${CALLBACK_PATH}`,
     authorize(url, signal) {
       if (!popup) return Promise.reject(new Error('Allow pop-ups for Ghostly to sign in.'));
+      // Cancelled while the request was being made: the abort event has already fired.
+      if (signal.aborted) return Promise.reject(new Error('Sign-in cancelled'));
       const expected = new URL(url).searchParams.get('state');
       return new Promise<string>((resolve, reject) => {
         const timer = setTimeout(() => finish(() => reject(new Error('Sign-in timed out. Try again.'))), WAIT_MS);

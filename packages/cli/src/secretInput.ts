@@ -88,6 +88,28 @@ export async function completeWithPipedEvidence(call: (params: Record<string, un
   return call({ ...params, evidence });
 }
 
+/**
+ * `settings set <key> <json-value>`'s value: from stdin when it is `-`, or when none is given and stdin is not a
+ * terminal (a pipe nobody writes: the note, then the usage error, as for a join). A TURN password (`iceServers` with a
+ * `credential`) given on the command line still goes, with the ps/history warning: `settings get` hides it as a secret.
+ */
+export async function settingValue(key: string, value: string | undefined, read: StdinRead, tty = false, note: (text: string) => void = () => {}): Promise<{ value: string; warning?: string }> {
+  // No value at all: the usage error every command gives (reason, then the usage line); an empty stdin after `-` says how.
+  const usage = "Missing <json-value>: ghostly settings set <key> <json-value>";
+  if (value !== undefined && value !== "-") return { value, ...(key === "iceServers" && hasCredential(value) && { warning: `A TURN password on the command line shows in ps and the shell's history: give it on stdin instead (… | ghostly settings set ${key} -)` }) };
+  if (value === undefined && tty) throw new CliError("usage", usage);
+  const text = (value === "-" ? await read() : await readUnasked(read, note, { what: "the value", missing: "Missing <json-value>", command: `settings set ${key}`, as: "an argument" })).replace(/\r?\n$/, "");
+  if (!text.trim()) throw new CliError("usage", value === "-" ? `Missing <json-value> on stdin: … | ghostly settings set ${key} -` : usage);
+  return { value: text };
+}
+
+/** Whether an `iceServers` value as typed holds a TURN password: an entry with a `credential` that is not empty. */
+function hasCredential(value: string): boolean {
+  let servers: unknown;
+  try { servers = JSON.parse(value); } catch { return false; }
+  return Array.isArray(servers) && servers.some((server) => !!server && typeof server === "object" && typeof (server as { credential?: unknown }).credential === "string" && (server as { credential: string }).credential !== "");
+}
+
 /** What `readUnasked` says: `what` is waited for, `missing` is the usage error's title, `as` the other way to give it. */
 interface Unasked { what: string; missing: string; command: string; as: string }
 
@@ -100,6 +122,38 @@ async function readUnasked(read: StdinRead, note: (text: string) => void, ask: U
   });
   try { return await Promise.race([read(stop), nothingCame]); }
   finally { stop(); }
+}
+
+/**
+ * `identity add`'s fields: each `--field name=value`, then with `--stdin` the `name=value` lines piped to it (a NIP-46
+ * signer's bunker:// link holds the signer's secret). `secret`: the names the signer's form marks `kind: "secret"`
+ * (`identitySecretFields`); one given as a `--field` still goes, with the warning. Neither error repeats a value.
+ */
+export async function identityFields(items: string[], stdin: boolean, secret: string[], read: StdinRead, tty = false): Promise<{ fields: Record<string, string>; warning?: string }> {
+  const fields: Record<string, string> = {};
+  for (const item of items) {
+    const eq = item.indexOf("=");
+    if (eq < 1) throw new CliError("usage", "--field takes name=value, and one has no name or no =");
+    fields[item.slice(0, eq)] = item.slice(eq + 1);
+  }
+  const onLine = secret.filter((name) => fields[name] !== undefined);
+  if (stdin) {
+    if (tty) throw new CliError("usage", "--stdin takes the fields as name=value lines piped to it (… | ghostly identity add <provider> --signer id --stdin), not a terminal");
+    for (const line of (await read()).split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      const eq = line.indexOf("=");
+      if (eq < 1) throw new CliError("usage", "--stdin takes name=value lines, and one has no name or no =");
+      fields[line.slice(0, eq).trim()] = line.slice(eq + 1);
+    }
+  }
+  if (!onLine.length) return { fields };
+  return { fields, warning: `${onLine.map((name) => `--field ${name}`).join(", ")} on the command line shows in ps and the shell's history: give ${onLine.length > 1 ? "them" : "it"} on stdin instead (--stdin, name=value lines)` };
+}
+
+/** The fields a provider's signer marks `kind: "secret"`: the one `--signer` names, or any of its signers when none is. */
+export function identitySecretFields(provider: { signers: readonly { id: string; fields?: readonly { name: string; kind?: string }[] }[] } | undefined, signer?: string): string[] {
+  const signers = (provider?.signers ?? []).filter((s) => signer === undefined || s.id === signer);
+  return [...new Set(signers.flatMap((s) => (s.fields ?? []).filter((f) => f.kind === "secret").map((f) => f.name)))];
 }
 
 /**

@@ -272,6 +272,19 @@ export function cardUrl(value: unknown): string | undefined {
   return url.href.length <= STATUS_CARD_LIMITS.url ? url.href : undefined;
 }
 
+/**
+ * The link an app card names, sent or read (WISP 405 § An app): a card's link without its query or fragment. A
+ * private file's read token rides in a query, and a card goes to a contact; a bundle is pinned by its digest, not its link.
+ */
+export function appCardUrl(value: unknown): string | undefined {
+  const href = cardUrl(value);
+  if (!href) return undefined;
+  const url = new URL(href);
+  url.search = "";
+  url.hash = "";
+  return url.href;
+}
+
 /** The host a card shows beside a link, so the reader sees where it goes before following it. */
 export function cardLinkHost(url: string): string {
   try { return new URL(url).host; } catch { return ""; }
@@ -379,7 +392,7 @@ export function readStatusCard(raw: unknown, now = Date.now()): StatusCard | und
     if (!isAppRef(raw.ref) || id !== appCardId(raw.ref) || !isAppHash(raw.digest) || !appSequence(raw.sequence)) return undefined;
     const title = cardLine(raw.title, STATUS_CARD_LIMITS.appTitle);
     if (!title) return undefined;
-    const version = cardLine(raw.version, STATUS_CARD_LIMITS.appVersion), url = cardUrl(raw.url);
+    const version = cardLine(raw.version, STATUS_CARD_LIMITS.appVersion), url = appCardUrl(raw.url);
     return { kind: "app", id, ref: raw.ref, digest: raw.digest, sequence: raw.sequence, title,
       ...(version && { version }), ...(url && { url }), ...(raw.opened === true && { opened: true as const }) };
   }
@@ -646,8 +659,8 @@ export function statusCardText(card: StatusCard): string {
   if (card.kind === "removed") return removedCardText(card.of);
   // An app card names the app, and its url on a line of its own so an older app shows a link (WISP 405 § An app).
   if (card.kind === "app") {
-    const named = `${card.title}${card.version ? ` ${card.version}` : ""}`;
-    return [card.opened ? `🧩 Opened ${named} in this chat (Ghostly app)` : `🧩 ${named} (Ghostly app)`, ...(card.url ? [card.url] : [])].join("\n");
+    const named = `${card.title}${card.version ? ` ${card.version}` : ""}`, url = appCardUrl(card.url);
+    return [card.opened ? `🧩 Opened ${named} in this chat (Ghostly app)` : `🧩 ${named} (Ghostly app)`, ...(url ? [url] : [])].join("\n");
   }
   // One line: what an older app shows, and the chat list's line (WISP 405 § Usage).
   if (card.kind === "usage") {

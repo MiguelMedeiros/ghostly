@@ -2,8 +2,9 @@ import { forwardRef, memo, useCallback, useRef, type ReactNode } from "react";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { PeerAvatar } from "./Avatar";
 import { GroupAvatar } from "./GroupAvatar";
+import { invitationStatus, invitationWaitsForMe } from "./GroupInvitation";
 import { useI18n } from "../contexts/I18nContext";
-import { groupChat, useChatMute } from "../lib/chatMute";
+import { groupChat, mentionsNotify, useChatMute } from "../lib/chatMute";
 import { groupReadAt, groupUnreadAt } from "../lib/groups";
 import { sameValue } from "../lib/sameValue";
 import { RAIL_SHORTCUT, railShortcutLabel } from "../hooks/useRailShortcut";
@@ -115,16 +116,39 @@ export function RailGroup({ group, active, onOpen }: { group: GroupView; active:
   return <SameRailGroup group={group} active={active} readAt={groupReadAt(group.id)} onOpen={useLatestOpen(onOpen)} />;
 }
 
-/** The list's unread dot on the picture's corner (a group counts no messages). */
+/**
+ * The list's unread dot on the picture's corner (a group counts no messages); an unread mention its "@" instead, grey in
+ * a muted group only when the mute keeps mentions quiet too (`GroupRow`). An invitation has its own mark, in the accent
+ * while its row waits for my answer, and its label says what it waits for, as the row's line does.
+ */
 const SameRailGroup = memo(function SameRailGroup({ group, active, readAt, onOpen }: { group: GroupView; active: boolean; readAt: number; onOpen(): void }) {
   const { t } = useI18n();
   const muted = useChatMute(groupChat(group.id)) !== undefined;
   const name = group.name || t("group.chat.unnamed");
-  const unread = !active && !group.invitation && groupUnreadAt(group) > readAt;
+  const invitation = group.invitation;
+  const unread = !active && !invitation && groupUnreadAt(group) > readAt;
+  const mention = unread && (group.lastMentionAt ?? 0) > readAt;
+  const mentionQuiet = muted && !mentionsNotify(groupChat(group.id));
+  const label = invitation ? t("sidebar.rail.invitation", { name, status: invitationStatus(group, t) })
+    : mention ? t("sidebar.rail.mention", { name }) : unread ? t("sidebar.rail.unread", { name }) : name;
+  const waiting = invitation && !invitationWaitsForMe(invitation);
+  const mark = invitation ? <span aria-hidden="true" data-testid="chat-rail-invitation" data-muted={waiting || undefined}
+      className={`h-5 w-5 inline-flex items-center justify-center rounded-full ${badge(!!waiting)}`}><EnvelopeIcon /></span>
+    : mention ? <span aria-hidden="true" data-testid="chat-rail-mention" data-muted={mentionQuiet || undefined}
+      className={`h-5 w-5 inline-flex items-center justify-center rounded-full text-[12px] font-bold leading-none ${badge(mentionQuiet)}`}>@</span>
+    : unread && <span aria-hidden="true" data-testid="chat-rail-unread" data-muted={muted || undefined} className={`h-3 w-3 rounded-full ${badge(muted)}`} />;
   return (
-    <RailItem testId="chat-rail-group" id={groupChat(group.id)} name={name} label={unread ? t("sidebar.rail.unread", { name }) : name} active={active} onOpen={onOpen}
-      mark={unread && <span aria-hidden="true" data-testid="chat-rail-unread" data-muted={muted || undefined} className={`h-3 w-3 rounded-full ${badge(muted)}`} />}>
+    <RailItem testId="chat-rail-group" id={groupChat(group.id)} name={name} label={label} active={active} onOpen={onOpen} mark={mark}>
       <GroupAvatar picture={group.picture} size={AVATAR} testId="chat-rail-avatar" className={active ? "bg-surface-alt" : "bg-surface-hover"} />
     </RailItem>
   );
 }, sameValue);
+
+/** An invitation's mark: a small envelope. */
+function EnvelopeIcon() {
+  return (
+    <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" />
+    </svg>
+  );
+}

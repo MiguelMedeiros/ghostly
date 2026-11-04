@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { liftGlobals, parseArgs } from "../src/args";
+import { liftGlobals, nearest, parseArgs } from "../src/args";
 import { idSlot, positionals, COMMANDS, TEXT_COMMANDS } from "../src/commands";
 import { GhostlyHttpError, TYPING_KINDS, engineError } from "@ghostly/core";
 import { asCliError, CliError, EXIT } from "../src/errors";
@@ -27,6 +27,11 @@ describe("the argument parser", () => {
     expect(() => parseArgs(["alice", "--stdn"], send.options, idSlot(send))).toThrow(/Unknown option --stdn/);
     expect(() => parseArgs(["abc", "-oops"], COMMANDS["chat rename"].options ?? {}, idSlot(COMMANDS["chat rename"]))).toThrow(/Unknown option -oops/);
     expect(() => parseArgs(["-oops"], COMMANDS["group create"].options!, idSlot(COMMANDS["group create"]))).toThrow(/Unknown option -oops/);
+    // A path is not an id: a mistyped flag in its place is refused with the one meant, not taken as the file.
+    const credential = COMMANDS["x401 credential add"];
+    for (const argv of [["--lable", "work"], ["--lable"]]) {
+      expect(() => parseArgs(argv, credential.options!, idSlot(credential)), argv.join(" ")).toThrow(/Unknown option --lable \(did you mean --label\?\)/);
+    }
   });
 
   it("takes a draft that starts with a dash (identity complete, the #357 failure)", () => {
@@ -85,10 +90,48 @@ describe("the argument parser", () => {
   it("says to put -- before a two-character word that starts with a dash, as it does for a longer one", () => {
     const send = TEXT_COMMANDS.send;
     for (const word of ["-1", "-5", "-ph"]) {
-      expect(() => parseArgs(["bob", word, "degrees"], send.options, idSlot(send)), word)
-        .toThrow(new CliError("usage", `Unknown option ${word} (put -- before text that starts with a dash)`));
+      expect(() => parseArgs(["bob", word, "degrees"], send.options, idSlot(send), { command: "send", text: true }), word)
+        .toThrow(new CliError("usage", `Unknown option ${word} for ghostly send (put -- before text that starts with a dash; ghostly help send)`));
     }
     expect(parseArgs(["bob", "--", "-1"], send.options, idSlot(send)).positionals).toEqual(["bob", "-1"]);
+    // Only where text comes, and only for a word with one dash: there is no text to put after `--` in these.
+    expect(() => parseArgs(["-x"], {}, undefined, { command: "version" })).toThrow(new CliError("usage", "Unknown option -x for ghostly version (ghostly help version)"));
+    expect(() => parseArgs(["bob", "--nope"], send.options, idSlot(send), { command: "send", text: true })).toThrow(new CliError("usage", "Unknown option --nope for ghostly send (ghostly help send)"));
+  });
+
+  it("names the nearest option of the command for a typo, and none for a word near nothing", () => {
+    const send = TEXT_COMMANDS.send, history = COMMANDS["chat history"];
+    expect(() => parseArgs(["bob", "--wiat", "sent"], send.options, idSlot(send), { command: "send", text: true }))
+      .toThrow(new CliError("usage", "Unknown option --wiat for ghostly send (did you mean --wait? ghostly help send)"));
+    // `--wiat=sent` too, a single-dash `-wait`, a negated boolean, and a global option.
+    expect(() => parseArgs(["bob", "--wiat=sent"], send.options, idSlot(send))).toThrow(new CliError("usage", "Unknown option --wiat (did you mean --wait?)"));
+    expect(() => parseArgs(["bob", "-wait"], send.options, idSlot(send), { command: "send", text: true }))
+      .toThrow(new CliError("usage", "Unknown option -wait for ghostly send (did you mean --wait? put -- before text that starts with a dash; ghostly help send)"));
+    expect(() => parseArgs(["bob", "--no-forse"], send.options, idSlot(send))).toThrow(new CliError("usage", "Unknown option --no-forse (did you mean --no-force?)"));
+    expect(() => parseArgs(["bob", "--prety"], history.options!, idSlot(history))).toThrow(new CliError("usage", "Unknown option --prety (did you mean --pretty?)"));
+    expect(() => parseArgs(["bob", "--frobnicate"], history.options!, idSlot(history))).toThrow(new CliError("usage", "Unknown option --frobnicate"));
+    // Two edits in a short word are another word: `--nope` is not `--home`.
+    expect(() => parseArgs(["--nope"], {})).toThrow(new CliError("usage", "Unknown option --nope"));
+  });
+
+  // Before, `--no-pretty=true` was "Unknown option --no-pretty (did you mean --no-pretty?)": the word typed itself.
+  it("answers a boolean's --no- form with a value as --pretty=maybe is answered", () => {
+    const send = TEXT_COMMANDS.send;
+    for (const [arg, name] of [["--no-pretty=true", "no-pretty"], ["--no-pretty=", "no-pretty"], ["--no-force=false", "no-force"]]) {
+      expect(() => parseArgs(["bob", "hi", arg], send.options, idSlot(send), { command: "send", text: true }), arg).toThrow(new CliError("usage", `--${name} takes no value`));
+    }
+    expect(() => parseArgs(["--pretty=maybe"], {})).toThrow(new CliError("usage", "--pretty takes no value"));
+  });
+
+  // A word whose length is more than 2 away from a name's is more than 2 edits away from it: no distance is worked out.
+  // Before, a 100,000-character text that starts with a dash took over a second to be refused (a table per name).
+  it("refuses a long word that starts with a dash as fast as a short one", () => {
+    const send = TEXT_COMMANDS.send, long = `-${"a".repeat(100_000)}`;
+    const started = performance.now();
+    expect(() => parseArgs(["bob", long], send.options, idSlot(send), { command: "send", text: true })).toThrow(/^Unknown option -a+ for ghostly send/);
+    expect(nearest(long.slice(1), Object.keys(COMMANDS))).toBeUndefined();
+    expect(performance.now() - started).toBeLessThan(100);
+    expect(nearest(`wait${"x".repeat(2)}`, ["wait", "wai"])).toBe("wait");
   });
 
   it("knows booleans, --no-, short options, lists and global options anywhere", () => {
@@ -464,6 +507,8 @@ describe("errors", () => {
     for (const code of ["hostTimedOut", "networkTimedOut"] as const) expect(asCliError(engineError(code, host)).code, code).toBe("timeout");
     for (const code of ["invalidMintUrl", "mintNotHttps", "invalidMaxFee"] as const) expect(asCliError(engineError(code)).code, code).toBe("bad_request");
     for (const code of ["notEnoughSats", "ecashAlreadySpent"] as const) expect(asCliError(engineError(code)).code, code).toBe("refused");
+    // A mint that refused a Lightning payment at once: nothing left the wallet, its own words kept at the end (agents#2253).
+    expect(asCliError(engineError("lightningRefused", { reason: "Lightning payment failed: no route" })).toJSON()).toEqual({ code: "refused", message: "The mint refused this Lightning payment, and no sats left your wallet: it is safe to try again. The mint said: Lightning payment failed: no route" });
     expect(asCliError(engineError("lnurlUnreachable", host)).toJSON()).toEqual({ code: "unavailable", message: "Could not reach nowhere.example" });
     // A contact with no wallet was `engine`, telling both sides to update the same release: what to do, and a reason to branch on.
     expect(asCliError(engineError("contactNoWallet")).toJSON()).toEqual({ code: "refused", message: "Your contact has no wallet yet: they need one to pay or be paid (on a CLI: ghostly wallet create cashu)", details: { reason: "contact_no_wallet" } });
@@ -504,9 +549,11 @@ describe("errors", () => {
   it("say a group refusal as refused, and an invite into a community as a wrong request", () => {
     for (const message of [
       "Only the admin can rename the group", "Only the admin can change the members of this group", "Only the admin can renew the group's secret",
-      "Only the admin can share a link to the group", "Only the admin can invite", "Only the admin can choose the group's hubs",
+      "Only the admin can hand the admin role over", "Only the admin can share a link to the group", "Only the admin can invite", "Only the admin can choose the group's hubs",
       "Only the admin can change the group's picture", "Only the admin can replace or turn off the group's link", "Only the admin can do that",
       "No invitation to accept", "No invitation to decline",
+      // A removed member's (or a former admin's) group rename, rotate, remove, admin, hub or picture.
+      "You are no longer in this group",
     ]) expect(asCliError(new Error(message)).toJSON(), message).toEqual({ code: "refused", message });
     const community = "Share the group's link with them: anyone who opens it joins";
     expect(asCliError(new Error(community)).toJSON()).toEqual({ code: "bad_request", message: community });

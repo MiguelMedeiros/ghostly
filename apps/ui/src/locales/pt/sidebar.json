@@ -40,6 +40,7 @@
   "joinChat": "Entrar numa conversa",
   "new": "Nova",
   "newChat": "Nova conversa",
+  "newChatShort": "Nova",
   "newMenu": {
     "chat": "Conversa",
     "chatHint": "Uma pessoa, com um convite",
@@ -57,10 +58,22 @@
   "rail": {
     "collapse": "Recolher lista de conversas",
     "expand": "Expandir lista de conversas",
+    "invitation": "{{name}}, {{status}}",
+    "mention": "{{name}}, você foi mencionado",
     "title": "{{action}} ({{keys}})",
     "unread": "{{name}}, mensagens não lidas",
     "unreadCount": "{{name}}, {{count}} mensagens não lidas",
     "unreadOne": "{{name}}, 1 mensagem não lida"
+  },
+  "row": {
+    "mention": "você foi mencionado",
+    "muted": "notificações silenciadas",
+    "pinned": "fixada",
+    "separator": ", ",
+    "unread": "{{count}} mensagens não lidas",
+    "unreadSome": "mensagens não lidas",
+    "unread_one": "{{count}} mensagem não lida",
+    "unread_other": "{{count}} mensagens não lidas"
   },
   "searchPlaceholder": "Buscar conversas...",
   "settings": "Ajustes",

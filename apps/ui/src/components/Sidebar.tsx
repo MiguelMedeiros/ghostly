@@ -1,5 +1,6 @@
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { DeleteChatDialog } from "./DeleteChatDialog";
+import { chatOnCall, useChatOnCall } from "../lib/chatsOnCall";
 import { useUsageByPeer } from "../hooks/useUsage";
 import { useWorkingByPeer } from "../hooks/useWorking";
 import { useChatsFound } from "../hooks/useChatsFound";
@@ -11,8 +12,9 @@ import { FolderIcon } from "./chat/ChatFolderMenu";
 import { groupChat, mentionsNotify, mutedUntil } from "../lib/chatMute";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { formatListTime } from "../lib/chatList";
-import { foldText } from "../lib/chatSearch";
-import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
+import { foldText, searchText } from "../lib/chatSearch";
+import type { Translate } from "../locales/translate";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { NewGroupDialog } from "./NewGroupDialog";
 import { groupPath, groupReadAt, groupRouteId, invitationRow } from "../lib/groups";
@@ -56,9 +58,12 @@ import { SidebarSaved } from "./saved/SidebarSaved";
 import { openJoinProfile } from "../lib/devices";
 import { RAIL_WIDTH, RailAction, RailChat, RailGroup, RailToggle } from "./ChatRail";
 import { useRailShortcut } from "../hooks/useRailShortcut";
+import { useOpenRowInView } from "../hooks/useOpenRowInView";
+import { useEngineValue } from "../lib/engineState";
 
-const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
-const engineSnapshot = () => engine.state;
+const NO_GROUPS: NonNullable<typeof engine.state>["groups"] = [];
+/** What the list reads of the engine's state itself, for `useEngineValue`: its groups, and whether they came yet. */
+const listOfState = (state: typeof engine.state) => ({ groups: state?.groups ?? NO_GROUPS, groupsLoaded: !!state?.groupsLoaded });
 
 /** New chat's mark (a bubble with a plus) and Join's (an arrow into a bubble): the list's header, and the rail's top. */
 const NEW_CHAT_PATH = "M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8";
@@ -79,16 +84,17 @@ const found = (text: string | undefined, q: string) => !!text && foldText(text).
 /**
  * A chat's message texts folded for search, once per list of messages: the page's one cache keeps that list while the
  * chat is unchanged (`listShownSessions`). Folded at every draw, a search over 100k messages took ~100 ms of each
- * engine state, which draws the list again with nothing in a message changed.
+ * engine state, which draws the list again with nothing in a message changed. Each message reads as the search inside
+ * the chat reads it (`searchText`): "hello world" finds "*hello* world" in both, a file by its name, no payment lines.
  */
-const foldedTexts = new WeakMap<ChatSession["messages"], string[]>();
-function messagesFound(messages: ChatSession["messages"], q: string): boolean {
-  let texts = foldedTexts.get(messages);
-  if (!texts) {
-    texts = messages.flatMap((m) => (m.text ? [foldText(m.text)] : []));
-    foldedTexts.set(messages, texts);
+const foldedTexts = new WeakMap<ChatSession["messages"], { t: Translate; texts: string[] }>();
+function messagesFound(messages: ChatSession["messages"], q: string, t: Translate): boolean {
+  let folded = foldedTexts.get(messages);
+  if (folded?.t !== t) {
+    folded = { t, texts: messages.flatMap((m) => { const text = searchText(m, t); return text ? [foldText(text)] : []; }) };
+    foldedTexts.set(messages, folded);
   }
-  return texts.some((text) => text.includes(q));
+  return folded.texts.some((text) => text.includes(q));
 }
 
 /** The groups whose name has the search in it; all of them with no search. (Outside the component: the React Compiler keeps its memoization then.) */
@@ -144,21 +150,26 @@ export function Sidebar() {
   const [showNewChat, setShowNewChat] = useState(false);
   const [showNewGroup, setShowNewGroup] = useState(false);
   const [showNewFolder, setShowNewFolder] = useState(false);
-  const [newMenuOpen, setNewMenuOpen] = useState(false);
+  // "shortcut": opened by the installed app's `#/new`, its Chat row focused, so one press makes the chat.
+  const [newMenuOpen, setNewMenuOpen] = useState<boolean | "shortcut">(false);
   const newMenuRef = useRef<HTMLDivElement>(null), newMoreRef = useRef<HTMLButtonElement>(null);
   const closeNewMenu = () => setNewMenuOpen(false);
-  const engineState = useSyncExternalStore(subscribeEngine, engineSnapshot);
+  // Its groups only, compared by content: the engine sends its whole state anew on every change (up to 20 a second while
+  // a file moves), and the whole of it drew the list and every row in it on each.
+  const engineState = useEngineValue(listOfState);
   // A bot's usage card (WISP 405 § Usage) per contact: the meter on its row.
   const usageByPeer = useUsageByPeer();
   // Each contact's running tasks (WISP 405 § Showing a card): the working mark on its row.
   const workingByPeer = useWorkingByPeer();
-  const groups = engineState?.groups ?? [];
+  const groups = engineState.groups;
   // The chats are in the page's storage at once, the groups come with the engine's state after every chat's history
   // is read: drawn alone, the chats were pushed down under the groups a second later, and a click aimed at a chat
   // opened a group. The list waits for the groups, and draws everything at once.
-  const listReady = !!engineState?.groupsLoaded;
+  const listReady = engineState.groupsLoaded;
   const activeGroupId = groupRouteId(location.pathname);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  // A chat a call is on or rings in is not deleted under it: the dialog says to end the call first.
+  const deleteOnCall = useChatOnCall(confirmDeleteId);
 
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_WIDTH);
   const isResizingRef = useRef(false);
@@ -237,7 +248,10 @@ export function Sidebar() {
     if (activeSessionId && pageShown) markSessionAsRead(activeSessionId);
   }, [activeSessionId, pageShown, sessions]);
 
-  // The installed app's shortcuts (manifest.json): `#/new` starts a chat, `#/scan` opens Join with the camera on.
+  // The installed app's shortcuts (manifest.json): `#/new` opens the New menu, `#/scan` opens Join with Scan focused.
+  // Any site can send the browser to either address, so neither does anything without a press: a chat made at `#/new`
+  // itself was one more empty chat with a fresh invite on each load, a page sending the browser there again and again,
+  // and a camera started at `#/scan` itself joined the first QR it saw, with no one's decision and past the link limit.
   // Each address is acted on once (StrictMode runs effects twice), and leaves the history at once (an intake, Root.tsx).
   const [scanOnOpen, setScanOnOpen] = useState(false);
   const shortcutDone = useRef<string | null>(null);
@@ -248,10 +262,10 @@ export function Sidebar() {
     if (!shortcut) { shortcutDone.current = null; return; }
     if (shortcutDone.current === shortcut) return;
     shortcutDone.current = shortcut;
-    // Replaced, so Back never lands on it again (and makes another chat).
+    // Replaced, so Back never lands on it again (and opens it again).
     navigate("/", { replace: true });
     if (shortcut === "/scan") { setScanOnOpen(true); setShowNewChat(true); return; }
-    void createPairedChat().then(id => nav.conversation(chatPath(id)), () => {});
+    setNewMenuOpen("shortcut");
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `nav` changes with every location
   }, [location.pathname]);
 
@@ -273,7 +287,7 @@ export function Sidebar() {
     if (found(s.nick, query)) return true;
     if (found(faceOf(s.peerPubKeyB64)?.name, query)) return true;
     if (found(s.peerPubKeyB64, query)) return true;
-    return messagesFound(s.messages, query) || foundInEngine.has(s.id);
+    return messagesFound(s.messages, query, t) || foundInEngine.has(s.id);
   });
   const shownGroups = groupsFound(groups, search);
   // The person's folders, first in the list and in their order; a search shows what it finds as one list, with no folders.
@@ -322,6 +336,22 @@ export function Sidebar() {
   const dropMark = (folder: string | null) => (reorder.over === folder ? " bg-accent/10 outline-2 -outline-offset-2 outline-accent" : "");
 
   const newChat = () => void createPairedChat().then(id => nav.conversation(chatPath(id)), () => {});
+  // The list's New menu; on the rail only the `#/new` shortcut opens it, from the rail's New.
+  const newMenu = (rail = false) => (
+    <Menu id="sidebar-new-menu" testId="sidebar-new-menu" open={!!newMenuOpen} onClose={closeNewMenu} anchorRef={newMenuRef} focusFirst={newMenuOpen === "shortcut"} {...(rail && { portal: true, align: "start" as const })}>
+      <MenuItem onClick={() => { closeNewMenu(); newChat(); }} hint={t("sidebar.newMenu.chatHint")}
+        icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/></svg>}>
+        {t("sidebar.newMenu.chat")}
+      </MenuItem>
+      <MenuItem testId="new-group" onClick={() => { closeNewMenu(); setShowNewGroup(true); }} hint={t("sidebar.newMenu.groupHint")}
+        icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M19 8v6M16 11h6" /></svg>}>
+        {t("sidebar.newMenu.group")}
+      </MenuItem>
+      <MenuItem testId="new-folder" onClick={() => { closeNewMenu(); setShowNewFolder(true); }} hint={t("sidebar.newMenu.folderHint")} icon={<FolderIcon />}>
+        {t("sidebar.newMenu.folder")}
+      </MenuItem>
+    </Menu>
+  );
   const openTasks = () => (location.pathname === "/tasks" ? nav.home() : nav.place("/tasks"));
   const openSaved = () => (location.pathname === "/saved" ? nav.home() : nav.place("/saved"));
   const openGroup = (id: string) => { nav.conversation(groupPath(id)); setConfirmDeleteId(null); };
@@ -391,6 +421,10 @@ export function Sidebar() {
       unread={active ? 0 : getUnreadCount(session!)} active={active} onOpen={() => openChat(session!.id)} />;
   };
 
+  // The list or the rail, whichever is drawn: the open chat's row is brought into sight in it (a reload, a link).
+  const rowsRef = useRef<HTMLDivElement>(null);
+  useOpenRowInView(rowsRef, { chat: activeSessionId, group: activeGroupId }, listReady);
+
   return (
     <div
       ref={sidebarRef}
@@ -400,6 +434,9 @@ export function Sidebar() {
       style={isMobile ? undefined : collapsed ? { width: RAIL_WIDTH } : { width: sidebarWidth, minWidth: MIN_WIDTH, maxWidth: `min(${MAX_WIDTH}px, 100vw - ${MIN_PAGE_WIDTH}px)` }}
     >
       <PinMoveNote text={moveNote} />
+      {/* For a screen reader's heading keys: the list is a phone's whole screen, its h1; beside the open chat, whose
+          name is the window's h1, an h2. */}
+      {isMobile ? <h1 className="sr-only">{t("sidebar.chats")}</h1> : <h2 className="sr-only">{t("sidebar.chats")}</h2>}
       {collapsed ? <>
         <div className="h-14 header-safe shrink-0 flex items-center justify-center bg-panel-header">
           <RailToggle ref={toggleRef} collapsed onToggle={toggleCollapsed} />
@@ -408,12 +445,15 @@ export function Sidebar() {
             New chat (a group or a folder stay in the list's New menu), Join, and Saved and Tasks while they have something.
             New keeps the list's test id: the dialogs that lose their opener give the focus to it (NameStep, DeleteChatDialog). */}
         <div data-testid="chat-rail-actions" className="flex shrink-0 flex-col border-b border-border py-1">
-          <RailAction testId="sidebar-new-chat" label={t("sidebar.startChat")} title={t("sidebar.newChat")} accent onClick={newChat}><ActionIcon d={NEW_CHAT_PATH} size={18} /></RailAction>
+          <div ref={newMenuRef}>
+            <RailAction testId="sidebar-new-chat" label={t("sidebar.startChat")} title={t("sidebar.newChat")} accent onClick={newChat}><ActionIcon d={NEW_CHAT_PATH} size={18} /></RailAction>
+            {newMenu(true)}
+          </div>
           <RailAction testId="rail-join" label={t("join.submit")} title={t("sidebar.joinChat")} onClick={() => setShowNewChat(true)}><ActionIcon d={JOIN_PATH} size={18} /></RailAction>
           <SidebarTasks rail active={location.pathname === "/tasks"} onOpen={openTasks} />
           <SidebarSaved rail active={location.pathname === "/saved"} onOpen={openSaved} />
         </div>
-        <nav aria-label={t("sidebar.chats")} data-testid="chat-rail" aria-busy={!listReady || undefined} className="flex flex-1 flex-col overflow-y-auto overflow-x-hidden py-1">
+        <nav ref={rowsRef} aria-label={t("sidebar.chats")} data-testid="chat-rail" aria-busy={!listReady || undefined} className="flex flex-1 flex-col overflow-y-auto overflow-x-hidden py-1">
           {listReady && railRows.map(railItem)}
         </nav>
       </> : <>
@@ -424,24 +464,12 @@ export function Sidebar() {
         <div className="grid shrink-0 grid-cols-2 items-stretch gap-1 whitespace-nowrap" data-testid="sidebar-chat-actions">
           {/* New: one click is a chat, as always; the arrow beside it also offers a group. */}
           <div ref={newMenuRef} role="group" aria-label={t("sidebar.new")} data-testid="sidebar-new" className="sidebar-new-split relative flex min-w-0">
-            <button onClick={newChat} data-testid="sidebar-new-chat" aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><ActionIcon d={NEW_CHAT_PATH} /><span className="sidebar-action-label">{t("sidebar.new")}</span></button>
-            <button ref={newMoreRef} onClick={() => setNewMenuOpen(open => !open)} aria-haspopup="true" aria-expanded={newMenuOpen} aria-controls="sidebar-new-menu" aria-label={t("sidebar.newMenu.label")} title={t("sidebar.newMenu.label")} data-testid="sidebar-new-more"
+            <button onClick={newChat} data-testid="sidebar-new-chat" aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><ActionIcon d={NEW_CHAT_PATH} /><span className="sidebar-action-label">{t("sidebar.newChatShort")}</span></button>
+            <button ref={newMoreRef} onClick={() => setNewMenuOpen(open => !open)} aria-haspopup="true" aria-expanded={!!newMenuOpen} aria-controls="sidebar-new-menu" aria-label={t("sidebar.newMenu.label")} title={t("sidebar.newMenu.label")} data-testid="sidebar-new-more"
               className="inline-flex min-h-10 w-6 shrink-0 items-center justify-center rounded-e-lg border-s border-panel-header/25 bg-accent text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header">
               <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${newMenuOpen ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6"/></svg>
             </button>
-            <Menu id="sidebar-new-menu" testId="sidebar-new-menu" open={newMenuOpen} onClose={closeNewMenu} anchorRef={newMenuRef}>
-              <MenuItem onClick={() => { closeNewMenu(); newChat(); }} hint={t("sidebar.newMenu.chatHint")}
-                icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/></svg>}>
-                {t("sidebar.newMenu.chat")}
-              </MenuItem>
-              <MenuItem testId="new-group" onClick={() => { closeNewMenu(); setShowNewGroup(true); }} hint={t("sidebar.newMenu.groupHint")}
-                icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M19 8v6M16 11h6" /></svg>}>
-                {t("sidebar.newMenu.group")}
-              </MenuItem>
-              <MenuItem testId="new-folder" onClick={() => { closeNewMenu(); setShowNewFolder(true); }} hint={t("sidebar.newMenu.folderHint")} icon={<FolderIcon />}>
-                {t("sidebar.newMenu.folder")}
-              </MenuItem>
-            </Menu>
+            {newMenu()}
           </div>
           <button onClick={() => setShowNewChat(true)} aria-label={t("join.submit")} title={t("sidebar.joinChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-lg p-2 text-sm font-medium text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"><ActionIcon d={JOIN_PATH} /><span className="sidebar-action-label">{t("sidebar.join")}</span></button>
         </div>
@@ -463,6 +491,8 @@ export function Sidebar() {
             stroke="currentColor"
             strokeWidth="2"
             className="text-text-muted shrink-0"
+            aria-hidden="true"
+            focusable="false"
           >
             <circle cx="11" cy="11" r="8" />
             <path d="m21 21-4.35-4.35" />
@@ -481,7 +511,7 @@ export function Sidebar() {
       <SidebarSaved active={location.pathname === "/saved"} onOpen={openSaved} />
 
       {/* Chat List */}
-      <div className="flex-1 overflow-y-auto" data-testid="chat-list" data-drag-scroll="" aria-busy={!listReady || undefined}>
+      <div ref={rowsRef} className="flex-1 overflow-y-auto" data-testid="chat-list" data-drag-scroll="" aria-busy={!listReady || undefined}>
         {listReady && <>
         {shownFolders.map((folder, index) => {
           const itsGroups = shownGroups.filter(g => folderOfGroup(g) === folder.id);
@@ -522,7 +552,7 @@ export function Sidebar() {
         {filtered.length === 0 && sessions.length === 0 && groups.length === 0 && shownFolders.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full px-8 text-center">
             <div className="text-text-muted mb-4 animate-ghost-boo">
-              <svg className="w-12 h-12 mx-auto" viewBox="0 0 24 24" fill="currentColor">
+              <svg className="w-12 h-12 mx-auto" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
                 <path d="M12 2C7.582 2 4 5.582 4 10v8c0 .75.6 1 1 .6l2-1.6 2 1.6c.4.3.8.3 1.2 0L12 17l1.8 1.6c.4.3.8.3 1.2 0l2-1.6 2 1.6c.4.4 1 .15 1-.6v-8c0-4.418-3.582-8-8-8z"/>
                 <circle cx="9" cy="9" r="1.5" fill="#111b21"/>
                 <circle cx="15" cy="9" r="1.5" fill="#111b21"/>
@@ -554,13 +584,14 @@ export function Sidebar() {
       {/* Out of the list's branches: the installed app's #/new and #/scan open them on the rail too. */}
       {showNewGroup && <NewGroupDialog returnFocus={newMoreRef} onClose={() => setShowNewGroup(false)} onCreated={id => { setShowNewGroup(false); nav.conversation(groupPath(id), { share: "created" }); }} />}
       {showNewFolder && <FolderNameDialog returnFocus={newMoreRef} onClose={() => setShowNewFolder(false)} onSave={name => { createFolder(name); setShowNewFolder(false); setSearch(""); }} />}
-      {showNewChat && <JoinDialog autoScan={scanOnOpen} onClose={() => setShowNewChat(false)} onJoin={keys => {const id = ensureSession(keys); setShowNewChat(false); nav.conversation(chatPath(id)); refreshSessions();}}
+      {showNewChat && <JoinDialog focusScan={scanOnOpen} onClose={() => setShowNewChat(false)} onJoin={keys => {const id = ensureSession(keys); setShowNewChat(false); nav.conversation(chatPath(id)); refreshSessions();}}
         onOpenChat={id => { setShowNewChat(false); nav.conversation(chatPath(id)); }}
         onJoinGroup={async link => { const { groupId } = await engine.call("joinGroupByLink", { link }); setShowNewChat(false); nav.conversation(groupPath(groupId)); }} />}
       {confirmDeleteId && <DeleteChatDialog
         name={(() => { const target=sessions.find(s=>s.id===confirmDeleteId); return `${target?.label || target?.nick || t("common.unnamedContact", { key: contactTag(target?.peerPubKeyB64 ?? confirmDeleteId) })} · ${publicKeyLabel(target?.peerPubKeyB64 ?? confirmDeleteId)}`; })()}
         onClose={() => setConfirmDeleteId(null)}
-        onConfirm={() => { const id=confirmDeleteId; deleteSession(id); setChatFolder(id, undefined); stopPlayingFrom(chatPath(id), activeSessionId===id); setConfirmDeleteId(null); refreshSessions(); window.dispatchEvent(new Event("session-updated")); if(activeSessionId===id) nav.home(); }} />}
+        callOn={deleteOnCall}
+        onConfirm={() => { const id=confirmDeleteId; if (chatOnCall(id)) return; deleteSession(id); setChatFolder(id, undefined); stopPlayingFrom(chatPath(id), activeSessionId===id); setConfirmDeleteId(null); refreshSessions(); window.dispatchEvent(new Event("session-updated")); if(activeSessionId===id) nav.home(); }} />}
       {!isMobile && <AccountBar rail={collapsed} />}
 
       {/* Resize Handle */}

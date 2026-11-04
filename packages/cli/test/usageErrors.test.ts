@@ -9,7 +9,7 @@ const BACKUP = "profile backup --out <file> [--passphrase-file f | --no-passphra
 const RESTORE = "profile restore <file> <new profile> [--passphrase-file f] [--use]";
 const ENGINE = "engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes] [--force]";
 const SETTINGS = "settings set <key> <json-value>";
-const IDENTITY = "identity add <provider> [subject] [--signer id] [--field name=value]... [--days n] [--timeout s]";
+const IDENTITY = "identity add <provider> [subject] [--signer id] [--field name=value]... [--stdin] [--days n] [--timeout s]";
 const AUTO = "call auto [on|off] [--from <chat>]... [--rate 48000]";
 const REVOKE = "app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>] [--bundle <file>] [--force]";
 const EDIT = "edit <chat> <message> [text... | --text <text> | --stdin] [--force] [--wait none|confirmed] [--timeout s]";

@@ -10,7 +10,7 @@ import type { BrowserHost } from "./host";
  * its pages.)
  */
 export interface InPageHostOptions
-  extends Pick<BrowserHost, "version" | "notice" | "updates" | "appRunner" | "appNetRunner" | "appRunnerServed" | "features" | "requestLocalAccess" | "forgetLocalAccess" | "openService" | "oidc" | "atproto" | "openPaymentLink" | "fullscreenWindow" | "shareText" | "readClipboardText" | "readClipboardFiles" | "openPubkyPassport" | "pubkyCookieSession" | "callMedia" | "keepAwake"> {
+  extends Pick<BrowserHost, "version" | "notice" | "updates" | "appRunner" | "appNetRunner" | "appRunnerServed" | "features" | "requestLocalAccess" | "forgetLocalAccess" | "openService" | "forgetServices" | "oidc" | "atproto" | "openPaymentLink" | "fullscreenWindow" | "shareText" | "readClipboardText" | "readClipboardFiles" | "openPubkyPassport" | "pubkyCookieSession" | "callMedia" | "keepAwake" | "hideFromSwitcher"> {
   node?: NodeOptions;
   /** Called once the peer exists, e.g. to let something outside the page reach it. Never on a standby: no engine runs there. */
   onServer?: (server: EngineServer) => void;
@@ -31,6 +31,7 @@ export function createInPageHost(options: InPageHostOptions): BrowserHost & { an
     requestLocalAccess: options.requestLocalAccess,
     forgetLocalAccess: options.forgetLocalAccess,
     openService: options.openService,
+    forgetServices: options.forgetServices,
     oidc: options.oidc,
     atproto: options.atproto,
     openPaymentLink: options.openPaymentLink,
@@ -38,6 +39,7 @@ export function createInPageHost(options: InPageHostOptions): BrowserHost & { an
     shareText: options.shareText,
     readClipboardText: options.readClipboardText,
     keepAwake: options.keepAwake,
+    hideFromSwitcher: options.hideFromSwitcher,
     readClipboardFiles: options.readClipboardFiles,
     openPubkyPassport: options.openPubkyPassport,
     pubkyCookieSession: options.pubkyCookieSession,
@@ -99,6 +101,20 @@ export function becomeThePeer(lockName: string, onWaiting: () => void): Promise<
       if (!acquired && !refused) onWaiting();
     }, 150);
   });
+}
+
+/**
+ * Resolves once another page asks for the lock this page holds (`becomeThePeer`), or after `timeoutMs`. A page that
+ * must not run what it loaded (another tab took a new version) waits here before it reloads, so the page that asks
+ * gets the lock first instead of racing this one's reload for it. Also resolves where the browser cannot tell.
+ */
+export async function untilAskedFor(lockName: string, { timeoutMs = 10_000, everyMs = 100 } = {}): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const state = await Promise.resolve().then(() => navigator.locks.query()).catch(() => null);
+    if (!state || state.pending?.some((request) => request.name === lockName)) return;
+    await new Promise((resolve) => setTimeout(resolve, everyMs));
+  }
 }
 
 /** The single-peer lock cannot be had in this browser (see `becomeThePeer`). */

@@ -19,8 +19,12 @@
   "dhtTooLong": "Demasiado largo para la DHT ({{bytes}} de {{max}} bytes). Acórtalo o conéctate en vivo; el borrador se guarda.",
   "document": "Documento",
   "dropFiles": "Suelta para enviar",
+  "dropReading": "Leyendo lo que soltaste…",
   "emoji": "Emoji",
   "emojiCategories": "Categorías de emoji",
+  "emojiFound": "{{count}} emojis",
+  "emojiFound_one": "{{count}} emoji",
+  "emojiFound_other": "{{count}} emojis",
   "emojiNotLoading": "No se pudieron cargar los emoji.",
   "expressions": "Emoji y GIF",
   "filePreparing": "Preparando {{name}}…",
@@ -96,6 +100,6 @@
     "stale": "El mensaje cambió",
     "working": "Traduciendo…"
   },
-  "videoConverting": "Convirtiendo {{name}} a MP4… {{percent}}",
+  "videoConverting": "Convirtiendo {{name}} a MP4…",
   "videoSentAsIs": "{{name}} se envió tal cual: este dispositivo no puede convertirlo. Algunos móviles y ordenadores quizá solo puedan descargarlo."
 }

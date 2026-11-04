@@ -17,6 +17,16 @@ export const SWAP_SETTLED_MS=120_000;
 export function swapSettledAt(review:PaymentReview,prepared:CashuPrepared):number{
  return Math.max((review.submittedAt ?? review.createdAt)+CASHU_REQUEST_TIMEOUT_MS+SWAP_SETTLED_MS,(prepared.attemptEndedAt ?? 0)+SWAP_SETTLED_MS);
 }
+/**
+ * The mint answered, and refused. cashu-ts turns a refusal of a keyset the mint retired or does not know (codes
+ * 12xxx) into a `StaleKeysetError` once it has reloaded the mint's keysets: the mint's refusal all the same, with it
+ * as its cause. By name, as cashu-ts's own `isMintOperationError`, so it needs no import of the library.
+ */
+export function mintRefused(error:unknown):boolean{
+ if(!(error instanceof Error))return false;
+ if(error.name==='StaleKeysetError')return mintRefused((error as {cause?:unknown}).cause);
+ return error.name==='MintOperationError' && 'code' in error;
+}
 export const NEVER_REACHED_MINT="The payment never reached the mint: nothing was sent, and the sats are back in your wallet. You can pay again.";
 
 export class CashuAdapter implements PaymentAdapter<CashuPrepared> {
@@ -36,8 +46,13 @@ export class CashuAdapter implements PaymentAdapter<CashuPrepared> {
   catch(error){
    // Saved with the intent when the coordinator records the unknown outcome: the swap may still reach the mint for a while.
    prepared.attemptEndedAt=Date.now();
-   // A refusal, and the mint says why: the ecash it was to spend was spent somewhere else. The payment ends here.
-   if(persist && (await import('@cashu/cashu-ts')).isMintOperationError(error) && await this.wallet.reviewedCashuSpentElsewhere(prepared).catch(()=>false))return this.spentElsewhere(prepared,persist);
+   if(persist && mintRefused(error)){
+    // A refusal, and the mint says why: the ecash it was to spend was spent somewhere else. The payment ends here.
+    if(await this.wallet.reviewedCashuSpentElsewhere(prepared).catch(()=>false))return this.spentElsewhere(prepared,persist);
+    // A refusal of the only request made for it (outputs on a keyset the mint retired since): no request of it is on
+    // its way, so the mint's word that it never happened ends it now, not once reconcile may ask.
+    if(await this.wallet.reviewedCashuNeverSwapped(prepared).catch(()=>false))return this.abandon(prepared,persist);
+   }
    throw error;
   }
   await persist?.();

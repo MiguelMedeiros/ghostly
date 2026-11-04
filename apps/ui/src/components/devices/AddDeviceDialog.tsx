@@ -86,7 +86,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
   const start = async () => {
     clear(); setBusy(true);
     try {
-      const first = await engine.call("deviceEnrollInvite", { name: defaultDeviceName(isDesktopApp() ? { userAgent: navigator.userAgent, desktop: true } : undefined) });
+      const first = await engine.call("deviceEnrollInvite", { name: defaultDeviceName(isDesktopApp() ? { userAgent: navigator.userAgent, desktop: true } : undefined, t) });
       ended.current = false; dismissed.current = false;
       setView(first); setStep("enroll");
     } catch (cause) {

@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import type { Locator, Page } from "@playwright/test";
 import { chat, expect, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
+import { CHROMIUM_SANDBOX } from "../support/chromiumSandbox";
 
 /**
  * Chromium's fake microphone plays this file on a loop: two seconds of a 220 Hz voice-like tone in
@@ -11,6 +12,7 @@ const SAMPLE = fileURLToPath(new URL("../support/voice-sample.wav", import.meta.
 
 test.use({
   launchOptions: {
+    chromiumSandbox: CHROMIUM_SANDBOX,
     args: [
       "--disable-features=WebRtcHideLocalIpsWithMdns",
       "--use-fake-device-for-media-stream",

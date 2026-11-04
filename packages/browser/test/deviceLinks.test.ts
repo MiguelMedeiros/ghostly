@@ -268,6 +268,26 @@ describe("the device links of a profile on this device", () => {
     expect(computer.links.views()[0].transport).toBe("webrtc/1");
   });
 
+  it("go back and forth between WebRTC and none less and less often while neither connects", async () => {
+    // WebRTC is answered and never connects, and neither device's Iroh starts: each round without WebRTC ends at once.
+    rtc.blocked = true;
+    let refused = 0;
+    const factories = { "iroh/1": async () => { refused++; throw new Error("The Iroh relay did not answer"); } };
+    const d = newDeviceSetSecret();
+    const phone = await makeDevice("Phone", { nativeTransports: factories });
+    const computer = await makeDevice("Computer", { nativeTransports: factories });
+    await write(phone, "active", d, [phone, computer]);
+    await write(computer, "standby", d, [phone, computer]);
+    await settled(Promise.all([phone.links.start(), computer.links.start()]));
+    expect(await until(() => refused > 0, 60_000)).toBe(true);
+    // The wait before each round without WebRTC doubles (20 s, 40 s, 80 s, 160 s, then 5 min): ten minutes hold about
+    // five rounds per device, not one every few seconds.
+    const before = refused;
+    await run(10 * 60_000);
+    expect(refused - before).toBeLessThanOrEqual(14);
+    expect(liveBetween(phone, computer)).toBe(false);
+  }, 120_000);
+
   it("offer HyperDHT where only it goes through, and start again a native transport that did not start", async () => {
     // The Linux Desktop has no WebRTC; the page's Iroh is on a relay the Desktop cannot reach (two Iroh worlds), so
     // HyperDHT is the only way through. The page's HyperDHT relay does not answer the first time.

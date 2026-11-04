@@ -40,6 +40,7 @@
   "joinChat": "Join chat",
   "new": "New",
   "newChat": "New chat",
+  "newChatShort": "New",
   "newMenu": {
     "chat": "Chat",
     "chatHint": "One person, with an invite",
@@ -57,10 +58,22 @@
   "rail": {
     "collapse": "Collapse chat list",
     "expand": "Expand chat list",
+    "invitation": "{{name}}, {{status}}",
+    "mention": "{{name}}, you were mentioned",
     "title": "{{action}} ({{keys}})",
     "unread": "{{name}}, unread messages",
     "unreadCount": "{{name}}, {{count}} unread messages",
     "unreadOne": "{{name}}, 1 unread message"
+  },
+  "row": {
+    "mention": "you were mentioned",
+    "muted": "notifications muted",
+    "pinned": "pinned",
+    "separator": ", ",
+    "unread": "{{count}} unread messages",
+    "unreadSome": "unread messages",
+    "unread_one": "{{count}} unread message",
+    "unread_other": "{{count}} unread messages"
   },
   "searchPlaceholder": "Search chats...",
   "settings": "Settings",

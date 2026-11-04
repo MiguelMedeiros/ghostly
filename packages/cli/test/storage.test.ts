@@ -1,4 +1,4 @@
-import { appendFileSync, cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1104,6 +1104,141 @@ describe("messages kept in rows.db", () => {
     for (const name of readdirSync(dir)) expect(readFileSync(join(dir, name)).includes("deleted-secret"), name).toBe(false);
   });
 
+  it("a deleted chat and its messages leave the journal once the snapshot is an hour old, at a start, a write or a close", async () => {
+    const chats = (factory: IDBFactory) => new Promise<IDBDatabase>((resolve, reject) => {
+      const request = factory.open("ghostly", 1);
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore("links", { keyPath: "id" });
+        request.result.createObjectStore("messages", { keyPath: ["linkId", "id"] }).createIndex("byLink", "linkId");
+        request.result.createObjectStore("settings");
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const held = (dir: string) => readdirSync(dir).filter((name) => { const bytes = readFileSync(join(dir, name)); return bytes.includes("gone-seed") || bytes.includes("gone-text"); });
+    const age = (dir: string) => { const then = (Date.now() - 2 * 60 * 60_000) / 1000; utimesSync(join(dir, "snapshot.bin"), then, then); };
+    /** A profile whose chat (its seed in the row) and message were written, then deleted, and the store closed. */
+    const removed = async () => {
+      const dir = folder();
+      const store = await openPersistentIndexedDb(dir);
+      const d = await chats(store.factory);
+      await store.compact();
+      await tx(d, ["links", "messages"], (s) => { s.links.put({ id: "chat-1", seed: "gone-seed" }); s.messages.put({ linkId: "chat-1", id: "m1", text: "gone-text" }); });
+      await tx(d, ["links", "messages"], (s) => { s.links.delete("chat-1"); s.messages.delete(IDBKeyRange.bound(["chat-1"], ["chat-1", []])); });
+      d.close();
+      await store.close();
+      return dir;
+    };
+
+    // A snapshot younger than an hour: the short journal is kept, as it is for any write.
+    const fresh = await removed();
+    expect(held(fresh)).toEqual(["journal.bin"]);
+    const kept = await openPersistentIndexedDb(fresh);
+    opened.push(kept);
+    expect(held(fresh)).toEqual(["journal.bin"]);
+
+    // At a start.
+    const start = await removed();
+    age(start);
+    const started = await openPersistentIndexedDb(start);
+    opened.push(started);
+    expect(held(start)).toEqual([]);
+    expect(await read((await chats(started.factory)).transaction("links").objectStore("links").count())).toBe(0);
+
+    // At the next write, while the store is in use: what came before the delete goes with it.
+    const write = await removed();
+    const running = await openPersistentIndexedDb(write);
+    opened.push(running);
+    age(write);
+    await tx(await chats(running.factory), ["settings"], (s) => { s.settings.put(1, "k"); });
+    await running.flush();
+    expect(held(write)).toEqual([]);
+
+    // At a close.
+    const close = await removed();
+    const closing = await openPersistentIndexedDb(close);
+    age(close);
+    await closing.close();
+    expect(held(close)).toEqual([]);
+
+    // A journal with nothing taken away is kept however old the snapshot: a fold costs a large profile a second.
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    const d = await chats(store.factory);
+    await store.compact();
+    await tx(d, ["links", "messages"], (s) => { s.links.put({ id: "chat-2", seed: "kept" }); s.messages.put({ linkId: "chat-2", id: "m1", text: "kept" }); });
+    d.close();
+    await store.close();
+    age(dir);
+    const snapshot = statSync(join(dir, "snapshot.bin")).mtimeMs;
+    opened.push(await openPersistentIndexedDb(dir));
+    expect(statSync(join(dir, "snapshot.bin")).mtimeMs).toBe(snapshot);
+    expect(readFileSync(join(dir, "journal.bin")).includes("kept")).toBe(true);
+  });
+
+  it("a secret written over in the settings and a deleted service leave the journal once the snapshot is an hour old", async () => {
+    const profile = (factory: IDBFactory) => new Promise<IDBDatabase>((resolve, reject) => {
+      const request = factory.open("ghostly", 1);
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore("services", { keyPath: "id" });
+        request.result.createObjectStore("settings");
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const held = (dir: string) => readdirSync(dir).filter((name) => readFileSync(join(dir, name)).includes("gone-"));
+    const age = (dir: string) => { const then = (Date.now() - 2 * 60 * 60_000) / 1000; utimesSync(join(dir, "snapshot.bin"), then, then); };
+    /** `x401 credential remove` and `settings set iceServers` write their row again without the secret; `service remove` deletes it. */
+    const removed = async () => {
+      const dir = folder();
+      const store = await openPersistentIndexedDb(dir);
+      const d = await profile(store.factory);
+      await store.compact();
+      await tx(d, ["services", "settings"], (s) => {
+        s.settings.put({ credentials: [{ id: "c1", holderKey: { secret: { sealed: "gone-sealed", deviceKey: "gone-device-key" } } }] }, "x401Credentials");
+        s.settings.put({ iceServers: [{ urls: "turn:relay.example", username: "u", credential: "gone-turn" }] }, "settings");
+        s.services.put({ id: "svc-1", seed: "gone-service" });
+      });
+      await tx(d, ["services", "settings"], (s) => {
+        s.settings.put({ credentials: [] }, "x401Credentials");
+        s.settings.put({ iceServers: [] }, "settings");
+        s.services.delete("svc-1");
+      });
+      d.close();
+      await store.close();
+      return dir;
+    };
+
+    // A snapshot younger than an hour: the short journal is kept.
+    const fresh = await removed();
+    opened.push(await openPersistentIndexedDb(fresh));
+    expect(held(fresh)).toEqual(["journal.bin"]);
+
+    // At a start.
+    const start = await removed();
+    age(start);
+    const started = await openPersistentIndexedDb(start);
+    opened.push(started);
+    expect(held(start)).toEqual([]);
+    expect(await read((await profile(started.factory)).transaction("settings").objectStore("settings").get("x401Credentials"))).toEqual({ credentials: [] });
+
+    // At the next write, while the store is in use.
+    const write = await removed();
+    const running = await openPersistentIndexedDb(write);
+    opened.push(running);
+    age(write);
+    await tx(await profile(running.factory), ["services"], (s) => { s.services.put({ id: "svc-2" }); });
+    await running.flush();
+    expect(held(write)).toEqual([]);
+
+    // At a close.
+    const close = await removed();
+    const closing = await openPersistentIndexedDb(close);
+    age(close);
+    await closing.close();
+    expect(held(close)).toEqual([]);
+  });
+
   it("an index added by an upgrade to a store that holds messages is built in rows.db, and kept across a restart", async () => {
     const dir = folder();
     const store = await openPersistentIndexedDb(dir);
@@ -1173,6 +1308,89 @@ describe("messages kept in rows.db", () => {
       request.onerror = () => reject(request.error);
     });
     expect(links).toEqual([{ id: "chat", seedB64: "seed" }]);
+  });
+
+  describe("a chat's old ratchet states (WISP 4xx) do not stay on the disk", () => {
+    const HOUR = 60 * 60_000;
+    const links = async (store: PersistentIndexedDb) => new Promise<IDBDatabase>((resolve, reject) => {
+      const request = store.factory.open("ghostly", 1);
+      request.onupgradeneeded = () => { request.result.createObjectStore("links", { keyPath: "id" }); };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const save = (d: IDBDatabase, key: string) => tx(d, ["links"], (s) => { s.links.put({ id: "chat", ratchetState: { v: 1, current: { rk: key } } }); });
+    const age = (dir: string, ms: number) => { const then = new Date(Date.now() - ms); utimesSync(join(dir, "snapshot.bin"), then, then); };
+    const onDisk = (dir: string, name: string) => (existsSync(join(dir, name)) ? readFileSync(join(dir, name)).toString("latin1") : "");
+    const start = async (dir: string) => {
+      const store = await openPersistentIndexedDb(dir);
+      opened.push(store);
+      const d = await links(store);
+      await store.flush();
+      return { store, d };
+    };
+
+    it("a new state folds the journal once the snapshot is an hour old, and the row reads as it was saved", async () => {
+      const dir = folder();
+      const { store, d } = await start(dir);
+      await save(d, "the old root key");
+      age(dir, HOUR);
+      await save(d, "the new root key");
+      await store.flush();
+      expect(onDisk(dir, "journal.bin")).not.toContain("the old root key");
+      expect(onDisk(dir, "snapshot.bin")).not.toContain("the old root key");
+      d.close();
+      await store.close();
+      const again = await start(dir);
+      expect(await read(again.d.transaction("links").objectStore("links").get("chat"))).toEqual({ id: "chat", ratchetState: { v: 1, current: { rk: "the new root key" } } });
+    });
+
+    it("a close folds a journal that holds one once the snapshot is an hour old", async () => {
+      const dir = folder();
+      const { store, d } = await start(dir);
+      await save(d, "the old root key");
+      await save(d, "the new root key");
+      age(dir, HOUR);
+      d.close();
+      await store.close();
+      expect(onDisk(dir, "journal.bin")).not.toContain("the old root key");
+      expect(onDisk(dir, "snapshot.bin")).not.toContain("the old root key");
+    });
+
+    it("a start folds what a killed process left, once the snapshot is an hour old", async () => {
+      const dir = folder();
+      const { d } = await start(dir);
+      await save(d, "the old root key");
+      await save(d, "the new root key");
+      const killed = folder();
+      cpSync(dir, killed, { recursive: true });
+      age(killed, HOUR);
+      const { store: again } = await start(killed);
+      expect(again.recovered).toBe(true);
+      expect(onDisk(killed, "journal.bin")).not.toContain("the old root key");
+      expect(onDisk(killed, "snapshot.bin")).not.toContain("the old root key");
+    });
+
+    it("a young snapshot is not written again: a command's close stays cheap", async () => {
+      const dir = folder();
+      const { store, d } = await start(dir);
+      await save(d, "the old root key");
+      await save(d, "the new root key");
+      age(dir, HOUR - 60_000);
+      d.close();
+      await store.close();
+      expect(onDisk(dir, "journal.bin")).toContain("the old root key");
+    });
+
+    it("an old snapshot is not written again for a journal with no ratchet in it", async () => {
+      const dir = folder();
+      const { store, d } = await start(dir);
+      await tx(d, ["links"], (s) => { s.links.put({ id: "chat", label: "no ratchet here" }); });
+      age(dir, HOUR);
+      await tx(d, ["links"], (s) => { s.links.put({ id: "chat", label: "still none" }); });
+      d.close();
+      await store.close();
+      expect(onDisk(dir, "journal.bin")).toContain("no ratchet here");
+    });
   });
 
   it("moves a profile of format 1 with a journal after it (killed): the journal's overwrites and deletes reach rows.db and its indexes", async () => {

@@ -9,19 +9,23 @@ import { switchProfile, type ProfileEntry } from "../lib/profiles";
 import { guardRestore, markUncheckedRestore, restoreForTakeover, type RestoreGuard } from "../lib/restoreGuard";
 import { Block, Button, Notice, Row, Section, Segmented, input } from "./wallet/ui";
 import { useRun } from "./wallet/run";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
 import { useBackupJob } from "../hooks/useBackupJob";
 import { BackupProgress } from "./BackupProgress";
 import { Select } from "./ui/Select";
 import { ButtonGroup, Field, FieldGrid, InputGroup, Truncate } from "./layout";
 import { said } from "../lib/notices";
 import { fillNames } from "../lib/fillNodes";
+import { exactText } from "../lib/exactText";
 
 const EMPTY_S3: S3Config = { endpoint: "", region: "us-east-1", bucket: "", prefix: "ghostly", accessKeyId: "", secretAccessKey: "" };
 type Open = "none" | "backup" | "restore" | "s3";
 type Protection = "passphrase" | "none";
 /** Everything, or a light backup: everything but the bytes of larger files (WISP 05 § Light backups). */
 type Content = "everything" | "light";
+/** Real money this profile has held on Mainnet (a wallet's backup reminder that saw it funded). */
+const hasHeldRealMoney = () => Object.values(servicesPlatform?.wallet?.getState()?.backupReminders ?? {}).some((record) => record.funded !== undefined);
 
 /**
  * Backups of the whole profile (WISP 05) to a file or S3-compatible storage (WISP 1000). A restore always
@@ -31,7 +35,7 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
   const { settings, updateBackupStorage } = useSettings();
   const { t, language } = useI18n();
   const { busy, error, setError, run } = useRun();
-  const wallet = useServicesPlatform()?.wallet;
+  const wallet = servicesPlatform?.wallet;
   const { job, start, saving, end, cancel } = useBackupJob();
   // `openBackup`: the wallet's backup reminder led here. Back up is open, and its passphrase takes the focus.
   const [open, setOpen] = useState<Open>(openBackup ? "backup" : "none");
@@ -72,7 +76,8 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
   const sealed = protection === "passphrase";
   const ready = sealed ? passphrase.length >= 12 && passphrase === confirm : understood;
   // Real money this profile has held on Mainnet: said by name before a file that anyone could spend it from is made.
-  const realMoney = Object.values(wallet?.getState()?.backupReminders ?? {}).some((record) => record.funded !== undefined);
+  // Drawn again when that changes, not on every engine state.
+  const realMoney = usePlatformValue(hasHeldRealMoney);
 
   /** What is said after a backup: where it went, and what could not go with it. */
   const madeText = (text: string, result: BackupResult) => [
@@ -271,7 +276,7 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
         <Block>
           <FieldGrid>
             {([["endpoint", t("profile.backups.s3.endpoint")], ["bucket", t("profile.backups.s3.bucket")], ["accessKeyId", t("profile.backups.s3.accessKey")], ["secretAccessKey", t("profile.backups.s3.secretKey")], ["region", t("profile.backups.s3.region")], ["prefix", t("profile.backups.s3.folder")]] as const).map(([key, label]) => (
-              <input key={key} data-testid={`s3-${key}`} aria-label={label} placeholder={label} spellCheck={false} autoComplete="off" type={key === "secretAccessKey" ? "password" : "text"} className={input}
+              <input key={key} data-testid={`s3-${key}`} aria-label={label} placeholder={label} {...exactText} autoComplete="off" type={key === "secretAccessKey" ? "password" : "text"} className={input}
                 value={draft[key]} onChange={(e) => setDraft({ ...draft, [key]: e.target.value })} />
             ))}
           </FieldGrid>

@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { copyInvite } from "../support/clipboard";
-import { expect, link, test } from "../support/fixtures";
+import { expect, link, type Peer, test } from "../support/fixtures";
+import { choose } from "../support/select";
 
 /**
  * The installable web app (docs/WEB.md § Install it): the service worker, the offline shell, the share target, the
@@ -63,6 +64,29 @@ test.describe("service worker", () => {
       await ana.context.setOffline(false);
     }
     await expect(ana.page.getByTestId("offline-banner")).toBeHidden();
+  });
+
+  test("the install leaves the online-only libraries and the other languages out; a language picked later opens offline too", { tag: ["@feature:app.pwa.offline"] }, async ({ peer }) => {
+    const ana = await peer("Ana", { serviceWorkers: "allow" });
+    await controlled(ana.page);
+    const paths = async () => (await cached(ana.page)).map((entry) => entry.path);
+    // Pubky's approval, a Keet proof and the USDT wallet need the network, and the browser reads in English.
+    expect((await paths()).filter((path) => /^\/assets\/(pubky|keet-identity-key|usdt|ar|es|fr|it|ja|pt|zh)-/.test(path))).toEqual([]);
+
+    await ana.page.goto("/#/settings");
+    await choose(ana.page.getByTestId("settings-language"), "fr");
+    await expect(ana.page.getByTitle("Nouvelle conversation", { exact: true })).toBeVisible();
+    // Fetched through the worker, so kept like any file of the build.
+    await expect.poll(async () => (await paths()).filter((path) => /^\/assets\/fr-/.test(path)).length).toBe(1);
+
+    await ana.context.setOffline(true);
+    try {
+      await ana.page.reload();
+      await expect(ana.page.getByTitle("Nouvelle conversation", { exact: true })).toBeVisible();
+      await expect(ana.page.getByTestId("offline-banner")).toBeVisible();
+    } finally {
+      await ana.context.setOffline(false);
+    }
   });
 
   test("a chat opened offline says Offline in its header, not a connection issue with the relays' errors", { tag: ["@feature:app.pwa.offline"] }, async ({ peer }) => {
@@ -166,16 +190,26 @@ test("the app icon's shortcuts: New chat, Scan invite, Wallets", { tag: ["@featu
   await ana.page.waitForFunction(() => document.readyState === "complete");
   expect(await ana.page.evaluate(() => navigator.serviceWorker.getRegistration().then((r) => !!r))).toBe(false);
   await ana.page.goto("/#/new");
+  // Any site can send the browser here: New opens with Chat focused, and only a press makes the chat.
+  await expect(ana.page.getByTestId("sidebar-new-menu")).toBeVisible();
+  await expect(ana.page).toHaveURL(/#\/$/);
+  await expect(ana.page.getByTestId("chat-row")).toHaveCount(0);
+  await ana.page.keyboard.press("Enter");
   await expect(ana.page.getByTestId("invite-card")).toBeVisible();
   await expect(ana.page).toHaveURL(/#\/chat\//);
   await expect(ana.page.getByTestId("chat-row")).toHaveCount(1);
-  // The shortcut left the history: Back does not make another chat.
+  // The shortcut left the history: Back does not open New again, nor make another chat.
   await ana.page.goBack();
+  await expect(ana.page.getByTestId("sidebar-new-menu")).toBeHidden();
   await expect(ana.page.getByTestId("chat-row")).toHaveCount(1);
 
+  // Join opens with Scan focused, and the camera starts only on a press.
   await ana.page.goto("/#/scan");
-  await expect(ana.page.getByLabel("QR camera preview")).toBeVisible();
+  await expect(ana.page.getByRole("button", { name: "Scan QR" })).toBeFocused();
   await expect(ana.page).toHaveURL(/#\/$/);
+  await expect(ana.page.getByLabel("QR camera preview")).toBeHidden();
+  await ana.page.keyboard.press("Enter");
+  await expect(ana.page.getByLabel("QR camera preview")).toBeVisible();
   await ana.page.keyboard.press("Escape");
 
   await ana.page.goto("/#/wallet");
@@ -207,6 +241,17 @@ async function menuOffersInstall(page: Page): Promise<boolean> {
   return offered;
 }
 
+/**
+ * The person opens the web app again later: the tab closed, a new one. A reload is the same visit, so it never makes
+ * the second one the hint waits for (installPrompt.ts `countInstallVisit`).
+ */
+async function openAgain(peer: Peer): Promise<void> {
+  await peer.page.close();
+  peer.page = await peer.context.newPage();
+  await peer.page.goto("/");
+  await expect(peer.page.getByTitle("New Chat")).toBeVisible();
+}
+
 const IPHONE_SAFARI = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
 const MAC_SAFARI = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
 const MAC_FIREFOX = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:133.0) Gecko/20100101 Firefox/133.0";
@@ -228,10 +273,12 @@ test.describe("installing the app", () => {
     await expect(page.getByTestId("invite-card")).toBeVisible();
     await page.goto("/#/");
     await expect(page.getByTestId("install-hint")).toBeVisible();
-    await page.getByTestId("install-hint-install").click();
+    await page.getByTestId("install-hint-install").focus();
+    await page.keyboard.press("Enter");
     await expect.poll(() => installPrompts(page)).toBe(1);
-    // It has done its job, whatever the person answered the browser.
+    // It has done its job, whatever the person answered the browser. The key that pressed it lands on New chat.
     await expect(page.getByTestId("install-hint")).toBeHidden();
+    await expect(page.getByTitle("New Chat")).toBeFocused();
 
     // The browser offers again later: the menu has it, and asks the browser too.
     await offerInstall(page);
@@ -252,17 +299,25 @@ test.describe("installing the app", () => {
 
   test("Not now puts the hint away for good; Install stays in Settings", { tag: ["@feature:app.pwa.install-entry"] }, async ({ peer }) => {
     const ana = await peer("Ana");
-    const page = ana.page;
+    // A reload of the first visit, no chat yet: still no hint.
+    await ana.page.reload();
+    await expect(ana.page.getByTitle("New Chat")).toBeVisible();
+    await offerInstall(ana.page);
+    expect(await menuOffersInstall(ana.page)).toBe(true);
+    await expect(ana.page.getByTestId("install-hint")).toBeHidden();
+
     // The second visit, no chat yet: the hint may show.
-    await page.reload();
-    await expect(page.getByTitle("New Chat")).toBeVisible();
+    await openAgain(ana);
+    let page = ana.page;
     await offerInstall(page);
     await expect(page.getByTestId("install-hint")).toBeVisible();
-    await page.getByTestId("install-hint-later").click();
+    await page.getByTestId("install-hint-later").focus();
+    await page.keyboard.press("Enter");
     await expect(page.getByTestId("install-hint")).toBeHidden();
+    await expect(page.getByTitle("New Chat")).toBeFocused();
 
-    await page.reload();
-    await expect(page.getByTitle("New Chat")).toBeVisible();
+    await openAgain(ana);
+    page = ana.page;
     await offerInstall(page);
     expect(await menuOffersInstall(page)).toBe(true);
     await expect(page.getByTestId("install-hint")).toBeHidden();
@@ -274,9 +329,8 @@ test.describe("installing the app", () => {
   // CI has Chromium only: these say they are Safari and Firefox, which is all the app goes by.
   test("iPhone Safari: Install shows where Add to Home Screen is", { tag: ["@feature:app.pwa.install-entry", "@feature:app.pwa.install"] }, async ({ peer }) => {
     const ana = await peer("Ana", { mobile: true, userAgent: IPHONE_SAFARI });
+    await openAgain(ana);
     const page = ana.page;
-    await page.reload();
-    await expect(page.getByTitle("New Chat")).toBeVisible();
     await expect(page.getByTestId("install-hint")).toBeVisible();
     await page.getByTestId("install-hint-install").click();
     const steps = page.getByTestId("install-steps");
@@ -286,10 +340,13 @@ test.describe("installing the app", () => {
     await expect(steps.getByTestId("install-share-glyph")).toBeVisible();
     // iOS 26 keeps Add to Home Screen under More in the Share sheet.
     await expect(steps).toContainText("Choose Add to Home Screen (under More if you don't see it).");
-    await steps.getByTestId("install-steps-done").click();
+    await expect(steps.getByTestId("install-steps-done")).toBeFocused();
+    await page.keyboard.press("Enter");
     await expect(steps).toBeHidden();
-    // Shown once: Safari never says the app was added, so having seen the steps is enough.
+    // Shown once: Safari never says the app was added, so having seen the steps is enough. The hint's Install went
+    // with it, so the focus goes to New chat.
     await expect(page.getByTestId("install-hint")).toBeHidden();
+    await expect(page.getByTitle("New Chat")).toBeFocused();
 
     // Settings still has it, and the same steps.
     await page.getByTestId("mobile-tab-settings").click();
@@ -311,8 +368,7 @@ test.describe("installing the app", () => {
     await expect(steps).toBeHidden();
 
     const bo = await peer("Bo", { userAgent: MAC_FIREFOX });
-    await bo.page.reload();
-    await expect(bo.page.getByTitle("New Chat")).toBeVisible();
+    await openAgain(bo);
     await expect(bo.page.getByTestId("install-hint")).toBeHidden();
     expect(await menuOffersInstall(bo.page)).toBe(false);
     await bo.page.goto("/#/settings");

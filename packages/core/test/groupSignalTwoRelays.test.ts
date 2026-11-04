@@ -79,7 +79,9 @@ describe("a group edge's signal goes to two relays", () => {
     // b.test's minute: the edges' floor spent first (4 of 30), then background looks, chats' writes and their signals.
     for (let i = 0; i < 4; i++) await transport.publish(createIdentity(), offer("x"), EDGE);
     await vi.advanceTimersByTimeAsync(30_000);
-    for (let i = 0; i < 20; i++) await transport.publish(createIdentity(), offer("x"), { background: true });
+    // Background writes take half of the background share at most (`BACKGROUND_WRITES_SHARE`): looks the rest.
+    for (let i = 0; i < 10; i++) await transport.publish(createIdentity(), offer("x"), { background: true });
+    for (let i = 0; i < 10; i++) await transport.resolve(createIdentity().pubKeyZ32, { background: true });
     for (let i = 0; i < 6; i++) await transport.publish(createIdentity(), offer("x"));
     for (let i = 0; i < 4; i++) await transport.publish(createIdentity(), offer("x"), { signal: true });
     await vi.advanceTimersByTimeAsync(20_000);

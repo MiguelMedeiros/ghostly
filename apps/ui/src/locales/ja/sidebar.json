@@ -40,6 +40,7 @@
   "joinChat": "チャットに参加",
   "new": "新規",
   "newChat": "新規チャット",
+  "newChatShort": "新規",
   "newMenu": {
     "chat": "チャット",
     "chatHint": "1人と、招待で",
@@ -57,15 +58,27 @@
   "rail": {
     "collapse": "チャット一覧を折りたたむ",
     "expand": "チャット一覧を展開",
+    "invitation": "{{name}}、{{status}}",
+    "mention": "{{name}}、あなたがメンションされました",
     "title": "{{action}}（{{keys}}）",
     "unread": "{{name}}、未読メッセージあり",
     "unreadCount": "{{name}}、未読メッセージ {{count}} 件",
     "unreadOne": "{{name}}、未読メッセージ 1 件"
   },
+  "row": {
+    "mention": "あなたがメンションされました",
+    "muted": "通知はミュート中",
+    "pinned": "ピン留め済み",
+    "separator": "、",
+    "unread": "未読メッセージ {{count}} 件",
+    "unreadSome": "未読メッセージあり",
+    "unread_one": "未読メッセージ {{count}} 件",
+    "unread_other": "未読メッセージ {{count}} 件"
+  },
   "searchPlaceholder": "チャットを検索...",
   "settings": "設定",
   "sharedIdentity": "IDを共有しました",
   "skipToContent": "コンテンツへスキップ",
-  "startChat": "新しいチャット",
+  "startChat": "新規チャット",
   "unread": "未読メッセージ"
 }

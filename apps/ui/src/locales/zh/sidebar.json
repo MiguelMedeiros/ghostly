@@ -40,6 +40,7 @@
   "joinChat": "加入聊天",
   "new": "新建",
   "newChat": "新建聊天",
+  "newChatShort": "新建",
   "newMenu": {
     "chat": "聊天",
     "chatHint": "一个人，通过邀请",
@@ -57,15 +58,27 @@
   "rail": {
     "collapse": "收起聊天列表",
     "expand": "展开聊天列表",
+    "invitation": "{{name}}，{{status}}",
+    "mention": "{{name}}，有人提及了你",
     "title": "{{action}}（{{keys}}）",
     "unread": "{{name}}，未读消息",
     "unreadCount": "{{name}}，{{count}} 条未读消息",
     "unreadOne": "{{name}}，1 条未读消息"
   },
+  "row": {
+    "mention": "有人提及了你",
+    "muted": "通知已静音",
+    "pinned": "已置顶",
+    "separator": "，",
+    "unread": "{{count}} 条未读消息",
+    "unreadSome": "未读消息",
+    "unread_one": "{{count}} 条未读消息",
+    "unread_other": "{{count}} 条未读消息"
+  },
   "searchPlaceholder": "搜索聊天...",
   "settings": "设置",
   "sharedIdentity": "分享了一个身份",
   "skipToContent": "跳到内容",
-  "startChat": "新聊天",
+  "startChat": "新建聊天",
   "unread": "未读消息"
 }

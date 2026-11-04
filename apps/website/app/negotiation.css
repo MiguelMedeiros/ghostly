@@ -300,8 +300,8 @@
 }
 .ng-order li[data-state="off"],
 .ng-chip[data-state="off"] {
+  /* No opacity: the strike-through says "off", and the name is what the scene teaches (AA, 4.5:1). */
   color: var(--dim);
-  opacity: 0.55;
   text-decoration: line-through;
   text-decoration-color: rgba(244, 114, 182, 0.75);
   text-decoration-thickness: 1.5px;

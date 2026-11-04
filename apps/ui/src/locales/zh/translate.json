@@ -5,6 +5,7 @@
     "engine": "首次下载还会从 GitHub 上的 Ghostly 发布版本获取翻译引擎。",
     "failed": "语言没有下载成功",
     "failedNext": "请重试。",
+    "goesOn": "可以关闭此窗口：下载会继续，如果失败会在这里提示。",
     "notNow": "以后再说",
     "pair": "{{from}}到{{to}}，{{size}}",
     "pairBack": "{{from}}与{{to}}互译，{{size}}",

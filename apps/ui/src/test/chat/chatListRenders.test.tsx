@@ -116,13 +116,19 @@ describe("the rail's places on a state that changes nothing they show", () => {
     expect(screen.getAllByTestId("chat-rail-chat").find(place => place.getAttribute("data-chat") === "b")).toHaveAccessibleName("Bob, 2 unread messages");
   });
 
-  it("a group read here, with nothing else about it changed, loses its mark", () => {
-    renderApp(<UpdateProvider><Sidebar /></UpdateProvider>);
-    const place = () => screen.getAllByTestId("chat-rail-group").find(g => g.getAttribute("data-chat") === "group:g-1")!;
-    expect(place()).toHaveAccessibleName("Climbing, unread messages");
-    markGroupRead("g-1", NOW);
-    sameStateAgain();
-    expect(place()).toHaveAccessibleName("Climbing");
+  it("a group read here, with nothing else about it changed, loses its mark at the list's next look", () => {
+    // The look every few seconds: an engine state that changes nothing the list shows draws nothing of it.
+    vi.useFakeTimers({ toFake: ["setInterval"] });
+    try {
+      renderApp(<UpdateProvider><Sidebar /></UpdateProvider>);
+      const place = () => screen.getAllByTestId("chat-rail-group").find(g => g.getAttribute("data-chat") === "group:g-1")!;
+      expect(place()).toHaveAccessibleName("Climbing, unread messages");
+      markGroupRead("g-1", NOW);
+      act(() => { vi.advanceTimersByTime(3000); });
+      expect(place()).toHaveAccessibleName("Climbing");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("opens the chat of the latest draw from a place that was not drawn again", async () => {

@@ -7,7 +7,7 @@ import { MeshHubs, removalEpoch } from "../src/engine/meshHubs";
 import { db } from "../src/engine/db";
 import { STORES, transact } from "../src/shared/idb";
 import type { StoredLink } from "../src/shared/types";
-// covers: groups.remove-member, groups.payments.group-request, groups.payments.notes, groups.protocol.reactions, groups.protocol.pins
+// covers: groups.remove-member, groups.payments.group-request, groups.payments.notes, groups.protocol.reactions, groups.protocol.pins, groups.connection.auto-reconnect
 
 /**
  * What a private group says goes to its members as the roster has them now, and to nobody else (WISP 902 · Group Mesh
@@ -263,6 +263,110 @@ describe("a private group's traffic goes to its current members only", () => {
     await settle();
     expect(await texts()).not.toContain("after the removal");
     closeEdge.mockRestore();
+  }, 30_000);
+});
+
+describe("the app back in front reconnects its group's dropped edges at once (WISP 100 § Background retry)", () => {
+  interface Edge { myPubKeyZ32: string; autoConnectFailures: number; lastAutoConnectAt: number; session: { events: { onPresence(presence: unknown): void } } }
+
+  it("each edge down forgets its wait, reads its member now, and the side whose turn it is dials as soon as that read says it is there", async () => {
+    const a = await adminOf([]);
+    // One member whose edge this app dials (its key the lower), one whose edge waits for the member's offer.
+    const edges: { link: GhostLink; dials: number }[] = [];
+    const dials = (link: GhostLink) => link.myPubKeyZ32 < (link as unknown as { options: { params: { peerPubKeyZ32: string } } }).options.params.peerPubKeyZ32;
+    while (edges.length < 2 || edges.every(e => dials(e.link)) || edges.every(e => !dials(e.link))) {
+      const member = await a.admit(false);
+      edges.push({ link: (await startedEdge(() => a.edgeOf(member.key))).link, dials: 0 });
+    }
+    const asked: string[] = [], offersAwaited: string[] = [], published: string[] = [];
+    for (const edge of edges) {
+      const { link } = edge, inner = link as unknown as Edge;
+      // Away a while: three failed dials (the next one 160 s off), and the member's last packet says it is gone.
+      inner.autoConnectFailures = 3;
+      inner.lastAutoConnectAt = Date.now();
+      let presence = { online: false, lastPacketAt: 1, seenAt: Date.now() - 600_000, services: [] };
+      vi.spyOn(link.session, "peerPresence", "get").mockImplementation(() => presence);
+      // The read the wake asks for finds the member there, fresh.
+      vi.spyOn(link.session, "pollNow").mockImplementation(() => {
+        asked.push(link.myPubKeyZ32);
+        presence = { online: true, lastPacketAt: Date.now(), seenAt: Date.now(), services: [] };
+        inner.session.events.onPresence(presence);
+      });
+      vi.spyOn(link.session, "expectPeer").mockImplementation(() => { offersAwaited.push(link.myPubKeyZ32); });
+      vi.spyOn(link.session, "publishedRecently").mockReturnValue(false);
+      vi.spyOn(link.session, "refreshAdvertisement").mockImplementation(async () => { published.push(link.myPubKeyZ32); });
+      vi.spyOn(link as unknown as { dial(): Promise<void> }, "dial").mockImplementation(async () => { edge.dials++; });
+    }
+
+    a.node.wake();
+
+    for (const edge of edges) {
+      const { link } = edge, inner = link as unknown as Edge, dialler = dials(link);
+      expect(asked.filter(k => k === link.myPubKeyZ32)).toHaveLength(1);
+      expect(inner.autoConnectFailures, "the wait starts over").toBe(dialler ? 1 : 0);
+      // The dialling side dials at once; the other says it is here and looks fast for the member's offer.
+      expect(edge.dials).toBe(dialler ? 1 : 0);
+      if (!dialler) {
+        expect(published).toContain(link.myPubKeyZ32);
+        expect(offersAwaited).toContain(link.myPubKeyZ32);
+      }
+    }
+  }, 30_000);
+
+  it("back after a restart, a member live then whose packet no read finds is reconnecting only for presence's window", async () => {
+    const a = await adminOf(["bob"]);
+    const [bob] = a.members;
+    await vi.waitFor(async () => expect((await db.getLinks()).find(l => l.id === bob.linkId)?.edgeLive).toBe(true));
+    await a.node.shutdown();
+    nodes.splice(nodes.indexOf(a.node), 1);
+
+    // The app starts again; the member's app stays closed and the relays hold no packet of it (`resolve` finds none).
+    const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() } as never, { transport, automaticWallets: false });
+    nodes.push(node);
+    await node.start();
+    const inner = node as unknown as Inner;
+    await startedEdge(() => [...inner.links.values()].find(live => live.stored.id === bob.linkId));
+    const edge = () => node.getState().groups.find(g => g.id === a.groupId)?.members.find(m => m.key === bob.key)?.edge;
+    // The resume is under way: its reads and its dial go in the first seconds.
+    expect(edge()?.reconnecting).toBe(true);
+    // Ten minutes on, nothing of the member read: it is not dialled (no presence), so not "Reconnecting…" for good.
+    const later = Date.now() + 11 * 60_000;
+    vi.spyOn(Date, "now").mockReturnValue(later);
+    try { expect(edge()).not.toHaveProperty("reconnecting"); }
+    finally { vi.mocked(Date.now).mockRestore(); }
+  }, 30_000);
+});
+
+describe("a profile no longer in a private group", () => {
+  it("is refused a pin with the group's reason, as a reaction is, and nothing is pinned", async () => {
+    const { node, inner, groupId } = await adminOf([]);
+    const chat = `group:${groupId}`;
+    const said = await node.sendGroupMessage({ groupId, text: "before" });
+    const messageId = (said as { messageId: string }).messageId;
+    // As the group shows to a member the admin removed (`group-removed`): the reason, and no sending.
+    const view = inner.groups.view(groupId)!;
+    vi.spyOn(inner.groups, "view").mockImplementation(id => id === groupId ? { ...view, status: "removed", statusReason: "You were removed from this group", canSend: false } : undefined);
+    expect(await node.react({ linkId: chat, messageId, emoji: "👍" })).toEqual({ error: "You were removed from this group", refused: true });
+    expect(await node.pinMessage({ linkId: chat, messageId })).toEqual({ error: "You were removed from this group", refused: true });
+    expect(await node.pinMessage({ linkId: chat, remove: true })).toEqual({ error: "You were removed from this group", refused: true });
+    vi.restoreAllMocks();
+    expect(inner.groups.view(groupId)?.pin).toBeUndefined();
+  }, 30_000);
+
+  it("is refused an edit and a delete for everyone with the group's reason, and the message stays as it was", async () => {
+    const { node, inner, groupId } = await adminOf([]);
+    const chat = `group:${groupId}`;
+    const said = await node.sendGroupMessage({ groupId, text: "before" });
+    const messageId = (said as { messageId: string }).messageId;
+    const view = inner.groups.view(groupId)!;
+    vi.spyOn(inner.groups, "view").mockImplementation(id => id === groupId ? { ...view, status: "removed", statusReason: "You were removed from this group", canSend: false } : undefined);
+    expect(await node.editMessage({ linkId: chat, messageId, text: "after" })).toEqual({ error: "You were removed from this group", refused: true });
+    expect(await node.removeMessage({ linkId: chat, messageId })).toEqual({ error: "You were removed from this group", refused: true });
+    vi.restoreAllMocks();
+    const kept = await node.getMessage(chat, messageId);
+    expect(kept?.text).toBe("before");
+    expect(kept?.removed).toBeFalsy();
   }, 30_000);
 });
 

@@ -40,11 +40,15 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
     connect: vi.fn(async () => undefined),
     setChatTransport: vi.fn(async ({ linkId, transport }: { linkId: string; transport: string }) => { setLink(linkId, transport === "dht" ? { deliveryMode: "dht", textDelivery: "dht" } : { deliveryMode: "stream" }); }),
     setDeliveryMode: vi.fn(async ({ linkId, mode: m }: { linkId: string; mode: string }) => { setLink(linkId, { deliveryMode: m as never }); }),
+    removeLink: vi.fn(({ linkId }: { linkId: string }) => { s.links = s.links.filter((l) => l.id !== linkId); }),
   };
   const setLink = (linkId: string, fields: Partial<LinkView>) => { s.links = s.links.map((l) => (l.id === linkId ? { ...l, ...fields } : l)); };
   const dir = mkdtempSync(join(tmpdir(), "ghostly-bots-profile-"));
+  /** The calls on, as `call.list` shows them. */
+  const calls: { call: string; chat: string; state: string }[] = [];
   const ctx = {
     runtime: { server: { node }, paths: { name: "default", dir } },
+    calls: { list: () => calls, forgetChat: () => {} },
     hub: {
       onEvent: (l: (e: GhostlyEvent) => void) => { events.add(l); return () => events.delete(l); },
       onState: (l: (s: EngineState) => void) => { states.add(l); return () => states.delete(l); },
@@ -57,7 +61,7 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
   const event = (e: Partial<GhostlyEvent>) => { for (const l of events) l({ seq: 0, id: "x", at: 1, type: "x", ...e }); };
   /** A chat's link changes, and the engine says its state changed. */
   const linkChanged = (linkId: string, fields: Partial<LinkView>) => { setLink(linkId, fields); for (const l of states) l(s); };
-  return { ctx, node, s, dir, emitted, transfer, event, setLink, linkChanged };
+  return { ctx, node, s, dir, emitted, calls, transfer, event, setLink, linkChanged };
 }
 
 describe("file wait", () => {
@@ -82,7 +86,7 @@ describe("file wait", () => {
   it("times out with how far it got; an unknown file is not found", async () => {
     const { ctx, transfer } = fake();
     transfer("chat-one-in-c", { state: "transferring", transferred: 40, size: 100, direction: "in", stage: "paused" });
-    await expect(callApi(ctx, "file.wait", { file: "chat-one-in-c", timeout: 1 })).rejects.toMatchObject({ code: "timeout", details: { transferred: 40, size: 100, stage: "paused" } });
+    await expect(callApi(ctx, "file.wait", { file: "chat-one-in-c", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for file chat-one-in-c to arrive (40 of 100 bytes, paused here (file resume))", details: { transferred: 40, size: 100, stage: "paused" } });
     await expect(callApi(ctx, "file.wait", { file: "chat-one-in-nothing" })).rejects.toMatchObject({ code: "not_found" });
     await expect(callApi(ctx, "file.wait", { file: "nochat-in-x" })).rejects.toMatchObject({ code: "not_found" });
   }, 10_000);
@@ -93,6 +97,7 @@ describe("file wait", () => {
     expect(await callApi(ctx, "file.action", { file: "chat-two-in-d", action: "accept" })).toMatchObject({ chat: "chat-two", action: "accept" });
     expect(node.fileAction).toHaveBeenLastCalledWith({ linkId: "chat-two", fileId: "chat-two-in-d", action: "accept" });
     await expect(callApi(ctx, "file.action", { chat: "Alice", file: "chat-two-in-d", action: "cancel" })).rejects.toMatchObject({ code: "not_found" });
+    transfer("chat-two-in-d", { state: "transferring", transferred: 0, size: 5, direction: "in", stage: "queued" });
     // The bytes are not in this fake's store: saving fails after the wait, not before it.
     const saving = callApi(ctx, "file.save", { file: "chat-two-in-d", wait: true, timeout: 5 });
     let settled = false;
@@ -101,6 +106,50 @@ describe("file wait", () => {
     expect(settled).toBe(false);
     transfer("chat-two-in-d", { state: "done", transferred: 5, size: 5, direction: "in" });
     await expect(saving).rejects.toMatchObject({ code: "not_found", message: "No file chat-two-in-d" });
+  });
+
+  it("a received file that waits for file accept says so at once, whether it waited so from the start or came to", async () => {
+    const { ctx, transfer } = fake();
+    const confirm = { code: "confirm", message: "The file (40 MB) waits for you to take it: ghostly file accept chat-one-in-e (or file decline)", details: { file: "chat-one-in-e", chat: "chat-one", size: 40_000_000, stage: "asking" } };
+    transfer("chat-one-in-e", { state: "transferring", transferred: 0, size: 40_000_000, direction: "in", stage: "asking" });
+    const started = Date.now();
+    await expect(callApi(ctx, "file.wait", { file: "chat-one-in-e", timeout: 30 })).rejects.toMatchObject(confirm);
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-e", wait: true, timeout: 30 })).rejects.toMatchObject(confirm);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    // Not there yet when the wait began: the offer reaches this side during it.
+    transfer("chat-one-in-f", { state: "transferring", transferred: 0, size: 26_214_401, direction: "in", stage: "waiting" });
+    const waiting = callApi(ctx, "file.wait", { file: "chat-one-in-f", timeout: 30 });
+    transfer("chat-one-in-f", { state: "transferring", transferred: 0, size: 26_214_401, direction: "in", stage: "asking" });
+    await expect(waiting).rejects.toMatchObject({ code: "confirm", message: expect.stringContaining("(26.2 MB) waits for you to take it: ghostly file accept chat-one-in-f") });
+    // A file sent from here that waits for the contact's person goes on waiting: only they can take it.
+    transfer("chat-one-out-g", { state: "transferring", transferred: 0, size: 40_000_000, direction: "out", stage: "asking" });
+    await expect(callApi(ctx, "file.wait", { file: "chat-one-out-g", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: expect.stringContaining("(0 of 40000000 bytes, waiting for the contact to take it)"), details: { stage: "asking" } });
+  }, 10_000);
+
+  it("times out naming where the transfer stands in words, the stage's id in details", async () => {
+    const { ctx, transfer } = fake();
+    const words = async (t: Partial<FileTransferView>) => {
+      transfer("chat-one-in-h", { state: "transferring", transferred: 0, size: 9, direction: "in", ...t });
+      return ((await callApi(ctx, "file.wait", { file: "chat-one-in-h", timeout: 1 }).catch((e: CliError) => e)) as CliError).message.replace(/^.*bytes, /, "");
+    };
+    expect(await words({ stage: "waiting" })).toBe("waiting for a connection to the contact)");
+    expect(await words({ stage: "paused", pausedBy: "peer" })).toBe("paused by the contact)");
+    expect(await words({ stage: "queued" })).toBe("waiting its turn)");
+    expect(await words({ stage: "verifying", transferred: 9 })).toBe("every byte here, checking it)");
+  }, 10_000);
+});
+
+describe("file list", () => {
+  it("says whose decision a file waits for: mine for one received, the contact's for one sent", async () => {
+    const { ctx, node, transfer } = fake();
+    const message = (id: string, file: string) => ({ id, sender: id.startsWith("me_") ? "me" : "peer", timestamp: 1, file: { id: file, name: "big.bin", size: 40_000_000, mime: "application/octet-stream" } });
+    node.getMessages.mockResolvedValueOnce([message("peer_1", "chat-one-in-i"), message("me_2", "chat-one-out-j"), message("peer_3", "chat-one-in-k")] as never);
+    transfer("chat-one-in-i", { state: "transferring", transferred: 0, size: 40_000_000, direction: "in", stage: "asking" });
+    transfer("chat-one-out-j", { state: "transferring", transferred: 0, size: 40_000_000, direction: "out", stage: "asking" });
+    transfer("chat-one-in-k", { state: "transferring", transferred: 0, size: 40_000_000, direction: "in", stage: "queued" });
+    const { files } = await callApi(ctx, "file.list", { chat: "Alice" }) as { files: { transfer: Record<string, unknown> }[] };
+    expect(files.map((f) => f.transfer.waitingFor)).toEqual(["me", "contact", undefined]);
+    expect(files[0].transfer).toMatchObject({ state: "transferring", stage: "asking", direction: "in" });
   });
 });
 
@@ -227,6 +276,102 @@ describe("chat disconnect --hold", () => {
     expect(node.setDeliveryMode).toHaveBeenCalledWith({ linkId: "chat-one", mode: "stream" });
     expect(emitted.at(-1)).toMatchObject({ type: "chat.released", chat: "chat-one", reason: "lifted" });
     await expect(callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 10_081 })).rejects.toMatchObject({ code: "bad_request" });
+  });
+
+  // Held mid-call, the call talked on over its own connection while its signals had no way across: one side's hang-up
+  // never reached the other, whose call ended only when its media stalled out 16 s later, as failed.
+  it("is refused while a call is on in the chat, which stays live; another chat is held", async () => {
+    const { ctx, node, calls, dir, emitted } = fake();
+    calls.push({ call: "c1", chat: "chat-one", state: "connected" });
+    const refused = await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 1 }).then(() => undefined, (error: unknown) => error as CliError);
+    expect(refused).toMatchObject({ code: "busy", details: { call: "c1" } });
+    expect(refused?.message).toMatch(/^A call is on in this chat: hang it up first \(ghostly call hangup chat-one\)/);
+    expect(node.setChatTransport).not.toHaveBeenCalled();
+    expect(existsSync(join(dir, "holds.json"))).toBe(false);
+    expect(emitted).toEqual([]);
+    // Without --hold the chat reconnects at once, and a signal the session could not carry goes on the next one.
+    await callApi(ctx, "chat.disconnect", { chat: "Alice" });
+    expect(node.disconnect).toHaveBeenCalledWith({ linkId: "chat-one" });
+    await callApi(ctx, "chat.disconnect", { chat: "Bob", hold: 1 });
+    expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-two", transport: "dht" });
+    calls.length = 0;
+    await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 1 });
+    expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-one", transport: "dht" });
+  });
+
+  // `chat transport dht` is the switch a hold makes, with the same lost hang-up: refused the same way mid-call.
+  it("chat transport dht is refused while a call is on in the chat; another transport or chat is not", async () => {
+    const { ctx, node, calls } = fake();
+    calls.push({ call: "c1", chat: "chat-one", state: "connected" });
+    const refused = await callApi(ctx, "chat.transport", { chat: "Alice", transport: "dht" }).then(() => undefined, (error: unknown) => error as CliError);
+    expect(refused).toMatchObject({ code: "busy", details: { call: "c1" } });
+    expect(refused?.message).toMatch(/^A call is on in this chat: hang it up first \(ghostly call hangup chat-one\)/);
+    expect(node.setChatTransport).not.toHaveBeenCalled();
+    await callApi(ctx, "chat.transport", { chat: "Alice", transport: "iroh" });
+    expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-one", transport: "iroh/1" });
+    await callApi(ctx, "chat.transport", { chat: "Bob", transport: "dht" });
+    expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-two", transport: "dht" });
+    calls.length = 0;
+    await callApi(ctx, "chat.transport", { chat: "Alice", transport: "dht" });
+    expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-one", transport: "dht" });
+  });
+
+  // Removed mid-call, the chat was gone and its call talked on (sound both ways, `call list` naming a chat `chat show`
+  // could not find); a hang-up then had no chat to cross, and the contact's call ended only when its media stalled out.
+  it("chat remove is refused while a call is on in the chat, which stays; another chat is removed", async () => {
+    const { ctx, node, calls } = fake();
+    calls.push({ call: "c1", chat: "chat-one", state: "connected" });
+    await expect(callApi(ctx, "chat.remove", { chat: "Alice" })).rejects.toMatchObject({ code: "confirm" });
+    const refused = await callApi(ctx, "chat.remove", { chat: "Alice", yes: true }).then(() => undefined, (error: unknown) => error as CliError);
+    expect(refused).toMatchObject({ code: "busy", details: { call: "c1" } });
+    expect(refused?.message).toBe("A call is on in this chat: hang it up first (ghostly call hangup chat-one), then remove the chat");
+    expect(node.removeLink).not.toHaveBeenCalled();
+    expect(await callApi(ctx, "chat.remove", { chat: "Bob", yes: true })).toEqual({ removed: "chat-two" });
+    calls.length = 0;
+    expect(await callApi(ctx, "chat.remove", { chat: "Alice", yes: true })).toEqual({ removed: "chat-one" });
+    expect(node.removeLink).toHaveBeenCalledWith({ linkId: "chat-one" });
+  });
+
+  // `engine removeLink`, `setChatTransport dht` and `setDeliveryMode dht` are the same switches, refused the same way.
+  it("the raw engine calls that remove the chat or put it on DHT only are refused while a call is on in it", async () => {
+    const { ctx, node, calls } = fake();
+    calls.push({ call: "c1", chat: "chat-one", state: "connected" });
+    const raw = (method: string, params: Record<string, unknown>) => callApi(ctx, "engine.call", { method, params, yes: true });
+    for (const [method, params, then] of [
+      ["removeLink", { linkId: "chat-one" }, "remove the chat"],
+      ["setChatTransport", { linkId: "chat-one", transport: "dht" }, "put the chat on DHT only"],
+      ["setDeliveryMode", { linkId: "chat-one", mode: "dht" }, "put the chat on DHT only"],
+    ] as const) {
+      const refused = await raw(method, params).then(() => undefined, (error: unknown) => error as CliError);
+      expect(refused, method).toMatchObject({ code: "busy", details: { call: "c1" } });
+      expect(refused?.message).toBe(`A call is on in this chat: hang it up first (ghostly call hangup chat-one), then ${then}`);
+    }
+    expect(node.removeLink).not.toHaveBeenCalled();
+    expect(node.setChatTransport).not.toHaveBeenCalled();
+    expect(node.setDeliveryMode).not.toHaveBeenCalled();
+    // Back on the live link, another chat, or no call: they go through.
+    await raw("setDeliveryMode", { linkId: "chat-one", mode: "stream" });
+    expect(node.setDeliveryMode).toHaveBeenCalledWith({ linkId: "chat-one", mode: "stream" });
+    await raw("setChatTransport", { linkId: "chat-two", transport: "dht" });
+    expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-two", transport: "dht" });
+    calls.length = 0;
+    await raw("removeLink", { linkId: "chat-one" });
+    expect(node.removeLink).toHaveBeenCalledWith({ linkId: "chat-one" });
+  });
+
+  // `engine clearProfileData` removes every chat at once: mid-call, the call's hang-up had no chat left to cross either.
+  it("engine clearProfileData is refused while a call is on in any chat, and clears once it is hung up", async () => {
+    const { ctx, node, calls } = fake("one-shot");
+    const clearProfileData = vi.fn(async () => undefined);
+    Object.assign(node, { clearProfileData });
+    calls.push({ call: "c1", chat: "chat-two", state: "connected" });
+    const refused = await callApi(ctx, "engine.call", { method: "clearProfileData", yes: true }).then(() => undefined, (error: unknown) => error as CliError);
+    expect(refused).toMatchObject({ code: "busy", details: { call: "c1" } });
+    expect(refused?.message).toBe("A call is on in a chat: hang it up first (ghostly call hangup chat-two), then clear the profile");
+    expect(clearProfileData).not.toHaveBeenCalled();
+    calls.length = 0;
+    expect(await callApi(ctx, "engine.call", { method: "clearProfileData", yes: true })).toEqual({ cleared: { chats: 2, groups: 0 } });
+    expect(clearProfileData).toHaveBeenCalledOnce();
   });
 
   // The engine refused it as `engine`, "Both peers must choose a live method first", though this side had: a bot retried.

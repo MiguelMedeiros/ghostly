@@ -1,5 +1,5 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -16,6 +16,8 @@ const desktop = vi.hoisted(() => ({
   calls: [] as [string, unknown][],
   /** The next download fails with these words. */
   failNext: null as string | null,
+  /** Downloads wait for this, as a real one takes minutes. */
+  hold: null as Promise<void> | null,
 }));
 const MB = 1024 * 1024;
 const PINNED: Record<string, number> = { "pt-en": 37 * MB, "en-pt": 36.4 * MB, "es-en": 37 * MB };
@@ -26,6 +28,7 @@ vi.mock("@tauri-apps/api/core", () => ({
       case "translation_status":
         return { runtime: desktop.runtime, runtimeBytes: 80 * MB, pairs: Object.entries(PINNED).map(([pair, bytes]) => ({ pair, bytes, downloaded: desktop.downloaded.has(pair) })) };
       case "translation_download": {
+        await desktop.hold;
         const failed = desktop.failNext;
         desktop.failNext = null;
         if (failed) throw failed;
@@ -53,8 +56,10 @@ vi.mock("../../lib/translateDetector", () => ({
 
 import { MessageBubble } from "../../components/MessageBubble";
 import { TranslateMenu } from "../../components/ChatTranslate";
+import { TranslateDownloadFailure } from "../../components/TranslateDownloadFailure";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
+import { setChatLanguage } from "../../lib/chatLanguage";
 import { CueChat } from "../../lib/cues";
 import { loadSettings } from "../../lib/settings";
 import { forgetTranslations } from "../../lib/translateReceived";
@@ -103,6 +108,7 @@ beforeEach(() => {
   desktop.downloaded = new Set();
   desktop.calls = [];
   desktop.failNext = null;
+  desktop.hold = null;
   (window as unknown as { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__ = {};
   vi.stubEnv("VITE_TRANSLATE", "1");
   vi.stubGlobal("IntersectionObserver", OnScreen);
@@ -142,6 +148,31 @@ describe("Settings and the models on this computer", () => {
     await waitFor(() => expect(screen.getAllByTestId("settings-translate-pair")).toHaveLength(2));
   });
 
+  it("the switch turned on with another language's pairs downloaded still asks for what the app's language is missing", async () => {
+    // A Spanish chat set to On came first: es-en and en-pt are here, pt-en is not.
+    desktop.downloaded = new Set(["es-en", "en-pt"]);
+    settings("pt", false);
+    const { user } = renderSettings();
+    await waitFor(() => expect(screen.getAllByTestId("settings-translate-pair")).toHaveLength(2));
+    await user.click(screen.getByTestId("settings-translate"));
+    const question = await screen.findByTestId("translate-download");
+    expect(within(question).getByTestId("translate-download-pair")).toHaveTextContent("Português para inglês e de volta, 37 MB");
+    await user.click(within(question).getByTestId("translate-download-yes"));
+    await waitFor(() => expect(screen.getAllByTestId("settings-translate-pair")).toHaveLength(3));
+    expect(asked("translation_download")).toEqual([{ pair: "pt-en" }, { pair: "en-pt" }]);
+  });
+
+  it("the switch turned on with the app's language both ways here asks nothing", async () => {
+    desktop.downloaded = new Set(["pt-en", "en-pt"]);
+    settings("pt", false);
+    const { user } = renderSettings();
+    await waitFor(() => expect(screen.getAllByTestId("settings-translate-pair")).toHaveLength(2));
+    await user.click(screen.getByTestId("settings-translate"));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(screen.queryByTestId("translate-download")).not.toBeInTheDocument();
+    expect(loadSettings().translateMessages).toBe(true);
+  });
+
   it("a download that fails says so in the question, with Rust's words behind the ⓘ, and Download again finishes it", async () => {
     settings("pt", false);
     desktop.failNext = "The download did not finish";
@@ -157,6 +188,92 @@ describe("Settings and the models on this computer", () => {
     await user.click(within(question).getByTestId("translate-download-yes"));
     await waitFor(() => expect(screen.queryByTestId("translate-download")).not.toBeInTheDocument());
     expect(asked("translation_download")).toEqual([{ pair: "pt-en" }, { pair: "pt-en" }, { pair: "en-pt" }]);
+  });
+
+  describe("a download whose question is gone", () => {
+    /** Settings that can be left, and what the app keeps mounted. */
+    function App() {
+      const [page, setPage] = useState(true);
+      return <>
+        <button type="button" onClick={() => setPage(false)}>leave</button>
+        {page && <LockScreenProvider><UpdateProvider><Routes><Route path="/settings/:section?" element={<Settings />} /></Routes></UpdateProvider></LockScreenProvider>}
+        <TranslateDownloadFailure />
+      </>;
+    }
+
+    /** Download pressed on the question, the download held. Returns what lets it end. */
+    async function downloading(user: ReturnType<typeof renderApp>["user"]) {
+      let finish!: () => void;
+      desktop.hold = new Promise((resolve) => { finish = resolve; });
+      await user.click(await screen.findByTestId("settings-translate"));
+      await user.click(within(await screen.findByTestId("translate-download")).getByTestId("translate-download-yes"));
+      await waitFor(() => expect(asked("translation_download")).toHaveLength(1));
+      return async () => { desktop.hold = null; finish(); await act(() => new Promise((resolve) => setTimeout(resolve, 20))); };
+    }
+
+    it("closed while it downloads: it goes on, Settings says so, and its languages are listed when it ends", async () => {
+      settings("pt", false);
+      const { user } = renderApp(<App />, { route: "/settings/appearance" });
+      const end = await downloading(user);
+      const question = screen.getByTestId("translate-download");
+      expect(within(question).getByTestId("translate-download-goes-on")).toBeInTheDocument();
+      await user.click(within(question).getByTestId("translate-download-not-now"));
+
+      expect(screen.queryByTestId("translate-download")).not.toBeInTheDocument();
+      expect(screen.getByTestId("settings-translate-downloading")).toBeInTheDocument();
+      await end();
+      await waitFor(() => expect(screen.getAllByTestId("settings-translate-pair")).toHaveLength(2));
+      expect(screen.queryByTestId("settings-translate-downloading")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("translate-download")).not.toBeInTheDocument();
+    });
+
+    it("closed, then it fails: the question is back with the failure, and Download finishes it", async () => {
+      settings("pt", false);
+      const { user } = renderApp(<App />, { route: "/settings/appearance" });
+      const end = await downloading(user);
+      await user.click(screen.getByTestId("translate-download-not-now"));
+      desktop.failNext = "The download did not finish";
+      await end();
+
+      const again = await screen.findByTestId("translate-download");
+      expect(within(again).getByTestId("translate-download-failed")).toHaveTextContent("Os idiomas não foram baixados");
+      expect(screen.getAllByTestId("translate-download")).toHaveLength(1);
+      await user.click(within(again).getByTestId("translate-download-yes"));
+      await waitFor(() => expect(screen.queryByTestId("translate-download")).not.toBeInTheDocument());
+      expect(desktop.downloaded).toEqual(new Set(["pt-en", "en-pt"]));
+    });
+
+    it("closed while it downloads: a chat's question for other languages still downloads them", async () => {
+      settings("pt", false);
+      setChatLanguage("s1", "es");
+      const { user } = renderApp(<><App /><Chat messages={[]} /></>, { route: "/settings/appearance" });
+      const end = await downloading(user);
+      await user.click(screen.getByTestId("translate-download-not-now"));
+
+      await user.click(screen.getByTestId("translate-on"));
+      const question = await screen.findByTestId("translate-download");
+      expect(within(question).getByTestId("translate-download-pair")).toHaveTextContent("Espanhol para português");
+      expect(within(question).queryByTestId("translate-download-goes-on")).not.toBeInTheDocument();
+      await user.click(within(question).getByTestId("translate-download-yes"));
+      await waitFor(() => expect(asked("translation_download")).toContainEqual({ pair: "es-en" }));
+      await end();
+      await waitFor(() => expect(screen.queryByTestId("translate-download")).not.toBeInTheDocument());
+      expect(desktop.downloaded).toEqual(new Set(["pt-en", "en-pt", "es-en"]));
+    });
+
+    it("Settings left, then it fails: the question is there all the same", async () => {
+      settings("pt", false);
+      const { user } = renderApp(<App />, { route: "/settings/appearance" });
+      const end = await downloading(user);
+      await user.click(screen.getByRole("button", { name: "leave", hidden: true }));
+      expect(screen.queryByTestId("translate-download")).not.toBeInTheDocument();
+      desktop.failNext = "The download did not finish";
+      await end();
+
+      expect(within(await screen.findByTestId("translate-download")).getByTestId("translate-download-failed")).toBeInTheDocument();
+      await user.click(screen.getByTestId("translate-download-not-now"));
+      await waitFor(() => expect(screen.queryByTestId("translate-download")).not.toBeInTheDocument());
+    });
   });
 });
 

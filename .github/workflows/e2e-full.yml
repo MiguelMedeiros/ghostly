@@ -31,6 +31,11 @@ concurrency:
   group: e2e-full
   cancel-in-progress: false
 
+env:
+  # GitHub's ubuntu-24.04 runners refuse the unprivileged user namespaces Chromium's sandbox needs ("Chromium sandboxing
+  # failed!"): the e2e and site checks launch it without here, as before; our own machines keep it on (e2e/support/chromiumSandbox.ts).
+  E2E_CHROMIUM_SANDBOX: "0"
+
 jobs:
   e2e-full:
     name: End-to-end, gated suites included

@@ -40,6 +40,7 @@
   "joinChat": "Unirse a un chat",
   "new": "Nuevo",
   "newChat": "Nuevo chat",
+  "newChatShort": "Nuevo",
   "newMenu": {
     "chat": "Chat",
     "chatHint": "Una persona, con una invitación",
@@ -57,10 +58,22 @@
   "rail": {
     "collapse": "Contraer la lista de chats",
     "expand": "Expandir la lista de chats",
+    "invitation": "{{name}}, {{status}}",
+    "mention": "{{name}}, te mencionaron",
     "title": "{{action}} ({{keys}})",
     "unread": "{{name}}, mensajes sin leer",
     "unreadCount": "{{name}}, {{count}} mensajes sin leer",
     "unreadOne": "{{name}}, 1 mensaje sin leer"
+  },
+  "row": {
+    "mention": "te mencionaron",
+    "muted": "notificaciones silenciadas",
+    "pinned": "fijado",
+    "separator": ", ",
+    "unread": "{{count}} mensajes sin leer",
+    "unreadSome": "mensajes sin leer",
+    "unread_one": "{{count}} mensaje sin leer",
+    "unread_other": "{{count}} mensajes sin leer"
   },
   "searchPlaceholder": "Buscar chats...",
   "settings": "Ajustes",

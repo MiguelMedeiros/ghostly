@@ -132,7 +132,7 @@ sequenceDiagram
 
 A place is text too: a `geo:` URI (RFC 5870) or a Google Maps, Apple Maps or OpenStreetMap link that carries its coordinates shows as a location card, read from the text alone. Its map is not loaded until the person asks for it, because loading map tiles tells the tile server the device's address; the card says so. Short map links that hide their coordinates stay plain links.
 
-Other things a text can hold are shown as cards, read from the text alone, with nothing added on the wire: a `ghostly1` invite, a group link, a Nostr profile or note (`npub`, `nprofile`, `note`, `nevent`), a Pubky key or a DID (#281), and money in the formats the app reads, each checked against the network it is for (BIP 21 links and bitcoin addresses, BOLT 12 offers, Ark addresses, USDT addresses and EIP-681 links, #284). The text itself is sent as typed. These are the "parser cards" the rules below refer to.
+Other things a text can hold are shown as cards, read from the text alone, with nothing added on the wire: a `ghostly1` invite, a group link, a Nostr profile or note (`npub`, `nprofile`, `note`, `nevent`), a Pubky key or a DID (#281), and money in the formats the app reads, each checked against the network it is for (BIP 21 links and bitcoin addresses, BOLT 12 offers, Ark addresses, USDT addresses and EIP-681 links, #284; Monero addresses and `monero:` links, opened in the person's own wallet). The text itself is sent as typed. These are the "parser cards" the rules below refer to.
 
 A Lightning invoice pasted as text is text: it fits the DHT when short enough, and sending it starts no payment. Cashu tokens are refused as DHT text.
 

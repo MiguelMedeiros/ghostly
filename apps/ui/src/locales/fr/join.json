@@ -2,6 +2,7 @@
   "alreadyIn": "Vous êtes déjà dans cette discussion.",
   "cameraPreview": "Aperçu caméra QR",
   "cameraUnavailable": "Caméra indisponible. Collez une invitation ou ouvrez une image.",
+  "chatGone": "Cette discussion n'est plus sur cet appareil.",
   "clipboardUnavailable": "Impossible de lire le presse-papiers. Appuyez sur {{keys}} pour coller l’invitation ci-dessous.",
   "clipboardUnavailableTouch": "Impossible de lire le presse-papiers. Appuyez longuement sur le champ ci-dessous, puis sur Coller.",
   "close": "Fermer",

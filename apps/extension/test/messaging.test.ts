@@ -59,6 +59,8 @@ describe("the service worker keeps one peer", () => {
   it("opens the tab on a first install even when the peer does not start, so the page can say why", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     try {
+      // The document the worker made as it loaded went away, and the next one's script never listens.
+      world.endOffscreen();
       world.onCreateDocument = async () => {};
       fire(world.chrome.runtime.onInstalled, { reason: "install" });
       await vi.advanceTimersByTimeAsync(100 * 50 + 1000);
@@ -71,7 +73,8 @@ describe("the service worker keeps one peer", () => {
   it("says so when the peer never answers", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     try {
-      // The document is created but its script never listens.
+      // The document the worker made as it loaded went away; the next one is created but its script never listens.
+      world.endOffscreen();
       world.onCreateDocument = async () => {};
       const reply = send({ target: "background", type: "ensure-engine" });
       await vi.advanceTimersByTimeAsync(100 * 50 + 1000);
@@ -83,6 +86,8 @@ describe("the service worker keeps one peer", () => {
 
   it("waits for the peer to be ready before saying the engine is there", async () => {
     let ready!: () => void;
+    // The peer the worker started as it loaded went away; the next one is slow to be ready.
+    world.endOffscreen();
     engineControl().ready = new Promise<void>((resolve) => (ready = resolve));
     let answered = false;
     const reply = send({ target: "background", type: "ensure-engine" }).then((r) => ((answered = true), r));
@@ -103,9 +108,9 @@ describe("messages nobody should act on", () => {
     ["a string", "ensure-engine"],
     ["a number", 42],
   ])("%s gets no answer and does nothing", async (_, message) => {
+    const before = world.calls.length;
     await expect(send(message)).rejects.toThrow("message port closed");
-    expect(world.callsTo("offscreen.createDocument")).toEqual([]);
-    expect(world.callsTo("tabs.create")).toEqual([]);
+    expect(world.calls.slice(before).map((c) => c.api)).toEqual(["runtime.sendMessage"]);
   });
 
   it("nothing outside the extension is heard: no external listeners at all", async () => {
@@ -123,6 +128,8 @@ describe("open-payment-link", () => {
     "bitcoin:BC1QAR0SRRR7XFKVY5L643LYDNW9RE59GTZZWF5MDQ?ark=tark1q",
     // A label and message as the app writes them (apps/ui/src/lib/parse/money-bitcoin.ts bip21Uri).
     "bitcoin:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq?amount=0.0001&label=Bob%27s%20%28Tue%29&message=Thanks%21%2A%7E",
+    // As apps/ui/src/lib/parse/money-monero.ts writes it.
+    "monero:4AzKEX4gXdJdNeM6dfiBFL7kqund3HYGvMBF3ttsNd9SfzgYB6L7ep1Yg1osYJzLdaKAYSLVh6e6jKnAuzj3bw1oGy9kXCb?tx_amount=0.25&tx_description=Rent%20%28May%29",
   ])("hands %s to the system's wallet", async (uri) => {
     expect(await send({ target: "background", type: "open-payment-link", uri })).toEqual({ ok: true });
     expect(world.callsTo("tabs.create")).toEqual([[uri]]);
@@ -164,7 +171,10 @@ describe("the page and the peer talk over the 'ui' port", () => {
       () => (disconnected = true),
     );
     const server = engine();
-    expect(world.callsTo("runtime.sendMessage")[0]).toEqual([{ target: "background", type: "ensure-engine" }]);
+    // The worker's own pings came first, as it loaded.
+    const ensured = world.calls.findIndex((c) => c.api === "runtime.sendMessage" && (c.args[0] as { type?: string }).type === "ensure-engine");
+    expect(ensured).toBeGreaterThanOrEqual(0);
+    expect(ensured).toBeLessThan(world.calls.findIndex((c) => c.api === "runtime.connect"));
     expect(server.attached).toHaveLength(1);
 
     connection.send({ id: 1, method: "getState", params: [] } as never);
@@ -219,6 +229,7 @@ describe("the page and the peer talk over the 'ui' port", () => {
   it("fails the page's connect when the peer cannot start", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     try {
+      world.endOffscreen();
       world.onCreateDocument = async () => {};
       const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
       const connecting = extensionHost.connect(() => {}, () => {});
@@ -236,7 +247,7 @@ describe("viewer tabs", () => {
   it("opens one tab bound to one contact's service, intercepting only the virtual origin", async () => {
     const tabId = await openViewer(world);
     expect(world.callsTo("tabs.create")).toEqual([["about:blank"]]);
-    expect(world.session.get(`viewer:${tabId}`)).toEqual({ peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG });
+    expect(world.session.get(`viewer:${tabId}`)).toEqual({ peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, page: expect.objectContaining({ lang: "en", dir: "ltr" }) });
     expect(world.callsTo("debugger.attach")).toEqual([[{ tabId }, "1.3"]]);
     expect(world.callsTo("debugger.sendCommand").map(([, method, params]) => [method, params])).toEqual([
       ["Fetch.enable", { patterns: [{ urlPattern: "https://*.invalid/*", requestStage: "Request" }] }],
@@ -391,8 +402,9 @@ describe("viewer tabs", () => {
     ]);
   });
 
-  it("answers 503 when the contact is gone and 502 with an escaped reason otherwise", async () => {
-    const tabId = await openViewer(world);
+  it("answers 503 when the contact is gone and 502 otherwise, in the words and language of the page that opened the tab", async () => {
+    const page = { lang: "ar", dir: "rtl", unreachable: "هذه الخدمة غير متاحة.", failed: 'فشل <img src=x onerror="alert(1)">' };
+    const tabId = await openViewer(world, PEER, SERVICE, TAG, page);
     const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/`;
     const offline = await httpError("offline", "offline");
     engineControl().respond = async () => {
@@ -403,17 +415,41 @@ describe("viewer tabs", () => {
       responseCode: 503,
       responseHeaders: expect.arrayContaining([{ name: "x-ghostly-error", value: "offline" }, { name: "cache-control", value: "no-store" }]),
     });
-    expect(bodyText(gone.params)).toContain("This service is not reachable");
+    expect(bodyText(gone.params)).toContain('<html lang="ar" dir="rtl">');
+    expect(bodyText(gone.params)).toContain("هذه الخدمة غير متاحة.");
+    expect(bodyText(gone.params)).not.toContain("not reachable");
 
+    // The engine's English is for the console, not the page.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     engineControl().respond = async () => {
-      throw new Error('<img src=x onerror="alert(1)">');
+      throw new Error("Request reset by peer");
     };
     const failed = await pauseRequest(world, tabId, { url });
     expect(failed.params).toMatchObject({ responseCode: 502 });
     expect(failed.params.responseHeaders).toContainEqual({ name: "x-ghostly-error", value: "error" });
     const html = bodyText(failed.params);
+    expect(html).not.toContain("Request reset by peer");
     expect(html).not.toContain("<img");
-    expect(html).toContain("&#60;img src=x onerror=&#34;alert(1)&#34;&#62;");
+    expect(html).toContain("فشل &#60;img src=x onerror=&#34;alert(1)&#34;&#62;");
+    expect(warn).toHaveBeenCalledWith("Service request failed:", "error", "Request reset by peer");
+  });
+
+  it.each([
+    ["no page", undefined],
+    ["a language that is no tag", { lang: 'ar" onload="x', dir: "rtl", unreachable: "a", failed: "b" }],
+    ["another direction", { lang: "ar", dir: "auto", unreachable: "a", failed: "b" }],
+    ["a text that is not one", { lang: "ar", dir: "rtl", unreachable: 1, failed: "b" }],
+    ["an empty text", { lang: "ar", dir: "rtl", unreachable: "a", failed: "" }],
+    ["a text too long", { lang: "ar", dir: "rtl", unreachable: "a".repeat(501), failed: "b" }],
+  ])("says it in English when the page sent %s", async (_, page) => {
+    const tabId = await openViewer(world, PEER, SERVICE, TAG, page);
+    const offline = await httpError("offline", "offline");
+    engineControl().respond = async () => {
+      throw offline;
+    };
+    const gone = await pauseRequest(world, tabId, { url: `https://${SERVICE}.${PEER}.${TAG}.invalid/` });
+    expect(bodyText(gone.params)).toContain('<html lang="en" dir="ltr">');
+    expect(bodyText(gone.params)).toContain("This service is not reachable. Services exist while their ghost is online.");
   });
 
   it("stops intercepting once the tab leaves the virtual origin, and only then", async () => {
@@ -497,6 +533,8 @@ describe("the debugger stays on the tabs the worker opened", () => {
     ["a web page claiming the extension's id", { id: "nbedaagicniejlmfcncndfjcejaidbcf", url: "https://evil.example/" }],
     ["a sender with no url", { id: "nbedaagicniejlmfcncndfjcejaidbcf" }],
   ])("does not hear %s", async (_, sender) => {
+    // The peer the worker started as it loaded went away: a stranger's ensure-engine does not bring it back.
+    world.endOffscreen();
     for (const message of [
       { target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG },
       { target: "background", type: "open-payment-link", uri: "lightning:lnbc1" },
@@ -506,7 +544,8 @@ describe("the debugger stays on the tabs the worker opened", () => {
     }
     expect(world.callsTo("tabs.create")).toEqual([]);
     expect(world.callsTo("debugger.attach")).toEqual([]);
-    expect(world.callsTo("offscreen.createDocument")).toEqual([]);
+    expect(world.callsTo("offscreen.createDocument")).toHaveLength(1);
+    expect(world.offscreenDocument).toBe(false);
   });
 });
 

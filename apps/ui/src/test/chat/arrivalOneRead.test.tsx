@@ -22,7 +22,7 @@ import { renderApp } from "../render";
 
 // The real sync (the setup stubs it out).
 vi.unmock("@ghostly/browser/platform/sync");
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const PEER = "peer".padEnd(52, "p");
 const LINK = "link-1";

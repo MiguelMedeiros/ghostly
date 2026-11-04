@@ -141,6 +141,11 @@ describe("ghostly group edit", () => {
     paced.node.groupTaken.mockImplementation(() => 0);
     paced.node.getMessage.mockResolvedValueOnce(groupRow({ edit: { seq: 2, at: 4, history: [] } }));
     expect(await callApi(paced.ctx, "group.edit", { group: "Crew", message: "mekey:1:0", text: "x" })).toMatchObject({ edits: 3, sent: false, edges: 0 });
+    // Said, but every member's edge is down (a one-shot, or all away): nobody has it yet, as for group send.
+    const away = groupFake(undefined, [groupRow({ edit: { seq: 3, at: 5, history: [] } })]);
+    away.node.groupTaken.mockImplementation(() => 0);
+    away.node.getMessage.mockResolvedValueOnce(groupRow({ edit: { seq: 2, at: 4, history: [] } }));
+    expect(await callApi(away.ctx, "group.edit", { group: "Crew", message: "mekey:1:0", text: "x" })).toEqual({ group: "g1", messageId: "mekey:1:0", edits: 3, sent: false, edges: 0 });
     const theirs = groupFake({ error: "Only your own text messages can be edited", refused: true }, [groupRow(), groupRow({ id: "bobkey:1:0", sender: "peer", member: "bobkey" })]);
     await expect(callApi(theirs.ctx, "group.edit", { group: "Crew", message: "bobkey:1:0", text: "x" })).rejects.toMatchObject({ code: "refused" });
     await expect(callApi(theirs.ctx, "group.edit", { group: "Crew", message: "mekey:9:9", text: "x" })).rejects.toMatchObject({ code: "not_found", message: 'No message "mekey:9:9" in this group: give the messageId group send printed' });
