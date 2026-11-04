@@ -9252,10 +9252,12 @@ export class GhostlyNode implements EngineImplementation {
         throw new Error("All native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.");
       }
       // Such an edge takes a free listener only once its group's one has one, and within what 1:1 chats leave (all but
-      // four); it never takes one that is held. An entry session (a join) takes a free one within that room, as before.
-      // One that finds none waits for a slot.
-      if (group && (entry || extra(live)) && (full || groups >= this.groupNativeSlots(key)
-        || (!entry && !anchorOf(live.stored.group!)?.link?.availableTransports.includes(key)))) return "no-slot";
+      // four); it never takes one that is held. One that finds none waits for a slot.
+      if (group && extra(live) && (full || groups >= this.groupNativeSlots(key) || !anchorOf(live.stored.group!)?.link?.availableTransports.includes(key))) return "no-slot";
+      // An entry session (a join) is short-lived and in use right then: it takes any free listener, past the groups'
+      // room too (two groups with members held the four, and a third group's link let nobody in), or, every one held,
+      // one from a group's edge past its group's one. Never a chat's, nor another group's one.
+      if (entry && full && !owners.some(other => extra(other) && other.link?.canReleaseEndpoint(key))) return "no-slot";
       // A chat finds none free once every listener is taken, or the chats hold their eight (of Iroh's sixteen in a
       // browser; half of its 64 on relays that are not n0's).
       if (full || (!group && owners.length - groups >= this.chatNativeSlots(key))) {
