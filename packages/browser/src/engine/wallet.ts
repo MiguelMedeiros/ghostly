@@ -544,16 +544,20 @@ export class CashuWallet {
   /**
    * A payer says it paid this invoice of ours (a contact's app, once its payment went through). A held quote (a test
    * mint's, which reads paid by itself) is minted from now on; on any other mint the mint's own answer decides, as
-   * always. Returns whether the invoice is one of ours.
+   * always. Returns whether the invoice is one of ours. `said` false: the payer spoke of another invoice, so this one is
+   * only asked about, and a held one stays held. Only this invoice is asked about now: the others keep their pace.
    */
-  async vouch(invoice: string): Promise<boolean> {
+  async vouch(invoice: string, said = true): Promise<boolean> {
     const wanted = invoice.trim().toLowerCase();
-    const quote = (await wrap<StoredQuote[]>((await store(STORES.quotes, "readonly")).getAll())).find((q) => q.invoice.toLowerCase() === wanted);
+    let quote = (await wrap<StoredQuote[]>((await store(STORES.quotes, "readonly")).getAll())).find((q) => q.invoice.toLowerCase() === wanted);
     if (!quote) return false;
-    if (quote.held) await committed((await store(STORES.quotes, "readwrite")).put({ ...quote, held: undefined } satisfies StoredQuote));
+    if (quote.held && said) {
+      quote = { ...quote, held: undefined } satisfies StoredQuote;
+      await committed((await store(STORES.quotes, "readwrite")).put(quote));
+    }
     // The payment may take a moment to settle at the mint: the invoice is asked about at the fast pace meanwhile.
     this.quoteWatched.set(quote.quote, Date.now() + INVOICE_PACE.watchMs);
-    await this.pollQuotes(true);
+    if (!(await this.settleQuotes([quote])).length && !quote.held && !quote.issuedUnclaimed) this.scheduleQuotes(this.nextAsk(quote, Date.now()));
     return true;
   }
 
