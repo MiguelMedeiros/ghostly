@@ -139,8 +139,14 @@ const randomId = () => randomIds(1)[0]!;
 /** How many picked files a pick turns into links per turn of the thread: a pick of 100,000 lets the page answer between. */
 const PICK_CHUNK = 4096;
 
-/** Whether a path names something hidden: any of its parts starts with a dot. */
-const hidden = (path: string) => path.startsWith(".") || path.includes("/.");
+/**
+ * Whether a path names something hidden: any of its parts starts with a dot. A folder's paths start with its own name,
+ * which the person chose, so only those under it count (`.Films` links its files), as the Desktop's walk.
+ */
+const hidden = (path: string, folder: boolean) => {
+  const under = folder ? path.slice(path.indexOf("/") + 1) : path;
+  return under.startsWith(".") || under.includes("/.");
+};
 
 /** A file's extension in lower case (ASCII letters only, as the Desktop's walk), "" for none. */
 const extensionOf = (path: string) => {
@@ -502,7 +508,7 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
       // In chunks, the thread let go between them: at 100,000 files the links took the page for half a second.
       for (let from = 0; from < picked.files.length; from += PICK_CHUNK) {
         if (from) await yieldThread();
-        const chunk = picked.files.slice(from, from + PICK_CHUNK).filter(({ path }) => !hidden(path) && accepted(path, accept));
+        const chunk = picked.files.slice(from, from + PICK_CHUNK).filter(({ path }) => !hidden(path, folder) && accepted(path, accept));
         if (linksOf(ref).size + added.length + chunk.length > MINI_APP_LIMITS.filesEntries) throw refusal("too-large", "Too many files for one app");
         const ids = randomIds(chunk.length);
         chunk.forEach(({ path, file, at }, i) => {
