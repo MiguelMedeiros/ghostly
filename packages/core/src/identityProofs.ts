@@ -446,9 +446,15 @@ export class IdentityExchange {
         case "idp-result": {
           const s = id ? this.shared(id) : undefined;
           if (!s || s.status !== "pending") return;
-          const error = frame.ok === true ? undefined : clean(frame.error, ERROR_MAX) ?? "Your contact could not verify it";
-          await this.setShared({ ...s, status: frame.ok === true ? "accepted" : "rejected", at: this.now(), error },
-            { type: "result", side: "mine", proof: s.id, ok: frame.ok === true, error });
+          const ok = frame.ok === true;
+          const error = ok ? undefined : clean(frame.error, ERROR_MAX) ?? "Your contact could not verify it";
+          const entry: SharedIdentity = { ...s, status: ok ? "accepted" : "rejected", at: this.now(), error };
+          // The contact keeps one proof per identity (onPresent): the one it accepted replaced any other of the same
+          // provider and subject it held from here, so that one is no longer shared in this chat.
+          const replaced = (x: SharedIdentity) => ok && x.status === "accepted" && x.provider === s.provider && x.subject === s.subject;
+          await this.options.storage.update(l => this.log({ ...l, shared: [
+            ...l.shared.filter(x => x.id !== s.id).map(x => replaced(x) ? { ...x, status: "withdrawn" as const, at: entry.at } : x), entry,
+          ] }, { type: "result", side: "mine", proof: s.id, ok, error }));
           return;
         }
         case "idp-withdraw": {
