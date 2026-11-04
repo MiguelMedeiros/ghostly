@@ -5,16 +5,19 @@ import { chatTargetRows } from "../../lib/chatTargets";
 
 /**
  * One chat in a picker: its picture and name, and for a choice of several, whether it is chosen. `disabled`: it cannot
- * be chosen now (the picker has as many as it takes).
+ * be pressed for now (a send is running). `unavailable`: it cannot be chosen now (the picker has as many as it takes):
+ * `aria-disabled`, still reachable by the keys so the reason is read, with that reason in the element `describedBy`
+ * names, as the app's Switch does.
  */
-export function ChatTargetRow({ target, testId, onClick, checked, disabled }: {
-  target: ChatTarget; testId: string; onClick: () => void; checked?: boolean; disabled?: boolean;
+export function ChatTargetRow({ target, testId, onClick, checked, disabled, unavailable, describedBy }: {
+  target: ChatTarget; testId: string; onClick: () => void; checked?: boolean; disabled?: boolean; unavailable?: boolean; describedBy?: string;
 }) {
   const multi = checked !== undefined;
   return (
-    <button type="button" data-testid={testId} data-kind={target.kind} onClick={onClick} disabled={disabled}
+    <button type="button" data-testid={testId} data-kind={target.kind} onClick={() => { if (!unavailable) onClick(); }} disabled={disabled}
+      aria-disabled={unavailable || undefined} aria-describedby={unavailable ? describedBy : undefined}
       {...(multi && { role: "checkbox", "aria-checked": checked })}
-      className="w-full flex items-center gap-3 px-4 py-2.5 min-h-12 text-start hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent cursor-pointer disabled:opacity-50 disabled:cursor-default">
+      className="w-full flex items-center gap-3 px-4 py-2.5 min-h-12 text-start hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent cursor-pointer disabled:opacity-50 disabled:cursor-default aria-disabled:opacity-50 aria-disabled:cursor-default aria-disabled:hover:bg-transparent">
       {target.kind === "chat"
         ? <span className="relative w-9 h-9 shrink-0 overflow-hidden rounded-full flex items-center justify-center bg-surface-hover">{target.avatar}</span>
         : target.avatar}

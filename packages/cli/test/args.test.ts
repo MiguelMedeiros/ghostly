@@ -27,6 +27,11 @@ describe("the argument parser", () => {
     expect(() => parseArgs(["alice", "--stdn"], send.options, idSlot(send))).toThrow(/Unknown option --stdn/);
     expect(() => parseArgs(["abc", "-oops"], COMMANDS["chat rename"].options ?? {}, idSlot(COMMANDS["chat rename"]))).toThrow(/Unknown option -oops/);
     expect(() => parseArgs(["-oops"], COMMANDS["group create"].options!, idSlot(COMMANDS["group create"]))).toThrow(/Unknown option -oops/);
+    // A path is not an id: a mistyped flag in its place is refused with the one meant, not taken as the file.
+    const credential = COMMANDS["x401 credential add"];
+    for (const argv of [["--lable", "work"], ["--lable"]]) {
+      expect(() => parseArgs(argv, credential.options!, idSlot(credential)), argv.join(" ")).toThrow(/Unknown option --lable \(did you mean --label\?\)/);
+    }
   });
 
   it("takes a draft that starts with a dash (identity complete, the #357 failure)", () => {

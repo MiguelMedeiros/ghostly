@@ -72,11 +72,13 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
   };
   const note = full ? t("group.link.full", { count: cap }) : community ? t("group.link.noteCommunity", { count: cap }) : t("group.link.note", { count: cap });
 
+  // A community member's panel stays open while the admin turns the link off (the Share dialog): only the admin turns it
+  // on again, so a member is told so, with no button the engine would refuse.
   if (!url) return <div className={large ? "text-center" : "mt-4"} data-testid="group-link" data-state="off">
     {!large && <h3 className="text-xs font-bold uppercase tracking-wider text-accent">{t("group.link.title")}</h3>}
-    <p className="mt-1 text-sm text-text-muted">{t("group.link.off")}</p>
-    <button ref={enableButton} disabled={full} aria-disabled={busy || undefined} onClick={() => { if (!busy) void run(() => engine.call("enableGroupLink", { groupId: group.id }), true); }} data-testid="group-link-enable"
-      className="mt-2 min-h-9 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 aria-disabled:opacity-40">{full ? t("group.link.fullShort") : t("group.link.enable")}</button>
+    <p className="mt-1 text-sm text-text-muted">{group.isAdmin ? t("group.link.off") : t("group.link.offMember")}</p>
+    {group.isAdmin && <button ref={enableButton} disabled={full} aria-disabled={busy || undefined} onClick={() => { if (!busy) void run(() => engine.call("enableGroupLink", { groupId: group.id }), true); }} data-testid="group-link-enable"
+      className="mt-2 min-h-9 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 aria-disabled:opacity-40">{full ? t("group.link.fullShort") : t("group.link.enable")}</button>}
     {error && <Notice problem={error} className="mt-2 text-xs" />}
   </div>;
 
@@ -140,7 +142,8 @@ export function GroupShareDialog({ group, created = false, onClose, returnFocus 
   const backdrop = useBackdropDismiss(onClose);
   useBackCloses(onClose);
   useEffect(() => {
-    const before = document.activeElement as HTMLElement | null, opener = returnFocus?.current;
+    // `opener` read as it closes, not now: what it names may have changed meanwhile (the header's Share, gone with the link).
+    const before = document.activeElement as HTMLElement | null, opener = () => returnFocus?.current;
     const element = dialog.current!; element.showModal();
     // Share first, not the address field (which would select itself and scroll to its end). Then scrolled into view by
     // scrollIntoView, which keeps it clear of the sticky footer (the dialog's scroll-padding below) in every engine.
@@ -149,10 +152,20 @@ export function GroupShareDialog({ group, created = false, onClose, returnFocus 
     share?.scrollIntoView?.({ block: "nearest" });
     return () => {
       element.close();
-      const back = before && before !== document.body && before.isConnected ? before : opener;
-      back?.focus();
+      const back = before && before !== document.body && before.isConnected ? before : opener();
+      if (back?.isConnected) back.focus();
     };
   }, [returnFocus]);
+  // The link turned off or on elsewhere (the admin, another of my devices) swaps the panel with what had the focus:
+  // Done, the dialog's next stop, has it rather than the page.
+  const done = useRef<HTMLButtonElement>(null);
+  const linkOn = !!group.entryLink, wasOn = useRef(linkOn);
+  useEffect(() => {
+    if (wasOn.current === linkOn) return;
+    wasOn.current = linkOn;
+    const active = document.activeElement;
+    if (!active || active === document.body || active === dialog.current) done.current?.focus();
+  }, [linkOn]);
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`} data-testid="group-share-dialog"
     className="m-auto w-[calc(100%_-_2rem)] max-w-sm max-h-[92dvh] overflow-y-auto scroll-pb-20 rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <div className="mb-4 text-center">
@@ -165,7 +178,7 @@ export function GroupShareDialog({ group, created = false, onClose, returnFocus 
         4.5rem high (pt-2, a min-h-11 button, pb-5); the dialog's scroll-pb-20 is that plus room for a focus ring, so
         whatever the focus or a scroll into view brings up (Share on open, the next button on Tab) stops above it. */}
     <div className="sticky -bottom-5 -mx-5 -mb-5 mt-4 bg-sidebar-bg px-5 pb-5 pt-2">
-      <button onClick={onClose} data-testid="group-share-done" className="min-h-11 w-full rounded-lg px-4 text-sm text-text-secondary hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">
+      <button ref={done} onClick={onClose} data-testid="group-share-done" className="min-h-11 w-full rounded-lg px-4 text-sm text-text-secondary hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">
         {created ? t("group.share.open") : t("group.share.done")}
       </button>
     </div>

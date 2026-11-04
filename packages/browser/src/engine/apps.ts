@@ -560,6 +560,11 @@ export class Apps {
    * index listing the same is not peeked again at every check.
    */
   private readonly listingMisses = new Map<string, string>();
+  /**
+   * The index a store's own URL served at its last read when it was not taken (behind the copy the person took, at a
+   * commit): by store key, with that URL. The same bytes there again are not checked whole at every refresh.
+   */
+  private readonly behindReads = new Map<string, { url: string; index: AppStoreIndex; digest: string }>();
   /** `ghostly-revoke.json` files checked, by the SHA-256 of their bytes: their revocations, or null when refused, and the bytes the held list counts for. */
   private readonly revocationFiles = new Map<string, { revocations: SignedAppRevocation[] | null; bytes: number }>();
   /** Revocations read in a store's index and verified, by `appRevocationId`: at most `STORE_REVOCATIONS_KEPT`. */
@@ -1009,12 +1014,13 @@ export class Apps {
 
   /**
    * Reads the index at `url`. With the index held for this store, bytes equal to it (by digest) are the held index: its
-   * signature and every revocation in it were checked when it was read, so only its expiry is taken again. Any other
+   * signature and every revocation in it were checked when it was read, so only its expiry is taken again; the same for
+   * `behind`, the index this URL served at its last read when it was not taken (`behindReads`). Any other
    * index is read with a pause every few ms (the engine shares the page's thread, and an index holds up to 4096
    * listings and 4096 revocations, each of these a signature check), and a revocation checked in an earlier read, of
    * this store or another, a preview included, is not checked again.
    */
-  private async readStoreAt(url: string, heldKey?: string, held?: Pick<AddedAppStore, "index" | "digest">): Promise<AppStoreRead> {
+  private async readStoreAt(url: string, heldKey?: string, held?: Pick<AddedAppStore, "index" | "digest">, behind?: { index: AppStoreIndex; digest: string }): Promise<AppStoreRead> {
     // Read side by side; the first of the two that fails stops the other, whose bytes nobody would use.
     const stop = new AbortController();
     const read = (at: string, maxBytes: number) => this.host.fetch(at, { maxBytes, revalidate: true, signal: stop.signal }).catch((error: unknown) => { stop.abort(); throw error; });
@@ -1022,8 +1028,12 @@ export class Apps {
       read(url, APP_FETCH_LIMITS.storeIndexBytes),
       read(besideUrl(url, "ghostly-store.sig"), APP_FETCH_LIMITS.sigBytes),
     ]);
-    if (held?.index && held.digest !== undefined && toBase64Url(await sha256Paced(indexBytes)) === held.digest) {
-      return { ok: true, store: { index: held.index, digest: held.digest, expired: held.index.expires < this.nowS() } };
+    // The index held, or the one this URL served last time it was behind (`behindReads`): checked whole then.
+    const known = held?.index && held.digest !== undefined ? [{ index: held.index, digest: held.digest }, ...(behind ? [behind] : [])] : [];
+    if (known.length) {
+      const digest = toBase64Url(await sha256Paced(indexBytes));
+      const same = known.find((k) => k.digest === digest);
+      if (same) return { ok: true, store: { index: same.index, digest, expired: same.index.expires < this.nowS() } };
     }
     const steps = readAppStoreSteps(indexBytes, sigBytes, this.nowS(), heldKey, this.checkedRevocations);
     const pause = pacer(REVOCATIONS_SLICE_MS);
@@ -1197,6 +1207,7 @@ export class Apps {
   async removeStore({ key }: { key: string }): Promise<void> {
     const held = await this.storeRecord(key);
     if (!held) return;
+    this.behindReads.delete(key);
     // Its index's revocations stay with the apps they stop (an index held from before they were kept at each read).
     await this.keepStoreRevocations(held);
     const seen = held.index ?{ sequence: held.index.sequence, digest: held.digest ?? "" } : held.seen;
@@ -1230,12 +1241,15 @@ export class Apps {
     for (const s of stores) {
       let read: AppStoreRead | { ok: false; reason: string };
       try {
-        read = await this.readStoreAt(s.url, s.key, s);
+        const last = this.behindReads.get(s.key);
+        read = await this.readStoreAt(s.url, s.key, s, last?.url === s.url ? last : undefined);
       } catch (error) {
         read = { ok: false, reason: error instanceof AppFetchError ? error.code : "network" };
       }
       // Its own URL behind the copy of its index the person took (or not answering): that copy's URL is read too.
       const behind = !read.ok || !!this.withIndex(s, read.store.index, read.store.digest).problem;
+      if (read.ok && behind) this.behindReads.set(s.key, { url: s.url, index: read.store.index, digest: read.store.digest });
+      else this.behindReads.delete(s.key);
       const copy = s.copyUrl !== undefined && behind ? await this.readStoreAt(s.copyUrl, s.key, s).catch((): null => null) : null;
       // Removed meanwhile: not put back.
       const now = await this.storeRecord(s.key);
@@ -1516,10 +1530,12 @@ export class Apps {
     await this.refreshStores();
     const stores = await this.stores();
     // A few apps at a time: each waits on its publisher's files (and its sources' peeks), so one after the other a
-    // check took the app count times the round trip. The results stay in the installed order.
+    // check took the app count times the round trip. The results stay in the installed order. An app whose check fails
+    // (a bundle write refused on a full disk) is left out, as one uninstalled meanwhile is: a throw would end the check
+    // while the other workers still run, and the next check would start beside them.
     const out: (AppCheckResult | null)[] = [];
     let next = 0;
-    const worker = async () => { while (next < apps.length) { const i = next++; out[i] = await this.checkApp(apps[i]!, stores); } };
+    const worker = async () => { while (next < apps.length) { const i = next++; out[i] = await this.checkApp(apps[i]!, stores).catch(() => null); } };
     await Promise.all(Array.from({ length: Math.min(APP_CHECK_PARALLEL, apps.length) }, worker));
     return out.filter((r) => r !== null);
   }
