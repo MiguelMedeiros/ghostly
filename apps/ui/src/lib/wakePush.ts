@@ -120,16 +120,15 @@ export function useNoPushService(): boolean {
 }
 
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
-const engineSnapshot = () => engine.state;
 
 /**
  * Whether this device is woken now (it shared a subscription of its own), as the engine has it. In a profile on several
  * devices a subscription that is another device's (the phone's, given to contacts while this desktop is active) is not
- * this device's: the switch is off here (WISP 06 § Push and the phone).
+ * this device's: the switch is off here (WISP 06 § Push and the phone). Drawn again only when the answer changes, not
+ * on every state of the engine.
  */
 export function useWakeOn(): boolean {
-  const state = useSyncExternalStore(subscribeEngine, engineSnapshot);
-  return !!state?.settings.wake && state.wakeOwner !== "away";
+  return useSyncExternalStore(subscribeEngine, wakeIsOn);
 }
 
 /** Whether this device is woken now, as the engine has it (`useWakeOn`, read once). */
