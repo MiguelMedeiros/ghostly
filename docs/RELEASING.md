@@ -131,14 +131,15 @@ The workflow signs in as a Google Cloud service account that the store's publish
 1. In the [Google Cloud console](https://console.cloud.google.com/), pick or create a project and enable the **Chrome Web Store API** for it.
 2. IAM & Admin → Service accounts → create one (say `chrome-web-store-upload`). It needs no role in the project. On it, Keys → Add key → JSON: the browser downloads its key file. A project under a Google Workspace organization may refuse keys (the policy `iam.disableServiceAccountKeyCreation`); a project of a personal account does not.
 3. In the [Chrome Web Store Developer Dashboard](https://chrome.google.com/webstore/devconsole), Account: add the service account's email (`...@<project>.iam.gserviceaccount.com`; a publisher can have one). Copy the **publisher ID** from the publisher's settings.
-4. Add both as repository secrets, then delete the downloaded key file:
+4. On GitHub, Settings → Environments → New environment `chrome-web-store`; under Deployment branches and tags: "Selected branches and tags", with the branch `main` and the tag pattern `v*`, as for `npm`. A run uses the copy of `chrome-web-store.yml` on the ref it runs from, and a repository secret reaches every branch's copy: only an environment's rule keeps the key from a branch's workflow.
+5. Add both as secrets of that environment, never of the repository, then delete the downloaded key file:
 
    ```bash
-   gh secret set CWS_SERVICE_ACCOUNT_JSON -R MiguelMedeiros/ghostly < ~/Downloads/<key file>.json
-   gh secret set CWS_PUBLISHER_ID -R MiguelMedeiros/ghostly   # paste the publisher ID
+   gh secret set CWS_SERVICE_ACCOUNT_JSON --env chrome-web-store -R MiguelMedeiros/ghostly < ~/Downloads/<key file>.json
+   gh secret set CWS_PUBLISHER_ID --env chrome-web-store -R MiguelMedeiros/ghostly   # paste the publisher ID
    ```
 
-5. Try it on the newest published release: `gh workflow run chrome-web-store.yml -f tag=v1.0.0`. Its summary says what it did: submitted for review, or why not (the store already has that version, or is reviewing an earlier one).
+6. Try it on the newest published release: `gh workflow run chrome-web-store.yml --ref main -f tag=v1.0.0` (from any other branch the job is skipped). Its summary says what it did: submitted for review, or why not (the store already has that version, or is reviewing an earlier one).
 
 The key can manage every item of the publisher, and nothing else. To revoke it, delete the key on the service account (or remove the service account from the dashboard) and the secret. The store publishes with the visibility the dashboard has: after changing visibility there, publish once by hand before the workflow can.
 
