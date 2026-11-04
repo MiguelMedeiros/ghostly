@@ -25,10 +25,15 @@ const SwitchKnob = ({ checked }: { checked: boolean }) => <span className={`abso
  */
 export const chosenInForcedColors = "forced-colors:forced-color-adjust-none forced-colors:bg-[color:Highlight] forced-colors:text-[color:HighlightText]";
 
-export function Switch({ checked, onChange, label, disabled, testId }: { checked: boolean; onChange: (next: boolean) => void; label: string; disabled?: boolean; testId?: string }) {
+/**
+ * An on/off switch. `unavailable`: it cannot be turned on here for now (`aria-disabled`, still reachable by the keys so
+ * its reason is read), with that reason in the element `describedBy` names.
+ */
+export function Switch({ checked, onChange, label, disabled, unavailable, describedBy, testId }: { checked: boolean; onChange: (next: boolean) => void; label: string; disabled?: boolean; unavailable?: boolean; describedBy?: string; testId?: string }) {
   return (
-    <button type="button" role="switch" data-testid={testId} aria-checked={checked} aria-label={label} disabled={disabled} onClick={() => onChange(!checked)}
-      className={`${switchTrack(checked)} cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed before:absolute before:-inset-2 before:content-['']`}>
+    <button type="button" role="switch" data-testid={testId} aria-checked={checked} aria-label={label} aria-disabled={unavailable || undefined} aria-describedby={describedBy} disabled={disabled}
+      onClick={() => { if (!unavailable) onChange(!checked); }}
+      className={`${switchTrack(checked)} cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:cursor-not-allowed before:absolute before:-inset-2 before:content-['']`}>
       <SwitchKnob checked={checked} />
     </button>
   );
