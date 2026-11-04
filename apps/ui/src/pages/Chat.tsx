@@ -6,6 +6,7 @@ import { useBackdropDismiss, useDialogFocus } from "../hooks/useDismiss";
 import { useComposition } from "../hooks/useComposition";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { setChatOnCall } from "../lib/chatsOnCall";
+import { setCallNoPath, useCallNoPath } from "../lib/callNoPath";
 import { createPortal } from "react-dom";
 import { ChatHoldDialog, ChatHoldLine } from "../components/ChatHoldDialog";
 import { ContactIdentitiesPanel } from "../components/identities/ContactIdentitiesPanel";
@@ -325,6 +326,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // Out of sight, a ringing call is a system notification too: one for every tab that rings it (its offer's time).
   const incomingOfferTs = useMemo(() => (incomingCallSignal ? parseCallSignal(incomingCallSignal)?.ts : undefined), [incomingCallSignal]);
   useIncomingCallNotice(callState === "incoming" && callRings(sessionId), sessionId, t("pwa.wakeCall"), incomingOfferTs);
+  // The no-path note outlives this page (lib/callNoPath.ts): a chat off screen is let go once its call ends. It goes
+  // when closed, or when the chat's next call starts.
+  useEffect(() => { if (webrtc.noPath) setCallNoPath(sessionId, true); }, [webrtc.noPath, sessionId]);
+  useEffect(() => { if (callState === "offering" || callState === "incoming") setCallNoPath(sessionId, false); }, [callState, sessionId]);
+  const noPathShown = useCallNoPath(sessionId);
 
   useEffect(() => () => { onCallChange(sessionId, false); setChatOnCall(sessionId, false); }, [onCallChange, sessionId]);
 
@@ -809,7 +815,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       )}
       {/* Our call found no path to the contact (a VPN or firewall that blocks UDP, on either side): where a TURN server
           is set, and the guide. */}
-      {webrtc.noPath && !webrtc.mediaProblem && <CallNoPathNotice iceServers={engine.state?.settings.iceServers} onClose={webrtc.dismissNoPath} />}
+      {(webrtc.noPath || noPathShown) && !webrtc.mediaProblem && (
+        <CallNoPathNotice iceServers={engine.state?.settings.iceServers} onClose={() => { webrtc.dismissNoPath(); setCallNoPath(sessionId, false); }} />
+      )}
       {/* The system paused our microphone in a call (an iPhone's Home Screen app while the screen is locked): the
           contact hears nothing until Ghostly is back on screen, and the call is still on. */}
       {webrtc.micPaused && !webrtc.mediaProblem && (
