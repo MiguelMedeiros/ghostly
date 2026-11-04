@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CueChat } from "../lib/cues";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
@@ -53,7 +53,8 @@ import { GroupTypingText, type GroupTyper } from "../components/TypingIndicator"
 import { navOnly } from "../lib/navigation";
 import { mentionViews, type MentionCandidate } from "../lib/parse/mentions";
 import { COMMUNITY_LIMITS, GROUP_FILE_LIMITS, GROUP_LIMITS, isPlayableVideoType, mayPin, replySnippet, type GroupMention, type RoutineCard, type VoiceMeta } from "@ghostly/core";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
+import { useEngineValue } from "../lib/engineState";
 import { formatFileSize } from "../lib/format";
 import { videoMetaOf } from "../lib/videoPoster";
 import { messageSnippet, quoteFor, replyIndexer, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
@@ -74,8 +75,8 @@ import { working } from "../lib/focus";
 import { setSaved, useSavedIn } from "../hooks/useSavedMessages";
 import { Spinner } from "../components/wallet/ui";
 
-const subscribe = (listener: () => void) => engine.subscribe(listener);
-const snapshot = () => engine.state;
+/** This device's payments the page's bubbles are about, by id: what it reads of the engine's. */
+type Payments = Partial<EngineState["payments"]>;
 
 /** A roster's names as the history's rows read them: built once per roster, not once per message. */
 interface RosterNames {
@@ -134,8 +135,8 @@ function mentionCandidates(group: GroupView, t: Translate): MentionCandidate[] {
 }
 
 /** The group note a payment of this device is part of: a request's own, or the request a payment answers (by its id on the wire). */
-function noteIdOf(state: EngineState, paymentId: string): string {
-  const payment = state.payments[paymentId];
+function noteIdOf(payments: Payments, paymentId: string): string {
+  const payment = payments[paymentId];
   return paymentWireId(payment?.kind === "payment" && payment.requestId ? payment.requestId : paymentId);
 }
 
@@ -143,11 +144,11 @@ function noteIdOf(state: EngineState, paymentId: string): string {
  * The note that captions a payment bubble: the one about that bubble's own payment, which the member who started it
  * says (the payee of a request, the payer of a payment), never a note of another member that reuses its id.
  */
-function captionOf(state: EngineState, notes: ReadonlyMap<string, GroupPayNote>, message: StoredMessage, myKey: string | undefined): GroupPayNote | undefined {
-  const payment = state.payments[message.paymentId!];
+function captionOf(payments: Payments, notes: ReadonlyMap<string, GroupPayNote>, message: StoredMessage, myKey: string | undefined): GroupPayNote | undefined {
+  const payment = payments[message.paymentId!];
   // Said once, under the request (or the payment) itself: not again under a payment that answers it.
   if (payment?.kind === "payment" && payment.requestId) return undefined;
-  const note = notes.get(noteIdOf(state, message.paymentId!));
+  const note = notes.get(noteIdOf(payments, message.paymentId!));
   const starter = message.sender === "me" ? myKey : message.member;
   return note && starter && (note.kind === "request" ? note.to : note.from) === starter ? note : undefined;
 }
@@ -327,16 +328,20 @@ export function GroupChat() {
   const navigate = useNavigate();
   const nav = useAppNavigation();
   const { t } = useI18n();
-  const state = useSyncExternalStore(subscribe, snapshot);
+  // What the page shows of the engine's state, each compared by content (lib/engineState): the whole state drew the
+  // open group, its header and its rows' authors on every change, up to 20 a second while a file moves.
+  const started = useEngineValue(state => !!state);
+  const rosterGroup = useEngineValue(state => state?.groups.find(g => g.id === groupId));
+  // Of the 1:1 chats, what names and pictures members who are contacts: not each link's whole state.
+  const links = useEngineValue(state => state?.links.map(({ id, peerPubKeyZ32, peerAvatar }) => ({ id, peerPubKeyZ32, peerAvatar })));
   // Members who are contacts go by the identity they are shown as, if one was chosen (identities/contactFace.ts).
   const faceOf = useContactFaces();
-  const rosterGroup = state?.groups.find(g => g.id === groupId);
   // A member's nickname from that contact's chat, read only for members who are contacts and parsed again only when the
   // chat changed: every engine state comes through here, and a read of every chat each time grew with the chat list.
   const group = useMemo(() => {
     if (!rosterGroup) return undefined;
-    return withContactFaces(rosterGroup, state?.links, faceOf, peerKey => chatNamesForPeer(peerKey)?.label);
-  }, [rosterGroup, state?.links, faceOf]);
+    return withContactFaces(rosterGroup, links, faceOf, peerKey => chatNamesForPeer(peerKey)?.label);
+  }, [rosterGroup, links, faceOf]);
   // The history of this group only: the page stays mounted from one group to the next, and for the render that changes
   // groups the last one's messages would still be here (the timeline would open on them, and never find where this
   // group was left). Until this group's own list comes, what the engine last sent for it.
@@ -413,7 +418,7 @@ export function GroupChat() {
   const shown = useMemo(() => names ? pickShown(messages) : NO_ROWS, [names, pickShown, messages]);
   const forwarding = useForwarding(group ? `group:${groupId}` : undefined, shown);
   // Members learn my name on the edges, as a contact does on a chat: the engine must know it here too.
-  const engineNick = state?.settings.nick;
+  const engineNick = useEngineValue(state => state?.settings.nick);
   useEffect(() => {
     const nick = settings.defaultNickname;
     if (engineNick !== undefined && engineNick !== nick) void engine.call("updateSettings", { settings: { nick } }).catch(() => {});
@@ -477,13 +482,22 @@ export function GroupChat() {
   const [pickScrollRow] = useState(() => rowPicker<StoredMessage, ScrollRow>(m => m.event || m.groupPay ? undefined : { id: m.id, mine: m.sender === "me" }));
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the window's edges: see above
   const scrollRows = useMemo(() => pickScrollRow(messages).slice(), [pickScrollRow, messages, rowWindow.from, rowWindow.to]);
-  // The rows a page's every draw looks at (it draws on each engine state, up to 20 a second), found in the rows that
-  // changed: the payments' notes, this device's own payment bubbles, and my own "You joined" lines.
+  // The rows a page's every draw looks at, found in the rows that changed: the payments' notes, this device's own
+  // payment bubbles, and my own "You joined" lines.
   const [pickNote] = useState(() => rowPicker<StoredMessage, GroupPayNote>(m => m.groupPay));
   const noteRows = useMemo(() => pickNote(messages), [pickNote, messages]);
   const notes = useMemo(() => new Map(noteRows.map(note => [note.id, note])), [noteRows]);
   const [pickPaymentRow] = useState(() => rowPicker<StoredMessage, StoredMessage>(m => m.paymentId && !m.groupPay ? m : undefined));
   const paymentRows = useMemo(() => pickPaymentRow(messages), [pickPaymentRow, messages]);
+  // Their payments, and the contact each went to or came from (over a member's edge): not every payment of the device.
+  const payments = useEngineValue(state => Object.fromEntries(paymentRows.map(m => [m.paymentId!, state?.payments[m.paymentId!]]))) as Payments;
+  const paymentPeers = useEngineValue(state => Object.fromEntries(paymentRows.map(m => {
+    const linkId = state?.payments[m.paymentId!]?.linkId;
+    return [m.paymentId!, state?.edges?.find(l => l.id === linkId)?.peerPubKeyZ32 ?? ""];
+  })));
+  // Getting in takes a group link: an app with no transport for one (no WebRTC, no native transport) is never let in,
+  // so it says so rather than "you are in in a moment" (as the group's connection does, GroupConnection).
+  const noLinks = useEngineValue(state => state?.transport.groupLinks === false);
   const [pickMyJoin] = useState(() => rowPicker<StoredMessage, number>(m => m.event === "joined" && !m.member ? m.timestamp : undefined));
   const myJoins = useMemo(() => pickMyJoin(messages), [pickMyJoin, messages]);
   const jump = useChatScroll({ rows: scrollRows, chat: groupId, window: rowWindow });
@@ -524,7 +538,7 @@ export function GroupChat() {
 
   // Files and voice messages (WISP 503): the 1:1 composer's, within the group's limit. The first thing sent after
   // Reply carries it, as a text does.
-  const platform = useServicesPlatform();
+  const platform = servicesPlatform;
   const sendFile = useCallback(async (source: File, voice?: VoiceMeta): Promise<string | null> => {
     if (!platform?.sendGroupFile) return null;
     if (source.size > GROUP_FILE_LIMITS.maxBytes) return t("chat.fileTooLarge", { size: formatFileSize(GROUP_FILE_LIMITS.maxBytes) });
@@ -575,7 +589,7 @@ export function GroupChat() {
     if (at && at !== document.body && !at.closest("[data-composer]")) return;
     (noticeRef.current ?? optionsRef.current)?.focus();
   }, [canSend, active]);
-  if (!state) return null;
+  if (!started) return null;
   const back = <button onClick={nav.up} className="md:hidden w-11 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0" title={t("common.back")} aria-label={t("common.back")} data-testid="chat-back">
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="rtl:-scale-x-100"><path d="M15 19l-7-7 7-7" /></svg>
   </button>;
@@ -597,15 +611,15 @@ export function GroupChat() {
   const reachable = others.filter(m => m.online).length;
   // Payments: this device's own bubbles (from the desk, over an edge) and the notes the group shares about them.
   // A note is left out of the timeline only when one of these bubbles is about it: its own caption, or a payment answering it.
-  const ownNotes = new Set(paymentRows.filter(m => captionOf(state, notes, m, group.myKey) || state.payments[m.paymentId!]?.requestId)
-    .map(m => noteIdOf(state, m.paymentId!)));
+  const ownNotes = new Set(paymentRows.filter(m => captionOf(payments, notes, m, group.myKey) || payments[m.paymentId!]?.requestId)
+    .map(m => noteIdOf(payments, m.paymentId!)));
   // Who wrote each member's message (their colour, their picture once per run): see `authorsOf`.
   // A bot's routines folded into one row count as one message of the run (the rest are under it, drawn when it opens).
-  const authors = authorsFor(messages, stackHeads, group, ownNotes, key => memberPhoto(group, { key, me: false }, state.links, faceOf));
+  const authors = authorsFor(messages, stackHeads, group, ownNotes, key => memberPhoto(group, { key, me: false }, links, faceOf));
   /** A member's face in the Tasks panel, as their messages show it (`authorsOf`); none for my own cards ("me"). */
   const memberFace = (key: string): MemberFaceOf | undefined => key === "me" ? undefined : {
     key, name: group.members.find(x => x.key === key)?.nick || group.formerNames?.[key] || "",
-    picture: memberPhoto(group, { key, me: false }, state.links, faceOf),
+    picture: memberPhoto(group, { key, me: false }, links, faceOf),
   };
   /** `inStack`: a message inside a folded row, as that row's writer, its picture beside the stack's last one. */
   const authorProps = (m: StoredMessage, inStack?: MessageAuthor) => {
@@ -617,9 +631,9 @@ export function GroupChat() {
   /** The contact who wrote a member's message, when they are one: told when an invoice in it is paid from its card. */
   const payeeOf = (m: StoredMessage) => {
     const linkId = m.member ? Object.keys(group.memberLinks).find(id => group.memberLinks[id] === m.member) : undefined;
-    return linkId ? state.links?.find(l => l.id === linkId)?.peerPubKeyZ32 : undefined;
+    return linkId ? links?.find(l => l.id === linkId)?.peerPubKeyZ32 : undefined;
   };
-  const peerOf = (paymentId: string) => { const linkId = state.payments[paymentId]?.linkId; return state.edges?.find(l => l.id === linkId)?.peerPubKeyZ32 ?? ""; };
+  const peerOf = (paymentId: string) => paymentPeers[paymentId] ?? "";
   // A row of the timeline: an event, a payment's note, or a message.
   const row = (m: StoredMessage, inStack?: MessageAuthor) => m.event
     ? <div key={m.id} data-testid="group-event" className="flex justify-center mb-3.5 px-6"><span className="rounded-lg bg-surface-alt/90 px-3 py-1.5 text-center text-[11px] text-text-muted">{eventText(m, group, t)}</span></div>
@@ -627,7 +641,7 @@ export function GroupChat() {
     : m.groupPay ? (ownNotes.has(m.groupPay.id) ? null : <GroupPaymentNote key={m.id} note={m.groupPay} group={group} />)
     : m.paymentId ? <div key={m.id} data-testid="group-payment">
       <MessageBubble message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} peerPubKey={peerOf(m.paymentId)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} {...authorProps(m, inStack)} />
-      {(() => { const note = captionOf(state, notes, m, group.myKey); return note && <GroupPaymentCaption note={note} group={group} />; })()}
+      {(() => { const note = captionOf(payments, notes, m, group.myKey); return note && <GroupPaymentCaption note={note} group={group} />; })()}
     </div>
     // No `peerAck`: a group has no receipts (WISP 902), so a message of mine is sent, one tick, never "Delivered".
     : <MessageBubble key={m.id} message={shownOf(m)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} highlight={search.highlight(m.id)} {...authorProps(m, inStack)} payee={payeeOf(m)}
@@ -657,9 +671,6 @@ export function GroupChat() {
   const linkUnanswered = !!group.invitation?.viaLink && !!group.invitation.unanswered;
   // The link was replaced since it was shared: nothing more happens here, only the current link gets in.
   const linkReplaced = stage === "replaced";
-  // Getting in takes a group link: an app with no transport for one (no WebRTC, no native transport) is never let in,
-  // so it says so rather than "you are in in a moment" (as the group's connection does, GroupConnection).
-  const noLinks = state?.transport.groupLinks === false;
   const joining = noLinks ? { title: t("group.connection.noWebrtc"), body: t("group.connection.noWebrtcHint") }
     : linkUnanswered ? { title: t("group.join.unanswered"), body: t("group.join.unansweredBody") }
     : joiningText(stage, group.name, group.profile === "community", t, group.invitation?.full, admittedLong, !!group.invitation?.othersKnocked);
