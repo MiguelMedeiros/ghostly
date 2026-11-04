@@ -56,6 +56,8 @@ function amountlessUnderOptions(info: GetInfoResponse): GetInfoResponse {
 }
 /** A Lightning payment can stay in flight for minutes or hours; the mint is asked again this often. */
 const MELT_POLL_MS = 30_000;
+/** Once its request can no longer land, a payment still pending is asked twice as late each time, up to this. */
+const MELT_SLOW_POLL_MS = 1_800_000;
 const MAX_AMOUNT = 1_000_000;
 /** How long "Get test coins" waits for the test mint to mark its invoice paid before saying the coins come later. */
 const TEST_COINS_WAIT_MS = 30_000;
@@ -320,6 +322,8 @@ export class CashuWallet {
   /** Per quote the screen shows: until when (`watch`). */
   private readonly quoteWatched = new Map<string, number>();
   private meltTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Per pending melt: when it is asked about next and the wait before that, in this run (a restart asks at once). */
+  private readonly meltAsk = new Map<string, { at: number; wait: number }>();
   private restoredTimer: ReturnType<typeof setTimeout> | null = null;
   private swapTimer: ReturnType<typeof setTimeout> | null = null;
   private swapTimerAt = 0;
@@ -1613,7 +1617,10 @@ export class CashuWallet {
     return melts.some((m) => m.request === invoice);
   }
 
-  /** Lightning payments left pending, asked about again until the mint settles each one. */
+  /**
+   * Lightning payments left pending, asked about again until the mint settles each one: every MELT_POLL_MS while its
+   * request may still land, then each at its own pace, twice as late every time up to MELT_SLOW_POLL_MS.
+   */
   private async pollMelts(): Promise<void> {
     if (this.meltTimer) clearTimeout(this.meltTimer);
     this.meltTimer = null;
@@ -1621,6 +1628,8 @@ export class CashuWallet {
     const melts = await this.readMelts();
 
     for (const melt of melts) {
+      const pace = this.meltAsk.get(melt.quote);
+      if (pace && Date.now() < pace.at) continue;
       try {
         const outcome = await this.locked(melt.mint, async () => {
           // It may have been settled while this waited for the lock.
@@ -1636,10 +1645,17 @@ export class CashuWallet {
       } catch {
         // mint unreachable: try again on the next round
       }
+      const wait = Date.now() < meltOverdueAt(melt) ? MELT_POLL_MS : Math.min((pace?.wait ?? MELT_POLL_MS) * 2, MELT_SLOW_POLL_MS);
+      this.meltAsk.set(melt.quote, { at: Date.now() + wait, wait });
     }
 
-    const remaining = await wrap((await store(STORES.melts, "readonly")).count());
-    if (remaining > 0 && !this.stopped) this.meltTimer = setTimeout(() => void this.pollMelts(), MELT_POLL_MS);
+    const remaining = new Set((await this.readMelts()).map((m) => m.quote));
+    for (const quote of this.meltAsk.keys()) if (!remaining.has(quote)) this.meltAsk.delete(quote);
+    if (remaining.size === 0 || this.stopped) return;
+    // A melt written down since this round began has no pace yet: it is asked at once.
+    const next = Math.min(...[...remaining].map((quote) => this.meltAsk.get(quote)?.at ?? 0));
+    if (this.meltTimer) clearTimeout(this.meltTimer);
+    this.meltTimer = setTimeout(() => void this.pollMelts(), Math.max(0, next - Date.now()));
   }
 
   /**
