@@ -88,8 +88,9 @@ export interface StoredLink {
   /** Messages deleted on this device, by id, so a republished one is not stored again. */
   deletedIds?: string[];
   /**
-   * 1:1 chats: the contact has had a row here (a contact request's note aside), so no later row of theirs is the chat's
-   * joined line (`StoredMessage.joinLine`). Absent on a chat stored before it was kept: set as the engine starts.
+   * 1:1 chats: the contact has had a row here in the words of the chat's joined line (a contact request's note aside),
+   * so no later row of theirs is that line (`StoredMessage.joinLine`). Absent on a chat stored before it was kept: set
+   * as the engine starts.
    */
   peerSpoke?: true;
   /** My messages I deleted for everyone, their removal on its way to the contact (`engine/removals.ts`). */
@@ -1005,7 +1006,7 @@ export interface StoredMessage {
   notice?: ChatNotice;
   /**
    * A 1:1 chat's "👋 <name> joined" line, drawn as the app's own line: set only on the contact's first row of the chat
-   * (`peerSpoke` on its link), when it came in those words. Decided once, as the row is stored, so it never moves to
+   * in those words (`peerSpoke` on its link), whatever they wrote before it. Decided once, as the row is stored, so it never moves to
    * another row as history loads or rows go. Any other row in those words is an ordinary message.
    */
   joinLine?: true;

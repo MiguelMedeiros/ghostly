@@ -449,11 +449,17 @@ const cardDue = (m: StoredMessage) => m.sender === "me" && (m.cardRestore ?? m.b
  */
 const contactRowId = (id: string) => id.startsWith("peer_") && !id.startsWith("peer_contact_") && !isRefusalId(id);
 
-/** Whether a 1:1 chat holds a row of the contact's (`contactRowId`) other than `except`: oldest first, a page at a time. */
-async function contactRowStored(linkId: string, except: string): Promise<boolean> {
+/** A row of the contact's own (`contactRowId`) in the words of the chat's joined line. */
+const contactJoinRow = (m: StoredMessage) => m.sender === "peer" && contactRowId(m.id) && isJoinNotice(m.text);
+
+/**
+ * Whether a 1:1 chat holds a row of the contact's in the joined line's words (`contactJoinRow`) other than `except`:
+ * oldest first, a page at a time.
+ */
+async function contactJoinRowStored(linkId: string, except: string): Promise<boolean> {
   for (let after: { timestamp: number; id?: string } = { timestamp: -Infinity }; ;) {
     const page = await db.getMessagePageAfter(linkId, { limit: 64, after });
-    if (page.messages.some((m) => m.id !== except && m.sender === "peer" && contactRowId(m.id))) return true;
+    if (page.messages.some((m) => m.id !== except && contactJoinRow(m))) return true;
     const last = page.messages[page.messages.length - 1];
     if (!page.more || !last) return false;
     after = { timestamp: last.timestamp, id: last.id };
@@ -911,7 +917,7 @@ export class GhostlyNode implements EngineImplementation {
   }
   /** The newest time written in each chat while this engine runs: a message written well before it is a catch-up. */
   private readonly newestAt = new Map<string, number>();
-  /** The chats whose contact has had a row while this engine runs (`firstContactRow`), whatever their `stored` says. */
+  /** The chats whose contact's joined line came while this engine runs (`firstContactRow`), whatever `stored` says. */
   private readonly contactSpoke = new WeakSet<LiveLink>();
   /** Per group: when the last message written well before it came, came. What comes after it, as old, is its catch-up. */
   private readonly lateAt = new Map<string, number>();
@@ -9348,33 +9354,35 @@ export class GhostlyNode implements EngineImplementation {
   private async storeMessage(message: StoredMessage): Promise<void> { await this.storeNewMessage(message); }
 
   /**
-   * Whether this row is the contact's first in a 1:1 chat, the only one of theirs that may be drawn as the chat's joined
-   * line (`StoredMessage.joinLine`). False at once for any later row: the chat is marked (`peerSpoke`) as the first one
-   * comes, before anything is awaited, so of two rows stored together only the first is. A chat not marked yet is looked
-   * at once, for rows of the contact's this engine did not see come (a history brought in while it runs).
+   * Whether this row is the contact's first in a 1:1 chat in the joined line's words, the only one of theirs that may be
+   * drawn as that line (`StoredMessage.joinLine`). Not their first row: they say it once the chat first goes live (WISP
+   * 1100), and what they wrote before that may come first. False at once for any later row in those words: the chat is
+   * marked (`peerSpoke`) as the first one comes, before anything is awaited, so of two stored together only the first
+   * is. A chat not marked yet is looked at once, for rows of the contact's this engine did not see come (a history
+   * brought in while it runs).
    */
   private firstContactRow(live: LiveLink, message: StoredMessage): Promise<boolean> | false {
     const { stored } = live;
-    if (message.sender !== "peer" || stored.group || message.linkId !== stored.id || message.linkId.startsWith("group:") || !contactRowId(message.id)) return false;
+    if (stored.group || message.linkId !== stored.id || message.linkId.startsWith("group:") || !contactJoinRow(message)) return false;
     if (stored.peerSpoke || this.contactSpoke.has(live)) return false;
     this.contactSpoke.add(live);
     live.stored = { ...stored, peerSpoke: true };
     const marked = db.patchLink(stored.id, { peerSpoke: true }).catch(() => {});
     // A row of theirs deleted here was stored before this one.
     if (stored.deletedIds?.some(contactRowId)) return false;
-    return Promise.all([contactRowStored(stored.id, message.id), marked]).then(([had]) => !had, () => false);
+    return Promise.all([contactJoinRowStored(stored.id, message.id), marked]).then(([had]) => !had, () => false);
   }
 
   /**
-   * A chat stored before `peerSpoke` was kept, as the engine starts: the contact's oldest row left there is its joined
-   * line if it reads as one (as it was drawn before), and no later row of theirs is. Done once: the chat is marked.
+   * A chat stored before `peerSpoke` was kept, as the engine starts: the contact's oldest row left there in the joined
+   * line's words is that line (as it was drawn before), and no later row of theirs is. Done once: the chat is marked.
    */
   private async settleJoinLine(stored: StoredLink, messages: StoredMessage[]): Promise<StoredLink> {
     if (stored.peerSpoke || stored.group) return stored;
-    const at = messages.findIndex((m) => m.sender === "peer" && contactRowId(m.id));
+    const at = messages.findIndex(contactJoinRow);
     if (at < 0 && !stored.deletedIds?.some(contactRowId)) return stored;
     const first = messages[at];
-    if (first && !first.joinLine && isJoinNotice(first.text)) {
+    if (first && !first.joinLine) {
       await db.patchMessage(stored.id, first.id, () => ({ joinLine: true }));
       messages[at] = { ...first, joinLine: true };
     }
