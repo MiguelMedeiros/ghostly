@@ -95,6 +95,8 @@ export function DevicesSection() {
   // The device a takeover stopped, while it is still in the set: what "Remove <device>" after the offer removes.
   const stopped = view?.secretOffer?.device ? devices.find((device) => !device.self && device.name === view.secretOffer!.device) : undefined;
   const waiting = listNamesFor(view?.waiting?.map((w) => w.name) ?? [], language);
+  // The handoff keeps the name the device had when it started: the set has its name after a Rename.
+  const handoffDevice = handoff ? devices.find((device) => device.key === handoff.key)?.name || handoff.device : "";
   return (
     <Section title={t("devices.section.title")} testId="profile-devices">
       {/* Four devices, the most a profile has (WISP 06): the button stays, off, and the line says why. */}
@@ -159,14 +161,14 @@ export function DevicesSection() {
         </div>
       )}
       {handoff?.failure === "password" && handoff.role === "giver" && (
-        <Row testId="handoff-wrong-password" label={fillNames(t("devices.handoff.wrongPassword"), { device: handoff.device })}>
-          <Button data-testid="handoff-allow" onClick={() => ask("allow", engine.call("deviceHandoffAllow", { key: handoff.key }))}>{fillNames(t("devices.handoff.allowAgain"), { device: handoff.device })}</Button>
+        <Row testId="handoff-wrong-password" label={fillNames(t("devices.handoff.wrongPassword"), { device: handoffDevice })}>
+          <Button data-testid="handoff-allow" onClick={() => ask("allow", engine.call("deviceHandoffAllow", { key: handoff.key }))}>{fillNames(t("devices.handoff.allowAgain"), { device: handoffDevice })}</Button>
         </Row>
       )}
       {handoff?.failure === "password" && handoff.role === "giver" && refused.allow && <div className="px-4 py-3"><Notice problem={refused.allow} testId="handoff-allow-error" /></div>}
       {/* A move whose copy stopped (WISP 06 § Handoff progress, Failures): the profile is still here; Try again moves it. */}
       {thisActive && handoff?.role === "giver" && handoff.step === "failed" && handoff.failure && STOPPED.has(handoff.failure) && (() => {
-        const name = devices.find((device) => device.key === handoff.key)?.name || handoff.device || t("devices.join.otherDevice");
+        const name = handoffDevice || t("devices.join.otherDevice");
         return (
           <Row testId="handoff-stopped" label={fillNames(t(FAILURES[handoff.failure]), { device: name })} hint={fillNames(nextOf(FAILURES[handoff.failure], t), { device: name })}>
             <Button data-testid="handoff-try-again" onClick={() => setMoving({ key: handoff.key, name })}>{t("devices.handoff.tryAgain")}</Button>
@@ -175,7 +177,7 @@ export function DevicesSection() {
       })()}
       {/* A pull this device's wallets or a call on it kept from happening: what keeps the profile here (WISP 06 § Wallets). */}
       {handoff?.role === "giver" && handoff.step === "failed" && handoff.failure && WALLET_REFUSALS.has(handoff.failure) && (
-        <Row testId="handoff-wallet-refusal" label={t(FAILURES[handoff.failure], { device: handoff.device, wallet: walletNameOf(handoff.wallet) })}
+        <Row testId="handoff-wallet-refusal" label={t(FAILURES[handoff.failure], { device: handoffDevice, wallet: walletNameOf(handoff.wallet) })}
           hint={handoff.expiresAt !== undefined ? t("devices.handoff.staysExpires", { wallet: walletNameOf(handoff.wallet), date: dayText(handoff.expiresAt, language) }) : undefined} />
       )}
       {adding && <AddDeviceDialog onClose={() => setAdding(false)} />}
