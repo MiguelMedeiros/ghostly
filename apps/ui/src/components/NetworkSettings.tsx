@@ -3,7 +3,8 @@ import { irohRelayUrl, normalizeRelayUrl, relayUrlProblem } from "@ghostly/core"
 import { iceServerProblem } from "@ghostly/browser/shared/ice";
 import { hyperdhtRelayProblem } from "@ghostly/browser/shared/hyperdhtRelay";
 import { pushRelayProblem } from "@ghostly/browser/shared/pushRelay";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
 import { useI18n } from "../contexts/I18nContext";
 import { Block, Field, FieldGrid, Row, Section } from "./layout";
 import { Switch } from "./wallet/ui";
@@ -53,8 +54,9 @@ function refusedField(message: string, irohRelays: readonly string[]): FieldName
  */
 export function NetworkSettings() {
   const { t, language } = useI18n();
-  const platform = useServicesPlatform();
-  const network = platform?.getNetwork() ?? null;
+  const platform = servicesPlatform;
+  // Drawn again when the network's settings change by content, not on every state of the engine.
+  const network = usePlatformValue(() => platform?.getNetwork() ?? null);
   const [relays, setRelays] = useState("");
   const [turn, setTurn] = useState({ urls: "", username: "", credential: "" });
   const [iroh, setIroh] = useState("");

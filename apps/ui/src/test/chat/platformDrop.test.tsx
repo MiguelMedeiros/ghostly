@@ -17,9 +17,13 @@ import { renderApp } from "../render";
 const onSend = vi.fn<(text: string) => Promise<string | null>>();
 const onSendFile = vi.fn<(file: File) => Promise<string | null>>();
 
+function column(extra: Partial<Parameters<typeof MessageInput>[0]> = {}) {
+  return <LockScreenProvider><div data-file-drop data-testid="column"><p data-testid="messages">messages</p>
+    <MessageInput onSend={onSend} onSendFile={onSendFile} {...extra} /></div></LockScreenProvider>;
+}
+
 function composer() {
-  return renderApp(<LockScreenProvider><div data-file-drop data-testid="column"><p data-testid="messages">messages</p>
-    <MessageInput onSend={onSend} onSendFile={onSendFile} /></div></LockScreenProvider>);
+  return renderApp(column());
 }
 
 const field = () => screen.getByPlaceholderText<HTMLTextAreaElement>("Message…");
@@ -78,6 +82,25 @@ describe("files dragged in from another app that the webview names by address on
     expect(field().value).toBe("");
   });
 
+  it("while the platform reads a drop's files (up to 256 MB, in steps), the composer says so; the sheet replaces the line", async () => {
+    let release!: () => void;
+    const slow = held("film.mp4", "bytes");
+    slow.read = vi.fn(async (offset: number, length: number) => {
+      await new Promise<void>((done) => { release = done; });
+      return new TextEncoder().encode("bytes").slice(offset, offset + length);
+    });
+    read.mockResolvedValueOnce([slow]);
+    composer();
+    act(() => over(true));
+    expect(fireEvent.drop(screen.getByTestId("messages"), named())).toBe(false);
+    expect(await screen.findByRole("status")).toHaveTextContent("Reading what you dropped…");
+    expect(screen.queryByTestId("attachment-sheet")).toBeNull();
+    await waitFor(() => expect(slow.read).toHaveBeenCalled());
+    act(() => release());
+    expect(await screen.findByTestId("attachment-sheet")).toBeInTheDocument();
+    expect(screen.queryByTestId("paste-reading")).toBeNull();
+  });
+
   it("a drop with no file to send (a folder) says so; the next drag is a link again once the drop is over", async () => {
     read.mockResolvedValueOnce([]);
     composer();
@@ -109,6 +132,18 @@ describe("files dragged in from another app that the webview names by address on
     act(() => over(true));
     expect(fireEvent.drop(screen.getByTestId("messages"), named())).toBe(false);
     await waitFor(() => expect(screen.getAllByRole("alert").map((alert) => alert.textContent)).toContainEqual(expect.stringContaining("That drop is gone. Drop it again.")));
+    expect(screen.queryByTestId("attachment-sheet")).toBeNull();
+  });
+
+  it("a read that ends after an edit began says its files could not be added, not nothing", async () => {
+    let end!: () => void;
+    read.mockImplementationOnce(() => new Promise((done) => { end = () => done([held("relatório final.txt", "olá")]); }));
+    const { rerender } = composer();
+    act(() => over(true));
+    expect(fireEvent.drop(screen.getByTestId("messages"), named())).toBe(false);
+    rerender(column({ edit: { key: "m1", text: "boo", snippet: "boo", onSave: vi.fn(async () => null), onClose: vi.fn() } }));
+    await act(async () => end());
+    expect(await screen.findByRole("alert")).toHaveTextContent("What you dropped could not be added just now. Drop it again when you are done here.");
     expect(screen.queryByTestId("attachment-sheet")).toBeNull();
   });
 

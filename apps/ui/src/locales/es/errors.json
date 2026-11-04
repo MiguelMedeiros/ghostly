@@ -161,6 +161,7 @@
     "declinedThere": "Tu contacto lo rechazó.",
     "dropGone": "Esos archivos soltados ya no están",
     "dropGoneNext": "Suéltalos de nuevo.",
+    "dropLate": "No se pudo añadir ahora lo que soltaste. Suéltalo de nuevo cuando termines.",
     "dropTooLarge": "Es demasiado grande para soltarlo aquí. Envíalo con + → Documento.",
     "dropUnreadable": "No se pudieron añadir esos archivos. Envíalos con + → Documento.",
     "floor": {

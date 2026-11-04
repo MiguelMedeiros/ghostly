@@ -161,6 +161,7 @@
     "declinedThere": "Seu contato recusou.",
     "dropGone": "Esses arquivos soltos expiraram",
     "dropGoneNext": "Solte de novo.",
+    "dropLate": "Não foi possível adicionar agora o que você soltou. Solte de novo quando terminar.",
     "dropTooLarge": "Isso é grande demais para soltar aqui. Envie com + → Documento.",
     "dropUnreadable": "Não foi possível adicionar esses arquivos. Envie-os com + → Documento.",
     "floor": {
