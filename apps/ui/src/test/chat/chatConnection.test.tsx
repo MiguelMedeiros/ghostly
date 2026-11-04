@@ -215,7 +215,7 @@ describe("ChatConnection: what the header says", () => {
     expect(screen.getByText("Iroh: UDP blocked")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Iroh" })).toHaveAttribute("title", "Iroh: UDP blocked");
     expect(screen.getByRole("radio", { name: "Iroh" })).toBeDisabled();
-    expect(screen.getByRole("radio", { name: "HyperDHT" })).toHaveAttribute("title", "HyperDHT: Your contact's app doesn't support HyperDHT");
+    expect(screen.getByRole("radio", { name: "HyperDHT" })).toHaveAttribute("title", "Your contact's app doesn't support HyperDHT");
     expect(screen.getByRole("radio", { name: "HyperDHT" })).toBeDisabled();
   });
 
@@ -226,7 +226,7 @@ describe("ChatConnection: what the header says", () => {
       "iroh/1": "All native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.",
     } })] }));
     const [hyperdht, iroh] = screen.getAllByTestId("connection-transport-error");
-    expect(within(hyperdht!).getByTestId("connection-transport-error-title")).toHaveTextContent("HyperDHT: Relay HyperDHT inacessível");
+    expect(within(hyperdht!).getByTestId("connection-transport-error-title")).toHaveTextContent(/^Relay HyperDHT inacessível$/);
     expect(within(hyperdht!).getByTestId("connection-transport-error-next")).toHaveTextContent("Confira o endereço em Ajustes → Rede. Ele também pode não aceitar este app: pergunte a quem o mantém.");
     expect(within(iroh!).getByTestId("connection-transport-error-title")).toHaveTextContent("Iroh: Todas as conexões nativas em uso");
     expect(within(iroh!).getByTestId("connection-transport-error-next")).toHaveTextContent("Desconecte a conexão nativa de outra conversa, ou espere uma ficar ociosa.");
@@ -235,7 +235,30 @@ describe("ChatConnection: what the header says", () => {
     expect(option).toHaveAttribute("title", "Iroh: Todas as conexões nativas em uso");
     expect(option).toHaveAttribute("aria-description", "Todas as conexões nativas em uso");
     expect(option).toHaveTextContent("Todas as conexões nativas em uso");
-    expect(screen.getByRole("radio", { name: "HyperDHT" })).toHaveAttribute("title", "HyperDHT: Relay HyperDHT inacessível");
+    expect(screen.getByRole("radio", { name: "HyperDHT" })).toHaveAttribute("title", "Relay HyperDHT inacessível");
+  });
+
+  it.each<[string, string, Record<string, string>]>([
+    ["en", "en", {
+      "Could not reach the HyperDHT relay": "HyperDHT relay unreachable",
+      "The HyperDHT relay did not answer": "HyperDHT relay not answering",
+      "The HyperDHT relay closed the connection": "HyperDHT relay closed the connection",
+      "The HyperDHT relay did not let this chat listen": "HyperDHT relay refused this chat",
+    }],
+    ["ja", "ja", {
+      "Could not reach the HyperDHT relay": "HyperDHTリレーに接続できません",
+      "The HyperDHT relay did not answer": "HyperDHTリレーが応答しません",
+      "The HyperDHT relay closed the connection": "HyperDHTリレーが接続を閉じました",
+      "The HyperDHT relay did not let this chat listen": "HyperDHTリレーがこのチャットを拒否しました",
+    }],
+  ])("names HyperDHT once for a relay error, below and on its option (%s)", (_, language, said) => {
+    for (const [error, title] of Object.entries(said)) {
+      const view = renderApp(<ChatConnection peerKey="peer" />, { language: language as "en" | "ja" });
+      act(() => view.engine.update({ links: [linkView({ availableTransports: ["webrtc/1"], pairing: ready(), transportErrors: { "hyperdht/1": error } })] }));
+      expect(screen.getByTestId("connection-transport-error-title")).toHaveTextContent(new RegExp(`^${title}$`));
+      expect(screen.getByRole("radio", { name: "HyperDHT" })).toHaveAttribute("title", title);
+      view.unmount();
+    }
   });
 
   it.each<[string, Partial<LinkView>, string]>([
@@ -412,7 +435,7 @@ describe("ChatConnection: what the panel does", () => {
     expect(screen.getByRole("radio", { name: "WebRTC" })).toBeEnabled();
     for (const native of ["Iroh", "HyperDHT"]) {
       expect(screen.getByRole("radio", { name: native })).toBeDisabled();
-      expect(screen.getByRole("radio", { name: native })).toHaveAttribute("title", `${native}: ${native} needs Ghostly Desktop${native === "HyperDHT" ? ", or a HyperDHT relay in Settings" : ""}`);
+      expect(screen.getByRole("radio", { name: native })).toHaveAttribute("title", `${native} needs Ghostly Desktop${native === "HyperDHT" ? ", or a HyperDHT relay in Settings" : ""}`);
     }
     await user.click(screen.getByRole("radio", { name: "WebRTC" }));
     expect(engine.callsTo("setChatTransport")).toEqual([]);
