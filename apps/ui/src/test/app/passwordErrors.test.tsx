@@ -94,6 +94,19 @@ describe("a refused lock password in Settings", () => {
     expect(stored()).toBe(hash);
   }, 30_000);
 
+  it("a password changed in another tab since this one opened: the old one is no longer the current one", async () => {
+    await lockWith("first secret");
+    const { user } = await renderSettings();
+    // The extension's other tab changes it; this page has not heard yet.
+    const hash = await lockWith("second secret");
+    await user.click(screen.getByTestId("settings-password-edit"));
+    await user.type(screen.getByTestId("settings-password-current"), "first secret");
+    await user.click(screen.getByRole("button", { name: "Remove password" }));
+    expect(await screen.findByTestId("settings-notice-title")).toHaveTextContent("Password not removed");
+    expectRefused(screen.getByTestId("settings-password-current"), "settings-password-current-error", "Incorrect password");
+    expect(stored()).toBe(hash);
+  }, 30_000);
+
   it("too short, then not the same twice: each under its own field, with the card", async () => {
     const { user } = await renderSettings();
     await user.click(screen.getByTestId("settings-lock"));

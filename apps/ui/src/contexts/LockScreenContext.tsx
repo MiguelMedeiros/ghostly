@@ -103,7 +103,7 @@ function saveAttempts(attempts: Attempts | null): void {
 }
 
 export function LockScreenProvider({ children }: { children: ReactNode }) {
-  const { settings, updateLockScreen } = useSettings();
+  const { settings, updateLockScreen, followStored } = useSettings();
   const lockActive = settings.lockScreen.enabled && !!settings.lockScreen.passwordHash;
   // Locked from the first render: a reload must not skip the password, unless the app handed the lock it passed across.
   const [handed] = useState(() => lockActive && takeUnlockHandover(activeProfileId(), settings.lockScreen.passwordHash));
@@ -142,11 +142,13 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
     void host.hideFromSwitcher?.(lockActive).catch(() => {});
   }, [lockActive]);
 
+  // The lock as stored, not as this page last had it: a password set in another tab locks this one too.
   const lockHere = useCallback(() => {
-    if (settings.lockScreen.enabled && settings.lockScreen.passwordHash) {
+    const { enabled, passwordHash } = followStored().lockScreen;
+    if (enabled && passwordHash) {
       setIsLocked(true);
     }
-  }, [settings.lockScreen.enabled, settings.lockScreen.passwordHash]);
+  }, [followStored]);
 
   // The extension runs the app in several tabs at once: Lock Now in one locks them all, or the next tab would show
   // the chats to whoever clicks it. Only locking spreads; each tab is unlocked with the password on its own. The time
