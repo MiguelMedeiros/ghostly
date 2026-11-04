@@ -240,9 +240,14 @@ interface Want {
   offeredBytes?: number;
   /**
    * Holders that answered `busy` in this round and said since, while another served it, that they hold the file (a place
-   * of theirs freed): one it may leave for, when that one is slow (`leaveSlow`).
+   * of theirs freed): one it may leave for, as for a known holder, when that one is slow (`leaveSlow`).
    */
   free?: Set<string>;
+  /**
+   * The holders known when the holder offered: one it may leave for when that one is slow (`leaveSlow`). Not one that
+   * came to hold the file since: the members waiting take its places at once.
+   */
+  knownAtOffer?: Set<string>;
   /** What the last holder asked in this round answered, when it was not the file: shown while the want waits. */
   why?: "busy" | "day" | "damaged";
   /**
@@ -640,6 +645,7 @@ export class GroupFileDesk {
       want.movedAt = want.offeredAt = this.deps.now();
       want.offeredBytes = kept.stored ?? 0;
       want.free = undefined;
+      want.knownAtOffer = new Set(kept.holders);
     }
     return edge.files.handle(frame);
   }
@@ -817,13 +823,14 @@ export class GroupFileDesk {
   }
 
   /**
-   * The holder serving this want is slow (served `slowAfterMs`, and at its pace more than `wantWaitMs` to go) and a holder
-   * that answered it busy said since that a place freed (`want.free`), and is free to ask: the transfer ends here, what
-   * came stays, and the next holder is asked (`transferChanged`), so a phone's slow upload does not keep a member the
-   * author or a fast holder could serve.
+   * The holder serving this want is slow (served `slowAfterMs`, and at its pace more than `wantWaitMs` to go) and another
+   * holder is free to ask, one known when it offered (`want.knownAtOffer`) or one that answered it busy and said since that
+   * a place freed (`want.free`): the transfer ends here, what came stays, and the next holder is asked
+   * (`transferChanged`), so a phone's slow upload does not keep a member the author or a fast holder could serve. (The
+   * newest holder heard is asked first, whatever its pace: a phone that finished after a fast member is the one taken.)
    */
   private leaveSlow(kept: Kept, want: Want): boolean {
-    if (!want.wire || !want.free?.size || want.offeredAt === undefined) return false;
+    if (!want.wire || want.offeredAt === undefined) return false;
     const edge = want.linkId ? this.edgesById.get(want.linkId) : undefined;
     const record = edge?.files.get("in", want.wire);
     if (!edge || !record || transferEnded(record) || record.state === "verifying") return false;
@@ -832,7 +839,9 @@ export class GroupFileDesk {
     const stored = Math.max(want.moved, kept.stored ?? 0, want.offeredBytes ?? 0), pace = (stored - (want.offeredBytes ?? 0)) / elapsed;
     if (pace > 0 && (kept.meta.size - stored) / pace <= GROUP_FILE_LIMITS.wantWaitMs) return false;
     const edges = this.deps.edges(kept.groupId);
-    const other = [...want.free].some(key => {
+    const known = this.knownHolders(kept, this.deps.membership(kept.groupId)).filter(key => want.knownAtOffer?.has(key));
+    const candidates = new Set([...known, ...want.free ?? []]);
+    const other = [...candidates].some(key => {
       const linkId = edges.get(key);
       return !!linkId && key !== want.holder && !kept.suspect?.has(key) && this.mayAsk(kept, want, key, linkId) && this.deps.ready(linkId)
         && !!this.edgesById.get(linkId)?.files.live && !this.askedOf(linkId, want);
