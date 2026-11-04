@@ -199,6 +199,7 @@
     "noContact": "还没有联系人",
     "offline": "离线",
     "onDht": "在 DHT 上 · 正在重试直连",
+    "onDhtPlain": "在 DHT 上",
     "publicationUnavailable": "无法发布",
     "switching": "正在切换 · {{transport}}",
     "waitingContact": "正在等待联系人"

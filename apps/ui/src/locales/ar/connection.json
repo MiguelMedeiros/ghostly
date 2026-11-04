@@ -215,6 +215,7 @@
     "noContact": "لا توجد جهة اتصال بعد",
     "offline": "غير متصل",
     "onDht": "على DHT · إعادة محاولة الاتصال المباشر",
+    "onDhtPlain": "على DHT",
     "publicationUnavailable": "النشر غير متاح",
     "switching": "جارٍ الانتقال · {{transport}}",
     "waitingContact": "في انتظار جهة الاتصال"
