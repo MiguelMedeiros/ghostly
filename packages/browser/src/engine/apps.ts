@@ -1374,9 +1374,14 @@ export class Apps {
     let wrote: FileBytesKind | undefined;
     try {
       // Written only over the record read (as the update check and Accept do): one changed while the files were written
-      // (the check installed a newer version, an update accepted, another tab) is read and judged again.
+      // (the check installed a newer version, an update accepted, another tab) is read and judged again. One gone meanwhile
+      // was uninstalled (another tab, the Apps page while a card's Install was busy): it is not put back as new, with its
+      // data gone, as Accept does.
+      let read = false;
       for (;;) {
         const [installed, stores] = await Promise.all([this.app(version.ref), this.stores()]);
+        if (read && !installed) fail("not-installed", "This app is not installed");
+        read = installed !== undefined;
         const run = this.runStatus(version, this.storeViews(stores), [...(installed?.revocations ?? []), ...revocations]);
         if (run.status === "revoked") fail("revoked", "Its publisher revoked this version");
         if (run.status === "removed") fail("removed", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
