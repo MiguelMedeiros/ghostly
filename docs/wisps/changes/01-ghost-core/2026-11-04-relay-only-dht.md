@@ -1,0 +1,1 @@
+Client policy, no wire change: with Hide my IP from contacts on (WISP 100, Relay only), the Desktop reads and writes through the Pkarr relays alone and sends nothing to a DHT node, so a contact running nodes near a chat's keys does not see who looks them up. Off, it reads the DHT directly as before.

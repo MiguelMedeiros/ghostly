@@ -2027,9 +2027,12 @@ export class GhostlyNode implements EngineImplementation {
     this.clockOff = this.transport.onServerTime?.(time => this.clock.server(time.source, time.date, time.sent, time.received));
   }
 
-  /** The Desktop reaches the DHT itself: the relays in Settings are written to, and read from only when the person chose so. */
+  /**
+   * The Desktop reaches the DHT itself: the relays in Settings are written to, and read from only when the person chose
+   * so. With Hide my IP from contacts on, it does not reach the DHT at all: reads and writes go through the relays.
+   */
   private configureDirect(): void {
-    this.transport.configure?.({ relays: this.settings.relays, readRelays: this.settings.readRelays === true });
+    this.transport.configure?.({ relays: this.settings.relays, readRelays: this.settings.readRelays === true, dhtDirect: this.settings.relayOnly !== true });
   }
 
   /**
@@ -6912,7 +6915,7 @@ export class GhostlyNode implements EngineImplementation {
       // The Desktop writes to them: kept as the browsers keep theirs. Elsewhere (a transport of one's own) as given.
       else if (this.transport.configure) this.settings.relays = [...new Set(settings.relays.map(normalizeRelayUrl).filter((relay): relay is string => relay !== null))];
     }
-    if (settings.relays || settings.readRelays !== undefined) {
+    if (settings.relays || settings.readRelays !== undefined || relayOnlyChanged) {
       if (this.settings.readRelays !== true) delete this.settings.readRelays;
       this.configureDirect();
     }

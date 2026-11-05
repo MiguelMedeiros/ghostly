@@ -19,6 +19,7 @@
   "readRelays": "Utiliser aussi les relais Pkarr",
   "readRelaysHint": "Trouve plus vite un premier contact. Les relais voient quelles clés sont cherchées.",
   "readRelaysInfo": "Cette app lit directement la DHT Mainline. Activé : elle lit aussi via les relais Pkarr ci-dessous. Si la DHT est bloquée, elle lit quand même via ces relais.",
+  "readRelaysRelayOnly": "Masquer mon IP est activé : cette app lit et écrit uniquement via ces relais, jamais directement sur la DHT.",
   "relays": "Relais Pkarr",
   "relaysHint": "Un par ligne. Ils ne voient que des paquets signés et chiffrés.",
   "relaysInfoDirect": "Les contacts sur le web et dans l'extension n'atteignent pas la DHT Mainline et lisent via des relais : cette app y écrit donc aussi.",
