@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type UIEvent } from "react";
+import { flushSync } from "react-dom";
 import type { TaskStatus } from "@ghostly/core";
 import { PageHeader } from "../components/layout";
 import { MemberFace } from "../components/chat/SenderAvatar";
@@ -41,9 +42,13 @@ const icon = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strok
 /** A column's dot, by status: the tones the cards themselves use. */
 const COLUMN_DOT: Record<BoardColumn, string> = { queued: "bg-text-muted", running: "bg-accent", blocked: "bg-amber-500", review: "bg-link", done: "bg-success", closed: "bg-danger" };
 
-function Column({ group, name, dot, grouping, board, now, older, onOlder, onOpen, onTag, phone, labelledBy }: {
+function Column({ group, name, dot, grouping, board, now, older, onOlder, onOpen, onTag, phone, labelledBy, away, onColumn }: {
   group: BoardGroup; name: string; dot?: string; grouping: BoardGrouping; board: TaskBoardData; now: number; onTag: (tag: string) => void;
   older: boolean; onOlder: () => void; onOpen: (entry: BoardEntry) => void; phone: boolean; labelledBy?: string;
+  /** A phone's column whose tab is not chosen: still drawn beside the chosen one for a swipe, but out of Tab and the screen reader. */
+  away?: boolean;
+  /** A phone: chooses another column's tab, at once, before the keys move the focus into it. */
+  onColumn?: (index: number) => void;
 }) {
   const { t } = useI18n();
   const [limit, setLimit] = useState(COLUMN_PAGE);
@@ -63,12 +68,15 @@ function Column({ group, name, dot, grouping, board, now, older, onOlder, onOpen
     const to = boardMove(cards.map((list) => list.length), { column, row: cards[column].indexOf(event.currentTarget) }, event.key, rtl);
     if (!to) return;
     const target = cards[to.column][to.row];
+    // On a phone the other column is inert until its tab is chosen: choose it first, with no slide that would pass
+    // through the columns between and choose each of them on the way.
+    if (onColumn && to.column !== column) flushSync(() => onColumn(to.column));
     target.focus();
     target.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   };
 
   return (
-    <section data-testid="board-column" data-board-column data-column={group.id} aria-labelledby={labelledBy ?? titleId}
+    <section data-testid="board-column" data-board-column data-column={group.id} aria-labelledby={labelledBy ?? titleId} inert={away || undefined}
       {...(phone ? { role: "tabpanel", id: `${labelledBy}-panel` } : {})}
       className={phone ? "flex h-full w-full shrink-0 snap-start flex-col min-h-0" : "flex max-h-full min-w-64 max-w-96 flex-1 basis-64 flex-col rounded-xl bg-text-primary/[0.04]"}>
       {!phone && (
@@ -163,28 +171,43 @@ export function Tasks() {
 
   // A phone: the column on screen is the chosen tab's; a swipe to another column chooses its tab.
   const motion = (smooth = true): ScrollBehavior => smooth && !window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "smooth" : "auto";
+  // The column a tab's slide is on its way to: the columns it passes on the way are not chosen (each would be, for a
+  // frame, and the chosen one stay inert until the slide was half way). For a second at most, and a touch on the board
+  // ends it: the board's place then chooses again.
+  const sliding = useRef<{ to: number; until: number } | undefined>(undefined);
   const toTab = (index: number, smooth = true) => {
     setTab(index);
     const scroller = boardRef.current;
     const column = scroller?.querySelectorAll<HTMLElement>("[data-board-column]")[index];
-    if (scroller && column) scroller.scrollTo?.({ left: column.offsetLeft - scroller.offsetLeft, behavior: motion(smooth) });
+    const behavior = motion(smooth);
+    sliding.current = behavior === "smooth" ? { to: index, until: performance.now() + 1000 } : undefined;
+    if (scroller && column) scroller.scrollTo?.({ left: column.offsetLeft - scroller.offsetLeft, behavior });
   };
   // Heard on the board itself, not by an effect that looks for it once: the page draws the board only when the cards
   // have been read, after its first render, and an effect that ran before then never heard a swipe.
   const settleFrame = useRef(0);
-  useEffect(() => () => cancelAnimationFrame(settleFrame.current), []);
+  const settleLater = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => { cancelAnimationFrame(settleFrame.current); clearTimeout(settleLater.current); }, []);
+  const settleAt = (scroller: HTMLElement) => {
+    const width = scroller.clientWidth;
+    if (!width) return;
+    const index = Math.round(Math.abs(scroller.scrollLeft) / width);
+    const slide = sliding.current;
+    clearTimeout(settleLater.current);
+    if (slide && index !== slide.to && performance.now() < slide.until) {
+      settleLater.current = setTimeout(() => settleAt(scroller), slide.until - performance.now());
+      return;
+    }
+    sliding.current = undefined;
+    setTab(index);
+    // The tab row scrolls too, or the chosen tab of a far column stays off screen (a tap shows it by focusing it).
+    if (index !== at) tabsRef.current?.querySelectorAll<HTMLElement>("[role=tab]")[index]?.scrollIntoView?.({ block: "nearest", inline: "nearest", behavior: motion() });
+  };
   const settle = (event: UIEvent<HTMLDivElement>) => {
     if (!phone) return;
     const scroller = event.currentTarget;
     cancelAnimationFrame(settleFrame.current);
-    settleFrame.current = requestAnimationFrame(() => {
-      const width = scroller.clientWidth;
-      if (!width) return;
-      const index = Math.round(Math.abs(scroller.scrollLeft) / width);
-      setTab(index);
-      // The tab row scrolls too, or the chosen tab of a far column stays off screen (a tap shows it by focusing it).
-      if (index !== at) tabsRef.current?.querySelectorAll<HTMLElement>("[role=tab]")[index]?.scrollIntoView?.({ block: "nearest", inline: "nearest", behavior: motion() });
-    });
+    settleFrame.current = requestAnimationFrame(() => settleAt(scroller));
   };
   const tabKeys = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") return;
@@ -284,10 +307,12 @@ export function Tasks() {
                 </div>
               )}
               <div ref={boardRef} data-testid="tasks-board" data-grouping={grouping} data-layout={phone ? "tabs" : "columns"} onScroll={settle}
+                onPointerDown={() => { sliding.current = undefined; }} onWheel={() => { sliding.current = undefined; }}
                 className={phone ? "flex min-h-0 flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden overscroll-x-contain [scrollbar-width:none]" : "flex min-h-0 flex-1 items-start gap-3 overflow-x-auto p-3"}>
                 {model.groups.map((group, i) => (
                   <Column key={group.id} group={group} name={nameOf(group)} dot={grouping === "status" ? COLUMN_DOT[group.id as BoardColumn] : undefined} grouping={grouping}
-                    board={board} now={now} older={older} onOlder={() => setOlder(!older)} onOpen={open} onTag={(name) => setTag(tag === name ? undefined : name)} phone={phone} labelledBy={phone ? `${tabsId}-${i}` : undefined} />
+                    board={board} now={now} older={older} onOlder={() => setOlder(!older)} onOpen={open} onTag={(name) => setTag(tag === name ? undefined : name)} phone={phone} labelledBy={phone ? `${tabsId}-${i}` : undefined}
+                    away={phone && i !== at} onColumn={phone ? (index) => toTab(index, false) : undefined} />
                 ))}
               </div>
             </>
