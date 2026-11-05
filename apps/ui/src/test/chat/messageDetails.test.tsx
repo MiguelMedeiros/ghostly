@@ -215,15 +215,19 @@ describe("opening and closing", () => {
     expect(section("path")).toBeNull();
   });
 
-  it("each value that copies is a thumb's height on a phone, at least 24 px", async () => {
-    // They were 17 px tall, 2 px apart: a mis-tap copied the row above or below.
+  it("each value that copies is at least 24 px tall at every width, not only on a phone", async () => {
+    // They were 17-18 px tall, 2 px apart: a mis-tap or a near miss with a mouse copied the row above or below.
     fakeEngine.on("messageDetails", () => textView());
     const { user } = bubble();
     await detailsClick(user,screen.getByText("hello"));
     await waitFor(() => expect(screen.getByTestId("message-details")).toHaveAttribute("data-loaded", "yes"));
     const copies = screen.getAllByTestId("message-details-copy");
     expect(copies.length).toBeGreaterThan(1);
-    for (const copy of copies) expect(copy.className.split(/\s+/)).toContain("max-md:min-h-6");
+    for (const copy of copies) {
+      const classes = copy.className.split(/\s+/);
+      expect(classes).toContain("min-h-6");
+      expect(classes.filter(c => /^[\w-]+:min-h-/.test(c))).toEqual([]);
+    }
   });
 
   it("Tab and Shift+Tab go round the panel's own buttons, never to the chat behind it", async () => {

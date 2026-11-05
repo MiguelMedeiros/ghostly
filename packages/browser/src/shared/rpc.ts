@@ -383,6 +383,10 @@ export interface EngineApi {
   inviteToGroup(params: { groupId: string; linkId: string }): void;
   acceptGroupInvitation(params: { groupId: string }): void;
   declineGroupInvitation(params: { groupId: string }): void;
+  /** Another group came under this one's id (`GroupView.others`): the one held is the real one; the others' inviters are told no. */
+  keepGroup(params: { groupId: string }): void;
+  /** Another group under this one's id is the real one (`to`: its `linkId`, or its `link`): the one held goes, as Delete takes it. */
+  switchGroup(params: { groupId: string; to: string }): void;
   /** Turns the group's link on (or replaces it with a new one: the old one stops working). Admin only. */
   enableGroupLink(params: { groupId: string; reset?: boolean }): { link: string };
   disableGroupLink(params: { groupId: string }): void;

@@ -266,6 +266,15 @@ describe("mirroring what the peer stores into the chat", () => {
     expect(sync.toChatMessage(message({ id: "me_y", sender: "me", edit: { seq: 1, at: 5, history: [], pending: true } }), "peer-1", "me-1", true).edit).toEqual({ seq: 1, at: 5, history: [], pending: true });
   });
 
+  it("shows a contact request's text as not confirmed, and drops the mark once the engine's row is confirmed", async () => {
+    const stored = await mirror([message({ id: "peer_contact_k", text: "Hi, it's me", unconfirmed: true })]);
+    expect(stored.messages[0]).toMatchObject({ id: "peer_contact_k", unconfirmed: true });
+    changes = 0;
+    engine.messageListeners[0]("link-1", [message({ id: "peer_contact_k", text: "Hi, it's me" })]);
+    expect(storage.loadSession("s1")!.messages[0]!.unconfirmed).toBeUndefined();
+    expect(changes).toBe(1);
+  });
+
   it("a received row the engine gave a place to takes that place here too, with the time its sender said", async () => {
     // Stored under the contact's clock, which was ahead (before places were kept); the engine settled it since.
     const shown = [{ id: "peer_x", sender: "peer" as const, text: "answer", timestamp: 500 }, { id: "me_y", sender: "me" as const, text: "reply", timestamp: 300 }];
@@ -322,10 +331,38 @@ describe("mirroring what the peer stores into the chat", () => {
   });
 
   it("attributes a join announcement to whoever made it, fixing an old attribution", async () => {
-    const stored = await mirror([message({ id: "j", text: "👋 Casper joined" })], {
+    const stored = await mirror([message({ id: "j", text: "👋 Casper joined", joinLine: true })], {
       messages: [{ id: "j", sender: "system", text: "👋 Casper joined", timestamp: 10, systemEvent: { type: "join", pubKey: "me-1" } }],
     });
     expect(stored.messages[0].systemEvent).toEqual({ type: "join", pubKey: "peer-1" });
+  });
+
+  it("draws the contact's joined line only on the row the engine took as it: later rows in its words are their messages", async () => {
+    const stored = await mirror([
+      message({ id: "peer_j", text: "👋 Casper joined", timestamp: 1, joinLine: true }),
+      message({ id: "peer_hi", text: "hello", timestamp: 2 }),
+      message({ id: "peer_again", text: "👋 Casper joined", timestamp: 3 }),
+    ]);
+    expect(stored.messages.map((m) => [m.id, m.sender, m.systemEvent?.type])).toEqual([
+      ["peer_j", "system", "join"], ["peer_hi", "peer", undefined], ["peer_again", "peer", undefined],
+    ]);
+  });
+
+  it("a row of the contact's mirrored as the joined line from its words alone is their message again", async () => {
+    const stored = await mirror([message({ id: "peer_again", text: "👋 Casper joined", timestamp: 3 })], {
+      messages: [{ id: "peer_again", sender: "system", text: "👋 Casper joined", timestamp: 3, systemEvent: { type: "join", pubKey: "peer-1" } }],
+    });
+    expect(stored.messages[0].sender).toBe("peer");
+    expect(stored.messages[0]).not.toHaveProperty("systemEvent");
+  });
+
+  it("keeps each row as it was drawn when the chat's older history comes after its newest page", async () => {
+    const newest = [message({ id: "peer_hi", text: "hello", timestamp: 2 }), message({ id: "peer_again", text: "👋 Casper joined", timestamp: 3 })];
+    const shown = (s: ChatSession) => s.messages.map((m) => [m.id, m.sender, m.systemEvent?.type]);
+    const page = await mirror(newest);
+    expect(shown(page)).toEqual([["peer_hi", "peer", undefined], ["peer_again", "peer", undefined]]);
+    engine.messageListeners[0]("link-1", [message({ id: "peer_j", text: "👋 Casper joined", timestamp: 1, joinLine: true }), ...newest]);
+    expect(shown(storage.loadSession("s1")!)).toEqual([["peer_j", "system", "join"], ["peer_hi", "peer", undefined], ["peer_again", "peer", undefined]]);
   });
 
   it("says a refused payment's line as the engine's row says it now, whatever the chat mirrored before", async () => {
@@ -486,7 +523,19 @@ describe("the contact's own name", () => {
     imported();
     storage.saveSession(session());
     await start([link({ createdAt: 1 })]);
-    engine.messageListeners[0]("link-1", [message({ id: "peer_j", text: "👋 Casper joined" })]);
+    engine.messageListeners[0]("link-1", [message({ id: "peer_j", text: "👋 Casper joined", joinLine: true })]);
+    expect(storage.loadSession("s1")!.nick).toBe("Casper");
+  });
+
+  it("is never taken from a later message of the contact's in the joined line's words", async () => {
+    imported();
+    storage.saveSession(session());
+    await start([link({ createdAt: 1 })]);
+    engine.messageListeners[0]("link-1", [message({ id: "peer_j", text: "👋 Casper joined", timestamp: 1, joinLine: true })]);
+    engine.messageListeners[0]("link-1", [
+      message({ id: "peer_j", text: "👋 Casper joined", timestamp: 1, joinLine: true }),
+      message({ id: "peer_again", text: "👋 Dana joined", timestamp: 2 }),
+    ]);
     expect(storage.loadSession("s1")!.nick).toBe("Casper");
   });
 });

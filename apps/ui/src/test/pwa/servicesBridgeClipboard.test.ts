@@ -22,6 +22,8 @@ async function bridgeFrame(): Promise<HTMLIFrameElement> {
   vi.spyOn(window, "parent", "get").mockReturnValue(parent as unknown as Window);
   const workers = Object.assign(new EventTarget(), { startMessages: () => {}, register: async () => ({}), ready: Promise.resolve({}) });
   Object.defineProperty(navigator, "serviceWorker", { value: workers, configurable: true });
+  // The server's clear of the services host's cookies, before the app is framed.
+  vi.stubGlobal("fetch", async () => new Response(null, { status: 204 }));
   await import("../../../../web/src/svc/bridge");
   expect(parent.postMessage).toHaveBeenCalled();
   const { port1 } = new MessageChannel();

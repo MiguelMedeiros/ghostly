@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
 import { chat, expect, openProfilePage, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
+import { CHROMIUM_SANDBOX } from "../support/chromiumSandbox";
 
 /**
  * Forwards (WISP 400 § Forwards). Bo sends Ana a voice note and a picture; Ana chooses both (⋮ → Select, then the
@@ -15,6 +16,7 @@ const PICTURE = fileURLToPath(new URL("../support/avatar-fixtures/avatar.png", i
 
 test.use({
   launchOptions: {
+    chromiumSandbox: CHROMIUM_SANDBOX,
     args: [
       "--disable-features=WebRtcHideLocalIpsWithMdns",
       "--use-fake-device-for-media-stream",

@@ -8,7 +8,7 @@
 // writes one `<gate>=true|false` line per gate (`lint=`, `rust=`, `website=`, `website_e2e=`, `app=`, `packages=`,
 // `full=`, `affected=`, `tested=`) to $GITHUB_OUTPUT (and prints them), with a notice for each job it skips. A path
 // gate may only leave a job out when that job cannot read any of the changed files: tools/scripts/test/ci-changes.test.ts
-// holds the website's list to what the site's scripts actually read.
+// holds the website's list to what the site's scripts, tests and browser checks actually read.
 //
 // A draft gets the fast tier: lint and types, the unit tests the change can reach (test-affected.mjs), the site's checks
 // when the site changed, and the Rust job when Rust changed. Everything else waits for the pull request to leave
@@ -89,8 +89,13 @@ export const WEBSITE_INPUTS = [
   "packages/core/src/canonicalJson.ts",
   "packages/core/src/bytes.ts",
   "packages/core/src/image.ts",
+  "packages/core/src/text.ts",
   // privacy-hosts.test.mjs checks the privacy page's resolver list against the app's DoH resolvers.
   "packages/browser/src/proofs/domain.ts",
+  // The launch checklist (e2e/launch-checklist.spec.ts) checks the repository's social preview's size.
+  "docs/assets/social-preview.png",
+  // shots-version.test.mjs checks lib/release.ts's version against the app's.
+  "package.json",
   // The jobs themselves.
   ".github/workflows/ci.yml",
 ];

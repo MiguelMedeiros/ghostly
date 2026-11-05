@@ -27,6 +27,8 @@ beforeEach(async () => {
 
 const ensure = () => world.chrome.runtime.sendMessage({ target: "background", type: "ensure-engine" });
 const log = () => engineControl().log;
+/** `useProfile`, for a switch made in a loop or a callback (no React hook, whatever its name says). */
+const switchTo = useProfile;
 
 describe("an install from before profiles", () => {
   it("runs the first profile on the original database and lock, with no registry written", async () => {
@@ -196,6 +198,71 @@ describe("switching", () => {
     expect(engineControl().servers.at(-1)!.database).toBe(`ghostly_${HOME}`);
     expect(log()).toEqual(["start ghostly", "stop ghostly", `start ghostly_${WORK}`, `stop ghostly_${WORK}`, `start ghostly_${HOME}`]);
   });
+
+  it("switches made one after another while each next peer starts: the page of the last profile gets that profile's peer", async () => {
+    const reload = vi.fn();
+    Object.assign(globalThis, { location: { reload }, history: { replaceState: vi.fn() } });
+    try {
+      await ensure();
+      /** The next peer to start takes a moment to open its database, until let go. */
+      const hold = () => {
+        let release!: () => void;
+        engineControl().ready = new Promise<void>((resolve) => (release = resolve));
+        return release;
+      };
+      let release = hold();
+      useProfile(world, WORK);
+      const first = ensure();
+      // Personal, Work, Personal again: each clicked in another tab while the peer before it still starts.
+      for (const next of ["", WORK, ""]) {
+        const started = engineControl().servers.length;
+        while (engineControl().servers.length === started) await settle(1);
+        switchTo(world, next, [WORK]);
+        if (engineControl().servers.length === 4) break;
+        const previous = release;
+        release = hold();
+        previous();
+      }
+      // The page of the profile clicked last opens, and connects while Work's peer still starts.
+      const { openPageProfile } = await world.load("page", () => import("../src/profile.ts"));
+      const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
+      expect(openPageProfile()).toBe("");
+      const connected = extensionHost.connect(() => {}, () => {}).then(() => "connected", (error) => String(error));
+      await settle();
+      engineControl().ready = Promise.resolve();
+      release();
+
+      expect(await first).toEqual({ ok: true });
+      expect(await connected).toBe("connected");
+      await settle(5);
+      const servers = engineControl().servers;
+      expect(servers.at(-1)!.database).toBe("ghostly");
+      // Whatever port the page holds is the Personal peer's: never Work's.
+      expect(servers.filter((s) => s.attached.length).map((s) => s.database)).not.toContain(`ghostly_${WORK}`);
+      expect(world.locks).toEqual(new Map([["ghostly-peer", "offscreen"]]));
+    } finally {
+      delete (globalThis as { location?: unknown }).location;
+      delete (globalThis as { history?: unknown }).history;
+    }
+  });
+
+  it("a registry that never settles while peers start: the page is told to retry, never that the peer runs", async () => {
+    await ensure();
+    // Each new peer finds the registry moved on as soon as its document loads.
+    const createDocument = world.onCreateDocument;
+    let active = WORK;
+    world.onCreateDocument = async () => {
+      await createDocument();
+      active = active ? "" : WORK;
+      switchTo(world, active, [WORK]);
+    };
+    useProfile(world, WORK);
+    expect(await ensure()).toEqual({ ok: false, error: "Error: Switching profiles…" });
+    // Once the clicks stop, the next page gets the profile in use.
+    world.onCreateDocument = createDocument;
+    expect(await ensure()).toEqual({ ok: true });
+    expect(engineControl().servers.at(-1)!.database).toBe(active ? `ghostly_${active}` : "ghostly");
+  }, 10_000);
 
   it("does not wait for ever on a peer that hangs while stopping", async () => {
     await ensure();

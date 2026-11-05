@@ -327,16 +327,22 @@ pub async fn read_clipboard_files<R: tauri::Runtime>(
                 mime: Some("image/png".into()),
             }]
         }
-        Ready::Files(files) => files
-            .into_iter()
-            .map(|(path, name, size)| PastedItem {
-                token: shelf.put(Held::Path(path)),
-                name: Some(name),
-                size,
-                mime: None,
-            })
-            .collect(),
+        Ready::Files(files) => shelve_files(&shelf, files),
     })
+}
+
+/// Files ([`pasted_files`]'s) on the shelf, for the page to read by token: a paste's, or a drop's
+/// (`dropped_files`).
+pub fn shelve_files(shelf: &PasteShelf, files: Vec<(PathBuf, String, u64)>) -> Vec<PastedItem> {
+    files
+        .into_iter()
+        .map(|(path, name, size)| PastedItem {
+            token: shelf.put(Held::Path(path)),
+            name: Some(name),
+            size,
+            mime: None,
+        })
+        .collect()
 }
 
 /// Something another app shared into Ghostly (Android's "Share to Ghostly"), for the page's share picker: its text,

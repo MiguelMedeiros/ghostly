@@ -8,6 +8,7 @@ import { languageTag, textDirection } from "../../ui/src/lib/documentLanguage";
 import { translatorFor } from "../../ui/src/locales";
 import { markEngineRestart, pageProfileIsCurrent, startAsProfileInUse } from "./profile";
 import { setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
+import { forgetLocalAccess, releaseUnusedLocalAccess } from "./localAccess";
 
 // A contact's app tabs close when the profile locks, as Desktop's windows do: the worker serves them, page or not.
 setServiceWindowsCloser(() => void chrome.runtime.sendMessage({ target: "background", type: "close-services" } satisfies RuntimeMessage).catch(() => {}));
@@ -36,6 +37,11 @@ export const extensionHost: BrowserHost = {
     }
     const ready = await chrome.runtime.sendMessage({ target: "background", type: "ensure-engine" } satisfies RuntimeMessage);
     if (!ready?.ok) throw new Error(ready?.error ?? "The Ghostly peer is unavailable. Reopen the extension to retry.");
+    // Another switch may have come while the peer started: this page's profile is no longer the one it runs.
+    if (!pageProfileIsCurrent()) {
+      startAsProfileInUse();
+      throw new Error("Switching profiles…");
+    }
     const port = chrome.runtime.connect({ name: UI_PORT });
     port.onMessage.addListener(onMessage);
     port.onDisconnect.addListener(() => {
@@ -54,6 +60,9 @@ export const extensionHost: BrowserHost = {
 
   // Chrome's own prompt, and only from a user gesture.
   requestLocalAccess: (originPattern) => chrome.permissions.request({ origins: [originPattern] }),
+  // Given back once no app of any profile is at that host, on any port (localAccess.ts).
+  forgetLocalAccess,
+  releaseUnusedLocalAccess,
 
   async openPaymentLink(uri) {
     const reply = await chrome.runtime.sendMessage({ target: "background", type: "open-payment-link", uri } satisfies RuntimeMessage);

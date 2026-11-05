@@ -14,8 +14,13 @@ import { createServer } from 'node:http'
 
 /** Push services a relay posts to by default: Google (Chrome, Android, Edge on Android), Apple, Mozilla, Microsoft. */
 export const PUSH_HOSTS = [/^fcm\.googleapis\.com$/, /(^|\.)push\.apple\.com$/, /(^|\.)push\.services\.mozilla\.com$/, /(^|\.)notify\.windows\.com$/]
-/** Only these headers go through: what Web Push needs, nothing the sender could use to reach anything else. */
-const HEADERS = ['authorization', 'ttl', 'urgency', 'topic', 'content-encoding', 'content-type']
+/** Only these headers go through (by their name in lower case): what Web Push needs, nothing the sender could use to reach anything else. */
+const HEADERS = { authorization: 'Authorization', ttl: 'TTL', urgency: 'Urgency', topic: 'Topic', 'content-encoding': 'Content-Encoding', 'content-type': 'Content-Type' }
+/**
+ * A header value `fetch` sends: bytes, with no NUL, line break, other control or DEL. Anything else it throws on before
+ * connecting, which the relay would take for a push service that did not answer.
+ */
+const FIELD_VALUE = /^[\t\x20-\x7e\x80-\xff]*$/
 
 /**
  * `tracked`: addresses whose counts are kept at most. Past it, the ones idle for a minute go first, then the oldest:
@@ -46,7 +51,10 @@ export function readRelayRequest (text, { hosts = PUSH_HOSTS, bodyBytes = DEFAUL
     // A header named twice (in two spellings) is refused: the check below reads one, the push service would get both.
     if (seen.has(lower)) return { error: `${name} twice` }
     seen.add(lower)
-    if (HEADERS.includes(lower) && typeof value === 'string' && value.length < 2048 && !/[\r\n]/.test(value)) forwarded[name] = value
+    if (!Object.hasOwn(HEADERS, lower) || typeof value !== 'string' || value.length >= 2048) continue
+    // Named in the answer, so a sender sees what in its own request is wrong; the log gets one of six fixed names.
+    if (!FIELD_VALUE.test(value)) return { error: `Bad ${HEADERS[lower]} value` }
+    forwarded[name] = value
   }
   const authorization = Object.entries(forwarded).find(([name]) => name.toLowerCase() === 'authorization')?.[1]
   if (!authorization || !VAPID.test(authorization)) return { error: 'No VAPID authorization' }
@@ -63,6 +71,13 @@ export function failure (error) {
   if (typeof code === 'string' && /^[A-Z][A-Z0-9_]{1,63}$/.test(code)) return code
   return error?.cause?.message === 'unexpected redirect' ? 'redirect' : 'error'
 }
+
+/**
+ * Whether `fetch` threw on the request itself: a `TypeError` without a cause (an invalid header value, a character
+ * above U+00FF) or with undici's invalid-argument code (a control character). A network failure is a `TypeError`
+ * `fetch failed` with its cause.
+ */
+const refusedByFetch = error => error instanceof TypeError && (!('cause' in error) || error.cause?.code === 'UND_ERR_INVALID_ARG')
 
 /**
  * The address a request counts against. Behind `proxies` reverse proxies (a tunnel, nginx), the socket's address is the
@@ -84,13 +99,18 @@ export function clientAddress (req, proxies = 0) {
  */
 export function rateKey (address) {
   address = /^\[([^\]]+)\](?::\d+)?$/.exec(address)?.[1] ?? /^(\d+\.\d+\.\d+\.\d+):\d+$/.exec(address)?.[1] ?? address
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address)
-  if (mapped) return mapped[1]
   if (!address.includes(':')) return address
-  const [head, tail] = address.split('%')[0].split('::')
+  // The eight groups, whichever way the address is written: zone dropped, a dotted IPv4 tail as its two groups, `::`
+  // filled with zeros. An IPv4-mapped one (`::ffff:192.0.2.1`, `::ffff:c000:201`, `0:0:0:0:0:ffff:...`) is its IPv4.
+  const [head, tail] = address.split('%')[0].replace(/(\d+)\.(\d+)\.(\d+)\.(\d+)$/, (dotted, ...octets) =>
+    octets.slice(0, 4).every(octet => octet <= 255) ? `${(octets[0] * 256 + +octets[1]).toString(16)}:${(octets[2] * 256 + +octets[3]).toString(16)}` : dotted).split('::')
   const before = head ? head.split(':') : []
   const after = tail ? tail.split(':') : []
   const groups = tail === undefined ? before : [...before, ...Array(Math.max(0, 8 - before.length - after.length)).fill('0'), ...after]
+  const words = groups.map(group => /^[0-9a-f]{1,4}$/i.test(group) ? parseInt(group, 16) : NaN)
+  if (words.length === 8 && words.slice(0, 5).every(word => word === 0) && words[5] === 0xffff && words.every(word => word >= 0)) {
+    return [words[6] >> 8, words[6] & 255, words[7] >> 8, words[7] & 255].join('.')
+  }
   const prefix = groups.slice(0, 4).map(group => parseInt(group, 16))
   return prefix.length === 4 && prefix.every(n => n >= 0 && n <= 0xffff) ? `${prefix.map(n => n.toString(16)).join(':')}::/64` : address
 }
@@ -192,6 +212,8 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
         log('forwarded', response.status)
         answer(200, { status: response.status })
       } catch (error) {
+        // `fetch` refusing what it was handed, before any connection, is a refusal of the request, not a failed forward.
+        if (refusedByFetch(error)) return refuse('Not a request fetch can send', 400, { error: 'Not a request fetch can send' })
         stats.failed++
         log('failed', failure(error))
         answer(502, { error: 'The push service did not answer' })

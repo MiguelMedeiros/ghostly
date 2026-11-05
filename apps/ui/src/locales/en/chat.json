@@ -190,8 +190,14 @@
   "forward": {
     "forward": "Forward",
     "forwarded": "Forwarded",
+    "found": "{{count}} chats",
+    "found_one": "{{count}} chat",
+    "found_other": "{{count}} chats",
+    "limit": "You can forward to {{count}} chats at a time",
+    "limit_one": "You can forward to {{count}} chat at a time",
     "many": "Forwarded many times",
     "messages": "{{count}} messages",
+    "more": "{{count}} more",
     "noChats": "No chats yet",
     "noMatch": "No chat by that name",
     "partial": "{{sent}} of {{count}} sent",
@@ -460,6 +466,10 @@
   "typing": "typing…",
   "typingRecording": "recording audio…",
   "typingThinking": "thinking…",
+  "unconfirmed": {
+    "hint": "Sent with a contact request. Their app has not confirmed yet that it sent this.",
+    "label": "Not confirmed"
+  },
   "video": {
     "arriving": "Arriving",
     "cantPlay": "This device can't play this video ({{format}}). Download it to watch.",

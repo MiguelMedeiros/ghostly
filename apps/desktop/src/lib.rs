@@ -26,6 +26,7 @@ mod crypto;
 mod device_state;
 mod diagnostics;
 mod downloads;
+mod dropped_files;
 // The macOS end-to-end tests' way into the page (debug builds with `--features e2e-driver` only).
 #[cfg(any(test, feature = "e2e-driver"))]
 #[cfg_attr(not(feature = "e2e-driver"), allow(dead_code))]
@@ -36,6 +37,7 @@ mod file_stream;
 mod forget_origins;
 #[cfg(desktop)]
 mod fullscreen;
+mod hold_fetch;
 #[cfg(desktop)]
 mod hyperdht;
 #[cfg(desktop)]
@@ -144,6 +146,7 @@ macro_rules! commands {
             commands::get_profile,
             commands::get_public_key,
             commands::hide_from_switcher,
+            commands::hold_fetch,
             commands::link_preview_fetch,
             commands::lnd_request,
             commands::local_fetch,
@@ -176,6 +179,7 @@ macro_rules! commands {
             commands::webkit_version,
             device_state::device_state_read,
             device_state::device_state_write,
+            dropped_files::read_dropped_files,
             file_store::file_bytes_append,
             file_store::file_bytes_close,
             file_store::file_bytes_digest,
@@ -284,6 +288,9 @@ pub fn run() {
     if single_instance::hand_over(&context.config().identifier) {
         return;
     }
+    // Before any window: an app window's IPC message is bounded before Tauri parses it (on the main thread on Linux).
+    #[cfg(desktop)]
+    tauri::ipc::set_post_message_limit(app_sandbox::message_limit);
     let builder = tauri::Builder::default();
     #[cfg(target_os = "linux")]
     let builder = single_instance::register(builder, &context.config().identifier);
@@ -356,6 +363,7 @@ pub fn run() {
         .manage(clipboard_source())
         .manage(paste_source())
         .manage(clipboard::PasteShelf::default())
+        .manage(dropped_files::DroppedFiles::default())
         .setup(|app| {
             // The app's log, where the peer and the Pkarr client say how a link is doing.
             if let Ok(dir) = app.path().app_log_dir() {
@@ -389,6 +397,8 @@ pub fn run() {
                 microphone::install(&main);
                 // A file is saved through the app's own Save only, never by the WebView's own menu.
                 downloads::install(&main);
+                // A file dragged in from a file manager reaches the chat (WebKitGTK hands the page its address only).
+                dropped_files::install(&main);
             }
             #[cfg(feature = "e2e-driver")]
             {

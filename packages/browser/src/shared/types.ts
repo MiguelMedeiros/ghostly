@@ -85,13 +85,28 @@ export interface StoredLink {
   peerAvatar?: string;
   /** Present on the side that created the link, until the peer shows up. */
   inviteCode?: string;
-  /** Messages deleted on this device, by id, so a republished one is not stored again. */
+  /**
+   * A chat started by accepting a contact request (WISP 8xx § Accept), until its requester's app proves it holds the
+   * request's asker key `key` (asked through `link`): the request's text, row `message`, shows as not confirmed till then.
+   */
+  contactAsker?: { link: string; key: string; message: string };
+  /**
+   * Messages deleted on this device, by id, so a republished one is not stored again: 500 at most, my deletions never
+   * pushing out the contact's ids nor theirs mine (`withDeletedId`).
+   */
   deletedIds?: string[];
+  /**
+   * 1:1 chats: the contact has had a row here in the words of the chat's joined line (a contact request's note aside),
+   * so no later row of theirs is that line (`StoredMessage.joinLine`). Absent on a chat stored before it was kept: set
+   * as the engine starts.
+   */
+  peerSpoke?: true;
   /** My messages I deleted for everyone, their removal on its way to the contact (`engine/removals.ts`). */
   removals?: Removal[];
   /**
    * The ids both sides know (`replyRef`) of the messages deleted for everyone, mine or the contact's, here or not, the
-   * newest 500: a pin naming one shows as unpinned, the pin kept as it came (WISP 400 § Delete for everyone).
+   * newest 500: a pin naming one shows as unpinned, the pin kept as it came and marked (`StoredPin.removed`), so no
+   * later trimming brings it back (WISP 400 § Delete for everyone).
    */
   removedRefs?: string[];
   /**
@@ -137,6 +152,9 @@ export interface StoredLink {
 export type GroupEvent = "created" | "joined" | "gone" | "admin" | "rotated" | "removed" | "left" | "forked" | "picture" | "renamed";
 
 /** A private group as stored: an invitation not yet answered, or a group I am (or was) in. */
+/** Another group under the id of one held (`StoredGroup.others`): a contact's invitation, or a group link opened. */
+export type OtherGroup = { at: number; linkId: string; name: string; admin: string; e: number; n: number } | { at: number; link: string };
+
 export interface StoredGroup {
   id: string;
   createdAt: number;
@@ -203,6 +221,13 @@ export interface StoredGroup {
   formerNames?: Record<string, string>;
   /** Removed, then invited again: the removed group as it was, which a Decline puts back (with the history it kept). */
   previous?: StoredGroup;
+  /**
+   * Other groups that came under this id while it was held: an invitation over a contact chat from someone outside the
+   * group held, or a link opened. A private group's id names no genesis (anyone who knows it may sign one under it), so
+   * which of them is the real one is the person's to say: each is kept beside the group held until they pick
+   * (`Groups.keepGroup`, `Groups.switchGroup`), and an inviter turned down hears a decline.
+   */
+  others?: OtherGroup[];
   /**
    * Past 16 members, with hubs (WISP 902 · Group Mesh § Hubs): the hubs I kept edges with (as a hub, the other hubs),
    * where my edges go when the app starts again, before the beacon is read.
@@ -345,6 +370,8 @@ export interface GroupView {
   /** On the invitee's side, until the welcome arrives. */
   /**
    * `waiting`: joining a community through its link, how many others were knocking with me when I last knocked.
+   * `othersKnocked`: joining a private group through its link, others knocked in its record lately (`KNOCK_REFRESH_MS`):
+   * the admin's app may be busy letting them in, its relay budget spent, so the wait is not a sign it is closed.
    * `since`: joining a community through its link, when the knock started (a group kept here, knocking to get back in,
    * was created long before).
    * `admittedAt`: joining a community through its link, at stage `admitted`, when a member's app let me in. A welcome
@@ -355,9 +382,19 @@ export interface GroupView {
    * this run (`JOIN_GIVE_UP_MS`), so the knocks stopped; accepting knocks again.
    * `takenBack`: who sent it took it back (the group is gone from its app, or the admin role from it): nothing to answer.
    */
-  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; takenBack?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; since?: number; admittedAt?: number; full?: { n: number; max: number } };
+  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; takenBack?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; othersKnocked?: boolean; since?: number; admittedAt?: number; full?: { n: number; max: number } };
+  /**
+   * Other groups that came under this one's id (a contact's invitation, or a link opened) while it was here: kept beside
+   * it until the person picks the real one (`keepGroup`, `switchGroup` with the other's `linkId` or `link`).
+   */
+  others?: ({ linkId: string; contact: string; name: string; members: number } | { link: string })[];
   /** The group's link while it is on (`group1/<id>/<entry key>`); only the admin who made it sees it. */
   entryLink?: string;
+  /**
+   * The admin's link of a private group lets nobody in: knocks under it keep coming from keys whose app never answers,
+   * and they hold the places a joiner is answered in. A new link (`enableGroupLink` with `reset`) ends it.
+   */
+  entryJammed?: true;
   /** Contacts (by chat id) invited by me and not yet in. */
   invited: string[];
   /** Contact chats that are members, by chat id → member key. */
@@ -380,7 +417,14 @@ export interface GroupView {
    */
   hubs?: { hub: boolean };
   /** Community groups: how this device is connected (a hub for others, or through hubs). */
-  community?: { hub: boolean; hubs: number; connected: number };
+  community?: {
+    hub: boolean; hubs: number; connected: number;
+    /**
+     * Admin only: this many joiners lately were let in to an entry session that never came up on their side, enough that
+     * the knocks may not be real people and real ones may not get in. A new link (`enableLink` with `reset`) ends it.
+     */
+    unansweredKnocks?: number;
+  };
   /** Private groups: the members typing now, in the order they started (WISP 902 · Group Mesh § Typing). Never stored. */
   typing?: GroupTypingView[];
   /** Private groups: this side's wake-up tokens, one per member it shared its subscription with (the push worker's table). */
@@ -651,6 +695,12 @@ export interface StoredPayment {
   lightningPending?: boolean;
   /** Requests we pay: this device paid it over Lightning (the payee's wallet cannot say who paid an invoice). */
   paidHere?: boolean;
+  /**
+   * Requests we pay: the payee said it is paid (its `pay-res` ok), so its wallet has seen the money and our receipts
+   * for it (on-chain, Ark, Bark, Spark, USDT) are not said again when the chat reconnects. Absent: not heard yet, or a
+   * record from before this was kept (see `PaymentDesk.receiptOwed`).
+   */
+  payeeConfirmed?: boolean;
   /**
    * A request to a whole group (WISP 902 § Payments): the group's id. Its `linkId` is `group:<id>`, it went to
    * every member over their edges, and the first member whose payment settles it pays it; later ones are refused.
@@ -937,6 +987,11 @@ export interface StoredMessage {
   nick?: string;
   file?: MessageFile;
   paymentId?: string;
+  /**
+   * The text a contact request carried, while its requester's app has not proven in the chat that it sent it (WISP 8xx
+   * § Accept): whoever made the chat's invite may not be who asked.
+   */
+  unconfirmed?: true;
   /** Group messages: the member key of the sender. */
   member?: string;
   /** Group history lines that are not messages. */
@@ -998,6 +1053,12 @@ export interface StoredMessage {
    * values (`paymentRefusal` in `shared/refusals.ts`), and `text` keeps its English for the CLI and older apps.
    */
   notice?: ChatNotice;
+  /**
+   * A 1:1 chat's "👋 <name> joined" line, drawn as the app's own line: set only on the contact's first row of the chat
+   * in those words (`peerSpoke` on its link), whatever they wrote before it. Decided once, as the row is stored, so it never moves to
+   * another row as history loads or rows go. Any other row in those words is an ordinary message.
+   */
+  joinLine?: true;
 }
 
 /**
@@ -1043,9 +1104,10 @@ export interface MessagePage { messages: StoredMessage[]; more: boolean }
 /**
  * A chat's pin as kept (WISP 400 § Pinned message): the message's id both sides know (`id`, "" unpinned), the pinner's
  * number (the highest wins), who pinned (`me`, `peer`, or a member's key) and when it came here. `messageId`: the row
- * here, when it was here then. A private group's keeps the pinner's signature (`k`, `sig`), to pass it on.
+ * here, when it was here then. A private group's keeps the pinner's signature (`k`, `sig`), to pass it on. `removed`: a
+ * 1:1 chat's, its message deleted for everyone: shown as unpinned for good, the pin kept as it came.
  */
-export interface StoredPin extends WirePin { by: string; at: number; messageId?: string; k?: string; sig?: string }
+export interface StoredPin extends WirePin { by: string; at: number; messageId?: string; k?: string; sig?: string; removed?: true }
 
 /** A chat's pin, as the pages and the CLI see it. `id`: the id both sides know the message by ("" once unpinned); `messageId`: the row here. */
 export interface PinView { id: string; by: string; at: number; messageId?: string }

@@ -53,9 +53,26 @@ describe("what the extension may do, as the manifest declares it", () => {
   it("runs no code it did not ship", () => {
     const csp = manifest.content_security_policy.extension_pages;
     expect(csp).toContain("script-src 'self' 'wasm-unsafe-eval';");
-    expect(csp).not.toMatch(/'unsafe-eval'|'unsafe-inline'|script-src[^;]*https?:/);
+    expect(csp).not.toMatch(/'unsafe-eval'|script-src[^;]*('unsafe-inline'|https?:)/);
     expect(csp).toContain("object-src 'none'");
     expect(csp).toContain("frame-ancestors 'none'");
+  });
+
+  it("loads nothing else from, and sends nothing to, a host it does not need", () => {
+    const directives = new Map(manifest.content_security_policy.extension_pages.split(";").map((part) => {
+      const [name, ...sources] = part.trim().split(/\s+/);
+      return [name, sources] as const;
+    }));
+    // A load with no directive of its own falls back to default-src: frames, media, fonts and styles stay on the extension.
+    expect(directives.get("default-src")).toEqual(["'self'"]);
+    expect(directives.get("style-src")).toEqual(["'self'", "'unsafe-inline'"]);
+    expect(directives.get("font-src")).toEqual(["'self'", "data:"]);
+    expect(directives.get("media-src")).toEqual(["'self'", "blob:"]);
+    expect(directives.get("frame-src")).toEqual(["'none'"]);
+    expect(directives.get("form-action")).toEqual(["'none'"]);
+    // Only the shipped scripts can connect (script-src above). The engine checks itself that plain HTTP and WS stay on
+    // this machine (pairedTransports, http.ts), which a policy cannot say: Chrome takes no [::1] in a source.
+    expect(directives.get("connect-src")).toEqual(["'self'", "https:", "wss:", "http:", "ws:", "data:", "blob:"]);
   });
 });
 

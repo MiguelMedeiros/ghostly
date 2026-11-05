@@ -7,17 +7,15 @@ import { announceJoins } from "./announce";
 import { reportAppFrames } from "./appEvents";
 import { callApi, type ApiContext } from "./api";
 import { CallManager } from "./calls/manager";
+import { MAX_LINE } from "./client";
 import { greeting, HELLO, newDaemonSecret, proof, removeDaemonSecret } from "./daemonProof";
 import { asCliError, CliError } from "./errors";
 import { EventHub, type GhostlyEvent } from "./events";
 import { resumeHolds } from "./holds";
-import { ownFolder, privateFolder } from "./privateFolder";
+import { ownFolder, ownProfile, privateFolder } from "./privateFolder";
 import { acquireLock, startingPath, type ProfilePaths } from "./profiles";
 import { startRuntime, type RuntimeOptions } from "./runtime/engine";
 import { flushCardUpdates } from "./statusCards";
-
-/** The longest request line the daemon reads (WISP 1100 § Framing). */
-export const MAX_LINE = 16 * 1024 * 1024;
 
 /**
  * The most a connection may leave unread (answers and events the daemon wrote that its client has not taken): past
@@ -45,6 +43,8 @@ export interface Host {
  * `deferGroups`: the groups' sessions would spend the relays' budget its message needs.
  */
 export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], version: string, options: RuntimeOptions = {}): Promise<Host> {
+  // Before the lock, the store and the events journal are written there (WISP 1100 § Profiles and files).
+  ownProfile(paths.dir);
   const locked = acquireLock(paths);
   // A daemon says it is starting until its socket listens (`serve`): a command that finds the profile held tells it
   // from a one-shot command (`startingDaemon`). Without it, `daemon status` said no daemon ran and `daemon stop` missed it.

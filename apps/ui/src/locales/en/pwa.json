@@ -45,6 +45,7 @@
   "wakeHint": "Contacts' apps can wake this one with a push. Nothing of the message goes in it.",
   "wakeInfo": "It goes through your browser's push service (Google, Apple or Mozilla), which learns when. Contacts learn your push address; New address replaces it.",
   "wakeMoveHere": "{{device}} wants to move this profile here. Open Ghostly.",
+  "wakeNoPushService": "This browser has no push service, so Ghostly can't be woken while it's closed. On GrapheneOS, install sandboxed Google Play or use another browser.",
   "wakeNotice": "New message",
   "wakeOnHint": "On. A message sent while Ghostly is closed shows \"New message\".",
   "wakeRotate": "New address",
@@ -53,5 +54,6 @@
   "wakeStandbyCallUnnamed": "Call for you. Open Ghostly on your active device.",
   "wakeStandbyUnnamed": "New message. Open Ghostly on your active device.",
   "wakeTakeover": "{{device}} wants to take over. Open Ghostly.",
+  "wakeTryAgain": "Try again",
   "wakeUnavailable": "This browser can't wake Ghostly while it's closed."
 }

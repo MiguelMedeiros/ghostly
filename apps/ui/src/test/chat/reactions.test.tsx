@@ -228,6 +228,21 @@ describe("the quick bar", () => {
     expect(screen.queryByTestId("reaction-bar")).not.toBeInTheDocument();
   });
 
+  it("a refused copy's note stays until the person closes it, and the focus goes back to the message", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new DOMException("denied", "NotAllowedError"));
+    const { container } = renderApp(<MessageBubble message={message()} peerPubKey="peer" onReact={() => {}} reactionName={names} />);
+    pressCopy(container);
+    await act(async () => {});
+    // Time to select the text and copy it by hand: it does not go by itself.
+    act(() => { vi.advanceTimersByTime(10 * 60_000); });
+    expect(screen.getByTestId("message-copy-text")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByTestId("message-copy-error")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("message-copy-text")).not.toBeInTheDocument();
+    expect(screen.getByTestId("message-options")).toHaveFocus();
+  });
+
   it("the React button's bar (a pointer) has no Copy: the text is selectable there", async () => {
     const { user } = renderApp(<MessageBubble message={message()} peerPubKey="peer" onReact={() => {}} reactionName={names} />);
     await user.click(screen.getByTestId("message-react-action"));

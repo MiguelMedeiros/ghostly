@@ -30,6 +30,8 @@ const seedAt = (linkKeyZ32: string) => ({ store: STORES.settings, key: linkKeyZ3
 interface StoredRequest extends ContactRequest {
   key: string;
   receivedAt: number;
+  /** The link it came through: a request kept past a new link still names the old one, which its asker's proof signs. */
+  link?: string;
 }
 
 interface StoredContactLinks {
@@ -47,8 +49,11 @@ export interface ContactLinkHost {
   resolve(pubKeyZ32: string): Promise<GhostRecord[] | null>;
   /** Whether a chat invite is one this profile made or already joined: a request carrying one is no request. */
   ownInvite(code: string): boolean;
-  /** Joins a request's invite as a chat named and opened as the request says; the chat's id. */
-  accept(request: ContactRequest & { key: string; receivedAt: number }): Promise<string>;
+  /**
+   * Joins a request's invite as a chat named and opened as the request says; the chat's id. Its text shows as not
+   * confirmed until the requester's app proves, in the chat, that it holds `key` (asked through `link`).
+   */
+  accept(request: ContactRequest & { key: string; receivedAt: number; link: string }): Promise<string>;
 }
 
 export const CONTACT_LINKS_KEY = "contactLinks";
@@ -123,10 +128,13 @@ export class ContactLinks {
    */
   accept(id: string): Promise<{ linkId: string }> {
     return this.serial(async () => {
-      const request = this.stored.current?.requests?.find(r => r.key === id);
-      if (!request) throw new Error("This request is no longer waiting");
+      const current = this.stored.current;
+      const request = current?.requests?.find(r => r.key === id);
+      if (!current || !request) throw new Error("This request is no longer waiting");
       if (request.expires <= Date.now()) throw new Error("This request expired");
-      const linkId = await this.host.accept(request);
+      // Taken before requests kept their link: the current one. Had it come through an older one, no proof holds and
+      // its text stays not confirmed, which is the safe side.
+      const linkId = await this.host.accept({ ...request, link: request.link ?? current.linkKeyZ32 });
       await this.settle(id);
       return { linkId };
     });
@@ -246,7 +254,7 @@ export class ContactLinks {
         const request = records ? openRequest(seedB64, key, records, now) : null;
         if (!request || this.host.ownInvite(request.invite)) continue;
         inbox = takeRequest(linkKey, inbox, key, request.expires, now);
-        taken.push({ ...request, key, receivedAt: now });
+        taken.push({ ...request, key, receivedAt: now, link: linkKey });
       }
     }
     // A publish that went out meanwhile marked the link: keep its mark. Requests are only ever changed in this queue.

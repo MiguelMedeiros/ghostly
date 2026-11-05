@@ -2061,7 +2061,7 @@ dependencies = [
 
 [[package]]
 name = "ghostly"
-version = "1.9.0"
+version = "1.10.0"
 dependencies = [
  "arboard",
  "async-trait",
@@ -2075,6 +2075,7 @@ dependencies = [
  "ghostly-transports",
  "gstreamer",
  "gstreamer-app",
+ "gtk",
  "iroh",
  "jni 0.22.4",
  "libc",
@@ -6569,8 +6570,6 @@ checksum = "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca"
 [[package]]
 name = "tauri"
 version = "2.12.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d061d042ccd2df9c9f1508c1e63d835278c0a4c8801eb41764080e51f2eaaf34"
 dependencies = [
  "anyhow",
  "bytes",

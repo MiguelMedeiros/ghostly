@@ -27,10 +27,12 @@ import type { EngineServer } from "@ghostly/browser/engine/server";
 import { createInPageHost } from "@ghostly/browser/inPageHost";
 import { defaultWalletsAllowed } from "@ghostly/browser/platform/walletSetupSwitch";
 import { getIdentifier } from "@tauri-apps/api/app";
-import type { PubkyCookieSession } from "@ghostly/browser/host";
+import type { ClipboardFile, PubkyCookieSession } from "@ghostly/browser/host";
+import { followPlatformDrags } from "../lib/pastedFiles";
 import type { NodeOptions } from "@ghostly/browser/engine/node";
 import { createIrohEndpoint, createHyperEndpoint } from "./nativeTransports";
 import { desktopUpdates } from "./updates";
+import { desktopHoldFetch } from "./holdFetch";
 import { desktopLnurlFetch } from "./lnurlFetch";
 import { desktopOidc } from "./oidc";
 import { desktopAtprotoHost } from "./atproto";
@@ -352,6 +354,21 @@ export function desktopApps(runsApps: boolean) {
   };
 }
 
+/** A file Rust put on its paste shelf (a paste's, a drop's): read by token, never by path. */
+interface ShelvedItem { token: string; name: string | null; size: number; mime: string | null }
+
+/** Shelved files as the page reads them. Once read (or not), Rust lets them go (`incoming_share_done`). */
+function shelved(items: ShelvedItem[]): ClipboardFile[] {
+  return items.map(({ token, ...item }) => ({
+    ...item,
+    read: async (offset: number, length: number) => {
+      const bytes = await invoke<ArrayBuffer | number[]>("read_pasted_bytes", { token, offset, length });
+      return bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : new Uint8Array(bytes);
+    },
+    done: () => void invoke("incoming_share_done", { tokens: [token] }).catch(() => {}),
+  }));
+}
+
 /**
  * `calls`: what Rust says about calls on this machine (`nativeCallSupport`), for `nativeCallOptions`. It may still be
  * coming: on Linux it starts GStreamer, 0.6 s on a first launch, and the page is drawn meanwhile. The engine starts
@@ -377,12 +394,18 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   registerFileBytes("native", async () => new NativeFileBytes(invoke as NativeInvoke, { jsonIpc: androidApp() }), true);
   // The unread count, as the web app's icon has it (muted chats left out), on the Dock icon.
   setAppBadgeTarget(dockBadge());
+  // WebKitGTK names another app's dragged files to the page by their address only: Rust says when such a drag is over
+  // the window and holds the files of its drop, which the page reads as a paste's (Linux; elsewhere it never says).
+  const draggedOver = followPlatformDrags(async () => shelved(await invoke<ShelvedItem[]>("read_dropped_files")));
+  void listen<boolean>("file-drag", ({ payload }) => draggedOver(payload === true)).catch(() => {});
   const apps = desktopApps(appsPlatform());
   const node: NodeOptions = { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, nativeIrohRelays: true, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke,
     // Wake-ups go from Rust: push services answer without CORS, which a WebView would enforce (WISP 401 § Wake-up push).
     pushSend: (request) => invoke<number>("push_send", { url: request.url, headers: Object.entries(request.headers), body: toBase64Url(request.body) }),
     // A Lightning address whose service redirects is asked from Rust, which checks every hop before following it.
     lnurlFetch: desktopLnurlFetch(invoke),
+    // Held items are read from the contact's storage on public addresses only, which Rust checks and a WebView cannot.
+    holdFetch: desktopHoldFetch(invoke),
     // A new profile gets its default Mainnet wallets; never under an e2e suite (desktopUnderTest).
     defaultWallets: defaultWalletsAllowed(desktopUnderTest),
     ...apps.node, ...macPeerBudget() };
@@ -424,15 +447,7 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     // A paste the webview showed the page nothing of (no files, no text): Rust looks for copied files or a picture.
     // Their bytes stay in Rust, read by token; the page never names a path. Once the page has them, Rust lets them
     // go (`incoming_share_done`, named after a share, takes a paste's tokens too): a pasted picture's PNG is not kept.
-    readClipboardFiles: async () => (await invoke<{ token: string; name: string | null; size: number; mime: string | null }[]>("read_clipboard_files"))
-      .map(({ token, ...item }) => ({
-        ...item,
-        read: async (offset: number, length: number) => {
-          const bytes = await invoke<ArrayBuffer | number[]>("read_pasted_bytes", { token, offset, length });
-          return bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : new Uint8Array(bytes);
-        },
-        done: () => void invoke("incoming_share_done", { tokens: [token] }).catch(() => {}),
-      })),
+    readClipboardFiles: async () => shelved(await invoke<ShelvedItem[]>("read_clipboard_files")),
     // Rust asks in a native dialog naming the exact address (the page can neither draw nor answer it), and keeps the
     // answer per profile: `local_fetch` reaches only an address allowed there. The dialog is in the page's language.
     requestLocalAccess: (_pattern, origin) => invoke<boolean>("local_service_allow", { space: fileSpace(), origin, lang: dialogLanguage() }),

@@ -46,6 +46,12 @@ const OLD_MIGRATED_KEY = "ghostly_browser_sessions_imported";
 const FORGET_AFTER_MS = 15_000;
 const JOIN_PATTERN = /^👋 (?:.+ )?joined$/;
 
+/**
+ * Whether a row is the chat's joined line, drawn as the app's own line: the contact's only when the engine took it as
+ * one (`joinLine`, their first row of the chat), any other row of theirs in those words being a message; mine by its words.
+ */
+const isJoinLine = (message: StoredMessage) => JOIN_PATTERN.test(message.text) && (message.sender === "me" || !!message.joinLine);
+
 export function notifySessionsChanged(): void {
   window.dispatchEvent(new Event("session-updated"));
 }
@@ -82,7 +88,7 @@ export function sessionForPeer(peerPubKeyZ32: string): ChatSession | undefined {
 }
 
 export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string, myPubKeyZ32: string, modern = false): ChatMessage {
-  const isJoin = JOIN_PATTERN.test(message.text);
+  const isJoin = isJoinLine(message);
   // A payment of the contact's this app refused: the app's own line, not the contact's (stored as theirs for the CLI).
   const notice = paymentRefusal(message);
   return {
@@ -103,6 +109,7 @@ export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string, myP
     ...(message.reactions && { reactions: message.reactions }),
     ...(message.edit && { edit: message.edit }),
     ...(message.forwarded && { forwarded: message.forwarded }),
+    ...(message.unconfirmed && { unconfirmed: true as const }),
     ...(message.card && { card: message.card }),
     meta: modern ? undefined : {
       dhtKey: peerPubKeyZ32,
@@ -254,9 +261,22 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
         // A status card belongs to its version (WISP 405 · Status Cards): the edit's, or none.
         if (message.card) row.card = message.card; else delete row.card;
       }
-      // Only a join announcement has one; the others are not mapped again.
-      const systemEvent = JOIN_PATTERN.test(message.text) ? mapped().systemEvent : undefined;
+      // A contact request's text, confirmed by its requester's app since (WISP 8xx § Accept).
+      if (!!previous.unconfirmed !== !!message.unconfirmed) {
+        if (message.unconfirmed) change().unconfirmed = true; else delete change().unconfirmed;
+      }
+      // Only a joined line has one; the others are not mapped again. A row of the contact's is that line only as the
+      // engine says (`isJoinLine`): one mirrored as it from its words alone is their message again.
+      const systemEvent = isJoinLine(message) ? mapped().systemEvent : undefined;
       if (systemEvent && previous.systemEvent?.pubKey !== systemEvent.pubKey) change().systemEvent = systemEvent;
+      if (message.sender === "peer") {
+        if (systemEvent && previous.sender !== "system") change().sender = "system";
+        else if (!systemEvent && previous.systemEvent?.type === "join") {
+          const row = change();
+          row.sender = "peer";
+          delete row.systemEvent;
+        }
+      }
       // A refused payment's line as the engine's row says it (shared/refusals.ts): one mirrored before its values were
       // kept as the contact's, or a contact's text under its id mirrored as the app's line. The UI reads only this.
       if (isRefusalId(message.id)) {

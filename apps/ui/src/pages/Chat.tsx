@@ -6,6 +6,7 @@ import { useBackdropDismiss, useDialogFocus } from "../hooks/useDismiss";
 import { useComposition } from "../hooks/useComposition";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { setChatOnCall } from "../lib/chatsOnCall";
+import { setCallNoPath, useCallNoPath } from "../lib/callNoPath";
 import { createPortal } from "react-dom";
 import { ChatHoldDialog, ChatHoldLine } from "../components/ChatHoldDialog";
 import { ContactIdentitiesPanel } from "../components/identities/ContactIdentitiesPanel";
@@ -28,6 +29,7 @@ import { openOnArrow } from "../lib/menuButton";
 import { useI18n } from "../contexts/I18nContext";
 import { InviteCard } from "../components/InviteCard";
 import { LinkQrDialog } from "../components/chat/LinkQrDialog";
+import { CallNoPathNotice } from "../components/CallNoPathNotice";
 import { ChatConnection } from "../components/ChatConnection";
 import { focus } from "../lib/connection";
 import { PairingScene } from "../components/pairing/PairingScene";
@@ -49,7 +51,7 @@ import { mediaDeniedText, preferredDevice } from "../lib/mediaDevices";
 import { useSettings } from "../contexts/SettingsContext";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
-import { messageSnippet, quoteFor, replyIndexer, replyTarget, sentReply, type NameOf } from "../lib/replies";
+import { heldOriginal, messageSnippet, quoteFor, replyIndexer, replyTarget, sentReply, type NameOf } from "../lib/replies";
 import { buttonsViews, compactPresses } from "../lib/buttons";
 import { ChatOnScreen } from "../lib/chatOnScreen";
 import { replySnippet, type RoutineCard } from "@ghostly/core";
@@ -66,7 +68,7 @@ import { formatFileSize } from "../lib/format";
 import { playSound, startRinging } from "../lib/sounds";
 import { CueChat } from "../lib/cues";
 import { NowPlayingChat, pauseForCall, stopPlayingFrom } from "../lib/nowPlaying";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
 import {
   isSessionPinned,
   setSessionPinned,
@@ -84,7 +86,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { fileMessageText, inviteQrSegments, isPlayableVideoType, PAIRED_CALL_CANDIDATES, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
 import { videoMetaOf } from "../lib/videoPoster";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
-import type { WalletNetwork } from "../lib/platform";
+import { servicesPlatform, type WalletNetwork } from "../lib/platform";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
 import { TranslateMenu, TranslateMenuItem } from "../components/ChatTranslate";
@@ -280,7 +282,15 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     uncountMissedCall(line);
   }, [deleteMessage, uncountMissedCall]);
 
-  const platform = useServicesPlatform();
+  const platform = servicesPlatform;
+  // What this page reads of the platform and the engine's settings as it draws, compared by content: drawn again when
+  // that changes, not on every engine state (up to 20 a second while a file moves), which drew the open chat and every
+  // chat kept loaded off screen for its call or mini-app each time.
+  usePlatformValue(() => {
+    const peerKey = params?.peerPubKeyB64 ?? "";
+    const settings = engine.state?.settings;
+    return [platform?.getPeer(peerKey), platform?.wallet?.getState(), platform?.getSharedServices(), settings?.online, settings?.iceServers, settings?.relayOnly];
+  });
   const webrtc = useWebRTC({
     incomingCallSignal,
     callHandledElsewhere,
@@ -316,6 +326,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // Out of sight, a ringing call is a system notification too: one for every tab that rings it (its offer's time).
   const incomingOfferTs = useMemo(() => (incomingCallSignal ? parseCallSignal(incomingCallSignal)?.ts : undefined), [incomingCallSignal]);
   useIncomingCallNotice(callState === "incoming" && callRings(sessionId), sessionId, t("pwa.wakeCall"), incomingOfferTs);
+  // The no-path note outlives this page (lib/callNoPath.ts): a chat off screen is let go once its call ends. It goes
+  // when closed, or when the chat's next call starts.
+  useEffect(() => { if (webrtc.noPath) setCallNoPath(sessionId, true); }, [webrtc.noPath, sessionId]);
+  useEffect(() => { if (callState === "offering" || callState === "incoming") setCallNoPath(sessionId, false); }, [callState, sessionId]);
+  const noPathShown = useCallNoPath(sessionId);
 
   useEffect(() => () => { onCallChange(sessionId, false); setChatOnCall(sessionId, false); }, [onCallChange, sessionId]);
 
@@ -352,8 +367,16 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // its card goes and the scene alone tells the rest. It comes back if the state says nobody is there any more.
   const invitePast = contactArrived(pairing.progress);
   const peerKey = params?.peerPubKeyB64;
-  /** The message the composer answers (WISP 400 § Replies): a paired chat's only. */
-  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  // Read without its older messages (just started, the engine's history not in yet): a quote's original may be among them.
+  const [readReplies] = useState(() => replyIndexer());
+  const quoteIndex = useMemo(() => readReplies(messages, !!(sessionId && loadShownSession(sessionId)?.older)), [messages, sessionId, readReplies]);
+  /**
+   * The message the composer answers (WISP 400 § Replies): a paired chat's only. Read as the chat has it now: the
+   * contact's edit shows in the bar, and a message deleted (here, or for everyone) lets the bar go, its words with it.
+   */
+  const [chosenReply, setReplyingTo] = useState<ChatMessage | null>(null);
+  const replyingTo = useMemo(() => (chosenReply && heldOriginal(chosenReply, quoteIndex)) ?? null, [chosenReply, quoteIndex]);
+  useEffect(() => { if (chosenReply && !replyingTo) setReplyingTo(null); }, [chosenReply, replyingTo]);
   /**
    * The reply as it is when something is sent, not as a render's closure saw it: a recording or a sheet of files
    * started earlier goes with the reply set now. The first thing sent after Reply carries it (a text, a voice note, a
@@ -361,10 +384,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
    */
   const replyingRef = useRef(replyingTo);
   replyingRef.current = replyingTo;
-  /** Sent with the reply: the bar goes, unless another message was chosen meanwhile. */
+  /** Sent with the reply: the bar goes, unless another message was chosen meanwhile (an edit is the same one). */
   const replied = useCallback((answering: ChatMessage) => {
-    if (replyingRef.current === answering) replyingRef.current = null;
-    setReplyingTo(current => current === answering ? null : current);
+    if (replyingRef.current?.id === answering.id) replyingRef.current = null;
+    setReplyingTo(current => current?.id === answering.id ? null : current);
   }, [setReplyingTo]);
   const sendFile = useCallback(
     async (source: File, voice?: VoiceMeta): Promise<string | null> => {
@@ -513,9 +536,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const [editing, setEditing] = useState<ChatMessage | null>(null);
   // Opened from the Tasks board: on the card's message, once it is here.
   useJumpTo(visible, id => messages.some(m => m.id === id));
-  // Read without its older messages (just started, the engine's history not in yet): a quote's original may be among them.
-  const [readReplies] = useState(() => replyIndexer());
-  const quoteIndex = useMemo(() => readReplies(messages, !!(sessionId && loadShownSession(sessionId)?.older)), [messages, sessionId, readReplies]);
   // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
   // Both read only the questions with buttons and the replies, found in the rows that changed.
   const [pickButtonRow] = useState(() => rowPicker<ChatMessage, ChatMessage>(m => m.card?.kind === "buttons" || m.replyTo ? m : undefined));
@@ -797,6 +817,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           <span className="block font-medium">{t(MEDIA_PROBLEM_TEXT[webrtc.mediaProblem][0])}</span>
           <span className="block text-text-secondary">{t(webrtc.mediaProblem === "denied" && mediaDeniedText() === "settings.media.deniedIos" ? "settings.media.deniedIos" : MEDIA_PROBLEM_TEXT[webrtc.mediaProblem][1])}</span>
         </div>
+      )}
+      {/* Our call found no path to the contact (a VPN or firewall that blocks UDP, on either side): where a TURN server
+          is set, and the guide. */}
+      {(webrtc.noPath || noPathShown) && !webrtc.mediaProblem && (
+        <CallNoPathNotice iceServers={engine.state?.settings.iceServers} onClose={() => { webrtc.dismissNoPath(); setCallNoPath(sessionId, false); }} />
       )}
       {/* The system paused our microphone in a call (an iPhone's Home Screen app while the screen is locked): the
           contact hears nothing until Ghostly is back on screen, and the call is still on. */}

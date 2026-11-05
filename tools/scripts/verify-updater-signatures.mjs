@@ -13,7 +13,8 @@
  *
  * <release-dir> holds latest.json and the files its URLs name. The public key
  * comes from plugins.updater.pubkey (default apps/desktop/tauri.conf.json).
- * Exits 1 when any platform's bundle is missing or does not verify.
+ * Exits 1 when any platform's bundle is missing or does not verify, or when its
+ * signature does not name latest.json's `version` (the apps refuse it then).
  *
  * A signature is minisign's, base64-encoded as Tauri writes it: Ed25519 over
  * the file's BLAKE2b-512 (algorithm `ED`) or over the file itself (`Ed`), plus
@@ -60,8 +61,18 @@ async function blake2b512(file) {
   return hash.digest();
 }
 
-/** Why `file` does not verify against `signatureBase64` and `publicKey`, or null when it does. */
-export async function signatureProblem(file, signatureBase64, publicKey) {
+/** The `version:` field of a trusted comment (tab-separated `key:value` pairs), or null. */
+function signedVersion(trustedComment) {
+  const field = trustedComment.split("\t").find((part) => part.startsWith("version:"));
+  return field === undefined ? null : field.slice("version:".length);
+}
+
+/**
+ * Why `file` does not verify against `signatureBase64` and `publicKey`, or null when it does.
+ * With `version` (latest.json's), the signature must also name that version, as the apps require
+ * (plugins.updater.requireSignedVersion): a leading `v` on either side is the same version.
+ */
+export async function signatureProblem(file, signatureBase64, publicKey, version) {
   let sig;
   try {
     sig = parseSignature(signatureBase64);
@@ -76,6 +87,10 @@ export async function signatureProblem(file, signatureBase64, publicKey) {
   if (!verify(null, message, publicKey.key, sig.signature)) return "the file does not match its signature";
   const global = Buffer.concat([sig.signature, Buffer.from(sig.trustedComment, "utf8")]);
   if (!verify(null, global, publicKey.key, sig.globalSignature)) return "the trusted comment does not match its signature";
+  if (version === undefined) return null;
+  const signed = signedVersion(sig.trustedComment);
+  if (signed === null) return "the signature names no version";
+  if (signed.replace(/^v/, "") !== String(version).replace(/^v/, "")) return `signed for version ${signed}, latest.json announces ${JSON.stringify(version)}`;
   return null;
 }
 
@@ -86,7 +101,11 @@ export async function verifyRelease(dir, pubkey) {
   const results = [];
   for (const [platform, entry] of Object.entries(manifest.platforms ?? {})) {
     const file = join(dir, decodeURIComponent(basename(new URL(entry.url).pathname)));
-    const problem = existsSync(file) ? await signatureProblem(file, entry.signature, publicKey) : "the file is not in the release";
+    const problem = !existsSync(file)
+      ? "the file is not in the release"
+      : typeof manifest.version !== "string" || !manifest.version
+        ? "latest.json announces no version"
+        : await signatureProblem(file, entry.signature, publicKey, manifest.version);
     results.push({ platform, file: basename(file), problem });
   }
   if (results.length === 0) results.push({ platform: "(none)", file: "latest.json", problem: "names no platform" });

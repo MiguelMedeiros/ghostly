@@ -231,6 +231,30 @@ export function viewerResponseHeaders(headers: HeaderList): HeaderList {
 }
 
 /**
+ * Ghostly's connection policy for a contact's app in a viewer: its requests and forms reach only its own origin, the
+ * contact's service; its scripts, pictures, frames and the rest its own origin and public https sites (and inline,
+ * data: and blob: content), never plain http, so not a service on this machine or the local network. The same value as
+ * Desktop's `SERVICE_CSP` (apps/desktop/src/viewer.rs) and `OPENED_SERVICE_CSP` (`service open`,
+ * packages/cli/src/services.ts).
+ */
+export const VIEWER_SERVICE_CSP = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
+
+/**
+ * `headers` with Ghostly's policy after the contact's own, all in one `content-security-policy` joined by commas: a
+ * browser enforces every policy of the list, so the contact's can narrow Ghostly's but never widen it.
+ */
+export function withViewerPolicy(headers: HeaderList): HeaderList {
+  const policies: string[] = [];
+  const out: HeaderList = [];
+  for (const [name, value] of headers) {
+    if (name.toLowerCase() === "content-security-policy") policies.push(value);
+    else out.push([name, value]);
+  }
+  out.push(["content-security-policy", [...policies, VIEWER_SERVICE_CSP].join(", ")]);
+  return out;
+}
+
+/**
  * Turns `http://localhost:3400/base/x` into `/x` so the client never learns or
  * follows the local address. Null when the location is not on the target origin
  * and under its base path.

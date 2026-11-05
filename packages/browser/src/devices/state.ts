@@ -209,7 +209,9 @@ export interface SetNotice {
 export interface SecretOffer {
   why: "takeover";
   at: number;
-  /** The device that stopped, as the takeover named it. */
+  /** The device that stopped: its signing key (base64url). An offer stored by an older build has none. */
+  key?: string;
+  /** Its name when the takeover stopped it. Only for older builds: what is shown is the name its slot holds now. */
   device?: string;
   /** The person said it was lost or stolen: the money checklist comes first. */
   lost?: true;
@@ -608,7 +610,7 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
   if (!optional(r.tombstone, bytes)) return bad("tombstone");
   if (r.secretOffer !== undefined) {
     const o = r.secretOffer as Partial<SecretOffer> | null;
-    if (!o || typeof o !== "object" || o.why !== "takeover" || !count(o.at, Number.MAX_SAFE_INTEGER) || !optional(o.device, text) || (o.lost !== undefined && o.lost !== true)) return bad("secretOffer");
+    if (!o || typeof o !== "object" || o.why !== "takeover" || !count(o.at, Number.MAX_SAFE_INTEGER) || !optional(o.key, bytes) || !optional(o.device, text) || (o.lost !== undefined && o.lost !== true)) return bad("secretOffer");
   }
   if (r.push !== undefined && !isPush(r.push)) return bad("push");
   if (r.ownSet !== undefined) {

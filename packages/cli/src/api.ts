@@ -1,7 +1,7 @@
 import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, ownInviteRefusal, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
-import { findSecret } from "./secretGuard";
+import { findSecret, guardText, secretWords } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
 import {
@@ -212,6 +212,8 @@ const METHODS: Record<string, Method> = {
   async "profile.set"(ctx, params) {
     const patch: Partial<Settings> = {};
     if (params.name !== undefined) patch.nick = checkShownName(params.name);
+    // Every contact reads it, as a message's text.
+    guardText(patch.nick, bool(params, "force"), "name", "set it");
     if (params.shareProfile !== undefined) patch.shareProfile = bool(params, "shareProfile");
     await node(ctx).updateSettings({ settings: patch });
     return METHODS["profile.get"](ctx, {});
@@ -224,6 +226,7 @@ const METHODS: Record<string, Method> = {
     const patch: Record<string, unknown> = {};
     let warning: string | undefined;
     for (const [key, value] of Object.entries(params)) {
+      if (key === "force") continue;
       // The table's own keys only: every object has `constructor` and `toString`, which are no settings.
       const kind = Object.hasOwn(SETTABLE, key) ? SETTABLE[key] : undefined;
       // The app's "Also use Pkarr relays": the CLI reads the relays first whatever it says (README § Network), and a
@@ -234,7 +237,7 @@ const METHODS: Record<string, Method> = {
       if (kind === "string" && typeof value !== "string") throw new CliError("bad_request", `${key} must be a string`);
       if (kind === "boolean" && typeof value !== "boolean") throw new CliError("bad_request", `${key} must be true or false`);
       // The name contacts see: `profile set --name`'s rule.
-      if (key === "nick") { patch.nick = checkShownName(value, key); continue; }
+      if (key === "nick") { patch.nick = checkShownName(value, key); guardText(patch.nick, bool(params, "force"), "nick", "set it"); continue; }
       if (kind === "ice") {
         if (!(Array.isArray(value) && value.every((v) => v && typeof v === "object"))) throw new CliError("bad_request", `${key} must be a list of ICE servers`);
         // WebRTC's own form (`urls` a list) is taken; a server without urls is said here, not as the engine's TypeError.
@@ -315,7 +318,7 @@ const METHODS: Record<string, Method> = {
     checkTextSize(text);
     if (!bool(params, "force")) {
       const secret = findSecret(text);
-      if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; send it with --force if you mean to`, { kind: secret.kind });
+      if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; send it with --force if you mean to`, { kind: secret.kind });
     }
     const wait = oneOf(params, "wait", ["none", "sent", "delivered"] as const, "none");
     // Read before anything is sent, as `wait` is: a timeout refused after the send made a retry send it again.
@@ -343,7 +346,7 @@ const METHODS: Record<string, Method> = {
     const text = str(params, "text", true);
     if (!bool(params, "force")) {
       const secret = findSecret(text);
-      if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; edit with --force if you mean to`, { kind: secret.kind });
+      if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; edit with --force if you mean to`, { kind: secret.kind });
     }
     const wait = oneOf(params, "wait", ["none", "confirmed"] as const, "none");
     const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
@@ -419,19 +422,21 @@ const METHODS: Record<string, Method> = {
   async "saved.remove"(ctx, params) {
     return saveMark(ctx, params, true);
   },
-  /** The saved messages, the last saved first, each as it is now and named by its chat or group. */
+  /** The saved messages under `saved`, the last saved first, each as it is now and named by its chat or group. */
   async "saved.list"(ctx) {
     const { links, groups } = state(ctx);
     const saved = await node(ctx).savedMessages();
     // A saved reply quotes its original as history gives it: per chat or group, one read per quoted original.
     const originals = new Map<string, Originals>();
     for (const linkId of new Set(saved.map((s) => s.message.linkId))) originals.set(linkId, await originalsNow(ctx, linkId, saved.flatMap((s) => (s.message.linkId === linkId ? [s.message] : []))));
-    return saved.map(({ savedAt, message }) => {
-      const checked = (json: MessageJson) => quoteChecked(json, message, originals.get(message.linkId)!);
-      if (!message.linkId.startsWith("group:")) return { chat: message.linkId, savedAt, message: checked(chatMessageJson(message, links.find((l) => l.id === message.linkId))) };
-      const id = message.linkId.slice("group:".length);
-      return { group: id, savedAt, message: checked(groupMessageJson(message, groups.find((g) => g.id === id))) };
-    });
+    return {
+      saved: saved.map(({ savedAt, message }) => {
+        const checked = (json: MessageJson) => quoteChecked(json, message, originals.get(message.linkId)!);
+        if (!message.linkId.startsWith("group:")) return { chat: message.linkId, savedAt, message: checked(chatMessageJson(message, links.find((l) => l.id === message.linkId))) };
+        const id = message.linkId.slice("group:".length);
+        return { group: id, savedAt, message: checked(groupMessageJson(message, groups.find((g) => g.id === id))) };
+      }),
+    };
   },
   /**
    * WISP 400 § Forwards: messages of a chat or a group sent on to up to 5 chats and groups, each as a new message of mine
@@ -454,7 +459,7 @@ const METHODS: Record<string, Method> = {
     }
     if (!bool(params, "force")) for (const message of chosen) {
       const secret = message.file ? null : findSecret(message.text);
-      if (secret) throw new CliError("confirm", `A message looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; forward it with --force if you mean to`, { kind: secret.kind, messageId: message.id });
+      if (secret) throw new CliError("confirm", `A message looks like ${secretWords(secret)}; forward it with --force if you mean to`, { kind: secret.kind, messageId: message.id });
     }
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
     const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
@@ -598,6 +603,8 @@ const METHODS: Record<string, Method> = {
     // As `group rename` checks it: a name a group cannot have is said here, before anything is made.
     const name = groupName(str(params, "name", true));
     if (!name) throw new CliError("bad_request", `A group's name is 1 to ${MAX_GROUP_NAME_LENGTH} characters on one line`);
+    // Every member reads it, and a community's anyone who opens its link.
+    guardText(name, bool(params, "force"), "group's name", "create it");
     const profile = oneOf(params, "profile", ["community", "mesh"] as const, "community");
     const { groupId } = await node(ctx).createGroup({ name, profile });
     let link: string | null = null;
@@ -661,7 +668,7 @@ const METHODS: Record<string, Method> = {
     const text = str(params, "text", true);
     if (!bool(params, "force")) {
       const secret = findSecret(text);
-      if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; edit with --force if you mean to`, { kind: secret.kind });
+      if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; edit with --force if you mean to`, { kind: secret.kind });
     }
     const mentions = mentionsFor(text, list(params, "mentions"), group);
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
@@ -814,7 +821,8 @@ async function clearProfile(ctx: ApiContext): Promise<{ cleared: { chats: number
 }
 
 /**
- * The engine's calls that send a text this side writes (a message, a file's caption, a payment's memo): `engine.call`
+ * The engine's calls that send a text this side writes (a message, a file's caption, a payment's memo, a name others
+ * read): `engine.call`
  * runs the secret guard of `send`, `edit` and `forward` on them too (docs/CLI.md § Safety), so a raw call is no way around it. `force: true` (`--force`) sends it.
  */
 const ENGINE_SENDS: ReadonlySet<string> = new Set([
@@ -824,10 +832,14 @@ const ENGINE_SENDS: ReadonlySet<string> = new Set([
   // The payment sheet's own path (its memo goes out with the token), an invoice's description the payer reads, and a
   // Lightning address's comment its owner reads (agents#1624).
   "preparePayment", "fedimintInvoice", "lnurlInvoice",
+  // A group's name, the name contacts see and a file's name, as `group create`, `group rename`, `profile set` and
+  // `file send` guard them.
+  "createGroup", "renameGroup", "updateSettings", "sendFile",
 ]);
 
 async function guardEngineSend(ctx: ApiContext, method: string, args: Params): Promise<void> {
-  let texts: unknown = [args.text, args.card, args.caption, args.memo, args.comment];
+  const of = (value: unknown, key: string) => (value && typeof value === "object" ? (value as Params)[key] : undefined);
+  let texts: unknown = [args.text, args.card, args.caption, args.memo, args.comment, args.name, of(args.settings, "nick"), of(args.file, "name")];
   if (method === "forwardMessages") {
     const ids = Array.isArray(args.messageIds) ? args.messageIds.filter((id): id is string => typeof id === "string") : [];
     const linkId = args.linkId;
@@ -837,7 +849,7 @@ async function guardEngineSend(ctx: ApiContext, method: string, args: Params): P
     })) : [];
   }
   const secret = secretIn(texts);
-  if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; call ${method} with --force if you mean to`, { kind: secret.kind });
+  if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; call ${method} with --force if you mean to`, { kind: secret.kind });
 }
 
 /**

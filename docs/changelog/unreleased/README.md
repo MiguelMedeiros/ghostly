@@ -14,11 +14,13 @@ section: For users / Chat
 - Forward a message to up to five chats and groups at once.
 ```
 
-- `section` is a `###` heading of `## Unreleased` (`For users`, `For developers`, `Fixed`, `Security`...), and after
-  ` / ` a bold group under it (`Chat`, `Calls`, `Groups`, `Wallets`, `Identities`, `Everywhere`). A group that does
-  not exist yet is added at the end of its heading. The headings come out in the order Security, For users, Fixed, For
-  developers (another one after them), whatever the files' names.
-- The text is one or more list items, written for the people who read release notes. Plain English, no em dashes.
+- `section` is a `###` heading of `## Unreleased`, one of `Security`, `For users`, `Fixed` and `For developers` (a new
+  feature goes under `For users`, never `Added` or `Changed`), and after ` / ` (a space on each side) a bold group under
+  it (`Chat`, `Calls`, `Groups`, `Wallets`, `Identities`, `Everywhere`), written as the changelog writes it. A group
+  that does not exist yet is added at the end of its heading. The headings come out in the order Security, For users,
+  Fixed, For developers, whatever the files' names. The check refuses any other heading, or one in another case.
+- The text is one or more list items, written for the people who read release notes. Plain English, no em dashes, and
+  no line that starts with `#` or `<!--`: the release would copy it as a heading or a note.
 - Entries of one section go in the files' name order.
 - `release: <major>.<minor>` (optional, after `section`) holds the entry for that release, for a change that ships
   behind a flag until then. A bump to an older version leaves the file here (`release: 1.2` stays through every

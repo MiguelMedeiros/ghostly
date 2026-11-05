@@ -8,7 +8,7 @@ import { updateFailure } from "../lib/updateFailure";
 import { canInstall, isAppleMobile, isMacSafari, startInstall, useInstallState } from "../lib/installPrompt";
 import { browserPrompts, reconsiderPersist, requestPersist, useStorageProtection } from "../lib/storagePersistence";
 import { storageBreakdown, useDesktopStorage } from "../lib/desktopStorage";
-import { pushPlatform, pushUnavailable, setWake, useWakeOn } from "../lib/wakePush";
+import { isNoPushService, noPushService, pushPlatform, pushUnavailable, setWake, useNoPushService, useWakeOn, wakeIsOn } from "../lib/wakePush";
 import { noticePlace, noticeSettings, notificationPermission, openNoticeSettings, requestNotifications, type NoticePermission } from "../lib/notifications";
 import { getVersion } from "@tauri-apps/api/app";
 import { NetworkSettings } from "../components/NetworkSettings";
@@ -27,7 +27,8 @@ import { currentProfile, listProfiles } from "../lib/profiles";
 import { openProfileSwitcher, useProfileGlances } from "../hooks/useProfileSwitcher";
 import { NeedsYouDot, NeedsYouList } from "../components/NeedsYou";
 import type { NeedsYou } from "../lib/needsYou";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
 import { Button, Switch, chosenInForcedColors } from "../components/wallet/ui";
 import { setLoadPublicProfiles, useLoadPublicProfiles } from "../hooks/usePublicProfileRequest";
 import { setSendTyping, useSendTyping } from "../hooks/useTyping";
@@ -42,7 +43,7 @@ import { playSound } from "../lib/sounds";
 import { clearAllData } from "../lib/clearData";
 import { useAppsAvailable } from "../lib/apps/flag";
 import { lockPasswordMin, useDeviceSet } from "../lib/devices";
-import { useEngineState } from "../lib/engineState";
+import { useEngineValue } from "../lib/engineState";
 import { engine } from "@ghostly/browser/platform/engine";
 import {
   hashPassword,
@@ -107,7 +108,7 @@ function SettingsGroup({ id, view, children }: { id: SettingsSection; view: Sect
 export function Settings() {
   const nav = useAppNavigation();
   const { settings, updateColorScheme, updateLanguage, updateLockScreen, updateNotifications,
-    updateReduceMotion, updateChatListDensity, updateCheckForUpdates, updateLinkPreviews, updateProfilePeek, randomizeNickname } =
+    updateReduceMotion, updateChatListDensity, updateCheckForUpdates, updateLinkPreviews, updateProfilePeek, randomizeNickname, followStored } =
     useSettings();
   const nickname = useOwnNameField();
   const { t, languageNotLoaded, retryLanguage } = useI18n();
@@ -119,15 +120,23 @@ export function Settings() {
   const wakeOn = useWakeOn();
   const [wakeBusy, setWakeBusy] = useState(false);
   const [wakeError, setWakeError] = useState("");
+  // A browser with no push service (Chromium without Google Play services: GrapheneOS's Vanadium): found once and kept
+  // for the browser (lib/wakePush.ts `noPushService`), so the switch reads as unavailable with why, until Try again.
+  const wakeNoPush = useNoPushService() && !wakeOn;
+  const wakeHintId = useId();
   const changeWake = async (on: boolean) => {
     setWakeBusy(true);
     setWakeError("");
-    try { await setWake(on); } catch (e) { setWakeError(problemLine(e, t)); } finally { setWakeBusy(false); }
+    try { await setWake(on); } catch (e) {
+      // No push service: kept for the browser, the row says so itself for as long as it is and wake-ups are off (a line
+      // of this page's when the browser's storage refused to keep it, or a refused New token left them on).
+      if (on && isNoPushService(e)) { if (!noPushService() || wakeIsOn()) setWakeError(t("pwa.wakeNoPushService")); } else setWakeError(problemLine(e, t));
+    } finally { setWakeBusy(false); }
   };
   const isMobile = useIsMobile();
   const profile = currentProfile();
   const myAvatar = useMyAvatar();
-  const canSwitch = !!useServicesPlatform()?.features.profiles;
+  const canSwitch = usePlatformValue(() => !!servicesPlatform?.features.profiles);
   const glances = useProfileGlances();
   const peekOn = peekEnabled(settings, isDesktopApp());
   const loadPublicProfiles = useLoadPublicProfiles();
@@ -217,6 +226,11 @@ export function Settings() {
   const [timeoutMinutes, setTimeoutMinutes] = useState(
     settings.lockScreen.timeoutMinutes
   );
+  // The lock as another tab of the app may have changed it since this page opened.
+  useEffect(() => {
+    setLockEnabled(settings.lockScreen.enabled);
+    setTimeoutMinutes(settings.lockScreen.timeoutMinutes);
+  }, [settings.lockScreen.enabled, settings.lockScreen.timeoutMinutes]);
   // What a password or data action says: a floating card near where the person is looking, not a line at the top of the page.
   const notice = useToast();
   // A refused password: which field, and why, shown right under it.
@@ -236,6 +250,17 @@ export function Settings() {
     focusPasswordForm.current = false;
     first.focus();
   }, [showPasswordForm, section, isMobile]); // eslint-disable-line react-hooks/exhaustive-deps -- the refs are read when it is drawn
+  // The form closed (set, changed, removed, Cancel) with the focus in it: the focus goes back to what opened it, not to
+  // the page. Change password once it stays (a change), else the Lock Screen switch (a password set, removed, given up).
+  const lockSwitch = useRef<HTMLButtonElement>(null);
+  const passwordEdit = useRef<HTMLButtonElement>(null);
+  const focusPasswordOpener = useRef<"lock" | "edit" | null>(null);
+  const closePasswordFormTo = (opener: "lock" | "edit") => { focusPasswordOpener.current = opener; setShowPasswordForm(false); };
+  useLayoutEffect(() => {
+    const opener = focusPasswordOpener.current;
+    focusPasswordOpener.current = null;
+    if (opener && focusLost()) (opener === "edit" ? passwordEdit : lockSwitch).current?.focus();
+  }, [showPasswordForm]);
   const [storageInfo, setStorageInfo] = useState({ used: 0, keys: 0 });
   // Whether the browser may clear this device's storage (lib/storagePersistence). Nothing on Desktop: no browser evicts it.
   const { protection, estimate } = useStorageProtection();
@@ -297,9 +322,10 @@ export function Settings() {
     return engine.call("deviceSet").then((view) => view.state !== "single", () => true);
   };
   // The push address contacts hold is another device's (WISP 06 § Push and the phone): this one is not woken by it.
-  const engineState = useEngineState();
-  const wakeAway = engineState?.wakeOwner === "away" && !!engineState.settings.wake;
-  const wakeAwayDevice = wakeAway ? devices?.devices.find((device) => device.key === engineState?.settings.wake?.device)?.name : undefined;
+  // Read alone, so a state that changes nothing here (a file's progress, up to 20 a second) does not draw the page again.
+  const wakeAwayKey = useEngineValue((state) => state?.wakeOwner === "away" && state.settings.wake ? state.settings.wake.device ?? "" : null);
+  const wakeAway = wakeAwayKey !== null;
+  const wakeAwayDevice = wakeAway ? devices?.devices.find((device) => device.key === wakeAwayKey)?.name : undefined;
 
   useEffect(() => {
     setStorageInfo(getStorageUsage());
@@ -352,8 +378,10 @@ export function Settings() {
     setPasswordBusy(true);
     try {
       const deviceSet = await hasDeviceSet();
-      // The current one first: nothing changes for someone who does not know it.
-      if (hasPassword && !(await verifyPassword(currentPassword, settings.lockScreen.passwordHash!))) {
+      // The current one first, as stored (another tab may have set or changed it): nothing changes for someone who
+      // does not know it.
+      const storedHash = followStored().lockScreen.passwordHash;
+      if (storedHash && !(await verifyPassword(currentPassword, storedHash))) {
         refusePassword("current", t("settings.incorrectPassword"), title);
         return;
       }
@@ -373,16 +401,16 @@ export function Settings() {
       });
       // A profile on several devices: a pull proves this password now, so its verifier is made again while it is typed (WISP 06).
       let verifierFailed = false;
-      if (deviceSet) await engine.call("deviceHandoffVerifier", { password: newPassword, current: hasPassword ? currentPassword : undefined }).catch(() => { verifierFailed = true; });
+      if (deviceSet) await engine.call("deviceHandoffVerifier", { password: newPassword, current: storedHash ? currentPassword : undefined }).catch(() => { verifierFailed = true; });
 
       setLockEnabled(true);
       setNewPassword("");
       setConfirmPassword("");
       setCurrentPassword("");
-      setShowPasswordForm(false);
+      closePasswordFormTo(hasPassword ? "edit" : "lock");
       // The lock changed, and a pull would still need a proof that could not be made: said, not hidden.
       if (verifierFailed) notice.show(t("devices.handoff.verifierFailed"));
-      else notice.show(hasPassword ? t("settings.passwordChanged") : t("settings.passwordSet"), { tone: "success" });
+      else notice.show(storedHash ? t("settings.passwordChanged") : t("settings.passwordSet"), { tone: "success" });
     } finally {
       setPasswordBusy(false);
     }
@@ -397,7 +425,8 @@ export function Settings() {
         notice.show(t("devices.password.keep"), { title });
         return;
       }
-      if (hasPassword && !(await verifyPassword(currentPassword, settings.lockScreen.passwordHash!))) {
+      const storedHash = followStored().lockScreen.passwordHash;
+      if (storedHash && !(await verifyPassword(currentPassword, storedHash))) {
         refusePassword("current", t("settings.incorrectPassword"), title);
         return;
       }
@@ -409,7 +438,7 @@ export function Settings() {
 
       setLockEnabled(false);
       setCurrentPassword("");
-      setShowPasswordForm(false);
+      closePasswordFormTo("lock");
       notice.show(t("settings.passwordRemoved"), { tone: "success" });
     } finally {
       setPasswordBusy(false);
@@ -422,7 +451,7 @@ export function Settings() {
   const systemSettings = noticeSettings();
   const deniedHint = { macos: "settings.noticesDeniedMac", windows: "settings.noticesDeniedWindows", android: "settings.noticesDeniedSystem", system: "settings.noticesDeniedSystem",
     extension: "settings.noticesDeniedExtension", web: "settings.noticesDenied" } as const;
-  const closePasswordForm = () => { setShowPasswordForm(false); setCurrentPassword(""); setNewPassword(""); setConfirmPassword(""); setPasswordError(null); };
+  const closePasswordForm = () => { closePasswordFormTo(hasPassword ? "edit" : "lock"); setCurrentPassword(""); setNewPassword(""); setConfirmPassword(""); setPasswordError(null); };
   /** One of the password fields, wired to its error: `aria-invalid`, `aria-describedby`, and the line under it. */
   const passwordField = (which: PasswordField, label: string, value: string, change: (value: string) => void) => {
     const error = passwordError?.field === which ? passwordError.text : null;
@@ -638,9 +667,10 @@ export function Settings() {
         </Row>
         {canWake && (
           <Row label={t("pwa.wake")} testId="settings-wake-row" info={t("pwa.wakeInfo")}
-            hint={<span role="status" data-testid="settings-wake-hint">{wakeError || (wakeAway ? (wakeAwayDevice ? t("pwa.wakeAway", { device: wakeAwayDevice }) : t("pwa.wakeAwayUnnamed")) : t(wakeOn ? "pwa.wakeOnHint" : "pwa.wakeHint"))}</span>}>
+            hint={<span role="status" id={wakeHintId} data-testid="settings-wake-hint">{wakeError || (wakeNoPush ? t("pwa.wakeNoPushService") : wakeAway ? (wakeAwayDevice ? t("pwa.wakeAway", { device: wakeAwayDevice }) : t("pwa.wakeAwayUnnamed")) : t(wakeOn ? "pwa.wakeOnHint" : "pwa.wakeHint"))}</span>}>
             {wakeOn && <Button data-testid="settings-wake-rotate" disabled={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeRotate")}</Button>}
-            <Switch testId="settings-wake" label={t("pwa.wake")} checked={wakeOn} disabled={wakeBusy} onChange={(on) => void changeWake(on)} />
+            {wakeNoPush && <Button data-testid="settings-wake-retry" disabled={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeTryAgain")}</Button>}
+            <Switch testId="settings-wake" label={t("pwa.wake")} checked={wakeOn} disabled={wakeBusy} unavailable={wakeNoPush} describedBy={wakeNoPush ? wakeHintId : undefined} onChange={(on) => void changeWake(on)} />
           </Row>
         )}
         {!canWake && pushUnavailable() && (
@@ -673,7 +703,7 @@ export function Settings() {
               {t("settings.lockNow")}
             </Button>
           )}
-          <Switch testId="settings-lock" label={t("settings.lockScreen")} checked={lockOn} onChange={() => void handleLockToggle()} />
+          <Switch ref={lockSwitch} testId="settings-lock" label={t("settings.lockScreen")} checked={lockOn} onChange={() => void handleLockToggle()} />
         </Row>
         {hasPassword && (
           <Row label={t("settings.timeout")}>
@@ -683,7 +713,7 @@ export function Settings() {
         )}
         {hasPassword && (
           <Row label={t("settings.password")}>
-            <Button data-testid="settings-password-edit" aria-expanded={showPasswordForm} onClick={() => (showPasswordForm ? closePasswordForm() : openPasswordForm())}>
+            <Button ref={passwordEdit} data-testid="settings-password-edit" aria-expanded={showPasswordForm} onClick={() => (showPasswordForm ? closePasswordForm() : openPasswordForm())}>
               {showPasswordForm ? t("common.close") : t("settings.passwordEdit")}
             </Button>
           </Row>

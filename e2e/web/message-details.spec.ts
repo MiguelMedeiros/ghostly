@@ -1,7 +1,9 @@
 import { fileURLToPath } from "node:url";
+import AxeBuilder from "@axe-core/playwright";
 import type { Locator, Page } from "@playwright/test";
 import { GIF, chat, expect, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
+import { CHROMIUM_SANDBOX } from "../support/chromiumSandbox";
 
 /**
  * A message's details (WISP 400 § Message details), between two people on the web: a text, a file and a voice
@@ -13,6 +15,7 @@ const SAMPLE = fileURLToPath(new URL("../support/voice-sample.wav", import.meta.
 
 test.use({
   launchOptions: {
+    chromiumSandbox: CHROMIUM_SANDBOX,
     args: [
       "--disable-features=WebRtcHideLocalIpsWithMdns",
       "--use-fake-device-for-media-stream",
@@ -33,6 +36,18 @@ async function openFromMenu(peer: Peer, row: Locator) {
   await row.getByTestId("message-options").click();
   await peer.page.getByTestId("message-details").click();
   await expect(panel(peer.page)).toHaveAttribute("data-loaded", "yes");
+}
+
+/**
+ * Each value that copies is at least 24 px tall (WCAG 2.2 SC 2.5.8), at whatever width the page has: the rows sit
+ * 2 px apart, so a shorter one has no spacing exception and a near miss copies its neighbour. And axe agrees.
+ */
+async function copiesAreTargets(page: Page) {
+  const copies = panel(page).getByTestId("message-details-copy");
+  expect(await copies.count()).toBeGreaterThan(1);
+  for (const box of await copies.evaluateAll((all) => all.map((copy) => copy.getBoundingClientRect().height))) expect(box).toBeGreaterThanOrEqual(24);
+  const { violations } = await new AxeBuilder({ page }).include('[data-testid="message-details"]').withRules(["target-size"]).analyze();
+  expect(violations.flatMap((v) => v.nodes.map((n) => `${v.id}: ${n.target.join(" ")}`))).toEqual([]);
 }
 
 async function close(page: Page) {
@@ -100,6 +115,7 @@ test("message details: a text, a file and a voice message, on both sides", { tag
   await expect(field(bob.page, "Direction")).toHaveText("Received");
   await expect(field(bob.page, "After composing")).toContainText("by the two devices' clocks");
   await expect(field(bob.page, "Channel")).toHaveText("WebRTC data channel: DTLS 1.2+ with SCTP");
+  await copiesAreTargets(bob.page);
   await close(bob.page);
 
   // A file: files/3 between two current apps, its digest and chunking on both sides.
@@ -177,7 +193,24 @@ test("message details on a phone: a long press opens the quick bar, and Details 
   await expect(panel(bob.page)).toHaveAttribute("data-loaded", "yes");
   await expect(panel(bob.page)).toHaveAttribute("data-side", "bottom");
   await expect(field(bob.page, "Received over")).toHaveText("WebRTC, direct");
+  await copiesAreTargets(bob.page);
   // A tap outside closes it.
   await bob.page.getByTestId("message-details-backdrop").click({ position: { x: 10, y: 10 } });
   await expect(panel(bob.page)).toHaveCount(0);
+
+  // A copy the browser refuses, by both routes: the text to select by hand, kept until the person closes it.
+  await bob.page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async () => { throw new DOMException("denied", "NotAllowedError"); } } });
+    Object.defineProperty(document, "execCommand", { configurable: true, value: () => false });
+  });
+  await hold();
+  await bob.page.getByTestId("reaction-bar-copy").click();
+  await expect(row.getByTestId("message-copy-text")).toHaveValue("press and hold me");
+  const closeNote = row.getByTestId("message-copy-close");
+  await expect(closeNote).toHaveText("Close");
+  expect((await closeNote.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await closeNote.click();
+  await expect(row.getByTestId("message-copy-error")).toHaveCount(0);
+  await expect(row.getByTestId("message-copy-text")).toHaveCount(0);
+  await expect(row.getByTestId("message-options")).toBeFocused();
 });
