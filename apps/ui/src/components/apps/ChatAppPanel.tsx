@@ -139,7 +139,7 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
           </span>
         </span>
         <div className="min-w-0 flex-1 ms-1">
-          <h2 data-testid="mini-app-title" dir="auto" className="m-0 text-[15px] font-semibold leading-tight text-text-primary truncate">{title}</h2>
+          <h2 data-testid="mini-app-title" dir="auto" className="text-match-parent m-0 text-[15px] font-semibold leading-tight text-text-primary truncate">{title}</h2>
           {/* While the app serves a file to the contact, the line says so (WISP 1200 § A read lane to the contact). */}
           <p data-testid="mini-app-with" data-serving={app?.serving || undefined} className={`m-0 flex min-w-0 overflow-hidden text-[12px] leading-tight whitespace-nowrap ${named ? "text-text-secondary" : "text-text-muted italic"}`}>
             {aroundName(t(app?.serving ? "apps.view.sharingWith" : "apps.view.withName", { name: NAME }), name)}
