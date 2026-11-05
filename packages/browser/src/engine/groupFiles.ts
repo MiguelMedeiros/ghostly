@@ -150,6 +150,11 @@ export interface GroupFileDeps extends GroupFilesHost {
   /** The edge is up, and the app at its other end announced group files (`GROUP_VERSION_FILES`). */
   ready(linkId: string): boolean;
   membership(groupId: string): GroupFileMembership | undefined;
+  /**
+   * Why this device is out of the group for good (removed, its history forked), or undefined while it is in it: no
+   * holder serves it any more, so its files not here stop coming and say so.
+   */
+  out?(groupId: string): string | undefined;
   /** An application frame to everyone in a community. */
   sendApp(groupId: string, frame: Record<string, unknown>): Promise<void>;
   changed(): void;
@@ -370,7 +375,7 @@ export class GroupFileDesk {
         // would go into every state the engine builds, so each state would cost more with every file the groups ever had.
         if (kept.held) continue;
         // Every holder served it damaged: it waits for its person to ask again, not fetched again by itself.
-        if (file.transfer?.state === "failed") this.show(kept, { state: "failed", transferred: 0, size, direction: "in", retry: true, error: file.transfer.error ?? DAMAGED });
+        if (file.transfer?.state === "failed") this.show(kept, { state: "failed", transferred: 0, size, direction: "in", retry: !this.deps.out?.(groupId), error: file.transfer.error ?? DAMAGED });
         // Paused by its person: still paused, with the bytes that came (what the next transfer goes on from).
         else if (file.group.paused) {
           kept.paused = true;
@@ -544,6 +549,8 @@ export class GroupFileDesk {
     const kept = this.kept.get(fileId);
     if (!kept) throw new Error("No such file");
     if (kept.held) return;
+    const out = this.deps.out?.(kept.groupId);
+    if (out) throw new Error(out);
     if (!await this.hasRoom(kept.meta.size)) throw new Error(NO_ROOM);
     if (!kept.asked || kept.paused) {
       kept.asked = true; kept.paused = false;
@@ -770,6 +777,9 @@ export class GroupFileDesk {
   private ask(kept: Kept): void {
     const want = this.wants.get(kept.id);
     if (!want || kept.held || want.wire) return;
+    // Out of the group: it would wait for good on holders that serve this device no more. What came of it goes.
+    const out = this.deps.out?.(kept.groupId);
+    if (out) { void this.stop(kept, false).then(() => this.stopFailed(kept, out, false)); return; }
     const membership = this.deps.membership(kept.groupId);
     const edges = this.deps.edges(kept.groupId);
     const known = this.knownHolders(kept, membership);
@@ -869,13 +879,13 @@ export class GroupFileDesk {
 
   /**
    * No holder serves the author's bytes (`DAMAGED`), or this device has no room for them (`NO_ROOM`): the want stops,
-   * and stays stopped after a restart, until Download.
+   * and stays stopped after a restart, until Download. Out of the group (`retry` false), Download says why instead.
    */
-  private stopFailed(kept: Kept, error = DAMAGED): void {
+  private stopFailed(kept: Kept, error = DAMAGED, retry = true): void {
     this.wants.delete(kept.id);
     const { size } = kept.meta;
     void this.deps.store.patch(kept.id, { transfer: { state: "failed", transferred: 0, size, error } }).catch(() => {});
-    this.show(kept, { state: "failed", transferred: 0, size, direction: "in", retry: true, error });
+    this.show(kept, { state: "failed", transferred: 0, size, direction: "in", retry, error });
   }
 
   /** A holder's no: the next one is asked. One that deleted the file is no holder any more. */

@@ -1927,6 +1927,38 @@ describe("the files of a group this device no longer has", { timeout: 120_000 },
     expect(t.done(bob, id, messageId)).toBe(true);
   });
 
+  // A member removed while a file came (or was paused) kept it "coming" for good: Resume was taken, and it read
+  // "Nobody you are connected to has this file yet", though no holder serves a member out of the roster.
+  it("not here yet, of a group it was removed from, stop coming and say why, and Download says why too", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    for (const p of [bob, carol]) t.files.get(p)!.settings.autoDownloads = false;
+    // Carol's offers never come: her Download stays asked of a holder.
+    t.hold = (_from, to, frame) => to === carol && frame.t === "pf-offer";
+    const asked = await t.send(alice, id, pattern(60_000, 11), { name: "asked.bin" });
+    const paused = await t.send(alice, id, pattern(60_000, 12), { name: "paused.bin" });
+    await t.world.until(() => [asked, paused].every(s => !!t.got(carol, id, s.messageId).message?.file), 60_000);
+    const askedId = t.got(carol, id, asked.messageId).message!.file!.id, pausedId = t.got(carol, id, paused.messageId).message!.file!.id;
+    await carol.groups.downloadFile(askedId);
+    await carol.groups.downloadFile(pausedId);
+    await carol.groups.haltFile(pausedId, true);
+    expect(t.got(carol, id, paused.messageId).transfer).toMatchObject({ stage: "paused" });
+
+    await alice.groups.remove(id, t.key(carol, id));
+    await t.world.until(() => t.world.view(carol, id)?.status === "removed", 60_000);
+    const reason = t.world.view(carol, id)!.statusReason ?? "You were removed from this group";
+    await t.world.run(2 * GROUP_FILE_LIMITS.wantWaitMs);
+    expect(t.got(carol, id, asked.messageId).transfer).toMatchObject({ state: "failed", direction: "in", retry: false, error: reason });
+    expect(t.files.get(carol)!.store.records.get(askedId)!.transfer).toMatchObject({ state: "failed", error: reason });
+    for (const fileId of [askedId, pausedId]) await expect(carol.groups.downloadFile(fileId)).rejects.toThrow(reason);
+    // Started again: the file that stopped still says why, and asks nobody.
+    const from = t.seen.length;
+    await t.restart(carol);
+    await t.world.run(2 * GROUP_FILE_LIMITS.wantWaitMs);
+    expect(t.got(carol, id, asked.messageId).transfer).toMatchObject({ state: "failed", retry: false, error: reason });
+    expect(t.seen.slice(from).filter(s => s.from === "carol" && s.frame.t === "group-want")).toEqual([]);
+  });
+
   it("stay on a copy that must stay as it is (limited mode)", async () => {
     const t = new FilesWorld();
     const { peers: [, bob] } = await t.mesh(["alice", "bob"]);
