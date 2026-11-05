@@ -22,14 +22,14 @@ const zebra: StoredMessage = { linkId: LINK, id: `peer_${WIRE}`, text: "zebra se
 const hello: StoredMessage = { linkId: LINK, id: `peer_${"H".repeat(22)}`, text: "hello there", sender: "peer", timestamp: Date.now() - 120_000, via: "datalink" };
 const tick = () => act(() => new Promise((resolve) => setTimeout(resolve, MESSAGE_CHANGES_TICK_MS * 2)));
 
-async function openChat() {
+async function openChat(last = zebra) {
   saveSession({ id: "zebra", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", messages: [], createdAt: Date.now() - 600_000 });
   const utils = renderApp(<Chat sessionId="zebra" visible onCallChange={() => {}} callLayer={null} />, { route: "/chat/zebra" });
   utils.engine.on("ensureLink", () => ({ linkId: LINK })).on("setActiveLink", () => undefined).on("sendMessage", () => ({ error: null }))
     .update({ links: [linkView({ id: LINK, peerPubKeyZ32: PEER, profile: "paired-chat/1", pairing: { status: "ready" } } as never)] });
-  utils.engine.messages(LINK, [hello, zebra]);
+  utils.engine.messages(LINK, [hello, last]);
   await tick();
-  await screen.findByText("zebra secret 4472");
+  await screen.findByText(last.text);
   return utils;
 }
 
@@ -91,5 +91,52 @@ describe("messages chosen to forward", () => {
     act(() => engine.emit({ kind: "message-changes", linkId: LINK, messages: [], deleted: [hello.id] }));
     await tick();
     expect(screen.queryByTestId("select-bar")).not.toBeInTheDocument();
+  });
+
+  /** Both chosen, Forward pressed: "Forward to…" open on them (the one chat to send to is this one). */
+  async function forwardBoth(first: StoredMessage) {
+    const utils = await openChat(first);
+    utils.engine.on("forwardMessages", ({ to, messageIds }: { to: string[]; messageIds: string[] }) => ({ results: to.map(t => ({ to: t, messageIds, error: null })) }));
+    await tick();
+    await utils.user.click(within(row(first.id)).getByTestId("message-options"));
+    await utils.user.click(screen.getByTestId("message-select-start"));
+    fireEvent.click(screen.getByText("hello there"));
+    await utils.user.click(screen.getByTestId("select-forward"));
+    expect(screen.getByTestId("forward-count")).toHaveTextContent("2 messages");
+    return utils;
+  }
+
+  it("one deleted for everyone while Forward to… is open leaves it; Send forwards the rest", async () => {
+    const { engine, user } = await forwardBoth(zebra);
+    act(() => engine.emit({ kind: "message-changes", linkId: LINK, messages: [], deleted: [zebra.id] }));
+    await tick();
+    expect(screen.getByTestId("forward-dialog")).toBeInTheDocument();
+    expect(screen.queryByTestId("forward-count")).not.toBeInTheDocument();
+
+    await user.click(screen.getAllByTestId("forward-target")[0]!);
+    await user.click(screen.getByTestId("forward-send"));
+    expect(engine.callsTo("forwardMessages")).toEqual([{ linkId: LINK, messageIds: [hello.id], to: [LINK] }]);
+    expect(screen.queryByTestId("forward-error")).not.toBeInTheDocument();
+  });
+
+  it("a deleted seed no longer asks before the rest goes", async () => {
+    const seed: StoredMessage = { ...zebra, text: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" };
+    const { engine, user } = await forwardBoth(seed);
+    act(() => engine.emit({ kind: "message-changes", linkId: LINK, messages: [], deleted: [seed.id] }));
+    await tick();
+
+    await user.click(screen.getAllByTestId("forward-target")[0]!);
+    await user.click(screen.getByTestId("forward-send"));
+    expect(screen.queryByTestId("secret-guard")).not.toBeInTheDocument();
+    expect(engine.callsTo("forwardMessages")).toEqual([{ linkId: LINK, messageIds: [hello.id], to: [LINK] }]);
+  });
+
+  it("the last one deleted closes Forward to…", async () => {
+    const { engine } = await forwardBoth(zebra);
+    act(() => engine.emit({ kind: "message-changes", linkId: LINK, messages: [], deleted: [zebra.id, hello.id] }));
+    await tick();
+    expect(screen.queryByTestId("forward-dialog")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("select-bar")).not.toBeInTheDocument();
+    expect(engine.callsTo("forwardMessages")).toEqual([]);
   });
 });
