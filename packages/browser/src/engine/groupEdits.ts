@@ -53,8 +53,11 @@ export interface GroupEditsHost {
   now?(): number;
 }
 
-/** What `edit` answers: `refused` when it is not something to edit (the page says so and keeps the edit open). */
-export interface GroupEditResult { error: string | null; refused?: boolean; messageId?: string }
+/**
+ * What `edit` answers: `refused` when it is not something to edit (the page says so and keeps the edit open). `e`: a
+ * removal's edit number (`removeMine`), what `Groups.taken` counts it by.
+ */
+export interface GroupEditResult { error: string | null; refused?: boolean; messageId?: string; e?: number }
 
 /** My edits said again on an edge in one window (`GROUP_EDIT_RESEND_WINDOW_MS`): below what a receiver takes in one. */
 export const GROUP_EDIT_RESEND = 16;
@@ -161,10 +164,11 @@ export class GroupEdits {
     const message = typeof messageId === "string" ? await this.find(chat, messageId) : undefined;
     if (!message || message.removed || message.sender !== "me" || !GROUP_MESSAGE_ID.test(message.id)) return refuse("Only your own messages can be deleted for everyone");
     if (!canRemove(message)) return refuse("A payment, a request or a notice cannot be deleted for everyone");
-    await this.host.removeMine(chat, message, { id: message.id, e: removalNumber(message.edit?.seq), at: this.now(), pending: true });
+    const e = removalNumber(message.edit?.seq);
+    await this.host.removeMine(chat, message, { id: message.id, e, at: this.now(), pending: true });
     if (this.host.message) this.told(groupId).set(messageId, ++this.tick);
     await this.flush(groupId).catch(() => {});
-    return { error: null, messageId };
+    return { error: null, messageId, e };
   }
 
   /** What an edit or a removal in a group I am not in is refused with: the group's reason, as a message or a reaction is. */
