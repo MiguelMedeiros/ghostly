@@ -107,11 +107,11 @@ describe("the totals over the deck", () => {
 
   it("keeps the number in a shared-balance card's panel, with a line saying whose balance it is; the Cashu panel has none", async () => {
     const { user } = await openOn("mainnet");
-    expect(screen.getByTestId("wallet-balance")).toHaveTextContent("1,000");
+    expect(await screen.findByTestId("wallet-balance")).toHaveTextContent("1,000");
     expect(screen.queryByTestId("wallet-shared-balance")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("wallet-card-lightning-mainnet"));
     expect(await screen.findByTestId("wallet-shared-balance")).toHaveTextContent("Same balance as your Cashu card");
-    expect(screen.getByTestId("wallet-balance")).toHaveTextContent("1,000");
+    expect(await screen.findByTestId("wallet-balance")).toHaveTextContent("1,000");
   });
 
   it("opens USDT's own breakdown, with no ready line, and closes from its button", async () => {
