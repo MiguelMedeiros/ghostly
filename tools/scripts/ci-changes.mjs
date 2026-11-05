@@ -108,6 +108,9 @@ export const WEBSITE_INPUTS = [
   // agents-webrtc.test.mjs checks the site's text against it.
   "packages/cli/src/runtime/engine.ts",
   "packages/browser/src/engine/node.ts",
+  // first-pairing.test.mjs checks the site's text against it.
+  "packages/core/src/ghostlink.ts",
+  "packages/core/src/capsRecord.ts",
   // The jobs themselves.
   ".github/workflows/ci.yml",
 ];
