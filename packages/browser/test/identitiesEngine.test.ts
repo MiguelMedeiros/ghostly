@@ -504,6 +504,95 @@ describe("removing a proof and its revocation", () => {
     expect(await stored("identityRevocationsCheckedAt")).toBeTypeOf("number");
   });
 
+  /**
+   * The lookup under way (`identityRevocationsRound`) was written whole after every proof read: n writes growing to n
+   * entries, about n²/2 entries a lookup, twice a day. 300 contacts with 3 proofs each: 900 writes, 45 MB.
+   */
+  it("the lookup under way is written about once a minute, not after every proof: 300 contacts × 3 proofs", async () => {
+    await clearStorage();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const at = Math.floor(Date.now() / 1000);
+    const ledgers = new Map<string, IdentityLedger>();
+    // Link ids as long as the app's (43 characters).
+    for (let i = 0; i < 300; i++) ledgers.set(String(i).padStart(43, "L"), { ...emptyIdentityLedger(), received: [received(at), received(at), received(at)] });
+    const written: number[] = [];
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (this: IDBObjectStore, value: unknown, key?: IDBValidKey) {
+      if (key === "identityRevocationsRound") written.push(JSON.stringify(value).length);
+      return put.call(this, value, key);
+    };
+    const engine = new IdentityProofs({ ...ledgerHost(ledgers), resolve: async () => null }, () => [fakeKey]);
+    try {
+      await engine.load(); engine.start();
+      // 60 s to the first lookup, then 900 reads 3 s apart.
+      await vi.advanceTimersByTimeAsync(50 * 60_000);
+    } finally {
+      IDBObjectStore.prototype.put = put;
+      engine.stop();
+    }
+    expect(await stored("identityRevocationsCheckedAt"), "the lookup completed").toBeTypeOf("number");
+    expect(await stored("identityRevocationsRound")).toBeUndefined();
+    const done = [...ledgers].flatMap(([linkId, l]) => l.received.map(r => `${linkId}|${r.id}`));
+    const whole = JSON.stringify({ startedAt: Date.now(), done }).length;
+    const bytes = written.reduce((a, b) => a + b, 0);
+    // About one write a minute (20 reads): 45, not 900.
+    const seen = `${written.length} writes, ${bytes} bytes; the whole record is ${whole}`;
+    expect(written.length, seen).toBeLessThanOrEqual(900 / 20 + 2);
+    // Each write is the round so far: about 23 times the whole record in all, not 450 times (45 MB).
+    expect(bytes, seen).toBeLessThanOrEqual(25 * whole);
+  });
+
+  /** Written once a minute, the lookup must still go on from where it stopped: a restart reads again at most that minute's proofs, and skips none. */
+  it("a lookup cut short goes on from its last write: a crash reads again at most the last minute's proofs, a stop none, and no proof is skipped", async () => {
+    await clearStorage();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const at = Math.floor(Date.now() / 1000);
+    const ledgers = new Map<string, IdentityLedger>();
+    for (let i = 0; i < 100; i++) ledgers.set(String(i).padStart(43, "L"), { ...emptyIdentityLedger(), received: [received(at)] });
+    const reads = new Map<string, number>();
+    let dead = false;
+    const host: IdentityLinkHost = {
+      ...ledgerHost(ledgers),
+      // The app is gone: its reads never answer, and nothing after them runs.
+      resolve: key => dead ? new Promise(() => {}) : (reads.set(key, (reads.get(key) ?? 0) + 1), Promise.resolve(null)),
+    };
+    const total = () => [...reads.values()].reduce((a, b) => a + b, 0);
+    const saved = async () => (await stored<{ done: string[] }>("identityRevocationsRound"))?.done.length ?? 0;
+
+    // Run 1: 60 s to the lookup, about 50 proofs read, then the app crashes (no stop).
+    const first = new IdentityProofs(host, () => [fakeKey]);
+    await first.load(); first.start();
+    await vi.advanceTimersByTimeAsync(60_000 + 150_000);
+    dead = true;
+    await vi.advanceTimersByTimeAsync(10_000);
+    const crashed = total();
+    expect(crashed).toBeGreaterThan(40);
+    expect(crashed - await saved(), "read since the last write").toBeLessThanOrEqual(20);
+    expect(await saved()).toBeGreaterThan(0);
+
+    // Run 2: goes on, and is stopped (the app closed) a minute and a half in: the stop writes every proof read.
+    dead = false;
+    const second = new IdentityProofs(host, () => [fakeKey]);
+    await second.load(); second.start();
+    await vi.advanceTimersByTimeAsync(60_000 + 90_000);
+    second.stop();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(async () => expect(await saved()).toBe(reads.size));
+    const stopped = total(), lookedUp = reads.size;
+
+    // Run 3: completes the lookup without reading again what run 2 read.
+    const third = new IdentityProofs(host, () => [fakeKey]);
+    await third.load(); third.start();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    third.stop();
+    expect(await stored("identityRevocationsCheckedAt"), "the lookup completed").toBeTypeOf("number");
+    const keys = [...ledgers.values()].map(l => l.received[0].binding.key);
+    expect(keys.filter(key => !reads.has(key)), "every proof looked up").toEqual([]);
+    expect(total() - stopped, "run 3 reads only what was left").toBe(100 - lookedUp);
+    expect(total(), "read again: at most the crash's unsaved minute").toBeLessThanOrEqual(100 + 20);
+    expect(Math.max(...reads.values())).toBeLessThanOrEqual(2);
+  });
+
   /** Removed while offline mid-run: the revocation went out only at the next hourly republish, up to an hour after the network came back. */
   it("a revocation that could not be published offline is published when the network comes back", async () => {
     const { state, pkarr, make, id, binding } = await shared();

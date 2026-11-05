@@ -106,6 +106,9 @@ export function NetworkSettings() {
   const edited = (...names: FieldName[]) => {
     if (names.some((name) => problems[name])) setProblems((now) => Object.fromEntries(Object.entries(now).filter(([name]) => !names.includes(name as FieldName))));
   };
+  // The Desktop runs HyperDHT itself and ignores the relay, except while "Hide my IP from contacts" is on: its
+  // HyperDHT then goes through the relay, as a browser's does.
+  const relaysHyperdht = !direct || network.relayOnly === true;
 
   const save = async () => {
     setError("");
@@ -113,7 +116,7 @@ export function NetworkSettings() {
     setSavedAs(null);
     const server = turn.urls.trim() ? { ...turn, urls: turn.urls.trim() } : null;
     // Checked here as well as in the engine, so the person sees why before anything changes: every field at once.
-    const relay = direct ? "" : hyperdhtRelay.trim();
+    const relay = relaysHyperdht ? hyperdhtRelay.trim() : "";
     const push = pushRelay.trim();
     // The engine keeps only the Pkarr relays it can read and drops the rest unsaid: a typo next to working relays is
     // named instead (with nothing usable at all, the engine's own "Enter at least one relay address" says it).
@@ -134,7 +137,7 @@ export function NetworkSettings() {
       // The defaults are stored as "none chosen", so a later change of the defaults reaches this profile.
       // Either spelling of a default (with or without the trailing dot of a full domain name) is that default.
       const defaults = network.iroh && JSON.stringify(irohRelays.map(url => irohRelayUrl(url))) === JSON.stringify(network.iroh.defaultRelays.map(url => irohRelayUrl(url)));
-      await platform.setNetwork({ relays: relayList, turn: server, ...(network.iroh ? { irohRelays: defaults ? [] : irohRelays } : {}), ...(direct ? {} : { hyperdhtRelay: relay }), pushRelay: push });
+      await platform.setNetwork({ relays: relayList, turn: server, ...(network.iroh ? { irohRelays: defaults ? [] : irohRelays } : {}), ...(relaysHyperdht ? { hyperdhtRelay: relay } : {}), pushRelay: push });
     } catch (e) {
       const field = refusedField(rawError(e), irohRelays);
       if (field) refuse({ [field]: problemLine(e, t) }); else setError(problemLine(e, t));
@@ -148,6 +151,14 @@ export function NetworkSettings() {
     setError("");
     setSwitching(true);
     try { await platform.setNetwork({ relays: network.relays, readRelays: on }); }
+    catch (e) { setError(problemLine(e, t)); }
+    finally { setSwitching(false); }
+  };
+  // The same, for "Hide my IP from contacts": the TURN server as saved is the one it needs (the engine says so if none).
+  const hideMyIp = async (on: boolean) => {
+    setError("");
+    setSwitching(true);
+    try { await platform.setNetwork({ relays: network.relays, relayOnly: on }); }
     catch (e) { setError(problemLine(e, t)); }
     finally { setSwitching(false); }
   };
@@ -181,8 +192,9 @@ export function NetworkSettings() {
         {problemUnder("iroh")}
       </Field>}
 
-      {/* The Desktop (the DHT reached directly) runs HyperDHT itself and ignores the relay: not offered, and left as saved. */}
-      {!direct && <Field label={t("network.hyperdht")} htmlFor="network-hyperdht-relay" hint={t("network.hyperdhtHint")} info={t("network.hyperdhtInfo")}>
+      {/* The Desktop (the DHT reached directly) runs HyperDHT itself and ignores the relay: not offered, and left as saved,
+          unless "Hide my IP from contacts" is on (`relaysHyperdht`). */}
+      {relaysHyperdht && <Field label={t("network.hyperdht")} htmlFor="network-hyperdht-relay" hint={t("network.hyperdhtHint")} info={t("network.hyperdhtInfo")}>
         <input id={FIELDS.hyperdht} value={hyperdhtRelay} onChange={(e) => { setHyperdhtRelay(e.target.value); edited("hyperdht"); }} placeholder="wss://relay.example.org"
           {...exactText} dir="ltr" data-testid="network-hyperdht-relay" {...invalid("hyperdht")} className={`${field} font-mono text-sm`} />
         {problemUnder("hyperdht")}
@@ -207,6 +219,10 @@ export function NetworkSettings() {
         {problemUnder("turnUsername")}
         {problemUnder("turnCredential")}
       </Field>
+
+      <Row label={t("network.relayOnly")} hint={t("network.relayOnlyHint")} info={t("network.relayOnlyInfo")} testId="network-relay-only-row">
+        <Switch label={t("network.relayOnly")} checked={network.relayOnly === true} disabled={switching} onChange={(on) => void hideMyIp(on)} testId="network-relay-only" />
+      </Row>
 
       <Block>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">

@@ -11,7 +11,7 @@ import { LOCAL_SETTINGS, offlineCall, readOnly } from "../src/main";
 const READS = [
   "events", "status", "chat history", "chat list", "chat show", "message details", "group history", "group list", "group show",
   "file list", "payment list", "wallet history", "wallet list", "identity contact", "identity list", "identity providers",
-  "service list", "service peer", "call auto", "chat accept", "call list", "app served", "x401 credential list", "saved list",
+  "service list", "service peer", "call auto", "group auto", "chat accept", "call list", "app served", "x401 credential list", "saved list",
 ];
 /** Changes that stay on this device: no contact and no relay hears of them. */
 const LOCAL_WRITES = ["chat remove", "chat rename", "identity cancel", "saved add", "saved remove", "service add", "x401 credential add", "x401 credential remove", "x401 key new"];
@@ -49,6 +49,12 @@ describe("which one-shots open the profile offline", () => {
     expect(readOnly("call.auto", { on: true, from: ["bob"] })).toBe(false);
     expect(offlineCall("call.auto", { on: true, from: ["bob"] })).toBe(true);
     expect(offlineCall("call.auto", { on: false })).toBe(true);
+  });
+
+  it("opens group auto offline when it turns auto-join on or off: groups.json is this device's, and only a daemon accepts", () => {
+    expect(readOnly("group.auto", { on: true, from: ["bob"] })).toBe(false);
+    expect(offlineCall("group.auto", { on: true, from: ["bob"] })).toBe(true);
+    expect(offlineCall("group.auto", { on: false })).toBe(true);
   });
 
   it("opens chat accept offline only when it names no method: then it says what the chat takes", () => {

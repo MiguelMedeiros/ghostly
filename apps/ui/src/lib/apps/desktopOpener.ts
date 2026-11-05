@@ -21,7 +21,7 @@
  */
 import { toBase64 } from "@ghostly/core";
 import { createBroker, runnerFor, START_TIMEOUT_MS, type AppStopReason, type AppView, type Broker } from "./broker";
-import { appInput, registerRunningApp, type AppOpener } from "./open";
+import { appInput, LOCKED, lockedSince, registerRunningApp, type AppOpener } from "./open";
 import type { AppsPlatform, LinkedFilesHost } from "../platform";
 
 /** Rust's events to the Ghostly window (apps/desktop/src/app_sandbox.rs). */
@@ -99,15 +99,20 @@ export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (tit
     const engine = apps();
     if (!engine) throw new Error("Apps cannot run in this app");
     const host: AppsPlatform = linkedFiles ? { ...engine, linkedFiles } : engine;
+    // The profile locking while it opens (its files downloading, its window being made) stops nothing yet: it never starts.
+    const locked = lockedSince();
     // A version a store removed runs only with "Run anyway"; a revoked one never (the engine checks both again).
     const entry = await host.entry(ref, options?.runAnyway === true);
+    if (locked()) throw new Error(LOCKED);
     // Throws where this client has no runner for what the person granted.
     runnerFor(host, entry);
     // Open pressed twice before its window is there (a double click) gets here twice: the second waits for the first's.
     const place = `${linkId ?? ""} ${ref}`;
     const there = windows.get(place);
     if (there) {
-      await invoke("app_focus", { label: await there }).catch(() => { /* it went meanwhile */ });
+      const label = await there;
+      if (locked()) throw new Error(LOCKED);
+      await invoke("app_focus", { label }).catch(() => { /* it went meanwhile */ });
       return "shown";
     }
     const opening = invoke<string>("app_open", {
@@ -116,6 +121,13 @@ export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (tit
     });
     windows.set(place, opening);
     const label = await opening.catch((e: unknown) => { windows.delete(place); throw e; });
+    if (locked()) {
+      // Its window is there already, over the locked Ghostly window: it closes before the app starts in it.
+      if (windows.get(place) === opening) windows.delete(place);
+      early.delete(label);
+      void invoke("app_close", { label }).catch(() => { /* already gone */ });
+      throw new Error(LOCKED);
+    }
     let timer: ReturnType<typeof setTimeout> | null = null;
     // A version found revoked, or removed without Run anyway, while it runs: its window closes (WISP 1200 § Takedowns).
     const unregister = registerRunningApp({ ref, digest: entry.digest, runAnyway: options?.runAnyway === true, takeDown: () => broker.stop("stopped"), stop: () => broker.stop("stopped") });

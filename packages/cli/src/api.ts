@@ -570,6 +570,7 @@ const METHODS: Record<string, Method> = {
     noCallOn(ctx, link.id, "remove the chat");
     await node(ctx).removeLink({ linkId: link.id });
     ctx.calls.forgetChat(link.id);
+    ctx.groupAuto.forgetChat(link.id);
     return { removed: link.id };
   },
   async "chat.transport"(ctx, params) {
@@ -659,7 +660,12 @@ const METHODS: Record<string, Method> = {
   },
   async "group.list"(ctx, params) {
     const showSecret = bool(params, "showSecret");
-    return { groups: state(ctx).groups.map((g) => groupJson(g, showSecret)).sort((a, b) => b.lastMessageAt - a.lastMessageAt) };
+    return { groups: state(ctx).groups.map((g) => groupJson(g, showSecret)).sort((a, b) => b.lastMessageAt - a.lastMessageAt), autoJoin: ctx.groupAuto.get() };
+  },
+  /** Invitations over the chats named accepted by the daemon itself (`group auto on --from`); no argument: the setting. */
+  async "group.auto"(ctx, params) {
+    if (params.on === undefined) return { autoJoin: ctx.groupAuto.get() };
+    return { autoJoin: ctx.groupAuto.set({ on: bool(params, "on"), from: list(params, "from") }) };
   },
   async "group.get"(ctx, params) {
     return groupJson(groupOf(ctx, params, "chat show <chat>"), bool(params, "showSecret"));
@@ -803,9 +809,10 @@ const METHODS: Record<string, Method> = {
     const raw = params.params;
     if (raw !== undefined && (raw === null || typeof raw !== "object" || Array.isArray(raw))) throw new CliError("bad_request", "params must be an object");
     const args = raw as Params | undefined;
-    // "Hide my IP from contacts" (`relayOnly`, WISP 100 § Relay only) is not in 1.5: no app shows it, and the Desktop's
-    // own transports do not follow it yet. Nobody turns it on through here either, until the release that shows it;
-    // turning it off stays possible, for a profile an older CLI (whose engine took any key) turned it on in.
+    // "Hide my IP from contacts" (`relayOnly`, WISP 100 § Relay only) is the apps' switch in Settings, Network, not the
+    // CLI's yet: its WebRTC chat links (node-datachannel) still check from this machine's own sockets under the relay
+    // policy, as its calls did (they are refused while it is on). Nobody turns it on through here until they keep to
+    // the relay; turning it off stays possible, for a profile an older CLI (whose engine took any key) turned it on in.
     if (method === "updateSettings" && args?.settings && typeof args.settings === "object" && "relayOnly" in args.settings && (args.settings as Params).relayOnly !== false) {
       throw new CliError("bad_request", "relayOnly is not a setting yet: Hide my IP from contacts comes in a later release");
     }
@@ -835,8 +842,11 @@ const METHODS: Record<string, Method> = {
     if (typeof target !== "function") throw new CliError("not_found", `The engine has no call ${method}`);
     try {
       const result = (await target.call(node(ctx), args)) ?? null;
-      // The chat is gone, as with `chat remove`: auto-answer no longer names it.
-      if (method === "removeLink") ctx.calls.forgetChat(str(args ?? {}, "linkId", true));
+      // The chat is gone, as with `chat remove`: auto-answer and auto-join no longer name it.
+      if (method === "removeLink") {
+        ctx.calls.forgetChat(str(args ?? {}, "linkId", true));
+        ctx.groupAuto.forgetChat(str(args ?? {}, "linkId", true));
+      }
       return result;
     } catch (error) {
       // A value of the wrong kind (a number for a text, a missing key of a typed object) ends as JavaScript reading what is

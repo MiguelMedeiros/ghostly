@@ -580,6 +580,7 @@ const RULES: readonly Rule[] = [
   exact("Unknown profile", "errors.profile.unknown"),
   exact("This profile is open in another window. Close it, then try again.", "errors.profile.openElsewhere"),
   exact("Wrong lock password for that profile", "errors.profile.wrongPassword"),
+  { match: /^Too many attempts\. Try again in (?<seconds>\d+) s$/, key: "lockScreen.tooManyAttempts" },
   exact("This backup does not hold a profile", "errors.profile.notABackup"),
   exact("Wrong passphrase, or the backup was changed", "errors.profile.wrongPassphrase", "errors.profile.wrongPassphraseNext"),
   exact("This is not a Ghostly backup", "errors.profile.notGhostlyBackup"),

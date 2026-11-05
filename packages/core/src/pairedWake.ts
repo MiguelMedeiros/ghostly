@@ -14,7 +14,8 @@ import { checkPushEndpoint, pushRequest, vapidKeysMatch, type PushRequest, type 
  * of a few bytes to the endpoint: `{"wake":1,"k":"<token>"}`. It says nothing about the message: the contact's
  * app shows "New message", opens on a tap, connects and fetches the message itself. The token is the contact's
  * own name for this chat, different for every contact, so its app knows which chat (and whether it is muted)
- * without the push service learning anything: it sees only that a push happened, and when.
+ * without the push service learning anything: every wake-up is padded to one size (`PUSH_PAD_BYTES`), so it sees that
+ * a push happened, and when; only the time to live and a call's repeats set a call or a device handoff apart.
  *
  * It needs `wake/1` in `paired-capabilities` on both sides. The VAPID key pair belongs to that one subscription,
  * so sharing its private half lets a contact post to that subscription and nothing else. Rotating it (a new

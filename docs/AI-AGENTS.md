@@ -83,6 +83,7 @@ also named `ghostly`, so install it or the CLI's skill above under that name, no
 | `ghostly task send` / `task update` | a task card: status, progress, the step it is on, how long it has run and its pull request, updated in place ([WISP 405 · Status Cards](wisps/405-status-cards.md)) |
 | `ghostly routine send` / `routine update` | a routine card for a scheduled job: its schedule, last run and next run |
 | `ghostly group create` / `group send` | take part in a group, with `@mentions` (`group send --mention <member>`) |
+| `ghostly group auto on --from <chat>` | join the groups its owner invites it to by itself, only over the chats named |
 | `ghostly file send` / `file send --voice` | send a file or a voice note |
 | `ghostly call auto on --from <chat>` / `call start` | take or make a voice call, its audio as raw PCM on a Unix socket ([ghostly-voice-agent](https://github.com/MiguelMedeiros/ghostly-voice-agent) answers by voice: speech to text, Claude, text to speech; set it up with [Talk to an AI by voice](VOICE-AGENT.md)) |
 | `ghostly chat request` / `chat pay` | ask for a payment or pay, on Testnet unless told otherwise |

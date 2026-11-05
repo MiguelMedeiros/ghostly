@@ -322,6 +322,18 @@ export function extractParamsFromSdp(sdp: string, { maxCandidates = 2, loopback 
 
 /** Offers, answers and hang-ups older (or further in the future) than this are ignored. */
 export const CALL_SIGNAL_MAX_AGE_MS = 120_000;
+
+/**
+ * A call that comes this soon after the contact's last missed one does not ring, when that one barely rang
+ * (`BURST_RING_MS`): a bot looping call and hang-up does that (1,375 calls a minute), no person does. It is kept as a
+ * missed call, and the wait starts over with it, so a burst rings once and a call placed after a pause rings again.
+ * A person's call that rang a while, then was cancelled or rang out, holds nothing back: calling again at once (voice to
+ * video, a slip of the finger) rings. The apps (`useWebRTC`) and the headless CLI's call manager both keep it.
+ */
+export const QUICK_REDIAL_MS = 2000;
+
+/** A missed call that rang shorter than this was not a person's (`QUICK_REDIAL_MS`). */
+export const BURST_RING_MS = 1000;
 /**
  * A signal dated further ahead of this clock than this is not taken, however it was heard. A receiver acts on a signal
  * only when its `ts` is later than the last one it acted on: taken, a signal dated a day ahead would be that last one,

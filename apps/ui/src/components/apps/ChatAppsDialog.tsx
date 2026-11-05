@@ -79,8 +79,8 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
                   <div className="flex items-center gap-3 min-w-0 flex-[1_1_12rem]">
                     <AppIcon size={36} installed={app} />
                     <div className="min-w-0 flex-1">
-                      <p dir="auto" className="text-sm text-text-primary truncate">{app.title}</p>
-                      <p dir="auto" className="text-xs text-text-muted truncate">{app.run.status === "ok" ? app.tagline : t(app.run.status === "needs-files" ? "apps.app.needsFiles" : "apps.app.stopped")}</p>
+                      <p dir="auto" className="text-match-parent text-sm text-text-primary truncate">{app.title}</p>
+                      <p dir="auto" className="text-match-parent text-xs text-text-muted truncate">{app.run.status === "ok" ? app.tagline : t(app.run.status === "needs-files" ? "apps.app.needsFiles" : "apps.app.stopped")}</p>
                     </div>
                   </div>
                   <Button variant="primary" data-testid="chat-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: app.title })} disabled={!opens(app) || busy !== null} loading={busy === app.ref} onClick={() => void open(app)}>{t("apps.page.open")}</Button>
@@ -91,8 +91,8 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
               <div className="flex items-center gap-3 min-w-0 flex-[1_1_12rem]">
                 <AppIcon size={36} />
                 <div className="min-w-0 flex-1">
-                  <p dir="auto" className="text-sm text-text-primary truncate">{app.title}</p>
-                  <p dir="auto" className="text-xs text-text-muted truncate">{app.tagline}</p>
+                  <p dir="auto" className="text-match-parent text-sm text-text-primary truncate">{app.title}</p>
+                  <p dir="auto" className="text-match-parent text-xs text-text-muted truncate">{app.tagline}</p>
                 </div>
               </div>
               <Button variant="primary" data-testid="chat-built-in-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: app.title })} disabled={busy !== null} loading={busy === app.ref} onClick={() => setFirst(app)}>{t("apps.page.open")}</Button>

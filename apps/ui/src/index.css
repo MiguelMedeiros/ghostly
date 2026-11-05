@@ -1230,6 +1230,10 @@ html .toast-place.toast-place-page[data-at="top"] {
 [dir="rtl"] {
   direction: rtl;
 }
+/* A line of someone else's words beside an icon (an app's title, its tagline): it reads in its own direction
+   (`dir="auto"`, an English title cut at its end) but lines up with the page. Aligned to its own start, a Latin title
+   sat at the far left of its line in Arabic, away from the icon on the right. Chromium takes the prefixed value only. */
+.text-match-parent { text-align: match-parent; text-align: -webkit-match-parent; }
 
 /* ============================================
    Motion: things arriving, money moving

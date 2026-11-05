@@ -102,12 +102,28 @@ describe("the wake-up itself", () => {
     const request = wakeRequest(target, Date.now(), "online");
     expect(request.headers.TTL).toBe(String(WAKE_ONLINE_TTL_SECONDS));
     expect(WAKE_ONLINE_TTL_SECONDS).toBe(300);
+    // Per-kind times to live (WISP 401 § Privacy): an online notice has a handoff's, so it adds no value of its own.
+    expect(WAKE_ONLINE_TTL_SECONDS).toBe(DEVICE_WAKE_TTL_SECONDS);
     const text = utf8Decode(decryptPushPayload(request.body, secret, auth));
     expect(JSON.parse(text)).toEqual({ wake: 1, k: target.token, o: 1 });
     expect(readWake(text)).toEqual({ token: target.token, kind: "online" });
     // A call or a device flag wins: an online notice never hides one.
     expect(readWake(JSON.stringify({ wake: 1, k: target.token, c: 1, o: 1 }))?.kind).toBe("call");
     expect(readWake(JSON.stringify({ wake: 1, k: target.token, d: 1, o: 1 }))?.kind).toBe("device");
+  });
+
+  it("a message, a call, an online notice and a device wake-up are the same size on the wire, whatever the token's length", () => {
+    for (const token of [newWakeToken(), "a".repeat(16), "b".repeat(64)]) {
+      const { target, secret, auth } = subscription();
+      const t = { ...target, token };
+      const sizes = [wakeRequest(t), wakeRequest(t, Date.now(), "call"), wakeRequest(t, Date.now(), "online"), deviceWakeRequest(t)].map((request) => {
+        readWake(utf8Decode(decryptPushPayload(request.body, secret, auth)));
+        return request.body.length;
+      });
+      expect(new Set(sizes).size).toBe(1);
+      expect(relayRequest(wakeRequest(t)).body.length).toBe(relayRequest(deviceWakeRequest(t)).body.length);
+      expect(relayRequest(wakeRequest(t, Date.now(), "online")).body.length).toBe(relayRequest(wakeRequest(t)).body.length);
+    }
   });
 
   it("the receiver reads nothing else as a wake-up", () => {

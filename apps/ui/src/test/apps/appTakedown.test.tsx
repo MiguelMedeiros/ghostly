@@ -79,7 +79,7 @@ describe("an app running when its version is taken down", () => {
     expect(started[0]!.stop).toHaveBeenCalled();
     const app = screen.getByTestId("mini-app");
     expect(app).toBeVisible();
-    expect(within(app).getByTestId("mini-app-stopped")).toHaveTextContent("Chess was stopped: its maker revoked this version");
+    expect(within(app).getByTestId("mini-app-stopped")).toHaveTextContent("Chess was stopped: its publisher revoked this version");
     expect(within(app).queryByRole("iframe")).not.toBeInTheDocument();
     expect(started[0]!.frame.isConnected).toBe(false);
     await user.click(within(app).getByRole("button", { name: "Close" }));
@@ -137,7 +137,7 @@ describe("an app running when its version is taken down", () => {
     updated([{ digest: "d", run: { status: "revoked" } }]);
     await checked({ status: "ok" });
     expect(started[0]!.stop).toHaveBeenCalled();
-    expect(screen.getByTestId("mini-app-stopped")).toHaveTextContent("Chess was stopped: its maker revoked this version");
+    expect(screen.getByTestId("mini-app-stopped")).toHaveTextContent("Chess was stopped: its publisher revoked this version");
   });
 
   it("alone: stops it and says why in its place", async () => {
@@ -145,7 +145,7 @@ describe("an app running when its version is taken down", () => {
     await checked({ status: "revoked" });
     expect(started[0]!.stop).toHaveBeenCalled();
     const app = await waitFor(() => screen.getByTestId("mini-app"));
-    expect(within(app).getByTestId("mini-app-stopped")).toHaveTextContent("Chess was stopped: its maker revoked this version");
+    expect(within(app).getByTestId("mini-app-stopped")).toHaveTextContent("Chess was stopped: its publisher revoked this version");
     within(app).getByRole("button", { name: "Close" }).click();
     expect(screen.queryByTestId("mini-app")).not.toBeInTheDocument();
   });
@@ -153,7 +153,7 @@ describe("an app running when its version is taken down", () => {
 
 // The runner (WISP 1200 § the runner, step 7): an app whose frame loads again is torn down, and its place says it stopped.
 describe("an app that stops on its own", () => {
-  const STOPPED = "Chess stopped working and was closed. If it keeps happening, tell its maker.";
+  const STOPPED = "Chess stopped working and was closed. If it keeps happening, tell its publisher.";
   beforeEach(() => { vi.spyOn(console, "warn").mockImplementation(() => {}); });
 
   it("in a chat: the panel stays, shown, and says it stopped until it is closed", async () => {
@@ -201,7 +201,7 @@ describe("an app that stops on its own", () => {
 // The watchdog (WISP 1200 § The runner and the broker): an app that held its thread past the bound was stopped by the
 // page. Its place says so, and it may be opened again.
 describe("an app the watchdog stopped", () => {
-  const UNRESPONSIVE = "Chess stopped responding and was closed, so your chats keep working. Open it again, or tell its maker if it keeps happening.";
+  const UNRESPONSIVE = "Chess stopped responding and was closed, so your chats keep working. Open it again, or tell its publisher if it keeps happening.";
   beforeEach(() => { vi.spyOn(console, "warn").mockImplementation(() => {}); });
   afterEach(() => { setAppOpener(null); });
 
