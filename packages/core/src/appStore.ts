@@ -3,7 +3,7 @@ import { toBase64Url, toZ32 } from "./bytes";
 import { canonicalJsonBytes, readCanonicalJson, type JsonValue } from "./canonicalJson";
 import { findAppForbiddenKey, isAppUrl } from "./appBundle";
 import {
-  APP_PREFIXES, isAppHash, isAppKey, isAppRef, readAppRevocationShape, readAppSignature, signAppObject, verifyAppRevocation, verifyAppSignature,
+  APP_PREFIXES, isAppHash, isAppKey, isAppLine, isAppRef, readAppRevocationShape, readAppSignature, signAppObject, verifyAppRevocation, verifyAppSignature,
   type AppRevocationsChecked, type AppSignature, type SignedAppRevocation,
 } from "./appStatements";
 import type { Signer } from "./signer";
@@ -71,7 +71,6 @@ export type AppStoreRefusal =
   | "bad-revocation";
 
 const isObject = (v: unknown): v is Record<string, JsonValue> => typeof v === "object" && v !== null && !Array.isArray(v);
-const isLine = (v: unknown, max: number, min = 0): v is string => typeof v === "string" && [...v].length >= min && [...v].length <= max && !/\p{Cc}/u.test(v);
 const isText = (v: unknown, max: number): v is string => typeof v === "string" && [...v].length <= max && !/[^\P{Cc}\n]/u.test(v);
 const isCount = (v: unknown, min: number): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= min;
 
@@ -112,9 +111,9 @@ export function checkAppListing(value: unknown, options: AppFormatOptions = {}):
   if (!isAppHash(value.digest)) return bad("digest");
   const urls = value.urls;
   if (!Array.isArray(urls) || urls.length < 1 || urls.length > APP_STORE_LIMITS.urls || !urls.every(isAppUrl)) return bad("urls");
-  if (!isLine(value.title, APP_STORE_LIMITS.title, 1)) return bad("title");
-  if (!isLine(value.tagline, APP_STORE_LIMITS.tagline, 1)) return bad("tagline");
-  for (const k of ["category", "developer", "submitter"] as const) if (value[k] !== undefined && !isLine(value[k], APP_STORE_LIMITS.label, 1)) return bad(k);
+  if (!isAppLine(value.title, APP_STORE_LIMITS.title, 1)) return bad("title");
+  if (!isAppLine(value.tagline, APP_STORE_LIMITS.tagline, 1)) return bad("tagline");
+  for (const k of ["category", "developer", "submitter"] as const) if (value[k] !== undefined && !isAppLine(value[k], APP_STORE_LIMITS.label, 1)) return bad(k);
   for (const k of ["repo", "support"] as const) if (value[k] !== undefined && !isAppUrl(value[k])) return bad(k);
   return fine;
 }
@@ -168,7 +167,7 @@ function checkRemoval(value: unknown, options: AppFormatOptions): Check {
   if (!isObject(value)) return { ok: false, reason: "bad-field", detail: "A removal is not an object" };
   const keys = keysOf(value, ["ref", "digest", "reason", "at"], [], options);
   if (!keys.ok) return keys;
-  if (!isAppRef(value.ref) || !isAppHash(value.digest) || !isLine(value.reason, APP_STORE_LIMITS.reason, 1) || !isCount(value.at, 0)) {
+  if (!isAppRef(value.ref) || !isAppHash(value.digest) || !isAppLine(value.reason, APP_STORE_LIMITS.reason, 1) || !isCount(value.at, 0)) {
     return { ok: false, reason: "bad-field", detail: "removed: not {ref, digest, reason, at}" };
   }
   return fine;
@@ -206,7 +205,7 @@ function* checkAppStoreFieldsSteps(value: unknown, options: AppFormatOptions = {
   if (!keys.ok) return keys;
   const bad = (field: string): Check => ({ ok: false, reason: "bad-field", detail: field });
   if (!isAppKey(value.key)) return bad("key");
-  if (!isLine(value.name, APP_STORE_LIMITS.name, 1)) return bad("name");
+  if (!isAppLine(value.name, APP_STORE_LIMITS.name, 1)) return bad("name");
   if (value.description !== undefined && !isText(value.description, APP_STORE_LIMITS.description)) return bad("description");
   if (!(APP_STORE_KINDS as readonly unknown[]).includes(value.kind)) return bad("kind");
   if (!isCount(value.sequence, 1)) return bad("sequence");

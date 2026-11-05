@@ -309,7 +309,7 @@ describe("viewer tabs", () => {
       postData: '{"name":"ç"}',
     });
     expect(answer.method).toBe("Fetch.fulfillRequest");
-    expect(answer.params).toMatchObject({ responseCode: 201, responseHeaders: [{ name: "content-type", value: "text/html" }] });
+    expect(answer.params).toMatchObject({ responseCode: 201, responseHeaders: [{ name: "content-type", value: "text/html" }, { name: "content-security-policy", value: expect.any(String) }] });
     expect(bodyText(answer.params)).toBe("<h1>atlas</h1>");
 
     const [request] = engine().requests;
@@ -318,6 +318,26 @@ describe("viewer tabs", () => {
     expect(request.init).toMatchObject({ method: "POST", path: "/api/items?limit=5", headers: [["Content-Type", "application/json"]] });
     expect(new TextDecoder().decode(request.init.body!)).toBe('{"name":"ç"}');
     expect(request.init.maxResponseBytes).toBe(32 * 1024 * 1024);
+  });
+
+  it("serves every answer with Ghostly's connection policy after the contact's own, the error page's too", async () => {
+    const policy = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
+    const policies = (params: Record<string, unknown>) =>
+      (params.responseHeaders as { name: string; value: string }[]).filter(({ name }) => name.toLowerCase() === "content-security-policy").map(({ value }) => value);
+    const tabId = await openViewer(world);
+    const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/`;
+
+    engineControl().respond = async () => okResponse("<h1>atlas</h1>", 200, [["content-type", "text/html"]]);
+    expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([policy]);
+
+    engineControl().respond = async () => okResponse("<h1>atlas</h1>", 200, [["Content-Security-Policy", "default-src * http: ws:"], ["content-security-policy", "img-src *"]]);
+    expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([`default-src * http: ws:, img-src *, ${policy}`]);
+
+    const offline = await httpError("offline", "offline");
+    engineControl().respond = async () => {
+      throw offline;
+    };
+    expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([policy]);
   });
 
   it("joins a body DevTools hands over in several pieces", async () => {
@@ -378,6 +398,7 @@ describe("viewer tabs", () => {
       { name: "Set-Cookie", value: "sid=1; Path=/" },
       { name: "Set-Cookie", value: "other=2; path=/; HttpOnly" },
       { name: "X-Domain", value: "Domain=kept" },
+      { name: "content-security-policy", value: expect.any(String) },
     ]);
   });
 
@@ -399,6 +420,7 @@ describe("viewer tabs", () => {
     expect(answer.params.responseHeaders).toEqual([
       { name: "Content-Type", value: "text/html" },
       { name: "X-Kept", value: "fine; really" },
+      { name: "content-security-policy", value: expect.any(String) },
     ]);
   });
 

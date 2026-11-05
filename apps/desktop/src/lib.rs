@@ -37,6 +37,7 @@ mod file_stream;
 mod forget_origins;
 #[cfg(desktop)]
 mod fullscreen;
+mod hold_fetch;
 #[cfg(desktop)]
 mod hyperdht;
 #[cfg(desktop)]
@@ -146,6 +147,7 @@ macro_rules! commands {
             commands::get_profile,
             commands::get_public_key,
             commands::hide_from_switcher,
+            commands::hold_fetch,
             commands::link_preview_fetch,
             commands::lnd_request,
             commands::local_fetch,
@@ -287,6 +289,9 @@ pub fn run() {
     if single_instance::hand_over(&context.config().identifier) {
         return;
     }
+    // Before any window: an app window's IPC message is bounded before Tauri parses it (on the main thread on Linux).
+    #[cfg(desktop)]
+    tauri::ipc::set_post_message_limit(app_sandbox::message_limit);
     let builder = tauri::Builder::default();
     #[cfg(target_os = "linux")]
     let builder = single_instance::register(builder, &context.config().identifier);

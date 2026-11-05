@@ -25,6 +25,8 @@ import { formatAmount } from "../lib/amount";
 import { useAmountText } from "../hooks/useAmountText";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
+import { SecretGuardDialog } from "./SecretGuardDialog";
+import { findSecret, type SecretFinding } from "../lib/parse/secrets";
 
 interface PaymentComposerProps {
   balance: number;
@@ -171,6 +173,12 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   /** A send with no review on real money: the second step is open, and only it sends. */
   const [confirmSend, setConfirmSend] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
+  /**
+   * The memo reaches the contact as a message's text does: one that looks like a seed or a key (or a Cashu token) asks
+   * first, as the composer does (SecretGuardDialog), and `go` is what Send anyway goes on with.
+   */
+  const [secret, setSecret] = useState<{ finding: SecretFinding; go(): void } | null>(null);
+  const guarded = (go: () => void) => { const found = findSecret(memo); if (found) setSecret({ finding: found, go }); else go(); };
   const containerRef = useRef<HTMLDivElement>(null);
   useOutsideDismiss(containerRef, true, onClose);
   // The review takes the amount's place after Send, and is taller: on a short screen (a phone with its keyboard up) it
@@ -333,16 +341,17 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
           <input className="payment-back-memo" placeholder={t("payments.composer.memo")} aria-label={t("payments.composer.memo")} maxLength={140} value={memo} onChange={(e) => setMemo(e.target.value)} />
           <p className="payment-back-hint" data-testid={amountField.hint && !blocked ? "amount-unclear" : undefined}>{blocked ?? amountField.hint ?? (tooMuch ? t("payments.composer.tooMuch", { amount: formatAmount(holds!, t.language), unit }) : how(rail))}</p>
           {confirmSend ? <ConfirmRealMoney what={`${formatAmount(value, t.language)} ${unitFor(t, unit, value)}`} busy={busy !== null} onSend={() => void send(true)} onBack={() => setConfirmSend(false)} /> : <div className="payment-back-actions" data-turning={turning || undefined}>
-            <button data-testid="payment-request" disabled={turning || !value || busy !== null || !!asking || !!blocked} onClick={() => void request()} className="payment-back-secondary">
+            <button data-testid="payment-request" disabled={turning || !value || busy !== null || !!asking || !!blocked} onClick={() => guarded(() => void request())} className="payment-back-secondary">
               {busy === "request" ? t("payments.composer.requesting") : t("payments.composer.request")}
             </button>
-            <button data-testid="payment-send" disabled={turning || !canSend || !!blocked || !value || busy !== null || !!asking || tooMuch} onClick={() => void send()}
+            <button data-testid="payment-send" disabled={turning || !canSend || !!blocked || !value || busy !== null || !!asking || tooMuch} onClick={() => guarded(() => void send())}
               title={canSend ? undefined : sendUnavailable ?? t("payments.composer.sendHint")} className="payment-back-primary">
               {asking ? t("payments.composer.asking") : busy === "send" ? t("payments.composer.preparing") : t("payments.composer.send")}
             </button>
           </div>}
         </>}
         {error && <Notice problem={error} className="text-xs m-0" />}
+        {secret && <SecretGuardDialog finding={secret.finding} recipient={contact} onCancel={() => setSecret(null)} onConfirm={() => { setSecret(null); secret.go(); }} />}
       </div>
     </div>
   );

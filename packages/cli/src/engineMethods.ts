@@ -172,6 +172,8 @@ export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
   inviteToGroup: "{ groupId, linkId }",
   acceptGroupInvitation: "{ groupId }",
   declineGroupInvitation: "{ groupId }",
+  keepGroup: "{ groupId }",
+  switchGroup: "{ groupId, to }",
   enableGroupLink: "{ groupId, reset? }",
   disableGroupLink: "{ groupId }",
   joinGroupByLink: "{ link }",

@@ -466,6 +466,10 @@
   "typing": "digitando…",
   "typingRecording": "gravando áudio…",
   "typingThinking": "pensando…",
+  "unconfirmed": {
+    "hint": "Enviada com um pedido de contato. O app da pessoa ainda não confirmou que enviou isto.",
+    "label": "Não confirmada"
+  },
   "video": {
     "arriving": "Chegando",
     "cantPlay": "Este aparelho não reproduz este vídeo ({{format}}). Baixe para assistir.",

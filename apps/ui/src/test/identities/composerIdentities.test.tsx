@@ -191,7 +191,7 @@ describe("ComposerIdentityPicker", () => {
     await user.keyboard("{Enter}");
     await turned();
     expect(back()).toHaveTextContent("example.com");
-    await user.click(screen.getByRole("button", { name: "Choose another identity" }));
+    await user.click(screen.getByRole("button", { name: "Cards" }));
     await deckAgain();
     expect(chosen()).toBe(cards()[0]);
     await waitFor(() => expect(cards()[0]).toHaveFocus());
@@ -304,7 +304,7 @@ describe("ComposerIdentityPicker", () => {
     await user.click(action());
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
     onClose.mockClear();
-    await user.click(screen.getByRole("button", { name: "Choose another identity" }));
+    await user.click(screen.getByRole("button", { name: "Cards" }));
     await deckAgain();
     await user.click(screen.getByRole("button", { name: "Manage identities" }));
     expect(onClose).toHaveBeenCalledOnce();
@@ -490,7 +490,7 @@ describe("MessageInput: the + menu's Identity row", () => {
       expect(await navigator.clipboard.readText()).toBe(KEY);
       expect(screen.getByTestId("composer-identity-copy-key")).toHaveTextContent("Copied");
       // Back to the cards, the Ghostly card chosen.
-      await user.click(screen.getByRole("button", { name: "Choose another identity" }));
+      await user.click(screen.getByRole("button", { name: "Cards" }));
       await deckAgain();
       expect(chosen()).toBe(ghostly());
     });
