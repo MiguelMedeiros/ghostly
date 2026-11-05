@@ -87,6 +87,19 @@ describe("the wake-up itself", () => {
     expect(readWake(JSON.stringify({ wake: 1, k: target.token, c: 1, d: 1 }))?.kind).toBe("device");
   });
 
+  it("a message, a call and a device wake-up are the same size on the wire, whatever the token's length", () => {
+    for (const token of [newWakeToken(), "a".repeat(16), "b".repeat(64)]) {
+      const { target, secret, auth } = subscription();
+      const t = { ...target, token };
+      const sizes = [wakeRequest(t), wakeRequest(t, Date.now(), "call"), deviceWakeRequest(t)].map((request) => {
+        readWake(utf8Decode(decryptPushPayload(request.body, secret, auth)));
+        return request.body.length;
+      });
+      expect(new Set(sizes).size).toBe(1);
+      expect(relayRequest(wakeRequest(t)).body.length).toBe(relayRequest(deviceWakeRequest(t)).body.length);
+    }
+  });
+
   it("the receiver reads nothing else as a wake-up", () => {
     for (const text of [null, "", "{}", '{"wake":2,"k":"aaaaaaaaaaaaaaaaaaaaaa"}', '{"wake":1,"k":"<script>"}', "not json", "x".repeat(500)]) {
       expect(readWakePayload(text)).toBeNull();
