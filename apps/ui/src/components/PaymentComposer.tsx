@@ -226,12 +226,12 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
    * Escape steps back: from a turned card to the deck, and only then out of the sheet. Wherever the focus is (a click
    * on the card's text leaves it on the page), so this listens on the document before anything else does; the
    * sheet's dismissal (useOutsideDismiss) leaves an Escape handled here alone. A card under review stays: its
-   * review has taken the card's place.
+   * review has taken the card's place. A dialog over the sheet (the memo's SecretGuardDialog) answers its own Escape.
    */
   const escapeToCards = useRef<() => boolean>(() => false);
   escapeToCards.current = () => {
     // Already on its way back to the deck: a second Escape closes.
-    if (side !== "back" || leaving.current || !cards.length || review) return false;
+    if (side !== "back" || leaving.current || !cards.length || review || document.querySelector("dialog[open]")) return false;
     backToCards();
     return true;
   };
@@ -405,7 +405,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
       data-mode={onSaveMethods ? mode : undefined}
       className={`payment-composer${accepting ? "" : ` wallet-card-${rail}`}`}
       data-network={accepting ? undefined : network}
-      onKeyDown={(e) => { if (e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); onClose(); } }}
+      // Not one from a dialog portalled out of the sheet (SecretGuardDialog): React hands it here too, and it is the dialog's.
+      onKeyDown={(e) => { if (e.key === "Escape" && !e.defaultPrevented && e.currentTarget.contains(e.target as Node)) { e.preventDefault(); onClose(); } }}
     >
       {side === "cards" ? <>
         <ComposerSheetHead title={modes || (sendUnavailable ? t("payments.composer.request") : t("payments.mode.pay"))} who={t("payments.composer.with", { name: who })} before={onBack && <button type="button" className="deck-flip-turn" data-testid="payment-recipient-change" aria-label={t("payments.composer.chooseOther")} title={t("payments.composer.chooseOther")} onClick={onBack}>
