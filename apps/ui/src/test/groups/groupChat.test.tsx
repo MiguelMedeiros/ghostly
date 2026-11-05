@@ -908,6 +908,20 @@ describe("GroupChat: the options menu", () => {
     expect(await screen.findByTestId("group-share-dialog")).toBeInTheDocument();
   });
 
+  it("replaces the link once when the unanswered joiners' New link is pressed again while it works", async () => {
+    // A reset seals a fresh key to every member, a slice at a time: the button is pressed again before it ends.
+    const entryLink = "ghostly://c/group-1";
+    const { user, engine } = openGroup(active({ profile: "community", isAdmin: true, entryLink, community: { hub: true, hubs: 1, connected: 0, unansweredKnocks: 16 } }));
+    let done = () => {};
+    engine.on("enableGroupLink", () => new Promise(resolve => { done = () => resolve({ link: entryLink }); }));
+    await user.click(screen.getByTestId("group-knocks-reset"));
+    await user.click(screen.getByTestId("group-knocks-reset"));
+    expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: "group-1", reset: true }]);
+    expect(screen.getByTestId("group-knocks-reset")).toHaveAttribute("aria-busy", "true");
+    await act(async () => { done(); });
+    expect(await screen.findByTestId("group-share-dialog")).toBeInTheDocument();
+  });
+
   it("says nothing of unanswered joiners to a member, or with none", async () => {
     openGroup(active({ profile: "community", community: { hub: true, hubs: 1, connected: 0, unansweredKnocks: 16 } }));
     expect(screen.queryByTestId("group-knocks-unanswered")).toBeNull();
