@@ -165,6 +165,9 @@ function settlesWithin(promise: Promise<unknown>, ms: number): Promise<boolean> 
 export function chatOnly(method: string, params: Record<string, unknown>): boolean {
   // A status card's `chat` may name a group as well (WISP 405 · Status Cards): its sessions must start.
   if (method.startsWith("task.") || method.startsWith("routine.") || method.startsWith("button.")) return false;
+  // So may `message delete --everyone`'s: a group's removal goes over its members' edges, which a one-shot that left
+  // the groups unstarted never opened (it waited its whole timeout, and the members kept the message).
+  if (method === "chat.delete" && params.everyone === true) return false;
   // A usage report to every 1:1 chat (`--all`) needs no group; one to a named chat may name a group.
   if (method === "usage.send") return params.all === true;
   return method.startsWith("chat.") || (params.chat !== undefined && params.group === undefined && !method.startsWith("group."));

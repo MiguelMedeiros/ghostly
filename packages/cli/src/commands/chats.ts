@@ -116,12 +116,12 @@ export const commands: Record<string, Command> = {
     params: ({ options }, { invite }) => ({ invite, label: options.label }),
   },
   "message delete": {
-    method: "chat.delete", usage: "message delete <chat|group> <message> [--everyone [--wait none|confirmed] [--timeout s]]",
+    method: "chat.delete", usage: "message delete <chat|group> <message> [--everyone [--wait none|confirmed|sent] [--timeout s]]",
     summary: "Forget a message on this device (the contact keeps theirs); --everyone deletes one of yours, in a chat or a group, from every member's device",
     args: ["chat", "message"],
     options: {
       everyone: { type: "boolean", description: "Delete a message of yours for everyone (a chat or a group)" },
-      wait: { type: "string", choices: ["none", "confirmed"], description: "With --everyone in a chat: none or confirmed, until the contact has it (default: none with a daemon, confirmed without)" },
+      wait: { type: "string", choices: ["none", "confirmed", "sent"], description: "With --everyone: in a chat none or confirmed, until the contact has it; in a group none or sent, until a member's edge took it (default: none with a daemon, confirmed or sent without)" },
       timeout: wait.timeout,
     },
     params: ({ options }, a) => {

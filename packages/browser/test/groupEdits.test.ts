@@ -95,7 +95,8 @@ describe("GroupEdits on its own", () => {
     const card = { kind: "task" as const, id: "t", title: "T", status: "running" as const };
     const removed: string[] = [];
     const { edits, sent, messages, tick } = setup([{ ...mine(0, "🔄 T"), card, edit: { seq: 7, at: 5, history: [] } }, bobs(0)], [me, bob, carol], removed);
-    expect(await edits.removeMine("g1", mine(0).id)).toEqual({ error: null, messageId: mine(0).id });
+    // `e`: the number the removal is said under, past the message's last edit.
+    expect(await edits.removeMine("g1", mine(0).id)).toEqual({ error: null, messageId: mine(0).id, e: 8 });
     expect(removed).toEqual([mine(0).id]);
     expect(sent).toEqual([{ edit: { id: mine(0).id, e: 8, ts: 1_000_000, m: REMOVED_TEXT, rm: true } }]);
     expect(messages[0]).toMatchObject({ removed: true, edit: { seq: 8 } });
@@ -461,8 +462,11 @@ describe("GroupEdits on its own", () => {
     await world.until(() => [alice, carol].every(m => !!textOf(m.peer, messageId!)), 60_000);
     carol.peer.online = false;
     await world.run(5_000);
-    expect(await bob.edits.removeMine(id, messageId!)).toMatchObject({ error: null });
+    const removed = await bob.edits.removeMine(id, messageId!);
+    // Its edit number, by which an edge that took it is counted (what the CLI's one-shot delete waits for).
+    expect(removed).toMatchObject({ error: null, e: 1 });
     await world.until(() => !textOf(alice.peer, messageId!), 60_000);
+    expect(bob.peer.groups.taken(id, messageId!, removed.e)).toBeGreaterThan(0);
     expect(textOf(carol.peer, messageId!)).toBe("🔄 Task 1");
     carol.peer.online = true;
     // Nobody asks: Bob's side of the edge coming up says it again.
