@@ -132,9 +132,18 @@ let forwardFor: { profile: string | null } | null = null;
 const sharePages = new Map<string, { profile: string; at: number }>();
 let inFront = 0;
 
-/** Holds a share for the page that asks for it, behind those held before; `done` once it is taken or dropped. */
+/**
+ * Holds a share for the page that asks for it, behind those held before; `done` once it is taken or dropped. Full, one
+ * a page gives back waited before any posted since: the newest of those is dropped in its place.
+ */
 function hold(item: SharedItem, done: () => void, kept = false): void {
-  if (held.length >= MAX_HELD_SHARES) { dropped += 1; done(); return; }
+  if (held.length >= MAX_HELD_SHARES) {
+    const newest = kept ? held.filter((other) => !other.kept).pop() : undefined;
+    dropped += 1;
+    if (!newest) { done(); return; }
+    held = held.filter((other) => other !== newest);
+    newest.done();
+  }
   const entry = { item, done, kept };
   held.splice(kept ? held.filter((other) => other.kept).length : held.length, 0, entry);
   setTimeout(() => {
