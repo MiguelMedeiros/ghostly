@@ -897,12 +897,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 type="button"
                 ref={nameRef}
                 onClick={startEditLabel}
-                className={`group/name min-w-0 text-start text-[15px] font-normal m-0 leading-tight truncate cursor-pointer rounded hover:text-accent transition-colors ${focus} ${isAnonymous ? "text-text-muted italic" : "text-text-primary"}`}
+                className={`group/name flex items-center min-w-0 text-start text-[15px] font-normal m-0 leading-tight cursor-pointer rounded hover:text-accent transition-colors ${focus} ${isAnonymous ? "text-text-muted italic" : "text-text-primary"}`}
                 title={t("chat.setNameHint")}
               >
                 {/* With no name, the word alone: the start of their key ("Contact · 1kwb54" elsewhere) is on the line
-                    right under it, and the whole of it was cut to "Contac…" on a 320px phone. */}
-                <bdi data-testid="chat-name">{isAnonymous ? t("common.unnamedContactShort") : shownName}</bdi>
+                    right under it, and the whole of it was cut to "Contac…" on a 320px phone. Cut in its own direction,
+                    as the group header's name is: in Arabic a Latin name cut by the page's direction lost its start. */}
+                <span data-testid="chat-name" dir="auto" className="min-w-0 truncate">{isAnonymous ? t("common.unnamedContactShort") : shownName}</span>
                 {!chatLabel && (
                   <svg
                     width="12"
@@ -914,7 +915,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     aria-hidden="true"
-                    className="inline ms-1.5 text-text-muted opacity-0 group-hover/name:opacity-100 group-focus-visible/name:opacity-100 max-md:hidden"
+                    className="shrink-0 ms-1.5 text-text-muted opacity-0 group-hover/name:opacity-100 group-focus-visible/name:opacity-100 max-md:hidden"
                   >
                     <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                     <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
