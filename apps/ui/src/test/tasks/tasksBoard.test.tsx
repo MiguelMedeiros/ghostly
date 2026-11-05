@@ -93,7 +93,7 @@ describe("the Tasks board", () => {
     const card = screen.getByTestId("board-card");
     expect(within(card).getByTestId("board-card-chips").children).toHaveLength(3);
     const pr = within(card).getByTestId("board-card-pr");
-    expect(pr).toHaveTextContent("PR #612+123−45");
+    expect(pr).toHaveTextContent("PR #612github.com+123−45");
     expect(pr).toHaveAttribute("href", "https://github.com/o/r/pull/612");
     expect(pr).toHaveAttribute("target", "_blank");
     expect(pr).toHaveAttribute("rel", "noopener noreferrer");
@@ -374,6 +374,18 @@ describe("richer task cards on the board", () => {
     expect(within(card("pass")).getByTestId("board-card-open")).toHaveAccessibleName(/PR #612, Open, Checks passing, updated /);
     await user.click(within(card("wait")).getByRole("button", { name: "Details" }));
     expect(within(card("wait")).getByTestId("board-card-pr-standing")).toHaveTextContent("Draft · Checks pending");
+  });
+
+  it("the pull request's chip shows where it goes on the card, in its name and in Details, not only on hover", async () => {
+    const { user } = profile([row("link-1", task({ pr: { url: "https://evil.example/github.com/o/r/pull/612", number: 612, additions: 3, deletions: 1 } }))]);
+    await loaded();
+    const card = screen.getByTestId("board-card");
+    const chip = within(card).getByTestId("board-card-pr");
+    expect(chip).toHaveAttribute("href", "https://evil.example/github.com/o/r/pull/612");
+    expect(within(chip).getByTestId("board-card-pr-host")).toHaveTextContent(/^evil\.example$/);
+    expect(chip).toHaveAccessibleName("PR #612 · Open on evil.example");
+    await user.click(within(card).getByRole("button", { name: "Details" }));
+    expect(within(card).getByTestId("board-card-pr-standing")).toHaveTextContent(/^evil\.example$/);
   });
 
   it("shows tags as chips (three chips at most, all of them in Details) and filters by one", async () => {
