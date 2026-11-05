@@ -118,6 +118,7 @@ export const PACKAGES_READ_FROM_SITE = [
   // packages/cli's agentDocs test: every command the agents guide (and its prompt) and the agents page teach, and the
   // guides and pages that point to the voice agent.
   "docs/AI-AGENTS.md",
+  "docs/VOICE-AGENT.md",
   "apps/website/content/agents.ts",
   "apps/website/content/agentsThreat.ts",
   "docs/CLI.md",
