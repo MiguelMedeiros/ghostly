@@ -343,6 +343,20 @@ export interface VideoSource {
   read(offset: number, length: number): Promise<Uint8Array>;
 }
 
+/**
+ * Whether `start` to `end` of the file meets one of `ranges` (in file order, apart): the first one that ends past
+ * `start` is the only one that can, found by halves, so a fragment per range is not checked against every other.
+ */
+function meets(ranges: [number, number][], start: number, end: number): boolean {
+  let low = 0, high = ranges.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (ranges[middle]![1] > start) high = middle;
+    else low = middle + 1;
+  }
+  return low < ranges.length && ranges[low]![0] < end;
+}
+
 /** A part of a video replaced as it is sent, `start` to `end` of the file: by `bytes`, or by zeros. */
 export interface VideoPatch { start: number; end: number; bytes?: Uint8Array }
 
@@ -415,7 +429,7 @@ export async function videoMetadataPatches(source: VideoSource, mime: string): P
 
   // The top-level boxes, by their headers alone.
   const top: Box[] = [];
-  /** What goes as zeros at the top: the boxes emptied, the space's bodies, and the bytes after the last box. */
+  /** What goes as zeros at the top, in file order: the boxes emptied, the space's bodies, and the bytes after the last box. */
   const dropped: [number, number][] = [];
   let trailer = false;
   for (let at = 0; at < source.size;) {
@@ -452,7 +466,7 @@ export async function videoMetadataPatches(source: VideoSource, mime: string): P
     const { chunks, offsetOf } = chunkOffsets(moov, stbl);
     for (let i = 0; i < chunks; i++) {
       const offset = offsetOf(i);
-      check(!dropped.some(([start, end]) => offset >= start && offset < end));
+      check(!meets(dropped, offset, offset + 1));
     }
   }
 
@@ -463,9 +477,7 @@ export async function videoMetadataPatches(source: VideoSource, mime: string): P
     if (box.type === "moof") {
       const moof = await whole(source, box);
       // No fragment's sample is where zeros go either.
-      if (dropped.length) for (const [start, end] of fragmentRanges(moof, box.start, sizes ?? new Map())) {
-        check(!dropped.some(([from, to]) => start < to && end > from));
-      }
+      if (dropped.length) for (const [start, end] of fragmentRanges(moof, box.start, sizes ?? new Map())) check(!meets(dropped, start, end));
       emptyWithin(moof, box.body - box.start, moof.length);
       patches.push({ start: box.start, end: box.end, bytes: moof });
     } else if (SPACE.has(box.type)) {
