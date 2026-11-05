@@ -14,7 +14,7 @@
     "mutual": "Suit {{name}}, et {{name}} suit ce compte",
     "notShown": "Non affichée.",
     "notShownWhy": "Non affichée : {{reason}}.",
-    "off": "Les profils publics sont désactivés (Réglages → Sécurité).",
+    "off": "Les profils publics sont désactivés ({{settings}} → {{section}}).",
     "open": "Ouvrir",
     "openIn": "Ouvrir dans {{network}}",
     "openPostIn": "Ouvrir cette publication dans {{network}}",
