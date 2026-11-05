@@ -10,7 +10,8 @@ import {
 import { flushSync } from "react-dom";
 import { getBrowserHost, type BrowserHost } from "@ghostly/browser/host";
 import { useSettings } from "./SettingsContext";
-import { hashPassword, needsRehash, verifyPassword } from "../lib/settings";
+import { hashPassword, needsRehash } from "../lib/settings";
+import { lockRetryAt, tryLockPassword } from "../lib/lockAttempts";
 import { activeProfileId } from "../lib/profiles";
 import { takeUnlockHandover } from "../lib/lockHandover";
 import { onAppInput, stopRunningApps } from "../lib/apps/open";
@@ -59,11 +60,6 @@ export interface LockedCall {
 
 const LockScreenContext = createContext<LockScreenContextValue | null>(null);
 
-// Kept across reloads, or reloading would reset the pacing.
-const ATTEMPTS_KEY = "ghostly_lock_attempts";
-/** Failures allowed before the wait starts; then it doubles from 1 s, up to 5 minutes. */
-const FREE_ATTEMPTS = 3;
-const MAX_DELAY_MS = 5 * 60_000;
 /** The longest wait between two looks at the clock while unlocked (see `checkIdle`). */
 const LOCK_CHECK_MS = 30_000;
 /** The channel the app's pages of one origin hear Lock Now on (`lock`). */
@@ -79,41 +75,6 @@ function awayFromSwitcher(): boolean {
   return typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
 }
 
-interface Attempts {
-  failures: number;
-  retryAt: number;
-}
-
-function loadAttempts(): Attempts {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(ATTEMPTS_KEY) ?? "") as Partial<Attempts>;
-    return { failures: Number(parsed.failures) || 0, retryAt: Number(parsed.retryAt) || 0 };
-  } catch {
-    return { failures: 0, retryAt: 0 };
-  }
-}
-
-function saveAttempts(attempts: Attempts | null): void {
-  try {
-    if (attempts) localStorage.setItem(ATTEMPTS_KEY, JSON.stringify(attempts));
-    else localStorage.removeItem(ATTEMPTS_KEY);
-  } catch {
-    // storage unavailable
-  }
-}
-
-/** The Web Lock the app's pages of one origin take turns on to try a password (`unlock`). */
-const ATTEMPTS_LOCK = "ghostly-unlock";
-
-/**
- * Runs one try at the password while no other page of the app runs one: the extension opens the app in as many tabs
- * as one likes, and tries made in them at once would otherwise all read the same count and fit in one paced slot.
- */
-function oneTryAtATime(run: () => Promise<boolean>): Promise<boolean> {
-  const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
-  return typeof locks?.request === "function" ? locks.request(ATTEMPTS_LOCK, run).then((valid) => valid) : run();
-}
-
 export function LockScreenProvider({ children }: { children: ReactNode }) {
   const { settings, updateLockScreen, followStored } = useSettings();
   const lockActive = settings.lockScreen.enabled && !!settings.lockScreen.passwordHash;
@@ -121,10 +82,8 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
   const [handed] = useState(() => lockActive && takeUnlockHandover(activeProfileId(), settings.lockScreen.passwordHash));
   const [isLocked, setIsLocked] = useState(lockActive && !handed);
   const [hasUnlocked, setHasUnlocked] = useState(!lockActive || handed);
-  const [retryAt, setRetryAt] = useState<number | null>(() => {
-    const { retryAt } = loadAttempts();
-    return retryAt > Date.now() ? retryAt : null;
-  });
+  // Wrong passwords are paced as everywhere this profile's password is checked (lib/lockAttempts.ts).
+  const [retryAt, setRetryAt] = useState<number | null>(() => lockRetryAt(activeProfileId()));
   const [covered, setCovered] = useState(false);
   const [ringing, setRinging] = useState<readonly LockedCall[]>([]);
   const offerCall = useCallback((call: LockedCall) => {
@@ -189,30 +148,10 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
       const storedHash = settings.lockScreen.passwordHash;
       if (!storedHash) return true;
 
-      const valid = await oneTryAtATime(async () => {
-        const attempts = loadAttempts();
-        if (attempts.retryAt > Date.now()) {
-          setRetryAt(attempts.retryAt);
-          return false;
-        }
+      const tried = await tryLockPassword(activeProfileId(), password, storedHash);
+      setRetryAt(tried.retryAt);
+      if (!tried.ok) return false;
 
-        // The try is counted as a failure, and the next wait set, before the check: a try started meanwhile where
-        // there are no Web Locks finds the slot taken. A right password gives it back.
-        const failures = attempts.failures + 1;
-        const delay =
-          failures < FREE_ATTEMPTS ? 0 : Math.min(MAX_DELAY_MS, 1000 * 2 ** (failures - FREE_ATTEMPTS));
-        const next = delay ? Date.now() + delay : 0;
-        saveAttempts({ failures, retryAt: next });
-        if (await verifyPassword(password, storedHash)) {
-          saveAttempts(null);
-          return true;
-        }
-        setRetryAt(next || null);
-        return false;
-      });
-      if (!valid) return false;
-
-      setRetryAt(null);
       setCovered(false);
       setIsLocked(false);
       setHasUnlocked(true);
