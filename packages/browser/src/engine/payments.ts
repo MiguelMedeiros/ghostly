@@ -27,6 +27,7 @@ import { STORES, store, wrap, committed } from "../shared/idb";
 import { digestHex } from "./messageDetails";
 import { isWorthlessMint, mintNetwork } from "../shared/mints";
 import { refusedRow } from "../shared/refusals";
+import { openRow, openRows, sealRow } from "./sealedRows";
 import type { PaymentView, PendingMelt, PendingSwap, StoredMessage, StoredPayment, StoredQuote } from "../shared/types";
 import { SwapUnsettledError, assertAmount, type CashuWallet } from "./wallet";
 
@@ -377,7 +378,7 @@ export class PaymentDesk {
   }
 
   async start(): Promise<void> {
-    const stored = await wrap<StoredPayment[]>((await store(STORES.payments, "readonly")).getAll());
+    const stored = await openRows(STORES.payments, await wrap<StoredPayment[]>((await store(STORES.payments, "readonly")).getAll()));
     for (const payment of stored) this.payments.set(payment.id, payment);
     for (const payment of stored) if (payment.kind === "request" && payment.direction === "in" && payment.lightningPending) await this.settleInterrupted(payment);
     const claims = await wrap<InvoiceClaim[] | undefined>((await store(STORES.settings, "readonly")).get(INVOICE_CLAIMS_KEY));
@@ -1397,7 +1398,7 @@ export class PaymentDesk {
     if(!review.linkId || review.method!=="cashu")throw new Error("Cashu chat recipient missing");
     const link=this.requireLink(review.linkId);
     await link.requirePaymentSupport();
-    const existing=await wrap<StoredPayment|undefined>((await store(STORES.payments,"readonly")).get(review.id));
+    const existing=await openRow(STORES.payments,await wrap<StoredPayment|undefined>((await store(STORES.payments,"readonly")).get(review.id)));
     if(!existing || existing.linkId!==review.linkId || existing.requestId!==review.requestId)throw new Error("Cashu outbox does not match the reviewed payment");
     this.payments.set(existing.id,existing);
     this.host.onChange();
@@ -1406,7 +1407,7 @@ export class PaymentDesk {
   }
   async confirmReviewedCashu(review:PaymentReview):Promise<void> {
     if(review.method!=="cashu" || review.state!=="settled")return;
-    const payment=this.payments.get(review.id) ?? await wrap<StoredPayment|undefined>((await store(STORES.payments,"readonly")).get(review.id));
+    const payment=this.payments.get(review.id) ?? await openRow(STORES.payments,await wrap<StoredPayment|undefined>((await store(STORES.payments,"readonly")).get(review.id)));
     // Ecash we took back is spent too, by us: the mint saying "spent" then is not the contact being paid.
     if(!payment || payment.linkId!==review.linkId || payment.state==="reclaimed")return;
     await this.save({...payment,state:"settled",token:undefined});
@@ -1972,7 +1973,9 @@ export class PaymentDesk {
 
   private async save(payment: StoredPayment): Promise<void> {
     this.payments.set(payment.id, payment);
-    await committed((await store(STORES.payments, "readwrite")).put(payment));
+    // Its token sealed when the profile is encrypted: ecash kept for Take it back can still be spent.
+    const row = await sealRow(STORES.payments, payment);
+    await committed((await store(STORES.payments, "readwrite")).put(row));
     this.host.onChange();
   }
 
