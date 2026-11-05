@@ -617,6 +617,22 @@ describe("with the apps flag on", () => {
     expect(screen.queryByTestId("app-card-run-anyway")).not.toBeInTheDocument();
   });
 
+  it("the card's Open shows it is opening while the app's files are fetched, and a second press opens nothing more", async () => {
+    fakeEngine.on("appList", () => [installed({ run: { status: "needs-files" } })]);
+    let finish: () => void = () => {};
+    const opener = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    setAppOpener(opener);
+    const { user } = renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
+    act(() => fakeEngine.update({ links: [ana(true)] }));
+    const open = await screen.findByTestId("app-card-open");
+    await user.click(open);
+    expect(open).toHaveAttribute("aria-busy", "true");
+    await user.click(open);
+    expect(opener).toHaveBeenCalledTimes(1);
+    await act(async () => finish());
+    await waitFor(() => expect(open).not.toHaveAttribute("aria-busy"));
+  });
+
   it("a revoked app's card offers no Run anyway", async () => {
     fakeEngine.on("appList", () => [installed()]);
     setAppOpener(vi.fn(async () => { throw new Error("revoked: Its publisher revoked this version"); }));
