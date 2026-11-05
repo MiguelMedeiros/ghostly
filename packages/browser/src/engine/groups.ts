@@ -2078,6 +2078,8 @@ export class Groups {
     const size = session.roster.length + contactsInvited + pending;
     if (size >= GROUP_MEMBER_CAP.max) return { n: session.roster.length, update: false };
     return this.growthBlocked(group, session, size + 1) ? { n: session.roster.length, update: true } : null;
+  }
+
   /** The admin's entry sessions of this group whose other side was seen, once and for as long as they are open. */
   private seenEntries(groupId: string): Set<string> {
     let seen = this.entriesSeen.get(groupId);
