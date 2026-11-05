@@ -474,6 +474,29 @@ describe("viewer tabs", () => {
     expect(bodyText(gone.params)).toContain("This service is not reachable. Services exist while their ghost is online.");
   });
 
+  it("says in the profile's language and from this side why the contact's machine answered in place of their app", async () => {
+    world.storage.set("ghostly_app_settings", JSON.stringify({ language: "ar" }));
+    // The contact chose the app's name: it goes into the page escaped.
+    engineControl().links = [{ peerPubKeyZ32: PEER, peerServices: [{ id: SERVICE, name: "<b>Atlas</b>" }] }];
+    const tabId = await openViewer(world);
+    const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/`;
+    const { default: ar } = await import("../../ui/src/locales/ar/services.json");
+    // Arabic's chunk transformed once here, so the peer's own `loadLocale` is not slower than `pauseRequest` waits.
+    await import("../../ui/src/locales/ar/index.ts");
+    const named = (text: string) => text.replace("{{app}}", "&#60;b&#62;Atlas&#60;/b&#62;");
+
+    // The contact's machine answered in place of their app, which is not running there (docs/PROTOCOL.md "Host errors").
+    engineControl().respond = async () =>
+      okResponse("The local service is not reachable.\n", 502, [["content-type", "text/plain; charset=utf-8"], ["x-ghostly-error", "unreachable"]]);
+    const down = await pauseRequest(world, tabId, { url });
+    expect(down.params).toMatchObject({ responseCode: 502 });
+    expect(down.params.responseHeaders).toContainEqual({ name: "x-ghostly-error", value: "unreachable" });
+    const downHtml = bodyText(down.params);
+    expect(downHtml).toContain(named(ar.window.notAnswering));
+    expect(downHtml).not.toContain("The local service");
+    expect(downHtml).toContain('<html lang="ar" dir="rtl">');
+  });
+
   it("stops intercepting once the tab leaves the virtual origin, and only then", async () => {
     const tabId = await openViewer(world);
     const navigate = (frame: { url: string; parentId?: string }) =>

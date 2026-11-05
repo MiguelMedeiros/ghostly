@@ -46,7 +46,15 @@ export interface ViewerPage {
 
 export type HttpRequestReply =
   | { ok: true; status: number; headers: [string, string][]; bodyB64: string }
-  | { ok: false; code: string; message: string };
+  /** `status`: the one the contact's machine gave, when it answered in place of its app. */
+  | { ok: false; code: string; message: string; status?: number; shown?: ShownError };
+
+/** What a viewer tab shows in place of the app when the contact's machine answered for it: said by the peer in the profile's language (viewerWords.ts). */
+export interface ShownError {
+  text: string;
+  lang: string;
+  dir: "ltr" | "rtl";
+}
 
 /** The profile the running peer opened, and the one the profile registry names now (WISP 04). */
 export interface EngineStatus {

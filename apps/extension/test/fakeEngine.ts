@@ -29,6 +29,8 @@ export interface FakeEngineControl {
   log: string[];
   ready: Promise<void>;
   respond: (peer: string, service: string, init: EngineRequestInit) => Promise<EngineResponse>;
+  /** The chats the peer's state lists (`getState().links`): what a contact shares, by name. */
+  links?: { peerPubKeyZ32: string; peerServices: { id: string; name: string }[] | null }[];
 }
 
 export function engineControl(): FakeEngineControl {
@@ -66,6 +68,7 @@ export class FakeEngineServer {
       this.requests.push({ peer, service, init });
       return engineControl().respond(peer, service, init);
     },
+    getState: () => ({ links: engineControl().links ?? [] }),
     shutdown: async () => {
       this.shutdowns++;
       engineControl().log.push(`stop ${this.database}`);
