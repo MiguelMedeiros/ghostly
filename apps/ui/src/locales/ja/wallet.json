@@ -874,6 +874,21 @@
       "login": "ログインが必要なので、Ghostly は代わりに問い合わせません。"
     }
   },
+  "total": {
+    "away": "{{device}} にあります。合計に含みません",
+    "federation": "フェデレーションが保管する ecash",
+    "info": "合計は、Ghostly が今読み取れた残高だけを足したものです。読み取れなかったカードは含まず、Testnet を Mainnet に足すことはありません。",
+    "label": "残高",
+    "mint": "あなたのミントが保管する ecash",
+    "none": "未設定",
+    "ready": "今すぐ使える額",
+    "shared": "{{name}} と同じ残高。1 回だけ数えます",
+    "title": "残高の内訳",
+    "total": "合計",
+    "uncounted": "{{count}} 枚のカードは合計に含みません",
+    "unknown": "今は読み取れません。合計に含みません",
+    "waiting": "{{amount}} {{unit}} はまだ使えません"
+  },
   "ui": {
     "amountIn": "{{unit}} での金額",
     "amountUnclear": "金額があいまいです。{{example}} のように入力してください",

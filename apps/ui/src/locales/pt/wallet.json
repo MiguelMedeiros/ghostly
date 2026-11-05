@@ -874,6 +874,22 @@
       "login": "Ele pede um login, então o Ghostly não pede por você."
     }
   },
+  "total": {
+    "away": "Em {{device}}, fora do total",
+    "federation": "Ecash guardado pela federação",
+    "info": "O total soma só os saldos que o Ghostly conseguiu ler agora. Um cartão que não deu para ler fica de fora, e a Testnet nunca entra na soma da Mainnet.",
+    "label": "Saldos",
+    "mint": "Ecash guardado pelas suas mints",
+    "none": "Não configurado",
+    "ready": "Pronto para gastar agora",
+    "shared": "Mesmo saldo de {{name}}, contado uma vez",
+    "title": "De onde vem o saldo",
+    "total": "Total",
+    "uncounted": "{{count}} cartões fora do total",
+    "uncounted_one": "{{count}} cartão fora do total",
+    "unknown": "Não deu para ler agora, fora do total",
+    "waiting": "{{amount}} {{unit}} ainda não disponíveis"
+  },
   "ui": {
     "amountIn": "Valor em {{unit}}",
     "amountUnclear": "Valor ambíguo: escreva como {{example}}",
