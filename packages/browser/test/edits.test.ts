@@ -251,6 +251,24 @@ describe("editing my message", () => {
     await refused(sent.messageId!, "one more");
   });
 
+  it("refuses an edit within 16 KiB whose frame passes the contact's frame limit once encoded, as a send is, and the session stays", async () => {
+    const t = await setup();
+    const sent = await t.node.sendMessage({ linkId: t.id, text: "short" });
+    await vi.waitFor(async () => expect((await t.row(sent.messageId!)).delivery).toBe("delivered"));
+    // 12,002 UTF-8 bytes of mostly control characters: six characters each in the frame's JSON, ~72 K against 60 K.
+    const controls = `x${"\u0001".repeat(12_000)}x`;
+    expect(await t.node.editMessage({ linkId: t.id, messageId: sent.messageId!, text: controls }))
+      .toEqual({ error: "Message too long once encoded. Shorten it or send it as a file.", refused: true });
+    expect(await t.row(sent.messageId!)).toMatchObject({ text: "short" });
+    expect((await t.row(sent.messageId!)).edit).toBeUndefined();
+    // As many quotes (two characters each) fit, and go; the session that carries them stays.
+    const quotes = "\"".repeat(12_002);
+    expect(await t.node.editMessage({ linkId: t.id, messageId: sent.messageId!, text: quotes })).toEqual({ error: null, messageId: sent.messageId });
+    await vi.waitFor(() => expect(t.contactEdits.map(e => e.m)).toEqual([quotes]));
+    await vi.waitFor(async () => expect((await t.row(sent.messageId!)).edit?.pending).toBeUndefined());
+    expect(t.view().pairing?.status).toBe("ready");
+  });
+
   it("waits for a contact whose app does not offer edit/1, and nothing is sent to it", async () => {
     const t = await setup({ editSupport: false });
     const sent = await t.node.sendMessage({ linkId: t.id, text: "status: 1" });

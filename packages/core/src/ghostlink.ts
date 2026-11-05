@@ -344,6 +344,14 @@ export function pairedMessageFits(ts: number, m: string, reply?: WireReply, forw
 }
 
 /**
+ * The `paired-edit` frame of this edit fits a session, as `pairedMessageFits` says of a text's: an edit within 16 KiB
+ * can pass it the same way, and the contact's session ends on it each time it is said again.
+ */
+export function pairedEditFits(edit: WireEdit): boolean {
+  return editFrame(edit).length <= SESSION_FRAME_MAX;
+}
+
+/**
  * A native descriptor from the contact's capability record against the one known (a session's, or an older record's).
  * The record carries only how to dial, never an address: the Iroh endpoint id and the relay it is homed on, the
  * HyperDHT key and the relay a browser's goes through. For the same endpoint, a known Iroh descriptor keeps its
@@ -3596,6 +3604,8 @@ export class GhostLink {
       // Past a text's edits only an app that shows cards takes one (WISP 405 · Status Cards); an older one would drop it.
       // A removal goes whatever its number: an app that knows removals takes it, an older one shows or drops its fallback.
       if (!edit.rm && !validEditNumber(edit.e) && !(edit.sc && this.supportsStatusCards)) return "Your contact's app takes no more edits of this message";
+      // One past what a session takes would end the contact's session, again on every new one.
+      if (!pairedEditFits(edit)) return PAIRED_FRAME_TOO_LARGE;
       try { this.channel.send(editFrame(edit)); return null; } catch { return "The connection closed before sending"; }
     }
     // A card's edit waits for the live session: on the floor the card would read as its text until the next one.
