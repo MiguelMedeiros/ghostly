@@ -190,8 +190,14 @@
   "forward": {
     "forward": "转发",
     "forwarded": "已转发",
+    "found": "{{count}} 个聊天",
+    "found_one": "{{count}} 个聊天",
+    "found_other": "{{count}} 个聊天",
+    "limit": "一次最多可转发到{{count}}个聊天",
+    "limit_one": "一次最多可转发到{{count}}个聊天",
     "many": "已多次转发",
     "messages": "{{count}} 条消息",
+    "more": "另外{{count}}个",
     "noChats": "还没有聊天",
     "noMatch": "没有这个名字的聊天",
     "partial": "已发送 {{sent}}/{{count}}",
@@ -460,6 +466,10 @@
   "typing": "正在输入…",
   "typingRecording": "正在录音…",
   "typingThinking": "正在思考…",
+  "unconfirmed": {
+    "hint": "随联系请求一起发送。对方的应用尚未确认这是它发送的。",
+    "label": "未确认"
+  },
   "video": {
     "arriving": "正在接收",
     "cantPlay": "此设备无法播放此视频（{{format}}）。请下载后观看。",

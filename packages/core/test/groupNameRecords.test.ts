@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { encryptText, epochKeys } from "../src/groupCrypto";
 import { fromBase64Url, toBase64Url, utf8Encode } from "../src/bytes";
 import { identityFromSeedB64, sign } from "../src/identity";
-import { GroupSession, type GroupEdgeFrame } from "../src/groupSession";
+import { GROUP_LIMITS, GroupSession, type GroupEdgeFrame } from "../src/groupSession";
 import { Mesh, admit, clone } from "./support/groupMesh";
 // covers: groups.catch-up, groups.hubs
 
@@ -98,6 +98,36 @@ describe("a member's name record", { timeout: 60_000 }, () => {
     await mesh.settle();
     expect(bob.state.names?.[carol.myKey]).toBeUndefined();
     expect(await bob.handle(alice.myKey, forged(v + 1, "Ghost", carol.state.seedB64))).toEqual([]);
+  });
+
+  it("a member's refused records of another cost that member nothing: its own still gets through", async () => {
+    const { alice, bob, carol } = await hubbed();
+    const e = alice.epoch, key = epochKeys(fromBase64Url(alice.state.secrets[e]), alice.id, e).message;
+    const record = (v: number, nm: string, signer: string) => {
+      const sig = toBase64Url(sign(utf8Encode(JSON.stringify(["ghostly-group/1 name", alice.id, carol.myKey, v, nm])), identityFromSeedB64(signer).seed));
+      const box = encryptText(key, JSON.stringify(["ghostly-group/1 name", alice.id, e, carol.myKey, v]), JSON.stringify({ nm, sig }));
+      return { t: "group-name", g: alice.id, e, k: carol.myKey, v, nn: box.n, c: box.c };
+    };
+    const v = Date.now() + 120_000;
+    // Alice sends Bob more records "of Carol" than a minute takes, each signed by Alice.
+    for (let i = 1; i <= GROUP_LIMITS.namesPerMember + 2; i++) await bob.handle(alice.myKey, record(v + i, "Mallory", alice.state.seedB64));
+    expect(bob.state.nicks[carol.myKey]).toBe("Carol");
+    // Carol's own rename, in the same minute, is taken.
+    await bob.handle(alice.myKey, record(v + 100, "Caz", carol.state.seedB64));
+    expect(bob.state.nicks[carol.myKey]).toBe("Caz");
+  });
+
+  it("is forgotten by the admin too, in its saved group, once its own commit takes the member out", async () => {
+    for (const left of [false, true]) {
+      const { mesh, alice, bob, carol } = await hubbed();
+      expect(alice.state.names?.[carol.myKey]?.nm).toBe("Carol");
+      await alice.remove(carol.myKey, Date.now(), { left });
+      await mesh.settle();
+      expect(alice.state.names?.[carol.myKey]).toBeUndefined();
+      expect(mesh.add(clone(alice.state)).state.names?.[carol.myKey]).toBeUndefined();
+      // Bob, still a member, keeps his.
+      expect(alice.state.names?.[bob.myKey]?.nm).toBe("Bob");
+    }
   });
 
   it("is kept across a restart, and an older one handed over afterwards changes nothing", async () => {

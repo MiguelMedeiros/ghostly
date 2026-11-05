@@ -2,6 +2,7 @@ import { test, expect, chromium, type Browser, type Page } from "@playwright/tes
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { buildSdpFromSignal, extractParamsFromSdp, parseCallSignal } from "@ghostly/core";
+import { CHROMIUM_SANDBOX } from "../support/chromiumSandbox";
 import { attachDesktopLogs, desktopHome, openDesktop, type DesktopApp } from "../support/desktop";
 
 /**
@@ -94,7 +95,7 @@ test.beforeAll(async () => {
   server = createServer((_, response) => response.end("<!doctype html><title>peer</title>"));
   await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
   origin = `http://localhost:${(server.address() as AddressInfo).port}`;
-  browser = await chromium.launch({ args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] });
+  browser = await chromium.launch({ chromiumSandbox: CHROMIUM_SANDBOX, args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] });
 });
 
 test.afterAll(async () => {

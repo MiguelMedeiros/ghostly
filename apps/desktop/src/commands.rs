@@ -5,6 +5,7 @@ use tauri::State;
 use crate::bitcoind_rpc::{self, RpcError};
 use crate::crypto;
 use crate::diagnostics;
+use crate::hold_fetch::{self, HoldResponse};
 use crate::link_preview::{self, PreviewResponse};
 use crate::lnd::{self, LndRequest, LndResponse};
 use crate::local_access::{self, LocalAccess, Reason};
@@ -334,6 +335,12 @@ pub async fn link_preview_fetch(url: String, kind: String) -> Result<PreviewResp
     link_preview::fetch(url, kind).await
 }
 
+/// A held item or manifest from the storage a contact chose (WISP 404): public addresses only, see `hold_fetch`.
+#[tauri::command]
+pub async fn hold_fetch(url: String) -> Result<HoldResponse, String> {
+    hold_fetch::fetch(url).await
+}
+
 /// Opens a web link from a message (a link preview, a location card) in the
 /// system's browser or maps app. http(s) only; the page never names a program.
 #[tauri::command]
@@ -532,6 +539,45 @@ pub fn hide_from_switcher(on: bool) -> Result<(), String> {
     }
 }
 
+/// The call on in the Android app: who it is with, as the chat shows them, and whether it sends the camera's picture.
+#[derive(Debug, serde::Deserialize)]
+pub struct CallNotice {
+    name: String,
+    video: bool,
+}
+
+/// At most this many characters of the name go into the call's notification.
+const CALL_NAME_MAX: usize = 64;
+
+/// The name as the notification shows it: no control characters, at most `CALL_NAME_MAX` characters, trimmed.
+fn call_name(name: &str) -> String {
+    let name: String = name
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(CALL_NAME_MAX)
+        .collect();
+    name.trim().to_string()
+}
+
+/// Android: while a call is on (`call`), a foreground service of type microphone (camera too, while it sends the
+/// camera's picture) with an ongoing "Call with …" notification keeps the call going with the app out of sight
+/// (Android silences the microphone of an app out of sight otherwise); `None` stops it. Whether this start went
+/// through. Elsewhere nothing held: `Ok(false)`.
+// Off the main thread: the Kotlin plugin is waited for.
+#[tauri::command(async)]
+pub fn call_service(call: Option<CallNotice>) -> Result<bool, String> {
+    let call = call.map(|call| (call_name(&call.name), call.video));
+    #[cfg(target_os = "android")]
+    {
+        crate::android::call_service(call)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = call;
+        Ok(false)
+    }
+}
+
 /// `#rrggbb` as 0xRRGGBB.
 fn hex_color(color: &str) -> Option<u32> {
     let hex = color.strip_prefix('#')?;
@@ -695,6 +741,19 @@ mod project_link_tests {
             assert!(super::system_bars(color.into(), true).is_err(), "{color}");
         }
         assert_eq!(super::system_bars("#0b141a".into(), true), Ok(()));
+    }
+
+    #[test]
+    fn the_call_notification_takes_a_plain_short_name() {
+        assert_eq!(super::call_name("Alice"), "Alice");
+        assert_eq!(super::call_name("  Al\u{0}ice\n "), "Alice");
+        assert_eq!(super::call_name(&"é".repeat(100)), "é".repeat(64));
+        assert_eq!(super::call_name(""), "");
+        // Nothing held on a desktop: the page asks the same everywhere.
+        let call =
+            serde_json::from_value(serde_json::json!({ "name": "Alice", "video": true })).unwrap();
+        assert_eq!(super::call_service(Some(call)), Ok(false));
+        assert_eq!(super::call_service(None), Ok(false));
     }
 
     #[test]

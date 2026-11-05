@@ -190,8 +190,14 @@
   "forward": {
     "forward": "Reenviar",
     "forwarded": "Reenviado",
+    "found": "{{count}} chats",
+    "found_one": "{{count}} chat",
+    "found_other": "{{count}} chats",
+    "limit": "Puedes reenviar a {{count}} chats a la vez",
+    "limit_one": "Puedes reenviar a {{count}} chat a la vez",
     "many": "Reenviado muchas veces",
     "messages": "{{count}} mensajes",
+    "more": "{{count}} más",
     "noChats": "Aún no hay chats",
     "noMatch": "Ningún chat con ese nombre",
     "partial": "{{sent}} de {{count}} enviados",
@@ -460,6 +466,10 @@
   "typing": "escribiendo…",
   "typingRecording": "grabando audio…",
   "typingThinking": "pensando…",
+  "unconfirmed": {
+    "hint": "Enviado con una solicitud de contacto. Su app aún no ha confirmado que lo envió.",
+    "label": "Sin confirmar"
+  },
   "video": {
     "arriving": "Llegando",
     "cantPlay": "Este dispositivo no puede reproducir este vídeo ({{format}}). Descárgalo para verlo.",

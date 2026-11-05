@@ -1,6 +1,9 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createIdentity, emptyIdentityLedger, identityFromSeed, identityStatement, type IdentityDisplay, type IdentityLedger } from "@ghostly/core";
+import {
+  createIdentity, DEFAULT_RELAYS, DiscoveryBudgetError, emptyIdentityLedger, IdentityCheckUnavailable, identityFromSeed, identityRevocationValue, identityStatement, IDENTITY_REVOCATION_LABEL,
+  newIdentityBinding, RelayTransport, type IdentityDisplay, type IdentityLedger, type VerifiedIdentity,
+} from "@ghostly/core";
 import { STORES, clearProfileStores, store, transact, wrap } from "../src/shared/idb";
 import { IdentityProofs, type IdentityLinkHost } from "../src/engine/identities";
 import { fakeKey, fakeKeySign, fakeKeySubject } from "../src/proofs/testing";
@@ -33,7 +36,9 @@ function pair() {
     /** Chats deleted on that side: gone from its list, with their ledger. */
     deleted: {} as Partial<Record<Me, boolean>>,
     /** Settings → Hide my IP from contacts, on that side. */
-    relayOnly: {} as Partial<Record<Me, boolean>> };
+    relayOnly: {} as Partial<Record<Me, boolean>>,
+    /** No Pkarr relay answers: a lookup throws. */
+    relaysDown: false };
   const pkarr = new Map<string, { label: string; value: string }[]>();
   const resolved: string[] = [];
   const engines = {} as Record<Me, IdentityProofs>;
@@ -51,7 +56,7 @@ function pair() {
       linkIds: () => state.deleted[me] ? ["plain"] : ["chat", "plain"], online: () => state.online, emit: vi.fn(),
       relayOnly: () => !!state.relayOnly[me],
       publish: async (seed, records) => { pkarr.set(identityFromSeed(seed).pubKeyZ32, records); },
-      resolve: async key => { resolved.push(key); return pkarr.get(key) ?? null; },
+      resolve: async key => { resolved.push(key); if (state.relaysDown) throw new Error("No relay answered"); return pkarr.get(key) ?? null; },
     };
   };
   const make = (me: Me) => new IdentityProofs(host(me), () => state.providers[me]);
@@ -60,7 +65,9 @@ function pair() {
 }
 
 async function clearStorage() {
-  await transact([STORES.settings], stores => { stores[STORES.settings].delete("identityProofs"); stores[STORES.settings].delete("identityRevocations"); stores[STORES.settings].delete("identityRevocationsCheckedAt"); });
+  await transact([STORES.settings], stores => {
+    for (const key of ["identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "identityRevocationsRound"]) stores[STORES.settings].delete(key);
+  });
 }
 const stored = async <T,>(key: string) => wrap<T | undefined>((await store(STORES.settings, "readonly")).get(key));
 
@@ -78,6 +85,18 @@ async function shared() {
   await p.engines.a.share({ linkId: "chat", id: proof.id });
   await vi.waitFor(() => expect(p.ledgers.b.received.find(r => r.id === proof.id)?.status).toBe("verified"));
   return { ...p, ...proof };
+}
+
+/** A contact's proof received (fake-key, 30 days) and verified, last checked at `checkedAt` (s). */
+function received(checkedAt: number) {
+  const { binding } = newIdentityBinding({ provider: "fake-key", subject: fakeKeySubject(), validitySeconds: 30 * 86_400 });
+  return { id: identityStatement(binding).id, binding, evidence: { sig: "A".repeat(86) }, verified: { provider: "fake-key", subject: binding.subject } as VerifiedIdentity,
+    presenter: "p", audience: "a", context: "c".repeat(64), verifiedAt: checkedAt, checkedAt, status: "verified" as const };
+}
+/** A host for many chats, none connected: their ledgers only. */
+function ledgerHost(ledgers: Map<string, IdentityLedger>): Omit<IdentityLinkHost, "resolve"> {
+  return { ledger: id => ledgers.get(id), updateLedger: async (id, change) => { ledgers.set(id, change(structuredClone(ledgers.get(id)!))); return ledgers.get(id)!; },
+    channel: () => undefined, keys: () => ({}), linkIds: () => [...ledgers.keys()], online: () => true, emit: () => {}, publish: async () => {} };
 }
 
 afterEach(() => { vi.useRealTimers(); });
@@ -120,6 +139,28 @@ describe("adding a proof: drafts and limits", () => {
     await expect(completing).rejects.toThrow(/started too long ago/);
     expect(engines.a.views()).toEqual([]);
     expect(await stored("identityProofs")).toBeUndefined();
+  });
+
+  /**
+   * A daemon's `identity add` (or another window's Add) still checking when "Clear all data" comes: the check went on,
+   * and its save wrote every proof the cleared profile had, with its sealed key, back under `identityProofs`.
+   */
+  it("a proof whose check ends after Clear all data saves nothing into the cleared profile", async () => {
+    const { engines, state, make } = await shared();
+    let checked!: () => void;
+    const gate = new Promise<void>(resolve => { checked = resolve; });
+    state.providers.a = [{ ...fakeKey, verify: async (statement, evidence, ctx) => { await gate; return fakeKey.verify(statement, evidence, ctx); } }];
+    const { draftId, binding } = engines.a.begin({ provider: "fake-key", subject: fakeKeySubject() });
+    const completing = engines.a.complete({ draftId, evidence: fakeKeySign(identityStatement(binding)) }).then(() => "saved", () => "refused");
+    await engines.a.revokeAll();
+    await clearProfileStores();
+    checked();
+    const outcome = await completing;
+    expect((await stored<{ binding: unknown }[]>("identityProofs"))?.length, "the cleared profile has no proofs").toBeUndefined();
+    expect(outcome).toBe("refused");
+    const next = make("a");
+    await next.load();
+    expect(next.views()).toEqual([]);
   });
 
   it("a profile holds at most 32 proofs", async () => {
@@ -292,6 +333,196 @@ describe("removing a proof and its revocation", () => {
     third.stop();
   });
 
+  /** Offline at the 60 s lookup and online right after: the next lookup came 12 h later. */
+  it("a revocation lookup missed offline runs when the network comes back, not 12 h later", async () => {
+    const { state, resolved, make } = await shared();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    state.connected = false; state.online = false;
+    const b = make("b");
+    await b.load(); b.start();
+    resolved.length = 0;
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(resolved).toEqual([]);
+    state.online = true;
+    b.networkBack();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(resolved).toHaveLength(1);
+    expect(await stored("identityRevocationsCheckedAt")).toBeTypeOf("number");
+    b.stop();
+  });
+
+  /**
+   * No relay answered the lookup, yet its time was saved: once the owner removed the proof and the relays were back, the
+   * contact's restarted app looked nothing up for 12 h and showed the proof verified.
+   */
+  it("a revocation lookup no relay answered is not noted as done: tried again soon, and at the next start", async () => {
+    const { engines, state, resolved, make, id } = await shared();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    state.connected = false; state.relaysDown = true;
+    const b = make("b");
+    await b.load(); b.start();
+    resolved.length = 0;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(resolved).toHaveLength(1);
+    expect(await stored("identityRevocationsCheckedAt"), "a failed lookup is not a lookup made").toBeUndefined();
+    // Tried again within minutes, backing off while the relays stay down.
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(resolved).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(resolved).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(resolved).toHaveLength(3);
+    b.stop();
+
+    // The owner removes the proof meanwhile; the relays are back, and the contact's app restarts.
+    await engines.a.remove({ id });
+    state.relaysDown = false;
+    const again = make("b");
+    await again.load(); again.start();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.waitFor(() => expect(again.linkView("chat", true)!.received[0].status).toBe("revoked"));
+    expect(await stored("identityRevocationsCheckedAt")).toBeTypeOf("number");
+    again.stop();
+  });
+
+  /**
+   * The relays hold a background read back past their minute's share (`DiscoveryBudgetError`, ~45 a minute on the default
+   * three): with more of the contacts' proofs than that, the lookup was never noted done. Each retry (5 min, 10, 20…, at
+   * every start and every time the network came back) read every proof again and was refused at the same place, so
+   * the proofs past it were never looked up: 150 proofs took 709 relay reads in 12 h, and the last 61 none.
+   */
+  it("a revocation lookup held back by the relays' budget waits for it: every proof looked up once, and the lookup noted done", async () => {
+    await clearStorage();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const ledgers = new Map<string, IdentityLedger>();
+    for (let i = 0; i < 12; i++) ledgers.set(`chat${i}`, { ...emptyIdentityLedger(), received: [received(0)] });
+    // The last contact removed its proof: its key holds the revocation.
+    const last = ledgers.get("chat11")!.received[0];
+    const pkarr = new Map([[last.binding.key, [{ label: IDENTITY_REVOCATION_LABEL, value: identityRevocationValue(last.id, Math.floor(Date.now() / 1000)) }]]]);
+    // Five background reads a minute.
+    const answered: string[] = [], spent: number[] = [];
+    const engine = new IdentityProofs({
+      ...ledgerHost(ledgers),
+      resolve: async key => {
+        const recent = spent.filter(at => Date.now() - at < 60_000);
+        if (recent.length >= 5) throw new DiscoveryBudgetError(recent[0] + 60_000 - Date.now());
+        spent.push(Date.now());
+        answered.push(key);
+        return pkarr.get(key) ?? null;
+      },
+    }, () => [fakeKey]);
+    await engine.load(); engine.start();
+    await vi.advanceTimersByTimeAsync(12 * 60 * 60_000 - 60_000);
+    engine.stop();
+    expect(ledgers.get("chat11")!.received[0].status, "the proof past the budget is looked up").toBe("revoked");
+    expect(answered, "each proof read once in 12 h").toHaveLength(12);
+    expect(new Set(answered).size).toBe(12);
+    expect(await stored("identityRevocationsCheckedAt")).toBeTypeOf("number");
+  });
+
+  it("relays that refuse every read for longer than its tries stop the lookup, which goes on later from where it stopped and completes", async () => {
+    await clearStorage();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const t0 = Date.now();
+    const ledgers = new Map<string, IdentityLedger>();
+    for (let i = 0; i < 6; i++) ledgers.set(`chat${i}`, { ...emptyIdentityLedger(), received: [received(0)] });
+    const answered: string[] = [];
+    const engine = new IdentityProofs({
+      ...ledgerHost(ledgers),
+      resolve: async key => {
+        // Two answered, then the relays' budget is held for an hour.
+        if (answered.length >= 2 && Date.now() - t0 < 60 * 60_000) throw new DiscoveryBudgetError(60_000);
+        answered.push(key);
+        return null;
+      },
+    }, () => [fakeKey]);
+    await engine.load(); engine.start();
+    await vi.advanceTimersByTimeAsync(12 * 60 * 60_000 - 60_000);
+    engine.stop();
+    expect(answered, "each proof read once").toHaveLength(6);
+    expect(new Set(answered).size).toBe(6);
+    expect(await stored("identityRevocationsCheckedAt")).toBeTypeOf("number");
+  });
+
+  /**
+   * One read that failed (no relay answered that key), the network going away or the app closing made the lookup start
+   * again from the first contact's proof: each retry read every proof again, so a few unlucky keys cost the whole list
+   * several times over. 150 proofs on the real relay transport, as the app reads them (background, the default relays).
+   */
+  it("a revocation lookup cut short goes on from the proofs still to look up: 150 proofs, each read once in 12 h, through failures, offline and a restart", async () => {
+    await clearStorage();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const t0 = Date.now();
+    const ledgers = new Map<string, IdentityLedger>();
+    // Ten were last checked two days ago (their provider asks for a daily check), the rest just now.
+    for (let i = 0; i < 150; i++) ledgers.set(`c${i}`, { ...emptyIdentityLedger(), received: [received(i < 10 ? Math.floor(t0 / 1000) - 2 * 86_400 : Math.floor(t0 / 1000))] });
+    const proof = (i: number) => ledgers.get(`c${i}`)!.received[0];
+    // c7's record was taken down; c140's owner removed the proof; no relay answers c50-c52's keys for the first 20 minutes.
+    const gone = proof(7).id, revoked = proof(140).binding.key;
+    const flaky = new Set([50, 51, 52].map(i => proof(i).binding.key));
+    let online = true;
+    const transport = new RelayTransport({ relays: DEFAULT_RELAYS, log: () => {}, fetch: async url => {
+      if ([...flaky].some(key => String(url).includes(key)) && Date.now() - t0 < 20 * 60_000) throw new TypeError("Failed to fetch");
+      return new Response(null, { status: 404 });
+    } });
+    const answered = new Map<string, number>();
+    const provider = { ...fakeKey, recheck: { afterSeconds: 86_400 },
+      verify: async ({ id, binding }) => { if (id === gone) throw new Error("The record is not published"); return { subject: binding.subject, source: "Test record" }; } } as IdentityProofProvider;
+    const host: IdentityLinkHost = {
+      ...ledgerHost(ledgers), online: () => online,
+      resolve: async key => {
+        const records = (await transport.resolve(key, { background: true }))?.records ?? null;
+        answered.set(key, (answered.get(key) ?? 0) + 1);
+        return key === revoked ? [{ label: IDENTITY_REVOCATION_LABEL, value: identityRevocationValue(proof(140).id, Math.floor(t0 / 1000)) }] : records;
+      },
+    };
+    let engine = new IdentityProofs(host, () => [provider]);
+    await engine.load(); engine.start();
+    // Offline for a minute while the lookup runs.
+    await vi.advanceTimersByTimeAsync(90_000);
+    online = false;
+    await vi.advanceTimersByTimeAsync(60_000);
+    online = true;
+    engine.networkBack();
+    // The app closes and opens again.
+    await vi.advanceTimersByTimeAsync(60_000);
+    engine.stop();
+    engine = new IdentityProofs(host, () => [provider]);
+    await engine.load(); engine.start();
+    await vi.advanceTimersByTimeAsync(12 * 60 * 60_000 - 4 * 60_000);
+    engine.stop();
+
+    const keys = [...ledgers.values()].map(l => l.received[0].binding.key);
+    expect(keys.filter(key => !answered.has(key)), "every proof looked up").toEqual([]);
+    // A daily check reads the revocation record too: the ten due ones once more, and the read a stop cut short at most.
+    const reads = [...answered.values()].reduce((a, b) => a + b, 0);
+    expect(reads, "no proof read again and again").toBeLessThanOrEqual(150 + 10 + 1);
+    expect(Math.max(...answered.values())).toBeLessThanOrEqual(2);
+    expect(proof(140).status).toBe("revoked");
+    expect(proof(7)).toMatchObject({ status: "unconfirmed", error: "The record is not published" });
+    expect(proof(8)).toMatchObject({ status: "verified", error: undefined });
+    expect(await stored("identityRevocationsCheckedAt")).toBeTypeOf("number");
+  });
+
+  /** Removed while offline mid-run: the revocation went out only at the next hourly republish, up to an hour after the network came back. */
+  it("a revocation that could not be published offline is published when the network comes back", async () => {
+    const { state, pkarr, make, id, binding } = await shared();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    state.connected = false;
+    const a = make("a");
+    await a.load(); a.start();
+    await vi.advanceTimersByTimeAsync(10_000);
+    state.online = false;
+    await a.remove({ id });
+    expect(pkarr.get(binding.key)).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(60_000);
+    state.online = true;
+    a.networkBack();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(pkarr.get(binding.key)?.[0]).toMatchObject({ label: "_ghostly-revoked", value: expect.stringContaining(id) });
+    a.stop();
+  });
+
   it("a revocation lookup still on its way when the profile's data is cleared does not note its time in the cleared profile", async () => {
     const { engines, pkarr, resolved } = await shared();
     let release: (() => void) | undefined;
@@ -325,6 +556,32 @@ describe("removing a proof and its revocation", () => {
     engines.b.stop();
   });
 
+  it("a proof removed while the contact is still checking it: the contact keeps it withdrawn, not verified, then finds it revoked", async () => {
+    const { engines, state, resolved, pkarr } = pair();
+    await clearStorage();
+    await engines.a.load(); await engines.b.load();
+    let checking!: () => void, release!: () => void;
+    const entered = new Promise<void>(resolve => { checking = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    state.providers.b = [{ ...fakeKey, verify: async (statement, evidence, ctx) => { checking(); await gate; return fakeKey.verify(statement, evidence, ctx); } }];
+    const { id } = await prove(engines.a);
+    await engines.a.share({ linkId: "chat", id });
+    await entered;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    resolved.length = 0;
+    await engines.a.remove({ id });
+    // The relays do not return the owner's revocation yet when the check looks it up.
+    const published = [...pkarr];
+    pkarr.clear();
+    release();
+    await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received.map(r => r.status)).toEqual(["withdrawn"]));
+    for (const [key, records] of published) pkarr.set(key, records);
+    await vi.advanceTimersByTimeAsync(20_000);
+    await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received[0].status).toBe("revoked"));
+    expect(resolved.length, "its revocation looked up after the withdraw").toBeGreaterThan(0);
+    engines.b.stop();
+  });
+
   it("a proof only withdrawn from this chat (still in the owner's profile) stays withdrawn, after a few lookups that back off", async () => {
     const { engines, resolved, id } = await shared();
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -340,6 +597,22 @@ describe("removing a proof and its revocation", () => {
     expect(engines.b.linkView("chat", true)!.received[0].status).toBe("withdrawn");
     engines.b.stop();
   });
+
+  it("a chat whose connection drops while its withdrawal is written does not stop the removal: the contact is told on reconnect", async () => {
+    const { engines, ledgers, state, pkarr, id, binding } = await shared();
+    // The chat's link closes right after A's ledger write, before the withdraw frame is sent.
+    let a = ledgers.a;
+    Object.defineProperty(ledgers, "a", { get: () => a, set: (next: IdentityLedger) => { a = next; state.connected = false; } });
+    await engines.a.remove({ id });
+    expect(engines.a.views()).toEqual([]);
+    expect(ledgers.a.shared.find(s => s.id === id)?.status).toBe("withdrawal-pending");
+    expect(await stored<{ id: string }[]>("identityRevocations")).toEqual([expect.objectContaining({ id, key: binding.key })]);
+    await vi.waitFor(() => expect(pkarr.get(binding.key)?.[0]).toMatchObject({ label: "_ghostly-revoked", value: expect.stringContaining(id) }));
+    engines.a.closed("chat");
+    state.connected = true;
+    engines.a.ready("chat");
+    await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === id)?.status).toBe("withdrawn"));
+  });
 });
 
 describe("per chat", () => {
@@ -354,6 +627,24 @@ describe("per chat", () => {
     await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === id)?.status).toBe("withdrawn"));
     expect(engines.b.linkView("chat", true)!.received[0].status).toBe("withdrawn");
     expect(engines.a.views()[0].sharedWith).toBe(0);
+  });
+
+  it("two proofs of the same identity shared in one chat: the profile counts only the one the contact keeps, and removing it leaves both sides with none", async () => {
+    const { engines, ledgers, id: older } = await shared();
+    const { id: newer } = await prove(engines.a);
+    expect(engines.a.views().map(v => v.subject)).toEqual([fakeKeySubject(), fakeKeySubject()]);
+    await engines.a.share({ linkId: "chat", id: newer });
+    await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === newer)?.status).toBe("accepted"));
+    expect(engines.b.linkView("chat", true)!.received.map(r => r.id)).toEqual([newer]);
+    const sharedWith = () => Object.fromEntries(engines.a.views().map(v => [v.id, v.sharedWith]));
+    expect(sharedWith()).toEqual({ [older]: 0, [newer]: 1 });
+    await engines.a.remove({ id: newer });
+    await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received.map(r => `${r.id}:${r.status}`)).toEqual([`${newer}:withdrawn`]));
+    expect(sharedWith()).toEqual({ [older]: 0 });
+    // Shared again by hand, the older one is what the contact holds.
+    await engines.a.share({ linkId: "chat", id: older });
+    await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received.find(r => r.id === older)?.status).toBe("verified"));
+    expect(sharedWith()).toEqual({ [older]: 1 });
   });
 
   it("a recheck is refused offline, and a proof that no longer verifies shows unconfirmed with the reason", async () => {
@@ -450,6 +741,70 @@ describe("per chat", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(Date.now() + 2 * 3600_000);
     expect(engines.b.linkView("chat", true)!.received[0].recheckDue).toBe(true);
+  });
+
+  it("a contact's proof is checked again on its own a day after the last check: one whose record is gone stops reading verified", async () => {
+    const { engines, state } = await shared();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const verify = vi.fn(fakeKey.verify);
+    state.providers.b = [{ ...fakeKey, recheck: { afterSeconds: 86_400 }, verify } as IdentityProofProvider];
+    engines.b.start();
+    await vi.advanceTimersByTimeAsync(12 * 60 * 60_000);
+    expect(verify, "not before a day").not.toHaveBeenCalled();
+    // The record is removed.
+    verify.mockImplementation(async () => { throw new Error("The record is not published"); });
+    await vi.advanceTimersByTimeAsync(13 * 60 * 60_000);
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(engines.b.linkView("chat", true)!.received[0]).toMatchObject({ status: "unconfirmed", error: "The record is not published" });
+    engines.b.stop();
+  });
+
+  it("a check that could not reach the server changes nothing and backs off; offline nothing is checked; a check that holds is due a day later", async () => {
+    const { engines, ledgers, state } = await shared();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const verify = vi.fn(fakeKey.verify);
+    state.providers.b = [{ ...fakeKey, recheck: { afterSeconds: 600 }, verify } as IdentityProofProvider];
+    state.online = false;
+    engines.b.start();
+    await vi.advanceTimersByTimeAsync(25 * 60 * 60_000);
+    expect(verify, "offline").not.toHaveBeenCalled();
+    state.online = true;
+    verify.mockImplementation(async () => { throw new IdentityCheckUnavailable("records.example could not be reached"); });
+    const checkedAt = ledgers.b.received[0].checkedAt;
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(engines.b.linkView("chat", true)!.received[0]).toMatchObject({ status: "verified", checkedAt });
+    // Backs off: not tried again at every tick.
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(verify).toHaveBeenCalledTimes(1);
+    verify.mockImplementation(fakeKey.verify);
+    await vi.advanceTimersByTimeAsync(3 * 60 * 60_000);
+    expect(verify).toHaveBeenCalledTimes(2);
+    expect(engines.b.linkView("chat", true)!.received[0].status).toBe("verified");
+    expect(ledgers.b.received[0].checkedAt).toBeGreaterThan(checkedAt);
+    // Held: not again before a day, though the provider's own interval is ten minutes.
+    await vi.advanceTimersByTimeAsync(20 * 60 * 60_000);
+    expect(verify).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(5 * 60 * 60_000);
+    expect(verify).toHaveBeenCalledTimes(3);
+    engines.b.stop();
+  });
+
+  it("a check that ran out of time (servers that hang) changes nothing either", async () => {
+    const { engines, ledgers, state } = await shared();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    // The check's own time limit, fired at once: what a provider throws when its servers hang past it.
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => AbortSignal.abort(new DOMException("The operation timed out.", "TimeoutError")));
+    try {
+      const verify = vi.fn(async (_s: unknown, _e: unknown, ctx: { signal: AbortSignal }) => { ctx.signal.throwIfAborted(); throw new Error("not reached"); });
+      state.providers.b = [{ ...fakeKey, recheck: { afterSeconds: 600 }, verify } as unknown as IdentityProofProvider];
+      const checkedAt = ledgers.b.received[0].checkedAt;
+      engines.b.start();
+      await vi.advanceTimersByTimeAsync(25 * 60 * 60_000);
+      expect(verify).toHaveBeenCalled();
+      expect(engines.b.linkView("chat", true)!.received[0]).toMatchObject({ status: "verified", checkedAt });
+      engines.b.stop();
+    } finally { timeout.mockRestore(); }
   });
 
   it("what the contact verifies is shown only where identities are supported, and forgotten with the chat", async () => {

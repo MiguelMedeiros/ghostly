@@ -112,6 +112,15 @@ export function sentReply(original: Quotable, group = false): MessageReply | und
   return ref ? replyTo(original, ref) : undefined;
 }
 
+/**
+ * The message a composer answers, as the chat has it now: an edit's new text, or none once it is gone (deleted here or
+ * for everyone), so the bar never shows words the chat no longer holds and Send carries no reply to them.
+ */
+export function heldOriginal<T extends Quotable>(held: T, index: ReplyIndex, group = false): T | undefined {
+  const ref = replyRef(held, group);
+  return (index.byId.get(held.id) ?? (ref ? index.byRef.get(ref) : undefined)) as T | undefined;
+}
+
 /** Who wrote a message or an original, as the page names people: me, the contact, a member. */
 export type NameOf = (from: "me" | "peer" | undefined, member?: string) => string | undefined;
 

@@ -61,7 +61,10 @@ the profile.
 To join someone else's invite: `printf '%s' "$INVITE" | ghostly invite join --label bob` (stdin keeps it out of `ps`
 and the shell's history; `ghostly invite join <ghostly1… or link>` works too, with a warning). With no invite given,
 a join whose stdin stays empty says so on stderr after 2 s and gives up with a usage error after 60 s; `invite join -`
-waits for stdin as long as it takes. The invite is the app's own, so
+waits for stdin as long as it takes. Any command that reads stdin takes at most 16 MiB there, the most a daemon's
+request line holds: more is refused as it comes (`bad_request`), and so is a file a request carries (a card's `--json`,
+`identity complete --evidence-file`, `x401 credential add`). A request whose JSON passes 16 MiB all the same (a text's
+escapes) is refused before it goes to the daemon. The invite is the app's own, so
 the other side can be the web app, the extension, the Desktop or another `ghostly`. A one-shot (no daemon) waits up
 to 60 s for the inviter, then answers `"paired":true|false` and the `stage`; when it did not pair, stderr says the next
 step (keep the profile running with `ghostly daemon --detach`, then `ghostly chat wait bob --until paired`).
@@ -69,6 +72,8 @@ step (keep the profile running with `ghostly daemon --detach`, then `ghostly cha
 ## Profiles
 
 A profile is a folder, `~/.ghostly/profiles/<name>/` (0700, files 0600), with its own chats, keys and wallets.
+The keys are not encrypted on disk: any program running as your user can read them. To keep them from an agent's
+tools, run Ghostly as an OS user of its own ([threat model](https://ghostly.tools/developers/agents/threat-model#apart)).
 
 | Command or option | What |
 |---|---|
@@ -158,7 +163,7 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
   meanwhile (past 10,000 events or 16 MiB, an `events.gap` says what was dropped).
 
 Main types: `message.received`, `message.sent`, `message.delivery`, `message.edited`, `chat.pairing`, `chat.connection`, `chat.joined`,
-`typing.started` (with `kind` and `status`) and `typing.stopped` (`group.typing.started` and `group.typing.stopped` in a private group, with `member`), `message.reaction` and `group.reaction`, `group.message.edited`,
+`typing.started` (with `kind` and `status`) and `typing.stopped` (`group.typing.started` and `group.typing.stopped` in a private group, with `member`; all live only, never replayed), `message.reaction` and `group.reaction`, `group.message.edited`,
 `group.message` and `group.sent` (with `messageId`, `member`, `nick` from the roster, and `mentioned`), `group.mentioned`
 (a mention of this profile learned after its `group.message`, once), `group.members`,
 `file.offered`, `file.done` and `file.failed` (with the file's `messageId`), `payment.created`, `payment.updated`,
@@ -175,7 +180,7 @@ ghostly listen --from alice --from bob --group team --exec ./bot.sh
   chat made after `listen` started, and only ever the chat of that key (a contact's own name never stands for a key).
   A prefix of a chat's id or the name its contact gave itself is refused, with the chat it found: another contact
   could call itself that. Name the chat first (`ghostly chat rename <chat> <name>`). `--group` takes a group (id,
-  prefix or name). Names are turned into ids once, at the
+  prefix or name; one that fits more than one group is refused, with their ids). Names are turned into ids once, at the
   start, so a contact who renames themselves later changes nothing. A name that matches nothing is an error (exit 3).
 - With either flag, an event of any other chat or group never reaches `--exec`, `--webhook` or stdout. The message
   itself is kept in the chat as always, and the cursor moves past it. Events of the profile itself
@@ -231,7 +236,7 @@ reactions, typing).
 | Voice calls | `call start <chat>`, `call answer`, `call auto on [--from <chat>]`, `call hangup\|list\|flush`, `call pipe`: the audio as raw PCM on a Unix socket per call, for a program of yours |
 
 A chat is named by its id, its contact's key, the label you gave it, or (only when no label matches) a unique prefix
-of its id or the name the contact gave itself; a group by its id, its name, or (only when no name matches) a unique
+of its id or the name the contact gave itself; a group by its id, its name, or a unique
 prefix of its id; a member by its key, a unique prefix or its name. **Names are a convenience for people**: a contact chooses its own name, a group's admin the
 group's and a member its own, so a bot or a script addresses by id (`<chat id>`, `group:<group id>`, a member's whole
 key), which every answer and event carries. What the CLI does when names meet:
@@ -240,9 +245,10 @@ key), which every answer and event carries. What the CLI does when names meet:
   chat found only by a prefix of its id or the name its contact gave itself never takes what also names a group. The group's id is the
   group; a prefix of it or the name of a group you are in is refused (exit 1, `bad_request`, `details.chat` and `details.groups`):
   use the chat's id or `group:<id>`. A label you gave the chat still wins.
-- A label you gave a chat, or a group's name, wins over an id prefix: a contact can choose how a chat's id begins
-  (yours is made from their invite code), and a group's creator its id. A prefix that fits one chat and the name a
-  contact gave another is refused.
+- A label you gave a chat wins over an id prefix: a contact can choose how a chat's id begins (yours is made from
+  their invite code). A prefix that fits one chat and the name a contact gave another is refused.
+- A group's creator chooses both its name and its id, so neither wins: a ref that is one group's name and a prefix of
+  another's id is refused (exit 1, `bad_request`, `details.matches` with both ids). Use its id, or `group:<id>`.
 - A group you are in wins over an invitation with the same name or id prefix; an invitation is found by its id, and
   by a name or prefix none of your groups has.
 - A member's whole key is that member, whatever another member calls itself. A prefix or a name that fits two members
@@ -253,11 +259,14 @@ Safety rules the CLI enforces:
 - **Real money.** Wallets default to Testnet. A Mainnet spend needs `--network mainnet --confirm-real`; without the
   flag it exits with code 5. `pay` never guesses Mainnet from an invoice.
 - **Secret guard.** `send` (and `edit`, `forward`, the task, routine and usage cards, the memo of `chat pay` and
-  `chat request`, the comment of `pay` to a Lightning address, and the engine's own `sendMessage`,
-  `sendGroupMessage`, `editMessage`, `forwardMessages`, `sendGroupFile` caption, payment memos of `sendPayment`,
-  `requestPayment`, `requestGroupPayment`, `askToPay` and `preparePayment`, `fedimintInvoice`'s memo and
-  `lnurlInvoice`'s comment through `ghostly engine`) refuses text that looks like a recovery phrase, a private key or a Cashu token (exit 5)
-  unless `--force`.
+  `chat request`, the comment of `pay` to a Lightning address, the name of `group create` and `group rename`, the
+  name contacts see in `profile set`, `profile create --name` and `settings set nick`, the `--name` of `file send`,
+  the `--reason` of `app revoke`, and the engine's own `sendMessage`, `sendGroupMessage`, `editMessage`,
+  `forwardMessages`, `sendGroupFile` caption and file name, `sendFile`'s file name, payment memos of `sendPayment`,
+  `requestPayment`, `requestGroupPayment`, `askToPay` and `preparePayment`, `fedimintInvoice`'s memo,
+  `lnurlInvoice`'s comment, the name of `createGroup` and `renameGroup` and `updateSettings`' nick through
+  `ghostly engine`) refuses text that looks like a recovery phrase, a private key or a Cashu token (exit 5) unless
+  `--force`, before anything is sent or asked of a server.
 - **Secrets stay hidden.** Seeds, keys, wallet phrases, backups, group entry links and a pending chat's invite code are printed only with `--show-secret` (or `group link`, for a group's link, and `invite create`, for the invite it makes).
 
 Errors print `{"error":{"code","message"}}` and exit with 1 (failed), 2 (usage), 3 (not found), 4 (timed out),
@@ -334,7 +343,8 @@ ghostly listen --type call.              # call.connected carries {"audio":{"soc
 auto-answer off rather than leaving an empty list, which would answer everyone.
 
 A ready one: [ghostly-voice-agent](https://github.com/MiguelMedeiros/ghostly-voice-agent) answers calls by voice (speech to text, Claude,
-text to speech) on this socket. Clone it; its `AGENTS.md` takes an AI agent through the setup.
+text to speech) on this socket. Clone it; its `AGENTS.md` takes an AI agent through the setup. What you need, the
+costs and where the audio goes: [Talk to an AI by voice](VOICE-AGENT.md).
 
 The audio contract, one Unix socket per call:
 

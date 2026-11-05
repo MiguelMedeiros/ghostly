@@ -28,7 +28,7 @@ import { profileDatabase } from "../../ui/src/lib/profileData";
 import { activeProfileId } from "../../ui/src/lib/profiles";
 import { nameInChat } from "../../ui/src/lib/apps/nameInChat";
 import { currentPush, pushSupported, subscribePush, syncWakeTable, syncWakeText, unsubscribePush } from "./pwa/push";
-import { SHARE_FORWARD_AFTER_MS, askForShare, followNewVersion, forwardShare, listenForShares, openedForShare, registerServiceWorker } from "./pwa/serviceWorker";
+import { SHARE_FORWARD_AFTER_MS, askForShare, followNewVersion, handShareOver, listenForShares, listenForTaps, openedForShare, registerServiceWorker } from "./pwa/serviceWorker";
 
 // A build for the e2e suite runs mini-apps through the real runner and broker before the app has a screen for them.
 if (import.meta.env.VITE_APPS_TEST === "1") void import("../../ui/src/lib/apps/testHook").then((hook) => hook.installAppsTestHook());
@@ -40,6 +40,10 @@ const root = createRoot(document.getElementById("root")!);
 // is registered in every tab, including one that waits for another below.
 watchInstallPrompt();
 registerServiceWorker();
+/** Whether this tab holds its profile's peer: until then it waits behind another tab, or is still starting. */
+let isPeer = false;
+// A wake-up notification tapped: heard in every tab, so the push worker can tell one that waits from the one to open it in.
+listenForTaps(() => isPeer);
 // Another tab took a new version: this one reloads into it rather than run the build whose files its worker deleted.
 const mayStart = followNewVersion();
 // Wake-up push (WISP 401 § Wake-up push): this app can be woken while closed; Settings shows the switch.
@@ -77,15 +81,13 @@ const missing = await missingEssentials();
 if (missing.length) await cannotRun(missing);
 
 const peerLock = profile ? `ghostly-peer-${profile}` : "ghostly-peer";
-let isPeer = false;
 let stopLink = () => {};
 await becomeThePeer(peerLock, () => {
   const draw = (state: OtherTabState) => root.render(<OtherTab state={state} t={profileTranslator()} />);
-  // Opened for a share while the app runs in another tab: that tab gets it. Not at once: a share posted from this
-  // same tab (the system opens the app's window for it) replaces a page that holds the lock a moment longer on its
-  // way out, and a forward then would hand the share to that page as it goes. Once the lock is this tab's, it asks.
+  // Opened for a share while the app runs in another tab: that tab gets it (after a wait, or as this tab goes), and
+  // this one says it went only once the worker handed it over. Once the lock is this tab's, it asks for it itself.
   const sharing = openedForShare();
-  if (sharing) setTimeout(() => { if (!isPeer) forwardShare(); }, SHARE_FORWARD_AFTER_MS);
+  if (sharing) handShareOver(() => isPeer, draw);
   // Opened for a link (an invite, a group's, a device code's): that tab opens it, with the same wait. Taken there, it
   // leaves this address, so this tab opens nothing twice if it takes over later; until then, this tab keeps it.
   const link = sharing ? null : linkInAddress(window.location.hash);
@@ -95,7 +97,7 @@ await becomeThePeer(peerLock, () => {
       draw("linkTaken");
     }, SHARE_FORWARD_AFTER_MS);
   }
-  draw(sharing ? "shared" : link ? "link" : "plain");
+  draw(sharing ? "sharing" : link ? "link" : "plain");
   // The lock is there but the browser refuses it: the same screen as a browser without it.
 }).catch((error: unknown) => (error instanceof PeerLockUnavailable ? cannotRun(["locks"], error) : Promise.reject(error)));
 // A tab that waited while another took a new version reloads into it instead, once that tab asked for the lock again.
@@ -115,7 +117,7 @@ setBrowserHost(webHost);
 if (gate.full) {
   startSessionSync();
   // Shares for this tab: the one it opened for, and any another tab forwards while this one is the app.
-  listenForShares();
+  listenForShares(peerLock);
   askForShare();
   // Links another tab of this profile opened: here, as if this tab's address had changed to them.
   takeLinks(peerLock, (route) => { window.location.hash = route; });

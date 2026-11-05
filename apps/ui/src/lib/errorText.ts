@@ -127,6 +127,15 @@ const RULES: readonly Rule[] = [
   // A call refused in limited mode (packages/browser/src/engine/node.ts LIMITED_MODE_ERROR): the banner's own words, and what to do.
   exact("Ghostly could not check which device is active yet. This works once it can.", "devices.limited.title", "errors.app.limitedNext"),
   exact("Ghostly needs your permission to reach that local address", "errors.app.localAddress"),
+  // The Share form's address checks (packages/core http.ts parseLocalTarget; the CLI matches the English) and its name
+  // check (engine/node.ts addService): what is wrong, then what to type.
+  exact("Not a valid URL", "errors.services.badAddress", "errors.services.addressNext"),
+  exact("Only http and https targets are supported", "errors.services.webOnly", "errors.services.addressNext"),
+  exact("Credentials in the target URL are not supported", "errors.services.noCredentials", "errors.services.addressNext"),
+  exact("Only services on this machine can be shared (localhost, 127.0.0.1 or [::1])", "errors.services.thisComputer", "errors.services.addressNext"),
+  exact("The target cannot contain a query or fragment", "errors.services.noQuery", "errors.services.addressNext"),
+  exact("Port 0 is not a port a web app can listen on", "errors.services.portZero", "errors.services.addressNext"),
+  exact("Give the service a name", "errors.services.name"),
   exact("Pick a Lightning card first", "errors.app.pickCard"),
   exact("This client cannot install updates", "errors.app.installUpdates"),
   exact("That update is no longer available", "errors.app.updateGone"),
@@ -154,6 +163,11 @@ const RULES: readonly Rule[] = [
   exact("The file arrived damaged and was deleted. Ask for it again.", "errors.files.refused.damaged", "errors.files.askAgain"),
   exact("The offer expired", "errors.files.offerExpired", "errors.files.askAgain"),
   exact("Cancelled by the sender", "chat.file.cancelled", "errors.files.askAgain"),
+  // A 1:1 file declined or cancelled, by the contact (chatFiles.ts `refusalText`) or here: the status says what, the ⓘ who.
+  exact("Declined by your contact", "chat.file.declined", "errors.files.declinedThere"),
+  exact("Cancelled by your contact", "chat.file.cancelled", "errors.files.cancelledThere"),
+  exact("You declined it", "chat.file.declined", "errors.files.declinedHere"),
+  exact("You cancelled it", "chat.file.cancelled", "errors.files.cancelledHere"),
   // A file said on the DHT floor that ended here before it came (packages/browser engine/fileDesk.ts): why this device
   // refused its offer, or its week ran out. Its sender still has it, and its next offer takes the bubble over.
   exact("No room on this device for this file", "errors.files.noRoomHere", "errors.files.floor.noRoomNext"),
@@ -174,6 +188,9 @@ const RULES: readonly Rule[] = [
   exact("The clipboard's picture is damaged", "errors.files.pasteDamaged", "errors.files.pasteDamagedNext"),
   exact("Clipboard unavailable", "errors.files.clipboardUnavailable", "errors.files.clipboardUnavailableNext"),
   exact("That paste is gone. Paste it again.", "errors.files.pasteGone", "errors.files.pasteGoneNext"),
+  // Another app's drop the platform held (Linux Desktop), refused as a paste would be (lib/pastedFiles.ts).
+  exact("That is too large to drop. Send it with + → Document.", "errors.files.dropTooLarge"),
+  exact("That drop is gone. Drop it again.", "errors.files.dropGone", "errors.files.dropGoneNext"),
   { match: /^Could not read the pasted file: [\s\S]+$/, key: "errors.files.pasteFileUnreadable", next: "errors.files.pasteFileUnreadableNext", detail: true },
   // A file being sent whose copy could not be read (packages/core chatFiles.ts): picked with + or dropped, not pasted.
   { match: /^Could not read the file: [\s\S]+$/, key: "errors.files.unreadable", next: "errors.files.unreadableNext", detail: true },
@@ -244,13 +261,15 @@ const RULES: readonly Rule[] = [
   exact("Your contact's app cannot show a screen in this call", "calls.share.contactCannot"),
   exact("Screen sharing is not available on Linux yet", "calls.share.notOnLinux"),
   exact("All native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.", "errors.transport.slotsFull", "errors.transport.slotsFullNext"),
-  // Its listener, which did not start or stopped (packages/browser/src/platform: hyperdhtRelay.ts, irohWeb.ts). A
-  // browser sees no status on a refused WebSocket, so a relay that leaves this app's origin out reads "unreachable" too.
+  // Its listener, which did not start or stopped (packages/browser/src/platform: hyperdhtRelay.ts, irohWeb.ts; the
+  // Iroh WASM's own, native/transports/iroh-web/src/lib.rs). A browser sees no status on a refused WebSocket, so a
+  // relay that leaves this app's origin out reads "unreachable" too.
   exact("Could not reach the HyperDHT relay", "errors.transport.hyperdhtUnreachable", "errors.transport.hyperdhtUnreachableNext"),
   exact("The HyperDHT relay did not answer", "errors.transport.hyperdhtSilent", "errors.transport.hyperdhtCheckNext"),
   exact("The HyperDHT relay closed the connection", "errors.transport.hyperdhtClosed", "errors.transport.hyperdhtCheckNext"),
   exact("The HyperDHT relay did not let this chat listen", "errors.transport.hyperdhtRefused", "errors.transport.hyperdhtRefusedNext"),
   exact("Iroh endpoint is stopped", "errors.transport.irohStopped"),
+  exact("Iroh relay unreachable", "errors.transport.irohUnreachable", "errors.transport.irohUnreachableNext"),
   // "The codes match" refused: the connection changed or closed after the code was shown (packages/core pairedSession.ts,
   // ghostlink.ts `confirmPair`).
   { match: /^(?:The connection changed\. )?Compare the current code again\.$/, key: "errors.verify.codeChanged", next: "errors.verify.codeChangedNext" },
@@ -460,7 +479,6 @@ const RULES: readonly Rule[] = [
   exact("Nobody in the group is connected right now to take your leave. Try again in a moment.", "errors.group.nobodyForLeave", "errors.group.nobodyForLeaveNext"),
   exact("Only the admin can share a link to the group", "errors.group.adminShares"),
   exact("This is not a link to a group", "errors.group.notALink", "errors.group.notALinkNext"),
-  exact("You are already joining this group", "errors.group.alreadyJoining"),
   exact("This group is joined with its current link", "errors.group.currentLink"),
   // A group's link the engine refuses for a group already here (engine/groups.ts joinGroupByLink).
   exact("You have an invitation to this group. Answer it first.", "errors.group.invitedFirst", "errors.group.invitedFirstNext"),
@@ -705,6 +723,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   fedimintAlreadyJoined: "errors.engine.fedimintAlreadyJoined",
   fedimintConnecting: "errors.engine.fedimintConnecting",
   fedimintNotEnough: "errors.engine.fedimintNotEnough",
+  fedimintRedeemUnheard: "errors.engine.fedimintRedeemUnheard",
   fedimintRealOnTestnet: "errors.engine.fedimintRealOnTestnet",
   fedimintTestOnMainnet: "errors.engine.fedimintTestOnMainnet",
   walletAway: "errors.engine.walletAway",
@@ -718,6 +737,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
 const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {
   cannotSubmitAgain: "errors.engine.cannotSubmitAgainNext",
   fedimintRealOnTestnet: "errors.engine.fedimintRealOnTestnetNext",
+  fedimintRedeemUnheard: "errors.engine.fedimintRedeemUnheardNext",
   fedimintTestOnMainnet: "errors.engine.fedimintTestOnMainnetNext",
   groupTurnUnconfirmed: "errors.engine.groupTurnUnconfirmedNext",
   lastMint: "errors.engine.lastMintNext",

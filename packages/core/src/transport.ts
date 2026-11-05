@@ -152,8 +152,11 @@ export interface PkarrTransport {
    * a sequence number in seconds). A transport without it cannot publish one.
    */
   publishPayload?(pubKeyZ32: string, payload: Uint8Array, options?: PkarrRequestOptions): Promise<void>;
-  /** Most recent packet known for this key, or null when nothing is published. */
-  resolve(pubKeyZ32: string, options?: PkarrRequestOptions): Promise<SignedPacket | null>;
+  /**
+   * Most recent packet known for this key, or null when nothing is published. `keptOnFailure` false: a read nothing
+   * answered throws `RelaysFailedError` with the packet known before, rather than handing it back as the answer.
+   */
+  resolve(pubKeyZ32: string, options?: PkarrRequestOptions, keptOnFailure?: boolean): Promise<SignedPacket | null>;
   describe(): { protocol: string; relays: string[] };
   /** How reads go and how each relay is doing, for the connection panel; absent where nothing is known. */
   discovery?(): DiscoveryStatus;

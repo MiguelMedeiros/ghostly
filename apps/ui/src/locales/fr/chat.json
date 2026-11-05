@@ -190,8 +190,15 @@
   "forward": {
     "forward": "Transférer",
     "forwarded": "Transféré",
+    "found": "{{count}} discussions",
+    "found_one": "{{count}} discussion",
+    "found_other": "{{count}} discussions",
+    "limit": "Vous pouvez transférer à {{count}} conversations à la fois",
+    "limit_one": "Vous pouvez transférer à {{count}} conversation à la fois",
     "many": "Transféré de nombreuses fois",
     "messages": "{{count}} messages",
+    "more": "{{count}} autres",
+    "more_one": "{{count}} autre",
     "noChats": "Aucune discussion pour l’instant",
     "noMatch": "Aucune discussion de ce nom",
     "partial": "{{sent}} sur {{count}} envoyés",
@@ -460,6 +467,10 @@
   "typing": "écrit…",
   "typingRecording": "enregistre un audio…",
   "typingThinking": "réfléchit…",
+  "unconfirmed": {
+    "hint": "Envoyé avec une demande de contact. Son app n'a pas encore confirmé l'avoir envoyé.",
+    "label": "Non confirmé"
+  },
   "video": {
     "arriving": "En cours d'arrivée",
     "cantPlay": "Cet appareil ne peut pas lire cette vidéo ({{format}}). Téléchargez-la pour la regarder.",

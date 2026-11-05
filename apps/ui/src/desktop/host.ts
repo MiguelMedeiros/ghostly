@@ -32,6 +32,7 @@ import { followPlatformDrags } from "../lib/pastedFiles";
 import type { NodeOptions } from "@ghostly/browser/engine/node";
 import { createIrohEndpoint, createHyperEndpoint } from "./nativeTransports";
 import { desktopUpdates } from "./updates";
+import { desktopHoldFetch } from "./holdFetch";
 import { desktopLnurlFetch } from "./lnurlFetch";
 import { desktopOidc } from "./oidc";
 import { desktopAtprotoHost } from "./atproto";
@@ -279,11 +280,21 @@ export function forgetServiceWindows(which: { tag: string } | { profile: string 
 /** `t()` in the profile's language, as it is now. */
 const profileT = (): Translate => translatorFor(loadSettings().language);
 
+/** The name each contact's app had when its window opened, by `<peer> <service>`. */
+const openedNames = new Map<string, string>();
+
+/**
+ * The name a contact gave the app a window shows: as the chat lists it now, else as it was when the window opened.
+ * Their machine says they took it back (`services.window.unshared`) just when the chat no longer lists it.
+ */
+function serviceWindowName(peer: string, service: string): string | undefined {
+  return engine.linkByPeer(peer)?.peerServices?.find((s) => s.id === service)?.name ?? openedNames.get(`${peer} ${service}`);
+}
+
 /** Requests from a service window arrive here and leave over the contact's data link. */
 function serveServiceWindows(server: EngineServer): void {
   void listen<ServiceRequest>("ghostly-svc-request", async ({ payload }) => {
-    const name = engine.linkByPeer(payload.peer)?.peerServices?.find((s) => s.id === payload.service)?.name;
-    const response = await answerServiceWindow(server, payload, profileT(), name);
+    const response = await answerServiceWindow(server, payload, profileT(), serviceWindowName(payload.peer, payload.service));
     await invoke("service_respond", { id: payload.id, response });
   });
 }
@@ -404,6 +415,8 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     pushSend: (request) => invoke<number>("push_send", { url: request.url, headers: Object.entries(request.headers), body: toBase64Url(request.body) }),
     // A Lightning address whose service redirects is asked from Rust, which checks every hop before following it.
     lnurlFetch: desktopLnurlFetch(invoke),
+    // Held items are read from the contact's storage on public addresses only, which Rust checks and a WebView cannot.
+    holdFetch: desktopHoldFetch(invoke),
     // A new profile gets its default Mainnet wallets; never under an e2e suite (desktopUnderTest).
     defaultWallets: defaultWalletsAllowed(desktopUnderTest),
     ...apps.node, ...macPeerBudget() };
@@ -452,6 +465,7 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     forgetLocalAccess: (origin) => invoke<void>("local_service_forget", { space: fileSpace(), origin }),
     async openService(peerPubKeyZ32, serviceId, tag) {
       const service = engine.linkByPeer(peerPubKeyZ32)?.peerServices?.find((s) => s.id === serviceId);
+      if (service?.name) openedNames.set(`${peerPubKeyZ32} ${serviceId}`, service.name);
       // Noted first: what the app keeps on its origin goes with the chat, its data or its profile (`forgetServices`).
       // Android opens none (`viewer` is Desktop's).
       if (!androidApp()) openedServiceWindows.note({ profile: activeProfileId(), tag, service: serviceId, peer: peerPubKeyZ32 });

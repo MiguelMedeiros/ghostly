@@ -166,6 +166,10 @@ test("a bot's tasks from two chats on one board: columns by status, live updates
     await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
     await expect(column(page, "running").getByTestId("board-card")).toBeInViewport();
     await expect(column(page, "blocked").getByTestId("board-card")).not.toBeInViewport();
+    // Tab from the chosen tab goes into its column, not to the first column off screen (which then scrolled back in).
+    await page.keyboard.press("Tab");
+    await expect(column(page, "running").getByTestId("board-card-open")).toBeFocused();
+    await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.waitForTimeout(500); // the column's slide: the picture after it
     await shot(page, "board-phone.png");
@@ -216,36 +220,63 @@ test("a bot's tasks from two chats on one board: columns by status, live updates
     // A full column scrolls: its cards keep their two lines.
     expect((await cards(running).first().boundingBox())!.height).toBeGreaterThan(44);
     // Ninety frames of the column, scrolled 40 px each or left still: how far apart the frames came (the host's frame
-    // clock as much as the app), and how long the page worked on each one, from the frame's start to the end of its
-    // rendering, the scroll's own handlers included (the app's cost alone). A Mac with its screen off hands out a frame
-    // every 80 ms to a page that does nothing (2026-11-04): the scroll is judged against the same run's still column.
-    const measure = (scroll: boolean) => running.getByTestId("board-column-cards").evaluate(async (list, scroll) => {
-      list.scrollTop = 0;
-      let last = await new Promise<number>(requestAnimationFrame);
-      const gaps: number[] = [], work: number[] = [];
-      for (let i = 0; i < 90; i++) {
-        if (scroll) list.scrollTop += 40;
-        const start = await new Promise<number>(requestAnimationFrame);
-        // A message posted from the frame's callback lands once its style, layout and paint are done.
-        await new Promise((resolve) => { const channel = new MessageChannel(); channel.port1.onmessage = resolve; channel.port2.postMessage(0); });
-        work.push(performance.now() - start);
-        gaps.push(start - last);
-        last = start;
-      }
-      gaps.sort((a, b) => a - b); work.sort((a, b) => a - b);
+    // clock as much as the app), and how much CPU the page's main thread spent on each, from Chromium's trace: the
+    // scroll's handlers, style, layout and paint (the app's cost alone). The time from a frame's start to the end of its
+    // rendering is logged too, but it counts the time the thread waited for a core: a GitHub runner whose other worker
+    // was busy doubled it (median 19.2 ms against 6 to 9, 2026-11-04). A Mac with its screen off hands out a frame every
+    // 80 ms to a page that does nothing (2026-11-04): the scroll is judged against the same run's still column.
+    const cdp = await page.context().newCDPSession(page);
+    const measure = async (scroll: boolean) => {
+      const events: { name: string; cat: string; ph: string; pid: number; tid: number; ts: number; dur?: number; tdur?: number; args?: { data?: { message?: string } } }[] = [];
+      const collect = ({ value }: { value: object[] }) => { events.push(...value as typeof events); };
+      cdp.on("Tracing.dataCollected", collect);
+      const complete = new Promise((resolve) => cdp.once("Tracing.tracingComplete", resolve));
+      await cdp.send("Tracing.start", { traceConfig: { includedCategories: ["toplevel", "devtools.timeline"] }, transferMode: "ReportEvents" });
+      const frames = await running.getByTestId("board-column-cards").evaluate(async (list, scroll) => {
+        list.scrollTop = 0;
+        let last = await new Promise<number>(requestAnimationFrame);
+        const gaps: number[] = [], work: number[] = [];
+        for (let i = 0; i < 90; i++) {
+          if (scroll) list.scrollTop += 40;
+          const start = await new Promise<number>(requestAnimationFrame);
+          console.timeStamp("board-frame");
+          // A message posted from the frame's callback lands once its style, layout and paint are done.
+          await new Promise((resolve) => { const channel = new MessageChannel(); channel.port1.onmessage = resolve; channel.port2.postMessage(0); });
+          work.push(performance.now() - start);
+          gaps.push(start - last);
+          last = start;
+        }
+        gaps.sort((a, b) => a - b); work.sort((a, b) => a - b);
+        const ms = (n: number) => Math.round(n * 10) / 10;
+        return { median: ms(gaps[45]), p95: ms(gaps[85]), workMedian: ms(work[45]), workP95: ms(work[85]), scrolled: list.scrollTop };
+      }, scroll);
+      await cdp.send("Tracing.end");
+      await complete;
+      cdp.off("Tracing.dataCollected", collect);
+      // The main thread's tasks from one frame's mark to the next: the scroll step, then the frame that draws it.
+      const marks = events.filter((e) => e.name === "TimeStamp" && e.args?.data?.message === "board-frame").sort((a, b) => a.ts - b.ts);
+      expect(marks, "a frame mark per frame on the page's main thread").toHaveLength(90);
+      const tasks = events.filter((e) => e.ph === "X" && e.cat === "toplevel" && e.name.endsWith("RunTask") && e.pid === marks[0].pid && e.tid === marks[0].tid
+        && e.ts >= marks[0].ts && e.ts < marks[89].ts);
+      // Chromium leaves the CPU time off a task of a microsecond or so (1 to 14 in 500 on a runner): its length stands in.
+      const untimed = tasks.filter((t) => t.tdur === undefined);
+      expect(untimed.length, `the main thread's tasks with their CPU time: ${tasks.length} tasks, ${untimed.length} without`).toBeLessThan(tasks.length / 10);
+      const cpu = marks.slice(1).map((mark, i) => tasks.filter((t) => t.ts >= marks[i].ts && t.ts < mark.ts).reduce((sum, t) => sum + (t.tdur ?? t.dur ?? 0), 0) / 1000).sort((a, b) => a - b);
       const ms = (n: number) => Math.round(n * 10) / 10;
-      return { median: ms(gaps[45]), p95: ms(gaps[85]), workMedian: ms(work[45]), workP95: ms(work[85]), scrolled: list.scrollTop };
-    }, scroll);
+      return { ...frames, cpuMedian: ms(cpu[44]), cpuP95: ms(cpu[84]) };
+    };
     const still = await measure(false);
     const frames = await measure(true);
+    await cdp.detach();
     test.info().annotations.push({ type: "scroll frames with 500 cards (ms)", description: JSON.stringify({ still, scroll: frames }) });
     console.log(`tasks board, 500 cards: still ${JSON.stringify(still)}, scroll ${JSON.stringify(frames)}`);
     expect(frames.scrolled).toBeGreaterThan(1000);
-    // The app's work per scrolled frame fits a 60 Hz frame, whatever the host's clock.
-    expect(frames.workMedian).toBeLessThan(16);
-    expect(frames.workP95).toBeLessThan(34);
+    // The app's CPU per scrolled frame fits a 60 Hz frame, whatever the host's clock or load: a median of 7 to 13 ms on
+    // GitHub runners, quiet or beside two busy cores, and 19 to 21 with 9 ms more per scroll event (2026-11-04).
+    expect(frames.cpuMedian).toBeLessThan(16);
+    expect(frames.cpuP95).toBeLessThan(34);
     if (still.median > 25) {
-      test.info().annotations.push({ type: "scroll frame timing not judged", description: `this host's browser hands out a frame every ${still.median} ms to a still page (over 25 ms): its frame clock, not the app; the work per frame is still checked` });
+      test.info().annotations.push({ type: "scroll frame timing not judged", description: `this host's browser hands out a frame every ${still.median} ms to a still page (over 25 ms): its frame clock, not the app; the CPU per frame is still checked` });
     } else {
       // Scrolling costs at most a frame more than standing still.
       expect(frames.median - still.median).toBeLessThan(17);
@@ -350,6 +381,26 @@ test("richer task cards: a Review column for an open pull request, its checks, t
     await page.waitForTimeout(500);
     await shot(page, "fields-phone.png");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+    // A phone on its side: the rows above the board went with the page and left the cards 46 to 67 px, less than one.
+    // They scroll away with the cards now, and both of Running's cards show whole; a pull back down brings them back.
+    await page.locator('[data-testid="board-card"][data-card-id="rework"]').getByTestId("board-card-stack-toggle").click();
+    // 844x390 is wide enough for the columns side by side: no tabs there.
+    for (const size of [{ width: 667, height: 375 }, { width: 740, height: 360 }, { width: 844, height: 390 }]) {
+      await page.setViewportSize(size);
+      const running = page.locator('[data-testid="board-column"][data-column="running"]').getByTestId("board-column-cards");
+      await running.hover();
+      await page.mouse.wheel(0, 400);
+      await expect(page.getByTestId("tasks-summary")).not.toBeInViewport();
+      if (size.width < 768) await expect(page.getByTestId("tasks-tabs")).toBeInViewport({ ratio: 1 });
+      for (const id of ["rework", "docs"]) await expect(running.locator(`[data-testid="board-card"][data-card-id="${id}"]`)).toBeInViewport({ ratio: 1 });
+      await shot(page, `fields-phone-side-${size.width}.png`);
+      // A first pull may only take the list to its top, as a finger's would; the next one moves the page.
+      await expect(async () => {
+        await page.mouse.wheel(0, -400);
+        await expect(page.getByTestId("tasks-summary")).toBeInViewport({ timeout: 1000 });
+      }).toPass({ timeout: 10_000 });
+    }
   } finally {
     await bot.stop();
   }

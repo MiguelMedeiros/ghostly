@@ -1,6 +1,6 @@
 import { STATUS_CARD_LIMITS, cardLine, checkStatusCard, randomBytes, statusCardBytes, toBase64Url, type StatusCard } from "@ghostly/core";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
-import { findSecret } from "./secretGuard";
+import { findSecret, secretWords } from "./secretGuard";
 import { bool, chatOrGroup, node, num, oneOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError, asCliError } from "./errors";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
@@ -124,7 +124,7 @@ function guardSecrets(fields: unknown, params: Params, verb: string): void {
   if (bool(params, "force")) return;
   const check = (text: string) => {
     const secret = findSecret(text);
-    if (secret) throw new CliError("confirm", `The card's text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; ${verb} it with --force if you mean to`, { kind: secret.kind });
+    if (secret) throw new CliError("confirm", `The card's text looks like ${secretWords(secret)}; ${verb} it with --force if you mean to`, { kind: secret.kind });
   };
   for (const text of cardTexts([fields, params.run])) { check(text); check(cardLine(text, Infinity) ?? ""); }
   if (typeof params.text === "string") check(params.text);

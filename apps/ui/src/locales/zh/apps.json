@@ -5,6 +5,7 @@
     "checking": "正在检查…",
     "hint": "GitHub 仓库、raw.githubusercontent.com 文件，或固定到某个提交的 jsDelivr。",
     "label": "应用或商店链接",
+    "storeEquivocation": "此链接中是这个商店同一编号的另一份副本：该商店签署了两份不同的列表。Ghostly 保留了你的那份。",
     "storeHeld": "你已经有这个商店了：它在你的应用页面上。",
     "storeNewer": "你已经有这个商店了。这个链接里是它的较新副本。",
     "storeOlder": "这是你已有商店的较旧副本。你的那份更新，保持不变。",

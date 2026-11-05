@@ -3,6 +3,7 @@ import { fromBase64Url, identityFromSeed, readTurnPacket, sign, toBase64Url, tur
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type StoredDeviceState } from "../src/devices/state";
 import { TurnKeeper, type TurnStore } from "../src/devices/turn";
 import { RenameRefusal, renameDevice, renamedDeviceName } from "../src/devices/rename";
+import { deviceSetView } from "../src/devices/links";
 import { FakeTurnNetwork } from "./helpers/turnNetwork";
 // covers: devices.screens
 
@@ -85,12 +86,37 @@ describe("renaming a device", () => {
     expect(network.puts().length).toBe(puts);
   });
 
-  it("keeps a takeover's offer pointing at the device it renamed", async () => {
+  it("a takeover's offer keeps the device it stopped by its key, and shows that device's name after a rename", async () => {
     const network = new FakeTurnNetwork();
-    const active = device(0, network, "active", { secretOffer: { why: "takeover", at: 1, device: "Phone" } });
+    const active = device(0, network, "active", { secretOffer: { why: "takeover", at: 1, key: keyOf(1), device: "Phone" } });
     expect((await active.keeper.check(true)).kind).toBe("start");
     await active.rename(keyOf(1), "Old phone");
-    expect(active.store.record.secretOffer).toMatchObject({ why: "takeover", device: "Old phone" });
+    expect(active.store.record.secretOffer).toEqual({ why: "takeover", at: 1, key: keyOf(1), device: "Phone" });
+    expect(deviceSetView(active.store.record, []).secretOffer).toEqual({ key: keyOf(1), device: "Old phone" });
+  });
+
+  it("renaming this device, of the same name as the one the takeover stopped, leaves the offer on the stopped one", async () => {
+    const network = new FakeTurnNetwork();
+    const set = devices.map((d) => ({ key: toBase64Url(d.publicKey), name: "Phone" }));
+    const active = device(0, network, "active", { deviceSet: set, secretOffer: { why: "takeover", at: 1, key: keyOf(1), device: "Phone" } });
+    expect((await active.keeper.check(true)).kind).toBe("start");
+    expect(await active.rename(keyOf(0), "New phone")).toBe(true);
+    expect(active.store.record.secretOffer).toMatchObject({ key: keyOf(1), device: "Phone" });
+    expect(deviceSetView(active.store.record, []).secretOffer).toEqual({ key: keyOf(1), device: "Phone" });
+  });
+
+  it("an offer stored with only a name points at a device only when it is the one other device of the set", () => {
+    const third = toBase64Url(identityFromSeed(new Uint8Array(32).fill(3)).publicKey);
+    const offer = { why: "takeover" as const, at: 1, device: "Phone" };
+    const two = firstRecord("ghostly", "active", { turn: 40, d: toBase64Url(D), deviceSet: deviceSet(), ownSlot: 0, secretOffer: offer });
+    expect(deviceSetView(two, []).secretOffer).toEqual({ key: keyOf(1), device: "Phone" });
+    // Two other devices: a name (one an earlier rename may have moved to the wrong device) does not say which stopped.
+    for (const name of ["Phone", "Work phone"]) {
+      const three = firstRecord("ghostly", "active", { turn: 40, d: toBase64Url(D), deviceSet: [...deviceSet(), { key: third, name }], ownSlot: 0, secretOffer: offer });
+      expect(deviceSetView(three, []).secretOffer).toEqual({});
+    }
+    // A key the set no longer lists names no device either.
+    expect(deviceSetView({ ...two, secretOffer: { ...offer, key: third } }, []).secretOffer).toEqual({});
   });
 
   it("refuses a name the record would change, before anything is read or written", async () => {
@@ -106,7 +132,14 @@ describe("renaming a device", () => {
   it("keeps what a slot keeps: 16 bytes, an emoji sequence whole, the joiner inside it", () => {
     expect(renamedDeviceName("A".repeat(16))).toBe("A".repeat(16));
     expect(renamedDeviceName("Mãe 👩‍💻")).toBe("Mãe 👩‍💻");
+    expect(renamedDeviceName("می‌خوام")).toBe("می‌خوام");
     expect(() => renamedDeviceName(42)).toThrow(RenameRefusal);
+  });
+
+  it("refuses a joiner or a variation selector that joins nothing: the name would look like one it is not", () => {
+    for (const name of ["Phone‍", "‍Phone", "Pho‌ne", "Phone️"]) {
+      expect(() => renamedDeviceName(name), JSON.stringify(name)).toThrow(/^rename-name:/);
+    }
   });
 
   it("refuses on a standby, for a device not in the set, and when another device holds the turn", async () => {

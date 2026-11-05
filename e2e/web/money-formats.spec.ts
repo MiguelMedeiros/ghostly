@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { BDK_REGTEST } from "../support/bdk-regtest/regtest.mjs";
 import { chat, connect, createWallet, expect, link, openChat, openWallet, say, test, type Peer } from "../support/fixtures";
 import { choose } from "../support/select";
-import { BARK_TESTNET, arkadeAddress, bcrt1q, bolt12Offer } from "../../apps/ui/src/test/payments/moneyFormatFixtures";
+import { BARK_TESTNET, XMR_MAINNET, arkadeAddress, bcrt1q, bolt12Offer } from "../../apps/ui/src/test/payments/moneyFormatFixtures";
 
 /**
  * Money formats pasted into a chat (parser v2, card 4), test coins only:
@@ -44,6 +44,34 @@ test("a pasted regtest address, BOLT 12 offer and Ark addresses show their cards
 
   await card(alice, "onchain-bubble").getByTestId("money-create-wallet").click();
   await expect(alice.page.getByTestId("wallet")).toBeVisible();
+});
+
+test("on a 320 px phone a Monero card's long amount keeps its unit inside the card, in English and Arabic", { tag: ["@feature:payments.money.monero-card", "@feature:app.i18n"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("money-wrap-a"), peer("money-wrap-b")]);
+  await link(alice, bob);
+  await connect(alice, bob);
+  await say(bob, `monero:${XMR_MAINNET}?tx_amount=1234.567890123456`);
+  const monero = card(alice, "monero-bubble");
+  await expect(monero.getByTestId("money-amount")).toHaveText("1,234.567890123456");
+  await alice.page.setViewportSize({ width: 320, height: 640 });
+  // The bubble clips what goes past the card: the number and "XMR" were one run 13 px wider than the 230 px card.
+  const outside = () => monero.evaluate((card) => {
+    const edge = card.getBoundingClientRect();
+    return [...card.querySelectorAll("*")].filter((el) => {
+      const box = el.getBoundingClientRect();
+      return box.width > 0 && (box.left < edge.left - 1 || box.right > edge.right + 1);
+    }).map((el) => el.textContent);
+  });
+  await expect.poll(outside).toEqual([]);
+  await expect(monero).toContainText("XMR");
+  await alice.page.evaluate(() => {
+    const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language: "ar" }));
+  });
+  await alice.page.reload();
+  await expect(alice.page.locator("html")).toHaveAttribute("dir", "rtl");
+  await expect(monero.getByTestId("money-amount")).toHaveText("1,234.567890123456");
+  await expect.poll(outside).toEqual([]);
 });
 
 test("BDK on regtest: a pasted bitcoin: link is paid from the regtest wallet after the review", { tag: ["@gated", "@feature:payments.money.onchain-card", "@feature:payments.money.network", "@feature:payments.chat.review"] }, async ({ peer }) => {

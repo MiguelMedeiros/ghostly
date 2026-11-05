@@ -6,7 +6,7 @@ import { ENGINE_ERRORS, engineText, type EngineErrorCode } from "@ghostly/core";
 import { ERROR_RULES, errorText, knownErrorParts, rawError } from "../../lib/errorText";
 import { english } from "../../lib/english";
 import { failedReason, failedStatus } from "../../lib/fileStatus";
-import { problemText } from "../../lib/problemText";
+import { problemLine, problemText } from "../../lib/problemText";
 import type { TranslationKey } from "../../contexts/I18nContext";
 import { translateWith } from "../../locales/translate";
 import { LANGUAGES, LOCALES } from "./locales";
@@ -113,6 +113,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["The HyperDHT relay closed the connection", `${BROWSER}/platform/hyperdhtRelay.ts`],
   ["The HyperDHT relay did not let this chat listen", `${BROWSER}/platform/hyperdhtRelay.ts`],
   ["Iroh endpoint is stopped", `${BROWSER}/platform/irohWeb.ts`],
+  ["Iroh relay unreachable", "native/transports/iroh-web/src/lib.rs"],
   ["The connection changed. Compare the current code again.", "packages/core/src/pairedSession.ts"],
   ["Compare the current code again.", "packages/core/src/ghostlink.ts"],
   ["The connection closed. Compare again after reconnecting.", "packages/core/src/pairedSession.ts"],
@@ -140,6 +141,14 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["This device has no room left to save this", `${BROWSER}/shared/idb.ts`],
   ["Ghostly is still starting. Try again in a moment.", `${BROWSER}/platform/services.ts`],
   ["Ghostly needs your permission to reach that local address", `${BROWSER}/platform/services.ts`],
+  // The Share form's address checks (core http.ts parseLocalTarget) and its name check (engine node.ts addService).
+  ["Not a valid URL", `${CORE}/http.ts`],
+  ["Only http and https targets are supported", `${CORE}/http.ts`],
+  ["Credentials in the target URL are not supported", `${CORE}/http.ts`],
+  ["Only services on this machine can be shared (localhost, 127.0.0.1 or [::1])", `${CORE}/http.ts`],
+  ["The target cannot contain a query or fragment", `${CORE}/http.ts`],
+  ["Port 0 is not a port a web app can listen on", `${CORE}/http.ts`],
+  ["Give the service a name", `${BROWSER}/engine/node.ts`],
   ["Pick a Lightning card first", `${BROWSER}/platform/services.ts`],
   ["This client cannot install updates", `${BROWSER}/platform/updates.ts`],
   ["Connect to an updated peer to send files", `${BROWSER}/platform/services.ts`],
@@ -168,6 +177,11 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Could not store the file: The stored copy is gone", `${CORE}/chatFiles.ts`, "Could not store the file: "],
   ["Your contact could not take this file", `${CORE}/chatFiles.ts`],
   ["Cancelled by the sender", `${CORE}/chatFiles.ts`],
+  // A 1:1 file declined or cancelled, by the contact (chatFiles.ts `refusalText`) or here: the bubble's ⓘ says who.
+  ["Declined by your contact", `${CORE}/chatFiles.ts`],
+  ["Cancelled by your contact", `${CORE}/chatFiles.ts`],
+  ["You declined it", `${CORE}/chatFiles.ts`],
+  ["You cancelled it", `${CORE}/chatFiles.ts`],
   // A file said on the DHT floor that ended here before it came (engine/fileDesk.ts `floorRefusal`, `sweep`).
   ["No room on this device for this file", `${BROWSER}/engine/fileDesk.ts`],
   ["Too many files are waiting here", `${BROWSER}/engine/fileDesk.ts`],
@@ -276,7 +290,6 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["This is not a link to a group", `${BROWSER}/engine/groups.ts`],
   ["There are no digits to confirm", `${BROWSER}/devices/enroll.ts`],
   ["Only an enrollment that did not finish is removed here", `${BROWSER}/devices/links.ts`],
-  ["You are already joining this group", `${BROWSER}/engine/groups.ts`],
   ["This group is joined with its current link", `${BROWSER}/engine/groups.ts`],
   ["You have an invitation to this group. Answer it first.", `${BROWSER}/engine/groups.ts`],
   ["You are out of this group and its history is still here. Delete it from this device to join with a link.", `${BROWSER}/engine/groups.ts`],
@@ -419,6 +432,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["The clipboard's picture is damaged", "apps/desktop/src/clipboard.rs"],
   ["Clipboard unavailable", "apps/desktop/src/clipboard.rs"],
   ["That paste is gone. Paste it again.", "apps/desktop/src/clipboard.rs"],
+  ["That is too large to drop. Send it with + → Document.", "apps/ui/src/lib/pastedFiles.ts"],
+  ["That drop is gone. Drop it again.", "apps/ui/src/lib/pastedFiles.ts"],
   ["Could not read the pasted file: Permission denied (os error 13)", "apps/desktop/src/clipboard.rs", "Could not read the pasted file: {e}"],
   ["Could not read the file: The file changed while it was being copied", `${CORE}/chatFiles.ts`, "Could not read the file: "],
   ["This browser cannot wake Ghostly while it is closed.", "apps/ui/src/lib/wakePush.ts"],
@@ -659,6 +674,21 @@ describe("errors in the app's language", () => {
     expect(bubble("Cancelled by the sender")).toEqual({ status: t("chat.file.cancelled"), info: { text: t("errors.files.askAgain") } });
   });
 
+  it.each(LANGUAGES)("a 1:1 file declined or cancelled says who did it behind its ⓘ in %s, never the engine's English", (language) => {
+    const t = translators[language];
+    const file = { id: "L-out-abc", name: "x.bin", size: 30_000, mime: "application/octet-stream" };
+    const bubble = (error: string, direction: "in" | "out") => {
+      const transfer = { state: "failed", direction, transferred: 0, size: 30_000, error } as const;
+      return { status: failedStatus(file, transfer, t), info: failedReason(transfer, t) };
+    };
+    expect(bubble("Declined by your contact", "out")).toEqual({ status: t("chat.file.declined"), info: { text: t("errors.files.declinedThere") } });
+    expect(bubble("Cancelled by your contact", "out")).toEqual({ status: t("chat.file.cancelled"), info: { text: t("errors.files.cancelledThere") } });
+    expect(bubble("You declined it", "in")).toEqual({ status: t("chat.file.declined"), info: { text: t("errors.files.declinedHere") } });
+    expect(bubble("You cancelled it", "in")).toEqual({ status: t("chat.file.cancelled"), info: { text: t("errors.files.cancelledHere") } });
+    expect(bubble("You cancelled it", "out")).toEqual({ status: t("chat.file.cancelled"), info: { text: t("errors.files.cancelledHere") } });
+    for (const key of ["declinedThere", "cancelledThere", "declinedHere", "cancelledHere"] as const) expect(t(`errors.files.${key}`)).not.toBe(`errors.files.${key}`);
+  });
+
   it("a group's file every holder served damaged says so, and that the group is asked again, not a contact", () => {
     const damaged = "Every copy of this file arrived damaged and was deleted. Ask for it again later.";
     expect(knownErrorParts(damaged, translators.pt)).toEqual({ title: "O arquivo chegou danificado", next: "Peça de novo ao grupo mais tarde." });
@@ -780,6 +810,19 @@ describe("errors in the app's language", () => {
     expect(errorText(new Error("Relay said: rate limited"), translators.pt)).toBe("Relay said: rate limited");
     expect(errorText("plain", translators.fr)).toBe("plain");
     expect(errorText(42, translators.fr)).toBe("42");
+  });
+
+  // The Share form showed these as "Something went wrong." and the engine's English, in every language.
+  it("the Share form's address and name refusals read in the language, with what to type", () => {
+    const pt = translators.pt;
+    const next = "Use um endereço deste computador, como localhost:3400.";
+    expect(problemLine(new Error("Not a valid URL"), pt)).toBe(`Não deu para ler esse endereço. ${next}`);
+    expect(problemLine(new Error("Only http and https targets are supported"), pt)).toBe(`Só endereços web (http ou https) podem ser compartilhados. ${next}`);
+    expect(problemLine(new Error("Credentials in the target URL are not supported"), pt)).toBe(`O endereço não pode ter usuário nem senha. ${next}`);
+    expect(problemLine(new Error("Only services on this machine can be shared (localhost, 127.0.0.1 or [::1])"), pt)).toBe(`Só serviços deste computador podem ser compartilhados. ${next}`);
+    expect(problemLine(new Error("The target cannot contain a query or fragment"), pt)).toBe(`O endereço não pode ter uma parte com ? ou #. ${next}`);
+    expect(problemLine(new Error("Port 0 is not a port a web app can listen on"), pt)).toBe(`Nenhum app web escuta na porta 0. ${next}`);
+    expect(problemLine(new Error("Give the service a name"), pt)).toBe("Dê um nome ao serviço");
   });
 });
 

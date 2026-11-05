@@ -2,8 +2,9 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } f
 import { engine } from "@ghostly/browser/platform/engine";
 import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import type { NostrContactView } from "@ghostly/browser/nostr/types";
+import { displaySourceOf } from "@ghostly/browser/proofs/displaySource";
 import { useDialogFocus } from "../../hooks/useDismiss";
-import { dateTime, providerOf, useEngineState } from "../../lib/identities";
+import { dateTime, providerOf, useEngineValue } from "../../lib/identities";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { Deck } from "../deck/Deck";
 import { CardFlip, FlipTurnButton } from "../deck/Flip";
@@ -18,7 +19,7 @@ import { PeerAvatar } from "../Avatar";
 import { AvatarOpener } from "../AvatarViewer";
 import { usePeerAvatar } from "../../hooks/useAvatars";
 import { IdCardFace, IdCardMark } from "./IdCardFace";
-import { IdentityActivity } from "./IdentityActivity";
+import { IdentityActivity, type ChipLink } from "./IdentityActivity";
 import { contactGhostlyCard, GHOSTLY, idCardTone, machineLine, receivedIdCard, type IdCardContent } from "./idCard";
 import { ProviderMark } from "./ProviderMark";
 import { PublicProfileDetails } from "./PublicProfileDetails";
@@ -46,9 +47,11 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
   card?: { side: "mine" | "theirs"; id: string };
   onClose: () => void;
 }) {
-  const state = useEngineState();
+  // This contact's link, and whose each chat is with the identities they shared (the names the activity's chips
+  // show): not the whole state, which drew the panel again on every engine state while it stayed open.
+  const link = useEngineValue(state => state?.links.find(l => l.peerPubKeyZ32 === peerKey));
+  const links = useEngineValue(state => (state?.links ?? []).map((l): ChipLink => ({ id: l.id, peerPubKeyZ32: l.peerPubKeyZ32, identities: l.identities && { received: l.identities.received } })));
   const { t, language } = useI18n();
-  const link = state?.links.find(l => l.peerPubKeyZ32 === peerKey);
   const ref = useRef<HTMLElement>(null), backdrop = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const beside = useBeside(backdrop);
@@ -91,7 +94,7 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
         <section className="contact-panel-section" data-testid="chat-identities-received" aria-label={t("identities.contact.sharedBy", { name })}>
           <h3 className="contact-panel-heading">{t("identities.contact.sharedBy", { name })}</h3>
           {link
-            ? <TheirCards t={t} entries={entries} link={link} links={state?.links ?? []} name={name} nostr={link.nostr ?? []} initial={card?.side === "theirs" ? card.id : undefined} />
+            ? <TheirCards t={t} entries={entries} link={link} links={links} name={name} nostr={link.nostr ?? []} initial={card?.side === "theirs" ? card.id : undefined} />
             : <p className="contact-panel-note" data-testid="chat-identities-none">{t("identities.ghostly.nothingElse", { name })}</p>}
         </section>
         {link?.identities?.error && <p className="contact-panel-note" role="alert" data-testid="chat-identities-link-error">{problemLine(link.identities.error, t)}</p>}
@@ -121,7 +124,7 @@ function useBeside(backdrop: RefObject<HTMLElement | null>) {
 }
 
 /** The contact's ID cards: a deck, then the chosen card turned over. */
-function TheirCards({ t, entries, link, links, name, nostr, initial }: { t: Translate; entries: Entry[]; link: LinkView; links: readonly LinkView[]; name: string; nostr: NostrContactView[]; initial?: string }) {
+function TheirCards({ t, entries, link, links, name, nostr, initial }: { t: Translate; entries: Entry[]; link: LinkView; links: readonly ChipLink[]; name: string; nostr: NostrContactView[]; initial?: string }) {
   // The card shown first: the one tapped in the timeline, else their first shared identity, else their Ghostly card.
   const [chosen, setChosen] = useState<string | undefined>(initial ?? entries.find(e => !e.ghostly)?.id);
   const { side, flipped, turn, turnBack } = useCardFlip();
@@ -202,6 +205,21 @@ function TheirGhostlyBack({ t, card, link, name, turning, onCards }: { t: Transl
 }
 
 /**
+ * Who wrote a name, in the app's language where the provider's words are fixed (a key's user ID is its holder's own, a
+ * sign-in provider may not have checked the email): a caveat to act on. Any other source is shown as written.
+ */
+function nameSource(provider: string, source: string, t: Translate): string {
+  const known = displaySourceOf(provider, source);
+  if (!known) return source;
+  if (known.kind === "openpgp-user-id") return t("identities.contact.sourceUserId");
+  if (known.kind === "openpgp-keyserver") return t("identities.contact.sourceKeyserver");
+  const signer = { provider: known.provider };
+  return known.email === "verified" ? t("identities.contact.sourceSignedEmailVerified", signer)
+    : known.email === "unverified" ? t("identities.contact.sourceSignedEmailUnverified", signer)
+    : t("identities.contact.sourceSigned", signer);
+}
+
+/**
  * A contact's card turned over: what it proves and how (their own key, or a provider that says so), when this app
  * checked it and until when it holds, Check again, and a public profile when the provider has one. A Nostr card's
  * back holds what the key published, loaded on request.
@@ -230,7 +248,7 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
               : <span className="id-card-back-subject" title={card.subject} data-testid="chat-identity-received-subject">{card.short}</span>}
             <span className="id-card-back-meta">{card.category}</span>
             {/* A name the evidence or a lookup carried, and who wrote it: a holder's own words are not a proof. */}
-            {card.name && <span className="id-card-back-meta" data-testid="chat-identity-received-name-source">{fillNames(t("identities.contact.nameFrom"), { source: card.profile?.found && card.profile.name ? t("identities.contact.theirProfile") : r.display?.source ?? r.verified.display?.source ?? "" })}</span>}
+            {card.name && <span className="id-card-back-meta id-card-back-meta-whole" data-testid="chat-identity-received-name-source">{fillNames(t("identities.contact.nameFrom"), { source: card.profile?.found && card.profile.name ? t("identities.contact.theirProfile") : nameSource(r.provider, r.display?.source ?? r.verified.display?.source ?? "", t) })}</span>}
           </span>
         </div>
         {card.lookup && <PublicProfileDetails provider={r.provider} profile={card.profile} testId="chat-identity-public-profile" />}
@@ -251,7 +269,7 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
           {canCheck && <button type="button" className="contact-card-action" data-testid="chat-identity-recheck" disabled={turning} aria-disabled={!!busy || undefined}
             onClick={() => { if (!busy) act("recheck", () => engine.call("recheckIdentityProof", { linkId, id: r.id })); }}>{busy === "recheck" ? t("identities.contact.checking") : t("identities.contact.recheck")}</button>}
           {provider?.lookupDisplay && ok && <button type="button" className="contact-card-action" data-testid="chat-identity-lookup" disabled={turning} aria-disabled={!!busy || undefined}
-            onClick={() => { if (!busy) act("lookup", () => engine.call("lookupIdentityDisplay", { linkId, id: r.id })); }}>{busy === "lookup" ? t("identities.contact.lookingUp") : provider.lookupLabel ?? t("identities.contact.showProfile")}</button>}
+            onClick={() => { if (!busy) act("lookup", () => engine.call("lookupIdentityDisplay", { linkId, id: r.id })); }}>{busy === "lookup" ? t("identities.contact.lookingUp") : r.provider === "openpgp" ? t("identities.contact.lookupOpenpgp") : provider.lookupLabel ?? t("identities.contact.showProfile")}</button>}
         </div>
         {/* What Check again does, only where there is one: a withdrawn or revoked card is not checked again. */}
         {canCheck && <p className="id-card-back-note">{provider?.recheck ? t("identities.contact.recheckNoteRepeat") : t("identities.contact.recheckNote")}{provider?.lookupDisplay && ok ? ` ${t("identities.contact.lookupNote")}` : ""}</p>}

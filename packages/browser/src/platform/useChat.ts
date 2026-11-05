@@ -13,14 +13,24 @@ import {
   saveSession,
   sessionLinkParams,
 } from "../../../../apps/ui/src/lib/storage";
+import { sameValue } from "../../../../apps/ui/src/lib/sameValue";
 import type { LinkParams, LinkPreview } from "@ghostly/core";
 import type { ChatMessage, ChatTechInfo, ConnectionStatus } from "../../../../apps/ui/src/lib/types";
+import type { LinkView } from "../shared/types";
 import { engine } from "./engine";
 import { notifySessionsChanged, startSessionSync } from "./sync";
 
 const NO_MESSAGES: ChatMessage[] = [];
 const subscribe = (listener: () => void) => engine.subscribe(listener);
-const getState = () => engine.state;
+const NO_RELAYS: string[] = [];
+
+/** What a chat shows of the engine's state (`useChat`). */
+interface ChatEngineView {
+  link: LinkView | undefined;
+  offline: boolean;
+  protocol: string;
+  relays: string[];
+}
 const NONE_LANDED: ReadonlySet<ChatMessage> = new Set();
 
 /**
@@ -46,7 +56,22 @@ function landedRows(pending: ChatMessage[], history: ChatMessage[]): ReadonlySet
  * page is open. The session in localStorage is kept exactly as Desktop keeps it.
  */
 export const useChat: typeof Desktop.useChat = (params) => {
-  const state = useSyncExternalStore(subscribe, getState);
+  const peerPubKey = params?.peerPubKeyB64;
+  // Only what the chat shows of the engine's state, compared by content: the engine sends its whole state anew on every
+  // change (up to 20 a second while a file moves), and the whole of it drew this chat on each, and every chat kept
+  // loaded off screen for its call or mini-app too.
+  const shown = useRef<ChatEngineView | null>(null);
+  const view = useSyncExternalStore(subscribe, () => {
+    const state = engine.state;
+    const next: ChatEngineView = {
+      link: peerPubKey ? state?.links.find((l) => l.peerPubKeyZ32 === peerPubKey) : undefined,
+      offline: state?.settings.online === false,
+      protocol: state?.transport.protocol ?? "",
+      relays: state?.transport.relays ?? NO_RELAYS,
+    };
+    if (!shown.current || !sameValue(next, shown.current)) shown.current = next;
+    return shown.current;
+  });
   const [sessionMessages, setMessages] = useState<ChatMessage[]>([]);
   /**
    * A paired chat's texts sent from this page that the engine's history has not brought back yet: shown at once as
@@ -63,10 +88,9 @@ export const useChat: typeof Desktop.useChat = (params) => {
   const profile = params?.profile;
   const deliveryMode = params?.deliveryMode;
   const seedB64 = params?.seedB64;
-  const peerPubKey = params?.peerPubKeyB64;
   const encKeyB64 = params?.encKeyB64;
   const sessionId = params?.sessionId ?? "";
-  const link = peerPubKey ? state?.links.find((l) => l.peerPubKeyZ32 === peerPubKey) : undefined;
+  const { link } = view;
   const linkId = link?.id;
 
   const nickRef = useRef(params?.nick);
@@ -340,7 +364,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
   };
 
   let status: ConnectionStatus = "connecting";
-  if (isBurned || state?.settings.online === false) status = "offline";
+  if (isBurned || view.offline) status = "offline";
   else if (link) status = link.status;
 
   const techInfo: ChatTechInfo = {
@@ -351,10 +375,10 @@ export const useChat: typeof Desktop.useChat = (params) => {
     currentPollInterval: poll?.interval ?? 0,
     republishInterval: 4 * 60_000,
     messageTtl: 300,
-    protocol: state?.transport.protocol ?? "",
+    protocol: view.protocol,
     peerToPeer: link?.dataLink === "open",
     encryption: "NaCl secretbox (XSalsa20-Poly1305)",
-    relays: state?.transport.relays ?? [],
+    relays: view.relays,
     createdAt: createdAtRef.current,
     peerAck: link?.peerAck ?? 0,
   };

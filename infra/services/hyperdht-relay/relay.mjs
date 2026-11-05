@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import http from 'node:http'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
@@ -5,6 +6,8 @@ import DHT from 'hyperdht'
 import { relay } from '@hyperswarm/dht-relay'
 import WsStream from '@hyperswarm/dht-relay/ws'
 import { WebSocketServer } from 'ws'
+
+const require = createRequire(import.meta.url)
 
 /**
  * What one relay accepts. A Ghostly browser holds one WebSocket, listens once per saved chat or group link (at most
@@ -40,7 +43,10 @@ export const DEFAULT_LIMITS = Object.freeze({
   requestMs: 15_000,
   /** How long the relay waits for a client's part of a handshake (a browser answers in one round trip). */
   handshakeMs: 15_000,
-  /** Handshakes that may wait on one client's answer at once: its dials and the connections its servers get. */
+  /**
+   * Handshakes that may wait on one client's answer at once: its dials and the connections its servers get. One server's
+   * incoming ones take at most a quarter of it, and all of them together leave that quarter to the dials (see crowded).
+   */
   handshakes: 64,
   /** Bytes the relay may hold for one client that the client has not read yet (a chat's files have at most 2 MiB out). */
   queuedBytes: 8 * 1024 * 1024,
@@ -52,6 +58,15 @@ export const DEFAULT_LIMITS = Object.freeze({
    */
   queuedTotalBytes: 96 * 1024 * 1024,
 })
+
+/**
+ * The congestion window of the relay's one HyperDHT node: requests it may have out per 750 ms tick before the rest wait
+ * in its queue, for every client together. dht-rpc's default (80) is sized for one app, and each listen's announcer pings
+ * its 3 nodes every 3 s, about one request a second per listen: measured on loopback, 80 keeps up with about 1,000
+ * listens and 320 with 4,096, so a window of listens / 12 sends them all. At the defaults 512 × 16 / 12 = 683. Never
+ * below dht-rpc's 80; at most 2048 (24,576 listens), past which a relay is better split in two.
+ */
+export const relayWindow = ({ clients, listens }) => Math.min(2048, Math.max(80, Math.ceil(clients * listens / 12)))
 
 /**
  * dht-relay 0.4.3 (its latest release) hands a browser the announce record where the browser expects the
@@ -80,6 +95,40 @@ const fixSign = (sign, onLeave) => sign && ((target, token, id, ann, keyPair) =>
 const fixOptions = (options = {}, onLeave) => ({ ...options, signAnnounce: fixSign(options.signAnnounce, onLeave), signUnannounce: fixSign(options.signUnannounce, onLeave) })
 
 /**
+ * Whether the client holds the secret key of the key it asks to listen on. HyperDHT's own node does not check it: its
+ * announcer sends every signature it is given and goes on when the nodes it announces to turn them all down, so a
+ * listen on a key whose secret the client does not hold would still resolve, and hold the key on this relay's node.
+ * Before that, the client signs an announcement over a token and a node id the relay draws at random (dht-relay's own
+ * `signAnnounce`, no message of its own), checked as a HyperDHT node checks one. No node issued that token, so the
+ * signature announces nothing anywhere; no node needs to answer, and the key is not held while the client signs.
+ * A custodial client hands the relay its secret key, which signs the same way.
+ */
+const hyperdht = createRequire(require.resolve('hyperdht'))
+const sodium = hyperdht('sodium-universal')
+const { encode } = hyperdht('compact-encoding')
+const { NS } = hyperdht('./lib/constants.js')
+const { peer: peerEncoding } = hyperdht('./lib/messages.js')
+const Persistent = hyperdht('./lib/persistent.js')
+async function holdsKey(keyPair, options, onLeave) {
+  const publicKey = keyPair?.publicKey
+  if (!publicKey || publicKey.byteLength !== 32) return false
+  const target = Buffer.alloc(32)
+  sodium.crypto_generichash(target, publicKey)
+  const token = randomBytes(32)
+  const id = randomBytes(32)
+  const ann = { peer: { publicKey, relayAddresses: [] }, refresh: null, signature: null }
+  const sign = fixSign(options?.signAnnounce, onLeave) ?? Persistent.signAnnounce
+  let signature
+  try { signature = await sign(target, token, id, ann, keyPair) } catch { return false }
+  if (!signature || signature.byteLength !== 64) return false
+  const signable = Buffer.alloc(64)
+  signable.set(NS.ANNOUNCE, 0)
+  sodium.crypto_generichash_batch(signable.subarray(32), [target, id, token, encode(peerEncoding, ann.peer)])
+  return sodium.crypto_sign_verify_detached(signature, signable, publicKey)
+}
+const listensOn = (dht, keyPair) => [...dht.listening].some(server => server._keyPair && keyPair?.publicKey && Buffer.compare(server._keyPair.publicKey, keyPair.publicKey) === 0)
+
+/**
  * The DHT one client's relay session sees: listen and dial within its budget, nothing else. Topic lookups
  * and announcements are refused (Ghostly never uses them), so the relay is no open crawler. Past a limit
  * the client is dropped, and so is one that holds its slot with no listen open and no dial for `idleMs`.
@@ -89,7 +138,8 @@ const fixOptions = (options = {}, onLeave) => ({ ...options, signAnnounce: fixSi
  * the process and every client with it. A listen the node refuses closes that server only: the client that holds
  * the key, and the asking client's other listens, go on. The asking client is told: dht-relay has no message for a
  * refusal and its client drops a `closed` for a server that has had no `listening`, so the server says `listening` at
- * no address (0.0.0.0:0, the browser's sign of a refusal), then `closed`.
+ * no address (0.0.0.0:0, the browser's sign of a refusal), then `closed`. A listen by a client that does not sign for
+ * the key (holdsKey) is refused the same way, before the node holds the key.
  */
 function clientDht(dht, limits, drop, gone, log) {
   let listening = 0
@@ -139,12 +189,21 @@ function clientDht(dht, limits, drop, gone, log) {
         watchIdle()
         const server = target.createServer({ ...options, createHandshake: untracked(options?.createHandshake) }, onconnection)
         const listen = server.listen.bind(server)
-        server.listen = (keyPair, listenOptions) => listen(keyPair, fixOptions(listenOptions, onLeave)).catch(error => {
-          log('refused listen', error?.code ?? 'error')
-          server.address = () => ({ publicKey: keyPair?.publicKey, host: '0.0.0.0', port: 0 })
-          server.emit('listening')
-          void server.close().catch(() => {})
-        })
+        server.listen = async (keyPair, listenOptions) => {
+          try {
+            // A key the node already listens on is refused by the node itself (KEYPAIR_ALREADY_USED), at once: no signature asked.
+            const held = listensOn(target, keyPair) || await holdsKey(keyPair, listenOptions, onLeave)
+            // Closed while it signed (the client let go of it, or left): a listen now would stay in the node's list.
+            if (server._closing || left) return
+            if (!held) throw Object.assign(new Error('The client did not sign for this key'), { code: 'unsigned' })
+            return await listen(keyPair, fixOptions(listenOptions, onLeave))
+          } catch (error) {
+            log('refused listen', error?.code ?? 'error')
+            server.address = () => ({ publicKey: keyPair?.publicKey, host: '0.0.0.0', port: 0 })
+            server.emit('listening')
+            void server.close().catch(() => {})
+          }
+        }
         server.once('close', () => { listening--; watchIdle() })
         server.on('connection', hold)
         return server
@@ -184,7 +243,6 @@ function guardProtocol(protocol, drop) {
   }
 }
 
-const require = createRequire(import.meta.url)
 // Not in the package's exports: loaded by path, the same module dht-relay itself uses (0.4.3 is pinned).
 const { HandshakeProxy } = require(join(dirname(require.resolve('@hyperswarm/dht-relay')), 'lib', 'handshake-proxy.js'))
 
@@ -200,10 +258,36 @@ const untracked = create => create && ((...args) => {
   handshake._node._handshakes.delete(handshake._id)
   return handshake
 })
+/**
+ * Why a handshake may not wait on its client now (a word for the log), or null. The connections a client's servers
+ * get are started by whoever knows the key, so one contact dialling its own chat over and over would fill the client's
+ * whole `handshakes` and leave its other chats unreachable and its dials refused. A server's incoming handshakes take at
+ * most a quarter of it, and all servers' together leave that quarter to the client's dials.
+ */
+function crowded(handshake, handshakes, limits) {
+  if (handshakes.size >= limits.handshakes) return 'limit'
+  // A dial's handshake has no server.
+  if (handshake._serverAlias == null) return null
+  const quarter = Math.floor(limits.handshakes / 4)
+  let incoming = 0
+  let server = 0
+  for (const other of handshakes.values()) {
+    if (other._serverAlias == null) continue
+    incoming++
+    if (other._serverAlias === handshake._serverAlias) server++
+  }
+  if (server >= Math.max(1, quarter)) return 'listen share'
+  if (incoming >= limits.handshakes - quarter) return 'incoming'
+  return null
+}
 const roundTrip = original => function (payload) {
   const handshakes = this._node._handshakes
   const limits = this._node._limits ?? DEFAULT_LIMITS
-  if (handshakes.size >= limits.handshakes) return Promise.reject(new Error('Too many handshakes'))
+  const why = crowded(this, handshakes, limits)
+  if (why) {
+    this._node._refused?.('refused handshake', why)
+    return Promise.reject(new Error('Too many handshakes'))
+  }
   handshakes.set(this._id, this)
   let timer
   return Promise.race([
@@ -242,8 +326,9 @@ class Servers extends Map {
     return super.set(alias, proxy)
   }
 }
-function bound(node, limits, gone) {
+function bound(node, limits, gone, refused) {
   node._limits = limits
+  node._refused = refused
   const signatures = new Signatures()
   for (const [id, signature] of node._signatures) signatures.set(id, signature)
   node._signatures = signatures
@@ -295,14 +380,19 @@ export function addressOf(request, { proxies = 0, cloudflare = false } = {}) {
  * limit never applies. The push relay's `rateKey`; the two services ship separately.
  */
 export function addressKey(address) {
-  address = /^\[([^\]]+)\](?::\d+)?$/.exec(address)?.[1] ?? /^(\d+\.\d+\.\d+\.\d+):\d+$/.exec(address)?.[1] ?? address
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address)
-  if (mapped) return mapped[1]
+  address = /^\[([^\]]+)\](?::\d+)?$/.exec(address)?.[1] ?? /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):\d{1,5}$/.exec(address)?.[1] ?? address
   if (!address.includes(':')) return address
-  const [head, tail] = address.split('%')[0].split('::')
+  // The eight groups, whichever way the address is written: zone dropped, a dotted IPv4 tail as its two groups, `::`
+  // filled with zeros. An IPv4-mapped one (`::ffff:192.0.2.1`, `::ffff:c000:201`, `0:0:0:0:0:ffff:...`) is its IPv4.
+  const [head, tail] = address.split('%')[0].replace(/(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/, (dotted, ...octets) =>
+    octets.slice(0, 4).every(octet => octet <= 255) ? `${(octets[0] * 256 + +octets[1]).toString(16)}:${(octets[2] * 256 + +octets[3]).toString(16)}` : dotted).split('::')
   const before = head ? head.split(':') : []
   const after = tail ? tail.split(':') : []
   const groups = tail === undefined ? before : [...before, ...Array(Math.max(0, 8 - before.length - after.length)).fill('0'), ...after]
+  const words = groups.map(group => /^[0-9a-f]{1,4}$/i.test(group) ? parseInt(group, 16) : NaN)
+  if (words.length === 8 && words.slice(0, 5).every(word => word === 0) && words[5] === 0xffff && words.every(word => word >= 0)) {
+    return [words[6] >> 8, words[6] & 255, words[7] >> 8, words[7] & 255].join('.')
+  }
   const prefix = groups.slice(0, 4).map(group => parseInt(group, 16))
   return prefix.length === 4 && prefix.every(n => n >= 0 && n <= 0xffff) ? `${prefix.map(n => n.toString(16)).join(':')}::/64` : address
 }
@@ -360,7 +450,7 @@ export async function startRelay(options = {}) {
   // A new node counts itself firewalled until its first network check, about 20 minutes in (dht-rpc's STABLE_TICKS).
   // Until then two browsers on this relay reach each other only by holepunching the relay's own socket, which on
   // loopback often fails. On loopback nothing stands between the nodes, so the relay says so from the start.
-  const dht = options.dht ?? new DHT(bootstrap.length ? { bootstrap, ...(loopback ? { host: '127.0.0.1', firewalled: false } : {}) } : {})
+  const dht = options.dht ?? new DHT({ maxWindow: relayWindow(limits), ...(bootstrap.length ? { bootstrap, ...(loopback ? { host: '127.0.0.1', firewalled: false } : {}) } : {}) })
   // When another node last answered this one. With no outgoing UDP (a firewall, a tunnel, a container network) none
   // ever does: the node is up, its routing table stays empty, and a browser's listen through it still resolves.
   let answeredAt = null
@@ -513,7 +603,7 @@ export async function startRelay(options = {}) {
     }
     void relay(clientDht(dht, limits, drop, gone, refusals.line), stream).then(node => {
       guardProtocol(node._protocol, drop)
-      bound(node, limits, gone)
+      bound(node, limits, gone, refusals.line)
       nodes.add(node)
       void gone.then(() => nodes.delete(node))
     })

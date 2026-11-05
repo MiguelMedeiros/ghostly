@@ -94,6 +94,21 @@ export const UNIT_PROJECTS = [
       ".github/workflows/**", ".github/dependabot.yml", "e2e/features.json", "apps/web/nginx*.conf", "apps/web/Dockerfile",
       "apps/desktop/tauri.conf.json", "apps/desktop/gen/android/gradle/wrapper/**",
     ],
+    // Docs, crates and configs a few of its tests read from disk: a change there runs those tests, not the suite.
+    // affected.test.ts fails on a test that reads a repository file by name and is in neither list.
+    reads: {
+      "README.md": ["readme", "androidReleased"],
+      "docs/INSTALLATION.md": ["readme", "androidReleased", "bumpVersion"],
+      "{docs/README.md,docs/FEATURES.md,docs/WEB.md,docs/APPS.md,docs/ANDROID.md,docs/wisps/ADAPTER-ROADMAP.md,apps/website/content/*.ts}": ["androidReleased"],
+      "docs/RELEASING.md": ["chromeWebStore", "npmPublish", "webLatest"],
+      "{CHANGELOG.md,apps/desktop/Cargo.toml,apps/website/lib/release.ts,apps/extension/public/manifest.json,packages/browser/src/shared/features.ts}": ["bumpVersion"],
+      "packages/cli/package.json": ["npmPublish"],
+      "apps/desktop/src/{translate,translate_models}.rs": ["translationRuntimes"],
+      "e2e/playwright.config.ts": ["e2eWorkflow"],
+      "{native/transports/Cargo.toml,native/transports/iroh-web/**,packages/iroh-web/pkg/**}": ["irohWebBuild"],
+      "{packages/cli/vite.config.ts,packages/cli/vitest.config.ts,packages/cli/test/support/cli.ts}": ["affected"],
+      "{packages/cli/vite.config.ts,e2e/fixtures/chess/**}": ["storeKeys"],
+    },
     tests: ["tools/scripts/test/**"],
   },
   {
@@ -415,7 +430,12 @@ export function plan({ changed: all, inventory, e2eFiles, codeFiles }) {
     // a change there by relative path are found here and handed over themselves.
     const outside = [...code.map((c) => c.path), ...coreDependents].filter((f) => !match(p.sources, f));
     const viaPath = outside.length && codeFiles ? testsReaching(outside, codeFiles, p.tests).filter((f) => !direct.includes(f) && !viaCore.includes(f)) : [];
-    const files = [...direct, ...viaCore, ...viaPath];
+    // A deleted file counts too: the test that reads it fails.
+    const read = Object.entries(p.reads ?? {})
+      .filter(([glob]) => changed.some((c) => match([glob], c.path)))
+      .flatMap(([, names]) => names.map((n) => `tools/scripts/test/${n}.test.ts`))
+      .filter((f, i, all) => all.indexOf(f) === i && !direct.includes(f) && !viaPath.includes(f));
+    const files = [...direct, ...viaCore, ...viaPath, ...read];
     const reach = p.bundle && codeFiles ? bundleReaches(p.bundle.entry, codeFiles) : null;
     const bundled = p.bundle ? code.filter((c) => (reach ? reach.has(stripExt(c.path)) : match(p.bundle.sources, c.path))) : [];
     if (bundled.length && !files.includes(p.bundle.runner)) files.push(p.bundle.runner);
@@ -425,6 +445,7 @@ export function plan({ changed: all, inventory, e2eFiles, codeFiles }) {
     if (direct.length) parts.push(`${direct.length} changed file(s)`);
     if (viaCore.length) parts.push(`${viaCore.length} importer(s) of the changed core code`);
     if (viaPath.length) parts.push(`${viaPath.length} test file(s) importing the change by relative path`);
+    if (read.length) parts.push(`${read.length} test file(s) reading a changed file from disk`);
     if (bundled.length) parts.push(`the tests of the built CLI (${bundled.length} changed file(s) it is built from)`);
     return { ...p, mode: "related", files, reason: `vitest related over ${parts.join(" + ")}${tests ? ` (${tests} test file(s) among them)` : ""}` };
   });

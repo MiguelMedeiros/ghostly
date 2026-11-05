@@ -55,3 +55,29 @@ test("a call that finds no path says the network may block calls, with Network s
   await bob.page.getByTestId("call-no-path-close").click();
   await expect(bob.page.getByTestId("call-no-path")).toHaveCount(0);
 });
+
+test("a caller who left the chat while it rang finds the note there when back", { tag: ["@feature:calls.no-path"] }, async ({ peer }) => {
+  test.setTimeout(4 * 60_000);
+  const [alice, bob] = await Promise.all([
+    peer("no-path-away-alice", { beforeOpen: callsFindNoPath }),
+    peer("no-path-away-bob", { beforeOpen: callsFindNoPath }),
+  ]);
+  await pair(alice, bob);
+  for (const p of [alice, bob]) await expect(p.page.getByTestId("call-audio")).toBeEnabled();
+  const chatRoute = await alice.page.evaluate(() => location.hash);
+
+  // Alice calls, makes the call window small and goes to Settings while it rings: only the call keeps the chat loaded.
+  await alice.page.getByTestId("call-audio").click();
+  await alice.page.getByTestId("call-minimize").click();
+  await alice.page.getByTestId("account-settings").click();
+  await expect(bob.page.getByText("Incoming audio call...")).toBeVisible();
+  await bob.page.getByTitle("Accept audio call").click();
+  await expect(alice.page.getByTitle("End call")).toHaveCount(0, { timeout: 90_000 });
+
+  // Back in the chat, the call's line and the note say why, as they do for one who stayed.
+  await alice.page.evaluate((route) => { location.hash = route; }, chatRoute);
+  await expect(chat(alice).getByText("Audio call couldn't connect")).toBeVisible();
+  await expect(alice.page.getByTestId("call-no-path")).toContainText("A VPN or firewall, yours or your contact's, may block calls.");
+  await alice.page.getByTestId("call-no-path-close").click();
+  await expect(alice.page.getByTestId("call-no-path")).toHaveCount(0);
+});

@@ -190,8 +190,14 @@
   "forward": {
     "forward": "Encaminhar",
     "forwarded": "Encaminhada",
+    "found": "{{count}} conversas",
+    "found_one": "{{count}} conversa",
+    "found_other": "{{count}} conversas",
+    "limit": "Você pode encaminhar para {{count}} conversas por vez",
+    "limit_one": "Você pode encaminhar para {{count}} conversa por vez",
     "many": "Encaminhada muitas vezes",
     "messages": "{{count}} mensagens",
+    "more": "mais {{count}}",
     "noChats": "Nenhuma conversa ainda",
     "noMatch": "Nenhuma conversa com esse nome",
     "partial": "{{sent}} de {{count}} enviadas",
@@ -460,6 +466,10 @@
   "typing": "digitando…",
   "typingRecording": "gravando áudio…",
   "typingThinking": "pensando…",
+  "unconfirmed": {
+    "hint": "Enviada com um pedido de contato. O app da pessoa ainda não confirmou que enviou isto.",
+    "label": "Não confirmada"
+  },
   "video": {
     "arriving": "Chegando",
     "cantPlay": "Este aparelho não reproduz este vídeo ({{format}}). Baixe para assistir.",

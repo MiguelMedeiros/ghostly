@@ -10,7 +10,7 @@ import { viewOf } from "./gate";
 import { DEVICE_GATED_ERROR, type DeviceLinkEngine, type DeviceLinkHost } from "./linkOnly";
 import { DeviceSetError, deviceIdentity, openTurnKeeper } from "./setup";
 import { loadDeviceSigningKey, type DeviceSigningKey } from "./signingKey";
-import { forkTimes, type DevicePatch, type DeviceRecord, type DeviceState } from "./state";
+import { forkTimes, type DevicePatch, type DeviceRecord, type DeviceSlot, type DeviceState, type SecretOffer } from "./state";
 import { amendDevice, forgetDevice, moveDevice, readDeviceRecord } from "./store";
 import { acknowledged, pendingFrames } from "./remove";
 import { checkSetUpdate } from "./setUpdate";
@@ -88,8 +88,11 @@ export interface DeviceSetView {
    * The active device makes the move by itself; this says it is due.
    */
   newSecretDue?: true;
-  /** "New device secret" is offered: this device took over from `device`, which still holds the old secret. `lost`: the person said it was lost or stolen. */
-  secretOffer?: { device?: string; lost?: true };
+  /**
+   * "New device secret" is offered: this device took over from the device of signing key `key`, named `device` now,
+   * which still holds the old secret. Neither when that device is not known. `lost`: the person said it was lost or stolen.
+   */
+  secretOffer?: { key?: string; device?: string; lost?: true };
   /** Devices that stay and have not taken the new secret yet: they get it the next time they open Ghostly. */
   waiting?: { key: string; name: string }[];
   /** Another tombstone stands where this device put its own: a device that was left behind started a set of its own, or something else closed it. */
@@ -119,14 +122,26 @@ export function deviceSetView(record: DeviceRecord | null, links: DeviceLinkView
     const slot = record.deviceSet.find((s) => s?.key === key);
     return slot && all.findIndex((other) => other.key === key) === i ? [{ key, name: slot.name }] : [];
   });
+  const stopped = record.secretOffer ? offeredDevice(record, record.secretOffer) : undefined;
   return { state: record.state, devices, ...(grants.length ? { unfinishedGrants: grants } : {}), ...(enrollmentUnfinished(record) ? { unfinished: true as const } : {}),
     ...(due?.why === "unfinished-grant" ? { newSecretDue: true as const } : {}),
-    ...(record.state === "active" && record.secretOffer ? { secretOffer: { ...(record.secretOffer.device ? { device: record.secretOffer.device } : {}), ...(record.secretOffer.lost ? { lost: true as const } : {}) } } : {}),
+    ...(record.state === "active" && record.secretOffer ? { secretOffer: { ...(stopped ? { key: stopped.key, device: stopped.name } : {}), ...(record.secretOffer.lost ? { lost: true as const } : {}) } } : {}),
     ...(record.state === "active" && waiting.length ? { waiting } : {}),
     ...(record.state === "active" && record.earlierSets.some((set) => set.foreign) ? { foreignSet: true as const } : {}),
     ...(record.setNotice && !record.setNotice.seen ? { notice: record.setNotice.names } : {}),
     ...(record.reenroll ? { reenroll: true as const } : {}),
     ...(record.state === "active" && record.forks?.length ? { forks: [...record.forks], forkKeptAt: forkTimes(record) } : {}) };
+}
+
+/**
+ * The device a takeover's offer is about, as the set lists it now: found by its key, never this device. An offer an older
+ * build stored has only the name, which a rename there may have moved to another device: it is trusted only when the
+ * set has one other device and the name is that device's.
+ */
+function offeredDevice(record: DeviceRecord, offer: SecretOffer): DeviceSlot | undefined {
+  const others = record.deviceSet.filter((slot, index): slot is DeviceSlot => !!slot && index !== record.ownSlot);
+  if (offer.key) return others.find((slot) => slot.key === offer.key);
+  return others.length === 1 && others[0]!.name === offer.device ? others[0] : undefined;
 }
 
 export interface DeviceLinksOptions {
@@ -223,10 +238,16 @@ interface Running {
   nativeMisses: number;
   /**
    * This link runs without WebRTC, which connected nothing between the two devices (`withoutRtc`). For this run only,
-   * unless none of its native transports starts (`withRtc`).
+   * unless none of its native transports starts or no session opens over them (`withRtc`).
    */
   rtcOff: boolean;
-  /** The other device is there and no session is open: `withoutRtc` once `DEVICE_RTC_MS` passed so. */
+  /** The other device's packet last signed that it has no WebRTC: a Linux Desktop, or a link that went on without it there. */
+  peerRtcOff?: boolean;
+  /** The other device's packet carries no `_tr` now, though it did: its link may have gone back to WebRTC. */
+  peerUnsaid?: boolean;
+  /** The wait for a session ran out while the other device's packet said it has no WebRTC: `withRtc` once it says nothing. */
+  rtcDue?: boolean;
+  /** The other device is there and no session is open: `withoutRtc` once `DEVICE_RTC_MS` passed so (`withRtc` after `DEVICE_NATIVE_MS` where `native`). */
   rtcWait?: ReturnType<typeof setTimeout>;
   waiting: Map<string, { resolve(ms: number): void; reject(error: Error): void; sentAt: number; timer: ReturnType<typeof setTimeout> }>;
 }
@@ -246,6 +267,8 @@ export const NATIVE_RETRY_MS = 10_000;
 export const NATIVE_RETRY_MAX_MS = 120_000;
 /** The other device is there and no session opened over WebRTC in this long: the link goes on without it (`withoutRtc`). */
 export const DEVICE_RTC_MS = 20_000;
+/** The other device is there and no session opened over a link's native endpoints in this long: it starts again with WebRTC (`withRtc`). */
+export const DEVICE_NATIVE_MS = 60_000;
 /** The longest that wait grows to, for a link that went back to WebRTC again and again (`withRtc`). */
 export const DEVICE_RTC_MAX_MS = 5 * 60_000;
 
@@ -490,6 +513,7 @@ export class DeviceLinks implements DeviceLinkEngine {
         onDataLinkState: (state) => {
           if (state === "open") this.rtcBacks.delete(running.id);
           if (state === "open" && running.rtcWait) { clearTimeout(running.rtcWait); running.rtcWait = undefined; }
+          if (state === "open") running.rtcDue = false;
           if (state !== "open") {
             // A live link of the set closed, and not by this device (`close` forgets it first): a removal does this.
             if (running.agreed && !running.earlier && this.running.get(running.id) === running) void this.linkLost().catch(() => {});
@@ -506,9 +530,17 @@ export class DeviceLinks implements DeviceLinkEngine {
         onAnswersRefused: () => this.withoutRtc(running),
         // The other device is there and no session opens by `DEVICE_RTC_MS`: the side that answers may hear nothing of
         // an attempt that failed (it waits out its 90 s).
+        // A link that runs its native endpoints, the same by `DEVICE_NATIVE_MS`: one device's endpoint may start where the
+        // other's never does, so no session opens over them while WebRTC might connect now (`withRtc`).
         onPresence: (presence) => { if (presence.online) this.waitForRtc(running); },
         // The other device has no WebRTC: this one starts its native endpoints for it.
-        onPacketTransports: (transports) => { if (!running.native && !transports.includes("webrtc/1")) this.startNative(running); },
+        onPacketTransports: (transports) => {
+          running.peerRtcOff = !transports.includes("webrtc/1");
+          if (!running.native && running.peerRtcOff) this.startNative(running);
+        },
+        // Its packet says nothing of its transports now: it may have gone back to WebRTC (`withRtc`), which this link,
+        // native for it, would never offer again (`waitForRtc`).
+        onPacketTransportsUnsaid: (unsaid) => { running.peerUnsaid = unsaid; if (unsaid && running.rtcDue) this.withRtc(running); },
         // An endpoint went away (its relay closed the connection): it is started again in a while.
         onTransportsChanged: () => { if (running.native && this.missingNative(running).length) this.retryNative(running); },
       },
@@ -536,6 +568,8 @@ export class DeviceLinks implements DeviceLinkEngine {
    * and a transport that does not start is tried again (`retryNative`), as a chat's listeners are.
    */
   private startNative(running: Running): void {
+    // A wait for WebRTC no longer holds: the next presence waits `DEVICE_NATIVE_MS` for these instead.
+    if (!running.native && running.rtcWait) { clearTimeout(running.rtcWait); running.rtcWait = undefined; }
     running.native = true;
     const factories = this.nativeFactories();
     for (const transport of this.missingNative(running)) {
@@ -906,10 +940,29 @@ export class DeviceLinks implements DeviceLinkEngine {
     this.queue = run;
   }
 
-  /** `withoutRtc` once `DEVICE_RTC_MS` passed with no session open, twice as long for each time it went back (`rtcBacks`). */
+  /**
+   * `withoutRtc` once `DEVICE_RTC_MS` passed with no session open, twice as long for each time it went back (`rtcBacks`).
+   * A link that runs its native endpoints (`native`) waits `DEVICE_NATIVE_MS` so instead, then goes back to WebRTC
+   * (`withRtc`): one device's endpoint may start where the other's never does, so nothing opens over them.
+   * Not while the other device's packet still says it has no WebRTC, where this link did not go without it itself:
+   * WebRTC connects nothing there, and each round only made new endpoints the other device had to read of before it
+   * could dial. It goes back once that packet says nothing (`rtcDue`): a page whose own link went back to WebRTC.
+   */
   private waitForRtc(running: Running): void {
-    if (running.rtcOff || running.rtcWait || running.link.isDataLinkOpen) return;
-    running.rtcWait = setTimeout(() => { running.rtcWait = undefined; if (!running.link.isDataLinkOpen) this.withoutRtc(running, true); }, Math.min(DEVICE_RTC_MS * 2 ** (this.rtcBacks.get(running.id) ?? 0), DEVICE_RTC_MAX_MS));
+    if ((running.rtcOff && !running.native) || running.rtcWait || running.rtcDue || running.link.isDataLinkOpen) return;
+    const wait = (running.native ? DEVICE_NATIVE_MS : DEVICE_RTC_MS) * 2 ** (this.rtcBacks.get(running.id) ?? 0);
+    running.rtcWait = setTimeout(() => {
+      running.rtcWait = undefined;
+      if (running.link.isDataLinkOpen) return;
+      if (this.peerWithoutRtc(running)) running.rtcDue = true;
+      else if (running.native) this.withRtc(running);
+      else this.withoutRtc(running, true);
+    }, Math.min(wait, DEVICE_RTC_MAX_MS));
+  }
+
+  /** A link that runs native for the other device, whose packet still says it has no WebRTC. */
+  private peerWithoutRtc(running: Running): boolean {
+    return running.native && !running.rtcOff && !!running.peerRtcOff && !running.peerUnsaid;
   }
 
   /**
@@ -917,9 +970,13 @@ export class DeviceLinks implements DeviceLinkEngine {
    * device reaches, and no HyperDHT relay. With nothing to go through it starts again with WebRTC, which may connect
    * now, or only after `DEVICE_RTC_MS` (a device that just reloaded dials at its own pace). The wait before it goes
    * without WebRTC again doubles each time (`rtcBacks`), so a native transport that comes back is still tried.
+   * The same where its native transports started and no session opened over them by `DEVICE_NATIVE_MS` while the other
+   * device is there (its own endpoint never started, or is on another Iroh relay), and on the other device's link
+   * that runs native for it: the new link forgets the transports the other device's packet said, which a device link
+   * keeps although the packet no longer says any (the other device went back to WebRTC), and offers WebRTC again.
    */
   private withRtc(running: Running): void {
-    if (this.stopped || !running.rtcOff || running.link.isDataLinkOpen || this.running.get(running.id) !== running) return;
+    if (this.stopped || !this.createPeerConnection || !running.native || running.link.isDataLinkOpen || this.running.get(running.id) !== running) return;
     this.rtcBacks.set(running.id, (this.rtcBacks.get(running.id) ?? 0) + 1);
     const run = this.queue.catch(() => {}).then(async () => {
       if (this.stopped || this.running.get(running.id) !== running || running.link.isDataLinkOpen) return;

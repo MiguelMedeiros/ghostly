@@ -226,6 +226,15 @@
   .pairing-invite-row { display: flex; align-items: flex-start; justify-content: center; gap: 16px; padding: 0 16px; }
   .pairing-invite-row > * { flex: 0 1 22rem; min-width: 0; margin-inline: 0; }
 }
+/* One above the other on a short screen (a phone, a phone on its side, a zoomed window): the invite first, the one thing
+   to share, so it is in view when the chat opens; the scene under it. Its top margin goes, as it would have collapsed. */
+@media (max-height: 45rem) {
+  @container pairing-invite (width < 46rem) {
+    .pairing-invite-row { display: flex; flex-direction: column; }
+    .pairing-invite-row > .invite-card { order: -1; }
+    .pairing-invite-row > .ps:has(+ .invite-card) { margin-top: 0; }
+  }
+}
 
 /* The scene in small, as the chat's connection icon while a first pairing is on its way (PairingGlyph.tsx). */
 .pg { overflow: visible; }

@@ -1,5 +1,5 @@
 import type { FoundUpdate } from "../../../apps/ui/src/lib/updates";
-import type { ClientMessage, EngineEvent, RpcResponse } from "./shared/rpc";
+import type { ClientMessage, PostedEvent } from "./shared/rpc";
 import type { OidcPlatform } from "./proofs/oidc/providers";
 import type { OidcWindow } from "./proofs/oidc/flow";
 import type { AtprotoHost } from "./proofs/atproto/oauth";
@@ -68,15 +68,23 @@ export interface BrowserHost {
    */
   restartEngine?(): Promise<void>;
   /** Reaches the peer. `onDisconnect` fires when it goes away; the client then connects again. */
-  connect(onMessage: (message: EngineEvent | RpcResponse) => void, onDisconnect: () => void): Promise<EngineConnection>;
+  connect(onMessage: (message: PostedEvent) => void, onDisconnect: () => void): Promise<EngineConnection>;
   /**
    * Asks the user for access to a local origin, where the platform has such a thing: `originPattern` is the
    * extension's host pattern (`http://localhost/*`), `origin` the exact address with its port (`http://localhost:3400`),
    * which the desktop app has Rust ask about in a native dialog.
    */
   requestLocalAccess(originPattern: string, origin: string): Promise<boolean>;
-  /** The profile no longer shares any app at `origin` (desktop: off Rust's list of addresses it may reach). */
+  /**
+   * The profile no longer shares any app at `origin` (desktop: off Rust's list of addresses it may reach; the extension
+   * gives Chrome back `localAccessPattern(origin)` once no profile shares an app at that host, on any port).
+   */
   forgetLocalAccess?(origin: string): Promise<void>;
+  /**
+   * A profile's shared apps all went at once ("Clear all data", a profile deleted): the host gives back the local
+   * access no profile on this device still needs. The extension's host permissions are every profile's at once.
+   */
+  releaseUnusedLocalAccess?(): Promise<void>;
   /** `tag` (`viewerTag` of this side's key for the chat) goes in the app's origin, so each profile's storage for it is its own. */
   openService(peerPubKeyZ32: string, serviceId: string, tag: string): Promise<void>;
   /**
@@ -179,6 +187,20 @@ export function setBrowserHost(host: BrowserHost): void {
 export function getBrowserHost(): BrowserHost {
   if (!current) throw new Error("No browser host configured");
   return current;
+}
+
+/**
+ * The extension's host permission for a local origin (`http://127.0.0.1:3400` is `http://127.0.0.1/*`): one host on
+ * every port, as Chrome takes it. What `requestLocalAccess` asks for, and what the extension later gives back.
+ */
+export function localAccessPattern(origin: string): string {
+  const url = new URL(origin);
+  return `${url.protocol}//${url.hostname}/*`;
+}
+
+/** `releaseUnusedLocalAccess` of the host, where it has one: never throws. */
+export async function releaseUnusedLocalAccessOf(): Promise<void> {
+  await current?.releaseUnusedLocalAccess?.().catch(() => {});
 }
 
 /** `forgetServices` of the host, where it has one: never throws (no host, or one that failed, holds nothing up). */
