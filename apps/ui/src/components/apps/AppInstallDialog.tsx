@@ -244,7 +244,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
   const shownTitle = preview?.manifest.title ?? title ?? t("apps.title");
   const blocked = preview && (preview.run.status === "revoked" || preview.run.status === "removed" || preview.install === "rollback" || preview.install === "equivocation" || preview.install === "same");
   const why = preview && (runLine(preview.run, t) ?? (preview.install === "rollback" ? t("apps.install.rollback")
-    : preview.install === "equivocation" ? t("apps.install.equivocation", { sequence: String(preview.manifest.sequence) })
+    : preview.install === "equivocation" ? t("apps.install.equivocation")
       : preview.install === "same" ? t("apps.install.same") : null));
   return (
     <Shell titleId={titleId} onClose={onClose} testId="app-install">
@@ -351,11 +351,13 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
       <Publisher fingerprint={app.fingerprint} unknown={app.unknownPublisher} listedBy={app.listedBy} builtIn={app.builtIn && "installed"} />
       {app.description && <p dir="auto" className="text-sm text-text-secondary whitespace-pre-line [overflow-wrap:anywhere]">{app.description}</p>}
       {why && <Line tone={app.run.status === "needs-files" ? "warning" : "danger"} testId="app-run-line">{why}</Line>}
-      {app.equivocation && <Line tone="warning" testId="app-equivocation">{t("apps.install.equivocation", { sequence: String(app.equivocation.sequence) })}</Line>}
+      {/* The version's internal `sequence` is never shown: the person knows it by the version in the header. */}
+      {app.equivocation && <Line tone="warning" testId="app-equivocation">{t("apps.install.equivocation")}</Line>}
       {app.pending && (
         <div className="bg-surface rounded-xl px-4 py-3 space-y-3" data-testid="app-update">
           <p className="text-sm text-text-primary">{t("apps.app.updateWaits", { version: app.pending.version })}</p>
-          <Permissions asks={app.pending.added} update />
+          {/* An update that no longer adds a permission to the version installed meanwhile has nothing to list. */}
+          {app.pending.added.length > 0 && <Permissions asks={app.pending.added} update />}
           <div className="flex justify-end">
             <Button variant="primary" data-testid="app-update-accept" disabled={busy} loading={pending === "update"} onClick={() => void act(() => engine.call("appUpdateAccept", { ref: app.ref }), false, "update")}>{t("apps.install.update")}</Button>
           </div>
@@ -365,7 +367,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
       <Privacy internet={(app.permissions as readonly string[]).includes("internet")} />
       {error && <ErrorLine error={error} testId="app-details-error" />}
       <div className="flex flex-wrap justify-end gap-2">
-        <Button ref={uninstall} variant="danger" data-testid="app-uninstall-open" onClick={() => setRemoving(true)}>{app.run.status === "ok" ? t("apps.app.uninstall") : t("apps.app.remove")}</Button>
+        <Button ref={uninstall} variant="danger" data-testid="app-uninstall-open" onClick={() => setRemoving(true)}>{t("apps.app.uninstall")}</Button>
         {app.run.status === "needs-files" && <Button data-testid="app-fetch-files" disabled={busy} loading={pending === "files"} onClick={() => void act(() => engine.call("appFetchFiles", { ref: app.ref }), false, "files")}>{t("apps.app.fetchFiles")}</Button>}
         {app.run.status === "removed" && <Button data-testid="app-run-anyway" onClick={() => { onOpen(app, { runAnyway: true }); onClose(); }}>{t("apps.app.runAnyway")}</Button>}
         {!canRun && app.run.status !== "needs-files" && <Button data-testid="app-keep-stopped" onClick={onClose}>{t("apps.app.keepStopped")}</Button>}

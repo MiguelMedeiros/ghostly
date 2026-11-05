@@ -18,7 +18,6 @@
     "fetchFiles": "Baixar os arquivos",
     "keepStopped": "Manter parado",
     "needsFiles": "Precisa dos arquivos",
-    "remove": "Remover",
     "runAnyway": "Executar mesmo assim",
     "stopped": "Parado",
     "uninstall": "Desinstalar",
@@ -100,7 +99,7 @@
     "note": "Nada é copiado: {{app}} lê o que você escolher, neste aparelho."
   },
   "install": {
-    "equivocation": "Existem duas versões {{sequence}} diferentes. O Ghostly manteve a que você tem.",
+    "equivocation": "Existem duas cópias diferentes desta versão. O Ghostly manteve a que você tem.",
     "fetching": "Verificando o app…",
     "foundBy": "Encontrado por {{name}}",
     "inStore": "Em {{name}}",
@@ -130,7 +129,7 @@
     "same": "Já instalado.",
     "sentBy": "Enviado por {{name}}",
     "unknownPublisher": "Publicador desconhecido",
-    "unknownPublisherInfo": "Qualquer pessoa pode assinar um app com uma chave nova. Só uma loja que você adicionou pode garantir quem o fez. Compare a chave com a que o autor publica.",
+    "unknownPublisherInfo": "Qualquer pessoa pode assinar um app com uma chave nova. Só uma loja que você adicionou pode garantir o publicador dele. Compare a chave com a que o publicador divulga.",
     "update": "Atualizar",
     "webkit": "Neste navegador, um app ainda pode contatar outros servidores.",
     "webkitInfo": "O Safari e qualquer navegador no iPhone ou iPad deixam um app abrir conexões que o Ghostly não consegue bloquear. Esses servidores ficam sabendo do seu endereço IP. O app para desktop as bloqueia."
@@ -140,7 +139,7 @@
     "addHint": "Adicionar um app ou uma loja pelo link",
     "details": "{{title}}: detalhes",
     "installed": "Instalados",
-    "intro": "Jogos e pequenos apps, assinados por quem os fez e rodando em uma sandbox.",
+    "intro": "Jogos e pequenos apps, assinados pelos publicadores e rodando em uma sandbox.",
     "loading": "Carregando…",
     "noStores": "Nenhuma loja ainda. Adicione uma pelo link.",
     "none": "Nenhum app ainda.",
@@ -186,10 +185,10 @@
     "resume": "Voltar para {{title}}",
     "resumeSharing": "compartilhando um arquivo",
     "sharingWith": "compartilhando um arquivo com {{name}}",
-    "stoppedFailed": "{{title}} parou de funcionar e foi fechado. Se continuar acontecendo, avise o autor.",
+    "stoppedFailed": "{{title}} parou de funcionar e foi fechado. Se continuar acontecendo, avise o publicador.",
     "stoppedRemoved": "{{title}} foi parado: {{store}} removeu esta versão",
-    "stoppedRevoked": "{{title}} foi parado: o autor revogou esta versão",
-    "stoppedUnresponsive": "{{title}} parou de responder e foi fechado, para suas conversas continuarem funcionando. Abra de novo ou, se continuar acontecendo, avise o autor.",
+    "stoppedRevoked": "{{title}} foi parado: o publicador revogou esta versão",
+    "stoppedUnresponsive": "{{title}} parou de responder e foi fechado, para suas conversas continuarem funcionando. Abra de novo ou, se continuar acontecendo, avise o publicador.",
     "with": "{{title}} com {{name}}",
     "withName": "com {{name}}",
     "withSharing": "{{title}} · compartilhando um arquivo com {{name}}"

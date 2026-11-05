@@ -18,7 +18,6 @@
     "fetchFiles": "Get its files",
     "keepStopped": "Keep it stopped",
     "needsFiles": "Needs its files",
-    "remove": "Remove",
     "runAnyway": "Run anyway",
     "stopped": "Stopped",
     "uninstall": "Uninstall",
@@ -100,7 +99,7 @@
     "note": "Nothing is copied: {{app}} reads what you pick, on this device."
   },
   "install": {
-    "equivocation": "Two different versions {{sequence}} exist. Ghostly kept the one you have.",
+    "equivocation": "Two different copies of this version exist. Ghostly kept the one you have.",
     "fetching": "Checking the app…",
     "foundBy": "Found by {{name}}",
     "inStore": "In {{name}}",
@@ -130,7 +129,7 @@
     "same": "Already installed.",
     "sentBy": "Sent by {{name}}",
     "unknownPublisher": "Unknown publisher",
-    "unknownPublisherInfo": "Anyone can sign an app with a new key. Only a store you added vouches for its maker. Compare this key with the maker's own.",
+    "unknownPublisherInfo": "Anyone can sign an app with a new key. Only a store you added vouches for its publisher. Compare this key with the publisher's own.",
     "update": "Update",
     "webkit": "In this browser, an app can still contact other servers.",
     "webkitInfo": "Safari and every iPhone or iPad browser let apps open connections Ghostly cannot block. Those servers learn your IP address. The desktop app blocks them."
@@ -140,7 +139,7 @@
     "addHint": "Add an app or a store by its link",
     "details": "{{title}}: details",
     "installed": "Installed",
-    "intro": "Games and small apps, signed by their makers and run in a sandbox.",
+    "intro": "Games and small apps, signed by their publishers and run in a sandbox.",
     "loading": "Loading…",
     "noStores": "No stores yet. Add one by its link.",
     "none": "No apps yet.",
@@ -186,10 +185,10 @@
     "resume": "Back to {{title}}",
     "resumeSharing": "sharing a file",
     "sharingWith": "sharing a file with {{name}}",
-    "stoppedFailed": "{{title}} stopped working and was closed. If it keeps happening, tell its maker.",
+    "stoppedFailed": "{{title}} stopped working and was closed. If it keeps happening, tell its publisher.",
     "stoppedRemoved": "{{title}} was stopped: {{store}} removed this version",
-    "stoppedRevoked": "{{title}} was stopped: its maker revoked this version",
-    "stoppedUnresponsive": "{{title}} stopped responding and was closed, so your chats keep working. Open it again, or tell its maker if it keeps happening.",
+    "stoppedRevoked": "{{title}} was stopped: its publisher revoked this version",
+    "stoppedUnresponsive": "{{title}} stopped responding and was closed, so your chats keep working. Open it again, or tell its publisher if it keeps happening.",
     "with": "{{title}} with {{name}}",
     "withName": "with {{name}}",
     "withSharing": "{{title}} · sharing a file with {{name}}"
