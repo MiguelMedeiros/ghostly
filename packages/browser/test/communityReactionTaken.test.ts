@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { COMMUNITY_REACTION_FRAME } from "@ghostly/core";
-import { reactionKey } from "../src/engine/groups";
+import { COMMUNITY_PIN_FRAME, COMMUNITY_REACTION_FRAME } from "@ghostly/core";
+import { pinKey, reactionKey } from "../src/engine/groups";
 import { CommunityWorld, RELAY_NETWORK } from "./communityWorld";
 // covers: groups.protocol.reactions, groups.community.send
 
@@ -24,11 +24,16 @@ describe("my reaction in a community", { timeout: 120_000 }, () => {
     world.cut = (a, b) => apart && (a === bob || b === bob);
     const n = 7;
     await bob.groups.sendCommunityApp(id, { t: COMMUNITY_REACTION_FRAME, id: "somebody:1", e: "👍", n }, reactionKey(n));
+    // A pin rides the same way (`pin <group> --wait sent`), under its own number.
+    const pin = Date.now();
+    await bob.groups.sendCommunityApp(id, { t: COMMUNITY_PIN_FRAME, id: "somebody:1", n: pin }, pinKey(pin));
     await world.run(5_000);
     expect(bob.groups.taken(id, "somebody:1", undefined, n)).toBe(0);
+    expect(bob.groups.taken(id, "somebody:1", undefined, undefined, pin)).toBe(0);
     // An edge opens: the frame goes out, and the reaction with it. Another number is not taken.
     apart = false;
     await world.until(() => bob.groups.taken(id, "somebody:1", undefined, n) > 0, 5 * 60_000);
     expect(bob.groups.taken(id, "somebody:1", undefined, n + 1)).toBe(0);
+    await world.until(() => bob.groups.taken(id, "somebody:1", undefined, undefined, pin) > 0, 5 * 60_000);
   });
 });

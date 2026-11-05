@@ -168,3 +168,45 @@ describe("forward", () => {
     expect(node.forwardMessages).not.toHaveBeenCalled();
   });
 });
+
+describe("forward to a group waits for an edge, as group send does", () => {
+  /** A forward of `peer_1` to Crew, its new message `mine:0:9`; `took` says how many edges took it at each look. */
+  function toGroup(mode: "one-shot" | "daemon", took: () => number) {
+    const { ctx, node } = fake();
+    node.forwardMessages.mockImplementation(async ({ to, messageIds }) => ({ results: to.map((t) => ({ messageIds: [t.startsWith("group:") ? "mine:0:9" : "me_fwd"], sent: messageIds, error: null })) }));
+    node.groupTaken.mockImplementation(took);
+    return { ctx: { ...ctx, mode } as ApiContext, node };
+  }
+
+  it("a one-shot stays until an edge took it, and says how many did; a chat beside it is not waited for", async () => {
+    let looks = 0;
+    const { ctx, node } = toGroup("one-shot", () => (++looks > 2 ? 1 : 0));
+    expect(await callApi(ctx, "chat.forward", { chat: "Alice", messages: ["peer_1"], to: ["Crew", "Bob"] })).toEqual({ from: "chat-one", results: [
+      { to: "g1", kind: "group", messageIds: ["mine:0:9"], sent: ["peer_1"], error: null, edges: 1 },
+      { to: "chat-two", kind: "chat", messageIds: ["me_fwd"], sent: ["peer_1"], error: null },
+    ] });
+    expect(node.groupTaken).toHaveBeenLastCalledWith({ groupId: "g1", messageId: "mine:0:9" });
+    expect(looks).toBe(3);
+  });
+
+  it("a one-shot no edge took in time: a timeout (exit 4) that says it stays in the group; --wait none answers at once", async () => {
+    await expect(callApi(toGroup("one-shot", () => 0).ctx, "chat.forward", { chat: "Alice", messages: ["peer_1"], to: ["Crew"], timeout: 1 })).rejects.toMatchObject({
+      code: "timeout", message: expect.stringMatching(/no member's edge took it yet .*next command/), details: { messageId: "mine:0:9" },
+    });
+    expect(await callApi(toGroup("one-shot", () => 0).ctx, "chat.forward", { chat: "Alice", messages: ["peer_1"], to: ["Crew"], wait: "none" }))
+      .toMatchObject({ results: [{ to: "g1", edges: 0 }] });
+  });
+
+  it("a daemon answers at once with how many took it so far", async () => {
+    const { ctx, node } = toGroup("daemon", () => 2);
+    expect(await callApi(ctx, "chat.forward", { chat: "Alice", messages: ["peer_1"], to: ["Crew"] })).toMatchObject({ results: [{ to: "g1", edges: 2 }] });
+    expect(node.groupTaken).toHaveBeenCalledOnce();
+  });
+
+  it("a one-shot starts the groups' sessions for a forward and a pin: the edge they go over is a group's", async () => {
+    const { chatOnly } = await import("../src/main");
+    expect(chatOnly("chat.forward", { chat: "Alice", messages: ["peer_1"], to: ["Crew"] })).toBe(false);
+    expect(chatOnly("chat.pin", { chat: "Crew", message: "k:0:1" })).toBe(false);
+    expect(chatOnly("chat.react", { chat: "Alice", message: "peer_1", emoji: "👍" })).toBe(true);
+  });
+});
