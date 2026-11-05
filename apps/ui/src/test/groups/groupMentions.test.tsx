@@ -234,6 +234,17 @@ describe("an unread mention in the chat list", () => {
     again.unmount();
   });
 
+  it("goes at once when an edit takes the mention out: the engine's view moves the group's mark back", async () => {
+    const t = 1_700_000_000_000;
+    markGroupRead("group-1", t - 10);
+    list([active({ lastMessageAt: t, lastPeerMessageAt: t, lastMentionAt: t })]);
+    expect(within(row()).getByTestId("group-row-mention")).toBeInTheDocument();
+    // The edited message is still the newest, unread; the mention before it was read.
+    act(() => { fakeEngine.update({ groups: [active({ lastMessageAt: t, lastPeerMessageAt: t, lastMentionAt: t - 20 })] }); });
+    await waitFor(() => expect(within(row()).queryByTestId("group-row-mention")).not.toBeInTheDocument());
+    expect(within(row()).getByTestId("group-row-unread")).toBeInTheDocument();
+  });
+
   it("goes grey in a muted group only when mentions are kept quiet too", () => {
     const t = 1_700_000_000_000;
     markGroupRead("group-1", 0);
