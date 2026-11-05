@@ -85,6 +85,8 @@ Who is asked first: the author while its edge or session is up, then holders who
 
 A member that answered `gone` is not asked for that file again until it says it holds it (`group-have`) or its edge closes and opens again: asking the members in reach costs each of them one want and one answer per file, not one every round. Only an edge that is up is used this way; no file session is opened to a member that is not known to hold the file.
 
+A device that is out of the group for good (removed, or its history forked) asks nobody: no holder serves a member out of the roster. Its files that were coming stop, what came of them is deleted, and each says why, in the words a file send to that group is refused with; Download and Resume on any file of the group not all here are refused the same way.
+
 ### The file session
 
 - **Private groups, full mesh (up to 16 members):** the edge between the two members, which is up anyway, carries `files/3` (above) as a 1:1 chat's session does.
