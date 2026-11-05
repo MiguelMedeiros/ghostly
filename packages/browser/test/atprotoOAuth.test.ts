@@ -235,6 +235,17 @@ describe("the provider's signers", () => {
     await expect(none.run(ctxOf({ handle: alice.handle }), async () => ({}))).rejects.toThrow("not available here");
   });
 
+  it("says the full-access sign-in reaches the whole account and when it is suggested, here and on the website", () => {
+    const [narrow, full] = createAtprotoIdentityProvider({ host: () => undefined }).signers;
+    expect(narrow.description).toMatch(/only to create and delete its own proof records/);
+    expect(full.description).toMatch(/whole account/);
+    expect(full.description).toMatch(/suggests it when your server refuses/);
+    expect(full.description).not.toMatch(/^Only if/);
+    const home = readFileSync(new URL("../../../apps/website/content/home.ts", import.meta.url), "utf8");
+    const card = /id: "atproto",[\s\S]*?limits: "([^"]*)"/.exec(home)?.[1];
+    expect(card).toMatch(/only for Ghostly's records, or for the whole account/);
+  });
+
   it("removes the record with a fresh approval, and asks for full access next time on a server that refused the narrow one", async () => {
     const { h, events } = host();
     const provider = createAtprotoIdentityProvider({ host: () => h, fetch: net.fetch });

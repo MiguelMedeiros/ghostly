@@ -48,6 +48,7 @@ test("the contact opens a shared app from Services, and it is gone once removed"
 
     // Removed on A: it leaves A's page, and the contact's Services page and chat forget it.
     await a.page.getByRole("button", { name: "Remove Atlas" }).click();
+    await a.page.getByTestId("service-remove-confirm").click();
     await expect(a.page.getByTestId("service-item")).toHaveCount(0);
     await expect(a.page.getByTestId("your-apps")).toContainText("Nothing shared yet.");
     await expect(open).toHaveCount(0, { timeout: 60_000 });
@@ -57,7 +58,7 @@ test("the contact opens a shared app from Services, and it is gone once removed"
     await expect(b.page.getByTestId("open-service")).toHaveCount(0);
     // And the page B still had open is refused, not served.
     await viewer.reload();
-    await expect(viewer.getByText("This peer does not share that service")).toBeVisible();
+    await expect(viewer.getByText(/is no longer shared with you/)).toBeVisible();
   } finally {
     atlas.server.close();
   }

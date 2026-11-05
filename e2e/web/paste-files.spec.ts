@@ -1,5 +1,12 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Locator, Page } from "@playwright/test";
 import { chat, connect, expect, link, test } from "../support/fixtures";
+
+/** `bytes` as the app writes a size under 1 KB in `language`: its common.json `size.b` ("{{n}} B", "{{n}} بايت"). */
+const bytesIn = (language: string, bytes: number): string =>
+  (JSON.parse(readFileSync(join(import.meta.dirname, "..", "..", "apps", "ui", "src", "locales", language, "common.json"), "utf8")).size.b as string)
+    .replace("{{n}}", String(bytes));
 
 /** A 1×1 PNG, as a screenshot would put one on the clipboard. */
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
@@ -128,15 +135,17 @@ test("a picture's name too long for the sheet reads from its start in either app
 
     expect(await paste(alice.page, ".composer-row textarea", [{ name, type: "image/png", base64: PNG }])).toBe(false);
     const caption = alice.page.getByTestId("attachment-sheet").getByTestId("attachment-name");
-    await expect(caption).toHaveText(`${name} · 70 B`);
+    // The size in the app's language: "70 بايت" in Arabic, "70 B" in English.
+    const size = bytesIn(language, 70);
+    await expect(caption).toHaveText(`${name} · ${size}`);
     // The box that clips: the caption's content box (no padding), as the text is cut inside it.
     const inner = (el: Element) => {
       const { left, right } = el.getBoundingClientRect(), style = getComputedStyle(el);
       return { left: left + parseFloat(style.paddingLeft), right: right - parseFloat(style.paddingRight) };
     };
-    const [box, start, size] = await Promise.all([caption.evaluate(inner), textBox(caption, first), textBox(caption, "70 B")]);
+    const [box, start, end] = await Promise.all([caption.evaluate(inner), textBox(caption, first), textBox(caption, size)]);
     // Its first word and the size are drawn inside it, not under the "…" or past its edge.
-    for (const shown of [start, size]) {
+    for (const shown of [start, end]) {
       expect(shown.left).toBeGreaterThanOrEqual(box.left - 1);
       expect(shown.right).toBeLessThanOrEqual(box.right + 1);
     }

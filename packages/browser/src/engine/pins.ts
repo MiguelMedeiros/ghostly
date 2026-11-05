@@ -15,6 +15,11 @@ export interface PinsHost {
   message?(chat: string, id: string): Promise<StoredMessage | undefined>;
   /** The rows of a 1:1 chat a wire id may name besides `peer_`/`me_` and that id (`ReactionsHost.rows`), each read alone. */
   rows?(chat: string, id: string): Promise<string[]>;
+  /**
+   * The rows of a 1:1 chat that go by another id than their own, by that id, read once in a run; undefined when the
+   * host keeps none for that chat (the chat is then read whole).
+   */
+  unkeyed?(chat: string): Promise<ReadonlyMap<string, string>> | undefined;
 }
 
 const isGroup = (chat: string) => chat.startsWith("group:");
@@ -26,10 +31,18 @@ export function pinView(pin: StoredPin | undefined): PinView | undefined {
 
 /**
  * Whether a private group's pin was made by someone no longer in its roster (`inRoster`): it goes when they do, so a
- * member removed leaves nothing of theirs at the top of the chat.
+ * member removed leaves nothing of theirs at the top of the chat. Their unpin shows nothing already: it stays.
  */
 export function pinOfFormerMember(pin: StoredPin | undefined, inRoster: (key: string) => boolean): boolean {
-  return !!pin && pin.by !== "me" && !inRoster(pin.by);
+  return !!pin?.id && pin.by !== "me" && !inRoster(pin.by);
+}
+
+/**
+ * What a former member's pin is dropped to: an unpin at its number, so only a pin numbered past it shows. Dropped to
+ * none, an older pin a member kept while away (and says again when its edges open) would come back.
+ */
+export function droppedPin(pin: StoredPin, now = Date.now()): StoredPin {
+  return { id: "", n: pin.n, by: pin.by, at: now };
 }
 
 /** Whether I may pin in this group now: the rule (`mayPin`) with my key and its admin's. */
@@ -39,7 +52,8 @@ export function mayPinIn(group: GroupView | undefined): boolean {
 
 /**
  * The row a pin names, when it is here: the row of that id (a group's), or of `peer_`/`me_` and that id, or one the host
- * knows that id names (a file of mine, a payment), each read alone; else any other of a chat's.
+ * knows that id names (a file of mine, a payment), each read alone; else any other of a chat's, from the rows the host
+ * knows by another id (`unkeyed`) or, without those, the whole chat.
  */
 export async function pinnedRow(host: PinsHost, chat: string, id: string): Promise<StoredMessage | undefined> {
   if (!id) return undefined;
@@ -51,6 +65,12 @@ export async function pinnedRow(host: PinsHost, chat: string, id: string): Promi
     }
     // In a group there is no other: a row that takes a pin goes by its own id there, and a long group is not read whole.
     if (group) return undefined;
+    // Nor is a chat for each pin: a contact can name ids that never were, ten a window.
+    const unkeyed = host.unkeyed?.(chat);
+    if (unkeyed) {
+      const rowId = (await unkeyed).get(id), row = rowId === undefined ? undefined : await host.message(chat, rowId);
+      return row && replyRef(row, false) === id ? row : undefined;
+    }
   }
   return reactionTarget(await host.messages(chat), id, group);
 }

@@ -163,7 +163,7 @@ export interface EngineApi {
    * here or the id both sides know it by, `emoji` one emoji, or "" to take this side's reaction back. One reaction per
    * person per message: a new one replaces the old.
    */
-  react(params: { linkId: string; messageId: string; emoji: string }): { error: string | null; refused?: boolean };
+  react(params: { linkId: string; messageId: string; emoji: string }): { error: string | null; refused?: boolean; n?: number };
   /**
    * Pins a message (WISP 400 § Pinned message), or unpins with `remove`: `linkId` a chat's link or `group:<id>`,
    * `messageId` the message's id here or the id both sides know it by. One per chat: a new pin replaces the old. In a
@@ -193,7 +193,7 @@ export interface EngineApi {
   appSend(params: { linkId: string; ref: string; data: unknown; digest?: string }): { error: import("@ghostly/core").AppSendError | null };
   /**
    * The read lane (`app-ranges/1`, WISP 1200 § A read lane to the contact): lets the contact's app read `file` (this
-   * side's linked file id) while both have the app open on this session. The serve id, or why not (`not-open`,
+   * side's linked file id) while both have the app open, across a reconnect. The serve id, or why not (`not-open`,
    * `offline`, `peer-closed`). Each range the contact asks comes as an `app-range` event, answered by `appRangeAnswer`.
    */
   appServe(params: { linkId: string; ref: string; file: string; digest?: string }): { serve: string } | { error: "not-open" | "offline" | "peer-closed" };
@@ -383,6 +383,10 @@ export interface EngineApi {
   inviteToGroup(params: { groupId: string; linkId: string }): void;
   acceptGroupInvitation(params: { groupId: string }): void;
   declineGroupInvitation(params: { groupId: string }): void;
+  /** Another group came under this one's id (`GroupView.others`): the one held is the real one; the others' inviters are told no. */
+  keepGroup(params: { groupId: string }): void;
+  /** Another group under this one's id is the real one (`to`: its `linkId`, or its `link`): the one held goes, as Delete takes it. */
+  switchGroup(params: { groupId: string; to: string }): void;
   /** Turns the group's link on (or replaces it with a new one: the old one stops working). Admin only. */
   enableGroupLink(params: { groupId: string; reset?: boolean }): { link: string };
   disableGroupLink(params: { groupId: string }): void;
@@ -394,8 +398,11 @@ export interface EngineApi {
   sendGroupMessage(params: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string; card?: StatusCard }): { error: string | null; messageId?: string; refused?: boolean };
   /** A press on a button of someone else's message in a chat or a group (`group:<id>`), WISP 406 · Message Buttons. */
   pressButton(params: { linkId: string; messageId: string; buttonId: string }): { error: string | null; refused?: boolean; paced?: true; messageId?: string };
-  /** How many edges took my message `messageId` (or its edit number `edit`): members' edges in a private group, hubs' in a community. */
-  groupTaken(params: { groupId: string; messageId: string; edit?: number }): number;
+  /**
+   * How many edges took my message `messageId` (or its edit number `edit`, or my reaction numbered `reaction`, the `n`
+   * of `react`): members' edges in a private group, hubs' in a community.
+   */
+  groupTaken(params: { groupId: string; messageId: string; edit?: number; reaction?: number }): number;
   /** The numbers of my reactions and of my pin in a 1:1 chat that the contact has not confirmed yet. */
   chatUnconfirmed(params: { linkId: string }): { reactions: number[]; pin: number | null };
   groupMessages(params: { groupId: string }): StoredMessage[];
@@ -697,3 +704,11 @@ export type EngineEvent =
    * every engine call fails.
    */
   | { kind: "device-gate"; gate: import("../devices/gate").DeviceGateView };
+
+/**
+ * A state as a client across a copying boundary gets it (`copyingSink`, the extension's port): `payments` and `wallet`
+ * are left out when they are the ones that client was sent last, and the page keeps those.
+ */
+export type PostedState = Omit<EngineState, "payments" | "wallet"> & Partial<Pick<EngineState, "payments" | "wallet">>;
+/** What a page hears from the peer: an event, a state that may leave out what it already has, or an answer. */
+export type PostedEvent = Exclude<EngineEvent, { kind: "state" }> | { kind: "state"; state: PostedState } | RpcResponse;

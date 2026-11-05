@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-call-service"
+description = "Enables the call_service command without any pre-configured scope."
+commands.allow = ["call_service"]
+
+[[permission]]
+identifier = "deny-call-service"
+description = "Denies the call_service command without any pre-configured scope."
+commands.deny = ["call_service"]

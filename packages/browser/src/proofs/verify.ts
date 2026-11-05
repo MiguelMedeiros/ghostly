@@ -1,4 +1,4 @@
-import { boundVerifiedIdentity, IDENTITY_MAX_EVIDENCE, IDENTITY_MAX_VALIDITY, type IdentityStatement, type VerifiedIdentity } from "@ghostly/core";
+import { boundVerifiedIdentity, IdentityCheckUnavailable, IDENTITY_MAX_EVIDENCE, IDENTITY_MAX_VALIDITY, type IdentityStatement, type VerifiedIdentity } from "@ghostly/core";
 import type { IdentityFetch, IdentityProofProvider, IdentitySigner, VerifyContext } from "./contract";
 
 const DAY = 86_400;
@@ -59,7 +59,7 @@ export function availableSigners<E>(p: IdentityProofProvider<E>, platform: Ident
  */
 export function boundedIdentityFetch(options: { online: () => boolean; timeoutMs?: number; fetcher?: typeof fetch } = { online: () => true }): IdentityFetch {
   return async (url, { headers, maxBytes = 64 * 1024, signal, redirect = "error" } = {}) => {
-    if (!options.online()) throw new Error("Offline: this identity cannot be checked now");
+    if (!options.online()) throw new IdentityCheckUnavailable("Offline: this identity cannot be checked now");
     const target = new URL(url);
     if (target.protocol !== "https:" || target.username || target.password) throw new Error("Identity checks use HTTPS only");
     const timeout = AbortSignal.timeout(options.timeoutMs ?? 10_000);

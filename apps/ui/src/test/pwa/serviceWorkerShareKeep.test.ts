@@ -28,8 +28,19 @@ async function startWorker(scope = "https://app.ghostly.tools/", windows: { id: 
   await import("../../../../web/src/sw/sw");
   const waits: Promise<unknown>[] = [];
   const say = (data: unknown, source: Message["source"]) => listeners.get("message")!({ data, source, waitUntil: (promise) => { waits.push(promise); } });
-  return { say, waits };
+  /** Another app shares `text`: a POST to the share target, held once the worker read it. */
+  const post = async (text: string) => {
+    const form = new FormData();
+    form.set("text", text);
+    const request = new Request("https://app.ghostly.tools/share-target", { method: "POST", body: form });
+    let answered: Promise<unknown> = Promise.resolve();
+    listeners.get("fetch")!({ request, respondWith: (answer: Promise<unknown>) => { answered = answer; }, waitUntil: (promise: Promise<unknown>) => { waits.push(promise); } } as never);
+    await answered.catch(() => {});
+  };
+  return { say, post, waits };
 }
+
+const item = (text: string) => ({ title: "", text, url: "", files: [] });
 
 const page = (id: string) => {
   const heard: unknown[] = [];
@@ -53,6 +64,38 @@ it("holds a share the page gave back until the next page asks for it, and stays 
   // Handed over once.
   worker.say({ type: "share-ready" }, next);
   expect(next.heard).toEqual([{ type: "share", item }, { type: "share-none" }]);
+});
+
+it("shares posted past the three it holds are counted, and the page that takes the others is told how many", async () => {
+  const worker = await startWorker();
+  for (const text of ["one", "two", "three", "four", "five"]) await worker.post(text);
+  const next = page("b");
+  worker.say({ type: "share-ready" }, next);
+  expect(next.heard).toEqual([
+    { type: "share", item: expect.objectContaining(item("one")) },
+    { type: "share", item: expect.objectContaining(item("two")) },
+    { type: "share", item: expect.objectContaining(item("three")), dropped: 2 },
+  ]);
+  // Told once.
+  await worker.post("six");
+  worker.say({ type: "share-ready" }, next);
+  expect(next.heard[next.heard.length - 1]).toEqual({ type: "share", item: expect.objectContaining(item("six")) });
+});
+
+it("a page that goes with shares in its picker (a share into the same window) has them held ahead of the share it went for", async () => {
+  const worker = await startWorker();
+  // The window posts a new share: the worker holds it, and the page it replaces gives back the two in its picker.
+  await worker.post("new");
+  const leaving = page("a");
+  worker.say({ type: "share-keep", item: item("shown") }, leaving);
+  worker.say({ type: "share-keep", item: item("behind") }, leaving);
+  const next = page("b");
+  worker.say({ type: "share-ready" }, next);
+  expect(next.heard).toEqual([
+    { type: "share", item: item("shown") },
+    { type: "share", item: item("behind") },
+    { type: "share", item: expect.objectContaining(item("new")) },
+  ]);
 });
 
 it("a profile's push worker holds nothing", async () => {

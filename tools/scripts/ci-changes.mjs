@@ -67,6 +67,8 @@ export const WEBSITE_INPUTS = [
   "packages/cli/README.md",
   // llms.test.mjs checks the install line against the CLI's package name.
   "packages/cli/package.json",
+  // llms.test.mjs checks that llms.txt's Android line follows the Release workflow's ANDROID_FROM.
+  ".github/workflows/release.yml",
   // Quoted on /developers: sync-references.mjs's excerpt().
   "packages/core/src/invite.ts",
   "packages/core/src/pairedTransports.ts",
@@ -89,6 +91,7 @@ export const WEBSITE_INPUTS = [
   "packages/core/src/canonicalJson.ts",
   "packages/core/src/bytes.ts",
   "packages/core/src/image.ts",
+  "packages/core/src/text.ts",
   // privacy-hosts.test.mjs checks the privacy page's resolver list against the app's DoH resolvers.
   "packages/browser/src/proofs/domain.ts",
   // The launch checklist (e2e/launch-checklist.spec.ts) checks the repository's social preview's size.
@@ -113,11 +116,13 @@ export const NOT_APP = /^(apps\/website|docs)\//;
 export const PACKAGES_READ_FROM_SITE = [
   // packages/core's websiteInvite test: the join page's own copy of the invite rules.
   "apps/website/lib/invite.ts",
-  // packages/browser's atprotoOAuth test: the client metadata the site serves.
+  // packages/browser's atprotoOAuth test: the client metadata the site serves, and the home's Bluesky proof card.
   "apps/website/public/oauth/",
+  "apps/website/content/home.ts",
   // packages/cli's agentDocs test: every command the agents guide (and its prompt) and the agents page teach, and the
   // guides and pages that point to the voice agent.
   "docs/AI-AGENTS.md",
+  "docs/VOICE-AGENT.md",
   "apps/website/content/agents.ts",
   "apps/website/content/agentsThreat.ts",
   "docs/CLI.md",

@@ -16,6 +16,15 @@ describe("a member whose one hub was removed, and whose hub does not take that i
   type Live = { myHubs: string[] };
   const liveOf = (p: Peer, id: string) => (p.groups.communities as unknown as { live: Map<string, Live> }).live.get(id)!;
   const keyOf = (world: CommunityWorld, p: Peer, id: string) => world.view(p, id)!.myKey!;
+  /**
+   * The admin removes Bob alone, as an app from before revision 2026-11-03 does: one that removes him now also takes out
+   * Carol and Dave, whom he let in, and Dave is the member this is about.
+   */
+  type Commits = { serialize<T>(run: () => Promise<T>): Promise<T>; commit(kind: "remove", fields: { s: string }, now: number): Promise<unknown> };
+  const removeAlone = (p: Peer, id: string, key: string) => {
+    const s = p.groups.communities.session(id) as unknown as Commits;
+    return s.serialize(() => s.commit("remove", { s: key }, Date.now()));
+  };
 
   /** Alice (admin) lets Bob in; with her app closed, Bob lets Carol and Dave in: Dave's one hub is Bob. */
   async function setUp(seed: number) {
@@ -50,7 +59,7 @@ describe("a member whose one hub was removed, and whose hub does not take that i
 
   it("the group goes on talking: the member catches up past its hub, and the removed hub reads nothing after", async () => {
     const { world, alice, bob, dave, id, bobKey } = await setUp(7);
-    await alice.groups.remove(id, bobKey);
+    await removeAlone(alice, id, bobKey);
     await world.run(60_000);
     expect(world.view(bob, id)?.status).toBe("active");
     await alice.groups.send(id, "alice after the removal");
@@ -65,7 +74,7 @@ describe("a member whose one hub was removed, and whose hub does not take that i
 
   it("nobody else talks: the beacon keeps leaving the hub out, and the member catches up all the same", async () => {
     const { world, alice, bob, dave, id, bobKey } = await setUp(11);
-    await alice.groups.remove(id, bobKey);
+    await removeAlone(alice, id, bobKey);
     await world.until(() => dave.groups.communities.session(id)!.wasRemoved(bobKey), 5 * 60_000);
     expect(world.view(bob, id)?.status).toBe("active");
     await world.run(5_000);

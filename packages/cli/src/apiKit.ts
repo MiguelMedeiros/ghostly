@@ -20,6 +20,11 @@ export interface ApiContext {
   version: string;
   /** The daemon asks to stop (answered first). */
   stop?: () => void;
+  /**
+   * Aborted when the daemon stops (`serve().close`): a wait still open answers with what it knows (`waits.ts`), as a
+   * timeout with `details.reason: "daemon-stopped"`, before the connections end.
+   */
+  stopping?: AbortSignal;
   /** The daemon is a `listen` that found none and runs the profile itself: a stop ends that listen too. */
   listen?: true;
 }
@@ -149,10 +154,11 @@ export function namedByThem(ref: string, chat: { chat: string; name: string | nu
 const invitedOnly = (group: GroupView) => group.status === undefined && !!group.invitation;
 
 /**
- * A group by its id, by its name, or (only when no name matches) by a unique prefix of its id: whoever created a group
- * chose its id, so a prefix never wins over a name. A group this profile is in wins over an invitation with the same
- * name or prefix (the one who invites chooses those); an invitation is still found by its id, and by name or prefix
- * where no group of this profile has it.
+ * A group by its id, by its name, or by a unique prefix of its id. Whoever created a group chose its id and its admin
+ * chooses its name, so neither wins over the other: a ref that is one group's name and another's prefix is refused,
+ * with both ids, as `chatBy` does for chats. A group this profile is in wins over an invitation with the same name or
+ * prefix (the one who invites chooses those); an invitation is still found by its id, and by name or prefix where no
+ * group of this profile has it.
  */
 export function findGroup(groups: readonly GroupView[], ref: string): GroupView {
   if (!ref.trim()) throw new CliError("bad_request", `${JSON.stringify(ref)} names no group`);
@@ -160,8 +166,7 @@ export function findGroup(groups: readonly GroupView[], ref: string): GroupView 
   if (exact) return exact;
   const lower = ref.toLowerCase();
   for (const among of [groups.filter((group) => !invitedOnly(group)), groups.filter(invitedOnly)]) {
-    const byName = among.filter((group) => group.name.trim().toLowerCase() === lower);
-    const found = byName.length ? byName : among.filter((group) => group.id.startsWith(ref));
+    const found = among.filter((group) => group.name.trim().toLowerCase() === lower || group.id.startsWith(ref));
     if (found.length === 1) return found[0];
     if (found.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one group: use its id`, { matches: found.map((group) => group.id) });
   }
@@ -196,6 +201,20 @@ export function findChatOrGroup(links: readonly LinkView[], groups: readonly Gro
   const also = groups.filter((group) => !invitedOnly(group) && (group.id.startsWith(ref) || group.name.trim().toLowerCase() === lower));
   if (also.length) throw new CliError("bad_request", `${JSON.stringify(ref)} names a chat (by what its contact chose) and a group: use the chat's id or group:<id>`, { chat: chat.link.id, groups: also.map((group) => group.id) });
   return { link: chat.link };
+}
+
+/**
+ * Starts the chats a call names (its `chat`, a forward's `to`) in a runtime that left the saved chats unstarted
+ * (`RuntimeOptions.deferChats`). A ref that names no chat, or names a group, starts nothing: the call says so itself.
+ */
+export function startNamedChats(ctx: ApiContext, params: Params): void {
+  const { links, groups } = state(ctx);
+  for (const ref of [params.chat, ...(Array.isArray(params.to) ? params.to : [])]) {
+    if (typeof ref !== "string") continue;
+    let found: ReturnType<typeof findChatOrGroup>;
+    try { found = findChatOrGroup(links, groups, ref); } catch { continue; }
+    if ("link" in found) node(ctx).startDeferredChat(found.link.id);
+  }
 }
 
 export const chatOf = (ctx: ApiContext, params: Params) => findChat(state(ctx).links, str(params, "chat", true));

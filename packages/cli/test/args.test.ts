@@ -322,9 +322,9 @@ describe("the argument parser", () => {
       expect((error as CliError).code, name).toBe("usage");
       expect((error as CliError).message, name).toBe(message);
     };
-    usage("group create", [], "Missing <name>: ghostly group create <name...> [--mesh]");
-    usage("group create", ["--mesh"], "Missing <name>: ghostly group create <name...> [--mesh]");
-    usage("group rename", ["g1"], "Missing <name>: ghostly group rename <group> <name...> [--show-secret]");
+    usage("group create", [], "Missing <name>: ghostly group create <name...> [--mesh] [--force]");
+    usage("group create", ["--mesh"], "Missing <name>: ghostly group create <name...> [--mesh] [--force]");
+    usage("group rename", ["g1"], "Missing <name>: ghostly group rename <group> <name...> [--force] [--show-secret]");
     usage("lightning rename", ["c1"], "Missing <name>: ghostly lightning rename <card> <name...> [--network testnet]");
     usage("profile picture", [], "Missing <jpeg>: ghostly profile picture <jpeg> | --clear");
     usage("group picture", ["g1"], "Missing <jpeg>: ghostly group picture <group> <jpeg> | --clear");
