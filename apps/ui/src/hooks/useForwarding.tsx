@@ -31,16 +31,20 @@ export function useForwarding(from: string | undefined, messages: readonly ChatM
   useEffect(() => { setSelected(null); setForwarding(null); }, [from]);
   // A chosen message that leaves the chat (deleted here, or for everyone) is no longer chosen; the last one gone ends it.
   // "Forward to…" open on it forwards the rest (the engine refuses a forward with a message it no longer has, for every
-  // chat), or closes when none is left.
+  // chat), or closes when none is left. One edited meanwhile is held as it reads now: the engine forwards its new text,
+  // and the seed/key question must judge that text, not the one it had when Forward was pressed.
   useEffect(() => {
-    const here = new Set(messages.map(m => m.id));
-    const keep = <T,>(now: T[] | null, id: (item: T) => string) => {
+    const here = new Map(messages.map(m => [m.id, m]));
+    setSelected(now => {
       if (!now) return now;
-      const rest = now.filter(item => here.has(id(item)));
+      const rest = now.filter(id => here.has(id));
       return rest.length === now.length ? now : rest.length ? rest : null;
-    };
-    setSelected(now => keep(now, id => id));
-    setForwarding(now => keep(now, m => m.id));
+    });
+    setForwarding(now => {
+      if (!now) return now;
+      const rest = now.flatMap(m => here.get(m.id) ?? []);
+      return rest.length === now.length && rest.every((m, i) => m === now[i]) ? now : rest.length ? rest : null;
+    });
   }, [messages]);
   useEffect(() => {
     if (!selected || forwarding) return;

@@ -20,6 +20,7 @@ vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRing
 const PEER = "peer".padEnd(52, "p"), LINK = "link-zebra", WIRE = "Z".repeat(22);
 const zebra: StoredMessage = { linkId: LINK, id: `peer_${WIRE}`, text: "zebra secret 4472", sender: "peer", timestamp: Date.now() - 60_000, via: "datalink" };
 const hello: StoredMessage = { linkId: LINK, id: `peer_${"H".repeat(22)}`, text: "hello there", sender: "peer", timestamp: Date.now() - 120_000, via: "datalink" };
+const SEED = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 const tick = () => act(() => new Promise((resolve) => setTimeout(resolve, MESSAGE_CHANGES_TICK_MS * 2)));
 
 async function openChat(last = zebra) {
@@ -120,7 +121,7 @@ describe("messages chosen to forward", () => {
   });
 
   it("a deleted seed no longer asks before the rest goes", async () => {
-    const seed: StoredMessage = { ...zebra, text: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" };
+    const seed: StoredMessage = { ...zebra, text: SEED };
     const { engine, user } = await forwardBoth(seed);
     act(() => engine.emit({ kind: "message-changes", linkId: LINK, messages: [], deleted: [seed.id] }));
     await tick();
@@ -129,6 +130,32 @@ describe("messages chosen to forward", () => {
     await user.click(screen.getByTestId("forward-send"));
     expect(screen.queryByTestId("secret-guard")).not.toBeInTheDocument();
     expect(engine.callsTo("forwardMessages")).toEqual([{ linkId: LINK, messageIds: [hello.id], to: [LINK] }]);
+  });
+
+  /** The contact's edit of a chosen message while "Forward to…" is open: the forward sends the row's new text. */
+  const edited = (message: StoredMessage, text: string): StoredMessage =>
+    ({ ...message, text, edit: { seq: 1, at: Date.now(), history: [{ at: message.timestamp, text: message.text }] } });
+
+  it("one edited into a seed while Forward to… is open is asked about before it goes", async () => {
+    const { engine, user } = await forwardBoth(zebra);
+    act(() => engine.emit({ kind: "message-changes", linkId: LINK, messages: [edited(zebra, SEED)], deleted: [] }));
+    await tick();
+
+    await user.click(screen.getAllByTestId("forward-target")[0]!);
+    await user.click(screen.getByTestId("forward-send"));
+    expect(screen.getByTestId("secret-guard")).toBeInTheDocument();
+    expect(engine.callsTo("forwardMessages")).toEqual([]);
+  });
+
+  it("one whose seed was edited away while Forward to… is open goes without asking", async () => {
+    const { engine, user } = await forwardBoth({ ...zebra, text: SEED });
+    act(() => engine.emit({ kind: "message-changes", linkId: LINK, messages: [edited({ ...zebra, text: SEED }, "zebra secret 4473")], deleted: [] }));
+    await tick();
+
+    await user.click(screen.getAllByTestId("forward-target")[0]!);
+    await user.click(screen.getByTestId("forward-send"));
+    expect(screen.queryByTestId("secret-guard")).not.toBeInTheDocument();
+    expect(engine.callsTo("forwardMessages")).toEqual([{ linkId: LINK, messageIds: [hello.id, zebra.id], to: [LINK] }]);
   });
 
   it("the last one deleted closes Forward to…", async () => {
