@@ -588,6 +588,47 @@ describe("redeeming a token", () => {
   });
 });
 
+describe("restored ecash at a mint that cannot say what is spent", () => {
+  for (const [what, answer] of [["does not answer", "lost"], ["holds it pending", "pending"]] as const) {
+    it(`${what}: asked every minute at first, then less and less often, every 30 min at most, and checked once it says`, async () => {
+      await transact([STORES.proofs], (s) => { s[STORES.proofs].put(stored(16, "u", { unchecked: true })); });
+      if (answer === "lost") mintApi.checkProofsStates.mockRejectedValue(lost());
+      else mintApi.checkProofsStates.mockImplementation(async (asked: unknown[]) => asked.map(() => ({ state: "PENDING" })));
+      const { wallet } = setup();
+      wallet.start();
+      await pass(5 * 60_000, 60_000);
+      const early = mintApi.checkProofsStates.mock.calls.length;
+      expect(early, "asked at once on a start").toBeGreaterThanOrEqual(1);
+      await pass(24 * 3_600_000, 60_000);
+      // At most every 30 min: 48 a day. Every minute, it was 1,440.
+      expect(mintApi.checkProofsStates.mock.calls.length - early, "not every minute for a day").toBeLessThan(60);
+      expect((await proofs()).find((p) => p.secret === "u")?.unchecked).toBe(true);
+
+      mintApi.checkProofsStates.mockReset();
+      mintApi.checkProofsStates.mockImplementation(async (asked: unknown[]) => asked.map(() => ({ state: "UNSPENT" })));
+      await pass(30 * 60_000 + 60_000, 60_000);
+      expect((await proofs()).find((p) => p.secret === "u")?.unchecked).toBeUndefined();
+      expect(await balance()).toBe(72 + 16);
+      await wallet.stop();
+    }, 120_000);
+  }
+
+  it("a mint asked less often is asked at once on the next start", async () => {
+    await transact([STORES.proofs], (s) => { s[STORES.proofs].put(stored(16, "u", { unchecked: true })); });
+    mintApi.checkProofsStates.mockRejectedValue(lost());
+    const first = setup();
+    first.wallet.start();
+    await pass(3_600_000, 60_000);
+    await first.wallet.stop();
+    mintApi.checkProofsStates.mockReset();
+    mintApi.checkProofsStates.mockImplementation(async (asked: unknown[]) => asked.map(() => ({ state: "SPENT" })));
+    const next = await reopened();
+    expect(mintApi.checkProofsStates).toHaveBeenCalledOnce();
+    expect(await balance()).toBe(72);
+    await next.wallet.stop();
+  });
+});
+
 describe("splitting ecash for a token", () => {
   const outbox = (token: string, mint: string): StoredPayment => ({ id: "out1", linkId: "l1", kind: "payment", direction: "out", amount: 40, unit: "sat", state: "pending", createdAt: 1, mint, token });
 
