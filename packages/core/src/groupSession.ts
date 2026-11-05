@@ -890,6 +890,7 @@ export class GroupSession {
     this.chainMovedAt = this.clock();
     this.state.secrets[epoch] = toBase64Url(secret);
     this.pruneSecrets();
+    this.pruneSeen();
     this.pruneRelay();
     this.state.seq = 0; this.state.seqEpoch = epoch;
     await this.persist();
@@ -1798,6 +1799,16 @@ export class GroupSession {
     // Epochs older than what I can read are not worth a replay window.
     for (const e of Object.keys(bySender)) if (Number(e) < this.epoch - GROUP_LIMITS.secrets) delete bySender[e];
   }
+  /**
+   * The same for every sender, as the chain moves: `markSeen` prunes only the sender that writes, and a member who left
+   * never writes again. Each sync carries what is left here (`have`, `miss`), on every edge.
+   */
+  private pruneSeen(): void {
+    for (const [sender, bySender] of Object.entries(this.state.seen)) {
+      for (const e of Object.keys(bySender)) if (Number(e) < this.epoch - GROUP_LIMITS.secrets) delete bySender[e];
+      if (!Object.keys(bySender).length) delete this.state.seen[sender];
+    }
+  }
 
   private park(from: string, frame: GroupMessageFrame): void {
     if (frame.e > this.epoch + GROUP_LIMITS.secrets) return;
@@ -1916,6 +1927,7 @@ export class GroupSession {
     }
     if (sealed) this.takeSecret(commit.e, sealed);
     this.pruneSecrets();
+    this.pruneSeen();
     this.pruneRelay();
     // Someone out of the roster is named by no record of theirs: let in again, theirs start over.
     for (const key of Object.keys(this.state.names ?? {})) if (!rosterHas(commit.m, key)) delete this.state.names![key];
