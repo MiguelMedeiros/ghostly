@@ -16,6 +16,8 @@ function Where() {
   return <p data-testid="where">{useLocation().pathname}</p>;
 }
 
+const viewport = (width: number, height = 800) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });
+
 /** A paired chat with Alice, connected now. */
 const paired = (patch: Partial<LinkView> = {}) => linkView({ pairing: { status: "ready" } as LinkView["pairing"], identities: identitiesView(), ...patch });
 
@@ -326,6 +328,31 @@ describe("ComposerIdentityPicker", () => {
     await turned();
     await second.user.keyboard("{Escape}");
     expect(second.onClose).toHaveBeenCalled();
+  });
+
+  it("on a phone the sheet keeps Tab: Tab and Shift+Tab go round its own controls, never to the page behind its backdrop", async () => {
+    // From Manage identities Tab went on to the chat under the backdrop (its Back, header, messages), the sheet still
+    // open over it; Shift+Tab from the chosen card went to the composer's voice and + buttons.
+    viewport(390, 844);
+    try {
+      const { user, engine } = renderApp(<><button>Behind</button><ComposerIdentityPicker peerKey="peer" contact="Alice" onClose={() => {}} /></>);
+      act(() => engine.update({ links: [paired()], identityProofs: [proofView()] }));
+      const manage = screen.getByTestId("composer-identities-manage");
+      act(() => chosen()!.focus());
+      await user.tab({ shift: true });
+      expect(manage).toHaveFocus();
+      await user.tab();
+      expect(sheet()).toContainElement(document.activeElement as HTMLElement);
+      expect(screen.getByRole("button", { name: "Behind" })).not.toHaveFocus();
+    } finally { viewport(1024, 768); }
+  });
+
+  it("on a wide screen, where it floats over the composer with no backdrop, Tab goes on to the page", async () => {
+    const { user, engine } = renderApp(<><ComposerIdentityPicker peerKey="peer" contact="Alice" onClose={() => {}} /><button>After</button></>);
+    act(() => engine.update({ links: [paired()], identityProofs: [proofView()] }));
+    act(() => screen.getByTestId("composer-identities-manage").focus());
+    await user.tab();
+    expect(screen.getByRole("button", { name: "After" })).toHaveFocus();
   });
 });
 
