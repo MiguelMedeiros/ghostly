@@ -192,14 +192,17 @@ test("a message to a closed web app wakes it with a push its contact's app sends
   await worker.deliver(pushed);
   await expect.poll(() => worker.shown()).toEqual([{ body: "New message", tag: expect.stringContaining(row!.path), path: row!.path }]);
 
-  // A push naming a token Bo no longer uses (the one from before the mute) shows nothing.
-  await worker.deliver(JSON.stringify({ wake: 1, k: row!.token }));
-  await worker.page.waitForTimeout(1500);
-  expect(await worker.shown()).toHaveLength(1);
+  // A push naming a token Bo no longer uses (the one from before the mute) shows no chat: the app's name alone, one
+  // per profile however many come, since a push that shows nothing counts against the subscription.
+  for (const k of [row!.token, row!.token]) await worker.deliver(JSON.stringify({ wake: 1, k }));
+  await expect.poll(async () => (await worker.shown()).sort((a, b) => a.tag.localeCompare(b.tag))).toEqual([
+    { body: "", tag: "quiet:", path: "/" },
+    { body: "New message", tag: expect.stringContaining(row!.path), path: row!.path },
+  ]);
 
   // The tap: the app's window comes to that chat (a new window opens only from a real tap, which a test cannot make).
   await reopen(bo);
-  const [notice] = await worker.shown();
+  const notice = (await worker.shown()).find((shown) => shown.path === row!.path);
   await worker.page.evaluate(async (tag) => {
     const registration = await navigator.serviceWorker.getRegistration("/push/default/");
     registration!.active!.postMessage({ type: "open-notification", tag });
@@ -207,7 +210,9 @@ test("a message to a closed web app wakes it with a push its contact's app sends
   await expect(bo.page).toHaveURL(new RegExp(`#${row!.path}$`));
   await expect(chat(bo).getByText("wake up")).toBeVisible({ timeout: 150_000 });
   await expect(chat(bo).getByText("hello?")).toBeVisible({ timeout: 150_000 });
-  expect(await worker.shown()).toEqual([]);
+  // The tap closed the chat's notice. (Whether the quiet one is still listed depends on how long the app took to
+  // fetch: the headless browser's own list drops notices about 30 s after the push worker's last event.)
+  expect((await worker.shown()).filter((shown) => shown.path !== "/")).toEqual([]);
 });
 
 test("turning it off tells the contact, and stops the wake-ups", { tag: ["@feature:push.wake.exchange"] }, async ({ peer }) => {
