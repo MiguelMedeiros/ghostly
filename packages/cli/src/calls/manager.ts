@@ -339,8 +339,10 @@ export class CallManager {
    */
   private prepare(call: Call): void {
     if (this.host.answers === false || call.ended || call.state !== "ringing") return;
-    const iceServers = this.host.engine.getState().settings?.iceServers ?? [];
-    if (callUsesTurn(callIceServers(iceServers))) return;
+    const settings = this.host.engine.getState().settings;
+    const iceServers = settings?.iceServers ?? [];
+    // Hide my IP from contacts: no call is answered here (`callable`), so none is made ahead either.
+    if (settings?.relayOnly === true || callUsesTurn(callIceServers(iceServers))) return;
     this.stopEarly(call);
     call.earlyTimer = setTimeout(() => this.prepare(call), this.host.earlyAnswerMs ?? EARLY_ANSWER_MS);
     call.earlyTimer.unref?.();
@@ -762,6 +764,7 @@ export class CallManager {
     if (this.host.answers === false) throw new CliError("unavailable", CALLS_NEED_DAEMON);
     if (!link.profile) throw new CliError("unavailable", "Calls are in chats made since 0.4 (the chat session): this is a compatibility chat");
     if (link.callsUnavailable) throw new CliError("unavailable", link.callsUnavailable);
+    if (this.host.engine.getState().settings?.relayOnly === true) throw new CliError("unavailable", CALLS_OFF_RELAY_ONLY);
     return link;
   }
 
@@ -771,6 +774,13 @@ export class CallManager {
 }
 
 const CALLS_NEED_DAEMON = "Calls need the daemon (a call outlives this command): start it with `ghostly daemon --detach`";
+/**
+ * Hide my IP from contacts (`relayOnly`, WISP 601 Relay only): libdatachannel's relay policy only keeps the other
+ * candidates out of the signal; its ICE still checks from this machine's own sockets, and a call connected on a direct
+ * pair in a local lab. So the CLI places and answers no call while it is on, as the apps do with media that cannot keep
+ * to the relay.
+ */
+const CALLS_OFF_RELAY_ONLY = "Calls are off while Hide my IP from contacts is on: this headless Ghostly cannot keep a call to the relay";
 
 function nameOf(link: LinkView): string | null {
   return link.label?.trim() || link.peerNick?.trim() || null;
