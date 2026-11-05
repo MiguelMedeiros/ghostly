@@ -1,5 +1,6 @@
 import type { KeyboardEvent, RefObject } from "react";
 import { useI18n } from "../../contexts/I18nContext";
+import { draftDirection } from "../../lib/documentLanguage";
 import type { ChatTarget } from "../../hooks/useChatTargets";
 import { chatTargetRows } from "../../lib/chatTargets";
 
@@ -52,7 +53,7 @@ export function ChatTargetSearch({ inputRef, list, value, onChange, testId }: {
     first.focus();
   };
   return (
-    <input ref={inputRef} type="search" data-testid={testId} value={value} onChange={e => onChange(e.target.value)} onKeyDown={keys}
+    <input ref={inputRef} type="search" data-testid={testId} value={value} dir={draftDirection(value)} onChange={e => onChange(e.target.value)} onKeyDown={keys}
       placeholder={t("chat.forward.search")} aria-label={t("chat.forward.search")}
       className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus-visible:ring-2 focus-visible:ring-focus-ring" />
   );

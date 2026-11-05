@@ -4,6 +4,7 @@ import { PeerAvatar } from "../components/Avatar";
 import { AvatarOpener } from "../components/AvatarViewer";
 import { useBackdropDismiss, useDialogFocus } from "../hooks/useDismiss";
 import { useComposition } from "../hooks/useComposition";
+import { draftDirection } from "../lib/documentLanguage";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { setChatOnCall } from "../lib/chatsOnCall";
 import { callHoldsService, useCallService } from "../lib/callService";
@@ -877,6 +878,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 ref={labelInputRef}
                 type="text"
                 value={labelDraft}
+                dir={draftDirection(labelDraft)}
                 onChange={(e) => setLabelDraft(e.target.value)}
                 {...labelComposition.inputProps}
                 onKeyDown={(e) => {

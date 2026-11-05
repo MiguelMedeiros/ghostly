@@ -1,6 +1,7 @@
 import type { KeyboardEvent, ReactNode, Ref } from "react";
 import { SearchIcon } from "./icons";
 import { useComposition } from "../../hooks/useComposition";
+import { draftDirection } from "../../lib/documentLanguage";
 
 /** The row of category icons over the emoji/GIF panel's grid; the chosen one is underlined. */
 export function CategoryBar({ label, items, active, onChoose, testIdPrefix }: {
@@ -38,7 +39,7 @@ export function PanelSearch({ value, onChange, placeholder, inputRef, onKeyDown,
     <div className="expression-search-row">
       <label className="expression-search">
         <SearchIcon />
-        <input ref={inputRef} type="search" value={value} data-testid="expression-search" placeholder={placeholder} aria-label={placeholder}
+        <input ref={inputRef} type="search" value={value} dir={draftDirection(value)} data-testid="expression-search" placeholder={placeholder} aria-label={placeholder}
           onChange={(e) => onChange(e.target.value)} {...composition.inputProps}
           onKeyDown={(e) => { if (!composition.composing(e)) onKeyDown?.(e); }} autoComplete="off" spellCheck={false} />
       </label>
