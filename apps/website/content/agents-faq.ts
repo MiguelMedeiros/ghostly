@@ -95,7 +95,7 @@ export const agentsFaq = {
     {
       id: "install",
       q: "What does the agent need installed?",
-      a: "Node.js 22.12 or newer and the CLI: `npm install -g @ghostlytools/cli`. WebRTC comes from a native module with prebuilt binaries for Linux, macOS and Windows; without it the CLI still chats over HyperDHT, Iroh and the DHT, but groups do not work. CI tests it on Linux x64 and arm64 and it is developed on Apple silicon Macs; Intel Macs and Windows get the same prebuilt modules but no CI run. The agent guide, SKILL.md, takes the agent through the rest.",
+      a: "Node.js 22.12 or newer and the CLI: `npm install -g @ghostlytools/cli`. WebRTC comes from a native module with prebuilt binaries for Linux, macOS and Windows; without it the CLI still chats over HyperDHT, Iroh and the DHT, and its groups go over Iroh or HyperDHT, but it cannot place or answer calls. CI tests it on Linux x64 and arm64 and it is developed on Apple silicon Macs; Intel Macs and Windows get the same prebuilt modules but no CI run. The agent guide, SKILL.md, takes the agent through the rest.",
       links: [SKILL, { label: "The CLI", href: "/cli" }],
     },
     {
