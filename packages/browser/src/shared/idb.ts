@@ -325,6 +325,10 @@ export const PROFILE_STORES = [STORES.links, STORES.messages, STORES.files, STOR
  */
 export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "nostrSocial", "publicProfiles", "appBuiltIns", "appBundles", "x401Credentials", "contactLinks", "contactAsks", "savedMessages"] as const;
 
+/** A private group's small row in the settings store (`GroupLive`, `engine/groupRows.ts`): the profile's too. */
+export const groupLiveKey = (groupId: string): string => `groupLive:${groupId}`;
+export const GROUP_LIVE_RANGE = (): IDBKeyRange => IDBKeyRange.bound(groupLiveKey(""), `${groupLiveKey("")}￿`);
+
 /**
  * The fields of the peer's `settings` record that are a wallet's, kept by "Clear all data": the mint list, the first-run
  * wallet setup and the backup reminders. Everything else in it is the profile's (name, picture, network settings,
@@ -347,6 +351,7 @@ export async function clearProfileStores(): Promise<void> {
   if (names.includes(STORES.settings)) {
     const settings = tx.objectStore(STORES.settings);
     for (const key of PROFILE_SETTINGS_KEYS) settings.delete(key);
+    settings.delete(GROUP_LIVE_RANGE());
     const read = settings.get("settings");
     read.onsuccess = () => {
       const record = read.result as Record<string, unknown> | undefined;
