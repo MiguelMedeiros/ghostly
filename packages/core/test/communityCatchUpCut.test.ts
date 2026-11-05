@@ -164,7 +164,8 @@ describe("a community catch-up cut after a live frame of an author whose missed 
     await net.settle();
     for (let i = 0; i < 40; i++) { net.now += 500; await net.step(); }
     expect(bob.texts).toHaveLength(COMMUNITY_LIMITS.store);
-    expect(bob.session.missing(carol.session.myKey)).toBe(128);
+    // Nobody holds them: once the answer is over they are not counted as on their way (`settleGaps`), but still asked for.
+    expect(bob.session.missing(carol.session.myKey)).toBe(0);
     const handedToBob = () => net.sent.filter(x => x.to === "Bob" && x.frame.t === "group-msg").length;
     const counts: number[] = [];
     for (let r = 0; r < 8; r++) { const from = handedToBob(); await idleSyncs(net, bob, [alice], 1); counts.push(handedToBob() - from); }
