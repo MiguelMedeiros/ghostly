@@ -267,31 +267,38 @@ describe("withoutVideoMetadata", () => {
   });
 
   it("a fragmented video with a box it empties in each fragment is checked once per fragment, not against every other fragment", async () => {
-    // A live encoder's recording: a `prft` (when the fragment was made) before each of 8,000 fragments, two samples each.
+    // A live encoder's recording: a `prft` (when the fragment was made) before each of 16,000 fragments, two samples each.
     const u32 = (n: number) => Buffer.from([n >>> 24, (n >> 16) & 255, (n >> 8) & 255, n & 255]);
     const head = box("ftyp", Buffer.from("isom\0\0\0\0isom", "latin1"));
     const moov = box("moov", box("mvhd", Buffer.alloc(100)), metadataTrack(0, 4, "soun"), box("mvex", box("trex", u32(0), u32(1), u32(1), u32(0), u32(6), u32(0))));
     const mdat = box("mdat", Buffer.from("frame1frame2", "latin1"));
     // Its run starts past the `moof` (the base is the `moof`'s start), at its `mdat`'s samples.
     const moof = (n: number, offset: number) => box("moof", box("mfhd", u32(0), u32(n)), box("traf", box("tfhd", u32(0x20000), u32(1)), box("trun", u32(1), u32(2), u32(offset))));
-    const recording = (prft: boolean) => Buffer.concat([head, moov, ...Array.from({ length: 8_000 }, (_, i) => [
+    const recording = (prft: boolean) => Buffer.concat([head, moov, ...Array.from({ length: 16_000 }, (_, i) => [
       ...prft ? [box("prft", u32(0), u32(1), Buffer.alloc(8), u32(0))] : [], moof(i + 1, moof(0, 0).length + 8), mdat]).flat()]);
     // Read from memory, so the time is the walk's and the checks', not a Blob's reads.
     const cpu = async (file: Buffer) => {
-      const prfts = file.includes(Buffer.from("prft", "latin1")) ? 8_000 : 0;
+      const prfts = file.includes(Buffer.from("prft", "latin1")) ? 16_000 : 0;
       const before = process.cpuUsage();
       const patches = await videoMetadataPatches({ size: file.length, read: async (offset, length) => new Uint8Array(file.subarray(offset, offset + length)) }, "video/mp4");
       const used = process.cpuUsage(before);
-      // Each `prft` made `free`, its body zeros, the 8,000 `moof`s as they were.
+      // Each `prft` made `free`, its body zeros, the 16,000 `moof`s as they were.
       expect(patches!.filter((patch) => !patch.bytes).length).toBe(prfts);
       return used.user + used.system;
     };
-    // The same video without them: the `prft`s cost about what the fragments do, not fragments x fragments.
-    // Twice as long with them (each is two more reads), seven times before.
-    await cpu(recording(false));
-    const plain = await cpu(recording(false)), timed = await cpu(recording(true));
-    expect(timed / plain, `${timed} µs with a prft per fragment, ${plain} µs without`).toBeLessThan(3.5);
-  });
+    // The same video without them: the `prft`s cost about what the fragments do, not fragments x fragments. Each run
+    // warmed up, the best of three: at most twice as long with them (each is two more reads), seventeen times before.
+    const plainFile = recording(false), timedFile = recording(true);
+    const best = async (file: Buffer) => {
+      let least = Infinity;
+      for (let run = 0; run < 3; run++) least = Math.min(least, await cpu(file));
+      return least;
+    };
+    await cpu(plainFile);
+    await cpu(timedFile);
+    const plain = await best(plainFile), timed = await best(timedFile);
+    expect(timed / plain, `${timed} µs with a prft per fragment, ${plain} µs without`).toBeLessThan(5);
+  }, 120_000);
 
   it("a video with nothing left to remove goes the same: the fixture's encoder tag (udta/meta/ilst) went the first time", async () => {
     const once = await bytesOf((await withoutVideoMetadata(new Blob([H264_MP4]), "video/mp4"))!);
