@@ -14,6 +14,7 @@ import {
   PRESENCE_WINDOW,
   presenceSeenAt,
   RELAY_POLL_INTERVALS,
+  SIGNAL_DUE_READS,
   SIGNAL_OUT_READS,
   STALLED_LOOK_MS,
   WATCH_PEER_MS,
@@ -597,6 +598,47 @@ describe("LinkSession presence and signals", () => {
     await settle();
     expect(lastRead()).not.toHaveProperty("signal");
     await a.s.stop(false);
+  });
+
+  it("marks as signaling the first fast reads once the contact's offer is due, not one the budget held back, until one finds it", async () => {
+    const { a, b } = pair({ getServices: () => [] }, { getServices: () => [] });
+    a.s.start();
+    b.s.start();
+    await settle();
+    const lastRead = () => (a.transport.resolve.mock.lastCall as unknown[] | undefined)?.[1];
+    // The peer expected: fast reads, not signaling.
+    a.s.expectPeer();
+    await settle();
+    expect(lastRead()).toMatchObject({ urgent: true });
+    expect(lastRead()).not.toHaveProperty("signal");
+    // Its offer due now (the chat left DHT only on both sides): the first reads are.
+    a.s.expectPeer(false, true);
+    await settle();
+    expect(lastRead()).toMatchObject({ urgent: true, signal: true });
+    // One the relays' budget held back asked them nothing: it is not counted.
+    a.transport.failResolve = new DiscoveryBudgetError(5_000);
+    a.s.pollNow();
+    await settle();
+    a.transport.failResolve = null;
+    for (let i = 1; i < SIGNAL_DUE_READS; i++) {
+      a.s.pollNow();
+      await settle();
+      expect(lastRead()).toMatchObject({ urgent: true, signal: true });
+    }
+    a.s.pollNow();
+    await settle();
+    expect(lastRead()).not.toHaveProperty("signal");
+    // Due again, and the first read finds the offer: what follows reads as its answer's, not as more of these.
+    await b.s.setRtcSignal('{"t":"o"}');
+    a.s.expectPeer(false, true);
+    await settle();
+    expect(lastRead()).toMatchObject({ signal: true });
+    expect(a.ev.onRtcSignal).toHaveBeenCalledOnce();
+    a.s.pollNow();
+    await settle();
+    expect(lastRead()).not.toHaveProperty("signal");
+    await a.s.stop(false);
+    await b.s.stop(false);
   });
 
   it("does not publish the RTC signal or services in its departure packet", async () => {
