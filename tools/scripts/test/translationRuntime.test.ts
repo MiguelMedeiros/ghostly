@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { nativeRuntimeFiles } from "../native-runtime-files.mjs";
+import { packTarGz, sourceDateEpoch } from "../tar-gz.mjs";
 import { MAX_LINE, MAX_MODELS, MAX_TEXTS, createRuntime, lineReader, modelFiles, pairFiles, parsePair } from "../../../native/translation/protocol.mjs";
 
 /**
@@ -308,4 +309,14 @@ it.skipIf(!existsSync(`${BUILT}.tar.gz`))(`translates pt-en on this host (${PLAT
   runtime.end();
   expect(await runtime.exited).toBe(0);
   rmSync(dirname(dir), { recursive: true, force: true });
+});
+
+// The SHA-256 the app pins comes back from the same folder and commit: anyone can rebuild a published archive from its
+// tag. A build from an older commit than the one checked out fails here too: build it again.
+it.skipIf(!existsSync(`${BUILT}.tar.gz`))(`packs this host's (${PLATFORM}) runtime into the same bytes again`, { timeout: 120_000 }, async () => {
+  const [pinned] = readFileSync(`${BUILT}.tar.gz.sha256`, "utf8").split(/\s+/);
+  const again = join(mkdtempSync(join(tmpdir(), "ghostly-translation-runtime-")), basename(`${BUILT}.tar.gz`));
+  await packTarGz(BUILT, again, { mtime: sourceDateEpoch(SOURCE) });
+  expect(sha256(readFileSync(again))).toBe(pinned);
+  rmSync(dirname(again), { recursive: true, force: true });
 });
