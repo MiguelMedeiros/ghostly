@@ -586,6 +586,38 @@ describe("the event stream", () => {
       expect(h.emit("x", "x:2").seq).toBe(h.replay(0).at(-2)!.seq + 1);
     });
 
+    /**
+     * An old message deleted wrote the whole journal again from its first event on, made into text (16 MiB and 70 ms a
+     * deletion at 10,000 events): now only its lines are read as text and written over where they are.
+     */
+    it("an old message deleted writes over its own lines only, and the journal still opens and replays", async () => {
+      const { h, path } = await filled("in-place.jsonl", 2_000);
+      const quote = { replyTo: { id: "wire-m5", snippet: `${text} 5`, from: "peer" as const, messageId: "m5" } };
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: [message("c1", "r1", { text: "an answer", ...quote })], deleted: [] });
+      const before = readFileSync(path), file = statSync(path).ino;
+      expect(decoded(() => h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["m5"] }))).toBeLessThan(before.length / 50);
+      const after = readFileSync(path);
+      // The same file, where only the message's own line and the reply that quoted it changed; then the deletion's line.
+      expect(statSync(path).ino).toBe(file);
+      const lines = (bytes: Buffer) => bytes.toString("utf8").split("\n");
+      const was = lines(before), now = lines(after.subarray(0, before.length));
+      expect(now).toHaveLength(was.length);
+      expect(was.filter((line, i) => line !== now[i]).map((line) => (JSON.parse(line) as GhostlyEvent).id)).toEqual(["message.received:c1:m5", "message.received:c1:r1"]);
+      expect(after.toString("utf8")).not.toContain(`${text} 5"`);
+      const check = (hub: EventHub) => {
+        const replayed = hub.replay(0);
+        expect(replayed.filter((e) => e.type === "message.received")).toHaveLength(2_000);
+        expect(replayed.map((e) => e.id)).not.toContain("message.received:c1:m5");
+        expect(replayed.find((e) => e.id === "message.received:c1:r1")!.message).toMatchObject({ replyTo: { id: "m5", snippet: "", found: false, deleted: true } });
+        expect(replayed.at(-1)!.id).toBe("message.deleted:c1:m5");
+      };
+      check(h);
+      const again = new EventHub(path, () => 1000, "in-place-again");
+      await again.open();
+      expect(again.lastSeq).toBe(h.lastSeq);
+      check(again);
+    });
+
     it("a change that deletes thousands of messages reads each line once", async () => {
       const { h, path } = await filled("many.jsonl", 5_000);
       const ids = Array.from({ length: 4_000 }, (_, i) => `m${i}`);

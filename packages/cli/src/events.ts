@@ -347,9 +347,9 @@ export class EventHub {
   }
 
   /**
-   * What was removed here leaves the journal too: the journal is written again without the events that name it (a
-   * line that names it and cannot be read goes as well), and a journal set aside as unreadable, which cannot be sorted,
-   * is deleted. `ids`: what was removed (a message's id, a chat's or a group's); `gone`: whether an event is of it;
+   * What was removed here leaves the journal too: the events that name it are blanked, or the journal is written again
+   * without them (a line that names it and cannot be read goes as well), and a journal set aside as unreadable, which
+   * cannot be sorted, is deleted. `ids`: what was removed (a message's id, a chat's or a group's); `gone`: whether an event is of it;
    * `unquote`: an event that stays, written again without what it quotes of the removed (a reply's event), else none.
    */
   private forget(ids: readonly string[], gone: (event: GhostlyEvent) => boolean, unquote: (event: GhostlyEvent) => GhostlyEvent | undefined = () => undefined): void {
@@ -357,37 +357,55 @@ export class EventHub {
     try {
       rmSync(this.journalPath + ".unreadable", { force: true });
       if (!existsSync(this.journalPath)) return;
-      const { bytes, start } = journalWindow(this.journalPath);
-      // A few ids: looked for in the bytes, and only the lines from the first one that names one are read (a message
-      // deleted is most often a recent one, its events at the end). None named: nothing to write. Many (a chat removed
-      // with its history, a long change): every line is read once, against all of them at once.
+      const { bytes, start, at } = journalWindow(this.journalPath);
+      // A few ids: looked for in the bytes, and only the lines that name one are read. None named: nothing to write.
+      // Many (a chat removed with its history, a long change): every line is read once, against all of them at once.
       const needles = ids.map((id) => JSON.stringify(id)), few = ids.length <= FORGET_SEARCHED_IDS;
       const names = (line: string) => needles.some((needle) => line.includes(needle));
-      let from = few ? bytes.length : start;
-      if (few) for (const needle of needles) { const at = bytes.indexOf(needle, start); if (at !== -1 && at < from) from = at; }
-      if (from === bytes.length) return;
-      from = Math.max(start, bytes.lastIndexOf(10, from) + 1);
-      const lines = bytes.toString("utf8", from).split("\n").filter(Boolean);
-      let changed = false;
-      const kept = lines.flatMap((line) => {
-        if (few && !names(line)) return [line];
+      // What changes: each line's bounds in `bytes`, and what it becomes (null: it goes).
+      const edits: { from: number; to: number; line: string | null }[] = [];
+      for (const [from, to] of few ? linesNaming(bytes, start, needles) : linesOf(bytes, start)) {
+        const line = bytes.toString("utf8", from, to);
         let event: GhostlyEvent;
         // A line that names one and cannot be read goes.
-        try { event = JSON.parse(line) as GhostlyEvent; } catch { if (!few && !names(line)) return [line]; changed = true; return []; }
-        if (gone(event)) { changed = true; return []; }
+        try { event = JSON.parse(line) as GhostlyEvent; } catch { if (few || names(line)) edits.push({ from, to, line: null }); continue; }
+        if (gone(event)) { edits.push({ from, to, line: null }); continue; }
         const written = unquote(event);
-        if (!written) return [line];
-        changed = true;
-        return [JSON.stringify(written)];
-      });
-      if (!changed) return;
+        if (written) edits.push({ from, to, line: JSON.stringify(written) });
+      }
+      if (!edits.length) return;
       // Without a mark, the next start would take the events removed at the journal's start for dropped ones.
       if (!this.marked) this.markDropped(this.dropped);
-      const tail = kept.length ? kept.join("\n") + "\n" : "";
-      writeFileSync(this.journalPath + ".tmp", Buffer.concat([bytes.subarray(start, from), Buffer.from(tail)]), { mode: 0o600 });
+      // A few lines are written over where they are: one that goes as spaces (a blank no reader takes for an event, and
+      // the next trim drops), a quote taken out padded to its line. The journal written again for each deletion was up to
+      // 16 MiB and 95 ms of a blocked daemon.
+      if (few && edits.every(({ from, to, line }) => line === null || Buffer.byteLength(line) <= to - from)) {
+        const fd = openSync(this.journalPath, "r+");
+        try {
+          for (const { from, to, line } of edits) {
+            const over = Buffer.alloc(to - from, " ");
+            if (line !== null) over.write(line);
+            for (let done = 0; done < over.length;) done += writeSync(fd, over, done, over.length - done, at + from + done);
+          }
+        } finally {
+          closeSync(fd);
+        }
+        return;
+      }
+      const parts: Buffer[] = [];
+      let from = start, removed = 0;
+      for (const edit of edits) {
+        parts.push(bytes.subarray(from, edit.from));
+        if (edit.line === null) removed++;
+        else parts.push(Buffer.from(edit.line));
+        from = edit.line === null ? edit.to + 1 : edit.to;
+      }
+      parts.push(bytes.subarray(from));
+      const written = Buffer.concat(parts);
+      writeFileSync(this.journalPath + ".tmp", written, { mode: 0o600 });
       renameSync(this.journalPath + ".tmp", this.journalPath);
-      this.journalLines -= lines.length - kept.length;
-      this.journalBytes = from - start + Buffer.byteLength(tail);
+      this.journalLines -= removed;
+      this.journalBytes = written.length;
     } catch (error) {
       process.stderr.write(`ghostly: event journal error: ${error instanceof Error ? error.message : String(error)}\n`);
     }
@@ -836,11 +854,12 @@ function groupShape(group: GroupView): GroupShape {
 
 /**
  * The journal's whole lines within its last `JOURNAL_MAX_BYTES`, and its size: never the whole file as one string, so
- * a journal grown past what a string can hold (or a trim's bound) is still read, and in bounded time.
+ * a journal grown past what a string can hold (or a trim's bound) is still read, and in bounded time. Lines `forget`
+ * blanked are left out.
  */
 function journalTail(path: string): { lines: string[]; size: number } {
   const { bytes, start, size } = journalWindow(path);
-  return { lines: bytes.toString("utf8", start).split("\n").filter(Boolean), size };
+  return { lines: bytes.toString("utf8", start).split("\n").filter((line) => line.trimStart()), size };
 }
 
 /**
@@ -918,8 +937,35 @@ function appendWhole(path: string, line: Buffer): void {
   }
 }
 
-/** The bytes of the journal's last `JOURNAL_MAX_BYTES`, `start` where its first whole line begins in them, and its size. */
-function journalWindow(path: string): { bytes: Buffer; start: number; size: number } {
+/** The bounds in `bytes` of each line from `start` on, its newline left out. */
+function linesOf(bytes: Buffer, start: number): [number, number][] {
+  const lines: [number, number][] = [];
+  for (let from = start; from < bytes.length;) {
+    const end = bytes.indexOf(10, from), to = end === -1 ? bytes.length : end;
+    if (to > from) lines.push([from, to]);
+    from = to + 1;
+  }
+  return lines;
+}
+
+/** The bounds in `bytes` of each line from `start` on that holds one of the needles, in their order, found in the bytes. */
+function linesNaming(bytes: Buffer, start: number, needles: readonly string[]): [number, number][] {
+  const lines = new Map<number, number>();
+  for (const needle of needles) {
+    for (let at = bytes.indexOf(needle, start); at !== -1;) {
+      const from = Math.max(start, bytes.lastIndexOf(10, at) + 1), end = bytes.indexOf(10, at), to = end === -1 ? bytes.length : end;
+      lines.set(from, to);
+      at = end === -1 ? -1 : bytes.indexOf(needle, end + 1);
+    }
+  }
+  return [...lines].sort(([a], [b]) => a - b);
+}
+
+/**
+ * The bytes of the journal's last `JOURNAL_MAX_BYTES`, `start` where its first whole line begins in them, `at` where
+ * they begin in the file, and its size.
+ */
+function journalWindow(path: string): { bytes: Buffer; start: number; at: number; size: number } {
   const fd = openSync(path, "r");
   try {
     const size = fstatSync(fd).size;
@@ -934,7 +980,7 @@ function journalWindow(path: string): { bytes: Buffer; start: number; size: numb
     }
     const bytes = buffer.subarray(0, read);
     // The line cut by the window is not whole: it is left out.
-    return { bytes, start: from > 0 ? bytes.indexOf(10) + 1 || bytes.length : 0, size };
+    return { bytes, start: from > 0 ? bytes.indexOf(10) + 1 || bytes.length : 0, at: from, size };
   } finally {
     closeSync(fd);
   }
