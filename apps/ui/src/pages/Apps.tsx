@@ -9,6 +9,7 @@ import { Toast } from "../components/ui/Toast";
 import { useToast } from "../hooks/useToast";
 import { useFocusBack } from "../hooks/useFocusBack";
 import { useI18n, type Translate } from "../contexts/I18nContext";
+import { draftDirection } from "../lib/documentLanguage";
 import { AppIcon, Fingerprint } from "../components/apps/AppIcon";
 import { AppInstallDialog, InstalledAppDialog } from "../components/apps/AppInstallDialog";
 import { AddAppDialog } from "../components/apps/AddAppDialog";
@@ -249,7 +250,7 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
       </div>
       {open && searchable && (
         <div className="border-t border-border px-4 py-2">
-          <input type="search" data-testid="app-store-filter" value={filter} onChange={(e) => { setFilter(e.target.value); setLimit(LISTING_PAGE); setAdded(null); }}
+          <input type="search" data-testid="app-store-filter" value={filter} dir={draftDirection(filter)} onChange={(e) => { setFilter(e.target.value); setLimit(LISTING_PAGE); setAdded(null); }}
             placeholder={t("apps.store.filter")} aria-label={t("apps.store.filter")}
             className="w-full rounded-lg border-none bg-search-bg px-2.5 py-1.5 text-sm text-text-primary placeholder-text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-accent" />
         </div>

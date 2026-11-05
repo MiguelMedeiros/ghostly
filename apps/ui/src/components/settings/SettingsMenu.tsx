@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useI18n } from "../../contexts/I18nContext";
+import { draftDirection } from "../../lib/documentLanguage";
 import { LinkRow } from "../layout";
 import { SECTION_TITLE, SETTINGS_SECTIONS, searchSettings, type SettingEntry, type SettingNeeds, type SettingsSection } from "../../lib/settingsSections";
 
@@ -30,7 +31,7 @@ function SearchField({ value, onChange, testId }: { value: string; onChange: (va
     <div className="relative">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"
         className="absolute start-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
-      <input type="search" value={value} onChange={(e) => onChange(e.target.value)} data-testid={testId}
+      <input type="search" value={value} dir={draftDirection(value)} onChange={(e) => onChange(e.target.value)} data-testid={testId}
         placeholder={t("settings.search")} aria-label={t("settings.search")}
         className="w-full min-w-0 ps-9 pe-3 py-2 min-h-10 bg-input-bg border border-field-border rounded-lg text-sm text-text-primary placeholder-text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring" />
     </div>
