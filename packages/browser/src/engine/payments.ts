@@ -1910,12 +1910,13 @@ export class PaymentDesk {
     if (!link?.supportsPayments) return;
     // "I paid your invoice" that did not get through goes now (`InvoiceClaim`).
     for (const claim of this.claims) if (claim.linkId === linkId && !claim.pending && claim.expiresAt > Date.now()) await this.tellClaim(claim);
-    // Our open requests to this edge's group reach the member now; one already paid is closed on their side.
+    // Our open requests to this edge's group reach the member now; one already paid is closed on their side while
+    // fresh, as a 1:1 request is below: not the group's whole history at every edge opening.
     const group = this.host.groupOf?.(linkId);
     if (group) for (const request of this.payments.values()) {
       if (request.group !== group || request.kind !== "request" || request.direction !== "out") continue;
       if (request.state === "pending") await this.sendGroupRequest(linkId, request);
-      else if (request.state === "settled") link.sendPaymentResult({ id: request.id, ok: true });
+      else if (request.state === "settled" && Date.now() - request.createdAt < RECEIPT_FRESH_MS) link.sendPaymentResult({ id: request.id, ok: true });
     }
     for (const payment of this.payments.values()) {
       if (payment.linkId !== linkId || payment.direction !== "out" || this.reclaims.has(payment.id)) continue;
