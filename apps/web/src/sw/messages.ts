@@ -17,7 +17,8 @@ export type ToWorker =
 
 /** What the service worker says to a page. */
 export type FromWorker =
-  | { type: "share"; item: SharedItem }
+  /** A share held for this page; with the last handed over, how many posted meanwhile it could not keep. */
+  | { type: "share"; item: SharedItem; dropped?: number }
   /** Asked for a share, and there is none (it was already taken, or it timed out). */
   | { type: "share-none" }
   /** A wake-up notification was tapped: open this chat, in this profile (switching to it when another is open). */
@@ -36,5 +37,8 @@ export const OPEN_ASK_MS = 500;
 /** How long a shared item waits for the app to ask for it. Past that it is dropped, never stored. */
 export const SHARE_HOLD_MS = 2 * 60_000;
 
-/** Most shares held at once, the worker's and a page's picker's each: one past that is dropped, never one that waits. */
+/**
+ * Most shares held at once, the worker's and a page's picker's each: one past that is dropped, never one that waits,
+ * and the page that takes the others says how many.
+ */
 export const MAX_HELD_SHARES = 3;
