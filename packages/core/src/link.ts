@@ -11,6 +11,7 @@ import {
 } from "./records";
 import type { ServiceAd } from "./services";
 import type { SignalSight } from "./signal";
+import { RelaysFailedError } from "./relay";
 import { budgetRetryMs, isDiscoveryBudgetError, type PkarrTransport } from "./transport";
 import { traceLink } from "./linkTrace";
 
@@ -894,9 +895,14 @@ export class LinkSession {
       const background = pace === "background" || pace === "connected" || (pace === "idle" && !this.active);
       // Back after a restart: the offer waits on this read (`PkarrRequestOptions.resume`).
       const resume = !signal && !watch && (this.resumeReads || Date.now() < this.awaitedUntil);
-      const packet = await this.transport.resolve(this.peerPubKeyZ32, { background, urgent: pace === "fast", ...(signal && { signal }), ...(watch && { watch }), ...(departed && { departed }), ...(resume && { resume }) });
+      // Every relay out of reach: what they gave last still stands for the contact, but the read says it failed. Taken as
+      // the answer, the link never said it could not read its contact, and the engine let a gone contact's HyperDHT
+      // listener go for the whole outage (`contactUnread`), where only that listener could bring the contact back.
+      let unread: RelaysFailedError | undefined;
+      const packet = await this.transport.resolve(this.peerPubKeyZ32, { background, urgent: pace === "fast", ...(signal && { signal }), ...(watch && { watch }), ...(departed && { departed }), ...(resume && { resume }) }, false)
+        .catch((error: unknown) => { if (!(error instanceof RelaysFailedError)) throw error; unread = error; return error.kept; });
       if (!this.running) return;
-      this.discoveryResult("read");
+      this.discoveryResult("read", unread);
       const ms = Date.now() - started;
       const wasOnline = this.presence.online, wasSeen = this.presence.lastPacketAt;
       // What this read finds that the read before did not have came in between, by this device's clock.
