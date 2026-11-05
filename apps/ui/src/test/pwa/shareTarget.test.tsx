@@ -329,6 +329,28 @@ describe("the Share to… picker", () => {
     expect(screen.queryByTestId("share-unread")).toBeNull();
   });
 
+  it("a share past the three that can wait is never dropped without a word: the share shown says how many were not kept", async () => {
+    for (const text of ["one", "two", "three", "four", "five"]) receiveShare(share({ text }), { queue: true });
+    const { user } = picker();
+    expect(screen.getByTestId("share-text")).toHaveTextContent("one");
+    expect(screen.getByTestId("share-dropped-title")).toHaveTextContent("2 more shares couldn't be kept: 3 were already waiting.");
+    expect(screen.getByTestId("share-dropped-next")).toHaveTextContent("Send or cancel the ones waiting, then share the rest again.");
+    // Said once, with the share it came beside: the next one shown is the next share, nothing more.
+    await user.click(screen.getByTestId("share-cancel"));
+    expect(screen.getByTestId("share-text")).toHaveTextContent("two");
+    expect(screen.queryByTestId("share-dropped")).toBeNull();
+  });
+
+  it("shares the web app's worker could not keep before any reached the page are said too, one alone in its own words", () => {
+    // The worker held three already: a fourth was not kept, and it says so with the last it hands over.
+    receiveShare(share({ text: "one" }), { queue: true });
+    receiveShare(share({ text: "two", dropped: 1 }), { queue: true });
+    picker();
+    expect(screen.getByTestId("share-text")).toHaveTextContent("one");
+    expect(screen.getByTestId("share-dropped-title")).toHaveTextContent("1 more share couldn't be kept: 3 were already waiting.");
+    expect(incomingShare()?.dropped).toBe(1);
+  });
+
   it("with nothing shared, it says so once it has waited", () => {
     vi.useFakeTimers();
     try {

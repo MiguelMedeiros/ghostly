@@ -113,13 +113,16 @@ async function tellBuildGone(): Promise<void> {
 
 // ---------- share target ----------
 
-type Held = { item: SharedItem; done: () => void };
+type Held = { item: SharedItem; done: () => void; kept: boolean };
 
 /**
  * The shares held for the page that asks, oldest first. Any website can post to the share target, so a share never
- * takes the place of one that waits: it waits behind it, and one past `MAX_HELD_SHARES` is dropped.
+ * takes the place of one that waits: it waits behind it, and one past `MAX_HELD_SHARES` is dropped. Those a page gave
+ * back (`kept`) waited in its picker before any posted since: they go first.
  */
 let held: Held[] = [];
+/** Shares dropped past `MAX_HELD_SHARES` since a page last took those held: that page is told how many. */
+let dropped = 0;
 /**
  * Asked to forward the shares held while no page of that profile was there (none yet, or this worker restarted and
  * forgot them): the first page of it that says it is there gets them. `profile` null: a page that did not say its own.
@@ -130,24 +133,26 @@ const sharePages = new Map<string, { profile: string; at: number }>();
 let inFront = 0;
 
 /** Holds a share for the page that asks for it, behind those held before; `done` once it is taken or dropped. */
-function hold(item: SharedItem, done: () => void): void {
-  if (held.length >= MAX_HELD_SHARES) { done(); return; }
-  const entry = { item, done };
-  held.push(entry);
+function hold(item: SharedItem, done: () => void, kept = false): void {
+  if (held.length >= MAX_HELD_SHARES) { dropped += 1; done(); return; }
+  const entry = { item, done, kept };
+  held.splice(kept ? held.filter((other) => other.kept).length : held.length, 0, entry);
   setTimeout(() => {
     if (!held.includes(entry)) return;
     held = held.filter((other) => other !== entry);
-    if (!held.length) forwardFor = null;
+    if (!held.length) { forwardFor = null; dropped = 0; }
     done();
   }, SHARE_HOLD_MS);
 }
 
-/** Every share held, handed to `client` in the order they came. */
+/** Every share held, handed to `client` in the order they came; the last says how many could not be kept. */
 function handOver(client: WindowClient): void {
   const taken = held;
+  const lost = dropped;
   held = [];
+  dropped = 0;
   forwardFor = null;
-  for (const { item } of taken) client.postMessage({ type: "share", item });
+  taken.forEach(({ item }, at) => client.postMessage({ type: "share", item, ...(lost > 0 && at === taken.length - 1 && { dropped: lost }) } satisfies FromWorker));
   for (const { done } of taken) done();
 }
 
@@ -183,7 +188,7 @@ worker.addEventListener("message", (event) => {
   if (message.type === "share-keep") {
     if (PUSH_PROFILE !== null || !message.item || typeof message.item !== "object") return;
     // The worker stays up while it waits again, as a share just posted does.
-    event.waitUntil(new Promise<void>((resolve) => hold(message.item, resolve)));
+    event.waitUntil(new Promise<void>((resolve) => hold(message.item, resolve, true)));
     return;
   }
   const source = event.source;

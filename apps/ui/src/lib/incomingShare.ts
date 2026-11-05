@@ -31,6 +31,11 @@ export interface IncomingShare {
   /** The names of files left out past the most one share brings (`MAX_SHARE_FILES`); the picker says so on a line of its own. */
   pastLimit?: string[];
   /**
+   * How many shares came while this one waited and could not be kept, past the most that can wait
+   * (`MAX_WAITING_SHARES`, here or in the web app's worker); the picker says so with this one.
+   */
+  dropped?: number;
+  /**
    * Reads `files` into the page where they are only names and sizes (the Android app's share: its bytes are read
    * when a chat's composer takes it, not before the picker shows). Without it, `files` are the Files.
    */
@@ -73,14 +78,23 @@ export function isEmptyShare(share: IncomingShare): boolean {
  *
  * `queue` (the web app, whose share target any website can post to): a share never replaces or changes the one that
  * waits; it waits behind it, and is shown once that one is sent to a chat or put aside. Past `MAX_WAITING_SHARES` the
- * newest is dropped.
+ * newest is dropped, never without a word: the share shown counts it (`dropped`), as it counts those the worker could
+ * not keep before this one reached the page (this one's `dropped`).
  */
 export function receiveShare(share: IncomingShare, { queue = false } = {}): void {
   if (queue) {
-    if (isEmptyShare(share) && !share.leftOut?.length && !share.unread?.length && !share.noRoom?.length && !share.pastLimit?.length) return;
+    const { dropped: before = 0, ...rest } = share;
+    const said = !isEmptyShare(rest) || !!(rest.leftOut?.length || rest.unread?.length || rest.noRoom?.length || rest.pastLimit?.length);
+    if (!said && !before) return;
     if (!pending) pending = share;
-    else if (behind.length + 1 < MAX_WAITING_SHARES) behind.push(share);
-    else return;
+    else {
+      let dropped = before;
+      if (said) {
+        if (behind.length + 1 < MAX_WAITING_SHARES) behind.push(rest);
+        else dropped += 1;
+      }
+      if (dropped) pending = { ...pending, dropped: (pending.dropped ?? 0) + dropped };
+    }
     emit();
     return;
   }
@@ -114,13 +128,16 @@ export function dropIncomingShare(): void {
 }
 
 /**
- * The page is about to restart: the shares that wait for a chat to be picked are kept for the next page, in their
- * order. Whether the one shown was.
+ * The page is about to go (a profile switch restarts it; on the web, a share into the same window replaces it): the
+ * shares that wait for a chat to be picked are kept for the next page, in their order. Those kept are the next page's,
+ * no longer this one's, so a second call keeps nothing twice. Whether the one shown was. Nothing is redrawn: the page
+ * is going.
  */
 export function carryIncomingShare(): boolean {
   const carry = (share: IncomingShare | null) => { try { return share?.carry?.() ?? false; } catch { return false; } };
   const kept = carry(pending);
-  for (const share of behind) carry(share);
+  behind = behind.filter((share) => !carry(share));
+  if (kept) pending = behind.shift() ?? null;
   return kept;
 }
 
