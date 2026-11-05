@@ -17,7 +17,7 @@ export function GroupDownloadsRow() {
   const label = t("settings.groupDownloads.title");
   return (
     <Row label={label} testId="settings-group-downloads-row" hint={t("settings.groupDownloads.hint")}
-      info={t("settings.groupDownloads.info", { file: formatFileSize(GROUP_FILE_LIMITS.autoBytes), group: formatFileSize(GROUP_FILE_LIMITS.autoBytesPerGroup) })}>
+      info={t("settings.groupDownloads.info", { file: formatFileSize(GROUP_FILE_LIMITS.autoBytes, t), group: formatFileSize(GROUP_FILE_LIMITS.autoBytesPerGroup, t) })}>
       <Select fit aria-label={label} data-testid="settings-group-downloads" value={mode} onChange={(value) => void setGroupDownloads(value).catch(() => {})}
         options={modes.map((value) => ({ value, label: t(`settings.groupDownloads.${value}` as const) }))} />
     </Row>
