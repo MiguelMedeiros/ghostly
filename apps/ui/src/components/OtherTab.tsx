@@ -1,14 +1,17 @@
 import type { Translate, TranslationKey } from "../locales/translate";
 
 /**
- * What the tab waits with: nothing of its own, a share that went to the other tab, a link it is handing to the other
- * tab (and opens itself if that one closes first), or a link the other tab took.
+ * What the tab waits with: nothing of its own, a share on its way to the other tab, a share that went there, a share
+ * the worker no longer held, a link it is handing to the other tab (and opens itself if that one closes first), or a
+ * link the other tab took.
  */
-export type OtherTabState = "plain" | "shared" | "link" | "linkTaken";
+export type OtherTabState = "plain" | "sharing" | "shared" | "shareNone" | "link" | "linkTaken";
 
 const WORDS: Record<OtherTabState, [TranslationKey, TranslationKey]> = {
   plain: ["boot.otherTab", "boot.otherTabHint"],
+  sharing: ["boot.sharing", "boot.otherTabHint"],
   shared: ["boot.shared", "boot.sharedHint"],
+  shareNone: ["pwa.shareNone", "boot.otherTabHint"],
   link: ["boot.otherTab", "boot.linkHint"],
   linkTaken: ["boot.linkTaken", "boot.linkTakenHint"],
 };
