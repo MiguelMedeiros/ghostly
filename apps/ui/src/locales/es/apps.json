@@ -18,7 +18,6 @@
     "fetchFiles": "Descargar sus archivos",
     "keepStopped": "Mantener detenida",
     "needsFiles": "Necesita sus archivos",
-    "remove": "Quitar",
     "runAnyway": "Ejecutar de todos modos",
     "stopped": "Detenida",
     "uninstall": "Desinstalar",
@@ -100,7 +99,7 @@
     "note": "No se copia nada: {{app}} lee lo que elijas, en este dispositivo."
   },
   "install": {
-    "equivocation": "Existen dos versiones {{sequence}} distintas. Ghostly conservó la que tienes.",
+    "equivocation": "Existen dos copias distintas de esta versión. Ghostly conservó la que tienes.",
     "fetching": "Comprobando la app…",
     "foundBy": "Encontrada por {{name}}",
     "inStore": "En {{name}}",
@@ -130,7 +129,7 @@
     "same": "Ya instalada.",
     "sentBy": "Enviada por {{name}}",
     "unknownPublisher": "Editor desconocido",
-    "unknownPublisherInfo": "Cualquiera puede firmar una app con una clave nueva. Solo una tienda que añadiste puede responder por quién la hizo. Compara la clave con la que publica su autor.",
+    "unknownPublisherInfo": "Cualquiera puede firmar una app con una clave nueva. Solo una tienda que añadiste puede responder por su editor. Compara la clave con la que publica el editor.",
     "update": "Actualizar",
     "webkit": "En este navegador, una app aún puede contactar con otros servidores.",
     "webkitInfo": "Safari y cualquier navegador en iPhone o iPad dejan que una app abra conexiones que Ghostly no puede bloquear. Esos servidores conocen tu dirección IP. La app de escritorio las bloquea."
@@ -140,7 +139,7 @@
     "addHint": "Añadir una app o una tienda por su enlace",
     "details": "{{title}}: detalles",
     "installed": "Instaladas",
-    "intro": "Juegos y pequeñas apps, firmados por sus autores y ejecutados en un sandbox.",
+    "intro": "Juegos y pequeñas apps, firmados por sus editores y ejecutados en un sandbox.",
     "loading": "Cargando…",
     "noStores": "Aún no hay tiendas. Añade una por su enlace.",
     "none": "Aún no hay apps.",
@@ -186,10 +185,10 @@
     "resume": "Volver a {{title}}",
     "resumeSharing": "compartiendo un archivo",
     "sharingWith": "compartiendo un archivo con {{name}}",
-    "stoppedFailed": "{{title}} dejó de funcionar y se cerró. Si sigue pasando, avisa a su autor.",
+    "stoppedFailed": "{{title}} dejó de funcionar y se cerró. Si sigue pasando, avisa a su editor.",
     "stoppedRemoved": "{{title}} se detuvo: {{store}} retiró esta versión",
-    "stoppedRevoked": "{{title}} se detuvo: su autor revocó esta versión",
-    "stoppedUnresponsive": "{{title}} dejó de responder y se cerró, para que tus chats sigan funcionando. Ábrela de nuevo o, si sigue pasando, avisa a su autor.",
+    "stoppedRevoked": "{{title}} se detuvo: su editor revocó esta versión",
+    "stoppedUnresponsive": "{{title}} dejó de responder y se cerró, para que tus chats sigan funcionando. Ábrela de nuevo o, si sigue pasando, avisa a su editor.",
     "with": "{{title}} con {{name}}",
     "withName": "con {{name}}",
     "withSharing": "{{title}} · compartiendo un archivo con {{name}}"
