@@ -296,6 +296,30 @@ describe("with the apps flag on", () => {
     expect(fetches).toEqual([]);
   });
 
+  it("while Install and open runs, the screen's Cancel, Escape and its backdrop do not close it: no Cancel the app opens after all", async () => {
+    let finish: () => void = () => {};
+    fakeEngine.on("appList", () => []).on("appPreview", () => preview())
+      .on("appInstall", () => new Promise<InstalledAppView>((resolve) => { finish = () => resolve(installed()); }));
+    const opener = vi.fn(async () => {});
+    setAppOpener(opener);
+    const { user } = renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
+    act(() => fakeEngine.update({ links: [ana(true)] }));
+    await user.click(await screen.findByTestId("app-card-install"));
+    const screenEl = await screen.findByTestId("app-install");
+    await user.click(await within(screenEl).findByRole("button", { name: "Install and open" }));
+    expect(within(screenEl).getByTestId("app-install-confirm")).toHaveAttribute("aria-busy", "true");
+    const cancel = within(screenEl).getByRole("button", { name: "Cancel" });
+    expect(cancel).toBeDisabled();
+    await user.click(cancel);
+    await user.keyboard("{Escape}");
+    await user.pointer({ keys: "[MouseLeft]", target: screenEl.parentElement! });
+    expect(screen.getByTestId("app-install")).toBeInTheDocument();
+    await act(async () => finish());
+    // It installs and opens as it said it would, and the screen closes.
+    await waitFor(() => expect(opener).toHaveBeenCalledWith(REF, "link-1", { runAnyway: false }));
+    await waitFor(() => expect(screen.queryByTestId("app-install")).not.toBeInTheDocument());
+  });
+
   it("names a contact with no name as the chat does, not Anonymous, on the card and its install screen", async () => {
     fakeEngine.on("appList", () => []).on("appPreview", () => preview());
     // The chat of a contact with no name passes none (Chat.tsx), and calls them "Contact · <the start of their key>".
