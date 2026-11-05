@@ -17,7 +17,7 @@ import { AppChatPicker } from "../components/apps/AppChatPicker";
 import { useAppsState } from "../lib/apps/flag";
 import { refreshInstalledApps, useBuiltInApps, useInstalledApps, useInstalledAppsFailure } from "../lib/apps/installed";
 import { openApp, type OpenAppOptions } from "../lib/apps/open";
-import { appErrorText, appErrorView } from "../lib/apps/errors";
+import { appErrorText, appErrorView, appStoreProblemText } from "../lib/apps/errors";
 import { date } from "../lib/identities";
 import { listText } from "../lib/listText";
 
@@ -136,7 +136,7 @@ const LISTING_PAGE = 50;
 /** A store that lists this many apps or fewer shows them without being asked, beside other stores too. */
 const LISTING_FEW = 6;
 
-function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, onError }: {
+function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, onError, onProblem }: {
   store: AppStoreSummary;
   /** The only store of the page. */
   alone: boolean;
@@ -146,6 +146,8 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
   /** Removed: its block, and the Remove that had the focus, are about to go. */
   onRemoved: () => void;
   onError: (e: unknown) => void;
+  /** A Refresh read the store and that read failed: why, in the app's words. */
+  onProblem: (text: string) => void;
 }) {
   const { t } = useI18n();
   // Its apps show from the start when it is the only store or lists a few: nothing told a person on a phone that the
@@ -198,6 +200,13 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
   // What its block shows as its name: its link until it is read.
   const storeName = store.name ?? store.url;
   const kind = store.kind === "indexed" ? t("apps.store.indexed") : store.kind === "curated" ? t("apps.store.curated") : null;
+  const problem = appStoreProblemText(store, t);
+  // A read never fails the call: one that failed again says so, else the same line under the store showed nothing new.
+  const refresh = async () => {
+    const [now] = await engine.call("appStoreRefresh", { key: store.key });
+    const failed = now?.problem ? appStoreProblemText(now, t) : null;
+    if (failed) onProblem(failed);
+  };
   const toggle = () => {
     setChosen(!open);
     setLimit(LISTING_PAGE);
@@ -223,14 +232,14 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
           </span>
           {!read && <span className="block text-xs text-text-muted">{t("apps.store.notRead")}</span>}
           {store.expired && store.fetchedAt !== undefined && <span data-testid="app-store-stale" className="block text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires ?? 0, t.language) })}</span>}
-          {store.problem && <span data-testid="app-store-problem" className="block text-xs text-danger">{t("apps.store.problem")}</span>}
+          {problem && <span data-testid="app-store-problem" className="block text-xs text-danger">{problem}</span>}
         </button>
         {!asking && (
           <div className="flex flex-wrap items-center gap-2 ms-auto">
             {/* A store read again or removed can stop an installed app (a removal) or change who lists it: both lists again.
                 Each named with its store: every page has two stores once one is added, and two bare Removes. */}
             <Button data-testid="app-store-refresh" disabled={busy} loading={pending === "refresh"} aria-label={t(read ? "apps.store.refreshNamed" : "apps.store.readNamed", { name: storeName })}
-              onClick={() => void work(() => engine.call("appStoreRefresh", { key: store.key }), undefined, "refresh")}>{read ? t("apps.store.refresh") : t("apps.store.read")}</Button>
+              onClick={() => void work(refresh, undefined, "refresh")}>{read ? t("apps.store.refresh") : t("apps.store.read")}</Button>
             <Button ref={remove} variant="danger" data-testid="app-store-remove" disabled={busy} aria-label={t("apps.store.removeNamed", { name: storeName })} onClick={() => setAsking(true)}>{t("apps.store.remove")}</Button>
           </div>
         )}
@@ -389,7 +398,7 @@ export function Apps() {
         {storesFailure != null && <ReadFailed error={storesFailure} testId="apps-stores-error" onRetry={() => void reloadStores()} />}
         {stores === null ? <Block><Notice>{t("apps.page.loading")}</Notice></Block>
           : stores.length === 0 ? storesFailure == null && <Block testId="apps-no-stores"><Notice>{t("apps.page.noStores")}</Notice></Block>
-            : stores.map((store) => <StoreBlock key={store.key} store={store} alone={stores.length === 1} installed={installed ?? []} onError={fail} onRemoved={() => setGone({ store: store.key })}
+            : stores.map((store) => <StoreBlock key={store.key} store={store} alone={stores.length === 1} installed={installed ?? []} onError={fail} onProblem={show} onRemoved={() => setGone({ store: store.key })}
               onChanged={() => void Promise.all([reloadStores(), refreshInstalledApps()])} onInstall={(listing) => setInstalling({ store: store.key, listing })} />)}
       </Section>
       {adding && <AddAppDialog onClose={() => setAdding(false)} onStoreAdded={() => void reloadStores()} onInstalled={(app) => setJustInstalled(app.ref)} />}
