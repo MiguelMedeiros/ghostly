@@ -54,11 +54,11 @@ export async function waitForRemoval(ctx: ApiContext, chat: string, messageId: s
 }
 
 /**
- * Waits until an edge took my group message, or its edit number `edit`, or my reaction to it numbered `reaction`
- * (WISP 902: a group has no receipts, so this is as far as the author sees): a member's edge in a private group, an
- * edge to one of my hubs in a community.
+ * Waits until an edge took my group message, or its edit number `edit`, or my reaction to it numbered `reaction`, or my
+ * pin numbered `pin` (WISP 902: a group has no receipts, so this is as far as the author sees): a member's edge in a
+ * private group, an edge to one of my hubs in a community.
  */
-export async function waitForGroupFrame(ctx: ApiContext, groupId: string, messageId: string, edit: number | { reaction: number } | undefined, ms: number): Promise<number> {
+export async function waitForGroupFrame(ctx: ApiContext, groupId: string, messageId: string, edit: number | { reaction: number } | { pin: number } | undefined, ms: number): Promise<number> {
   const until = performance.now() + ms;
   const which = typeof edit === "object" ? edit : edit ? { edit } : {};
   for (;;) {

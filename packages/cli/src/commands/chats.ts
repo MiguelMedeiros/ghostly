@@ -96,7 +96,7 @@ export const commands: Record<string, Command> = {
     options: {
       to: { type: "list", description: "A chat or a group to forward to (id, prefix or name; group:<id> for a group; a dash-leading id as it is); up to 5" },
       force: { type: "boolean", description: "Forward even if a text looks like a seed, a key or ecash" },
-      wait: { type: "string", choices: ["none", "sent"], description: "none or sent: each text on its way (in a group, taken by an edge), each file's transfer done (default none)" },
+      wait: { type: "string", choices: ["none", "sent"], description: "none or sent: each text on its way (in a group, taken by an edge), each file's transfer done (default none; without a daemon a group's waits for an edge)" },
       timeout: groupWait.timeout,
     },
     params: ({ options }, a) => {
@@ -132,8 +132,13 @@ export const commands: Record<string, Command> = {
   "message details": { method: "chat.details", usage: "message details <chat|group> <message>", summary: "How a message travelled", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
   "message retry": { method: "chat.retry", usage: "message retry <chat> <message>", summary: "Send a failed message again", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
   "pin": {
-    method: "chat.pin", usage: "pin <chat|group> <message> | --remove [--wait none|confirmed] [--timeout s]", summary: "Pin a message at the top of a chat or group (one per chat: it replaces the pinned one); --remove unpins",
-    args: ["chat", "message...?"], options: { remove: { type: "boolean", description: "Unpin the chat's pinned message (it names no message)" }, ...confirmWait },
+    method: "chat.pin", usage: "pin <chat|group> <message> | --remove [--wait none|confirmed|sent] [--timeout s]", summary: "Pin a message at the top of a chat or group (one per chat: it replaces the pinned one); --remove unpins",
+    args: ["chat", "message...?"],
+    options: {
+      remove: { type: "boolean", description: "Unpin the chat's pinned message (it names no message)" },
+      wait: { type: "string", choices: ["none", "confirmed", "sent"], description: "In a 1:1 chat none or confirmed, until the contact confirmed it; in a group none or sent, until a member's edge took it (default: none with a daemon, confirmed or sent without)" },
+      timeout: groupWait.timeout,
+    },
     params: ({ options }, a) => {
       // --remove names no message: the chat has one pin. One given beside it is taken as before, and not read.
       if (a.message === undefined && options.remove !== true) throw new CliError("usage", "Missing <message>: ghostly pin <chat|group> <message> | --remove");

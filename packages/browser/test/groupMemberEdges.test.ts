@@ -483,3 +483,30 @@ describe("my reaction in a private group counts once an edge took it", () => {
     expect(frames(away).filter(f => f.t === "group-react")).toMatchObject([{ n: second.n, e: "🎉" }]);
   }, 30_000);
 });
+
+/**
+ * `pin <group> --wait sent` waits for an edge to take my pin (`groupTaken` with its number), as `group react` does for
+ * a reaction. A one-shot's pin counted for nothing, so the CLI answered before it went and the pin left with it.
+ */
+describe("my pin in a private group counts once an edge took it", () => {
+  it("each open edge that takes it counts; one that was down counts when it opens and hears it", async () => {
+    const { node, groupId, members: [bob, away] } = await adminOf(["bob", "away"]);
+    const chat = `group:${groupId}`;
+    const { messageId } = await node.sendGroupMessage({ groupId, text: "pin me" }) as { messageId: string };
+    const first = await node.pinMessage({ linkId: chat, messageId });
+    expect(first).toEqual({ error: null, n: expect.any(Number) });
+    const taken = (n: number) => node.groupTaken({ groupId, messageId, pin: n });
+    expect(frames(bob).filter(f => f.t === "group-pin")).toHaveLength(1);
+    expect(taken(first.n!)).toBe(1);
+    // An unpin is a new number: the pin taken says nothing of it, and it is not taken while nobody is there.
+    bob.wire.open = false;
+    bob.events.onDataLinkState("closed");
+    const second = await node.pinMessage({ linkId: chat, remove: true });
+    expect(second.n).toBeGreaterThan(first.n!);
+    expect(taken(second.n!)).toBe(0);
+    // The member that was away comes up and hears the group's pin: that edge took it.
+    await away.comeUp();
+    await vi.waitFor(() => expect(taken(second.n!)).toBe(1));
+    expect(frames(away).filter(f => f.t === "group-pin")).toMatchObject([{ n: second.n, id: "" }]);
+  }, 30_000);
+});

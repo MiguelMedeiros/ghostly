@@ -175,7 +175,10 @@ function chatOrGroup(method: string, params: Record<string, unknown>): boolean {
   if (method.startsWith("task.") || method.startsWith("routine.") || method.startsWith("button.") || method === "usage.send") return true;
   // So may `message delete --everyone`'s: a group's removal goes over its members' edges, which a one-shot that left
   // the groups unstarted never opened (it waited its whole timeout, and the members kept the message).
-  return method === "chat.delete" && params.everyone === true;
+  if (method === "chat.delete" && params.everyone === true) return true;
+  // And `pin`'s and `forward --to`'s: a group's pin or forwarded copy goes over the same edges (the pin never went,
+  // and a forward's wait could only time out).
+  return method === "chat.pin" || method === "chat.forward";
 }
 
 /**

@@ -167,9 +167,9 @@ export interface EngineApi {
   /**
    * Pins a message (WISP 400 § Pinned message), or unpins with `remove`: `linkId` a chat's link or `group:<id>`,
    * `messageId` the message's id here or the id both sides know it by. One per chat: a new pin replaces the old. In a
-   * community only the admin pins.
+   * community only the admin pins. In a group, `n` is the pin's number, for `groupTaken`.
    */
-  pinMessage(params: { linkId: string; messageId?: string; remove?: boolean }): { error: string | null; refused?: boolean };
+  pinMessage(params: { linkId: string; messageId?: string; remove?: boolean }): { error: string | null; refused?: boolean; n?: number };
   /**
    * Mini-apps in a paired 1:1 chat (`apps/1`, WISP 1200 § In a chat), refused while the apps feature is off. `ref` is
    * the app reference `<publisher key in z-base32>/<name>`; the contact's frames (`app-frame` events) name the app by
@@ -401,9 +401,9 @@ export interface EngineApi {
   pressButton(params: { linkId: string; messageId: string; buttonId: string }): { error: string | null; refused?: boolean; paced?: true; messageId?: string };
   /**
    * How many edges took my message `messageId` (or its edit number `edit`, or my reaction numbered `reaction`, the `n`
-   * of `react`): members' edges in a private group, hubs' in a community.
+   * of `react`, or my pin numbered `pin`, the `n` of `pinMessage`): members' edges in a private group, hubs' in a community.
    */
-  groupTaken(params: { groupId: string; messageId: string; edit?: number; reaction?: number }): number;
+  groupTaken(params: { groupId: string; messageId: string; edit?: number; reaction?: number; pin?: number }): number;
   /** The numbers of my reactions and of my pin in a 1:1 chat that the contact has not confirmed yet. */
   chatUnconfirmed(params: { linkId: string }): { reactions: number[]; pin: number | null };
   groupMessages(params: { groupId: string }): StoredMessage[];
