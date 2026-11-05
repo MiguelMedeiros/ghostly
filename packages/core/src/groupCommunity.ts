@@ -429,6 +429,12 @@ export interface CommunityState {
    * Absent in older states.
    */
   alone?: string[];
+  /**
+   * My texts saved here (counter, frame in `store`) whose message row may not be stored or whose frame may not have gone
+   * yet, as `e:h16:n`, oldest first: an app killed in between stores and says them when it opens again (`resume`), so the
+   * number is never given to another text. Absent in older states.
+   */
+  unsaid?: string[];
   /** Leave requests waiting for a member to commit them. */
   pendingLeaves: { s: string; ls: string; ls3?: string }[];
   /** Leave commit (full hash) → its mark, as its committer signed it (`group-left`), oldest first. Absent in older states. */
@@ -1613,6 +1619,7 @@ export class CommunitySession {
     this.state.statusReason = reason;
     this.state.secrets = {};
     this.state.store = [];
+    delete this.state.unsaid;
     for (const id of this.onRows.values()) this.hooks.forgetFrame?.(id);
     this.onRows.clear();
     delete this.state.lasting;
@@ -1641,11 +1648,36 @@ export class CommunitySession {
       const fileBytes = described ? utf8Encode(JSON.stringify(described)).length + 8 : 0;
       const hops = readForwarded(forwarded);
       if (utf8Encode(trimmed).length + mentionsBytes(named) + replyBytes + fileBytes + (hops ? 16 : 0) + (card ? statusCardBytes(card) + 8 : 0) > COMMUNITY_LIMITS.textBytes) return { error: "Message exceeds 16 KiB" };
+      // A text an app killed mid-send left saved but not stored or said goes first, in its place.
+      await this.sayUnsaid();
       const sent = await this.sendPayload(() => ({ text: trimmed, ...(named.length ? { m: named } : {}), ...(answers ? { r: answers } : {}), ...(hops ? { fw: hops } : {}), ...(card ? { sc: card } : {}), ...(described ? { fl: described } : {}) }), nick, now);
       if ("error" in sent) return sent;
-      const onRow = await this.hooks.message({ id: sent.id, sender: this.myKey, epoch: sent.frame.e, seq: sent.frame.n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}), ...(answers ? { reply: answers } : {}), ...(hops ? { forwarded: hops } : {}), ...(card ? { card } : {}), ...(described ? { file: described } : {}), frame: sent.frame });
+      // The counter and the frame are saved before the row is stored: an app killed after the row but before the save
+      // gave the next text this same id, and the members held one text or the other under it, or dropped the next as
+      // seen. Until the row is stored and the frame said, the number is `unsaid`, and an app opened again does both (`resume`).
+      const key = frameKey(sent.frame);
+      this.state.unsaid = [...(this.state.unsaid ?? []), key];
+      this.markUnheard(sent.frame);
+      const unsend = async () => {
+        this.state.store = this.state.store.filter(f => f !== sent.frame);
+        this.state.unsaid = (this.state.unsaid ?? []).filter(k => k !== key);
+        this.state.unheard = (this.state.unheard ?? []).filter(k => k !== key);
+        await this.persist().catch(() => {});
+      };
+      try { await this.persist(); } catch (error) { await unsend(); throw error; }
+      let onRow: boolean | void;
+      try {
+        onRow = await this.hooks.message({ id: sent.id, sender: this.myKey, epoch: sent.frame.e, seq: sent.frame.n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}), ...(answers ? { reply: answers } : {}), ...(hops ? { forwarded: hops } : {}), ...(card ? { card } : {}), ...(described ? { file: described } : {}), frame: sent.frame });
+      } catch (error) {
+        // Never said, so not sent. A row the app stored before it failed brings its frame, and a counter above it, back
+        // when the app opens again (`takeRows`).
+        await unsend();
+        throw error;
+      }
       if (onRow === true) this.onRows.set(storeKey(sent.frame), sent.id);
-      await this.say(sent.frame);
+      this.state.unsaid = (this.state.unsaid ?? []).filter(k => k !== key);
+      // Said once more after a kill before this save: members take a frame they hold as already seen.
+      await this.say(sent.frame, true);
       return { id: sent.id };
     });
   }
@@ -1758,20 +1790,68 @@ export class CommunitySession {
   /**
    * Saves, then says my frame on every edge. One no edge took (none is up: I just joined, or my app just opened) is
    * remembered until a member it was written for is handed it: I may be behind on the chain without knowing, and the
-   * first member I reach may be one let in since, who cannot read it but can carry it (`receiveSync`).
+   * first member I reach may be one let in since, who cannot read it but can carry it (`receiveSync`). `saved`: the
+   * caller marked it unheard and saved it (`sendText`).
    */
-  private async say(frame: CommunityMessageFrame): Promise<void> {
+  private async say(frame: CommunityMessageFrame, saved = false): Promise<void> {
     const inStore = new Set(this.state.store.filter(f => f.s === this.myKey).map(frameKey));
-    this.state.unheard = [...(this.state.unheard ?? []).filter(key => inStore.has(key)), frameKey(frame)].slice(-UNHEARD_KEPT);
-    await this.persist();
+    if (!saved) {
+      this.markUnheard(frame);
+      await this.persist();
+    }
     if (this.hooks.broadcast(frame) === 0) {
       // Said alone: I may be behind on the chain without knowing (`resealBehind`).
       this.state.alone = rememberAlone(this.state.alone, frameKey(frame), key => inStore.has(key));
       this.persistSoon();
       return;
     }
-    this.state.unheard = this.state.unheard.filter(key => key !== frameKey(frame));
+    this.state.unheard = (this.state.unheard ?? []).filter(key => key !== frameKey(frame));
     this.persistSoon();
+  }
+  /** My frame in `unheard`, before it is said: the frames of mine the store no longer holds leave it. */
+  private markUnheard(frame: CommunityMessageFrame): void {
+    const inStore = new Set(this.state.store.filter(f => f.s === this.myKey).map(frameKey));
+    this.state.unheard = [...(this.state.unheard ?? []).filter(key => inStore.has(key) && key !== frameKey(frame)), frameKey(frame)].slice(-UNHEARD_KEPT);
+  }
+
+  /**
+   * Stores and says what an app killed mid-send left `unsaid`: its counter and frame were saved, its row or its sending
+   * may not have happened. A row stored already is not stored twice (the app's store takes one row per id), a frame
+   * that went already is taken by the members as one they hold. The engine calls this on each tick; a send does first.
+   */
+  resume(): Promise<void> {
+    if (!this.state.unsaid?.length) return Promise.resolve();
+    return this.serialize(() => this.sayUnsaid());
+  }
+
+  private async sayUnsaid(): Promise<void> {
+    for (const key of [...this.state.unsaid ?? []]) {
+      const frame = this.isMember ? this.state.store.find(f => f.s === this.myKey && frameKey(f) === key) : undefined;
+      const row = frame && this.ownRow(frame);
+      // Stored before it leaves the list: a store that fails keeps it there, for the next tick.
+      if (frame && row) {
+        let onRow: boolean | void;
+        try { onRow = await this.hooks.message(row); } catch { return; }
+        if (onRow === true) this.onRows.set(storeKey(frame), row.id);
+      }
+      this.state.unsaid = (this.state.unsaid ?? []).filter(k => k !== key);
+      if (frame && row) await this.say(frame); else await this.persist();
+    }
+  }
+
+  /** The row of one of my own texts, as `sendText` stored it, opened from its frame; none for anything else, or one deleted for everyone. */
+  private ownRow(f: CommunityMessageFrame): CommunityIncomingMessage | undefined {
+    const found = this.commitByShort(f.e, f.h), secret = found && this.state.secrets[found.hash];
+    const plain = secret ? decryptText(epochKeys(fromBase64Url(secret), this.id, f.e).message, messageAad(f), f.nn, f.c) : null;
+    let parsed: unknown = null;
+    try { parsed = plain === null ? null : JSON.parse(plain); } catch { /* not a payload */ }
+    if (!isObject(parsed) || typeof parsed.text !== "string" || parsed.o !== undefined) return undefined;
+    const id = communityMessageId(this.myKey, f.e, f.h, f.n);
+    if (this.hooks.removed?.(id)) return undefined;
+    const text = parsed.text, mentions = validMentions(parsed.m, text, false), reply = parsed.r === undefined ? undefined : readReply(parsed.r, groupReplyAuthor);
+    const forwarded = readForwarded(parsed.fw), card = parsed.sc === undefined ? undefined : readStatusCard(parsed.sc), file = parsed.fl === undefined ? undefined : readGroupFileMeta(parsed.fl) ?? undefined;
+    return { id, sender: this.myKey, epoch: f.e, seq: f.n, timestamp: f.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}),
+      ...(forwarded ? { forwarded } : {}), ...(card ? { card } : {}), ...(file ? { file } : {}), frame: f };
   }
 
   /**
@@ -1823,6 +1903,8 @@ export class CommunitySession {
     for (const { id, frame } of rows) {
       this.onRows.set(storeKey(frame), id);
       if (!inRecord.has(storeKey(frame))) this.state.store.push(frame);
+      // My counter goes above a row of mine an older app stored before it was killed mid-send, its counter unsaved.
+      if (frame.s === this.myKey && frame.h === shortHash(this.state.seqH) && frame.n >= this.state.seq && frame.n < OWN_FRAME_LIMIT) this.state.seq = frame.n + 1;
     }
     this.state.store.sort((a, b) => a.ts - b.ts);
     this.trimStore();

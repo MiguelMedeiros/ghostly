@@ -1085,6 +1085,8 @@ export class Communities {
       const ready = [...this.host.edges(groupId)].filter(([key, id]) => this.host.linkReady(id, 2) && !s.wasRemoved(key)).map(([key]) => key);
       for (const key of ready.slice(0, 3)) s.catchUp(key);
     }
+    // A text of mine an app killed mid-send saved but did not store or say (WISP 903 § Messages).
+    await s.resume().catch(() => {});
     // Something I said with no edge up may be sealed under a commit I took for the newest: said again once caught up.
     await s.reseal().catch(() => {});
     await this.reconcile(groupId, live, now);
