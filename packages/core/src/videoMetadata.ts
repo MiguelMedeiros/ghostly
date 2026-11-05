@@ -24,6 +24,8 @@ export const VIDEO_METADATA_LIMITS = {
   maxBoxes: 100_000,
   /** Bytes read first to tell a video from another file. */
   headBytes: 64,
+  /** Bytes read at once for a box's header or a small box, so the next headers and `moof`s are read with it. */
+  readAhead: 64 * 1024,
 } as const;
 
 /** Why a video is refused: its metadata could not be removed, so it does not go at all. */
@@ -357,6 +359,27 @@ function meets(ranges: [number, number][], start: number, end: number): boolean 
   return low < ranges.length && ranges[low]![0] < end;
 }
 
+/**
+ * `source` read a window at a time: a read that fits in `readAhead` bytes reads that many from where it starts, and
+ * the reads after it within them (the next boxes' headers, a fragment's `moof`) are served from it, as copies (they
+ * are changed in place). A Blob's read costs about the same whatever its size, so a fragment costs one, not three.
+ */
+function readingAhead(source: VideoSource): VideoSource {
+  let start = 0, window: Uint8Array = new Uint8Array(0);
+  return {
+    size: source.size,
+    async read(offset, length) {
+      const end = start + window.length;
+      if (offset < start || (offset + length > end && end < source.size)) {
+        if (length > VIDEO_METADATA_LIMITS.readAhead) return source.read(offset, length);
+        start = offset;
+        window = await source.read(offset, VIDEO_METADATA_LIMITS.readAhead);
+      }
+      return window.slice(offset - start, offset - start + length);
+    },
+  };
+}
+
 /** A part of a video replaced as it is sent, `start` to `end` of the file: by `bytes`, or by zeros. */
 export interface VideoPatch { start: number; end: number; bytes?: Uint8Array }
 
@@ -415,7 +438,8 @@ export async function withoutVideoMetadata(source: Blob, mime: string): Promise<
  * the parts replaced, in order and apart, the rest of its bytes going as they are; undefined when it goes as it is.
  * Throws `NO_VIDEO_METADATA` as it does.
  */
-export async function videoMetadataPatches(source: VideoSource, mime: string): Promise<VideoPatch[] | undefined> {
+export async function videoMetadataPatches(file: VideoSource, mime: string): Promise<VideoPatch[] | undefined> {
+  const source = readingAhead(file);
   const head = await source.read(0, VIDEO_METADATA_LIMITS.headBytes);
   const typed = STRIPPED_TYPES.has(mime.split(";")[0]!.trim().toLowerCase());
   const container = containerOf(head, mime);
