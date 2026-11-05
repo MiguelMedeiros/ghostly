@@ -63,8 +63,9 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
       <div className="flex items-start gap-3">
         <AppIcon size={40} installed={app} />
         <div className="min-w-0 flex-1">
-          {/* A long title is cut alone: the version stays whole after it, the one a contact opened or this app has. */}
-          <p dir="auto" className="flex items-baseline gap-1 text-sm font-medium text-text-primary" data-testid="app-card-title">
+          {/* A long title is cut alone: the version stays whole after it, the one a contact opened or this app has. The
+              row goes the page's way, from the icon; only the title reads in its own direction. */}
+          <p className="flex items-baseline gap-1 text-sm font-medium text-text-primary" data-testid="app-card-title">
             <span dir="auto" className="truncate min-w-0">{title}</span>
             {version && <>{" "}<span className="shrink-0 whitespace-nowrap">{version}</span></>}
           </p>

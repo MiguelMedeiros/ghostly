@@ -861,6 +861,30 @@ describe("with the apps flag on", () => {
     expect(within(details).getByText("Chess for two.")).toHaveAttribute("dir", "auto");
   });
 
+  // Aligned to their own start, an English title and tagline sat at the far left of their lines in Arabic, away from
+  // the icon on the right; the row with the version went left to right after its title.
+  it("lines up an app's title and tagline with the page, beside its icon, whatever their own direction", async () => {
+    // Built in: its row's line is the tagline alone, not after "Unknown publisher ·".
+    fakeEngine.on("appList", () => [installed({ builtIn: true })])
+      .on("appStoreList", () => [
+        { key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
+          name: "Ghostly", kind: "curated", sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1,
+          apps: [{ ref: `${KEY}/other`, sequence: 1, digest: DIGEST, urls: [URL_], title: "Snake", tagline: "Eat, grow." }], removed: [] },
+      ]).on("appCheckUpdates", () => []);
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    const row = await screen.findByTestId("installed-app");
+    const title = within(row).getByText("Chess");
+    expect(title).toHaveAttribute("dir", "auto");
+    expect(title.parentElement).not.toHaveAttribute("dir");
+    expect(within(row).getByText("Play chess with a contact")).toHaveClass("text-match-parent");
+    expect(screen.getByText("Snake")).toHaveClass("text-match-parent");
+    expect(screen.getByText("Eat, grow.")).toHaveClass("text-match-parent");
+    await user.click(within(row).getByRole("button", { name: detailsOf("Chess") }));
+    const details = screen.getByTestId("app-details");
+    expect(within(details).getByRole("heading", { name: "Chess" })).toHaveClass("text-match-parent");
+    expect(within(details).getByText("Play chess with a contact")).toHaveClass("text-match-parent");
+  });
+
   it("breaks a publisher's or a store's word with no space anywhere, so on a phone it pushes no screen sideways (nor cuts it off in Arabic)", async () => {
     // 80 characters, a tagline's limit, with nowhere to break: a link, a German compound, a name in Latin letters.
     const long = `https://example.com/${"a".repeat(60)}`;
@@ -1007,10 +1031,14 @@ describe("with the apps flag on", () => {
     expect(rows()).toHaveLength(50);
   });
 
-  it("gives the card's title its own direction", async () => {
+  // The row with the version goes the page's way, from the icon: in its title's direction, an English title sat at the
+  // far left of an Arabic card.
+  it("gives the card's title its own direction, and its row the page's", async () => {
     fakeEngine.on("appList", () => []);
     renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
-    expect(await screen.findByTestId("app-card-title")).toHaveAttribute("dir", "auto");
+    const row = await screen.findByTestId("app-card-title");
+    expect(row).not.toHaveAttribute("dir");
+    expect(within(row).getByText(CARD.title)).toHaveAttribute("dir", "auto");
   });
 
   // A title may have 40 characters: cut as one text with the version, a phone showed no version at all.
