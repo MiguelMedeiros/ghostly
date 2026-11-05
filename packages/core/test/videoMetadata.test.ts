@@ -293,6 +293,35 @@ describe("withoutVideoMetadata", () => {
     expect(timed / plain, `${timed} µs with a prft per fragment, ${plain} µs without`).toBeLessThan(3.5);
   });
 
+  it("a fragmented video's boxes are read a window at a time, not one read per box header and one per moof", async () => {
+    // A read from a Blob costs about the same whatever its size (half a millisecond in Chromium): what counts is how many.
+    const u32 = (n: number) => Buffer.from([n >>> 24, (n >> 16) & 255, (n >> 8) & 255, n & 255]);
+    const head = box("ftyp", Buffer.from("isom\0\0\0\0isom", "latin1"));
+    const moov = box("moov", box("mvhd", Buffer.alloc(100)), metadataTrack(0, 4, "soun"), box("mvex", box("trex", u32(0), u32(1), u32(1), u32(0), u32(6), u32(0))));
+    const prft = box("prft", u32(0), u32(1), Buffer.alloc(8), u32(0));
+    // Its run starts past the `moof` (the base is the `moof`'s start), at its `mdat`'s samples.
+    const moof = (n: number, sample: number, offset: number) => box("moof", box("mfhd", u32(0), u32(n)), box("traf", box("tfhd", u32(0x20010), u32(1), u32(sample)), box("trun", u32(1), u32(2), u32(offset))));
+    /** `fragments` fragments of two samples of `sample` bytes, each after a `prft`. */
+    const recording = (fragments: number, sample: number) => Buffer.concat([head, moov, ...Array.from({ length: fragments }, (_, i) => [
+      prft, moof(i + 1, sample, moof(0, 0, 0).length + 8), box("mdat", Buffer.alloc(sample * 2, i & 255))]).flat()]);
+    const reads = async (file: Buffer, fragments: number) => {
+      let count = 0;
+      const patches = (await videoMetadataPatches({ size: file.length, read: async (offset, length) => { count++; return Uint8Array.from(file.subarray(offset, offset + length)); } }, "video/mp4"))!;
+      // Each `prft` made `free` (its header rewritten, its body zeros), each `moof` as it was, byte for byte.
+      expect(patches.filter((patch) => !patch.bytes).length).toBe(fragments);
+      expect(patches.filter((patch) => patch.bytes && Buffer.from(patch.bytes).subarray(4, 8).toString("latin1") === "free").length).toBe(fragments);
+      const moofs = patches.filter((patch) => patch.bytes && Buffer.from(patch.bytes).subarray(4, 8).toString("latin1") === "moof");
+      expect(moofs.length).toBe(fragments);
+      for (const patch of moofs) expect(Buffer.from(patch.bytes!).equals(file.subarray(patch.start, patch.end))).toBe(true);
+      return count;
+    };
+    // A low-latency recording, a frame per fragment: many fragments share a read (five reads per fragment before).
+    expect(await reads(recording(1_000, 6), 1_000)).toBeLessThan(100);
+    // Fragments of 100 KB: one read for a fragment's three headers and its `moof`, one for its `prft` and `moof` again
+    // when they are emptied and copied (five before).
+    expect(await reads(recording(40, 50_000), 40)).toBeLessThanOrEqual(2 * 40 + 4);
+  });
+
   it("a video with nothing left to remove goes the same: the fixture's encoder tag (udta/meta/ilst) went the first time", async () => {
     const once = await bytesOf((await withoutVideoMetadata(new Blob([H264_MP4]), "video/mp4"))!);
     expect(Buffer.from(once).includes(Buffer.from("ilst", "latin1"))).toBe(false);
