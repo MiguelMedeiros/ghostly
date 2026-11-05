@@ -790,6 +790,23 @@ describe("per chat", () => {
     engines.b.stop();
   });
 
+  it("a check that ran out of time (servers that hang) changes nothing either", async () => {
+    const { engines, ledgers, state } = await shared();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    // The check's own time limit, fired at once: what a provider throws when its servers hang past it.
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => AbortSignal.abort(new DOMException("The operation timed out.", "TimeoutError")));
+    try {
+      const verify = vi.fn(async (_s: unknown, _e: unknown, ctx: { signal: AbortSignal }) => { ctx.signal.throwIfAborted(); throw new Error("not reached"); });
+      state.providers.b = [{ ...fakeKey, recheck: { afterSeconds: 600 }, verify } as unknown as IdentityProofProvider];
+      const checkedAt = ledgers.b.received[0].checkedAt;
+      engines.b.start();
+      await vi.advanceTimersByTimeAsync(25 * 60 * 60_000);
+      expect(verify).toHaveBeenCalled();
+      expect(engines.b.linkView("chat", true)!.received[0]).toMatchObject({ status: "verified", checkedAt });
+      engines.b.stop();
+    } finally { timeout.mockRestore(); }
+  });
+
   it("what the contact verifies is shown only where identities are supported, and forgotten with the chat", async () => {
     const { engines } = await shared();
     engines.b.ready("chat");

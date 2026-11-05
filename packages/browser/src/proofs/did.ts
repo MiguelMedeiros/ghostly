@@ -1,5 +1,5 @@
 import {
-  DidError, DID_DOCUMENT_MAX_BYTES, IdentityCheckUnavailable, resolveDidDht, DID_FILE_MAX_BYTES, didWebDocumentUrl, didWebFileUrl, didWebHost, parseDid, parseDidDocument, staticDidDocument,
+  DidDhtError, DidError, DID_DOCUMENT_MAX_BYTES, IdentityCheckUnavailable, resolveDidDht, DID_FILE_MAX_BYTES, didWebDocumentUrl, didWebFileUrl, didWebHost, parseDid, parseDidDocument, staticDidDocument,
   type DidDocumentView, type DidMethod,
 } from "@ghostly/core";
 import type { IdentityFetch } from "./contract";
@@ -79,7 +79,9 @@ async function resolve(did: string, method: DidMethod, options: DidResolveOption
     try { raw = JSON.parse(text); } catch { throw new DidError(`${documentUrl} is not JSON`); }
     return { method, document: parseDidDocument(did, raw), host: didWebHost(did), documentUrl };
   }
-  const found = await (options.dht ?? resolveDidDht)(did, { fetch: options.fetch, signal: options.signal });
+  // No relay answered (not reached, or an error status): this side's network, which says nothing of the DID.
+  const found = await (options.dht ?? resolveDidDht)(did, { fetch: options.fetch, signal: options.signal })
+    .catch((e: unknown) => { throw e instanceof DidDhtError && e.code === "unreachable" ? new IdentityCheckUnavailable(e.message) : e; });
   if (found.metadata.deactivated) throw new DidError("This DID is deactivated: its owner retired it");
   return { method, document: parseDidDocument(did, found.document), relay: found.relay };
 }
