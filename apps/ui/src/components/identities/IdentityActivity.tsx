@@ -45,7 +45,7 @@ export function IdentityActivity({ provider, subject, profile, links }: { provid
   const { posts, graph, loading, error, more, retry } = usePublicActivity(provider, subject, on);
   const network = Object.prototype.hasOwnProperty.call(ACTIVITY_NETWORKS, provider) ? ACTIVITY_NETWORKS[provider] : undefined;
   if (!network) return null;
-  if (!on) return <p className="identity-activity-note" data-testid="contact-activity-off">{t("identities.activity.off")}</p>;
+  if (!on) return <p className="identity-activity-note" data-testid="contact-activity-off">{t("identities.activity.off", { settings: t("settings.title"), section: t("settings.security") })}</p>;
   const found = profile?.found ? profile : undefined;
   const counts = found ? profileCounts(found, t) : "";
   const hosts = [...new Set([...(found?.hosts ?? []), ...(posts?.hosts ?? []), ...(graph?.hosts ?? [])])];

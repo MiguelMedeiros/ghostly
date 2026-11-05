@@ -14,7 +14,7 @@
     "mutual": "关注了 {{name}}，{{name}} 也关注了该账号",
     "notShown": "未显示。",
     "notShownWhy": "未显示：{{reason}}。",
-    "off": "公开资料已关闭（设置 → 安全）。",
+    "off": "公开资料已关闭（{{settings}} → {{section}}）。",
     "open": "打开",
     "openIn": "在 {{network}} 中打开",
     "openPostIn": "在 {{network}} 中打开此帖子",
