@@ -1,6 +1,6 @@
 import { identityStatement, type IdentityBinding, type IdentityStatement } from "@ghostly/core";
 import { IDENTITY_PROVIDERS } from "@ghostly/browser/proofs/registry";
-import type { IdentityProofProvider, IdentitySigner, SignerInstructions } from "@ghostly/browser/proofs/contract";
+import type { IdentityProofProvider, IdentitySigner, SignerField, SignerInstructions } from "@ghostly/browser/proofs/contract";
 import type { IdentityProofView } from "@ghostly/browser/shared/types";
 import { IDENTITY_DRAFT_TTL_MS, IDENTITY_MAX_DRAFTS } from "@ghostly/browser/engine/identities";
 import { chatOf, findOwnNamedChat, node, num, state, str, type ApiContext, type Method, type Params } from "./apiKit";
@@ -86,6 +86,12 @@ export function proofJson(p: IdentityProofView) {
   };
 }
 
+/** Where the CLI takes a signer's field: a secret (a bunker:// link) on stdin first, kept out of ps and the shell's history. */
+function howToGive(field: SignerField): string {
+  const stdin = `on stdin (--stdin, a ${field.name}=... line)`, flag = `--field ${field.name}=...`;
+  return field.kind === "secret" ? `give it ${stdin}, or ${flag}` : `give it with ${flag}, or ${stdin}`;
+}
+
 function pruneDrafts(now = Date.now()) {
   for (const [id, draft] of drafts) if (now - draft.createdAt > IDENTITY_DRAFT_TTL_MS) drafts.delete(id);
 }
@@ -123,7 +129,7 @@ export const IDENTITY_METHODS: Record<string, Method> = {
     if (signer.kind === "in-app") {
       const values = (params.fields ?? {}) as Record<string, string>;
       if (typeof values !== "object" || Array.isArray(values) || Object.values(values).some((v) => typeof v !== "string")) throw new CliError("bad_request", "fields must be an object of strings");
-      for (const field of signer.fields ?? []) if (!field.optional && !values[field.name]) throw new CliError("bad_request", `${signer.label} needs ${field.name} (${field.label})`);
+      for (const field of signer.fields ?? []) if (!field.optional && !values[field.name]) throw new CliError("usage", `${signer.label} needs ${field.name} (${field.label}): ${howToGive(field)}`);
       const seconds = num(params, "timeout", 300, { min: 5, max: 3600 });
       const signal = AbortSignal.timeout(seconds * 1000);
       const proof = await signer.run({

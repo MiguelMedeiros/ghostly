@@ -6,6 +6,7 @@ import type { EngineState } from "@ghostly/browser/shared/types";
 import type { InAppSigner } from "@ghostly/browser/proofs/contract";
 import { IDENTITY_PROVIDERS } from "@ghostly/browser/proofs/registry";
 import { callApi, type ApiContext } from "../src/api";
+import { EXIT } from "../src/errors";
 import { EventHub, type GhostlyEvent } from "../src/events";
 // covers: headless.identities
 
@@ -38,7 +39,22 @@ describe("identity signers on Node", () => {
 
   it("a Nostr proof takes the remote signer by default, and asks for its link", async () => {
     const { ctx, node } = fake();
-    await expect(callApi(ctx, "identity.add", { provider: "nostr" })).rejects.toMatchObject({ code: "bad_request", message: "Remote signer (NIP-46) needs bunker (Signer connection link)" });
+    await expect(callApi(ctx, "identity.add", { provider: "nostr" })).rejects.toMatchObject({
+      code: "usage", message: "Remote signer (NIP-46) needs bunker (Signer connection link): give it on stdin (--stdin, a bunker=... line), or --field bunker=...",
+    });
+    expect(node.beginIdentityProof).not.toHaveBeenCalled();
+  });
+
+  // It named the field ("needs bunker (Signer connection link)") but not how to give it, as `bad_request` (exit 1).
+  it("a signer's missing field names how to give it, stdin first for a secret, as a usage error", async () => {
+    const { ctx, node } = fake();
+    await expect(callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46" })).rejects.toMatchObject({
+      code: "usage", message: "NIP-05 with a remote signer needs domain (Domain): give it with --field domain=..., or on stdin (--stdin, a domain=... line)",
+    });
+    await expect(callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", fields: { domain: "example.com" } })).rejects.toMatchObject({
+      code: "usage", message: "NIP-05 with a remote signer needs bunker (Signer connection link): give it on stdin (--stdin, a bunker=... line), or --field bunker=...",
+    });
+    expect(EXIT.usage).toBe(2);
     expect(node.beginIdentityProof).not.toHaveBeenCalled();
   });
 
