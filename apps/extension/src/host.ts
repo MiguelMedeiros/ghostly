@@ -37,6 +37,11 @@ export const extensionHost: BrowserHost = {
     }
     const ready = await chrome.runtime.sendMessage({ target: "background", type: "ensure-engine" } satisfies RuntimeMessage);
     if (!ready?.ok) throw new Error(ready?.error ?? "The Ghostly peer is unavailable. Reopen the extension to retry.");
+    // Another switch may have come while the peer started: this page's profile is no longer the one it runs.
+    if (!pageProfileIsCurrent()) {
+      startAsProfileInUse();
+      throw new Error("Switching profiles…");
+    }
     const port = chrome.runtime.connect({ name: UI_PORT });
     port.onMessage.addListener(onMessage);
     port.onDisconnect.addListener(() => {

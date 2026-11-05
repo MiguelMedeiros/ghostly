@@ -447,6 +447,63 @@ test("an app may ask for the pointer after a click (mouse look): its sandbox no 
   expect(["held", "WrongDocumentError"]).toContain((await stored(page, ref)).lock);
 });
 
+test("an app writes nothing to the clipboard: not on load, not in a tap, not from a timer after one", {
+  tag: ["@feature:apps.web-sandbox"],
+}, async ({ page, context, browserName }) => {
+  // Read only, for the check at the end. Playwright's Chromium lets the copy through even on load, with no tap.
+  if (browserName === "chromium") await context.grantPermissions(["clipboard-read"]);
+  await appPage(page);
+  const ref = "evilpublisherkey/clipboard";
+  // Every way the app has to `execCommand` a clipboard command, on a selected textarea; the browser's answer (true:
+  // it wrote) goes to storage. The async Clipboard API is the frame's `allow=""`'s to refuse.
+  const entry = `<!doctype html><title>clip</title><body style="margin:0"><textarea id=t></textarea><div id=pad style="width:100vw;height:90vh"></div><script>
+    const g = window.ghostly, t = document.getElementById("t"), proto = Document.prototype;
+    const exec = proto.execCommand;
+    const tries = (tag) => {
+      const out = {};
+      const ways = {
+        copy: () => document.execCommand("copy"),
+        COPY: () => document.execCommand("COPY"),
+        cut: () => document.execCommand("cut"),
+        paste: () => document.execCommand("paste"),
+        taken: () => exec.call(document, "copy"),
+        proto: () => proto.execCommand.call(document, "copy", false),
+        other: () => document.implementation.createHTMLDocument("").execCommand("copy"),
+      };
+      for (const way in ways) {
+        t.value = "bc1q-APP-" + tag + "-" + way;
+        t.select();
+        try { out[way] = ways[way](); } catch (e) { out[way] = e.name; }
+      }
+      g.storage.set(tag, out);
+    };
+    tries("load");
+    let taps = 0;
+    document.getElementById("pad").addEventListener("pointerdown", () => {
+      if (taps++) return;
+      tries("tap");
+      t.value = "";
+      t.focus();
+      const typed = document.execCommand("insertText", false, "typed");
+      g.storage.set("edit", typed + " " + t.value);
+      setTimeout(() => tries("timer"), 1000);
+    });
+    g.storage.set("ready", true);
+  </script>`;
+  await open(page, ref, entry);
+  await expect.poll(() => stored(page, ref)).toMatchObject({ ready: true });
+  await page.frameLocator(`iframe[data-app="${ref}"]`).locator("#pad").click();
+  await expect.poll(async () => (await stored(page, ref)).timer, { timeout: 10_000 }).toBeDefined();
+  const seen = await stored(page, ref);
+  test.info().annotations.push({ type: `clipboard (${browserName})`, description: JSON.stringify(seen) });
+  for (const tag of ["load", "tap", "timer"]) {
+    for (const [way, wrote] of Object.entries(seen[tag] as Record<string, unknown>)) expect(`${tag} ${way}: ${String(wrote)}`).toBe(`${tag} ${way}: false`);
+  }
+  // None of the app's text is in the system clipboard, and an editing command still edits.
+  if (browserName === "chromium") expect(await page.evaluate(() => navigator.clipboard.readText())).not.toContain("bc1q-APP");
+  expect(seen.edit).toBe("true typed");
+});
+
 test("Chess, as it is built, runs under the runner's lock", {
   tag: ["@feature:apps.web-sandbox", "@feature:apps.chess"],
 }, async ({ page }) => {

@@ -10,7 +10,7 @@ import { viewOf } from "./gate";
 import { DEVICE_GATED_ERROR, type DeviceLinkEngine, type DeviceLinkHost } from "./linkOnly";
 import { DeviceSetError, deviceIdentity, openTurnKeeper } from "./setup";
 import { loadDeviceSigningKey, type DeviceSigningKey } from "./signingKey";
-import { forkTimes, type DevicePatch, type DeviceRecord, type DeviceState } from "./state";
+import { forkTimes, type DevicePatch, type DeviceRecord, type DeviceSlot, type DeviceState, type SecretOffer } from "./state";
 import { amendDevice, forgetDevice, moveDevice, readDeviceRecord } from "./store";
 import { acknowledged, pendingFrames } from "./remove";
 import { checkSetUpdate } from "./setUpdate";
@@ -88,8 +88,11 @@ export interface DeviceSetView {
    * The active device makes the move by itself; this says it is due.
    */
   newSecretDue?: true;
-  /** "New device secret" is offered: this device took over from `device`, which still holds the old secret. `lost`: the person said it was lost or stolen. */
-  secretOffer?: { device?: string; lost?: true };
+  /**
+   * "New device secret" is offered: this device took over from the device of signing key `key`, named `device` now,
+   * which still holds the old secret. Neither when that device is not known. `lost`: the person said it was lost or stolen.
+   */
+  secretOffer?: { key?: string; device?: string; lost?: true };
   /** Devices that stay and have not taken the new secret yet: they get it the next time they open Ghostly. */
   waiting?: { key: string; name: string }[];
   /** Another tombstone stands where this device put its own: a device that was left behind started a set of its own, or something else closed it. */
@@ -119,14 +122,26 @@ export function deviceSetView(record: DeviceRecord | null, links: DeviceLinkView
     const slot = record.deviceSet.find((s) => s?.key === key);
     return slot && all.findIndex((other) => other.key === key) === i ? [{ key, name: slot.name }] : [];
   });
+  const stopped = record.secretOffer ? offeredDevice(record, record.secretOffer) : undefined;
   return { state: record.state, devices, ...(grants.length ? { unfinishedGrants: grants } : {}), ...(enrollmentUnfinished(record) ? { unfinished: true as const } : {}),
     ...(due?.why === "unfinished-grant" ? { newSecretDue: true as const } : {}),
-    ...(record.state === "active" && record.secretOffer ? { secretOffer: { ...(record.secretOffer.device ? { device: record.secretOffer.device } : {}), ...(record.secretOffer.lost ? { lost: true as const } : {}) } } : {}),
+    ...(record.state === "active" && record.secretOffer ? { secretOffer: { ...(stopped ? { key: stopped.key, device: stopped.name } : {}), ...(record.secretOffer.lost ? { lost: true as const } : {}) } } : {}),
     ...(record.state === "active" && waiting.length ? { waiting } : {}),
     ...(record.state === "active" && record.earlierSets.some((set) => set.foreign) ? { foreignSet: true as const } : {}),
     ...(record.setNotice && !record.setNotice.seen ? { notice: record.setNotice.names } : {}),
     ...(record.reenroll ? { reenroll: true as const } : {}),
     ...(record.state === "active" && record.forks?.length ? { forks: [...record.forks], forkKeptAt: forkTimes(record) } : {}) };
+}
+
+/**
+ * The device a takeover's offer is about, as the set lists it now: found by its key, never this device. An offer an older
+ * build stored has only the name, which a rename there may have moved to another device: it is trusted only when the
+ * set has one other device and the name is that device's.
+ */
+function offeredDevice(record: DeviceRecord, offer: SecretOffer): DeviceSlot | undefined {
+  const others = record.deviceSet.filter((slot, index): slot is DeviceSlot => !!slot && index !== record.ownSlot);
+  if (offer.key) return others.find((slot) => slot.key === offer.key);
+  return others.length === 1 && others[0]!.name === offer.device ? others[0] : undefined;
 }
 
 export interface DeviceLinksOptions {

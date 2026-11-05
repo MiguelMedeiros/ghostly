@@ -127,6 +127,16 @@ const MAX_PENDING_ENTRIES = 8;
 const ENTRY_TIMEOUT_MS = 3 * 60_000;
 const ENTRY_UNANSWERED_MS = 90_000;
 /**
+ * Knock records are written by anyone with the link: filled again and again with keys that have no app behind them,
+ * they take every entry session the door opens, each for `ENTRY_UNANSWERED_MS`, and nobody real gets in (8 at a time,
+ * a lone admin's door gave 64 such keys their session in 12 minutes while a real joiner waited the whole time). The
+ * admin is told once this many keys went unanswered within `UNANSWERED_WINDOW_MS` (about 3 minutes of that), and
+ * offered a new link. A busy link stays well under: a joiner whose session never comes up closed its app within
+ * seconds of opening the link and did not open it again.
+ */
+const UNANSWERED_TELL = 16;
+const UNANSWERED_WINDOW_MS = 10 * 60_000;
+/**
  * Each attempt to let one joiner in belongs to one hub for this long (see `answerKnocks`): it opens
  * the entry session in the first `KNOCK_SLOT_OPEN_MS` and gives up after `ENTRY_UNANSWERED_MS`,
  * before the turn ends. A paired session over Pkarr can take the better part of a minute to come up.
@@ -291,6 +301,9 @@ interface Live {
   lastKnockPoll: number;
   /** Joiners with an entry session open: key → since; knocks first seen: key → when, and with which hubs at the door. */
   pendingEntries: Map<string, number>;
+  /** Knocks whose entry session never came up, given up: key → when (`UNANSWERED_TELL`); and whether the admin is told. */
+  unanswered?: Map<string, number>;
+  unansweredTold?: boolean;
   /** Joiners told the community is full (`group-full`), and when. */
   fullTold: Map<string, number>;
   /** The entry key those entry sessions were opened through: a link replaced since reaches nobody, and they go with it. */
@@ -502,7 +515,7 @@ export class Communities {
       ...(s.isMember && s.entryKey ? { entryLink: encodeCommunityLink({ g: s.id, host: s.entryKey }) } : {}),
       canSend: s.canSend, ...(s.picture ? { picture: s.picture } : {}), ...(invitation ? { invitation } : {}),
       // Not an edge to one whose leave I hold, which its app keeps a while after it left (`leftBehind`): it carries nothing.
-      community: { hub: live.hub, hubs: hubs.length, connected: [...edges.keys()].filter(key => ready(key) && !this.gone(live, key)).length },
+      community: { hub: live.hub, hubs: hubs.length, connected: [...edges.keys()].filter(key => ready(key) && !this.gone(live, key)).length, ...(s.isAdmin && live.unansweredTold && { unansweredKnocks: live.unanswered!.size }) },
       members: roster.map(([key, role]) => ({ key, role, me: key === s.myKey,
         nick: key === s.myKey ? undefined : (edges.get(key) && this.host.edgeNick(edges.get(key)!)) || s.state.nicks[key],
         online: key === s.myKey || ready(key), missing: s.missing(key) })) }];
@@ -812,6 +825,8 @@ export class Communities {
     const s = this.require(groupId);
     if (!s.isAdmin) throw new Error("Only the admin can replace or turn off the group's link");
     await this.closeEntries(groupId);
+    const live = this.live.get(groupId);
+    if (live) { live.unanswered = undefined; live.unansweredTold = false; }
     const key = await s.replaceLink(off);
     return key ? encodeCommunityLink({ g: groupId, host: key }) : "";
   }
@@ -1158,10 +1173,17 @@ export class Communities {
       // wait for an admission waited: the lobby of a hub left behind, read every half minute while the members of the
       // hub that left asked there (CLI daemons, 2026-10-11). Not a session opened for a member whose welcome was lost.
       const elsewhere = rosterHas(s.roster, key) && since < this.addedAt(s, key) + this.timings.knockFallbackMs;
-      if (!up && (elsewhere || now - since > ENTRY_UNANSWERED_MS)) live.pendingEntries.delete(key);
-      else if (now - since > ENTRY_TIMEOUT_MS) { live.pendingEntries.delete(key); this.refused.set(key, now + REFUSED_FOR_MS); }
+      if (!up && (elsewhere || now - since > ENTRY_UNANSWERED_MS)) {
+        live.pendingEntries.delete(key);
+        if (!elsewhere) (live.unanswered ??= new Map()).set(key, now);
+      } else if (now - since > ENTRY_TIMEOUT_MS) { live.pendingEntries.delete(key); this.refused.set(key, now + REFUSED_FOR_MS); }
       else continue;
       if (linkId) await this.host.closeEdge(linkId);
+    }
+    if (live.unanswered) {
+      for (const [key, at] of live.unanswered) if (now - at > UNANSWERED_WINDOW_MS) live.unanswered.delete(key);
+      const tell = live.unanswered.size >= UNANSWERED_TELL;
+      if (tell !== !!live.unansweredTold) { live.unansweredTold = tell; this.host.emit(); }
     }
     // Missing a secret or waiting on an epoch: ask whoever I am connected to, now and then, until it
     // comes. And every half minute anyway: a commit or a message that went by while an edge was
@@ -1380,8 +1402,8 @@ export class Communities {
       const records = read ?? [];
       existing = live.hubClocks.inMyTime(readBeacon(keys, records), now); head = readBeaconHead(keys, records);
     }
-    // Nobody drops a hub it does not know: a member behind on the roster would erase newer ones.
-    const hubs = mergeBeacon(existing, live.session.myKey, listed ? { key: live.session.myKey, ts: now, load: this.beaconLoad(groupId, live, now), since: live.hubSince || now } : null, now, key => !this.gone(live, key));
+    // Nobody drops a hub it does not know: a member behind on the roster would erase newer ones. Those it knows go first.
+    const hubs = mergeBeacon(existing, live.session.myKey, listed ? { key: live.session.myKey, ts: now, load: this.beaconLoad(groupId, live, now), since: live.hubSince || now } : null, now, key => !this.gone(live, key), key => rosterHas(live.session.roster, key));
     // Nor a newer head: several hubs write this record in turn.
     const newest = newerHead(head, this.newestFrame(live), now);
     await this.host.publish(keys.identity, beaconRecords(keys, live.hubClocks.asWritten(hubs), newest), !back, live.hub && !back, back);
@@ -1392,13 +1414,15 @@ export class Communities {
 
   /**
    * The beacon's hubs, less those the chain took out: hubs are members. Someone removed while its app was closed lists
-   * itself there when it comes back, believing it is a member, until it is told (`wantFarewell`).
+   * itself there when it comes back, believing it is a member, until it is told (`wantFarewell`). A key my roster does
+   * not have is nobody's hub here either (anyone holding the rendezvous secret can write one in), though it stays in the
+   * beacon I write: a member behind on the roster must not erase the newest hubs.
    */
   private hubs(live: Live): Hub[] {
     // Asked many times a tick: worked out again only when the beacon, the chain or the leave requests moved.
     const top = live.session.top, leaves = live.session.state.pendingLeaves, memo = live.hubsMemo;
     if (memo && memo.beacon === live.beacon && memo.top === top && memo.leaves === leaves) return memo.hubs;
-    const hubs = live.beacon.filter(h => !this.gone(live, h.key));
+    const hubs = live.beacon.filter(h => !this.gone(live, h.key) && rosterHas(live.session.roster, h.key));
     live.hubsMemo = { beacon: live.beacon, top, leaves, hubs };
     return hubs;
   }
@@ -2165,7 +2189,7 @@ export class Communities {
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
         // A file it announces (WISP 503): kept here, and fetched now when it is one this device takes by itself. Not one of
         // a message deleted for everyone that comes after its removal (`Groups.removed`): its row is not stored either.
-        const file = m.file && this.files && !this.stored.get(id)?.removedIds?.includes(m.id) ? await this.files.announced(id, { id: m.id, sender: m.sender, ts: m.timestamp, file: m.file }, session.myKey) : undefined;
+        const file = m.file && this.files && !this.stored.get(id)?.removedIds?.includes(m.id) ? await this.files.announced(id, { id: m.id, sender: m.sender, file: m.file }, session.myKey) : undefined;
         // Its place is taken as the store is called, before anything is awaited: the line order follows it from there.
         const placing = this.lineOrder.placing(MESSAGE_LINK(id), { id: m.id, epoch: m.epoch, line: false }, this.now());
         // Live (straight from its author, or handed on at once by a hub that says so): it tells the author's clock.

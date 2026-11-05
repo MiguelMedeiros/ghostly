@@ -3,7 +3,7 @@ import { toBase64Url, toZ32, utf8Encode } from "./bytes";
 import { canonicalJsonBytes, readCanonicalJson, type JsonValue } from "./canonicalJson";
 import { imageSize } from "./image";
 import {
-  APP_NAME, APP_PREFIXES, isAppHash, isAppKey, readAppSignature, signAppObject, verifyAppSignature, type AppSignature,
+  APP_NAME, APP_PREFIXES, isAppHash, isAppKey, isAppLine, readAppSignature, signAppObject, verifyAppSignature, type AppSignature,
 } from "./appStatements";
 import type { Signer } from "./signer";
 
@@ -160,8 +160,6 @@ const HOST = /^>=(0|[1-9]\d*)\.(0|[1-9]\d*)(\.(0|[1-9]\d*))?$/;
 const SEGMENT = /^[A-Za-z0-9._-]+$/;
 
 const codePoints = (s: string) => [...s].length;
-/** One line: no control character. */
-const isLine = (v: unknown, max: number, min = 0): v is string => typeof v === "string" && codePoints(v) >= min && codePoints(v) <= max && !/\p{Cc}/u.test(v);
 /** Text of several lines: no control character but the line feed. */
 const isText = (v: unknown, max: number): v is string => typeof v === "string" && codePoints(v) <= max && !/[^\P{Cc}\n]/u.test(v);
 const isSafeCount = (v: unknown, min: number): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= min;
@@ -237,10 +235,10 @@ export function checkAppManifest(value: unknown, options: AppManifestOptions = {
   if (typeof m.version !== "string" || m.version.length > APP_BUNDLE_LIMITS.version || !SEMVER.test(m.version)) return bad("version");
   if (!isSafeCount(m.sequence, 1)) return bad("sequence");
   if (m.kind !== "mini-app") return bad("kind");
-  if (!isLine(m.title, APP_BUNDLE_LIMITS.title, 1)) return bad("title");
-  if (!isLine(m.tagline, APP_BUNDLE_LIMITS.tagline, 1)) return bad("tagline");
+  if (!isAppLine(m.title, APP_BUNDLE_LIMITS.title, 1)) return bad("title");
+  if (!isAppLine(m.tagline, APP_BUNDLE_LIMITS.tagline, 1)) return bad("tagline");
   if (m.description !== undefined && !isText(m.description, APP_BUNDLE_LIMITS.description)) return bad("description");
-  if (m.releaseNotes !== undefined && !isLine(m.releaseNotes, APP_BUNDLE_LIMITS.releaseNotes)) return bad("releaseNotes");
+  if (m.releaseNotes !== undefined && !isAppLine(m.releaseNotes, APP_BUNDLE_LIMITS.releaseNotes)) return bad("releaseNotes");
   const permissions = m.permissions;
   if (!Array.isArray(permissions) || new Set(permissions).size !== permissions.length
     || !permissions.every((p) => (APP_PERMISSIONS as readonly unknown[]).includes(p))) return bad("permissions");

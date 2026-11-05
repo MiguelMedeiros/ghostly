@@ -275,7 +275,8 @@ const LOCAL_SUFFIXES = ["localhost", "local", "internal", "lan", "home", "home.a
  * A URL a bundle or manifest may be fetched from. The contact chose it and this device fetches it on its own, so it
  * is HTTPS, without a user or password, at a public name or a public IPv4 address: never this machine or its network.
  * A name with no dot or under a local suffix is a local one. A public name may still resolve to a local address:
- * where the host can resolve, its `fetch` refuses that too (the CLI's, packages/cli/src/runtime/holdFetch.ts).
+ * where the host can resolve, its `fetch` refuses that too (the CLI's, packages/cli/src/runtime/holdFetch.ts, and
+ * Desktop's, apps/desktop/src/hold_fetch.rs).
  * `loopback` adds plain HTTP to this machine, for a test against a local server; no shipped app passes it.
  */
 export function isHoldUrl(value: unknown, loopback = false): value is string {

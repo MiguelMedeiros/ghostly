@@ -57,6 +57,14 @@ export const GROUP_FILE_LIMITS = {
   haveFramesTaken: 20,
   communityHaveEveryMs: 60_000,
   /**
+   * `group-want` frames an edge sends in `wantWindowMs`, and takes from its member, the rest dropped before anything is
+   * looked up: twice what it may send, as for `group-have`. A member back from away in a group of 16 asked one member
+   * for at most 47 in 10 seconds, its files coming as fast as the network lets them.
+   */
+  wantFrames: 50,
+  wantFramesTaken: 100,
+  wantWindowMs: 10_000,
+  /**
    * How long a want waits for an offer before the next holder is asked; a transfer that does not move for as long is
    * left for the next holder too.
    */
