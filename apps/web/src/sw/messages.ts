@@ -10,6 +10,8 @@ export type ToWorker =
   | { type: "share-forward"; profile: string }
   /** This page holds `profile`'s peer and takes shares: said when it starts and whenever it comes to the front. */
   | { type: "share-here"; profile: string }
+  /** This page that took shares goes (a share into the same window replaces it): none is forwarded to it on its way out. */
+  | { type: "share-away" }
   /** This page restarts (a profile switch) with a share still in its picker: hold it again for the page that loads next. */
   | { type: "share-keep"; item: SharedItem }
   /** Opens a wake-up notification's chat as a tap would (the push worker; a page of this origin only). */
@@ -21,6 +23,8 @@ export type FromWorker =
   | { type: "share"; item: SharedItem; dropped?: number }
   /** Asked for a share, and there is none (it was already taken, or it timed out). */
   | { type: "share-none" }
+  /** The shares this page asked to forward (`share-forward`) are handed to the app's page of its profile. */
+  | { type: "share-forwarded" }
   /** A wake-up notification was tapped: open this chat, in this profile (switching to it when another is open). */
   | { type: "open-chat"; path: string; profile: string }
   /** A wake-up notification was tapped: which profile does this window run, and does it hold its peer? Answered on the port sent with it (`WindowSays`). */

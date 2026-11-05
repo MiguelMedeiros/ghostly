@@ -184,7 +184,11 @@ export function listenForShares(): void {
   workers.startMessages();
   // A share into this same window replaces this page with one opened for it: the shares still in the picker go back
   // to the worker, which hands them to that page ahead of the new one, instead of going with this page.
-  addEventListener("pagehide", () => { carryIncomingShare(); });
+  // The worker then forwards no share to this page on its way out (`handShareOver`): said now, nothing later runs.
+  addEventListener("pagehide", () => {
+    carryIncomingShare();
+    tell(workers.controller, { type: "share-away" });
+  });
   // This page takes the shares forwarded to its profile: the worker gives one to the page of the profile in front last.
   const here = () => tellReady({ type: "share-here", profile: activeProfileId() });
   here();
@@ -241,9 +245,38 @@ export function askForShare(): void {
 /** How long a tab opened for a share waits for the peer's lock before it hands the share to the tab that holds it. */
 export const SHARE_FORWARD_AFTER_MS = 3000;
 
-/** Another tab of this profile holds the peer: the worker hands the share to that one instead, and to no other. */
-export function forwardShare(): void {
+/**
+ * Another tab of this profile holds the peer: the worker hands the share to that one instead, and to no other.
+ * `answered` hears what came of it: handed over (true), or nothing was held to forward (false). Told at once to the
+ * worker that controls this page, so it is said even from `pagehide`.
+ */
+export function forwardShare(answered: (forwarded: boolean) => void = () => {}): void {
   const workers = container();
   if (!workers || !openedForShare()) return;
-  tellReady({ type: "share-forward", profile: activeProfileId() });
+  workers.addEventListener("message", (event: MessageEvent<FromWorker>) => {
+    const type = event.data?.type;
+    if (type === "share-forwarded" || type === "share-none") answered(type === "share-forwarded");
+  });
+  workers.startMessages();
+  const message: ToWorker = { type: "share-forward", profile: activeProfileId() };
+  if (workers.controller) tell(workers.controller, message);
+  else tellReady(message);
+}
+
+/**
+ * This tab opened for a share while another tab of its profile is the app: that tab gets it. Not at once: a share
+ * posted from this same window (the system opens the app's window for it) replaces a page that holds the lock a moment
+ * longer on its way out, so the share is forwarded after `afterMs`, unless this tab holds the peer by then (`peer`:
+ * it asks for it itself). Closed or left before that, it forwards as it goes: the page on its way out said so to the
+ * worker (`share-away`), which forwards nothing to it. `answered`: the worker handed it over, or there was none.
+ */
+export function handShareOver(peer: () => boolean, answered: (state: "shared" | "shareNone") => void, afterMs = SHARE_FORWARD_AFTER_MS): void {
+  let asked = false;
+  const forward = () => {
+    if (asked || peer()) return;
+    asked = true;
+    forwardShare((forwarded) => { if (!peer()) answered(forwarded ? "shared" : "shareNone"); });
+  };
+  setTimeout(forward, afterMs);
+  addEventListener("pagehide", forward);
 }

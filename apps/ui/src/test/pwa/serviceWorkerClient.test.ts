@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applyUpdate, askForShare, buildGone, followNewVersion, forwardShare, listenForShares, listenForTaps, onBuildGone, openedForShare, prepareUpdate } from "../../../../web/src/pwa/serviceWorker";
+import { SHARE_FORWARD_AFTER_MS, applyUpdate, askForShare, buildGone, followNewVersion, forwardShare, handShareOver, listenForShares, listenForTaps, onBuildGone, openedForShare, prepareUpdate } from "../../../../web/src/pwa/serviceWorker";
 import { carryIncomingShare, dropIncomingShare, incomingShare, resetIncomingShare } from "../../lib/incomingShare";
 import { activeProfileId } from "../../lib/profiles";
 
@@ -188,12 +188,63 @@ describe("a share, on the page's side", () => {
     await vi.waitFor(() => expect(registration.active!.posted).toEqual([{ type: "share-forward", profile: activeProfileId() }]));
   });
 
+  describe("a tab opened for it while another tab is the app", () => {
+    beforeEach(() => { vi.useFakeTimers(); window.location.hash = "#/shared"; });
+    afterEach(() => { vi.useRealTimers(); });
+    const forwards = () => registration.active!.posted.filter((message) => (message as { type: string }).type === "share-forward");
+    const say = (type: string) => container.dispatchEvent(Object.assign(new Event("message"), { data: { type } }));
+
+    it("forwards it after the wait, and says it went only once the worker answers", () => {
+      const answered = vi.fn();
+      handShareOver(() => false, answered);
+      vi.advanceTimersByTime(SHARE_FORWARD_AFTER_MS - 1);
+      expect(forwards()).toEqual([]);
+      vi.advanceTimersByTime(1);
+      expect(forwards()).toEqual([{ type: "share-forward", profile: activeProfileId() }]);
+      expect(answered).not.toHaveBeenCalled();
+      say("share-forwarded");
+      expect(answered).toHaveBeenCalledWith("shared");
+    });
+
+    it("closed before the wait is over, it forwards at once as it goes, and only once", () => {
+      handShareOver(() => false, () => {});
+      window.dispatchEvent(new Event("pagehide"));
+      // Said as the page goes: nothing later of it runs.
+      expect(forwards()).toEqual([{ type: "share-forward", profile: activeProfileId() }]);
+      vi.advanceTimersByTime(SHARE_FORWARD_AFTER_MS);
+      expect(forwards()).toHaveLength(1);
+    });
+
+    it("nothing held to forward: it says so, not that it went", () => {
+      const answered = vi.fn();
+      handShareOver(() => false, answered);
+      vi.advanceTimersByTime(SHARE_FORWARD_AFTER_MS);
+      say("share-none");
+      expect(answered).toHaveBeenCalledWith("shareNone");
+    });
+
+    it("the tab took over meanwhile: it asks for the share itself, nothing is forwarded", () => {
+      const answered = vi.fn();
+      handShareOver(() => true, answered);
+      vi.advanceTimersByTime(SHARE_FORWARD_AFTER_MS);
+      window.dispatchEvent(new Event("pagehide"));
+      expect(forwards()).toEqual([]);
+    });
+  });
+
   it("the page that takes shares tells the worker its profile, when it starts and whenever it comes to the front", async () => {
     listenForShares();
     await vi.waitFor(() => expect(registration.active!.posted).toEqual([{ type: "share-here", profile: activeProfileId() }]));
     window.dispatchEvent(new Event("focus"));
     await vi.waitFor(() => expect(registration.active!.posted).toHaveLength(2));
     expect(registration.active!.posted[1]).toEqual({ type: "share-here", profile: activeProfileId() });
+  });
+
+  it("the app's page on its way out tells the worker, so no share is forwarded to it", async () => {
+    listenForShares();
+    await vi.waitFor(() => expect(registration.active!.posted).toHaveLength(1));
+    window.dispatchEvent(new Event("pagehide"));
+    expect(registration.active!.posted.slice(1)).toEqual([{ type: "share-away" }]);
   });
 
   it("a share never replaces one waiting in the picker: it is offered once that one is put aside", () => {
@@ -252,13 +303,14 @@ describe("a share, on the page's side", () => {
     const shown = { title: "", text: "shown", url: "", files: [] };
     const behind = { title: "", text: "behind", url: "", files: [] };
     for (const item of [shown, behind]) container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "share", item } }));
+    const kept = () => registration.active!.posted.filter((message) => (message as { type: string }).type === "share-keep");
     window.dispatchEvent(new Event("pagehide"));
-    expect(registration.active!.posted.slice(1)).toEqual([{ type: "share-keep", item: shown }, { type: "share-keep", item: behind }]);
+    expect(kept()).toEqual([{ type: "share-keep", item: shown }, { type: "share-keep", item: behind }]);
     // Handed back, they are the next page's: a profile switch that carried them already, then the page going, gives them once.
     expect(incomingShare()).toBeNull();
     expect(carryIncomingShare()).toBe(false);
     window.dispatchEvent(new Event("pagehide"));
-    expect(registration.active!.posted).toHaveLength(3);
+    expect(kept()).toHaveLength(2);
   });
 
   it("the shares the worker could not keep are said with the share shown", () => {

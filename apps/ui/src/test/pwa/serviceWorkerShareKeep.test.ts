@@ -138,7 +138,8 @@ it("a share forwarded goes to one window: the app's page of the same profile foc
   expect(home.heard).toEqual([{ type: "share", item }]);
   expect(older.heard).toEqual([]);
   expect(work.heard).toEqual([]);
-  expect(opened.heard).toEqual([]);
+  // Only that it went.
+  expect(opened.heard).toEqual([{ type: "share-forwarded" }]);
 });
 
 it("no page of the profile to forward it to: it waits, and goes to the first of that profile that says it is there", async () => {
@@ -158,4 +159,51 @@ it("no page of the profile to forward it to: it waits, and goes to the first of 
   expect(work.heard).toEqual([]);
   worker.say({ type: "share-here", profile: "home" }, home);
   expect(home.heard).toEqual([{ type: "share", item }]);
+});
+
+it("the tab that asked for a forward is told once the share is handed over, and not before", async () => {
+  const home = page("home");
+  const opened = page("opened");
+  const worker = await startWorker(undefined, [home, opened]);
+  worker.say({ type: "share-here", profile: "home" }, home);
+  worker.say({ type: "share-keep", item: item("for Ana") }, opened);
+  worker.say({ type: "share-forward", profile: "home" }, opened);
+  expect(opened.heard).toEqual([]);
+  await Promise.all(worker.waits.slice(1));
+  expect(home.heard).toEqual([{ type: "share", item: item("for Ana") }]);
+  expect(opened.heard).toEqual([{ type: "share-forwarded" }]);
+});
+
+it("no page to forward to yet: the tab that asked hears it went once one says it is there; nothing held, it hears there is none", async () => {
+  const opened = page("opened");
+  const home = page("home");
+  const worker = await startWorker(undefined, [opened, home]);
+  worker.say({ type: "share-keep", item: item("for Ana") }, opened);
+  worker.say({ type: "share-forward", profile: "home" }, opened);
+  await Promise.all(worker.waits.slice(1));
+  expect(opened.heard).toEqual([]);
+  worker.say({ type: "share-here", profile: "home" }, home);
+  expect(home.heard).toEqual([{ type: "share", item: item("for Ana") }]);
+  expect(opened.heard).toEqual([{ type: "share-forwarded" }]);
+
+  const late = page("late");
+  worker.say({ type: "share-forward", profile: "home" }, late);
+  expect(late.heard).toEqual([{ type: "share-none" }]);
+});
+
+it("a share forwarded never goes to the app's page on its way out (a share into the same window replaced it)", async () => {
+  const leaving = page("leaving");
+  const opened = page("opened");
+  const next = page("next");
+  const worker = await startWorker(undefined, [leaving, opened, next]);
+  worker.say({ type: "share-here", profile: "home" }, leaving);
+  worker.say({ type: "share-away" }, leaving);
+  worker.say({ type: "share-keep", item: item("for Ana") }, opened);
+  // The tab opened for it goes before its wait is over: it forwards at once.
+  worker.say({ type: "share-forward", profile: "home" }, opened);
+  await Promise.all(worker.waits.slice(1));
+  expect(leaving.heard).toEqual([]);
+  // Held for the next page of the profile instead.
+  worker.say({ type: "share-here", profile: "home" }, next);
+  expect(next.heard).toEqual([{ type: "share", item: item("for Ana") }]);
 });

@@ -128,6 +128,8 @@ let dropped = 0;
  * forgot them): the first page of it that says it is there gets them. `profile` null: a page that did not say its own.
  */
 let forwardFor: { profile: string | null } | null = null;
+/** The tabs that asked to forward the shares held now: told once those are handed over (they say so), or dropped. */
+let forwarding: WindowClient[] = [];
 /** The app's pages that take shares (they hold the peer), by window id: their profile, and when they were last in front. */
 const sharePages = new Map<string, { profile: string; at: number }>();
 let inFront = 0;
@@ -149,7 +151,7 @@ function hold(item: SharedItem, done: () => void, kept = false): void {
   setTimeout(() => {
     if (!held.includes(entry)) return;
     held = held.filter((other) => other !== entry);
-    if (!held.length) { forwardFor = null; dropped = 0; }
+    if (!held.length) { forwardFor = null; dropped = 0; tellForwarding({ type: "share-none" }); }
     done();
   }, SHARE_HOLD_MS);
 }
@@ -163,6 +165,16 @@ function handOver(client: WindowClient): void {
   forwardFor = null;
   taken.forEach(({ item }, at) => client.postMessage({ type: "share", item, ...(lost > 0 && at === taken.length - 1 && { dropped: lost }) } satisfies FromWorker));
   for (const { done } of taken) done();
+  // The tab that asked for them took them itself (it is the app now): nothing went elsewhere to tell it about.
+  forwarding = forwarding.filter((asked) => asked.id !== client.id);
+  tellForwarding({ type: "share-forwarded" });
+}
+
+/** The tabs that asked for a forward hear what came of it, once. */
+function tellForwarding(message: FromWorker): void {
+  const asked = forwarding;
+  forwarding = [];
+  for (const client of asked) client.postMessage(message);
 }
 
 function share(event: FetchEvent): void {
@@ -213,8 +225,15 @@ worker.addEventListener("message", (event) => {
     if (held.length && forwardFor && (forwardFor.profile === null || forwardFor.profile === message.profile)) handOver(source);
     return;
   }
+  if (message.type === "share-away") {
+    // Gone before a forward could reach it: a share into its own window, which the tab opened for it waits behind.
+    sharePages.delete(source.id);
+    return;
+  }
   if (message.type === "share-forward") {
     if (!held.length) { source.postMessage({ type: "share-none" }); return; }
+    // It says "Sent" only once they are handed over: closed before, nothing would have asked for them again.
+    if (!forwarding.some((asked) => asked.id === source.id)) forwarding.push(source);
     const profile = typeof message.profile === "string" ? message.profile : null;
     event.waitUntil(worker.clients.matchAll({ type: "window" }).then((all) => {
       const open = new Set(all.map((client) => client.id));
