@@ -93,7 +93,8 @@ test("three people: the admin sets the group's picture, a late joiner by link se
   expect(first!.length).toBeLessThan(40_000);
   await shows(alice, first);
   await shows(bob, first);
-  await expect(bob.page.getByTestId("group-event").filter({ hasText: "Alice changed the group's picture" })).toBeVisible();
+  // Alice is the admin: her name in the line carries the admin's mark.
+  await expect(bob.page.getByTestId("group-event").filter({ hasText: "Alice admin changed the group's picture" })).toBeVisible();
 
   // Carol joins later by the link and sees it; nobody had to set it again.
   await join(carol, url);

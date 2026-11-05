@@ -6,7 +6,7 @@ import { useOutsideDismiss, useTabTrap } from "../hooks/useDismiss";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { useI18n } from "../contexts/I18nContext";
-import { edgeDot, memberName } from "../lib/groups";
+import { edgeDot, memberName, sameNamed } from "../lib/groups";
 import { PaymentComposer } from "./PaymentComposer";
 import type { ChatRail } from "./WalletCards";
 import { problemText } from "../lib/problemText";
@@ -32,6 +32,7 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
   // On a phone the list of members is a sheet over a backdrop, as the payment sheet after it: Tab stays in it.
   useTabTrap(ref, useIsMobile() && to === null);
   const others = group.members.filter(m => !m.me);
+  const same = sameNamed(group.members);
   const community = group.profile === "community";
   // A community member is reached through the group: a link the engine lists once their ways of paying are known.
   const linkIdOf = (m: GroupMemberView) => community ? pairLinkId(group.id, m.key) : m.edge?.linkId;
@@ -64,7 +65,7 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
   const member = to ? others.find(m => m.key === to) : undefined;
   const found = member && linkOf(member);
   const link = found ?? (member && community ? { id: pairLinkId(group.id, member.key), peerPubKeyZ32: member.key } : undefined);
-  if (member && link) return <PaymentComposer balance={balance} contact={memberName(member, t)} onBack={() => setTo(null)} onClose={onClose}
+  if (member && link) return <PaymentComposer balance={balance} contact={memberName(member, t, same)} onBack={() => setTo(null)} onClose={onClose}
     reviewContext={wallet ? { wallet, peer: link.peerPubKeyZ32, linkId: link.id } : undefined}
     onSend={async (amount, memo, network, confirmedReal) => {
       try { await engine.call("sendPayment", { linkId: link.id, amount, memo: memo || undefined, timestamp: Date.now(), ...(network ? { network } : {}), ...(confirmedReal ? { confirmedReal: true as const } : {}) }); return null; } catch (e) { return problemText(e, t); }
@@ -94,7 +95,7 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
               {/* The member's name in its own direction, on the box that cuts it and as wide as it: a Latin name in Arabic
                   keeps its start, and a short one stays at the line's start. */}
               <span className="min-w-0 flex-1 flex flex-col items-start">
-                <span dir="auto" className="max-w-full truncate text-sm text-text-primary">{memberName(m, t)}</span>
+                <span dir="auto" className="max-w-full truncate text-sm text-text-primary">{memberName(m, t, same)}</span>
                 {reason && <span className="max-w-full truncate text-[11px] text-text-muted">{reason}</span>}
               </span>
             </button>
