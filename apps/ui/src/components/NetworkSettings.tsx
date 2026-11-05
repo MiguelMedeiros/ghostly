@@ -152,7 +152,7 @@ export function NetworkSettings() {
 
   // Addresses read left to right in every language (in Arabic a wrapped relay's trailing "/" would start the next line); labels and hints follow the page.
   const field =
-    "w-full min-w-0 px-3 py-2 min-h-10 bg-input-bg border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent transition-colors aria-invalid:border-danger aria-invalid:focus:ring-danger";
+    "w-full min-w-0 px-3 py-2 min-h-10 bg-input-bg border border-field-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent transition-colors aria-invalid:border-danger aria-invalid:focus:ring-danger";
   // A refused field: its border says so, and it names its error to assistive technology.
   const invalid = (name: FieldName) => problems[name] ? { "aria-invalid": true, "aria-describedby": `${FIELDS[name]}-error` } : {};
   const problemUnder = (name: FieldName) => <FieldError id={`${FIELDS[name]}-error`} testId="network-error">{problems[name]}</FieldError>;
