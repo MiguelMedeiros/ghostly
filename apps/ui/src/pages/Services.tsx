@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { usePlatformValue } from "../hooks/useServicesPlatform";
 import { useStoredSessions } from "../hooks/useStoredSessions";
 import { listShownSessions } from "../lib/storage";
@@ -10,7 +10,6 @@ import { ButtonGroup, FieldGrid, Page } from "../components/layout";
 import { externalLinkProps } from "../lib/externalLink";
 import { useI18n } from "../contexts/I18nContext";
 import { problemLine } from "../lib/problemText";
-
 const GLOBE = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>;
 
 /**
@@ -47,6 +46,9 @@ export function Services() {
   const [name, setName] = useState(""), [target, setTarget] = useState("");
   const [error, setError] = useState("");
   const [openError, setOpenError] = useState("");
+  // Share waits on the host's permission (Chrome's prompt, Desktop's dialog): pressed again meanwhile, it added the app twice.
+  const sharing = useRef(false);
+  const [busy, setBusy] = useState(false);
   if (!platform || !view) return null;
 
   const { online, services, canShare } = view;
@@ -55,9 +57,13 @@ export function Services() {
     .filter((c) => c.apps.length > 0);
 
   const share = async () => {
+    if (sharing.current) return;
+    sharing.current = true;
+    setBusy(true);
     setError("");
     try { await platform.shareService(name, target); setName(""); setTarget(""); setAdding(false); }
     catch (e) { setError(problemLine(e, t)); }
+    finally { sharing.current = false; setBusy(false); }
   };
 
   return (
@@ -84,7 +90,7 @@ export function Services() {
               <Notice>{t("services.nobodyYet")}</Notice>
               {error && <Notice tone="error">{error}</Notice>}
               <ButtonGroup>
-                <Button type="submit" variant="primary" data-testid="service-save" disabled={!name.trim() || !target.trim()}>{t("services.share")}</Button>
+                <Button type="submit" variant="primary" data-testid="service-save" disabled={!name.trim() || !target.trim()} loading={busy}>{t("services.share")}</Button>
                 <Button onClick={() => { setAdding(false); setError(""); }}>{t("common.cancel")}</Button>
               </ButtonGroup>
             </form>
