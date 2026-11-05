@@ -30,12 +30,18 @@ export function useForwarding(from: string | undefined, messages: readonly ChatM
   // Another chat, or this one left: nothing stays chosen.
   useEffect(() => { setSelected(null); setForwarding(null); }, [from]);
   // A chosen message that leaves the chat (deleted here, or for everyone) is no longer chosen; the last one gone ends it.
-  useEffect(() => setSelected(now => {
-    if (!now) return now;
+  // "Forward to…" open on it forwards the rest (the engine refuses a forward with a message it no longer has, for every
+  // chat), or closes when none is left.
+  useEffect(() => {
     const here = new Set(messages.map(m => m.id));
-    const rest = now.filter(id => here.has(id));
-    return rest.length === now.length ? now : rest.length ? rest : null;
-  }), [messages]);
+    const keep = <T,>(now: T[] | null, id: (item: T) => string) => {
+      if (!now) return now;
+      const rest = now.filter(item => here.has(id(item)));
+      return rest.length === now.length ? now : rest.length ? rest : null;
+    };
+    setSelected(now => keep(now, id => id));
+    setForwarding(now => keep(now, m => m.id));
+  }, [messages]);
   useEffect(() => {
     if (!selected || forwarding) return;
     // An Escape a menu or a field answered is not the choice's; the one that ends it is spent.
