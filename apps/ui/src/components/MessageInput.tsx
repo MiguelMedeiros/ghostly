@@ -36,7 +36,7 @@ import { problemLine } from "../lib/problemText";
 import { readingTime } from "../lib/readingTime";
 import { TranslatePreview } from "./composer/TranslatePreview";
 import { translationStale, useDraftTranslation, type ComposerTranslation, type DraftTranslationFailure } from "../hooks/useDraftTranslation";
-import { languageName } from "../lib/documentLanguage";
+import { draftDirection, languageName } from "../lib/documentLanguage";
 import { carryMentions } from "../lib/translateDraft";
 import { translateEnabled } from "../lib/translateFlag";
 import { isConvertibleVideo, prepareVideo, type PreparedVideo } from "../lib/videoSend";
@@ -1054,9 +1054,7 @@ export function MessageInput({
               placeholder={disabled ? disabledPlaceholder ?? t("composer.placeholder") : t("composer.placeholder")}
               disabled={disabled}
               rows={1}
-              // A draft reads in its own direction, as its bubble will (an English one left to right in the Arabic app),
-              // from its first letter. Empty or with no letter yet ("auto" would make it left to right), the app's.
-              dir={/\p{L}/u.test(text) ? "auto" : undefined}
+              dir={draftDirection(text)}
               className="composer-textarea"
             />
             {softBytes && !maxBytes && !nearHard && bytes > softBytes - 60 && (

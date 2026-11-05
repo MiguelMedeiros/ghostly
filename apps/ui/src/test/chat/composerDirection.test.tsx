@@ -7,9 +7,9 @@ import { renderApp } from "../render";
 // covers: app.i18n
 
 /**
- * The message field reads a draft in its own direction, as its bubble will: from its first letter (`dir="auto"`). Empty or
- * with no letter yet it keeps the app's, so the placeholder and a lone emoji stay where the app writes. The direction a
- * browser draws: e2e/web/text-direction.spec.ts.
+ * The message field and a file's caption read a draft in its own direction, as its bubble will: from its first letter
+ * (`dir="auto"`). Empty or with no letter yet they keep the app's, so the placeholder and a lone emoji stay where the app
+ * writes. The direction a browser draws: e2e/web/text-direction.spec.ts.
  */
 describe("the message field's direction", () => {
   const field = () => screen.getByPlaceholderText<HTMLTextAreaElement>("Message…");
@@ -26,5 +26,19 @@ describe("the message field's direction", () => {
     expect(field()).toHaveAttribute("dir", "auto");
     type("");
     expect(field()).not.toHaveAttribute("dir");
+  });
+
+  it("the caption of a file being sent does the same", async () => {
+    URL.createObjectURL = vi.fn(() => "blob:file");
+    URL.revokeObjectURL = vi.fn();
+    renderApp(<LockScreenProvider><MessageInput onSend={vi.fn(async () => null)} onSendFile={vi.fn(async () => null)} /></LockScreenProvider>);
+    const file = new File(["notes"], "notes.txt", { type: "text/plain" });
+    fireEvent.paste(field(), { clipboardData: { files: [file], types: ["Files"], items: [{ kind: "file", type: file.type, getAsFile: () => file }], getData: () => "" } });
+    const caption = await screen.findByTestId("attachment-caption");
+    expect(caption).not.toHaveAttribute("dir");
+    fireEvent.change(caption, { target: { value: "notes for Sunday?" } });
+    expect(caption).toHaveAttribute("dir", "auto");
+    fireEvent.change(caption, { target: { value: "🙂" } });
+    expect(caption).not.toHaveAttribute("dir");
   });
 });
