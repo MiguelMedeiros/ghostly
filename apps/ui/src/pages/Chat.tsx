@@ -4,8 +4,11 @@ import { PeerAvatar } from "../components/Avatar";
 import { AvatarOpener } from "../components/AvatarViewer";
 import { useBackdropDismiss, useDialogFocus } from "../hooks/useDismiss";
 import { useComposition } from "../hooks/useComposition";
+import { draftDirection } from "../lib/documentLanguage";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { setChatOnCall } from "../lib/chatsOnCall";
+import { callHoldsService, useCallService } from "../lib/callService";
+import { setCallNoPath, useCallNoPath } from "../lib/callNoPath";
 import { createPortal } from "react-dom";
 import { ChatHoldDialog, ChatHoldLine } from "../components/ChatHoldDialog";
 import { ContactIdentitiesPanel } from "../components/identities/ContactIdentitiesPanel";
@@ -28,6 +31,7 @@ import { openOnArrow } from "../lib/menuButton";
 import { useI18n } from "../contexts/I18nContext";
 import { InviteCard } from "../components/InviteCard";
 import { LinkQrDialog } from "../components/chat/LinkQrDialog";
+import { CallNoPathNotice } from "../components/CallNoPathNotice";
 import { ChatConnection } from "../components/ChatConnection";
 import { focus } from "../lib/connection";
 import { PairingScene } from "../components/pairing/PairingScene";
@@ -49,7 +53,7 @@ import { mediaDeniedText, preferredDevice } from "../lib/mediaDevices";
 import { useSettings } from "../contexts/SettingsContext";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
-import { messageSnippet, quoteFor, replyIndexer, replyTarget, sentReply, type NameOf } from "../lib/replies";
+import { heldOriginal, messageSnippet, quoteFor, replyIndexer, replyTarget, sentReply, type NameOf } from "../lib/replies";
 import { buttonsViews, compactPresses } from "../lib/buttons";
 import { ChatOnScreen } from "../lib/chatOnScreen";
 import { replySnippet, type RoutineCard } from "@ghostly/core";
@@ -66,7 +70,7 @@ import { formatFileSize } from "../lib/format";
 import { playSound, startRinging } from "../lib/sounds";
 import { CueChat } from "../lib/cues";
 import { NowPlayingChat, pauseForCall, stopPlayingFrom } from "../lib/nowPlaying";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
 import {
   isSessionPinned,
   setSessionPinned,
@@ -84,7 +88,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { fileMessageText, inviteQrSegments, isPlayableVideoType, PAIRED_CALL_CANDIDATES, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
 import { videoMetaOf } from "../lib/videoPoster";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
-import type { WalletNetwork } from "../lib/platform";
+import { servicesPlatform, type WalletNetwork } from "../lib/platform";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
 import { TranslateMenu, TranslateMenuItem } from "../components/ChatTranslate";
@@ -223,7 +227,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     setNick,
   } = useChat(params);
   // The composer's Translate, in a chat that translates and has a language of its own.
-  const composerTranslation = useComposerTranslation(sessionId);
+  const { translation: composerTranslation, question: translateQuestion } = useComposerTranslation(sessionId);
 
   // Only what contacts may see: the join notice names nobody while this profile does not share its name.
   useEffect(() => {
@@ -280,7 +284,15 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     uncountMissedCall(line);
   }, [deleteMessage, uncountMissedCall]);
 
-  const platform = useServicesPlatform();
+  const platform = servicesPlatform;
+  // What this page reads of the platform and the engine's settings as it draws, compared by content: drawn again when
+  // that changes, not on every engine state (up to 20 a second while a file moves), which drew the open chat and every
+  // chat kept loaded off screen for its call or mini-app each time.
+  usePlatformValue(() => {
+    const peerKey = params?.peerPubKeyB64 ?? "";
+    const settings = engine.state?.settings;
+    return [platform?.getPeer(peerKey), platform?.wallet?.getState(), platform?.getSharedServices(), settings?.online, settings?.iceServers, settings?.relayOnly];
+  });
   const webrtc = useWebRTC({
     incomingCallSignal,
     callHandledElsewhere,
@@ -316,6 +328,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // Out of sight, a ringing call is a system notification too: one for every tab that rings it (its offer's time).
   const incomingOfferTs = useMemo(() => (incomingCallSignal ? parseCallSignal(incomingCallSignal)?.ts : undefined), [incomingCallSignal]);
   useIncomingCallNotice(callState === "incoming" && callRings(sessionId), sessionId, t("pwa.wakeCall"), incomingOfferTs);
+  // The no-path note outlives this page (lib/callNoPath.ts): a chat off screen is let go once its call ends. It goes
+  // when closed, or when the chat's next call starts.
+  useEffect(() => { if (webrtc.noPath) setCallNoPath(sessionId, true); }, [webrtc.noPath, sessionId]);
+  useEffect(() => { if (callState === "offering" || callState === "incoming") setCallNoPath(sessionId, false); }, [callState, sessionId]);
+  const noPathShown = useCallNoPath(sessionId);
 
   useEffect(() => () => { onCallChange(sessionId, false); setChatOnCall(sessionId, false); }, [onCallChange, sessionId]);
 
@@ -352,8 +369,16 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // its card goes and the scene alone tells the rest. It comes back if the state says nobody is there any more.
   const invitePast = contactArrived(pairing.progress);
   const peerKey = params?.peerPubKeyB64;
-  /** The message the composer answers (WISP 400 § Replies): a paired chat's only. */
-  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  // Read without its older messages (just started, the engine's history not in yet): a quote's original may be among them.
+  const [readReplies] = useState(() => replyIndexer());
+  const quoteIndex = useMemo(() => readReplies(messages, !!(sessionId && loadShownSession(sessionId)?.older)), [messages, sessionId, readReplies]);
+  /**
+   * The message the composer answers (WISP 400 § Replies): a paired chat's only. Read as the chat has it now: the
+   * contact's edit shows in the bar, and a message deleted (here, or for everyone) lets the bar go, its words with it.
+   */
+  const [chosenReply, setReplyingTo] = useState<ChatMessage | null>(null);
+  const replyingTo = useMemo(() => (chosenReply && heldOriginal(chosenReply, quoteIndex)) ?? null, [chosenReply, quoteIndex]);
+  useEffect(() => { if (chosenReply && !replyingTo) setReplyingTo(null); }, [chosenReply, replyingTo]);
   /**
    * The reply as it is when something is sent, not as a render's closure saw it: a recording or a sheet of files
    * started earlier goes with the reply set now. The first thing sent after Reply carries it (a text, a voice note, a
@@ -361,10 +386,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
    */
   const replyingRef = useRef(replyingTo);
   replyingRef.current = replyingTo;
-  /** Sent with the reply: the bar goes, unless another message was chosen meanwhile. */
+  /** Sent with the reply: the bar goes, unless another message was chosen meanwhile (an edit is the same one). */
   const replied = useCallback((answering: ChatMessage) => {
-    if (replyingRef.current === answering) replyingRef.current = null;
-    setReplyingTo(current => current === answering ? null : current);
+    if (replyingRef.current?.id === answering.id) replyingRef.current = null;
+    setReplyingTo(current => current?.id === answering.id ? null : current);
   }, [setReplyingTo]);
   const sendFile = useCallback(
     async (source: File, voice?: VoiceMeta): Promise<string | null> => {
@@ -372,7 +397,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       // The platform says it in English, as sendFile throws it: the same words in the app's language.
       const refused = platform.fileTooLarge?.(peerKey, source.size);
       const tooLarge = platform.fileTooLarge ? refused && problemLine(refused, t)
-        : source.size > platform.maxFileBytes ? t("chat.fileTooLarge", { size: formatFileSize(platform.maxFileBytes) }) : null;
+        : source.size > platform.maxFileBytes ? t("chat.fileTooLarge", { size: formatFileSize(platform.maxFileBytes, t) }) : null;
       if (tooLarge) return tooLarge;
       // A file answers as a text does: the engine keeps the reply and sends it with the file (files/2, files/3, held).
       const answering = paired ? replyingRef.current : null;
@@ -509,13 +534,15 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (!request) return;
     void openAppInChat(request.app, appHere, request.options).catch((e: unknown) => { setAppsError(appErrorText(e, t)); setShowApps(true); });
   }, [visible, appHere, openRequested, t]);
-  /** The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. */
-  const [editing, setEditing] = useState<ChatMessage | null>(null);
+  /**
+   * The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. Only while the chat has it: deleted
+   * meanwhile (from its own ⋮, or for everyone), the edit ends, its words with it, and the draft set aside comes back.
+   */
+  const [chosenEdit, setEditing] = useState<ChatMessage | null>(null);
+  const editing = chosenEdit && heldOriginal(chosenEdit, quoteIndex) ? chosenEdit : null;
+  useEffect(() => { if (chosenEdit && !editing) setEditing(null); }, [chosenEdit, editing]);
   // Opened from the Tasks board: on the card's message, once it is here.
   useJumpTo(visible, id => messages.some(m => m.id === id));
-  // Read without its older messages (just started, the engine's history not in yet): a quote's original may be among them.
-  const [readReplies] = useState(() => replyIndexer());
-  const quoteIndex = useMemo(() => readReplies(messages, !!(sessionId && loadShownSession(sessionId)?.older)), [messages, sessionId, readReplies]);
   // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
   // Both read only the questions with buttons and the replies, found in the rows that changed.
   const [pickButtonRow] = useState(() => rowPicker<ChatMessage, ChatMessage>(m => m.card?.kind === "buttons" || m.replyTo ? m : undefined));
@@ -663,6 +690,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const shownName = shown.name;
   // What the now-playing bar names, for a voice message from here that plays on in another chat.
   const playingChat = useMemo(() => ({ path: chatPath(sessionId), name: shownName, contact: true }), [sessionId, shownName]);
+  // The Android app keeps the call going out of sight, with its "Call with …" notification (lib/callService.ts).
+  useCallService(
+    callHoldsService(callState, webrtc.localStream) ? { name: shownName, video: !webrtc.isVideoOff && !webrtc.isScreenSharing } : null,
+    webrtc.hangUp,
+  );
   // While locked, the lock screen shows who calls, as this chat shows them, and nothing else of it (WISP 601 § Locked).
   useRingOnLockScreen(params && callState === "incoming" ? {
     id: sessionId, name: shownName, named: !isAnonymous, peerPubKey: params.peerPubKeyB64, photo: face?.photo,
@@ -846,6 +878,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 ref={labelInputRef}
                 type="text"
                 value={labelDraft}
+                dir={draftDirection(labelDraft)}
                 onChange={(e) => setLabelDraft(e.target.value)}
                 {...labelComposition.inputProps}
                 onKeyDown={(e) => {
@@ -1035,6 +1068,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
       {/* On a phone the chat list's offline notice is on another screen: what is written here waits too. */}
       <OfflineBanner inChat />
+      {/* Our call found no path to the contact (a VPN or firewall that blocks UDP, on either side): where a TURN server
+          is set, and the guide. It stays until closed, so it is a line under the header, never over its controls. */}
+      {(webrtc.noPath || noPathShown) && !webrtc.mediaProblem && (
+        <CallNoPathNotice iceServers={engine.state?.settings.iceServers} onClose={() => { webrtc.dismissNoPath(); setCallNoPath(sessionId, false); }} />
+      )}
       <ChatSearchBar search={search} />
       {appHere && <ChatAppResume linkId={appHere} />}
       <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} returnFocus={optionsRef} />
@@ -1198,6 +1236,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         apps={appsOn && paired && chatLink ? { onOpen: () => setShowApps(true), hint: appsComposerHint(platform?.getPeer(params.peerPubKeyB64), shownName, t) ?? undefined } : undefined}
       />
       </div>
+      {/* Translate's question for a model that is not here yet. */}
+      {translateQuestion}
 
       {/* Incoming call notification */}
       {/* Incoming call notification: over whatever is on screen, since this chat may not be. */}

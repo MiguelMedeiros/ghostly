@@ -194,11 +194,13 @@
     "dhtWaitingFor": "Sur la DHT · en attente de {{transport}}",
     "discoveryUnavailable": "Découverte indisponible",
     "held": "Absent · messages en attente",
+    "heldPlain": "Messages en attente",
     "identityMismatch": "Identité différente",
     "issue": "Problème de connexion",
     "noContact": "Pas encore de contact",
     "offline": "Hors ligne",
     "onDht": "Sur la DHT · liaison directe en cours",
+    "onDhtPlain": "Sur la DHT",
     "publicationUnavailable": "Publication indisponible",
     "switching": "Changement · {{transport}}",
     "waitingContact": "En attente du contact"

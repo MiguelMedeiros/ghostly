@@ -10,7 +10,7 @@ import { chatRouteSession } from "./lib/url";
 import { offerSession } from "./lib/lockedRing";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useIsMobile } from "./hooks/useIsMobile";
-import { useServicesPlatform } from "./hooks/useServicesPlatform";
+import { servicesPlatform } from "./lib/platform";
 import { useSettings } from "./contexts/SettingsContext";
 import { newSpace } from "@ghostly/browser/backup/storage";
 import { useViewportHeight } from "./hooks/useViewportHeight";
@@ -65,7 +65,9 @@ function useThemeColor() {
  */
 function useHoldStorageSync() {
   const { settings, updateBackupStorage } = useSettings();
-  const platform = useServicesPlatform();
+  // The platform object only (it never changes): following its state drew the app's shell, and every chat it holds, on
+  // every engine state.
+  const platform = servicesPlatform;
   const s3 = settings.backupS3 ? JSON.stringify(settings.backupS3) : null;
   const space = settings.backupSpace;
   useEffect(() => {
@@ -224,7 +226,11 @@ export function App() {
           className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:start-2 focus:z-[60] focus:rounded-lg focus:bg-accent focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-on-accent focus:outline-2 focus:outline-offset-2 focus:outline-accent">
           {t("sidebar.skipToContent")}
         </button>
-        <Sidebar />
+        {/* The list at the same place as on a phone, before <main>: turned on its side, a phone keeps the list's
+            search and its New group and Join dialogs, with what was typed in them. */}
+        <div key="list" className="contents">
+          <Sidebar />
+        </div>
         {/* Keyed as on a phone: a phone turned on its side (or back) keeps the open chat and page mounted, and the
             message field its focus and its keyboard. */}
         {/* Three rows: the list's notices when it is folded to a rail, which has no room for them, and a voice message
@@ -254,10 +260,12 @@ export function App() {
   return (
     <div className="app-shell w-full flex flex-col bg-app-bg">
       {!tabs && <NowPlayingBar key="playing" className="now-playing-top shrink-0" />}
-      <main key="main" className="flex-1 flex flex-col min-h-0 min-w-0">
-        <div className={onChatList ? "flex-1 flex min-h-0" : "hidden"}>
-          <Sidebar />
-        </div>
+      {/* Out of <main>, as in two panes, so that a turn to two panes (or back) keeps it mounted. */}
+      <div key="list" className={onChatList ? "flex-1 flex min-h-0" : "hidden"}>
+        <Sidebar />
+      </div>
+      {/* On the chat list it holds only what a call puts over it. */}
+      <main key="main" className={`${onChatList ? "" : "flex-1 "}flex flex-col min-h-0 min-w-0`}>
         <Fragment key="chats">{chats("flex-1 flex flex-col min-h-0 min-w-0")}</Fragment>
         {!onChatList && !inChat && (
           <div key="page" className="flex-1 flex flex-col min-h-0 min-w-0">

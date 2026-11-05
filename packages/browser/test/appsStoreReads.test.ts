@@ -96,6 +96,30 @@ describe("the stores' records read and written", () => {
     expect((await rows(STORES.appStores) as { problem?: string }[])[0]!.problem).toBeUndefined();
   });
 
+  it("a store that signed two indexes under one number is written once, and keeps when that was first seen", async () => {
+    await installed();
+    let now = NOW_MS + 3600_000;
+    const store = apps(net, { now: () => now });
+    await store.listStores();
+    const calls = counted();
+    // Its own URL now serves another index under the same sequence 1.
+    await net.putStore(await storeFiles({ apps: [] }));
+    const first = now;
+    expect(await store.refreshStores()).toMatchObject([{ sequence: 1, problem: "equivocation", equivocation: { sequence: 1, at: first } }]);
+    for (let i = 0; i < 3; i++) {
+      now += 60_000;
+      expect(await store.refreshStores()).toMatchObject([{ problem: "equivocation", equivocation: { at: first } }]);
+    }
+    expect(calls.put, "the same other index is not written again").toBe(1);
+    expect(await rows(STORES.appStores)).toMatchObject([{ index: { sequence: 1 }, equivocation: { sequence: 1, at: first } }]);
+
+    // Yet another index under sequence 1: written once more, seen now.
+    await net.putStore(await storeFiles({ apps: [], name: "Another" }));
+    now += 60_000;
+    expect(await store.refreshStores()).toMatchObject([{ problem: "equivocation", equivocation: { at: now } }]);
+    expect(calls.put).toBe(2);
+  });
+
   it("a write that fails leaves what was held, and the next one is written", async () => {
     await installed();
     const store = apps(net);

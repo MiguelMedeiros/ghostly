@@ -15,9 +15,9 @@ Open **https://app.ghostly.tools** in any modern browser.
 
 ## Android
 
-On an Android phone, Ghostly is the web app: open [app.ghostly.tools](https://app.ghostly.tools) in Chrome, Edge or Brave and install it (⋮, *Install app*), as [above](#web-app-nothing-to-install). It then opens from the home screen in a window of its own.
+Each release since 1.6.0 attaches the native Android app, for arm64 phones on Android 8.0 or newer: `ghostly-<version>-android-arm64.apk` on the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest), signed with Ghostly's upload key and listed in `SHA256SUMS.txt`. Open it on the phone and allow your browser (or Files) to install unknown apps when Android asks. A newer release installs over it, and the app tells you when one is out. It is not yet the whole Desktop app: what it leaves out, and how to check and install the APK over USB, are in [ANDROID.md](ANDROID.md#install-it).
 
-A native Android app is planned and not released: no release has an APK. Where its work stands, for developers: [ANDROID.md](ANDROID.md).
+Or use the web app: open [app.ghostly.tools](https://app.ghostly.tools) in Chrome, Edge or Brave and install it (⋮, *Install app*), as [above](#web-app-nothing-to-install). It then opens from the home screen in a window of its own.
 
 ## Browser extension (Chrome, Brave, Edge)
 
@@ -25,7 +25,7 @@ A native Android app is planned and not released: no release has an APK. Where i
 
 **From the release zip** (the newest version, or a browser without store access):
 
-1. Download [ghostly-browser-extension-1.8.1.zip](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.8.1/ghostly-browser-extension-1.8.1.zip) from the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest) and unzip it somewhere you will keep.
+1. Download [ghostly-browser-extension-1.10.0.zip](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.10.0/ghostly-browser-extension-1.10.0.zip) from the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest) and unzip it somewhere you will keep.
 2. Open `chrome://extensions` and turn on **Developer mode**.
 3. Click **Load unpacked** and pick the folder.
 
@@ -37,15 +37,15 @@ Download from the [latest release](https://github.com/MiguelMedeiros/ghostly/rel
 
 | Platform | File |
 |---|---|
-| macOS, Apple silicon | [Ghostly_1.8.1_aarch64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.8.1/Ghostly_1.8.1_aarch64.dmg) |
-| macOS, Intel | [Ghostly_1.8.1_x64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.8.1/Ghostly_1.8.1_x64.dmg) |
-| Windows x64, installer | [Ghostly_1.8.1_x64-setup.exe](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.8.1/Ghostly_1.8.1_x64-setup.exe) |
-| Windows x64, MSI | [Ghostly_1.8.1_x64_en-US.msi](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.8.1/Ghostly_1.8.1_x64_en-US.msi) |
-| Linux x64, AppImage | [Ghostly_1.8.1_amd64.AppImage](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.8.1/Ghostly_1.8.1_amd64.AppImage) |
-| Linux x64, Debian/Ubuntu | [Ghostly_1.8.1_amd64.deb](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.8.1/Ghostly_1.8.1_amd64.deb) |
+| macOS, Apple silicon | [Ghostly_1.10.0_aarch64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.10.0/Ghostly_1.10.0_aarch64.dmg) |
+| macOS, Intel | [Ghostly_1.10.0_x64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.10.0/Ghostly_1.10.0_x64.dmg) |
+| Windows x64, installer | [Ghostly_1.10.0_x64-setup.exe](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.10.0/Ghostly_1.10.0_x64-setup.exe) |
+| Windows x64, MSI | [Ghostly_1.10.0_x64_en-US.msi](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.10.0/Ghostly_1.10.0_x64_en-US.msi) |
+| Linux x64, AppImage | [Ghostly_1.10.0_amd64.AppImage](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.10.0/Ghostly_1.10.0_amd64.AppImage) |
+| Linux x64, Debian/Ubuntu | [Ghostly_1.10.0_amd64.deb](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.10.0/Ghostly_1.10.0_amd64.deb) |
 
-- **Updates.** The app offers a new release, downloads it, checks Ghostly's signature and restarts into it. On Linux that is the AppImage; a `.deb` install is sent to the download instead. The check runs only while **Settings, Updates** allows it, and nothing installs without your OK.
-- **Linux has no WebRTC in its WebView** (WebKitGTK ships without it). Chats connect over Iroh, HyperDHT or the DHT, and calls run in the app itself, with GStreamer: the `.deb` and `.rpm` depend on its base and good plugins, and the AppImage carries them. If a plugin is missing, the call buttons name the package to install. Screen sharing is not available on Linux yet.
+- **Updates.** The app offers a new release, downloads it, checks Ghostly's signature and restarts into it. On Linux that is the AppImage; a `.deb` install is sent to the download instead. The check runs only while **Settings → About → Check for updates automatically** is on, and nothing installs without your OK.
+- **Linux has no WebRTC in its WebView** (WebKitGTK ships without it). Chats connect over Iroh, HyperDHT or the DHT, and calls run in the app itself, with GStreamer: the `.deb` depends on its base and good plugins, and the AppImage carries them. On Fedora, openSUSE, Arch and other distributions without `.deb`, use the AppImage. If a plugin is missing, the call buttons name the package to install. Screen sharing is not available on Linux yet.
 - **Linux microphones, cameras and speakers** are listed by GStreamer, for calls and for Settings → Audio & video (the microphone meter and the test sound run there too). Microphones and speakers come from GStreamer's PulseAudio plugin (`gstreamer1.0-pulseaudio`, which the `.deb` recommends) or PipeWire's (`gstreamer1.0-pipewire`). Without either, none is listed and calls use the system default.
 - **Checksums.** Each release has `SHA256SUMS.txt` and its signature `SHA256SUMS.txt.asc`. Check a download with `shasum -a 256 -c SHA256SUMS.txt --ignore-missing`.
 - **Signature.** `SHA256SUMS.txt` is signed with GPG key `46A3AC8395F95A6E6D8F1E34819EDEE4673F3EBB`, published on [keys.openpgp.org](https://keys.openpgp.org/search?q=46A3AC8395F95A6E6D8F1E34819EDEE4673F3EBB) and at [github.com/MiguelMedeiros.gpg](https://github.com/MiguelMedeiros.gpg). Import it with `gpg --keyserver hkps://keys.openpgp.org --recv-keys 46A3AC8395F95A6E6D8F1E34819EDEE4673F3EBB`, then run `gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt`: it should say *Good signature* from that fingerprint.

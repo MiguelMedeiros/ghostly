@@ -2,16 +2,18 @@ import { execFile } from "node:child_process";
 import { openAsBlob } from "node:fs";
 import { access, constants, copyFile, link, open, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
-import { GROUP_FILE_LIMITS, LIMITS, NO_PICTURE_METADATA, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, claimedTime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, voiceDownloadName, withoutPictureMetadata, type VoiceMeta } from "@ghostly/core";
+import { GROUP_FILE_LIMITS, LIMITS, NO_PICTURE_METADATA, NO_VIDEO_METADATA, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, claimedTime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, voiceDownloadName, withoutPictureMetadata, withoutVideoMetadata, type VoiceMeta } from "@ghostly/core";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { removeStored, waitingGroupFile } from "@ghostly/browser/shared/storedFiles";
 import { replyRef } from "@ghostly/browser/shared/replies";
 import type { FileTransferView, GroupView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
 import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
+import { childEnv } from "./childEnv";
 import { bool, chatOf, findChatOrGroup, list, node, num, oneOf, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
 import { groupSendRefused } from "./api";
 import { CliError } from "./errors";
+import { guardText } from "./secretGuard";
 import { endTyping } from "./typing";
 import { measureVoice } from "./voicePeaks";
 
@@ -155,17 +157,17 @@ async function voiceOf(params: Params, path: string, mime: string, size: number)
 }
 
 /**
- * The file at `path` as it is sent, as the apps send it (platform/services.ts `sendable`): a picture without its metadata
- * (where it was taken, the device, the time), before its size is read and its digest computed. A picture whose metadata
- * cannot be removed is refused, never sent as it was. A voice note goes as it is.
+ * The file at `path` as it is sent, as the apps send it (platform/services.ts `sendable`): a picture or an MP4 or
+ * QuickTime video without its metadata (where it was taken or recorded, the device, the time), before its size is read
+ * and its digest computed. One whose metadata cannot be removed is refused, never sent as it was. A voice note goes as it is.
  */
 async function sendable(path: string, mime: string, voice: VoiceMeta | undefined): Promise<Blob> {
   const source = await openAsBlob(path, { type: mime });
   if (voice) return source;
   try {
-    return await withoutPictureMetadata(source, mime) ?? source;
+    return await withoutPictureMetadata(source, mime) ?? await withoutVideoMetadata(source, mime) ?? source;
   } catch (error) {
-    if (error instanceof Error && error.message === NO_PICTURE_METADATA) throw new CliError("refused", NO_PICTURE_METADATA);
+    if (error instanceof Error && (error.message === NO_PICTURE_METADATA || error.message === NO_VIDEO_METADATA)) throw new CliError("refused", error.message);
     throw error;
   }
 }
@@ -259,7 +261,7 @@ async function markDownloaded(path: string): Promise<void> {
   if (process.platform === "darwin") {
     // Flags 0x0001 (downloaded) and 0x0080, as browsers write them; then time and agent.
     const value = `0081;${Math.floor(Date.now() / 1000).toString(16).padStart(8, "0")};Ghostly;`;
-    await new Promise<void>((done) => execFile("/usr/bin/xattr", ["-w", "com.apple.quarantine", value, path], { timeout: 10_000 }, () => done()));
+    await new Promise<void>((done) => execFile("/usr/bin/xattr", ["-w", "com.apple.quarantine", value, path], { timeout: 10_000, env: childEnv() }, () => done()));
   } else if (process.platform === "win32") {
     await writeFile(`${path}:Zone.Identifier`, "[ZoneTransfer]\r\nZoneId=3\r\n").catch(() => {});
   }
@@ -269,6 +271,8 @@ const ACTIONS = ["accept", "decline", "pause", "resume", "cancel", "resend", "re
 
 export const FILE_METHODS: Record<string, Method> = {
   async "file.send"(ctx, params) {
+    // The contact (or every member) reads its name as a message's text (docs/CLI.md § Safety).
+    guardText(str(params, "name"), bool(params, "force"), "file's name", "send it");
     const target = chatOrGroupOf(ctx, params);
     const path = resolve(str(params, "path", true));
     let info;

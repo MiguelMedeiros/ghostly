@@ -17,7 +17,7 @@ export function useAmountText(value: string, onChange: (value: string) => void, 
   if (value !== given) { setGiven(value); setText(amountText(value, language)); }
   const read = readAmount(text, language, decimals);
   const change = (typed: string) => {
-    const next = amountInput(typed), meant = readAmount(next, language, decimals);
+    const next = amountInput(typed, language), meant = readAmount(next, language, decimals);
     const amount = meant.ok ? meant.value : "";
     setText(next); setGiven(amount);
     if (amount !== value) onChange(amount);

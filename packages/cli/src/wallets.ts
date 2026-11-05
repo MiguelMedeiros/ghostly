@@ -6,7 +6,7 @@ import { bool, chatOf, inviteTaken, node, num, oneOf, sentAt, state, str, type A
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
 import { CliError, type ErrorCode } from "./errors";
 import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "./words";
-import { findSecret } from "./secretGuard";
+import { findSecret, secretWords } from "./secretGuard";
 
 /**
  * Wallets and payments (WISP 1100, phase 2): the app's wallet deck and a chat's payment sheet, as methods. Test
@@ -152,7 +152,7 @@ function memoOf(params: Params, verb: string, field: "memo" | "comment" = "memo"
   const memo = str(params, field);
   if (memo && !bool(params, "force")) {
     const secret = findSecret(memo);
-    if (secret) throw new CliError("confirm", `The ${field} looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; ${verb} with --force if you mean to`, { kind: secret.kind });
+    if (secret) throw new CliError("confirm", `The ${field} looks like ${secretWords(secret)}; ${verb} with --force if you mean to`, { kind: secret.kind });
   }
   return memo || undefined;
 }
@@ -312,6 +312,11 @@ const WALLETS: Record<string, Method> = {
     let invoice = text.replace(/^lightning:/i, "");
     let n: WalletNetwork;
     let note: string | undefined;
+    // The chat the invoice was found in: on Testnet its contact is told it was paid, as a chat card's Pay tells it. A test
+    // mint says every invoice is paid, so one from `wallet receive` is credited only on its payer's word.
+    if (params.chat !== undefined && !isInvoice(text)) throw new CliError("usage", "--chat names the chat an invoice came from: an address's or LNURL's invoice is its server's");
+    const chat = params.chat === undefined ? undefined : chatOf(ctx, params);
+    if (chat) inviteTaken(chat);
     if (isInvoice(text)) {
       // Which wallet pays is named, never guessed from the invoice: test mints issue `lnbc` invoices too, and a
       // guess must never be what makes real money move. Testnet unless `network` says mainnet.
@@ -320,6 +325,8 @@ const WALLETS: Record<string, Method> = {
       n = network(params);
       const amount = num(params, "amount", 0, { min: 1 });
       if (!amount) throw new CliError("bad_request", "amount is required to pay a Lightning address or LNURL");
+      // Asked before the address's server hears of the payment (and its comment).
+      if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This pays real money (Mainnet): pass --confirm-real to confirm this payment");
       const view = await node(ctx).lnurlResolve({ text, network: n });
       if (amount < view.minSat || amount > view.maxSat) throw new CliError("refused", `${view.domain} takes from ${view.minSat} to ${view.maxSat} sats`);
       const got = await node(ctx).lnurlInvoice({ id: view.id, amount, ...(comment ? { comment } : {}), network: n });
@@ -330,7 +337,7 @@ const WALLETS: Record<string, Method> = {
     const quote =await node(ctx).walletQuoteInvoice({ invoice, network: n, ...(card ? { card } : {}) });
     const maxFee = params.maxFee === undefined ? null : num(params, "maxFee", 0);
     if (maxFee !== null && quote.feeReserve > maxFee) throw new CliError("refused", `The fee may reach ${quote.feeReserve} sats, more than the ${maxFee} allowed`);
-    const paid = await node(ctx).walletPayQuote({ quote: quote.quote, mint: quote.mint, ...(note ? { note } : {}), ...real(params) });
+    const paid = await node(ctx).walletPayQuote({ quote: quote.quote, mint: quote.mint, ...(note ? { note } : {}), ...real(params), ...(chat ? { linkId: chat.id, invoice } : {}) });
     return { network: n, amount: quote.amount, feeReserve: quote.feeReserve, source: (quote as { source?: string }).source ?? quote.mint, paid: paid.paid };
   },
 

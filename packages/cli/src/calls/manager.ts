@@ -48,8 +48,11 @@ export interface CallHost {
   callPaceMs?: number;
 }
 
-/** The audio contract of one call, as commands and events report it. */
-export interface AudioInfo { socket: string; rate: CallRate; channels: 1; format: "s16le"; frameMs: typeof FRAME_MS }
+/**
+ * The audio contract of one call, as commands and events report it. `token` is the call's secret, which a program sends
+ * first on the socket (`AudioSocket`): only the daemon's own clients are told it.
+ */
+export interface AudioInfo { socket: string; token: string; rate: CallRate; channels: 1; format: "s16le"; frameMs: typeof FRAME_MS }
 
 /** An outgoing call rings this long, then ends as `unanswered`. */
 export const RING_MS = 60_000;
@@ -478,7 +481,8 @@ export class CallManager {
 
   setAuto(next: { on: boolean; from?: string[]; rate?: unknown }): AutoAnswer {
     // The daemon answers these chats' calls from now on: never one found only by a name its contact chose.
-    const from = (next.from ?? []).map((ref) => findOwnNamedChat(this.host.engine.getState().links, ref).id);
+    const { links, groups } = this.host.engine.getState();
+    const from = (next.from ?? []).map((ref) => findOwnNamedChat(links, ref, groups).id);
     this.auto = { on: next.on, from: next.on ? from : [], rate: rateOf(next.rate, next.on ? this.auto.rate : DEFAULT_RATE) };
     this.saveAuto();
     return this.getAuto();
@@ -706,7 +710,7 @@ export class CallManager {
   }
 
   private audioInfo(call: Call): AudioInfo | null {
-    return call.socket ? { socket: call.socket.path, rate: call.rate, channels: 1, format: "s16le", frameMs: FRAME_MS } : null;
+    return call.socket ? { socket: call.socket.path, token: call.socket.token, rate: call.rate, channels: 1, format: "s16le", frameMs: FRAME_MS } : null;
   }
 
   private view(call: Call): Record<string, unknown> {
@@ -744,9 +748,10 @@ export class CallManager {
     return this.host.engine.getState().links.find((l) => l.id === chat);
   }
 
-  /** A chat by id, contact key, prefix or name (the API's rules, `findChat`). */
+  /** A chat by id, contact key, prefix or name (the API's rules, `findChat`); a group's says it is one. */
   private chatId(ref: string): string {
-    return findChat(this.host.engine.getState().links, ref).id;
+    const { links, groups } = this.host.engine.getState();
+    return findChat(links, ref, groups).id;
   }
 
   /** The chat, if a call can go in it now; else why not (the engine's reason). */

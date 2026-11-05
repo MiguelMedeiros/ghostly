@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { DEFAULT_IROH_RELAYS, MAX_IROH_RELAYS, createIrohWebEndpoint, irohRelayProblem, onPublicIrohRelay, type IrohWasm } from "../src/platform/irohWeb";
 
 // covers: transport.iroh-web, settings.network.iroh-relays
@@ -11,15 +11,19 @@ import { DEFAULT_IROH_RELAYS, MAX_IROH_RELAYS, createIrohWebEndpoint, irohRelayP
  * ends in one: neither the `wss://…/relay` socket nor the `https://…/ping` probe. A Desktop's record names its relay
  * with the dot, so this is the one place that keeps a browser from being asked to open it.
  */
-function fakeWasm() {
+function fakeWasm({ home = 0, refuse = (_relays: string[]) => false } = {}) {
   const started: string[][] = [], dialled: unknown[] = [];
   const conn = { binding: () => ({ transport: "iroh/1" as const, context: "00", identities: ["a", "b"] as [string, string] }), send: async () => {}, recv: () => new Promise<undefined>(() => {}), rtt: () => -1, close() {}, free() {} };
   const load = async (): Promise<IrohWasm> => ({
     IrohNode: {
       start: async (_seed, relays) => {
         started.push(relays);
+        await new Promise(resolve => setTimeout(resolve, 5));
+        if (refuse(relays)) throw new Error("Iroh relay unreachable");
+        // The relay it measured as nearest, spelled as Iroh spells a relay URL.
+        const relay = home ? new URL(relays[Math.min(home, relays.length - 1)]).href : relays[0];
         return {
-          address: () => ({ id: "c".repeat(64), relay: relays[0], addresses: [] }),
+          address: () => ({ id: "c".repeat(64), relay, addresses: [] }),
           connect: async (descriptor: unknown) => { dialled.push(descriptor); return conn; },
           accept: () => new Promise<undefined>(() => {}), close: async () => {}, free() {},
         };
@@ -79,6 +83,46 @@ it("homes on the same relays whichever way they are spelled, never under a dotte
   await Promise.all([byDefault.close(), typed.close()]);
 });
 
+/**
+ * Iroh moves an endpoint's home to another of its relays when the one it homed on goes away, or another answers
+ * faster. The contact reaches it only through the relay its record names: one dialled through the relay it left timed
+ * out (15 s, every time, 7 of 7 on local relays, the old one up or down), and through the new one it was live in 2 to 16 ms.
+ */
+it("says when the wasm Iroh moves home to another relay, and publishes that one", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  try {
+    let home: string | null = "https://use1-1.relay.n0.iroh.link/";
+    const load = async (): Promise<IrohWasm> => ({
+      IrohNode: {
+        start: async () => ({
+          address: () => ({ id: "c".repeat(64), relay: home, addresses: [] }),
+          connect: async () => { throw new Error("unused"); },
+          accept: () => new Promise<undefined>(() => {}), close: async () => {}, free() {},
+        }),
+      },
+    });
+    const endpoint = await createIrohWebEndpoint(seed, { load });
+    const told = vi.fn(() => (endpoint.descriptor as { relay: string }).relay);
+    endpoint.onDescriptor = told;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(told).not.toHaveBeenCalled();
+    // Between two homes it has none for a moment: the last one stays published.
+    home = null;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(told).not.toHaveBeenCalled();
+    home = "https://iroh.miguelmedeiros.dev/";
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(told).toHaveBeenCalledTimes(1);
+    expect(told).toHaveReturnedWith("https://iroh.miguelmedeiros.dev/");
+    expect(endpoint.descriptor).toEqual({ id: "c".repeat(64), relay: "https://iroh.miguelmedeiros.dev/", addresses: [], relayed: true });
+    // Closed, it says nothing more.
+    await endpoint.close();
+    home = "https://euc1-1.relay.n0.iroh.link/";
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(told).toHaveBeenCalledTimes(1);
+  } finally { vi.useRealTimers(); }
+});
+
 it("dials a Desktop through its relay without the dot its record has, so one on this endpoint's relay needs no second connection", async () => {
   const wasm = fakeWasm();
   const endpoint = await createIrohWebEndpoint(seed, { load: wasm.load });
@@ -91,4 +135,65 @@ it("dials a Desktop through its relay without the dot its record has, so one on 
   expect((wasm.dialled[0] as { relay: string }).relay).toBe(wasm.started[0][0]);
   noDottedHost(wasm.dialled.map(d => (d as { relay: string }).relay));
   await endpoint.close();
+});
+
+/**
+ * Hide my IP from contacts (WISP 100 § Relay only): the wasm reaches a contact through the relay its descriptor names,
+ * so a contact who runs that relay would see this profile's address there. With `ownRelaysOnly` a contact is dialled
+ * only on one of this endpoint's relays (either spelling), and nothing is opened toward any other.
+ */
+it("with ownRelaysOnly, dials a contact only through one of this endpoint's own relays", async () => {
+  const wasm = fakeWasm({ home: 1 });
+  const own = ["https://relay.example.com/", "https://use1-1.relay.n0.iroh.link/"];
+  const endpoint = await createIrohWebEndpoint(seed, { load: wasm.load, relays: own, ownRelaysOnly: true });
+  const later = await createIrohWebEndpoint(Buffer.alloc(32, 2).toString("base64url"), { load: wasm.load, relays: own, ownRelaysOnly: true });
+  const onOwn = { id: "e".repeat(64), relay: "https://use1-1.relay.n0.iroh.link./", addresses: ["192.0.2.1:4433"] };
+  const onTheirs = { id: "d".repeat(64), relay: "https://relay.contact.example/", addresses: [], relayed: true };
+  const noRelay = { id: "f".repeat(64), relay: null, addresses: ["192.0.2.2:4433"] };
+  await endpoint.connect(onOwn);
+  await expect(endpoint.connect(onTheirs)).rejects.toThrow("not on one of this profile's Iroh relays");
+  await expect(endpoint.connect(noRelay)).rejects.toThrow("not on one of this profile's Iroh relays");
+  // One that started on the measured home alone still takes the whole list as its own.
+  expect(wasm.started[wasm.started.length - 1]).toEqual([own[1]]);
+  await later.connect({ ...onOwn, relay: own[0] });
+  expect(wasm.dialled).toEqual([{ ...onOwn, relay: "https://use1-1.relay.n0.iroh.link/" }, { ...onOwn, relay: own[0] }]);
+  // Without it (a link to the profile's own device), any relay is dialled as before.
+  const device = await createIrohWebEndpoint(Buffer.alloc(32, 3).toString("base64url"), { load: wasm.load, relays: own });
+  await device.connect(onTheirs);
+  expect(wasm.dialled[wasm.dialled.length - 1]).toEqual(onTheirs);
+  await Promise.all([endpoint.close(), later.close(), device.close()]);
+});
+
+/**
+ * Each endpoint pings every relay in its list about 1.3 times a minute, and an app runs up to 16 of them on one
+ * network. The first measures; the others, started at the same time or later, home on its relay alone.
+ */
+it("measures the relays once per app: endpoints after the first start on its home relay alone", async () => {
+  const wasm = fakeWasm({ home: 1 });
+  const own = ["https://relay.example.com/", "http://127.0.0.1:47085"];
+  const endpoints = await Promise.all([...[1, 2, 3].map(n => createIrohWebEndpoint(Buffer.alloc(32, n).toString("base64url"), { load: wasm.load })),
+    createIrohWebEndpoint(seed, { load: wasm.load, relays: own })]);
+  const later = await createIrohWebEndpoint(Buffer.alloc(32, 4).toString("base64url"), { load: wasm.load, relays: own });
+  expect(wasm.started).toEqual([[...DEFAULT_IROH_RELAYS], own, [DEFAULT_IROH_RELAYS[1]], [DEFAULT_IROH_RELAYS[1]], ["http://127.0.0.1:47085"]]);
+  expect(endpoints.slice(0, 3).map(e => (e.descriptor as { relay: string }).relay)).toEqual(Array(3).fill(DEFAULT_IROH_RELAYS[1]));
+  expect((later.descriptor as { relay: string }).relay).toBe("http://127.0.0.1:47085/");
+  await Promise.all([...endpoints, later].map(e => e.close()));
+});
+
+it("measures every relay again when the home relay stops answering, or the first endpoint fails", async () => {
+  let down = false;
+  const wasm = fakeWasm({ home: 1, refuse: relays => down && relays.length === 1 });
+  const first = await createIrohWebEndpoint(seed, { load: wasm.load });
+  down = true;
+  const second = await createIrohWebEndpoint(Buffer.alloc(32, 2).toString("base64url"), { load: wasm.load });
+  expect(wasm.started).toEqual([[...DEFAULT_IROH_RELAYS], [DEFAULT_IROH_RELAYS[1]], [...DEFAULT_IROH_RELAYS]]);
+  expect((second.descriptor as { relay: string }).relay).toBe(DEFAULT_IROH_RELAYS[1]);
+
+  let calls = 0;
+  const failing = fakeWasm({ home: 1, refuse: () => calls++ === 0 });
+  const [lost, kept] = await Promise.allSettled([1, 2].map(n => createIrohWebEndpoint(Buffer.alloc(32, n).toString("base64url"), { load: failing.load })));
+  expect(lost.status).toBe("rejected");
+  expect(kept.status).toBe("fulfilled");
+  expect(failing.started).toEqual([[...DEFAULT_IROH_RELAYS], [...DEFAULT_IROH_RELAYS]]);
+  await Promise.all([first.close(), second.close(), (kept as PromiseFulfilledResult<{ close(): Promise<void> }>).value.close()]);
 });

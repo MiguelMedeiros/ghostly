@@ -44,6 +44,7 @@ Real money and test coins never meet. Every wallet a client holds is on one of t
 - A network's wallet of each kind is stored on its own (`arkWallet-mode-<network>`, `usdtWallet-mode-<network>`, … in the peer database). Clients from before wallets had their own network kept the wallet of the mode in use under a bare key (`arkWallet`); a client moves it to its network's key once, in one transaction, deleting and overwriting nothing ([05](05-backups.md)).
 - The chain of a payment target decides its network (Bitcoin and Ethereum are Mainnet; every other chain is Testnet), and so does a Cashu mint. A payment goes only through the wallet of its own network. A request or a payment of one network is refused by a wallet of the other, with nothing spent.
 - A `pay-req` carries `n`: `"mainnet"` or `"testnet"`, the network that pays it. A `pay-ask` carries the `n` the payer pays from, and the payee answers from its wallet of that network, or not at all. An older client sends no `n`: the request's endpoints tell (a test mint, a test chain; a bare invoice without mints is taken as Mainnet). Clients ignore an `n` that is neither value.
+- A USDT `pay-req` names the wallet's one address, so its amount is what tells requests apart: it asks for the amount typed plus 1 to 999 base units, an amount no other open USDT request of that wallet asks for, and a transfer settles only the request of its exact amount. One transaction settles one request; a receipt naming a transaction that already settled another is shown as such in its chat. A payer ties a USDT answer to its `pay-ask` when it asks for the asked amount up to 999 base units more (an older client answers with the amount asked).
 - `paired-payments` may carry `n`: for each way of paying in `m`, the networks this side has a wallet on (`{"cashu":["testnet"],"arkade":["mainnet","testnet"]}`). A client offers a card only where its network is in the contact's list; a method missing from the map has none. No `n` at all (an older client) means any network may meet. A malformed map is ignored and the last good one kept; unknown methods are left out. It is sent again on the open session when a wallet is made.
 - Test sats never settle a request for real sats, and a request is never mixed: it names either only real mints or only test mints ([201](201-cashu.md)).
 - The client shows each wallet's network with it, in words (Real money / Test money), and every test amount reads as test sats, test coins or TEST-USDT.
@@ -79,6 +80,14 @@ A `pay` frame without a receipt (the request's own invoice, or the payload `{"ch
 means "I paid it: look now"; the payee bounds how often it looks and answers `ok` again for a request already
 paid. Opening the URI is the client's platform's job (desktop and extension hand it to the system); copy and
 the code are the fallback.
+
+A receipt the payer sent (an on-chain, Ark, Bark, Spark or USDT payment already made, `pay` with the request's ID)
+is said again when the chat's session opens or switches transport, since the payee may have been away. The payee
+answers a receipt for a request it already marked paid with `pay-res ok` again, whether it knew the receipt or
+not. The payer keeps on its copy of the request that the payee said so, and from then on does not send those
+receipts again. Until then it sends each one at every reconnect for a week after the payment, and after that once
+per run of the app, so a payee that was away when it was paid still gets the receipt the first time the chat
+opens. Records from before this rule carry no such mark: they follow the same bound until the payee answers.
 
 ## Compatibility, privacy and open decisions
 

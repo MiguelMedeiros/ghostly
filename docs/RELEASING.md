@@ -131,14 +131,15 @@ The workflow signs in as a Google Cloud service account that the store's publish
 1. In the [Google Cloud console](https://console.cloud.google.com/), pick or create a project and enable the **Chrome Web Store API** for it.
 2. IAM & Admin → Service accounts → create one (say `chrome-web-store-upload`). It needs no role in the project. On it, Keys → Add key → JSON: the browser downloads its key file. A project under a Google Workspace organization may refuse keys (the policy `iam.disableServiceAccountKeyCreation`); a project of a personal account does not.
 3. In the [Chrome Web Store Developer Dashboard](https://chrome.google.com/webstore/devconsole), Account: add the service account's email (`...@<project>.iam.gserviceaccount.com`; a publisher can have one). Copy the **publisher ID** from the publisher's settings.
-4. Add both as repository secrets, then delete the downloaded key file:
+4. On GitHub, Settings → Environments → New environment `chrome-web-store`; under Deployment branches and tags: "Selected branches and tags", with the branch `main` and the tag pattern `v*`, as for `npm`. A run uses the copy of `chrome-web-store.yml` on the ref it runs from, and a repository secret reaches every branch's copy: only an environment's rule keeps the key from a branch's workflow.
+5. Add both as secrets of that environment, never of the repository, then delete the downloaded key file:
 
    ```bash
-   gh secret set CWS_SERVICE_ACCOUNT_JSON -R MiguelMedeiros/ghostly < ~/Downloads/<key file>.json
-   gh secret set CWS_PUBLISHER_ID -R MiguelMedeiros/ghostly   # paste the publisher ID
+   gh secret set CWS_SERVICE_ACCOUNT_JSON --env chrome-web-store -R MiguelMedeiros/ghostly < ~/Downloads/<key file>.json
+   gh secret set CWS_PUBLISHER_ID --env chrome-web-store -R MiguelMedeiros/ghostly   # paste the publisher ID
    ```
 
-5. Try it on the newest published release: `gh workflow run chrome-web-store.yml -f tag=v1.0.0`. Its summary says what it did: submitted for review, or why not (the store already has that version, or is reviewing an earlier one).
+6. Try it on the newest published release: `gh workflow run chrome-web-store.yml --ref main -f tag=v1.0.0` (from any other branch the job is skipped). Its summary says what it did: submitted for review, or why not (the store already has that version, or is reviewing an earlier one).
 
 The key can manage every item of the publisher, and nothing else. To revoke it, delete the key on the service account (or remove the service account from the dashboard) and the secret. The store publishes with the visibility the dashboard has: after changing visibility there, publish once by hand before the workflow can.
 
@@ -158,6 +159,8 @@ How each client picks it up:
 ## The translation runtime
 
 The Desktop app's translation runtime (`native/translation`) is not in the app's bundle: the app downloads it with the first language model, from a release on a tag of its own, and checks it against the size and SHA-256 it pins (`RUNTIMES` in `apps/desktop/src/translate_models.rs`). It has its own version and ships only when that changes. To cut one, bump `version` in `native/translation/package.json` and `RUNTIME_VERSION` in `apps/desktop/src/translate.rs` together (a test holds them equal; on `dev`, by pull request), then push the tag `translation-runtime-v<that version>` from the merged commit. The `Translation runtime` workflow (`.github/workflows/translation-runtime.yml`) builds the archive on each Desktop platform, checks that it translates there, and publishes a prerelease that never becomes Latest (the updater reads the Latest release's `latest.json`), with the four archives, their `.sha256` files and `runtimes.txt`. A pull request then pastes `runtimes.txt`'s lines (`<platform> <size> <sha256>`) into `RUNTIMES`; no app release goes out between the bump and that pin, or its `RUNTIMES` would name the old archives under the new version. A release that carries translation (`TRANSLATE_FROM` in `release.yml`) checks it before any Desktop build: its `guard` job stops when a Desktop platform has no entry, or an entry is not the size and SHA-256 that `translation-runtime-v<RUNTIME_VERSION>` lists in `runtimes.txt` and its `.sha256` files (`tools/scripts/translation-runtimes.mjs --check`). A published runtime is never replaced: an app that pinned it refuses any other file, so a fix is a new version.
+
+The archive is reproducible: `tools/scripts/prepare-translation-runtime.mjs` packs it with `tools/scripts/tar-gz.mjs` (entries in name order, every time set to the checked-out commit's, owner 0:0, gzip with no time), so building a tag again on the same platform, with Node 22 as the workflow uses, gives the SHA-256 its `.sha256` file published. To check a pin, check out the tag (not a later commit: the commit's time is in every header), run `node tools/scripts/prepare-translation-runtime.mjs` (it runs `npm ci` in `native/translation` itself) and compare `native/translation/dist/*.sha256` with that platform's line in `RUNTIMES`. Runtime 0.1.0 was packed with `tar -czf` and cannot be rebuilt to its published bytes. The next runtime build gives other bytes than 0.1.0's, so it changes every pin and ships as a new version by the steps above.
 
 ## Hotfixes
 

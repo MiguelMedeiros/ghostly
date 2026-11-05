@@ -194,11 +194,13 @@
     "dhtWaitingFor": "DHT 上 · {{transport}} を待機中",
     "discoveryUnavailable": "検出できません",
     "held": "不在 · メッセージを保留中",
+    "heldPlain": "メッセージを保留中",
     "identityMismatch": "ID が一致しません",
     "issue": "接続の問題",
     "noContact": "まだ相手がいません",
     "offline": "オフライン",
     "onDht": "DHT 上 · 直接接続を再試行中",
+    "onDhtPlain": "DHT 上",
     "publicationUnavailable": "公開できません",
     "switching": "切り替え中 · {{transport}}",
     "waitingContact": "相手を待っています"

@@ -230,7 +230,7 @@
     "settings": "Opzioni",
     "testBalance": "{{amount}} sats di prova (senza valore)",
     "testBalance_one": "{{amount}} sat di prova (senza valore)",
-    "testMintInvoice": "In attesa del pagamento… I mint di prova segnano da soli ogni fattura come pagata, quindi questa conta solo quando un contatto la paga in una chat. Per avere subito sats di prova, usa Ottieni monete di prova qui sopra.",
+    "testMintInvoice": "In attesa del pagamento… I mint di prova segnano da soli ogni fattura come pagata, quindi condividi questa in una chat 1:1: conta solo quando un contatto la paga lì. Per avere subito sats di prova, usa Ottieni monete di prova qui sopra.",
     "tokenHint": "Hai ricevuto un token ecash? Incollalo in Invia.",
     "tokenRedeemedFee": "{{amount}} sats riscattati (la mint ha trattenuto {{fee}} come commissione).",
     "tokenRedeemedFeeTest": "{{amount}} sats di prova riscattati (la mint ha trattenuto {{fee}} come commissione).",

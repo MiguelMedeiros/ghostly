@@ -7,7 +7,7 @@ import {
 import { resetDeviceGates } from "../src/devices/gate";
 import { DeviceLinks, type DeviceLinksOptions } from "../src/devices/links";
 import {
-  DEVICE_WAKE_FRAME, DeviceWaker, deviceOfToken, deviceWakeFrame, otherTarget, ownTargetFor, profileWakeAfter, profileWakeOnRemoval, pushForSet, readDeviceWake,
+  DEVICE_WAKE_FRAME, DeviceWaker, deviceOfToken, deviceWakeFrame, otherTarget, ownTargetFor, postPush, profileWakeAfter, profileWakeOnRemoval, pushForSet, readDeviceWake,
   DEVICE_TOKENS_FRAME, readDeviceTokens, wakeOwnerOf, withAllowed, withOtherPush, withOwnPush, withRenew,
 } from "../src/devices/push";
 import { DEVICE_KEYS_DB, closeDeviceKeysDb, createDeviceSigningKey, type DeviceSigningKey } from "../src/devices/signingKey";
@@ -194,6 +194,33 @@ describe("a device wake-up", () => {
     expect(await waker.wake(PHONE, target)).toBe("gone");
     expect(sent).toHaveLength(2);
   });
+
+  it("through a push relay, only the push service's status the relay reports can say gone: any other answer is a failure", async () => {
+    let relay: Response = new Response("");
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.startsWith("https://fcm.googleapis.com")) throw new TypeError("Failed to fetch");
+      return relay;
+    }));
+    try {
+      let now = 1_000_000;
+      const waker = new DeviceWaker((request) => postPush(request, { relay: "https://push-relay.example/" }), () => now);
+      const target = subscription().target();
+      const answers: [Response, string][] = [
+        [new Response("<html>Not Found</html>", { status: 404 }), "failed"],
+        [new Response("Gone", { status: 410 }), "failed"],
+        [new Response("<html>Sign in to the Wi-Fi</html>", { status: 200 }), "failed"],
+        [new Response(JSON.stringify({ status: 410 }), { status: 404 }), "failed"],
+        [new Response(JSON.stringify({ error: "Too many" }), { status: 429 }), "failed"],
+        [new Response(JSON.stringify({ status: 201 }), { status: 200 }), "sent"],
+        [new Response(JSON.stringify({ status: 410 }), { status: 200 }), "gone"],
+      ];
+      for (const [answer, outcome] of answers) {
+        relay = answer;
+        now += 30_000;
+        expect(await waker.wake(PHONE, target)).toBe(outcome);
+      }
+    } finally { vi.unstubAllGlobals(); }
+  });
 });
 
 // ---------- two devices' links ----------
@@ -305,16 +332,16 @@ describe("device-wake between two devices", () => {
     await write(phone, "standby", d, [desktop, phone], { push: { own: { e: own.sub.endpoint, p: own.sub.p256dh, a: own.sub.auth, vp: own.sub.vapid.publicKey, vk: own.sub.vapid.privateKey, tokens: {} } } });
     await settled(Promise.all([desktop.links.start(), phone.links.start()]));
     expect(await until(() => desktop.links.live(phone.slot.key) && phone.links.live(desktop.slot.key), 60_000)).toBe(true);
-    expect(desktop.links.askRenew(phone.slot.key)).toBe(true);
-    expect(desktop.links.sendTokens(phone.slot.key, ["c".repeat(22)])).toBe(true);
+    expect(await settled(desktop.links.askRenew(phone.slot.key))).toBe(true);
+    expect(await settled(desktop.links.sendTokens(phone.slot.key, ["c".repeat(22)]))).toBe(true);
     expect(await until(async () => (await readDeviceRecord(phone.profile))?.push?.renew === true, 10_000)).toBe(true);
     expect(await until(async () => JSON.stringify((await readDeviceRecord(phone.profile))?.push?.allowed) === JSON.stringify(["c".repeat(22)]), 10_000)).toBe(true);
     // What the standby page reads: the renewal asked.
     expect(await settled(phone.links.call("devicePushState", null))).toEqual({ endpoint: own.sub.endpoint, vapidPublic: own.sub.vapid.publicKey, renew: true });
     // The other way round: a standby asks nothing of the active device.
     await write(desktop, "active", d, [desktop, phone], { push: { own: { e: own.sub.endpoint, p: own.sub.p256dh, a: own.sub.auth, vp: own.sub.vapid.publicKey, vk: own.sub.vapid.privateKey, tokens: {} } } });
-    expect(phone.links.askRenew(desktop.slot.key)).toBe(true);
-    phone.links.sendTokens(desktop.slot.key, ["e".repeat(22)]);
+    expect(await settled(phone.links.askRenew(desktop.slot.key))).toBe(true);
+    await settled(phone.links.sendTokens(desktop.slot.key, ["e".repeat(22)]));
     await run(2_000);
     expect((await readDeviceRecord(desktop.profile))?.push).toMatchObject({ own: { e: own.sub.endpoint } });
     expect((await readDeviceRecord(desktop.profile))?.push?.renew).toBeUndefined();
@@ -336,5 +363,31 @@ describe("device-wake between two devices", () => {
     const receive = (desktop.links as unknown as { deviceWake(from: string, frame: unknown): Promise<void> }).deviceWake.bind(desktop.links);
     await settled(receive(PHONE, deviceWakeFrame(subscription().target())));
     expect((await readDeviceRecord(desktop.profile))!.push).toBeUndefined();
+    // Nor does the engine hear it: the profile's target would go to every contact.
+    expect(desktop.wakes).toEqual([]);
+  });
+
+  it("a device the set no longer lists, its link still running until the links follow the record, is told nothing and asked nothing", async () => {
+    const d = newDeviceSetSecret();
+    const desktop = await makeDevice("Desktop"), phone = await makeDevice("Phone");
+    const own = subscription();
+    const push = { own: { e: own.sub.endpoint, p: own.sub.p256dh, a: own.sub.auth, vp: own.sub.vapid.publicKey, vk: own.sub.vapid.privateKey, tokens: {} } };
+    await write(desktop, "active", d, [desktop, phone], { push });
+    await write(phone, "standby", d, [desktop, phone]);
+    await settled(Promise.all([desktop.links.start(), phone.links.start()]));
+    expect(await until(() => desktop.links.live(phone.slot.key) && phone.links.live(desktop.slot.key), 60_000)).toBe(true);
+    expect(await until(() => phone.wakes.length > 0, 10_000)).toBe(true);
+    // The phone is removed: the record no longer lists it, and the links have not read it again yet.
+    await write(desktop, "active", newDeviceSetSecret(), [desktop], { push });
+    const heard = phone.wakes.length;
+    const fresh = subscription("https://fcm.googleapis.com/fcm/send/desktop-2");
+    await settled(desktop.links.setOwnPush({ ...fresh.sub }));
+    expect(await settled(desktop.links.askRenew(phone.slot.key))).toBe(false);
+    expect(await settled(desktop.links.sendTokens(phone.slot.key, ["c".repeat(22)]))).toBe(false);
+    await run(2_000);
+    expect(phone.wakes.length).toBe(heard);
+    expect((await readDeviceRecord(desktop.profile))!.push!.own!.tokens[phone.slot.key]).toBeUndefined();
+    expect((await readDeviceRecord(phone.profile))?.push?.renew).toBeUndefined();
+    expect((await readDeviceRecord(phone.profile))?.push?.allowed).toBeUndefined();
   });
 });

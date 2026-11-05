@@ -130,6 +130,7 @@
   "name": "名称",
   "nameInChats": "聊天中的名字",
   "nameLabel": "资料名称",
+  "nameSaved": "名称已保存",
   "nameStep": {
     "placeholder": "你的名字",
     "save": "继续",

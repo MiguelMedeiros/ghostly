@@ -57,10 +57,10 @@ function check(ok: boolean): asserts ok {
   if (!ok) throw new Error(NO_PICTURE_METADATA);
 }
 
-// JPEG: the segments that draw the picture stay (frames, tables, scans, restart intervals, JFIF, the ICC profile,
-// Adobe's colour transform) and the camera's Orientation, alone in an Exif of its own; every other APPn (Exif, XMP,
-// IPTC, MPF), comments, and whatever follows the image's end (a gain map, a motion photo's video) go. As Android's
-// Camera strips its photos (CameraPhoto.kt).
+// JPEG: the segments that draw the picture stay (frames, tables, scans, restart intervals, JFIF without its thumbnail,
+// the ICC profile, Adobe's colour transform) and the camera's Orientation, alone in an Exif of its own; every other
+// APPn (Exif, XMP, IPTC, MPF), comments, and whatever follows the image's end (a gain map, a motion photo's video) go.
+// As Android's Camera strips its photos (CameraPhoto.kt).
 
 /** SOFn markers: every frame type but DHT (C4), JPG (C8) and DAC (CC). */
 const JPEG_FRAME = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
@@ -73,11 +73,13 @@ function jpegKeeps(marker: number, b: Uint8Array, payload: number): boolean {
   return false;
 }
 
-/** An APP1 Exif, big-endian, whose IFD0 holds `orientation` alone. */
-const orientationOnly = (orientation: number) => Uint8Array.of(
-  0xff, 0xe1, 0, 34, 0x45, 0x78, 0x69, 0x66, 0, 0, 0x4d, 0x4d, 0, 42, 0, 0, 0, 8,
-  0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, orientation, 0, 0, 0, 0, 0, 0,
+/** An Exif (its TIFF), big-endian, whose IFD0 holds `orientation` alone: all a picture keeps of its Exif. */
+const orientationTiff = (orientation: number) => Uint8Array.of(
+  0x4d, 0x4d, 0, 42, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, orientation, 0, 0, 0, 0, 0, 0,
 );
+
+/** An APP1 Exif whose IFD0 holds `orientation` alone. */
+const orientationOnly = (orientation: number) => Uint8Array.of(0xff, 0xe1, 0, 34, 0x45, 0x78, 0x69, 0x66, 0, 0, ...orientationTiff(orientation));
 
 function stripJpeg(b: Uint8Array): Uint8Array[] {
   const parts = [b.subarray(0, 2)];
@@ -97,7 +99,10 @@ function stripJpeg(b: Uint8Array): Uint8Array[] {
     check(marker !== 0x00 && marker !== 0xd8 && at + 2 <= b.length);
     const length = u16be(b, at);
     check(length >= 2 && at + length <= b.length);
-    if (jpegKeeps(marker, b, at + 2)) {
+    if (marker === 0xe0 && length > 16 && starts(b, at + 2, "JFIF\0")) {
+      // JFIF's header without its thumbnail: no thumbnail's width and height, and no pixels after them.
+      parts.push(Uint8Array.of(0xff, 0xe0, 0, 16, ...b.subarray(at + 2, at + 14), 0, 0));
+    } else if (jpegKeeps(marker, b, at + 2)) {
       parts.push(Uint8Array.of(0xff, marker), b.subarray(at, at + length));
       if (JPEG_FRAME.has(marker)) framed = true;
     } else if (marker === 0xe1 && !scanned && !exif && starts(b, at + 2, "Exif\0\0")) {
@@ -126,14 +131,32 @@ function stripJpeg(b: Uint8Array): Uint8Array[] {
 }
 
 // PNG: the critical chunks and the ancillary ones that change how it is drawn (transparency, colour, animation)
-// stay; text (tEXt, iTXt, zTXt), eXIf, tIME and every other chunk go, and anything after IEND.
+// stay, and the camera's Orientation, alone in an eXIf of its own before the image data; text (tEXt, iTXt, zTXt), the
+// rest of the Exif, tIME and every other chunk go, and anything after IEND.
 
 const PNG_CRITICAL = new Set(["IHDR", "PLTE", "IDAT", "IEND"]);
 const PNG_DRAWS = new Set(["tRNS", "gAMA", "cHRM", "sRGB", "iCCP", "sBIT", "bKGD", "pHYs", "cICP", "mDCV", "cLLI", "acTL", "fcTL", "fdAT"]);
 
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  for (let k = 0; k < 8; k++) n = n & 1 ? 0xedb88320 ^ (n >>> 1) : n >>> 1;
+  return n >>> 0;
+});
+
+/** A PNG chunk: its length, type, data and the CRC of its type and data. */
+function pngChunk(type: string, data: Uint8Array): Uint8Array {
+  const out = new Uint8Array(12 + data.length), view = new DataView(out.buffer);
+  view.setUint32(0, data.length);
+  for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+  out.set(data, 8);
+  let crc = ~0;
+  for (const byte of out.subarray(4, 8 + data.length)) crc = CRC_TABLE[(crc ^ byte) & 0xff]! ^ (crc >>> 8);
+  view.setUint32(8 + data.length, ~crc >>> 0);
+  return out;
+}
+
 function stripPng(b: Uint8Array): Uint8Array[] {
   const parts = [b.subarray(0, 8)];
-  let at = 8;
+  let at = 8, exif = false, imaged = false;
   for (;;) {
     check(at + 12 <= b.length);
     const length = u32be(b, at), type = text(b, at + 4, 4);
@@ -142,13 +165,20 @@ function stripPng(b: Uint8Array): Uint8Array[] {
     const critical = (b[at + 4]! & 0x20) === 0;
     check(!critical || PNG_CRITICAL.has(type));
     if (critical || PNG_DRAWS.has(type)) parts.push(b.subarray(at, at + 12 + length));
+    else if (type === "eXIf" && !exif && !imaged) {
+      // The first one, read before the image data as browsers do; its Orientation alone, where it was.
+      exif = true;
+      const orientation = exifOrientation(b, at + 8, at + 8 + length);
+      if (orientation >= 2) parts.push(pngChunk("eXIf", orientationTiff(orientation)));
+    }
+    if (type === "IDAT") imaged = true;
     at += 12 + length;
     if (type === "IEND") return parts;
   }
 }
 
-// WebP: the image, its alpha, animation and ICC profile stay; EXIF, XMP and unknown chunks go, and VP8X no longer
-// says it has them.
+// WebP: the image, its alpha, animation and ICC profile stay, and the camera's Orientation, alone in an EXIF of its
+// own; XMP, the rest of the Exif and unknown chunks go, and VP8X says it has an EXIF only when one is left.
 
 const WEBP_KEEPS = new Set(["VP8 ", "VP8L", "VP8X", "ALPH", "ANIM", "ANMF", "ICCP"]);
 
@@ -157,20 +187,35 @@ function stripWebp(b: Uint8Array): Uint8Array[] {
   const riffEnd = 8 + u32le(b, 4);
   check(riffEnd <= b.length && riffEnd % 2 === 0);
   const parts: Uint8Array[] = [];
-  let at = 12, size = 4, drawn = false;
+  let at = 12, size = 4, drawn = false, exif = false, vp8x: Uint8Array | undefined;
   while (at < riffEnd) {
     check(at + 8 <= riffEnd);
     const type = text(b, at, 4), length = u32le(b, at + 4), end = at + 8 + length + (length & 1);
     check(end <= riffEnd && (at > 12 || type === "VP8 " || type === "VP8L" || type === "VP8X"));
+    let chunk: Uint8Array | undefined;
     if (WEBP_KEEPS.has(type)) {
-      let chunk = b.subarray(at, end);
+      chunk = b.subarray(at, end);
       if (type === "VP8X") {
         check(length >= 10);
-        // Its flags: EXIF (0x08) and XMP (0x04) are gone.
-        chunk = chunk.slice();
+        // Its flags: EXIF (0x08) and XMP (0x04) are gone, until an Orientation is kept.
+        chunk = vp8x = chunk.slice();
         chunk[8] = chunk[8]! & ~0x0c;
       }
       if (type === "VP8 " || type === "VP8L" || type === "ANMF") drawn = true;
+    } else if (type === "EXIF" && !exif && vp8x) {
+      // The first one, in an extended WebP (a simple one has none); some writers put JPEG's "Exif\0\0" before its TIFF.
+      exif = true;
+      const tiff = starts(b, at + 8, "Exif\0\0") ? at + 14 : at + 8;
+      const orientation = exifOrientation(b, tiff, at + 8 + length);
+      if (orientation >= 2) {
+        const data = orientationTiff(orientation);
+        chunk = new Uint8Array(8 + data.length);
+        chunk.set([0x45, 0x58, 0x49, 0x46, data.length]);
+        chunk.set(data, 8);
+        vp8x[8] = vp8x[8]! | 0x08;
+      }
+    }
+    if (chunk) {
       parts.push(chunk);
       size += chunk.length;
     }
@@ -184,8 +229,9 @@ function stripWebp(b: Uint8Array): Uint8Array[] {
 }
 
 // HEIF (HEIC, AVIF): its Exif and XMP are items of the `meta` box whose bytes sit elsewhere in the file. They are
-// overwritten with zeros where they are, so no offset in the file moves. A part this does not know, at the top or in
-// `meta` (a video track, an XML box, a `uuid` box), refuses the picture.
+// overwritten with zeros where they are, so no offset in the file moves, and so are the bodies of `free` and `skip`
+// boxes (an editor's leftovers), their headers kept. A part this does not know, at the top or in `meta` (a video
+// track, an XML box, a `uuid` box), or a picture's bytes inside a `free` or `skip` box, refuses the picture.
 
 const HEIF_TOP = new Set(["ftyp", "meta", "mdat", "free", "skip"]);
 const HEIF_META = new Set(["hdlr", "dinf", "pitm", "iloc", "iinf", "iref", "iprp", "idat", "grpl", "free", "skip"]);
@@ -246,6 +292,9 @@ function stripHeif(b: Uint8Array): Uint8Array[] {
     if (HEIF_METADATA_ITEMS.has(text(b, at + 2, 4))) metadata.add(id);
   }
 
+  /** `free` and `skip` boxes, at the top and in `meta`: their bodies go as zeros. */
+  const space = [...top, ...children].filter((box) => box.type === "free" || box.type === "skip");
+
   // Where their bytes are (iloc), overwritten in a copy.
   const out = b.slice();
   const version = b[iloc.body]!;
@@ -274,7 +323,12 @@ function stripHeif(b: Uint8Array): Uint8Array[] {
     for (let e = 0; e < extents; e++) {
       if (indexSize) read(indexSize);
       const offset = read(offsetSize), length = read(lengthSize);
-      if (!metadata.has(id)) continue;
+      if (!metadata.has(id)) {
+        // The picture's bytes (to the file's end for a length of 0) are in no space zeroed below.
+        const start = base + offset, end = length ? start + length : b.length;
+        check(reference !== 0 || method !== 0 || !space.some((box) => start < box.end && end > box.body));
+        continue;
+      }
       // Its bytes in this file (0) or in `idat` (1): a length of 0 (to the end) or another file, refused.
       check(reference === 0 && length > 0 && (method === 0 || (method === 1 && !!idat)));
       const start = (method === 1 ? idat!.body : 0) + base + offset, limit = method === 1 ? idat!.end : b.length;
@@ -282,6 +336,7 @@ function stripHeif(b: Uint8Array): Uint8Array[] {
       out.fill(0, start, start + length);
     }
   }
+  for (const box of space) out.fill(0, box.body, box.end);
   return [out];
 }
 

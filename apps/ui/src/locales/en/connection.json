@@ -194,11 +194,13 @@
     "dhtWaitingFor": "On DHT · waiting for {{transport}}",
     "discoveryUnavailable": "Discovery unavailable",
     "held": "Away · messages are held",
+    "heldPlain": "Messages are held",
     "identityMismatch": "Identity mismatch",
     "issue": "Connection issue",
     "noContact": "No contact yet",
     "offline": "Offline",
     "onDht": "On DHT · retrying live",
+    "onDhtPlain": "On DHT",
     "publicationUnavailable": "Publication unavailable",
     "switching": "Switching · {{transport}}",
     "waitingContact": "Waiting for contact"

@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import runtimePackage from "../../../native/translation/package.json" with { type: "json" };
 import { translateFrom, type DetectLanguages } from "../../../apps/ui/src/lib/translateWhich";
+import { childEnv } from "./childEnv";
 import { CliError } from "./errors";
 import type { GhostlyEvent } from "./events";
 
@@ -99,7 +100,7 @@ export function openTranslator({ home, to, detect, warn }: TranslatorOptions): T
 
   // Started at the first message to translate, and kept for the ones after it (a model loads once).
   const start = () => {
-    const started = spawn(bare, [script, models], { stdio: ["pipe", "pipe", "ignore"] });
+    const started = spawn(bare, [script, models], { stdio: ["pipe", "pipe", "ignore"], env: childEnv() });
     started.stdin.on("error", () => {});
     createInterface({ input: started.stdout }).on("line", (line) => {
       let answer: Answer;

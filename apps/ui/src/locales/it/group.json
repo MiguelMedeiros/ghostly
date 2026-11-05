@@ -115,12 +115,15 @@
     "answered": "L'app dell'admin ha visto la tua richiesta e si sta collegando a te. Tra un attimo sei dentro.",
     "answeredCommunity": "L'app di un membro ha visto la tua richiesta e si sta collegando a te. Tra un attimo sei dentro.",
     "answeredTitleCommunity": "Un membro ti sta facendo entrare",
+    "blocked": "Questo gruppo aspetta degli aggiornamenti",
+    "blockedBody": "Accetta di nuovo membri quando tutti al suo interno hanno Ghostly aggiornato. Allora entri: tieni l'app aperta.",
     "cancel": "Annulla accesso",
     "full": "Questo gruppo è pieno",
     "fullBody": "Ha {{n}} membri su {{max}}. Entri quando qualcuno esce: tieni l'app aperta.",
     "joiningGroup": "Accesso al gruppo…",
     "joiningName": "Accesso a {{name}}…",
     "knocked": "Succede appena l'app dell'admin è aperta. Puoi lasciare questa pagina.",
+    "knockedBusy": "Anche altri hanno chiesto di entrare: l'app dell'admin potrebbe essere occupata a farli entrare. Puoi lasciare questa pagina.",
     "knockedCommunity": "Succede appena l'app di un membro è aperta. Puoi lasciare questa pagina.",
     "knocking": "Lascio una richiesta dove l'app dell'admin la cerca…",
     "knockingCommunity": "Lascio una richiesta dove le app del gruppo la cercano…",
@@ -176,9 +179,11 @@
     "full": "Il gruppo è pieno ({{count}} su {{count}}). Nessuno entra finché qualcuno non esce.",
     "fullShort": "Il gruppo è pieno",
     "hideQr": "Nascondi QR",
+    "jammed": "Nessuno può entrare con il link di questo gruppo in questo momento: continua a ricevere richieste da app che non si collegano mai, e occupano i posti in cui aspetta chi arriva. Qualcuno che ha il link potrebbe farlo apposta. Crea un nuovo link e condividilo di nuovo.",
     "note": "Chi apre questo link entra, senza essere tuo contatto né dire chi è. Entra mentre la tua app è aperta, fino a {{count}} membri.",
     "noteCommunity": "Chi apre questo link entra, senza essere contatto di nessuno né dire chi è. L'app di qualsiasi membro lo fa entrare, quindi funziona anche quando non ci sei; fino a {{count}} membri. Rimuovere qualcuno non gli impedisce di riaprire il link: per questo l'admin ne crea uno nuovo.",
     "off": "Il link è disattivato: nessuno può entrare con esso, e il link condiviso prima non funzionerà più. Attivarlo crea un nuovo link da condividere.",
+    "offMember": "L'admin ha disattivato il link: nessuno può entrare con esso, e il link condiviso prima non funzionerà più. Solo l'admin può crearne uno nuovo.",
     "qrTitle": "Codice QR del link del gruppo",
     "reset": "Nuovo link",
     "resetBody": "Il link condiviso finora smette di funzionare per sempre: chi lo ha e non è ancora entrato non può più entrare con esso. I membri restano nel gruppo.",
@@ -192,7 +197,8 @@
     "showQr": "Mostra QR",
     "title": "Link del gruppo",
     "tooMany": "Troppi link di gruppo aperti",
-    "tooManyNext": "Elimina un gruppo che aspetta ancora di entrare o incolla il link in Unisciti."
+    "tooManyNext": "Elimina un gruppo che aspetta ancora di entrare o incolla il link in Unisciti.",
+    "unanswered": "Chi apre il link forse non riesce a entrare: molti che hanno bussato di recente non hanno mai risposto. Un nuovo link risolve; poi condividi quello nuovo."
   },
   "makeAdmin": {
     "body": "Non sarai più l'admin. Solo {{name}} potrà rinominare il gruppo, cambiarne foto e link, invitare o rimuovere membri, e restituirti il ruolo.",
@@ -242,6 +248,15 @@
     "leave": "Esci dal gruppo",
     "members": "Membri…",
     "rotate": "Rinnova chiavi"
+  },
+  "others": {
+    "body": "Chi conosce l'id di un gruppo può crearne uno suo con lo stesso id, e solo uno dei due può stare su questo dispositivo. Tieni questo o passa all'altro: passare esce da questo e lo elimina da questo dispositivo.",
+    "invitedBy": "{{contact}} ti ha invitato a {{name}} ({{members}})",
+    "invitedByUnknown": "Un invito a {{name}} ({{members}})",
+    "keep": "Tieni questo",
+    "link": "Un link di gruppo che hai aperto",
+    "switch": "Passa a questo",
+    "title": "Un altro gruppo ha l'id di questo gruppo"
   },
   "readNote": "Tutti nel gruppo possono leggere tutto ciò che viene inviato mentre ne fanno parte. Chi viene rimosso conserva ciò che ha già ricevuto e non può leggere ciò che segue; chi entra dopo non può leggere ciò che c'era prima. I messaggi vanno a ogni membro; chi era assente riceve ciò che ha perso da qualsiasi membro che lo abbia (gli ultimi {{count}} messaggi del gruppo) quando si ritrovano.",
   "readNoteCommunity": "Chiunque abbia il link del gruppo può entrare, e qualsiasi membro può far entrare altre persone. Tutti nel gruppo possono leggere tutto ciò che viene inviato mentre ne fanno parte; chi viene rimosso non può leggere ciò che segue, chi entra dopo non può leggere ciò che c'era prima. I membri che erano assenti ricevono gli ultimi {{count}} messaggi da chi c'è quando tornano.",

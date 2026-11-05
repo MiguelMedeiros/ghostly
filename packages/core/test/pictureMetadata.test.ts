@@ -1,5 +1,6 @@
+import { crc32 } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { imageSize } from "../src/image";
+import { exifOrientation, imageSize } from "../src/image";
 import { NO_PICTURE_METADATA, PICTURE_METADATA_LIMITS, stripPictureMetadata, withoutPictureMetadata } from "../src/pictureMetadata";
 // covers: files.image.metadata
 
@@ -121,6 +122,54 @@ function tiffIfds(b: Uint8Array): { at: number; tags: number[] }[] {
   return found;
 }
 
+/**
+ * An Exif's TIFF whose IFD0 holds Make (the secret), the Orientation when there is one, and a pointer to a GPS IFD whose
+ * processing method holds the GPS secret: as a camera or `sips` writes it, in either byte order.
+ */
+const GPS_SECRET = "GHOSTLY-GPS-PROCESSING 52.37N";
+function exifTiff(orientation: number | undefined, little = false): number[] {
+  const u16 = (n: number) => (little ? [n & 0xff, n >> 8] : be16(n)), u32 = (n: number) => (little ? le32(n) : be32(n));
+  const entry = (tag: number, type: number, count: number, value: number[]) => [...u16(tag), ...u16(type), ...u32(count), ...value];
+  const make = ascii(`${SECRET}\0`), gps = ascii(GPS_SECRET);
+  const count = orientation === undefined ? 2 : 3, makeAt = 8 + 2 + count * 12 + 4, gpsIfdAt = makeAt + make.length, gpsAt = gpsIfdAt + 2 + 12 + 4;
+  const ifd0 = [entry(0x010f, 2, make.length, u32(makeAt)), ...(orientation === undefined ? [] : [entry(0x0112, 3, 1, [...u16(orientation), 0, 0])]), entry(0x8825, 4, 1, u32(gpsIfdAt))];
+  return [...(little ? [0x49, 0x49, 42, 0] : [0x4d, 0x4d, 0, 42]), ...u32(8), ...u16(count), ...ifd0.flat(), ...u32(0), ...make,
+    ...u16(1), ...entry(0x001b, 7, gps.length, u32(gpsAt)), ...u32(0), ...gps];
+}
+
+/** What an Exif kept holds: its IFDs and their tags, and the Orientation a browser reads. */
+function readExif(tiff: Uint8Array) {
+  return { ifds: tiffIfds(tiff), orientation: exifOrientation(tiff, 0, tiff.length) };
+}
+
+/** A PNG chunk with its real CRC. */
+const crcChunk = (type: string, data: number[]) => [...be32(data.length), ...ascii(type), ...data, ...be32(crc32(Uint8Array.from([...ascii(type), ...data])))];
+/** A PNG's chunks, each CRC checked. */
+function pngChunks(b: Uint8Array): { type: string; data: Uint8Array }[] {
+  expect([...b.subarray(0, 8)]).toEqual(pngSignature);
+  const view = new DataView(b.buffer, b.byteOffset, b.byteLength), found: { type: string; data: Uint8Array }[] = [];
+  for (let at = 8; at < b.length;) {
+    const length = view.getUint32(at), type = Buffer.from(b.subarray(at + 4, at + 8)).toString("latin1");
+    expect(view.getUint32(at + 8 + length), `${type} CRC`).toBe(crc32(b.subarray(at + 4, at + 8 + length)));
+    found.push({ type, data: b.subarray(at + 8, at + 8 + length) });
+    at += 12 + length;
+  }
+  return found;
+}
+
+/** A WebP's chunks, its RIFF size checked against its length and every chunk padded to an even size. */
+function webpChunks(b: Uint8Array): { type: string; data: Uint8Array }[] {
+  const view = new DataView(b.buffer, b.byteOffset, b.byteLength), found: { type: string; data: Uint8Array }[] = [];
+  expect(view.getUint32(4, true)).toBe(b.length - 8);
+  for (let at = 12; at < b.length;) {
+    const length = view.getUint32(at + 4, true);
+    found.push({ type: Buffer.from(b.subarray(at, at + 4)).toString("latin1"), data: b.subarray(at + 8, at + 8 + length) });
+    at += 8 + length + (length & 1);
+    expect(at).toBeLessThanOrEqual(b.length);
+  }
+  return found;
+}
+
 describe("a picture's metadata, removed before it is sent", () => {
   it("GIF: comments, XMP and other application extensions go; frames, timing, the loop and ICC stay byte for byte", () => {
     const icc = gifExtension(0xff, ascii("ICCRGBG1012"), [1, 2, 3]);
@@ -230,6 +279,53 @@ describe("a picture's metadata, removed before it is sent", () => {
     expect(imageSize(out)).toEqual({ width: 300, height: 200 });
   });
 
+  it("PNG: a turned picture keeps an eXIf with its Orientation alone, before IDAT and with a valid CRC; Make and GPS go", () => {
+    for (const little of [false, true]) {
+      const sent = [...pngSignature, ...crcChunk("IHDR", [...be32(64), ...be32(48), 8, 2, 0, 0, 0]), ...crcChunk("sRGB", [0]),
+        ...crcChunk("eXIf", exifTiff(6, little)), ...crcChunk("iTXt", ascii(`XML:com.adobe.xmp\0\0\0\0\0${SECRET}`)),
+        ...crcChunk("IDAT", [0x78, 0x9c, 1, 2, 3]), ...crcChunk("IEND", [])];
+      expect(has(Uint8Array.from(sent), GPS_SECRET)).toBe(true);
+      const out = strip(sent, "image/png");
+      const chunks = pngChunks(out);
+      expect(chunks.map(({ type }) => type)).toEqual(["IHDR", "sRGB", "eXIf", "IDAT", "IEND"]);
+      expect(readExif(chunks[2]!.data)).toEqual({ ifds: [{ at: 8, tags: [0x0112] }], orientation: 6 });
+      expect(has(out, SECRET)).toBe(false);
+      expect(has(out, GPS_SECRET)).toBe(false);
+    }
+  });
+
+  it("PNG: an upright picture or one without Orientation keeps no eXIf, nor one after the image data", () => {
+    for (const exif of [exifTiff(1), exifTiff(undefined)]) {
+      const out = strip([...pngSignature, ...ihdr, ...chunk("eXIf", exif), ...idat, ...iend], "image/png");
+      expect([...out]).toEqual([...pngSignature, ...ihdr, ...idat, ...iend]);
+    }
+    const late = strip([...pngSignature, ...ihdr, ...idat, ...chunk("eXIf", exifTiff(6)), ...iend], "image/png");
+    expect([...late]).toEqual([...pngSignature, ...ihdr, ...idat, ...iend]);
+  });
+
+  it("WebP: a turned picture keeps an EXIF with its Orientation alone and VP8X says so; Make, GPS and XMP go", () => {
+    for (const exif of [exifTiff(6), exifTiff(6, true), [...ascii("Exif\0\0"), ...exifTiff(6, true)]]) {
+      const sent = riff(vp8x, vp8l, riffChunk("EXIF", exif), riffChunk("XMP ", ascii(SECRET)));
+      const out = strip(sent, "image/webp");
+      const chunks = webpChunks(out);
+      expect(chunks.map(({ type }) => type)).toEqual(["VP8X", "VP8L", "EXIF"]);
+      // ICC and alpha as they were, EXIF (0x08) still said, XMP (0x04) no longer.
+      expect(chunks[0]!.data[0]).toBe(0x38);
+      expect(readExif(chunks[2]!.data)).toEqual({ ifds: [{ at: 8, tags: [0x0112] }], orientation: 6 });
+      expect(has(out, SECRET)).toBe(false);
+      expect(has(out, GPS_SECRET)).toBe(false);
+      expect(imageSize(out)).toEqual({ width: 300, height: 200 });
+    }
+  });
+
+  it("WebP: an upright picture or one without Orientation keeps no EXIF and VP8X stops saying it has one", () => {
+    for (const exif of [exifTiff(1), exifTiff(undefined)]) {
+      const out = strip(riff(vp8x, vp8l, riffChunk("EXIF", exif)), "image/webp");
+      expect(webpChunks(out).map(({ type }) => type)).toEqual(["VP8X", "VP8L"]);
+      expect([...out]).toEqual(riff(riffChunk("VP8X", [0x30, 0, 0, 0, 43, 1, 0, 199, 0, 0]), vp8l));
+    }
+  });
+
   it("HEIC: the Exif item's bytes are zeroed where they are, in the file or in idat; nothing else moves", () => {
     for (const exifMethod of [0, 1]) {
       const sent = Uint8Array.from(heif({ exifMethod }));
@@ -243,6 +339,38 @@ describe("a picture's metadata, removed before it is sent", () => {
       expect(changed.length).toBeGreaterThan(0);
       expect(changed.every((i) => out[i] === 0)).toBe(true);
     }
+  });
+
+  it("HEIC: free and skip boxes, at the top and in meta, keep their headers and go with their bodies zeroed; nothing moves", () => {
+    for (const type of ["free", "skip"]) {
+      for (const sent of [heif({ topExtra: [box(type, ascii(SECRET))] }), heif({ extra: [box(type, ascii(SECRET))] }), [...heif(), ...box(type, ascii(SECRET))]]) {
+        const out = strip(sent, "image/heic");
+        expect(has(Uint8Array.from(sent), SECRET)).toBe(true);
+        expect(has(out, SECRET)).toBe(false);
+        expect(out.length).toBe(sent.length);
+        expect(has(out, `\0\0\0${String.fromCharCode(8 + SECRET.length)}${type}${"\0".repeat(SECRET.length)}`)).toBe(true);
+        expect(has(out, "\xaa\xbb\xcc\xdd")).toBe(true);
+        const changed = [...sent.keys()].filter((i) => sent[i] !== out[i]);
+        expect(changed.every((i) => out[i] === 0)).toBe(true);
+      }
+    }
+  });
+
+  it("HEIC whose picture's bytes are inside a free box is refused, not sent with them zeroed", () => {
+    // The picture item's extent moved into a free box at the end of the file.
+    const sent = [...heif(), ...box("free", [0xaa, 0xbb, 0xcc, 0xdd])];
+    const ilocAt = Buffer.from(Uint8Array.from(sent)).indexOf("iloc", 0, "latin1") + 4 + 4 + 2 + 2 + 2 + 2 + 2 + 2;
+    sent.splice(ilocAt, 4, ...be32(sent.length - 4));
+    expect(() => stripPictureMetadata(Uint8Array.from(sent), "image/heic")).toThrow(NO_PICTURE_METADATA);
+  });
+
+  it("JPEG: the JFIF header stays but its thumbnail goes, and says it has none", () => {
+    const thumbnail = ascii(SECRET.padEnd(3 * 11 * 1, "."));
+    const withThumbnail = segment(0xe0, [...ascii("JFIF\0"), 1, 2, 1, 0, 72, 0, 72, 11, 1, ...thumbnail]);
+    const out = strip(jpeg(withThumbnail, dqt, sof(300, 200), dht), "image/jpeg");
+    expect(has(out, SECRET)).toBe(false);
+    expect([...out]).toEqual(jpeg(segment(0xe0, [...ascii("JFIF\0"), 1, 2, 1, 0, 72, 0, 72, 0, 0]), dqt, sof(300, 200), dht));
+    expect(imageSize(out)).toEqual({ width: 300, height: 200 });
   });
 
   it("HEIC with a part this does not know is refused: an XML box, a video track, a uuid box", () => {

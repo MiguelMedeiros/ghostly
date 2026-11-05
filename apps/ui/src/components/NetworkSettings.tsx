@@ -3,7 +3,8 @@ import { irohRelayUrl, normalizeRelayUrl, relayUrlProblem } from "@ghostly/core"
 import { iceServerProblem } from "@ghostly/browser/shared/ice";
 import { hyperdhtRelayProblem } from "@ghostly/browser/shared/hyperdhtRelay";
 import { pushRelayProblem } from "@ghostly/browser/shared/pushRelay";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
 import { useI18n } from "../contexts/I18nContext";
 import { Block, Field, FieldGrid, Row, Section } from "./layout";
 import { Switch } from "./wallet/ui";
@@ -53,8 +54,9 @@ function refusedField(message: string, irohRelays: readonly string[]): FieldName
  */
 export function NetworkSettings() {
   const { t, language } = useI18n();
-  const platform = useServicesPlatform();
-  const network = platform?.getNetwork() ?? null;
+  const platform = servicesPlatform;
+  // Drawn again when the network's settings change by content, not on every state of the engine.
+  const network = usePlatformValue(() => platform?.getNetwork() ?? null);
   const [relays, setRelays] = useState("");
   const [turn, setTurn] = useState({ urls: "", username: "", credential: "" });
   const [iroh, setIroh] = useState("");
@@ -150,7 +152,7 @@ export function NetworkSettings() {
 
   // Addresses read left to right in every language (in Arabic a wrapped relay's trailing "/" would start the next line); labels and hints follow the page.
   const field =
-    "w-full min-w-0 px-3 py-2 min-h-10 bg-input-bg border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent transition-colors aria-invalid:border-danger aria-invalid:focus:ring-danger";
+    "w-full min-w-0 px-3 py-2 min-h-10 bg-input-bg border border-field-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent transition-colors aria-invalid:border-danger aria-invalid:focus:ring-danger";
   // A refused field: its border says so, and it names its error to assistive technology.
   const invalid = (name: FieldName) => problems[name] ? { "aria-invalid": true, "aria-describedby": `${FIELDS[name]}-error` } : {};
   const problemUnder = (name: FieldName) => <FieldError id={`${FIELDS[name]}-error`} testId="network-error">{problems[name]}</FieldError>;

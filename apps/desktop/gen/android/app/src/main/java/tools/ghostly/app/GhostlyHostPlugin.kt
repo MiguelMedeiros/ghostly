@@ -82,6 +82,13 @@ class AwakeArgs {
 }
 
 @InvokeArg
+class CallArgs {
+  var on: Boolean = false
+  var name: String = ""
+  var video: Boolean = false
+}
+
+@InvokeArg
 class HideArgs {
   var on: Boolean = false
 }
@@ -139,7 +146,7 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     private val sharesSwept = AtomicBoolean(false)
   }
 
-  /** Rust (src/android.rs): `kind` is "oidc", "share", "notification" or "network". */
+  /** Rust (src/android.rs): `kind` is "oidc", "share", "notification", "network", "visibility" or "call". */
   private external fun received(kind: String, value: String)
 
   private val pendingSave = SaveSlot<SaveArgs>()
@@ -152,6 +159,8 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     }
     take(activity.intent)
     watchNetwork()
+    // The call notification's Hang up (CallService.kt): the page ends the call.
+    CallService.hangUp = { activity.runOnUiThread { received("call", "hangUp") } }
   }
 
   override fun onNewIntent(intent: Intent) {
@@ -602,6 +611,20 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     invoke.resolve(JSObject().put("held", held))
   }
 
+  // ---- A call out of sight ----
+
+  /**
+   * While a call is on (`on`, Rust's `call_service`), the call service (CallService.kt) keeps its microphone, and its
+   * camera while it sends the camera's picture, with the app out of sight; it stops with the call. Told again when
+   * the name or the camera changes. `held`: whether this start went through.
+   */
+  @Command
+  fun callService(invoke: Invoke) {
+    val args = invoke.parseArgs(CallArgs::class.java)
+    val held = if (args.on) CallService.start(activity, args.name, args.video) else false.also { CallService.stop(activity) }
+    invoke.resolve(JSObject().put("held", held))
+  }
+
   // ---- System bars ----
 
   /** The strips around the page take its background colour, and icons that read on it. */
@@ -630,7 +653,8 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
 
   /**
    * While the app lock is on (`on`), the app switcher keeps no picture of the app (SwitcherPicture): Android takes it
-   * before the page hears the app is going, so the lock's cover would come too late for it. Off again with the lock.
+   * before the page hears the app is going, so the lock's cover would come too late for it. The activity's cover goes
+   * over the app's live window there too (MainActivity.lockOn). Off again with the lock.
    */
   // SwitcherPicture takes setRecentsScreenshotEnabled only on Android 13 and up.
   @SuppressLint("NewApi")
@@ -644,6 +668,7 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
           if (on) activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
           else activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
       }
+      (activity as? MainActivity)?.lockOn = on
       invoke.resolve()
     }
   }

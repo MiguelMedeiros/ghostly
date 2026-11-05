@@ -1375,6 +1375,21 @@ describe("text in a chat", () => {
     expect(history).toHaveBeenCalled();
   });
 
+  it("forty texts asked for at once, as a bot's workers do, read the rows on their way, not the chat's whole history", async () => {
+    const chat = row();
+    const { node, events: pages, linkOf } = await started(chat);
+    // As the CLI and the web app host it: the pages hear the rows that changed, not the whole history.
+    Object.assign(pages, { onMessageChanges: vi.fn() });
+    await node.sendMessage({ linkId: chat.id, text: "first", timestamp: 1 });
+    const history = vi.spyOn(db, "getMessages");
+    const texts =Array.from({ length: 40 }, (_, i) => `m${i}`);
+    const sends = await Promise.all(texts.map((text, i) => node.sendMessage({ linkId: chat.id, text, timestamp: 2 + i })));
+    expect(sends.every(sent => sent.error === null)).toBe(true);
+    // Past the sixteenth on its way (or awaiting its receipt), each one's turn read the history.
+    expect(history).not.toHaveBeenCalled();
+    expect(linkOf(chat.id).sendMessage.mock.calls.map(([text]) => text)).toEqual(["first", ...texts]);
+  });
+
   it("a receipt for a file said on the DHT floor finds it without reading the chat's whole history again", async () => {
     const chat = row();
     const { node, events: pages, linkOf } = await started(chat);
@@ -2308,6 +2323,41 @@ describe("private groups through the engine", () => {
       onTestFinished(() => { vi.unstubAllGlobals(); });
       expect(host.staysOnline()).toBe(true);
       expect(host.peerRoom(groupId)).toBeUndefined();
+    });
+
+    // An admin with no WebRTC in two groups with members: the third group's link let nobody in, its entry session found
+    // the groups' four listeners held and waited for good (2026-10-19).
+    it.each(["host", "guest"] as const)("an entry session (%s side) takes a free listener once two groups hold the groups' four", async (role) => {
+      const { node } = await nativeEngine();
+      for (const name of ["One", "Two"]) {
+        const { groupId } = await node.createGroup({ name });
+        const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+        for (let i = 0; i < 2; i++) await openEdge(node, state, createIdentity().pubKeyZ32);
+      }
+      const edges = () => links.filter((l) => node["links"].get(l.options.params.id)?.stored.group && l.availableTransports.includes("iroh/1"));
+      await vi.waitFor(() => expect(edges()).toHaveLength(GROUP_NATIVE_SLOTS));
+      const { groupId } = await node.createGroup({ name: "Three" });
+      const me = createIdentity(), other = createIdentity();
+      const entryId = await node["openEntry"]({ g: groupId, host: other.pubKeyZ32 }, role, me.seedB64, other.pubKeyZ32);
+      await vi.waitFor(() => expect(edgeOf(entryId).registerEndpoint).toHaveBeenCalledOnce());
+    });
+
+    it("an entry session with every listener held takes one from a group's edge past the one its group keeps, never a chat's", async () => {
+      const chats = Array.from({ length: 4 }, () => row({ pairedPeerKey: createIdentity().pubKeyZ32 }));
+      for (const r of chats) await db.putLink(r);
+      const { node } = await nativeEngine();
+      await vi.waitFor(() => { for (const chat of chats) expect(edgeOf(chat.id).registerEndpoint).toHaveBeenCalled(); });
+      const { groupId: one } = await node.createGroup({ name: "One" });
+      const state = (await db.getGroups()).find((g) => g.id === one)!.community;
+      const edgeIds: string[] = [];
+      for (let i = 0; i < GROUP_NATIVE_SLOTS; i++) edgeIds.push(await openEdge(node, state, createIdentity().pubKeyZ32));
+      await vi.waitFor(() => { for (const id of edgeIds) expect(edgeOf(id).registerEndpoint).toHaveBeenCalled(); });
+      const { groupId } = await node.createGroup({ name: "Two" });
+      const me = createIdentity(), other = createIdentity();
+      const entryId = await node["openEntry"]({ g: groupId, host: other.pubKeyZ32 }, "host", me.seedB64, other.pubKeyZ32);
+      await vi.waitFor(() => expect(edgeOf(entryId).registerEndpoint).toHaveBeenCalledOnce());
+      expect(edgeIds.filter((id) => edgeOf(id).releaseEndpoint.mock.calls.length > 0)).toHaveLength(1);
+      for (const chat of chats) expect(edgeOf(chat.id).releaseEndpoint).not.toHaveBeenCalled();
     });
 
     it("an app with no WebRTC leaves its groups the listeners its 1:1 chats do not hold, and four however many chats hold one", async () => {

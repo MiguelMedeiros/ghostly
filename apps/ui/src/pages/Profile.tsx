@@ -69,9 +69,11 @@ export function Profile() {
   // The field edits the name only: a restored profile's word for it is the tag beside the field, never text in it.
   const plain = baseProfileName(current.id) ?? current.name;
   const [name, setName] = useState(plain);
+  // A rename is said once, in the status line beside the field; typing again takes it away.
+  const [nameSaved, setNameSaved] = useState(false);
   const nameComposition = useComposition();
   // Both name fields keep what the name takes, between whole characters (`fitsProfileName`).
-  const nameField = useFittedNameField(name, setName, fitsProfileName);
+  const nameField = useFittedNameField(name, (next) => { setName(next); setNameSaved(false); }, fitsProfileName);
   // "Add a profile" in the account switcher lands here with the form open.
   const location = useLocation();
   const navigate = useNavigate();
@@ -99,7 +101,7 @@ export function Profile() {
 
   const chats = useStoredSessions(chatCount, Object.is);
   const attempt = (work: () => void) => { try { work(); setError(null); } catch (e) { setError(problemText(e, t)); } };
-  const saveName = () => { if (name.trim() && name.trim() !== plain) attempt(() => renameProfile(current.id, name)); };
+  const saveName = () => { if (name.trim() && name.trim() !== plain) attempt(() => { renameProfile(current.id, name); setNameSaved(true); }); };
   const schemes: { value: ColorScheme; label: string }[] = [{ value: "light", label: t("settings.colorSchemes.light") }, { value: "dark", label: t("settings.colorSchemes.dark") }, { value: "system", label: t("settings.colorSchemes.system") }];
 
   return (
@@ -114,9 +116,11 @@ export function Profile() {
           <input data-testid="profile-avatar-input" type="file" accept="image/*" aria-label={myAvatar ? t("profile.changePicture") : t("profile.addPicture")} className="sr-only"
             onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void avatarFromFile(file).then(setMyAvatar).then(() => setError(null), (err: unknown) => setError(problemText(err, t))); }} />
         </label>
-        <input data-testid="profile-name" aria-label={t("profile.nameLabel")} value={name} {...nameField} onBlur={saveName}
-          onCompositionEnd={(e) => { nameComposition.inputProps.onCompositionEnd(e); nameField.onCompositionEnd(e); }} onKeyDown={(e) => !nameComposition.composing(e) && e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
-          className="min-w-0 flex-[1_1_8rem] bg-transparent text-xl font-semibold text-text-primary rounded-lg px-2 -mx-2 py-1 border border-transparent hover:border-border focus:border-accent focus:outline-none" />
+        {/* Enter saves in place: blurring it dropped the keyboard's focus to the page. */}
+        {/* Left empty, it shows the saved name again, which an empty name does not replace (as the nickname field does). */}
+        <input data-testid="profile-name" aria-label={t("profile.nameLabel")} value={name} {...nameField} onBlur={() => { if (name.trim()) saveName(); else setName(plain); }}
+          onCompositionEnd={(e) => { nameComposition.inputProps.onCompositionEnd(e); nameField.onCompositionEnd(e); }} onKeyDown={(e) => { if (!nameComposition.composing(e) && e.key === "Enter") saveName(); }}
+          className="min-w-0 flex-[1_1_8rem] bg-transparent text-xl font-semibold text-text-primary rounded-lg px-2 -mx-2 py-1 border border-field-border focus:border-accent focus:outline-none" />
         {current.restored && (
           <span data-testid="profile-restored-tag" title={t("profile.restoredTagHint")} className="inline-flex items-center gap-0.5 shrink-0 whitespace-nowrap rounded-full border border-border bg-surface-alt ps-2.5 pe-0.5 text-xs text-text-muted">
             {t("profile.restoredTag")}
@@ -127,6 +131,8 @@ export function Profile() {
           </span>
         )}
         {myAvatar && <button type="button" data-testid="profile-avatar-remove" onClick={() => void setMyAvatar(null)} className="min-h-10 text-xs text-text-muted hover:text-danger cursor-pointer shrink-0 whitespace-nowrap">{t("profile.removePicture")}</button>}
+        {/* There before it fills, so a screen reader says it; a refused name shows the Notice below instead. */}
+        <span role="status" data-testid="profile-name-saved" className="text-accent text-sm shrink-0">{nameSaved ? t("profile.nameSaved") : ""}</span>
       </div>
       {error && <Notice problem={error} />}
 

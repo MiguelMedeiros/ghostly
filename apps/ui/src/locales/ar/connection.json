@@ -210,11 +210,13 @@
     "dhtWaitingFor": "على DHT · في انتظار {{transport}}",
     "discoveryUnavailable": "الاكتشاف غير متاح",
     "held": "غائب · الرسائل محفوظة",
+    "heldPlain": "الرسائل محفوظة",
     "identityMismatch": "عدم تطابق الهوية",
     "issue": "مشكلة في الاتصال",
     "noContact": "لا توجد جهة اتصال بعد",
     "offline": "غير متصل",
     "onDht": "على DHT · إعادة محاولة الاتصال المباشر",
+    "onDhtPlain": "على DHT",
     "publicationUnavailable": "النشر غير متاح",
     "switching": "جارٍ الانتقال · {{transport}}",
     "waitingContact": "في انتظار جهة الاتصال"

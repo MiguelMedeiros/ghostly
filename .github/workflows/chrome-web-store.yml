@@ -5,9 +5,14 @@ name: Chrome Web Store
 # service account (tools/scripts/chrome-web-store.mjs).
 #
 # A person publishing the draft (docs/RELEASING.md, step 4) starts it. By hand, for a release already published:
-#   gh workflow run chrome-web-store.yml -f tag=v1.8.1
+#   gh workflow run chrome-web-store.yml --ref main -f tag=v1.8.1
 #
-# It does nothing until the repository has the secrets CWS_SERVICE_ACCOUNT_JSON and CWS_PUBLISHER_ID
+# A run uses the copy of this file on the ref it runs from, and a repository secret reaches every branch's copy. So
+# the store key is a secret of the `chrome-web-store` environment, which allows only main and v* tags (a published
+# release runs on its tag), and the job checks the ref too: a branch's own copy can drop the check here, never the
+# environment's.
+#
+# It does nothing until that environment has the secrets CWS_SERVICE_ACCOUNT_JSON and CWS_PUBLISHER_ID
 # (docs/RELEASING.md, "Chrome Web Store"): without them the first step writes a notice and every other step is
 # skipped. A draft, a pre-release (the translation runtime's) or a tag that is not vX.Y.Z is skipped the same way,
 # and so is a version the store already has or a newer one. It is a workflow of its own, so a refusal from the store
@@ -33,7 +38,9 @@ concurrency:
 jobs:
   upload:
     name: Upload and submit for review
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
+    environment: chrome-web-store
     timeout-minutes: 20
     permissions:
       contents: read

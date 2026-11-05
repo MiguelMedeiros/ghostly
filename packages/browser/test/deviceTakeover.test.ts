@@ -93,6 +93,22 @@ describe("a forced takeover through the turn keeper", () => {
     expect(phone.store.record).toMatchObject({ state: "active", takeovers: 1, raise: { why: "takeover", takeovers: 1 } });
     expect(phone.store.record.copy).toBeUndefined();
     expect(phone.store.record.handoff).toBeUndefined();
+    // The offer of a new device secret keeps the device that stopped by its key: names change, and two may be the same.
+    expect(phone.store.record.secretOffer).toMatchObject({ why: "takeover", key: toBase64Url(devices[0].publicKey), device: "Desktop" });
+  });
+
+  it("takes the name as the person sees and types it: a character that draws nothing is not asked for", async () => {
+    // A record stored by a build that kept a joiner where it joins nothing, or a filler that shows as nothing.
+    for (const stored of ["Desktop‍", "‍Desktop", "Desk‌top", "Desktop️", "Desktopㅤ"]) {
+      const net = new FakeTurnNetwork();
+      const phone = await device(net, 1, "standby", { deviceSet: deviceSet().map((slot, i) => (i === 0 ? { ...slot, name: stored } : slot)) });
+      net.seed(phone.stored);
+      expect((await forceTakeover(ports(phone.store, phone.keeper), { password: PASSWORD, name: "Desktop" })).kind, JSON.stringify(stored)).toBe("start");
+    }
+    // What shows is still what is checked.
+    const phone = await device(network, 1, "standby", { deviceSet: deviceSet().map((slot, i) => (i === 0 ? { ...slot, name: "می‌خوام" } : slot)) });
+    await expect(forceTakeover(ports(phone.store, phone.keeper), { password: PASSWORD, name: "Desktop" })).rejects.toThrow("takeover-name");
+    expect(network.calls).toEqual([]);
   });
 
   it("a releaser whose taker never finished takes the profile back at N + 2", async () => {

@@ -190,11 +190,16 @@ export function readLobby(keys: { key: Uint8Array; aad: Uint8Array }, records: G
 /**
  * The beacon to publish: my entry (or none, `mine` null, when I step down) with the other fresh
  * hubs, newest first, at most `maxHubs`. A hub not in the roster any more is dropped.
+ *
+ * Anyone holding the rendezvous secret writes this record, so what is in it does not decide what stays: my entry always
+ * does, then the keys I know as members (`known`) before keys I do not, and an entry dated ahead of now ranks as one of
+ * now. Entries stay as their hubs dated them.
  */
-export function mergeBeacon(existing: Hub[], me: string, mine: Hub | null, now = Date.now(), isMember: (key: string) => boolean = () => true): Hub[] {
+export function mergeBeacon(existing: Hub[], me: string, mine: Hub | null, now = Date.now(), isMember: (key: string) => boolean = () => true, known: (key: string) => boolean = () => true): Hub[] {
   const fresh = existing.filter(h => h.key !== me && now - h.ts < COMMUNITY_TOPOLOGY.beaconFreshMs && h.ts <= now + 60_000 && isMember(h.key));
-  const all = mine ? [mine, ...fresh] : fresh;
-  return all.sort((a, b) => b.ts - a.ts).slice(0, COMMUNITY_TOPOLOGY.maxHubs);
+  const rank = (h: Hub) => (known(h.key) ? 0 : 1);
+  const others = fresh.sort((a, b) => rank(a) - rank(b) || Math.min(b.ts, now) - Math.min(a.ts, now));
+  return (mine ? [mine, ...others] : others).slice(0, COMMUNITY_TOPOLOGY.maxHubs);
 }
 
 /** The lobby to publish: my request refreshed, others' still fresh, newest last. */

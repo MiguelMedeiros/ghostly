@@ -1,20 +1,64 @@
-import { useState } from "react";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
-import { listSessions } from "../lib/storage";
+import { useRef, useState } from "react";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
+import { useStoredSessions } from "../hooks/useStoredSessions";
+import { listShownSessions } from "../lib/storage";
+import { sameValue } from "../lib/sameValue";
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
-import type { SharedService } from "../lib/platform";
+import { servicesPlatform, type SharedService } from "../lib/platform";
 import { Block, Button, Notice, Row, Section, Switch, SwitchLook, input } from "../components/wallet/ui";
 import { ButtonGroup, FieldGrid, Page } from "../components/layout";
 import { externalLinkProps } from "../lib/externalLink";
-import { useI18n } from "../contexts/I18nContext";
+import { useToast } from "../hooks/useToast";
+import { useFocusLanding } from "../hooks/useFocusLanding";
+import { Toast } from "../components/ui/Toast";
+import { useI18n, type Translate } from "../contexts/I18nContext";
+import { draftDirection } from "../lib/documentLanguage";
 import { problemLine } from "../lib/problemText";
-
 const GLOBE = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>;
+
+/**
+ * The chats' keys and names, through the page's one cache of the stored chats: a chat's stored copy, messages and all,
+ * is parsed only when it changed, not on every draw.
+ */
+const storedContacts = () => listShownSessions().map((s) => ({ key: s.peerPubKeyB64, label: s.label, nick: s.nick }));
 
 /** Everyone this device has a chat with, by the key services are granted to. */
 function useContacts() {
   const { t } = useI18n();
-  return listSessions().map((s) => ({ key: s.peerPubKeyB64, name: s.label || s.nick || t("common.unnamedContact", { key: contactTag(s.peerPubKeyB64) }), short: publicKeyLabel(s.peerPubKeyB64) }));
+  return useStoredSessions(storedContacts, sameValue).map((s) => ({ key: s.key, name: s.label || s.nick || t("common.unnamedContact", { key: contactTag(s.key) }), short: publicKeyLabel(s.key) }));
+}
+
+/** What the page shows of the platform: drawn again when that changes, not on every engine state. */
+const shown = () => servicesPlatform && {
+  online: servicesPlatform.isOnline(),
+  services: servicesPlatform.getSharedServices(),
+  canShare: servicesPlatform.features.shareLocalServices,
+};
+
+/**
+ * Where the focus goes once Share, Cancel or Remove took away the control that had it. `sharing`: Share is running (the
+ * apps there before it); `shared`: it closed the form, and the new app's card can come a draw later.
+ */
+type Landing =
+  | { sharing: ReadonlySet<string> }
+  | { shared: ReadonlySet<string> }
+  | { cancelled: true }
+  | { removed: SharedService; next: string | null };
+
+const ADD = "[data-testid=add-service]";
+const cardOf = (id: string) => `[data-testid=service-item][data-id="${CSS.escape(id)}"]`;
+
+/** The element `landing` waits for, once it is there to take the focus, and what the page says then. */
+function landingGoal(landing: Landing | null, services: readonly SharedService[], t: Translate): { selector: string; said?: string } | null {
+  if (!landing || "sharing" in landing) return null;
+  if ("cancelled" in landing) return { selector: ADD };
+  if ("shared" in landing) {
+    const added = services.find((s) => !landing.shared.has(s.id));
+    return added ? { selector: cardOf(added.id), said: t("services.added", { app: added.name }) } : null;
+  }
+  if (services.some((s) => s.id === landing.removed.id)) return null;
+  const next = landing.next;
+  return { selector: next && services.some((s) => s.id === next) ? cardOf(next) : ADD, said: t("services.removed", { app: landing.removed.name }) };
 }
 
 /**
@@ -22,30 +66,65 @@ function useContacts() {
  * device shares and exactly who can reach each one, and the apps contacts share back.
  */
 export function Services() {
-  const platform = useServicesPlatform();
+  const platform = servicesPlatform;
   const { t } = useI18n();
   const contacts = useContacts();
-  const [adding, setAdding] = useState(false);
+  const view = usePlatformValue(shown);
+  // The apps each listed contact shares back.
+  const theirApps = usePlatformValue(() => contacts.map((c) => (servicesPlatform?.getPeer(c.key)?.services ?? []).filter((s) => s.type === "http")));
+  const [adding, showForm] = useState(false);
   const [name, setName] = useState(""), [target, setTarget] = useState("");
+  // Share, Cancel and Remove take away the control that had the focus: it goes to the app just shared, back to "Share a
+  // local service", or to the next app, and the page's card says what was added or removed.
+  const notice = useToast();
+  const [landing, setLanding] = useState<Landing | null>(null);
+  const goal = landingGoal(landing, view?.services ?? [], t);
+  useFocusLanding(goal?.selector ?? null, () => {
+    setLanding(null);
+    if (goal?.said) notice.show(goal.said, { tone: "success" });
+  });
+  // Share closes the form only once the app is added: a close while it runs is that, not a Cancel.
+  const setAdding = (open: boolean) => {
+    showForm(open);
+    if (!open) setLanding((was) => (was && "sharing" in was ? { shared: was.sharing } : { cancelled: true }));
+  };
   const [error, setError] = useState("");
   const [openError, setOpenError] = useState("");
-  if (!platform) return null;
+  // Share waits on the host's permission (Chrome's prompt, Desktop's dialog): pressed again meanwhile, it added the app twice.
+  const sharing = useRef(false);
+  const [busy, setBusy] = useState(false);
+  if (!platform || !view) return null;
 
-  const online = platform.isOnline();
-  const services = platform.getSharedServices();
-  const canShare = platform.features.shareLocalServices;
+  const { online, services, canShare } = view;
   const fromContacts = contacts
-    .map((c) => ({ ...c, apps: (platform.getPeer(c.key)?.services ?? []).filter((s) => s.type === "http") }))
+    .map((c, i) => ({ ...c, apps: theirApps[i] ?? [] }))
     .filter((c) => c.apps.length > 0);
 
   const share = async () => {
+    if (sharing.current) return;
+    sharing.current = true;
+    setBusy(true);
     setError("");
     try { await platform.shareService(name, target); setName(""); setTarget(""); setAdding(false); }
     catch (e) { setError(problemLine(e, t)); }
+    finally { sharing.current = false; setBusy(false); }
+  };
+
+  const shareThenLand = async () => {
+    // A Share pressed again while one runs keeps the first one's apps.
+    const mark = { sharing: new Set(services.map((s) => s.id)) };
+    setLanding((was) => (was && "sharing" in was ? was : mark));
+    await share();
+    // Refused: the form stays open, with its error and the focus.
+    setLanding((was) => (was === mark ? null : was));
+  };
+  const remove = (service: SharedService, next: string | null) => {
+    setLanding({ removed: service, next });
+    void platform.removeService(service.id);
   };
 
   return (
-    <Page title={t("tabs.services")} testId="my-services" trailing={
+    <Page title={t("tabs.services")} testId="my-services" overlay={<Toast toast={notice.toast} onDismiss={notice.dismiss} place="page" />} trailing={
       // Ghostly's own network switch: off, every chat goes offline. Where nothing can be shared (the web) it says so,
       // with a name that stays put, rather than a state and a hint about shares.
       <button type="button" role="switch" aria-checked={online} data-testid="online-toggle" onClick={() => void platform.setOnline(!online)}
@@ -57,18 +136,18 @@ export function Services() {
     }>
       <Section title={t("services.yourApps")} testId="your-apps">
         {services.length === 0 && !adding && <Block><Notice>{canShare ? t("services.nothingShared") : t("services.needsApp")}</Notice></Block>}
-        {services.map((service) => <ServiceCard key={service.id} service={service} online={online} contacts={contacts} />)}
+        {services.map((service, i) => <ServiceCard key={service.id} service={service} online={online} contacts={contacts} onRemove={() => remove(service, (services[i + 1] ?? services[i - 1])?.id ?? null)} />)}
         {canShare && (adding ? (
           <Block>
-            <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void share(); }}>
+            <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void shareThenLand(); }}>
               <FieldGrid>
-                <input data-testid="service-name" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t("services.namePlaceholder")} maxLength={48} className={input} />
+                <input data-testid="service-name" autoFocus value={name} dir={draftDirection(name)} onChange={(e) => setName(e.target.value)} placeholder={t("services.namePlaceholder")} maxLength={48} className={input} />
                 <input data-testid="service-target" value={target} onChange={(e) => setTarget(e.target.value)} placeholder="localhost:3400" className={`${input} font-mono`} />
               </FieldGrid>
               <Notice>{t("services.nobodyYet")}</Notice>
               {error && <Notice tone="error">{error}</Notice>}
               <ButtonGroup>
-                <Button type="submit" variant="primary" data-testid="service-save" disabled={!name.trim() || !target.trim()}>{t("services.share")}</Button>
+                <Button type="submit" variant="primary" data-testid="service-save" disabled={!name.trim() || !target.trim()} loading={busy}>{t("services.share")}</Button>
                 <Button onClick={() => { setAdding(false); setError(""); }}>{t("common.cancel")}</Button>
               </ButtonGroup>
             </form>
@@ -113,10 +192,13 @@ export function Services() {
   );
 }
 
-function ServiceCard({ service, online, contacts }: { service: SharedService; online: boolean; contacts: { key: string; name: string; short: string }[] }) {
-  const platform = useServicesPlatform()!;
+function ServiceCard({ service, online, contacts, onRemove }: { service: SharedService; online: boolean; contacts: { key: string; name: string; short: string }[]; onRemove: () => void }) {
+  const platform = servicesPlatform!;
   const { t } = useI18n();
   const [showPeople, setShowPeople] = useState(false);
+  // Remove asks first, as an app store's Remove does: contacts may be using the app. The question takes the place of
+  // the button, the focus goes to its Cancel, and Cancel or Escape gives it back to Remove.
+  const [asking, setAsking] = useState(false), [asked, setAsked] = useState(false);
   const granted = service.sharedWith ?? [];
   const reached = granted.length;
   const shared = service.enabled && online && reached > 0;
@@ -126,7 +208,9 @@ function ServiceCard({ service, online, contacts }: { service: SharedService; on
     : t("services.status.offline");
   const href = /^https?:\/\//.test(service.target) ? service.target : `http://${service.target}`;
   return (
-    <div data-testid="service-item">
+    // The card itself takes the focus once it is added, or once the one before it is removed: a screen reader says its name.
+    <div data-testid="service-item" data-id={service.id} role="group" aria-label={service.name} tabIndex={-1}
+      className="focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
       <Row leading={<span className={`grid place-items-center w-10 h-10 rounded-xl ${shared ? "bg-accent/15 text-accent" : "bg-surface-alt text-text-muted"}`}>{GLOBE}</span>}
         label={<>
           {/* Each in its own direction, on the box that cuts it and as wide as its words, as a contact's app below: in
@@ -140,10 +224,21 @@ function ServiceCard({ service, online, contacts }: { service: SharedService; on
         </span>}>
           <Button onClick={() => setShowPeople(!showPeople)} data-testid="service-people" aria-expanded={showPeople}>{showPeople ? t("services.peopleDone") : t("services.people")}</Button>
           <Switch label={t("services.shareNamed", { app: service.name })} testId="service-sharing" checked={service.enabled} onChange={(on) => void platform.setServiceEnabled(service.id, on)} />
-          <button type="button" aria-label={t("services.removeNamed", { app: service.name })} title={t("services.remove")} onClick={() => void platform.removeService(service.id)} className="grid place-items-center w-10 h-10 rounded-lg text-text-muted hover:text-danger hover:bg-surface-alt transition-colors cursor-pointer">
+          {!asking && <button type="button" aria-label={t("services.removeNamed", { app: service.name })} title={t("services.remove")} autoFocus={asked} onClick={() => { setAsking(true); setAsked(true); }} className="grid place-items-center w-10 h-10 rounded-lg text-text-muted hover:text-danger hover:bg-surface-alt transition-colors cursor-pointer">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>
-          </button>
+          </button>}
       </Row>
+      {asking && (
+        <div role="group" aria-label={t("services.removeTitle", { app: service.name })} data-testid="service-remove-question" className="mx-4 mb-4 space-y-2"
+          onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setAsking(false); } }}>
+          <p dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{t("services.removeTitle", { app: service.name })}</p>
+          <p className="text-xs text-text-secondary">{t("services.removeText")}</p>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button autoFocus onClick={() => setAsking(false)}>{t("common.cancel")}</Button>
+            <Button variant="danger" data-testid="service-remove-confirm" onClick={onRemove}>{t("services.remove")}</Button>
+          </div>
+        </div>
+      )}
       {showPeople && (
         <div className="mx-4 mb-4 rounded-xl bg-surface-alt divide-y divide-border" data-testid="service-grants">
           {contacts.length === 0 && <p className="px-4 py-3 text-xs text-text-muted">{t("services.noContacts")}</p>}

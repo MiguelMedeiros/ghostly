@@ -28,6 +28,8 @@ export type RuntimeMessage =
       path: string;
       headers: [string, string][];
       bodyB64: string | null;
+      /** The app's name when its tab opened (`ViewerPage.app`), for when the peer's state no longer lists it. */
+      app?: string;
     };
 
 /**
@@ -42,11 +44,24 @@ export interface ViewerPage {
   unreachable: string;
   /** Any other failure (`services.window.failed`); the engine's own words go to the console. */
   failed: string;
+  /**
+   * The app's name as the chat listed it when the tab opened: the peer's state no longer has it once the contact took
+   * the app back, which is when the tab says so by name (`services.window.unshared`).
+   */
+  app?: string;
 }
 
 export type HttpRequestReply =
   | { ok: true; status: number; headers: [string, string][]; bodyB64: string }
-  | { ok: false; code: string; message: string };
+  /** `status`: the one the contact's machine gave, when it answered in place of its app. */
+  | { ok: false; code: string; message: string; status?: number; shown?: ShownError };
+
+/** What a viewer tab shows in place of the app when the contact's machine answered for it: said by the peer in the profile's language (viewerWords.ts). */
+export interface ShownError {
+  text: string;
+  lang: string;
+  dir: "ltr" | "rtl";
+}
 
 /** The profile the running peer opened, and the one the profile registry names now (WISP 04). */
 export interface EngineStatus {

@@ -81,6 +81,24 @@ describe("the event stream", () => {
     expect(sent).toMatchObject({ type: "message.sent", message: { id: "me_1", nick: null } });
   });
 
+  it("a contact's message in the words of a joined line is a message: only the row the engine took as that line is chat.joined", async () => {
+    const { h, events } = await hub("joined.jsonl");
+    h.baseline(state([link("c1")]), new Map([["c1", []]]));
+    h.sink.post({ kind: "messages", linkId: "c1", messages: [
+      message("c1", "peer_1", { text: "👋 Bob joined", joinLine: true }),
+      message("c1", "peer_2", { text: "👋 I just joined" }),
+      message("c1", "peer_3", { text: "👋 joined" }),
+      message("c1", "me_4", { sender: "me", text: "👋 Bot joined", delivery: "sending" }),
+    ] });
+    expect(events.map((e) => [e.type, (e as { name?: unknown }).name ?? null])).toEqual([
+      ["chat.joined", "Bob"],
+      ["message.received", null],
+      ["message.received", null],
+      ["chat.announced", "Bot"],
+    ]);
+    expect(toTurn(events[1]!)).toMatchObject({ untrusted: { text: "👋 I just joined" } });
+  });
+
   it("reports the same events from only what changed as from the whole history, a deletion included", async () => {
     const run = async (journal: string, changesOnly: boolean) => {
       const { h, events } = await hub(journal);
@@ -169,6 +187,26 @@ describe("the event stream", () => {
       { type: "group.typing.stopped", group: "g1", member: "bo", kind: undefined, status: undefined },
     ]);
     expect(new Set(events.map((e) => e.id)).size).toBe(events.length);
+  });
+
+  it("typing is live only: a contact who keeps changing it pushes no other chat's events out of the journal", async () => {
+    const { h, events } = await hub("typing-live.jsonl");
+    const group = (typing?: unknown[]) => ({ id: "g1", status: "active", members: [{ key: "ana" }], ...(typing ? { typing } : {}) });
+    h.baseline(state([link("c1"), link("c2")], [group()]), new Map([["c1", []], ["c2", []]]));
+    h.sink.post({ kind: "messages", linkId: "c2", messages: [message("c2", "m1")] });
+    // A status that changes at the rate the receiver allows: each change a start again, then a stop.
+    for (let i = 0; i < 40; i++) {
+      h.sink.post({ kind: "state", state: state([link("c1", { peerTyping: true, peerTypingKind: "thinking", peerTypingStatus: `step ${i}` }), link("c2")], [group([{ key: "ana", kind: "thinking", status: `step ${i}` }])]) });
+    }
+    h.sink.post({ kind: "state", state: state([link("c1"), link("c2")], [group()]) });
+    h.sink.post({ kind: "messages", linkId: "c2", messages: [message("c2", "m1"), message("c2", "m2")] });
+    // The listeners hear every change, each with its own id, carrying the last journaled event's seq.
+    const typing = events.filter((e) => e.type.includes("typing."));
+    expect(typing).toHaveLength(82);
+    expect(new Set(typing.map((e) => e.id)).size).toBe(typing.length);
+    expect(typing.every((e) => e.seq === 1)).toBe(true);
+    // The journal holds the two messages only, numbered one after the other.
+    expect(h.replay(0).map((e) => [e.seq, e.type])).toEqual([[1, "message.received"], [2, "message.received"]]);
   });
 
   it("notes what it reported with relaxed transactions: a message's delivery states cost the daemon no disk sync each", async () => {
@@ -335,6 +373,63 @@ describe("the event stream", () => {
     void h;
   });
 
+  /**
+   * What the person removes leaves holes in the seqs (`forget`): none is a gap. Before, a cursor that stopped right before
+   * a message deleted, a chat removed or a group left got an `events.gap` for it, and one a step earlier did not.
+   */
+  it("a message deleted, a chat removed or a group left is no gap after a cursor, before and after a restart", async () => {
+    const path = join(dir, "holes.jsonl");
+    const { h } = await hub("holes.jsonl");
+    h.baseline(state([link("c1"), link("c2")], [{ id: "g1", status: "active", members: [{ key: "ana" }] }]), new Map());
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [message("c1", "m1"), message("c1", "m2"), message("c1", "m3")], deleted: [] });
+    h.sink.post({ kind: "message-changes", linkId: "c2", messages: [message("c2", "x")], deleted: [] });
+    h.sink.post({ kind: "message-changes", linkId: "group:g1", messages: [message("group:g1", "y", { member: "ana" })], deleted: [] });
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [message("c1", "m4")], deleted: [] });
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["m2"] });
+    h.sink.post({ kind: "state", state: state([link("c1")], [{ id: "g1", status: "active", members: [{ key: "ana" }] }]) });
+    h.sink.post({ kind: "messages", linkId: "group:g1", messages: [] });
+    h.sink.post({ kind: "state", state: state([link("c1")]) });
+    // The journal's first event goes too.
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["m1"] });
+    const check = (hub: EventHub) => {
+      const held = hub.replay(0).map((e) => e.seq);
+      expect(held).not.toContain(0);
+      const holes = Array.from({ length: hub.lastSeq }, (_, i) => i + 1).filter((seq) => !held.includes(seq));
+      expect(holes).toEqual([1, 2, 4, 5]);
+      for (let since = 0; since < hub.lastSeq; since++) {
+        const replayed = hub.replay(since);
+        expect(replayed.map((e) => e.type)).not.toContain("events.gap");
+        expect(replayed.map((e) => e.seq)).toEqual(held.filter((seq) => seq > since));
+      }
+    };
+    check(h);
+    const again = new EventHub(path, () => 1000, "holes-again");
+    await again.open();
+    check(again);
+  });
+
+  it("a journal trimmed says what it dropped, and not the events removed on purpose after the trim, before and after a restart", async () => {
+    const path = join(dir, "trimmed-holes.jsonl");
+    const { h } = await hub("trimmed-holes.jsonl");
+    h.baseline(state([link("c1")]), new Map());
+    for (let i = 0; i < 10_001; i++) h.emit("x", `x:${i}`);
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [message("c1", "a"), message("c1", "b")], deleted: [] });
+    for (let i = 0; i < 9_998; i++) h.emit("x", `y:${i}`);
+    // 20,001 events: the trim kept the last 10,000, from the first message on (10,002); then both are deleted.
+    expect(h.replay(10_001)[0]).toMatchObject({ seq: 10_002, id: "message.received:c1:a" });
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["a", "b"] });
+    const check = (hub: EventHub) => {
+      expect(hub.replay(5)[0]).toMatchObject({ seq: 5, type: "events.gap", from: 6, to: 10_001 });
+      expect(hub.replay(5)[1].seq).toBe(10_004);
+      expect(hub.replay(10_000)[0]).toMatchObject({ type: "events.gap", from: 10_001, to: 10_001 });
+      for (const since of [10_001, 10_002, 10_003]) expect(hub.replay(since)[0].seq).toBe(10_004);
+    };
+    check(h);
+    const again = new EventHub(path, () => 1000, "trimmed-holes-again");
+    await again.open();
+    check(again);
+  }, 60_000);
+
   it("a journal past the longest string still opens, replays and is cut to its bound in bytes", async () => {
     const path = join(dir, "huge.jsonl");
     // 600 MiB, more characters than a string can hold, mostly a hole on disk; then whole events.
@@ -360,15 +455,15 @@ describe("the event stream", () => {
     await h.open();
     const longest = Math.max(0, ...decode.mock.results.map((r) => (typeof r.value === "string" ? r.value.length : 0)));
     decode.mockRestore();
-    // A torn last line: the seq is the last whole one's.
-    expect(h.lastSeq).toBe(1_000);
+    // A torn last line: cut off, and the seq it names (told to listeners before the cut) is not given again.
+    expect(h.lastSeq).toBe(1_001);
     expect(longest).toBeLessThan(10_000);
-    // The torn line counts as one, as the trim counts it.
+    // A torn line with no seq: the last whole one's. It is cut off, and the trim counts what is left.
     const many = join(dir, "many.jsonl");
-    writeFileSync(many, Array.from({ length: 20_000 }, (_, i) => JSON.stringify({ seq: i + 1, id: `x:${i + 1}`, type: "x", at: 1 }) + "\n").join("") + "torn");
+    writeFileSync(many, Array.from({ length: 20_001 }, (_, i) => JSON.stringify({ seq: i + 1, id: `x:${i + 1}`, type: "x", at: 1 }) + "\n").join("") + "torn");
     const full = new EventHub(many, () => 1000, "many");
     await full.open();
-    expect(full.lastSeq).toBe(20_000);
+    expect(full.lastSeq).toBe(20_001);
     expect(readFileSync(many, "utf8").trim().split("\n")).toHaveLength(10_000);
   });
 
@@ -489,6 +584,38 @@ describe("the event stream", () => {
       expect(h.replay(0).filter((e) => e.type === "message.received")).toHaveLength(1_998);
       expect(h.replay(0).map((e) => e.id)).toContain("message.deleted:c1:m1999");
       expect(h.emit("x", "x:2").seq).toBe(h.replay(0).at(-2)!.seq + 1);
+    });
+
+    /**
+     * An old message deleted wrote the whole journal again from its first event on, made into text (16 MiB and 70 ms a
+     * deletion at 10,000 events): now only its lines are read as text and written over where they are.
+     */
+    it("an old message deleted writes over its own lines only, and the journal still opens and replays", async () => {
+      const { h, path } = await filled("in-place.jsonl", 2_000);
+      const quote = { replyTo: { id: "wire-m5", snippet: `${text} 5`, from: "peer" as const, messageId: "m5" } };
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: [message("c1", "r1", { text: "an answer", ...quote })], deleted: [] });
+      const before = readFileSync(path), file = statSync(path).ino;
+      expect(decoded(() => h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["m5"] }))).toBeLessThan(before.length / 50);
+      const after = readFileSync(path);
+      // The same file, where only the message's own line and the reply that quoted it changed; then the deletion's line.
+      expect(statSync(path).ino).toBe(file);
+      const lines = (bytes: Buffer) => bytes.toString("utf8").split("\n");
+      const was = lines(before), now = lines(after.subarray(0, before.length));
+      expect(now).toHaveLength(was.length);
+      expect(was.filter((line, i) => line !== now[i]).map((line) => (JSON.parse(line) as GhostlyEvent).id)).toEqual(["message.received:c1:m5", "message.received:c1:r1"]);
+      expect(after.toString("utf8")).not.toContain(`${text} 5"`);
+      const check = (hub: EventHub) => {
+        const replayed = hub.replay(0);
+        expect(replayed.filter((e) => e.type === "message.received")).toHaveLength(2_000);
+        expect(replayed.map((e) => e.id)).not.toContain("message.received:c1:m5");
+        expect(replayed.find((e) => e.id === "message.received:c1:r1")!.message).toMatchObject({ replyTo: { id: "m5", snippet: "", found: false, deleted: true } });
+        expect(replayed.at(-1)!.id).toBe("message.deleted:c1:m5");
+      };
+      check(h);
+      const again = new EventHub(path, () => 1000, "in-place-again");
+      await again.open();
+      expect(again.lastSeq).toBe(h.lastSeq);
+      check(again);
     });
 
     it("a change that deletes thousands of messages reads each line once", async () => {

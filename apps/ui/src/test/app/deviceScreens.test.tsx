@@ -172,6 +172,15 @@ describe("Profile, Devices", () => {
     await waitFor(() => expect(engine.callsTo("deviceHandoffPush")).toEqual([{ key: PHONE }]));
   });
 
+  it("a wrong password's row says the device's name after it was renamed", async () => {
+    const { engine } = renderApp(<DevicesSection />);
+    // The handoff view keeps the name the device had when the move failed; the set has its new one.
+    engine.on("deviceSet", () => set({ devices: set().devices.map((device) => (device.key === PHONE ? { ...device, name: "Pixel" } : device)) }));
+    engine.on("deviceHandoffView", () => ({ role: "giver", device: "iPhone", key: PHONE, step: "failed", bytes: 0, total: 0, failure: "password" }) satisfies HandoffView);
+    const row = await screen.findByTestId("handoff-wrong-password");
+    await waitFor(() => expect(row).toHaveTextContent("Pixel tried to move this profile with a wrong password." + "Let Pixel try again"));
+  });
+
   it("a move under way whose dialog was closed: its steps and Cancel stay in the section, and no second Move to is offered", async () => {
     const { user, engine } = renderApp(<DevicesSection />);
     engine.on("deviceSet", () => set());
@@ -635,7 +644,7 @@ describe("a limited start (WISP 06 § When a device checks)", () => {
     expect(await screen.findByTestId("sidebar")).toBeInTheDocument();
     expect(screen.queryByTestId("limited-start")).toBeNull();
     expect(screen.queryByTestId("limited-banner")).toBeNull();
-    const typing = screen.getAllByRole("textbox")[0];
+    const typing = screen.getByRole("searchbox", { name: "Search chats" });
     act(() => typing.focus());
     // No source answered: a limited start, but the person is already using the app, so it is not taken away.
     act(() => fakeEngine.setState({ limited: true }));

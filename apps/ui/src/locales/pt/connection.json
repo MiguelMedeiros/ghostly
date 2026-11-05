@@ -194,11 +194,13 @@
     "dhtWaitingFor": "Na DHT · aguardando {{transport}}",
     "discoveryUnavailable": "Descoberta indisponível",
     "held": "Ausente · mensagens guardadas",
+    "heldPlain": "Mensagens guardadas",
     "identityMismatch": "Identidade não confere",
     "issue": "Problema de conexão",
     "noContact": "Nenhum contato ainda",
     "offline": "Offline",
     "onDht": "Na DHT · tentando conexão direta",
+    "onDhtPlain": "Na DHT",
     "publicationUnavailable": "Publicação indisponível",
     "switching": "Mudando · {{transport}}",
     "waitingContact": "Aguardando contato"

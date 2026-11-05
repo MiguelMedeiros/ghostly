@@ -190,8 +190,14 @@
   "forward": {
     "forward": "転送",
     "forwarded": "転送されたメッセージ",
+    "found": "{{count}} 件のチャット",
+    "found_one": "{{count}} 件のチャット",
+    "found_other": "{{count}} 件のチャット",
+    "limit": "一度に転送できるのは{{count}}件のチャットまでです",
+    "limit_one": "一度に転送できるのは{{count}}件のチャットまでです",
     "many": "何度も転送されたメッセージ",
     "messages": "{{count}}件のメッセージ",
+    "more": "他{{count}}件",
     "noChats": "チャットはまだありません",
     "noMatch": "その名前のチャットはありません",
     "partial": "{{count}} 件中 {{sent}} 件送信済み",
@@ -460,6 +466,10 @@
   "typing": "入力中…",
   "typingRecording": "録音中…",
   "typingThinking": "考え中…",
+  "unconfirmed": {
+    "hint": "連絡先リクエストと一緒に送られました。相手のアプリはまだ、これを送ったことを確認していません。",
+    "label": "未確認"
+  },
   "video": {
     "arriving": "受信中",
     "cantPlay": "この端末ではこの動画（{{format}}）を再生できません。ダウンロードして観てください。",

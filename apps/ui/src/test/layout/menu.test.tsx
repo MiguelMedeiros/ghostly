@@ -179,6 +179,23 @@ describe("Menu: one line per row", () => {
     expect(screen.queryByTestId("menu")).not.toBeInTheDocument();
   });
 
+  it("on a phone the sheet keeps Tab: Tab and Shift+Tab go round its rows, never to the page behind its backdrop", async () => {
+    // From the last row Tab went on to the page under the backdrop (the chat's Back, its messages, the composer), the
+    // sheet still open over it; Shift+Tab from the first row went to the composer, whose + opened a second sheet.
+    viewport(390, 844);
+    const { user } = renderApp(<><Harness /><button>Behind</button></>);
+    await user.click(screen.getByRole("button", { name: "Options" }));
+    const [short, long] = [screen.getByTestId("short"), screen.getByTestId("long")];
+    short.focus();
+    await user.tab();
+    expect(document.activeElement).toBe(long);
+    await user.tab();
+    expect(document.activeElement).toBe(short);
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(long);
+    expect(screen.getByTestId("menu")).toBeInTheDocument();
+  });
+
   it("closes on Escape", async () => {
     const { user } = renderApp(<Harness />);
     await user.click(screen.getByRole("button", { name: "Options" }));

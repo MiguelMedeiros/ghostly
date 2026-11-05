@@ -24,7 +24,7 @@ are in WISP 103, "Browser profile".
 
 ## Fixes over dht-relay 0.4.3
 
-0.4.3 is dht-relay's latest release (2023). `relay.mjs` fixes four bugs in it:
+0.4.3 is dht-relay's latest release (2023). `relay.mjs` fixes five bugs in it:
 
 1. Relayed listening could not sign announcements on hyperdht 6.x.
 2. One client closing an incoming stream with an error could stop the process.
@@ -32,6 +32,7 @@ are in WISP 103, "Browser profile".
 4. A dial to a key the relay had reached before hung. The handshake goes through several DHT nodes at once, each
    brings back a reply, and dht-relay passed every reply to the browser, whose handshake then stopped. Only the
    first reply goes on now.
+5. Every server a client had closed stayed in memory until the client left. It is freed when it closes now.
 
 ## Limits (per relay, `DEFAULT_LIMITS` in relay.mjs)
 
@@ -42,6 +43,7 @@ are in WISP 103, "Browser profile".
 | largest message | 256 KiB | `GHOSTLY_RELAY_PAYLOAD_BYTES` |
 | bytes a client sends per second, burst | 512 KiB/s, 4 MiB | `GHOSTLY_RELAY_BYTES_PER_SECOND`, `GHOSTLY_RELAY_BURST_BYTES` |
 | keys one client listens on | 16 | `GHOSTLY_RELAY_LISTENS` |
+| listens per client per minute, refused ones too (an app starts at most 8 on start or reconnect) | 60 | `GHOSTLY_RELAY_LISTENS_PER_MINUTE` |
 | dials per client per minute | 60 | `GHOSTLY_RELAY_CONNECTS_PER_MINUTE` |
 | HyperDHT streams one client holds open (its dials and incoming ones) | 64 | `GHOSTLY_RELAY_STREAMS` |
 | bytes waiting for a client that it has not read yet | 8 MiB | `GHOSTLY_RELAY_QUEUED_BYTES` |
@@ -50,10 +52,10 @@ are in WISP 103, "Browser profile".
 | ping, dropped when the last went unanswered | every 30 s | `GHOSTLY_RELAY_PING_MS` |
 | a connection's request before it upgrades | 15 s | `GHOSTLY_RELAY_REQUEST_MS` |
 | a client's part of a handshake (its answer) | 15 s | `GHOSTLY_RELAY_HANDSHAKE_MS` |
-| handshakes waiting on one client's answer at once (its dials and incoming ones) | 64 | `GHOSTLY_RELAY_HANDSHAKES` |
+| handshakes waiting on one client's answer at once (its dials and incoming ones; one key's incoming ones at most a quarter, and a quarter kept for its dials) | 64 | `GHOSTLY_RELAY_HANDSHAKES` |
 
 Past a limit the client is dropped, or its socket is paused (the byte rate), or an incoming stream past
-`streams` is closed. Topic lookups and announcements
+`streams` is closed, or a handshake past `handshakes` is refused (`refused handshake <why>` in the log). Topic lookups and announcements
 are refused: Ghostly never makes them, and they would make the relay an open crawler.
 
 Other settings:

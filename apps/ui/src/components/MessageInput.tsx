@@ -1,4 +1,4 @@
-import { getSessionDraft, setSessionDraft } from "../lib/storage";
+import { flushSessionDraft, getSessionDraft, setSessionDraft, setSessionDraftLater } from "../lib/storage";
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useId, type ClipboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { PaymentComposer } from "./PaymentComposer";
@@ -36,7 +36,7 @@ import { problemLine } from "../lib/problemText";
 import { readingTime } from "../lib/readingTime";
 import { TranslatePreview } from "./composer/TranslatePreview";
 import { translationStale, useDraftTranslation, type ComposerTranslation, type DraftTranslationFailure } from "../hooks/useDraftTranslation";
-import { languageName } from "../lib/documentLanguage";
+import { draftDirection, languageName } from "../lib/documentLanguage";
 import { carryMentions } from "../lib/translateDraft";
 import { translateEnabled } from "../lib/translateFlag";
 import { isConvertibleVideo, prepareVideo, type PreparedVideo } from "../lib/videoSend";
@@ -143,6 +143,8 @@ const DEFAULT_MAX = 500;
 const TOAST_DURATION = 5_000;
 /** How often the line takes a video conversion's progress: the converter tells each sample. */
 const PROGRESS_EVERY_MS = 250;
+/** The pause in the typing after which the draft is written (and the secret guard reads it). */
+const DRAFT_SAVE_PAUSE = 400;
 
 /** The same file on disk, picked again: a picker gives a new File each time. */
 
@@ -215,6 +217,8 @@ export function MessageInput({
   /** A paste the platform is reading: one at a time, and said on screen (the sheet opens only once every byte is here). */
   const [reading, setReading] = useState(false);
   const readingRef = useRef(false);
+  /** Drops the platform is reading (another app's files, on Linux), said on screen as a paste is. */
+  const [dropsReading, setDropsReading] = useState(0);
   const [dragging, setDragging] = useState<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -300,12 +304,35 @@ export function MessageInput({
     setText(draft);
     edit?.onClose();
   };
+  // The edit taken away (its message deleted meanwhile): it ends as Cancel ends it, the draft set aside back in the field.
+  useEffect(() => {
+    if (editKey || draftAside.current === null) return;
+    const draft = draftAside.current;
+    draftAside.current = null;
+    setText(draft);
+  }, [editKey]);
 
   const editing = !!edit;
+  // The draft is written after a pause in the typing (the guard reads all of it: per key, a long draft cost a frame on a
+  // slow phone), and at once as the page goes or is hidden, or the chat closes. Sent or cleared meanwhile (its chat
+  // deleted, its group left), it is not written back (storage.ts setSessionDraftLater).
   useEffect(() => {
     // A draft holding a seed or a key is not written to storage; ecash is, since the draft may be its only copy.
     // Not while editing: the draft is the one kept aside.
-    if (draftId && !editing) { const found = findSecret(text); setSessionDraft(draftId, found && found.kind !== "cashu" ? "" : text); }
+    if (!draftId) return;
+    if (!editing) setSessionDraftLater(draftId, () => { const found = findSecret(text); setSessionDraft(draftId, found && found.kind !== "cashu" ? "" : text); });
+    const pause = setTimeout(() => flushSessionDraft(draftId), DRAFT_SAVE_PAUSE);
+    return () => clearTimeout(pause);
+  }, [draftId,text,editing]);
+  useEffect(() => {
+    if (!draftId) return;
+    const flush = () => flushSessionDraft(draftId);
+    const hidden = () => { if (document.visibilityState === "hidden") flush(); };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", hidden);
+    return () => { window.removeEventListener("pagehide", flush); document.removeEventListener("visibilitychange", hidden); flush(); };
+  }, [draftId]);
+  useEffect(() => {
     // Text put in by the app (an emoji, an edit, a share): the field fits it. A keystroke was fitted already.
     // Emptied by the app (an edit ended, saved or not) after it grew: back to one line.
     const input=textareaRef.current;
@@ -709,10 +736,20 @@ export function MessageInput({
     shareFiles(share).then((files) => offerRef.current(files), (error: unknown) => showToast(problemLine(error, t)));
   };
   const offerSharedRef = useRef(offerShared); offerSharedRef.current = offerShared;
-  /** A drop's files the platform read (another app's, on Linux), as a paste's are: what could not be read is said. */
+  /**
+   * A drop's files the platform read (another app's, on Linux), as a paste's are: what could not be read is said, and so
+   * is a read that ends where files cannot go any more (an edit began meanwhile).
+   */
   const offerHeld = (held: Promise<File[]>) => {
-    held.then((files) => { if (!files.length) showToast(t("errors.files.dropUnreadable")); else offerRef.current(files); },
-      (error: unknown) => showToast(problemLine(error, t)));
+    // Up to 256 MB read in steps: the line says so until the sheet, or the reason there is none, takes its place.
+    setDropsReading((was) => was + 1);
+    const ended = () => setDropsReading((was) => was - 1);
+    held.then((files) => {
+      ended();
+      if (!files.length) showToast(t("errors.files.dropUnreadable"));
+      else if (!offerRef.current(files)) showToast(t("errors.files.dropLate"));
+    },
+      (error: unknown) => { ended(); showToast(problemLine(error, t)); });
   };
   const offerHeldRef = useRef(offerHeld); offerHeldRef.current = offerHeld;
 
@@ -943,10 +980,10 @@ export function MessageInput({
       </button>
     </div>
   );
-  const readingLine = reading && !locked && (
+  const readingLine = (reading || dropsReading > 0) && !locked && (
     <p role="status" data-testid="paste-reading" className="m-0 flex items-center gap-2 text-[13px] text-text-secondary animate-fade-in">
       <span aria-hidden="true" className="inline-block size-4 shrink-0 animate-spin rounded-full border-2 border-accent border-e-transparent motion-reduce:animate-none" />
-      {t("composer.pasteReading")}
+      {t(reading ? "composer.pasteReading" : "composer.dropReading")}
     </p>
   );
   const shown = preparing[0];
@@ -983,7 +1020,7 @@ export function MessageInput({
   // above the composer cut at the top of the screen rather than off it (composer/fieldHeight.ts, composer/keptOnScreen.ts).
   useFieldFitsView(textareaRef);
   const aboveShown = (toastBox || readingLine || preparingLine) && !sheetOpen;
-  useKeptOnScreen(aboveRef, aboveShown ? `${toast ?? ""}|${reading}|${shown?.name ?? ""}|${shownProgress !== undefined}` : null);
+  useKeptOnScreen(aboveRef, aboveShown ? `${toast ?? ""}|${reading}|${dropsReading}|${shown?.name ?? ""}|${shownProgress !== undefined}` : null);
 
   return (
     <div ref={composerRef} data-composer className="@container/composer bg-panel-header px-3 max-md:px-2 py-2 composer-safe shrink-0 relative">
@@ -1035,6 +1072,7 @@ export function MessageInput({
               placeholder={disabled ? disabledPlaceholder ?? t("composer.placeholder") : t("composer.placeholder")}
               disabled={disabled}
               rows={1}
+              dir={draftDirection(text)}
               className="composer-textarea"
             />
             {softBytes && !maxBytes && !nearHard && bytes > softBytes - 60 && (

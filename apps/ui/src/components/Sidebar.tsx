@@ -14,7 +14,7 @@ import type { GroupView } from "@ghostly/browser/shared/types";
 import { formatListTime } from "../lib/chatList";
 import { foldText, searchText } from "../lib/chatSearch";
 import type { Translate } from "../locales/translate";
-import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { NewGroupDialog } from "./NewGroupDialog";
 import { groupPath, groupReadAt, groupRouteId, invitationRow } from "../lib/groups";
@@ -59,9 +59,13 @@ import { openJoinProfile } from "../lib/devices";
 import { RAIL_WIDTH, RailAction, RailChat, RailGroup, RailToggle } from "./ChatRail";
 import { useRailShortcut } from "../hooks/useRailShortcut";
 import { useOpenRowInView } from "../hooks/useOpenRowInView";
+import { useComposition } from "../hooks/useComposition";
+import { draftDirection } from "../lib/documentLanguage";
+import { useEngineValue } from "../lib/engineState";
 
-const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
-const engineSnapshot = () => engine.state;
+const NO_GROUPS: NonNullable<typeof engine.state>["groups"] = [];
+/** What the list reads of the engine's state itself, for `useEngineValue`: its groups, and whether they came yet. */
+const listOfState = (state: typeof engine.state) => ({ groups: state?.groups ?? NO_GROUPS, groupsLoaded: !!state?.groupsLoaded });
 
 /** New chat's mark (a bubble with a plus) and Join's (an arrow into a bubble): the list's header, and the rail's top. */
 const NEW_CHAT_PATH = "M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8";
@@ -125,9 +129,12 @@ export function Sidebar() {
   const isMobile = useIsMobile();
   const { settings: { chatListDensity: density, chatListCollapsed }, updateChatListCollapsed } = useSettings();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [search, setSearch] = useState("");
+  const [typed, setSearch] = useState("");
   // Folded to a rail of pictures, where there is a side list; a phone's list is the whole screen and never folds.
   const collapsed = !isMobile && chatListCollapsed;
+  // The rail has no search: it shows every chat. A phone turned on its side into a folded list keeps what was typed in
+  // its search for the way back.
+  const search = collapsed ? "" : typed;
   const sidebarRef = useRef<HTMLDivElement>(null), toggleRef = useRef<HTMLButtonElement>(null);
   // The button that folded or unfolded the list goes with it: the focus goes to the one that takes its place (in the
   // header, or at the top of the rail). A shortcut pressed elsewhere (the message field) leaves the focus where it is.
@@ -152,16 +159,18 @@ export function Sidebar() {
   const [newMenuOpen, setNewMenuOpen] = useState<boolean | "shortcut">(false);
   const newMenuRef = useRef<HTMLDivElement>(null), newMoreRef = useRef<HTMLButtonElement>(null);
   const closeNewMenu = () => setNewMenuOpen(false);
-  const engineState = useSyncExternalStore(subscribeEngine, engineSnapshot);
+  // Its groups only, compared by content: the engine sends its whole state anew on every change (up to 20 a second while
+  // a file moves), and the whole of it drew the list and every row in it on each.
+  const engineState = useEngineValue(listOfState);
   // A bot's usage card (WISP 405 § Usage) per contact: the meter on its row.
   const usageByPeer = useUsageByPeer();
   // Each contact's running tasks (WISP 405 § Showing a card): the working mark on its row.
   const workingByPeer = useWorkingByPeer();
-  const groups = engineState?.groups ?? [];
+  const groups = engineState.groups;
   // The chats are in the page's storage at once, the groups come with the engine's state after every chat's history
   // is read: drawn alone, the chats were pushed down under the groups a second later, and a click aimed at a chat
   // opened a group. The list waits for the groups, and draws everything at once.
-  const listReady = !!engineState?.groupsLoaded;
+  const listReady = engineState.groupsLoaded;
   const activeGroupId = groupRouteId(location.pathname);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   // A chat a call is on or rings in is not deleted under it: the dialog says to end the call first.
@@ -286,6 +295,8 @@ export function Sidebar() {
     return messagesFound(s.messages, query, t) || foundInEngine.has(s.id);
   });
   const shownGroups = groupsFound(groups, search);
+  const foundCount = filtered.length + shownGroups.length;
+  const composition = useComposition();
   // The person's folders, first in the list and in their order; a search shows what it finds as one list, with no folders.
   const { folders, folderOf, othersFolded, orderOf } = useChatFolders();
   const shownFolders = search ? [] : folders;
@@ -478,7 +489,7 @@ export function Sidebar() {
 
       {/* Search */}
       <div className="px-3 py-2 bg-sidebar-bg">
-        <div className="flex items-center gap-3 bg-search-bg rounded-lg px-3 py-1.5 has-[input:focus-visible]:outline-2 has-[input:focus-visible]:-outline-offset-2 has-[input:focus-visible]:outline-focus-ring">
+        <div className="flex items-center gap-3 bg-search-bg rounded-lg px-3 py-1.5 ring-1 ring-inset ring-field-border has-[input:focus-visible]:outline-2 has-[input:focus-visible]:-outline-offset-2 has-[input:focus-visible]:outline-focus-ring">
           <svg
             width="16"
             height="16"
@@ -493,12 +504,23 @@ export function Sidebar() {
             <circle cx="11" cy="11" r="8" />
             <path d="m21 21-4.35-4.35" />
           </svg>
+          {/* Named apart from its placeholder, which is gone once typed in. Escape clears it, the focus staying here, as
+              the search inside a chat closes on it; with nothing to clear, Escape goes on to whatever else takes it. */}
           <input
-            type="text"
+            type="search"
             value={search}
+            dir={draftDirection(search)}
             onChange={(e) => setSearch(e.target.value)}
-                  placeholder={t("sidebar.searchPlaceholder")}
-            className="flex-1 bg-transparent border-none text-sm text-text-primary placeholder-text-muted outline-none py-1"
+            {...composition.inputProps}
+            onKeyDown={(e) => {
+              if (e.key !== "Escape" || composition.composing(e) || !search) return;
+              e.preventDefault();
+              e.stopPropagation();
+              setSearch("");
+            }}
+            placeholder={t("sidebar.searchPlaceholder")}
+            aria-label={t("sidebar.searchLabel")}
+            className="flex-1 bg-transparent border-none text-sm text-text-primary placeholder-text-muted outline-none py-1 [&::-webkit-search-cancel-button]:hidden"
           />
         </div>
       </div>
@@ -565,13 +587,16 @@ export function Sidebar() {
           </div>
         )}
 
-        {/* Nothing matches the search: neither a chat nor a group. */}
-        {filtered.length === 0 && shownGroups.length === 0 && (sessions.length > 0 || groups.length > 0) && (
-          <div className="flex items-center justify-center py-10 px-8">
-            <p className="text-text-muted text-sm">{t("sidebar.noResults")}</p>
-          </div>
-        )}
         </>}
+        {/* What the search found, read out as it changes: a screen reader hears nothing of the rows coming and going.
+            Nothing matches it, neither a chat nor a group: that shows too. */}
+        <div role="status" aria-live="polite" data-testid="chat-list-search-status">
+          {listReady && search && (foundCount === 0 && (sessions.length > 0 || groups.length > 0) ? (
+            <div className="flex items-center justify-center py-10 px-8">
+              <p className="text-text-muted text-sm">{t("sidebar.noResults")}</p>
+            </div>
+          ) : foundCount > 0 && <span className="sr-only">{t(foundCount === 1 ? "sidebar.foundOne" : "sidebar.foundCount", { count: String(foundCount) })}</span>)}
+        </div>
       </div>
       </>}
 

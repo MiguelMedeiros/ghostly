@@ -6,6 +6,7 @@ import { JOIN_OPEN_EVENT, DEVICE_LINK_EVENT, deviceLinkOffered } from "../lib/de
 import { useFittedNameField } from "../hooks/useGroupNameField";
 import { nameStepAllowed, nameStepDone, nameStepPending } from "../lib/nameStep";
 import { cleanOwnName, fitsOwnName } from "../lib/ownName";
+import { closedByArrival } from "../lib/layerHistory";
 import { currentProfile } from "../lib/profiles";
 import { touchOnly } from "../lib/touchOnly";
 import { DeviceDialog, field, primaryButton } from "./devices/DeviceDialog";
@@ -67,6 +68,9 @@ export function NameStep() {
 
   if (!open) return null;
   const done = () => { nameStepDone(); setOpen(false); requestAnimationFrame(focusAfter); };
+  // A link that reaches this page (another tab's, the installed app's launch) is no answer: it stays over the chat the
+  // link opens, as on a first visit with the link, and Back has an entry to close it again (`useBackCloses`).
+  const close = () => { if (!closedByArrival()) done(); };
   const chosen = cleanOwnName(name);
   const save = () => {
     if (!chosen) return;
@@ -74,11 +78,11 @@ export function NameStep() {
     done();
   };
   return (
-    <DeviceDialog title={t("profile.nameStep.title")} onClose={done} testId="name-step">
+    <DeviceDialog title={t("profile.nameStep.title")} onClose={close} testId="name-step">
       <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); save(); }}>
         <input ref={input} data-testid="name-step-input" aria-label={t("profile.nameStep.title")} className={field} autoFocus
           placeholder={t("profile.nameStep.placeholder")} value={name} onChange={nameField.onChange}
-          onCompositionStart={nameField.onCompositionStart} onCompositionEnd={nameField.onCompositionEnd} />
+          onCompositionStart={nameField.onCompositionStart} onCompositionEnd={nameField.onCompositionEnd} dir={nameField.dir} />
         <button type="submit" data-testid="name-step-save" className={primaryButton} disabled={!chosen}>{t("profile.nameStep.save")}</button>
         <button type="button" data-testid="name-step-skip" onClick={done}
           className="mx-auto block min-h-10 px-2 text-sm text-text-secondary underline underline-offset-4 hover:text-accent cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded">

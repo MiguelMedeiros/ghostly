@@ -268,7 +268,7 @@ describe("the workflow's steps, as the runner calls the script", () => {
     const none = cli(["credentials"], {});
     expect(none.status).toBe(0);
     expect(none.output).toBe("ready=false\n");
-    expect(none.stdout).toContain("::notice::Chrome Web Store upload not set up: the repository has no CWS_SERVICE_ACCOUNT_JSON or CWS_PUBLISHER_ID secret");
+    expect(none.stdout).toContain("::notice::Chrome Web Store upload not set up: the chrome-web-store environment has no CWS_SERVICE_ACCOUNT_JSON or CWS_PUBLISHER_ID secret");
     const half = cli(["credentials"], { CWS_SERVICE_ACCOUNT_JSON: "set" });
     expect(half.output).toBe("ready=false\n");
     expect(half.stdout).toContain("no CWS_PUBLISHER_ID secret");
@@ -316,5 +316,20 @@ describe("chrome-web-store.yml", () => {
     const withValues = steps.filter((s) => /secrets\.CWS_[A-Z_]+ \}\}/.test(s)).map((s) => /^name: (.*)$/m.exec(s)?.[1]);
     expect(withValues).toEqual(["Upload and submit for review"]);
     expect(workflow).not.toMatch(/echo[^\n]*CWS_SERVICE_ACCOUNT_JSON/);
+  });
+
+  // A run uses the copy of the workflow on the ref it runs from, and repository secrets reach every branch's copy: the
+  // key lives in an environment that only main and v* tags may use, as npm-publish.yml's `npm` does.
+  it("reads the store key only in the chrome-web-store environment, only from main or a v* tag", () => {
+    const job = workflow.slice(workflow.indexOf("\n  upload:\n"), workflow.indexOf("\n    steps:\n"));
+    expect(job).toContain("\n    environment: chrome-web-store\n");
+    expect(job).toContain("\n    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')\n");
+    expect(workflow).toContain("gh workflow run chrome-web-store.yml --ref main -f tag=");
+    const releasing = read("docs/RELEASING.md");
+    const section = releasing.slice(releasing.indexOf("### Chrome Web Store"), releasing.indexOf("\n## ", releasing.indexOf("### Chrome Web Store")));
+    expect(section).toContain("gh secret set CWS_SERVICE_ACCOUNT_JSON --env chrome-web-store -R MiguelMedeiros/ghostly");
+    expect(section).toContain("gh secret set CWS_PUBLISHER_ID --env chrome-web-store -R MiguelMedeiros/ghostly");
+    expect(section).not.toMatch(/gh secret set CWS_\w+ -R/);
+    expect(section).toContain("gh workflow run chrome-web-store.yml --ref main -f tag=");
   });
 });
