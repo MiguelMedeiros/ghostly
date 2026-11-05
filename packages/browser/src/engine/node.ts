@@ -1875,6 +1875,11 @@ export class GhostlyNode implements EngineImplementation {
       await this.groups.setRemovals(groupId, withRemoval(this.groups.removals(groupId), removal));
       await this.forgetGroupMessage(chat, message.id, message);
     },
+    // The group's "@" in the list as it is without the mention, as a removal's (`forgetGroupMessage`): the row stays.
+    unmentioned: async (chat, row) => {
+      await this.groups.unmark(chat.slice("group:".length), row, true);
+      this.emitState();
+    },
     edge: (groupId, member) => {
       const link = this.links.get(this.memberEdges(groupId).get(member) ?? "")?.link;
       return link?.supportsGroupVersion(1) ? link : undefined;

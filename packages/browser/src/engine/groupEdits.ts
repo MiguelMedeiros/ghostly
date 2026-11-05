@@ -43,6 +43,8 @@ export interface GroupEditsHost {
    * that opens.
    */
   removeMine(chat: string, message: StoredMessage, removal: Removal): Promise<void>;
+  /** A member's edit took my mention out of its message (`row`, as it is now): the group's "@" in the list goes back. */
+  unmentioned?(chat: string, row: StoredMessage): Promise<void>;
   /** Says an edit to the group (a private group's: to member `to` alone, when given). An error when it could not go now. */
   send(groupId: string, edit: GroupEdit, to?: string): Promise<string | null>;
   /**
@@ -344,13 +346,17 @@ export class GroupEdits {
     const takes = (m: StoredMessage) => takesPeerEdit(m, edit.m) && m.member === sender;
     if (!takes(message)) return "dropped";
     if ((message.edit?.seq ?? 0) >= edit.e) return "stale";
+    let wasMentioned = false;
     const updated = await this.host.patch(chat, message.id, current => {
       if (!takes(current) || (current.edit?.seq ?? 0) >= edit.e) return null;
+      wasMentioned = !!current.mentioned;
       const next = withEdit(current, { seq: edit.e, at: heardTime(edit.ts), text: edit.m, card: edit.sc });
       // Who it names now shows as such; an edit that names me is never a new mention (no sound, no @ in the list).
       return { text: next.text, edit: next.edit, card: next.card, mentions: edit.k?.length ? edit.k : undefined, mentioned: mentionsMember(edit.k, me) ? true : undefined };
     });
     if (!updated) return "stale";
+    // One that names me no more takes its "@" out of the list too, as a restart reads it from the history.
+    if (wasMentioned && !updated.mentioned) await this.host.unmentioned?.(chat, updated);
     await this.host.changed(chat, message.id);
     return "applied";
   }
