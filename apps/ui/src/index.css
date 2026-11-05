@@ -27,6 +27,9 @@
   --color-border-bright: var(--theme-border-bright);
   /* An off switch's track (components/wallet/ui.tsx): the bright border on dark themes, a darker grey on light ones. */
   --color-switch-off: var(--theme-switch-off, var(--theme-border-bright));
+  /* A text field's edge: the muted ink, 3:1 or more on every panel and on the field's own fill in every theme (WCAG
+     1.4.11). The border tokens are 1.0-1.7:1 there, so a field's fill alone, close to the panel's, left it no edge. */
+  --color-field-border: var(--theme-text-muted);
   --color-accent: var(--theme-accent);
   --color-accent-dim: var(--theme-accent-dim);
   --color-accent-hover: var(--theme-accent-hover);

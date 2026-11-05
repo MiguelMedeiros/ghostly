@@ -445,7 +445,7 @@ export function Settings() {
     }
   };
 
-  const field = "w-full min-w-0 px-3 py-2 min-h-10 bg-input-bg border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent transition-colors";
+  const field = "w-full min-w-0 px-3 py-2 min-h-10 bg-input-bg border border-field-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent transition-colors";
   const lockOn = lockEnabled && hasPassword;
   const systemOn = settings.notifications.systemEnabled && noticePermission === "granted";
   const systemSettings = noticeSettings();

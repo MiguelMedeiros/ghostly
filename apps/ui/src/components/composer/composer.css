@@ -2,14 +2,14 @@
    the message, and the mic (or send) beside it. Theme tokens only, so both schemes and every colour theme follow. */
 
 /* The wells text is typed into. Light themes paint the input colour the same as the bar around it, so there the
-   wells are the surface (white) with a hairline, as WhatsApp's white field on its grey bar. */
+   wells are the surface (white), as WhatsApp's white field on its grey bar. Either way a fill this close to the bar's
+   is no edge: the well's hairline is a text field's edge, 3:1 on the bar (WCAG 1.4.11). */
 :root {
   --composer-well: var(--color-input-bg);
-  --composer-well-edge: transparent;
+  --composer-well-edge: var(--color-field-border);
 }
 :root[data-theme="light"] {
   --composer-well: var(--color-surface);
-  --composer-well-edge: var(--color-border);
 }
 
 .composer-field {
