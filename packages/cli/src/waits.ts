@@ -54,15 +54,17 @@ export async function waitForRemoval(ctx: ApiContext, chat: string, messageId: s
 }
 
 /**
- * Waits until an edge took my group message, or its edit number `edit` (WISP 902: a group has no receipts, so this is
- * as far as the author sees): a member's edge in a private group, an edge to one of my hubs in a community.
+ * Waits until an edge took my group message, or its edit number `edit`, or my reaction to it numbered `reaction`
+ * (WISP 902: a group has no receipts, so this is as far as the author sees): a member's edge in a private group, an
+ * edge to one of my hubs in a community.
  */
-export async function waitForGroupFrame(ctx: ApiContext, groupId: string, messageId: string, edit: number | undefined, ms: number): Promise<number> {
+export async function waitForGroupFrame(ctx: ApiContext, groupId: string, messageId: string, edit: number | { reaction: number } | undefined, ms: number): Promise<number> {
   const until = performance.now() + ms;
+  const which = typeof edit === "object" ? edit : edit ? { edit } : {};
   for (;;) {
-    const taken = node(ctx).groupTaken({ groupId, messageId, ...(edit ? { edit } : {}) });
+    const taken = node(ctx).groupTaken({ groupId, messageId, ...which });
     if (taken > 0) return taken;
-    if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: no member's edge took it yet (it stays in the group and goes when one opens). It ${goesOn(ctx)}`, known(ctx, { messageId, ...(edit ? { edits: edit } : {}) }));
+    if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: no member's edge took it yet (it stays in the group and goes when one opens). It ${goesOn(ctx)}`, known(ctx, { messageId, ...("edit" in which ? { edits: which.edit } : which) }));
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }
