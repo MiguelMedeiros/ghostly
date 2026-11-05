@@ -134,6 +134,30 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     for (const node of kept) expect(node).toHaveClass("shrink-0");
   });
 
+  it.each([
+    ["ja", " に戻る"],
+    ["ar", "العودة إلى "],
+    ["en", "Back to "],
+  ] as const)("in %s on a phone after Back, the way back cuts only the app's title, in its own direction, never the words", async (language, words) => {
+    windowIs(true);
+    renderApp(<div className="chat-column"><ChatAppResume linkId="link-1" /><ChatAppPanel linkId="link-1" sessionId="s1" contact={{ name: "Ana", named: true }} peerKey="peer" /></div>, { language });
+    act(() => fakeEngine.update({ links: [ana(true)] }));
+    await act(() => open(REF, "link-1"));
+    act(() => updateChatApp("link-1", { shown: false }));
+    const resume = screen.getByTestId("mini-app-resume");
+    // The title alone truncates, laid out in its own direction (a Latin title in Arabic keeps its first letters);
+    // the translated words around it keep their width ("Chess に戻る" would lose "に戻る" after a long title).
+    const title = within(resume).getByTestId("mini-app-resume-title");
+    expect(title).toHaveTextContent(/^Chess$/);
+    expect(title.tagName).toBe("BDI");
+    expect(title).toHaveClass("truncate", "min-w-0");
+    const line = title.parentElement!;
+    expect(line).toHaveClass("flex", "min-w-0", "overflow-hidden", "whitespace-nowrap");
+    const kept = [...line.children].filter((node) => node !== title);
+    expect(kept.some((node) => node.textContent === words)).toBe(true);
+    for (const node of kept) expect(node).toHaveClass("shrink-0");
+  });
+
   it("in pt on a 320 px phone, the words that fill the line stop short of its end: some of the name shows, nothing runs under the buttons", async () => {
     windowIs(true);
     renderApp(<ChatAppPanel linkId="link-1" sessionId="s1" contact={{ name: "Ana", named: true }} peerKey="peer" />, { language: "pt" });
