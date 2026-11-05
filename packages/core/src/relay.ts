@@ -247,10 +247,10 @@ export const GROUP_SIGNALING_ALLOWANCE_SHARE = 2 / 15;
  * in the first minute on the default relays: a reading of each beacon, and a read and a write in a hub's lobby (a write
  * goes to every relay). A member asks it only while it has no edge up in that community.
  *
- * At worst a relay then sees, in one minute, its limit, the chats' allowance past it, the edges' and this one: 46 on a
- * relay of 30 (pkarr.pubky.org allows 50 an address, `x-ratelimit-limit`), 92 on pkarr.pubky.app's 60 (it allows 1000)
- * and 7 on a relay of 5 (relay.pkarr.org and pkarr.miguelmedeiros.dev allow 10). A share raised past those limits gets
- * 429s (docs/TRANSPORTS.md, "The default list").
+ * At worst a relay then sees, in one minute, its limit, the chats' allowance past it, the edges', this one and the edges'
+ * answer reads' (`ANSWER_READ_ALLOWANCE`): 49 on a relay of 30 (pkarr.pubky.org allows 50 an address,
+ * `x-ratelimit-limit`), 95 on pkarr.pubky.app's 60 (it allows 1000) and 7 on a relay of 5 (relay.pkarr.org and
+ * pkarr.miguelmedeiros.dev allow 10). A share raised past those limits gets 429s (docs/TRANSPORTS.md, "The default list").
  */
 export const WAY_BACK_SHARE = 1 / 5;
 /** Past the limit, a group's reads within its allowance go no more often than this on a relay. */
@@ -268,6 +268,23 @@ export const GROUP_OVER_PACE_MS = 5_000;
  * 2026-11-03).
  */
 export const ANSWER_READ_FIRST_MS = 5_000;
+/**
+ * A group edge's read for the answer to its offer (`signal`) that everything else holds back (the limit, the groups'
+ * allowance, the chats' reserve, a write the budget refused) goes within an allowance of its own on that relay: this
+ * many in a minute, never more than the groups' allowance there (`GROUP_SIGNALING_ALLOWANCE_SHARE`: none on a relay of
+ * 5), one at a time (`ANSWER_READ_SPACING_MS`). What it takes counts there alone, as a way back's (`WAY_BACK_SHARE`),
+ * so it shortens no one else's minute. Going first on the floor (`ANSWER_READ_FIRST_MS`) was not enough: a daemon back
+ * after a restart had its edges' reads back and offers spend its whole minute on each relay 6 s on, before any member
+ * had answered (7 to 19 s on), and read the answers when the minute freed: from an answer going out to the hub
+ * reading it, 60 to 66 s at the median in each of four runs. With this allowance, 2 to 60 s (14 s over the four runs,
+ * against 63 s), and all 18 members were back 77 to 108 s on, against 102 to 153 s (agents#971, CLI lab, 2026-11-05).
+ *
+ * At worst it adds 3 to a relay's minute: 49 on a relay of 30 (pkarr.pubky.org allows 50), 95 on pkarr.pubky.app's 60,
+ * and nothing on a relay of 5.
+ */
+export const ANSWER_READ_ALLOWANCE = 3;
+/** Within that allowance, an edge's read for its answer goes no more often than this on a relay (`ANSWER_READ_ALLOWANCE`). */
+export const ANSWER_READ_SPACING_MS = 20_000;
 /**
  * Groups' urgent reads (their edges looking fast for a signal) take at most a quarter of a relay's minute in any this
  * long, so that they never spend it in a burst. An app back after a restart has every edge offering and looking fast at
@@ -525,6 +542,8 @@ export class RelayTransport implements PkarrTransport {
   private readonly spentGroupSignal = new Map<string, number[]>();
   /** Community members' ways back on each relay in the last minute: their allowance (`WAY_BACK_SHARE`). */
   private readonly spentWayBack = new Map<string, number[]>();
+  /** Edges' reads for an answer that only their own allowance let through, on each relay in the last minute (`ANSWER_READ_ALLOWANCE`). */
+  private readonly spentAnswerAllowance = new Map<string, number[]>();
   /** Per contact, its departed reads past the limit in the last minute, every relay together (`DEPARTED_READS`). */
   private readonly departedOver = new Map<string, number[]>();
   /**
@@ -1330,6 +1349,12 @@ export class RelayTransport implements PkarrTransport {
       if (isGroupRead(who)) this.readTurns.set(key, { servedAt: now, askedAt: now, waiting: false, watch: false, lane: watchLane(who) });
       return true;
     }
+    // So does an edge's read for its answer that only its own allowance let through (`ANSWER_READ_ALLOWANCE`).
+    if (isGroupAnswerRead(who) && this.heldFor(relay, who, now, key, false, false) > 0) {
+      this.spentAnswerAllowance.set(relay, [...(this.spentAnswerAllowance.get(relay) ?? []), now]);
+      this.readTurns.set(key, { servedAt: now, askedAt: now, waiting: false, watch: false, lane: watchLane(who), answer: true });
+      return true;
+    }
     if (isGroupSignal(who) && !who.write && this.spent.get(relay)!.length >= this.limitOf(relay)) this.spentGroupOver.get(relay)!.push(now);
     if (isGroupSignal(who)) this.spentGroupSignal.get(relay)!.push(now);
     const departedOver = isDepartedRead(who) && this.spent.get(relay)!.length >= this.limitOf(relay);
@@ -1354,9 +1379,10 @@ export class RelayTransport implements PkarrTransport {
    * Who goes first: a chat's refused write holds back everything but chat writes; a group's refused write holds back
    * group reads and background requests, never a chat's. Background requests yield to a link that signals. A chat's
    * signaling goes over the limit by its allowance (`SIGNALING_ALLOWANCE_SHARE`), and so do a few of its reads of a
-   * contact that just went away (`DEPARTED_READS`).
+   * contact that just went away (`DEPARTED_READS`). `ownAllowance` false: what holds an edge's read for its answer
+   * without its own allowance (`ANSWER_READ_ALLOWANCE`).
    */
-  private heldFor(relay: string, who: Asker, now = Date.now(), key?: string, turns = true): number {
+  private heldFor(relay: string, who: Asker, now = Date.now(), key?: string, turns = true, ownAllowance = true): number {
     const recent = (this.spent.get(relay) ?? []).filter((at) => now - at < 60_000);
     const recentBackground = (this.spentBackground.get(relay) ?? []).filter((at) => now - at < 60_000);
     this.spent.set(relay, recent);
@@ -1451,7 +1477,7 @@ export class RelayTransport implements PkarrTransport {
     // take now (`ANSWER_READ_FIRST_MS`): not the floor's last request, which only a write takes.
     if (isGroupSignal(who) && !isGroupAnswerRead(who)) {
       const ahead = this.answerReadAhead(relay, now);
-      if (ahead && this.heldFor(relay, ANSWER_READER, now, ahead.key, false) <= 0) wait = Math.max(wait, ahead.ms);
+      if (ahead && this.heldFor(relay, ANSWER_READER, now, ahead.key, false, false) <= 0) wait = Math.max(wait, ahead.ms);
     }
     // In turn per key: a key read longer ago that is asking too goes first (`READ_TURN_MS`).
     if (turns && wait <= 0 && isTurnRead(who) && this.turnAhead(relay, key, who, now)) turn = TURN_WAIT_MS;
@@ -1459,7 +1485,20 @@ export class RelayTransport implements PkarrTransport {
     // too: the key whose turn it is waits for the same. Not past a turn alone: a request is free, and that key takes it
     // first, a second, as for any group's read; the allowance stays for a full minute.
     if (wait > 0 && isWayBack(who) && this.wayBackLeft(relay, who, now) > 0) return 0;
+    // So does an edge's read for its answer, within its own (`ANSWER_READ_ALLOWANCE`), one at a time.
+    if (wait > 0 && ownAllowance && isGroupAnswerRead(who) && this.answerAllowanceFree(relay, now)) return 0;
     return Math.max(wait, turn, 0);
+  }
+
+  /**
+   * The edges' reads for their answers may take their own allowance on this relay now (`ANSWER_READ_ALLOWANCE`): fewer
+   * than it in the last minute, and none within `ANSWER_READ_SPACING_MS`. None where the groups have no allowance.
+   */
+  private answerAllowanceFree(relay: string, now: number): boolean {
+    const spent = (this.spentAnswerAllowance.get(relay) ?? []).filter((at) => now - at < 60_000);
+    this.spentAnswerAllowance.set(relay, spent);
+    const most = Math.min(ANSWER_READ_ALLOWANCE, Math.floor(this.limitOf(relay) * GROUP_SIGNALING_ALLOWANCE_SHARE));
+    return spent.length < most && (spent.length === 0 || now - spent[spent.length - 1] >= ANSWER_READ_SPACING_MS);
   }
 
   /**
