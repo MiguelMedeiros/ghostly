@@ -4,11 +4,11 @@ import type { GroupStore } from "./groups";
 
 /**
  * A private group's record in two rows. A message sent or received changes a few fields of the group's state (my
- * sequence number, what I saw, my last frames); the rest, its membership chain above all, changes with a commit or a
- * secret only. Each commit carries the whole roster and the chain is never compacted, so the record grew with every
- * join and leave, and each message wrote all of it again: 50 KB in a group of 32 just made, 800 KB after 150 joins
- * and leaves. Now a message writes the group's small row (`GroupLive`, in the settings store) alone, and the record is
- * written when the rest changes.
+ * sequence number, what I saw, my last frames, my texts not yet stored or said); the rest, its membership chain above
+ * all, changes with a commit or a secret only. Each commit carries the whole roster and the chain is never compacted,
+ * so the record grew with every join and leave, and each message wrote all of it again: 50 KB in a group of 32 just
+ * made, 800 KB after 150 joins and leaves. Now a message writes the group's small row (`GroupLive`, in the settings
+ * store) alone, and the record is written when the rest changes.
  *
  * An app from before reads the record alone. Each time the record is written, its `state.seq` is `SEQ_BLOCK` above
  * mine (`StoredGroup.seqReserved`), and it is written again before I send at that number: such an app sends above
@@ -18,7 +18,7 @@ import type { GroupStore } from "./groups";
 export const SEQ_BLOCK = 1024;
 
 /** The fields of the state the small row holds. */
-const LIVE = ["seq", "seqEpoch", "seen", "sent", "alone", "provisional", "nicks"] as const;
+const LIVE = ["seq", "seqEpoch", "seen", "sent", "alone", "provisional", "nicks", "unsaid"] as const;
 
 const topOf = (state: GroupState): string => state.chain[state.chain.length - 1]?.sig ?? "";
 
@@ -31,7 +31,9 @@ function recordKey(state: GroupState): string {
 
 function liveOf(group: StoredGroup): GroupLive {
   const s = group.state!;
-  return { top: topOf(s), state: { seq: s.seq, seqEpoch: s.seqEpoch, seen: s.seen, sent: s.sent, nicks: s.nicks, ...(s.alone && { alone: s.alone }), ...(s.provisional && { provisional: s.provisional }) },
+  return { top: topOf(s), state: { seq: s.seq, seqEpoch: s.seqEpoch, seen: s.seen, sent: s.sent, nicks: s.nicks, ...(s.alone && { alone: s.alone }), ...(s.provisional && { provisional: s.provisional }),
+    // A text saved before its row is stored (`unsaid`) is saved with its counter and frame, in the same row.
+    ...(s.unsaid?.length ? { unsaid: s.unsaid } : {}) },
     ...(group.came && { came: group.came }) };
 }
 

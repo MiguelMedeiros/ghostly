@@ -27,7 +27,7 @@ function writes(): Record<string, number> {
 }
 
 /** An engine whose every member's edge is up: the numbers of the messages it sent, in order. */
-function engine(groupStore: GroupStore = db): { groups: Groups; said: number[] } {
+function engine(groupStore: GroupStore = db): { groups: Groups; said: number[]; host: GroupsHost } {
   const edges = new Map<string, Map<string, string>>(), said: number[] = [];
   const host = {
     // One frame per member: a number once.
@@ -50,7 +50,7 @@ function engine(groupStore: GroupStore = db): { groups: Groups; said: number[] }
     storeMessage: async () => true,
     emit: () => {},
   } as unknown as GroupsHost;
-  return { groups: new Groups(host, groupStore), said };
+  return { groups: new Groups(host, groupStore), said, host };
 }
 
 const sessionOf = (groups: Groups, id: string) => (groups as unknown as { sessions: Map<string, GroupSession> }).sessions.get(id)!;
@@ -134,6 +134,38 @@ describe("a private group's saves", () => {
     await back.groups.send(id, "back");
     expect(back.said[0]).toBeGreaterThan(Math.max(...old.said));
     expect(new Set([...now.said, ...old.said, ...back.said]).size).toBe(now.said.length + old.said.length + back.said.length);
+  });
+
+  it("killed right after a send saved its counter and frame: that save went to the small row, and opened again the text is stored and said", async () => {
+    // The other tests' groups would be opened again too.
+    await clearProfileStores();
+    let dead = false;
+    const die = () => { dead = true; throw new Error("killed"); };
+    // A killed app writes nothing more.
+    const disk: GroupStore = { getGroups: () => db.getGroups(), deleteGroup: groupId => db.deleteGroup(groupId), getMessages: linkId => db.getMessages(linkId),
+      getGroupLive: () => db.getGroupLive(), putGroup: (group, live) => dead ? die() : db.putGroup(group, live), putGroupLive: (groupId, live) => dead ? die() : db.putGroupLive(groupId, live) };
+    const first = engine(disk);
+    await first.groups.load();
+    const id = await grown(first.groups, 3, 0);
+    await first.groups.send(id, "one");
+    await first.groups.flush();
+    // The kill: once the send saved, as its row is stored.
+    first.host.storeMessage = async () => die();
+    const written = writes();
+    await first.groups.send(id, "two").catch(() => {});
+    expect(dead).toBe(true);
+    expect(written[STORES.groups] ?? 0, "the record is not written").toBe(0);
+    expect(first.said).toEqual([0]);
+    vi.restoreAllMocks();
+
+    const again = engine(), stored: string[] = [];
+    again.host.storeMessage = async message => { stored.push(message.text); return true; };
+    await again.groups.load();
+    await again.groups.tick();
+    await vi.waitFor(() => expect(again.said).toEqual([1]));
+    expect(stored).toEqual(["two"]);
+    await again.groups.send(id, "three");
+    expect(again.said).toEqual([1, 2]);
   });
 
   it("forgetting a group, or clearing the profile's data, deletes its small row", async () => {

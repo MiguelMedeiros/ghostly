@@ -279,7 +279,7 @@ export interface StoredGroup {
  */
 export interface GroupLive {
   top: string;
-  state: Pick<GroupState, "seq" | "seqEpoch" | "seen" | "sent" | "alone" | "provisional" | "nicks">;
+  state: Pick<GroupState, "seq" | "seqEpoch" | "seen" | "sent" | "alone" | "provisional" | "nicks" | "unsaid">;
   came?: StoredGroup["came"];
 }
 
