@@ -219,10 +219,46 @@ describe("reacting over the live link", () => {
     await says(dinner, "", 50);
     await vi.waitFor(() => expect(t.view().lastReaction).toMatchObject({ by: "peer", emoji: "😂", snippet: "breakfast?" }));
     expect(reads()).toBe(0);
-    // Past what this run showed, the history says whether an older one is left.
+    // Past what this run showed, none is left: the chat had none at start, and each since was shown here.
     await says(breakfast, "", 60);
     await vi.waitFor(() => expect(t.view().lastReaction).toBeUndefined());
-    expect(reads()).toBe(1);
+    expect(reads()).toBe(0);
+    whole.mockRestore();
+  });
+
+  it("a contact flipping the chat's only reaction on and off never reads the chat whole: none stood at start or since", async () => {
+    const t = await setup({ onMessageChanges: () => {} });
+    await t.agreed();
+    const texts = Array.from({ length: 10 }, (_, i) => `meal ${i}?`);
+    for (const text of texts) await t.node.sendMessage({ linkId: t.id, text });
+    const rows = await Promise.all(texts.map(text => t.row(text)));
+    let n = 0;
+    const says = async (to: StoredMessage, e: string) => {
+      t.contact.sendReaction({ id: to.wireId!, e, n: ++n });
+      await vi.waitFor(() => expect(t.receipts).toContain(n));
+    };
+    const whole = vi.spyOn(db, "getMessages");
+    const reads = () => whole.mock.calls.filter(([chat]) => chat === t.id).length;
+    // 28 frames in all: within the 30 a window takes.
+    for (let i = 0; i < 3; i++) {
+      await says(rows[0]!, "👍");
+      await vi.waitFor(() => expect(t.view().lastReaction).toMatchObject({ emoji: "👍", snippet: "meal 0?" }));
+      await says(rows[0]!, "");
+      await vi.waitFor(() => expect(t.view().lastReaction).toBeUndefined());
+    }
+    expect(reads()).toBe(0);
+    // Past the notes this run keeps, the oldest is known only to the history: read once for it, and once to find none left.
+    for (const row of rows) await says(row, "🙏");
+    for (const row of [...rows].reverse()) {
+      await says(row, "");
+      const left = rows.indexOf(row) - 1;
+      await vi.waitFor(() => expect(t.view().lastReaction?.snippet).toBe(left < 0 ? undefined : `meal ${left}?`));
+    }
+    expect(reads()).toBe(2);
+    await says(rows[3]!, "👍");
+    await says(rows[3]!, "");
+    await vi.waitFor(() => expect(t.view().lastReaction).toBeUndefined());
+    expect(reads()).toBe(2);
     whole.mockRestore();
   });
 

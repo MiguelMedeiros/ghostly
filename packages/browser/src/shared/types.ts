@@ -86,6 +86,11 @@ export interface StoredLink {
   /** Present on the side that created the link, until the peer shows up. */
   inviteCode?: string;
   /**
+   * A chat started by accepting a contact request (WISP 8xx § Accept), until its requester's app proves it holds the
+   * request's asker key `key` (asked through `link`): the request's text, row `message`, shows as not confirmed till then.
+   */
+  contactAsker?: { link: string; key: string; message: string };
+  /**
    * Messages deleted on this device, by id, so a republished one is not stored again: 500 at most, my deletions never
    * pushing out the contact's ids nor theirs mine (`withDeletedId`).
    */
@@ -147,6 +152,9 @@ export interface StoredLink {
 export type GroupEvent = "created" | "joined" | "gone" | "admin" | "rotated" | "removed" | "left" | "forked" | "picture" | "renamed";
 
 /** A private group as stored: an invitation not yet answered, or a group I am (or was) in. */
+/** Another group under the id of one held (`StoredGroup.others`): a contact's invitation, or a group link opened. */
+export type OtherGroup = { at: number; linkId: string; name: string; admin: string; e: number; n: number } | { at: number; link: string };
+
 export interface StoredGroup {
   id: string;
   createdAt: number;
@@ -214,6 +222,13 @@ export interface StoredGroup {
   /** Removed, then invited again: the removed group as it was, which a Decline puts back (with the history it kept). */
   previous?: StoredGroup;
   /**
+   * Other groups that came under this id while it was held: an invitation over a contact chat from someone outside the
+   * group held, or a link opened. A private group's id names no genesis (anyone who knows it may sign one under it), so
+   * which of them is the real one is the person's to say: each is kept beside the group held until they pick
+   * (`Groups.keepGroup`, `Groups.switchGroup`), and an inviter turned down hears a decline.
+   */
+  others?: OtherGroup[];
+  /**
    * Past 16 members, with hubs (WISP 902 · Group Mesh § Hubs): the hubs I kept edges with (as a hub, the other hubs),
    * where my edges go when the app starts again, before the beacon is read.
    */
@@ -256,6 +271,13 @@ export interface StoredGroup {
    * device, where that is later than the message's own time (`cameAt`): what makes the group unread survives a restart.
    */
   came?: { peer?: number; mention?: number };
+  /**
+   * Where `state.seq` was raised to when `state` was last written whole (`engine/groupRows.ts`), in epoch `e`: the numbers
+   * below `n` are this app's to send at, and the group's small row (`GroupLive`) says how far it went. An app from before
+   * reads `state` alone and sends from `n` on, above everything said here. A `state.seq` other than `n` is one such an app
+   * wrote since.
+   */
+  seqReserved?: { e: number; n: number };
   /** A community group (`group-community/1`) I am in: its session state. Mesh groups use `state`. */
   community?: CommunityState;
   /**
@@ -263,6 +285,17 @@ export interface StoredGroup {
    * race: my member seed, the entry session, and what arrived of the welcome.
    */
   joining?: { g: string; host: string; seedB64: string; linkId: string; name: string; inviter: string; invitedAt?: number; pieces: unknown[]; since: number; check?: boolean; replaced?: boolean };
+}
+
+/**
+ * What a message sent or received changes of a private group's state, in a row of its own (settings store,
+ * `groupLiveKey`): written alone at each message, while the group's record (its chain, its secrets) is written only when
+ * they change (`engine/groupRows.ts`). `top`: the signature of the last commit of the chain it goes with.
+ */
+export interface GroupLive {
+  top: string;
+  state: Pick<GroupState, "seq" | "seqEpoch" | "seen" | "sent" | "alone" | "provisional" | "nicks" | "unsaid">;
+  came?: StoredGroup["came"];
 }
 
 export interface GroupMemberView {
@@ -368,8 +401,18 @@ export interface GroupView {
    * `takenBack`: who sent it took it back (the group is gone from its app, or the admin role from it): nothing to answer.
    */
   invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; takenBack?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; othersKnocked?: boolean; since?: number; admittedAt?: number; full?: { n: number; max: number } };
+  /**
+   * Other groups that came under this one's id (a contact's invitation, or a link opened) while it was here: kept beside
+   * it until the person picks the real one (`keepGroup`, `switchGroup` with the other's `linkId` or `link`).
+   */
+  others?: ({ linkId: string; contact: string; name: string; members: number } | { link: string })[];
   /** The group's link while it is on (`group1/<id>/<entry key>`); only the admin who made it sees it. */
   entryLink?: string;
+  /**
+   * The admin's link of a private group lets nobody in: knocks under it keep coming from keys whose app never answers,
+   * and they hold the places a joiner is answered in. A new link (`enableGroupLink` with `reset`) ends it.
+   */
+  entryJammed?: true;
   /** Contacts (by chat id) invited by me and not yet in. */
   invited: string[];
   /** Contact chats that are members, by chat id → member key. */
@@ -392,7 +435,14 @@ export interface GroupView {
    */
   hubs?: { hub: boolean };
   /** Community groups: how this device is connected (a hub for others, or through hubs). */
-  community?: { hub: boolean; hubs: number; connected: number };
+  community?: {
+    hub: boolean; hubs: number; connected: number;
+    /**
+     * Admin only: this many joiners lately were let in to an entry session that never came up on their side, enough that
+     * the knocks may not be real people and real ones may not get in. A new link (`enableLink` with `reset`) ends it.
+     */
+    unansweredKnocks?: number;
+  };
   /** Private groups: the members typing now, in the order they started (WISP 902 · Group Mesh § Typing). Never stored. */
   typing?: GroupTypingView[];
   /** Private groups: this side's wake-up tokens, one per member it shared its subscription with (the push worker's table). */
@@ -955,6 +1005,11 @@ export interface StoredMessage {
   nick?: string;
   file?: MessageFile;
   paymentId?: string;
+  /**
+   * The text a contact request carried, while its requester's app has not proven in the chat that it sent it (WISP 8xx
+   * § Accept): whoever made the chat's invite may not be who asked.
+   */
+  unconfirmed?: true;
   /** Group messages: the member key of the sender. */
   member?: string;
   /** Group history lines that are not messages. */

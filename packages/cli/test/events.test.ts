@@ -189,6 +189,26 @@ describe("the event stream", () => {
     expect(new Set(events.map((e) => e.id)).size).toBe(events.length);
   });
 
+  it("typing is live only: a contact who keeps changing it pushes no other chat's events out of the journal", async () => {
+    const { h, events } = await hub("typing-live.jsonl");
+    const group = (typing?: unknown[]) => ({ id: "g1", status: "active", members: [{ key: "ana" }], ...(typing ? { typing } : {}) });
+    h.baseline(state([link("c1"), link("c2")], [group()]), new Map([["c1", []], ["c2", []]]));
+    h.sink.post({ kind: "messages", linkId: "c2", messages: [message("c2", "m1")] });
+    // A status that changes at the rate the receiver allows: each change a start again, then a stop.
+    for (let i = 0; i < 40; i++) {
+      h.sink.post({ kind: "state", state: state([link("c1", { peerTyping: true, peerTypingKind: "thinking", peerTypingStatus: `step ${i}` }), link("c2")], [group([{ key: "ana", kind: "thinking", status: `step ${i}` }])]) });
+    }
+    h.sink.post({ kind: "state", state: state([link("c1"), link("c2")], [group()]) });
+    h.sink.post({ kind: "messages", linkId: "c2", messages: [message("c2", "m1"), message("c2", "m2")] });
+    // The listeners hear every change, each with its own id, carrying the last journaled event's seq.
+    const typing = events.filter((e) => e.type.includes("typing."));
+    expect(typing).toHaveLength(82);
+    expect(new Set(typing.map((e) => e.id)).size).toBe(typing.length);
+    expect(typing.every((e) => e.seq === 1)).toBe(true);
+    // The journal holds the two messages only, numbered one after the other.
+    expect(h.replay(0).map((e) => [e.seq, e.type])).toEqual([[1, "message.received"], [2, "message.received"]]);
+  });
+
   it("notes what it reported with relaxed transactions: a message's delivery states cost the daemon no disk sync each", async () => {
     const { h } = await hub("relaxed.jsonl");
     const db = (h as unknown as { db: IDBDatabase }).db;

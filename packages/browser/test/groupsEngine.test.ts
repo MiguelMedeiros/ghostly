@@ -1470,7 +1470,7 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     expect(hostEntries()).toBe(1);
   });
 
-  it("a link to a group this profile is out of, or is invited to, is refused: the kept history and the invitation stay", async () => {
+  it("a link to a group this profile is out of is refused, one to a group it is invited to is kept beside it: the kept history and the invitation stay", async () => {
     const { world, alice, others: [bob], groupId, key } = await groupOf(["bob"]);
     world.add("carol"); world.chats.set("chat-ac", ["alice", "carol"]);
     await alice.send(groupId, "dinner at 8"); await bob.send(groupId, "the only copy of my note"); await world.settle();
@@ -1482,9 +1482,12 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     // Any member knows the id; the key is nobody's.
     const code = `group1/${groupId}/${createIdentity().pubKeyZ32}`;
     await expect(bob.joinByLink(code)).rejects.toThrow(/history is still here/);
-    await expect(carol.groups.joinByLink(code)).rejects.toThrow(/have an invitation/);
+    // The link may be another group's under the same id: shown beside the invitation, for Carol to pick.
+    expect(await carol.groups.joinByLink(code)).toBe(groupId);
     await world.settle();
-    expect([removed.store.groups.get(groupId), carol.store.groups.get(groupId)]).toEqual(before);
+    expect(view(carol.groups, groupId).others).toEqual([{ link: code }]);
+    const { others: _others, ...carolAfter } = carol.store.groups.get(groupId)!;
+    expect([removed.store.groups.get(groupId), carolAfter]).toEqual(before);
     for (const spy of deleted) expect(spy).not.toHaveBeenCalled();
     expect(view(bob, groupId)).toMatchObject({ status: "removed" });
     expect(world.texts("bob")).toEqual(expect.arrayContaining(["dinner at 8", "the only copy of my note"]));
@@ -1549,10 +1552,17 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     const code = await alice.enableLink(groupId);
     await alice.invite(groupId, "chat-ab"); await world.settle();
     await bob.accept(groupId);
-    await expect(bob.joinByLink(code)).rejects.toThrow(/already joining/);
+    // Accepted, waiting for its welcome: the link is kept beside it (it may be another group's under the id), not joined.
+    expect(await bob.joinByLink(code)).toBe(groupId);
+    expect(view(bob).invitation).toMatchObject({ linkId: "chat-ab", accepted: true });
     await world.settle();
-    expect(await bob.joinByLink(code)).toBe(groupId); // already in: nothing happens
+    expect(view(bob)).toMatchObject({ status: "active", others: [{ link: code }] });
+    expect(await bob.joinByLink(code)).toBe(groupId); // already in: nothing is joined, the link stays shown beside it
+    expect(view(bob).others).toEqual([{ link: code }]);
     expect(world.peers.get("bob")!.entries.size).toBe(0);
+    // The person says this group is the real one: nothing is left to pick.
+    await bob.keepGroup(groupId);
+    expect(view(bob).others).toBeUndefined();
     await bob.leave(groupId); await world.settle();
     expect(await bob.joinByLink(code)).toBe(groupId);
     expect(view(bob).invitation).toMatchObject({ viaLink: true, accepted: true });

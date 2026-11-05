@@ -74,6 +74,18 @@ describe("the push relay (infra/services/push-relay)", () => {
     expect(rateKey("::1")).toBe("0:0:0:0::/64");
   });
 
+  it("counts an IPv4-mapped address as its IPv4 address however it is written", () => {
+    expect(rateKey("::ffff:c000:201")).toBe("192.0.2.1");
+    expect(rateKey("::ffff:c000:202")).toBe("192.0.2.2");
+    expect(rateKey("0:0:0:0:0:ffff:192.0.2.1")).toBe("192.0.2.1");
+    expect(rateKey("0000:0000:0000:0000:0000:FFFF:C000:0201")).toBe("192.0.2.1");
+    expect(rateKey("::FFFF:192.0.2.1")).toBe("192.0.2.1");
+    expect(rateKey("::ffff:192.0.2.1%eth0")).toBe("192.0.2.1");
+    expect(rateKey("[::ffff:c000:201]:443")).toBe("192.0.2.1");
+    expect(rateKey("::ffff:0:c000:201")).toBe("0:0:0:0::/64");
+    expect(rateKey("1::2:3:4:5:1.2.3.4")).toBe("1:0:2:3::/64");
+  });
+
   it("counts an address a proxy wrote with its port, or in brackets, as the address alone", () => {
     expect(rateKey("203.0.113.7:51234")).toBe("203.0.113.7");
     expect(rateKey("203.0.113.7:51235")).toBe("203.0.113.7");

@@ -121,7 +121,7 @@ describe("Remove, on the active device", () => {
 
   it("after a takeover offers to remove the device that stopped, the checklist when it was lost, or not now", async () => {
     const { user, engine } = renderApp(<DevicesSection />);
-    engine.on("deviceSet", () => activeSet({ secretOffer: { device: "Phone", lost: true } }));
+    engine.on("deviceSet", () => activeSet({ secretOffer: { key: PHONE, device: "Phone", lost: true } }));
     engine.on("deviceSecretOfferDismiss", () => undefined);
     expect(await screen.findByTestId("device-secret-offer")).toHaveTextContent("You took over from Phone.");
     expect(screen.getByTestId("device-secret-offer-remove")).toHaveTextContent("Remove Phone");
@@ -130,6 +130,30 @@ describe("Remove, on the active device", () => {
     await user.click(screen.getByTestId("device-lost-done"));
     await user.click(screen.getByTestId("device-secret-offer-dismiss"));
     await waitFor(() => expect(engine.callsTo("deviceSecretOfferDismiss")).toHaveLength(1));
+  });
+
+  it("after a takeover, Remove and the checklist's Remove take out the device that stopped by its key, whatever the names", async () => {
+    // A lost "Phone" (stopped) and another "Phone" listed before it.
+    const OTHER = "O".repeat(43);
+    const devices = [activeSet().devices[0], { key: OTHER, name: "Phone", slot: 1, self: false, active: false, status: "live" as const }, { ...activeSet().devices[1], slot: 2 }];
+    for (const [i, via] of [["device-secret-offer-remove"], ["device-secret-offer-lost", "device-lost-remove"]].entries()) {
+      const { user, engine, unmount } = renderApp(<DevicesSection />);
+      engine.on("deviceSet", () => activeSet({ devices, secretOffer: { key: PHONE, device: "Phone", lost: true } }));
+      engine.on("deviceRemove", () => activeSet({ devices }));
+      await screen.findByTestId("device-secret-offer-remove");
+      for (const testId of via) await user.click(screen.getByTestId(testId));
+      await user.click(screen.getByTestId("device-remove-go"));
+      await waitFor(() => expect(engine.callsTo("deviceRemove")).toEqual(Array(i + 1).fill({ key: PHONE })));
+      unmount();
+    }
+  });
+
+  it("after a takeover whose stopped device is not known, offers a new device secret and removes nothing by name", async () => {
+    const { engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => activeSet({ secretOffer: { device: "Phone" } }));
+    expect(await screen.findByTestId("device-secret-offer")).toHaveTextContent("You took over from another device.");
+    expect(screen.queryByTestId("device-secret-offer-remove")).toBeNull();
+    expect(screen.getByTestId("device-secret-offer-new")).toBeInTheDocument();
   });
 
   it("on a standby offers no Remove and no new secret", async () => {

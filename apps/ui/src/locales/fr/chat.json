@@ -467,6 +467,10 @@
   "typing": "écrit…",
   "typingRecording": "enregistre un audio…",
   "typingThinking": "réfléchit…",
+  "unconfirmed": {
+    "hint": "Envoyé avec une demande de contact. Son app n'a pas encore confirmé l'avoir envoyé.",
+    "label": "Non confirmé"
+  },
   "video": {
     "arriving": "En cours d'arrivée",
     "cantPlay": "Cet appareil ne peut pas lire cette vidéo ({{format}}). Téléchargez-la pour la regarder.",

@@ -469,6 +469,23 @@ describe("the Forward to… picker", () => {
     await user.click(screen.getByTestId("secret-guard-send"));
     expect(fakeEngine.callsTo("forwardMessages")).toHaveLength(1);
   });
+
+  // The guard is the picker's child in React's tree (portalled out of it): React handed the guard's cancel to the
+  // picker's too, and one Escape closed both, the chosen chats with them.
+  it("Escape on the seed question closes only the question: the picker stays with its chats chosen", async () => {
+    const onClose = vi.fn();
+    const { user } = renderApp(<ForwardDialog from="link-bo" messages={[message({ text: SEED })]} onClose={onClose} />);
+    await user.click(screen.getAllByTestId("forward-target")[0]!);
+    await user.click(screen.getByTestId("forward-send"));
+    // The browser's cancel on Escape: on the dialog, not bubbling.
+    act(() => { screen.getByTestId("secret-guard").dispatchEvent(new Event("cancel", { cancelable: true })); });
+    expect(screen.queryByTestId("secret-guard")).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByTestId("forward-chosen")).toHaveTextContent("Ana");
+    // The next Escape is the picker's.
+    act(() => { screen.getByTestId("forward-dialog").dispatchEvent(new Event("cancel", { cancelable: true })); });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("choosing several", () => {

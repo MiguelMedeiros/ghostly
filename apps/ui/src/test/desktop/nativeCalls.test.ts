@@ -236,6 +236,46 @@ describe("the RTCPeerConnection stand-in", () => {
     await vi.waitFor(() => expect(decoded).toHaveBeenCalledTimes(3), { timeout: 3000 });
   });
 
+  it("decodes no picture while the window is out of sight, and draws the newest one as soon as it is back", async () => {
+    // A JPEG's decode and draw is 8-15 ms of WebKitGTK's work at 15 a second, for each picture; hidden, nobody sees it.
+    const hidden = { on: false };
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockImplementation(() => (hidden.on ? "hidden" : "visible"));
+    const hiddenSpy = vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden.on);
+    const show = (on: boolean) => { hidden.on = !on; document.dispatchEvent(new Event("visibilitychange")); };
+    const seen: number[] = [];
+    const decoded = vi.fn(async (blob: Blob) => {
+      seen.push(new Uint8Array(await blob.arrayBuffer())[4]);
+      return { width: 640, height: 480, close() {} };
+    });
+    vi.stubGlobal("createImageBitmap", decoded);
+    try {
+      const pc = new NativePeerConnection({});
+      const ontrack = vi.fn();
+      pc.ontrack = ontrack;
+      await pc.createOffer();
+      await pc.setRemoteDescription({ type: "answer", sdp: "their answer" });
+      const jpeg = (n: number) => new Uint8Array([0xff, 0xd8, 0xff, 0xe0, n]).buffer;
+      // Hidden from the start: the first picture is still drawn, the call needs it to show the peer's picture at all.
+      show(false);
+      tauri.channels[0].onmessage(jpeg(1));
+      await vi.waitFor(() => expect(ontrack).toHaveBeenCalledTimes(1));
+      for (let n = 2; n <= 30; n++) tauri.channels[0].onmessage(jpeg(n));
+      await new Promise((done) => setTimeout(done, 20));
+      expect(decoded).toHaveBeenCalledTimes(1);
+
+      show(true);
+      await vi.waitFor(() => expect(decoded).toHaveBeenCalledTimes(2));
+      expect(seen).toEqual([1, 30]);
+      tauri.channels[0].onmessage(jpeg(31));
+      await vi.waitFor(() => expect(decoded).toHaveBeenCalledTimes(3));
+      expect(seen).toEqual([1, 30, 31]);
+      pc.close();
+    } finally {
+      visibility.mockRestore();
+      hiddenSpy.mockRestore();
+    }
+  });
+
   it("answers an offer through Rust, the lanes known as soon as the offer is", async () => {
     const pc = new NativePeerConnection({});
     await pc.setRemoteDescription({ type: "offer", sdp: "their offer" });

@@ -341,6 +341,38 @@ describe("a picture's metadata, removed before it is sent", () => {
     }
   });
 
+  it("HEIC: free and skip boxes, at the top and in meta, keep their headers and go with their bodies zeroed; nothing moves", () => {
+    for (const type of ["free", "skip"]) {
+      for (const sent of [heif({ topExtra: [box(type, ascii(SECRET))] }), heif({ extra: [box(type, ascii(SECRET))] }), [...heif(), ...box(type, ascii(SECRET))]]) {
+        const out = strip(sent, "image/heic");
+        expect(has(Uint8Array.from(sent), SECRET)).toBe(true);
+        expect(has(out, SECRET)).toBe(false);
+        expect(out.length).toBe(sent.length);
+        expect(has(out, `\0\0\0${String.fromCharCode(8 + SECRET.length)}${type}${"\0".repeat(SECRET.length)}`)).toBe(true);
+        expect(has(out, "\xaa\xbb\xcc\xdd")).toBe(true);
+        const changed = [...sent.keys()].filter((i) => sent[i] !== out[i]);
+        expect(changed.every((i) => out[i] === 0)).toBe(true);
+      }
+    }
+  });
+
+  it("HEIC whose picture's bytes are inside a free box is refused, not sent with them zeroed", () => {
+    // The picture item's extent moved into a free box at the end of the file.
+    const sent = [...heif(), ...box("free", [0xaa, 0xbb, 0xcc, 0xdd])];
+    const ilocAt = Buffer.from(Uint8Array.from(sent)).indexOf("iloc", 0, "latin1") + 4 + 4 + 2 + 2 + 2 + 2 + 2 + 2;
+    sent.splice(ilocAt, 4, ...be32(sent.length - 4));
+    expect(() => stripPictureMetadata(Uint8Array.from(sent), "image/heic")).toThrow(NO_PICTURE_METADATA);
+  });
+
+  it("JPEG: the JFIF header stays but its thumbnail goes, and says it has none", () => {
+    const thumbnail = ascii(SECRET.padEnd(3 * 11 * 1, "."));
+    const withThumbnail = segment(0xe0, [...ascii("JFIF\0"), 1, 2, 1, 0, 72, 0, 72, 11, 1, ...thumbnail]);
+    const out = strip(jpeg(withThumbnail, dqt, sof(300, 200), dht), "image/jpeg");
+    expect(has(out, SECRET)).toBe(false);
+    expect([...out]).toEqual(jpeg(segment(0xe0, [...ascii("JFIF\0"), 1, 2, 1, 0, 72, 0, 72, 0, 0]), dqt, sof(300, 200), dht));
+    expect(imageSize(out)).toEqual({ width: 300, height: 200 });
+  });
+
   it("HEIC with a part this does not know is refused: an XML box, a video track, a uuid box", () => {
     expect(() => stripPictureMetadata(Uint8Array.from(heif({ extra: [fullBox("xml ", 0, ascii(SECRET))] })), "image/heic")).toThrow(NO_PICTURE_METADATA);
     expect(() => stripPictureMetadata(Uint8Array.from(heif({ topExtra: [box("moov", [])] })), "image/heic")).toThrow(NO_PICTURE_METADATA);

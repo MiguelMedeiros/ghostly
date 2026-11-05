@@ -9,10 +9,11 @@ import { MONERO_WORDS } from "./monero-words";
  *
  * Detection is local and synchronous, and a finding never carries the text it found: only what kind it is and, for
  * ecash, the amount decoded here. Ark, Spark and Fedimint wallets are BIP39 seeds or raw keys, caught by the rules
- * below; Fedimint ecash notes are plain base64 with no prefix, so they are not recognised.
+ * below; Fedimint ecash notes are plain base64 with no prefix, so they are not recognised. A `node-login` is what the
+ * wallet sources ask for to reach a node: an LND macaroon, a Core Lightning rune, a bitcoind RPC password or cookie.
  */
 export type SecretFinding =
-  | { kind: "mnemonic" | "nsec" | "bitcoin-key" | "hex-key" }
+  | { kind: "mnemonic" | "nsec" | "bitcoin-key" | "hex-key" | "node-login" }
   | { kind: "cashu"; amount: number | null; unit: string };
 
 export type SecretKind = SecretFinding["kind"];
@@ -99,9 +100,19 @@ const HEX_SECRET = /\b(?:0x)?(?:[0-9a-fA-F]{128}|[0-9a-fA-F]{64})\b/g;
  * Monero's keys count too: "Private spend key" and "Spend key (private)" (Cake Wallet, MyMonero). A bare "spend key" or
  * "view key" does not, as a wallet's public keys are written that way too.
  */
-const SECRET_CONTEXT = /priv(?:ate)?[\s_-]*(?:(?:spend|view)[\s_-]*)?key|(?:spend|view)[\s_-]*key[\s_-]*\(\s*private|secret|seed|mnemonic|nsec|xprv|\bwif\b|recovery|passphrase/i;
+const SECRET_CONTEXT = /priv(?:ate)?[\s_-]*(?:(?:spend|view)[\s_-]*)?key|(?:spend|view)[\s_-]*key[\s_-]*\(\s*private|secret|seed|mnemonic|nsec|xprv|\bwif\b|recovery|passphrase|password/i;
+/** A bitcoind login: its cookie file (`__cookie__:<hex>`), `rpcpassword=`, or the bitcoind source's own words. */
+const NODE_CONTEXT = /__cookie__|rpc[\s_-]*pass(?:word)?|\bcookie\b/i;
 /** How far from a 64-hex string a word like "seed" still counts as saying what it is. */
 const CONTEXT_REACH = 48;
+/** A macaroon (version 2) with a location, as LND writes it: `02 01 <length> lnd …`, in hex or base64. */
+const MACAROON_HEX = /\b0201[0-9a-fA-F]{96,}\b/g;
+const MACAROON_BASE64 = /(?<![\w+/-])AgE[\w+/-]{60,}={0,2}/g;
+/** A Core Lightning rune: base64url of a 32-byte authcode and the restrictions. */
+const RUNE = /(?<![\w-])[\w-]{43,}={0,2}(?![\w=-])/g;
+/** The restrictions of a rune that `createrune` made: its unique id first (`=0`, `=3&method=…`). */
+const RUNE_RESTRICTIONS = /^=\d+(?:[&|][ -~]*)?$/;
+const RUNE_WORD = /\brunes?\b/i;
 const CASHU_TOKEN = /\bcashu([AB])([A-Za-z0-9_\-+/]{20,}={0,2})/g;
 
 /**
@@ -130,6 +141,7 @@ export function findSecret(text: string): SecretFinding | null {
   })) return { kind: "mnemonic" };
   if (readings.some((reading) => NSEC.test(reading))) return { kind: "nsec" };
   if (readings.some((reading) => EXTENDED_PRIVATE.test(reading) || hasWif(reading))) return { kind: "bitcoin-key" };
+  if (readings.some(hasNodeLogin)) return { kind: "node-login" };
   if (readings.some(hasHexSecret)) return { kind: "hex-key" };
   const tokens = readings.map(findCashu);
   return tokens.find((found) => found?.kind === "cashu" && found.amount !== null) ?? tokens.find((found) => found) ?? null;
@@ -233,14 +245,68 @@ function hasWif(text: string): boolean {
   return false;
 }
 
+/** Whether `context` is said within reach of `match`, before or after it. */
+function beside(text: string, match: RegExpExecArray, context: RegExp): boolean {
+  const before = text.slice(Math.max(0, match.index - CONTEXT_REACH), match.index);
+  const after = text.slice(match.index + match[0].length, match.index + match[0].length + CONTEXT_REACH);
+  return context.test(before) || context.test(after);
+}
+
 /** 64 or 128 hex digits with "private key", "secret", "seed" or the like close by. A bare hash is not asked about. */
 function hasHexSecret(text: string): boolean {
-  for (const match of text.matchAll(HEX_SECRET)) {
-    const before = text.slice(Math.max(0, match.index - CONTEXT_REACH), match.index);
-    const after = text.slice(match.index + match[0].length, match.index + match[0].length + CONTEXT_REACH);
-    if (SECRET_CONTEXT.test(before) || SECRET_CONTEXT.test(after)) return true;
-  }
+  return hexBeside(text, SECRET_CONTEXT);
+}
+
+function hexBeside(text: string, context: RegExp): boolean {
+  for (const match of text.matchAll(HEX_SECRET)) if (beside(text, match, context)) return true;
   return false;
+}
+
+/** A login to a node: a macaroon, a rune, or 64 hex digits that bitcoind's cookie or `rpcpassword` names. */
+function hasNodeLogin(text: string): boolean {
+  if (hexBeside(text, NODE_CONTEXT)) return true;
+  for (const [hex] of text.matchAll(MACAROON_HEX)) if (hex.length % 2 === 0 && isMacaroon(Uint8Array.from(hex.match(/../g)!, (b) => parseInt(b, 16)))) return true;
+  for (const [text64] of text.matchAll(MACAROON_BASE64)) if (isMacaroon(tryBase64(text64))) return true;
+  for (const match of text.matchAll(RUNE)) if (isRune(text, match)) return true;
+  return false;
+}
+
+const printable = (bytes: Uint8Array) => bytes.every((b) => b >= 0x20 && b <= 0x7e);
+/** Bytes as a string of one character each, however many there are. */
+const binary = (bytes: Uint8Array) => Array.from(bytes, (b) => String.fromCharCode(b)).join("");
+
+function tryBase64(text: string): Uint8Array | null {
+  try { return fromBase64(text); } catch { return null; }
+}
+
+/** Whether `text` is exactly how `bytes` are written in padded base64url: nothing left over in its last letter. */
+function canonicalBase64url(text: string, bytes: Uint8Array): boolean {
+  return btoa(binary(bytes)).replace(/\+/g, "-").replace(/\//g, "_") === text;
+}
+
+/** Version 2 with a location (LND's "lnd"), the identifier next, and the 32-byte signature last. */
+function isMacaroon(bytes: Uint8Array | null): boolean {
+  if (!bytes || bytes[0] !== 2 || bytes[1] !== 1) return false;
+  const length = bytes[2];
+  return length > 0 && length < 128 && printable(bytes.subarray(3, 3 + length)) && bytes[3 + length] === 2
+    && bytes.length >= 3 + length + 36 && bytes[bytes.length - 34] === 6 && bytes[bytes.length - 33] === 32;
+}
+
+/**
+ * A rune decodes to a hash, which is never text, and then its restrictions, which always are: the unique id first
+ * when `createrune` made it, padded as it prints it. One with no restriction (or an older one with no id, or with its
+ * padding taken off) counts only beside the word "rune".
+ * Hex is read as a hash or a key above, never as a rune.
+ */
+function isRune(text: string, match: RegExpExecArray): boolean {
+  if (/^[0-9a-fA-F]+=*$/.test(match[0])) return false;
+  const bytes = tryBase64(match[0]);
+  if (!bytes || bytes.length < 32 || printable(bytes.subarray(0, 32))) return false;
+  const tail = bytes.subarray(32);
+  if (!printable(tail)) return false;
+  const restrictions = binary(tail);
+  if (canonicalBase64url(match[0], bytes) && RUNE_RESTRICTIONS.test(restrictions)) return true;
+  return (!restrictions || /^\w*[!=/^$~<>{}#]/.test(restrictions)) && beside(text, match, RUNE_WORD);
 }
 
 /** Every Cashu token in the text, with their amounts added up when all of them decode and share one unit. */
