@@ -436,12 +436,13 @@ describe("redeeming a token", () => {
     // An answer that covers only some of the outputs is no answer either.
     const [kept] = await swaps();
     const whole = signed(kept);
+    // Past its overdue time a mint that only errs is asked less often: within 10 min, and a round.
     mintApi.restore.mockResolvedValue({ outputs: whole.outputs.slice(1), signatures: whole.signatures.slice(1) });
-    await pass(30_000);
+    await pass(630_000);
     expect(await swaps()).toHaveLength(1);
 
     mintApi.restore.mockResolvedValue(whole);
-    await pass(30_000);
+    await pass(630_000);
     expect(events.onSwapSettled).toHaveBeenCalledWith(expect.objectContaining({ id: kept.id }), true);
     expect(await balance()).toBe(72 + 62);
     expect(await all<StoredPayment>(STORES.payments)).toMatchObject([{ id: "p1", state: "settled" }]);
@@ -656,6 +657,43 @@ describe("splitting ecash for a token", () => {
     await reopened();
     await pass(SETTLED_MS);
     expect(await balance(), "stored once").toBe(72 - 8);
+  });
+
+  it("a mint that stops answering is asked about less and less often, every 10 min at most, and the swap is settled once it answers", async () => {
+    mintApi.completeSwap.mockRejectedValue(lost());
+    mintApi.restore.mockRejectedValue(lost());
+    mintApi.checkProofsStates.mockRejectedValue(lost());
+    const { wallet, events } = setup();
+    await expect(wallet.createToken(40, undefined, undefined, outbox)).rejects.toBeInstanceOf(SwapUnsettledError);
+    wallet.start();
+    await pass(SETTLED_MS);
+    expect(mintApi.restore.mock.calls.length, "every 30 s while a request may still reach the mint").toBeGreaterThanOrEqual(10);
+    const early = mintApi.restore.mock.calls.length;
+    await pass(24 * 3_600_000);
+    // At most every 10 min: 144 a day. Every 30 s, it was 2,880.
+    expect(mintApi.restore.mock.calls.length - early, "not every 30 s for a day").toBeLessThan(160);
+    expect(await swaps(), "still written down: the mint never said").toHaveLength(1);
+
+    const [kept] = await swaps();
+    mintApi.restore.mockImplementation(async () => signed(kept));
+    await pass(600_000 + 30_000);
+    expect(events.onSwapSettled).toHaveBeenCalledWith(expect.objectContaining({ id: kept.id }), true);
+    expect(await swaps()).toEqual([]);
+    expect(await balance()).toBe(72 - 8);
+  }, 120_000);
+
+  it("a mint asked less often is asked at once when its wallet is removed", async () => {
+    mintApi.completeSwap.mockRejectedValue(lost());
+    mintApi.restore.mockRejectedValue(lost());
+    mintApi.checkProofsStates.mockRejectedValue(lost());
+    const { wallet } = setup();
+    await expect(wallet.createToken(40, undefined, undefined, outbox)).rejects.toBeInstanceOf(SwapUnsettledError);
+    wallet.start();
+    await pass(3_600_000);
+    const [kept] = await swaps();
+    mintApi.restore.mockImplementation(async () => signed(kept));
+    await wallet.settleSwaps([MINT]);
+    expect(await swaps()).toEqual([]);
   });
 
   it("the app closed while the mint was being asked: the next start settles it either way", async () => {

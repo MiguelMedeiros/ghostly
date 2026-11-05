@@ -327,6 +327,8 @@ export class CashuWallet {
   private restoredTimer: ReturnType<typeof setTimeout> | null = null;
   private swapTimer: ReturnType<typeof setTimeout> | null = null;
   private swapTimerAt = 0;
+  /** Per open swap whose mint did not answer past its overdue time: as `meltAsk`, in this run (a restart asks at once). */
+  private readonly swapAsk = new Map<string, { at: number; wait: number }>();
   /** Per melt quote that ended unpaid: the sats the mint kept all the same (the fee of the split before the melt). */
   private readonly failedFees = new Map<string, number>();
   /** Melt quotes that ended unpaid with proofs the mint read spent: ecash spent somewhere else, said as such. */
@@ -1362,10 +1364,14 @@ export class CashuWallet {
       if (this.stopped) return;
     }
     const open = (await this.readSwaps()).filter((s) => !mints || mints.includes(s.mint));
+    if (!mints) for (const id of this.swapAsk.keys()) if (!open.some((s) => s.id === id)) this.swapAsk.delete(id);
     let again = 0;
     const later = (ms: number) => { again = again ? Math.min(again, ms) : ms; };
     // One swap at a time under its mint's lock, read again inside it: the user's own payments there go in between.
     for (const { id, mint } of open) {
+      // A mint that has not answered for a while is asked less and less often; a wallet's removal asks it now.
+      const pace = this.swapAsk.get(id);
+      if (pace && Date.now() < pace.at && !mints) { later(pace.at - Date.now()); continue; }
       await this.locked(mint, async () => {
         let swap = await openRow(STORES.swaps, await wrap<PendingSwap | undefined>((await store(STORES.swaps, "readonly")).get(id)));
         if (!swap) return;
@@ -1385,6 +1391,7 @@ export class CashuWallet {
             await this.putSwap(swap);
           }
           const outcome = await this.swapOutcome(swap);
+          this.swapAsk.delete(id);
           if (outcome.state === "open") {
             // Its inputs went back, and an hour on the mint still cannot say more: nothing of it is held here.
             if (swap.released && Date.now() >= swap.createdAt + SWAP_WATCH_MS) { await this.dropSwap(swap, new Set()); return; }
@@ -1460,7 +1467,13 @@ export class CashuWallet {
           // Mint unreachable, or its answer was an error: asked again on the next round. One that holds nothing
           // any more is not asked about past its hour.
           if (swap.released && Date.now() >= swap.createdAt + SWAP_WATCH_MS) await this.dropSwap(swap, new Set()).catch(() => {});
-          else later(swap.released ? SWAP_SLOW_POLL_MS : SWAP_POLL_MS);
+          else if (swap.released) later(SWAP_SLOW_POLL_MS);
+          else {
+            // Every 30 s while a request may still reach the mint, then less and less often, as melts are.
+            const wait = Date.now() < swapOverdueAt(swap) ? SWAP_POLL_MS : Math.min((this.swapAsk.get(id)?.wait ?? SWAP_POLL_MS) * 2, SWAP_SLOW_POLL_MS);
+            this.swapAsk.set(id, { at: Date.now() + wait, wait });
+            later(wait);
+          }
         }
       }).catch(() => { later(SWAP_POLL_MS); });
     }
