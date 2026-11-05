@@ -359,4 +359,19 @@ describe("resolving a did:dht", () => {
     const deactivated = async () => ({ document: net.document, metadata: { versionId: "1", updated: "", deactivated: true as const }, relay: "x" });
     await expect(resolveDid(net.didDht, { fetch: net.fetch, dht: deactivated })).rejects.toThrow(/deactivated/);
   });
+
+  it("marks relays it could not read as this side's network, not the DID's record: none reached, or none answering", async () => {
+    const net = dhtNetwork();
+    net.publish(net.document);
+    const down: IdentityFetch = async () => { throw new TypeError("Failed to fetch"); };
+    await expect(resolveDid(net.didDht, { fetch: down })).rejects.toThrow(IdentityCheckUnavailable);
+    clearDidCache();
+    const failing: IdentityFetch = async () => ({ status: 503, contentType: "", text: "", bytes: new Uint8Array() });
+    await expect(resolveDid(net.didDht, { fetch: failing })).rejects.toThrow(IdentityCheckUnavailable);
+    // A relay that answers "not here" is an answer about the DID.
+    clearDidCache();
+    const missing = await resolveDid(`did:dht:${createIdentity().pubKeyZ32}`, { fetch: net.fetch }).catch((e: unknown) => e);
+    expect(missing).not.toBeInstanceOf(IdentityCheckUnavailable);
+    expect(String(missing)).toMatch(/No document is published/);
+  });
 });
