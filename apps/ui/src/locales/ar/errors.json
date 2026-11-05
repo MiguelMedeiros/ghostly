@@ -83,6 +83,8 @@
     "fedimintNotInvite": "هذا ليس رمز دعوة Fedimint: فهو يبدأ بـ fed1",
     "fedimintRealOnTestnet": "يحتفظ هذا الاتحاد ببيتكوين حقيقي",
     "fedimintRealOnTestnetNext": "أضفه إلى محفظة Fedimint على Mainnet.",
+    "fedimintRedeemUnheard": "لم يرد الاتحاد بشأن هذه الأوراق",
+    "fedimintRedeemUnheardNext": "إذا لم تظهر في رصيدك قريبًا، فالصقها مرة أخرى.",
     "fedimintTestOnMainnet": "هذا الاتحاد على {{chain}}، وهي شبكة تجريبية",
     "fedimintTestOnMainnetNext": "أضفه إلى محفظة Fedimint على Testnet.",
     "feeAboveLimit": "الرسوم تتجاوز الحد الذي وضعته",
