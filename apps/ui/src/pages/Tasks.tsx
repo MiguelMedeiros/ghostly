@@ -150,6 +150,7 @@ export function Tasks() {
   const [tab, setTab] = useState(0);
   const [clearedAt, setClearedAt] = useState(readClearedAt);
   const boardRef = useRef<HTMLDivElement>(null);
+  const tabsRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
   const tabsId = useId();
   const now = useMinuteClock(pageRef);
@@ -169,6 +170,7 @@ export function Tasks() {
   };
 
   // A phone: the column on screen is the chosen tab's; a swipe to another column chooses its tab.
+  const motion = (smooth = true): ScrollBehavior => smooth && !window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "smooth" : "auto";
   // The column a tab's slide is on its way to: the columns it passes on the way are not chosen (each would be, for a
   // frame, and the chosen one stay inert until the slide was half way). For a second at most, and a touch on the board
   // ends it: the board's place then chooses again.
@@ -177,9 +179,9 @@ export function Tasks() {
     setTab(index);
     const scroller = boardRef.current;
     const column = scroller?.querySelectorAll<HTMLElement>("[data-board-column]")[index];
-    const slide = smooth && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    sliding.current = slide ? { to: index, until: performance.now() + 1000 } : undefined;
-    if (scroller && column) scroller.scrollTo?.({ left: column.offsetLeft - scroller.offsetLeft, behavior: slide ? "smooth" : "auto" });
+    const behavior = motion(smooth);
+    sliding.current = behavior === "smooth" ? { to: index, until: performance.now() + 1000 } : undefined;
+    if (scroller && column) scroller.scrollTo?.({ left: column.offsetLeft - scroller.offsetLeft, behavior });
   };
   // Heard on the board itself, not by an effect that looks for it once: the page draws the board only when the cards
   // have been read, after its first render, and an effect that ran before then never heard a swipe.
@@ -198,6 +200,8 @@ export function Tasks() {
     }
     sliding.current = undefined;
     setTab(index);
+    // The tab row scrolls too, or the chosen tab of a far column stays off screen (a tap shows it by focusing it).
+    if (index !== at) tabsRef.current?.querySelectorAll<HTMLElement>("[role=tab]")[index]?.scrollIntoView?.({ block: "nearest", inline: "nearest", behavior: motion() });
   };
   const settle = (event: UIEvent<HTMLDivElement>) => {
     if (!phone) return;
@@ -290,8 +294,8 @@ export function Tasks() {
               )}
               {(filter.trim() || tag) && !model.shown && <p data-testid="tasks-no-match" className="m-0 shrink-0 px-4 pt-3 text-center text-xs text-text-muted">{t("cards.board.noMatch")}</p>}
               {phone && (
-                <div role="tablist" aria-label={t("cards.board.columns")} data-testid="tasks-tabs" onKeyDown={tabKeys}
-                  className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-2 py-1.5 [scrollbar-width:none]">
+                <div ref={tabsRef} role="tablist" aria-label={t("cards.board.columns")} data-testid="tasks-tabs" onKeyDown={tabKeys}
+                  className="flex shrink-0 scroll-px-2 gap-1 overflow-x-auto border-b border-border px-2 py-1.5 [scrollbar-width:none]">
                   {model.groups.map((group, i) => (
                     <button key={group.id} type="button" role="tab" id={`${tabsId}-${i}`} aria-selected={i === at} aria-controls={`${tabsId}-${i}-panel`} tabIndex={i === at ? 0 : -1}
                       data-testid="tasks-tab" data-column={group.id} onClick={() => toTab(i)}
