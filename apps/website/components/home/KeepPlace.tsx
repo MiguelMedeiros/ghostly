@@ -16,18 +16,19 @@ const PARTS = [".scene-visual, .scene-static-figure", TITLE, STEP, STEPS, ".eyeb
 
 /**
  * One element on the way from what is at the middle of the screen up to the page, the point of it to keep (`f` of
- * the way down it) and where on the screen that point was. `el` is null for a mark kept over a reload.
+ * the way down it) and where on the screen that point was, in a window `h` high (a window that changed height puts it
+ * as far down the new one: the middle stays the middle). `el` is null for a mark kept over a reload.
  * `pinned`: it was held on screen while the page scrolled under it (the film's picture and copy, in `.scene-sticky`
  * once their chapter has reached the top), so where it is says nothing about how far into its chapter the reader
  * is: the chapter itself does.
  */
-type Mark = { el: Element | null; id: string | null; f: number; at: number; home: string | null; part: string | null; i: number; pinned: boolean };
+type Mark = { el: Element | null; id: string | null; f: number; at: number; h: number; home: string | null; part: string | null; i: number; pinned: boolean };
 
 function marked(el: Element, f: number, at: number): Mark {
   const section = el.closest("section[id]");
   const part = PARTS.find((sel) => el.matches(sel)) ?? null;
   const i = section && part ? Array.prototype.indexOf.call(section.querySelectorAll(part), el) : -1;
-  return { el, id: el.id || null, f, at, home: section?.id ?? null, part, i, pinned: false };
+  return { el, id: el.id || null, f, at, h: window.innerHeight, home: section?.id ?? null, part, i, pinned: false };
 }
 
 /** Whether the element holds still on screen as the page scrolls: fixed, or sticky and held away from where its
@@ -117,7 +118,8 @@ function hold(marks: Mark[]) {
     // part of the chapter is where the reader is.
     if (!el || !el.getClientRects().length || (m.pinned && inSticky(el))) continue;
     const r = el.getBoundingClientRect();
-    const by = r.top + m.f * r.height - m.at;
+    const at = m.h > 0 ? (m.at * window.innerHeight) / m.h : m.at;
+    const by = r.top + m.f * r.height - at;
     if (Math.abs(by) >= 1) window.scrollBy({ top: by, behavior: "instant" });
     return;
   }
