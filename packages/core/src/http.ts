@@ -49,6 +49,9 @@ export function parseLocalTarget(input: string): LocalTarget {
     throw new Error("Only services on this machine can be shared (localhost, 127.0.0.1 or [::1])");
   }
   if (url.search || url.hash) throw new Error("The target cannot contain a query or fragment");
+  // Port 0 asks the system for any free port when listening: nothing ever answers on it, so every contact who opened
+  // the service got a failure that said nothing about why.
+  if (url.port === "0") throw new Error("Port 0 is not a port a web app can listen on");
   return { origin: url.origin, basePath: url.pathname.replace(/\/+$/, "") };
 }
 
@@ -224,6 +227,30 @@ export function viewerResponseHeaders(headers: HeaderList): HeaderList {
       out.push([name, value]);
     }
   }
+  return out;
+}
+
+/**
+ * Ghostly's connection policy for a contact's app in a viewer: its requests and forms reach only its own origin, the
+ * contact's service; its scripts, pictures, frames and the rest its own origin and public https sites (and inline,
+ * data: and blob: content), never plain http, so not a service on this machine or the local network. The same value as
+ * Desktop's `SERVICE_CSP` (apps/desktop/src/viewer.rs) and `OPENED_SERVICE_CSP` (`service open`,
+ * packages/cli/src/services.ts).
+ */
+export const VIEWER_SERVICE_CSP = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
+
+/**
+ * `headers` with Ghostly's policy after the contact's own, all in one `content-security-policy` joined by commas: a
+ * browser enforces every policy of the list, so the contact's can narrow Ghostly's but never widen it.
+ */
+export function withViewerPolicy(headers: HeaderList): HeaderList {
+  const policies: string[] = [];
+  const out: HeaderList = [];
+  for (const [name, value] of headers) {
+    if (name.toLowerCase() === "content-security-policy") policies.push(value);
+    else out.push([name, value]);
+  }
+  out.push(["content-security-policy", [...policies, VIEWER_SERVICE_CSP].join(", ")]);
   return out;
 }
 

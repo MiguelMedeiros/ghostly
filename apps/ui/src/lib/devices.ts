@@ -4,9 +4,11 @@ import { getBrowserHost } from "@ghostly/browser/host";
 import type { EnrollFailure } from "@ghostly/browser/devices/enroll";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import type { WalletView } from "@ghostly/browser/shared/types";
-import { useI18n, type TranslationKey } from "../contexts/I18nContext";
+import { useI18n, type Translate, type TranslationKey } from "../contexts/I18nContext";
+import { englishT } from "../locales/translate";
 import { DEVICE_INVITE_LIFETIME_S, TURN_NAME_BYTES, inviteLink, inviteQrSegments, readInviteCode, sanitizeDisplayText } from "@ghostly/core";
 import { utf8Bytes } from "./fitText";
+import { reloadPage } from "./layerHistory";
 import { handOverUnlock } from "./lockHandover";
 import { activeProfileId, createProfile, currentProfile, settingsKeyFor, switchProfile } from "./profiles";
 import { protocolLinkCode } from "./url";
@@ -32,19 +34,23 @@ export function lockPasswordProblem(password: string, again: string, deviceSet: 
   return null;
 }
 
-/** A first guess at this device's name, for the person to change: the kind of device, in its 16 bytes (`fitsDeviceName`). */
-export function defaultDeviceName(env: { userAgent: string; platform?: string; maxTouchPoints?: number; desktop?: boolean } = typeof navigator === "undefined" ? { userAgent: "" } : { userAgent: navigator.userAgent, platform: navigator.platform, maxTouchPoints: navigator.maxTouchPoints }): string {
+/**
+ * A first guess at this device's name, for the person to change: the kind of device, in its 16 bytes (`fitsDeviceName`),
+ * in the words of `t`'s language. The system's and the browser's own names stay as they are ("iPhone", "Chrome").
+ */
+export function defaultDeviceName(env: { userAgent: string; platform?: string; maxTouchPoints?: number; desktop?: boolean } = typeof navigator === "undefined" ? { userAgent: "" } : { userAgent: navigator.userAgent, platform: navigator.platform, maxTouchPoints: navigator.maxTouchPoints }, t: Translate = englishT): string {
   const ua = env.userAgent;
+  const fallback = t("devices.defaultName.browser");
   if (/iPhone/.test(ua)) return "iPhone";
   if (/iPad/.test(ua) || (env.platform === "MacIntel" && (env.maxTouchPoints ?? 0) > 1)) return "iPad";
-  if (/Android/.test(ua)) return /Mobile/.test(ua) ? "Phone" : "Tablet";
+  if (/Android/.test(ua)) return t(/Mobile/.test(ua) ? "devices.defaultName.phone" : "devices.defaultName.tablet");
   const os = /Mac OS X|Macintosh/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : /Linux|X11|CrOS/.test(ua) ? "Linux" : "";
-  if (env.desktop) return os ? `${os} app` : "Desktop";
+  if (env.desktop) return [os && t("devices.defaultName.app", { os }), os].find((name) => name && fitsDeviceName(name)) || t("devices.defaultName.desktop");
   const browser = /Firefox\//.test(ua) ? "Firefox" : /Edg\//.test(ua) ? "Edge" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "";
   // The longest of these that fits the 16 bytes a name has, never one cut in the middle of a word:
   // "Chrome on Mac", "Chrome, Windows", then the system alone.
-  const names = browser && os ? [`${browser} on ${os}`, `${browser}, ${os}`, os, browser] : [browser || os || "Browser"];
-  return names.find(fitsDeviceName) ?? "Browser";
+  const names = browser && os ? [t("devices.defaultName.on", { browser, os }), t("devices.defaultName.short", { browser, os }), os, browser] : [browser || os || fallback];
+  return names.find(fitsDeviceName) ?? fallback;
 }
 
 /**
@@ -169,12 +175,13 @@ const lockHashOf = (id: string): string | null => {
 
 /**
  * Starts the app again into the gate: where the engine outlives the page (the extension), it starts again too.
- * `keepUnlocked`: the lock this tab passed carries across this one reload (a device just added, `handOverUnlock`).
+ * `keepUnlocked`: the lock this tab passed carries across this one reload (a device just added, one that took over or
+ * read at start that it was replaced, `handOverUnlock`). Never from a page whose lock is closed (`useLockPassedNow`).
  */
 export async function reloadIntoGate(options: { keepUnlocked?: boolean } = {}): Promise<void> {
   try { await getBrowserHost().restartEngine?.(); } catch { /* the reload says what is wrong now */ }
   if (options.keepUnlocked) handOverUnlock(activeProfileId(), lockHashOf(activeProfileId()));
-  window.location.reload();
+  reloadPage();
 }
 
 /** What the engine's `takeover-<reason>:` errors say to the person. */
@@ -198,12 +205,33 @@ export function removeErrorKey(error: unknown): TranslationKey | null {
   return reason === "busy" ? "devices.remove.fail.busy" : reason === "offline" ? "devices.fail.offline" : "devices.remove.fail.failed";
 }
 
+/** What a refused rename (`rename-<reason>:`) says; null for an error the engine did not word as one. */
+export function renameErrorKey(error: unknown): TranslationKey | null {
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const reason = message.match(/^rename-([a-z-]+):/)?.[1];
+  if (!reason) return null;
+  if (reason === "name" || reason === "long") return "devices.rename.fail.name";
+  if (reason === "busy") return "devices.remove.fail.busy";
+  if (reason === "offline") return "devices.fail.offline";
+  if (reason === "unreachable") return "devices.fail.unreachable";
+  if (reason === "replaced") return "devices.fail.replaced";
+  return "devices.remove.fail.failed";
+}
+
 /** Names as a list a person reads in their language: "Desktop and Phone", "Desktop, Phone and Tablet". */
 export function listNames(names: readonly string[], language: string): string {
   // Not in this build's TypeScript library, but in every browser the app runs in.
   const ListFormat = (Intl as unknown as { ListFormat?: new (locale: string, options: object) => { format(list: readonly string[]): string } }).ListFormat;
   try { if (ListFormat) return new ListFormat(language, { style: "long", type: "conjunction" }).format(names); } catch { /* below */ }
   return names.join(", ");
+}
+
+/**
+ * The list of names for a sentence, each to be put back in its own direction: `[list, named]`, the list with a stand-in
+ * per name and the names by stand-in, for `fillNames(t(key, { devices: list }), named)` (lib/fillNodes.tsx).
+ */
+export function listNamesFor(names: readonly string[], language: string): [string, Record<string, string>] {
+  return [listNames(names.map((_, i) => `{{name${i}}}`), language), Object.fromEntries(names.map((name, i) => [`name${i}`, name]))];
 }
 
 const JOIN_REQUEST = "ghostly_join_device";

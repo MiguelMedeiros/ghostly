@@ -13,18 +13,26 @@
     "turnBack": "Tarjetas"
   },
   "delete": "Eliminar",
+  "deleteChatCallOn": "Hay una llamada en este chat. Termínala primero y luego elimina el chat.",
   "deleteChatLocal": "Se eliminarán el chat y su historial de este dispositivo, no la copia de tu contacto.",
   "deleteChatTitle": "¿Eliminar chat?",
   "error": "Error",
   "goHome": "Ir al inicio",
   "loading": "Cargando...",
   "moreInfo": "Más información",
+  "needsYou": {
+    "mark": "requiere atención",
+    "show": "Ver",
+    "title": "Te espera"
+  },
+  "notCopied": "No se copió",
   "save": "Guardar",
   "size": {
     "b": "{{n}} B",
     "gb": "{{n}} GB",
     "kb": "{{n}} KB",
-    "mb": "{{n}} MB"
+    "mb": "{{n}} MB",
+    "tb": "{{n}} TB"
   },
   "success": "Éxito",
   "unnamedContact": "Contacto · {{key}}",

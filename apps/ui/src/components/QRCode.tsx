@@ -1,6 +1,9 @@
 import { QRCodeSVG } from "qrcode.react";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../contexts/I18nContext";
+import { useSameValue } from "../hooks/useSameValue";
+import { copyText } from "../lib/shareLink";
+import { CopiedStatus } from "./chat/LinkQrDialog";
 
 interface QRCodeDisplayProps {
   /** What Copy and Share hand over. */
@@ -20,30 +23,24 @@ export function QRCodeDisplay({ value, qr, label, copyLabel }: QRCodeDisplayProp
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
 
+  const canShare = typeof navigator.share === "function";
+  // A refused copy leaves the link on screen, to select and copy by hand.
+  const [refused, setRefused] = useState(false);
+  // qrcode.react encodes again for every other array, even one with the same segments: the invite card and Add device
+  // (each second, for its time left) hand a new one at every draw.
+  const encoded = useSameValue(qr ?? value);
+
   const handleCopy = async () => {
     setError(""); setCopied(false); clearTimeout(copiedTimer.current);
     try {
-      try {
-        await navigator.clipboard.writeText(value);
-      } catch {
-        const previous = document.activeElement as HTMLElement | null;
-        const textarea = document.createElement("textarea");
-        textarea.value = value;
-        textarea.style.position = "fixed"; textarea.style.opacity = "0";
-        document.body.appendChild(textarea);
-        try {
-          textarea.select();
-          if (!document.execCommand("copy")) throw new Error("Copy unavailable");
-        } finally {
-          textarea.remove();
-          if (previous?.isConnected) previous.focus();
-        }
-      }
+      await copyText(value);
       if (currentValue.current !== value) return;
-      setCopied(true);
+      setRefused(false); setCopied(true);
       copiedTimer.current = setTimeout(() => setCopied(false), 2000);
     } catch {
-      if (currentValue.current === value) setError(t("invite.copyFailed"));
+      if (currentValue.current !== value) return;
+      setRefused(true);
+      setError(t(canShare ? "invite.copyFailedShare" : "invite.copyFailed"));
     }
   };
 
@@ -56,7 +53,7 @@ export function QRCodeDisplay({ value, qr, label, copyLabel }: QRCodeDisplayProp
       )}
       <div data-testid="invite-qr" className="bg-white p-4 rounded-xl max-w-full [&_svg]:max-w-full [&_svg]:h-auto">
         <QRCodeSVG
-          value={qr ?? value}
+          value={encoded}
           size={232}
           marginSize={2}
           title={t("invite.qrTitle")}
@@ -65,14 +62,15 @@ export function QRCodeDisplay({ value, qr, label, copyLabel }: QRCodeDisplayProp
           level="M"
         />
       </div>
-      <button onClick={() => void handleCopy()} aria-label={copied ? t("common.copied") : copyLabel ?? t("invite.copy")}
+      <button onClick={() => void handleCopy()}
         className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-panel-header cursor-pointer hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-alt">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
           <rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3"/>
         </svg>
-        <span role="status">{copied ? t("common.copied") : copyLabel ?? t("invite.copy")}</span>
+        {copied ? t("common.copied") : copyLabel ?? t("invite.copy")}
       </button>
-      {typeof navigator.share === "function" && <button onClick={() => {
+      <CopiedStatus copied={copied} />
+      {canShare && <button onClick={() => {
         setError("");
         void navigator.share({text: value}).catch((cause: unknown) => {
           if (!(cause instanceof DOMException && cause.name === "AbortError")) setError(t("invite.shareFailed"));
@@ -82,6 +80,8 @@ export function QRCodeDisplay({ value, qr, label, copyLabel }: QRCodeDisplayProp
         {t("tabs.share")}
       </button>}
       {error && <p role="alert" className="text-xs text-danger">{error}</p>}
+      {refused && <textarea readOnly value={value} dir="ltr" rows={3} aria-label={t("chat.entity.link")} data-testid="qr-copy-field" onFocus={(event) => event.currentTarget.select()}
+        className="w-full min-w-0 resize-none break-all rounded-lg bg-input-bg px-3 py-2 font-mono text-xs text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent" />}
     </div>
   );
 }

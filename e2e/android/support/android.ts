@@ -1,7 +1,8 @@
 import { test as base, expect, type Page, type TestInfo } from "@playwright/test";
 import { _android, type AndroidDevice } from "playwright";
 import { execFileSync } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { openPeer, type Peer } from "../../support/fixtures";
 import { LocalRelay } from "../../support/relay";
 
@@ -143,8 +144,43 @@ type WorkerFixtures = {
   android: { adb: Adb; device: AndroidDevice } | null;
 };
 
-/** The device, or the test skipped: a machine with no emulator runs none of these. */
-function needDevice(android: WorkerFixtures["android"]): { adb: Adb; device: AndroidDevice } {
+/**
+ * A device lost mid-run (the emulator's process died): noted once, in the run's output folder (emptied at each run's
+ * start), so the specs after it are skipped with where it died instead of each failing at `adb install`.
+ */
+const lostNote = (outputDir: string) => join(outputDir, "device-lost.json");
+
+interface Lost {
+  testId: string;
+  where: string;
+}
+
+function readLost(outputDir: string): Lost | null {
+  try {
+    return JSON.parse(readFileSync(lostNote(outputDir), "utf8")) as Lost;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * When the device is gone after (or during) a test: noted for the specs after it, and the error that test fails with.
+ * Null while adb still has it.
+ */
+function lostDuring(adb: Adb, testInfo: TestInfo): Error | null {
+  const state = adb.tryRun("get-state");
+  if (state.ok || !/not found|offline|no devices/i.test(state.out)) return null;
+  const where = `${relative(testInfo.project.testDir, testInfo.file)}:${testInfo.line} (${testInfo.title})`;
+  writeFileSync(lostNote(testInfo.project.outputDir), JSON.stringify({ testId: testInfo.testId, where } satisfies Lost));
+  return new Error(`The emulator ${adb.serial} died during ${where}: adb says "${state.out.trim()}". The specs after it are skipped; the run's logcat (test-results/android-run on CI) has its last lines.`);
+}
+
+/** The device, or the test skipped: a machine with no emulator runs none of these, nor a run that lost its device. */
+function needDevice(android: WorkerFixtures["android"], testInfo: TestInfo): { adb: Adb; device: AndroidDevice } {
+  const lost = readLost(testInfo.project.outputDir);
+  // The retry of the test it died in fails again (a skip there would count it as flaky, and the run as passed).
+  if (lost?.testId === testInfo.testId) throw new Error(`The emulator died during this test's first run (${lost.where}): not run again`);
+  base.skip(!!lost, `The emulator died during ${lost?.where}: not run`);
   base.skip(!android, process.env.CI
     ? "no Android device or emulator (adb devices)"
     : "no device named: E2E_ANDROID_SERIAL=<adb serial> (the specs clear the app's data on it); see e2e/android/playwright.config.ts");
@@ -247,8 +283,8 @@ async function collect(app: AndroidApp | null, adb: Adb, device: AndroidDevice, 
 }
 
 export const test = base.extend<Fixtures, WorkerFixtures>({
-  android: [async ({}, use) => {
-    const serial = chooseSerial();
+  android: [async ({}, use, workerInfo) => {
+    const serial = readLost(workerInfo.project.outputDir) ? null : chooseSerial();
     if (!serial) {
       await use(null);
       return;
@@ -273,8 +309,8 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
     relay.close();
   },
 
-  relayUrl: async ({ relay, android }, use) => {
-    const { adb } = needDevice(android);
+  relayUrl: async ({ relay, android }, use, testInfo) => {
+    const { adb } = needDevice(android, testInfo);
     const url = await relay.listen();
     adb.reverse(portOf(url));
     await use(url);
@@ -282,7 +318,7 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
   },
 
   app: async ({ android, relayUrl }, use, testInfo) => {
-    const { adb, device } = needDevice(android);
+    const { adb, device } = needDevice(android, testInfo);
     const iroh = irohRelay();
     if (iroh) adb.reverse(portOf(iroh));
     adb.run("shell", "am", "force-stop", PKG);
@@ -304,6 +340,8 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
       await useTestNetwork(page, relayUrl, iroh);
     } catch (error) {
       // The start itself failed: what the device said is all there is to go on.
+      const lost = lostDuring(adb, testInfo);
+      if (lost) throw lost;
       await collect(null, adb, device, testInfo);
       throw error;
     }
@@ -319,6 +357,9 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
       foreground: () => void adb.run("shell", "am", "start", "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER", "-n", ACTIVITY, "-f", "0x10200000"),
     };
     await use(app);
+    // No device left: nothing to collect, and the test fails with where it died (the specs after it skip).
+    const lost = lostDuring(adb, testInfo);
+    if (lost) throw lost;
     await collect(app, adb, device, testInfo);
     adb.tryRun("shell", "am", "force-stop", PKG);
     if (iroh) adb.unreverse(portOf(iroh));

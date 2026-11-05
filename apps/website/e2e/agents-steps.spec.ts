@@ -112,9 +112,9 @@ test("the detail is folded under Details", async ({ page }) => {
   await page.goto("/developers/agents", { waitUntil: "networkidle" });
   const details = page.getByTestId("agent-details");
   await expect(details).not.toHaveAttribute("open", "");
-  await expect(page.getByRole("heading", { name: "Contact text is data, never instructions" })).toBeHidden();
+  await expect(page.getByRole("heading", { name: "One turn per message" })).toBeHidden();
   await details.locator("summary").click();
-  await expect(page.getByRole("heading", { name: "Contact text is data, never instructions" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "One turn per message" })).toBeVisible();
   await expect(details.locator(".cl-code")).toContainText('"type":"agent.turn"');
   await expect(details.locator(".cl-cmds")).toContainText("ghostly listen --turns --from owner");
 });

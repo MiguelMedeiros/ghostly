@@ -221,6 +221,24 @@ describe("Pubky proofs: verify", () => {
     await expect(verify(net, s, { folder })).rejects.toThrow(/no records/);
   });
 
+  it("marks relays it could not read as this side's network, not the key's records: none reached, or none answering", async () => {
+    const net = new PubkyNet();
+    const me = net.user(net.homeserver());
+    const s = statementFor(me.pubKeyZ32);
+    net.write("hs.example.com", me.pubKeyZ32, pubkyProofPath(folder, s.id), s.text);
+    for (const relay of net.relays.keys()) net.down.add(relay);
+    await expect(verify(net, s, { folder })).rejects.toThrow(IdentityCheckUnavailable);
+    net.down.clear();
+    for (const relay of net.relays.keys()) net.status.set(new URL(relay).host, 503);
+    await expect(verify(net, s, { folder })).rejects.toThrow(IdentityCheckUnavailable);
+    // One relay that answers "not here" is an answer.
+    net.status.delete("pkarr.pubky.app");
+    net.relays.get("https://pkarr.pubky.app")!.clear();
+    const missing = await verify(net, s, { folder }).catch((e: unknown) => e);
+    expect(missing).not.toBeInstanceOf(IdentityCheckUnavailable);
+    expect(String(missing)).toMatch(/no records on the Pkarr relays/);
+  });
+
   it("refuses a homeserver that only publishes a private or Pkarr address", async () => {
     for (const target of ["localhost", "hs.internal", "192.168.1.10", createIdentity().pubKeyZ32]) {
       const net = new PubkyNet();
@@ -237,6 +255,13 @@ describe("Pubky proofs: verify", () => {
     net.publish(me, [{ name: `_other.${me.pubKeyZ32}`, priority: 0, target: createIdentity().pubKeyZ32 }]);
     await expect(verify(net, statementFor(me.pubKeyZ32), { folder })).rejects.toThrow(/names no homeserver/);
     await expect(provider.verify(statementFor("npub1notapubkykey"), { folder }, ctxOf(net))).rejects.toThrow(/not a Pubky key/);
+  });
+
+  it("blames the homeserver, not the person's key, when only the homeserver's key has no records", async () => {
+    const net = new PubkyNet();
+    const me = net.user(createIdentity());
+    await expect(verify(net, statementFor(me.pubKeyZ32), { folder })).rejects.toThrow("The homeserver of this Pubky key has no records on the Pkarr relays");
+    await expect(verify(net, statementFor(createIdentity().pubKeyZ32), { folder })).rejects.toThrow("This Pubky key has no records on the Pkarr relays");
   });
 
   it("reads relay answers bounded: an oversized one does not count", async () => {

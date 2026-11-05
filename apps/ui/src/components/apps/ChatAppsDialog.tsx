@@ -50,6 +50,9 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
       // Already running in this chat, and shown again: the contact was told when it opened.
       const failed = shown === "shown" ? null : await sendAppCard(linkId, app, true);
       if (failed) throw new Error(failed);
+      // The panel closed while the card was on its way (an Escape there) and gave the focus back to Open, gone with this
+      // dialog: the chat's message field has it.
+      if (ref.current?.contains(document.activeElement)) document.querySelector<HTMLElement>(".chat-column textarea")?.focus({ preventScroll: true });
       onClose();
     } catch (e) { setError(appErrorText(e, t)); } finally {
       setBusy(null);
@@ -70,24 +73,29 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
         <div className="bg-surface rounded-xl divide-y divide-border">
           {installed === null ? <p className="px-4 py-3 text-xs text-text-muted">{t("apps.page.loading")}</p>
             : installed.length === 0 && builtIns.length === 0 ? <p className="px-4 py-3 text-xs text-text-muted" data-testid="chat-apps-none">{t("apps.composer.none")}</p>
+              // Open goes under the name when both don't fit (a large text size on a phone): two apps' Opens stay told apart.
               : installed.map((app) => (
-                <div key={app.ref} className="flex items-center gap-3 px-4 py-3" data-testid="chat-app" data-ref={app.ref}>
-                  <AppIcon size={36} installed={app} />
-                  <div className="min-w-0 flex-1">
-                    <p dir="auto" className="text-sm text-text-primary truncate">{app.title}</p>
-                    <p dir="auto" className="text-xs text-text-muted truncate">{app.run.status === "ok" ? app.tagline : t(app.run.status === "needs-files" ? "apps.app.needsFiles" : "apps.app.stopped")}</p>
+                <div key={app.ref} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3" data-testid="chat-app" data-ref={app.ref}>
+                  <div className="flex items-center gap-3 min-w-0 flex-[1_1_12rem]">
+                    <AppIcon size={36} installed={app} />
+                    <div className="min-w-0 flex-1">
+                      <p dir="auto" className="text-sm text-text-primary truncate">{app.title}</p>
+                      <p dir="auto" className="text-xs text-text-muted truncate">{app.run.status === "ok" ? app.tagline : t(app.run.status === "needs-files" ? "apps.app.needsFiles" : "apps.app.stopped")}</p>
+                    </div>
                   </div>
-                  <Button variant="primary" data-testid="chat-app-open" disabled={!opens(app) || busy !== null} loading={busy === app.ref} onClick={() => void open(app)}>{t("apps.page.open")}</Button>
+                  <Button variant="primary" data-testid="chat-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: app.title })} disabled={!opens(app) || busy !== null} loading={busy === app.ref} onClick={() => void open(app)}>{t("apps.page.open")}</Button>
                 </div>
               ))}
           {installed !== null && builtIns.map((app) => (
-            <div key={app.ref} className="flex items-center gap-3 px-4 py-3" data-testid="chat-built-in-app" data-ref={app.ref}>
-              <AppIcon size={36} />
-              <div className="min-w-0 flex-1">
-                <p dir="auto" className="text-sm text-text-primary truncate">{app.title}</p>
-                <p dir="auto" className="text-xs text-text-muted truncate">{app.tagline}</p>
+            <div key={app.ref} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3" data-testid="chat-built-in-app" data-ref={app.ref}>
+              <div className="flex items-center gap-3 min-w-0 flex-[1_1_12rem]">
+                <AppIcon size={36} />
+                <div className="min-w-0 flex-1">
+                  <p dir="auto" className="text-sm text-text-primary truncate">{app.title}</p>
+                  <p dir="auto" className="text-xs text-text-muted truncate">{app.tagline}</p>
+                </div>
               </div>
-              <Button variant="primary" data-testid="chat-built-in-app-open" disabled={busy !== null} loading={busy === app.ref} onClick={() => setFirst(app)}>{t("apps.page.open")}</Button>
+              <Button variant="primary" data-testid="chat-built-in-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: app.title })} disabled={busy !== null} loading={busy === app.ref} onClick={() => setFirst(app)}>{t("apps.page.open")}</Button>
             </div>
           ))}
           <button type="button" data-testid="chat-apps-browse" onClick={() => { onClose(); nav.open("/apps"); }}

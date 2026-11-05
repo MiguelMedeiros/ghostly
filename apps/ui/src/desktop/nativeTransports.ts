@@ -12,7 +12,9 @@ type Event = { type: "open"; id: number; binding: NativeBinding; incoming: boole
   /** The endpoint itself ended in Rust (HyperDHT: its runtime died or dropped it). */
   | { type: "stopped" }
   /** The endpoint's own address came to be another (Iroh: it homed on a relay, the network changed). */
-  | { type: "address"; descriptor: unknown };
+  | { type: "address"; descriptor: unknown }
+  /** Iroh: the endpoint is connected to its home relay again after it lost it (a phone back from Doze). */
+  | { type: "relayBack" };
 
 /**
  * Ordered IPC writes and bounded buffering before the session installs its reader. A frame counts against the send
@@ -29,6 +31,8 @@ class NativeChannel implements FrameChannel {
   /** HyperDHT: the runtime said the connection's socket is full, and not yet that it has room. */
   private full = false;
   private waiting: (() => void)[] = [];
+  /** The frame Rust holds for this connection's exit (`parting`). */
+  private last: string | null = null;
   bufferedAmount = 0;
   readonly sendBudget = 120 * 1024;
   /** HyperDHT's frames mark a binary message (WISP 103 § Frames), and its sidecar and Rust carry one; Iroh's take text only. */
@@ -64,6 +68,18 @@ class NativeChannel implements FrameChannel {
     this.queue = this.queue.then(async () => {
       if (!this.closed) await invoke("paired_hyperdht_send", { endpointId: this.endpointId(), connectionId: this.id, seq, ...frame });
     }).catch(() => this.close()).finally(() => { this.bufferedAmount -= data.length; this.wake(); });
+  }
+  /**
+   * Rust holds `frame` for this connection and sends it as the app exits, after whatever the page sent: the page may be
+   * gone by then (a logout ends WebKit's processes with the app). In order with the sends, and only when it changed.
+   */
+  parting(frame: string | null) {
+    if (this.closed || frame === this.last) return;
+    this.last = frame;
+    const command = this.kind === "iroh" ? "paired_native_parting" : "paired_hyperdht_parting";
+    this.queue = this.queue.then(async () => {
+      if (!this.closed) await invoke(command, { endpointId: this.endpointId(), connectionId: this.id, text: frame });
+    }).catch(() => {});
   }
   /** HyperDHT: the runtime's socket for this connection is full (`true`) or has room again. */
   held(full: boolean) {
@@ -132,6 +148,7 @@ export async function createNativeEndpoint(seedB64: string, kind: "iroh" | "hype
       if (!endpoint) { moved = event.descriptor; return; }
       endpoint.descriptor = event.descriptor; endpoint.onDescriptor?.();
     }
+    else if (event.type === "relayBack") { if (!stopped) lifecycle.endpoint?.onRelayBack?.(); }
     else { connections.get(event.id)?.channel.close(); connections.delete(event.id); }
   };
   // In the spelling native Iroh names relays with (the trailing dot), as a contact's record and the dial use.
@@ -159,7 +176,7 @@ export async function createNativeEndpoint(seedB64: string, kind: "iroh" | "hype
   };
   let handler: NativeEndpoint["onConnection"] = null;
   const endpoint: NativeEndpoint = {
-    transport: kind === "iroh" ? "iroh/1" : "hyperdht/1", descriptor: moved ?? result.descriptor, onDescriptor: null,
+    transport: kind === "iroh" ? "iroh/1" : "hyperdht/1", descriptor: moved ?? result.descriptor, onDescriptor: null, onRelayBack: null,
     get onConnection() { return handler; },
     set onConnection(value) { handler = value; if (value) for (const bound of early.splice(0)) value(bound); },
     get onUnavailable() { return unavailable; },

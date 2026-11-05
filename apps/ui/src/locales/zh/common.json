@@ -13,18 +13,26 @@
     "turnBack": "卡片"
   },
   "delete": "删除",
+  "deleteChatCallOn": "此聊天中有通话。请先结束通话，再删除聊天。",
   "deleteChatLocal": "这将删除此设备上的聊天及其记录，不会删除联系人的副本。",
   "deleteChatTitle": "删除聊天？",
   "error": "错误",
   "goHome": "返回首页",
   "loading": "加载中...",
   "moreInfo": "更多信息",
+  "needsYou": {
+    "mark": "需要查看",
+    "show": "查看",
+    "title": "等你处理"
+  },
+  "notCopied": "未复制",
   "save": "保存",
   "size": {
     "b": "{{n}} B",
     "gb": "{{n}} GB",
     "kb": "{{n}} KB",
-    "mb": "{{n}} MB"
+    "mb": "{{n}} MB",
+    "tb": "{{n}} TB"
   },
   "success": "成功",
   "unnamedContact": "联系人 · {{key}}",

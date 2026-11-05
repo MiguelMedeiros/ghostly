@@ -142,6 +142,8 @@ export function memoryHost(runnerUrl = "/app-frame.html", netRunnerUrl: string |
       serve: async (linkId, ref, file) => {
         calls.push({ op: "ranges.serve", ref, linkId, key: file });
         if (host.serveResult) return { error: host.serveResult };
+        // A file served already answers the id it has, as the engine does.
+        for (const [id, held] of serves) if (held.linkId === linkId && held.ref === ref && held.file === file) return { serve: id };
         const serve = `serve${String(nextServe++).padStart(17, "0")}`;
         serves.set(serve, { linkId, ref, file });
         return { serve };

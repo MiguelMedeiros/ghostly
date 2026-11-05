@@ -7,7 +7,7 @@ import { STORES, store, transact, wrap } from "../src/shared/idb";
 import type { CashuWallet } from "../src/engine/wallet";
 import { CashuMintLightning, cashuMint, CASHU_MINT_SOURCE } from "../src/engine/paymentAdapters/providers/cashuMint";
 import type { LightningProvider, LightningProviderDescriptor } from "../src/engine/paymentAdapters/providers/lightning";
-import { LightningService, type LightningEvents, type LightningOp } from "../src/engine/paymentAdapters/providers/lightningService";
+import { LightningService, journaledPayment, type LightningEvents, type LightningOp } from "../src/engine/paymentAdapters/providers/lightningService";
 import { ProviderSources } from "../src/engine/paymentAdapters/providers/sources";
 import { FakeLightningProvider, fakeInvoice, fakeLightning } from "../src/engine/paymentAdapters/providers/testing";
 import type { ProviderDescriptor, ProviderNetwork } from "../src/engine/paymentAdapters/providers/types";
@@ -31,7 +31,7 @@ afterEach(async () => { for (const s of services.splice(0)) await s.stop(); });
 
 function service(provider: LightningProvider = new FakeLightningProvider({ settleMs: 600_000 }), extra: Partial<LightningProviderDescriptor> = {}) {
   const events = { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() } satisfies LightningEvents;
-  const cashu = { view: async () => ({ balance: 7, mints: [], history: [], feesPaid: 0 }) } as unknown as CashuWallet;
+  const cashu = { balance: async () => 7 } as unknown as CashuWallet;
   // Nothing secret to configure: no sealing (a 600k-round PBKDF2) on every set.
   const descriptor: LightningProviderDescriptor = { ...fakeLightning, fields: [], validate: undefined, create: async () => provider, ...extra };
   const lightning = new LightningService("testnet", () => [cashuMint, descriptor], () => ({ platform: "web", cashu }), events, CASHU_MINT_SOURCE);
@@ -191,7 +191,7 @@ describe("quoting an invoice to pay", () => {
     expect(pay).not.toHaveBeenCalled();
     await expect(lightning.quote(testInvoice({ sats: 10, prefix: "lntb" }))).resolves.toMatchObject({ amount: 10 });
     // The mints take it to the wallet, which refuses it unless a test mint pays (wallet.test.ts).
-    const wallet = { quoteInvoice: vi.fn(async () => ({ quote: "m1", mint: "https://testnut.cashu.space", amount: 10, feeReserve: 1 })), view: async () => ({ balance: 100 }) };
+    const wallet = { quoteInvoice: vi.fn(async () => ({ quote: "m1", mint: "https://testnut.cashu.space", amount: 10, feeReserve: 1 })), balance: async () => 100 };
     const mints = await ready(new CashuMintLightning(wallet as unknown as CashuWallet, "testnet"), { networks: ["testnet"] });
     await expect(mints.lightning.quote(testInvoice({ sats: 10, prefix: "lnbc" }))).resolves.toMatchObject({ mint: "https://testnut.cashu.space" });
     expect(wallet.quoteInvoice).toHaveBeenCalledWith(expect.stringMatching(/^lnbc10/), "testnet");
@@ -199,7 +199,7 @@ describe("quoting an invoice to pay", () => {
 
   it("names the Cashu mint that will pay when the source is the mints", async () => {
     const invoice = fakeInvoice(40, hash());
-    const wallet = { quoteInvoice: vi.fn(async () => ({ quote: "m1", mint: "https://mint.example", amount: 40, feeReserve: 2 })), view: async () => ({ balance: 100 }) };
+    const wallet = { quoteInvoice: vi.fn(async () => ({ quote: "m1", mint: "https://mint.example", amount: 40, feeReserve: 2 })), balance: async () => 100 };
     const mints = new CashuMintLightning(wallet as unknown as CashuWallet, "testnet");
     const { lightning } = await ready(mints, { networks: ["testnet"] });
     expect(await lightning.quote(invoice)).toMatchObject({ mint: "https://mint.example", feeReserve: 2, source: "fake-lightning" });
@@ -356,7 +356,7 @@ describe("a payment through the mints that the app was cut off from", () => {
       payQuote: vi.fn(async () => new Promise<boolean>(() => {})),
       meltQuoteState: vi.fn(async () => quoteState),
       meltInFlight: vi.fn(async () => inFlight),
-      view: async () => ({ balance: 100 }),
+      balance: async () => 100,
     };
     return { wallet, provider: new CashuMintLightning(wallet as unknown as CashuWallet, "testnet") };
   }
@@ -428,6 +428,22 @@ describe("a payment through the mints that the app was cut off from", () => {
     expect(await opOf(down.lightning, down.paymentHash)).toMatchObject({ state: "unknown" });
     expect(events.resolved).not.toHaveBeenCalled();
     expect(down.events.resolved).not.toHaveBeenCalled();
+  });
+
+  // A contact's request still marked as being paid at a restart is read against the journal (PaymentDesk.start).
+  it("the journal says what became of a request's payment: none left, one under way, or paid", async () => {
+    expect(await journaledPayment("req-1"), "nothing journaled: nothing left the wallet").toBeUndefined();
+    await journal(op({ paymentHash: "70", paymentId: "req-1", state: "failed" }));
+    await journal(op({ direction: "in", paymentHash: "71", paymentId: "req-1", state: "paid" }));
+    await journal(op({ paymentHash: "72", paymentId: "req-2", state: "paid" }));
+    expect(await journaledPayment("req-1"), "a failed one and our own invoice's are not a payment out").toBeUndefined();
+    for (const state of ["sending", "pending", "unknown"] as const) {
+      await journal(op({ paymentHash: "73", paymentId: "req-1", state }));
+      expect(await journaledPayment("req-1"), state).toBe("pending");
+    }
+    await journal(op({ paymentHash: "73", paymentId: "req-1", state: "paid" }));
+    expect(await journaledPayment("req-1")).toBe("paid");
+    expect(await journaledPayment("req-2")).toBe("paid");
   });
 });
 

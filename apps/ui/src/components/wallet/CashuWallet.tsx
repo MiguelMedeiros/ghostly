@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { paymentUri, type Bolt11Invoice, type PaymentReview as Review } from "@ghostly/core";
+import { parseEngineError, paymentUri, type Bolt11Invoice, type PaymentReview as Review } from "@ghostly/core";
 import type { WalletPlatform, WalletState } from "../../lib/platform";
 import { useCountUp } from "../../hooks/useCountUp";
 import { PaymentReview } from "../PaymentReview";
@@ -8,6 +8,7 @@ import { Actions, Address, Amount, Block, Button, Notice, Row, Section, Signed, 
 import { LightningAddressPay } from "./LightningAddressPay";
 import { SendScan } from "./SendScan";
 import { routeSend } from "../../lib/sendRoute";
+import { touchOnly } from "../../lib/touchOnly";
 import { RemoveMintConfirm } from "./RemoveMint";
 import { useRun } from "./run";
 import { ButtonGroup, InputGroup, Truncate } from "../layout";
@@ -16,12 +17,13 @@ import { LightningCardSettings } from "./LightningCardSettings";
 import { CASHU_MINT_SOURCE, holdsLess } from "../walletCardData";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { fillNodes } from "../../lib/fillNodes";
-import { satsIn } from "../NetworkTag";
+import { satsIn, unitFor } from "../NetworkTag";
 import { mintNetwork } from "@ghostly/browser/shared/mints";
 import { lightningStateLabel, paymentStateLabel } from "../paymentWords";
 import { formatAmount } from "../../lib/amount";
 import { formatAt } from "../../lib/time";
 import { problemLine, problemText } from "../../lib/problemText";
+import { exactText } from "../../lib/exactText";
 
 const TX_LABEL = {
   "lightning-in": "wallet.cashu.tx.lightningIn",
@@ -52,6 +54,9 @@ const noteText = (t: Translate, { kind, note = "" }: { kind: keyof typeof TX_LAB
   const key = ENGINE_NOTES[kind]?.[note];
   return key ? t(key) : note;
 };
+/** How often the Receive screen says again that it shows its invoice (the engine's watch lasts 90 s). */
+const INVOICE_WATCH_AGAIN_MS = 60_000;
+
 /** When a movement happened, as the history writes it ("Sep 30, 03:15 PM"; "30 de set., 15:15" in Portuguese). */
 const MOVED_AT: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" };
 
@@ -68,7 +73,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
   const [action, setAction] = useState<Action>("receive");
   // The amount takes the focus when the person chose this wallet (`focusAmount`), chose Receive here or pressed Done.
   const [actionChosen, setActionChosen] = useState(false);
-  const { busy, running, error, setError, run } = useRun();
+  const { busy, running, error, failed, setError, run } = useRun();
   const [amount, setAmount] = useState("");
   const [invoice, setInvoice] = useState<string | null>(null);
   const [paymentHash, setPaymentHash] = useState<string | undefined>();
@@ -78,6 +83,14 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
   const [invoiceExpiresAt, setInvoiceExpiresAt] = useState<number | null>(null);
   const [invoiceExpired, setInvoiceExpired] = useState(false);
   const [payInput, setPayInput] = useState("");
+  /** What the person chose to pay on an invoice with no amount: it goes with the text it was typed for. */
+  const [payAmount, setPayAmount] = useState("");
+  /** Max was pressed and the amount not typed over: it comes down by the fee, as all the card holds leaves none for it. */
+  const maxed = useRef(false);
+  /** Send was just opened, and nothing given to it yet: on a phone its camera starts (`SendScan`), once. */
+  const [sendOpened, setSendOpened] = useState(false);
+  /** Done after paying an address takes its panel away with the button pressed: the keys go to the emptied field. */
+  const payField = useRef<HTMLTextAreaElement>(null);
   const [quote, setQuote] = useState<{ quote: string; mint: string; amount: number; feeReserve: number } | null>(null);
   /** The invoice the quote is for: its description shows in the review. */
   const [quoted, setQuoted] = useState<Bolt11Invoice | null>(null);
@@ -86,6 +99,12 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
   /** Real money: Pay opens the second step, and only it pays. */
   const [confirming, setConfirming] = useState(false);
   const [notice, setNotice] = useState("");
+  /** The backup was just copied: said below Copy backup, where it was pressed. */
+  const [copied, setCopied] = useState(false);
+  // On a phone the card is one long column: what Add, Make primary and Copy backup answer is said by them, below, not
+  // above the Mints section, off the screen.
+  const mintsFailed = failed === "add-mint" || failed === "primary";
+  const backupFailed = failed === "backup";
   const [mintUrl, setMintUrl] = useState("");
   /** The mint whose Remove was pressed: asked about below its row (the last one: the wallet's removal). */
   const [removingMint, setRemovingMint] = useState<string | null>(null);
@@ -108,6 +127,11 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
   const unit = satsIn(t, testnet ? "testnet" : "mainnet");
   // Test sats say so wherever an amount shows on a Testnet wallet: its invoice, its mints, what came in.
   const sats = (amount: number) => t("wallet.cards.amount", { amount: formatAmount(amount, t.language), unit });
+  // A redeemed token says what arrived and, at a mint that charges to take ecash in, what it kept: the face value
+  // the person was handed is the two together (agents#2255).
+  const redeemedLine = ({ amount, fee }: { amount: number; fee: number }) => fee > 0
+    ? t(testnet ? "wallet.cashu.tokenRedeemedFeeTest" : "wallet.cashu.tokenRedeemedFee", { count: amount, amount: formatAmount(amount, t.language), fee: formatAmount(fee, t.language) })
+    : t("wallet.cashu.redeemed", { amount: formatAmount(amount, t.language), unit });
   // Only this invoice's own receipt: other money of the same amount (a contact's ecash, a token taken back, a chat
   // request paid, test coins) is not a payment of it. A Lightning card's invoice is matched by its hash below.
   const mintPaid = !!invoiceQuote && state.history.some((tx) => tx.kind === "lightning-in" && tx.quote === invoiceQuote);
@@ -122,20 +146,41 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
     setSent(paid ? t("wallet.cashu.paid") : viaMint ? t("wallet.cashu.pendingMint") : t("wallet.lightning.pending"));
   }, "pay");
   /** The invoice's review: what paying it costs, from the mint or the source. */
-  const quoteFor = (invoice: Bolt11Invoice) => void run(async () => {
-    const got = await wallet.quoteInvoice(invoice.invoice, rail === "cashu" ? "cashu" : undefined);
+  // `chosen`: the amount typed for an invoice with no amount, which only the mints are asked.
+  const quoteFor = (invoice: Bolt11Invoice, chosen?: number) => void run(async () => {
+    setSendOpened(false);
+    const got = chosen === undefined ? await wallet.quoteInvoice(invoice.invoice, rail === "cashu" ? "cashu" : undefined) : await quoteChosen(invoice.invoice, chosen);
     setQuoted(invoice); setQuote(got);
   }, "send");
+  // A Max comes down to what the mint says leaves room for its fee, known only once it is asked: twice at most, as a
+  // fee may grow a little. An amount typed is the person's: it is refused, never lowered.
+  const quoteChosen = async (invoice: string, chosen: number) => {
+    for (let sats = chosen, again = maxed.current ? 2 : 0; ; again--) {
+      try {
+        const got = await wallet.quoteInvoice(invoice, "cashu", sats);
+        setPayAmount(String(sats));
+        return got;
+      } catch (cause) {
+        const refusal = parseEngineError(cause instanceof Error ? cause.message : String(cause));
+        const room = refusal?.code === "notEnoughForFee" ? Number(refusal.values.amount) : 0;
+        if (!again || room <= 0 || room >= sats) throw cause;
+        sats = room;
+      }
+    }
+  };
   // A scanned, pasted or pictured invoice with its amount goes straight to its review, as a phone wallet does; anything
   // else fills the field, where it is shown, asked about or refused as typed text is.
   const given = (text: string) => {
-    setError(""); setNotice(""); setPayInput(text);
+    setError(""); setNotice(""); setPayInput(text); setPayAmount(""); maxed.current = false;
     const found = routeSend(text);
     if (found.kind === "invoice") quoteFor(found.invoice);
   };
   // More than this card holds is never approved: the mint or the node would only refuse it afterwards.
   const over = quote ? holdsLess(rail, state, quote.amount) : undefined;
   const pasted = route.kind === "invoice" || route.kind === "no-amount" ? route.invoice : null;
+  // The mints take an amount for an invoice with none; any other source refuses one (WISP 203).
+  const choosing = route.kind === "no-amount" && viaMint;
+  const chosen = choosing && pasted && pasted.expiresAt * 1000 >= Date.now() ? Number(payAmount) : 0;
   /** A Lightning address or LNURL: resolved and paid step by step, through the same source. */
   const destination = route.kind === "destination" ? route.text : null;
   const destinationError = route.kind === "bad-destination" ? problemText(route.error, t).title : "";
@@ -159,6 +204,17 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
     const timer = setTimeout(() => setInvoiceExpired(true), Math.max(0, invoiceExpiresAt - Date.now()));
     return () => clearTimeout(timer);
   }, [invoice, invoiceExpiresAt]);
+  // While the invoice shows, its mint or source is asked about it every few seconds: the engine asks less and less about
+  // an invoice nobody looks at (agents#2447). Said again before the engine's watch (90 s) runs out.
+  const walletNow = useRef(wallet);
+  useEffect(() => { walletNow.current = wallet; });
+  useEffect(() => {
+    if (showing !== "invoice" || invoicePaid || !invoice) return;
+    const watch = () => void walletNow.current.watchInvoice?.(invoice)?.catch(() => {});
+    watch();
+    const timer = setInterval(watch, INVOICE_WATCH_AGAIN_MS);
+    return () => clearInterval(timer);
+  }, [showing, invoicePaid, invoice]);
 
   // The button pressed keeps the keys while it works (Button's `loading`, by the key `run` was given); the others wait,
   // disabled. A mint's question closed hands them back to its Remove, or (the mint gone) to the field that adds one.
@@ -181,7 +237,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
     if (invoicePaid && (!document.activeElement || document.activeElement === document.body)) doneButton.current?.focus();
   }, [invoicePaid]);
 
-  const choose = (next: Action) => { setAction(next); setActionChosen(true); setError(""); setNotice(""); setInvoice(null); setQuote(null); setQuoted(null); setConfirming(false); setSent(null); };
+  const choose = (next: Action) => { setAction(next); setActionChosen(true); setSendOpened(next === "send"); setError(""); setNotice(""); setCopied(false); setInvoice(null); setQuote(null); setQuoted(null); setConfirming(false); setSent(null); };
 
   return (
     <div className="space-y-6">
@@ -191,7 +247,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
             {/* Only the number isolated, as an invoice's card does: in a right-to-left page the unit's Latin "sats" was one
                 run with it, glued to it ("100,000sats"). The unit stays in the line's direction. */}
             <bdi className="text-4xl font-semibold tabular-nums">{formatAmount(testnet ? testShown : realShown, t.language)}</bdi>
-            <span className="text-text-muted text-sm ms-2">{unit}</span>
+            <span className="text-text-muted text-sm ms-2">{unitFor(t, unit, testnet ? testShown : realShown)}</span>
             {/* A Testnet wallet's whole balance is test sats; a test mint's sats never count in a Mainnet one. */}
             {testMint && !testnet && <span className="block text-xs text-warn-ink mt-1" data-testid="wallet-test-balance">{t("wallet.cashu.testBalance", { amount: formatAmount(testShown, t.language) })}</span>}
             {!!state.setAside && (
@@ -284,11 +340,11 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
                 )}
               </div>
             ) : (
-              <SendScan onText={given} disabled={busy}>
-              <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (isToken) void run(async () => { const received = await wallet.receiveToken(route.text); setPayInput(""); setNotice(t("wallet.cashu.redeemed", { amount: formatAmount(received, t.language), unit })); }, "send"); else if (route.kind === "invoice") quoteFor(route.invoice); }}>
-                <textarea data-testid="wallet-pay-input" className={`${input} font-mono text-xs resize-none`} rows={3} autoFocus
-                  placeholder={rail === "cashu" ? t("wallet.cashu.pastePlaceholder") : t("wallet.lightning.pastePlaceholder")} value={payInput} onChange={(e) => setPayInput(e.target.value)} />
-                {destination && <div className="bg-surface-alt rounded-xl p-3 text-text-primary" data-testid="wallet-lnurl"><LightningAddressPay key={destination} wallet={wallet} text={destination} via={rail === "cashu" ? "cashu" : undefined} onDone={() => setPayInput("")} /></div>}
+              <SendScan onText={given} disabled={busy} scanOnOpen={sendOpened}>
+              <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (isToken) void run(async () => { const received = await wallet.receiveToken(route.text); setPayInput(""); setNotice(redeemedLine(received)); }, "send"); else if (route.kind === "invoice") quoteFor(route.invoice); else if (route.kind === "no-amount" && chosen) quoteFor(route.invoice, chosen); }}>
+                <textarea ref={payField} data-testid="wallet-pay-input" className={`${input} font-mono text-xs resize-none`} rows={3} {...exactText} autoFocus={!touchOnly()}
+                  placeholder={rail === "cashu" ? t("wallet.cashu.pastePlaceholder") : t("wallet.lightning.pastePlaceholder")} value={payInput} onChange={(e) => { setNotice(""); setPayInput(e.target.value); setPayAmount(""); maxed.current = false; }} />
+                {destination && <div className="bg-surface-alt rounded-xl p-3 text-text-primary" data-testid="wallet-lnurl"><LightningAddressPay key={destination} wallet={wallet} text={destination} via={rail === "cashu" ? "cashu" : undefined} onDone={() => { setPayInput(""); payField.current?.focus(); }} /></div>}
                 {pasted && (
                   <p className="text-text-primary text-sm" data-testid="wallet-pay-preview">
                     <span className="text-accent">⚡</span> <b>{pasted.amountSat === null ? t("wallet.lightning.anyAmount") : sats(pasted.amountSat)}</b>
@@ -297,10 +353,16 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
                     {pasted.expiresAt * 1000 < Date.now() && <span className="text-danger"> · {t("wallet.lightning.expired")}</span>}
                   </p>
                 )}
-                {!destination && <Button type="submit" variant="primary" className="w-full" loading={running === "send"} disabled={busy || !payInput.trim() || (!isToken && route.kind !== "invoice")}>
-                  {busy ? t("wallet.cashu.working") : isToken ? t("wallet.cashu.redeem") : pasted?.amountSat ? t("wallet.cashu.payAmount", { amount: formatAmount(pasted.amountSat, t.language), unit }) : t("wallet.lightning.pay")}
+                {choosing && <Amount value={payAmount} onChange={(next) => { maxed.current = false; setPayAmount(next); }} unit={unit} testId="wallet-pay-amount" />}
+                {/* The line's dim is its text's only: Max keeps full-strength ink and a phone-sized target. */}
+                {choosing && <p className="text-xs m-0 flex flex-wrap items-center gap-2" data-testid="wallet-pay-balance">
+                  <span className="text-text-muted">{t("wallet.send.balance", { amount: formatAmount(state.balance, t.language), unit })}</span>
+                  {state.balance > 0 && <button type="button" className="min-h-6 max-md:min-h-11 rounded-md px-2.5 py-1 font-bold text-text-primary bg-surface-alt hover:bg-border cursor-pointer disabled:opacity-40" disabled={busy} data-testid="wallet-pay-max" onClick={() => { setPayAmount(String(state.balance)); maxed.current = true; }}>{t("wallet.send.max")}</button>}
+                </p>}
+                {!destination && <Button type="submit" variant="primary" className="w-full" loading={running === "send"} disabled={busy || !payInput.trim() || (!isToken && route.kind !== "invoice" && !chosen)}>
+                  {busy ? t("wallet.cashu.working") : isToken ? t("wallet.cashu.redeem") : chosen ? t("wallet.cashu.payAmount", { amount: formatAmount(chosen, t.language), unit }) : pasted?.amountSat ? t("wallet.cashu.payAmount", { amount: formatAmount(pasted.amountSat, t.language), unit }) : t("wallet.lightning.pay")}
                 </Button>}
-                {destinationError ? <Notice tone="error">{destinationError}</Notice> : route.kind === "no-amount" ? <Notice tone="error" testId="wallet-pay-no-amount">{t("wallet.send.noAmount")}</Notice> : route.kind === "refused" ? <Notice tone="error" testId="wallet-pay-refused">{t("payments.formats.unsupported")}</Notice>: route.kind === "unknown" ? <Notice tone="error">{t("wallet.lightning.notInvoice")}</Notice> : !destination && <Notice>{t("wallet.cashu.contactHint")}</Notice>}
+                {destinationError ? <Notice tone="error">{destinationError}</Notice> : choosing ? <Notice testId="wallet-pay-choose">{t("wallet.send.chooseAmount")}</Notice> : route.kind === "no-amount" ? <Notice tone="error" testId="wallet-pay-no-amount">{t("wallet.send.noAmount")}</Notice> : route.kind === "refused" ? <Notice tone="error" testId="wallet-pay-refused">{t("payments.formats.unsupported")}</Notice>: route.kind === "unknown" ? <Notice tone="error">{t("wallet.lightning.notInvoice")}</Notice> : !destination && <Notice>{t("wallet.cashu.contactHint")}</Notice>}
               </form>
               </SendScan>
             )}
@@ -322,7 +384,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
                   <div key={tx.id} className="text-sm py-2" data-testid="wallet-tx">
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="text-text-primary truncate">{t(TX_LABEL[tx.kind])}</span>
-                      <span className={`font-semibold shrink-0 tabular-nums ${incoming ? "text-accent" : "text-text-primary"}`}><Signed sign={incoming ? "+" : "−"} amount={formatAmount(tx.amount, t.language)} /> <span className="text-xs font-normal text-text-muted">{unit}</span></span>
+                      <span className={`font-semibold shrink-0 tabular-nums ${incoming ? "text-accent" : "text-text-primary"}`}><Signed sign={incoming ? "+" : "−"} amount={formatAmount(tx.amount, t.language)} /> <span className="text-xs font-normal text-text-muted">{unitFor(t, unit, tx.amount)}</span></span>
                     </div>
                     <div className="flex items-baseline justify-between gap-2 text-xs text-text-muted">
                       <span className="truncate">{formatAt(tx.timestamp, MOVED_AT, t.language)} · {mint?.name ?? new URL(tx.mint).hostname}{tx.note ? ` · ${noteText(t, tx)}` : ""}</span>
@@ -335,7 +397,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
           </div>
         )}
         {notice && <Notice tone="success" testId="wallet-notice">{notice}</Notice>}
-        {error && <Notice problem={error} testId="wallet-error" />}
+        {error && !mintsFailed && !backupFailed && <Notice problem={error} testId="wallet-error" />}
         {/* The reviewed payments with something left to do or read: a settled one is in the history, and a cancelled
             one (by Cancel, or past its expiry) moved nothing. Pending, on its way, unknown or failed stay. */}
         {(state.intents ?? []).filter((i) => i.method === "cashu" && i.id !== review?.id && i.state !== "settled" && i.state !== "cancelled").map((i) => (
@@ -371,7 +433,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
               <Row testId="mint-row" label={<>{mint.name}{index === 0 && <span className="text-accent ms-2 text-[10px] uppercase tracking-wider">{t("wallet.cashu.primary")}</span>}</>}
                 hint={<><span data-testid="mint-fees">{mint.info ? shortFee(t, mint.info.inputFeePpk, mintNetwork(mint.url) === "testnet") : t("wallet.cashu.unreachable")}</span><Truncate className="font-mono" title={mint.url}>{mint.url.replace(/^https?:\/\//, "")}</Truncate></>}
                 value={sats(mint.balance)}>
-                {index !== 0 && <Button onClick={() => void run(() => wallet.setPrimaryMint(mint.url))}>{t("wallet.cashu.makePrimary")}</Button>}
+                {index !== 0 && <Button onClick={() => void run(() => wallet.setPrimaryMint(mint.url), "primary")}>{t("wallet.cashu.makePrimary")}</Button>}
                 <Button ref={(button) => { if (button) removeButtons.current.set(mint.url, button); else removeButtons.current.delete(mint.url); }} variant="danger" data-testid="mint-remove" aria-expanded={state.mints.length > 1 ? removingMint === mint.url : undefined} aria-haspopup={state.mints.length === 1 ? "dialog" : undefined}
                   onClick={() => setRemovingMint(mint.url)} aria-label={t("wallet.cashu.removeMint", { name: mint.name })}>{t("wallet.cashu.remove")}</Button>
               </Row>
@@ -383,15 +445,18 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
                 // Add is disabled once the field is empty: the keys go back to the field, for another mint.
                 if (document.activeElement === addMint.current) mintField.current?.focus();
               }, "add-mint"); }}>
-                <input ref={mintField} data-testid="wallet-mint-url" className={`${input} font-mono text-xs`} placeholder={t("wallet.cashu.addMintPlaceholder")} value={mintUrl} onChange={(e) => setMintUrl(e.target.value)} />
+                <input ref={mintField} data-testid="wallet-mint-url" className={`${input} font-mono text-xs`} inputMode="url" {...exactText} placeholder={t("wallet.cashu.addMintPlaceholder")} value={mintUrl} onChange={(e) => setMintUrl(e.target.value)} />
                 <Button ref={addMint} type="submit" variant="primary" data-testid="wallet-add-mint" loading={running === "add-mint"} disabled={busy || !mintUrl.trim()}>{t("wallet.cashu.add")}</Button>
               </InputGroup>
+              {error && mintsFailed && <Notice problem={error} testId="wallet-error" />}
             </Block>
           </Section>
-          <Section title={t("wallet.cashu.settings")}>
+          <Section title={t("wallet.cashu.settings")} testId="wallet-backup">
             <Row label={t("wallet.cashu.copyEcash")} hint={t("wallet.cashu.copyEcashHint")}>
-              <Button loading={running === "backup"} disabled={busy || state.balance === 0} onClick={() => void run(async () => { const tokens = await wallet.exportTokens(); await navigator.clipboard.writeText(tokens.map((token) => token.token).join("\n")); setNotice(t("wallet.cashu.backupCopied")); }, "backup")}>{t("wallet.cashu.copyBackup")}</Button>
+              <Button loading={running === "backup"} disabled={busy || state.balance === 0} onClick={() => { setCopied(false); void run(async () => { const tokens = await wallet.exportTokens(); await navigator.clipboard.writeText(tokens.map((token) => token.token).join("\n")); setCopied(true); }, "backup"); }}>{t("wallet.cashu.copyBackup")}</Button>
+              <p role="status" className="sr-only">{copied ? t("wallet.cashu.backupCopied") : ""}</p>
             </Row>
+            {(copied || (error && backupFailed)) && <Block>{copied ? <Notice tone="success" testId="wallet-notice">{t("wallet.cashu.backupCopied")}</Notice> : error && <Notice problem={error} testId="wallet-error" />}</Block>}
           </Section>
         </>
       )}

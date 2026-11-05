@@ -4,15 +4,17 @@ import "./wallet-networks.css";
 import { NetworkTag, moneyLabel } from "../NetworkTag";
 import { useI18n } from "../../contexts/I18nContext";
 import { NETWORK_NAME } from "./names";
+import { NeedsYouDot } from "../NeedsYou";
 import type { WalletNetwork } from "../../lib/platform";
 
 /**
  * Mainnet | Testnet as two tabs, real money first, each saying whose money it is in words (the NetworkTag) and its
  * count: the Wallets page's and the chat payment sheet's, so both look the same. A tablist: the arrows (and Home, End)
  * move and choose as they go. `testId` names the tablist; each tab is `<tabTestId>-<network>`, with `-tag` and `-count` inside.
- * `compact` is the sheet's lower row.
+ * `compact` is the sheet's lower row. `marked`: the tabs on the way to something that needs the person (lib/needsYou)
+ * wear its dot.
  */
-export function NetworkTabs({ network, counts, onChange, label, testId, tabTestId, idPrefix, controls, compact }: {
+export function NetworkTabs({ network, counts, onChange, label, testId, tabTestId, idPrefix, controls, compact, marked }: {
   network: WalletNetwork;
   counts: Record<WalletNetwork, number>;
   onChange: (network: WalletNetwork) => void;
@@ -24,6 +26,7 @@ export function NetworkTabs({ network, counts, onChange, label, testId, tabTestI
   /** The panel's element id. */
   controls: string;
   compact?: boolean;
+  marked?: Partial<Record<WalletNetwork, boolean>>;
 }) {
   const { t } = useI18n();
   const tabs = useRef<Partial<Record<WalletNetwork, HTMLButtonElement | null>>>({});
@@ -43,9 +46,11 @@ export function NetworkTabs({ network, counts, onChange, label, testId, tabTestI
         const count = counts[n], on = n === network;
         return (
           <button key={n} ref={(el) => { tabs.current[n] = el; }} type="button" role="tab" id={`${idPrefix}-${n}`} data-testid={`${tabTestId}-${n}`} data-network={n}
-            aria-label={t(count === 1 ? "wallet.networks.tabOne" : "wallet.networks.tab", { money: moneyLabel(t, n), network: NETWORK_NAME[n], count })} aria-selected={on} aria-controls={controls} tabIndex={on ? 0 : -1} className="wallet-network" onClick={() => onChange(n)}>
+            aria-label={`${t(count === 1 ? "wallet.networks.tabOne" : "wallet.networks.tab", { money: moneyLabel(t, n), network: NETWORK_NAME[n], count })}${marked?.[n] ? `, ${t("common.needsYou.mark")}` : ""}`}
+            aria-selected={on} aria-controls={controls} tabIndex={on ? 0 : -1} className="wallet-network" onClick={() => onChange(n)}>
             <NetworkTag network={n} testId={`${tabTestId}-${n}-tag`} />
             <span className="wallet-network-name">{NETWORK_NAME[n]} <span aria-hidden="true">·</span> <span data-testid={`${tabTestId}-${n}-count`}>{count}</span></span>
+            {marked?.[n] && <NeedsYouDot />}
           </button>
         );
       })}

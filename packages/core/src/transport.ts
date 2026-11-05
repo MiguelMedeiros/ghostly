@@ -152,8 +152,11 @@ export interface PkarrTransport {
    * a sequence number in seconds). A transport without it cannot publish one.
    */
   publishPayload?(pubKeyZ32: string, payload: Uint8Array, options?: PkarrRequestOptions): Promise<void>;
-  /** Most recent packet known for this key, or null when nothing is published. */
-  resolve(pubKeyZ32: string, options?: PkarrRequestOptions): Promise<SignedPacket | null>;
+  /**
+   * Most recent packet known for this key, or null when nothing is published. `keptOnFailure` false: a read nothing
+   * answered throws `RelaysFailedError` with the packet known before, rather than handing it back as the answer.
+   */
+  resolve(pubKeyZ32: string, options?: PkarrRequestOptions, keptOnFailure?: boolean): Promise<SignedPacket | null>;
   describe(): { protocol: string; relays: string[] };
   /** How reads go and how each relay is doing, for the connection panel; absent where nothing is known. */
   discovery?(): DiscoveryStatus;
@@ -191,8 +194,10 @@ export interface PkarrTransport {
   /**
    * Where the DHT is reached directly (Desktop): the relays from Settings, and whether reads may use them too
    * (`readRelays`, "Also use Pkarr relays"). Writes go to them either way, so browser contacts see this peer's packets.
+   * `dhtDirect: false` (Hide my IP from contacts, WISP 100 § Relay only): reads and writes go through the relays alone,
+   * and no UDP goes to a DHT node; absent leaves the DHT as it is.
    */
-  configure?(options: { relays: string[]; readRelays: boolean }): void;
+  configure?(options: { relays: string[]; readRelays: boolean; dhtDirect?: boolean }): void;
   /**
    * The turn record's own read (WISP 06 § Publishing and reading): every source is asked, in parallel, and each
    * one's answer is handed back as it came, not verified, not cached and never taken from this client's own writes.

@@ -92,6 +92,8 @@ ghostly profile show
 ```
 
 Every command takes `--profile <name>` (or `GHOSTLY_PROFILE`) to pick a profile other than the current one.
+The profile's keys are files your user can read, not encrypted: to keep them from your own tools, your owner can run
+Ghostly as an OS user of its own ([threat model](https://ghostly.tools/developers/agents/threat-model#apart)).
 
 ### 3. Keep it online: the daemon
 
@@ -111,7 +113,8 @@ ghostly invite create --label alice     # {"chat","invite":"ghostly1…","link":
 ghostly chat wait alice --until live    # returns once Alice opened the link in the app
 ```
 
-Give the link to the person through the channel your owner chose. To join someone else's invite instead:
+`"published":false` (with a `reason` and a `note`) means no relay took it yet: the invite is good and goes out by itself
+while the daemon runs, so don't make another. Give the link to the person through the channel your owner chose. To join someone else's invite instead:
 `printf '%s' '<ghostly1… or https://ghostly.tools/#ghostly1…>' | ghostly invite join --label bob` (on stdin, not in `ps`
 or the shell's history). `ghostly chat list` shows every
 chat; a `<chat>` is its id, a unique prefix of it, or its name.
@@ -120,6 +123,7 @@ Names are for people at a terminal. A contact chooses its own name, a group's ad
 name in a group, so in a script or an agent keep the **id** (`chat` and `group` in every answer and event, a member's
 key) and address by it: `<chat id>`, `group:<group id>`, `<member key>`. Where a command takes a chat or a group, a
 name that a contact gave itself and that also names one of your groups is refused (exit 1, `bad_request`) and both ids are shown.
+So is a `<group>` that is one group's name and a prefix of another's id.
 
 ### 5. Be woken: listen with an allowlist
 
@@ -198,7 +202,7 @@ ghostly file save <file id> --dir ./inbox --wait     # a file or voice note a tu
 ghostly typing alice --kind thinking --status "Transcribing your audio" --for 120
 ghostly file send alice ./answer.ogg --voice --reply <message id>   # a voice note: length and waveform from the file
 ghostly file send alice ./note.m4a --voice 4200      # or its length given in ms (AAC needs ffmpeg for the waveform)
-ghostly file send alice ./report.pdf                 # a file
+ghostly file send alice ./report.pdf                 # a file (no daemon: stays until alice has all of it)
 ghostly file wait <file id> --timeout 120            # exit 0 when done, 1 when it failed, 4 on timeout
 ghostly file accept <file id>                        # a file over 25 MiB waits for this (file.offered event)
 ```
@@ -255,6 +259,9 @@ ghostly task update owner relay-fix --status done --steps 4/4 --pr-url https://g
   every 2.5 s at most: with the daemon, a sooner update answers `"queued":true` and merges into the next one; without
   it, the command waits. Always end with `done`, `failed` or `cancelled`, or the card stays running. A card takes
   5,000 updates; after that, `task send` a new one.
+- **Without a daemon** a card in a chat stays until it went out: `send` until it is sent, `update` until the contact
+  confirmed it, up to `--timeout` (30 s). Past it the command exits 4 and the card goes with your next command;
+  `--wait none` answers at once. A group's card answers at once (`--wait sent` waits for an edge).
 
 Something that runs on a schedule (a nightly check, a weekly report) is a routine card. The app runs nothing: your own
 scheduler runs it, and the card shows the schedule, the last run and the next.
@@ -268,7 +275,8 @@ ghostly routine update owner nightly --state paused                             
 ```
 
 `--schedule` is words people read (80 characters) and `--cron` is only shown. `--run ok|failed|skipped[:summary]`
-records a run as the last one (the card keeps 10); `--next` takes a date or milliseconds, up to a year ahead.
+records a run as the last one (the card keeps 10); `--next` takes a date or milliseconds, up to a year ahead: `2026-10-01` and
+`2026-10-01 01:00` are local time (a date alone is local midnight), `2026-10-01T01:00:00Z` or `+02:00` keep their zone.
 
 ### 11. Safety
 
@@ -292,8 +300,9 @@ records a run as the last one (the card keeps 10); `--next` takes a date or mill
 
 - **No daemon, and `listen` takes the profile.** With no daemon running, `listen` opens the profile itself and serves
   its socket, so it becomes the daemon: `daemon --detach` then fails ("A daemon already runs profile …"), and when
-  that listener stops, the profile goes offline with it. Start `ghostly daemon --detach` first, so `listen` only
-  subscribes. Any other command with no daemon runs the profile for that one command and exits.
+  that listener stops, the profile goes offline with it. `daemon stop` and `daemon restart` (the advice after an
+  upgrade) end such a listener: it exits 1 with a line on stderr, and the restarted daemon has no reader. Start
+  `ghostly daemon --detach` first, so `listen` only subscribes and follows a restart. Any other command with no daemon runs the profile for that one command and exits.
 - **A headless session is not woken later.** An agent whose session ends (a `-p` run, a closed chat) hears nothing
   when a message arrives. Keep a listener process running (`ghostly listen --turns … --exec`) under something that
   outlives the session, and let it start the agent once per turn.
@@ -320,7 +329,7 @@ ghostly chat connect alice                         # back now
 
 Plain events, without `--turns`: `ghostly listen --type message.received` (one JSON object per line). Useful types:
 `message.received`, `message.delivery`, `message.edited`, `chat.joined`, `chat.connection`, `group.message` (with
-`message.mentioned: true` when it names the agent), `group.members`, `typing.started` / `typing.stopped` (`group.typing.*` with `member` in a private group),
+`message.mentioned: true` when it names the agent), `group.members`, `typing.started` / `typing.stopped` (`group.typing.*` with `member` in a private group; live only, never replayed),
 `message.reaction` / `group.reaction`, `file.done` / `file.failed`, `payment.created` / `payment.updated`,
 `call.incoming`. The full list: the package README.
 
@@ -373,7 +382,8 @@ ghostly service add docs http://127.0.0.1:8080     # a web app on this machine
 ghostly service share <service id> alice           # alice may open it; nobody else
 ```
 
-A call's audio is raw PCM on its own Unix socket, 48 kHz by default; see `examples/call-echo.mjs`. To answer calls by
+A call's audio is raw PCM on its own Unix socket, 48 kHz by default, after the call's `audio.token` and a line feed
+(required on Windows); see `examples/call-echo.mjs`. To answer calls by
 voice, clone [ghostly-voice-agent](https://github.com/MiguelMedeiros/ghostly-voice-agent) rather than writing one: it listens, transcribes, asks Claude
 and speaks the reply (ElevenLabs), and its `AGENTS.md` walks an agent through the setup. Making an identity proof
 needs a person who holds the key: leave that to the owner.
@@ -381,9 +391,10 @@ needs a person who holds the key: leave that to the owner.
 ## Rules the CLI enforces
 
 - Output is JSON. A failure is `{"error":{"code","message"}}` with exit 1 (failed), 2 (usage), 3 (not found),
-  4 (timed out) or 5 (needs `--force`, `--yes` or `--confirm-real`).
+  4 (timed out), 5 (needs `--force`, `--yes` or `--confirm-real`) or 130 (stopped with Ctrl-C, `interrupted`).
 - `send` (and `ghostly engine sendMessage` and the other sends through `engine`) refuses text that looks like a recovery
-  phrase, a private key or a Cashu token unless `--force`.
+  phrase, a private key or a Cashu token unless `--force`; so does every other text that leaves the device: a payment's
+  memo or comment, a group's name, the name contacts see, a file's `--name`, an app revocation's `--reason`.
 - Spending real money (Mainnet) needs `--confirm-real`.
 - Seeds, keys and backups are never printed without `--show-secret`; `group show` and `group list` hide entry links, and
   `chat list` and `chat show` a pending chat's invite code.
@@ -392,7 +403,7 @@ needs a person who holds the key: leave that to the owner.
 
 Every call of the app's engine is reachable: `ghostly engine --list --verbose` (each call with what it takes), then `ghostly engine <method> '<json params>'`.
 A call that deletes chats or groups (`clearProfileData`, `removeLink`, `leaveGroup`, `forgetGroup`, `deviceRemove`)
-needs `--yes`; `clearProfileData` stops a running daemon after it answers.
+needs `--yes`; `clearProfileData` stops a running daemon after it answers, and is refused (`busy`) while a call is on: hang it up first.
 Not on the CLI yet: Bark wallets, OpenID Connect proofs, and video in calls (voice only). More:
 [AI agents on Ghostly](https://ghostly.tools/developers/agents), the
 [CLI guide](https://github.com/MiguelMedeiros/ghostly/blob/main/docs/CLI.md), the

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
 import { decodablePicture } from "../../lib/decodablePicture";
+import { draftDirection } from "../../lib/documentLanguage";
 import { formatFileSize } from "../../lib/format";
 import { DocumentGlyph } from "./icons";
 import { useComposition } from "../../hooks/useComposition";
@@ -81,15 +82,23 @@ export function AttachmentSheet({ files, alert, status, returnFocus, onPaste, on
   const button = "min-h-10 px-4 rounded-full text-sm font-medium cursor-pointer";
 
   return createPortal(
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 animate-fade-in" {...backdrop}>
+    // \`keyboard-layer\` (index.css): with a phone's keyboard up the layer ends where the keyboard starts, so the panel is
+    // centred in what is left, and the picture takes only the room the caption and the buttons leave.
+    <div className="keyboard-layer fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 animate-fade-in" {...backdrop}>
       <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t("composer.sendFiles")} data-testid="attachment-sheet"
-        onPaste={paste} className="focus:outline-none w-full max-w-md max-h-full flex flex-col bg-panel-header border border-border rounded-2xl shadow-2xl overflow-hidden">
+        onPaste={paste} className="focus:outline-none w-full max-w-md max-h-full flex flex-col bg-panel-header border border-border rounded-2xl shadow-2xl overflow-y-auto">
         {single && picture(0) ? (
-          <figure className="m-0 flex flex-col min-h-0">
-            <div className="bg-black/40 flex items-center justify-center min-h-0">
-              <img src={picture(0)} alt={single.name} onError={() => lost(single)} data-testid="attachment-image" className="max-w-full max-h-[55vh] object-contain" />
+          // Where even the smallest picture leaves no room (a phone on its side, the keyboard up), the picture scrolls
+          // within the panel: the caption and the buttons under it stay in view.
+          <figure className="m-0 min-h-0 overflow-y-auto">
+            <div className="bg-black/40 flex items-center justify-center">
+              <img src={picture(0)} alt={single.name} onError={() => lost(single)} data-testid="attachment-image" className="keyboard-layer-picture max-w-full object-contain" />
             </div>
-            <figcaption className="px-4 pt-2 text-xs text-text-muted truncate" data-testid="attachment-name"><bdi>{single.name}</bdi> · {formatFileSize(single.size)}</figcaption>
+            {/* The name is cut in its own direction, at its end, as in the file rows; the size stays whole beside it. */}
+            <figcaption className="px-4 pt-2 text-xs text-text-muted flex min-w-0" data-testid="attachment-name">
+              <span dir="auto" className="min-w-0 truncate">{single.name}</span>
+              <span className="shrink-0 whitespace-pre"> · {formatFileSize(single.size, t)}</span>
+            </figcaption>
           </figure>
         ) : (
           <ul className={`list-none m-0 p-3 overflow-y-auto min-h-0 grid gap-2 ${single ? "grid-cols-1" : "grid-cols-3"}`} data-testid="attachment-list">
@@ -100,7 +109,7 @@ export function AttachmentSheet({ files, alert, status, returnFocus, onPaste, on
                     <span className="shrink-0" aria-hidden="true"><DocumentGlyph /></span>
                     <span className={`min-w-0 ${single ? "" : "w-full"}`}>
                       <span dir="auto" className="block text-xs text-text-primary truncate">{file.name}</span>
-                      <span className="block text-[11px] text-text-muted">{formatFileSize(file.size)}</span>
+                      <span className="block text-[11px] text-text-muted">{formatFileSize(file.size, t)}</span>
                     </span>
                   </div>}
                 {files.length > 1 && (
@@ -118,7 +127,7 @@ export function AttachmentSheet({ files, alert, status, returnFocus, onPaste, on
           {alert && <div role="alert" className="animate-fade-in">{alert}</div>}
           <input ref={captionRef} type="text" value={caption} onChange={(e) => setCaption(e.target.value)} data-testid="attachment-caption"
             {...composition.inputProps} onKeyDown={(e) => { if (composition.composing(e)) return; if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-            placeholder={t("composer.caption")} aria-label={t("composer.caption")} maxLength={4000}
+            placeholder={t("composer.caption")} aria-label={t("composer.caption")} maxLength={4000} dir={draftDirection(caption)}
             className="w-full min-h-10 px-3 rounded-lg bg-surface-alt border border-border text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent" />
           <div className="flex items-center justify-end gap-2">
             <button type="button" data-testid="attachment-cancel" onClick={onCancel} className={`${button} bg-surface-alt text-text-primary border border-border`}>{t("common.cancel")}</button>

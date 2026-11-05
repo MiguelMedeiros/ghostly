@@ -14,7 +14,7 @@ import { isLive } from "./views";
 /** The chat and the served app a command names, on an engine that speaks apps/1. */
 function target(ctx: ApiContext, params: Params): { chat: string; live: boolean; app: ServedApp } {
   const app = servedApp(servedApps(ctx.runtime.paths.dir), str(params, "ref", true));
-  if (ctx.mode !== "daemon") throw new CliError("unavailable", "An app is open only while a daemon runs: start one (ghostly daemon start) and open it there");
+  if (ctx.mode !== "daemon") throw new CliError("unavailable", "An app is open only while a daemon runs: start one (ghostly daemon --detach) and open it there");
   if (!ctx.runtime.apps) throw new CliError("unavailable", "This daemon started before an app was served, so it offers no apps/1 yet: ghostly daemon restart");
   const link = chatOf(ctx, params);
   return { chat: link.id, live: isLive(link), app };

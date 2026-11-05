@@ -231,6 +231,32 @@ describe("waking a contact whose app is closed", () => {
     expect(JSON.parse(utf8Decode(decryptPushPayload(fromBase64Url(relayed.body), secret, auth))).k).toBe(target.token);
   });
 
+  it("a push relay address that answers 404 or 410 itself keeps the contact's subscription; the relay's own 410 forgets it", async () => {
+    let relay = () => new Response("<html>Not Found</html>", { status: 404 });
+    const relayed = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.startsWith("https://web.push.apple.com")) throw new TypeError("Failed to fetch");
+      relayed();
+      return relay();
+    }));
+    const node = engine();
+    await node.updateSettings({ settings: { pushRelay: "https://push-relay.example/" } });
+    const chat = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: contactTarget().target });
+    for (const answer of [() => new Response("<html>Not Found</html>", { status: 404 }), () => new Response("Gone", { status: 410 })]) {
+      relay = answer;
+      const before = relayed.mock.calls.length;
+      node["wakeLimiter"].reset(chat.id);
+      await node.sendMessage({ linkId: chat.id, text: "hi" });
+      await vi.waitFor(() => expect(relayed.mock.calls.length).toBe(before + 1));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect((await saved(chat.id))?.peerWake).toBeDefined();
+    }
+    relay = () => new Response(JSON.stringify({ status: 410 }), { status: 200 });
+    node["wakeLimiter"].reset(chat.id);
+    await node.sendMessage({ linkId: chat.id, text: "hi" });
+    await vi.waitFor(async () => expect((await saved(chat.id))?.peerWake).toBeUndefined());
+  });
+
   it("a call to a closed app: one call wake-up, limited apart from messages; none while live or without a target", async () => {
     const pushSend = vi.fn(async () => 201);
     const node = engine({ pushSend });

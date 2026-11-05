@@ -17,12 +17,24 @@ const HELLO_ID = "hello";
  */
 export const GREETING_MS = 2_000;
 
+/** The longest request line the daemon reads (WISP 1100 § Framing): it cuts the connection on a longer one. */
+export const MAX_LINE = 16 * 1024 * 1024;
+
 /** What a client needs of a profile to reach its daemon: the socket, and the folder the daemon's secret is in. */
 export interface DaemonAddress { socket: string; dir: string }
 
 /** The refusal of a listener that did not prove it is the profile's daemon (`isNotTheDaemon` tells it apart). */
 function notTheDaemon(socket: string): CliError {
   return new CliError("refused", `What answers on ${socket} did not prove it is this profile's daemon, so nothing was sent to it. A daemon of an older release cannot: \`ghostly daemon restart\` starts this one's`, { reason: "not-the-daemon" });
+}
+
+/**
+ * A call the daemon read and never answered, because it stopped (a restart, a crash): what was asked may be done, so
+ * it is no plain failure a bot tries again (a send went twice). A daemon that stops answers its waits first (`serve`);
+ * this is for the calls it could not.
+ */
+function stoppedUnanswered(method: string): CliError {
+  return new CliError("timeout", `The daemon stopped before it answered ${method}, which may be done: check (\`ghostly chat history\` for a message) before you try again`, { method, reason: "daemon-stopped" });
 }
 
 export function isNotTheDaemon(error: unknown): boolean {
@@ -42,7 +54,10 @@ export function isNotTheDaemon(error: unknown): boolean {
  */
 export class DaemonClient {
   private nextId = 1;
-  private readonly pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+  /** `written`: the call is on the socket, so the daemon may have acted on it. */
+  private readonly pending = new Map<number, { method: string; written: boolean; resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+  /** This client closed the connection: what was still unanswered is its own doing, not a daemon that stopped. */
+  private leaving = false;
   private eventListener: ((event: GhostlyEvent) => void) | null = null;
   private closedListener: (() => void) | null = null;
   /** While paused: the events of the chunk already read, given to the listener on resume. */
@@ -99,7 +114,7 @@ export class DaemonClient {
       clearTimeout(waitedTooLong);
       const why = this.refusal ?? new CliError("unavailable", "The daemon went away");
       if (!this.verified) this.settle.reject(why);
-      for (const waiting of this.pending.values()) waiting.reject(why);
+      for (const waiting of this.pending.values()) waiting.reject(waiting.written && !this.refusal && !this.leaving ? stoppedUnanswered(waiting.method) : why);
       this.pending.clear();
       this.closedListener?.();
     });
@@ -116,10 +131,16 @@ export class DaemonClient {
    * `timeoutMs`: give up (code `timeout`, exit 4) when the daemon has not answered by then; without it the call waits
    * for as long as the connection holds. A call that timed out closes the connection: its answer, if one ever comes,
    * is of no use, and the process leaves once nothing else keeps it (not every caller reaches `exit`).
+   *
+   * A call whose line is longer than `MAX_LINE` is refused here, never written: the daemon cut the connection on it,
+   * and the command answered "The daemon went away" (`unavailable`, read as try later) while the daemon ran on.
    */
   call(method: string, params: unknown = {}, { timeoutMs }: { timeoutMs?: number } = {}): Promise<unknown> {
     if (this.socket.destroyed) return Promise.reject(this.refusal ?? new CliError("unavailable", "The daemon went away"));
     const id = this.nextId++;
+    const line = JSON.stringify({ id, method, params }) + "\n";
+    const bytes = Buffer.byteLength(line);
+    if (bytes > MAX_LINE) return Promise.reject(new CliError("bad_request", `${method} came to ${(bytes / 1024 / 1024).toFixed(1)} MiB as JSON, more than a daemon reads in one request (16 MiB): nothing was sent (a long text goes as a file: ghostly file send <chat|group> <path>)`));
     return new Promise((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       if (timeoutMs !== undefined) {
@@ -131,13 +152,18 @@ export class DaemonClient {
         timer.unref?.();
       }
       const settle = {
+        method, written: false,
         resolve: (value: unknown) => { if (timer) clearTimeout(timer); resolve(value); },
         reject: (error: Error) => { if (timer) clearTimeout(timer); reject(error); },
       };
       this.pending.set(id, settle);
       // Written once the daemon proved itself, in the order the calls were made; a refusal ends each instead.
       this.ready.then(
-        () => { if (this.pending.has(id) && !this.socket.destroyed) this.socket.write(JSON.stringify({ id, method, params }) + "\n"); },
+        () => {
+          if (!this.pending.has(id) || this.socket.destroyed) return;
+          this.socket.write(line);
+          settle.written = true;
+        },
         (error: CliError) => { if (this.pending.delete(id)) settle.reject(error); },
       );
     });
@@ -173,11 +199,13 @@ export class DaemonClient {
   }
 
   close(): void {
+    this.leaving = true;
     this.socket.end();
   }
 
   /** Closes at once: what the daemon still sends is not read. */
   destroy(): void {
+    this.leaving = true;
     this.socket.destroy();
   }
 }

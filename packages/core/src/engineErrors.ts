@@ -6,7 +6,8 @@
  * none of these (a mint's own words, a provider's) stays as it is.
  *
  * `{name}` in a template is a value: a host or domain (no spaces), a network ("Mainnet" or "Testnet"), a chain's name,
- * an ecash unit ("usd"), or an amount (digits, with the separators of whatever locale wrote it).
+ * an ecash unit ("usd"), an amount (digits, with the separators of whatever locale wrote it), or a server's own `{reason}`
+ * (one line, last in its text).
  */
 export const ENGINE_ERRORS = {
   // Reaching a mint, a server, the network.
@@ -24,14 +25,18 @@ export const ENGINE_ERRORS = {
   invalidMintUrl: "That is not a valid mint URL",
   mintNotHttps: "Mints must use https",
   notEnoughSats: "Not enough sats in your wallet",
+  notEnoughForFee: "Not enough sats in your wallet: {amount} sats leave room for the fee",
+  mintsNoAnyAmount: "None of your mints can pay an invoice with no amount",
   noSharedMint: "You share no mint with this contact",
   ecashAlreadySpent: "This ecash was already spent somewhere else",
   ecashBeingReceived: "This ecash is already being received",
+  ecashFeeTakesAll: "The mint keeps all {amount} sats of this ecash as its fee to take it in: nothing was redeemed, and its sender can still take it back",
   ecashOtherUnit: "This ecash is in {unit}: only sat ecash can be redeemed here",
   reviewedEcashSpent: "The ecash for this payment was already spent somewhere else. Nothing was sent, and your balance now shows what the mint still holds.",
   reviewedSatsGone: "The sats this payment was reviewed with went to another payment. Nothing was sent: review it again.",
   // Lightning.
   lightningFeeTooHigh: "The Lightning fee ({fee} sats) is too high",
+  lightningRefused: "The mint refused this Lightning payment, and no sats left your wallet: it is safe to try again. The mint said: {reason}",
   invoiceExpired: "That invoice has expired",
   lnurlExactly: "{domain} asks for exactly {amount} sats",
   lnurlRange: "{domain} takes between {min} and {max} sats",
@@ -74,6 +79,7 @@ export const ENGINE_ERRORS = {
   fedimintAlreadyJoined: "You already joined this federation",
   fedimintConnecting: "Wait for the federation to connect",
   fedimintNotEnough: "Not enough in this federation",
+  fedimintRedeemUnheard: "Could not hear from the federation about these notes: if they don't show in your balance soon, paste them again",
   fedimintRealOnTestnet: "This federation holds real bitcoin: it belongs in a Mainnet Fedimint wallet",
   fedimintTestOnMainnet: "This federation is on {chain}, a test network: it belongs in a Testnet Fedimint wallet",
   walletAway: "{wallet} can't be used here. Use it on {device}.",

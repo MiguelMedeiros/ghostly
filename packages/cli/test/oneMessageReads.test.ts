@@ -20,7 +20,13 @@ function fake() {
     groupMessages: vi.fn(async ({ groupId }: { groupId: string }) => rows.filter((m) => m.linkId === `group:${groupId}`)),
     getMessage: vi.fn(async (linkId: string, id: string) => rows.find((m) => m.linkId === linkId && m.id === id)),
     deleteMessage: vi.fn(async () => {}),
-    removeMessage: vi.fn(async () => ({ error: null as string | null })),
+    removeMessage: vi.fn(async ({ linkId }: { linkId: string }) => ({ error: null as string | null, ...(linkId.startsWith("group:") && { e: 1 }) })),
+    removalPending: vi.fn(() => true),
+    groupTaken: vi.fn(() => 0),
+    messageDetails: vi.fn(async ({ linkId, messageId }: { linkId: string; messageId: string }) => {
+      const message = rows.find((m) => m.linkId === linkId && m.id === messageId);
+      return message ? { message: { id: message.id }, ...(linkId.startsWith("group:") && { group: { id: linkId.slice(6) } }) } : null;
+    }),
     forwardMessages: vi.fn(async ({ to, messageIds }: { to: string[]; messageIds: string[] }) => ({ results: to.map(() => ({ messageIds: ["me_fwd"], sent: messageIds, error: null })) })),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
@@ -45,10 +51,27 @@ describe("delete", () => {
         code: "not_found", message: `"${chat}" is a group, not a chat: ghostly message delete ${chat} mine:0:2 --everyone`, details: { group: "g1" },
       });
     // A name no chat and no group has stays the chat's own error.
-    await expect(callApi(ctx, "chat.delete", { chat: "Nobody", message: "mine:0:2" })).rejects.toMatchObject({ code: "not_found", message: 'No chat "Nobody"' });
+    await expect(callApi(ctx, "chat.delete", { chat: "Nobody", message: "mine:0:2" })).rejects.toMatchObject({ code: "not_found", message: 'No chat "Nobody" (ghostly chat list)' });
     expect(node.deleteMessage).not.toHaveBeenCalled();
     const { COMMANDS } = await import("../src/commands");
-    expect(COMMANDS["message delete"]!.usage).toBe("message delete <chat|group> <message> [--everyone]");
+    expect(COMMANDS["message delete"]!.usage).toBe("message delete <chat|group> <message> [--everyone [--wait none|confirmed|sent] [--timeout s]]");
+  });
+});
+
+describe("message details", () => {
+  it("reads a group's message too, by its name, its id or group:<id>; it said No chat", async () => {
+    const { ctx, node } = fake();
+    expect(await callApi(ctx, "chat.details", { chat: "Alice", message: "peer_1" })).toEqual({ message: { id: "peer_1" } });
+    expect(node.messageDetails).toHaveBeenLastCalledWith({ linkId: "chat-one", messageId: "peer_1" });
+    for (const chat of ["Crew", "g1", "group:g1"]) {
+      expect(await callApi(ctx, "chat.details", { chat, message: "k:0:1" })).toEqual({ message: { id: "k:0:1" }, group: { id: "g1" } });
+      expect(node.messageDetails).toHaveBeenLastCalledWith({ linkId: "group:g1", messageId: "k:0:1" });
+    }
+    await expect(callApi(ctx, "chat.details", { chat: "Crew", message: "nope" })).rejects.toMatchObject({ code: "not_found", message: "No message nope in this group" });
+    await expect(callApi(ctx, "chat.details", { chat: "Alice", message: "nope" })).rejects.toMatchObject({ code: "not_found", message: "No message nope in this chat" });
+    await expect(callApi(ctx, "chat.details", { chat: "Nobody", message: "x" })).rejects.toMatchObject({ code: "not_found" });
+    const { COMMANDS } = await import("../src/commands");
+    expect(COMMANDS["message details"]!.usage).toBe("message details <chat|group> <message>");
   });
 });
 
@@ -60,15 +83,68 @@ describe("delete --everyone", () => {
     const command = COMMANDS["message delete"]!;
     const parsed = parseArgs(["Alice", "me_1", "--everyone"], command.options ?? {});
     expect(command.params!(parsed, positionals(command, parsed.positionals))).toEqual({ chat: "Alice", message: "me_1", everyone: true });
-    expect(await callApi(ctx, "chat.delete", { chat: "Alice", message: "W1", everyone: true })).toEqual({ chat: "chat-one", messageId: "me_1", deleted: "me_1", everyone: true });
+    expect(await callApi(ctx, "chat.delete", { chat: "Alice", message: "W1", everyone: true })).toEqual({ chat: "chat-one", messageId: "me_1", deleted: "me_1", everyone: true, confirmed: false });
     expect(node.removeMessage).toHaveBeenCalledWith({ linkId: "chat-one", messageId: "me_1" });
-    expect(await callApi(ctx, "chat.delete", { chat: "Crew", message: "mine:0:2", everyone: true })).toEqual({ group: "g1", messageId: "mine:0:2", deleted: "mine:0:2", everyone: true });
+    expect(await callApi(ctx, "chat.delete", { chat: "Crew", message: "mine:0:2", everyone: true })).toEqual({ group: "g1", messageId: "mine:0:2", deleted: "mine:0:2", everyone: true, sent: false, edges: 0 });
     expect(node.removeMessage).toHaveBeenLastCalledWith({ linkId: "group:g1", messageId: "mine:0:2" });
+    // A group has no receipts to wait for: refused before anything is deleted.
+    node.removeMessage.mockClear();
+    await expect(callApi(ctx, "chat.delete", { chat: "Crew", message: "mine:0:2", everyone: true, wait: "confirmed" })).rejects.toMatchObject({ code: "bad_request" });
+    expect(node.removeMessage).not.toHaveBeenCalled();
     await expect(callApi(ctx, "chat.delete", { chat: "Alice", message: "peer_1", everyone: true })).rejects.toMatchObject({ code: "not_found", message: expect.stringMatching(/only your own/) });
     // What the engine refuses (a payment, say) is said as such.
     node.removeMessage.mockResolvedValueOnce({ error: "A payment, a request or a notice cannot be deleted for everyone", refused: true } as never);
     await expect(callApi(ctx, "chat.delete", { chat: "Alice", message: "me_1", everyone: true })).rejects.toMatchObject({ code: "refused" });
     expect(node.deleteMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("delete --everyone in a group waits for an edge, as group react does", () => {
+  /** My group message `mine:0:2` deleted for everyone, its removal numbered 3; `took` says how many edges took it at each look. */
+  function inGroup(mode: "one-shot" | "daemon", took: () => number) {
+    const { ctx, node } = fake();
+    node.removeMessage.mockResolvedValue({ error: null, e: 3 });
+    node.groupTaken.mockImplementation(took);
+    return { ctx: { ...ctx, mode } as ApiContext, node };
+  }
+
+  it("a one-shot stays until an edge took the removal, and says how many did", async () => {
+    let looks = 0;
+    const { ctx, node } = inGroup("one-shot", () => (++looks > 2 ? 1 : 0));
+    expect(await callApi(ctx, "chat.delete", { chat: "Crew", message: "mine:0:2", everyone: true })).toEqual({ group: "g1", messageId: "mine:0:2", deleted: "mine:0:2", everyone: true, sent: true, edges: 1 });
+    expect(node.groupTaken).toHaveBeenLastCalledWith({ groupId: "g1", messageId: "mine:0:2", edit: 3 });
+    expect(looks).toBe(3);
+  });
+
+  it("a one-shot no edge took in time: a timeout (exit 4) that says it stays in the group and goes with a later command", async () => {
+    const { ctx } = inGroup("one-shot", () => 0);
+    await expect(callApi(ctx, "chat.delete", { chat: "Crew", message: "mine:0:2", everyone: true, timeout: 1 })).rejects.toMatchObject({
+      code: "timeout", message: expect.stringMatching(/no member's edge took it yet .*next command/), details: { messageId: "mine:0:2", edits: 3 },
+    });
+  });
+
+  it("a daemon answers at once (it goes on saying it), unless asked to wait; a chat takes no --wait sent", async () => {
+    const { ctx, node } = inGroup("daemon", () => 0);
+    expect(await callApi(ctx, "chat.delete", { chat: "Crew", message: "mine:0:2", everyone: true })).toMatchObject({ sent: false, edges: 0 });
+    expect(node.groupTaken).toHaveBeenCalledTimes(1);
+    await expect(callApi(ctx, "chat.delete", { chat: "Crew", message: "mine:0:2", everyone: true, wait: "sent", timeout: 1 })).rejects.toMatchObject({ code: "timeout" });
+    node.removeMessage.mockClear();
+    await expect(callApi(ctx, "chat.delete", { chat: "Alice", message: "me_1", everyone: true, wait: "sent" })).rejects.toMatchObject({ code: "bad_request" });
+    expect(node.removeMessage).not.toHaveBeenCalled();
+  });
+
+  it("a one-shot starts the groups' sessions for it: the edge it waits for is a group's (a plain delete stays on this device)", async () => {
+    const { chatOnly } = await import("../src/main");
+    expect(chatOnly("chat.delete", { chat: "Crew", message: "mine:0:2", everyone: true })).toBe(false);
+    expect(chatOnly("chat.delete", { chat: "Alice", message: "peer_1", everyone: false })).toBe(true);
+  });
+
+  it("takes --wait sent", async () => {
+    const { COMMANDS, positionals } = await import("../src/commands");
+    const { parseArgs } = await import("../src/args");
+    const command = COMMANDS["message delete"]!;
+    const parsed = parseArgs(["Crew", "mine:0:2", "--everyone", "--wait", "sent", "--timeout", "5"], command.options ?? {});
+    expect(command.params!(parsed, positionals(command, parsed.positionals))).toEqual({ chat: "Crew", message: "mine:0:2", everyone: true, wait: "sent", timeout: 5 });
   });
 });
 
@@ -90,5 +166,47 @@ describe("forward", () => {
     node.getMessage.mockResolvedValueOnce(row("chat-one", "peer_1", { text: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" }));
     await expect(callApi(ctx, "chat.forward", { chat: "Alice", messages: ["peer_1"], to: ["Bob"] })).rejects.toMatchObject({ code: "confirm", details: { messageId: "peer_1" } });
     expect(node.forwardMessages).not.toHaveBeenCalled();
+  });
+});
+
+describe("forward to a group waits for an edge, as group send does", () => {
+  /** A forward of `peer_1` to Crew, its new message `mine:0:9`; `took` says how many edges took it at each look. */
+  function toGroup(mode: "one-shot" | "daemon", took: () => number) {
+    const { ctx, node } = fake();
+    node.forwardMessages.mockImplementation(async ({ to, messageIds }) => ({ results: to.map((t) => ({ messageIds: [t.startsWith("group:") ? "mine:0:9" : "me_fwd"], sent: messageIds, error: null })) }));
+    node.groupTaken.mockImplementation(took);
+    return { ctx: { ...ctx, mode } as ApiContext, node };
+  }
+
+  it("a one-shot stays until an edge took it, and says how many did; a chat beside it is not waited for", async () => {
+    let looks = 0;
+    const { ctx, node } = toGroup("one-shot", () => (++looks > 2 ? 1 : 0));
+    expect(await callApi(ctx, "chat.forward", { chat: "Alice", messages: ["peer_1"], to: ["Crew", "Bob"] })).toEqual({ from: "chat-one", results: [
+      { to: "g1", kind: "group", messageIds: ["mine:0:9"], sent: ["peer_1"], error: null, edges: 1 },
+      { to: "chat-two", kind: "chat", messageIds: ["me_fwd"], sent: ["peer_1"], error: null },
+    ] });
+    expect(node.groupTaken).toHaveBeenLastCalledWith({ groupId: "g1", messageId: "mine:0:9" });
+    expect(looks).toBe(3);
+  });
+
+  it("a one-shot no edge took in time: a timeout (exit 4) that says it stays in the group; --wait none answers at once", async () => {
+    await expect(callApi(toGroup("one-shot", () => 0).ctx, "chat.forward", { chat: "Alice", messages: ["peer_1"], to: ["Crew"], timeout: 1 })).rejects.toMatchObject({
+      code: "timeout", message: expect.stringMatching(/no member's edge took it yet .*next command/), details: { messageId: "mine:0:9" },
+    });
+    expect(await callApi(toGroup("one-shot", () => 0).ctx, "chat.forward", { chat: "Alice", messages: ["peer_1"], to: ["Crew"], wait: "none" }))
+      .toMatchObject({ results: [{ to: "g1", edges: 0 }] });
+  });
+
+  it("a daemon answers at once with how many took it so far", async () => {
+    const { ctx, node } = toGroup("daemon", () => 2);
+    expect(await callApi(ctx, "chat.forward", { chat: "Alice", messages: ["peer_1"], to: ["Crew"] })).toMatchObject({ results: [{ to: "g1", edges: 2 }] });
+    expect(node.groupTaken).toHaveBeenCalledOnce();
+  });
+
+  it("a one-shot starts the groups' sessions for a forward and a pin: the edge they go over is a group's", async () => {
+    const { chatOnly } = await import("../src/main");
+    expect(chatOnly("chat.forward", { chat: "Alice", messages: ["peer_1"], to: ["Crew"] })).toBe(false);
+    expect(chatOnly("chat.pin", { chat: "Crew", message: "k:0:1" })).toBe(false);
+    expect(chatOnly("chat.react", { chat: "Alice", message: "peer_1", emoji: "👍" })).toBe(true);
   });
 });

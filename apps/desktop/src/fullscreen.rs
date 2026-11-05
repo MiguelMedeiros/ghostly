@@ -3,13 +3,14 @@
 //! - macOS: WKWebView ships with element full screen off, so the button did nothing (Picture in Picture worked).
 //!   `WKPreferences.elementFullscreenEnabled` (public since macOS 12.3) turns it on; WebKit then shows the element
 //!   in a full-screen window of its own. Older macOS only has the private `fullScreenEnabled` key, what wry sets
-//!   under Tauri's `macos-private-api`.
+//!   under Tauri's `macos-private-api`. wry 0.57 now turns it on itself for every webview it builds; an app
+//!   window turns it off again (`app_sandbox`).
 //! - Windows: WebView2 has the API, but a full-screen element only fills the webview. The host puts the window in
 //!   full screen when WebView2 says it holds one (`ContainsFullScreenElementChanged`), and back out after.
 //! - Linux: WebKitGTK 2.50 aborts the whole app (SIGABRT inside libwebkit2gtk) as soon as an element enters full
 //!   screen: a real click, with or without a window manager, the DMA-BUF renderer or compositing. So the API is off
 //!   there (`enable-fullscreen`), and the page shows its own Full screen: the window goes full screen and the video
-//!   fills it (`VideoBubble`, `fullscreenWindow`).
+//!   fills it (`VideoBubble`, `fullscreenWindow`). App windows have it off too (`app_sandbox::app_settings`).
 
 /// Turns the Fullscreen API on for this window's webview, where the engine needs it.
 pub fn install<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {

@@ -22,6 +22,8 @@
     "unreadCount": "{{count}} non letti in {{name}}",
     "unreadOne": "1 non letto in {{name}}"
   },
+  "foundCount": "{{count}} chat trovate",
+  "foundOne": "1 chat trovata",
   "group": {
     "adminAnswered": "L'app dell'admin ha risposto…",
     "answerFailed": "Non è andato a buon fine. Riprova.",
@@ -31,6 +33,7 @@
     "inviterAwayUnknown": "Il contatto che ti ha invitato non è ancora connesso. Riprova tra un momento.",
     "letting": "Un membro ti sta facendo entrare…",
     "linkUnanswered": "Il link non ha risposto",
+    "others": "Un altro gruppo ha questo id: scegline uno",
     "takenBack": "Invito ritirato",
     "unanswered": "L'app di chi ti ha invitato non ha risposto. Accetta di nuovo, o rifiuta.",
     "waitingAdmin": "In attesa dell'app dell'admin…",
@@ -40,6 +43,7 @@
   "joinChat": "Entra in una chat",
   "new": "Nuova",
   "newChat": "Nuova chat",
+  "newChatShort": "Nuova",
   "newMenu": {
     "chat": "Chat",
     "chatHint": "Una persona, con un invito",
@@ -54,8 +58,29 @@
   "pinned": "Fissata",
   "quiet": "C'è silenzio qui...",
   "quietHint": "È ora di infestare qualcuno! 👻",
+  "rail": {
+    "collapse": "Comprimi l'elenco chat",
+    "expand": "Espandi l'elenco chat",
+    "invitation": "{{name}}, {{status}}",
+    "mention": "{{name}}, sei stato menzionato",
+    "title": "{{action}} ({{keys}})",
+    "unread": "{{name}}, messaggi non letti",
+    "unreadCount": "{{name}}, {{count}} messaggi non letti",
+    "unreadOne": "{{name}}, 1 messaggio non letto"
+  },
+  "row": {
+    "mention": "sei stato menzionato",
+    "muted": "notifiche silenziate",
+    "pinned": "fissata",
+    "separator": ", ",
+    "unread": "{{count}} messaggi non letti",
+    "unreadSome": "messaggi non letti",
+    "unread_one": "{{count}} messaggio non letto",
+    "unread_other": "{{count}} messaggi non letti"
+  },
+  "searchLabel": "Cerca chat",
   "searchPlaceholder": "Cerca chat...",
-  "settings": "Impostazioni",
+  "settings": "Opzioni",
   "sharedIdentity": "Ha condiviso un'identità",
   "skipToContent": "Vai al contenuto",
   "startChat": "Nuova chat",

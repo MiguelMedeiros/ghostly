@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   CHUNK_KIND,
@@ -20,6 +21,8 @@ import {
   utf8Decode,
   utf8Encode,
   viewerResponseHeaders,
+  VIEWER_SERVICE_CSP,
+  withViewerPolicy,
   type FrameChannel,
   type LocalFetch,
   type LocalRequest,
@@ -41,6 +44,9 @@ describe("local targets", () => {
       "file:///etc/passwd",
       "http://localhost:3400/?x=1",
       "http://0.0.0.0:80",
+      "http://127.0.0.1:0",
+      "localhost:0/app",
+      "http://[::1]:0",
     ]) {
       expect(() => parseLocalTarget(bad), bad).toThrow();
     }
@@ -177,6 +183,37 @@ describe("header hygiene", () => {
       ["Set-Cookie", "other=2; HttpOnly"],
       ["X-Domain", "Domain=kept"],
     ]);
+  });
+
+  it("adds Ghostly's connection policy after the contact's own, in one header, so theirs can only narrow it", () => {
+    expect(withViewerPolicy([["Content-Type", "text/html"]])).toEqual([
+      ["Content-Type", "text/html"],
+      ["content-security-policy", VIEWER_SERVICE_CSP],
+    ]);
+    expect(
+      withViewerPolicy([
+        ["Content-Security-Policy", "default-src *"],
+        ["X-Kept", "1"],
+        ["content-security-policy", "img-src *"],
+      ]),
+    ).toEqual([
+      ["X-Kept", "1"],
+      ["content-security-policy", `default-src *, img-src *, ${VIEWER_SERVICE_CSP}`],
+    ]);
+  });
+
+  it("keeps a viewer's page off plain http and so off this machine's and the local network's services", () => {
+    const policy = new Map(VIEWER_SERVICE_CSP.split(";").map((part) => part.trim().split(/\s+/)).map(([name, ...sources]) => [name, sources]));
+    for (const directive of ["default-src", "connect-src", "form-action"]) {
+      expect(policy.get(directive)).toContain("'self'");
+      expect(policy.get(directive)!.filter((source) => /^(\*|http:|ws:)$|^https?:\/\/|^wss?:\/\//.test(source))).toEqual([]);
+    }
+  });
+
+  it("uses the policy Desktop's viewer and `service open` add", () => {
+    const literal = `"${VIEWER_SERVICE_CSP}"`;
+    expect(readFileSync(new URL("../../cli/src/services.ts", import.meta.url), "utf8")).toContain(`export const OPENED_SERVICE_CSP = ${literal};`);
+    expect(readFileSync(new URL("../../../apps/desktop/src/viewer.rs", import.meta.url), "utf8")).toContain(`const SERVICE_CSP: &str = ${literal};`);
   });
 });
 

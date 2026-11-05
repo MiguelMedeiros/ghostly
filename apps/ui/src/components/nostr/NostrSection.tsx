@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { NostrDraftRequest, NostrOwnView } from "@ghostly/browser/nostr/types";
-import { useEngineState } from "../../lib/engineState";
+import { useEngineValue } from "../../lib/engineState";
+import { sameValue } from "../../lib/sameValue";
 import { agoIn } from "../../lib/relativeTime";
 import { useI18n } from "../../contexts/I18nContext";
+import { draftDirection } from "../../lib/documentLanguage";
 import { Block, Button, Notice, Row, Section, Switch, input } from "../wallet/ui";
 import { FieldGrid, InputGroup } from "../layout";
 import { NostrPublishDialog } from "./NostrPublishDialog";
 import { problemLine } from "../../lib/problemText";
+import { exactText } from "../../lib/exactText";
 
 
 /**
@@ -17,23 +20,31 @@ import { problemLine } from "../../lib/problemText";
  */
 export function NostrSection() {
   const { t } = useI18n();
-  const state = useEngineState();
-  const settings = state?.nostr.settings;
-  const own = state?.nostr.own ?? [];
+  // Only the Nostr part of the engine's state: the page stays open, and drew this again on every state.
+  const nostr = useEngineValue(state => state?.nostr);
+  const settings = nostr?.settings;
+  const own = nostr?.own ?? [];
   // What the person typed, kept until their save is in the engine's state: every state push carries a new
   // `settings`, and resetting the field from it would drop the edit (and turn Save off under the pointer).
   const [draft, setDraft] = useState<string | null>(null);
-  const savedAfter = useRef<typeof state>(null);
+  const savedAfter = useRef<typeof nostr | null>(null);
   const [error, setError] = useState("");
   const [publish, setPublish] = useState<NostrDraftRequest | null>(null);
-  // A state that reached this page after the save answered was made after the save: the list in it is the one kept.
-  useEffect(() => { if (savedAfter.current && state !== savedAfter.current) { savedAfter.current = null; setDraft(null); } }, [state]);
-  if (!state || !settings) return null;
+  // Nostr settings that changed after the save answered were made after the save: the list in them is the one kept.
+  useEffect(() => { if (savedAfter.current && !sameValue(nostr, savedAfter.current)) { savedAfter.current = null; setDraft(null); } }, [nostr]);
+  if (!nostr || !settings) return null;
   // Only the field that changes: the rest of the settings is the engine's, not this render's copy of it.
   const save = (patch: Partial<typeof settings>) => { setError(""); return engine.call("updateSettings", { settings: { nostr: patch } }); };
   const relays = draft ?? settings.relays.join("\n");
   const relaysChanged = relays.split(/\s+/).filter(Boolean).join("\n") !== settings.relays.join("\n");
-  const saveRelays = () => save({ relays: relays.split(/\s+/).filter(Boolean) }).then(() => { savedAfter.current = engine.state; }, e => setError(problemLine(e, t)));
+  const saveRelays = () => {
+    const list = relays.split(/\s+/).filter(Boolean);
+    return save({ relays: list }).then(() => {
+      // The saved list is already in the engine's state: no later change of it may come, so the field follows it now.
+      if (sameValue(engine.state?.nostr.settings.relays, list)) setDraft(null);
+      else savedAfter.current = engine.state?.nostr;
+    }, e => setError(problemLine(e, t)));
+  };
   const toggle = (patch: Partial<typeof settings>) => void save(patch).catch(e => setError(problemLine(e, t)));
 
   return (<>
@@ -44,7 +55,7 @@ export function NostrSection() {
           <p className="text-text-muted text-xs mt-0.5">{t("identities.nostr.relaysHint")}</p>
         </div>
         <InputGroup as="form" onSubmit={e => { e.preventDefault(); void saveRelays(); }}>
-          <textarea id="nostr-relays" data-testid="nostr-relays" value={relays} onChange={e => setDraft(e.target.value)} rows={2} spellCheck={false} className={`${input} font-mono text-xs`} placeholder="wss://…" />
+          <textarea id="nostr-relays" data-testid="nostr-relays" value={relays} onChange={e => setDraft(e.target.value)} rows={2} {...exactText} className={`${input} font-mono text-xs`} placeholder="wss://…" />
           <Button type="submit" data-testid="nostr-relays-save" disabled={!relaysChanged}>{t("common.save")}</Button>
         </InputGroup>
       </Block>
@@ -84,7 +95,7 @@ function OwnKey({ view, publish, onPublish, onError }: { view: NostrOwnView; pub
             return view.profile.stale ? t("identities.nostr.profileStaleFrom", from) : t("identities.nostr.profileFrom", from);
           })()}</p>}
           {view.follows && <p className="text-xs text-text-muted" data-testid="nostr-own-follows">{(() => {
-            const count = view.follows.follows.length, at = view.follows.eventAt;
+            const count = view.follows.count, at = view.follows.eventAt;
             if (at) return count === 1 ? t("identities.nostr.youFollowOneAsOf", { time: ago(at) }) : t("identities.nostr.youFollowAsOf", { count, time: ago(at) });
             return count === 1 ? t("identities.nostr.youFollowOne") : t("identities.nostr.youFollow", { count });
           })()}</p>}
@@ -113,11 +124,11 @@ function OwnKey({ view, publish, onPublish, onError }: { view: NostrOwnView; pub
         <form className="space-y-2" onSubmit={e => { e.preventDefault(); onPublish({ subject: view.subject, action: "profile", fields: { displayName: fields.displayName, name: fields.name, about: fields.about, nip05: fields.nip05, website: fields.website, ...(fields.picture ? { picture: fields.picture } : {}) } }); setMode(""); }}>
           {!view.profile && <Notice>{t("identities.nostr.loadFirst")}</Notice>}
           <FieldGrid>
-            <input data-testid="nostr-profile-name" aria-label={t("identities.nostr.name")} placeholder={t("identities.nostr.name")} maxLength={64} value={fields.displayName} onChange={e => setFields({ ...fields, displayName: e.target.value })} className={input} />
-            <input data-testid="nostr-profile-handle" aria-label={t("identities.nostr.handle")} placeholder={t("identities.nostr.handle")} maxLength={64} value={fields.name} onChange={e => setFields({ ...fields, name: e.target.value })} className={input} />
-            <input data-testid="nostr-profile-nip05" aria-label={t("identities.nostr.nip05")} placeholder={t("identities.nostr.nip05Placeholder")} maxLength={253} value={fields.nip05} onChange={e => setFields({ ...fields, nip05: e.target.value })} className={input} />
-            <input data-testid="nostr-profile-website" aria-label={t("identities.nostr.website")} placeholder="https://…" maxLength={512} value={fields.website} onChange={e => setFields({ ...fields, website: e.target.value })} className={input} />
-            <input data-testid="nostr-profile-picture" aria-label={t("identities.nostr.picture")} placeholder={t("identities.nostr.picturePlaceholder")} maxLength={2048} value={fields.picture} onChange={e => setFields({ ...fields, picture: e.target.value })} className={input} />
+            <input data-testid="nostr-profile-name" aria-label={t("identities.nostr.name")} placeholder={t("identities.nostr.name")} maxLength={64} value={fields.displayName} dir={draftDirection(fields.displayName)} onChange={e => setFields({ ...fields, displayName: e.target.value })} className={input} />
+            <input data-testid="nostr-profile-handle" aria-label={t("identities.nostr.handle")} placeholder={t("identities.nostr.handle")} maxLength={64} value={fields.name} onChange={e => setFields({ ...fields, name: e.target.value })} {...exactText} className={input} />
+            <input data-testid="nostr-profile-nip05" aria-label={t("identities.nostr.nip05")} placeholder={t("identities.nostr.nip05Placeholder")} maxLength={253} value={fields.nip05} onChange={e => setFields({ ...fields, nip05: e.target.value })} {...exactText} className={input} />
+            <input data-testid="nostr-profile-website" aria-label={t("identities.nostr.website")} placeholder="https://…" maxLength={512} value={fields.website} onChange={e => setFields({ ...fields, website: e.target.value })} {...exactText} className={input} />
+            <input data-testid="nostr-profile-picture" aria-label={t("identities.nostr.picture")} placeholder={t("identities.nostr.picturePlaceholder")} maxLength={2048} value={fields.picture} onChange={e => setFields({ ...fields, picture: e.target.value })} {...exactText} className={input} />
           </FieldGrid>
           <textarea data-testid="nostr-profile-about" aria-label={t("identities.nostr.about")} placeholder={t("identities.nostr.about")} rows={2} maxLength={500} value={fields.about} onChange={e => setFields({ ...fields, about: e.target.value })} className={input} />
           <p className="text-[11px] text-text-muted">{t("identities.nostr.fieldsNote")}</p>

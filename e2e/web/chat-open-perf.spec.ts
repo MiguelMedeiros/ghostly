@@ -136,7 +136,11 @@ test("scrolled up, a long chat's older messages come into the page above without
     // layout can still have rows above at sizes never painted (a row's content-visibility catching up), off by their
     // difference from where the view lands.
     if (el.scrollTop !== was) await new Promise(resolve => el.addEventListener("scroll", resolve, { once: true, capture: true }));
-    const row = [...el.querySelectorAll<HTMLElement>("[data-message-id]")].find(r => r.getBoundingClientRect().bottom > top + 1)!;
+    // The first row read: the first that starts in the view, not one the top edge cuts. That one is mostly above the view,
+    // maybe still at a typical height, and its real one may move its own top (it grows up), never the rows read.
+    const rows = [...el.querySelectorAll<HTMLElement>("[data-message-id]")];
+    const row = rows.find(r => r.getBoundingClientRect().top >= top && r.getBoundingClientRect().top < top + el.clientHeight)
+      ?? rows.find(r => r.getBoundingClientRect().bottom > top + 1)!;
     const id = row.dataset.messageId!, y = row.getBoundingClientRect().top;
     const before = edges();
     const at = () => el.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(id)}"]`)?.getBoundingClientRect().top ?? Infinity;

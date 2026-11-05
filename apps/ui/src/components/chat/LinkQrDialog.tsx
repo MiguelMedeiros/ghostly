@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { useI18n } from "../../contexts/I18nContext";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
+import { useSameValue } from "../../hooks/useSameValue";
 import { copyText } from "../../lib/shareLink";
 import { cardQuiet } from "./EntityCardFrame";
 
@@ -11,14 +12,15 @@ const COPIED_MS = 1500;
 
 /**
  * Copies a link on a click and says so for a moment; `failed` when neither way of copying worked. The link is
- * a secret that lets someone in: it goes to the clipboard and nowhere else.
+ * a secret that lets someone in: it goes to the clipboard and nowhere else. A copy empties the last Copied first, so
+ * a second one is said again.
  */
 function useCopyLink(url: string) {
   const [state, setState] = useState<"" | "copied" | "failed">("");
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
   const copy = async () => {
-    clearTimeout(timer.current);
+    clearTimeout(timer.current); setState("");
     try {
       await copyText(url);
       setState("copied");
@@ -26,6 +28,15 @@ function useCopyLink(url: string) {
     } catch { setState("failed"); }
   };
   return { copied: state === "copied", failed: state === "failed", copy };
+}
+
+/**
+ * Says Copied once, beside a Copy: the button keeps its label as its name, and going back to it is not said again.
+ * Always there, so the first Copied is heard.
+ */
+export function CopiedStatus({ copied }: { copied: boolean }) {
+  const { t } = useI18n();
+  return <span role="status" className="sr-only">{copied ? t("common.copied") : ""}</span>;
 }
 
 /**
@@ -40,6 +51,8 @@ export function LinkQrDialog({ title, url, qr, onClose }: { title: string; url: 
   useDialogFocus(dialog, onClose);
   const backdrop = useBackdropDismiss(onClose);
   const { copied, failed, copy } = useCopyLink(url);
+  // Its segments come as a new array at every draw of the chat behind it: the same ones are not encoded again.
+  const encoded = useSameValue(qr ?? url);
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 max-md:p-0 animate-fade-in" {...backdrop}>
       <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={`${id}-hint`} data-testid="link-qr"
@@ -48,15 +61,16 @@ export function LinkQrDialog({ title, url, qr, onClose }: { title: string; url: 
         <p id={`${id}-hint`} className="m-0 mt-1 text-xs text-text-muted">{t("chat.entity.qrHint")}</p>
         {/* It gives up some of its size on a short screen before the sheet has to scroll. */}
         <div data-testid="link-qr-code" className="mx-auto mt-4 w-fit max-w-full rounded-2xl bg-white p-3 [&_svg]:h-auto [&_svg]:max-w-full [&_svg]:w-[clamp(140px,34dvh,232px)]">
-          <QRCodeSVG value={qr ?? url} size={232} marginSize={1} title={t("chat.entity.qrTitle")} bgColor="#ffffff" fgColor="#0b0f1a" level="M" />
+          <QRCodeSVG value={encoded} size={232} marginSize={1} title={t("chat.entity.qrTitle")} bgColor="#ffffff" fgColor="#0b0f1a" level="M" />
         </div>
         <input readOnly value={url} dir="ltr" aria-label={t("chat.entity.link")} data-testid="link-qr-url" onFocus={e => e.currentTarget.select()}
           className="mt-4 w-full min-w-0 rounded-lg bg-input-bg px-3 py-2.5 font-mono text-xs text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent" />
         <div className="mt-3 flex gap-2">
           <button type="button" data-testid="link-qr-copy" onClick={() => void copy()}
             className="min-h-11 flex-1 rounded-lg bg-accent px-4 text-sm font-semibold text-on-accent cursor-pointer hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header">
-            <span role="status">{copied ? t("common.copied") : t("common.copy")}</span>
+            {copied ? t("common.copied") : t("common.copy")}
           </button>
+          <CopiedStatus copied={copied} />
           <button type="button" data-testid="link-qr-close" onClick={onClose}
             className="min-h-11 flex-1 rounded-lg bg-surface-alt px-4 text-sm font-semibold text-text-primary cursor-pointer hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
             {t("common.close")}
@@ -77,8 +91,9 @@ export function LinkActions({ name, title, url, qr }: { name: string; title: str
   const { copied, failed, copy } = useCopyLink(url);
   return <>
     <button type="button" data-testid={`${name}-copy`} className={cardQuiet} onClick={() => void copy()}>
-      <span role="status">{copied ? t("common.copied") : t("common.copy")}</span>
+      {copied ? t("common.copied") : t("common.copy")}
     </button>
+    <CopiedStatus copied={copied} />
     <button type="button" data-testid={`${name}-qr`} aria-haspopup="dialog" className={cardQuiet} onClick={() => setShowQr(true)}>{t("group.link.showQr")}</button>
     {failed && <p role="alert" className="m-0 basis-full text-danger-ink">{t("group.link.copyFailed")}</p>}
     {showQr && <LinkQrDialog title={title} url={url} qr={qr} onClose={() => setShowQr(false)} />}

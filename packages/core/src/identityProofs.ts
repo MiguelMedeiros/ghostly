@@ -2,6 +2,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { fromBase64Url, isZ32Key, randomBytes, toBase64Url, utf8Encode } from "./bytes";
 import { identityFromSeed, publicKeyFromZ32, sign, verify } from "./identity";
 import { applyIdentityEvent, type IdentityTimelineEntry, type IdentityTimelineEvent } from "./identityTimeline";
+import { hasVisible, stripHidden } from "./text";
 
 /**
  * Identity proofs (WISP 300), provider-agnostic half.
@@ -169,15 +170,22 @@ export function verifyIdentityPresentation(key: string, sig: string, proofId: st
 
 const clean = (value: unknown, max: number): string | undefined => {
   if (typeof value !== "string") return undefined;
-  // eslint-disable-next-line no-control-regex -- Strip control and bidi-override characters from peer-supplied text.
-  const text = value.replace(/[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g, "").trim();
-  return text ? text.slice(0, max) : undefined;
+  // One line of plain text, as a nickname: no control, format, bidi or line-separator character from peer-supplied text.
+  const text = stripHidden(value).trim();
+  return text && hasVisible(text) ? text.slice(0, max) : undefined;
 };
+
+/**
+ * Room for a line that names a domain (up to 253 characters) once or twice: a How line or a reason cut inside the name
+ * names a record that does not exist, and the app no longer knows the reason to say it in the person's language.
+ */
+const SOURCE_MAX = 640;
+const ERROR_MAX = 512;
 
 /** Bounds a provider's result so a buggy provider cannot store or show arbitrary data. */
 export function boundVerifiedIdentity(v: VerifiedIdentity): VerifiedIdentity {
   if (!v || typeof v.subject !== "string" || !IDENTITY_SUBJECT.test(v.subject)) throw new Error("Provider returned an invalid subject");
-  const source = clean(v.source, 120);
+  const source = clean(v.source, SOURCE_MAX);
   if (!source) throw new Error("Provider did not say how it verified");
   const out: VerifiedIdentity = { subject: v.subject, source };
   const attester = clean(v.attester, 253);
@@ -232,8 +240,9 @@ export interface ReceivedIdentity {
   display?: IdentityDisplay;
 }
 
-/** `id`: the proof the request named, kept here only (never sent) so the timeline can settle its entry. */
-export interface IdentityChallenge { nonce: string; issuedAt: number; provider: string; id?: string }
+/** `id`: the proof the request named, kept here only (never sent) so the timeline can settle its entry.
+ * `withdrawn`: its owner withdrew that proof while this side was checking its presentation. */
+export interface IdentityChallenge { nonce: string; issuedAt: number; provider: string; id?: string; withdrawn?: true }
 
 export interface IdentityLedger {
   challenges: IdentityChallenge[];
@@ -288,7 +297,11 @@ function receivedWithRoom(received: ReceivedIdentity[], id: string, replaced: (r
   return out.length < IDENTITY_MAX_RECEIVED ? out : undefined;
 }
 
-const shortError = (e: unknown) => clean(e instanceof Error ? e.message : String(e), 160) ?? "Invalid proof";
+const REVOKED = "Its owner revoked this proof";
+/** Revoked is final: a later lookup that fails or finds nothing (the relays forgot it) does not undo it. */
+const revokedHere = (received: ReceivedIdentity[], id: string) => received.some(r => r.id === id && r.status === "revoked");
+
+const shortError = (e: unknown) => clean(e instanceof Error ? e.message : String(e), ERROR_MAX) ?? "Invalid proof";
 
 /**
  * A check this side could not finish because of what its own network did: a host it refused to contact, a server
@@ -377,34 +390,46 @@ export class IdentityExchange {
     // One the contact refused, it never held: its app writes no stop, and neither does this side.
     await this.setShared({ ...s, status: "withdrawal-pending", at: this.now(), error: undefined },
       s.status === "rejected" ? undefined : { type: "stopped", side: "mine", proof: id, provider: s.provider, subject: s.subject, reason: "withdrawn" });
-    if (connected) this.send({ t: "idp-withdraw", id });
+    // A link that closed during that write: the withdrawal stays pending and ready() sends it on reconnect.
+    if (connected) try { this.send({ t: "idp-withdraw", id }); } catch { /* sent on reconnect */ }
   }
 
   /**
    * Run the checks again on a received proof: its revocation record, then (unless `revocationOnly`) the
-   * provider's check (a domain record may be gone).
+   * provider's check (a domain record may be gone). `keepUnavailable`: a check that could not run (IdentityCheckUnavailable)
+   * is thrown, and the proof is left as it was, for a check this side started on its own.
    */
-  async recheck(id: string, { revocationOnly = false } = {}): Promise<ReceivedIdentity> {
+  async recheck(id: string, { revocationOnly = false, keepUnavailable = false } = {}): Promise<ReceivedIdentity> {
     const r = this.options.storage.read().received.find(x => x.id === id);
     if (!r) throw new Error("Unknown identity");
     if (r.status === "revoked") return r;
-    let next: ReceivedIdentity;
-    const settled = r.status === "withdrawn";
     if (await this.options.revoked?.(identityStatement(r.binding)).catch(() => false)) {
-      next = { ...r, status: "revoked", checkedAt: this.now(), error: undefined };
-      await this.options.storage.update(l => this.log({ ...l, received: l.received.map(x => x.id === id ? next : x) },
-        { type: "stopped", side: "theirs", proof: id, provider: r.binding.provider, subject: r.verified.subject, reason: "revoked" }));
-      return next;
+      return await this.settleRecheck(id, x => x.status === "revoked" ? x : { ...x, status: "revoked", checkedAt: this.now(), error: undefined },
+        { type: "stopped", side: "theirs", proof: id, provider: r.binding.provider, subject: r.verified.subject, reason: "revoked" }) ?? r;
     }
     if (revocationOnly) return r;
+    let outcome: (x: ReceivedIdentity) => ReceivedIdentity;
     try {
       const verified = boundVerifiedIdentity(await this.options.verify(identityStatement(r.binding), r.evidence));
       if (verified.subject !== r.verified.subject) throw new Error("The identity changed");
-      next = { ...r, verified: { ...verified, display: verified.display ?? r.verified.display }, checkedAt: this.now(), status: settled ? "withdrawn" : "verified", error: undefined };
+      outcome = x => ({ ...x, verified: { ...verified, display: verified.display ?? x.verified.display }, checkedAt: this.now(), status: "verified", error: undefined });
     } catch (e) {
-      next = { ...r, checkedAt: this.now(), status: settled ? "withdrawn" : "unconfirmed", error: shortError(e) };
+      if (keepUnavailable && e instanceof IdentityCheckUnavailable) throw e;
+      const error = shortError(e);
+      outcome = x => ({ ...x, checkedAt: this.now(), status: "unconfirmed", error });
     }
-    await this.options.storage.update(l => ({ ...l, received: l.received.map(x => x.id === id ? next : x) }));
+    // Applied to the record as it is once the check is back: a withdraw or revocation that landed meanwhile holds.
+    return await this.settleRecheck(id, x => x.status === "revoked" ? x : x.status === "withdrawn" ? { ...outcome(x), status: "withdrawn" } : outcome(x)) ?? r;
+  }
+  private async settleRecheck(id: string, outcome: (x: ReceivedIdentity) => ReceivedIdentity, event?: IdentityTimelineEvent): Promise<ReceivedIdentity | undefined> {
+    let next: ReceivedIdentity | undefined;
+    await this.options.storage.update(l => {
+      const x = l.received.find(y => y.id === id);
+      if (!x) return l;
+      next = outcome(x);
+      const out = { ...l, received: l.received.map(y => y.id === id ? next! : y) };
+      return event && x.status !== "revoked" ? this.log(out, event) : out;
+    });
     return next;
   }
 
@@ -423,9 +448,15 @@ export class IdentityExchange {
         case "idp-result": {
           const s = id ? this.shared(id) : undefined;
           if (!s || s.status !== "pending") return;
-          const error = frame.ok === true ? undefined : clean(frame.error, 160) ?? "Your contact could not verify it";
-          await this.setShared({ ...s, status: frame.ok === true ? "accepted" : "rejected", at: this.now(), error },
-            { type: "result", side: "mine", proof: s.id, ok: frame.ok === true, error });
+          const ok = frame.ok === true;
+          const error = ok ? undefined : clean(frame.error, ERROR_MAX) ?? "Your contact could not verify it";
+          const entry: SharedIdentity = { ...s, status: ok ? "accepted" : "rejected", at: this.now(), error };
+          // The contact keeps one proof per identity (onPresent): the one it accepted replaced any other of the same
+          // provider and subject it held from here, so that one is no longer shared in this chat.
+          const replaced = (x: SharedIdentity) => ok && x.status === "accepted" && x.provider === s.provider && x.subject === s.subject;
+          await this.options.storage.update(l => this.log({ ...l, shared: [
+            ...l.shared.filter(x => x.id !== s.id).map(x => replaced(x) ? { ...x, status: "withdrawn" as const, at: entry.at } : x), entry,
+          ] }, { type: "result", side: "mine", proof: s.id, ok, error }));
           return;
         }
         case "idp-withdraw": {
@@ -433,11 +464,16 @@ export class IdentityExchange {
           // A durable write only for a proof this side actually received and still holds: a withdraw naming an
           // unknown (or already-withdrawn) id is only acknowledged, never written, so it cannot be repeated for a
           // durable write each time. The ack is always sent (a share the contact refused is withdrawn this way too).
+          // A revoked one stays revoked: the owner revoked it everywhere, which says more than a withdraw from here.
           const r = this.options.storage.read().received.find(x => x.id === id);
-          if (r && r.status !== "withdrawn")
+          if (r && r.status !== "withdrawn" && r.status !== "revoked")
             await this.options.storage.update(l => this.log(
               { ...l, received: l.received.map(x => x.id === id ? { ...x, status: "withdrawn" as const } : x) },
               { type: "stopped", side: "theirs", proof: id, provider: r.binding.provider, subject: r.verified.subject, reason: "withdrawn" }));
+          // A presentation of it may still be in its check (a withdraw on a new session after a reconnect): noted on
+          // the challenge, so the check's outcome is stored withdrawn. Once per challenge, and challenges are bounded.
+          if (this.options.storage.read().challenges.some(c => c.id === id && !c.withdrawn))
+            await this.options.storage.update(l => ({ ...l, challenges: l.challenges.map(c => c.id === id ? { ...c, withdrawn: true as const } : c) }));
           this.send({ t: "idp-withdrawn", id });
           return;
         }
@@ -504,10 +540,12 @@ export class IdentityExchange {
     let error: string | undefined;
     /** The same, as this side's own timeline says it. */
     let reason: string | undefined;
+    let withdrawn = false;
     try {
       // Before anything is checked or looked up: a contact past the bound costs this side nothing more.
       // The checked subject is not known yet: an identity kept under the binding's subject may be the one replaced.
       const mayReplace = (r: ReceivedIdentity) => r.binding.provider === binding.provider && (r.binding.subject === binding.subject || r.verified.subject === binding.subject);
+      if (revokedHere(this.options.storage.read().received, id)) throw new Error(REVOKED);
       if (!receivedWithRoom(this.options.storage.read().received, id, mayReplace, now)) throw new Error(TOO_MANY_RECEIVED);
       if (JSON.stringify(evidence ?? null).length > IDENTITY_MAX_EVIDENCE) throw new Error("Evidence too large");
       if (!verifyIdentityPresentation(binding.key, sig as string, id, scope, nonce, issuedAt)) throw new Error("The proof key did not sign this conversation's challenge");
@@ -516,7 +554,7 @@ export class IdentityExchange {
       if (Math.min(binding.expiresAt, result.expiresAt ?? Infinity) <= now) throw new Error("The proof has expired");
       // A presentation needs the proof key, so this only matters when its seed leaked: a lookup that
       // fails is not a refusal, a revocation found is.
-      if (await this.options.revoked?.(statement).catch(() => false)) throw new Error("Its owner revoked this proof");
+      if (await this.options.revoked?.(statement).catch(() => false)) throw new Error(REVOKED);
       verified = result;
     } catch (e) { error = peerError(e); reason = shortError(e); }
     // Consuming the nonce and recording the outcome are one transaction.
@@ -526,15 +564,22 @@ export class IdentityExchange {
       const challenges = l.challenges.filter(c => c.nonce !== nonce);
       // A newer proof of the same identity replaces the older one; the bound holds for presentations checked at once.
       const subject = verified?.subject;
+      // A re-check may have found it revoked while it was being checked.
+      if (verified && revokedHere(l.received, id)) { verified = undefined; error = reason = REVOKED; }
       const received = verified && receivedWithRoom(l.received, id, r => r.binding.provider === binding.provider && r.verified.subject === subject, now);
       if (verified && !received) { verified = undefined; error = reason = TOO_MANY_RECEIVED; }
       const logged = this.log(l, { type: "result", side: "theirs", proof: id, requested: challenge.id, provider: binding.provider,
         subject: verified?.subject ?? binding.subject, ok: !!verified, ...(reason ? { error: reason } : {}) });
       if (!verified || !received) return { ...logged, challenges };
+      // Its owner withdrew it while it was being checked: kept as if the withdraw had come just after.
+      withdrawn = !!challenge.withdrawn;
       const record: ReceivedIdentity = { id, binding, evidence, verified, presenter: scope.subject, audience: scope.audience, context: scope.context,
-        verifiedAt: now, checkedAt: now, status: "verified" };
-      return { ...logged, challenges, received: [...received, record] };
+        verifiedAt: now, checkedAt: now, status: withdrawn ? "withdrawn" : "verified" };
+      const kept = { ...logged, challenges, received: [...received, record] };
+      return withdrawn ? this.log(kept, { type: "stopped", side: "theirs", proof: id, provider: binding.provider, subject: verified.subject, reason: "withdrawn" }) : kept;
     });
-    this.send(verified ? { t: "idp-result", id, ok: true } : { t: "idp-result", id, ok: false, error });
+    // A withdrawn one gets no result: the owner has it withdrawn (`idp-withdrawn` went out), and a late one would
+    // settle a new share of the same proof made since.
+    if (!withdrawn) this.send(verified ? { t: "idp-result", id, ok: true } : { t: "idp-result", id, ok: false, error });
   }
 }

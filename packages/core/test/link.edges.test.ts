@@ -14,6 +14,8 @@ import {
   PRESENCE_WINDOW,
   presenceSeenAt,
   RELAY_POLL_INTERVALS,
+  SIGNAL_DUE_READS,
+  SIGNAL_OUT_READS,
   STALLED_LOOK_MS,
   WATCH_PEER_MS,
   DEPARTED_READ_MS,
@@ -557,7 +559,7 @@ describe("LinkSession presence and signals", () => {
     await expect(a.s.setRtcSignal(null, true)).rejects.toThrow("relay down");
   });
 
-  it("marks as signaling the publish of a new offer or answer and the fast reads for the answer to its offer, nothing else", async () => {
+  it("marks as signaling the publish of a new offer or answer, the fast reads for the answer to its offer and the first ones after its answer, nothing else", async () => {
     const { a } = pair({ getServices: () => [] });
     a.s.start();
     await settle();
@@ -581,7 +583,62 @@ describe("LinkSession presence and signals", () => {
     await settle();
     expect(lastRead()).toMatchObject({ urgent: true });
     expect(lastRead()).not.toHaveProperty("signal");
+    // An answer: its first fast reads are signaling (the offerer may have given up the offer it answered and made another).
+    await a.s.setRtcSignal('{"t":"a"}');
+    expect(lastPublish()).toEqual({ signal: true });
+    // (The first read is the one a new signal makes at once.)
+    await settle();
+    expect(lastRead()).toMatchObject({ urgent: true, signal: true });
+    for (let i = 1; i < SIGNAL_OUT_READS; i++) {
+      a.s.pollNow();
+      await settle();
+      expect(lastRead()).toMatchObject({ urgent: true, signal: true });
+    }
+    a.s.pollNow();
+    await settle();
+    expect(lastRead()).not.toHaveProperty("signal");
     await a.s.stop(false);
+  });
+
+  it("marks as signaling the first fast reads once the contact's offer is due, not one the budget held back, until one finds it", async () => {
+    const { a, b } = pair({ getServices: () => [] }, { getServices: () => [] });
+    a.s.start();
+    b.s.start();
+    await settle();
+    const lastRead = () => (a.transport.resolve.mock.lastCall as unknown[] | undefined)?.[1];
+    // The peer expected: fast reads, not signaling.
+    a.s.expectPeer();
+    await settle();
+    expect(lastRead()).toMatchObject({ urgent: true });
+    expect(lastRead()).not.toHaveProperty("signal");
+    // Its offer due now (the chat left DHT only on both sides): the first reads are.
+    a.s.expectPeer(false, true);
+    await settle();
+    expect(lastRead()).toMatchObject({ urgent: true, signal: true });
+    // One the relays' budget held back asked them nothing: it is not counted.
+    a.transport.failResolve = new DiscoveryBudgetError(5_000);
+    a.s.pollNow();
+    await settle();
+    a.transport.failResolve = null;
+    for (let i = 1; i < SIGNAL_DUE_READS; i++) {
+      a.s.pollNow();
+      await settle();
+      expect(lastRead()).toMatchObject({ urgent: true, signal: true });
+    }
+    a.s.pollNow();
+    await settle();
+    expect(lastRead()).not.toHaveProperty("signal");
+    // Due again, and the first read finds the offer: what follows reads as its answer's, not as more of these.
+    await b.s.setRtcSignal('{"t":"o"}');
+    a.s.expectPeer(false, true);
+    await settle();
+    expect(lastRead()).toMatchObject({ signal: true });
+    expect(a.ev.onRtcSignal).toHaveBeenCalledOnce();
+    a.s.pollNow();
+    await settle();
+    expect(lastRead()).not.toHaveProperty("signal");
+    await a.s.stop(false);
+    await b.s.stop(false);
   });
 
   it("does not publish the RTC signal or services in its departure packet", async () => {
@@ -696,7 +753,7 @@ describe("LinkSession poll pacing", () => {
     const old = pair({ awaitingSince: NOW - 30 * 86_400_000 });
     old.a.s.start();
     await settle();
-    expect(old.a.transport.resolve).toHaveBeenLastCalledWith(old.params.mine.peerPubKeyZ32, { background: true, urgent: false });
+    expect(old.a.transport.resolve).toHaveBeenLastCalledWith(old.params.mine.peerPubKeyZ32, { background: true, urgent: false }, false);
     expect(lastPoll(old.a.ev)).toBe(I.background);
     await old.a.s.stop(false);
     // Made three minutes ago, and the app opened again: the invite is awaited for the seven minutes left.

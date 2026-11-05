@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { AROUND_ROWS, MAX_ROWS, OPEN_ROWS, PAGE_ROWS, revealMessage, useRowWindow } from "../../hooks/useRowWindow";
+import { AROUND_ROWS, MAX_ROWS, OPEN_ROWS, PAGE_ROWS, holdRow, revealMessage, useRowWindow } from "../../hooks/useRowWindow";
 
 // covers: chat.scroll
 
@@ -105,6 +105,52 @@ describe("useRowWindow", () => {
     expect(Math.max(...drawn)).toBeLessThanOrEqual(MAX_ROWS);
     act(() => result.current.attach(true));
     expect(range(result.current)).toEqual([8_000 - OPEN_ROWS, 8_000]);
+  });
+
+  it("at the bottom, a batch past its most rows keeps a held row (a picture open large from it), within the most rows", () => {
+    const drawn: number[] = [];
+    const { result, rerender } = renderHook(({ ids }) => {
+      const w = useRowWindow(ids, "chat-1");
+      drawn.push(w.to - w.from);
+      return w;
+    }, { initialProps: { ids: rows(5_000) } });
+    const release = holdRow("m4999");
+    try {
+      rerender({ ids: rows(5_120) });
+      expect(range(result.current)).toEqual([4_999, 5_120]);
+      expect(result.current.detached).toBe(false);
+      // More than the most rows below it: those past them stay below the window, the held row in it.
+      rerender({ ids: rows(6_000) });
+      expect(range(result.current)).toEqual([4_999, 4_999 + MAX_ROWS]);
+      expect(result.current.detached).toBe(true);
+      // A page more below would let it go at the top: none. Above, it stays and the bottom ones go.
+      act(() => { expect(result.current.more("down")).toBe(false); });
+      expect(range(result.current)).toEqual([4_999, 4_999 + MAX_ROWS]);
+      act(() => { expect(result.current.more("up")).toBe(true); });
+      expect(range(result.current)).toEqual([4_999 - PAGE_ROWS, 4_999 - PAGE_ROWS + MAX_ROWS]);
+      // Now at the bottom edge, a page more above would let it go there: none.
+      for (let i = 0; i < MAX_ROWS / PAGE_ROWS; i++) act(() => { result.current.more("up"); });
+      expect(range(result.current)).toEqual([5_024 - MAX_ROWS, 5_024]);
+      act(() => { expect(result.current.more("up")).toBe(false); });
+      expect(Math.max(...drawn)).toBeLessThanOrEqual(MAX_ROWS);
+    } finally {
+      release();
+    }
+    // Let go: a page more above takes the held row's place as before.
+    act(() => { expect(result.current.more("up")).toBe(true); });
+    expect(range(result.current)).toEqual([5_024 - MAX_ROWS - PAGE_ROWS, 4_999]);
+  });
+
+  it("a held row one at a time: each arrival keeps it until the most rows, a row no longer held lets the window go on", () => {
+    const { result, rerender } = renderHook(({ ids }) => useRowWindow(ids, "chat-1"), { initialProps: { ids: rows(5_000) } });
+    const release = holdRow("m4950");
+    let n = 5_000;
+    for (; n < 4_950 + MAX_ROWS; n++) rerender({ ids: rows(n + 1) });
+    expect(range(result.current)).toEqual([4_950, 4_950 + MAX_ROWS]);
+    expect(result.current.detached).toBe(false);
+    release();
+    rerender({ ids: rows(n + 1) });
+    expect(range(result.current)).toEqual([n + 1 - OPEN_ROWS, n + 1]);
   });
 
   it("goes back to the last rows on attach", () => {

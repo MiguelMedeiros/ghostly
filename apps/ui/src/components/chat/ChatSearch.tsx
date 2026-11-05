@@ -2,17 +2,29 @@ import { useId, useState, type ReactNode } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import type { ChatSearch } from "../../hooks/useChatSearch";
 import { matchRanges } from "../../lib/chatSearch";
+import { draftDirection } from "../../lib/documentLanguage";
 import { useComposition } from "../../hooks/useComposition";
 
-/** `text` with the places that hold `term` marked; the text itself when there is no term or no match. */
+/**
+ * `text` with the places that hold `term` marked; the text itself when there is no term or no match. The mark's tint is
+ * faint enough for the bubble's words to read at 4.5:1 on it in every theme (at 35% they didn't on the dark sent bubbles).
+ */
 export function Highlight({ text, term }: { text: string; term?: string }) {
-  const ranges = term ? matchRanges(text, term) : [];
-  if (!ranges.length) return <>{text}</>;
+  return <Marked text={text} start={0} ranges={term ? matchRanges(text, term) : []} />;
+}
+
+/**
+ * `text`, a piece of a longer text that starts at `start` in it, with what falls in it of that text's matches (`ranges`)
+ * marked: a match that runs across formatting is marked in each piece it covers.
+ */
+export function Marked({ text, start, ranges }: { text: string; start: number; ranges: readonly [number, number][] }) {
   const parts: ReactNode[] = [];
   let at = 0;
-  for (const [from, to] of ranges) {
+  for (const [matchFrom, matchTo] of ranges) {
+    const from = Math.max(matchFrom - start, at), to = Math.min(matchTo - start, text.length);
+    if (to <= from) continue;
     if (from > at) parts.push(text.slice(at, from));
-    parts.push(<mark key={from} data-search-match className="rounded-[2px] bg-accent/35 text-inherit">{text.slice(from, to)}</mark>);
+    parts.push(<mark key={from} data-search-match className="rounded-[2px] bg-accent/25 text-inherit">{text.slice(from, to)}</mark>);
     at = to;
   }
   if (at < text.length) parts.push(text.slice(at));
@@ -51,6 +63,7 @@ export function ChatSearchBar({ search }: { search: ChatSearch }) {
           type="search"
           data-testid="chat-search-input"
           value={search.query}
+          dir={draftDirection(search.query)}
           onChange={(e) => search.setQuery(e.target.value)}
           {...composition.inputProps}
           onKeyDown={(e) => {

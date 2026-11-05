@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { ESCAPES, PRECONNECT_PROBES, RTC_PROBES, appEntry, hitTags, startListeners, type Listeners, type ProbeTargets } from "../support/appsSandbox";
+import { ESCAPES, HISTORY_WAYS, PRECONNECT_PROBES, RTC_PROBES, appEntry, hitTags, startListeners, type Listeners, type ProbeTargets } from "../support/appsSandbox";
 import { chessEntryHtml } from "../support/chessFixture";
 import { RUNNER_CSP } from "../../apps/web/runnerPolicy";
 
@@ -191,6 +191,48 @@ test("ways out that take the page with them reach nothing, and a load the broker
   testInfo.annotations.push({ type: `escapes (${browserName})`, description: JSON.stringify(outcome) });
 });
 
+const FRAGMENT_WAYS = new Set<string>(["history-hash", "history-link-hash", "history-assign-hash"]);
+
+test("an app adds no entry to the page's history and moves the page nowhere: Back still leaves it", {
+  tag: ["@feature:apps.web-sandbox"],
+}, async ({ page, browserName }, testInfo) => {
+  await appPage(page);
+  // The page's own entries carry a query (the router follows the hash only, and sends a fresh profile's routes to `#/`).
+  const where = () => page.evaluate(() => location.search + location.hash);
+  const length = () => page.evaluate(() => history.length);
+  const outcome: Record<string, unknown> = {};
+  for (const way of HISTORY_WAYS) {
+    await test.step(way, async () => {
+      // Where the person was, and where they are when the app opens.
+      await page.evaluate((way) => { history.pushState(null, "", `?was=${way}${location.hash}`); history.pushState(null, "", `?is=${way}${location.hash}`); }, way);
+      const was = `?was=${way}#/`;
+      const is = await where();
+      expect(is).toBe(`?is=${way}#/`);
+      const before = await length();
+      const ref = `evilpublisherkey/${way}`;
+      const handle = await open(page, ref, appEntry("history", { way }));
+      await expect.poll(() => stored(page, ref)).toMatchObject({ started: true });
+      await page.waitForTimeout(2_000);
+      const now = await status(page, handle);
+      outcome[way] = { ...now, tried: (await stored(page, ref)).outcome ?? null, at: await where(), added: (await length()) - before };
+      // The page did not move.
+      expect(await where(), way).toBe(is);
+      if (FRAGMENT_WAYS.has(way)) {
+        // A fragment navigation (location.hash, a link to "#…") is the one way no policy refuses: it becomes a load, and
+        // the app is gone. What it pushed before its first one was heard stays in the history (WISP 1200, threats).
+        expect(now, way).toEqual({ phase: "stopped", stopped: "navigated" });
+        return;
+      }
+      // Its history has no entry of the app's: one Back takes the person where they were.
+      expect(now, way).toEqual({ phase: "running", stopped: null });
+      expect(await length(), way).toBe(before);
+      await page.evaluate(() => history.back());
+      await expect.poll(where, { message: way }).toBe(was);
+    });
+  }
+  testInfo.annotations.push({ type: `history (${browserName})`, description: JSON.stringify(outcome) });
+});
+
 test("the broker answers 50 requests a second and refuses one over 64 KiB", {
   tag: ["@feature:apps.web-sandbox"],
 }, async ({ page }) => {
@@ -256,6 +298,70 @@ test("an app that reads its own 16 MiB file 50 times a second gets one a second,
   // Measured on a 4-core host: 36-40 ms; 453-473 ms while every read was answered (149 of 150, 2.3 GB copied).
   expect(gap).toBeLessThan(300);
   expect(await status(page, handle)).toEqual({ phase: "running", stopped: null });
+});
+
+/** The longest the page's 10 ms timer waits over `ms`: what the person feels of the page's thread. */
+const longestGap = (page: Page, ms: number) => page.evaluate((ms) => new Promise<number>((done) => {
+  let longest = 0;
+  let last = performance.now();
+  const started = last;
+  const timer = setInterval(() => {
+    const now = performance.now();
+    longest = Math.max(longest, now - last);
+    last = now;
+    if (now - started > ms) { clearInterval(timer); done(longest); }
+  }, 10);
+}), ms);
+
+test("an app that stops answering for longer than the watchdog's bound is closed, and one busy for less runs on", {
+  tag: ["@feature:apps.web-sandbox"],
+}, async ({ page }, testInfo) => {
+  await appPage(page);
+  // Busy for 3 s once, under the bound: a chess engine thinking on the app's thread. It runs on.
+  const busy = "honestpublisherkey/thinker";
+  const busyHandle = await open(page, busy, appEntry("hang", { ms: 3_000 }));
+  await expect.poll(() => stored(page, busy), { timeout: 30_000 }).toHaveProperty("ready");
+  await page.waitForTimeout(5_000);
+  expect(await status(page, busyHandle)).toEqual({ phase: "running", stopped: null });
+  // Closed before the next: where frames share the page's thread, the page cannot tell which app held it, and stops
+  // every app that runs then.
+  await page.evaluate((handle) => (window as unknown as { __ghostlyApps: { stop(handle: number): void } }).__ghostlyApps.stop(handle), busyHandle);
+  // Then one that answers nothing for 15 s.
+  const ref = "evilpublisherkey/hang";
+  const handle = await open(page, ref, appEntry("hang", { ms: 15_000 }));
+  await expect.poll(() => stored(page, ref), { timeout: 30_000 }).toHaveProperty("ready");
+  const started = Date.now();
+  // Where the frame shares the page's thread (WebKit, Chromium without site isolation) nothing on the page runs while
+  // the app loops, so it is seen once the loop gives the thread back; where it has its own, at the bound.
+  await expect.poll(() => status(page, handle), { timeout: 40_000 }).toEqual({ phase: "stopped", stopped: "unresponsive" });
+  testInfo.annotations.push({ type: "closed after", description: `${Date.now() - started} ms` });
+  expect(Date.now() - started).toBeLessThan(25_000);
+  await expect(page.locator(`iframe[data-app="${ref}"]`)).toHaveCount(0);
+  expect(await longestGap(page, 2_000)).toBeLessThan(500);
+});
+
+test("an app in an endless loop, in a frame with a thread of its own, is closed at the bound while the page runs on", {
+  tag: ["@feature:apps.web-sandbox"],
+}, async ({ browser, browserName, baseURL }, testInfo) => {
+  // Desktop Chrome's own isolation, which gives the runner's frame a process of its own. WebKit has none to turn on:
+  // there an endless loop holds the tab's one thread (WISP 1200 § Threats).
+  test.skip(browserName !== "chromium", "only Chromium can give the frame a thread of its own");
+  const isolated = await browser.browserType().launch({ args: ["--site-per-process", "--enable-features=IsolateSandboxedIframes"] });
+  try {
+    const page = await isolated.newPage({ baseURL, serviceWorkers: "block" });
+    await appPage(page);
+    const ref = "evilpublisherkey/forever";
+    const handle = await open(page, ref, appEntry("hang", { ms: 0 }));
+    await expect.poll(() => stored(page, ref), { timeout: 30_000 }).toHaveProperty("ready");
+    const started = Date.now();
+    const gap = longestGap(page, 8_000);
+    expect(await gap).toBeLessThan(500);
+    await expect.poll(() => status(page, handle), { timeout: 30_000 }).toEqual({ phase: "stopped", stopped: "unresponsive" });
+    testInfo.annotations.push({ type: "closed after", description: `${Date.now() - started} ms` });
+    await expect(page.locator(`iframe[data-app="${ref}"]`)).toHaveCount(0);
+  } finally {
+    await isolated.close();
+  }
 });
 
 test("an app in a chat talks to its contact's app through the broker, and keeps its data in that chat", {
@@ -339,6 +445,63 @@ test("an app may ask for the pointer after a click (mouse look): its sandbox no 
   await page.frameLocator(`iframe[data-app="${ref}"]`).locator("#pad").click();
   await expect.poll(async () => (await stored(page, ref)).lock).toBeDefined();
   expect(["held", "WrongDocumentError"]).toContain((await stored(page, ref)).lock);
+});
+
+test("an app writes nothing to the clipboard: not on load, not in a tap, not from a timer after one", {
+  tag: ["@feature:apps.web-sandbox"],
+}, async ({ page, context, browserName }) => {
+  // Read only, for the check at the end. Playwright's Chromium lets the copy through even on load, with no tap.
+  if (browserName === "chromium") await context.grantPermissions(["clipboard-read"]);
+  await appPage(page);
+  const ref = "evilpublisherkey/clipboard";
+  // Every way the app has to `execCommand` a clipboard command, on a selected textarea; the browser's answer (true:
+  // it wrote) goes to storage. The async Clipboard API is the frame's `allow=""`'s to refuse.
+  const entry = `<!doctype html><title>clip</title><body style="margin:0"><textarea id=t></textarea><div id=pad style="width:100vw;height:90vh"></div><script>
+    const g = window.ghostly, t = document.getElementById("t"), proto = Document.prototype;
+    const exec = proto.execCommand;
+    const tries = (tag) => {
+      const out = {};
+      const ways = {
+        copy: () => document.execCommand("copy"),
+        COPY: () => document.execCommand("COPY"),
+        cut: () => document.execCommand("cut"),
+        paste: () => document.execCommand("paste"),
+        taken: () => exec.call(document, "copy"),
+        proto: () => proto.execCommand.call(document, "copy", false),
+        other: () => document.implementation.createHTMLDocument("").execCommand("copy"),
+      };
+      for (const way in ways) {
+        t.value = "bc1q-APP-" + tag + "-" + way;
+        t.select();
+        try { out[way] = ways[way](); } catch (e) { out[way] = e.name; }
+      }
+      g.storage.set(tag, out);
+    };
+    tries("load");
+    let taps = 0;
+    document.getElementById("pad").addEventListener("pointerdown", () => {
+      if (taps++) return;
+      tries("tap");
+      t.value = "";
+      t.focus();
+      const typed = document.execCommand("insertText", false, "typed");
+      g.storage.set("edit", typed + " " + t.value);
+      setTimeout(() => tries("timer"), 1000);
+    });
+    g.storage.set("ready", true);
+  </script>`;
+  await open(page, ref, entry);
+  await expect.poll(() => stored(page, ref)).toMatchObject({ ready: true });
+  await page.frameLocator(`iframe[data-app="${ref}"]`).locator("#pad").click();
+  await expect.poll(async () => (await stored(page, ref)).timer, { timeout: 10_000 }).toBeDefined();
+  const seen = await stored(page, ref);
+  test.info().annotations.push({ type: `clipboard (${browserName})`, description: JSON.stringify(seen) });
+  for (const tag of ["load", "tap", "timer"]) {
+    for (const [way, wrote] of Object.entries(seen[tag] as Record<string, unknown>)) expect(`${tag} ${way}: ${String(wrote)}`).toBe(`${tag} ${way}: false`);
+  }
+  // None of the app's text is in the system clipboard, and an editing command still edits.
+  if (browserName === "chromium") expect(await page.evaluate(() => navigator.clipboard.readText())).not.toContain("bc1q-APP");
+  expect(seen.edit).toBe("true typed");
 });
 
 test("Chess, as it is built, runs under the runner's lock", {

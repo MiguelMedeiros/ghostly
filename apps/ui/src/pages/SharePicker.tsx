@@ -5,7 +5,7 @@ import { useChatTargets } from "../hooks/useChatTargets";
 import { useI18n } from "../contexts/I18nContext";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { Notice } from "../components/ui/Notice";
-import { dropIncomingShare, isEmptyShare, sendShareTo, shareText, useIncomingShare } from "../lib/incomingShare";
+import { MAX_SHARE_FILES, MAX_WAITING_SHARES, dropIncomingShare, incomingShare, isEmptyShare, sendShareTo, sharePreview, useIncomingShare } from "../lib/incomingShare";
 
 /** How long the page waits for a share that has not reached it yet before it says there is none. */
 const WAIT_MS = 5000;
@@ -32,8 +32,10 @@ export function SharePicker() {
   // A name may not be known (the web app's worker never reads a body that is too large): then it says so without one.
   const leftOutNames = leftOut.filter(Boolean);
   const noRoom = share?.noRoom ?? [];
+  const pastLimit = share?.pastLimit ?? [];
+  const dropped = share?.dropped ?? 0;
   const targets = useChatTargets();
-  const preview = share ? shareText(share) : "";
+  const preview = share ? sharePreview(share) : "";
 
   const pick = (chat: string, path: string) => {
     sendShareTo(chat);
@@ -41,7 +43,8 @@ export function SharePicker() {
   };
   const cancel = () => {
     dropIncomingShare();
-    nav.home();
+    // Another share waited behind this one (the web app's, `receiveShare` with `queue`): the picker shows it now.
+    if (!incomingShare()) nav.home();
   };
 
   return (
@@ -64,6 +67,17 @@ export function SharePicker() {
           {noRoom.length > 0 && (
             <Notice tone="error" className="text-sm" testId="share-no-room"
               title={t("pwa.shareNoRoom", { names: noRoom.join(", ") })} next={t("pwa.shareNoRoomNext")} />
+          )}
+          {/* Files past the most one share brings were left out: named apart, as they were not too large. */}
+          {pastLimit.length > 0 && (
+            <Notice tone="error" className="text-sm" testId="share-past-limit"
+              title={t("pwa.sharePastLimit", { count: String(MAX_SHARE_FILES), names: pastLimit.join(", ") })} next={t("pwa.sharePastLimitNext")} />
+          )}
+          {/* Shares that came while this one waited, past the most that can wait, were not kept: never dropped without a word. */}
+          {dropped > 0 && (
+            <Notice tone="error" className="text-sm" testId="share-dropped"
+              title={dropped === 1 ? t("pwa.shareDroppedOne", { waiting: String(MAX_WAITING_SHARES) }) : t("pwa.shareDropped", { count: String(dropped), waiting: String(MAX_WAITING_SHARES) })}
+              next={t("pwa.shareDroppedNext")} />
           )}
           {/* Nothing else came: no chat to pick. */}
           {!isEmptyShare(share) && (

@@ -660,16 +660,24 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
 
       describe("groups take listeners least recently used first, as chats do (WISP 902 § Transports)", () => {
         /** A group's edges toward these many members, each reached only natively (an app with no WebRTC, or a VPN). */
-        async function groupOf(node: GhostlyNode, members: number, options: { hub?: number; used?: boolean } = {}) {
+        async function groupOf(node: GhostlyNode, members: number, options: { hub?: number; used?: boolean; admin?: number; order?: (keys: string[], me: string) => string[] } = {}) {
           const { groupId } = await node.createGroup({ name: "Plaza" });
           const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
           const keys = Array.from({ length: members }, () => createIdentity().pubKeyZ32);
-          // A member the group's beacon names as a hub.
-          if (options.hub !== undefined) {
+          // A member the group's beacon names as a hub, and one that is the group's admin.
+          if (options.hub !== undefined || options.admin !== undefined) {
             const groups = node["groups"] as { view(id: string): { id: string; members: unknown[] } | undefined };
-            const view = groups.view.bind(groups);
-            vi.spyOn(groups, "view").mockImplementation((id) => { const g = view(id); return !g || g.id !== groupId ? g
-              : { ...g, members: [...g.members, { key: keys[options.hub!], role: "member", me: false, online: false, missing: 0, hub: true }] }; });
+            // Over a spy an earlier group of the test left: that one's answer, not the spy again.
+            const view = vi.isMockFunction(groups.view) ? groups.view.getMockImplementation()! : groups.view.bind(groups);
+            const added = [...(options.hub !== undefined ? [{ key: keys[options.hub], role: "member", me: false, online: false, missing: 0, hub: true }] : []),
+              ...(options.admin !== undefined ? [{ key: keys[options.admin], role: "admin", me: false, online: false, missing: 0 }] : [])];
+            vi.spyOn(groups, "view").mockImplementation((id) => { const g = view(id); return !g || g.id !== groupId ? g : { ...g, members: [...g.members, ...added] }; });
+          }
+          // A private group's roster in admission order (`meshOrder`), with that admin.
+          if (options.order) {
+            const me = createIdentity().pubKeyZ32, order = options.order(keys, me), groups = node["groups"];
+            const meshOrder = vi.isMockFunction(groups.meshOrder) ? groups.meshOrder.getMockImplementation()! : groups.meshOrder.bind(groups);
+            vi.spyOn(groups, "meshOrder").mockImplementation((id) => id === groupId ? { order, admin: options.admin !== undefined ? keys[options.admin] : order[0], me } : meshOrder(id));
           }
           // A text in it a moment ago: it was in use more lately than the chats, each quiet for minutes.
           if (options.used) expect((await node.sendGroupMessage({ groupId, text: "hi" })).error).toBeNull();
@@ -868,6 +876,32 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
             expect(onIroh()).toEqual([edgeIds[0]]);
           });
 
+          it("in a private group, the edge kept goes to the member admitted just before, not to the admin; a community keeps the admin's (ghostly-agents#1509)", async () => {
+            // Without WebRTC, every member kept its edge to the admin: an admin with five chats live and four groups of six
+            // had twenty to answer within its eight listeners, and members of the fourth group were left with no edge at all.
+            const { node, linkOf } = await allLive([10, 9, 8, 7, 6, 1, 1, 1]);
+            // Admitted in this order: the admin (keys[0]), keys[1], keys[2], me, keys[3].
+            const { groupId, edgeIds } = await groupOf(node, 4, { admin: 0, used: true, order: (keys, me) => [keys[0], keys[1], keys[2], me, keys[3]] });
+            const onIroh = () => edgeIds.filter((id) => linkOf(id).availableTransports.includes("iroh/1"));
+            await vi.waitFor(() => expect(onIroh()).toEqual([edgeIds[2]]));
+            expect(node["groupEdgesByRank"](groupId, node["groups"].view(groupId)).map((live: { stored: { id: string } }) => live.stored.id)[0]).toBe(edgeIds[2]);
+            // The newest keeps the admin's: it admitted it, and knows it at once.
+            const newest = await groupOf(node, 4, { admin: 0, used: true, order: (keys, me) => [keys[0], keys[1], keys[2], keys[3], me] });
+            expect(node["groupEdgesByRank"](newest.groupId, node["groups"].view(newest.groupId))[0].stored.id).toBe(newest.edgeIds[0]);
+            // A community: the admin's edge first, as before.
+            const community = await groupOf(node, 4, { admin: 0, used: true });
+            expect(node["groupEdgesByRank"](community.groupId, node["groups"].view(community.groupId))[0].stored.id).toBe(community.edgeIds[0]);
+          });
+
+          it("in a private group whose kept edge goes unanswered, the next is the edge a member keeps to it, then the admin's", async () => {
+            const { node, linkOf } = await allLive([10, 9, 8, 7, 6, 1, 1, 1]);
+            const { groupId, edgeIds } = await groupOf(node, 4, { admin: 0, used: true, order: (keys, me) => [keys[0], keys[1], me, keys[2], keys[3]] });
+            const ranked = () => node["groupEdgesByRank"](groupId, node["groups"].view(groupId)).map((live: { stored: { id: string } }) => live.stored.id);
+            // Kept: the one admitted before (keys[1]); then keys[2], which keeps its edge to me by the rule; then the admin.
+            expect(ranked().slice(0, 3)).toEqual([edgeIds[1], edgeIds[2], edgeIds[0]]);
+            await vi.waitFor(() => expect(edgeIds.filter((id) => linkOf(id).availableTransports.includes("iroh/1"))).toEqual([edgeIds[1]]));
+          });
+
           it("every member away past twenty seconds: no edge is passed over, and each has its listener when they come back", async () => {
             // A hub with no WebRTC, its three members stopped for minutes: the edge passed over while they were away gave
             // its listener up, nothing asked for one again, and its member stayed offline here once back (12 min seen).
@@ -1048,6 +1082,10 @@ describe("files a contact sends", () => {
     // Asked whether it is already here: only an exact match of what was announced says yes.
     expect(await events.onFileStored({ id: wire, name: "a.txt", size: 5, mime: "text/html", timestamp: 7 })).toBe("digest-1");
     expect(await events.onFileStored({ id: wire, name: "b.txt", size: 5, mime: "text/html", timestamp: 7 })).toBeUndefined();
+    // Said done in a state, then left to its record: a view kept for each would go into every state until the next start.
+    const app = node["events"] as unknown as { onState: ReturnType<typeof vi.fn> };
+    await vi.waitFor(() => expect(app.onState.mock.calls.some(([s]) => s.transfers[file.id]?.state === "done")).toBe(true));
+    await vi.waitFor(() => expect(node.getState().transfers[file.id]).toBeUndefined());
   });
 
   it("the app has a file's transfer before the message that shows it: a file still arriving never reads as gone", async () => {
@@ -1371,6 +1409,21 @@ describe("text in a chat", () => {
     expect(history).toHaveBeenCalled();
   });
 
+  it("forty texts asked for at once, as a bot's workers do, read the rows on their way, not the chat's whole history", async () => {
+    const chat = row();
+    const { node, events: pages, linkOf } = await started(chat);
+    // As the CLI and the web app host it: the pages hear the rows that changed, not the whole history.
+    Object.assign(pages, { onMessageChanges: vi.fn() });
+    await node.sendMessage({ linkId: chat.id, text: "first", timestamp: 1 });
+    const history = vi.spyOn(db, "getMessages");
+    const texts =Array.from({ length: 40 }, (_, i) => `m${i}`);
+    const sends = await Promise.all(texts.map((text, i) => node.sendMessage({ linkId: chat.id, text, timestamp: 2 + i })));
+    expect(sends.every(sent => sent.error === null)).toBe(true);
+    // Past the sixteenth on its way (or awaiting its receipt), each one's turn read the history.
+    expect(history).not.toHaveBeenCalled();
+    expect(linkOf(chat.id).sendMessage.mock.calls.map(([text]) => text)).toEqual(["first", ...texts]);
+  });
+
   it("a receipt for a file said on the DHT floor finds it without reading the chat's whole history again", async () => {
     const chat = row();
     const { node, events: pages, linkOf } = await started(chat);
@@ -1500,6 +1553,34 @@ describe("an away contact", () => {
     expect(node.getState().transfers[small.id]).toMatchObject({ state: "done", transferred: 3 });
   });
 
+  it.each(["held", "delivered"] as const)("a file %s through storage still reads as sent after the app restarts, not as an interrupted transfer", async (delivery) => {
+    // A voice message sent to a contact who was away: its record kept the "transferring" the app wrote when it was picked,
+    // so after a restart it said "Transfer interrupted. Retry when connected." though storage held it or it had arrived.
+    const { node, chat } = await away();
+    const file = { id: `${chat.id}-out-w5`, name: "voice.webm", size: 5, mime: "audio/webm" };
+    await fileStore.put({ id: file.id, linkId: chat.id, blob: new Blob([bytes("hello")]), createdAt: 1, direction: "out", wireId: "w5",
+      transfer: { state: "transferring", transferred: 0, size: 5 } });
+    node.sendFile({ linkId: chat.id, file, timestamp: 5 });
+    await vi.waitFor(async () => expect((await db.getMessages(chat.id))[0]).toMatchObject({ via: "hold", file: { id: file.id } }));
+    const host = node["hold"]["host"] as { delivery(linkId: string, messageId: string, state: string): Promise<void> };
+    await host.delivery(chat.id, "me_5", delivery);
+    expect((await fileStore.get(file.id))?.transfer).toMatchObject({ state: "done", transferred: 5 });
+    await node.shutdown();
+    const { node: again } = await started();
+    expect(again.getState().transfers[file.id]?.state ?? "done").toBe("done");
+  });
+
+  it("a held file kept before its delivery wrote its record (an earlier version) reads as sent after a restart", async () => {
+    const chat = row();
+    await db.putLink(chat);
+    const file = { id: `${chat.id}-out-w6`, name: "voice.webm", size: 5, mime: "audio/webm" };
+    await fileStore.put({ id: file.id, linkId: chat.id, blob: new Blob([bytes("hello")]), createdAt: 1, direction: "out", wireId: "w6",
+      transfer: { state: "transferring", transferred: 0, size: 5 } });
+    await db.addMessage({ linkId: chat.id, id: "me_6", text: "🎤", sender: "me", timestamp: 6, via: "hold", file, delivery: "delivered" });
+    const { node } = await started();
+    expect(node.getState().transfers[file.id]).toBeUndefined();
+  });
+
   it("reconnecting needs the engine online", async () => {
     const chat = row();
     const { node, linkOf } = await started(chat);
@@ -1539,6 +1620,124 @@ describe("an away contact", () => {
   });
 });
 
+describe("a 1:1 session that opens (agents#2468)", () => {
+  // Each open of a session read the chat's whole history three times beside what it sent: the outbox's look twice (the
+  // link says it is open, and that it switched transport) and the edit queue's relearning, with nothing to send again.
+  const WIRE_OLD = "o".repeat(22);
+  async function chatWithHistory(rows = 300) {
+    const chat = row();
+    await db.putLink(chat);
+    for (let i = 0; i < rows; i++) await db.putMessage({ linkId: chat.id, id: `peer_${i}`, text: `hello ${i}`, sender: "peer", timestamp: 1_000 + i, via: "datalink" });
+    await db.putMessage({ linkId: chat.id, id: `me_${WIRE_OLD}`, wireId: WIRE_OLD, text: "old", sender: "me", timestamp: 900, via: "datalink", delivery: "delivered" });
+    return chat;
+  }
+  /** The recorded link, live or not, with edits as the real one takes them: only on a live session. */
+  function wire(link: Recorded, open: boolean) {
+    Object.assign(link, { isDataLinkOpen: open, supportsEdits: open });
+    (link as unknown as { sendEdit: ReturnType<typeof vi.fn> }).sendEdit ??= vi.fn(() => link.isDataLinkOpen ? null : "Not live");
+    return (link as unknown as { sendEdit: ReturnType<typeof vi.fn> }).sendEdit;
+  }
+  /** A session opens as GhostLink says so: its data link is open, then the transport it settled on. */
+  function opens(link: Recorded) {
+    wire(link, true);
+    link.options.events.onDataLinkState("open");
+    link.options.events.onTransportSwitched("webrtc/1", "iroh/1");
+  }
+  function closes(link: Recorded) {
+    wire(link, false);
+    link.options.events.onDataLinkState("idle");
+  }
+  const settle = () => new Promise(resolve => setTimeout(resolve, 150));
+  /** The chat's whole-history reads while `run` goes and what it started settles. */
+  async function historyReads(linkId: string, run: () => unknown): Promise<number> {
+    const whole = vi.spyOn(db, "getMessages");
+    try {
+      await run();
+      await settle();
+      return whole.mock.calls.filter(([id]) => id === linkId).length;
+    } finally { whole.mockRestore(); }
+  }
+  const wires = (link: Recorded) => link.sendMessage.mock.calls.map(call => call[2] as string);
+  /** An engine with these chats, hosted as the CLI and the web app host it: the pages hear the rows that changed, not the whole history. */
+  async function hosted(...chats: StoredLink[]) {
+    const setup = await started(...chats);
+    Object.assign(setup.events, { onMessageChanges: vi.fn() });
+    vi.spyOn(setup.node["desk"], "replay").mockResolvedValue();
+    return setup;
+  }
+
+  it("with nothing to send again, a session that opens reads none of the chat's history", async () => {
+    const chat = await chatWithHistory();
+    const { linkOf } = await hosted(chat);
+    const link = linkOf(chat.id);
+    // The run's first session: the edit queue learns once what waits in the chat.
+    const first = await historyReads(chat.id, () => opens(link));
+    for (let n = 0; n < 3; n++) {
+      closes(link);
+      await settle();
+      expect.soft(await historyReads(chat.id, () => opens(link)), `whole-history reads at reconnect ${n + 1}`).toBe(0);
+    }
+    expect.soft(first).toBeLessThanOrEqual(1);
+    expect(link.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("a text awaiting its receipt goes again on the new transport, and what waited while away goes when the session opens, without a whole-history read", async () => {
+    const chat = await chatWithHistory();
+    const { node, linkOf } = await hosted(chat);
+    const link = linkOf(chat.id);
+    const sendEdit = wire(link, true);
+    await historyReads(chat.id, () => opens(link));
+    // Sent, no receipt: a transport switch sends it again at once, under the same id.
+    const awaiting = await node.sendMessage({ linkId: chat.id, text: "are you there?" });
+    await vi.waitFor(async () => expect((await db.getMessage(chat.id, awaiting.messageId!))?.delivery).toBe("sent"));
+    const awaitingWire = (await db.getMessage(chat.id, awaiting.messageId!))!.wireId!;
+    expect.soft(await historyReads(chat.id, () => link.options.events.onTransportSwitched("iroh/1", "hyperdht/1")), "whole-history reads at a switch").toBe(0);
+    await vi.waitFor(() => expect(wires(link)).toEqual([awaitingWire, awaitingWire]));
+    // The contact goes away: a text written meanwhile waits, and so does an edit.
+    closes(link);
+    await vi.waitFor(async () => expect((await db.getMessage(chat.id, awaiting.messageId!))?.delivery).toBe("queued"));
+    const away = await node.sendMessage({ linkId: chat.id, text: "written while you were away" });
+    await vi.waitFor(async () => expect((await db.getMessage(chat.id, away.messageId!))?.delivery).toBe("waiting"));
+    expect(await node.editMessage({ linkId: chat.id, messageId: `me_${WIRE_OLD}`, text: "old, edited" })).toMatchObject({ error: null });
+    await settle();
+    expect(sendEdit).not.toHaveBeenCalledWith(expect.objectContaining({ m: "old, edited" }), expect.anything());
+    const awayWire = (await db.getMessage(chat.id, away.messageId!))!.wireId!;
+    // Back: oldest first, then the edit.
+    expect.soft(await historyReads(chat.id, () => opens(link)), "whole-history reads at the reopen").toBe(0);
+    await vi.waitFor(() => expect(wires(link).slice(2)).toEqual([awaitingWire, awayWire]));
+    await vi.waitFor(() => expect(sendEdit).toHaveBeenCalledWith(expect.objectContaining({ id: WIRE_OLD, m: "old, edited" }), expect.anything()));
+  });
+
+  it("after a restart, what was queued, unconfirmed or edited while away goes when the session opens", async () => {
+    const chat = await chatWithHistory();
+    const first = await hosted(chat);
+    const link = first.linkOf(chat.id);
+    wire(link, true);
+    const unconfirmed = await first.node.sendMessage({ linkId: chat.id, text: "no receipt" });
+    await vi.waitFor(async () => expect((await db.getMessage(chat.id, unconfirmed.messageId!))?.delivery).toBe("sent"));
+    closes(link);
+    const away = await first.node.sendMessage({ linkId: chat.id, text: "written while you were away" });
+    await vi.waitFor(async () => expect((await db.getMessage(chat.id, away.messageId!))?.delivery).toBe("waiting"));
+    expect(await first.node.editMessage({ linkId: chat.id, messageId: `me_${WIRE_OLD}`, text: "old, edited" })).toMatchObject({ error: null });
+    const [unconfirmedWire, awayWire] = await Promise.all([unconfirmed, away].map(async sent => (await db.getMessage(chat.id, sent.messageId!))!.wireId!));
+    await first.node.shutdown();
+    nodes.splice(nodes.indexOf(first.node), 1);
+    links.length = 0;
+
+    const again = await hosted();
+    const back = again.linkOf(chat.id);
+    const sendEdit = wire(back, false);
+    // The new run reads the chat's history once for the edit queue (it starts with nothing known); the outbox has what
+    // the start read.
+    expect.soft(await historyReads(chat.id, () => opens(back)), "whole-history reads at the first open after a restart").toBeLessThanOrEqual(1);
+    await vi.waitFor(() => expect(wires(back)).toEqual([unconfirmedWire, awayWire]));
+    await vi.waitFor(() => expect(sendEdit).toHaveBeenCalledWith(expect.objectContaining({ id: WIRE_OLD, m: "old, edited" }), expect.anything()));
+    closes(back);
+    await settle();
+    expect.soft(await historyReads(chat.id, () => opens(back)), "whole-history reads at the next open").toBe(0);
+  });
+});
+
 describe("what arrives from held storage", () => {
   it("a held file lands once, its bytes before its message, and not in a chat that deleted it", async () => {
     const chat = row({ deletedIds: ["peer_gone"] });
@@ -1559,6 +1758,33 @@ describe("what arrives from held storage", () => {
     expect(stored!.blob).toBeUndefined();
     expect(stored!.bytes).toBe("idb");
     expect(await (await storedBlob(stored!, "text/plain"))!.text()).toBe("held");
+  });
+
+  it("a held file, received or sent, says done in one state and then leaves the states: a device up for days carries none", async () => {
+    const chat = row();
+    const { node, events } = await started(chat);
+    const host = node["hold"]["host"] as {
+      receiveFile(linkId: string, wire: object, bytes: Uint8Array, digest: string): Promise<string | null>;
+      delivery(linkId: string, messageId: string, state: string): Promise<void>;
+    };
+    const said = new Set<string>();
+    events.onState.mockImplementation((state: { transfers: Record<string, { state: string }> }) => {
+      for (const [id, transfer] of Object.entries(state.transfers)) if (transfer.state === "done") said.add(id);
+    });
+    for (let i = 0; i < 20; i++) expect(await host.receiveFile(chat.id, { wireId: `v${i}`, name: "v.ogg", size: 4, mime: "audio/ogg", timestamp: 10 + i }, bytes("held"), "d")).toBeNull();
+    const sent = { id: `${chat.id}-out-s1`, name: "s.txt", size: 3, mime: "text/plain" };
+    await fileStore.put({ id: sent.id, linkId: chat.id, blob: new Blob(["abc"]), createdAt: 1, direction: "out", wireId: "s1",
+      metadata: { name: sent.name, size: 3, mime: sent.mime, timestamp: 1 }, transfer: { state: "transferring", transferred: 0, size: 3 } });
+    await db.addMessage({ linkId: chat.id, id: "me_1", text: "s.txt", sender: "me", timestamp: 1, via: "hold", delivery: "sending", file: sent });
+    await host.delivery(chat.id, "me_1", "held");
+    await host.delivery(chat.id, "me_1", "delivered");
+    const files = (await db.getMessages(chat.id)).flatMap((m) => m.file ? [m.file.id] : []);
+    expect(files).toHaveLength(21);
+    // Each said done once (the CLI's `file.done`, the bubble's pop), then left to its record.
+    await vi.waitFor(() => expect([...said]).toEqual(expect.arrayContaining(files)));
+    await vi.waitFor(() => expect(Object.keys(node.getState().transfers)).toEqual([]));
+    // The sent file's record says it arrived: `file wait` reads it so once the view is gone, and so does the next start.
+    expect((await fileStore.get(sent.id))!.transfer).toMatchObject({ state: "done", transferred: 3 });
   });
 });
 
@@ -2133,6 +2359,41 @@ describe("private groups through the engine", () => {
       expect(host.peerRoom(groupId)).toBeUndefined();
     });
 
+    // An admin with no WebRTC in two groups with members: the third group's link let nobody in, its entry session found
+    // the groups' four listeners held and waited for good (2026-10-19).
+    it.each(["host", "guest"] as const)("an entry session (%s side) takes a free listener once two groups hold the groups' four", async (role) => {
+      const { node } = await nativeEngine();
+      for (const name of ["One", "Two"]) {
+        const { groupId } = await node.createGroup({ name });
+        const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+        for (let i = 0; i < 2; i++) await openEdge(node, state, createIdentity().pubKeyZ32);
+      }
+      const edges = () => links.filter((l) => node["links"].get(l.options.params.id)?.stored.group && l.availableTransports.includes("iroh/1"));
+      await vi.waitFor(() => expect(edges()).toHaveLength(GROUP_NATIVE_SLOTS));
+      const { groupId } = await node.createGroup({ name: "Three" });
+      const me = createIdentity(), other = createIdentity();
+      const entryId = await node["openEntry"]({ g: groupId, host: other.pubKeyZ32 }, role, me.seedB64, other.pubKeyZ32);
+      await vi.waitFor(() => expect(edgeOf(entryId).registerEndpoint).toHaveBeenCalledOnce());
+    });
+
+    it("an entry session with every listener held takes one from a group's edge past the one its group keeps, never a chat's", async () => {
+      const chats = Array.from({ length: 4 }, () => row({ pairedPeerKey: createIdentity().pubKeyZ32 }));
+      for (const r of chats) await db.putLink(r);
+      const { node } = await nativeEngine();
+      await vi.waitFor(() => { for (const chat of chats) expect(edgeOf(chat.id).registerEndpoint).toHaveBeenCalled(); });
+      const { groupId: one } = await node.createGroup({ name: "One" });
+      const state = (await db.getGroups()).find((g) => g.id === one)!.community;
+      const edgeIds: string[] = [];
+      for (let i = 0; i < GROUP_NATIVE_SLOTS; i++) edgeIds.push(await openEdge(node, state, createIdentity().pubKeyZ32));
+      await vi.waitFor(() => { for (const id of edgeIds) expect(edgeOf(id).registerEndpoint).toHaveBeenCalled(); });
+      const { groupId } = await node.createGroup({ name: "Two" });
+      const me = createIdentity(), other = createIdentity();
+      const entryId = await node["openEntry"]({ g: groupId, host: other.pubKeyZ32 }, "host", me.seedB64, other.pubKeyZ32);
+      await vi.waitFor(() => expect(edgeOf(entryId).registerEndpoint).toHaveBeenCalledOnce());
+      expect(edgeIds.filter((id) => edgeOf(id).releaseEndpoint.mock.calls.length > 0)).toHaveLength(1);
+      for (const chat of chats) expect(edgeOf(chat.id).releaseEndpoint).not.toHaveBeenCalled();
+    });
+
     it("an app with no WebRTC leaves its groups the listeners its 1:1 chats do not hold, and four however many chats hold one", async () => {
       const chats = Array.from({ length: 6 }, () => row({ pairedPeerKey: createIdentity().pubKeyZ32 }));
       for (const r of chats.slice(0, 2)) await db.putLink(r);
@@ -2220,6 +2481,29 @@ describe("private groups through the engine", () => {
       await vi.waitFor(() => expect(waiting()).toHaveLength(1));
       expect(onIroh(edgeIds)).toHaveLength(8);
       expect(onIroh(chats.map((c) => c.id))).toHaveLength(8);
+    });
+
+    it("on Iroh relays that are not n0's the browser build holds 64 Iroh listeners, 32 of them at most for 1:1 chats", async () => {
+      // A relay of the person's own (Settings, Network): a lab relay held 128 per app, n0's refused bursts of sixteen.
+      const chats = Array.from({ length: 34 }, () => row({ pairedPeerKey: createIdentity().pubKeyZ32 }));
+      for (const r of chats) await db.putLink(r);
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      irohWeb.start.mockImplementation(async () => endpoint());
+      await db.putSettings({ ...(await db.getSettings()), hyperdhtRelay: "", irohRelays: ["https://relay.example.com/"] });
+      const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() };
+      const node = new GhostlyNode(events, { automaticWallets: false, transport: fixture, irohWeb: true });
+      nodes.push(node);
+      await node.start();
+      const onIroh = (ids: string[]) => ids.filter((id) => edgeOf(id).availableTransports.includes("iroh/1"));
+      await vi.waitFor(() => expect(onIroh(chats.map((c) => c.id))).toHaveLength(32), { timeout: 3_000 });
+      await node["nativeQueues"].get("iroh/1");
+      expect(onIroh(chats.map((c) => c.id))).toHaveLength(32);
+      for (const [, options] of irohWeb.start.mock.calls) expect(options).toEqual({ relays: ["https://relay.example.com/"] });
+      // With no WebRTC, its groups may have the 60 the four kept for chats leave.
+      const { groupId } = await node.createGroup({ name: "Team" });
+      vi.unstubAllGlobals();
+      expect((node["groups"]["host"] as { peerRoom(groupId: string): number | undefined }).peerRoom(groupId)).toBe(60);
     });
 
     it("group links hold at most half the native slots, a chat takes one back from an idle group link, and a link with none says it waits", async () => {

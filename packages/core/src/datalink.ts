@@ -128,6 +128,17 @@ export const ANSWER_REFUSED_REDIALS = 4;
 const ANSWER_REFUSED_AFTER_MS = 1_000;
 /** An offer this close to the end of the offerer's attempt is not answered again: the new answer would come too late. */
 const REANSWER_MARGIN_MS = 15_000;
+/**
+ * An answer to this side's offer that comes this long or more after the offer reached the relays was read late (the
+ * relays' request budget held the read back, a restart's first minute), and an attempt that ends after this side made
+ * its answer again (`REANSWERS`) this long after it took an offer that still stands answered one the offerer has not
+ * read yet. Neither says anything about direct connections (`DirectEvidence`): the answering side's ICE gives up about
+ * 30 s after its answer with no reply, so the answer that went in late found nobody there, and the offerer gives up on
+ * the attempt and offers again. Taken for a network that lets nothing through, a group's edge went native on both
+ * sides, and past the native slots members stayed unreachable for the rest of a restart lab (agents#971, 2026-11-03):
+ * of 38 answers read 60 s or more after their offer, 13 connected nothing; of 78 read within 20 s, none failed.
+ */
+export const LATE_ANSWER_MS = 20_000;
 
 /**
  * Traces the candidate pair an opened data link uses, by type only (host, srflx, prflx, relay; never an address): two
@@ -153,7 +164,13 @@ async function tracePair(me: string, pc: RTCPeerConnection): Promise<void> {
 export class DataLink {
   state: DataLinkState = "idle";
   private pc: RTCPeerConnection | null = null;
+  /** Each connection's listeners, and its data channel's (`wrapDataChannel`), dropped once it is closed. */
+  private readonly ends = new WeakMap<RTCPeerConnection, AbortController>();
   private myOfferTs = 0;
+  /** When this side's offer reached the relays, as far as this link knows (`signalWentOut`). */
+  private myOfferOutAt = 0;
+  /** The answer to this side's offer came `LATE_ANSWER_MS` or more after the offer went out. */
+  private answerCameLate = false;
   /**
    * An offer or answer of this side's that went without a public candidate came to nothing (both descriptions were
    * exchanged, and no path connected): the next one waits for its STUN servers as long as it takes
@@ -200,7 +217,8 @@ export class DataLink {
         this.options.setFastPoll(true, true);
       }
 
-      this.myOfferTs = Date.now();
+      this.myOfferTs = this.myOfferOutAt = Date.now();
+      this.answerCameLate = false;
       this.sentLacksPublic = !PUBLIC_CANDIDATE.test(pc.localDescription?.sdp ?? "");
       const signal: RtcSignal = { t: "o", ts: this.myOfferTs, ...extractRtcParams(pc.localDescription!.sdp, { relayOnly: keepsToRelays(pc) }) };
       this.options.publishSignal(JSON.stringify(signal));
@@ -259,6 +277,9 @@ export class DataLink {
     } else if (this.state === "offering" && signal.o === this.myOfferTs && this.pc) {
       this.lastSignalTs = signal.ts;
       const pc = this.pc;
+      const sinceOffer = Date.now() - this.myOfferOutAt;
+      this.answerCameLate = sinceOffer >= LATE_ANSWER_MS;
+      if (this.answerCameLate) traceLink(this.options.myPubKeyZ32, "answer-late", { ms: sinceOffer });
       try {
         this.remoteSdp = buildDataSdp(signal);
         await pc.setRemoteDescription({ type: "answer", sdp: this.remoteSdp });
@@ -288,6 +309,12 @@ export class DataLink {
     catch { return null; }
   }
 
+  /**
+   * The answer this side's offer is connecting on came `LATE_ANSWER_MS` or more after the offer went out: if it connects
+   * nothing, that says nothing about direct connections, and the link offers again (`GhostLink`'s stall of a group link).
+   */
+  get answerLate(): boolean { return this.state === "connecting" && !!this.myOfferTs && this.answerCameLate; }
+
   /** The peer connection this link holds now (null when idle): a later one is another attempt. */
   get connection(): RTCPeerConnection | null { return this.pc; }
 
@@ -302,11 +329,20 @@ export class DataLink {
   }
 
   /**
+   * Given up for a reason that is not the network's (an answer made while the app was away, `WAKE_ANSWER_GRACE_MS`):
+   * as `close`, with nothing learnt about direct connections from it.
+   */
+  abandon(): void {
+    this.answered = null;
+    this.reset();
+  }
+
+  /**
    * This side's offer went with no public candidate and was answered, or its answer went with none, and it came to
    * nothing: the next offer or answer gathers for as long as it takes.
    */
   private noteNoPublic(ended: boolean): void {
-    if (ended && (this.myOfferTs || this.answered) && this.sentLacksPublic && this.state === "connecting") this.fullGather = true;
+    if (ended && !this.answerLate && (this.myOfferTs || this.answered) && this.sentLacksPublic && this.state === "connecting") this.fullGather = true;
   }
 
   /**
@@ -315,7 +351,7 @@ export class DataLink {
    * candidate, a public port per STUN server, or (for the side that offered) candidates that read as reachable.
    */
   private directEvidence(): DirectEvidence | null {
-    if (this.state !== "connecting" || !this.pc) return null;
+    if (this.state !== "connecting" || !this.pc || this.answerLate) return null;
     const local = this.pc.localDescription?.sdp ?? "";
     return !PUBLIC_CANDIDATE.test(local) ? "no-public" : symmetricNat(local) ? "symmetric" : this.myOfferTs ? "no-path" : null;
   }
@@ -336,8 +372,12 @@ export class DataLink {
     // An answer to an offer the offerer has given up since (its packet no longer carries it: the answer was refused
     // there, say) connected nothing because nobody was on the other end, whatever the network lets through.
     const givenUp = !!answered && this.options.offerStanding?.(answered.offer.ts) === false;
-    const evidence = givenUp ? null : this.directEvidence();
-    this.noteNoPublic(!givenUp);
+    // This side's answer made again, and the offer it answers still stands `LATE_ANSWER_MS` after it took it: the
+    // offerer has not read an answer in time (an offerer that read one and found no path gives the attempt up).
+    const unread = !!answered && answered.again > 0 && Date.now() - answered.at >= LATE_ANSWER_MS && this.options.offerStanding?.(answered.offer.ts) === true;
+    if (unread) traceLink(this.options.myPubKeyZ32, "answer-unread", { again: answered.again, sinceMs: Date.now() - answered.at });
+    const evidence = givenUp || unread ? null : this.directEvidence();
+    this.noteNoPublic(!givenUp && !unread);
     if (answered && answered.again < REANSWERS && left > REANSWER_MARGIN_MS && this.options.offerStanding?.(answered.offer.ts)) {
       answered.again++;
       traceLink(this.options.myPubKeyZ32, "reanswer", { again: answered.again, leftMs: left });
@@ -395,7 +435,7 @@ export class DataLink {
     for (let attempt = 1; ; attempt++) {
       // The new connection takes the old one's place first: closing that one then resets nothing.
       const pc = this.createConnection();
-      stalled?.close();
+      if (stalled) this.closeConnection(stalled);
       await describe(pc);
       if (this.pc !== pc) return null;
       const gathering = Date.now();
@@ -416,6 +456,9 @@ export class DataLink {
   private createConnection(): RTCPeerConnection {
     const pc = this.options.createPeerConnection();
     this.pc = pc;
+    const ended = new AbortController();
+    this.ends.set(pc, ended);
+    const { signal } = ended;
 
     // Negotiated channel: both sides declare it, no in-band open handshake.
     const dc = pc.createDataChannel(DATA_CHANNEL_LABEL, { negotiated: true, id: DATA_CHANNEL_ID, ordered: true });
@@ -429,12 +472,12 @@ export class DataLink {
       this.options.setFastPoll(false);
       this.options.publishSignal(null);
       this.options.onDirect?.("open");
-      this.options.onOpen(wrapDataChannel(dc));
+      this.options.onOpen(wrapDataChannel(dc, signal));
       void tracePair(this.options.myPubKeyZ32, pc);
-    });
+    }, { signal });
     dc.addEventListener("close", () => {
       if (this.pc === pc) this.failed(true);
-    });
+    }, { signal });
 
     pc.addEventListener("connectionstatechange", () => {
       if (this.pc !== pc) return;
@@ -447,7 +490,7 @@ export class DataLink {
           if (this.pc === pc) this.failed();
         }, DISCONNECT_GRACE_MS);
       }
-    });
+    }, { signal });
 
     this.startAttemptTimer(pc);
     return pc;
@@ -469,6 +512,7 @@ export class DataLink {
    * counts from here, so the other side has as long to read it as if it had gone out at once.
    */
   signalWentOut(): void {
+    if (this.state === "offering" && this.myOfferTs) this.myOfferOutAt = Date.now();
     if (this.pc && this.connectTimer && this.state !== "open" && this.state !== "idle") this.startAttemptTimer(this.pc);
   }
 
@@ -482,11 +526,23 @@ export class DataLink {
     this.clearTimers();
     const pc = this.pc;
     this.pc = null;
-    this.myOfferTs = 0;
+    this.myOfferTs = this.myOfferOutAt = 0;
+    this.answerCameLate = false;
     this.remoteSdp = null;
     if (!pc) return false;
-    pc.close();
+    this.closeConnection(pc);
     return true;
+  }
+
+  /**
+   * Closes `pc` and drops its listeners and its data channel's. The channel tells it closed (`wrapDataChannel`) a
+   * microtask later, after the link's own `onClose`, as when the data channel said so itself: node-datachannel does not
+   * always report a closed connection's channel closed, and the listeners it kept would hold the link for good.
+   */
+  private closeConnection(pc: RTCPeerConnection): void {
+    pc.close();
+    const ended = this.ends.get(pc);
+    if (ended) queueMicrotask(() => ended.abort());
   }
 
   private reset(): void {

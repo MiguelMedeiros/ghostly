@@ -1,14 +1,17 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type UIEvent } from "react";
+import { flushSync } from "react-dom";
 import type { TaskStatus } from "@ghostly/core";
 import { PageHeader } from "../components/layout";
 import { MemberFace } from "../components/chat/SenderAvatar";
 import { BoardCard } from "../components/tasks/BoardCard";
 import { useI18n } from "../contexts/I18nContext";
+import { draftDirection } from "../lib/documentLanguage";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { JUMP_TO } from "../hooks/useJumpTo";
 import { useMinuteClock } from "../hooks/useMinuteClock";
 import { useTaskBoard, type TaskBoardData } from "../hooks/useTaskBoard";
+import { radioGroupKeys } from "../lib/radioGroup";
 import { RESULT_TONE, sortRoutines, untilIn } from "../lib/statusCards";
 import { getPrefix } from "../lib/storage";
 import { COLUMN_PAGE, boardModel, boardMove, type BoardColumn, type BoardEntry, type BoardGroup, type BoardGrouping, type BoardRoutine } from "../lib/taskBoard";
@@ -40,9 +43,13 @@ const icon = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strok
 /** A column's dot, by status: the tones the cards themselves use. */
 const COLUMN_DOT: Record<BoardColumn, string> = { queued: "bg-text-muted", running: "bg-accent", blocked: "bg-amber-500", review: "bg-link", done: "bg-success", closed: "bg-danger" };
 
-function Column({ group, name, dot, grouping, board, now, older, onOlder, onOpen, onTag, phone, labelledBy }: {
+function Column({ group, name, dot, grouping, board, now, older, onOlder, onOpen, onTag, phone, labelledBy, away, onColumn }: {
   group: BoardGroup; name: string; dot?: string; grouping: BoardGrouping; board: TaskBoardData; now: number; onTag: (tag: string) => void;
   older: boolean; onOlder: () => void; onOpen: (entry: BoardEntry) => void; phone: boolean; labelledBy?: string;
+  /** A phone's column whose tab is not chosen: still drawn beside the chosen one for a swipe, but out of Tab and the screen reader. */
+  away?: boolean;
+  /** A phone: chooses another column's tab, at once, before the keys move the focus into it. */
+  onColumn?: (index: number) => void;
 }) {
   const { t } = useI18n();
   const [limit, setLimit] = useState(COLUMN_PAGE);
@@ -62,12 +69,15 @@ function Column({ group, name, dot, grouping, board, now, older, onOlder, onOpen
     const to = boardMove(cards.map((list) => list.length), { column, row: cards[column].indexOf(event.currentTarget) }, event.key, rtl);
     if (!to) return;
     const target = cards[to.column][to.row];
+    // On a phone the other column is inert until its tab is chosen: choose it first, with no slide that would pass
+    // through the columns between and choose each of them on the way.
+    if (onColumn && to.column !== column) flushSync(() => onColumn(to.column));
     target.focus();
     target.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   };
 
   return (
-    <section data-testid="board-column" data-board-column data-column={group.id} aria-labelledby={labelledBy ?? titleId}
+    <section data-testid="board-column" data-board-column data-column={group.id} aria-labelledby={labelledBy ?? titleId} inert={away || undefined}
       {...(phone ? { role: "tabpanel", id: `${labelledBy}-panel` } : {})}
       className={phone ? "flex h-full w-full shrink-0 snap-start flex-col min-h-0" : "flex max-h-full min-w-64 max-w-96 flex-1 basis-64 flex-col rounded-xl bg-text-primary/[0.04]"}>
       {!phone && (
@@ -77,7 +87,7 @@ function Column({ group, name, dot, grouping, board, now, older, onOlder, onOpen
           <span data-testid="board-column-count" className="shrink-0 font-normal tabular-nums text-text-muted">{group.tasks.length}</span>
         </h2>
       )}
-      <div data-testid="board-column-cards" className={`flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto overscroll-contain ${phone ? "px-3 pt-2 pb-4" : "px-1.5 pb-1.5"}`}>
+      <div data-testid="board-column-cards" className={`flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto overscroll-contain short:overscroll-auto ${phone ? "px-3 pt-2 pb-4" : "px-1.5 pb-1.5"}`}>
         {shown.map((task) => (
           <BoardCard key={task.key} task={task} grouping={grouping} face={board.faceOf(task)} now={now} onOpen={() => onOpen(task)} onOpenPart={onOpen} onKeys={keys} onTag={onTag} />
         ))}
@@ -141,6 +151,7 @@ export function Tasks() {
   const [tab, setTab] = useState(0);
   const [clearedAt, setClearedAt] = useState(readClearedAt);
   const boardRef = useRef<HTMLDivElement>(null);
+  const tabsRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
   const tabsId = useId();
   const now = useMinuteClock(pageRef);
@@ -160,24 +171,56 @@ export function Tasks() {
   };
 
   // A phone: the column on screen is the chosen tab's; a swipe to another column chooses its tab.
+  const motion = (smooth = true): ScrollBehavior => smooth && !window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "smooth" : "auto";
+  // The column a tab's slide is on its way to: the columns it passes on the way are not chosen (each would be, for a
+  // frame, and the chosen one stay inert until the slide was half way). For a second at most, and a touch on the board
+  // ends it: the board's place then chooses again.
+  const sliding = useRef<{ to: number; until: number } | undefined>(undefined);
   const toTab = (index: number, smooth = true) => {
     setTab(index);
     const scroller = boardRef.current;
     const column = scroller?.querySelectorAll<HTMLElement>("[data-board-column]")[index];
-    if (scroller && column) scroller.scrollTo?.({ left: column.offsetLeft - scroller.offsetLeft, behavior: smooth && !window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "smooth" : "auto" });
+    const behavior = motion(smooth);
+    sliding.current = behavior === "smooth" ? { to: index, until: performance.now() + 1000 } : undefined;
+    if (scroller && column) scroller.scrollTo?.({ left: column.offsetLeft - scroller.offsetLeft, behavior });
   };
   // Heard on the board itself, not by an effect that looks for it once: the page draws the board only when the cards
   // have been read, after its first render, and an effect that ran before then never heard a swipe.
   const settleFrame = useRef(0);
-  useEffect(() => () => cancelAnimationFrame(settleFrame.current), []);
+  const settleLater = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => { cancelAnimationFrame(settleFrame.current); clearTimeout(settleLater.current); }, []);
+  const settleAt = (scroller: HTMLElement) => {
+    const width = scroller.clientWidth;
+    if (!width) return;
+    const index = Math.round(Math.abs(scroller.scrollLeft) / width);
+    const slide = sliding.current;
+    clearTimeout(settleLater.current);
+    if (slide && index !== slide.to && performance.now() < slide.until) {
+      settleLater.current = setTimeout(() => settleAt(scroller), slide.until - performance.now());
+      return;
+    }
+    sliding.current = undefined;
+    setTab(index);
+    // The tab row scrolls too, or the chosen tab of a far column stays off screen (a tap shows it by focusing it).
+    if (index !== at) tabsRef.current?.querySelectorAll<HTMLElement>("[role=tab]")[index]?.scrollIntoView?.({ block: "nearest", inline: "nearest", behavior: motion() });
+  };
   const settle = (event: UIEvent<HTMLDivElement>) => {
     if (!phone) return;
     const scroller = event.currentTarget;
     cancelAnimationFrame(settleFrame.current);
-    settleFrame.current = requestAnimationFrame(() => {
-      const width = scroller.clientWidth;
-      if (width) setTab(Math.round(Math.abs(scroller.scrollLeft) / width));
-    });
+    settleFrame.current = requestAnimationFrame(() => settleAt(scroller));
+  };
+  // A short screen (a phone on its side): the rows above the board scroll away with the page, and the board below them
+  // is the page's whole height. A list scrolled while those rows still show moves the page first, so the rows go before
+  // the cards do; a pull past a list's top brings them back.
+  const fold = (event: UIEvent<HTMLDivElement>) => {
+    const scroller = event.currentTarget;
+    const list = event.target as HTMLElement;
+    const room = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
+    if (list === scroller || room < 1 || list.scrollTop <= 0) return;
+    const move = Math.min(room, list.scrollTop);
+    scroller.scrollTop += move;
+    list.scrollTop -= move;
   };
   const tabKeys = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") return;
@@ -212,7 +255,7 @@ export function Tasks() {
           <p className="m-0 text-xs text-text-muted">{t("cards.board.emptyHint")}</p>
         </div>
       ) : (
-        <>
+        <div data-testid="tasks-scroller" onScrollCapture={fold} className="flex min-h-0 flex-1 flex-col short:overflow-y-auto short:overscroll-y-contain">
           <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-2">
             <p data-testid="tasks-summary" className="m-0 text-xs text-text-secondary">{summary}</p>
             {showing === "tasks" && model.finished > 0 && (
@@ -229,17 +272,17 @@ export function Tasks() {
             )}
             {showing === "tasks" && (
               <>
-                <div role="radiogroup" aria-label={t("cards.board.groupBy.label")} className="flex items-center gap-1">
+                <div role="radiogroup" aria-label={t("cards.board.groupBy.label")} className="flex items-center gap-1" onKeyDown={(e) => radioGroupKeys(e, { choose: true })}>
                   <span aria-hidden="true" className="text-xs text-text-muted">{t("cards.board.groupBy.label")}</span>
                   {GROUPINGS.map((g) => (
-                    <button key={g} type="button" role="radio" aria-checked={grouping === g} data-testid={`tasks-group-${g}`} onClick={() => { setGrouping(g); toTab(0, false); }} className={pill(grouping === g)}>
+                    <button key={g} type="button" role="radio" aria-checked={grouping === g} tabIndex={grouping === g ? 0 : -1} data-testid={`tasks-group-${g}`} onClick={() => { setGrouping(g); toTab(0, false); }} className={pill(grouping === g)}>
                       {t(`cards.board.groupBy.${g}`)}
                     </button>
                   ))}
                 </div>
                 <label className="ms-auto flex min-w-36 flex-1 items-center gap-2 rounded-lg bg-search-bg px-2.5 py-1 md:max-w-64">
                   <svg {...icon} width={14} height={14} className="shrink-0 text-text-muted"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
-                  <input type="search" data-testid="tasks-filter" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("cards.board.filter")} aria-label={t("cards.board.filter")}
+                  <input type="search" data-testid="tasks-filter" value={filter} dir={draftDirection(filter)} onChange={(e) => setFilter(e.target.value)} placeholder={t("cards.board.filter")} aria-label={t("cards.board.filter")}
                     className="min-w-0 flex-1 border-none bg-transparent py-0.5 text-sm text-text-primary placeholder-text-muted focus:outline-none" />
                 </label>
               </>
@@ -247,7 +290,7 @@ export function Tasks() {
           </div>
 
           {showing === "routines" ? (
-            <ul data-testid="tasks-routines" aria-label={t("cards.board.view.routines")} className="m-0 flex-1 overflow-y-auto p-2">
+            <ul data-testid="tasks-routines" aria-label={t("cards.board.view.routines")} className="m-0 flex-1 overflow-y-auto p-2 short:h-full short:flex-none">
               {routines.map((routine) => <RoutineLine key={routine.key} routine={routine} board={board} onOpen={() => open(routine)} />)}
             </ul>
           ) : (
@@ -263,29 +306,33 @@ export function Tasks() {
                 </div>
               )}
               {(filter.trim() || tag) && !model.shown && <p data-testid="tasks-no-match" className="m-0 shrink-0 px-4 pt-3 text-center text-xs text-text-muted">{t("cards.board.noMatch")}</p>}
-              {phone && (
-                <div role="tablist" aria-label={t("cards.board.columns")} data-testid="tasks-tabs" onKeyDown={tabKeys}
-                  className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-2 py-1.5 [scrollbar-width:none]">
+              <div className="flex min-h-0 flex-1 flex-col short:h-full short:flex-none">
+                {phone && (
+                  <div ref={tabsRef} role="tablist" aria-label={t("cards.board.columns")} data-testid="tasks-tabs" onKeyDown={tabKeys}
+                    className="flex shrink-0 scroll-px-2 gap-1 overflow-x-auto border-b border-border px-2 py-1.5 [scrollbar-width:none]">
+                    {model.groups.map((group, i) => (
+                      <button key={group.id} type="button" role="tab" id={`${tabsId}-${i}`} aria-selected={i === at} aria-controls={`${tabsId}-${i}-panel`} tabIndex={i === at ? 0 : -1}
+                        data-testid="tasks-tab" data-column={group.id} onClick={() => toTab(i)}
+                        className={`flex min-h-9 max-w-44 shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-3 text-xs font-medium focus-visible:outline-2 focus-visible:outline-accent ${i === at ? "bg-accent text-on-accent" : "text-text-secondary"}`}>
+                        <bdi className="min-w-0 truncate">{nameOf(group)}</bdi>
+                        <span data-testid="tasks-tab-count" className="tabular-nums opacity-80">{group.tasks.length}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div ref={boardRef} data-testid="tasks-board" data-grouping={grouping} data-layout={phone ? "tabs" : "columns"} onScroll={settle}
+                  onPointerDown={() => { sliding.current = undefined; }} onWheel={() => { sliding.current = undefined; }}
+                  className={phone ? "flex min-h-0 flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden overscroll-x-contain [scrollbar-width:none]" : "flex min-h-0 flex-1 items-start gap-3 overflow-x-auto p-3"}>
                   {model.groups.map((group, i) => (
-                    <button key={group.id} type="button" role="tab" id={`${tabsId}-${i}`} aria-selected={i === at} aria-controls={`${tabsId}-${i}-panel`} tabIndex={i === at ? 0 : -1}
-                      data-testid="tasks-tab" data-column={group.id} onClick={() => toTab(i)}
-                      className={`flex min-h-9 max-w-44 shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-3 text-xs font-medium focus-visible:outline-2 focus-visible:outline-accent ${i === at ? "bg-accent text-on-accent" : "text-text-secondary"}`}>
-                      <bdi className="min-w-0 truncate">{nameOf(group)}</bdi>
-                      <span data-testid="tasks-tab-count" className="tabular-nums opacity-80">{group.tasks.length}</span>
-                    </button>
+                    <Column key={group.id} group={group} name={nameOf(group)} dot={grouping === "status" ? COLUMN_DOT[group.id as BoardColumn] : undefined} grouping={grouping}
+                      board={board} now={now} older={older} onOlder={() => setOlder(!older)} onOpen={open} onTag={(name) => setTag(tag === name ? undefined : name)} phone={phone} labelledBy={phone ? `${tabsId}-${i}` : undefined}
+                      away={phone && i !== at} onColumn={phone ? (index) => toTab(index, false) : undefined} />
                   ))}
                 </div>
-              )}
-              <div ref={boardRef} data-testid="tasks-board" data-grouping={grouping} data-layout={phone ? "tabs" : "columns"} onScroll={settle}
-                className={phone ? "flex min-h-0 flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden overscroll-x-contain [scrollbar-width:none]" : "flex min-h-0 flex-1 items-start gap-3 overflow-x-auto p-3"}>
-                {model.groups.map((group, i) => (
-                  <Column key={group.id} group={group} name={nameOf(group)} dot={grouping === "status" ? COLUMN_DOT[group.id as BoardColumn] : undefined} grouping={grouping}
-                    board={board} now={now} older={older} onOlder={() => setOlder(!older)} onOpen={open} onTag={(name) => setTag(tag === name ? undefined : name)} phone={phone} labelledBy={phone ? `${tabsId}-${i}` : undefined} />
-                ))}
               </div>
             </>
           )}
-        </>
+        </div>
       )}
     </div>
   );

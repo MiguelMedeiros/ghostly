@@ -1,11 +1,14 @@
 import "fake-indexeddb/auto";
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatFiles, GhostLink, createIdentity, createLink, forwardedAgain, forwardedMany, identityFromSeedB64, readForwarded, type FileTransferRecord, type IncomingMessage, type IncomingTarget } from "@ghostly/core";
+import { ChatFiles, GhostLink, NO_PICTURE_METADATA, NO_VIDEO_METADATA, createIdentity, createLink, forwardedAgain, forwardedMany, identityFromSeedB64, readForwarded, withoutVideoMetadata, type FileTransferRecord, type IncomingMessage, type IncomingTarget } from "@ghostly/core";
+import { H264_MP4, PLACE, hasPlace, withMovie, xyzUdta } from "../../core/test/support/videoFixtures";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { copyForForward, forwardError, forwardKind } from "../src/engine/forwards";
+import { fileBytes } from "../src/shared/fileBytes";
 import { fileStore } from "../src/shared/idb";
+import { FileAppender } from "../src/shared/storedFiles";
 import type { StoredMessage } from "../src/shared/types";
 import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
 // covers: chat.forward.wire, chat.forward.files, files.paired.send
@@ -24,6 +27,20 @@ function pattern(offset: number, length: number): Uint8Array {
   return out;
 }
 const digestOf = (size: number) => createHash("sha256").update(pattern(0, size)).digest("base64url");
+
+const SECRET = "GHOSTLY-SECRET-GPS 52.37N 4.89E";
+const ascii = (value: string) => [...value].map((c) => c.charCodeAt(0));
+const segment = (marker: number, body: number[]) => [0xff, marker, (body.length + 2) >> 8, (body.length + 2) & 0xff, ...body];
+/** A 300 × 200 JPEG, with an Exif holding `secret` when given; its scan `scan` bytes long. */
+function jpegWith(secret?: string, scan = 16): Uint8Array {
+  const exif = secret ? segment(0xe1, [...ascii("Exif\0\0"), 0x4d, 0x4d, 0, 42, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, ...ascii(secret)]) : [];
+  const head = [0xff, 0xd8, ...exif, ...segment(0xdb, [0, ...new Array(64).fill(1)]), ...segment(0xc0, [8, 0, 200, 1, 44, 1, 1, 0x11, 0]),
+    ...segment(0xc4, [0, ...new Array(16).fill(0)]), ...segment(0xda, [1, 1, 0, 0, 63, 0])];
+  const bytes = new Uint8Array(head.length + scan + 2);
+  bytes.set(head);
+  bytes.set([0xff, 0xd9], bytes.length - 2);
+  return bytes;
+}
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await step(); });
@@ -46,6 +63,7 @@ async function contactOf(net: FakeNativeNet, name: string, transport: Constructo
   const received = new Map<string, { hash: ReturnType<typeof createHash>; length: number }>();
   const records = new Map<string, FileTransferRecord>();
   const sizes = new Map<string, number>();
+  const contents = new Map<string, Uint8Array>();
   const peer: { link?: GhostLink } = {};
   const chatFiles = new ChatFiles({
     send: frame => peer.link?.sendFilesFrame(frame) ?? false,
@@ -57,6 +75,8 @@ async function contactOf(net: FakeNativeNet, name: string, transport: Constructo
         verify: async digest => disk.hash.copy().digest("base64url") === digest, discard: async () => { received.delete(record.id); } };
     },
     openSource: async record => {
+      const bytes = contents.get(record.id);
+      if (bytes) return { read: async (offset, length) => bytes.slice(offset, offset + length), digest: async () => createHash("sha256").update(bytes).digest("base64url") };
       const size = sizes.get(record.id)!;
       return { read: async (offset, length) => pattern(offset, Math.min(length, size - offset)), digest: async () => digestOf(size) };
     },
@@ -83,7 +103,12 @@ async function contactOf(net: FakeNativeNet, name: string, transport: Constructo
     id, name, transportSeed, link, files: chatFiles, takesFiles: files, got, frames, received, records,
     offer(wireId: string, size: number, extra: { forwarded?: number } = {}) {
       sizes.set(wireId, size);
-      chatFiles.offer({ id: wireId, name: `${wireId}.png`, mime: "image/png", size, timestamp: Date.now(), ...extra });
+      chatFiles.offer({ id: wireId, name: `${wireId}.bin`, mime: "application/octet-stream", size, timestamp: Date.now(), ...extra });
+    },
+    /** Offers these bytes, under this name and type. */
+    offerBytes(wireId: string, name: string, mime: string, bytes: Uint8Array) {
+      contents.set(wireId, bytes);
+      chatFiles.offer({ id: wireId, name, mime, size: bytes.length, timestamp: Date.now() });
     },
   };
 }
@@ -153,6 +178,75 @@ describe("a group file", () => {
   });
 });
 
+// covers: files.video.metadata
+describe("a received video", () => {
+  // From an app that sent it as it was recorded: it says where.
+  const recorded = withMovie(H264_MP4, [xyzUdta()]);
+  const bytesOf = async (blob: Blob) => new Uint8Array(await blob.arrayBuffer());
+
+  /** `bytes` received in chat `link-a`, kept whole in a Blob or in file storage, as a video the chat described or as a plain file. */
+  async function received(bytes: Uint8Array, name: string, mime: string, kept: "blob" | "storage", video?: { duration: number; width: number; height: number }) {
+    const id = `link-a-in-${crypto.randomUUID()}`, size = bytes.length;
+    const record = { id, linkId: "link-a", direction: "in" as const, createdAt: 1, metadata: { name, size, mime, timestamp: 1, ...(video && { video }) },
+      transfer: { state: "done" as const, transferred: size, size } };
+    if (kept === "blob") await fileStore.put({ ...record, blob: new Blob([bytes as BlobPart], { type: mime }) });
+    else {
+      const storage = await fileBytes(), appender = new FileAppender(storage, id);
+      await appender.append(bytes);
+      await appender.close();
+      await fileStore.put({ ...record, bytes: storage.kind, digest: await storage.digest(id) });
+    }
+    const target = { linkId: "link-b", wireId: `w${crypto.randomUUID().slice(0, 8)}`, timestamp: 2, file: { id: `link-b-out-${crypto.randomUUID()}`, name, size, mime, ...(video && { video }) } };
+    return { id, target };
+  }
+
+  /** The copy made for the new chat, read back whole. */
+  async function copied(id: string) {
+    const copy = await fileStore.get(id);
+    return copy!.blob ? bytesOf(copy!.blob) : (await fileBytes()).read(id, 0, copy!.metadata!.size);
+  }
+
+  for (const kept of ["blob", "storage"] as const)
+    for (const [as, name, mime, video] of [
+      ["as a video", "VID_0001.mp4", "video/mp4", { duration: 1000, width: 64, height: 64 }],
+      ["as a plain file", "VID_0002.mov", "video/quicktime", undefined],
+    ] as const)
+      it(`is forwarded ${as} (kept in ${kept}) without where it was recorded, as one sent from here: the digest is the stripped copy's`, async () => {
+        const { id, target } = await received(recorded, name, mime, kept, video);
+        const stripped = await bytesOf((await withoutVideoMetadata(new Blob([recorded]), mime))!);
+        const file = await copyForForward(id, target);
+        const sent = await copied(target.file.id);
+        expect(hasPlace(sent)).toBe(false);
+        expect(sent).toEqual(stripped);
+        expect(file).toMatchObject({ size: stripped.length, ...(video && { video }) });
+        expect(await fileStore.get(target.file.id)).toMatchObject({ digest: createHash("sha256").update(stripped).digest("base64url"), metadata: { size: stripped.length } });
+        // The one received here is kept as it came.
+        expect(hasPlace(await copied(id))).toBe(true);
+      });
+
+  it("kept in storage and copied a step at a time is changed across the steps: a recorder's padding that says where goes as zeros", async () => {
+    const tail = new Uint8Array(2.5 * 1024 * 1024);
+    // One across the first step's end, one at the file's.
+    tail.set(new TextEncoder().encode(PLACE), 1024 * 1024 - recorded.length - 4);
+    tail.set(new TextEncoder().encode(PLACE), tail.length - PLACE.length);
+    const padded = Buffer.concat([recorded, tail]);
+    const { id, target } = await received(padded, "VID_0003.mp4", "video/mp4", "storage");
+    const stripped = await bytesOf((await withoutVideoMetadata(new Blob([padded]), "video/mp4"))!);
+    await copyForForward(id, target);
+    const sent = await copied(target.file.id);
+    expect(hasPlace(sent)).toBe(false);
+    expect(Buffer.compare(sent, stripped)).toBe(0);
+  });
+
+  it("whose metadata cannot be removed is refused as one sent from here is, and no copy is kept", async () => {
+    for (const kept of ["blob", "storage"] as const) {
+      const { id, target } = await received(recorded.subarray(0, 500), "cut.mp4", "video/mp4", kept, { duration: 1000, width: 64, height: 64 });
+      await expect(copyForForward(id, target)).rejects.toThrow(NO_VIDEO_METADATA);
+      expect(await fileStore.get(target.file.id)).toBeUndefined();
+    }
+  });
+});
+
 describe("forwarding between chats", { timeout: 60_000 }, () => {
   it("sends a text on as a new message of mine, one hop further, and nothing of who wrote it", async () => {
     const t = await setup();
@@ -198,7 +292,7 @@ describe("forwarding between chats", { timeout: 60_000 }, () => {
     const { results } = await t.node.forwardMessages({ linkId: t.a.id, messageIds: [received.id], to: [t.b.id] });
     expect(results[0]).toMatchObject({ error: null, messageIds: [expect.stringMatching(/^me_/)] });
     const sent = await t.row(t.b, m => m.id === results[0]!.messageIds[0]);
-    expect(sent).toMatchObject({ sender: "me", forwarded: 1, file: { name: "pic-000001.png", size, mime: "image/png" } });
+    expect(sent).toMatchObject({ sender: "me", forwarded: 1, file: { name: "pic-000001.bin", size, mime: "application/octet-stream" } });
     // A copy of its own under the new chat, the original left as it was.
     expect(sent.file!.id.startsWith(`${t.b.id}-out-`)).toBe(true);
     expect((await fileStore.get(received.file!.id))?.metadata?.size).toBe(size);
@@ -208,6 +302,36 @@ describe("forwarding between chats", { timeout: 60_000 }, () => {
     expect(t.b.received.get(record.id)!.hash.digest("base64url")).toBe(digestOf(size));
     // Nothing about that file went to Alice after it arrived: no request, no second transfer.
     expect(t.a.frames.slice(heardFromA)).toEqual([]);
+  });
+
+  // covers: files.image.metadata
+  it("sends a received photo on without the metadata its author's app left in it: the size and digest are the stripped copy's", async () => {
+    const t = await setup();
+    t.a.offerBytes("photo-0001", "IMG_0001.jpg", "image/jpeg", jpegWith(SECRET, 300 * 1024));
+    const received = await t.row(t.a, m => m.id === "peer_photo-0001");
+    await vi.waitFor(() => expect(t.node.getState().transfers[received.file!.id]).toMatchObject({ state: "done" }), { timeout: 15_000 });
+    const clean = jpegWith(undefined, 300 * 1024);
+    const { results } = await t.node.forwardMessages({ linkId: t.a.id, messageIds: [received.id], to: [t.b.id] });
+    expect(results[0]).toMatchObject({ error: null, messageIds: [expect.stringMatching(/^me_/)] });
+    const sent = await t.row(t.b, m => m.id === results[0]!.messageIds[0]);
+    expect(sent.file).toMatchObject({ name: "IMG_0001.jpg", size: clean.length, mime: "image/jpeg" });
+    expect(await fileStore.get(sent.file!.id)).toMatchObject({ digest: createHash("sha256").update(clean).digest("base64url"), metadata: { size: clean.length } });
+    await vi.waitFor(() => expect([...t.b.records.values()].find(r => r.direction === "in")).toMatchObject({ state: "done" }), { timeout: 15_000 });
+    const record = [...t.b.records.values()].find(r => r.direction === "in")!;
+    expect(record.file).toMatchObject({ size: clean.length });
+    expect(t.b.received.get(record.id)!.hash.digest("base64url")).toBe(createHash("sha256").update(clean).digest("base64url"));
+    // The one received here is kept as it came.
+    expect((await fileStore.get(received.file!.id))?.metadata?.size).toBe(jpegWith(SECRET, 300 * 1024).length);
+  });
+
+  it("refuses to forward a received picture whose metadata cannot be removed, and keeps no copy", async () => {
+    const t = await setup();
+    t.a.offerBytes("photo-cut", "cut.jpg", "image/jpeg", jpegWith(SECRET).slice(0, -2));
+    const received = await t.row(t.a, m => m.id === "peer_photo-cut");
+    await vi.waitFor(() => expect(t.node.getState().transfers[received.file!.id]).toMatchObject({ state: "done" }), { timeout: 15_000 });
+    const { results } = await t.node.forwardMessages({ linkId: t.a.id, messageIds: [received.id], to: [t.b.id] });
+    expect(results[0]).toMatchObject({ error: NO_PICTURE_METADATA, messageIds: [], sent: [] });
+    expect(await fileStore.listForLink(t.b.id)).toEqual([]);
   });
 
   it("refuses a file still arriving, and what cannot be forwarded at all; one refused chat does not stop another", async () => {

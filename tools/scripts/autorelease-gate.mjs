@@ -26,8 +26,8 @@ const MAX_LINES = 600;
 const MIN_HOURS = 20;
 const PROTECTED = [/^\.github\//, /^tools\/scripts\/(security-scan|autorelease-gate)\.mjs$/];
 // Every lock file the repository ships from: the app and its workspace, the website, the Desktop's HyperDHT sidecar, the
-// HyperDHT relay for browsers and Iroh for browsers. One that is missing here is read as code: a dependency added to it
-// would pass, and its lines would count against MAX_LINES.
+// HyperDHT relay for browsers, Iroh for browsers and the translation runtime. One that is missing here is read as code: a
+// dependency added to it would pass, and its lines would count against MAX_LINES.
 const LOCKFILES = new Set([
   "package-lock.json",
   "apps/website/package-lock.json",
@@ -35,6 +35,7 @@ const LOCKFILES = new Set([
   "infra/services/hyperdht-relay/package-lock.json",
   "Cargo.lock",
   "native/transports/iroh-web/Cargo.lock",
+  "native/translation/package-lock.json",
 ]);
 const VERSION_FILES = new Set([
   "package.json",

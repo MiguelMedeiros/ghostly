@@ -1,8 +1,8 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
 import { ChatAppPanel } from "../../components/apps/ChatAppPanel";
-import { takedownText, type AppOpener } from "../../lib/apps/open";
+import { setAppOpener, takedownText, type AppOpener } from "../../lib/apps/open";
 import { LOCALES as locales } from "../i18n/locales";
 import { translateWith } from "../../locales/translate";
 import { chatApp } from "../../lib/apps/running";
@@ -17,7 +17,7 @@ import { windowIs } from "../viewport";
 
 // A version found revoked or removed while it runs (WISP 1200 § Takedowns): the page stops it and says why.
 vi.mock("../../lib/apps/runnerCheck", () => ({ runnerAvailable: vi.fn(async () => true), runnerPolicy: vi.fn(async () => true), forgetRunnerCheck: () => {}, isRunnerPolicy: () => true }));
-const started: { frame: HTMLIFrameElement; stop: ReturnType<typeof vi.fn> }[] = [];
+const started: { frame: HTMLIFrameElement; stop: Mock<(reason?: string) => void> }[] = [];
 vi.mock("../../lib/apps/broker", async (actual) => ({
   ...(await actual<typeof import("../../lib/apps/broker")>()),
   startApp: ({ container, launch, onStop }: { container: HTMLElement; launch: { title: string }; onStop?: (reason: string) => void }) => {
@@ -25,7 +25,8 @@ vi.mock("../../lib/apps/broker", async (actual) => ({
     frame.title = launch.title;
     container.appendChild(frame);
     let done = false;
-    const stop = vi.fn(() => { if (done) return; done = true; frame.remove(); onStop?.("stopped"); });
+    // `stop(reason)` here stands for the broker's own stops too: the frame navigated, broke the protocol, never started.
+    const stop = vi.fn((reason = "stopped") => { if (done) return; done = true; frame.remove(); onStop?.(reason); });
     started.push({ frame, stop });
     return { frame, phase: "running", stop };
   },
@@ -147,5 +148,96 @@ describe("an app running when its version is taken down", () => {
     expect(within(app).getByTestId("mini-app-stopped")).toHaveTextContent("Chess was stopped: its maker revoked this version");
     within(app).getByRole("button", { name: "Close" }).click();
     expect(screen.queryByTestId("mini-app")).not.toBeInTheDocument();
+  });
+});
+
+// The runner (WISP 1200 § the runner, step 7): an app whose frame loads again is torn down, and its place says it stopped.
+describe("an app that stops on its own", () => {
+  const STOPPED = "Chess stopped working and was closed. If it keeps happening, tell its maker.";
+  beforeEach(() => { vi.spyOn(console, "warn").mockImplementation(() => {}); });
+
+  it("in a chat: the panel stays, shown, and says it stopped until it is closed", async () => {
+    const { user } = chatPanel();
+    await act(() => open(REF, "link-1"));
+    act(() => started[0]!.stop("navigated"));
+    const app = screen.getByTestId("mini-app");
+    expect(app).toBeVisible();
+    expect(within(app).getByRole("status")).toHaveTextContent(STOPPED);
+    expect(started[0]!.frame.isConnected).toBe(false);
+    await user.click(within(app).getByRole("button", { name: "Close" }));
+    expect(app).not.toBeVisible();
+    expect(chatApp("link-1")).toBeUndefined();
+  });
+
+  it("alone: its layer stays, says it stopped, keeps the focus, and goes with Close", async () => {
+    for (const reason of ["navigated", "protocol", "timeout"]) {
+      await open(REF, null);
+      const last = started[started.length - 1]!;
+      last.frame.focus();
+      last.stop(reason);
+      const app = screen.getByTestId("mini-app");
+      expect(within(app).getByRole("status"), reason).toHaveTextContent(STOPPED);
+      const close = within(app).getByRole("button", { name: "Close" });
+      expect(app.contains(document.activeElement), reason).toBe(true);
+      close.click();
+      expect(screen.queryByTestId("mini-app"), reason).not.toBeInTheDocument();
+    }
+  });
+
+  it("one that asked to close, or that the person stopped, goes with no notice", async () => {
+    chatPanel();
+    await act(() => open(REF, "link-1"));
+    act(() => started[0]!.stop("closed"));
+    expect(chatApp("link-1")).toBeUndefined();
+    await open(REF, null);
+    started[1]!.stop("closed");
+    await open(REF, null);
+    started[2]!.stop();
+    expect(document.querySelector("[data-place=alone]")).toBeNull();
+    expect(screen.queryByTestId("mini-app-stopped")).toBeNull();
+  });
+});
+
+// The watchdog (WISP 1200 § The runner and the broker): an app that held its thread past the bound was stopped by the
+// page. Its place says so, and it may be opened again.
+describe("an app the watchdog stopped", () => {
+  const UNRESPONSIVE = "Chess stopped responding and was closed, so your chats keep working. Open it again, or tell its maker if it keeps happening.";
+  beforeEach(() => { vi.spyOn(console, "warn").mockImplementation(() => {}); });
+  afterEach(() => { setAppOpener(null); });
+
+  it("in a chat: the panel says it stopped responding, and Open again starts it in the same panel", async () => {
+    setAppOpener(open);
+    const { user } = chatPanel();
+    await act(() => open(REF, "link-1"));
+    act(() => started[0]!.stop("unresponsive"));
+    const app = screen.getByTestId("mini-app");
+    expect(within(app).getByRole("status")).toHaveTextContent(UNRESPONSIVE);
+    await user.click(within(app).getByRole("button", { name: "Open again" }));
+    await waitFor(() => expect(started).toHaveLength(2));
+    expect(within(app).queryByRole("status")).not.toBeInTheDocument();
+    expect(within(app).queryByRole("button", { name: "Open again" })).not.toBeInTheDocument();
+    expect(app).toContainElement(started[1]!.frame);
+    expect(chatApp("link-1")?.stopped).toBeUndefined();
+  });
+
+  it("alone: its layer says it stopped responding, and Open again opens it again", async () => {
+    open = webOpener({ apps: () => host, nameIn: () => undefined, closeLabel: () => "Close", openAgainLabel: () => "Open again", stoppedLabel: (title, takedown) => takedownText(title, takedown, translateWith(locales.en, "en")) });
+    await open(REF, null);
+    started[0]!.stop("unresponsive");
+    const app = screen.getByTestId("mini-app");
+    expect(within(app).getByRole("status")).toHaveTextContent(UNRESPONSIVE);
+    within(app).getByRole("button", { name: "Open again" }).click();
+    await waitFor(() => expect(started).toHaveLength(2));
+    expect(document.querySelectorAll("[data-place=alone]")).toHaveLength(1);
+    expect(screen.getByTestId("mini-app")).toContainElement(started[1]!.frame);
+    expect(screen.queryByTestId("mini-app-stopped")).not.toBeInTheDocument();
+  });
+
+  it("an app stopped for anything else offers no Open again", async () => {
+    setAppOpener(open);
+    chatPanel();
+    await act(() => open(REF, "link-1"));
+    act(() => started[0]!.stop("protocol"));
+    expect(screen.queryByRole("button", { name: "Open again" })).not.toBeInTheDocument();
   });
 });

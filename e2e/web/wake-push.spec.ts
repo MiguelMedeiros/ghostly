@@ -2,6 +2,7 @@ import type { BrowserContext, CDPSession, Page, Request } from "@playwright/test
 import { p256 } from "@noble/curves/nist.js";
 import { decryptPushPayload, fromBase64Url, readWakePayload, toBase64Url, utf8Decode, utf8Encode } from "@ghostly/core";
 import { chat, connect, expect, link, openProfilePage, say, test, type Peer } from "../support/fixtures";
+import { CHROMIUM_SANDBOX } from "../support/chromiumSandbox";
 
 /**
  * Wake-up push (WISP 401 § Wake-up push): Bo's closed web app is woken by a push Ana's own app sends, through the
@@ -16,6 +17,7 @@ const deployed = !!process.env.E2E_WEB_URL;
 test.use({
   channel: "chromium",
   launchOptions: {
+    chromiumSandbox: CHROMIUM_SANDBOX,
     args: [
       // The project's own arguments, and `NativeNotifications` off: Chromium then keeps a notification in its own list.
       // Handed to the machine's notification service instead, it stays in `getNotifications()` only as long as that

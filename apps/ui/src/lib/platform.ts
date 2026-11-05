@@ -44,7 +44,11 @@ export interface PeerLinkState {
   canSendText?: boolean;
   /** Store-and-forward in this chat: the switch, what the contact said, storage and what is waiting. */
   hold?: PeerHoldState;
-  dhtDelivery?: { mode: "stream" | "dht"; peerMode?: "stream" | "dht"; authenticated: boolean; error?: string; pendingUntil?: number; maxTextBytes: number };
+  /**
+   * `forwardSecrecy` (WISP 4xx): `on`, texts over the DHT and held items have keys used once; `starting`, both apps can
+   * and it is on once both wrote; `unsupported`, the contact's app cannot; `stopped`, it no longer says it can.
+   */
+  dhtDelivery?: { mode: "stream" | "dht"; peerMode?: "stream" | "dht"; authenticated: boolean; error?: string; pendingUntil?: number; maxTextBytes: number; forwardSecrecy?: "on" | "starting" | "unsupported" | "stopped" };
   pairing?: PairingState;
   /** The transport the chat waits for, and why (WISP 100): the chat's status says so rather than a connection issue. */
   transportWait?: TransportWait;
@@ -87,8 +91,13 @@ export interface PeerHoldState {
 }
 
 export interface NetworkSettings {
-  /** How this client reaches Pkarr, for display. */
+  /** How this client reaches Pkarr, as the engine words it in English (logs, the CLI). The page shows `kind` instead. */
   protocol: string;
+  /**
+   * How this client reaches the Mainline DHT, for a line in the page's language: `relays`, only through the Pkarr
+   * relays over HTTP (a browser); `direct`, the DHT itself over UDP and the relays too (Desktop, Android).
+   */
+  kind: "relays" | "direct";
   relays: string[];
   defaultRelays: string[];
   /** Optional TURN server, used only when no direct path exists. */
@@ -104,6 +113,11 @@ export interface NetworkSettings {
    * relays". Writes go to the relays either way, so contacts on the web see this app's packets.
    */
   readRelays?: boolean;
+  /**
+   * Hide my IP from contacts is on where the DHT is reached directly (Desktop): reads and writes go through the Pkarr
+   * relays alone, and nothing goes to the DHT itself (WISP 100 § Relay only).
+   */
+  relayOnly?: boolean;
   /** This device's own attempts say direct connections are blocked on its network (a VPN, a firewall): chats go through relays. */
   directBlocked?: boolean;
   /** This device's clock seems to be off by this much (ms, positive when it is ahead), as relays and several contacts say. */
@@ -141,10 +155,10 @@ export interface FileTransferState {
    */
   stalled?: boolean;
   /**
-   * A group's file, `waiting`: why. `nobody` connected has it, its holders are `busy`, or what came was `damaged`
-   * (it was dropped; `stalled`, so its person can ask again).
+   * A group's file, `waiting`: why. `nobody` connected has it, only its `author` has it (out of reach, on hubs), its
+   * holders are `busy`, or what came was `damaged` (it was dropped; `stalled`, so its person can ask again).
    */
-  wait?: "nobody" | "busy" | "day" | "damaged";
+  wait?: "nobody" | "author" | "busy" | "day" | "damaged";
   /** The same, in the engine's words. */
   note?: string;
 }
@@ -358,7 +372,9 @@ export interface WalletPlatform {
   setPrimaryMint(url: string): Promise<void>;
   /** An invoice from the bound Lightning card (else the default for receiving); `via: "cashu"` asks the Cashu mints. */
   receiveLightning(amount: number, via?: "cashu"): Promise<{ quote?: string; invoice: string; expiresAt: number | null; paymentHash?: string; source?: string }>;
-  quoteInvoice(invoice: string, via?: "cashu"): Promise<{ quote: string; mint: string; amount: number; feeReserve: number; source?: string }>;
+  /** The screen shows this invoice of ours: its mint or source is asked about it every few seconds for a while. Said again while it shows. */
+  watchInvoice?(invoice: string): Promise<void>;
+  quoteInvoice(invoice: string, via?: "cashu", amount?: number): Promise<{ quote: string; mint: string; amount: number; feeReserve: number; source?: string }>;
   /**
    * True when paid, false while the payment is pending (or its answer lost). Throws when the sats did not leave. `note`: what it was for, kept with the wallet's record.
    * `confirmedReal`: the person confirmed a Mainnet payment as real money; the engine refuses one without it.
@@ -392,7 +408,8 @@ export interface WalletPlatform {
   /** A fresh address of the Bitcoin source to be paid on. */
   bitcoinReceiveAddress(): Promise<string>;
   bitcoinRefresh(): Promise<void>;
-  receiveToken(token: string): Promise<number>;
+  /** `amount`: what arrived; `fee`: what the mint kept of the token's face value to take it in. */
+  receiveToken(token: string): Promise<{ amount: number; fee: number }>;
   /** Null when the text is neither an ecash token nor a Cashu payment request. */
   inspectCashu(text: string): Promise<CashuInspection | null>;
   exportTokens(): Promise<{ mint: string; token: string; amount: number }[]>;

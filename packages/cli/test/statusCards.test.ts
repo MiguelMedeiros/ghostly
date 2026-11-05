@@ -6,7 +6,7 @@ import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/b
 import { STATUS_CARD_LIMITS, checkStatusCard, type StatusCard } from "@ghostly/core";
 import { callApi, type ApiContext } from "../src/api";
 import { parseArgs } from "../src/args";
-import { EventHub } from "../src/events";
+import { EventHub, type GhostlyEvent } from "../src/events";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { COMMANDS, idSlot, positionals } from "../src/commands";
 import { chatOnly } from "../src/main";
@@ -18,15 +18,21 @@ const link = (id: string, fields: Partial<LinkView> = {}) => ({ id, peerPubKeyZ3
 const group = (fields: Partial<GroupView> = {}) => ({ id: "g1", name: "Sala de Máquinas", createdAt: 1, profile: "mesh", isAdmin: false, canSend: true, lastMessageAt: 0, invited: [], memberLinks: {},
   members: [{ key: "mekey", role: "member", me: true, online: true, missing: 0 }], ...fields }) as unknown as GroupView;
 
-function fake(mode: "daemon" | "one-shot" = "daemon") {
+/**
+ * `out.delivery`: what a new message's delivery is (default `sent`); `out.pending`: an edit waits for the contact's
+ * confirmation. `emit` tells the commands' waits a message changed, as the engine's events do.
+ */
+function fake(mode: "daemon" | "one-shot" = "daemon", out: { delivery?: StoredMessage["delivery"]; pending?: boolean } = {}) {
   const rows = new Map<string, StoredMessage[]>();
   const of = (linkId: string) => rows.get(linkId) ?? rows.set(linkId, []).get(linkId)!;
   let n = 0;
   const store = (linkId: string, text: string, card?: StatusCard) => {
     const id = `me_${++n}`;
-    of(linkId).push({ linkId, id, wireId: `w${n}`, text, sender: "me", timestamp: Date.now(), via: "datalink", delivery: "sent", ...(card && { card }) });
+    of(linkId).push({ linkId, id, wireId: `w${n}`, text, sender: "me", timestamp: Date.now(), via: "datalink", delivery: out.delivery ?? "sent", ...(card && { card }) });
     return id;
   };
+  const listeners = new Set<(event: GhostlyEvent) => void>();
+  const emit = (event: GhostlyEvent) => { for (const listener of listeners) listener(event); };
   const card = (raw: unknown) => { const checked = checkStatusCard(raw); if ("error" in checked) throw new Error(checked.error); return checked.card; };
   const node = {
     getState: () => ({ links: [link("chat-one", { label: "Coordinator" })], groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
@@ -38,13 +44,14 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
     editMessage: vi.fn(async ({ linkId, messageId, card: raw }: { linkId: string; messageId: string; text: string; card?: unknown }) => {
       const row = of(linkId).find((m) => m.id === messageId)!;
       row.card = card(raw);
-      row.edit = { seq: (row.edit?.seq ?? 0) + 1, at: Date.now(), history: [] };
+      row.edit = { seq: (row.edit?.seq ?? 0) + 1, at: Date.now(), history: [], ...(out.pending && { pending: true }) };
       return { error: null, messageId };
     }),
     groupTaken: vi.fn(() => 1),
   };
-  const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode, version: "test" } as unknown as ApiContext;
-  return { ctx, node, rows: of, store };
+  const onEvent = (listener: (event: GhostlyEvent) => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
+  const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode, version: "test" } as unknown as ApiContext;
+  return { ctx, node, rows: of, store, emit };
 }
 
 /** A command line as main.ts reads it: its options and positionals, then the method's parameters. */
@@ -111,6 +118,14 @@ describe("the task commands", () => {
     usage("task update", ["g1", "t", "--steps", "0/0"], /^--steps takes done\/total/);
     usage("task send", send("--tag", "a", "--tag", "b", "--tag", "c", "--tag", "d"), /^--tag is given at most 3 times, not 4$/);
     usage("task send", send("--progress", "150"), /^--progress takes a percent from 0 to 100, not 150$/);
+    // Before, these reached the card's check: bad_request (exit 1), "Status card: pr.number is a whole number from 1".
+    const pr = (...flags: string[]) => send("--pr-url", "https://x.example/1", ...flags);
+    usage("task send", pr("--pr-number", "1.5"), /^--pr-number takes a whole number from 1 to 1000000000, not 1.5$/);
+    usage("task send", pr("--pr-number", "0"), /^--pr-number takes a whole number from 1 to 1000000000, not 0$/);
+    for (const flag of ["additions", "deletions", "files"]) usage("task send", pr(`--${flag}`, "-3"), new RegExp(`^--${flag} takes a whole number from 0 to 1000000000, not -3$`));
+    usage("task update", ["g1", "t", "--additions", "2.5"], /^--additions takes a whole number from 0 to 1000000000, not 2.5$/);
+    usage("task send", send("--steps", "99999999999999999999/99999999999999999999"), /^--steps takes done\/total of at most 1000000000 steps, like 2\/5, not "99999999999999999999\/99999999999999999999"$/);
+    expect(params("task send", pr("--pr-number", "7", "--additions", "0", "--files", "1000000000", "--steps", "1000000000/1000000000")).card).toMatchObject({ pr: { number: 7, additions: 0, files: 1e9 }, done: 1e9, total: 1e9 });
     usage("task update", ["g1", "t", "--pr-state", "weird"], /^--pr-state takes draft, open, merged or closed, not "weird"$/);
     usage("task update", ["g1", "t", "--pr-checks", "green"], /^--pr-checks takes passing, failing or pending, not "green"$/);
     usage("task send", send("--pr-url", "http://github.com/o/r/pull/1"), /^--pr-url takes an https link of at most 512 characters, not "http:/);
@@ -149,6 +164,19 @@ describe("the task commands", () => {
     expect(params("task send", send("--json", `{"step":"${"x".repeat(210)}","status":"weird"}`)).card).toMatchObject({ status: "weird" });
   });
 
+  it("refuse a card past 8 KiB in all as a usage error with its size, though each flag is within its own bound", () => {
+    // Before, 20 items of 200 CJK characters (3 bytes each) passed every flag and failed as bad_request (exit 1),
+    // "Status card: The card takes 12529 bytes; at most 8192", the whole card in its details.
+    const items = (n: number, text: string) => Array.from({ length: n }, () => ["--item", `done:${text}`]).flat();
+    const big = /^The card takes \d+ bytes, and holds at most 8192 in all \(a character past Latin takes 2 to 4\): give shorter or fewer --item, --step, --link or --json$/;
+    expect(() => params("task send", ["g1", "--title", "t", ...items(20, "日".repeat(200))])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(big), details: undefined }));
+    expect(() => params("task update", ["g1", "t", ...items(20, "日".repeat(200))])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(big) }));
+    expect(() => params("routine send", ["g1", "--name", "n", "--schedule", "s", "--json", JSON.stringify({ x: "日".repeat(3000) })])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/bytes, and holds at most 8192 in all .*--name, --schedule, --link or --json$/) }));
+    expect(() => params("usage send", ["g1", "--left", "5", "--json", JSON.stringify({ x: "日".repeat(3000) })])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/give shorter or fewer --json$/) }));
+    expect((params("task send", ["g1", "--title", "t", ...items(20, "x".repeat(200))]).card as { items: unknown[] }).items).toHaveLength(20);
+    expect((params("task send", ["g1", "--title", "t", ...items(11, "日".repeat(200))]).card as { items: unknown[] }).items).toHaveLength(11);
+  });
+
   it("start the groups' sessions even in a one-shot: the chat they name may be a group", () => {
     expect(chatOnly("task.send", { chat: "Sala" })).toBe(false);
     expect(chatOnly("chat.send", { chat: "Alice" })).toBe(true);
@@ -178,7 +206,81 @@ describe("task send", () => {
     await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "x", status: "paused" } })).rejects.toMatchObject({ code: "bad_request", message: /status is one of/ });
     await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "x", pr: { url: "http://github.com/o/r/pull/1" } } })).rejects.toMatchObject({ code: "bad_request", message: /https/ });
     await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "x", items: Array.from({ length: 21 }, () => ({ text: "x" })) } })).rejects.toMatchObject({ code: "bad_request" });
+    // A card too big is said by its size, not echoed back whole.
+    const big = callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "x", step: "日".repeat(3000) } });
+    await expect(big).rejects.toMatchObject({ code: "bad_request", message: /^Status card: The card takes \d+ bytes; at most 8192$/, details: { bytes: expect.any(Number), max: 8192 } });
     expect(node.sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("the card commands in a chat, without a daemon", () => {
+  /** The message goes out (and the contact has it) 300 ms after the command, as a one-shot's first dial carries it. */
+  const goesOut = (f: ReturnType<typeof fake>, id: string, delivery: StoredMessage["delivery"] = "delivered") => setTimeout(() => {
+    f.rows("chat-one").find((m) => m.id === id)!.delivery = delivery;
+    f.emit({ seq: 1, id: "e1", type: "message.delivery", at: Date.now(), chat: "chat-one", messageId: id });
+  }, 300);
+  const goesOff = "goes with this profile's next command, or keep it online with `ghostly daemon --detach`";
+
+  it("task send and routine send stay until the card went out: the process leaving took it along unsent", async () => {
+    // Before, both answered at once with `delivery: waiting`, and the contact had the card only with a later one-shot.
+    for (const [method, card] of [["task.send", { id: "t1", title: "Fix" }], ["routine.send", { id: "r1", name: "Nightly", schedule: "every day 01:00" }]] as const) {
+      const f = fake("one-shot", { delivery: "waiting" });
+      goesOut(f, "me_1");
+      const started = Date.now();
+      expect(await callApi(f.ctx, method, { chat: "Coordinator", card })).toMatchObject({ chat: "chat-one", messageId: "me_1", delivery: "delivered" });
+      expect(Date.now() - started).toBeGreaterThanOrEqual(250);
+    }
+  });
+
+  it("time out with the shared words (exit 4); --wait none answers at once; a daemon and a group answer at once", async () => {
+    await expect(callApi(fake("one-shot", { delivery: "waiting" }).ctx, "task.send", { chat: "Coordinator", card: { title: "Fix" }, timeout: 1 })).rejects.toMatchObject({
+      code: "timeout", message: `Timed out after 1 s: the message is waiting and ${goesOff}`,
+    });
+    expect(await callApi(fake("one-shot", { delivery: "waiting" }).ctx, "task.send", { chat: "Coordinator", card: { title: "Fix" }, wait: "none" })).toMatchObject({ delivery: "waiting" });
+    expect(await callApi(fake("daemon", { delivery: "waiting" }).ctx, "task.send", { chat: "Coordinator", card: { title: "Fix" } })).toMatchObject({ delivery: "waiting" });
+    // A group has no receipts: a group's card keeps answering at once (`--wait sent` waits for an edge).
+    const group = fake("one-shot");
+    group.node.groupTaken.mockReturnValue(0);
+    expect(await callApi(group.ctx, "task.send", { chat: "g1", card: { title: "Fix" } })).toMatchObject({ group: "g1", messageId: "me_1" });
+  });
+
+  it("task update and routine update stay until the contact confirmed the edit; --wait none does not", async () => {
+    vi.useFakeTimers();
+    const f = fake("one-shot", { pending: true });
+    await callApi(f.ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Fix" }, wait: "none" });
+    const update = callApi(f.ctx, "task.update", { chat: "Coordinator", task: "t1", card: { status: "done" } });
+    let answered = false;
+    void update.then(() => { answered = true; }, () => { answered = true; });
+    await vi.advanceTimersByTimeAsync(CARD_UPDATE_GAP_MS + 1_000);
+    // Before, it answered as soon as the edit was made, with `confirmed: false`, and the process left with it.
+    expect(answered).toBe(false);
+    delete f.rows("chat-one")[0]!.edit!.pending;
+    await vi.advanceTimersByTimeAsync(300);
+    expect(await update).toMatchObject({ task: "t1", edits: 1, confirmed: true });
+    const none = callApi(f.ctx, "task.update", { chat: "Coordinator", task: "t1", card: { progress: 100 }, wait: "none" });
+    await vi.advanceTimersByTimeAsync(CARD_UPDATE_GAP_MS);
+    expect(await none).toMatchObject({ edits: 2, confirmed: false });
+    await callApi(f.ctx, "routine.send", { chat: "Coordinator", card: { id: "r1", name: "Nightly", schedule: "every day 01:00" }, wait: "none" });
+    const routine = callApi(f.ctx, "routine.update", { chat: "Coordinator", routine: "r1", card: {}, run: { result: "ok" }, timeout: 1 });
+    const said = expect(routine).rejects.toMatchObject({ code: "timeout", message: `Timed out after 1 s: the contact has not confirmed the edit yet (it needs a live chat and a contact's app that shows edits). It ${goesOff}` });
+    await vi.advanceTimersByTimeAsync(CARD_UPDATE_GAP_MS + 1_500);
+    await said;
+  });
+
+  it("usage send stays until its report went out: the first one sent, a later one confirmed", async () => {
+    const f = fake("one-shot", { delivery: "waiting", pending: true });
+    goesOut(f, "me_1");
+    expect(await callApi(f.ctx, "usage.send", { chat: "Coordinator", card: { left: 62 } })).toMatchObject({ messageId: "me_1", delivery: "delivered", updated: false });
+    setTimeout(() => { delete f.rows("chat-one")[0]!.edit!.pending; }, CARD_UPDATE_GAP_MS + 300);
+    expect(await callApi(f.ctx, "usage.send", { chat: "Coordinator", card: { left: 40 } })).toMatchObject({ messageId: "me_1", edits: 1, confirmed: true, updated: true });
+    expect(await callApi(fake("one-shot", { delivery: "waiting" }).ctx, "usage.send", { chat: "Coordinator", card: { left: 62 }, wait: "none" })).toMatchObject({ delivery: "waiting" });
+  }, 15_000);
+
+  it("say so in their help: the default is none with a daemon, and waits without one in a chat", () => {
+    // Before, task send and routine send said "sent without" a daemon and sent nothing; usage send said none.
+    for (const name of ["task send", "routine send"]) expect(COMMANDS[name]!.options!.wait!.description).toBe("none, sent or delivered; in a group none or sent: until an edge took it (default: none with a daemon; without one, sent in a chat and none in a group)");
+    for (const name of ["task update", "routine update"]) expect(COMMANDS[name]!.options!.wait!.description).toBe("none, confirmed (a chat's contact took it) or sent (a group's edge took it) (default: none with a daemon; without one, confirmed in a chat and none in a group)");
+    expect(COMMANDS["usage send"]!.options!.wait!.description).toBe("none or sent: until the contact has it in a chat, an edge took it in a group (default: none with a daemon; without one, sent in a chat and none in a group)");
   });
 });
 
@@ -192,6 +294,9 @@ describe("the secret guard on cards", () => {
     await expect(callApi(ctx, "task.send", { chat: "Sala de Máquinas", card: { title: "Deploy", items: [{ state: "done", text: nsec }] } })).rejects.toMatchObject({ code: "confirm", details: { kind: "nsec" } });
     await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "Deploy" }, text: seed })).rejects.toMatchObject({ code: "confirm" });
     await expect(callApi(ctx, "routine.send", { chat: "Coordinator", card: { name: "Nightly", schedule: "every day 01:00" }, run: { result: "failed", summary: `key: ${nsec}` } })).rejects.toMatchObject({ code: "confirm", details: { kind: "nsec" } });
+    // A login to a node is named as one.
+    await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "Node", step: `__cookie__:${"01".repeat(32)}` } }))
+      .rejects.toMatchObject({ code: "confirm", details: { kind: "node-login" }, message: /looks like a secret \(a login to a node.*send it with --force/ });
     expect(node.sendMessage).not.toHaveBeenCalled();
     expect(node.sendGroupMessage).not.toHaveBeenCalled();
     await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Deploy", step: seed }, force: true })).resolves.toMatchObject({ task: "t1" });
@@ -201,9 +306,9 @@ describe("the secret guard on cards", () => {
   it("refuses an update that brings one, and not one for the text the card already had", async () => {
     vi.useFakeTimers();
     const { ctx, node } = fake("one-shot");
-    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Deploy", step: seed }, force: true });
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Deploy", step: seed }, force: true, wait: "none" });
     await expect(callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { step: `seed: ${seed}` } })).rejects.toMatchObject({ code: "confirm", message: /update it with --force/ });
-    await callApi(ctx, "routine.send", { chat: "Coordinator", card: { id: "r1", name: "Nightly", schedule: "every day 01:00" } });
+    await callApi(ctx, "routine.send", { chat: "Coordinator", card: { id: "r1", name: "Nightly", schedule: "every day 01:00" }, wait: "none" });
     await expect(callApi(ctx, "routine.update", { chat: "Coordinator", routine: "r1", card: {}, run: { result: "failed", summary: nsec } })).rejects.toMatchObject({ code: "confirm" });
     expect(node.editMessage).not.toHaveBeenCalled();
     const update = callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { status: "done" } });
@@ -280,6 +385,27 @@ describe("task update", () => {
     expect(card).not.toHaveProperty("step");
   });
 
+  it("says how far a task is one way: a percent given replaces the card's steps, steps given replace its percent", async () => {
+    const { ctx, rows } = fake();
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Fix", done: 2, total: 5 } });
+    vi.useFakeTimers({ now: Date.now() + CARD_UPDATE_GAP_MS });
+    await callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { progress: 90 } });
+    expect(rows("chat-one")[0]!.card).toMatchObject({ progress: 90 });
+    expect(rows("chat-one")[0]!.card).not.toHaveProperty("done");
+    expect(rows("chat-one")[0]!.card).not.toHaveProperty("total");
+    vi.setSystemTime(Date.now() + CARD_UPDATE_GAP_MS);
+    // Before, the 90 stayed: the card showed "90% · 4 of 5 steps", its bar at 90.
+    await callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { done: 4, total: 5 } });
+    expect(rows("chat-one")[0]!.card).toMatchObject({ done: 4, total: 5 });
+    expect(rows("chat-one")[0]!.card).not.toHaveProperty("progress");
+    // Both given at once (`--json`) stay as given; a step's text alone leaves either.
+    vi.setSystemTime(Date.now() + CARD_UPDATE_GAP_MS);
+    await callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { progress: 85, done: 4, total: 5 } });
+    vi.setSystemTime(Date.now() + CARD_UPDATE_GAP_MS);
+    await callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { step: "Tests" } });
+    expect(rows("chat-one")[0]!.card).toMatchObject({ progress: 85, done: 4, total: 5, step: "Tests" });
+  });
+
   it("paces a card's updates in a daemon: those sooner than 2.5 s merge into one that goes when the time is up", async () => {
     const { ctx, node, rows } = fake("daemon");
     vi.useFakeTimers();
@@ -315,7 +441,7 @@ describe("task update", () => {
   it("in a one-shot, waits the gap out itself and sends", async () => {
     const { ctx, node } = fake("one-shot");
     vi.useFakeTimers();
-    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Fix" } });
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Fix" }, wait: "none" });
     const update = callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { progress: 30 } });
     await vi.advanceTimersByTimeAsync(CARD_UPDATE_GAP_MS);
     expect(await update).toMatchObject({ queued: false, edits: 1 });
@@ -430,6 +556,94 @@ describe("routines", () => {
     expect(params("routine update", ["g1", "nightly", "--next", "1791849403000"])).toMatchObject({ card: { nextRunAt: 1791849403000 } });
     expect(() => params("routine send", ["g1"])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/^--name and --schedule are needed/) }));
     expect(() => params("routine send", ["g1", "--name", "Nightly"])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/^--schedule is needed/) }));
+  });
+
+  it("read a date with no zone as local time, a bare date as local midnight, and keep a Z or an offset (agents#2355)", () => {
+    const next = (value: string) => (params("routine update", ["g1", "nightly", "--next", value]).card as { nextRunAt: number }).nextRunAt;
+    const zone = process.env.TZ;
+    try {
+      // Midnight of 2026-11-03 where the command runs: UTC-03, UTC+05:30 and UTC.
+      for (const [tz, midnight] of [["America/Sao_Paulo", Date.UTC(2026, 10, 3, 3)], ["Asia/Kolkata", Date.UTC(2026, 10, 2, 18, 30)], ["UTC", Date.UTC(2026, 10, 3)]] as const) {
+        process.env.TZ = tz;
+        // Before, a bare date was UTC midnight (21:00 the day before in UTC-03) while a date with a time was local.
+        expect(next("2026-11-03"), tz).toBe(midnight);
+        expect(next("2026-11-03T00:00"), tz).toBe(midnight);
+        expect(next("2026-11-03 09:00"), tz).toBe(midnight + 9 * 3_600_000);
+        expect(next("Nov 3 2026"), tz).toBe(midnight);
+        expect(next("2026-11"), tz).toBe(midnight - 2 * 86_400_000);
+        // A zone given is kept as given.
+        expect(next("2026-11-03T09:00:00Z"), tz).toBe(Date.UTC(2026, 10, 3, 9));
+        expect(next("2026-11-03Z"), tz).toBe(Date.UTC(2026, 10, 3));
+        expect(next("2026-11-03T09:00+02:00"), tz).toBe(Date.UTC(2026, 10, 3, 7));
+      }
+    } finally {
+      if (zone === undefined) delete process.env.TZ; else process.env.TZ = zone;
+    }
+    expect(next("1793707200000")).toBe(1793707200000);
+    expect(() => next("tomorrow 09:00")).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/^--next takes a time in milliseconds or a date: 2026-09-30 or 2026-09-30 01:00 \(no zone: local time; a date alone is its midnight\)/) }));
+    expect(COMMANDS["routine send"]!.options!.next.description).toMatch(/2026-09-30 01:00.*no zone: local time/);
+  });
+
+  it("refuse a day the month does not have as a usage error, where it was the next month's first days", () => {
+    const next = (value: string) => (params("routine update", ["g1", "nightly", "--next", value]).card as { nextRunAt: number }).nextRunAt;
+    const refused = (value: string, month: string, days: number) => expect(() => next(value), value).toThrow(expect.objectContaining({ code: "usage", message: `--next takes a day the month has (${month} has ${days}), not ${JSON.stringify(value)}` }));
+    // Before, each was May 1, March 3, July 1, December 1, March 1 and May 1.
+    refused("2026-04-31", "2026-04", 30);
+    refused("2026-02-31 01:00", "2026-02", 28);
+    refused("2026-06-31T10:00:00Z", "2026-06", 30);
+    refused("Nov 31 2026", "2026-11", 30);
+    refused("Feb 29 2026", "2026-02", 28);
+    refused("31 Apr 2026", "2026-04", 30);
+    refused("2026/4/31", "2026-04", 30);
+    // The days a month has, a leap day and a date whose zone moves it to the next day stay as they were.
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.UTC(2027, 5, 1) });
+    expect(next("2028-02-29T00:00:00Z")).toBe(Date.UTC(2028, 1, 29));
+    vi.useRealTimers();
+    expect(next("2026-04-30T23:00-05:00")).toBe(Date.UTC(2026, 4, 1, 4));
+    expect(next("Dec 31 2026 12:00Z")).toBe(Date.UTC(2026, 11, 31, 12));
+  });
+
+  it("refuse a day the month does not have in the other forms a JavaScript date reads: month first in numbers, a month's name between dashes, slashes or dots", () => {
+    const next = (value: string) => (params("routine update", ["g1", "nightly", "--next", value]).card as { nextRunAt: number }).nextRunAt;
+    const refused = (value: string, month: string, days: number) => expect(() => next(value), value).toThrow(expect.objectContaining({ code: "usage", message: `--next takes a day the month has (${month} has ${days}), not ${JSON.stringify(value)}` }));
+    // Before, each was the next month's first day.
+    refused("4/31/2026", "2026-04", 30);
+    refused("04/31/2026 10:00", "2026-04", 30);
+    refused("2/29/2027", "2027-02", 28);
+    refused("4/31/26", "2026-04", 30);
+    refused("4-31-2026", "2026-04", 30);
+    refused("4.31.2026", "2026-04", 30);
+    refused("31-Apr-2026", "2026-04", 30);
+    refused("31/Apr/2026", "2026-04", 30);
+    refused("Apr-31-2026", "2026-04", 30);
+    refused("Apr.31.2026", "2026-04", 30);
+    refused("2026-Apr-31", "2026-04", 30);
+    refused("31 Apr, 2026", "2026-04", 30);
+    // Days the month has stay as they were, a leap day included, as local time.
+    expect(next("12/31/2026")).toBe(new Date(2026, 11, 31).getTime());
+    expect(next("Apr-30-2026")).toBe(new Date(2026, 3, 30).getTime());
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.UTC(2027, 5, 1) });
+    expect(next("2/29/28 10:00")).toBe(new Date(2028, 1, 29, 10).getTime());
+    expect(next("29-Feb-2028")).toBe(new Date(2028, 1, 29).getTime());
+    vi.useRealTimers();
+  });
+
+  it("refuse a --next more than a year ahead as a usage error (exit 2) that names the flag and the last time it takes", () => {
+    const zone = process.env.TZ;
+    try {
+      process.env.TZ = "UTC";
+      vi.useFakeTimers({ toFake: ["Date"], now: Date.UTC(2026, 10, 4, 11, 30, 20) });
+      const send = (next: string) => params("routine send", ["g1", "--name", "r", "--schedule", "every day", "--next", next]);
+      // Before, bad_request (exit 1): "Status card: nextRunAt is a time in milliseconds, within a year".
+      expect(() => send("2028-02-29 09:00")).toThrow(expect.objectContaining({ code: "usage", message: "--next takes a time within a year from now (until 2027-11-05 11:30), not \"2028-02-29 09:00\"" }));
+      expect(() => params("routine update", ["g1", "nightly", "--next", String(Date.UTC(2027, 10, 6))])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/^--next takes a time within a year from now/) }));
+      // The last time it takes, and a time past, stay taken; the card checks a --json value itself.
+      expect((send("2027-11-05 11:30").card as { nextRunAt: number }).nextRunAt).toBe(Date.UTC(2027, 10, 5, 11, 30));
+      expect((send("2001-01-01").card as { nextRunAt: number }).nextRunAt).toBe(Date.UTC(2001, 0, 1));
+      expect((params("routine send", ["g1", "--json", `{"name":"r","schedule":"d","nextRunAt":${Date.UTC(2028, 0, 1)}}`]).card as { nextRunAt: number }).nextRunAt).toBe(Date.UTC(2028, 0, 1));
+    } finally {
+      if (zone === undefined) delete process.env.TZ; else process.env.TZ = zone;
+    }
   });
 
   it("refuse a wrong state or a text too long or blank as a usage error (exit 2) that names the flag, not the card's field", () => {

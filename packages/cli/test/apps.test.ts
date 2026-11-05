@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createHash, generateKeyPairSync } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -116,6 +116,18 @@ describe("app publish", () => {
     expect(readAppBundle(new Uint8Array(readFileSync(join(dir, "app.ghostlyapp"))))).toMatchObject({ ok: true, bundle: { manifest: { sequence: 2 } } });
   }, 60_000);
 
+  it("a bundle published into another --out never holds the one an earlier publish left in the folder", async () => {
+    const { manifest, files } = chess();
+    const dir = appFolder(manifest, files);
+    const key = vectorKey(tmp(), "publisher");
+    ok(await ghostly(["app", "publish", dir, "--key", key]));
+    const out = join(tmp(), "chess.ghostlyapp");
+    const made = ok(await ghostly(["app", "publish", dir, "--key", key, "--out", out])) as { files: string[] };
+    expect(made.files).toEqual([...files.keys()].sort());
+    const read = readAppBundle(new Uint8Array(readFileSync(out)));
+    expect(read.ok && [...read.bundle.files.keys()]).not.toContain("app.ghostlyapp");
+  }, 60_000);
+
   it("makes an owner-only key on first use and never prints it", async () => {
     const { manifest, files } = chess();
     const dir = appFolder(manifest, files);
@@ -166,6 +178,11 @@ describe("app publish", () => {
       ["publisher.key", readFileSync(key, "utf8")],
       ["old/store.pem", `Ghostly store key (WISP 1200). Secret.\n${readFileSync(key, "utf8")}`],
       ["deploy/id_ed25519", `-----BEGIN OPENSSH PRIVATE KEY-----\n${"b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ".repeat(2)}\n-----END OPENSSH PRIVATE KEY-----\n`],
+      // A traditional encrypted PEM (`openssl genrsa -aes256`, `openssl ec -aes256`): its body opens with
+      // "Proc-Type: 4,ENCRYPTED" and "DEK-Info: ...", headers with a space in them.
+      ["deploy/server.key", generateKeyPairSync("ec", { namedCurve: "P-256", publicKeyEncoding: { type: "spki", format: "pem" }, privateKeyEncoding: { type: "sec1", format: "pem", cipher: "aes-256-cbc", passphrase: "hunter2" } }).privateKey],
+      // An OpenPGP secret key (`gpg --export-secret-keys --armor`): a "PRIVATE KEY BLOCK", here with a version header.
+      ["signing/secret.asc", `-----BEGIN PGP PRIVATE KEY BLOCK-----\nVersion: GnuPG v2.4.5\n\n${"lQOYBGVt3n8BCADKz1x9".repeat(4)}\n=Xk2Q\n-----END PGP PRIVATE KEY BLOCK-----\n`],
     ] as const) {
       const leaky = appFolder(manifest, files);
       mkdirSync(dirname(join(leaky, path)), { recursive: true });
@@ -476,5 +493,41 @@ describe("store sign", () => {
     expect(readFileSync(join(dir, "ghostly-store.sig"), "utf8")).toBe(heldSig);
     // Another store is another --out.
     expect(ok(await ghostly(["store", "sign", join(dir, "index.json"), "--key", other, "--out", tmp()]))).toMatchObject({ previous: null, keyCreated: false });
+  }, 60_000);
+
+  it("never signs over a ghostly-store.json or .sig there that does not read as a signed index, but for its own bytes", async () => {
+    const dir = tmp();
+    const keys = tmp();
+    const key = vectorKey(keys, "store");
+    const index = JSON.parse(vector.index) as Record<string, unknown> & { name: string };
+    const draft = join(dir, "index.json");
+    writeFileSync(draft, JSON.stringify(index));
+    ok(await ghostly(["store", "sign", draft, "--key", key]));
+    const held = readFileSync(join(dir, "ghostly-store.json"), "utf8");
+    const heldSig = readFileSync(join(dir, "ghostly-store.sig"), "utf8");
+    // Equivocation over a held index whose signature is damaged, or gone: refused, naming the file, and both stay.
+    writeFileSync(draft, JSON.stringify({ ...index, name: `${index.name} 2` }));
+    writeFileSync(join(dir, "ghostly-store.sig"), heldSig.slice(0, -5));
+    const damaged = error(await ghostly(["store", "sign", draft, "--key", key]), "refused", 1) as { message: string; details?: { reason?: string } };
+    expect(damaged.message).toContain(`${join(dir, "ghostly-store.json")} is there and is not a signed store index`);
+    expect(readFileSync(join(dir, "ghostly-store.json"), "utf8")).toBe(held);
+    expect(readFileSync(join(dir, "ghostly-store.sig"), "utf8")).toBe(heldSig.slice(0, -5));
+    rmSync(join(dir, "ghostly-store.sig"));
+    expect((error(await ghostly(["store", "sign", draft, "--key", key]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("bad-signature-statement");
+    expect(readFileSync(join(dir, "ghostly-store.json"), "utf8")).toBe(held);
+    expect(existsSync(join(dir, "ghostly-store.sig"))).toBe(false);
+    // A signature alone: refused too, and no key is made for it.
+    const lone = tmp();
+    writeFileSync(join(lone, "ghostly-store.sig"), heldSig);
+    const fresh = join(keys, "new.pem");
+    const { key: _key, ...keyless } = index;
+    writeFileSync(join(lone, "index.json"), JSON.stringify(keyless));
+    expect((error(await ghostly(["store", "sign", join(lone, "index.json"), "--key", fresh]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("missing-file");
+    expect(existsSync(fresh)).toBe(false);
+    expect(existsSync(join(lone, "ghostly-store.json"))).toBe(false);
+    // The index there is the one this signs (a run stopped before its signature was written): signed again.
+    writeFileSync(draft, JSON.stringify(index));
+    ok(await ghostly(["store", "sign", draft, "--key", key]));
+    expect(readFileSync(join(dir, "ghostly-store.sig"), "utf8")).toBe(heldSig);
   }, 60_000);
 });

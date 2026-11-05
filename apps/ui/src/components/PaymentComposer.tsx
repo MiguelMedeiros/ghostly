@@ -6,7 +6,7 @@ import { cardOn, rememberNetwork, rememberRail, rememberedRail, startNetwork, ty
 import type { WalletNetwork, WalletPlatform } from "../lib/platform";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import type { PaymentReview as Review } from "@ghostly/core";
-import { NetworkTag, satsIn } from "./NetworkTag";
+import { NetworkTag, satsIn, unitFor } from "./NetworkTag";
 import { PaymentReview } from "./PaymentReview";
 import { WalletMark, type ChatRail } from "./WalletCards";
 import { CardDeck, WalletCardFace } from "./WalletDeck";
@@ -25,6 +25,8 @@ import { formatAmount } from "../lib/amount";
 import { useAmountText } from "../hooks/useAmountText";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
+import { SecretGuardDialog } from "./SecretGuardDialog";
+import { findSecret, type SecretFinding } from "../lib/parse/secrets";
 
 interface PaymentComposerProps {
   balance: number;
@@ -171,6 +173,12 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   /** A send with no review on real money: the second step is open, and only it sends. */
   const [confirmSend, setConfirmSend] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
+  /**
+   * The memo reaches the contact as a message's text does: one that looks like a seed or a key (or a Cashu token) asks
+   * first, as the composer does (SecretGuardDialog), and `go` is what Send anyway goes on with.
+   */
+  const [secret, setSecret] = useState<{ finding: SecretFinding; go(): void } | null>(null);
+  const guarded = (go: () => void) => { const found = findSecret(memo); if (found) setSecret({ finding: found, go }); else go(); };
   const containerRef = useRef<HTMLDivElement>(null);
   useOutsideDismiss(containerRef, true, onClose);
   // The review takes the amount's place after Send, and is taller: on a short screen (a phone with its keyboard up) it
@@ -218,12 +226,12 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
    * Escape steps back: from a turned card to the deck, and only then out of the sheet. Wherever the focus is (a click
    * on the card's text leaves it on the page), so this listens on the document before anything else does; the
    * sheet's dismissal (useOutsideDismiss) leaves an Escape handled here alone. A card under review stays: its
-   * review has taken the card's place.
+   * review has taken the card's place. A dialog over the sheet (the memo's SecretGuardDialog) answers its own Escape.
    */
   const escapeToCards = useRef<() => boolean>(() => false);
   escapeToCards.current = () => {
     // Already on its way back to the deck: a second Escape closes.
-    if (side !== "back" || leaving.current || !cards.length || review) return false;
+    if (side !== "back" || leaving.current || !cards.length || review || document.querySelector("dialog[open]")) return false;
     backToCards();
     return true;
   };
@@ -332,17 +340,18 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
           </label>
           <input className="payment-back-memo" placeholder={t("payments.composer.memo")} aria-label={t("payments.composer.memo")} maxLength={140} value={memo} onChange={(e) => setMemo(e.target.value)} />
           <p className="payment-back-hint" data-testid={amountField.hint && !blocked ? "amount-unclear" : undefined}>{blocked ?? amountField.hint ?? (tooMuch ? t("payments.composer.tooMuch", { amount: formatAmount(holds!, t.language), unit }) : how(rail))}</p>
-          {confirmSend ? <ConfirmRealMoney what={`${formatAmount(value, t.language)} ${unit}`} busy={busy !== null} onSend={() => void send(true)} onBack={() => setConfirmSend(false)} /> : <div className="payment-back-actions" data-turning={turning || undefined}>
-            <button data-testid="payment-request" disabled={turning || !value || busy !== null || !!asking || !!blocked} onClick={() => void request()} className="payment-back-secondary">
+          {confirmSend ? <ConfirmRealMoney what={`${formatAmount(value, t.language)} ${unitFor(t, unit, value)}`} busy={busy !== null} onSend={() => void send(true)} onBack={() => setConfirmSend(false)} /> : <div className="payment-back-actions" data-turning={turning || undefined}>
+            <button data-testid="payment-request" disabled={turning || !value || busy !== null || !!asking || !!blocked} onClick={() => guarded(() => void request())} className="payment-back-secondary">
               {busy === "request" ? t("payments.composer.requesting") : t("payments.composer.request")}
             </button>
-            <button data-testid="payment-send" disabled={turning || !canSend || !!blocked || !value || busy !== null || !!asking || tooMuch} onClick={() => void send()}
+            <button data-testid="payment-send" disabled={turning || !canSend || !!blocked || !value || busy !== null || !!asking || tooMuch} onClick={() => guarded(() => void send())}
               title={canSend ? undefined : sendUnavailable ?? t("payments.composer.sendHint")} className="payment-back-primary">
               {asking ? t("payments.composer.asking") : busy === "send" ? t("payments.composer.preparing") : t("payments.composer.send")}
             </button>
           </div>}
         </>}
         {error && <Notice problem={error} className="text-xs m-0" />}
+        {secret && <SecretGuardDialog finding={secret.finding} recipient={contact} onCancel={() => setSecret(null)} onConfirm={() => { setSecret(null); secret.go(); }} />}
       </div>
     </div>
   );
@@ -370,7 +379,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   const modes = onSaveMethods && (
     <span role="tablist" aria-label={t("payments.mode.label", { name: who })} className="payment-modes" onKeyDown={modeKeys}>
       {MODES.map((m) => (
-        <button key={m} type="button" role="tab" data-testid={`payment-mode-${m}`} aria-selected={mode === m} tabIndex={mode === m ? 0 : -1} onClick={() => switchMode(m)}>
+        <button key={m} type="button" role="tab" data-testid={`payment-mode-${m}`} aria-selected={mode === m} tabIndex={mode === m ? 0 : -1} onClick={() => switchMode(m)} className="max-md:min-h-11">
           {t(m === "pay" ? "payments.mode.pay" : "payments.mode.accept")}
         </button>
       ))}
@@ -396,7 +405,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
       data-mode={onSaveMethods ? mode : undefined}
       className={`payment-composer${accepting ? "" : ` wallet-card-${rail}`}`}
       data-network={accepting ? undefined : network}
-      onKeyDown={(e) => { if (e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); onClose(); } }}
+      // Not one from a dialog portalled out of the sheet (SecretGuardDialog): React hands it here too, and it is the dialog's.
+      onKeyDown={(e) => { if (e.key === "Escape" && !e.defaultPrevented && e.currentTarget.contains(e.target as Node)) { e.preventDefault(); onClose(); } }}
     >
       {side === "cards" ? <>
         <ComposerSheetHead title={modes || (sendUnavailable ? t("payments.composer.request") : t("payments.mode.pay"))} who={t("payments.composer.with", { name: who })} before={onBack && <button type="button" className="deck-flip-turn" data-testid="payment-recipient-change" aria-label={t("payments.composer.chooseOther")} title={t("payments.composer.chooseOther")} onClick={onBack}>

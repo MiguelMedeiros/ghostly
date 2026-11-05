@@ -1,5 +1,6 @@
 import { getStorageProfile } from "./storage";
 import { markFirstStart } from "./nameStep";
+import { cleanOwnName } from "./ownName";
 import { sizeIn } from "./sizeText";
 import type { Translate } from "../locales/translate";
 
@@ -44,6 +45,11 @@ export interface AppSettings {
   reduceMotion: boolean;
   chatListDensity: ChatListDensity;
   /**
+   * Where the layout has a side list (a wide window): the list folded to a rail of the chats' pictures, for more room
+   * for the open chat. Kept on this device only; a phone's list is unchanged.
+   */
+  chatListCollapsed: boolean;
+  /**
    * Whether this client may ask, now and then, whether a newer version was
    * published. The question is a request that says this device runs Ghostly,
    * so it is the user's to allow; off, updates are only looked for on demand.
@@ -54,6 +60,11 @@ export interface AppSettings {
    * and sends them with it. Only the sender's app ever contacts the site; off, links go as plain text.
    */
   linkPreviews: boolean;
+  /**
+   * Received messages in another language are shown translated into `language`, on this device (docs/AUTO-TRANSLATE.md):
+   * the default for chats that have not chosen. Off until turned on; only a `VITE_TRANSLATE` Desktop build offers it.
+   */
+  translateMessages: boolean;
   /**
    * Checking this device's other unlocked profiles for new messages (WISP 04 § Checking other profiles): `enabled`
    * absent follows the platform (on for Desktop, off for the web and the extension); `notify` shows a system notice.
@@ -86,8 +97,10 @@ const DEFAULT_SETTINGS: AppSettings = {
   defaultNickname: "",
   reduceMotion: false,
   chatListDensity: "compact",
+  chatListCollapsed: false,
   checkForUpdates: true,
   linkPreviews: true,
+  translateMessages: false,
 };
 
 const LANGUAGES: readonly Language[] = ["en", "pt", "es", "fr", "it", "zh", "ja", "ar"];
@@ -136,9 +149,12 @@ export function loadSettings(): AppSettings {
         ...parsed.notifications,
         cues: { ...DEFAULT_CUES, ...parsed.notifications?.cues },
       },
-      defaultNickname: parsed.defaultNickname ?? DEFAULT_SETTINGS.defaultNickname,
+      // Cleaned as it is saved now: a name kept before, of spaces or zero-width characters only, is no name.
+      defaultNickname: typeof parsed.defaultNickname === "string" ? cleanOwnName(parsed.defaultNickname) : DEFAULT_SETTINGS.defaultNickname,
       chatListDensity: parsed.chatListDensity === "comfortable" ? "comfortable" : "compact",
+      chatListCollapsed: parsed.chatListCollapsed === true,
       linkPreviews: parsed.linkPreviews !== false,
+      translateMessages: parsed.translateMessages === true,
     };
   } catch {
     return { ...DEFAULT_SETTINGS, language: browserLanguage() };
@@ -178,6 +194,50 @@ export function saveSettings(settings: AppSettings): void {
   } catch {
     // Storage full or unavailable
   }
+}
+
+/** The extension runs the app in several tabs: whether a stored change of the settings comes from one of the others. */
+export function isSettingsStorageEvent(event: StorageEvent): boolean {
+  return event.key === settingsKey() && event.newValue !== null;
+}
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** `base` with what changed from `before` to `after`, and nothing else; the keys of an object one level down too. */
+function withChanges(base: Record<string, unknown>, before: Record<string, unknown>, after: Record<string, unknown>, depth: number) {
+  const out = { ...base };
+  for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    const was = before[key];
+    const now = after[key];
+    if (JSON.stringify(was) === JSON.stringify(now)) continue;
+    if (depth > 0 && isPlainObject(was) && isPlainObject(now) && isPlainObject(base[key])) out[key] = withChanges(base[key], was, now, depth - 1);
+    else if (now === undefined) delete out[key];
+    else out[key] = now;
+  }
+  return out;
+}
+
+/** The settings `stored` with what a page changed from `before` to `after`: its copy of the rest is not taken. */
+export function settingsWithChanges(stored: AppSettings, before: AppSettings, after: AppSettings): AppSettings {
+  return withChanges({ ...stored }, { ...before }, { ...after }, 1) as unknown as AppSettings;
+}
+
+/**
+ * Saves what a page changed from `before` to `after` over the settings as stored now, and returns what is stored then.
+ * The extension runs the app in several tabs: another may have changed them since this page read them (a lock
+ * password set, changed or removed there), and this page's copy of what it did not change is never written back.
+ */
+export function saveSettingsChanges(before: AppSettings, after: AppSettings): AppSettings {
+  let stored: AppSettings | null = null;
+  try {
+    if (localStorage.getItem(settingsKey())) stored = loadSettings();
+  } catch {
+    // storage unavailable
+  }
+  const saved = stored ? settingsWithChanges(stored, before, after) : after;
+  saveSettings(saved);
+  return saved;
 }
 
 /** OWASP's 2023 figure for PBKDF2-HMAC-SHA256. */

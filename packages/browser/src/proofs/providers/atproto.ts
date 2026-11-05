@@ -1,5 +1,5 @@
 import {
-  ATPROTO_PROOF_COLLECTION, AtprotoProofError, atprotoProofRkey, checkAtprotoProofRecord, isAtprotoDid, normalizeAtprotoHandle, shortAtprotoDid,
+  ATPROTO_PROOF_COLLECTION, AtprotoProofError, atprotoProofRkey, checkAtprotoProofRecord, IdentityCheckUnavailable, isAtprotoDid, normalizeAtprotoHandle, shortAtprotoDid,
   verifyAtprotoRecordProof,
 } from "@ghostly/core";
 import type { IdentityFetch, IdentityProofProvider, InAppSigner, SignerContext } from "../contract";
@@ -32,6 +32,13 @@ function currentHost(): AtprotoHost | undefined {
 }
 
 const hostOf = (url: string) => new URL(url).host;
+
+/** Why the card shows the DID and no handle. */
+const HANDLE_NOT_SHOWN = {
+  none: "The account's DID document names no handle",
+  elsewhere: "The account's handle does not point back to it, so it is not shown",
+  unchecked: "The account's handle could not be checked, so it is not shown",
+} as const;
 
 export interface AtprotoIdentityOptions {
   /** The platform's sign-in window. */
@@ -115,7 +122,7 @@ export function createAtprotoIdentityProvider(options: AtprotoIdentityOptions = 
       signer("atproto-oauth", "proof-records", "Your server (Bluesky or another PDS)",
         "Opens your server's login page. Ghostly asks only to create and delete its own proof records: never to post, read your messages or edit your profile."),
       signer("atproto-oauth-full", "full", "Your server, full access (older servers)",
-        "Only if your server says it cannot limit Ghostly's permission: it then asks for access to your whole account. Ghostly still only writes this one record, and gives the access back right away."),
+        "Asks for access to your whole account, for servers that cannot limit Ghostly's permission. Ghostly suggests it when your server refuses the narrower sign-in or the record's write. Ghostly still only writes this one record, and gives the access back right away."),
     ],
     parseEvidence(raw) {
       if (!raw || typeof raw !== "object" || Array.isArray(raw) || Object.keys(raw).length) throw new Error("Invalid AT Protocol evidence");
@@ -132,14 +139,18 @@ export function createAtprotoIdentityProvider(options: AtprotoIdentityOptions = 
       const url = `${doc.pds}/xrpc/com.atproto.sync.getRecord?${new URLSearchParams({ did, collection: ATPROTO_PROOF_COLLECTION, rkey })}`;
       let response: Awaited<ReturnType<IdentityFetch>>;
       try { response = await ctx.fetch(url, { headers: { accept: "application/vnd.ipld.car" }, maxBytes: RECORD_PROOF_MAX_BYTES, signal: ctx.signal, redirect: "error" }); }
-      // eslint-disable-next-line preserve-caught-error -- A message people can act on; the library's error stays out of the UI (ES2020 has no Error.cause).
-      catch (e) { throw new Error(/too large/i.test(String(e)) ? "The account's server sent a proof that is too large" : `The account's server (${hostOf(doc.pds)}) could not be reached`); }
+      catch (e) {
+        // eslint-disable-next-line preserve-caught-error -- A message people can act on; the library's error stays out of the UI (ES2020 has no Error.cause).
+        if (/too large/i.test(String(e))) throw new Error("The account's server sent a proof that is too large");
+        // What this side's network did stays here: the contact is not told which server, port or answer was seen.
+        throw new IdentityCheckUnavailable(`The account's server (${hostOf(doc.pds)}) could not be reached`);
+      }
       if (response.status !== 200) {
         let code = "";
         try { code = String((JSON.parse(response.text) as { error?: unknown }).error ?? ""); } catch { /* not JSON */ }
         if (code === "RecordNotFound") throw new Error("The record is no longer in the account's repository");
         if (/^Repo(NotFound|Deactivated|Takendown|Suspended)$/.test(code)) throw new Error("The account is no longer on its server");
-        throw new Error(`The account's server (${hostOf(doc.pds)}) did not send the record`);
+        throw new IdentityCheckUnavailable(`The account's server (${hostOf(doc.pds)}) did not send the record`);
       }
       let proof: ReturnType<typeof verifyAtprotoRecordProof>;
       try { proof = verifyAtprotoRecordProof(response.bytes, { did, key: doc.key, collection: ATPROTO_PROOF_COLLECTION, rkey }); }
@@ -147,14 +158,14 @@ export function createAtprotoIdentityProvider(options: AtprotoIdentityOptions = 
       catch (e) { throw new Error(e instanceof AtprotoProofError ? `The account's repository does not prove the record: ${e.message}` : "The account's repository could not be read"); }
       if (!proof.record) throw new Error("The record is no longer in the account's repository");
       checkAtprotoProofRecord(proof.record.value, statement);
-      const handle = await verifiedAtprotoHandle(doc, resolve);
+      const { handle, missing } = await verifiedAtprotoHandle(doc, resolve);
       return {
         subject: did,
         source: `Record signed with the account's key, from ${hostOf(doc.pds)}`,
         display: {
           ...(handle ? { name: `@${handle}` } : {}),
           url: `https://bsky.app/profile/${did}`,
-          source: handle ? "Handle checked both ways: it points to this account" : "The account's handle does not point back to it, so it is not shown",
+          source: missing ? HANDLE_NOT_SHOWN[missing] : "Handle checked both ways: it points to this account",
           fetchedAt: ctx.now,
         },
       };

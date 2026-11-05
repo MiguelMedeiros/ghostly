@@ -7,7 +7,11 @@ export interface AtomViewProps<A extends Atom = Atom> {
   atom: A;
   /** When the message was sent (ms). */
   sentAt?: number;
+  /** A chat search's words and matches in the run of text the atom sits in, and where the atom's words start in it. */
+  marks?: AtomMarks;
 }
+
+export interface AtomMarks { term: string; ranges: readonly [number, number][]; start: number }
 
 /** A view for one kind of atom; typed loosely here, since each view knows its own atom's data. */
 export type AtomView = ComponentType<AtomViewProps<never>>;
@@ -23,3 +27,6 @@ export const VIEWS: Record<string, AtomView> = {
   time: TimeView,
   "member-mention": MentionChip,
 };
+
+/** Kinds whose view isolates its own parts, so the rich text does not wrap it in one `<bdi>`: a mention's "@" follows the message's direction, only its name is isolated. */
+export const ISOLATES_ITSELF: ReadonlySet<string> = new Set(["member-mention"]);

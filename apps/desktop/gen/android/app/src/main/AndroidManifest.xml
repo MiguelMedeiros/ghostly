@@ -4,12 +4,22 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Android's network callback (GhostlyHostPlugin.kt), which tells Iroh of a new network. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- Voice messages and calls in the WebView (asked at the first use); the screen-off call service is A4's. -->
+    <!-- Voice messages and calls in the WebView (asked at the first use). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.CAMERA" />
-    <!-- Android 13 and up: asked when the person turns notifications on in Settings, never at start. -->
+    <!-- Android 13 and up: asked when the person turns notifications on in Settings, or as a call starts (its ongoing
+         notification), never at start. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- A file moving with the app out of sight (TransferService.kt): a data-sync foreground service and a partial
+         wake lock, for as long as files move. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- A call going on with the app out of sight (CallService.kt): a foreground service of type microphone, and
+         camera while the call sends the camera's picture, for as long as the call is on. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
@@ -63,6 +73,16 @@
                 <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".TransferService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name=".CallService"
+            android:exported="false"
+            android:foregroundServiceType="microphone|camera" />
 
         <provider
           android:name="androidx.core.content.FileProvider"

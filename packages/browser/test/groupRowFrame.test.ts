@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { GROUP_LIMITS, type GroupMessageFrame } from "@ghostly/core";
+import { GROUP_LIMITS, STATUS_CARD_LIMITS, frameBytes, type GroupMessageFrame, type StatusCard } from "@ghostly/core";
 import { EngineServer } from "../src/engine/server";
 import { db } from "../src/engine/db";
 import { STORES, transact } from "../src/shared/idb";
@@ -61,17 +61,36 @@ describe("a private group's message keeps the frame it came in", { timeout: 120_
     expect(after[after.length - 1].text).toBe("one more");
   });
 
+  it("a member back gets what one author of long messages wrote while it was away, from another member", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave"]);
+    const [alice, , carol, dave] = peers;
+    dave.online = false;
+    await world.run(5_000);
+    // Alice alone writes 200 messages of 1,000 characters (a bot's reports), then her app closes too.
+    for (let i = 0; i < 200; i++) {
+      await alice.groups.send(id, `m ${i} ${"x".repeat(1_000)}`);
+      if (i % 8 === 7) await world.run(1_000);
+    }
+    await world.run(5_000);
+    expect(world.texts(carol, id).filter(t => t.startsWith("m "))).toHaveLength(200);
+    alice.online = false;
+    world.reopen(dave);
+    await world.run(5 * 60_000);
+    expect(world.texts(dave, id).filter(t => t.startsWith("m "))).toHaveLength(200);
+  });
+
   it("and long ones give way by their bytes, before their count", async () => {
     const { world, peers, id } = await meshOf(["alice", "bob"]);
     const [alice, bob] = peers;
-    // Sixteen messages of 12 KiB sealed are more than the bytes kept.
-    for (let i = 0; i < 16; i++) await alice.groups.send(id, `${i} ${"x".repeat(12 * 1024)}`);
+    // 256 texts as long as a message may be fit; 200 of them with a card each are more than the bytes kept.
+    const card = { kind: "task", id: "t", title: "y".repeat(STATUS_CARD_LIMITS.bytes - 64) } as unknown as StatusCard;
+    for (let i = 0; i < 200; i++) await alice.groups.send(id, `${i} ${"x".repeat(GROUP_LIMITS.textBytes - 4)}`, [], undefined, undefined, card);
     await world.settle();
     const held = said(bob, id).filter(m => m.frame);
-    expect(held.length).toBeLessThan(16);
-    expect(held.length).toBeGreaterThan(8);
-    expect(held.reduce((sum, m) => sum + m.frame!.c.length, 0)).toBeLessThanOrEqual(GROUP_LIMITS.relayBytes);
-    expect(held[held.length - 1].text.startsWith("15 ")).toBe(true);
+    expect(held.length).toBeLessThan(200);
+    expect(held.length).toBeGreaterThan(150);
+    expect(held.reduce((sum, m) => sum + frameBytes(m.frame!), 0)).toBeLessThanOrEqual(GROUP_LIMITS.relayBytes);
+    expect(held[held.length - 1].text.startsWith("199 ")).toBe(true);
   });
 });
 
@@ -80,8 +99,11 @@ describe("a private group's record carries none of the frames handed on", { time
     const { world, peers, id } = await meshOf(["alice", "bob"]);
     const [alice, bob] = peers;
     const sizes: number[] = [];
-    const put = bob.store.putGroup.bind(bob.store);
-    bob.store.putGroup = async group => { if (group.id === id) sizes.push(JSON.stringify(group).length); await put(group); };
+    // What a save writes: the group's record, or its small row alone (a message received changes only that).
+    const put = bob.store.putGroup.bind(bob.store), putLive = bob.store.putGroupLive!.bind(bob.store);
+    let records = 0;
+    bob.store.putGroup = async (group, live) => { if (group.id === id) { records++; sizes.push(JSON.stringify(group).length + JSON.stringify(live ?? null).length); } await put(group, live); };
+    bob.store.putGroupLive = async (groupId, live) => { if (groupId === id) sizes.push(JSON.stringify(live).length); await putLive(groupId, live); };
     for (let i = 0; i < 50; i++) { await alice.groups.send(id, `line ${i} ${"x".repeat(200)}`); await world.settle(); await bob.groups.flush(); }
     const stored = (await bob.store.getGroups()).find(g => g.id === id)!;
     expect(stored.state!.relay ?? []).toEqual([]);
@@ -89,6 +111,9 @@ describe("a private group's record carries none of the frames handed on", { time
     // Fifty frames of some 700 bytes were 35 KiB in the record, written again for each message.
     expect(sizes.length).toBeGreaterThanOrEqual(50);
     expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThan(4_000);
+    // And none of them wrote the record, with its membership chain: the group's small row took what they changed. Only
+    // Alice's name record, which came with her first one, is the record's to keep (`names`): written once.
+    expect(records).toBeLessThanOrEqual(1);
   });
 
   it("a member whose app started again hands on what it had received to one who was away", async () => {

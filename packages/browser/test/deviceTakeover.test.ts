@@ -93,6 +93,22 @@ describe("a forced takeover through the turn keeper", () => {
     expect(phone.store.record).toMatchObject({ state: "active", takeovers: 1, raise: { why: "takeover", takeovers: 1 } });
     expect(phone.store.record.copy).toBeUndefined();
     expect(phone.store.record.handoff).toBeUndefined();
+    // The offer of a new device secret keeps the device that stopped by its key: names change, and two may be the same.
+    expect(phone.store.record.secretOffer).toMatchObject({ why: "takeover", key: toBase64Url(devices[0].publicKey), device: "Desktop" });
+  });
+
+  it("takes the name as the person sees and types it: a character that draws nothing is not asked for", async () => {
+    // A record stored by a build that kept a joiner where it joins nothing, or a filler that shows as nothing.
+    for (const stored of ["Desktop‍", "‍Desktop", "Desk‌top", "Desktop️", "Desktopㅤ"]) {
+      const net = new FakeTurnNetwork();
+      const phone = await device(net, 1, "standby", { deviceSet: deviceSet().map((slot, i) => (i === 0 ? { ...slot, name: stored } : slot)) });
+      net.seed(phone.stored);
+      expect((await forceTakeover(ports(phone.store, phone.keeper), { password: PASSWORD, name: "Desktop" })).kind, JSON.stringify(stored)).toBe("start");
+    }
+    // What shows is still what is checked.
+    const phone = await device(network, 1, "standby", { deviceSet: deviceSet().map((slot, i) => (i === 0 ? { ...slot, name: "می‌خوام" } : slot)) });
+    await expect(forceTakeover(ports(phone.store, phone.keeper), { password: PASSWORD, name: "Desktop" })).rejects.toThrow("takeover-name");
+    expect(network.calls).toEqual([]);
   });
 
   it("a releaser whose taker never finished takes the profile back at N + 2", async () => {
@@ -186,6 +202,28 @@ describe("what keeps a forced takeover from locking the owner out", () => {
     clock.t += 3_600_001;
     expect((await forceTakeover(ports(phone.store, phone.keeper, counting), { password: PASSWORD, name: "Desktop" })).kind).toBe("start");
     expect(phone.store.record.takeoverAttempts).toEqual({ recent: [], total: 0 });
+  });
+
+  it("wrong passwords sent at once are each counted: no more than five are checked in the hour", async () => {
+    const phone = await device(network, 1, "standby");
+    let checks = 0;
+    const slow = async (_v: unknown, p: string) => { checks++; await new Promise((resolve) => setTimeout(resolve, 5)); return p === PASSWORD; };
+    const refusals = await Promise.all(Array.from({ length: 20 }, () => forceTakeover(ports(phone.store, phone.keeper, slow), { password: "guess", name: "Desktop" }).catch((e: unknown) => e as TakeoverRefusal)));
+    expect(checks).toBe(5);
+    expect(refusals.filter((r) => r.reason === "password")).toHaveLength(5);
+    expect(refusals.filter((r) => r.reason === "locked-out")).toHaveLength(15);
+    expect(phone.store.record.takeoverAttempts?.total).toBe(5);
+    expect(network.calls).toEqual([]);
+  });
+
+  it("a try is counted before its password is checked, and taken back when it is the right one", async () => {
+    const phone = await device(network, 1, "standby", { takeoverAttempts: { recent: [clock.t - 10], total: 1 } });
+    let during: unknown;
+    const watching = async (_v: unknown, p: string) => { during = phone.store.record.takeoverAttempts; return p === PASSWORD; };
+    // The right password with a wrong name: the try is taken back, the earlier one stays.
+    await expect(forceTakeover(ports(phone.store, phone.keeper, watching), { password: PASSWORD, name: "Laptop" })).rejects.toThrow("takeover-name");
+    expect(during).toEqual({ recent: [clock.t - 10, clock.t], total: 2 });
+    expect(phone.store.record.takeoverAttempts).toEqual({ recent: [clock.t - 10], total: 1 });
   });
 
   it("fifteen wrong passwords with no right one refuse the device for good", async () => {

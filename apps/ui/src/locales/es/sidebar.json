@@ -22,6 +22,8 @@
     "unreadCount": "{{count}} sin leer en {{name}}",
     "unreadOne": "1 sin leer en {{name}}"
   },
+  "foundCount": "{{count}} chats encontrados",
+  "foundOne": "1 chat encontrado",
   "group": {
     "adminAnswered": "La app del admin respondió…",
     "answerFailed": "No se pudo. Inténtalo de nuevo.",
@@ -31,6 +33,7 @@
     "inviterAwayUnknown": "El contacto que te invitó aún no está conectado. Inténtalo de nuevo en un momento.",
     "letting": "Un miembro te está dejando entrar…",
     "linkUnanswered": "El enlace no respondió",
+    "others": "Otro grupo tiene este id: elige uno",
     "takenBack": "Invitación retirada",
     "unanswered": "La app de quien te invitó no respondió. Acepta de nuevo, o rechaza.",
     "waitingAdmin": "Esperando la app del admin…",
@@ -40,6 +43,7 @@
   "joinChat": "Unirse a un chat",
   "new": "Nuevo",
   "newChat": "Nuevo chat",
+  "newChatShort": "Nuevo",
   "newMenu": {
     "chat": "Chat",
     "chatHint": "Una persona, con una invitación",
@@ -54,8 +58,29 @@
   "pinned": "Fijado",
   "quiet": "Hay silencio por aquí...",
   "quietHint": "¡Hora de asustar a alguien! 👻",
+  "rail": {
+    "collapse": "Contraer la lista de chats",
+    "expand": "Expandir la lista de chats",
+    "invitation": "{{name}}, {{status}}",
+    "mention": "{{name}}, te mencionaron",
+    "title": "{{action}} ({{keys}})",
+    "unread": "{{name}}, mensajes sin leer",
+    "unreadCount": "{{name}}, {{count}} mensajes sin leer",
+    "unreadOne": "{{name}}, 1 mensaje sin leer"
+  },
+  "row": {
+    "mention": "te mencionaron",
+    "muted": "notificaciones silenciadas",
+    "pinned": "fijado",
+    "separator": ", ",
+    "unread": "{{count}} mensajes sin leer",
+    "unreadSome": "mensajes sin leer",
+    "unread_one": "{{count}} mensaje sin leer",
+    "unread_other": "{{count}} mensajes sin leer"
+  },
+  "searchLabel": "Buscar chats",
   "searchPlaceholder": "Buscar chats...",
-  "settings": "Configuración",
+  "settings": "Ajustes",
   "sharedIdentity": "Compartió una identidad",
   "skipToContent": "Saltar al contenido",
   "startChat": "Nuevo chat",

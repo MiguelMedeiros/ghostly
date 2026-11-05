@@ -83,6 +83,24 @@ describe("the read lane in the engine", () => {
     expect(await settled(contact.readAppRange(app, served.serve, 0, 1))).toEqual({ error: "not-served" });
   });
 
+  // Each serve kept a serve of its own until unserve or close: an app that served on each play grew the engine by one
+  // a call (144 000 in an hour at 40 a second, 58 MiB).
+  it("a page that serves the same file again and again holds one serve: the last id reads, and the app's close ends it", async () => {
+    const { call, contact, server, id, ref, app, ranges } = await setup();
+    const link = () => (server.node as unknown as { links: Map<string, { link?: GhostLink }> }).links.get(id)!.link!;
+    const ids = new Set<string>();
+    for (let i = 0; i < 1_000; i++) ids.add((await call("appServe", { linkId: id, ref, file: "LinkIdOfAFilm000000000" }) as { serve: string }).serve);
+    expect(ids.size).toBe(1);
+    expect(link().appServes(app)).toHaveLength(1);
+    const [serve] = ids;
+    const reading = contact.readAppRange(app, serve!, 0, 100);
+    await vi.waitFor(() => expect(ranges()).toHaveLength(1));
+    await call("appRangeAnswer", { linkId: id, app, request: ranges()[0].range.request, bytes: FILM.subarray(0, 100), size: FILM.length });
+    expect(await reading).toEqual({ bytes: FILM.subarray(0, 100), size: FILM.length });
+    await call("appClose", { linkId: id, ref });
+    expect(link().appServes(app)).toEqual([]);
+  });
+
   it("a request number the contact cancelled and asks again gets the bytes of its new ask, not the answer to the first", async () => {
     const { call, contact, id, ref, app, ranges } = await setup();
     const first = await call("appServe", { linkId: id, ref, file: "LinkIdOfAFilm000000000" }) as { serve: string };
@@ -138,6 +156,40 @@ describe("the read lane in the engine", () => {
     expect(answers.mock.calls[0]![0]).toMatchObject({ t: "ar-end", r: 0, z: 200_000 });
     expect(data.mock.calls.map(([, request, offset, bytes]) => [request, offset, [...bytes as Uint8Array][0]])).toEqual([[0, 5000, 0x59]]);
     expect(inner.appRanges.size).toBe(0);
+  });
+
+  // WISP 1200: at most 4 in flight per app, counted until this side has stopped reading. A page reading a slow disk
+  // answers late; a contact that closes and opens its app again, or whose session drops, must not get 4 more reads each time.
+  it("a contact that closes and opens its app again meets busy while the page still reads its earlier asks, until the page answers", async () => {
+    const { call, contact, id, ref, app, ranges, appEvents } = await setup();
+    const busy: string[] = [];
+    // As an app serves each time the contact's app opens.
+    const serve = () => vi.waitFor(async () => {
+      const answer = await call("appServe", { linkId: id, ref, file: "LinkIdOfAFilm000000000" }) as { serve?: string };
+      expect(answer.serve).toBeTypeOf("string");
+      return answer.serve!;
+    });
+    for (let cycle = 0; cycle < 10; cycle++) {
+      const served = await serve();
+      const before = ranges().length, busyBefore = busy.length;
+      const reads = Array.from({ length: 5 }, (_, i) => settled(contact.readAppRange(app, served, i * 1024 * 1024, 1024 * 1024)).then(read => {
+        if ("error" in read && read.error === "busy") busy.push(read.error);
+      }));
+      // The contact sends 4 and keeps the fifth: each reaches the page or comes back busy.
+      await vi.waitFor(() => expect(ranges().length - before + busy.length - busyBefore).toBeGreaterThanOrEqual(4));
+      contact.closeApp(app);
+      await vi.waitFor(() => expect(appEvents().at(-1)?.event).toEqual({ app, o: "close" }));
+      await Promise.all(reads);
+      contact.openApp(app, "1.0.0");
+    }
+    expect(ranges().length, "reads asked of the page, none answered").toBeLessThanOrEqual(4);
+    expect(busy.length).toBeGreaterThan(0);
+    // Once the page answers one, the contact's next ask is taken.
+    await call("appRangeAnswer", { linkId: id, app, request: ranges()[0]!.range.request, bytes: FILM.subarray(0, 1024 * 1024), size: FILM.length });
+    const served = await serve();
+    const before = ranges().length;
+    void settled(contact.readAppRange(app, served, 0, 1));
+    await vi.waitFor(() => expect(ranges()).toHaveLength(before + 1));
   });
 
   it("a version stopped here serves nothing, answers nothing and reads nothing (WISP 1200 § Takedowns)", async () => {

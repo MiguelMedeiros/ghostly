@@ -21,6 +21,20 @@ export function invitationLine(invitation: Invitation, t: Translate): string {
 }
 
 /**
+ * What an invitation's row says it waits for: a contact's invitation in one line, or where a join through a link is. A
+ * link replaced since it was shared waits on nothing: the row says so, as the group's page does. A full group too, or one waiting for its members' updates.
+ */
+export function invitationStatus(group: GroupView, t: Translate): string {
+  const invitation = group.invitation!;
+  return invitation.viaLink ? (invitation.unanswered ? t("sidebar.group.linkUnanswered") : invitation.stage === "replaced" ? t("group.join.replaced")
+    : invitation.stage === "full" ? t("group.join.full") : invitation.stage === "blocked" ? t("group.join.blocked") : invitation.admin ? t("group.chat.joining") : group.profile === "community" ? (invitation.stage === "answered" ? t("sidebar.group.letting") : t("sidebar.group.waitingIn")) : invitation.stage === "answered" ? t("sidebar.group.adminAnswered") : t("sidebar.group.waitingAdmin"))
+    : invitationLine(invitation, t);
+}
+
+/** Whether the invitation's row offers a button: Accept and Decline, Delete once taken back, or Try again on a link nobody answered. */
+export const invitationWaitsForMe = (invitation: Invitation) => answerable(invitation) || !!invitation.takenBack || (!!invitation.viaLink && !!invitation.unanswered);
+
+/**
  * Whether Accept and Decline are offered: not answered yet, or accepted with no answer from the inviter's app. Not once
  * taken back, nor for a join through a link (a link nobody answered offers Try again, `LinkTryAgain`).
  */
@@ -116,10 +130,13 @@ export function InvitationRefusal({ refused, className }: { refused: Problem; cl
   return <div onClick={e => e.stopPropagation()} className={className}><Notice problem={refused} testId="group-answer-refused" /></div>;
 }
 
+/** A chat list row's answer buttons: small on a desktop; a thumb's height on a phone, where the list is the home screen. */
+const ROW_BUTTON = "px-3 py-1 text-xs max-md:min-h-11 max-md:px-4";
+
 /** Accept and Decline, small (a chat list row) or a thumb's height (the invitation's own page). */
 export function InvitationButtons({ busy, answer, large = false }: Pick<ReturnType<typeof useInvitationAnswer>, "busy" | "answer"> & { large?: boolean }) {
   const { t } = useI18n();
-  const size = large ? "min-h-11 px-5 text-sm" : "px-3 py-1 text-xs";
+  const size = large ? "min-h-11 px-5 text-sm" : ROW_BUTTON;
   return <>
     <button disabled={busy} data-testid="group-accept" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }}
       className={`rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 ${size}`}>{t("chat.file.accept")}</button>
@@ -132,14 +149,14 @@ export function InvitationButtons({ busy, answer, large = false }: Pick<ReturnTy
 export function LinkTryAgain({ busy, answer }: Pick<ReturnType<typeof useInvitationAnswer>, "busy" | "answer">) {
   const { t } = useI18n();
   return <button disabled={busy} data-testid="group-link-retry" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }}
-    className="rounded-lg bg-accent px-3 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">{t("group.join.tryAgain")}</button>;
+    className={`rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 ${ROW_BUTTON}`}>{t("group.join.tryAgain")}</button>;
 }
 
 /** A taken-back invitation's only action: Delete (it says nothing to whoever took it back). */
 export function TakenBackDelete({ busy, answer, large = false }: Pick<ReturnType<typeof useInvitationAnswer>, "busy" | "answer"> & { large?: boolean }) {
   const { t } = useI18n();
   return <button disabled={busy} data-testid="group-taken-back-delete" onClick={e => { e.stopPropagation(); void answer("declineGroupInvitation"); }}
-    className={`rounded-lg text-text-secondary hover:bg-surface-hover disabled:opacity-40 ${large ? "min-h-11 px-5 text-sm" : "px-3 py-1 text-xs"}`}>{t("common.delete")}</button>;
+    className={`rounded-lg text-text-secondary hover:bg-surface-hover disabled:opacity-40 ${large ? "min-h-11 px-5 text-sm" : ROW_BUTTON}`}>{t("common.delete")}</button>;
 }
 
 /**

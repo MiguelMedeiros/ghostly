@@ -7,6 +7,8 @@
 
   Before any app code:
   - the WebRTC constructors are deleted from this realm;
+  - so are History's methods and the Navigation API: the frame shares the page's session history;
+  - `execCommand` refuses the clipboard's commands (copy, cut, paste);
   - the runner refuses to run unless its origin is "null" and it has a parent;
   - the page is locked with a nonce: a second policy, `script-src 'nonce-N' 'wasm-unsafe-eval'`, where N is random and
     lives only in this script's closure (never in an attribute). A frame the app makes (srcdoc, about:blank) has
@@ -28,12 +30,43 @@
   for (const name of Object.getOwnPropertyNames(window)) {
     if (/^(webkit)?RTC/.test(name)) { try { delete window[name]; } catch (e) { /* stays: refused below */ } }
   }
+  // The session history is the page's, shared with this frame: an app adds no entry to it and moves it nowhere (in
+  // WebKit a frame's `history.go` takes the client's page back). A frame the app makes has an opaque origin of its own,
+  // so its History is out of this realm's reach.
+  const HISTORY = ["pushState", "replaceState", "go", "back", "forward"];
+  for (const name of HISTORY) { try { delete History.prototype[name]; } catch (e) { /* stays: refused below */ } }
+  try { delete window.navigation; } catch (e) { /* stays: refused below */ }
+  if (typeof Navigation === "function") {
+    for (const name of Object.getOwnPropertyNames(Navigation.prototype)) {
+      if (name !== "constructor") { try { delete Navigation.prototype[name]; } catch (e) { /* stays: refused below */ } }
+    }
+  }
+  // The frame's `allow=""` refuses the Clipboard API, but `execCommand("copy")` writes the system clipboard for as long
+  // as a tap in the frame lasts (in Chromium, seconds, from a timer too). An app has no clipboard permission (WISP
+  // 1200), so its clipboard commands answer false; editing commands work on. The wrapper asks nothing the app can
+  // change: it may have changed every prototype by the time it calls.
+  const execCommand = Document.prototype.execCommand;
+  let commands = execCommand;
+  if (typeof execCommand === "function") {
+    const apply = Reflect.apply;
+    const lower = String.prototype.toLowerCase;
+    commands = function (command, showUI, value) {
+      if (arguments.length === 0) return apply(execCommand, this, []);
+      const name = typeof command === "string" ? command : "" + command;
+      const named = apply(lower, name, []);
+      if (named === "copy" || named === "cut" || named === "paste") return false;
+      return apply(execCommand, this, arguments.length > 2 ? [name, showUI, value] : arguments.length > 1 ? [name, showUI] : [name]);
+    };
+    Object.defineProperty(Document.prototype, "execCommand", { configurable: true, writable: true, value: commands });
+  }
   const stop = (why) => {
     document.documentElement.textContent = "This app cannot run here.";
     document.documentElement.setAttribute("data-ghostly-refused", why);
   };
   if (self.origin !== "null" || window.parent === window) return stop("origin");
   if (Object.getOwnPropertyNames(window).some((name) => /^(webkit)?RTC/.test(name))) return stop("webrtc");
+  if (HISTORY.some((name) => name in history) || "navigation" in window) return stop("history");
+  if (document.execCommand !== commands) return stop("clipboard");
 
   // What the runner keeps for itself, taken before the app can touch a prototype.
   const nonceProperty = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "nonce");
@@ -52,7 +85,11 @@
   const httpEquiv = Object.getOwnPropertyDescriptor(HTMLMetaElement.prototype, "httpEquiv").set;
   const metaContent = Object.getOwnPropertyDescriptor(HTMLMetaElement.prototype, "content").set;
   const listen = EventTarget.prototype.addEventListener;
+  const portPost = MessagePort.prototype.postMessage;
   const stopImmediately = Event.prototype.stopImmediatePropagation;
+  const here = location;
+  const reload = here.reload;
+  const clockNow = Date.now;
   // ghostly:hint-guard:start
   // Defence in depth for what no policy governs in WebKit: a <link rel=preconnect> connects from here there, even in
   // a srcdoc frame (measured). No <link>, frame, object or embed of the entry is written, and one the app makes is
@@ -268,7 +305,7 @@
     return { html: "<!doctype html>" + doc.documentElement.outerHTML, scripts };
   };
 
-  const write = ({ html, scripts }) => {
+  const write = ({ html, scripts }, activity) => {
     document.open();
     // Every other app frame in the client's page can post to this window (parent.frames[i]), and neither the sandbox
     // nor a policy governs that, so this end is closed: the app talks to the broker over its port only, and nothing
@@ -278,6 +315,22 @@
     const deaf = (event) => { reflectApply(stopImmediately, event, []); };
     reflectApply(listen, window, ["message", deaf, true]);
     reflectApply(listen, window, ["messageerror", deaf, true]);
+    // A fragment navigation (`location.hash`, a link to "#…") is an entry in the page's history too, and no load. No
+    // policy stops it, so the runner makes it one: a reload, which tears the app down (any load but the one after
+    // `writing`).
+    reflectApply(listen, window, ["hashchange", () => { reflectApply(reload, here, []); }, true]);
+    // The person's taps and keys in the app never reach the client's page, whose lock screen would lock them out of a
+    // game longer than its time: the runner says `activity` for a trusted one, at most every 5 seconds (WISP 1200).
+    let said = -Infinity;
+    const heard = (event) => {
+      if (event.isTrusted !== true) return;
+      const at = clockNow();
+      if (at - said < 5000 && at >= said) return;
+      said = at;
+      try { activity(); } catch (e) { /* the app broke its own calls */ }
+    };
+    reflectApply(listen, window, ["pointerdown", heard, true]);
+    reflectApply(listen, window, ["keydown", heard, true]);
     if (hintGuard) hintGuard.install();
     reflectApply(documentWrite, document, [html]);
     // The app writes no markup into the page while it is parsed: it would go in past the guard and the broker's
@@ -331,6 +384,11 @@
     port.onmessage = (event) => {
       const message = event.data;
       if (!message || typeof message !== "object") return;
+      // The page's watchdog: answered at once, so the answer is late only while the app holds this thread.
+      if (message.event === "ping") {
+        try { reflectApply(portPost, port, [{ pong: message.data }]); } catch (e) { /* closed */ }
+        return;
+      }
       if (typeof message.id === "number") {
         const waiting = pending.get(message.id);
         if (!waiting) return;
@@ -342,7 +400,7 @@
       if (message.event === "start" && entry === null && typeof message.data === "string") {
         entry = message.data;
         const prepared = prepare(entry);
-        send("writing", []).then(() => write(prepared), () => stop("broker"));
+        send("writing", []).then(() => write(prepared, () => { send("activity", []).catch(() => {}); }), () => stop("broker"));
         return;
       }
       const kind = message.event === "chat.message" ? "message" : message.event === "chat.peer" ? "peer" : null;

@@ -79,3 +79,15 @@ describe("a chat's buttons and presses", () => {
     expect(reads.n).toBeLessThan(5 * 5_000);
   });
 });
+
+describe("a 1:1 chat's buttons and presses over its questions and replies only", () => {
+  it("are what the whole history gives", () => {
+    for (const every of [3, 5, 9]) {
+      const rows = chat(600, every);
+      const some = rows.filter(m => m.card?.kind === "buttons" || m.replyTo);
+      expect(buttonsViews(some, m => m.ref)).toEqual(buttonsViews(rows, m => m.ref));
+      expect(compactPresses(some, m => m.ref)).toEqual(compactPresses(rows, m => m.ref));
+      expect(compactPresses(some, m => m.ref).size).toBeGreaterThan(0);
+    }
+  });
+});

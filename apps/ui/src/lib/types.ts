@@ -58,8 +58,12 @@ export interface ChatMessage {
   edit?: import("@ghostly/browser/shared/types").MessageEdit;
   /** A forwarded message (WISP 400 § Forwards): how many times it has been forwarded. */
   forwarded?: number;
+  /** A contact request's text whose requester's app has not confirmed sending it (WISP 8xx § Accept). */
+  unconfirmed?: true;
   /** A bot's task or routine (WISP 405 · Status Cards), shown instead of `text`, its fallback. */
   card?: import("@ghostly/core").StatusCard;
+  /** A line this app wrote in the chat itself (a payment of the contact's it refused): said from these values. */
+  notice?: import("@ghostly/browser/shared/types").ChatNotice;
   systemEvent?: {
     type: SystemEventType;
     pubKey?: string;
@@ -149,15 +153,15 @@ export interface ChatTechInfo {
   myPubKey: string;
   peerPubKey: string;
   encKeyPreview: string;
-  pollCount: number;
   currentPollInterval: number;
   republishInterval: number;
   messageTtl: number;
+  /** The transport's own name for how it reaches the network; the screen words it itself while `peerToPeer`. */
   protocol: string;
+  /** The chat's data link is open: messages go peer to peer, the network only finds the contact. */
+  peerToPeer: boolean;
   encryption: string;
   relays: string[];
   createdAt: number;
-  myAck: number;
   peerAck: number;
-  sentBufferSize: number;
 }

@@ -253,12 +253,16 @@ async function openConnection(stack: CallStack, options: ConnectionOptions, offe
       videoTrack = pc.addTrack(video);
       videoTrack.onMessage(() => {});
     }
-    const gathered = gathering(pc, { turn: callUsesTurn(iceServers) });
+    const turn = callUsesTurn(iceServers);
+    const gathered = gathering(pc, { turn });
     if (offer) pc.setRemoteDescription(buildSdpFromSignal(held ? { ...offer, c: [] } : offer), "offer");
     else pc.setLocalDescription("offer");
     await gathered;
     const sdp = pc.localDescription()?.sdp;
     if (!sdp) throw new Error("No local description");
+    // libjuice says nothing of a TURN server that refused the allocation (a quota reached, wrong credentials): without
+    // this line, a call that needs the relay and never connects did not say why.
+    if (turn && !/ typ relay/.test(sdp)) log(`no relay address: the TURN server refused the allocation or did not answer in time`);
     // Every path, as a signal on the chat session may carry (pickCallCandidates); bound to loopback (the tests,
     // GHOSTLY_CALL_BIND=127.0.0.1), that is the one candidate there is.
     const params = extractParamsFromSdp(sdp, { maxCandidates: PAIRED_CALL_CANDIDATES, loopback: !!bind });

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-translate-texts"
+description = "Enables the translate_texts command without any pre-configured scope."
+commands.allow = ["translate_texts"]
+
+[[permission]]
+identifier = "deny-translate-texts"
+description = "Denies the translate_texts command without any pre-configured scope."
+commands.deny = ["translate_texts"]

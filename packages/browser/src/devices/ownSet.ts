@@ -1,10 +1,10 @@
 import {
-  turnInstance, turnVerifierMark, TURN_SETTLE_MS, bytesEqual, classifyTurnRead, fromBase64Url, handoffAttemptAllowed, handoffAttemptFailed, handoffAttemptSucceeded, handoffRetryAfter, newDeviceSetSecret,
+  turnInstance, turnVerifierMark, TURN_SETTLE_MS, bytesEqual, classifyTurnRead, fromBase64Url, handoffAttemptSucceeded, newDeviceSetSecret,
   randomBytes, readTurnPacket, signTombstone, signTurnPacket, toBase64Url, turnKeys, type TurnNetwork, type TurnRead, type TurnSigner,
 } from "@ghostly/core";
 import { pendingRaise } from "./raise";
 import { MAX_DEVICES, MAX_EARLIER_SETS, type DevicePatch, type DeviceRecord, type DeviceSlot, type OwnSetPlan, type StoredDeviceState } from "./state";
-import { TakeoverRefusal, takeoverTarget } from "./takeover";
+import { TakeoverRefusal, checkTakeoverPassword, oneTry, takeoverTarget } from "./takeover";
 
 /*
  * When the remover is gone for good (WISP 06 § Removing a device). A device that reads a tombstone that still lists it
@@ -62,28 +62,23 @@ export function canStartOwnSet(record: DeviceRecord | null): boolean {
  * settles. Throws `TakeoverRefusal` before anything is written.
  */
 export async function startOwnSet(ports: OwnSetPorts, request: { password: string; name: string }): Promise<OwnSetOutcome> {
-  const now = ports.now ?? Date.now;
-  const record = await ports.read();
-  if (!record || record.state !== "moving") throw new TakeoverRefusal("state", "Only a device that waits for its devices' new secret starts a set of its own.");
-  if (record.ownSet) return resumeOwnSet(ports);
-  if (!record.copy) throw new TakeoverRefusal("no-copy", "This device holds no copy of the profile.");
-  // What the screen offers is what is allowed here too: a device that can only be added back makes no set of its own.
-  if (!canStartOwnSet(record)) throw new TakeoverRefusal("state", "This device cannot start a device set of its own.");
-  const allowed = handoffAttemptAllowed(record.takeoverAttempts, now());
-  if (allowed !== "ok") throw new TakeoverRefusal(allowed, allowed === "locked-out" ? "Too many tries. Try again later." : "Too many tries on this device.", allowed === "locked-out" ? handoffRetryAfter(record.takeoverAttempts, now()) : undefined);
-  if (record.copy === "frozen" || record.verifier) {
-    if (!record.verifier) throw new TakeoverRefusal("no-password", "This device cannot check the profile's password yet.");
-    if (typeof request.password !== "string" || !request.password) throw new TakeoverRefusal("password", "Type the profile's password.");
-    if (!(await ports.proves(record.verifier, request.password).catch(() => false))) {
-      await ports.amend({ takeoverAttempts: handoffAttemptFailed(record.takeoverAttempts, now()) });
-      throw new TakeoverRefusal("password", "Wrong password.");
-    }
-  }
-  const target = takeoverTarget(record);
-  const same = (a: string, b: string) => a.normalize("NFC").trim().toLocaleLowerCase() === b.normalize("NFC").trim().toLocaleLowerCase();
-  if (target && (typeof request.name !== "string" || !same(request.name, target))) throw new TakeoverRefusal("name", `Type ${target} to confirm.`);
+  const record = await oneTry(async () => {
+    const record = await ports.read();
+    if (!record || record.state !== "moving") throw new TakeoverRefusal("state", "Only a device that waits for its devices' new secret starts a set of its own.");
+    if (record.ownSet) return null;
+    if (!record.copy) throw new TakeoverRefusal("no-copy", "This device holds no copy of the profile.");
+    // What the screen offers is what is allowed here too: a device that can only be added back makes no set of its own.
+    if (!canStartOwnSet(record)) throw new TakeoverRefusal("state", "This device cannot start a device set of its own.");
+    await checkTakeoverPassword(ports, record, request.password);
+    const target = takeoverTarget(record);
+    const same = (a: string, b: string) => a.normalize("NFC").trim().toLocaleLowerCase() === b.normalize("NFC").trim().toLocaleLowerCase();
+    if (target && (typeof request.name !== "string" || !same(request.name, target))) throw new TakeoverRefusal("name", `Type ${target} to confirm.`);
+    if (!ports.network) throw new TakeoverRefusal("offline", "Go online to take over.");
+    if (record.takeoverAttempts && (record.takeoverAttempts.total > 0 || record.takeoverAttempts.recent.length)) await ports.amend({ takeoverAttempts: handoffAttemptSucceeded() });
+    return record;
+  });
+  if (!record) return resumeOwnSet(ports);
   if (!ports.network) throw new TakeoverRefusal("offline", "Go online to take over.");
-  if (record.takeoverAttempts && (record.takeoverAttempts.total > 0 || record.takeoverAttempts.recent.length)) await ports.amend({ takeoverAttempts: handoffAttemptSucceeded() });
   // What stands at the old address now: the remover's tombstone, which this one has to outrank (below).
   if (!record.d || record.ownSlot === undefined || !record.deviceSet[record.ownSlot]) throw new TakeoverRefusal("state", "This device has no device set.");
   const keys = turnKeys(fromBase64Url(record.d));

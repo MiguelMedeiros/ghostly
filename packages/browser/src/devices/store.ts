@@ -228,11 +228,14 @@ export async function moveDevice(profile: string, to: StoredDeviceState, patch: 
   return change(profile, (current) => transition(current, profile, to, patch));
 }
 
-/** Fields of the record changed, its state kept. There must be a record. */
-export async function amendDevice(profile: string, patch: DevicePatch): Promise<DeviceRecord> {
+/**
+ * Fields of the record changed, its state kept. There must be a record. A function makes the patch from the record
+ * read inside this write, so a write that landed since the caller's own read is not written over (null: no change).
+ */
+export async function amendDevice(profile: string, patch: DevicePatch | ((current: DeviceRecord) => DevicePatch | null)): Promise<DeviceRecord> {
   return change(profile, (current) => {
     if (!current) throw new Error("This profile has no device set");
-    return amend(current, patch);
+    return amend(current, (typeof patch === "function" ? patch(current) : patch) ?? {});
   });
 }
 

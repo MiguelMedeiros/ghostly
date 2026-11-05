@@ -6,11 +6,14 @@ import {
   useState,
   useEffect,
   useCallback,
+  useRef,
   type ReactNode,
 } from "react";
 import {
   loadSettings,
-  saveSettings,
+  saveSettingsChanges,
+  settingsWithChanges,
+  isSettingsStorageEvent,
   type AppSettings,
   type Theme,
   type ColorScheme,
@@ -21,6 +24,7 @@ import {
   type NotificationSettings,
 } from "../lib/settings";
 import { getRandomGhostName } from "../lib/storage";
+import { cleanOwnName } from "../lib/ownName";
 
 interface SettingsContextValue {
   settings: AppSettings;
@@ -33,26 +37,53 @@ interface SettingsContextValue {
   updateDefaultNickname: (nickname: string) => void;
   updateReduceMotion: (reduce: boolean) => void;
   updateChatListDensity: (density: ChatListDensity) => void;
+  updateChatListCollapsed: (collapsed: boolean) => void;
   updateCheckForUpdates: (check: boolean) => void;
   updateLinkPreviews: (on: boolean) => void;
+  updateTranslateMessages: (on: boolean) => void;
   updateProfilePeek: (patch: NonNullable<AppSettings["profilePeek"]>) => void;
   randomizeNickname: () => void;
   resetSettings: () => void;
   /** Where this profile's backups go (WISP 1000). */
   updateBackupStorage: (patch: Pick<Partial<AppSettings>, "backupSpace" | "backupS3">) => void;
+  /** Takes the settings as stored now, as another tab may have left them, and returns them. */
+  followStored: () => AppSettings;
 }
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
+  // The settings as this page last read or saved them. The extension runs the app in several tabs at once: a change
+  // here is saved as a change over what is stored now, and what another tab saved is taken here as it lands.
+  const synced = useRef(settings);
 
   useEffect(() => {
+    if (settings === synced.current) return;
     // Not the active device for this profile (WISP 06 § The gate): its settings are part of a copy that stays as it
     // is. They are read (the language, the theme, the lock) and never written back.
     if (knownDeviceGate()?.full === false) return;
-    saveSettings(settings);
+    const saved = saveSettingsChanges(synced.current, settings);
+    synced.current = saved;
+    if (saved !== settings) setSettings(saved);
   }, [settings]);
+
+  const followStored = useCallback(() => {
+    const stored = loadSettings();
+    const before = synced.current;
+    synced.current = stored;
+    // A change made here and not saved yet is kept, over what is stored.
+    setSettings((current) => (current === before ? stored : settingsWithChanges(stored, before, current)));
+    return stored;
+  }, []);
+
+  useEffect(() => {
+    const stored = (event: StorageEvent) => {
+      if (isSettingsStorageEvent(event)) followStored();
+    };
+    window.addEventListener("storage", stored);
+    return () => window.removeEventListener("storage", stored);
+  }, [followStored]);
 
   const updateTheme = useCallback((theme: Theme) => {
     setSettings((prev) => ({ ...prev, theme, colorScheme: theme }));
@@ -90,8 +121,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  // Kept as contacts will show it (`cleanOwnName`): what a field shows as typed is its own draft (`useOwnNameField`).
   const updateDefaultNickname = useCallback((nickname: string) => {
-    setSettings((prev) => ({ ...prev, defaultNickname: nickname }));
+    setSettings((prev) => ({ ...prev, defaultNickname: cleanOwnName(nickname) }));
   }, []);
 
   const updateReduceMotion = useCallback((reduce: boolean) => {
@@ -102,12 +134,20 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setSettings((prev) => ({ ...prev, chatListDensity }));
   }, []);
 
+  const updateChatListCollapsed = useCallback((chatListCollapsed: boolean) => {
+    setSettings((prev) => ({ ...prev, chatListCollapsed }));
+  }, []);
+
   const updateCheckForUpdates = useCallback((check: boolean) => {
     setSettings((prev) => ({ ...prev, checkForUpdates: check }));
   }, []);
 
   const updateLinkPreviews = useCallback((linkPreviews: boolean) => {
     setSettings((prev) => ({ ...prev, linkPreviews }));
+  }, []);
+
+  const updateTranslateMessages = useCallback((translateMessages: boolean) => {
+    setSettings((prev) => ({ ...prev, translateMessages }));
   }, []);
 
   const updateProfilePeek = useCallback((patch: NonNullable<AppSettings["profilePeek"]>) => {
@@ -146,12 +186,15 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         updateDefaultNickname,
         updateReduceMotion,
         updateChatListDensity,
+        updateChatListCollapsed,
         updateCheckForUpdates,
         updateLinkPreviews,
+        updateTranslateMessages,
         updateProfilePeek,
         randomizeNickname,
         resetSettings,
         updateBackupStorage,
+        followStored,
       }}
     >
       {children}

@@ -126,12 +126,11 @@ const LND: LightningNode = {
   lock: "lnd",
   connect: async (actor, who) => {
     const lnd = await import("../support/lnd-regtest/regtest.mjs");
-    const { url, macaroon, cert } = lnd.credentials(who);
+    const { url, macaroon } = lnd.credentials(who);
     const source = await lightningSource(actor, "lnd", async (area) => {
       const form = area.getByTestId("provider-form-lnd");
-      await form.getByLabel("REST address").fill(url);
+      await form.getByLabel(either("REST address")).fill(url);
       await form.getByLabel("Macaroon (hex)").fill(macaroon);
-      await form.getByLabel("TLS certificate").fill(cert);
       await form.getByTestId("provider-save").click();
     }, macaroon);
     await expect(source.getByTestId("lightning-source-status")).toContainText(`ghostly-${who}`);
@@ -151,8 +150,8 @@ const CLN: LightningNode = {
     const rune: string = cln.rune(who);
     const source = await lightningSource(actor, "core-lightning", async (area) => {
       const form = area.getByTestId("provider-form-core-lightning");
-      await form.getByLabel("Node id").fill(cln.nodeId(who));
-      await form.getByLabel("WebSocket address").fill(cln.CLN_REGTEST[who].websocket);
+      await form.getByLabel(either("Node id")).fill(cln.nodeId(who));
+      await form.getByLabel(either("WebSocket address")).fill(cln.CLN_REGTEST[who].websocket);
       await form.getByLabel("Rune").fill(rune);
       await form.getByTestId("provider-save").click();
     }, rune);
@@ -169,7 +168,7 @@ const NWC: LightningNode = {
     // An app connection of this scenario's own on the person's Alby Hub.
     const uri: string = await nwc.nwcUri(who, { fresh: true });
     const source = await lightningSource(actor, "nwc", async (area) => {
-      await area.getByTestId("provider-form-nwc").getByLabel("Connection URI").fill(uri);
+      await area.getByTestId("provider-form-nwc").getByLabel(either("Connection URI")).fill(uri);
       await area.getByTestId("provider-save").click();
     }, uri);
     await expect(source.getByTestId("lightning-source-current")).toContainText("Nostr Wallet Connect");
@@ -461,10 +460,12 @@ async function usdt(a: Actor, b: Actor): Promise<void> {
   // and one pass of the engine's 10 s payment check to see it.
   const confirmed = async (payer: Actor) => { await rpc("evm_mine"); await payer.page.waitForTimeout(11_000); };
   await bothWays(a, b, "usdt", [3, 2, 1, 1], confirmed);
+  // Each USDT request asks a little more than typed (under a thousandth): about n, either side of it.
+  const about = (n: number) => new RegExp(`^(${n - 1}\\.99\\d*|${n}(\\.00\\d*)?) TEST-USDT`);
   await wallet(a, "usdt");
-  await expect(tokens(a), "10 in, 3 out, 2 out, 1 in, 1 in").toHaveText(/^7 TEST-USDT/, { timeout: 30_000 });
+  await expect(tokens(a), "10 in, 3 out, 2 out, 1 in, 1 in").toHaveText(about(7), { timeout: 30_000 });
   await wallet(b, "usdt");
-  await expect(tokens(b), "3 in, 2 in, 1 out, 1 out").toHaveText(/^3 TEST-USDT/, { timeout: 30_000 });
+  await expect(tokens(b), "3 in, 2 in, 1 out, 1 out").toHaveText(about(3), { timeout: 30_000 });
 }
 
 type Pair = { a: Actor; b: Actor };

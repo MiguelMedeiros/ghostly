@@ -111,7 +111,11 @@ it("keeps a contact's descriptors only in the shape the adapters make", () => {
   for (const hyper of [
     null, "hyper", { publicKey: "not a key", relay: "ftp://relay.test" }, { publicKey: publicKey.slice(2) }, { publicKey, relay: "ws://192.168.1.10/" },
     { publicKey, relay: null }, { publicKey, relayed: 1 },
+    // An older app named its relay as set: a login, a query or a fragment in it is not kept.
+    { publicKey, relayed: true, relay: "wss://alice:hunter2@relay.test/" }, { publicKey, relayed: true, relay: "wss://relay.test/?token=s3cr3t" },
+    { publicKey, relayed: true, relay: "wss://relay.test/#s3cr3t" }, { publicKey, relayed: true, relay: "ws://alice:hunter2@127.0.0.1:4900/" },
   ]) expect(checkedDescriptors({ "hyperdht/1": hyper })).toEqual({});
+  expect(checkedDescriptors({ "hyperdht/1": { publicKey, relayed: true, relay: "wss://relay.test/@path" } })["hyperdht/1"]).toBeDefined();
   for (const none of [undefined, null, "x", 7, [], [{ "iroh/1": { id, relay: null, addresses: [] } }]]) expect(checkedDescriptors(none)).toEqual({});
   expect(checkedDescriptors({ "webrtc/1": "w", "evil/9": { x: 1 }, "hyperdht/1": { publicKey, more: { x: 1 } } })).toEqual({ "hyperdht/1": { publicKey } });
 });

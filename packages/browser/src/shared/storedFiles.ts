@@ -58,26 +58,50 @@ const GATHER = 256 * 1024;
 
 /**
  * Writes one file in order, gathering small writes into larger ones. `written` counts what was handed over,
- * gathered or not; `flush` makes all of it durable.
+ * gathered or not; `flush` makes all of it durable. Its calls run one after another: a close while a flush still
+ * writes the gathered part (a holder gone, then the transfer cancelled) would write that part a second time.
  */
 export class FileAppender {
   private buffer = new Uint8Array(GATHER);
   private buffered = 0;
   private stored: number;
+  private turn: Promise<unknown> = Promise.resolve();
 
   constructor(readonly bytes: FileBytes, readonly id: string, offset = 0) { this.stored = offset; }
 
   get written(): number { return this.stored + this.buffered; }
 
-  async append(chunk: Uint8Array): Promise<void> {
-    if (this.buffered + chunk.length > GATHER) await this.drain();
-    if (chunk.length >= GATHER) {
-      await this.bytes.append(this.id, this.stored, chunk);
-      this.stored += chunk.length;
-      return;
-    }
-    this.buffer.set(chunk, this.buffered);
-    this.buffered += chunk.length;
+  append(chunk: Uint8Array): Promise<void> {
+    return this.inTurn(async () => {
+      if (this.buffered + chunk.length > GATHER) await this.drain();
+      if (chunk.length >= GATHER) {
+        await this.bytes.append(this.id, this.stored, chunk);
+        this.stored += chunk.length;
+        return;
+      }
+      this.buffer.set(chunk, this.buffered);
+      this.buffered += chunk.length;
+    });
+  }
+
+  flush(): Promise<void> {
+    return this.inTurn(async () => {
+      await this.drain();
+      await this.bytes.flush(this.id);
+    });
+  }
+
+  close(): Promise<void> {
+    return this.inTurn(async () => {
+      await this.drain();
+      await this.bytes.close(this.id);
+    });
+  }
+
+  private inTurn(work: () => Promise<void>): Promise<void> {
+    const done = this.turn.then(work);
+    this.turn = done.catch(() => {});
+    return done;
   }
 
   private async drain(): Promise<void> {
@@ -86,15 +110,5 @@ export class FileAppender {
     await this.bytes.append(this.id, this.stored, part);
     this.stored += part.length;
     this.buffered = 0;
-  }
-
-  async flush(): Promise<void> {
-    await this.drain();
-    await this.bytes.flush(this.id);
-  }
-
-  async close(): Promise<void> {
-    await this.drain();
-    await this.bytes.close(this.id);
   }
 }

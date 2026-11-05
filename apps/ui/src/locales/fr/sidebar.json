@@ -22,6 +22,8 @@
     "unreadCount": "{{count}} non lus dans {{name}}",
     "unreadOne": "1 non lu dans {{name}}"
   },
+  "foundCount": "{{count}} discussions trouvées",
+  "foundOne": "1 discussion trouvée",
   "group": {
     "adminAnswered": "L'app de l'admin a répondu…",
     "answerFailed": "Cela n'a pas abouti. Réessayez.",
@@ -31,6 +33,7 @@
     "inviterAwayUnknown": "Le contact qui vous a invité n'est pas encore connecté. Réessayez dans un instant.",
     "letting": "Un membre vous fait entrer…",
     "linkUnanswered": "Le lien n'a pas répondu",
+    "others": "Un autre groupe a cet identifiant : choisissez",
     "takenBack": "Invitation retirée",
     "unanswered": "L'app de la personne qui vous a invité n'a pas répondu. Acceptez à nouveau, ou refusez.",
     "waitingAdmin": "En attente de l'app de l'admin…",
@@ -40,6 +43,7 @@
   "joinChat": "Rejoindre une conversation",
   "new": "Nouveau",
   "newChat": "Nouvelle conversation",
+  "newChatShort": "Nouvelle",
   "newMenu": {
     "chat": "Discussion",
     "chatHint": "Une personne, avec une invitation",
@@ -54,8 +58,29 @@
   "pinned": "Épinglée",
   "quiet": "C'est calme ici...",
   "quietHint": "L'heure de hanter quelqu'un ! 👻",
+  "rail": {
+    "collapse": "Replier la liste des discussions",
+    "expand": "Déplier la liste des discussions",
+    "invitation": "{{name}}, {{status}}",
+    "mention": "{{name}}, vous avez été mentionné",
+    "title": "{{action}} ({{keys}})",
+    "unread": "{{name}}, messages non lus",
+    "unreadCount": "{{name}}, {{count}} messages non lus",
+    "unreadOne": "{{name}}, 1 message non lu"
+  },
+  "row": {
+    "mention": "vous avez été mentionné",
+    "muted": "notifications coupées",
+    "pinned": "épinglée",
+    "separator": ", ",
+    "unread": "{{count}} messages non lus",
+    "unreadSome": "messages non lus",
+    "unread_one": "{{count}} message non lu",
+    "unread_other": "{{count}} messages non lus"
+  },
+  "searchLabel": "Rechercher des discussions",
   "searchPlaceholder": "Rechercher...",
-  "settings": "Paramètres",
+  "settings": "Réglages",
   "sharedIdentity": "A partagé une identité",
   "skipToContent": "Aller au contenu",
   "startChat": "Nouvelle conversation",

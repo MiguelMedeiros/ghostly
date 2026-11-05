@@ -63,6 +63,25 @@ export async function takeWakeSlot(profile: string, token: string, call: boolean
   }
 }
 
+/** Forgets what this profile's tokens showed, when it stops being woken (`unsubscribePush`: push off, profile deleted). */
+export async function clearWakeLimit(profile: string): Promise<void> {
+  const prefix = `${profile}|`;
+  for (const key of memory.keys()) if (key.startsWith(prefix)) memory.delete(key);
+  if (typeof indexedDB === "undefined") return;
+  const db = await open();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(SHOWN, "readwrite");
+      transaction.objectStore(SHOWN).delete(IDBKeyRange.bound(prefix, `${prefix}\uffff`));
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
 /** Tests only: what the memory fallback holds. */
 export function resetWakeLimitMemory(): void {
   memory.clear();

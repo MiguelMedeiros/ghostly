@@ -66,6 +66,21 @@ describe("durable paired message delivery", () => {
     await db.deleteMessage(p.linkId, p.id); await p.box.received(p.wireId);
     expect(await p.row()).toBeUndefined(); await p.box.stop();
   });
+  it("a start leaves a row already queued, with its reason and window, unwritten, and still checks it", async () => {
+    const p = await setup(async () => null);
+    const reason = "No DHT receipt before it expired. It goes again when the chat is live.", until = Date.now() + 86_400_000;
+    await p.store.update(p.id, "queued", reason, { resendUntil: until });
+    const update = vi.fn(p.store.update), send = vi.fn(async () => null);
+    let ready = false;
+    const box = new Outbox({ ...p.store, update }, send, 100, undefined, { resender: { ready: () => ready }, policy: { backoffMs: [10] } });
+    await box.recover();
+    // On the engine each write marks the chat's history changed, and the CLI host then reads it whole at start.
+    expect(update).not.toHaveBeenCalled();
+    expect((await p.row())).toMatchObject({ delivery: "queued", deliveryError: reason, resendUntil: until });
+    ready = true;
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    await box.stop();
+  });
   it("keeps delivery uncertain if persisting a receipt fails", async () => {
     const p = await setup(async () => null);
     const update = p.store.update;
@@ -561,5 +576,135 @@ describe("a chat with many queued messages and the contact away", () => {
     const stopped = box.stop();
     await vi.advanceTimersByTimeAsync(10);
     await stopped;
+  });
+
+  it("a contact back just before the first check: the checks that come due during the catch-up read nothing for texts already delivered", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    let ready = false;
+    const n = 60, rows: StoredMessage[] = Array.from({ length: n }, (_, i) => {
+      const wireId = `w${String(i).padStart(21, "0")}`;
+      return { linkId: "many", id: `me_${wireId}`, wireId, text: `m${i}`, sender: "me", timestamp: i + 1, via: "datalink", delivery: "waiting" };
+    });
+    // Each store call takes as long as an IndexedDB transaction on a long chat: the catch-up spans the first check.
+    const tick = () => new Promise(resolve => setTimeout(resolve, 10));
+    const read = vi.fn(async () => { await tick(); return rows.map(row => ({ ...row })); });
+    const store = { read, get: async (id: string) => { await tick(); const row = rows.find(r => r.id === id); return row && { ...row }; },
+      update: async (id: string, delivery: NonNullable<StoredMessage["delivery"]>, error?: string, extra?: Partial<Pick<StoredMessage, "via" | "resendUntil">>) => {
+        await tick();
+        const row = rows.find(r => r.id === id);
+        if (row && row.delivery !== "delivered") Object.assign(row, extra, { delivery, deliveryError: error });
+      } };
+    const send = vi.fn(async (m: StoredMessage) => { setTimeout(() => void box.received(m.wireId!), 2); return null; });
+    const box = new Outbox(store, send, 20_000, undefined, { resender: { ready: () => ready } });
+    const recovered = box.recover(rows.map(row => ({ ...row })));
+    await vi.advanceTimersByTimeAsync(10);
+    await recovered;
+    // The contact comes back half a second before each text's first check.
+    await vi.advanceTimersByTimeAsync(RESEND_POLICY.backoffMs[0] - 500);
+    read.mockClear();
+    ready = true;
+    void box.flush({ reopened: true });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(rows.every(r => r.delivery === "delivered")).toBe(true);
+    expect(send).toHaveBeenCalledTimes(n);
+    expect(read.mock.calls.length, "whole-chat reads for the whole catch-up").toBeLessThanOrEqual(2);
+    const stopped = box.stop();
+    await vi.advanceTimersByTimeAsync(10);
+    await stopped;
+  });
+});
+
+describe("a session that opens (agents#2468)", () => {
+  /** A chat of `history` rows of the contact's and these of mine, in a store that counts its reads; `ready`: the chat carries text. */
+  function chat(mine: Partial<StoredMessage>[], history = 500, ready = () => true) {
+    const rows: StoredMessage[] = Array.from({ length: history }, (_, i) => ({ linkId: "open", id: `peer_${i}`, text: `p${i}`, sender: "peer", timestamp: i + 1, via: "datalink" }));
+    mine.forEach((fields, i) => {
+      const wireId = `m${String(i).padStart(21, "0")}`;
+      rows.push({ linkId: "open", id: `me_${wireId}`, wireId, text: `m${i}`, sender: "me", timestamp: history + i + 1, via: "datalink", delivery: "delivered", ...fields });
+    });
+    const read = vi.fn(async () => rows.map(row => ({ ...row })));
+    const get = vi.fn(async (id: string) => { const row = rows.find(r => r.id === id); return row && { ...row }; });
+    const store = { read, get, update: async (id: string, delivery: NonNullable<StoredMessage["delivery"]>, error?: string, extra?: Partial<Pick<StoredMessage, "via" | "resendUntil">>) => {
+      const row = rows.find(r => r.id === id);
+      if (row && row.delivery !== "delivered") Object.assign(row, extra, { delivery, deliveryError: error });
+    } };
+    const sent: string[] = [];
+    const box = new Outbox(store, async m => { sent.push(m.text); return null; }, 20_000, undefined, { resender: { ready } });
+    return { rows, read, get, sent, box, store };
+  }
+  /** The link says it is open, then which transport it settled on: two reopened looks. */
+  const opens = async (box: Outbox) => { await Promise.all([box.flush({ reopened: true }), box.flush({ reopened: true })]); };
+
+  it("with nothing to send again, reads nothing of the chat, after the start's look", async () => {
+    const { read, get, sent, box } = chat([{}, {}]);
+    // The start hands its read of the chat in, as the engine's does.
+    await box.recover(await read());
+    read.mockClear();
+    for (let n = 0; n < 3; n++) await opens(box);
+    expect([read.mock.calls.length, get.mock.calls.length, sent]).toEqual([0, 0, []]);
+    await box.stop();
+  });
+
+  it("an outbox made without a start's look reads the history at its first look, and not again once it holds what that found", async () => {
+    const { read, sent, box } = chat([{ delivery: "queued" }]);
+    await box.flush({ reopened: true });
+    expect([read.mock.calls.length, sent]).toEqual([1, ["m0"]]);
+    // It awaits that one's receipt now: the next look reads it alone, and finds the chat holds nothing else.
+    await box.flush({ reopened: true });
+    await box.received("m".padEnd(22, "0"));
+    await opens(box);
+    expect([read.mock.calls.length, sent]).toEqual([2, ["m0", "m0"]]);
+    await box.stop();
+  });
+
+  it("what was queued, waited or awaited its receipt at the start goes at the session, read by its id", async () => {
+    let live = false;
+    const { rows, read, get, sent, box } = chat([{ delivery: "queued" }, { delivery: "waiting" }, { delivery: "sent" }, {}], 500, () => live);
+    await box.recover(await read());
+    read.mockClear();
+    live = true;
+    await opens(box);
+    expect([sent, read.mock.calls.length]).toEqual([["m0", "m1", "m2"], 0]);
+    expect(new Set(get.mock.calls.map(([id]) => id))).toEqual(new Set(rows.filter(r => r.sender === "me" && r.text !== "m3").map(r => r.id)));
+    await box.stop();
+  });
+
+  it("a text awaiting its receipt goes again on the new link, and a file stored by someone else is found by one look at the chat", async () => {
+    const { rows, read, sent, box } = chat([]);
+    await box.recover(await read());
+    read.mockClear();
+    rows.push({ linkId: "open", id: "me_w", wireId: "w".repeat(22), text: "awaiting", sender: "me", timestamp: 9_000, via: "datalink", delivery: "sending" });
+    await box.transmit("me_w");
+    // Once on the new link, however many ways the link says it is open.
+    await opens(box);
+    expect([sent, read.mock.calls.length]).toEqual([["awaiting", "awaiting"], 0]);
+    // A row written by someone else (a file waiting for the live link, `storing`): the next look reads the chat once.
+    await box.storing(Promise.resolve());
+    await opens(box);
+    expect(read.mock.calls.length).toBe(1);
+    await opens(box);
+    expect(read.mock.calls.length).toBe(1);
+    await box.stop();
+  });
+
+  it("a text marked waiting while a session's look reads the chat goes with that session, not at its first check", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const { rows, read, store, sent, box } = chat([]);
+    await box.recover(await read());
+    rows.push({ linkId: "open", id: "me_x", wireId: "x".repeat(22), text: "later", sender: "me", timestamp: 9_000, via: "datalink", delivery: "waiting" });
+    // Its mark takes a moment, as an IndexedDB write does; the session opens meanwhile.
+    const update = store.update;
+    store.update = async (...args) => { await new Promise(resolve => setTimeout(resolve, 50)); return update(...args); };
+    try {
+      const waiting = box.wait("me_x", "Sent when your contact is reachable.");
+      await vi.advanceTimersByTimeAsync(10);
+      const opened = opens(box);
+      await vi.advanceTimersByTimeAsync(300);
+      await Promise.all([opened, waiting]);
+      expect(sent, "well before its first check").toEqual(["later"]);
+    } finally {
+      store.update = update;
+      await box.stop();
+    }
   });
 });

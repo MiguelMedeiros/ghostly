@@ -94,6 +94,19 @@ describe("a refused lock password in Settings", () => {
     expect(stored()).toBe(hash);
   }, 30_000);
 
+  it("a password changed in another tab since this one opened: the old one is no longer the current one", async () => {
+    await lockWith("first secret");
+    const { user } = await renderSettings();
+    // The extension's other tab changes it; this page has not heard yet.
+    const hash = await lockWith("second secret");
+    await user.click(screen.getByTestId("settings-password-edit"));
+    await user.type(screen.getByTestId("settings-password-current"), "first secret");
+    await user.click(screen.getByRole("button", { name: "Remove password" }));
+    expect(await screen.findByTestId("settings-notice-title")).toHaveTextContent("Password not removed");
+    expectRefused(screen.getByTestId("settings-password-current"), "settings-password-current-error", "Incorrect password");
+    expect(stored()).toBe(hash);
+  }, 30_000);
+
   it("too short, then not the same twice: each under its own field, with the card", async () => {
     const { user } = await renderSettings();
     await user.click(screen.getByTestId("settings-lock"));
@@ -159,6 +172,111 @@ describe("opening the lock password form", () => {
     await user.click(screen.getByTestId("settings-password-edit"));
     expect(screen.getByTestId("settings-password-current")).toHaveFocus();
   });
+});
+
+describe("closing the lock password form", () => {
+  it("Cancel hands the focus back to the Lock Screen switch that opened it, not to the page", async () => {
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-lock"));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByTestId("settings-password-form")).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-lock")).toHaveFocus();
+  });
+
+  it("a password set: the focus goes back to the Lock Screen switch", async () => {
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-lock"));
+    await user.type(screen.getByTestId("settings-password-new"), "spooky");
+    await user.type(screen.getByTestId("settings-password-confirm"), "spooky");
+    await user.click(screen.getByRole("button", { name: "Set password" }));
+    expect(await screen.findByTestId("settings-notice-text")).toHaveTextContent("Password set successfully");
+    expect(screen.queryByTestId("settings-password-form")).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-lock")).toHaveFocus();
+  }, 30_000);
+
+  it("a password changed: the focus goes back to Change password", async () => {
+    await lockWith("first secret");
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-password-edit"));
+    await user.type(screen.getByTestId("settings-password-current"), "first secret");
+    await user.type(screen.getByTestId("settings-password-new"), "second secret");
+    await user.type(screen.getByTestId("settings-password-confirm"), "second secret{Enter}");
+    expect(await screen.findByTestId("settings-notice-text")).toHaveTextContent("Password changed successfully");
+    expect(screen.queryByTestId("settings-password-form")).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-password-edit")).toHaveFocus();
+  }, 30_000);
+
+  it("a password removed: Change password goes with it, so the focus goes to the Lock Screen switch", async () => {
+    await lockWith("first secret");
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-password-edit"));
+    await user.type(screen.getByTestId("settings-password-current"), "first secret");
+    await user.click(screen.getByRole("button", { name: "Remove password" }));
+    expect(await screen.findByTestId("settings-notice-text")).toHaveTextContent("Password removed");
+    expect(screen.queryByTestId("settings-password-edit")).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-lock")).toHaveFocus();
+  }, 30_000);
+
+  it("Settings opened with the focus on the page: nothing takes it", async () => {
+    await renderSettings();
+    expect(document.body).toHaveFocus();
+  });
+});
+
+describe("Enter in the lock password form", () => {
+  it("Enter in New password or in Confirm password sets it, as the button does", async () => {
+    for (const which of ["new", "confirm"]) {
+      localStorage.clear();
+      const { user, unmount } = await renderSettings();
+      await user.click(screen.getByTestId("settings-lock"));
+      await user.type(screen.getByTestId("settings-password-new"), "spooky");
+      await user.type(screen.getByTestId("settings-password-confirm"), "spooky");
+      await user.type(screen.getByTestId(`settings-password-${which}`), "{Enter}");
+      await waitFor(() => expect(stored()).not.toBeNull());
+      expect(await screen.findByTestId("settings-notice-text")).toHaveTextContent("Password set successfully");
+      expect(screen.queryByTestId("settings-password-form")).not.toBeInTheDocument();
+      unmount();
+    }
+  }, 30_000);
+
+  it("Enter with the two not the same: the button's refusal, under Confirm, and nothing set", async () => {
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-lock"));
+    await user.type(screen.getByTestId("settings-password-new"), "spooky");
+    await user.type(screen.getByTestId("settings-password-confirm"), "spookier{Enter}");
+    await waitFor(() => expect(screen.getByTestId("settings-notice-text")).toHaveTextContent("Passwords do not match"));
+    expect(screen.getByTestId("settings-notice-title")).toHaveTextContent("Password not set");
+    expectRefused(screen.getByTestId("settings-password-confirm"), "settings-password-confirm-error", "Passwords do not match");
+    expect(stored()).toBeNull();
+    expect(screen.getByTestId("settings-password-form")).toBeInTheDocument();
+  }, 30_000);
+
+  it("Enter too short in New password: refused under it, as the button does", async () => {
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-lock"));
+    await user.type(screen.getByTestId("settings-password-new"), "boo{Enter}");
+    expect(await screen.findByTestId("settings-notice-title")).toHaveTextContent("Password not set");
+    expectRefused(screen.getByTestId("settings-password-new"), "settings-password-new-error", "Password must be at least 4 characters");
+    expect(stored()).toBeNull();
+  }, 30_000);
+
+  it("Change password: Enter in Current refuses a wrong one, then changes it, and never removes it", async () => {
+    const hash = await lockWith("first secret");
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-password-edit"));
+    await user.type(screen.getByTestId("settings-password-current"), "not it");
+    await user.type(screen.getByTestId("settings-password-new"), "second secret");
+    await user.type(screen.getByTestId("settings-password-confirm"), "second secret");
+    await user.type(screen.getByTestId("settings-password-current"), "{Enter}");
+    expect(await screen.findByTestId("settings-notice-title")).toHaveTextContent("Password not changed");
+    expectRefused(screen.getByTestId("settings-password-current"), "settings-password-current-error", "Incorrect password");
+    expect(stored()).toBe(hash);
+
+    await user.keyboard("first secret{Enter}");
+    await waitFor(() => expect(stored()).not.toBe(hash));
+    expect(stored()).not.toBeNull();
+    expect(await screen.findByTestId("settings-notice-text")).toHaveTextContent("Password changed successfully");
+  }, 30_000);
 });
 
 describe("a refused lock password in Add a device", () => {
@@ -241,6 +359,47 @@ describe("the floating card", () => {
     expect(screen.getByTestId("toast")).toBeInTheDocument();
     await act(() => new Promise((resolve) => setTimeout(resolve, 1_100)));
     expect(screen.queryByTestId("toast")).toBeNull();
+  });
+
+  it("waits while it is pointed at or its × has the focus, and its time runs again when it is left", async () => {
+    const { user } = renderApp(<Harness />);
+    await user.click(screen.getByRole("button", { name: "show" }));
+    await user.hover(screen.getByTestId("toast"));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 1_300)));
+    expect(screen.getByTestId("toast")).toBeInTheDocument();
+    await user.unhover(screen.getByTestId("toast"));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 1_100)));
+    expect(screen.queryByTestId("toast")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "show" }));
+    await user.tab();
+    expect(screen.getByTestId("toast-close")).toHaveFocus();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 1_300)));
+    expect(screen.getByTestId("toast")).toBeInTheDocument();
+  });
+
+  it("a focused card that goes hands the focus back to the button that brought it, not to the page", async () => {
+    const { user } = renderApp(<Harness />);
+    await user.click(screen.getByRole("button", { name: "show" }));
+    await user.tab();
+    expect(screen.getByTestId("toast-close")).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("toast")).toBeNull();
+    expect(screen.getByRole("button", { name: "show" })).toHaveFocus();
+  });
+
+  it("an error stays long enough to read in the app's language: Japanese takes longer than its least time", async () => {
+    function Refusal() {
+      const notice = useToast(1_000);
+      return <>
+        <button type="button" onClick={() => notice.show("パスワードは4文字以上必要です", { title: "パスワードは設定されていません" })}>show</button>
+        <Toast toast={notice.toast} onDismiss={notice.dismiss} />
+      </>;
+    }
+    const { user } = renderApp(<Refusal />, { language: "ja" });
+    await user.click(await screen.findByRole("button", { name: "show" }));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 1_500)));
+    expect(screen.getByTestId("toast")).toBeInTheDocument();
   });
 
   it("with the keyboard up, not over the button of the focused field's form either: it goes to the top", async () => {

@@ -30,6 +30,16 @@ describe("Ring authorizations", () => {
     }
   });
 
+  it("refuses claims that are not base64url or not JSON with its own message, not the parser's", () => {
+    const [h, p, s] = authorization.split(".");
+    for (const claims of ["!!!", enc("notjson")]) {
+      expect(() => verifyRingAuthorization(`${h}.${claims}.${s}`, statement, root.pubKeyZ32, iat, exp)).toThrow("Unsupported Ring authorization");
+    }
+    expect(() => verifyRingAuthorization(`${h}.${p}.${"!".repeat(86)}`, statement, root.pubKeyZ32, iat, exp)).toThrow("Ring did not authorize this exact conversation");
+    const evidence = ringEvidence(authorization, statement, delegate.seed);
+    expect(() => verifyRingEvidence({ ...evidence, signature: "!".repeat(86) }, statement, root.pubKeyZ32, iat, exp)).toThrow("Invalid delegated proof of possession");
+  });
+
   it("refuses claims that are not an object with a valid delegate key", () => {
     const [h, , s] = authorization.split(".");
     for (const claims of ["null", "5", JSON.stringify({ cnf: 5 }), JSON.stringify({ cnf: "not-a-key" })]) {

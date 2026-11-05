@@ -6,7 +6,7 @@ import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { findChat, findOwnNamedChat } from "../apiKit";
 import { CliError } from "../errors";
 import { AudioSocket, audioSocketPath, clearAudioSockets } from "./audioSocket";
-import { CallMedia, EarlyAnswer, loadCallStack, type CallStack, type MediaOptions } from "./media";
+import { callIceServers, CallMedia, callUsesTurn, EarlyAnswer, loadCallStack, type CallStack, type MediaOptions } from "./media";
 import { DEFAULT_RATE, FRAME_MS, isCallRate, PlaybackQueue, type CallRate } from "./pcm";
 
 /**
@@ -48,8 +48,11 @@ export interface CallHost {
   callPaceMs?: number;
 }
 
-/** The audio contract of one call, as commands and events report it. */
-export interface AudioInfo { socket: string; rate: CallRate; channels: 1; format: "s16le"; frameMs: typeof FRAME_MS }
+/**
+ * The audio contract of one call, as commands and events report it. `token` is the call's secret, which a program sends
+ * first on the socket (`AudioSocket`): only the daemon's own clients are told it.
+ */
+export interface AudioInfo { socket: string; token: string; rate: CallRate; channels: 1; format: "s16le"; frameMs: typeof FRAME_MS }
 
 /** An outgoing call rings this long, then ends as `unanswered`. */
 export const RING_MS = 60_000;
@@ -330,9 +333,16 @@ export class CallManager {
   /**
    * The ringing call's answer, made now (`EarlyAnswer`): when the call is answered, its candidates have been gathered
    * and the answer goes at once. Made again every EARLY_ANSWER_MS while it rings; when it cannot be made, the answer makes its own.
+   * Not made with a TURN server in the profile's settings: libjuice never gives an allocation back (no Refresh with
+   * LIFETIME 0 when a connection closes), so each one held a relay on the server for 10 minutes, those of calls declined,
+   * missed and cancelled too, and a server with a per-user quota refused the next calls theirs. The answer allocates.
    */
   private prepare(call: Call): void {
     if (this.host.answers === false || call.ended || call.state !== "ringing") return;
+    const settings = this.host.engine.getState().settings;
+    const iceServers = settings?.iceServers ?? [];
+    // Hide my IP from contacts: no call is answered here (`callable`), so none is made ahead either.
+    if (settings?.relayOnly === true || callUsesTurn(callIceServers(iceServers))) return;
     this.stopEarly(call);
     call.earlyTimer = setTimeout(() => this.prepare(call), this.host.earlyAnswerMs ?? EARLY_ANSWER_MS);
     call.earlyTimer.unref?.();
@@ -344,7 +354,7 @@ export class CallManager {
     const making: Making = {
       chat: call.chat,
       done: this.stack().then((stack) => EarlyAnswer.open(stack, offer, {
-        iceServers: this.host.engine.getState().settings?.iceServers ?? [],
+        iceServers,
         log: (line) => process.stderr.write(`ghostly: call ${call.id}: ${line}\n`),
       })).catch((error) => {
         // Not tried again while it rings: the answer makes its own connection, as it did before.
@@ -473,12 +483,28 @@ export class CallManager {
 
   setAuto(next: { on: boolean; from?: string[]; rate?: unknown }): AutoAnswer {
     // The daemon answers these chats' calls from now on: never one found only by a name its contact chose.
-    const from = (next.from ?? []).map((ref) => findOwnNamedChat(this.host.engine.getState().links, ref).id);
+    const { links, groups } = this.host.engine.getState();
+    const from = (next.from ?? []).map((ref) => findOwnNamedChat(links, ref, groups).id);
     this.auto = { on: next.on, from: next.on ? from : [], rate: rateOf(next.rate, next.on ? this.auto.rate : DEFAULT_RATE) };
+    this.saveAuto();
+    return this.getAuto();
+  }
+
+  /**
+   * A chat removed from this device leaves the chats auto-answer answers. The last one gone turns auto-answer off:
+   * an empty list is "answer everyone", never what was asked for.
+   */
+  forgetChat(chat: string): void {
+    if (!this.auto.from.includes(chat)) return;
+    const from = this.auto.from.filter((c) => c !== chat);
+    this.auto = from.length > 0 ? { ...this.auto, from } : { on: false, from: [], rate: DEFAULT_RATE };
+    this.saveAuto();
+  }
+
+  private saveAuto(): void {
     const tmp = `${this.configPath}.tmp`;
     writeFileSync(tmp, JSON.stringify({ autoAnswer: this.auto }, null, 2) + "\n", { mode: 0o600 });
     renameSync(tmp, this.configPath);
-    return this.getAuto();
   }
 
   /** Before the engine stops: every call is hung up (the contact's app is told), its program gets EOF. */
@@ -679,14 +705,14 @@ export class CallManager {
   }
 
   private async stack(): Promise<CallStack> {
-    if (this.host.answers === false) throw new CliError("unavailable", "Calls need the daemon (a call outlives this command): start it with `ghostly daemon --detach`");
+    if (this.host.answers === false) throw new CliError("unavailable", CALLS_NEED_DAEMON);
     const stack = await (this.host.stack ?? loadCallStack)();
     if (typeof stack === "string") throw new CliError("unavailable", stack);
     return stack;
   }
 
   private audioInfo(call: Call): AudioInfo | null {
-    return call.socket ? { socket: call.socket.path, rate: call.rate, channels: 1, format: "s16le", frameMs: FRAME_MS } : null;
+    return call.socket ? { socket: call.socket.path, token: call.socket.token, rate: call.rate, channels: 1, format: "s16le", frameMs: FRAME_MS } : null;
   }
 
   private view(call: Call): Record<string, unknown> {
@@ -724,16 +750,21 @@ export class CallManager {
     return this.host.engine.getState().links.find((l) => l.id === chat);
   }
 
-  /** A chat by id, contact key, prefix or name (the API's rules, `findChat`). */
+  /** A chat by id, contact key, prefix or name (the API's rules, `findChat`); a group's says it is one. */
   private chatId(ref: string): string {
-    return findChat(this.host.engine.getState().links, ref).id;
+    const { links, groups } = this.host.engine.getState();
+    return findChat(links, ref, groups).id;
   }
 
   /** The chat, if a call can go in it now; else why not (the engine's reason). */
   private callable(ref: string): LinkView {
     const link = this.link(this.chatId(ref))!;
+    // A one-shot's chat is not live yet, and never would be in time: it said "Calls need a live connection" before
+    // the daemon it needs (`stack`).
+    if (this.host.answers === false) throw new CliError("unavailable", CALLS_NEED_DAEMON);
     if (!link.profile) throw new CliError("unavailable", "Calls are in chats made since 0.4 (the chat session): this is a compatibility chat");
     if (link.callsUnavailable) throw new CliError("unavailable", link.callsUnavailable);
+    if (this.host.engine.getState().settings?.relayOnly === true) throw new CliError("unavailable", CALLS_OFF_RELAY_ONLY);
     return link;
   }
 
@@ -741,6 +772,15 @@ export class CallManager {
     return this.auto.on && (this.auto.from.length === 0 || this.auto.from.includes(chat));
   }
 }
+
+const CALLS_NEED_DAEMON = "Calls need the daemon (a call outlives this command): start it with `ghostly daemon --detach`";
+/**
+ * Hide my IP from contacts (`relayOnly`, WISP 601 Relay only): libdatachannel's relay policy only keeps the other
+ * candidates out of the signal; its ICE still checks from this machine's own sockets, and a call connected on a direct
+ * pair in a local lab. So the CLI places and answers no call while it is on, as the apps do with media that cannot keep
+ * to the relay.
+ */
+const CALLS_OFF_RELAY_ONLY = "Calls are off while Hide my IP from contacts is on: this headless Ghostly cannot keep a call to the relay";
 
 function nameOf(link: LinkView): string | null {
   return link.label?.trim() || link.peerNick?.trim() || null;

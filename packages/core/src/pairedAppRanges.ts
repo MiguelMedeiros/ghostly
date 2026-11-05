@@ -39,7 +39,7 @@ export const APP_RANGE_LIMITS = {
 } as const;
 
 /**
- * What an `ar-err` says. `not-served`: no serve of that id on this session (never given, or ended); `changed` and
+ * What an `ar-err` says. `not-served`: no serve of that id (never given, or ended); `changed` and
  * `gone`: the file under it, as `files.read` says them; `busy`: past the requests the server takes in flight. A
  * later version may add one: an asker reads a code it does not know as a failure.
  */
@@ -178,7 +178,7 @@ export function decodeAppRangeData(message: Uint8Array): { a: string; r: number;
 }
 
 /** Why a read of the contact's file failed, as the app hears it (a broker code). */
-export type AppRangeReadError = "not-served" | "changed" | "gone" | "offline" | "peer-closed" | "failed";
+export type AppRangeReadError = "not-served" | "changed" | "gone" | "busy" | "offline" | "peer-closed" | "failed";
 
 /** A request of the contact's to answer: read `length` bytes of `file` at `offset`, send them, then `finish`. */
 export interface AppRangeTask {
@@ -191,13 +191,15 @@ export interface AppRangeTask {
   readonly offset: number;
   readonly length: number;
   /**
-   * False once the asker cancelled, the app closed or the session ended: send nothing more for it. A task the asker
-   * cancelled still holds its place among the app's `inFlight` until it is settled (`finish`, `fail` or `release`).
+   * False once the asker cancelled, the app closed or the session ended: send nothing more for it. It still holds its
+   * place among the app's `inFlight` until it is settled (`finish`, `fail` or `release`), unless this side's app closed.
    */
   readonly live: boolean;
 }
 
-interface Serving { app: string; request: number; serve: string; file: string; offset: number; length: number; live: boolean }
+interface Serving { app: string; request: number; serve: string; file: string; offset: number; length: number; live: boolean; charge?: Taken }
+/** An ask counted in `bytesPerSecond`: when, how many bytes, and whether it aged out of the second. */
+interface Taken { at: number; bytes: number; out?: true }
 
 interface Asking {
   app: string;
@@ -215,30 +217,44 @@ const slot = (app: string, request: number) => `${app}:${request}`;
 
 /**
  * The read lane of one chat, both ways (WISP 1200 § A read lane to the contact). As the side that serves it keeps the
- * serve ids it gave out on this session and answers the contact's `ar-get` for those only, at most
+ * serve ids it gave out and answers the contact's `ar-get` for those only, at most
  * `APP_RANGE_LIMITS.inFlight` per app and `bytesPerSecond` asked in all (`busy` past either); the bytes themselves
  * are read and sent by the session, which calls `finish` or `fail` for each task. As the side that asks it sends at
  * most `inFlight` requests per app, keeps
- * the rest waiting, and puts each answer back together, in order, from the offset asked. Serves and requests last one
- * session: `reset` ends them all, `closeApp` those of one app.
+ * the rest waiting, and puts each answer back together, in order, from the offset asked. Requests last one session
+ * (`suspend` ends them); serves last until the app closes on either side (`closeApp`) or the session ends for good
+ * (`reset`, which ends both). A task still being read counts until it is settled.
  */
 export class AppRanges {
   private readonly serves = new Map<string, { app: string; file: string }>();
   private readonly serving = new Map<string, Serving>();
-  /** Tasks cancelled or unserved that the session is still reading or sending: each counts in its app's `inFlight` until settled. */
+  /**
+   * Tasks cancelled, unserved, or stopped by the contact's close or a session's end, that this side is still reading or
+   * sending: each counts in its app's `inFlight` until settled, across sessions.
+   */
   private readonly draining = new Set<Serving>();
   private readonly asking = new Map<string, Asking>();
   private readonly waiting = new Map<string, Asking[]>();
+  /**
+   * The size each serve of the contact said (its last `ar-end`), by app and serve id: an ask past it is cut to it. The
+   * server counts the bytes asked against its 32 MiB a second; an app reading small files with remote.read's 1 MiB
+   * length was refused `busy` from the 33rd read in a second, having moved about 1 MiB (agents#1766).
+   */
+  private readonly sizes = new Map<string, number>();
   private nextRequest = 0;
   /** The asks taken in the last second (when, how many bytes) and their sum: what `bytesPerSecond` counts. Kept across sessions. */
-  private readonly taken: { at: number; bytes: number }[] = [];
+  private readonly taken: Taken[] = [];
   private takenBytes = 0;
 
   constructor(private readonly send: (frame: AppRangeFrame) => void, private readonly newServeId = () => toBase64Url(randomBytes(16)), private readonly now = Date.now) {}
 
-  /** Lets the contact's `app` read `file` on this session: the serve id to tell it. */
+  /**
+   * Lets the contact's `app` read `file` until the app closes: the serve id to tell it. A file the app serves already
+   * answers the id it has, so an app that serves again on each play holds one serve per file, not one per call.
+   */
   serve(app: string, file: string): string {
     if (!isChatAppId(app)) throw new Error("Not a chat app id");
+    for (const [served, serve] of this.serves) if (serve.app === app && serve.file === file) return served;
     let id = this.newServeId();
     while (this.serves.has(id)) id = this.newServeId();
     this.serves.set(id, { app, file });
@@ -254,7 +270,7 @@ export class AppRanges {
     return true;
   }
 
-  /** The serve ids `app` has given out on this session (what the panel's "Sharing with" line shows). */
+  /** The serve ids `app` has given out and not ended (what the panel's "Sharing with" line shows). */
   servesOf(app: string): string[] {
     return [...this.serves].filter(([, serve]) => serve.app === app).map(([id]) => id);
   }
@@ -271,11 +287,12 @@ export class AppRanges {
     if (inFlight >= APP_RANGE_LIMITS.inFlight) { this.send(appRangeErrorFrame(app, request, "busy")); return null; }
     // Each ask is a read on this device, cancelled or not: past the bytes a second, nothing more is read.
     const at = this.now();
-    while (this.taken.length && this.taken[0]!.at <= at - 1000) this.takenBytes -= this.taken.shift()!.bytes;
+    while (this.taken.length && this.taken[0]!.at <= at - 1000) { const old = this.taken.shift()!; old.out = true; this.takenBytes -= old.bytes; }
     if (this.takenBytes + frame.n > APP_RANGE_LIMITS.bytesPerSecond) { this.send(appRangeErrorFrame(app, request, "busy")); return null; }
-    this.taken.push({ at, bytes: frame.n });
+    const charge: Taken = { at, bytes: frame.n };
+    this.taken.push(charge);
     this.takenBytes += frame.n;
-    const task: Serving = { app, request, serve: frame.s, file: serve.file, offset: frame.o, length: frame.n, live: true };
+    const task: Serving = { app, request, serve: frame.s, file: serve.file, offset: frame.o, length: frame.n, live: true, charge };
     this.serving.set(slot(app, request), task);
     return task;
   }
@@ -288,7 +305,13 @@ export class AppRanges {
 
   /** Every byte of `task` was sent: `ar-end` goes with the file's size, unless the task was dropped meanwhile. */
   finish(task: AppRangeTask, size: number): void {
-    if (this.take(task)) this.send(appRangeEndFrame(task.app, task.request, size));
+    if (!this.take(task)) return;
+    // Read and sent whole: it counts what the file held from its offset, not the length asked. An app reading small
+    // files at remote.read's 1 MiB was refused `busy` from the 33rd read in a second, having moved ~1 MiB (agents#1766).
+    // A cancelled ask is never finished, and keeps counting the read it started.
+    const charge = (task as Serving).charge, sent = Math.max(0, Math.min(task.length, size - task.offset));
+    if (charge && !charge.out && charge.bytes > sent) { this.takenBytes -= charge.bytes - sent; charge.bytes = sent; }
+    this.send(appRangeEndFrame(task.app, task.request, size));
   }
 
   /** The file under `task` could not be read: `ar-err` goes in place of the rest, unless the task was dropped meanwhile. */
@@ -302,8 +325,8 @@ export class AppRanges {
   }
 
   /**
-   * Whether `task` is still this session's: serving, or cancelled and draining until it is settled. False once it was
-   * settled, or its app closed or the session ended, which free its place: an answer to it sends and frees nothing.
+   * Whether `task` still holds a place: serving, or no longer live and draining until it is settled. False once it was
+   * settled, or this side's app closed, which frees its place: an answer to it sends and frees nothing.
    */
   holds(task: AppRangeTask): boolean {
     return this.draining.has(task as Serving) || this.serving.get(slot(task.app, task.request)) === task;
@@ -312,6 +335,8 @@ export class AppRanges {
   /** Reads `length` bytes at `offset` of what the contact's `app` serves as `serve`: the bytes (fewer at the end) and the file's size. */
   read(app: string, serve: string, offset: number, length: number): Promise<{ bytes: Uint8Array; size: number }> {
     appRangeGetFrame(app, serve, 0, offset, length);
+    const size = this.sizes.get(`${app} ${serve}`);
+    if (size !== undefined && size > offset) length = Math.min(length, size - offset);
     return new Promise((resolve, reject) => {
       const ask: Asking = { app, serve, offset, length, chunks: [], got: 0, resolve, reject };
       const queue = this.waiting.get(app) ?? [];
@@ -337,27 +362,53 @@ export class AppRanges {
   receiveAnswer(frame: Extract<AppRangeFrame, { t: "ar-end" | "ar-err" }>): void {
     const ask = this.asking.get(slot(frame.a, frame.r));
     if (!ask) return;
-    if (frame.t === "ar-err") return this.settle(ask, (["not-served", "changed", "gone"] as const).find(code => code === frame.e) ?? "failed");
+    // `busy`: the server's limits, a wait (the app hears too-fast), not a failure.
+    if (frame.t === "ar-err") return this.settle(ask, (["not-served", "changed", "gone", "busy"] as const).find(code => code === frame.e) ?? "failed");
     // Fewer bytes than asked only at the end of the file, and none past it.
     if (ask.got !== Math.max(0, Math.min(ask.length, frame.z - ask.offset))) return this.settle(ask, "failed");
     this.settle(ask);
+    this.sizes.set(`${ask.app} ${ask.serve}`, frame.z);
     ask.resolve({ bytes: concatBytes(...ask.chunks), size: frame.z });
   }
 
-  /** `app` closed on either side: its serves end, what it was sending stops and what it asked fails with `error`. */
-  closeApp(app: string, error: AppRangeReadError = "peer-closed"): void {
+  /**
+   * `app` closed on either side: its serves end, what it was sending stops and what it asked fails with `error`. A task
+   * this side is still reading keeps its place until it is settled, as a cancelled one does, so a contact that closes
+   * and opens its app again meets `busy`; only `stopped` (this side's app closed: nothing reads for it any more) frees
+   * them now.
+   */
+  closeApp(app: string, error: AppRangeReadError = "peer-closed", stopped = false): void {
     for (const [id, serve] of this.serves) if (serve.app === app) this.serves.delete(id);
-    for (const task of this.serving.values()) if (task.app === app) this.drop(task);
-    for (const task of this.draining) if (task.app === app) this.draining.delete(task);
+    for (const key of [...this.sizes.keys()]) if (key.startsWith(`${app} `)) this.sizes.delete(key);
+    this.endRequests(app, error, stopped);
+  }
+
+  /** The session ended: no serve id lasts into the next, and every request fails with `offline`. Tasks still being read keep their places into the next. */
+  reset(): void {
+    this.sizes.clear();
+    for (const app of new Set([...this.serves.values()].map(serve => serve.app))) this.closeApp(app, "offline");
+    this.suspend();
+  }
+
+  /**
+   * The session changed (a resume, a re-dial, a transport switch) and the apps are held across it: every request fails
+   * with `offline`, and the serve ids stay, for the next session, until the app closes on either side.
+   */
+  suspend(): void {
+    const apps = new Set([...this.serving.values(), ...this.draining].map(task => task.app).concat([...this.waiting.keys()], [...this.asking.values()].map(ask => ask.app)));
+    for (const app of apps) this.endRequests(app, "offline");
+  }
+
+  /**
+   * What `app` was sending stops and what it asked fails with `error`. A task this side is still reading keeps its place
+   * until it is settled; only `stopped` (this side's app closed) frees them now.
+   */
+  private endRequests(app: string, error: AppRangeReadError, stopped = false): void {
+    for (const task of this.serving.values()) if (task.app === app) this.drop(task, !stopped);
+    if (stopped) for (const task of this.draining) if (task.app === app) this.draining.delete(task);
     for (const ask of this.waiting.get(app) ?? []) ask.reject(new Error(error));
     this.waiting.delete(app);
     for (const ask of this.asking.values()) if (ask.app === app) this.settle(ask, error);
-  }
-
-  /** The session ended: no serve id lasts into the next, and every request fails with `offline`. */
-  reset(): void {
-    const apps = new Set([...this.serves.values()].map(serve => serve.app).concat([...this.serving.values(), ...this.draining].map(task => task.app), [...this.waiting.keys()], [...this.asking.values()].map(ask => ask.app)));
-    for (const app of apps) this.closeApp(app, "offline");
   }
 
   /** Stops `task` and frees its request number; `draining` keeps it counted until it is settled. */

@@ -1,5 +1,12 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Locator, Page } from "@playwright/test";
 import { chat, connect, expect, link, test } from "../support/fixtures";
+
+/** `bytes` as the app writes a size under 1 KB in `language`: its common.json `size.b` ("{{n}} B", "{{n}} بايت"). */
+const bytesIn = (language: string, bytes: number): string =>
+  (JSON.parse(readFileSync(join(import.meta.dirname, "..", "..", "apps", "ui", "src", "locales", language, "common.json"), "utf8")).size.b as string)
+    .replace("{{n}}", String(bytes));
 
 /** A 1×1 PNG, as a screenshot would put one on the clipboard. */
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
@@ -106,6 +113,45 @@ test("a file named in the other script reads from its start, in the sheet and in
   const { box, ...first } = await textBox(shown, "تقرير");
   expect(first.left).toBeGreaterThanOrEqual(box.left - 1);
   expect(first.right).toBeLessThanOrEqual(box.right + 1);
+});
+
+test("a picture's name too long for the sheet reads from its start in either app direction, its size still shown", { tag: ["@feature:app.composer.paste-files", "@feature:app.i18n"] }, async ({ peer }) => {
+  // The caption cut a name in the other script at its start ("…eenshot of …") and its " · size" off the end.
+  const [alice, bob] = await Promise.all([peer("alice", { mobile: true, viewport: { width: 375, height: 740 } }), peer("bob")]);
+  await link(alice, bob);
+  await connect(alice, bob);
+
+  const names = [
+    { language: "ar", name: "Screenshot of the quarterly planning meeting whiteboard.png", first: "Screenshot" },
+    { language: "en", name: "لقطة شاشة من اجتماع التخطيط الفصلي للفريق كاملة مع السبورة البيضاء والملاحظات.png", first: "لقطة" },
+  ];
+  for (const { language, name, first } of names) {
+    await alice.page.evaluate((language) => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+    }, language);
+    await alice.page.reload();
+    await expect(alice.page.locator("html")).toHaveAttribute("dir", language === "ar" ? "rtl" : "ltr");
+
+    expect(await paste(alice.page, ".composer-row textarea", [{ name, type: "image/png", base64: PNG }])).toBe(false);
+    const caption = alice.page.getByTestId("attachment-sheet").getByTestId("attachment-name");
+    // The size in the app's language: "70 بايت" in Arabic, "70 B" in English.
+    const size = bytesIn(language, 70);
+    await expect(caption).toHaveText(`${name} · ${size}`);
+    // The box that clips: the caption's content box (no padding), as the text is cut inside it.
+    const inner = (el: Element) => {
+      const { left, right } = el.getBoundingClientRect(), style = getComputedStyle(el);
+      return { left: left + parseFloat(style.paddingLeft), right: right - parseFloat(style.paddingRight) };
+    };
+    const [box, start, end] = await Promise.all([caption.evaluate(inner), textBox(caption, first), textBox(caption, size)]);
+    // Its first word and the size are drawn inside it, not under the "…" or past its edge.
+    for (const shown of [start, end]) {
+      expect(shown.left).toBeGreaterThanOrEqual(box.left - 1);
+      expect(shown.right).toBeLessThanOrEqual(box.right + 1);
+    }
+    await alice.page.keyboard.press("Escape");
+    await expect(alice.page.getByTestId("attachment-sheet")).toHaveCount(0);
+  }
 });
 
 /**

@@ -27,6 +27,13 @@ describe("the account bar's Profile place", () => {
     expect(place).toHaveAccessibleName(shownInName(place));
   });
 
+  it.each([["ja", /, (オンライン|オフライン)$/], ["ar", /, (متصل|غير متصل)$/]] as const)("says Online or Offline in the app's language (%s)", (language, state) => {
+    renderApp(<AccountBar />, { language });
+    const name = screen.getByTestId("account-profile").getAttribute("aria-label");
+    expect(name).toMatch(state);
+    expect(name).not.toMatch(/Online|Offline/);
+  });
+
   it("follows a rename at once", () => {
     renderApp(<AccountBar />);
     act(() => renameProfile(currentProfile().id, "Diary of a ghost"));

@@ -1,0 +1,10 @@
+{
+  "auto": "根据对方的消息",
+  "byHand": "{{language}}（你设置的）",
+  "change": "更改",
+  "detected": "{{language}}（检测到）",
+  "note": "简短消息按此语言识别，你发送的内容也可以翻译成此语言。",
+  "several": "多种语言",
+  "title": "此聊天的语言",
+  "unknown": "尚未确定"
+}

@@ -27,6 +27,12 @@ test("the active device removes the third device while the second is closed; the
   const dialog = desktop.page.getByTestId("device-remove");
   await expect(dialog).toContainText("Remove Tablet?");
   await dialog.getByTestId("device-remove-go").click();
+  // The moment the Removed row comes, the Tablet's own row (Standby · Connected, Move to, ⋮) is already gone, not
+  // seconds later at the next read of the set. Read in the page, at each frame, so no retry hides the overlap.
+  const atRemoved = await desktop.page.waitForFunction(() => document.querySelector('[data-testid="device-removed"]')
+    ? { tabletRows: [...document.querySelectorAll('[data-testid="device-row"]')].filter((row) => row.textContent?.includes("Tablet")).length }
+    : null, undefined, { timeout: 60_000 });
+  expect(await atRemoved.jsonValue()).toEqual({ tabletRows: 0 });
   const removed = desktop.page.getByTestId("device-removed");
   await expect(removed).toContainText("Tablet", { timeout: 60_000 });
   await expect(removed).toContainText("Removed");

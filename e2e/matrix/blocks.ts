@@ -9,7 +9,7 @@ import { strangerInvoice } from "../support/bolt11";
 import { callTrace, linkTrace, watchCalls, watchLink } from "../support/callTrace";
 import { setClipboard } from "../support/clipboard";
 import { startTestDomain, type TestDomain } from "../support/domain";
-import { delivered, GIF, type WalletKind } from "../support/fixtures";
+import { delivered, GIF, headerControl, phoneHeader, type WalletKind } from "../support/fixtures";
 import { mockMainnetMints } from "../support/mint";
 import { closeIdentities, openIdentities, shareIdentity, theirCards, theirFace } from "../support/identities";
 import { injectNostrSigner } from "../support/nostrSigner";
@@ -150,9 +150,8 @@ async function away(actor: Actor): Promise<() => Promise<void>> {
 async function setOnline(actor: Actor, online: boolean): Promise<void> {
   await go(actor, "#/services");
   const toggle = actor.page.getByTestId("online-toggle");
-  const want = online ? /Online/ : /Offline/;
-  if (!want.test((await toggle.textContent()) ?? "")) await toggle.click();
-  await expect(toggle).toHaveText(want);
+  if ((await toggle.getAttribute("aria-checked")) !== String(online)) await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", String(online));
 }
 
 /** DHT only is one of the connection choices; off leaves it for Automatic (a browser's one transport). */
@@ -477,7 +476,9 @@ export const identity: Block = {
     await shareIdentity(a, undefined, { timeout: 90_000 });
     await closeIdentities(a);
     await openChat(b);
-    await expect(b.page.getByTestId("chat-identity-badge").first()).toBeVisible({ timeout: 60_000 });
+    // The contact's marks in the header; on an upright phone a row of ⋮ instead, which counts them (no marks there).
+    if (await phoneHeader(b.page)) await expect(await headerControl(b.page, "chat-identity-badges")).not.toHaveAttribute("data-count", "0", { timeout: 60_000 });
+    else await expect(b.page.getByTestId("chat-identity-badge").first()).toBeVisible({ timeout: 60_000 });
     await openIdentities(b);
     const received = theirCards(b);
     await expect(received).toHaveCount(1);
@@ -792,6 +793,8 @@ export const restore: Block = {
     await b.context.close();
 
     const restored = await w.open(b.kind, `${b.name}-restored`, { phone: b.phone });
+    // The Mainnet wallet mainnetUi made comes back with the profile and reads its mint: routes stay with the old browser.
+    if (w.combo.wallet === "mainnet" && (w.combo.rail === "cashu" || w.combo.rail === "ln-mint") && b.kind === "web") await mockMainnetMints(restored.context);
     if (b.locale !== "en") await setLanguage(restored, b.locale);
     await go(restored, "#/profile");
     const again = restored.page.getByTestId("profile-backups");

@@ -2,7 +2,7 @@ import { appendFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CROSSED_WAIT_MS, GhostLink, RACE_DIRECT_MS, UNPROVEN_AUTH_MS } from "../src/ghostlink";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
-import { RELAY_POLL_INTERVALS } from "../src/link";
+import { DAEMON_WATCH_PEER_IDLE_MS, RELAY_POLL_INTERVALS } from "../src/link";
 import { DiscoveryBudgetError, type PkarrTransport } from "../src/transport";
 import { emptyDhtDeliveryState, type DhtDeliveryState } from "../src/dhtDelivery";
 import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, fakePeerConnection, invitationWhere, killRtc, rtc, useFakeWorld, yieldToLoop, type Side } from "./support/pairingWorld";
@@ -26,7 +26,7 @@ import { setLinkTraceSink } from "../src/linkTrace";
  */
 type Kind = "iroh" | "webrtc" | "webrtc+hyperdht" | "webrtc+iroh";
 interface App {
-  name: string; side: Side; link: GhostLink; dhtState: DhtDeliveryState; requests: { at: number }[]; stopped?: Promise<void>;
+  name: string; side: Side; link: GhostLink; dhtState: DhtDeliveryState; requests: { at: number; read?: string }[]; stopped?: Promise<void>;
   /** While set, the relays' request budget holds back every publish of this app (it throws `DiscoveryBudgetError`). */
   heldUntil?: number;
   /** While set, the relays' budget holds back every read of this app: it is answered with the last packet it read. */
@@ -53,7 +53,7 @@ function counted(pkarr: MemoryPkarr, app: App): PkarrTransport {
       if (app.offline) throw new Error("offline");
       // Held back: as the relay transport does, what it read last is the answer (`RelayTransport.resolve`).
       if (app.readsHeldUntil && Date.now() < app.readsHeldUntil) return lastRead.get(key) ?? null;
-      requests.push({ at: Date.now() });
+      requests.push({ at: Date.now(), read: key });
       const packet = await inner.resolve(key, options);
       lastRead.set(key, packet);
       return packet;
@@ -68,7 +68,9 @@ function counted(pkarr: MemoryPkarr, app: App): PkarrTransport {
  */
 function startApp(world: { pkarr: MemoryPkarr; native: NativeWorld }, name: string, side: Side, contact: { side: Side; name: string }, kind: Kind, dhtState: DhtDeliveryState, wasLive = false, endpointAfterMs?: number, chosen = false,
   /** `upgrade/1`: this app's, and the contact's as its capability record says. */
-  upgrade: { mine?: boolean; contact?: boolean } = {}): App {
+  upgrade: { mine?: boolean; contact?: boolean } = {},
+  /** More of the link's options (a CLI daemon's `watchPeerIdleMs`). */
+  more: Partial<ConstructorParameters<typeof GhostLink>[0]> = {}): App {
   const app = { name, side, dhtState, requests: [] } as unknown as App;
   const native = kind === "webrtc" ? undefined : kind === "webrtc+hyperdht" ? "hyperdht/1" as const : "iroh/1" as const;
   const peerNative = native === "hyperdht/1" ? { publicKey: world.native.key("hyperdht/1", contact.name) } : { id: world.native.key("iroh/1", contact.name), relay: "https://relay.test./", addresses: [] };
@@ -90,6 +92,7 @@ function startApp(world: { pkarr: MemoryPkarr; native: NativeWorld }, name: stri
     ...(upgrade.mine ? { upgradeSupport: true, peerUpgrades: () => !!upgrade.contact } : {}),
     createPeerConnection: () => fakePeerConnection(name),
     localFetch: vi.fn(), getServices: () => [{ id: "chat", type: "chat" }], getHostedHttpService: () => undefined,
+    ...more,
   });
   apps.push(app);
   app.link.start();
@@ -665,8 +668,13 @@ describe("back from the background (a phone that slept), the contact's chat not 
    * `times`: the app sleeps and wakes this many times, the same link throughout (the lab: only the first was fast).
    * The numbers are the last return's.
    */
-  async function sleepAndWake({ higher, awayMs, frozen = false, afterAttempt = false, duringAttemptMs = 0, times = 1 }: { higher: boolean; awayMs: number; frozen?: boolean; afterAttempt?: boolean; duringAttemptMs?: number; times?: number }) {
+  async function sleepAndWake({ higher, awayMs, frozen = false, afterAttempt = false, duringAttemptMs = 0, times = 1, relayBackMs, dialFailMs }: { higher: boolean; awayMs: number; frozen?: boolean; afterAttempt?: boolean; duringAttemptMs?: number; times?: number;
+    /** The app's Iroh is off its relay at the wake, and back on it this long after (`NativeWorld.offRelay`). */
+    relayBackMs?: number;
+    /** A dial that reaches nobody fails this long after it began (Iroh's: 20 s). */
+    dialFailMs?: number }) {
     const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    if (dialFailMs) world.native.dialFailMs = dialFailMs;
     const made = invitationWhere("inviter");
     const [phoneSide, cliSide] = higher ? [made.joiner, made.inviter] : [made.inviter, made.joiner];
     const up = { mine: true, contact: true };
@@ -701,6 +709,7 @@ describe("back from the background (a phone that slept), the contact's chat not 
         rtc.srflxAfterMs = 450;
       }
       phone.offline = false; world.native.asleep.delete("phone"); world.native.dialsLost.delete("phone");
+      if (relayBackMs !== undefined) { world.native.offRelay.add("phone"); setTimeout(() => world.native.relayBack("phone"), relayBackMs); }
       if (frozen) for (const channel of dead) channel.dispatchEvent(new Event("close"));
       const requests = () => phone.requests.length + cli.requests.length, before = requests();
       phone.link.wake();
@@ -734,6 +743,23 @@ describe("back from the background (a phone that slept), the contact's chat not 
     expect(requestsToLive).toBeLessThanOrEqual(10);
   }, 240_000);
 
+  /**
+   * An Android phone back from Doze (the emulator, 2026-11-01): its Iroh lost its relay while the network was cut, and
+   * finds it again only seconds after the return, once its own reconnect backoff (up to 16 s) runs out. The knock went at
+   * once and went nowhere; QUIC sends it again only seconds later, and Iroh gives a dial 20 s. Live again 4.4 s and
+   * 9.8 s after the return (away 5 and 15 minutes), once never over Iroh.
+   */
+  it.each([false, true])("back from Doze with its Iroh off its relay, it knocks again once the relay is back (higher key: %s)", async higher => {
+    const relayBackMs = 4_000, knocks: string[] = [];
+    setLinkTraceSink(line => { const step = JSON.parse(line) as { step: string }; if (step.step.startsWith("knock")) knocks.push(step.step); });
+    const { liveMs, firstOn } = await sleepAndWake({ higher, awayMs: 5 * 60_000 + 3_700, relayBackMs, dialFailMs: 20_000 });
+    setLinkTraceSink(null);
+    // Before: the knock's 20 s, or the CLI's background read of the offer. After: the relay's 4 s and a dial.
+    expect(liveMs, "from the return to live on both sides").toBeLessThan(relayBackMs + 2_000);
+    expect(firstOn).toBe("iroh/1");
+    expect(knocks.filter(step => step === "knock-again")).toHaveLength(1);
+  }, 240_000);
+
   it.each([
     { duringAttemptMs: 20_000, crossed: false },
     { duringAttemptMs: 30_000, crossed: false },
@@ -760,5 +786,58 @@ describe("back from the background (a phone that slept), the contact's chat not 
     expect(liveMs, "from the return to live on both sides").toBeLessThan(crossed ? 2_000 + CROSSED_WAIT_MS : 2_000);
     expect(firstOn).toBe("iroh/1");
     expect(directMs, "then to WebRTC, on the session").toBeLessThan(5_000);
+  }, 240_000);
+});
+
+/**
+ * A phone back after minutes asleep to a CLI bot, WebRTC the only transport between them (no Iroh), the phone's key the
+ * lower (it dials): its offer waits for the bot's read. The bot read a contact that left at the active pace for 2 minutes,
+ * then every 30 s: live again 2.3, 4.5 and 18.3 s after a return from 30 s, 2 and 5 minutes away (the web lab,
+ * 2026-11-01). A daemon reads it every 10 s up to 5 minutes (`DAEMON_WATCH_PEER_IDLE_MS`).
+ */
+describe("a phone back after minutes asleep to a CLI daemon, over WebRTC alone", () => {
+  const daemon = { watchPeerIdleMs: DAEMON_WATCH_PEER_IDLE_MS };
+  async function asleep(awayMs: number, cli: Partial<ConstructorParameters<typeof GhostLink>[0]>) {
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    // The inviter has the lower key: the phone.
+    const { inviter: phoneSide, joiner: botSide } = invitationWhere("inviter");
+    const phone = startApp(world, "phone", phoneSide, { side: botSide, name: "cli" }, "webrtc", emptyDhtDeliveryState());
+    const bot = startApp(world, "cli", botSide, { side: phoneSide, name: "phone" }, "webrtc", emptyDhtDeliveryState(), false, undefined, false, {}, cli);
+    expect(await until(() => phone.link.isDataLinkOpen && bot.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
+    await run(20_000);
+    // Asleep: no network, and its WebRTC connection dies unheard (the bot's fails 20 s on).
+    phone.offline = true;
+    killRtc("phone", undefined, 20_000);
+    const asleepAt = Date.now();
+    await run(awayMs);
+    phone.offline = false;
+    /** The bot's reads of the phone's key from `fromMs` to `toMs` into the absence. */
+    const reads = (fromMs: number, toMs: number) => bot.requests.filter(r => r.read === phone.link.myPubKeyZ32 && r.at >= asleepAt + fromMs && r.at < asleepAt + toMs).length;
+    phone.link.wake();
+    const liveMs = await until(() => phone.link.isDataLinkOpen && bot.link.isDataLinkOpen, 120_000);
+    return { liveMs, reads };
+  }
+
+  // Each just after one of the bot's reads at the background pace (170, 230 s…): the slowest returns before.
+  it.each([2 * 60_000 + 51_000, 3 * 60_000 + 51_000, 4 * 60_000 + 30_000])("live within seconds of a return between 2 and 5 minutes (away %i ms)", async awayMs => {
+    const { liveMs } = await asleep(awayMs, daemon);
+    if (process.env.WAKE_REPORT) appendFileSync(process.env.WAKE_REPORT, JSON.stringify({ daemon: true, awayMs, liveMs }) + "\n");
+    // The bot's next read (10 s at most) and the answer's way back.
+    expect(liveMs, "from the return to live on both sides").toBeLessThan(RELAY_POLL_INTERVALS.idle + 3_000);
+  }, 240_000);
+
+  it("reads a contact away the whole 5 minutes every 10 s from 2 to 5 minutes, 12 reads more, and nothing past them", async () => {
+    const before = await asleep(7 * 60_000, {}), after = await asleep(7 * 60_000, daemon);
+    if (process.env.WAKE_REPORT) appendFileSync(process.env.WAKE_REPORT, JSON.stringify({ before: before.reads(0, 420_000), after: after.reads(0, 420_000) }) + "\n");
+    // The first 2 minutes as before (fast, then the active pace).
+    expect(after.reads(0, 120_000)).toBe(before.reads(0, 120_000));
+    // From 2.5 to 5 minutes, past the slowing down from the active pace: one read every 10 s, not every 30 s.
+    expect(before.reads(150_000, 300_000)).toBeLessThanOrEqual(150_000 / RELAY_POLL_INTERVALS.background + 1);
+    expect(after.reads(150_000, 300_000)).toBeGreaterThanOrEqual(150_000 / RELAY_POLL_INTERVALS.idle - 1);
+    expect(after.reads(150_000, 300_000)).toBeLessThanOrEqual(150_000 / RELAY_POLL_INTERVALS.idle + 1);
+    // Past 5 minutes, the background pace again.
+    expect(after.reads(330_000, 420_000)).toBeLessThanOrEqual(90_000 / RELAY_POLL_INTERVALS.background + 1);
+    // The whole absence: 12 more (from 2 to 5 minutes, every 10 s and not every 30 s), give or take the edges.
+    expect(after.reads(0, 420_000) - before.reads(0, 420_000)).toBeLessThanOrEqual(14);
   }, 240_000);
 });
