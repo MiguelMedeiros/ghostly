@@ -144,7 +144,8 @@
     "noStores": "Aún no hay tiendas. Añade una por su enlace.",
     "none": "Aún no hay apps.",
     "open": "Abrir",
-    "stores": "Tiendas"
+    "stores": "Tiendas",
+    "tryAgain": "Reintentar"
   },
   "pick": {
     "hint": "Se usa en un chat, con tu contacto.",

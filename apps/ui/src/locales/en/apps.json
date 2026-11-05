@@ -144,7 +144,8 @@
     "noStores": "No stores yet. Add one by its link.",
     "none": "No apps yet.",
     "open": "Open",
-    "stores": "Stores"
+    "stores": "Stores",
+    "tryAgain": "Try again"
   },
   "pick": {
     "hint": "It runs in a chat, with your contact.",
