@@ -22,6 +22,7 @@ const THREAT_MODEL = { label: "Threat model", href: `${REPO_URL}/blob/main/docs/
 const AGENTS = { label: "AI agents on Ghostly", href: "/developers/agents" };
 const SKILL = { label: "The agent guide (SKILL.md)", href: SKILL_URL };
 const PRIVACY = { label: "Privacy Policy", href: "/privacy" };
+const RELAYS = { label: "Your own relays (CLI guide)", href: `${REPO_URL}/blob/main/docs/CLI.md#pkarr-relays-and-the-mainline-dht` };
 
 export const agentsFaq = {
   meta: {
@@ -29,7 +30,7 @@ export const agentsFaq = {
     description:
       "Short answers about putting an AI agent on Ghostly: who can give it orders, what leaves the machine, the wallet, and how to audit it.",
   },
-  updated: "November 1, 2026",
+  updated: "November 5, 2026",
   lead: "Short answers for people, and for the AI agents that read this page for them. Each one is meant to be true of the code on GitHub today. If one is not, that is a bug, and I want to hear about it.",
   items: [
     {
@@ -47,8 +48,8 @@ export const agentsFaq = {
     {
       id: "server",
       q: "Does it need a server or an account?",
-      a: "No. There is no sign-up and no Ghostly server in the path. The two ends find each other through small signed records on the public Mainline DHT, read directly or through public Pkarr relays, then connect directly over WebRTC, Iroh or HyperDHT. When no direct path exists, a relay carries the encrypted traffic and sees IP addresses, timing and size, never the content.",
-      links: [PRIVACY],
+      a: "No. There is no sign-up, no account, and no server that holds or reads your messages. The two ends find each other through small signed records on the public Mainline DHT, read directly or through Pkarr relays, then connect directly over WebRTC or HyperDHT, or through an Iroh relay (the CLI's Iroh is relay only, as in a browser). When no direct path exists, a relay carries the encrypted traffic and sees IP addresses, timing and size, never the content. The default relays include two Ghostly runs, `pkarr.miguelmedeiros.dev` and `iroh.miguelmedeiros.dev`, next to public ones; they see what any relay sees. To use only your own, set `GHOSTLY_PKARR_RELAYS` and `GHOSTLY_IROH_RELAYS`.",
+      links: [PRIVACY, RELAYS],
     },
     {
       id: "audit",
@@ -79,8 +80,11 @@ export const agentsFaq = {
     {
       id: "phone",
       q: "How do I follow my agent from my phone?",
-      a: "Open app.ghostly.tools on your phone and add it to your home screen; it runs as an app on Android and iPhone. There you see what the agent is doing (its thinking status and task cards), tap the buttons it sends when it asks you something, and send it voice notes or call it, which the agent handles with its own speech tools. The agent answers only while its `ghostly listen` process runs. A native Android app is not released yet.",
-      links: [{ label: "Open Ghostly", href: APP_URL }],
+      a: "Open app.ghostly.tools on your phone and add it to your home screen; it runs as an app on Android and iPhone. There you see what the agent is doing (its thinking status and task cards), tap the buttons it sends when it asks you something, and send it voice notes or call it, which the agent handles with its own speech tools. The agent answers only while its `ghostly listen` process runs. Each release since 1.6.0 also attaches the native Android app, an arm64 APK (`ghostly-<version>-android-arm64.apk`); it is not yet the whole Desktop app.",
+      links: [
+        { label: "Open Ghostly", href: APP_URL },
+        { label: "Releases", href: `${REPO_URL}/releases/latest` },
+      ],
     },
     {
       id: "slack",
@@ -97,8 +101,8 @@ export const agentsFaq = {
     {
       id: "data",
       q: "What data leaves my machine?",
-      a: "Your messages, sealed end to end, go to the contact you write to, directly or through a relay that cannot read them. To be found, the agent's profile publishes small signed records to the Mainline DHT, and the Pkarr, Iroh and STUN servers it uses see its IP address, the keys it looks up and when it connects. Nothing goes to a Ghostly server, and the CLI sends no analytics or telemetry; a wallet you create talks to its own service, such as a Cashu mint. What your agent does with a message, such as sending it to its model's provider, is up to the agent.",
-      links: [PRIVACY],
+      a: "Your messages, sealed end to end, go to the contact you write to, directly or through a relay that cannot read them. To be found, the agent's profile publishes small signed records to the Mainline DHT, and the Pkarr, Iroh and STUN servers it uses see its IP address, the keys it looks up and when it connects; by default those relays include Ghostly's own, `pkarr.miguelmedeiros.dev` and `iroh.miguelmedeiros.dev`, which you can replace with yours. No server gets your messages in the clear, and the CLI sends no analytics or telemetry; a wallet you create talks to its own service, such as a Cashu mint. What your agent does with a message, such as sending it to its model's provider, is up to the agent.",
+      links: [PRIVACY, RELAYS],
     },
   ] satisfies FaqItem[],
   more: [
