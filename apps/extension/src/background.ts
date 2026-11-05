@@ -1,4 +1,4 @@
-import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders } from "@ghostly/core";
+import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders, VIEWER_SERVICE_CSP, withViewerPolicy } from "@ghostly/core";
 import type { EngineStatus, HttpRequestReply, RuntimeMessage, ViewerPage } from "./messages";
 import { fromOwnPage } from "./shared/sender";
 import { parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
@@ -36,11 +36,15 @@ async function startEngine(): Promise<void> {
   await replaceEngine(status.activeId);
 }
 
+/** Peers started one after another for switches made while each one started, before the pages are told to retry. */
+const MAX_REPLACEMENTS = 20;
+
 /** `next`: the id of the profile the new peer runs as, when a switch is what replaces it. */
 async function replaceEngine(next?: string): Promise<void> {
   // A page that switched again while the next peer started (another tab's) waits on this start, and must get the
-  // profile it named, not the one before: that peer goes too. A few times at most, should the registry keep moving.
-  for (let attempt = 0; attempt < 3; attempt++) {
+  // profile it named, not the one before: that peer goes too, as often as the registry moved (only a click moves it).
+  // Should it never settle, the pages hear of it: none is told the peer runs while it runs another profile.
+  for (let attempt = 0; attempt < MAX_REPLACEMENTS; attempt++) {
     // A contact's app open as the profile before is no page of the next one's: its tab closes before that peer answers.
     await closeViewers();
     await clearNotices(next);
@@ -51,6 +55,7 @@ async function replaceEngine(next?: string): Promise<void> {
     if (status.profile === status.active) return;
     next = status.activeId;
   }
+  throw new Error("Switching profiles…");
 }
 
 /** A new peer in place of the running one, which stopped for good ("Clear all data"); after any start in progress. */
@@ -262,7 +267,11 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
 //
 // A tab serves the one service it was opened for. The app in it is a
 // contact's code: if it could reach another virtual origin, it would talk to
-// another contact's app as the user.
+// another contact's app as the user. Nor may it reach the person's own
+// services: every answer carries Ghostly's connection policy
+// (`withViewerPolicy`), which keeps it off plain http, whatever the browser's
+// own guard for local addresses allows. A top-level navigation is beyond any
+// policy, and once the tab leaves the virtual origin it is no viewer any more.
 //
 // The `debugger` permission reaches every tab, so its use is kept narrow here,
 // the only place in the extension that calls `chrome.debugger`:
@@ -299,13 +308,13 @@ interface ViewerBinding {
 /** The English page, for a request that came without one. */
 const ENGLISH_PAGE: ViewerPage = { lang: "en", dir: "ltr", unreachable: servicesEn.window.unreachable, failed: servicesEn.window.failed };
 
-/** What the page sent, if it is a page: short texts, a language tag and a direction; else English. */
+/** What the page sent, if it is a page: short texts, a language tag and a direction; else English. An app name only if short text. */
 function viewerPageOf(page: unknown): ViewerPage {
   const text = (value: unknown) => typeof value === "string" && value.length > 0 && value.length <= 500;
   if (typeof page !== "object" || page === null) return ENGLISH_PAGE;
-  const { lang, dir, unreachable, failed } = page as Record<string, unknown>;
+  const { lang, dir, unreachable, failed, app } = page as Record<string, unknown>;
   if (typeof lang !== "string" || !/^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(lang) || (dir !== "ltr" && dir !== "rtl") || !text(unreachable) || !text(failed)) return ENGLISH_PAGE;
-  return { lang, dir, unreachable: unreachable as string, failed: failed as string };
+  return { lang, dir, unreachable: unreachable as string, failed: failed as string, ...(text(app) ? { app: app as string } : {}) };
 }
 
 // Session storage outlives the service worker, which the browser stops whenever it is idle.
@@ -405,6 +414,7 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
     path: parsed.path,
     headers: Object.entries(paused.request.headers),
     bodyB64,
+    ...(binding.page.app ? { app: binding.page.app } : {}),
   };
 
   let reply: HttpRequestReply;
@@ -422,7 +432,7 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
     await devtools(tabId, "Fetch.fulfillRequest", {
       requestId: paused.requestId,
       responseCode: reply.status,
-      responseHeaders: viewerResponseHeaders(reply.headers).map(([name, value]) => ({ name, value })),
+      responseHeaders: withViewerPolicy(viewerResponseHeaders(reply.headers)).map(([name, value]) => ({ name, value })),
       body: reply.bodyB64,
     });
     return;
@@ -441,6 +451,7 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
       { name: "content-type", value: "text/html; charset=utf-8" },
       { name: "cache-control", value: "no-store" },
       { name: "x-ghostly-error", value: reply.code },
+      { name: "content-security-policy", value: VIEWER_SERVICE_CSP },
     ],
     body: toBase64(utf8Encode(html)),
   });

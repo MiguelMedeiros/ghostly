@@ -294,6 +294,9 @@ describe("the secret guard on cards", () => {
     await expect(callApi(ctx, "task.send", { chat: "Sala de Máquinas", card: { title: "Deploy", items: [{ state: "done", text: nsec }] } })).rejects.toMatchObject({ code: "confirm", details: { kind: "nsec" } });
     await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "Deploy" }, text: seed })).rejects.toMatchObject({ code: "confirm" });
     await expect(callApi(ctx, "routine.send", { chat: "Coordinator", card: { name: "Nightly", schedule: "every day 01:00" }, run: { result: "failed", summary: `key: ${nsec}` } })).rejects.toMatchObject({ code: "confirm", details: { kind: "nsec" } });
+    // A login to a node is named as one.
+    await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "Node", step: `__cookie__:${"01".repeat(32)}` } }))
+      .rejects.toMatchObject({ code: "confirm", details: { kind: "node-login" }, message: /looks like a secret \(a login to a node.*send it with --force/ });
     expect(node.sendMessage).not.toHaveBeenCalled();
     expect(node.sendGroupMessage).not.toHaveBeenCalled();
     await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Deploy", step: seed }, force: true })).resolves.toMatchObject({ task: "t1" });

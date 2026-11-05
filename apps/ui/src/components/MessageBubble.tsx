@@ -264,6 +264,21 @@ function SelectGlyph() {
   );
 }
 
+/**
+ * "Not confirmed" above a contact request's text until the requester's app confirms, in the chat, that it sent it
+ * (WISP 8xx § Accept): the chat is whoever made the request's invite, who may not be who asked.
+ */
+function UnconfirmedMark() {
+  const { t } = useI18n();
+  return (
+    <div data-testid="message-unconfirmed" title={t("chat.unconfirmed.hint")}
+      className="text-[12px] leading-[18px] italic text-text-primary/65 mb-[2px] px-[3px]">
+      <span>{t("chat.unconfirmed.label")}</span>
+      <span className="sr-only">{t("chat.unconfirmed.hint")}</span>
+    </div>
+  );
+}
+
 /** "Forwarded" above a forwarded message (WISP 400 § Forwards), "Forwarded many times" past a few hops. Never from whom. */
 function ForwardedMark({ hops }: { hops?: number }) {
   const { t } = useI18n();
@@ -1291,6 +1306,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         {/* In a group, the name is over the first message of a run only. */}
         {nickEl}
 
+        {message.unconfirmed && !isMe && <UnconfirmedMark />}
         <ForwardedMark hops={message.forwarded} />
         {quote && !pressed && <ReplyQuote quote={quote} />}
 

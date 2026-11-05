@@ -336,6 +336,21 @@ describe("the chat timeline's scrolling", () => {
     expect(topOf("peer_2")).toBe(-20);
   });
 
+  it("scrolled up with only a sliver of a row at the top, that row laying out at its real size moves none of the rows in view", () => {
+    renderApp(<Timeline rows={theirs(0, 20)} />);
+    // peer_2 shows its last pixel; peer_3 is the first row read.
+    scrollTo(149);
+    expect(topOf("peer_3")).toBe(1);
+    // peer_2 was drawn at the typical height until it came near the view (content-visibility): its real one is shorter.
+    heights.set("peer_2", 22);
+    resized();
+    expect(topOf("peer_3")).toBe(1);
+    // Taller, the same.
+    heights.set("peer_2", 120);
+    resized();
+    expect(topOf("peer_3")).toBe(1);
+  });
+
   it("at the bottom, a picture that loads keeps the view at the bottom", () => {
     renderApp(<Timeline rows={theirs(0, 10)} />);
     heights.set("peer_9", 300);
@@ -697,10 +712,11 @@ describe("the chat timeline's scrolling", () => {
   it("the message a chat was left on is gone: it opens at its bottom", () => {
     const rows = theirs(0, 20);
     const { rerender } = renderApp(<Timeline rows={rows} />);
+    // Left on peer_3, the first row that starts in the view.
     scrollTo(130);
     rerender(<Timeline chat="chat-2" rows={theirs(100, 12)} />);
-    rerender(<Timeline rows={rows.slice(3)} />);
-    expect(list().scrollTop).toBe(550);
+    rerender(<Timeline rows={rows.slice(4)} />);
+    expect(list().scrollTop).toBe(500);
   });
 
   it("a list taken off screen (a chat kept for a call) keeps its place", () => {

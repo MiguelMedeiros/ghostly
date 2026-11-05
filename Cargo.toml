@@ -1,6 +1,13 @@
 [workspace]
 members = ["apps/desktop", "native/transports"]
+# Vendored crates are dependencies, not members: not linted or tested as the workspace's own.
+exclude = ["apps/desktop/vendor"]
 resolver = "2"
+
+# tauri 2.12.2 with one change: a webview's IPC message can be refused by size before it is parsed
+# (apps/desktop/vendor/README.md). Same version as Cargo.lock's; drop it when upstream has a fix.
+[patch.crates-io]
+tauri = { path = "apps/desktop/vendor/tauri" }
 
 # Release builds (Desktop, and the Android app's native library): no symbol table, whole-program LTO, one codegen
 # unit. Measured on the 1.5.4 arm64 APK: libghostly_lib.so 54.3 MB -> 35.7 MB, APK 56.1 MB -> 37.5 MB, for a clean

@@ -60,7 +60,7 @@ describe("--type", () => {
         // An event's id starts with its type (`chat.held:${…}`); `type: "events.gap"` is written whole.
         for (const m of line.matchAll(/`([a-z]+(?:\.[a-z]+)+):\$\{|type: "([a-z]+(?:\.[a-z]+)+)"/g)) emitted.add(m[1] ?? m[2]);
         // A type chosen on the line that emits it, or held in a `type` first (`group.sent`, `message.received`).
-        if (/\.emit\(|const type = /.test(line)) for (const m of line.matchAll(/"([a-z]+(?:\.[a-z]+)+)"/g)) emitted.add(m[1]);
+        if (/\.emit(?:Live)?\(|const type = /.test(line)) for (const m of line.matchAll(/"([a-z]+(?:\.[a-z]+)+)"/g)) emitted.add(m[1]);
       }
     }
     // `${kind}.pinned`, kind "chat" or "group" (events.ts `pinned`).

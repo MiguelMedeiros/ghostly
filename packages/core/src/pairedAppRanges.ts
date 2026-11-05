@@ -191,8 +191,8 @@ export interface AppRangeTask {
   readonly offset: number;
   readonly length: number;
   /**
-   * False once the asker cancelled, the app closed or the session ended: send nothing more for it. A task the asker
-   * cancelled still holds its place among the app's `inFlight` until it is settled (`finish`, `fail` or `release`).
+   * False once the asker cancelled, the app closed or the session ended: send nothing more for it. It still holds its
+   * place among the app's `inFlight` until it is settled (`finish`, `fail` or `release`), unless this side's app closed.
    */
   readonly live: boolean;
 }
@@ -223,12 +223,15 @@ const slot = (app: string, request: number) => `${app}:${request}`;
  * most `inFlight` requests per app, keeps
  * the rest waiting, and puts each answer back together, in order, from the offset asked. Requests last one session
  * (`suspend` ends them); serves last until the app closes on either side (`closeApp`) or the session ends for good
- * (`reset`, which ends both).
+ * (`reset`, which ends both). A task still being read counts until it is settled.
  */
 export class AppRanges {
   private readonly serves = new Map<string, { app: string; file: string }>();
   private readonly serving = new Map<string, Serving>();
-  /** Tasks cancelled or unserved that the session is still reading or sending: each counts in its app's `inFlight` until settled. */
+  /**
+   * Tasks cancelled, unserved, or stopped by the contact's close or a session's end, that this side is still reading or
+   * sending: each counts in its app's `inFlight` until settled, across sessions.
+   */
   private readonly draining = new Set<Serving>();
   private readonly asking = new Map<string, Asking>();
   private readonly waiting = new Map<string, Asking[]>();
@@ -322,8 +325,8 @@ export class AppRanges {
   }
 
   /**
-   * Whether `task` is still this session's: serving, or cancelled and draining until it is settled. False once it was
-   * settled, or its app closed or the session ended, which free its place: an answer to it sends and frees nothing.
+   * Whether `task` still holds a place: serving, or no longer live and draining until it is settled. False once it was
+   * settled, or this side's app closed, which frees its place: an answer to it sends and frees nothing.
    */
   holds(task: AppRangeTask): boolean {
     return this.draining.has(task as Serving) || this.serving.get(slot(task.app, task.request)) === task;
@@ -368,14 +371,19 @@ export class AppRanges {
     ask.resolve({ bytes: concatBytes(...ask.chunks), size: frame.z });
   }
 
-  /** `app` closed on either side: its serves end, what it was sending stops and what it asked fails with `error`. */
-  closeApp(app: string, error: AppRangeReadError = "peer-closed"): void {
+  /**
+   * `app` closed on either side: its serves end, what it was sending stops and what it asked fails with `error`. A task
+   * this side is still reading keeps its place until it is settled, as a cancelled one does, so a contact that closes
+   * and opens its app again meets `busy`; only `stopped` (this side's app closed: nothing reads for it any more) frees
+   * them now.
+   */
+  closeApp(app: string, error: AppRangeReadError = "peer-closed", stopped = false): void {
     for (const [id, serve] of this.serves) if (serve.app === app) this.serves.delete(id);
     for (const key of [...this.sizes.keys()]) if (key.startsWith(`${app} `)) this.sizes.delete(key);
-    this.endRequests(app, error);
+    this.endRequests(app, error, stopped);
   }
 
-  /** The session ended: no serve id lasts into the next, and every request fails with `offline`. */
+  /** The session ended: no serve id lasts into the next, and every request fails with `offline`. Tasks still being read keep their places into the next. */
   reset(): void {
     this.sizes.clear();
     for (const app of new Set([...this.serves.values()].map(serve => serve.app))) this.closeApp(app, "offline");
@@ -391,10 +399,13 @@ export class AppRanges {
     for (const app of apps) this.endRequests(app, "offline");
   }
 
-  /** What `app` was sending stops and what it asked fails with `error`. */
-  private endRequests(app: string, error: AppRangeReadError): void {
-    for (const task of this.serving.values()) if (task.app === app) this.drop(task);
-    for (const task of this.draining) if (task.app === app) this.draining.delete(task);
+  /**
+   * What `app` was sending stops and what it asked fails with `error`. A task this side is still reading keeps its place
+   * until it is settled; only `stopped` (this side's app closed) frees them now.
+   */
+  private endRequests(app: string, error: AppRangeReadError, stopped = false): void {
+    for (const task of this.serving.values()) if (task.app === app) this.drop(task, !stopped);
+    if (stopped) for (const task of this.draining) if (task.app === app) this.draining.delete(task);
     for (const ask of this.waiting.get(app) ?? []) ask.reject(new Error(error));
     this.waiting.delete(app);
     for (const ask of this.asking.values()) if (ask.app === app) this.settle(ask, error);

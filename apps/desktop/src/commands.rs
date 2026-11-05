@@ -5,6 +5,7 @@ use tauri::State;
 use crate::bitcoind_rpc::{self, RpcError};
 use crate::crypto;
 use crate::diagnostics;
+use crate::hold_fetch::{self, HoldResponse};
 use crate::link_preview::{self, PreviewResponse};
 use crate::lnd::{self, LndRequest, LndResponse};
 use crate::local_access::{self, LocalAccess, Reason};
@@ -323,6 +324,12 @@ async fn ask_to_share<R: tauri::Runtime>(
 #[tauri::command]
 pub async fn link_preview_fetch(url: String, kind: String) -> Result<PreviewResponse, String> {
     link_preview::fetch(url, kind).await
+}
+
+/// A held item or manifest from the storage a contact chose (WISP 404): public addresses only, see `hold_fetch`.
+#[tauri::command]
+pub async fn hold_fetch(url: String) -> Result<HoldResponse, String> {
+    hold_fetch::fetch(url).await
 }
 
 /// Opens a web link from a message (a link preview, a location card) in the

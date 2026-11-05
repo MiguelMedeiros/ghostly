@@ -52,7 +52,7 @@ import { mediaDeniedText, preferredDevice } from "../lib/mediaDevices";
 import { useSettings } from "../contexts/SettingsContext";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
-import { messageSnippet, quoteFor, replyIndexer, replyTarget, sentReply, type NameOf } from "../lib/replies";
+import { heldOriginal, messageSnippet, quoteFor, replyIndexer, replyTarget, sentReply, type NameOf } from "../lib/replies";
 import { buttonsViews, compactPresses } from "../lib/buttons";
 import { ChatOnScreen } from "../lib/chatOnScreen";
 import { replySnippet, type RoutineCard } from "@ghostly/core";
@@ -226,7 +226,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     setNick,
   } = useChat(params);
   // The composer's Translate, in a chat that translates and has a language of its own.
-  const composerTranslation = useComposerTranslation(sessionId);
+  const { translation: composerTranslation, question: translateQuestion } = useComposerTranslation(sessionId);
 
   // Only what contacts may see: the join notice names nobody while this profile does not share its name.
   useEffect(() => {
@@ -368,8 +368,16 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // its card goes and the scene alone tells the rest. It comes back if the state says nobody is there any more.
   const invitePast = contactArrived(pairing.progress);
   const peerKey = params?.peerPubKeyB64;
-  /** The message the composer answers (WISP 400 § Replies): a paired chat's only. */
-  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  // Read without its older messages (just started, the engine's history not in yet): a quote's original may be among them.
+  const [readReplies] = useState(() => replyIndexer());
+  const quoteIndex = useMemo(() => readReplies(messages, !!(sessionId && loadShownSession(sessionId)?.older)), [messages, sessionId, readReplies]);
+  /**
+   * The message the composer answers (WISP 400 § Replies): a paired chat's only. Read as the chat has it now: the
+   * contact's edit shows in the bar, and a message deleted (here, or for everyone) lets the bar go, its words with it.
+   */
+  const [chosenReply, setReplyingTo] = useState<ChatMessage | null>(null);
+  const replyingTo = useMemo(() => (chosenReply && heldOriginal(chosenReply, quoteIndex)) ?? null, [chosenReply, quoteIndex]);
+  useEffect(() => { if (chosenReply && !replyingTo) setReplyingTo(null); }, [chosenReply, replyingTo]);
   /**
    * The reply as it is when something is sent, not as a render's closure saw it: a recording or a sheet of files
    * started earlier goes with the reply set now. The first thing sent after Reply carries it (a text, a voice note, a
@@ -377,10 +385,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
    */
   const replyingRef = useRef(replyingTo);
   replyingRef.current = replyingTo;
-  /** Sent with the reply: the bar goes, unless another message was chosen meanwhile. */
+  /** Sent with the reply: the bar goes, unless another message was chosen meanwhile (an edit is the same one). */
   const replied = useCallback((answering: ChatMessage) => {
-    if (replyingRef.current === answering) replyingRef.current = null;
-    setReplyingTo(current => current === answering ? null : current);
+    if (replyingRef.current?.id === answering.id) replyingRef.current = null;
+    setReplyingTo(current => current?.id === answering.id ? null : current);
   }, [setReplyingTo]);
   const sendFile = useCallback(
     async (source: File, voice?: VoiceMeta): Promise<string | null> => {
@@ -525,13 +533,15 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (!request) return;
     void openAppInChat(request.app, appHere, request.options).catch((e: unknown) => { setAppsError(appErrorText(e, t)); setShowApps(true); });
   }, [visible, appHere, openRequested, t]);
-  /** The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. */
-  const [editing, setEditing] = useState<ChatMessage | null>(null);
+  /**
+   * The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. Only while the chat has it: deleted
+   * meanwhile (from its own ⋮, or for everyone), the edit ends, its words with it, and the draft set aside comes back.
+   */
+  const [chosenEdit, setEditing] = useState<ChatMessage | null>(null);
+  const editing = chosenEdit && heldOriginal(chosenEdit, quoteIndex) ? chosenEdit : null;
+  useEffect(() => { if (chosenEdit && !editing) setEditing(null); }, [chosenEdit, editing]);
   // Opened from the Tasks board: on the card's message, once it is here.
   useJumpTo(visible, id => messages.some(m => m.id === id));
-  // Read without its older messages (just started, the engine's history not in yet): a quote's original may be among them.
-  const [readReplies] = useState(() => replyIndexer());
-  const quoteIndex = useMemo(() => readReplies(messages, !!(sessionId && loadShownSession(sessionId)?.older)), [messages, sessionId, readReplies]);
   // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
   // Both read only the questions with buttons and the replies, found in the rows that changed.
   const [pickButtonRow] = useState(() => rowPicker<ChatMessage, ChatMessage>(m => m.card?.kind === "buttons" || m.replyTo ? m : undefined));
@@ -1224,6 +1234,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         apps={appsOn && paired && chatLink ? { onOpen: () => setShowApps(true), hint: appsComposerHint(platform?.getPeer(params.peerPubKeyB64), shownName, t) ?? undefined } : undefined}
       />
       </div>
+      {/* Translate's question for a model that is not here yet. */}
+      {translateQuestion}
 
       {/* Incoming call notification */}
       {/* Incoming call notification: over whatever is on screen, since this chat may not be. */}

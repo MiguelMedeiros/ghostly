@@ -309,7 +309,7 @@ describe("viewer tabs", () => {
       postData: '{"name":"ç"}',
     });
     expect(answer.method).toBe("Fetch.fulfillRequest");
-    expect(answer.params).toMatchObject({ responseCode: 201, responseHeaders: [{ name: "content-type", value: "text/html" }] });
+    expect(answer.params).toMatchObject({ responseCode: 201, responseHeaders: [{ name: "content-type", value: "text/html" }, { name: "content-security-policy", value: expect.any(String) }] });
     expect(bodyText(answer.params)).toBe("<h1>atlas</h1>");
 
     const [request] = engine().requests;
@@ -318,6 +318,26 @@ describe("viewer tabs", () => {
     expect(request.init).toMatchObject({ method: "POST", path: "/api/items?limit=5", headers: [["Content-Type", "application/json"]] });
     expect(new TextDecoder().decode(request.init.body!)).toBe('{"name":"ç"}');
     expect(request.init.maxResponseBytes).toBe(32 * 1024 * 1024);
+  });
+
+  it("serves every answer with Ghostly's connection policy after the contact's own, the error page's too", async () => {
+    const policy = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
+    const policies = (params: Record<string, unknown>) =>
+      (params.responseHeaders as { name: string; value: string }[]).filter(({ name }) => name.toLowerCase() === "content-security-policy").map(({ value }) => value);
+    const tabId = await openViewer(world);
+    const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/`;
+
+    engineControl().respond = async () => okResponse("<h1>atlas</h1>", 200, [["content-type", "text/html"]]);
+    expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([policy]);
+
+    engineControl().respond = async () => okResponse("<h1>atlas</h1>", 200, [["Content-Security-Policy", "default-src * http: ws:"], ["content-security-policy", "img-src *"]]);
+    expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([`default-src * http: ws:, img-src *, ${policy}`]);
+
+    const offline = await httpError("offline", "offline");
+    engineControl().respond = async () => {
+      throw offline;
+    };
+    expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([policy]);
   });
 
   it("joins a body DevTools hands over in several pieces", async () => {
@@ -378,6 +398,7 @@ describe("viewer tabs", () => {
       { name: "Set-Cookie", value: "sid=1; Path=/" },
       { name: "Set-Cookie", value: "other=2; path=/; HttpOnly" },
       { name: "X-Domain", value: "Domain=kept" },
+      { name: "content-security-policy", value: expect.any(String) },
     ]);
   });
 
@@ -399,6 +420,7 @@ describe("viewer tabs", () => {
     expect(answer.params.responseHeaders).toEqual([
       { name: "Content-Type", value: "text/html" },
       { name: "X-Kept", value: "fine; really" },
+      { name: "content-security-policy", value: expect.any(String) },
     ]);
   });
 
@@ -473,6 +495,18 @@ describe("viewer tabs", () => {
     expect(downHtml).toContain(named(ar.window.notAnswering));
     expect(downHtml).not.toContain("The local service");
     expect(downHtml).toContain('<html lang="ar" dir="rtl">');
+  });
+
+  it("names an app the contact took back as it was named when the tab opened, not by its id", async () => {
+    const page = { lang: "en", dir: "ltr", unreachable: "a", failed: "b", app: "Atlas" };
+    const tabId = await openViewer(world, PEER, SERVICE, TAG, page);
+    // Taken back: the peer's state lists it no more, and their machine says so for it.
+    engineControl().links = [{ peerPubKeyZ32: PEER, peerServices: [] }];
+    engineControl().respond = async () =>
+      okResponse("This peer does not share that service.\n", 404, [["content-type", "text/plain; charset=utf-8"], ["x-ghostly-error", "unknown-service"]]);
+    const gone = await pauseRequest(world, tabId, { url: `https://${SERVICE}.${PEER}.${TAG}.invalid/` });
+    expect(gone.params).toMatchObject({ responseCode: 404 });
+    expect(bodyText(gone.params)).toContain(">Atlas is no longer shared with you.<");
   });
 
   it("stops intercepting once the tab leaves the virtual origin, and only then", async () => {

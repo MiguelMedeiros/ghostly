@@ -45,9 +45,9 @@ function start(): void {
     }
     if (type !== BRIDGE_PORT || !event.ports[0]) return;
     appPort = event.ports[0];
-    // One left by another contact's app (any chat, any profile) is not this one's to read.
-    dropSharedCookies(host.suffix);
-    void workers.register(WORKER_SCRIPT, { scope: "/", updateViaCache: "none" })
+    // One left by another contact's app (any chat, any profile) is not this one's to read: not framed while it stays.
+    void dropSharedCookies(host.suffix)
+      .then(() => workers.register(WORKER_SCRIPT, { scope: "/", updateViaCache: "none" }))
       .then(() => workers.ready)
       .then(() => {
         const frame = document.createElement("iframe");
