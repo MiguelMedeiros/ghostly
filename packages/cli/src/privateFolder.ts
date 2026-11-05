@@ -77,9 +77,14 @@ export function ownProfile(dir: string): void {
     if (!info.isDirectory() || !mine(info)) throw new CliError("refused", `${folder} is not a folder of this user's: ${what}`);
     if ((info.mode & 0o077) !== 0) chmodSync(folder, 0o700);
     for (const name of readdirSync(folder)) {
-      const path = join(folder, name), entry = lstatSync(path);
+      // Another command at once on the profile removes its lock's draft, start and stale files as it goes: one gone
+      // since the listing is passed over, not the command's error.
+      const path = join(folder, name), entry = lstatSync(path, { throwIfNoEntry: false });
+      if (!entry) continue;
       if (entry.isSymbolicLink() || !mine(entry)) throw new CliError("refused", `${path} is a link or another user's: ${what}`);
-      if (entry.isFile() && (entry.mode & 0o077) !== 0) chmodSync(path, 0o600);
+      if (entry.isFile() && (entry.mode & 0o077) !== 0) {
+        try { chmodSync(path, 0o600); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      }
     }
   }
 }

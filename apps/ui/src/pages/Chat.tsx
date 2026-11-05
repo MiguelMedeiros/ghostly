@@ -225,7 +225,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     setNick,
   } = useChat(params);
   // The composer's Translate, in a chat that translates and has a language of its own.
-  const composerTranslation = useComposerTranslation(sessionId);
+  const { translation: composerTranslation, question: translateQuestion } = useComposerTranslation(sessionId);
 
   // Only what contacts may see: the join notice names nobody while this profile does not share its name.
   useEffect(() => {
@@ -395,7 +395,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       // The platform says it in English, as sendFile throws it: the same words in the app's language.
       const refused = platform.fileTooLarge?.(peerKey, source.size);
       const tooLarge = platform.fileTooLarge ? refused && problemLine(refused, t)
-        : source.size > platform.maxFileBytes ? t("chat.fileTooLarge", { size: formatFileSize(platform.maxFileBytes) }) : null;
+        : source.size > platform.maxFileBytes ? t("chat.fileTooLarge", { size: formatFileSize(platform.maxFileBytes, t) }) : null;
       if (tooLarge) return tooLarge;
       // A file answers as a text does: the engine keeps the reply and sends it with the file (files/2, files/3, held).
       const answering = paired ? replyingRef.current : null;
@@ -1223,6 +1223,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         apps={appsOn && paired && chatLink ? { onOpen: () => setShowApps(true), hint: appsComposerHint(platform?.getPeer(params.peerPubKeyB64), shownName, t) ?? undefined } : undefined}
       />
       </div>
+      {/* Translate's question for a model that is not here yet. */}
+      {translateQuestion}
 
       {/* Incoming call notification */}
       {/* Incoming call notification: over whatever is on screen, since this chat may not be. */}

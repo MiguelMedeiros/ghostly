@@ -1,10 +1,10 @@
 import { createHash, generateKeyPairSync } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { appRevocationFor, readAppBundle, readAppRevocations, type AppManifest } from "@ghostly/core";
-import { verifyApp } from "../src/apps";
+import { verifyApp, writeWhole } from "../src/apps";
 import { CliError } from "../src/errors";
 import { error, ghostly, home, ok } from "./support/cli";
 // covers: apps.bundle, apps.store
@@ -336,6 +336,24 @@ describe("app revoke", () => {
   }, 60_000);
 });
 
+describe("writing a bundle, a revocation list or a store index", () => {
+  it("writes a new file by its temporary name, never into one that is there or where a link there points", () => {
+    if (process.platform === "win32") return;
+    const dir = tmp();
+    const other = join(tmp(), "someone-else.txt");
+    writeFileSync(other, "untouched");
+    const out = join(dir, "app.ghostlyapp");
+    const temporary = join(dir, `.app.ghostlyapp.${process.pid}.tmp`);
+    symlinkSync(other, temporary);
+    writeWhole(out, new TextEncoder().encode("bundle"));
+    expect(readFileSync(other, "utf8")).toBe("untouched");
+    expect(readFileSync(out, "utf8")).toBe("bundle");
+    expect(lstatSync(out).isSymbolicLink()).toBe(false);
+    expect(existsSync(temporary)).toBe(false);
+    expect(statSync(out).mode & 0o777).toBe(0o644 & ~process.umask());
+  });
+});
+
 describe("app verify", () => {
   it.each(bundleVectors.invalid.map((v) => [v.name, v] as const))("refuses %s with the vector's code", async (_, vector) => {
     const path = join(tmp(), "app.ghostlyapp");
@@ -493,5 +511,41 @@ describe("store sign", () => {
     expect(readFileSync(join(dir, "ghostly-store.sig"), "utf8")).toBe(heldSig);
     // Another store is another --out.
     expect(ok(await ghostly(["store", "sign", join(dir, "index.json"), "--key", other, "--out", tmp()]))).toMatchObject({ previous: null, keyCreated: false });
+  }, 60_000);
+
+  it("never signs over a ghostly-store.json or .sig there that does not read as a signed index, but for its own bytes", async () => {
+    const dir = tmp();
+    const keys = tmp();
+    const key = vectorKey(keys, "store");
+    const index = JSON.parse(vector.index) as Record<string, unknown> & { name: string };
+    const draft = join(dir, "index.json");
+    writeFileSync(draft, JSON.stringify(index));
+    ok(await ghostly(["store", "sign", draft, "--key", key]));
+    const held = readFileSync(join(dir, "ghostly-store.json"), "utf8");
+    const heldSig = readFileSync(join(dir, "ghostly-store.sig"), "utf8");
+    // Equivocation over a held index whose signature is damaged, or gone: refused, naming the file, and both stay.
+    writeFileSync(draft, JSON.stringify({ ...index, name: `${index.name} 2` }));
+    writeFileSync(join(dir, "ghostly-store.sig"), heldSig.slice(0, -5));
+    const damaged = error(await ghostly(["store", "sign", draft, "--key", key]), "refused", 1) as { message: string; details?: { reason?: string } };
+    expect(damaged.message).toContain(`${join(dir, "ghostly-store.json")} is there and is not a signed store index`);
+    expect(readFileSync(join(dir, "ghostly-store.json"), "utf8")).toBe(held);
+    expect(readFileSync(join(dir, "ghostly-store.sig"), "utf8")).toBe(heldSig.slice(0, -5));
+    rmSync(join(dir, "ghostly-store.sig"));
+    expect((error(await ghostly(["store", "sign", draft, "--key", key]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("bad-signature-statement");
+    expect(readFileSync(join(dir, "ghostly-store.json"), "utf8")).toBe(held);
+    expect(existsSync(join(dir, "ghostly-store.sig"))).toBe(false);
+    // A signature alone: refused too, and no key is made for it.
+    const lone = tmp();
+    writeFileSync(join(lone, "ghostly-store.sig"), heldSig);
+    const fresh = join(keys, "new.pem");
+    const { key: _key, ...keyless } = index;
+    writeFileSync(join(lone, "index.json"), JSON.stringify(keyless));
+    expect((error(await ghostly(["store", "sign", join(lone, "index.json"), "--key", fresh]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("missing-file");
+    expect(existsSync(fresh)).toBe(false);
+    expect(existsSync(join(lone, "ghostly-store.json"))).toBe(false);
+    // The index there is the one this signs (a run stopped before its signature was written): signed again.
+    writeFileSync(draft, JSON.stringify(index));
+    ok(await ghostly(["store", "sign", draft, "--key", key]));
+    expect(readFileSync(join(dir, "ghostly-store.sig"), "utf8")).toBe(heldSig);
   }, 60_000);
 });

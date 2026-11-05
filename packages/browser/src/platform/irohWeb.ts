@@ -1,4 +1,4 @@
-import { fromBase64Url, irohDescriptor, irohRelayUrl, type BoundChannel, type FrameChannel, type NativeBinding, type NativeEndpoint } from "@ghostly/core";
+import { dialableIrohRelay, fromBase64Url, irohDescriptor, irohRelayUrl, type BoundChannel, type FrameChannel, type NativeBinding, type NativeEndpoint } from "@ghostly/core";
 
 /**
  * Iroh (WISP 102) in a browser: the same QUIC/TLS session and binding as the
@@ -211,6 +211,7 @@ export async function createIrohWebEndpoint(seedB64: string, options: IrohWebOpt
     set onConnection(value) { handler = value; if (value) for (const bound of early.splice(0)) value(bound); },
     async connect(descriptor) {
       if (stopped) throw new Error("Iroh endpoint is stopped");
+      if (!dialableIrohRelay((descriptor as { relay?: unknown } | null)?.relay, relays)) throw new Error("The contact's Iroh relay is not one this device dials");
       const conn = await node.connect(irohDescriptor(descriptor, BROWSER_SPELLING), options.connectMs ?? 20_000);
       if (stopped) { conn.close(); throw new Error("Iroh endpoint is stopped"); }
       return bind(conn);

@@ -75,6 +75,26 @@ describe('OpenID Connect identity provider', () => {
     expect(bare.display).toBeUndefined();
     const unverified = await verifyIdentity([provider], s, { token: await token(key, s, { email: 'a@example.test' }) }, ctx(net.fetch));
     expect(unverified.display?.source).toMatch(/email not verified/);
+    expect(unverified.display?.name).toBeUndefined();
+  });
+
+  it('never names the account after an email the provider did not verify', async () => {
+    const key = await testKey('k1', 'ES256');
+    const provider = createOidcIdentityProvider({ providers: () => [test], jwks: new JwksCache(), host: () => undefined });
+    const s = statementFor(ISSUER);
+    const net = network(test, () => [key]);
+    const check = async (claims: Record<string, unknown>) => (await verifyIdentity([provider], s, { token: await token(key, s, claims) }, ctx(net.fetch))).display;
+    // Marked unverified, or not marked at all (Microsoft never sends the claim): the email is no name.
+    for (const email_verified of [false, 'false', undefined]) {
+      const display = await check({ email: 'ceo@bank.test', email_verified });
+      expect(display?.name).toBeUndefined();
+      expect(JSON.stringify(display)).not.toContain('ceo@bank.test');
+      expect(display?.source).toBe('Signed by Test issuer; email not verified by Test issuer');
+      // The name the provider signed is still the name, without the email beside it.
+      expect((await check({ email: 'ceo@bank.test', email_verified, name: 'Bank' }))?.name).toBe('Bank');
+    }
+    expect((await check({ email: 'ceo@bank.test', email_verified: true }))?.name).toBe('ceo@bank.test');
+    expect((await check({ email: 'ceo@bank.test', email_verified: 'true', name: 'Bank' }))?.name).toBe('Bank · ceo@bank.test');
   });
 
   it('is checked by a contact days later, but only for a sign-in that followed its statement', async () => {

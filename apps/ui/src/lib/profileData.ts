@@ -9,7 +9,7 @@ import { dropBreezDatabasesOf } from "@ghostly/browser/engine/paymentAdapters/pr
 import { activeProfileId, chosenProfileId, listProfiles, namespaceOf, prefixOf, registryKey, settingsKeyFor, unregisterProfile } from "./profiles";
 import { retryUnsaved, unreadUnder } from "./storage";
 import { clearPeek, peekFresh, storeKey as peekStoreKey } from "./profilePeek";
-import { verifyPassword } from "./settings";
+import { lockRetryAt, tryLockPassword, waitMessage } from "./lockAttempts";
 import { pushPlatform } from "./wakePush";
 import { linkedFilesDatabase } from "./apps/webFiles";
 
@@ -217,12 +217,18 @@ async function storedAvatar(dbName: string): Promise<string | undefined> {
 
 /**
  * Another profile's data is only read or removed from here with its lock password, when it has a lock:
- * being able to open one profile must not open the others.
+ * being able to open one profile must not open the others. Wrong passwords are paced as on that profile's lock screen.
  */
 export async function assertUnlocked(id: string, password?: string): Promise<void> {
   if (id === activeProfileId()) return;
   const hash = profileLock(id);
-  if (hash && !(password && (await verifyPassword(password, hash)))) throw new Error("Wrong lock password for that profile");
+  if (!hash) return;
+  const waiting = lockRetryAt(id);
+  if (waiting) throw new Error(waitMessage(waiting));
+  if (!password) throw new Error("Wrong lock password for that profile");
+  const tried = await tryLockPassword(id, password, hash);
+  if (tried.waited) throw new Error(waitMessage(tried.retryAt!));
+  if (!tried.ok) throw new Error("Wrong lock password for that profile");
 }
 
 /** Another window runs that profile: it is online itself. */

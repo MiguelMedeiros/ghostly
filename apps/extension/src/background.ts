@@ -97,6 +97,20 @@ async function waitForEngine(): Promise<EngineStatus> {
 }
 
 chrome.runtime.onStartup.addListener(() => void ensureEngine());
+
+/**
+ * The peer runs with no page open (it fetches mailbox texts that live minutes, answers contacts), so it comes back by
+ * itself: each start of the worker makes sure it runs, as Chrome fires neither `onStartup` nor `onInstalled` when the
+ * extension is turned on again, and an alarm wakes the worker once a minute, should the document go away with no tab
+ * open (its renderer crashed, or it was ended from Chrome's task manager). Set once: setting it again puts it off.
+ */
+const PEER_CHECK = "peer-check";
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === PEER_CHECK) void ensureEngine().catch(() => {});
+});
+void chrome.alarms.get(PEER_CHECK).then((alarm) => { if (!alarm) return chrome.alarms.create(PEER_CHECK, { periodInMinutes: 1 }); }).catch(() => {});
+void ensureEngine().catch(() => {});
+
 /**
  * A first install also opens the app in a tab: without it nothing showed, and a new user had to find the toolbar
  * button. The tab opens even when the peer does not start, so the page can say why. An update opens again the pages
@@ -361,7 +375,7 @@ async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string,
   await chrome.tabs.update(tab.id, { url });
 }
 
-function errorPage(page: ViewerPage, text: string): string {
+function errorPage(page: Pick<ViewerPage, "lang" | "dir">, text: string): string {
   const escape = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
   return `<!doctype html><html lang="${escape(page.lang)}" dir="${page.dir}"><meta charset="utf-8"><title>Ghostly</title>
 <body style="font:16px system-ui;background:#0b0b12;color:#d8d8e8;display:grid;place-items:center;height:100vh;margin:0">
@@ -425,18 +439,20 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
 
   const gone = UNREACHABLE_CODES.has(reply.code);
   // As on the Desktop: the person reads a sentence in their language, the engine's English goes to the console.
-  if (!gone) console.warn("Service request failed:", reply.code, reply.message);
+  if (!gone && !reply.shown) console.warn("Service request failed:", reply.code, reply.message);
   const { page } = binding;
+  // The contact's machine answered in place of their app: the peer said why, from this side (viewerWords.ts).
+  const html = reply.shown ? errorPage(reply.shown, reply.shown.text) : errorPage(page, gone ? page.unreachable : page.failed);
   await devtools(tabId, "Fetch.fulfillRequest", {
     requestId: paused.requestId,
-    responseCode: gone ? 503 : 502,
+    responseCode: reply.status ?? (gone ? 503 : 502),
     responseHeaders: [
       { name: "content-type", value: "text/html; charset=utf-8" },
       { name: "cache-control", value: "no-store" },
       { name: "x-ghostly-error", value: reply.code },
       { name: "content-security-policy", value: VIEWER_SERVICE_CSP },
     ],
-    body: toBase64(utf8Encode(errorPage(page, gone ? page.unreachable : page.failed))),
+    body: toBase64(utf8Encode(html)),
   });
 }
 

@@ -98,11 +98,11 @@ export function clientAddress (req, proxies = 0) {
  * and IPv6 brackets are dropped first: each connection has a new port, so keyed with it the limit never applies.
  */
 export function rateKey (address) {
-  address = /^\[([^\]]+)\](?::\d+)?$/.exec(address)?.[1] ?? /^(\d+\.\d+\.\d+\.\d+):\d+$/.exec(address)?.[1] ?? address
+  address = /^\[([^\]]+)\](?::\d+)?$/.exec(address)?.[1] ?? /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):\d{1,5}$/.exec(address)?.[1] ?? address
   if (!address.includes(':')) return address
   // The eight groups, whichever way the address is written: zone dropped, a dotted IPv4 tail as its two groups, `::`
   // filled with zeros. An IPv4-mapped one (`::ffff:192.0.2.1`, `::ffff:c000:201`, `0:0:0:0:0:ffff:...`) is its IPv4.
-  const [head, tail] = address.split('%')[0].replace(/(\d+)\.(\d+)\.(\d+)\.(\d+)$/, (dotted, ...octets) =>
+  const [head, tail] = address.split('%')[0].replace(/(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/, (dotted, ...octets) =>
     octets.slice(0, 4).every(octet => octet <= 255) ? `${(octets[0] * 256 + +octets[1]).toString(16)}:${(octets[2] * 256 + +octets[3]).toString(16)}` : dotted).split('::')
   const before = head ? head.split(':') : []
   const after = tail ? tail.split(':') : []

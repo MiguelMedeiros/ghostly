@@ -122,7 +122,7 @@ export function createAtprotoIdentityProvider(options: AtprotoIdentityOptions = 
       signer("atproto-oauth", "proof-records", "Your server (Bluesky or another PDS)",
         "Opens your server's login page. Ghostly asks only to create and delete its own proof records: never to post, read your messages or edit your profile."),
       signer("atproto-oauth-full", "full", "Your server, full access (older servers)",
-        "Only if your server says it cannot limit Ghostly's permission: it then asks for access to your whole account. Ghostly still only writes this one record, and gives the access back right away."),
+        "Asks for access to your whole account, for servers that cannot limit Ghostly's permission. Ghostly suggests it when your server refuses the narrower sign-in or the record's write. Ghostly still only writes this one record, and gives the access back right away."),
     ],
     parseEvidence(raw) {
       if (!raw || typeof raw !== "object" || Array.isArray(raw) || Object.keys(raw).length) throw new Error("Invalid AT Protocol evidence");

@@ -88,6 +88,24 @@ const RUNNER: &str = r#"<!doctype html>
   for (const name of Object.getOwnPropertyNames(window)) {
     if (/^(webkit)?RTC/.test(name)) { try { delete window[name]; } catch (e) {} }
   }
+  // WebKit lets `execCommand("copy")` write the system clipboard while a tap in the window is handled, whatever
+  // `javascript-can-access-clipboard` says (off here). An app has no clipboard permission (WISP 1200), so its
+  // clipboard commands answer false; editing commands work on. The web runner's wrapper (app-frame.html), the same
+  // text: it asks nothing the app can change, which may have changed every prototype by the time it calls.
+  const execCommand = Document.prototype.execCommand;
+  let commands = execCommand;
+  if (typeof execCommand === "function") {
+    const apply = Reflect.apply;
+    const lower = String.prototype.toLowerCase;
+    commands = function (command, showUI, value) {
+      if (arguments.length === 0) return apply(execCommand, this, []);
+      const name = typeof command === "string" ? command : "" + command;
+      const named = apply(lower, name, []);
+      if (named === "copy" || named === "cut" || named === "paste") return false;
+      return apply(execCommand, this, arguments.length > 2 ? [name, showUI, value] : arguments.length > 1 ? [name, showUI] : [name]);
+    };
+    Object.defineProperty(Document.prototype, "execCommand", { configurable: true, writable: true, value: commands });
+  }
   const stop = (why) => {
     document.documentElement.textContent = "This app cannot run here.";
     document.documentElement.setAttribute("data-ghostly-refused", why);
@@ -96,6 +114,7 @@ const RUNNER: &str = r#"<!doctype html>
   const label = internals && internals.metadata && internals.metadata.currentWindow && internals.metadata.currentWindow.label;
   if (self.origin !== "null" || !internals || typeof label !== "string" || !/^app-[A-Za-z0-9]+$/.test(label)) return stop("origin");
   if (Object.getOwnPropertyNames(window).some((name) => /^(webkit)?RTC/.test(name))) return stop("webrtc");
+  if (document.execCommand !== commands) return stop("clipboard");
 
   const invoke = internals.invoke.bind(internals);
   const clockNow = Date.now;
@@ -2424,6 +2443,35 @@ mod tests {
             assert!(web.contains(call), "web: {call}");
         }
         assert!(RUNNER.contains("delete window[name]"));
+    }
+
+    /// Both runners answer false to an app's clipboard commands (`execCommand` copy, cut, paste) with the very same
+    /// wrapper, installed before the app's code is written, and refuse to run when it is not in place.
+    #[test]
+    fn the_runners_refuse_the_clipboard_commands_alike() {
+        let web = include_str!("../../web/public/app-frame.html");
+        let begin = "const execCommand = Document.prototype.execCommand;";
+        let finish = "value: commands });\n  }\n";
+        let wrapper = |runner: &'static str| {
+            let start = runner.find(begin).unwrap();
+            let end = start + runner[start..].find(finish).unwrap();
+            (start, &runner[start..end])
+        };
+        let (at, desktop) = wrapper(RUNNER);
+        assert_eq!(desktop, wrapper(web).1);
+        let refused =
+            r#"if (named === "copy" || named === "cut" || named === "paste") return false;"#;
+        assert!(desktop.contains(refused));
+        let check = r#"if (document.execCommand !== commands) return stop("clipboard");"#;
+        let check = RUNNER.find(check).unwrap();
+        assert!(at < check);
+        for later in [
+            "const invoke = ",
+            "document.open()",
+            "document.write(entry)",
+        ] {
+            assert!(check < RUNNER.find(later).unwrap(), "{later}");
+        }
     }
 
     /// Both runners say `activity` for the person's trusted taps and keys, so the lock screen counts input in an app,

@@ -47,6 +47,28 @@ describe("a row sealed and opened", () => {
     expect(await openRow(STORES.melts, sealed)).toEqual(melt);
   });
 
+  it("a Cashu review's swap and token, a paid quote's outputs and a kept token are bound to their own record", async () => {
+    const intent = { review: { id: "r1", state: "pending" }, prepared: { mint: "m", swap: { inputs: [{ secret: "review input #1!" }] }, token: "cashuB review token #1!" } };
+    const sealed = await sealRow(STORES.intents, intent);
+    expect(isSealedField(sealed.prepared.swap)).toBe(true);
+    expect(isSealedField(sealed.prepared.token)).toBe(true);
+    expect(sealed.prepared.mint).toBe("m");
+    expect(JSON.stringify(sealed)).not.toContain("#1!");
+    expect(await openRow(STORES.intents, sealed)).toEqual(intent);
+    await expect(openRow(STORES.intents, { ...sealed, review: { id: "r2", state: "pending" } })).rejects.toThrow("could not be opened");
+
+    const quote = { quote: "q1", mint: "m", amount: 1, invoice: "lnbc1", createdAt: 1, expiresAt: null, outputs: [{ secret: "quote output #1!" }] };
+    const sealedQuote = await sealRow(STORES.quotes, quote);
+    expect(JSON.stringify(sealedQuote)).not.toContain("#1!");
+    expect(await openRow(STORES.quotes, sealedQuote)).toEqual(quote);
+    await expect(openRow(STORES.quotes, { ...sealedQuote, quote: "q2" })).rejects.toThrow("could not be opened");
+
+    const payment = { id: "p1", linkId: "l1", token: "cashuB kept token #1!" };
+    const sealedPayment = await sealRow(STORES.payments, payment);
+    expect(JSON.stringify(sealedPayment)).not.toContain("#1!");
+    expect(await openRow(STORES.payments, sealedPayment)).toEqual(payment);
+  });
+
   it("a proof is kept under a hash of its secret, the secret sealed beside it, and is found by its secret", async () => {
     const sealed = await sealRow(STORES.proofs, proof);
     expect(sealed.secret).toBe(proofKey(proof.secret));
@@ -86,6 +108,8 @@ describe("what the reader takes", () => {
 
   it("until the migration ends, plain and version 1 values in a sealed place are read", async () => {
     expect(await openRow(STORES.links, link)).toEqual(link);
+    const intent = { review: { id: "r1" }, prepared: { mint: "m", swap: { inputs: [] }, token: "cashuB" } };
+    expect(await openRow(STORES.intents, intent), "a review written before the profile was encrypted").toEqual(intent);
     dropDataKey();
     const v1 = await sealSecret("seed-1", at);
     setDataKey((await createProfileKey("throwaway passphrase 1", "")).key);

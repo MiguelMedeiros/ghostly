@@ -22,6 +22,8 @@
     "unreadCount": "{{count}} non lus dans {{name}}",
     "unreadOne": "1 non lu dans {{name}}"
   },
+  "foundCount": "{{count}} discussions trouvées",
+  "foundOne": "1 discussion trouvée",
   "group": {
     "adminAnswered": "L'app de l'admin a répondu…",
     "answerFailed": "Cela n'a pas abouti. Réessayez.",
@@ -76,6 +78,7 @@
     "unread_one": "{{count}} message non lu",
     "unread_other": "{{count}} messages non lus"
   },
+  "searchLabel": "Rechercher des discussions",
   "searchPlaceholder": "Rechercher...",
   "settings": "Réglages",
   "sharedIdentity": "A partagé une identité",

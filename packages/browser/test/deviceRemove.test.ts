@@ -378,7 +378,7 @@ describe("who a moving device believes", () => {
     expect(checkSetUpdate({ ...bareRecord(), turn: N }, frame, 1), "the same release, newer than the stored turn").toMatchObject({ kind: "accept" });
   });
 
-  it("goes to removed on a valid tombstone that no longer lists it, whoever hands it over", async () => {
+  it("goes to removed on a valid tombstone that no longer lists it, in a frame the device it believes signed", async () => {
     const { record } = await setOf(network);
     const desktop = memory(record(0, "active")), tablet = memory(record(2, "standby"));
     await moveSet(ports(desktop, network), { remove: slot(2).key });
@@ -386,6 +386,40 @@ describe("who a moving device believes", () => {
     expect(checkSetUpdate(tablet.record, frame, 1)).toMatchObject({ kind: "refuse", why: "removed" });
     await deliver(tablet, frame);
     expect(tablet.record.state).toBe("removed");
+  });
+
+  it("a device that was off is not removed by the removed device's tombstone: it waits, and takes the remover's frame", async () => {
+    const { record } = await setOf(network);
+    const desktop = memory(record(0, "active")), phone = memory(record(1, "standby"));
+    await moveSet(ports(desktop, network), { remove: slot(2).key });
+    // The removed tablet still holds the old secret: a tombstone of its own, listing the desktop and itself, counts there.
+    const rTomb = await signTombstone(oldKeys, 2, [{ key: signers[0].publicKey, name: "Desktop" }, null, { key: signers[2].publicKey, name: "Tablet" }, null], sign(2), { instance: new Uint8Array(8) });
+    network.of(oldKeys.identity.pubKeyZ32).seed(rTomb);
+    expect(await keeperOf(phone, network, 1).check(false)).toMatchObject({ kind: "gated", state: "moving" });
+    expect(phone.record.reenroll).toBeUndefined();
+    // The tablet's frame for it (its tombstone, signed by itself) ends nothing either.
+    const forged = await setUpdateFrame(oldKeys.address, { d: label(0xee), set: [slot(0), slot(2)].map((s) => ({ key: fromBase64Url(s.key), name: s.name })), turn: N + 9, rev: 0, tomb: rTomb }, signers[2]);
+    expect(checkSetUpdate(phone.record, forged, 1)).toMatchObject({ kind: "refuse", why: "signer" });
+    expect(await deliver(phone, forged)).toBe(false);
+    expect(phone.record.state).toBe("moving");
+    // The desktop's frame: accepted.
+    expect(await deliver(phone, pendingFrames(desktop.record)[0].frame)).toBe(true);
+    expect(phone.record).toMatchObject({ state: "standby", d: desktop.record.d, activeSlot: 0 });
+  });
+
+  it("the device that was active, closed by another slot's tombstone, is not ended or sent to enroll anew by that slot's frame", async () => {
+    const { record } = await setOf(network);
+    // The phone, a stolen standby, closes the address with a tombstone listing itself, and sends the desktop a frame.
+    const desktop = memory({ ...record(0, "active"), verifier: { v: 1, setup: "c2V0dXA", record: "cmVjb3Jk" } });
+    const pTomb = await signTombstone(oldKeys, 1, [null, { key: signers[1].publicKey, name: "Phone" }, null, null], sign(1));
+    network.of(oldKeys.identity.pubKeyZ32).seed(pTomb);
+    expect(await keeperOf(desktop, network, 0).check(true)).toMatchObject({ kind: "gated", state: "moving" });
+    expect(desktop.record).toMatchObject({ state: "moving", copy: "frozen" });
+    const frame = await setUpdateFrame(oldKeys.address, { d: label(0xee), set: [null, { key: signers[1].publicKey, name: "Phone" }], turn: N + 9, rev: 0, tomb: pTomb }, signers[1]);
+    expect(checkSetUpdate(desktop.record, frame, 1)).toEqual({ kind: "refuse", why: "signer", reenroll: false });
+    expect(await deliver(desktop, frame)).toBe(false);
+    expect(desktop.record.state).toBe("moving");
+    expect(desktop.record.reenroll).toBeUndefined();
   });
 
   it("a replaced device takes the frame through moving, and keeps its frozen copy", async () => {

@@ -496,12 +496,28 @@ export class IdentityProofs {
     this.timers.push(timer);
   }
 
+  /** Every engine state builds these: each chat's ledger is read once for all the proofs, not once per proof. */
   views(): IdentityProofView[] {
-    return this.proofs.map(p => this.viewOf(p));
+    const sharedWith = this.sharedWith();
+    return this.proofs.map(p => this.viewOf(p, sharedWith));
   }
-  private viewOf(p: StoredIdentityProof): IdentityProofView {
+  /** The subjects of the profile's own proofs of one provider, without building their views (no chat's ledger is read). */
+  subjects(provider: string): string[] {
+    return this.proofs.filter(p => p.binding.provider === provider).map(p => p.binding.subject);
+  }
+  /** By proof id, the chats it is shared in (not withdrawn, nor rejected by the contact). */
+  private sharedWith(): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const l of this.host.linkIds()) {
+      const ids = new Set<string>();
+      for (const s of this.host.ledger(l)?.shared ?? []) if (s.status !== "withdrawn" && s.status !== "withdrawal-pending" && s.status !== "rejected") ids.add(s.id);
+      for (const id of ids) counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    return counts;
+  }
+  private viewOf(p: StoredIdentityProof, shared = this.sharedWith()): IdentityProofView {
     const id = identityStatement(p.binding).id;
-    const sharedWith = this.host.linkIds().filter(l => this.host.ledger(l)?.shared.some(s => s.id === id && s.status !== "withdrawn" && s.status !== "withdrawal-pending" && s.status !== "rejected")).length;
+    const sharedWith = shared.get(id) ?? 0;
     const publicUri = this.publicUri(p);
     const expiresAt = Math.min(p.binding.expiresAt, p.verified.expiresAt ?? Infinity);
     const publicProfile = expiresAt > now() ? this.host.publicProfile?.(p.binding.provider, p.verified.subject) : undefined;

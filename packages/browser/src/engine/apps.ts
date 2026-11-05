@@ -669,6 +669,11 @@ export class Apps {
 
   private now(): number { return (this.host.now ?? Date.now)(); }
   private nowS(): number { return Math.floor(this.now() / 1000); }
+  /** Checked less than `ms` ago. A mark ahead of the clock (the clock went back since) is not recent: it would stay so until the clock caught up. */
+  private checkedWithin(at: number | undefined, ms: number): boolean {
+    const age = at === undefined ? -1 : this.now() - at;
+    return age >= 0 && age < ms;
+  }
 
   // ---------- life ----------
 
@@ -704,7 +709,7 @@ export class Apps {
         if (this.stopped) return;
         if (this.host.online()) {
           const apps = await this.installed();
-          const fresh = atStart && apps.length > 0 && apps.every((a) => a.checkedAt !== undefined && this.now() - a.checkedAt < APP_CHECK_TIMINGS.freshMs);
+          const fresh = atStart && apps.length > 0 && apps.every((a) => this.checkedWithin(a.checkedAt, APP_CHECK_TIMINGS.freshMs));
           // No app installed: no request, to a store or anywhere (WISP 1200 § Updates and rollback, "When").
           if (apps.length && !fresh) await this.checkUpdates().catch(() => {});
         }
@@ -1796,7 +1801,7 @@ export class Apps {
     app = { ...app, ...(merged.size && { revocations: [...merged.values()] }), checkedAt: this.now() };
     // Nothing new but when it was checked, marked recently: not written (each Apps page visit checks, and a write drops
     // the record held for the app's calls). The mark is kept fresh enough for a reload to skip the check at start.
-    const idle = stored.checkedAt !== undefined && this.now() - stored.checkedAt < APP_CHECK_TIMINGS.freshMs / 2 && sameExceptChecked(app, stored);
+    const idle = this.checkedWithin(stored.checkedAt, APP_CHECK_TIMINGS.freshMs / 2) && sameExceptChecked(app, stored);
     const put = idle ? sameRecord(current, stored) : await this.putAppIfUnchanged(app, stored);
     for (const files of [...dropped, ...(!put && wrote ? [wrote] : [])]) await this.removeUnusedBundle(app.ref, files.bytes, files.digest);
     if (!put) return null;

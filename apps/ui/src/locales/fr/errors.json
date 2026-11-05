@@ -83,6 +83,8 @@
     "fedimintNotInvite": "Ce n’est pas un code d’invitation Fedimint : il commence par fed1",
     "fedimintRealOnTestnet": "Cette fédération détient du vrai bitcoin",
     "fedimintRealOnTestnetNext": "Ajoutez-la à un portefeuille Fedimint Mainnet.",
+    "fedimintRedeemUnheard": "La fédération n’a pas répondu au sujet de ces notes",
+    "fedimintRedeemUnheardNext": "Si elles n’apparaissent pas bientôt dans votre solde, collez-les à nouveau.",
     "fedimintTestOnMainnet": "Cette fédération est sur {{chain}}, un réseau de test",
     "fedimintTestOnMainnetNext": "Ajoutez-la à un portefeuille Fedimint Testnet.",
     "feeAboveLimit": "Les frais dépassent votre limite",
@@ -601,6 +603,16 @@
     "useHttps": "Utilisez une adresse de relais https:// : {{address}}",
     "useWss": "Utilisez une adresse de relais wss://"
   },
+  "services": {
+    "addressNext": "Utilisez une adresse de cet ordinateur, comme localhost:3400.",
+    "badAddress": "Cette adresse est illisible",
+    "name": "Donnez un nom au service",
+    "noCredentials": "L’adresse ne peut pas contenir de nom d’utilisateur ni de mot de passe",
+    "noQuery": "L’adresse ne peut pas contenir de partie avec ? ou #",
+    "portZero": "Aucune app web n’écoute sur le port 0",
+    "thisComputer": "Seuls les services de cet ordinateur peuvent être partagés",
+    "webOnly": "Seules les adresses web (http ou https) peuvent être partagées"
+  },
   "startAgain": "Recommencer",
   "transport": {
     "adapterFailed": "Démarrage impossible. Rouvrez cette discussion pour réessayer.",
@@ -624,6 +636,8 @@
     "hyperdhtUnreachable": "Relais HyperDHT injoignable",
     "hyperdhtUnreachableNext": "Vérifiez son adresse dans Réglages → Réseau. Il peut aussi refuser cette app : demandez à qui le gère.",
     "irohStopped": "Point d'accès Iroh arrêté",
+    "irohUnreachable": "Relais Iroh injoignable",
+    "irohUnreachableNext": "Vérifiez les relais Iroh dans Réglages, Réseau, ou utilisez un autre transport.",
     "listenerGiven": "En pause pour une discussion plus active. Ouvrez celle-ci pour reprendre.",
     "listenerReleased": "En pause pour une autre discussion. Ouvrez celle-ci pour reprendre.",
     "noAddress": "L'adresse de votre contact pour ce transport n'est pas encore connue",

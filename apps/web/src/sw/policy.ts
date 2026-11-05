@@ -364,7 +364,7 @@ export interface NoticeDevice {
   active?: string;
   /** The tokens this device gave its other devices, each with that device's name. */
   tokens: Record<string, string>;
-  /** The chats' tokens the active device still hands out; a token not among them shows nothing. Absent: any. */
+  /** The chats' tokens the active device still hands out; a token not among them shows no notice of its own. Absent: any. */
   allowed?: string[];
 }
 
@@ -390,7 +390,7 @@ const fill = (template: string, device: string) => template.split("{device}").jo
  *   "Call for you. Active on <device>.", quietly, and a tap opens the standby screen. Once the active device said which
  *   chats' tokens it hands out (`allowed`), only those show: a chat deleted or muted there stays quiet here. Before it
  *   said, any well-formed wake-up shows (a chat made on the active device has a token this one never knew), except one
- *   this device knows for a muted chat. A removed device shows nothing.
+ *   this device knows for a muted chat. A removed device shows no notice of its own. In every such case the worker shows `quietWakeNotice`.
  * - **The active device, or a profile on one device**: today's notices (`wakeNotice`).
  */
 export function pushNotice(
@@ -422,9 +422,18 @@ export function pushNotice(
 }
 
 /**
- * What a wake-up shows (WISP 401 § Wake-up push): "New message" for a chat the token names, or nothing at all
- * for a token this profile no longer knows (a contact it stopped sharing with), for a muted chat, and while the
- * app is on screen (it is live, and the message arrives by itself). Never a sender or any text of the message.
+ * What a push with nothing of its own to show shows (WISP 401 § Wake-up push): the app's name alone, quietly, one per
+ * profile, replaced in place. Browsers end a subscription whose pushes show nothing, so the worker never shows nothing.
+ */
+export function quietWakeNotice(profile: string, title?: string): Omit<PushNotice, "quiet"> {
+  return { title: title || "Ghostly", body: "", tag: `quiet:${profile}`, call: false, data: { path: "/", profile } };
+}
+
+/**
+ * What a wake-up shows (WISP 401 § Wake-up push): "New message" for a chat the token names, or no notice of its own
+ * (the worker shows `quietWakeNotice`) for a token this profile no longer knows (a contact it stopped sharing with),
+ * for a muted chat, and while the app is on screen (it is live, and the message arrives by itself). Never a sender or
+ * any text of the message.
  */
 export function wakeNotice(found: { entry: { path: string; mutedUntil?: number | "forever" }; text: { title: string; body: string; call?: string } } | undefined, options: { now: number; appVisible: boolean; profile: string; kind?: "message" | "call" }):
   { title: string; body: string; tag: string; call: boolean; data: { path: string; profile: string } } | null {

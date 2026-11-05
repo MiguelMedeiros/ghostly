@@ -22,6 +22,8 @@
     "unreadCount": "{{count}} não lidas em {{name}}",
     "unreadOne": "1 não lida em {{name}}"
   },
+  "foundCount": "{{count}} conversas encontradas",
+  "foundOne": "1 conversa encontrada",
   "group": {
     "adminAnswered": "O app do admin respondeu…",
     "answerFailed": "Não deu certo. Tente de novo.",
@@ -76,6 +78,7 @@
     "unread_one": "{{count}} mensagem não lida",
     "unread_other": "{{count}} mensagens não lidas"
   },
+  "searchLabel": "Buscar conversas",
   "searchPlaceholder": "Buscar conversas...",
   "settings": "Ajustes",
   "sharedIdentity": "Compartilhou uma identidade",

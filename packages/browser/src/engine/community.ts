@@ -562,6 +562,8 @@ export class Communities {
       // Removed (or its admission lost): let in again by whoever is at the door, with the same key at the door it
       // knows, else with a fresh one, as any joiner; the history here stays.
       if (s.status === "removed" || s.status === "lost") { await this.startJoining(link, door ? s.state.seedB64 : dialedKey(link), this.now()); return link.g; }
+      // Anything else (forked): opening a link never deletes what is kept. Refused as a private group refuses it.
+      throw new Error("You are out of this group and its history is still here. Delete it from this device to join with a link.");
     }
     if (existing) await this.forget(link.g);
     await this.startJoining(link, dialedKey(link), this.now());
@@ -1105,6 +1107,8 @@ export class Communities {
       const ready = [...this.host.edges(groupId)].filter(([key, id]) => this.host.linkReady(id, 2) && !s.wasRemoved(key)).map(([key]) => key);
       for (const key of ready.slice(0, 3)) s.catchUp(key);
     }
+    // A text of mine an app killed mid-send saved but did not store or say (WISP 903 § Messages).
+    await s.resume().catch(() => {});
     // Something I said with no edge up may be sealed under a commit I took for the newest: said again once caught up.
     await s.reseal().catch(() => {});
     await this.reconcile(groupId, live, now);
