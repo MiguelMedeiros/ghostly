@@ -361,6 +361,202 @@
     "sourceAsked": "{{time}}に {{from}} に問い合わせました。問い合わせにより、このサーバーにこの端末の IP アドレスが伝わりました。",
     "sourceFound": "{{time}}に {{from}} から読み込みました。アカウント自身の記述で、証明の一部ではありません。問い合わせにより、このサーバーにこの端末の IP アドレスが伝わりました。"
   },
+  "providers": {
+    "atproto": {
+      "progress": {
+        "approve": "開いたウィンドウで {{server}} で承認してください…",
+        "deleting": "{{server}} のレコードを削除しています…",
+        "lookingUp": "{{account}} を検索しています…",
+        "publishing": "{{server}} に証明を公開しています…"
+      }
+    },
+    "bitcoin": {
+      "paste": {
+        "label": "署名",
+        "placeholder": "smp… (BIP-322) またはウォレットが表示する base64 の署名"
+      },
+      "scripts": {
+        "p2pkh": "レガシー (1…)",
+        "p2sh": "ネスト SegWit (3…)",
+        "p2tr": "Taproot (bc1p…)",
+        "p2wpkh": "ネイティブ SegWit (bc1q…)",
+        "p2wsh": "スクリプト / マルチシグ (P2WSH)",
+        "witness-unknown": "将来の SegWit バージョン"
+      },
+      "steps": {
+        "address": "このアドレスで:",
+        "cannotSign": "{{wallet}} は {{type}} アドレスに Ghostly が受け付ける形式で署名できません。BIP-322 で署名できるウォレットを使ってください。",
+        "cannotSignTry": "{{wallet}} は {{type}} アドレスに Ghostly が受け付ける形式で署名できません。{{others}}、または BIP-322 で署名できる別のウォレットを試してください。",
+        "command": "コマンドライン:",
+        "commandTestnet": "コマンドライン (-signet、-testnet4、-regtest のいずれかを付けてください):",
+        "either": "{{a}} または {{b}}",
+        "limits": "これはこのアドレスで署名できることを示します。残高、過去の支払い、支払う意思は示しません。",
+        "statement": "この宣言を、改行を加えずに 1 行のまま、そのとおりに署名してください:",
+        "testnet": "テストネットワーク: {{how}}"
+      },
+      "wallets": {
+        "bitcoin-core": {
+          "step1": "Bitcoin Core はレガシー形式でのみ、レガシーアドレス (メインネットでは 1…、テストネットワークでは m… または n…) のメッセージに署名します。Receive タブで Base58 (Legacy) タイプを選ぶか、`getnewaddress \"\" legacy` で作成してください。",
+          "step2": "GUI: File → Sign message… を開き、アドレスと宣言を貼り付け、Sign Message を押して署名をコピーします。",
+          "step3": "コマンドライン: bitcoin-cli signmessage \"<アドレス>\" '<宣言>' (シングルクォートで宣言のダブルクォートがそのまま保たれます)。",
+          "testnet": "-signet、-testnet4、-regtest のいずれかを付けて起動し、bitcoin-cli にも同じオプションを付けます。"
+        },
+        "coldcard": {
+          "note": "古いファームウェアはレガシー形式でのみ署名し (Ghostly はレガシーの 1… アドレスでそれを受け付けます)、メッセージの長さと文字に制限があります。",
+          "step1": "お使いのファームウェア用の COLDCARD の BIP-322 ガイドに従ってください。機種により MicroSD、NFC、QR のいずれかで、そのアドレスの 1 つで宣言に署名します。",
+          "step2": "Ghostly が表示するとおりの宣言と、証明するアドレスを渡します。",
+          "step3": "作成された署名を Ghostly に貼り付けます。"
+        },
+        "electrum": {
+          "step1": "Electrum はレガシー形式で署名し、Ghostly はそれをレガシーの 1… アドレス (テストネットワークでは m…/n…) でのみ受け付けます。既定の bc1… ウォレットでは別のウォレットが必要です。",
+          "step2": "Addresses タブ (View → Show Addresses) でアドレスを右クリック → Sign/verify message を選びます。",
+          "step3": "Message に宣言を貼り付けて Sign をクリックし、Signature をコピーして Ghostly に貼り付けます。",
+          "testnet": "Electrum を --testnet または --signet で起動します。"
+        },
+        "other": {
+          "step1": "ウォレットで「メッセージに署名」(Sign message) を探してください。形式を聞かれたら BIP-322 を選びます。",
+          "step2": "証明するアドレスで、Ghostly が表示するとおりの宣言に署名します。",
+          "step3": "ネスト SegWit アドレス (3…、テストネットワークでは 2…) には完全な BIP-322 署名 (ful… で始まります) が必要です。",
+          "step4": "署名を Ghostly に貼り付けます。一致しなければすぐに知らせます。"
+        },
+        "sparrow": {
+          "note": "Sparrow の BIP322 (Simple) はソフトウェアウォレット専用です。接続したハードウェアウォレットは Standard (Electrum) 形式で署名し、Ghostly はそれをレガシーの 1… アドレスでのみ受け付けます。",
+          "step1": "アドレスを持つウォレットを開き、Tools → Sign/Verify Message を選びます。",
+          "step2": "Address: 証明するアドレスを貼り付けます。",
+          "step3": "Message: Ghostly が表示する宣言をそのまま貼り付けます。",
+          "step4": "Format: bc1q… または bc1p… アドレス (テストネットワークでは tb1…) には BIP322 (Simple)。レガシーの 1… アドレスには Standard (Electrum)。",
+          "step5": "Sign Message を押し、Signature 全体 (smp… で始まります) をコピーして Ghostly に貼り付けます。",
+          "testnet": "Tools → Restart In → Testnet または Signet を選び、そのネットワークのウォレットを使います。"
+        },
+        "trezor": {
+          "step1": "Trezor はレガシー形式でメッセージに署名します。Ghostly は Legacy アカウント (1…) のアドレスでそれを受け付けます。",
+          "step2": "Legacy アカウントを開き、メニューから Sign & verify を選びます。",
+          "step3": "Message に宣言を貼り付け、アドレスを選んで Sign を押し、デバイスで確認してから、署名を Ghostly にコピーします。"
+        }
+      }
+    },
+    "did": {
+      "file": {
+        "check": "その後「確認」を押します。証明を使っている間、ファイルは公開されたままです。削除すると、各連絡先の次の確認でこの証明が取り下げられます。",
+        "content": "内容はこのとおりにしてください:",
+        "create": "Web サーバーの did.json の隣にこのファイルを作成してください:",
+        "serve": "HTTPS でちょうどそのアドレスから、リダイレクトなしで、ブラウザーが読めるようこのヘッダーを付けて配信してください (did.json にも必要です):"
+      },
+      "paste": {
+        "label": "JWS または署名",
+        "placeholder": "eyJhbGciOi… または 16 進の署名"
+      },
+      "preview": {
+        "document": "ドキュメント",
+        "domain": "ドメイン",
+        "key": "鍵",
+        "keyIsIdentifier": "{{method}}、鍵が識別子です",
+        "keys": "鍵",
+        "method": "メソッド",
+        "noKeys": "署名できる鍵なし: 代わりに公開してください",
+        "notUsable": "使用不可",
+        "relay": "リレー",
+        "unusable": "{{count}} 個の鍵: 別の曲線、または authentication でも assertionMethod でもありません",
+        "unusableOne": "1 個の鍵: 別の曲線、または authentication でも assertionMethod でもありません"
+      },
+      "service": {
+        "add": "did.json の \"service\" リストにこのエントリーを追加してください:",
+        "addAt": "did.json ({{url}}) の \"service\" リストにこのエントリーを追加してください:",
+        "check": "その後「確認」を押します。エントリーを削除すると、各連絡先の次の確認でこの証明が取り下げられます。"
+      },
+      "steps": {
+        "anyKey": "authentication または assertionMethod に記載された鍵",
+        "jose": "jose (Node.js 20 以降) で JWS を作る場合: これを sign.mjs として保存し、{{curve}} の秘密鍵の JWK ファイルを渡して実行します。",
+        "noble": "@noble/curves (Node.js) で生の署名を作る場合: これを sign.mjs として保存し、16 進の {{curve}} 秘密鍵を渡して実行します。",
+        "openssl": "または OpenSSL 3 と PEM 形式の {{curve}} 鍵で:",
+        "paste": "表示された内容を貼り付けてください: コンパクト JWS ({{alg}}、アタッチまたはデタッチ)、または 16 進か base64 の署名。DID に複数の鍵がある場合は、先頭に鍵の id を書けます: #key-1 <署名>。",
+        "sign": "{{key}} の秘密鍵でこの宣言に署名してください。1 行で、末尾に改行はありません:"
+      }
+    },
+    "domain": {
+      "dns": {
+        "name": "レジストラまたは DNS ホストで {{domain}} の DNS 設定を開き、この名前で TXT レコードを追加してください。ドメインを自動で付け足すホストでは、{{domain}} より前の部分だけを入力してください。",
+        "public": "証明を使っている間、レコードは公開されたままです。削除すると、各連絡先の次の確認でこの証明が取り下げられます。",
+        "ttl": "レコードの削除がすぐ反映されるよう、TTL を 300 秒以下にしてください。その後「確認」を押します。DNS の変更が反映されるまで数分かかることがあります。",
+        "value": "値 (表示どおりの 1 つの文字列):"
+      },
+      "https": {
+        "check": "その後「確認」を押します。証明を使っている間、ファイルは公開されたままです。削除すると、各連絡先の次の確認でこの証明が取り下げられます。",
+        "content": "内容はこのとおりにしてください:",
+        "file": "{{domain}} の Web サーバーにこのファイルを作成してください:",
+        "serve": "HTTPS でちょうどそのアドレスから、リダイレクトなし (www へのリダイレクトも不可) で、ブラウザーが読めるようこのヘッダーを付けて配信してください:"
+      },
+      "nip05": {
+        "approve": "署名ツールで Ghostly の本人確認の宣言を承認してください。"
+      }
+    },
+    "nostr": {
+      "approve": "署名ツールで Ghostly の本人確認の宣言を承認してください。"
+    },
+    "oidc": {
+      "signIn": "開いたウィンドウで {{provider}} にサインインしてください。"
+    },
+    "openpgp": {
+      "paste": {
+        "signed": "署名済みの宣言",
+        "signedAndKey": "署名済みの宣言と公開鍵"
+      },
+      "steps": {
+        "card": "YubiKey などの OpenPGP カードでは、gpg がカードの PIN を、カードが求める場合はタッチも求めます。シェルがない場合は、下の宣言をテキストファイルに保存し、そのファイルに署名してください。",
+        "save": "宣言をファイルに保存してください (1 行で、末尾に改行はありません):",
+        "sign": "署名して、表示された内容をすべてコピーしてください:",
+        "signExport": "署名して公開鍵をエクスポートし、表示された内容をすべてコピーしてください:"
+      }
+    },
+    "pubky": {
+      "approval": {
+        "googleNote": "Passport が Google で作ったアイデンティティは、Google と Passport の両方で復元します。どちらか一方だけではできません。",
+        "passport": "ブラウザーで承認 (Pubky Passport)",
+        "passportAbout": "Pubky Passport を開きます。Passport のアイデンティティがまだない場合は「Google で続ける」が表示され、作成できます。",
+        "qrNote": "このコードはあなたのリクエストです。自分でスキャンし、共有しないでください。",
+        "ring": "または Pubky Ring でスキャン"
+      },
+      "progress": {
+        "approved": "承認されました。Pubky が許可した内容を確認しています…",
+        "deleting": "ホームサーバーから証明ファイルを削除しています…",
+        "popupBlocked": "ブラウザーが Passport のウィンドウをブロックしました。Ghostly のポップアップを許可してもう一度ボタンを押すか、Pubky Ring でコードをスキャンしてください。",
+        "writing": "ホームサーバーに証明を書き込んでいます…"
+      }
+    },
+    "ssh": {
+      "paste": {
+        "label": "SSH 署名"
+      },
+      "steps": {
+        "orSave": "または、この宣言をファイルに保存して ssh-keygen -Y sign -n {{namespace}} -f <鍵> <ファイル> を実行し、書き出された <ファイル>.sig を貼り付けてください。",
+        "paste": "表示された署名を -----BEGIN SSH SIGNATURE----- から -----END SSH SIGNATURE----- まですべて貼り付けてください。秘密鍵がコンピューターから出ることはありません。",
+        "run": "ターミナル (macOS、Linux、Windows では Git Bash/WSL) でこれを実行してください。鍵が ~/.ssh/id_ed25519 でない場合は -f の後のパスを変えてください。秘密鍵が ssh-agent やセキュリティキーにある場合は .pub のパスでも動きます。",
+        "save": "この宣言をファイルに保存して ssh-keygen -Y sign -n {{namespace}} -f <鍵> <ファイル> を実行し、書き出された <ファイル>.sig を貼り付けてください。"
+      }
+    },
+    "ssh-github": {
+      "paste": {
+        "label": "SSH 署名"
+      },
+      "steps": {
+        "orSave": "または、この宣言をファイルに保存して ssh-keygen -Y sign -n {{namespace}} -f <鍵> <ファイル> を実行し、書き出された <ファイル>.sig を貼り付けてください。",
+        "paste": "表示された署名を -----BEGIN SSH SIGNATURE----- から -----END SSH SIGNATURE----- まですべて貼り付けてください。秘密鍵がコンピューターから出ることはありません。",
+        "run": "ターミナル (macOS、Linux、Windows では Git Bash/WSL) でこれを実行してください。鍵が ~/.ssh/id_ed25519 でない場合は -f の後のパスを変えてください。秘密鍵が ssh-agent やセキュリティキーにある場合は .pub のパスでも動きます。",
+        "save": "この宣言をファイルに保存して ssh-keygen -Y sign -n {{namespace}} -f <鍵> <ファイル> を実行し、書き出された <ファイル>.sig を貼り付けてください。"
+      }
+    },
+    "ssh-gitlab": {
+      "paste": {
+        "label": "SSH 署名"
+      },
+      "steps": {
+        "orSave": "または、この宣言をファイルに保存して ssh-keygen -Y sign -n {{namespace}} -f <鍵> <ファイル> を実行し、書き出された <ファイル>.sig を貼り付けてください。",
+        "paste": "表示された署名を -----BEGIN SSH SIGNATURE----- から -----END SSH SIGNATURE----- まですべて貼り付けてください。秘密鍵がコンピューターから出ることはありません。",
+        "run": "ターミナル (macOS、Linux、Windows では Git Bash/WSL) でこれを実行してください。鍵が ~/.ssh/id_ed25519 でない場合は -f の後のパスを変えてください。秘密鍵が ssh-agent やセキュリティキーにある場合は .pub のパスでも動きます。",
+        "save": "この宣言をファイルに保存して ssh-keygen -Y sign -n {{namespace}} -f <鍵> <ファイル> を実行し、書き出された <ファイル>.sig を貼り付けてください。"
+      }
+    }
+  },
   "received": {
     "checked": "{{category}} · {{time}} に確認",
     "title": "連絡先から"
