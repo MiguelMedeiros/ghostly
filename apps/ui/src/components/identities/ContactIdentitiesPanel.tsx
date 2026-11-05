@@ -2,6 +2,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } f
 import { engine } from "@ghostly/browser/platform/engine";
 import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import type { NostrContactView } from "@ghostly/browser/nostr/types";
+import { displaySourceOf } from "@ghostly/browser/proofs/displaySource";
 import { useDialogFocus } from "../../hooks/useDismiss";
 import { dateTime, providerOf, useEngineValue } from "../../lib/identities";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
@@ -204,6 +205,21 @@ function TheirGhostlyBack({ t, card, link, name, turning, onCards }: { t: Transl
 }
 
 /**
+ * Who wrote a name, in the app's language where the provider's words are fixed (a key's user ID is its holder's own, a
+ * sign-in provider may not have checked the email): a caveat to act on. Any other source is shown as written.
+ */
+function nameSource(provider: string, source: string, t: Translate): string {
+  const known = displaySourceOf(provider, source);
+  if (!known) return source;
+  if (known.kind === "openpgp-user-id") return t("identities.contact.sourceUserId");
+  if (known.kind === "openpgp-keyserver") return t("identities.contact.sourceKeyserver");
+  const signer = { provider: known.provider };
+  return known.email === "verified" ? t("identities.contact.sourceSignedEmailVerified", signer)
+    : known.email === "unverified" ? t("identities.contact.sourceSignedEmailUnverified", signer)
+    : t("identities.contact.sourceSigned", signer);
+}
+
+/**
  * A contact's card turned over: what it proves and how (their own key, or a provider that says so), when this app
  * checked it and until when it holds, Check again, and a public profile when the provider has one. A Nostr card's
  * back holds what the key published, loaded on request.
@@ -232,7 +248,7 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
               : <span className="id-card-back-subject" title={card.subject} data-testid="chat-identity-received-subject">{card.short}</span>}
             <span className="id-card-back-meta">{card.category}</span>
             {/* A name the evidence or a lookup carried, and who wrote it: a holder's own words are not a proof. */}
-            {card.name && <span className="id-card-back-meta id-card-back-meta-whole" data-testid="chat-identity-received-name-source">{fillNames(t("identities.contact.nameFrom"), { source: card.profile?.found && card.profile.name ? t("identities.contact.theirProfile") : r.display?.source ?? r.verified.display?.source ?? "" })}</span>}
+            {card.name && <span className="id-card-back-meta id-card-back-meta-whole" data-testid="chat-identity-received-name-source">{fillNames(t("identities.contact.nameFrom"), { source: card.profile?.found && card.profile.name ? t("identities.contact.theirProfile") : nameSource(r.provider, r.display?.source ?? r.verified.display?.source ?? "", t) })}</span>}
           </span>
         </div>
         {card.lookup && <PublicProfileDetails provider={r.provider} profile={card.profile} testId="chat-identity-public-profile" />}
@@ -253,7 +269,7 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
           {canCheck && <button type="button" className="contact-card-action" data-testid="chat-identity-recheck" disabled={turning} aria-disabled={!!busy || undefined}
             onClick={() => { if (!busy) act("recheck", () => engine.call("recheckIdentityProof", { linkId, id: r.id })); }}>{busy === "recheck" ? t("identities.contact.checking") : t("identities.contact.recheck")}</button>}
           {provider?.lookupDisplay && ok && <button type="button" className="contact-card-action" data-testid="chat-identity-lookup" disabled={turning} aria-disabled={!!busy || undefined}
-            onClick={() => { if (!busy) act("lookup", () => engine.call("lookupIdentityDisplay", { linkId, id: r.id })); }}>{busy === "lookup" ? t("identities.contact.lookingUp") : provider.lookupLabel ?? t("identities.contact.showProfile")}</button>}
+            onClick={() => { if (!busy) act("lookup", () => engine.call("lookupIdentityDisplay", { linkId, id: r.id })); }}>{busy === "lookup" ? t("identities.contact.lookingUp") : r.provider === "openpgp" ? t("identities.contact.lookupOpenpgp") : provider.lookupLabel ?? t("identities.contact.showProfile")}</button>}
         </div>
         {/* What Check again does, only where there is one: a withdrawn or revoked card is not checked again. */}
         {canCheck && <p className="id-card-back-note">{provider?.recheck ? t("identities.contact.recheckNoteRepeat") : t("identities.contact.recheckNote")}{provider?.lookupDisplay && ok ? ` ${t("identities.contact.lookupNote")}` : ""}</p>}
