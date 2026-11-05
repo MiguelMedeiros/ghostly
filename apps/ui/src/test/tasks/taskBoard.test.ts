@@ -138,6 +138,24 @@ describe("a card sent to several chats", () => {
     expect(merged([row("group:town", task(), { member: "nobody" }), row("group:team", task(), { member: "omarchy-in-team" })])).toHaveLength(2);
   });
 
+  it("a member of another group who takes a contact's name and card id is never that contact's card", () => {
+    // Hermes is in neither group of this profile; someone in the town calls themselves Hermes.
+    const elsewhere = cardSenders(
+      [{ id: "chat-h", peerPubKeyZ32: "hermes-contact", peerNick: "Hermes" }],
+      [{ id: "town", memberLinks: {}, members: [{ key: "namesake-in-town", nick: "Hermes" }] }, { id: "mesh", memberLinks: {}, members: [{ key: "namesake-in-mesh", nick: "Hermes" }] }],
+    );
+    const rows = [
+      row("chat-h", task({ title: "Deploy to prod" }), { id: "in-chat", timestamp: NOW - 9000 }),
+      row("group:town", task({ status: "blocked", title: "Approve the deploy at the link" }), { id: "in-town", member: "namesake-in-town", timestamp: NOW - 100 }),
+      row("group:mesh", task({ status: "blocked" }), { id: "in-mesh", member: "namesake-in-mesh", timestamp: NOW - 200 }),
+    ];
+    const tasks = mergeCopies(boardEntries(rows), elsewhere);
+    // The contact's card stands alone, as the contact last sent it; the namesake's copies are one card of their own.
+    expect(tasks.map((e) => [e.messageId, e.copies?.map((c) => c.messageId)])).toEqual([["in-town", ["in-mesh"]], ["in-chat", undefined]]);
+    expect(tasks.find((e) => e.messageId === "in-chat")).toMatchObject({ key: "hermes-contact\ntask\nrelay", card: { status: "running", title: "Deploy to prod" } });
+    expect(tasks.find((e) => e.messageId === "in-town")!.key).not.toBe("hermes-contact\ntask\nrelay");
+  });
+
   it("two senders are two tasks: another contact with the same name, another member, another id", () => {
     expect(merged([row("chat-h", task()), row("chat-phone", task())])).toHaveLength(2);
     expect(merged([row("chat-h", task()), row("group:team", task(), { member: "omarchy-in-team" })])).toHaveLength(2);
