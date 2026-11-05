@@ -61,6 +61,20 @@ describe("a community's admin role handed to a member whose leave is on its way"
       await converged(world, id, peers.filter(p => p !== carol && p !== next), key);
     });
 
+    it(`seed ${seed}: a member's unsigned leaves for the others do not steer the role to it, nor go on from the leaver`, async () => {
+      const { world, id, peers, carol, key, peerOf } = await group(seed);
+      const [, bob, dave, erin] = peers;
+      // What bob passes on, while it follows the chain after it left: never a leave nobody signed.
+      const passedOn: string[] = [];
+      world.drop = (from, _to, frame) => { if (from === bob && frame.t === "group-leave" && frame.s !== key(bob)) passedOn.push(String(frame.s)); return false; };
+      await Promise.allSettled([carol.groups.makeAdmin(id, key(bob)), bob.groups.leave(id)]);
+      for (const other of [carol, erin]) await bob.groups.handleEdgeFrame(id, key(dave), { t: "group-leave", v: 2, g: id, s: key(other), ls: "A".repeat(86) });
+      await world.until(() => peers.filter(p => p !== bob).every(p => world.view(p, id)?.members.length === 3), 5 * 60_000);
+      // The role goes back to carol, who handed it to bob: dave's lies took carol and erin out of bob's pick.
+      expect(peerOf(world.view(carol, id)!.members.find(m => m.role === "admin")!.key).name).toBe("carol");
+      expect(passedOn).toEqual([]);
+    });
+
     it(`seed ${seed}: control, the member leaves a second after the role reached it`, async () => {
       const { world, id, peers, carol, key } = await group(seed);
       const bob = peers[1];
