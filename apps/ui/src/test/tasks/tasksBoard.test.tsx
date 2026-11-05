@@ -505,6 +505,28 @@ describe("a card a bot sent to several chats", () => {
     expect(screen.getAllByTestId("board-column").map((c) => within(c).getByRole("heading").textContent).sort()).toEqual(["Coordinator2", "Phone1", "Sala de Máquinas1"]);
   });
 
+  it("a member of another group who takes the bot's name and card id has a card of their own, under that group", async () => {
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", messages: [], createdAt: 1_700_000_000_000, nick: "Coordinator" });
+    const state = {
+      links: [linkView({ id: "link-1", peerPubKeyZ32: PEER, peerNick: "Coordinator" })],
+      groups: [groupView({ id: "town", name: "Town square", status: "active", members: [{ key: "me-key", me: true, nick: "Me" }, { key: "namesake", me: false, nick: "Coordinator" }] as never })],
+    };
+    const rows = [
+      row("link-1", task({ id: "deploy", title: "Deploy to prod" }), { id: "in-chat", timestamp: NOW - 60_000 }),
+      row("group:town", task({ id: "deploy", title: "Approve the deploy at the link", status: "blocked" }), { id: "in-town", member: "namesake", timestamp: NOW - 50_000 }),
+    ];
+    const { engine } = renderApp(<Tasks />, { route: "/tasks" });
+    engine.on("statusCardIndex", () => rows).setState(state);
+    await loaded();
+    expect(cardIds("running")).toEqual(["deploy"]);
+    expect(cardIds("blocked")).toEqual(["deploy"]);
+    const real = column("running").querySelector<HTMLElement>('[data-card-id="deploy"]')!;
+    expect(real).toHaveTextContent("Deploy to prod");
+    expect(real).not.toHaveTextContent("Town square");
+    expect(within(column("blocked")).getByTestId("board-card-chat")).toHaveTextContent("Town square");
+    expect(screen.getByTestId("tasks-summary")).toHaveTextContent("2 active · 2 tasks");
+  });
+
   it("counts once on the way to the board", async () => {
     const state = everywhere();
     const { engine } = renderApp(<SidebarTasks active={false} onOpen={() => {}} />);
