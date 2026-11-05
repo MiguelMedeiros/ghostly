@@ -7,6 +7,9 @@
    every keystroke in proportion to the chat's length. */
 @source not "./test";
 
+/* A short window: a phone on its side (320-500px high), where rows that stay put leave a list no room. */
+@custom-variant short (@media (max-height: 500px));
+
 @theme {
   /* Tailwind's spinner and pulse, which never end by themselves: here they do. A dot that pulses while a contact is
      being reached rests after half a minute, a spinner after two (whatever it waits for is not coming), so a chat

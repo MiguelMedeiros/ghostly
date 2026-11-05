@@ -86,7 +86,7 @@ function Column({ group, name, dot, grouping, board, now, older, onOlder, onOpen
           <span data-testid="board-column-count" className="shrink-0 font-normal tabular-nums text-text-muted">{group.tasks.length}</span>
         </h2>
       )}
-      <div data-testid="board-column-cards" className={`flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto overscroll-contain ${phone ? "px-3 pt-2 pb-4" : "px-1.5 pb-1.5"}`}>
+      <div data-testid="board-column-cards" className={`flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto overscroll-contain short:overscroll-auto ${phone ? "px-3 pt-2 pb-4" : "px-1.5 pb-1.5"}`}>
         {shown.map((task) => (
           <BoardCard key={task.key} task={task} grouping={grouping} face={board.faceOf(task)} now={now} onOpen={() => onOpen(task)} onOpenPart={onOpen} onKeys={keys} onTag={onTag} />
         ))}
@@ -209,6 +209,18 @@ export function Tasks() {
     cancelAnimationFrame(settleFrame.current);
     settleFrame.current = requestAnimationFrame(() => settleAt(scroller));
   };
+  // A short screen (a phone on its side): the rows above the board scroll away with the page, and the board below them
+  // is the page's whole height. A list scrolled while those rows still show moves the page first, so the rows go before
+  // the cards do; a pull past a list's top brings them back.
+  const fold = (event: UIEvent<HTMLDivElement>) => {
+    const scroller = event.currentTarget;
+    const list = event.target as HTMLElement;
+    const room = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
+    if (list === scroller || room < 1 || list.scrollTop <= 0) return;
+    const move = Math.min(room, list.scrollTop);
+    scroller.scrollTop += move;
+    list.scrollTop -= move;
+  };
   const tabKeys = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") return;
     event.preventDefault();
@@ -242,7 +254,7 @@ export function Tasks() {
           <p className="m-0 text-xs text-text-muted">{t("cards.board.emptyHint")}</p>
         </div>
       ) : (
-        <>
+        <div data-testid="tasks-scroller" onScrollCapture={fold} className="flex min-h-0 flex-1 flex-col short:overflow-y-auto short:overscroll-y-contain">
           <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-2">
             <p data-testid="tasks-summary" className="m-0 text-xs text-text-secondary">{summary}</p>
             {showing === "tasks" && model.finished > 0 && (
@@ -277,7 +289,7 @@ export function Tasks() {
           </div>
 
           {showing === "routines" ? (
-            <ul data-testid="tasks-routines" aria-label={t("cards.board.view.routines")} className="m-0 flex-1 overflow-y-auto p-2">
+            <ul data-testid="tasks-routines" aria-label={t("cards.board.view.routines")} className="m-0 flex-1 overflow-y-auto p-2 short:h-full short:flex-none">
               {routines.map((routine) => <RoutineLine key={routine.key} routine={routine} board={board} onOpen={() => open(routine)} />)}
             </ul>
           ) : (
@@ -293,31 +305,33 @@ export function Tasks() {
                 </div>
               )}
               {(filter.trim() || tag) && !model.shown && <p data-testid="tasks-no-match" className="m-0 shrink-0 px-4 pt-3 text-center text-xs text-text-muted">{t("cards.board.noMatch")}</p>}
-              {phone && (
-                <div ref={tabsRef} role="tablist" aria-label={t("cards.board.columns")} data-testid="tasks-tabs" onKeyDown={tabKeys}
-                  className="flex shrink-0 scroll-px-2 gap-1 overflow-x-auto border-b border-border px-2 py-1.5 [scrollbar-width:none]">
+              <div className="flex min-h-0 flex-1 flex-col short:h-full short:flex-none">
+                {phone && (
+                  <div ref={tabsRef} role="tablist" aria-label={t("cards.board.columns")} data-testid="tasks-tabs" onKeyDown={tabKeys}
+                    className="flex shrink-0 scroll-px-2 gap-1 overflow-x-auto border-b border-border px-2 py-1.5 [scrollbar-width:none]">
+                    {model.groups.map((group, i) => (
+                      <button key={group.id} type="button" role="tab" id={`${tabsId}-${i}`} aria-selected={i === at} aria-controls={`${tabsId}-${i}-panel`} tabIndex={i === at ? 0 : -1}
+                        data-testid="tasks-tab" data-column={group.id} onClick={() => toTab(i)}
+                        className={`flex min-h-9 max-w-44 shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-3 text-xs font-medium focus-visible:outline-2 focus-visible:outline-accent ${i === at ? "bg-accent text-on-accent" : "text-text-secondary"}`}>
+                        <bdi className="min-w-0 truncate">{nameOf(group)}</bdi>
+                        <span data-testid="tasks-tab-count" className="tabular-nums opacity-80">{group.tasks.length}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div ref={boardRef} data-testid="tasks-board" data-grouping={grouping} data-layout={phone ? "tabs" : "columns"} onScroll={settle}
+                  onPointerDown={() => { sliding.current = undefined; }} onWheel={() => { sliding.current = undefined; }}
+                  className={phone ? "flex min-h-0 flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden overscroll-x-contain [scrollbar-width:none]" : "flex min-h-0 flex-1 items-start gap-3 overflow-x-auto p-3"}>
                   {model.groups.map((group, i) => (
-                    <button key={group.id} type="button" role="tab" id={`${tabsId}-${i}`} aria-selected={i === at} aria-controls={`${tabsId}-${i}-panel`} tabIndex={i === at ? 0 : -1}
-                      data-testid="tasks-tab" data-column={group.id} onClick={() => toTab(i)}
-                      className={`flex min-h-9 max-w-44 shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-3 text-xs font-medium focus-visible:outline-2 focus-visible:outline-accent ${i === at ? "bg-accent text-on-accent" : "text-text-secondary"}`}>
-                      <bdi className="min-w-0 truncate">{nameOf(group)}</bdi>
-                      <span data-testid="tasks-tab-count" className="tabular-nums opacity-80">{group.tasks.length}</span>
-                    </button>
+                    <Column key={group.id} group={group} name={nameOf(group)} dot={grouping === "status" ? COLUMN_DOT[group.id as BoardColumn] : undefined} grouping={grouping}
+                      board={board} now={now} older={older} onOlder={() => setOlder(!older)} onOpen={open} onTag={(name) => setTag(tag === name ? undefined : name)} phone={phone} labelledBy={phone ? `${tabsId}-${i}` : undefined}
+                      away={phone && i !== at} onColumn={phone ? (index) => toTab(index, false) : undefined} />
                   ))}
                 </div>
-              )}
-              <div ref={boardRef} data-testid="tasks-board" data-grouping={grouping} data-layout={phone ? "tabs" : "columns"} onScroll={settle}
-                onPointerDown={() => { sliding.current = undefined; }} onWheel={() => { sliding.current = undefined; }}
-                className={phone ? "flex min-h-0 flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden overscroll-x-contain [scrollbar-width:none]" : "flex min-h-0 flex-1 items-start gap-3 overflow-x-auto p-3"}>
-                {model.groups.map((group, i) => (
-                  <Column key={group.id} group={group} name={nameOf(group)} dot={grouping === "status" ? COLUMN_DOT[group.id as BoardColumn] : undefined} grouping={grouping}
-                    board={board} now={now} older={older} onOlder={() => setOlder(!older)} onOpen={open} onTag={(name) => setTag(tag === name ? undefined : name)} phone={phone} labelledBy={phone ? `${tabsId}-${i}` : undefined}
-                    away={phone && i !== at} onColumn={phone ? (index) => toTab(index, false) : undefined} />
-                ))}
               </div>
             </>
           )}
-        </>
+        </div>
       )}
     </div>
   );
