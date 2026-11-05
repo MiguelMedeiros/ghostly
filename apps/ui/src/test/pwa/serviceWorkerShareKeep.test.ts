@@ -98,6 +98,20 @@ it("a page that goes with shares in its picker (a share into the same window) ha
   ]);
 });
 
+it("a page that goes with three shares in its picker keeps all three: the share it went for is the one past them", async () => {
+  const worker = await startWorker();
+  await worker.post("new");
+  const leaving = page("a");
+  for (const text of ["shown", "second", "third"]) worker.say({ type: "share-keep", item: item(text) }, leaving);
+  const next = page("b");
+  worker.say({ type: "share-ready" }, next);
+  expect(next.heard).toEqual([
+    { type: "share", item: item("shown") },
+    { type: "share", item: item("second") },
+    { type: "share", item: item("third"), dropped: 1 },
+  ]);
+});
+
 it("a profile's push worker holds nothing", async () => {
   const worker = await startWorker("https://app.ghostly.tools/push/default/");
   worker.say({ type: "share-keep", item: { title: "", text: "hi", url: "", files: [] } }, page("a"));
