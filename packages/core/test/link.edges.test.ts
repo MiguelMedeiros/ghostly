@@ -753,7 +753,7 @@ describe("LinkSession poll pacing", () => {
     const old = pair({ awaitingSince: NOW - 30 * 86_400_000 });
     old.a.s.start();
     await settle();
-    expect(old.a.transport.resolve).toHaveBeenLastCalledWith(old.params.mine.peerPubKeyZ32, { background: true, urgent: false });
+    expect(old.a.transport.resolve).toHaveBeenLastCalledWith(old.params.mine.peerPubKeyZ32, { background: true, urgent: false }, false);
     expect(lastPoll(old.a.ev)).toBe(I.background);
     await old.a.s.stop(false);
     // Made three minutes ago, and the app opened again: the invite is awaited for the seven minutes left.
