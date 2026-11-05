@@ -1,4 +1,4 @@
-import { INVITE_TAKEN, isZ32Key, type PairedTransport } from "@ghostly/core";
+import { INVITE_TAKEN, isZ32Key, sanitizeDisplayText, type PairedTransport } from "@ghostly/core";
 import type { GhostlyNode } from "@ghostly/browser/engine/node";
 import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { CliError } from "./errors";
@@ -99,6 +99,20 @@ export const CONTACT_KEY = {
 };
 
 /**
+ * A chat's label, its contact's name or a group's name as a ref is compared with it: cleaned as the engine cleans a name
+ * it stores (`renameLink`, `groupName`: any run of whitespace one space, invisible and direction-changing characters
+ * dropped, trimmed), in one Unicode form (NFC) and one case. The string given to `chat rename` or `group create` finds
+ * what it named, though what was stored is the cleaned one. Empty when nothing visible is left: that names nothing.
+ */
+export function nameKey(name: string | null | undefined): string {
+  if (!name) return "";
+  return (sanitizeDisplayText(name.replace(/\s+/gu, " "), Infinity)?.replace(/ {2,}/g, " ") ?? "").normalize("NFC").toLowerCase();
+}
+
+/** Whether `name` is the one `key` (a ref's `nameKey`) names. */
+const namedAs = (key: string, name: string | null | undefined) => key !== "" && nameKey(name) === key;
+
+/**
  * A chat by its id; by its contact's key (only by the key: a name is never taken for one); by the label this side gave
  * it; and only when no label matches, by a unique prefix of its id or the name the contact gave itself. The contact
  * controls both of those (a joiner's chat id is made from the inviter's code), so neither wins over a label, and a ref
@@ -133,8 +147,8 @@ function chatBy(links: readonly LinkView[], ref: string, groups: readonly GroupV
     if (byKey.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: byKey.map((link) => link.id) });
     throw new CliError("not_found", `No chat with ${JSON.stringify(ref)} (ghostly chat list)`);
   }
-  const lower = ref.toLowerCase();
-  const named = (name: string | null | undefined) => name?.trim().toLowerCase() === lower;
+  const key = nameKey(ref);
+  const named = (name: string | null | undefined) => namedAs(key, name);
   const byLabel = links.filter((link) => named(link.label));
   const found = byLabel.length ? byLabel : [...new Set([...links.filter((link) => link.id.startsWith(ref)), ...links.filter((link) => named(link.peerNick))])];
   if (found.length === 1) return { link: found[0], theirName: !byLabel.length };
@@ -172,9 +186,9 @@ export function findGroup(groups: readonly GroupView[], ref: string): GroupView 
   if (!ref.trim()) throw new CliError("bad_request", `${JSON.stringify(ref)} names no group`);
   const exact = groups.find((group) => group.id === ref);
   if (exact) return exact;
-  const lower = ref.toLowerCase();
+  const key = nameKey(ref);
   for (const among of [groups.filter((group) => !invitedOnly(group)), groups.filter(invitedOnly)]) {
-    const found = among.filter((group) => group.name.trim().toLowerCase() === lower || group.id.startsWith(ref));
+    const found = among.filter((group) => namedAs(key, group.name) || group.id.startsWith(ref));
     if (found.length === 1) return found[0];
     if (found.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one group: use its id`, { matches: found.map((group) => group.id) });
   }
@@ -205,8 +219,8 @@ export function findChatOrGroup(links: readonly LinkView[], groups: readonly Gro
   if (!chat.theirName) return { link: chat.link };
   const exact = groups.find((group) => group.id === ref);
   if (exact) return { group: exact };
-  const lower = ref.toLowerCase();
-  const also = groups.filter((group) => !invitedOnly(group) && (group.id.startsWith(ref) || group.name.trim().toLowerCase() === lower));
+  const key = nameKey(ref);
+  const also = groups.filter((group) => !invitedOnly(group) && (group.id.startsWith(ref) || namedAs(key, group.name)));
   if (also.length) throw new CliError("bad_request", `${JSON.stringify(ref)} names a chat (by what its contact chose) and a group: use the chat's id or group:<id>`, { chat: chat.link.id, groups: also.map((group) => group.id) });
   return { link: chat.link };
 }
