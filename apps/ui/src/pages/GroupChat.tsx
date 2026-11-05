@@ -377,6 +377,10 @@ export function GroupChat() {
   const editing = chosenEdit && heldOriginal(chosenEdit, quoteIndex, true) ? chosenEdit : null;
   useEffect(() => { if (chosenEdit && !editing) setEditing(null); }, [chosenEdit, editing]);
   useEffect(() => { setReplyingTo(null); setEditing(null); }, [groupId]);
+  // The group no longer takes my messages (removed, left on another device): the composer under the bars is off, and
+  // they go. Not while it is off for a moment in a group still active (a join or removal past 16 members).
+  const closed = !!rosterGroup && !rosterGroup.canSend && rosterGroup.status !== "active";
+  useEffect(() => { if (closed) { setReplyingTo(null); setEditing(null); } }, [closed]);
   // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
   const [pickButtonRow] = useState(() => rowPicker<StoredMessage, StoredMessage>(m => m.card?.kind === "buttons" || m.replyTo ? m : undefined));
   const buttonRows = useMemo(() => pickButtonRow(messages), [pickButtonRow, messages]);
@@ -663,7 +667,7 @@ export function GroupChat() {
     </div>
     // No `peerAck`: a group has no receipts (WISP 902), so a message of mine is sent, one tick, never "Delivered".
     : <MessageBubble key={m.id} message={shownOf(m)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} highlight={search.highlight(m.id)} {...authorProps(m, inStack)} payee={payeeOf(m)}
-      onReply={replyTarget(m, true) ? () => { setEditing(null); setReplyingTo(m); } : undefined} quote={quoteOf(m)}
+      onReply={replyTarget(m, true) && group.canSend ? () => { setEditing(null); setReplyingTo(m); } : undefined} quote={quoteOf(m)}
       buttons={group.canSend ? buttonsOf.get(m.id) : undefined} compactPress={presses.has(m.id)}
       onEdit={canEditInGroup(m) && !m.card && group.canSend ? () => { setReplyingTo(null); setEditing(m); } : undefined}
       // Mine, as the group carried it (a text, a card, a file): taken off every member's device (WISP 400 § Delete for everyone).
