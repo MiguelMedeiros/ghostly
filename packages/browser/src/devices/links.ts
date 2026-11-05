@@ -241,6 +241,12 @@ interface Running {
    * unless none of its native transports starts or no session opens over them (`withRtc`).
    */
   rtcOff: boolean;
+  /** The other device's packet last signed that it has no WebRTC: a Linux Desktop, or a link that went on without it there. */
+  peerRtcOff?: boolean;
+  /** The other device's packet carries no `_tr` now, though it did: its link may have gone back to WebRTC. */
+  peerUnsaid?: boolean;
+  /** The wait for a session ran out while the other device's packet said it has no WebRTC: `withRtc` once it says nothing. */
+  rtcDue?: boolean;
   /** The other device is there and no session is open: `withoutRtc` once `DEVICE_RTC_MS` passed so (`withRtc` after `DEVICE_NATIVE_MS` where `native`). */
   rtcWait?: ReturnType<typeof setTimeout>;
   waiting: Map<string, { resolve(ms: number): void; reject(error: Error): void; sentAt: number; timer: ReturnType<typeof setTimeout> }>;
@@ -507,6 +513,7 @@ export class DeviceLinks implements DeviceLinkEngine {
         onDataLinkState: (state) => {
           if (state === "open") this.rtcBacks.delete(running.id);
           if (state === "open" && running.rtcWait) { clearTimeout(running.rtcWait); running.rtcWait = undefined; }
+          if (state === "open") running.rtcDue = false;
           if (state !== "open") {
             // A live link of the set closed, and not by this device (`close` forgets it first): a removal does this.
             if (running.agreed && !running.earlier && this.running.get(running.id) === running) void this.linkLost().catch(() => {});
@@ -527,7 +534,13 @@ export class DeviceLinks implements DeviceLinkEngine {
         // other's never does, so no session opens over them while WebRTC might connect now (`withRtc`).
         onPresence: (presence) => { if (presence.online) this.waitForRtc(running); },
         // The other device has no WebRTC: this one starts its native endpoints for it.
-        onPacketTransports: (transports) => { if (!running.native && !transports.includes("webrtc/1")) this.startNative(running); },
+        onPacketTransports: (transports) => {
+          running.peerRtcOff = !transports.includes("webrtc/1");
+          if (!running.native && running.peerRtcOff) this.startNative(running);
+        },
+        // Its packet says nothing of its transports now: it may have gone back to WebRTC (`withRtc`), which this link,
+        // native for it, would never offer again (`waitForRtc`).
+        onPacketTransportsUnsaid: (unsaid) => { running.peerUnsaid = unsaid; if (unsaid && running.rtcDue) this.withRtc(running); },
         // An endpoint went away (its relay closed the connection): it is started again in a while.
         onTransportsChanged: () => { if (running.native && this.missingNative(running).length) this.retryNative(running); },
       },
@@ -931,16 +944,25 @@ export class DeviceLinks implements DeviceLinkEngine {
    * `withoutRtc` once `DEVICE_RTC_MS` passed with no session open, twice as long for each time it went back (`rtcBacks`).
    * A link that runs its native endpoints (`native`) waits `DEVICE_NATIVE_MS` so instead, then goes back to WebRTC
    * (`withRtc`): one device's endpoint may start where the other's never does, so nothing opens over them.
+   * Not while the other device's packet still says it has no WebRTC, where this link did not go without it itself:
+   * WebRTC connects nothing there, and each round only made new endpoints the other device had to read of before it
+   * could dial. It goes back once that packet says nothing (`rtcDue`): a page whose own link went back to WebRTC.
    */
   private waitForRtc(running: Running): void {
-    if ((running.rtcOff && !running.native) || running.rtcWait || running.link.isDataLinkOpen) return;
+    if ((running.rtcOff && !running.native) || running.rtcWait || running.rtcDue || running.link.isDataLinkOpen) return;
     const wait = (running.native ? DEVICE_NATIVE_MS : DEVICE_RTC_MS) * 2 ** (this.rtcBacks.get(running.id) ?? 0);
     running.rtcWait = setTimeout(() => {
       running.rtcWait = undefined;
       if (running.link.isDataLinkOpen) return;
-      if (running.native) this.withRtc(running);
+      if (this.peerWithoutRtc(running)) running.rtcDue = true;
+      else if (running.native) this.withRtc(running);
       else this.withoutRtc(running, true);
     }, Math.min(wait, DEVICE_RTC_MAX_MS));
+  }
+
+  /** A link that runs native for the other device, whose packet still says it has no WebRTC. */
+  private peerWithoutRtc(running: Running): boolean {
+    return running.native && !running.rtcOff && !!running.peerRtcOff && !running.peerUnsaid;
   }
 
   /**

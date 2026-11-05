@@ -226,6 +226,8 @@ export interface LinkSessionEvents {
   onPeerTransports?(value: string): void;
   /** The peer's packet has said no `_tr` for `TRANSPORTS_GONE_MS`: the peer publishes none (any more). Once per such stretch. */
   onPeerTransportsGone?(): void;
+  /** The peer's packet that advertises carries no `_tr` (`true`) where the last read did, or carries one again (`false`). */
+  onPeerTransportsUnsaid?(unsaid: boolean): void;
   onStatus?(status: LinkStatus): void;
   /** A poll started, or finished with the next one due in `nextInMs`. */
   onPoll?(poll: { polling: boolean; nextInMs: number }): void;
@@ -308,6 +310,8 @@ export class LinkSession {
   /** When a read first found the peer's packet advertising with no `_tr` (0: the last packet that said carried one). */
   private transportsAbsentSince = 0;
   private transportsGone = false;
+  /** The peer's packet carried a `_tr` and the last read found none (`onPeerTransportsUnsaid`). */
+  private transportsUnsaid = false;
 
   private running = false;
   /** Stopped without a last packet (`stop(false)`): nothing more goes out. */
@@ -926,9 +930,11 @@ export class LinkSession {
             this.lastTransportsIn = batch.transports;
             this.events.onPeerTransports?.(batch.transports);
           }
+          if (this.transportsUnsaid) { this.transportsUnsaid = false; this.events.onPeerTransportsUnsaid?.(false); }
         } else if (batch.services !== null && !this.transportsGone) {
           // It advertises, and `_tr` is left out for size only after `_svc` is (`buildLinkRecords`): it set none.
           this.transportsAbsentSince ||= Date.now();
+          if (!this.transportsUnsaid && this.lastTransportsIn !== null) { this.transportsUnsaid = true; this.events.onPeerTransportsUnsaid?.(true); }
           if (Date.now() - this.transportsAbsentSince >= TRANSPORTS_GONE_MS) {
             this.transportsGone = true;
             // The value it said before, said again later, is news again.
