@@ -1465,6 +1465,90 @@ describe("relay transport: a group edge's signaling keeps its share of the minut
     } finally { vi.useRealTimers(); }
   });
 
+  it("puts an edge's read for the answer to its offer first on the groups' floor: another edge's read back waits for it", async () => {
+    // agents#971 (CLI lab, 2026-11-03): a daemon back after a restart had its edges' reads back and offers spend the
+    // floor in its first seconds, and read the answers to offers it had out at 0.4 s only once the minute freed, 66 to
+    // 97 s on, often after the member's attempt was over. When the floor frees a read, the read the budget held back for
+    // an answer takes it, not a read back that asked a moment before it.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const log: { key: string; method: string }[] = [];
+      const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        log.push({ key: new URL(String(input)).pathname.slice(1), method: init?.method ?? "GET" });
+        return init?.method === "PUT" ? new Response(null, { status: 204 }) : new Response(null, { status: 404 });
+      }) as typeof fetch });
+      const group = withRequestOptions(relay, { group: true });
+      const went = async (request: () => Promise<unknown>) => { const before = log.length; await request().catch(() => {}); return log.length > before; };
+      const start = Date.now(), at = (t: number) => vi.setSystemTime(start + t);
+      // Three edges back after the restart read their members: the floor's reads (it leaves its last request to a write).
+      const reads = Math.floor(REQUESTS_PER_MINUTE * GROUP_SIGNALING_ALLOWANCE_SHARE) - 1;
+      for (let i = 0; i < reads; i++) { at(i * 100); expect(await went(() => group.resolve(createIdentity().pubKeyZ32, { urgent: true, resume: true }))).toBe(true); }
+      // The chats spend the rest of the minute, then their allowance with offers.
+      for (let i = reads; i < REQUESTS_PER_MINUTE; i++) { at(1_000 + i * 100); await relay.resolve(createIdentity().pubKeyZ32, { urgent: true }); }
+      for (let i = 0; i < Math.floor(REQUESTS_PER_MINUTE * SIGNALING_ALLOWANCE_SHARE); i++) await relay.publish(createIdentity(), [{ label: "_ts", value: "1" }], { signal: true });
+      // An edge whose offer is out reads for the answer: the floor has no read left, and it waits.
+      const answer = createIdentity().pubKeyZ32;
+      at(20_000);
+      expect(await went(() => group.resolve(answer, { urgent: true, signal: true }))).toBe(false);
+      at(59_000);
+      expect(await went(() => group.resolve(answer, { urgent: true, signal: true }))).toBe(false);
+      // The first read back ages out of the floor. Another edge's read back asks first, and waits for the answer's read.
+      at(60_050);
+      expect(await went(() => group.resolve(createIdentity().pubKeyZ32, { urgent: true, resume: true }))).toBe(false);
+      at(60_500);
+      expect(await went(() => group.resolve(answer, { urgent: true, signal: true }))).toBe(true);
+      expect(log.at(-1)).toEqual({ key: answer, method: "GET" });
+      // Read, it holds nothing back any more: the next read back goes once the floor frees again.
+      at(61_000 + GROUP_OVER_PACE_MS);
+      expect(await went(() => group.resolve(createIdentity().pubKeyZ32, { urgent: true, resume: true }))).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("does not hold an edge's read for its answer behind the burst the edges' reads back spent", async () => {
+    // The same lab: the edges back after the restart read their members at once, which spent the groups' burst of
+    // urgent reads for 15 s, and the reads for the answers to the offers that followed waited for it.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const log: string[] = [];
+      const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        log.push(new URL(String(input)).pathname.slice(1));
+        return init?.method === "PUT" ? new Response(null, { status: 204 }) : new Response(null, { status: 404 });
+      }) as typeof fetch });
+      const group = withRequestOptions(relay, { group: true });
+      const went = async (request: () => Promise<unknown>) => { const before = log.length; await request().catch(() => {}); return log.length > before; };
+      const burst = Math.max(GROUP_BURST_ONE_LINK, Math.floor(REQUESTS_PER_MINUTE * GROUP_BURST_MS / 60_000));
+      for (let i = 0; i < burst; i++) expect(await went(() => group.resolve(createIdentity().pubKeyZ32, { urgent: true, resume: true }))).toBe(true);
+      expect(await went(() => group.resolve(createIdentity().pubKeyZ32, { urgent: true }))).toBe(false);
+      vi.setSystemTime(Date.now() + 2_000);
+      expect(await went(() => group.resolve(createIdentity().pubKeyZ32, { urgent: true, signal: true }))).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("holds the floor's other requests back for an edge's read for its answer only while that read waits", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const log: { key: string; method: string }[] = [];
+      const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        log.push({ key: new URL(String(input)).pathname.slice(1), method: init?.method ?? "GET" });
+        return init?.method === "PUT" ? new Response(null, { status: 204 }) : new Response(null, { status: 404 });
+      }) as typeof fetch });
+      const group = withRequestOptions(relay, { group: true });
+      const went = async (request: () => Promise<unknown>) => { const before = log.length; await request().catch(() => {}); return log.length > before; };
+      const start = Date.now(), at = (t: number) => vi.setSystemTime(start + t);
+      // The minute is spent; a group's presence write is refused, and waits to go first.
+      for (let i = 0; i < REQUESTS_PER_MINUTE; i++) { at(i * 100); await relay.resolve(createIdentity().pubKeyZ32, { urgent: true }); }
+      at(4_000);
+      expect(await went(() => group.publish(createIdentity(), [{ label: "_ts", value: "1" }]))).toBe(false);
+      // An edge's read for its answer takes the floor all the same, at once.
+      at(4_500);
+      const answer = createIdentity().pubKeyZ32;
+      expect(await went(() => group.resolve(answer, { urgent: true, signal: true }))).toBe(true);
+      // An offer of another edge, on the floor, goes too: no answer read waits.
+      expect(await went(() => group.publish(createIdentity(), [{ label: "_ts", value: "1" }], { signal: true }))).toBe(true);
+      expect(log.at(-2)).toEqual({ key: answer, method: "GET" });
+    } finally { vi.useRealTimers(); }
+  });
+
   it("counts the edges' signaling under the limit toward their floor", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
