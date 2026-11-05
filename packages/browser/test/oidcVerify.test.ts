@@ -138,6 +138,35 @@ describe('OIDC ID token verification', () => {
     expect(t.server.requests).toHaveLength(2);
   });
 
+  it('keeps the once-a-minute refetch limit while the key endpoint fails', async () => {
+    const key = await testKey('k1');
+    let clock = 0, requests = 0, failing: 'status' | 'throw' | false = false;
+    const fetcher = async () => {
+      requests++;
+      if (failing === 'throw') throw new Error('network down');
+      return failing ? { status: 503, text: '' } : { status: 200, text: JSON.stringify({ keys: [key.jwk] }) };
+    };
+    const cache = new JwksCache({ now: () => clock });
+    const url = 'https://keys.example/jwks';
+    await expect(cache.key(url, 'k1', fetcher)).resolves.toBeTruthy();
+    for (const mode of ['status', 'throw'] as const) {
+      failing = mode;
+      clock += REFETCH_INTERVAL_MS;
+      const before = requests;
+      // The first made-up kid tries once and reports the failure; the next ones within the minute cost nothing.
+      await expect(cache.key(url, 'made-up-0', fetcher)).rejects.toThrow(mode === 'status' ? /unavailable \(503\)/ : /network down/);
+      for (let i = 1; i < 5; i++) await expect(cache.key(url, `made-up-${i}`, fetcher)).resolves.toBeUndefined();
+      expect(requests - before).toBe(1);
+      // The cached key still verifies.
+      await expect(cache.key(url, 'k1', fetcher)).resolves.toBeTruthy();
+    }
+    // Once the endpoint answers again, the next minute's refetch goes through.
+    failing = false;
+    clock += REFETCH_INTERVAL_MS;
+    await expect(cache.key(url, 'made-up-5', fetcher)).resolves.toBeUndefined();
+    expect(requests).toBe(4);
+  });
+
   it('caches keys for the provider’s max-age, bounded, and refuses oversized, failing or insecure key sets', async () => {
     const key = await testKey('k1');
     const server = jwksServer(() => [key.jwk], { cacheControl: 'public, max-age=18645' });
