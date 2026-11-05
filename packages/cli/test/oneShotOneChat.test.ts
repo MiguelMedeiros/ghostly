@@ -34,7 +34,7 @@ async function relays(count: number) {
 }
 
 /**
- * A one-shot about one 1:1 chat (`send`, `chat wait`) or one that joins a chat (`invite join`) starts that chat only.
+ * A one-shot about one 1:1 chat (`send`, `chat wait`, a bot's `task send`) or one that joins a chat (`invite join`) starts that chat only.
  * It started every saved chat: each put its records and its leave packet on the relays, and with 12 unused invites
  * saved one `send` took the relays' 30 requests a minute (60 on two). Bob's requests come to a relay of his own,
  * which shares its store with Carol's: only his are counted.
@@ -80,22 +80,28 @@ describe("a one-shot about one chat", { timeout: 180_000 }, () => {
     const join = await counted(["invite", "join", invite.link as string, "--label", "carol"]);
     const wait = await counted(["chat", "wait", "carol", "--until", "live", "--timeout", "60"]);
     const send = await counted(["send", "carol", "hello from a one-shot"]);
+    // A status card's chat may name a group, so the groups start for it; the saved 1:1 chats it does not name do not.
+    const task = await counted(["task", "send", "carol", "--title", "A card from a one-shot", "--wait", "delivered", "--timeout", "60"]);
     // The chat named started: it paired, went live with Carol's daemon, and took the text.
     expect(ok(join.result)).toMatchObject({ paired: true });
     expect(ok(wait.result)).toMatchObject({ live: true });
     expect(ok(send.result)).toMatchObject({ chat: join.result.json.chat, delivery: expect.stringMatching(/^(sent|delivered)$/) });
+    expect(ok(task.result)).toMatchObject({ chat: join.result.json.chat, delivery: "delivered" });
     // 13 chats started asked the relay its whole 30 a minute; the one chat named asks it 6 to 20 times.
-    for (const [name, requests] of [["invite join", join.requests], ["chat wait", wait.requests], ["send", send.requests]] as const) {
+    for (const [name, requests] of [["invite join", join.requests], ["chat wait", wait.requests], ["send", send.requests], ["task send", task.requests]] as const) {
       expect(requests, name).toBeLessThan(24);
     }
   });
 
-  it("starts every chat for a call that names none and makes none, or one that may name a group", () => {
+  it("starts every chat for a call that names none and makes none", () => {
     expect(oneChatOnly("invite.join", { invite: "ghostly1…" })).toBe(true);
     expect(oneChatOnly("invite.create", {})).toBe(true);
     expect(oneChatOnly("file.send", { chat: "carol", path: "a.txt" })).toBe(true);
     expect(oneChatOnly("usage.send", { all: true })).toBe(false);
-    expect(oneChatOnly("task.send", { chat: "Sala" })).toBe(false);
+    // A call whose chat may name a group leaves the other 1:1 chats unstarted too; its groups start (`chatOnly` is false).
+    expect(oneChatOnly("task.send", { chat: "Sala" })).toBe(true);
+    expect(oneChatOnly("chat.delete", { chat: "Crew", message: "mine:0:2", everyone: true })).toBe(true);
+    expect(oneChatOnly("usage.send", { chat: "Sala" })).toBe(true);
     expect(oneChatOnly("group.send", { group: "Sala", chat: "carol" })).toBe(false);
     expect(oneChatOnly("chat.list", {})).toBe(false);
   });
