@@ -83,8 +83,15 @@ export interface CashuPrepared {mint:string;swap:SerializedSwapPreview;token?:st
   /** The mint answered that it signed none of the outputs while an input read spent: something else spent that ecash. */
   spentElsewhere?:boolean}
 
-/** Cashu's library (174 KiB) loads with the wallet's first use of a mint or a token, not with the app's start. */
-const loadCashu = () => import("@cashu/cashu-ts");
+/**
+ * Cashu's library (174 KiB) loads with the wallet's first use of a mint or a token, not with the app's start. A mint's
+ * redirect is refused on every request, not only on those with a body as the library does: `normalizeMintUrl` alone
+ * says where the wallet's requests go.
+ */
+const loadCashu = () => import("@cashu/cashu-ts").then((cashu) => {
+  cashu.setGlobalRequestOptions({ redirect: "error" });
+  return cashu;
+});
 
 // SDK 4.x preview.fees covers input swap fees, despite its declaration saying
 // it includes the recipient fee. includeFees(true) also tops up send outputs.
