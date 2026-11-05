@@ -210,6 +210,7 @@
     "dhtWaitingFor": "على DHT · في انتظار {{transport}}",
     "discoveryUnavailable": "الاكتشاف غير متاح",
     "held": "غائب · الرسائل محفوظة",
+    "heldPlain": "الرسائل محفوظة",
     "identityMismatch": "عدم تطابق الهوية",
     "issue": "مشكلة في الاتصال",
     "noContact": "لا توجد جهة اتصال بعد",

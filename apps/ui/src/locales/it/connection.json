@@ -194,6 +194,7 @@
     "dhtWaitingFor": "Sulla DHT · in attesa di {{transport}}",
     "discoveryUnavailable": "Rilevamento non disponibile",
     "held": "Assente · messaggi trattenuti",
+    "heldPlain": "Messaggi trattenuti",
     "identityMismatch": "Identità non corrispondente",
     "issue": "Problema di connessione",
     "noContact": "Nessun contatto ancora",
