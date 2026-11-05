@@ -1,4 +1,5 @@
 {
+  "added": "{{app}} adicionado. Escolha quem pode abrir em Pessoas.",
   "fromContacts": "Dos seus contatos",
   "fromContactsEmpty": "Os apps que seus contatos compartilham aparecem aqui.",
   "ghostlyOnline": "Ghostly online",
@@ -19,6 +20,9 @@
   "peopleDone": "Pronto",
   "remove": "Remover",
   "removeNamed": "Remover {{app}}",
+  "removeText": "Os contatos com quem você compartilhou não vão mais conseguir abrir.",
+  "removeTitle": "Remover {{app}}?",
+  "removed": "{{app}} removido.",
   "requestCount": "· {{count}} pedidos",
   "requestCount_one": "· {{count}} pedido",
   "share": "Compartilhar",

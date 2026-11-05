@@ -1,4 +1,5 @@
 {
+  "added": "已添加 {{app}}。在“联系人”中选择谁可以打开它。",
   "fromContacts": "来自联系人",
   "fromContactsEmpty": "联系人共享的应用会显示在这里。",
   "ghostlyOnline": "Ghostly 在线",
@@ -19,6 +20,9 @@
   "peopleDone": "完成",
   "remove": "移除",
   "removeNamed": "移除 {{app}}",
+  "removeText": "你共享给的联系人将无法再打开它。",
+  "removeTitle": "移除 {{app}}？",
+  "removed": "已移除 {{app}}。",
   "requestCount": "· {{count}} 次请求",
   "requestCount_one": "· {{count}} 次请求",
   "share": "共享",
