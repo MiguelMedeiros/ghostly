@@ -34,9 +34,9 @@ async function fakeLightning(p: Peer, name: string, token: string) {
   } });
 }
 
-/** A Testnet BDK wallet on regtest, through New, with the words written down and this Esplora server. */
+/** A Testnet BDK wallet on regtest, through New (picked by name: the fake source is offered beside it), with the words written down and this Esplora server. */
 async function makeBdk(p: Peer, esplora: string) {
-  await createWallet(p, "bitcoin", "testnet", { timeout: 60_000, fill: async (form: Locator) => {
+  await createWallet(p, "bitcoin", "testnet", { provider: "bdk", timeout: 60_000, fill: async (form: Locator) => {
     await form.getByTestId("bdk-written").check();
     await choose(form.getByTestId("provider-form-bdk").getByLabel("Network"), "regtest");
     await form.getByLabel("Esplora server").fill(esplora);
