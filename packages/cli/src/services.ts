@@ -273,7 +273,7 @@ export const SERVICE_METHODS: Record<string, Method> = {
   },
   async "service.share"(ctx, params) {
     // A grant the contact keeps using: only what this side chose names its chat, as for `call auto --from`.
-    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true));
+    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
     const shared = !bool(params, "off");
     const serviceId = serviceOf(ctx, params);
     await node(ctx).setServiceShared({ serviceId, peerPubKeyZ32: link.peerPubKeyZ32, shared });

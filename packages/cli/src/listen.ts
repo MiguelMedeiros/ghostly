@@ -81,12 +81,25 @@ export async function allowlist(from: readonly string[], groups: readonly string
   const chats = new Set<string>(), keys = new Set<string>(), groupIds = new Set<string>();
   for (const ref of from) {
     if (CONTACT_KEY.test(ref)) { keys.add(ref); continue; }
-    const chat = (await call("chat.get", { chat: ref })) as { id: string; label?: string | null; peerName?: string | null; peer?: string };
+    const chat = (await otherFlag(call("chat.get", { chat: ref }), ref, "--from")) as { id: string; label?: string | null; peerName?: string | null; peer?: string };
     if (chat.id !== ref && chat.label?.toLowerCase() !== ref.toLowerCase()) throw namedByThem(ref, { chat: chat.id, name: chat.peerName ?? null, contact: chat.peer });
     chats.add(chat.id);
   }
-  for (const ref of groups) groupIds.add(((await call("group.get", { group: ref })) as { id: string }).id);
+  for (const ref of groups) groupIds.add(((await otherFlag(call("group.get", { group: ref }), ref, "--group")) as { id: string }).id);
   return new Allowlist(chats, keys, groupIds, peerOf);
+}
+
+/**
+ * A `--from` that names a group, or a `--group` a chat: said with the flag that takes it. The lookup's own hint named
+ * `ghostly group show` (or `chat show`), which lists nothing.
+ */
+async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" | "--group"): Promise<unknown> {
+  try { return await lookup; } catch (error) {
+    const other = flag === "--from" ? "group" : "chat";
+    if (!(error instanceof CliError) || error.code !== "not_found" || typeof error.details?.[other] !== "string") throw error;
+    const shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
+    throw new CliError("not_found", `${JSON.stringify(ref)} is a ${other}, not a ${flag === "--from" ? "chat" : "group"}: ghostly listen ${flag === "--from" ? "--group" : "--from"} ${shown}`, error.details);
+  }
 }
 
 /**
