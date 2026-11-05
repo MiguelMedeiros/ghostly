@@ -145,7 +145,8 @@
     "noStores": "Nenhuma loja ainda. Adicione uma pelo link.",
     "none": "Nenhum app ainda.",
     "open": "Abrir",
-    "stores": "Lojas"
+    "stores": "Lojas",
+    "tryAgain": "Tentar de novo"
   },
   "pick": {
     "hint": "Ele roda em uma conversa, com seu contato.",
