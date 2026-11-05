@@ -154,13 +154,13 @@ it("with ownRelaysOnly, dials a contact only through one of this endpoint's own 
   await expect(endpoint.connect(onTheirs)).rejects.toThrow("not on one of this profile's Iroh relays");
   await expect(endpoint.connect(noRelay)).rejects.toThrow("not on one of this profile's Iroh relays");
   // One that started on the measured home alone still takes the whole list as its own.
-  expect(wasm.started.at(-1)).toEqual([own[1]]);
+  expect(wasm.started[wasm.started.length - 1]).toEqual([own[1]]);
   await later.connect({ ...onOwn, relay: own[0] });
   expect(wasm.dialled).toEqual([{ ...onOwn, relay: "https://use1-1.relay.n0.iroh.link/" }, { ...onOwn, relay: own[0] }]);
   // Without it (a link to the profile's own device), any relay is dialled as before.
   const device = await createIrohWebEndpoint(Buffer.alloc(32, 3).toString("base64url"), { load: wasm.load, relays: own });
   await device.connect(onTheirs);
-  expect(wasm.dialled.at(-1)).toEqual(onTheirs);
+  expect(wasm.dialled[wasm.dialled.length - 1]).toEqual(onTheirs);
   await Promise.all([endpoint.close(), later.close(), device.close()]);
 });
 
