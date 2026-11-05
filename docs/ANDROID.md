@@ -2,13 +2,13 @@
 
 The Android app is the Desktop app (`apps/desktop`) built with [Tauri 2](https://v2.tauri.app/) for Android: the same UI and engine as Desktop, with native Iroh and direct Mainline DHT reads in Rust. Package id `tools.ghostly.app`, Android 8.0 (API 26) and up, arm64 phones (`arm64-v8a`).
 
-**It is in progress and not released.** No release before 1.3.0 has it: the `Release` workflow builds and attaches an APK only for a tag from `ANDROID_FROM` on (`.github/workflows/release.yml`, `1.3.0` today), by the tag's version alone, whatever signing secrets the repository has, and an older release's notes say nothing of it. Moving that version is the owner's decision. Until then, Ghostly on an Android phone is [the web app](WEB.md), installed from the browser; to try this app, build it or take a CI run's debug APK ([What CI does](#what-ci-does)).
+**Each release since 1.6.0 attaches it**, signed ([Install it](#install-it)). No release before 1.3.0 has it: the `Release` workflow builds and attaches an APK only for a tag from `ANDROID_FROM` on (`.github/workflows/release.yml`, `1.3.0` today), by the tag's version alone, whatever signing secrets the repository has, and an older release's notes say nothing of it. Moving that version is the owner's decision. On an Android phone, [the web app](WEB.md), installed from the browser, works too; to try an unreleased build, build it or take a CI run's debug APK ([What CI does](#what-ci-does)).
 
 It is not the whole Desktop yet. Left out on Android, and why (`#[cfg(desktop)]`, refusing stubs in `apps/desktop/src/mobile.rs`): HyperDHT (a Node program; native HyperDHT through Bare is its own piece of work), the updater and the clipboard crate (no Android support; Android's own clipboard is read through the Android host), keep awake, and the windows of shared and installed apps (a mobile app has one window). What Desktop does with the system's processes and windows, Android does through [the Android host](#the-android-host-a1). What is still open is listed at the end ([Still open](#still-open-by-pull-request)).
 
 ## Install it
 
-Once it is released, each release attaches the APK: `ghostly-<version>-android-arm64.apk`, signed with Ghostly's upload key, and listed in `SHA256SUMS.txt` like the other downloads. Check it, then install it:
+Each release attaches the APK, and the download panel on [ghostly.tools](https://ghostly.tools/#download) offers it to an Android phone: `ghostly-<version>-android-arm64.apk`, signed with Ghostly's upload key, and listed in `SHA256SUMS.txt` like the other downloads. Check it, then install it:
 
 ```bash
 sha256sum --ignore-missing -c SHA256SUMS.txt
