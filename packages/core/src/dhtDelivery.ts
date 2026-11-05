@@ -486,8 +486,13 @@ export class DhtDelivery {
       // The contact learns the new method from the next envelope: it goes out now, not after the publish spacing.
       this.mode = mode; this.controlDue = 0; this.lastPublish = 0;
       this.leavingUntil = mode === "stream" ? Date.now() + LEAVING_DHT_FAST_MS : 0;
-      // DHT only here: no live link waits on the contact leaving it.
+      // DHT only here: no live link waits on the contact leaving it. Leaving it while the contact still says DHT only:
+      // the live link waits on a read saying it left too, its envelope maybe a moment away, and the first reads go as
+      // signaling (`LEAVING_SIGNAL_READS`). As plain reads, an extension whose relay minute was spent read its contact's
+      // mailbox once as it left, just before the contact's envelope saying it left too got there, and the next read
+      // waited 41 s: it never dialled, and the matrix's chat stayed "On DHT · retrying live" for 45 s (E2E full, 2026-11-05).
       if (mode === "dht") this.signalReads = 0;
+      else if (this.state.peerMode === "dht") this.signalReads = LEAVING_SIGNAL_READS;
       this.changed();
     });
     void this.tick();
@@ -1052,6 +1057,10 @@ export class DhtDelivery {
       this.readHeldUntil = 0;
       try { await this.read(background, signal); if (!this.running) return; delete this.errors.read; }
       catch (error) { if (isDiscoveryBudgetError(error)) this.readHeld(error.retryInMs); else if (readAt >= this.networkBackAt) this.errors.read = `Could not read DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
+      // A signaling read the budget held back asked nothing of the relays: it is not one of the few, and goes again
+      // when the budget frees a request (`schedule`). Counted, a read held by a refused write's turn (`WRITE_FIRST_MS` in
+      // relay.ts) used them up, and the next ones, plain reads, waited out the minute.
+      if (signal && this.readHeldUntil > 0) this.signalReads++;
       // The contact says it left DHT only: nothing waits on its mailbox any more.
       if (this.state.peerMode !== "dht") this.signalReads = 0;
       await this.publishOnTick();

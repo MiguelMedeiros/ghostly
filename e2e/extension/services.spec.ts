@@ -64,7 +64,8 @@ test("a local web app, shared with a contact and opened over WebRTC", { tag: ["@
     await a.page.getByTestId("service-sharing").click();
     await expect(a.page.getByTestId("service-item").filter({ hasText: "Stopped" })).toBeVisible();
     await viewer.goto(viewer.url().replace("/page2", "/"));
-    await viewer.waitForSelector("text=This peer does not share that service");
+    // Said from B's side, not in A's words ("This peer does not share that service.").
+    await viewer.waitForSelector("text=/is no longer shared with you/");
     await a.page.getByTestId("service-sharing").click();
     await expect(a.page.getByTestId("service-item").filter({ hasText: "Shared with 1 contact" })).toBeVisible();
     await viewer.reload();

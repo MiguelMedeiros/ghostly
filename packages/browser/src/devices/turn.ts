@@ -152,9 +152,41 @@ export function latestKnown(read: Pick<TurnRead, "result" | "record">, stored: T
   return !stored || news.sequence >= stored.sequence ? news : stored;
 }
 
+/**
+ * Whether a tombstone was signed by the device this one believes active: the one its record names (itself, on the
+ * active device), or the other device of a handoff under way (the one it releases the turn to, or takes it from). Any
+ * slot's key and `D` make a valid tombstone, so a stolen standby or a removed device can sign one too; only the believed
+ * device's ends this device (WISP 06 § Removing a device).
+ */
+export function tombstoneBelieved(record: DeviceRecord, tombstone: TurnRecord): boolean {
+  const author = tombstone.slots[tombstone.author];
+  if (!author) return false;
+  const key = toBase64Url(author.key);
+  const active = record.activeSlot === undefined ? undefined : record.deviceSet[record.activeSlot]?.key;
+  return key === active || key === record.handoff?.release?.to || key === record.handoff?.peer;
+}
+
 /** The record's slots as the device state keeps them. */
 export function deviceSetOf(record: TurnRecord): (DeviceSlot | null)[] {
   return record.slots.map((slot) => slot && { key: toBase64Url(slot.key), name: slot.name });
+}
+
+/**
+ * The slots of the first record of a turn this device raises (WISP 06 § Who may raise the turn): those of the newest
+ * record of the set it knows. The read the raise acts on may return a record above the one it stored (a device added or
+ * renamed since its last read); when that record still lists this device in its own slot, its slots are written, with
+ * any device of the stored set in a slot that record leaves empty (within one `D` a slot is never emptied). Undefined:
+ * the stored set is the newest. Written as stored, the set would drop the device added, which keeps `D` and is listed
+ * nowhere, and undo the rename.
+ */
+export function newestSlots(held: Pick<Held, "record" | "ownSlot" | "ownKey" | "storedRecord">, read: Pick<TurnRead, "result" | "record">): (DeviceSlot | null)[] | undefined {
+  const news = read.record;
+  if (!news || news.tombstone || read.result === "clone") return undefined;
+  if (held.storedRecord && news.sequence <= held.storedRecord.sequence) return undefined;
+  const listed = news.slots[held.ownSlot];
+  if (!listed || !bytesEqual(listed.key, held.ownKey)) return undefined;
+  const set = deviceSetOf(news);
+  return set.map((slot, i) => slot ?? (held.record.deviceSet[i] && !set.some((s) => s?.key === held.record.deviceSet[i]!.key) ? held.record.deviceSet[i] : null));
 }
 
 interface Held {
@@ -400,7 +432,9 @@ export class TurnKeeper {
       // settles can offer a new device secret against it by name.
       const stopping = held.record.activeSlot !== undefined && held.record.activeSlot !== held.ownSlot ? held.record.deviceSet[held.record.activeSlot]?.key : undefined;
       held.record = await this.store.move(this.options.profile, "taking", { handoff: { role: "taking", step: `${TAKEOVER}${prior}`, ...(stopping ? { peer: stopping } : {}) } });
-      try { await this.writeWith(held, read.conditions, { turn, ...(options.slots ? { slots: options.slots } : {}) }, true); } catch (error) {
+      // The set of the newest record it knows, not only the one it stored: a device added since its last read stays listed.
+      const slots = options.slots ?? newestSlots(held, read);
+      try { await this.writeWith(held, read.conditions, { turn, ...(slots ? { slots } : {}) }, true); } catch (error) {
         // Nothing was put: the device is what it was.
         if (!held.wroteNow) held.record = await this.store.move(this.options.profile, prior, { handoff: undefined, settle: undefined });
         // No record can be written above what it saw: it stays what it was, and the host is told.
@@ -446,7 +480,9 @@ export class TurnKeeper {
       }
       // Something other than the releaser's record it already holds: the table says what (yield, a tombstone, wait).
       if (!fresh) return this.settle(held, read, true);
-      try { await this.writeWith(held, read.conditions, { turn, release }, true); } catch (error) {
+      // A later rev of the releaser's turn lists the set as it is now (a device added, a rename): written from it.
+      const slots = newestSlots(held, read);
+      try { await this.writeWith(held, read.conditions, { turn, release, ...(slots ? { slots } : {}) }, true); } catch (error) {
         if (error instanceof TurnClosedError) return this.exhausted(held, "taking", read);
         if (error instanceof TurnStaleReadError) return { kind: "wait", read };
         throw error;
@@ -509,7 +545,8 @@ export class TurnKeeper {
         continue;
       }
       let outcome: TurnOutcome | null;
-      try { outcome = await this.carryOut(held, row, turnAction(row, read, behind), read); } catch (error) {
+      const facts = read.result === "tombstone" && read.record ? { ...read, believed: tombstoneBelieved(held.record, read.record) } : read;
+      try { outcome = await this.carryOut(held, row, turnAction(row, facts, behind), read); } catch (error) {
         // No record can be written above what this device saw: it does what it does when it cannot read the turn.
         if (error instanceof TurnClosedError) return this.exhausted(held, row, read);
         // A taking device's put would be sent more than P after the start of its read: it starts over with a read.
@@ -568,24 +605,29 @@ export class TurnKeeper {
         // crash between the two cannot start the engine on the old counters.
         const won = !!takeover && state === "active";
         const takeovers = held.record.takeovers + 1;
-        // The copy: an active device runs the profile and holds none apart; one replaced keeps its own, frozen.
+        // The copy: an active device runs the profile and holds none apart; one replaced keeps its own, frozen. So does one
+        // stopped by a tombstone another slot signed: a set of its own from that copy is its way out.
         const was = held.record.state;
-        const copy = state === "active" ? { copy: undefined } : state === "superseded" && (was === "active" || was === "releasing") ? { copy: "frozen" as const } : {};
+        const ran = was === "active" || was === "releasing";
+        const foreign = state === "moving" && read.result === "tombstone" && !!read.record && !tombstoneBelieved(held.record, read.record);
+        const copy = state === "active" ? { copy: undefined } : (state === "superseded" || foreign) && ran ? { copy: "frozen" as const } : {};
         // Replaced: which device took the turn, and the set as its record lists it (a restored copy may hold a slot of
         // its own), so the screen names it and a handoff back can reach it. Only from a record that still lists this
         // device in its own slot; the turn and the packet stay this device's own, below the mark it keeps.
         const listed = read.record?.slots[held.ownSlot];
         const replacedBy = state === "superseded" && read.result === "other" && read.record && !!listed && toBase64Url(listed.key) === toBase64Url(held.ownKey)
           ? { activeSlot: read.record.active, deviceSet: deviceSetOf(read.record) } : {};
-        // Closed by a tombstone that still lists it: `moving`, with the tombstone kept. When the device its stored record
-        // names active is not listed there (or is this device), no `set-update` can ever be accepted: it is enrolled anew.
+        // Closed by a tombstone: `moving`, with the tombstone kept. When the device its stored record names active is not
+        // listed there (or is this device), no `set-update` can ever be accepted: it is enrolled anew; unless it ran the
+        // profile and another slot closed its address, when it starts a set of its own instead.
         const tombstoned = state === "moving" && read.result === "tombstone" && read.record && read.payload
-          ? { tombstone: toBase64Url(read.payload), ...(storedActiveListed(held.record, read.record) ? {} : { reenroll: true as const }) } : {};
+          ? { tombstone: toBase64Url(read.payload), ...(storedActiveListed(held.record, read.record) || (foreign && ran) ? {} : { reenroll: true as const }) } : {};
         // A takeover that won: the device that stopped still holds `D`, so "New device secret" is offered (`rotate.ts`).
-        const stopped = won && held.record.handoff?.peer ? held.record.deviceSet.find((slot) => slot?.key === held.record.handoff!.peer)?.name : undefined;
+        // Kept by its key: names change, and two devices may have the same one.
+        const stopped = won && held.record.handoff?.peer ? held.record.deviceSet.find((slot) => slot?.key === held.record.handoff!.peer) : undefined;
         held.record = await this.store.move(this.options.profile, state, {
           ...(takeover ? { handoff: undefined } : {}), ...(held.record.settle ? { settle: undefined } : {}), ...copy, ...replacedBy, ...tombstoned,
-          ...(won ? { takeovers, raise: pendingRaise("takeover", takeovers, this.now()), secretOffer: { why: "takeover" as const, at: this.now(), ...(stopped ? { device: stopped } : {}) } } : {}),
+          ...(won ? { takeovers, raise: pendingRaise("takeover", takeovers, this.now()), secretOffer: { why: "takeover" as const, at: this.now(), ...(stopped ? { key: stopped.key, device: stopped.name } : {}) } } : {}),
         });
         if (!action.then) return { kind: "gated", state, reload: action.reload, ...(action.notice ? { notice: action.notice } : {}), read };
         return this.carryOut(held, turnRow(state as DeviceState, true), action.then, read);

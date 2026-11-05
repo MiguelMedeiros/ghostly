@@ -125,6 +125,28 @@ test("every link of llms.txt to the site lands on a page, a file or a WISP, and 
   for (const [url, path] of files) assert.ok(existsSync(resolve(root, path)), `${url}: no file ${path} in the repository`);
 });
 
+test("llms.txt says releases attach the Android APK, as the Release workflow does", () => {
+  const index = llmsIndex(entries, numbering);
+  assert.match(read(".github/workflows/release.yml"), /^ {2}ANDROID_FROM: "\d+\.\d+\.\d+"$/m, "the Release workflow attaches an APK from ANDROID_FROM on");
+  assert.doesNotMatch(index, /Android[^.]*\bno release\b/, "the native Android app is in the releases");
+  assert.ok(index.includes("ghostly-<version>-android-arm64.apk"), "the APK's file name, as docs/ANDROID.md gives it");
+  assert.match(index, /- \[Download\]\([^)]+\): [^\n]*Android/, "the Download line names Android");
+});
+
+test("the site's own pages say the same of the Android app as llms.txt: the agents FAQ and the roadmap", () => {
+  const notReleased = /Android[^.]*\b(no release|not (yet )?released|not in release)\b/i;
+  const content = readdirSync(resolve(root, "apps/website/content")).filter((name) => name.endsWith(".ts"));
+  for (const name of content) assert.doesNotMatch(read(`apps/website/content/${name}`), notReleased, `apps/website/content/${name}`);
+  assert.ok(read("apps/website/content/agents-faq.ts").includes("ghostly-<version>-android-arm64.apk"), "the agents FAQ names the APK");
+  const roadmap = read("docs/wisps/ADAPTER-ROADMAP.md").split("\n");
+  for (const line of roadmap.filter((l) => /Android/.test(l))) assert.doesNotMatch(line, notReleased, line);
+  const track = roadmap.filter((line) => line.startsWith("- **") && /native Android app/.test(line));
+  assert.equal(track.length, 1);
+  assert.match(track[0], /^- \*\*Available\*\*: /, "the roadmap's track has the Android app available");
+  const row = roadmap.find((line) => line.startsWith("| Ghostly for Android |")) ?? "";
+  assert.match(row.split("|")[3].trim(), /^\*\*Available/, "the roadmap's client row has the Android app available");
+});
+
 test("both files start with # Ghostly, and every page links llms.txt in its head and footer", () => {
   for (const name of ["llms.txt", "llms-full.txt"]) assert.ok(read(`apps/website/public/${name}`).startsWith("# Ghostly\n"), name);
   assert.match(read("apps/website/app/layout.tsx"), /<link rel="alternate" type="text\/plain" href="\/llms\.txt"/);

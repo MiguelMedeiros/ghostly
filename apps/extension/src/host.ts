@@ -1,4 +1,5 @@
 import type { BrowserHost } from "@ghostly/browser/host";
+import { engine } from "@ghostly/browser/platform/engine";
 import { UI_PORT, type RuntimeMessage, type ViewerPage } from "./messages";
 import { extensionUpdates } from "./updates";
 import { extensionOidc } from "./oidc";
@@ -13,11 +14,11 @@ import { forgetLocalAccess, releaseUnusedLocalAccess } from "./localAccess";
 // A contact's app tabs close when the profile locks, as Desktop's windows do: the worker serves them, page or not.
 setServiceWindowsCloser(() => void chrome.runtime.sendMessage({ target: "background", type: "close-services" } satisfies RuntimeMessage).catch(() => {}));
 
-/** The viewer tab's error page in the profile's language, as it is now. */
-export function viewerPage(): ViewerPage {
+/** The viewer tab's error page in the profile's language, as it is now, and the app's name as the chat lists it. */
+export function viewerPage(app?: string): ViewerPage {
   const { language } = loadSettings();
   const t = translatorFor(language);
-  return { lang: languageTag(language), dir: textDirection(language), unreachable: t("services.window.unreachable"), failed: t("services.window.failed") };
+  return { lang: languageTag(language), dir: textDirection(language), unreachable: t("services.window.unreachable"), failed: t("services.window.failed"), ...(app ? { app } : {}) };
 }
 
 /** Ghostly Browser: the peer lives in the offscreen document, reached through extension messaging. */
@@ -37,6 +38,11 @@ export const extensionHost: BrowserHost = {
     }
     const ready = await chrome.runtime.sendMessage({ target: "background", type: "ensure-engine" } satisfies RuntimeMessage);
     if (!ready?.ok) throw new Error(ready?.error ?? "The Ghostly peer is unavailable. Reopen the extension to retry.");
+    // Another switch may have come while the peer started: this page's profile is no longer the one it runs.
+    if (!pageProfileIsCurrent()) {
+      startAsProfileInUse();
+      throw new Error("Switching profiles…");
+    }
     const port = chrome.runtime.connect({ name: UI_PORT });
     port.onMessage.addListener(onMessage);
     port.onDisconnect.addListener(() => {
@@ -76,7 +82,7 @@ export const extensionHost: BrowserHost = {
       peerPubKeyZ32,
       serviceId,
       tag,
-      page: viewerPage(),
+      page: viewerPage(engine.linkByPeer(peerPubKeyZ32)?.peerServices?.find((s) => s.id === serviceId)?.name),
     } satisfies RuntimeMessage);
     if (!reply?.ok) throw new Error(reply?.error ?? "Could not open the service");
   },

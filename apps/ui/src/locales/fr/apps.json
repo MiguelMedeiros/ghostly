@@ -18,7 +18,6 @@
     "fetchFiles": "Récupérer ses fichiers",
     "keepStopped": "La laisser arrêtée",
     "needsFiles": "Il lui manque ses fichiers",
-    "remove": "Retirer",
     "runAnyway": "Lancer quand même",
     "stopped": "Arrêtée",
     "uninstall": "Désinstaller",
@@ -100,7 +99,7 @@
     "note": "Rien n’est copié : {{app}} lit ce que vous choisissez, sur cet appareil."
   },
   "install": {
-    "equivocation": "Deux versions {{sequence}} différentes existent. Ghostly a gardé celle que vous avez.",
+    "equivocation": "Deux copies différentes de cette version existent. Ghostly a gardé celle que vous avez.",
     "fetching": "Vérification de l'app…",
     "foundBy": "Trouvée par {{name}}",
     "inStore": "Dans {{name}}",
@@ -130,7 +129,7 @@
     "same": "Déjà installée.",
     "sentBy": "Envoyée par {{name}}",
     "unknownPublisher": "Éditeur inconnu",
-    "unknownPublisherInfo": "N'importe qui peut signer une app avec une nouvelle clé. Seule une boutique que vous avez ajoutée peut garantir qui l'a faite. Comparez la clé avec celle que publie son auteur.",
+    "unknownPublisherInfo": "N'importe qui peut signer une app avec une nouvelle clé. Seule une boutique que vous avez ajoutée peut garantir son éditeur. Comparez la clé avec celle que publie l'éditeur.",
     "update": "Mettre à jour",
     "webkit": "Dans ce navigateur, une app peut quand même contacter d'autres serveurs.",
     "webkitInfo": "Safari et tout navigateur sur iPhone ou iPad laissent une app ouvrir des connexions que Ghostly ne peut pas bloquer. Ces serveurs apprennent votre adresse IP. L'app de bureau les bloque."
@@ -140,12 +139,13 @@
     "addHint": "Ajouter une app ou une boutique par son lien",
     "details": "{{title}} : détails",
     "installed": "Installées",
-    "intro": "Des jeux et de petites apps, signés par leurs auteurs et lancés dans un bac à sable.",
+    "intro": "Des jeux et de petites apps, signés par leurs éditeurs et lancés dans un bac à sable.",
     "loading": "Chargement…",
     "noStores": "Aucune boutique. Ajoutez-en une par son lien.",
     "none": "Aucune app pour l'instant.",
     "open": "Ouvrir",
-    "stores": "Boutiques"
+    "stores": "Boutiques",
+    "tryAgain": "Réessayer"
   },
   "pick": {
     "hint": "Elle fonctionne dans une discussion, avec votre contact.",
@@ -186,10 +186,10 @@
     "resume": "Revenir à {{title}}",
     "resumeSharing": "partage un fichier",
     "sharingWith": "partage un fichier avec {{name}}",
-    "stoppedFailed": "{{title}} a cessé de fonctionner et a été fermée. Si cela se reproduit, prévenez son auteur.",
+    "stoppedFailed": "{{title}} a cessé de fonctionner et a été fermée. Si cela se reproduit, prévenez son éditeur.",
     "stoppedRemoved": "{{title}} a été arrêtée : {{store}} a retiré cette version",
-    "stoppedRevoked": "{{title}} a été arrêtée : son auteur a révoqué cette version",
-    "stoppedUnresponsive": "{{title}} ne répondait plus et a été fermée, pour que vos discussions continuent de fonctionner. Rouvrez-la ou, si cela se reproduit, prévenez son auteur.",
+    "stoppedRevoked": "{{title}} a été arrêtée : son éditeur a révoqué cette version",
+    "stoppedUnresponsive": "{{title}} ne répondait plus et a été fermée, pour que vos discussions continuent de fonctionner. Rouvrez-la ou, si cela se reproduit, prévenez son éditeur.",
     "with": "{{title}} avec {{name}}",
     "withName": "avec {{name}}",
     "withSharing": "{{title}} · partage un fichier avec {{name}}"

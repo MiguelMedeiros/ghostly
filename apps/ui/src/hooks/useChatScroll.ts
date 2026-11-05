@@ -153,7 +153,12 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
    */
   const away = useRef(false);
 
-  /** The first row not wholly above the view, and where it is. Rows are in order, so it is a binary search. */
+  /**
+   * The first row that starts in the view, and where it is. Not the one the view's top edge cuts: that one is mostly
+   * above, maybe still at a typical height (content-visibility lays it out only near the view), and held by its top,
+   * its real height would move every row read. Only a row taller than the view, with none starting in it, is held.
+   * Rows are in order, so it is a binary search.
+   */
   const capture = useCallback((el: HTMLElement) => {
     const all = rowsOf(el);
     const top = el.getBoundingClientRect().top;
@@ -163,6 +168,12 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
       if (shown(el, all[mid]).getBoundingClientRect().bottom > top) { found = mid; hi = mid - 1; } else lo = mid + 1;
+    }
+    // Rows folded into the cut one's fold share its box: on to the first that starts in the view.
+    for (let i = found + 1; found >= 0 && shown(el, all[found]).getBoundingClientRect().top < top && i < all.length; i++) {
+      const start = shown(el, all[i]).getBoundingClientRect().top;
+      if (start >= top + el.clientHeight) break;
+      if (start >= top) found = i;
     }
     anchor.current = found < 0 ? null : { id: all[found].dataset.messageId!, offset: shown(el, all[found]).getBoundingClientRect().top - top, height: el.clientHeight };
   }, []);

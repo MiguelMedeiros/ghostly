@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { readStatusCard, type TaskCard } from "@ghostly/core";
 import type { CardIndexRow, GroupView, SavedMessage } from "@ghostly/browser/shared/types";
 import { Sidebar } from "../../components/Sidebar";
+import { MOBILE_QUERY } from "../../hooks/useIsMobile";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { groupChat, setChatMute, setMentionsNotify } from "../../lib/chatMute";
 import { markGroupRead } from "../../lib/groups";
@@ -283,5 +284,29 @@ describe("on a phone", () => {
     fireEvent.keyDown(window, { code: "KeyL", key: "L", altKey: true, shiftKey: true });
     expect(screen.queryByTestId("chat-rail")).not.toBeInTheDocument();
     expect(stored()).toBe(true);
+  });
+
+  it("turned on its side with a search typed, to two panes whose list is folded, shows every chat on the rail and keeps the search for the way back", async () => {
+    // A phone turned on its side (or back) keeps its list mounted, the search typed in it with it (App.tsx).
+    let phone = true;
+    const changes = new Set<() => void>();
+    const matchMedia = window.matchMedia.bind(window);
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => query !== MOBILE_QUERY ? matchMedia(query) : ({
+      ...matchMedia(query), get matches() { return phone; },
+      addEventListener: (_: string, on: () => void) => changes.add(on), removeEventListener: (_: string, on: () => void) => changes.delete(on),
+    } as unknown as MediaQueryList));
+    const turn = (toPhone: boolean) => { phone = toPhone; act(() => { for (const on of changes) on(); }); };
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ chatListCollapsed: true }));
+    saveSession(chat("a", { nick: "Ana" }));
+    saveSession(chat("b", { nick: "Bea" }));
+    const { user } = list();
+    await user.type(screen.getByRole("searchbox", { name: "Search chats" }), "zzz");
+    expect(screen.queryAllByTestId("chat-row")).toHaveLength(0);
+
+    turn(false);
+    expect(within(rail()).getAllByRole("button").map(b => b.getAttribute("data-chat")).sort()).toEqual(["a", "b"]);
+    turn(true);
+    expect(screen.getByRole("searchbox", { name: "Search chats" })).toHaveValue("zzz");
+    expect(screen.queryAllByTestId("chat-row")).toHaveLength(0);
   });
 });

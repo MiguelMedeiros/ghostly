@@ -1,5 +1,8 @@
 import { CliError } from "../errors";
-import { type Command, here, showSecret, secret, cursor, pageLimit, typingFor, typingKind } from "./shared";
+import { type Command, groupWait, here, refs, showSecret, secret, cursor, pageLimit, timeout, typingFor, typingKind } from "./shared";
+
+const nameForce = { type: "boolean", description: "Use the name even if it looks like a seed, a key or ecash" } as const;
+const forced = (options: Record<string, unknown>) => (options.force === true ? { force: true } : {});
 
 /** Groups: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
@@ -8,10 +11,23 @@ export const commands: Record<string, Command> = {
     method: "group.admin", usage: "group admin <group> <member> [--show-secret]", summary: "Make a member the admin (admin)", args: ["group", "member"],
     options: showSecret, params: ({ options }, a) => ({ group: a.group, member: a.member, ...secret(options) }),
   },
+  "group auto": {
+    method: "group.auto", usage: "group auto [on|off] [--from <chat>]...", summary: "Accept group invitations by themselves, only from the chats named (kept in the profile; the daemon accepts)",
+    args: ["mode...?"], options: { from: { type: "list", description: "Invitations from this chat: its id, its contact's key or a label given here with chat rename (again for more)" } },
+    params: ({ options }, a) => {
+      if (a.mode !== undefined && a.mode !== "on" && a.mode !== "off") throw new CliError("usage", `group auto takes on or off, not ${JSON.stringify(a.mode)}: ghostly group auto [on|off] [--from <chat>]...`);
+      // Never from anyone: on names its chats. Without on, the chats would be dropped without a word.
+      if (a.mode === "on" && options.from === undefined) throw new CliError("usage", "group auto on needs the chats whose invitations it accepts: ghostly group auto on --from <chat>");
+      if (a.mode !== "on" && options.from !== undefined) throw new CliError("usage", "--from goes with on: ghostly group auto on --from <chat>");
+      refs(options.from, "from", "chat");
+      if (a.mode === undefined) return {};
+      return a.mode === "on" ? { on: true, from: options.from } : { on: false };
+    },
+  },
   "group create": {
-    method: "group.create", usage: "group create <name...> [--mesh]", summary: "A community (a link anyone can open) or, with --mesh, a private group of up to 32",
-    args: ["name..."], options: { mesh: { type: "boolean", description: "A private mesh of contacts instead of a community" } },
-    params: ({ options }, { name }) => ({ name, profile: options.mesh ? "mesh" : "community" }),
+    method: "group.create", usage: "group create <name...> [--mesh] [--force]", summary: "A community (a link anyone can open) or, with --mesh, a private group of up to 32",
+    args: ["name..."], options: { mesh: { type: "boolean", description: "A private mesh of contacts instead of a community" }, force: nameForce },
+    params: ({ options }, { name }) => ({ name, profile: options.mesh ? "mesh" : "community", ...forced(options) }),
   },
   "group decline": { method: "group.decline", usage: "group decline <group>", summary: "Decline an invitation to a group", args: ["group"], params: (_, { group }) => ({ group }) },
   "group forget": {
@@ -50,7 +66,7 @@ export const commands: Record<string, Command> = {
       return { group: a.group, on: options.off !== true, reset: options.reset === true };
     },
   },
-  "group list": { method: "group.list", usage: "group list [--show-secret]", summary: "Groups and invitations", options: showSecret, params: ({ options }) => secret(options) },
+  "group list": { method: "group.list", usage: "group list [--show-secret]", summary: "Groups, invitations and auto-join", options: showSecret, params: ({ options }) => secret(options) },
   "group picture": {
     method: "group.picture", usage: "group picture <group> <jpeg> | --clear", summary: "Set or clear the group's picture (admin; a square JPEG)", args: ["group", "path...?"],
     options: { clear: { type: "boolean", description: "Remove the picture" } },
@@ -61,17 +77,21 @@ export const commands: Record<string, Command> = {
     },
   },
   "group react": {
-    method: "group.react", usage: "group react <group> <message> <emoji> [--remove]", summary: "React to a group's message with one emoji; --remove takes yours back",
-    args: ["group", "message", "emoji...?"], options: { remove: { type: "boolean", description: "Take your reaction back" } },
-    params: ({ options }, a) => ({ group: a.group, message: a.message, emoji: a.emoji, remove: options.remove === true }),
+    method: "group.react", usage: "group react <group> <message> <emoji> [--remove] [--wait none|sent] [--timeout s]", summary: "React to a group's message with one emoji; --remove takes yours back",
+    args: ["group", "message", "emoji...?"],
+    options: {
+      remove: { type: "boolean", description: "Take your reaction back" },
+      wait: { ...groupWait.wait, description: "none or sent: until an edge took it (default: none with a daemon, sent without)" }, timeout: groupWait.timeout,
+    },
+    params: ({ options }, a) => ({ group: a.group, message: a.message, emoji: a.emoji, remove: options.remove === true, wait: options.wait, timeout: timeout(options) }),
   },
   "group remove": {
     method: "group.remove", usage: "group remove <group> <member> [--show-secret]", summary: "Remove a member (admin)", args: ["group", "member"],
     options: showSecret, params: ({ options }, a) => ({ group: a.group, member: a.member, ...secret(options) }),
   },
   "group rename": {
-    method: "group.rename", usage: "group rename <group> <name...> [--show-secret]", summary: "Rename the group (admin; the picture stays)", args: ["group", "name..."],
-    options: showSecret, params: ({ options }, a) => ({ group: a.group, name: a.name, ...secret(options) }),
+    method: "group.rename", usage: "group rename <group> <name...> [--force] [--show-secret]", summary: "Rename the group (admin; the picture stays)", args: ["group", "name..."],
+    options: { ...showSecret, force: nameForce }, params: ({ options }, a) => ({ group: a.group, name: a.name, ...forced(options), ...secret(options) }),
   },
   "group rotate": {
     method: "group.rotate", usage: "group rotate <group> [--show-secret]", summary: "A fresh group secret, members unchanged (admin)", args: ["group"],

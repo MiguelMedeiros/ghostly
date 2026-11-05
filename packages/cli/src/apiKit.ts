@@ -1,9 +1,10 @@
-import { INVITE_TAKEN, isZ32Key, type PairedTransport } from "@ghostly/core";
+import { INVITE_TAKEN, isZ32Key, sanitizeDisplayText, type PairedTransport } from "@ghostly/core";
 import type { GhostlyNode } from "@ghostly/browser/engine/node";
 import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { CliError } from "./errors";
 import type { CallManager } from "./calls/manager";
 import type { EventHub } from "./events";
+import type { GroupAutoJoin } from "./groupAuto";
 import type { Runtime } from "./runtime/engine";
 
 /**
@@ -15,11 +16,18 @@ export interface ApiContext {
   hub: EventHub;
   /** Voice calls (WISP 1100 § Calls). */
   calls: CallManager;
+  /** Group invitations accepted by themselves (`group auto`). */
+  groupAuto: GroupAutoJoin;
   /** How the host runs: a daemon stays; a one-shot leaves when its command is done. */
   mode: "daemon" | "one-shot";
   version: string;
   /** The daemon asks to stop (answered first). */
   stop?: () => void;
+  /**
+   * Aborted when the daemon stops (`serve().close`): a wait still open answers with what it knows (`waits.ts`), as a
+   * timeout with `details.reason: "daemon-stopped"`, before the connections end.
+   */
+  stopping?: AbortSignal;
   /** The daemon is a `listen` that found none and runs the profile itself: a stop ends that listen too. */
   listen?: true;
 }
@@ -99,17 +107,44 @@ export const CONTACT_KEY = {
 };
 
 /**
+ * A chat's label, its contact's name or a group's name as a ref is compared with it: cleaned as the engine cleans a name
+ * it stores (`renameLink`, `groupName`: any run of whitespace one space, invisible and direction-changing characters
+ * dropped, trimmed), in one Unicode form (NFC) and one case. The string given to `chat rename` or `group create` finds
+ * what it named, though what was stored is the cleaned one. Empty when nothing visible is left: that names nothing.
+ */
+export function nameKey(name: string | null | undefined): string {
+  if (!name) return "";
+  return (sanitizeDisplayText(name.replace(/\s+/gu, " "), Infinity)?.replace(/ {2,}/g, " ") ?? "").normalize("NFC").toLowerCase();
+}
+
+/** Whether `name` is the one `key` (a ref's `nameKey`) names. */
+const namedAs = (key: string, name: string | null | undefined) => key !== "" && nameKey(name) === key;
+
+/**
  * A chat by its id; by its contact's key (only by the key: a name is never taken for one); by the label this side gave
  * it; and only when no label matches, by a unique prefix of its id or the name the contact gave itself. The contact
  * controls both of those (a joiner's chat id is made from the inviter's code), so neither wins over a label, and a ref
- * that fits one chat's prefix and another's name is refused.
+ * that fits one chat's prefix and another's name is refused. A ref that names no chat but one of `groups` says it is a
+ * group (see `noChat`).
  */
-export function findChat(links: readonly LinkView[], ref: string): LinkView {
-  return chatBy(links, ref).link;
+export function findChat(links: readonly LinkView[], ref: string, groups: readonly GroupView[] = []): LinkView {
+  return chatBy(links, ref, groups).link;
+}
+
+/**
+ * No chat by `ref`. A group's id, prefix or name (or `group:<id>`) says it is a group, as `groupOf` says a chat is one:
+ * `chat connect`, `identity share`, `call start` and the other commands that take only a 1:1 chat read `No chat "Crew"`,
+ * as if nothing had that name.
+ */
+function noChat(ref: string, groups: readonly GroupView[]): CliError {
+  let group: GroupView | undefined;
+  try { group = findGroup(groups, ref.startsWith("group:") ? ref.slice("group:".length) : ref); } catch { /* no group, or more than one */ }
+  if (group) return new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat (ghostly chat list)`, { group: group.id });
+  return new CliError("not_found", `No chat ${JSON.stringify(ref)} (ghostly chat list)`);
 }
 
 /** `findChat`, and whether only what the contact controls (`theirName`: a prefix of the id, its own name) found the chat. */
-function chatBy(links: readonly LinkView[], ref: string): { link: LinkView; theirName: boolean } {
+function chatBy(links: readonly LinkView[], ref: string, groups: readonly GroupView[] = []): { link: LinkView; theirName: boolean } {
   // "" (an unset variable in a script) is a prefix of every id: it took the only chat.
   if (!ref.trim()) throw new CliError("bad_request", `${JSON.stringify(ref)} names no chat`);
   const exact = links.find((link) => link.id === ref);
@@ -120,13 +155,13 @@ function chatBy(links: readonly LinkView[], ref: string): { link: LinkView; thei
     if (byKey.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: byKey.map((link) => link.id) });
     throw new CliError("not_found", `No chat with ${JSON.stringify(ref)} (ghostly chat list)`);
   }
-  const lower = ref.toLowerCase();
-  const named = (name: string | null | undefined) => name?.trim().toLowerCase() === lower;
+  const key = nameKey(ref);
+  const named = (name: string | null | undefined) => namedAs(key, name);
   const byLabel = links.filter((link) => named(link.label));
   const found = byLabel.length ? byLabel : [...new Set([...links.filter((link) => link.id.startsWith(ref)), ...links.filter((link) => named(link.peerNick))])];
   if (found.length === 1) return { link: found[0], theirName: !byLabel.length };
   if (found.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: found.map((link) => link.id) });
-  throw new CliError("not_found", `No chat ${JSON.stringify(ref)} (ghostly chat list)`);
+  throw noChat(ref, groups);
 }
 
 /**
@@ -134,8 +169,8 @@ function chatBy(links: readonly LinkView[], ref: string): { link: LinkView; thei
  * label this side gave it name the chat. A prefix of its id or the name its contact gave itself is refused, with the
  * chat it found: the contact chose those, so another contact could take the grant by calling itself that name.
  */
-export function findOwnNamedChat(links: readonly LinkView[], ref: string): LinkView {
-  const chat = chatBy(links, ref);
+export function findOwnNamedChat(links: readonly LinkView[], ref: string, groups: readonly GroupView[] = []): LinkView {
+  const chat = chatBy(links, ref, groups);
   if (chat.theirName) throw namedByThem(ref, { chat: chat.link.id, name: chat.link.peerNick ?? null, contact: chat.link.peerPubKeyZ32 });
   return chat.link;
 }
@@ -149,19 +184,19 @@ export function namedByThem(ref: string, chat: { chat: string; name: string | nu
 const invitedOnly = (group: GroupView) => group.status === undefined && !!group.invitation;
 
 /**
- * A group by its id, by its name, or (only when no name matches) by a unique prefix of its id: whoever created a group
- * chose its id, so a prefix never wins over a name. A group this profile is in wins over an invitation with the same
- * name or prefix (the one who invites chooses those); an invitation is still found by its id, and by name or prefix
- * where no group of this profile has it.
+ * A group by its id, by its name, or by a unique prefix of its id. Whoever created a group chose its id and its admin
+ * chooses its name, so neither wins over the other: a ref that is one group's name and another's prefix is refused,
+ * with both ids, as `chatBy` does for chats. A group this profile is in wins over an invitation with the same name or
+ * prefix (the one who invites chooses those); an invitation is still found by its id, and by name or prefix where no
+ * group of this profile has it.
  */
 export function findGroup(groups: readonly GroupView[], ref: string): GroupView {
   if (!ref.trim()) throw new CliError("bad_request", `${JSON.stringify(ref)} names no group`);
   const exact = groups.find((group) => group.id === ref);
   if (exact) return exact;
-  const lower = ref.toLowerCase();
+  const key = nameKey(ref);
   for (const among of [groups.filter((group) => !invitedOnly(group)), groups.filter(invitedOnly)]) {
-    const byName = among.filter((group) => group.name.trim().toLowerCase() === lower);
-    const found = byName.length ? byName : among.filter((group) => group.id.startsWith(ref));
+    const found = among.filter((group) => namedAs(key, group.name) || group.id.startsWith(ref));
     if (found.length === 1) return found[0];
     if (found.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one group: use its id`, { matches: found.map((group) => group.id) });
   }
@@ -192,13 +227,27 @@ export function findChatOrGroup(links: readonly LinkView[], groups: readonly Gro
   if (!chat.theirName) return { link: chat.link };
   const exact = groups.find((group) => group.id === ref);
   if (exact) return { group: exact };
-  const lower = ref.toLowerCase();
-  const also = groups.filter((group) => !invitedOnly(group) && (group.id.startsWith(ref) || group.name.trim().toLowerCase() === lower));
+  const key = nameKey(ref);
+  const also = groups.filter((group) => !invitedOnly(group) && (group.id.startsWith(ref) || namedAs(key, group.name)));
   if (also.length) throw new CliError("bad_request", `${JSON.stringify(ref)} names a chat (by what its contact chose) and a group: use the chat's id or group:<id>`, { chat: chat.link.id, groups: also.map((group) => group.id) });
   return { link: chat.link };
 }
 
-export const chatOf = (ctx: ApiContext, params: Params) => findChat(state(ctx).links, str(params, "chat", true));
+/**
+ * Starts the chats a call names (its `chat`, a forward's `to`) in a runtime that left the saved chats unstarted
+ * (`RuntimeOptions.deferChats`). A ref that names no chat, or names a group, starts nothing: the call says so itself.
+ */
+export function startNamedChats(ctx: ApiContext, params: Params): void {
+  const { links, groups } = state(ctx);
+  for (const ref of [params.chat, ...(Array.isArray(params.to) ? params.to : [])]) {
+    if (typeof ref !== "string") continue;
+    let found: ReturnType<typeof findChatOrGroup>;
+    try { found = findChatOrGroup(links, groups, ref); } catch { continue; }
+    if ("link" in found) node(ctx).startDeferredChat(found.link.id);
+  }
+}
+
+export const chatOf = (ctx: ApiContext, params: Params) => findChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
 
 /**
  * A chat whose invite nobody took yet: nobody is there to pay or to dial, and its stage says so. Before, `chat pay`

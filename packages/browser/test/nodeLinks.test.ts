@@ -660,16 +660,24 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
 
       describe("groups take listeners least recently used first, as chats do (WISP 902 § Transports)", () => {
         /** A group's edges toward these many members, each reached only natively (an app with no WebRTC, or a VPN). */
-        async function groupOf(node: GhostlyNode, members: number, options: { hub?: number; used?: boolean } = {}) {
+        async function groupOf(node: GhostlyNode, members: number, options: { hub?: number; used?: boolean; admin?: number; order?: (keys: string[], me: string) => string[] } = {}) {
           const { groupId } = await node.createGroup({ name: "Plaza" });
           const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
           const keys = Array.from({ length: members }, () => createIdentity().pubKeyZ32);
-          // A member the group's beacon names as a hub.
-          if (options.hub !== undefined) {
+          // A member the group's beacon names as a hub, and one that is the group's admin.
+          if (options.hub !== undefined || options.admin !== undefined) {
             const groups = node["groups"] as { view(id: string): { id: string; members: unknown[] } | undefined };
-            const view = groups.view.bind(groups);
-            vi.spyOn(groups, "view").mockImplementation((id) => { const g = view(id); return !g || g.id !== groupId ? g
-              : { ...g, members: [...g.members, { key: keys[options.hub!], role: "member", me: false, online: false, missing: 0, hub: true }] }; });
+            // Over a spy an earlier group of the test left: that one's answer, not the spy again.
+            const view = vi.isMockFunction(groups.view) ? groups.view.getMockImplementation()! : groups.view.bind(groups);
+            const added = [...(options.hub !== undefined ? [{ key: keys[options.hub], role: "member", me: false, online: false, missing: 0, hub: true }] : []),
+              ...(options.admin !== undefined ? [{ key: keys[options.admin], role: "admin", me: false, online: false, missing: 0 }] : [])];
+            vi.spyOn(groups, "view").mockImplementation((id) => { const g = view(id); return !g || g.id !== groupId ? g : { ...g, members: [...g.members, ...added] }; });
+          }
+          // A private group's roster in admission order (`meshOrder`), with that admin.
+          if (options.order) {
+            const me = createIdentity().pubKeyZ32, order = options.order(keys, me), groups = node["groups"];
+            const meshOrder = vi.isMockFunction(groups.meshOrder) ? groups.meshOrder.getMockImplementation()! : groups.meshOrder.bind(groups);
+            vi.spyOn(groups, "meshOrder").mockImplementation((id) => id === groupId ? { order, admin: options.admin !== undefined ? keys[options.admin] : order[0], me } : meshOrder(id));
           }
           // A text in it a moment ago: it was in use more lately than the chats, each quiet for minutes.
           if (options.used) expect((await node.sendGroupMessage({ groupId, text: "hi" })).error).toBeNull();
@@ -866,6 +874,32 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
             await node["nativeQueues"].get("iroh/1");
             expect(linkOf(edgeIds[0]).releaseEndpoint).not.toHaveBeenCalled();
             expect(onIroh()).toEqual([edgeIds[0]]);
+          });
+
+          it("in a private group, the edge kept goes to the member admitted just before, not to the admin; a community keeps the admin's (ghostly-agents#1509)", async () => {
+            // Without WebRTC, every member kept its edge to the admin: an admin with five chats live and four groups of six
+            // had twenty to answer within its eight listeners, and members of the fourth group were left with no edge at all.
+            const { node, linkOf } = await allLive([10, 9, 8, 7, 6, 1, 1, 1]);
+            // Admitted in this order: the admin (keys[0]), keys[1], keys[2], me, keys[3].
+            const { groupId, edgeIds } = await groupOf(node, 4, { admin: 0, used: true, order: (keys, me) => [keys[0], keys[1], keys[2], me, keys[3]] });
+            const onIroh = () => edgeIds.filter((id) => linkOf(id).availableTransports.includes("iroh/1"));
+            await vi.waitFor(() => expect(onIroh()).toEqual([edgeIds[2]]));
+            expect(node["groupEdgesByRank"](groupId, node["groups"].view(groupId)).map((live: { stored: { id: string } }) => live.stored.id)[0]).toBe(edgeIds[2]);
+            // The newest keeps the admin's: it admitted it, and knows it at once.
+            const newest = await groupOf(node, 4, { admin: 0, used: true, order: (keys, me) => [keys[0], keys[1], keys[2], keys[3], me] });
+            expect(node["groupEdgesByRank"](newest.groupId, node["groups"].view(newest.groupId))[0].stored.id).toBe(newest.edgeIds[0]);
+            // A community: the admin's edge first, as before.
+            const community = await groupOf(node, 4, { admin: 0, used: true });
+            expect(node["groupEdgesByRank"](community.groupId, node["groups"].view(community.groupId))[0].stored.id).toBe(community.edgeIds[0]);
+          });
+
+          it("in a private group whose kept edge goes unanswered, the next is the edge a member keeps to it, then the admin's", async () => {
+            const { node, linkOf } = await allLive([10, 9, 8, 7, 6, 1, 1, 1]);
+            const { groupId, edgeIds } = await groupOf(node, 4, { admin: 0, used: true, order: (keys, me) => [keys[0], keys[1], me, keys[2], keys[3]] });
+            const ranked = () => node["groupEdgesByRank"](groupId, node["groups"].view(groupId)).map((live: { stored: { id: string } }) => live.stored.id);
+            // Kept: the one admitted before (keys[1]); then keys[2], which keeps its edge to me by the rule; then the admin.
+            expect(ranked().slice(0, 3)).toEqual([edgeIds[1], edgeIds[2], edgeIds[0]]);
+            await vi.waitFor(() => expect(edgeIds.filter((id) => linkOf(id).availableTransports.includes("iroh/1"))).toEqual([edgeIds[1]]));
           });
 
           it("every member away past twenty seconds: no edge is passed over, and each has its listener when they come back", async () => {
@@ -2323,6 +2357,41 @@ describe("private groups through the engine", () => {
       onTestFinished(() => { vi.unstubAllGlobals(); });
       expect(host.staysOnline()).toBe(true);
       expect(host.peerRoom(groupId)).toBeUndefined();
+    });
+
+    // An admin with no WebRTC in two groups with members: the third group's link let nobody in, its entry session found
+    // the groups' four listeners held and waited for good (2026-10-19).
+    it.each(["host", "guest"] as const)("an entry session (%s side) takes a free listener once two groups hold the groups' four", async (role) => {
+      const { node } = await nativeEngine();
+      for (const name of ["One", "Two"]) {
+        const { groupId } = await node.createGroup({ name });
+        const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+        for (let i = 0; i < 2; i++) await openEdge(node, state, createIdentity().pubKeyZ32);
+      }
+      const edges = () => links.filter((l) => node["links"].get(l.options.params.id)?.stored.group && l.availableTransports.includes("iroh/1"));
+      await vi.waitFor(() => expect(edges()).toHaveLength(GROUP_NATIVE_SLOTS));
+      const { groupId } = await node.createGroup({ name: "Three" });
+      const me = createIdentity(), other = createIdentity();
+      const entryId = await node["openEntry"]({ g: groupId, host: other.pubKeyZ32 }, role, me.seedB64, other.pubKeyZ32);
+      await vi.waitFor(() => expect(edgeOf(entryId).registerEndpoint).toHaveBeenCalledOnce());
+    });
+
+    it("an entry session with every listener held takes one from a group's edge past the one its group keeps, never a chat's", async () => {
+      const chats = Array.from({ length: 4 }, () => row({ pairedPeerKey: createIdentity().pubKeyZ32 }));
+      for (const r of chats) await db.putLink(r);
+      const { node } = await nativeEngine();
+      await vi.waitFor(() => { for (const chat of chats) expect(edgeOf(chat.id).registerEndpoint).toHaveBeenCalled(); });
+      const { groupId: one } = await node.createGroup({ name: "One" });
+      const state = (await db.getGroups()).find((g) => g.id === one)!.community;
+      const edgeIds: string[] = [];
+      for (let i = 0; i < GROUP_NATIVE_SLOTS; i++) edgeIds.push(await openEdge(node, state, createIdentity().pubKeyZ32));
+      await vi.waitFor(() => { for (const id of edgeIds) expect(edgeOf(id).registerEndpoint).toHaveBeenCalled(); });
+      const { groupId } = await node.createGroup({ name: "Two" });
+      const me = createIdentity(), other = createIdentity();
+      const entryId = await node["openEntry"]({ g: groupId, host: other.pubKeyZ32 }, "host", me.seedB64, other.pubKeyZ32);
+      await vi.waitFor(() => expect(edgeOf(entryId).registerEndpoint).toHaveBeenCalledOnce());
+      expect(edgeIds.filter((id) => edgeOf(id).releaseEndpoint.mock.calls.length > 0)).toHaveLength(1);
+      for (const chat of chats) expect(edgeOf(chat.id).releaseEndpoint).not.toHaveBeenCalled();
     });
 
     it("an app with no WebRTC leaves its groups the listeners its 1:1 chats do not hold, and four however many chats hold one", async () => {

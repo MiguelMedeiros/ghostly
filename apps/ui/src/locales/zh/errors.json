@@ -83,6 +83,8 @@
     "fedimintNotInvite": "这不是 Fedimint 邀请码：它以 fed1 开头",
     "fedimintRealOnTestnet": "这个联盟持有真实的比特币",
     "fedimintRealOnTestnetNext": "请把它添加到 Mainnet Fedimint 钱包。",
+    "fedimintRedeemUnheard": "联盟没有回复这些票据的情况",
+    "fedimintRedeemUnheardNext": "如果它们没有很快出现在余额里，请再粘贴一次。",
     "fedimintTestOnMainnet": "这个联盟在测试网络 {{chain}} 上",
     "fedimintTestOnMainnetNext": "请把它添加到 Testnet Fedimint 钱包。",
     "feeAboveLimit": "手续费超出你的上限",
@@ -235,7 +237,6 @@
     "adminRename": "只有管理员可以重命名群组",
     "adminRotate": "只有管理员可以更新群组的密钥",
     "adminShares": "只有管理员可以分享群组链接",
-    "alreadyJoining": "你已在加入此群组",
     "alreadyMember": "此联系人已是成员",
     "chainFull": "此群组的成员记录已满",
     "chainFullNext": "请创建一个新群组。",
@@ -602,6 +603,16 @@
     "useHttps": "请使用 https:// 中继地址：{{address}}",
     "useWss": "请使用 wss:// 中继地址"
   },
+  "services": {
+    "addressNext": "请使用这台电脑上的地址，例如 localhost:3400。",
+    "badAddress": "无法识别该地址",
+    "name": "请给服务起个名字",
+    "noCredentials": "地址中不能包含用户名或密码",
+    "noQuery": "地址中不能包含 ? 或 # 部分",
+    "portZero": "没有网页应用会监听端口 0",
+    "thisComputer": "只能共享这台电脑上的服务",
+    "webOnly": "只能共享网页地址（http 或 https）"
+  },
   "startAgain": "重新开始",
   "transport": {
     "adapterFailed": "无法启动。重新打开此聊天以重试。",
@@ -625,6 +636,8 @@
     "hyperdhtUnreachable": "无法连接 HyperDHT 中继",
     "hyperdhtUnreachableNext": "请在 设置 → 网络 中检查其地址。它也可能不允许此应用连接：请询问其运营者。",
     "irohStopped": "Iroh 端点已停止",
+    "irohUnreachable": "无法连接 Iroh 中继",
+    "irohUnreachableNext": "请在设置，网络中检查 Iroh 中继，或改用其他传输方式。",
     "listenerGiven": "已为更活跃的聊天暂停。打开此聊天即可恢复。",
     "listenerReleased": "已为另一个聊天暂停。打开此聊天即可恢复。",
     "noAddress": "尚不知道联系人在此传输方式上的地址",

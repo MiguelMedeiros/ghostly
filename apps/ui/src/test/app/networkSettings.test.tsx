@@ -7,7 +7,7 @@ import { fakeEngine } from "../fakeEngine";
 import { LANGUAGES, lookup } from "../i18n/locales";
 import arNetwork from "../../locales/ar/network.json";
 
-// covers: settings.network.native-dht, settings.network.relays, settings.network.iroh-relays, settings.network.turn
+// covers: settings.network.native-dht, settings.network.relays, settings.network.iroh-relays, settings.network.turn, settings.network.relay-only
 
 const RELAYS = ["https://pkarr.pubky.org", "https://pkarr.pubky.app"];
 
@@ -33,6 +33,18 @@ describe("Settings, Network: Pkarr relays", () => {
     act(() => engine.update({ settings: { relays: RELAYS, readRelays: true } }));
     expect(screen.getByTestId("network-read-relays")).toHaveAttribute("aria-checked", "true");
     expect(await info(user, screen.getByTestId("network-relays-field"))).toHaveTextContent(/this app writes to them too/);
+  });
+
+  it("on the Desktop with Hide my IP on, relay reads show on and stay so: nothing goes to the DHT directly", async () => {
+    const { engine } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport: { protocol: "Mainline DHT (BEP44) — Direct UDP", relays: [], direct: true }, settings: { relays: RELAYS, relayOnly: true } }));
+    const toggle = screen.getByTestId("network-read-relays");
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(toggle).toBeDisabled();
+    expect(screen.getByTestId("network-read-relays-row")).toHaveTextContent("Hide my IP is on: this app reads and writes through these relays only");
+    act(() => engine.update({ settings: { relays: RELAYS } }));
+    expect(screen.getByTestId("network-read-relays")).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByTestId("network-read-relays")).toBeEnabled();
   });
 
   it("in a browser there is no switch: the relays are the only way to the DHT", async () => {
@@ -197,6 +209,58 @@ describe("Settings, Network: HyperDHT relay", () => {
     expect(screen.getByTestId("network-iroh-relays")).toBeInTheDocument();
     expect(screen.getByText("Optional fallback when WebRTC fails. Empty: no HyperDHT.")).toBeInTheDocument();
     expect(screen.queryByText(/WebRTC only/)).toBeNull();
+  });
+});
+
+describe("Settings, Network: Hide my IP from contacts", () => {
+  const transport = { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: RELAYS };
+  const TURN = { urls: "turn:turn.example.org:3478", username: "ghost", credential: "c" };
+
+  it("turns on at once with the relays and TURN server as saved, and says what it does", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport, settings: { relays: RELAYS, iceServers: [TURN] } }));
+    const toggle = screen.getByTestId("network-relay-only");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    const row = screen.getByTestId("network-relay-only-row");
+    expect(row).toHaveTextContent("Hide my IP from contacts");
+    expect(row).toHaveTextContent("Calls and chats go through your TURN server only.");
+    expect(await info(user, row)).toHaveTextContent("Contacts see your TURN server, never your IP.");
+    await user.click(toggle);
+    expect(engine.callsTo("updateSettings").slice(-1)[0]).toEqual({ settings: { relays: RELAYS, relayOnly: true } });
+    act(() => engine.update({ settings: { relays: RELAYS, iceServers: [TURN], relayOnly: true } }));
+    expect(screen.getByTestId("network-relay-only")).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByTestId("network-relay-only"));
+    expect(engine.callsTo("updateSettings").slice(-1)[0]).toEqual({ settings: { relays: RELAYS, relayOnly: false } });
+  });
+
+  it("without a TURN server it stays off and says what to do first, in the app's language", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />, { language: "pt" });
+    act(() => engine.update({ transport, settings: { relays: RELAYS } }));
+    // As the engine refuses it (packages/browser/src/engine/node.ts `updateSettings`).
+    engine.on("updateSettings", () => { throw new Error("Add a TURN server first"); });
+    await user.click(screen.getByTestId("network-relay-only"));
+    expect(screen.getByRole("alert")).toHaveTextContent("Adicione um servidor TURN antes. Salve um acima e depois ligue isto.");
+    expect(screen.getByTestId("network-relay-only")).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("while on, a Save that takes the TURN server away is refused under its address", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport, settings: { relays: RELAYS, iceServers: [TURN], relayOnly: true } }));
+    engine.on("updateSettings", () => { throw new Error("Hide my IP from contacts needs a TURN server. Turn it off first"); });
+    await user.clear(screen.getByLabelText("TURN server URL"));
+    await user.click(screen.getByTestId("network-save"));
+    expect(screen.getByLabelText("TURN server URL")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByTestId("network-turn-field")).toHaveTextContent("Hide my IP needs this TURN server. Turn it off first, then remove the server.");
+  });
+
+  it("on the Desktop, while it is on, offers the HyperDHT relay its HyperDHT then goes through", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport: { protocol: "Mainline DHT (BEP44) — Direct UDP", relays: [], direct: true }, settings: { relays: RELAYS, iceServers: [TURN], hyperdhtRelay: "" } }));
+    expect(screen.queryByTestId("network-hyperdht-relay")).toBeNull();
+    act(() => engine.update({ settings: { relays: RELAYS, iceServers: [TURN], hyperdhtRelay: "", relayOnly: true } }));
+    await user.type(screen.getByTestId("network-hyperdht-relay"), "wss://relay.example.org");
+    await user.click(screen.getByTestId("network-save"));
+    expect(engine.callsTo("updateSettings").slice(-1)[0]).toMatchObject({ settings: { hyperdhtRelay: "wss://relay.example.org" } });
   });
 });
 

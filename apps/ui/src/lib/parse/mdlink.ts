@@ -71,9 +71,11 @@ export function labelMisleads(label: string, url: string): boolean {
   return false;
 }
 
-/** A label's words without its markers, for the chat list. */
-function labelText(label: Segment[]): string {
-  return label.map((s) => (s.type === "span" ? (s.style === "spoiler" ? SPOILER_PLAIN : labelText(s.children)) : s.text)).join("");
+/** A label's words without its markers, for the chat list; `revealed` reads a spoiler's words as a tap shows them. */
+function labelText(label: Segment[], revealed = false): string {
+  return label
+    .map((s) => (s.type === "span" ? (s.style === "spoiler" && !revealed ? SPOILER_PLAIN : labelText(s.children, revealed)) : s.text))
+    .join("");
 }
 
 /**
@@ -86,7 +88,10 @@ export const mdLink: Detector<"md-link", MdLinkData> = {
   accept(match) {
     const [, text, url] = match;
     if (!text.trim() || !hostOf(url)) return null;
-    return { data: { url, label: tokenizeInline(text, []), showUrl: labelMisleads(text, url) } };
+    const label = tokenizeInline(text, []);
+    // The written text, and the words the bubble draws: markers can split a host ("paypal.**com**") it shows whole.
+    const showUrl = labelMisleads(text, url) || labelMisleads(labelText(label, true), url);
+    return { data: { url, label, showUrl } };
   },
   plain(atom: Atom<"md-link", MdLinkData>) {
     return atom.data.showUrl ? shownUrl(atom.data.url) : labelText(atom.data.label);

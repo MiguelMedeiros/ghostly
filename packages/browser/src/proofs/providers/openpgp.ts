@@ -4,6 +4,7 @@ import {
   KEYSERVER, PgpProofError, assertSignableStatement, fetchKeyFromKeyserver, formatFingerprint, keyserverVerifiedEmails, parsePgpEvidence,
   preparePgpEvidence, splitPgpPaste, verifyPgpEvidence, type PgpEvidence,
 } from "../openpgp";
+import { OPENPGP_KEYSERVER_SOURCE as KEYSERVER_SOURCE, OPENPGP_USER_ID_SOURCE as USER_ID_SOURCE } from "../displaySource";
 
 /**
  * OpenPGP keys, signed with the person's own gpg — a YubiKey or another OpenPGP card works unchanged,
@@ -18,9 +19,6 @@ export function normalizeFingerprint(input: string): string {
   throw new PgpProofError("Enter your key's fingerprint: 40 hex characters (gpg --fingerprint).");
 }
 
-/** The user ID is its holder's own words: shown with that caveat, never as a checked name. */
-const USER_ID_SOURCE = "User ID on the key, written by its holder: not proof that the name or email is theirs";
-const KEYSERVER_SOURCE = "Email confirmed to keys.openpgp.org by its owner: the keyserver's check, not Ghostly's";
 
 function steps(statement: IdentityStatement, exportKey: boolean): SignerInstructions {
   assertSignableStatement(statement.text);

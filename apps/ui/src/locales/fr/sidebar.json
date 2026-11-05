@@ -22,6 +22,8 @@
     "unreadCount": "{{count}} non lus dans {{name}}",
     "unreadOne": "1 non lu dans {{name}}"
   },
+  "foundCount": "{{count}} discussions trouvées",
+  "foundOne": "1 discussion trouvée",
   "group": {
     "adminAnswered": "L'app de l'admin a répondu…",
     "answerFailed": "Cela n'a pas abouti. Réessayez.",
@@ -31,6 +33,7 @@
     "inviterAwayUnknown": "Le contact qui vous a invité n'est pas encore connecté. Réessayez dans un instant.",
     "letting": "Un membre vous fait entrer…",
     "linkUnanswered": "Le lien n'a pas répondu",
+    "others": "Un autre groupe a cet identifiant : choisissez",
     "takenBack": "Invitation retirée",
     "unanswered": "L'app de la personne qui vous a invité n'a pas répondu. Acceptez à nouveau, ou refusez.",
     "waitingAdmin": "En attente de l'app de l'admin…",
@@ -75,6 +78,7 @@
     "unread_one": "{{count}} message non lu",
     "unread_other": "{{count}} messages non lus"
   },
+  "searchLabel": "Rechercher des discussions",
   "searchPlaceholder": "Rechercher...",
   "settings": "Réglages",
   "sharedIdentity": "A partagé une identité",

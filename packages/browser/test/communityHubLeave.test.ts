@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { beaconKeys, freshHubs, lobbyKeys, readBeacon } from "@ghostly/core";
+import { COMMUNITY_TOPOLOGY, beaconKeys, beaconRecords, createIdentity, freshHubs, lobbyKeys, readBeacon } from "@ghostly/core";
 import { CommunityWorld, RELAY_NETWORK, sameRun, seededRandom, type Peer } from "./communityWorld";
 import { COMMUNITY_TIMINGS } from "../src/engine/community";
 // covers: groups.community.leave, groups.protocol.community-topology
@@ -288,6 +288,35 @@ describe("a reading of the beacon the relays held back", { timeout: 120_000 }, (
     await world.run(40_000);
     expect(listed()).toEqual(before);
     for (const p of peers) expect(world.view(p, id)?.community?.connected, p.name).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * Every member holds the rendezvous secret, so any member can write the whole beacon. A beacon of eight entries dated
+ * ahead of now (itself, empty, and seven keys of nobody, full) took every place: the hubs dropped their own entries when
+ * they merged with it, and with eight listed nobody counted too few hubs.
+ */
+describe("a beacon one member filled", { timeout: 120_000 }, () => {
+  it("counts no key outside the roster, and the hubs list themselves again when they republish", async () => {
+    const world = new CommunityWorld();
+    const { id, peers } = await settled(world, ["admin", "bob", "carol", "dave", "erin"]);
+    const keyOf = (p: Peer) => p.groups.communities.session(id)!.myKey;
+    const keys = beaconKeys(peers[0].groups.communities.session(id)!.state.rv, id);
+    const hubs = peers.filter(p => p.groups.communities.isHub(id)), writer = peers.find(p => !p.groups.communities.isHub(id))!;
+    expect(hubs.length).toBeGreaterThanOrEqual(2);
+    const strangers = Array.from({ length: COMMUNITY_TOPOLOGY.maxHubs - 1 }, () => createIdentity().pubKeyZ32);
+    // Written again every three seconds, half a minute ahead each time; each hub's own write is seen between two of them.
+    const seen = new Set<string>();
+    for (let s = 0; s < COMMUNITY_TOPOLOGY.beaconEveryMs / 1000 + 6; s++) {
+      if (s % 3 === 0) {
+        const ahead = world.now + 30_000;
+        world.pkarr.set(keys.identity.pubKeyZ32, beaconRecords(keys, [{ key: keyOf(writer), ts: ahead, load: 0 }, ...strangers.map(key => ({ key, ts: ahead, load: 255 }))]));
+      }
+      await world.run(1_000);
+      for (const h of readBeacon(keys, world.pkarr.get(keys.identity.pubKeyZ32) ?? [])) seen.add(h.key);
+      if (s >= 12) for (const p of peers) expect(world.view(p, id)?.community?.hubs, `the hubs ${p.name} counts after ${s + 1} s`).toBeLessThanOrEqual(hubs.length + 1);
+    }
+    for (const p of hubs) if (p.groups.communities.isHub(id)) expect(seen.has(keyOf(p)), `${p.name}'s own write lists it`).toBe(true);
   });
 });
 

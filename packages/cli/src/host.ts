@@ -11,8 +11,9 @@ import { MAX_LINE } from "./client";
 import { greeting, HELLO, newDaemonSecret, proof, removeDaemonSecret } from "./daemonProof";
 import { asCliError, CliError } from "./errors";
 import { EventHub, type GhostlyEvent } from "./events";
+import { GroupAutoJoin } from "./groupAuto";
 import { resumeHolds } from "./holds";
-import { ownFolder, privateFolder } from "./privateFolder";
+import { ownFolder, ownProfile, privateFolder } from "./privateFolder";
 import { acquireLock, startingPath, type ProfilePaths } from "./profiles";
 import { startRuntime, type RuntimeOptions } from "./runtime/engine";
 import { flushCardUpdates } from "./statusCards";
@@ -43,6 +44,8 @@ export interface Host {
  * `deferGroups`: the groups' sessions would spend the relays' budget its message needs.
  */
 export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], version: string, options: RuntimeOptions = {}): Promise<Host> {
+  // Before the lock, the store and the events journal are written there (WISP 1100 § Profiles and files).
+  ownProfile(paths.dir);
   const locked = acquireLock(paths);
   // A daemon says it is starting until its socket listens (`serve`): a command that finds the profile held tells it
   // from a one-shot command (`startingDaemon`). Without it, `daemon status` said no daemon ran and `daemon stop` missed it.
@@ -57,6 +60,7 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
   }
   const hub = new EventHub(paths.events);
   let calls!: CallManager;
+  let groupAuto!: GroupAutoJoin;
   try {
     await hub.open();
     const node = runtime.server.node;
@@ -81,13 +85,18 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     const manager = calls;
     hub.onCallSignal((chat, signal) => manager.onSignal(chat, signal));
     reportAppFrames(hub, node, paths.dir);
+    // Group invitations over the chats `group auto on --from` names: only a daemon accepts them, those that came while it was down too.
+    groupAuto = new GroupAutoJoin({ engine: node, profileDir: paths.dir, joins: mode === "daemon" });
+    const joiner = groupAuto;
+    hub.onState((s) => joiner.check(s));
     runtime.server.attach(hub.sink, { mark, ids: [...histories.keys(), ...newest.keys()] });
+    joiner.check(node.getState());
   } catch (error) {
     await runtime.close().catch(() => {});
     release();
     throw error;
   }
-  const ctx: ApiContext = { runtime, hub, mode, version, calls };
+  const ctx: ApiContext = { runtime, hub, mode, version, calls, groupAuto };
   resumeHolds(ctx);
   let closing: Promise<void> | null = null;
   return {
@@ -129,10 +138,13 @@ export async function serve(host: Host): Promise<Served> {
   // Written before the socket listens: a client reads it once something answered its hello.
   const secret = newDaemonSecret(ctx.runtime.paths.dir);
   const sockets = new Set<Socket>();
+  const answering = new Set<Promise<void>>();
+  const stopping = new AbortController();
+  ctx.stopping = stopping.signal;
   const server = createServer((socket) => {
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
-    connection(ctx, socket, secret);
+    connection(ctx, socket, secret, answering);
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -149,10 +161,27 @@ export async function serve(host: Host): Promise<Served> {
       // First: a greeting copied from this daemon proves nothing once it has stopped.
       removeDaemonSecret(ctx.runtime.paths.dir);
       server.close(() => resolve());
-      for (const socket of sockets) socket.end();
-      setTimeout(() => { for (const socket of sockets) socket.destroy(); }, 500).unref();
+      // The waits still open answer with what they know (`waits.ts`) before their connections end: a `send --wait`
+      // ended by a restart has its `messageId`, and its message goes on, where it failed as "The daemon went away".
+      stopping.abort();
+      void within(Promise.all(answering), STOP_ANSWERS_MS).then(() => {
+        for (const socket of sockets) socket.end();
+        setTimeout(() => { for (const socket of sockets) socket.destroy(); }, 500).unref();
+      });
     })),
   };
+}
+
+/** How long a stopping daemon gives the calls still open to answer before it ends their connections. */
+export const STOP_ANSWERS_MS = 1_000;
+
+/** Settles once `promise` has, or after `ms`. */
+function within(promise: Promise<unknown>, ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref();
+    void promise.then(() => { clearTimeout(timer); resolve(); });
+  });
 }
 
 /** Writes the daemon's start mark (`startingDaemon`); the function it returns removes it. A mark it cannot write is none. */
@@ -201,7 +230,8 @@ function ownerOnlyUmask(): (() => void) | null {
 /** A client's nonce: 16 to 64 bytes as lowercase hex, so the proof is over nothing but a nonce. */
 const NONCE = /^(?:[0-9a-f]{2}){16,64}$/;
 
-function connection(ctx: ApiContext, socket: Socket, secret: Buffer): void {
+/** `answering`: the calls of every connection still open, which a stopping daemon answers before it ends them. */
+function connection(ctx: ApiContext, socket: Socket, secret: Buffer, answering: Set<Promise<void>>): void {
   const unsubscribes: (() => void)[] = [];
   // A replay raises the limit by what it wrote; once the client has read everything, it is MAX_UNREAD again.
   let limit = MAX_UNREAD;
@@ -255,9 +285,11 @@ function connection(ctx: ApiContext, socket: Socket, secret: Buffer): void {
       for (const event of queued) if (event.seq > last) write({ event });
       return;
     }
-    void callApi(ctx, request.method, request.params ?? {}).then(
+    const answered = callApi(ctx, request.method, request.params ?? {}).then(
       (result) => write({ id, result: result ?? null }),
       (error) => write({ id, error: asCliError(error).toJSON() }),
     );
+    answering.add(answered);
+    void answered.then(() => answering.delete(answered));
   });
 }

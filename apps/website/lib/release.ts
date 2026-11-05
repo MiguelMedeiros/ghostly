@@ -3,7 +3,7 @@
  * published one (lib/latestRelease.ts). `tools/scripts/bump-version.mjs` sets it, and
  * /latest.json answers with it.
  */
-export const VERSION = "1.9.0";
+export const VERSION = "1.10.1";
 
 /** The version an app screenshot's caption names ("Ghostly {n}"): that release without its patch, so it follows each bump. */
 export const SHOTS_VERSION = VERSION.split(".").slice(0, 2).join(".");
@@ -25,6 +25,8 @@ export const assetNames = (version: string) => ({
   linuxDeb: `Ghostly_${version}_amd64.deb`,
   linuxAppImage: `Ghostly_${version}_amd64.AppImage`,
   extensionZip: `ghostly-browser-extension-${version}.zip`,
+  /** The native Android app, arm64, signed with the upload key: in every release since 1.6.0 (docs/ANDROID.md). */
+  androidApk: `ghostly-${version}-android-arm64.apk`,
 });
 
 /** Every download link of one release, plus the extension's Chrome Web Store page. */
@@ -39,6 +41,7 @@ export function downloads(version: string) {
     linuxDeb: asset("linuxDeb"),
     linuxAppImage: asset("linuxAppImage"),
     extensionZip: asset("extensionZip"),
+    androidApk: asset("androidApk"),
     /** The browser extension, published on the Chrome Web Store (item nbedaagicniejlmfcncndfjcejaidbcf). */
     chromeStore: "https://chromewebstore.google.com/detail/ghostly/nbedaagicniejlmfcncndfjcejaidbcf",
   };
@@ -50,7 +53,7 @@ export const RELEASE_URL = releaseUrl(VERSION);
 export const DOWNLOADS = downloads(VERSION);
 
 /** The installer a download strip should lead with. */
-export type InstallerKey = "macArm" | "macIntel" | "windowsExe" | "linuxDeb" | "linuxAppImage";
+export type InstallerKey = "macArm" | "macIntel" | "windowsExe" | "linuxDeb" | "linuxAppImage" | "androidApk";
 
 /** How a Linux userAgent or platform names an ARM machine: "Linux aarch64", "Linux armv7l", "CrOS aarch64". */
 const LINUX_ARM = /\b(aarch64|arm(64|v\d\w*)?)\b/;
@@ -70,12 +73,15 @@ const LINUX_ARM = /\b(aarch64|arm(64|v\d\w*)?)\b/;
  *
  * A release's Linux files are amd64 only (assetNames), so a Linux machine that
  * says it is ARM gets none: neither file runs there.
+ *
+ * An Android phone or tablet gets the release's APK (arm64, which nearly every
+ * one is); an iPhone or an iPad gets none.
  */
 export function defaultInstaller(userAgent: string, platform = "", arch?: string, maxTouchPoints = 0): InstallerKey | undefined {
   const ua = userAgent.toLowerCase();
   const pf = platform.toLowerCase();
-  const isPhone = /iphone|ipad|ipod|android/.test(ua);
-  if (isPhone) return undefined;
+  if (/android/.test(ua)) return "androidApk";
+  if (/iphone|ipad|ipod/.test(ua)) return undefined;
   if (/windows/.test(ua) || pf.startsWith("win")) return "windowsExe";
   if (/macintosh|mac os x/.test(ua) || pf.startsWith("mac")) {
     if (maxTouchPoints > 1) return undefined;
@@ -91,8 +97,8 @@ export function defaultInstaller(userAgent: string, platform = "", arch?: string
 }
 
 export type DownloadKey = keyof typeof DOWNLOADS;
-/** The desktop installers: every download except the browser extension. */
-export type DesktopKey = Exclude<DownloadKey, "extensionZip" | "chromeStore">;
+/** The desktop installers: every download except the browser extension and the Android app. */
+export type DesktopKey = Exclude<DownloadKey, "extensionZip" | "chromeStore" | "androidApk">;
 export type PlatformId = "mac" | "windows" | "linux";
 
 /** The three desktop platforms, each with its installers in the order a download panel lists them. */
@@ -120,8 +126,8 @@ export const PLATFORMS: { id: PlatformId; installers: { key: DesktopKey; ext: st
   },
 ];
 
-/** The platform an installer belongs to, so a panel can lead with the detected machine's card. */
-export function platformOf(key: InstallerKey): PlatformId {
+/** The desktop platform an installer belongs to, so a panel can lead with the detected machine's card. */
+export function platformOf(key: Exclude<InstallerKey, "androidApk">): PlatformId {
   if (key.startsWith("mac")) return "mac";
   if (key.startsWith("windows")) return "windows";
   return "linux";

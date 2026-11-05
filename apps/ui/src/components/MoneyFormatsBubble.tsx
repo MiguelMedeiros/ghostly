@@ -84,7 +84,10 @@ function Shell({ label, network, chain, amount, testId, lines, detail, qr, child
         <p className="text-[11px] uppercase tracking-wider text-text-primary/65 m-0">{label}</p>
         <MoneyNetworkTag network={network} chain={chain} />
       </div>
-      <p className="m-0 mt-1 leading-tight">{amount}</p>
+      {/* The number and its unit have no space between them: inline they were one run, and on a 320px phone a long
+          amount ("1,234.567890123456 XMR") pushed the unit past the card, which cuts it. As a wrapping row the unit goes
+          to the next line, and the number breaks only if it alone is wider than the card. */}
+      <p className="m-0 mt-1 leading-tight flex flex-wrap items-baseline [&>bdi]:min-w-0 [&>bdi]:break-all">{amount}</p>
       {/* A label or description is text someone else wrote, in any script: laid out by its own direction, as the invoice's card does. */}
       {lines.filter(Boolean).map((line) => (
         <p key={line} dir="auto" className="text-[12.5px] leading-snug m-0 mt-1 wrap-break-word text-text-primary/80">{line}</p>

@@ -22,6 +22,8 @@
     "unreadCount": "{{count}} sin leer en {{name}}",
     "unreadOne": "1 sin leer en {{name}}"
   },
+  "foundCount": "{{count}} chats encontrados",
+  "foundOne": "1 chat encontrado",
   "group": {
     "adminAnswered": "La app del admin respondió…",
     "answerFailed": "No se pudo. Inténtalo de nuevo.",
@@ -31,6 +33,7 @@
     "inviterAwayUnknown": "El contacto que te invitó aún no está conectado. Inténtalo de nuevo en un momento.",
     "letting": "Un miembro te está dejando entrar…",
     "linkUnanswered": "El enlace no respondió",
+    "others": "Otro grupo tiene este id: elige uno",
     "takenBack": "Invitación retirada",
     "unanswered": "La app de quien te invitó no respondió. Acepta de nuevo, o rechaza.",
     "waitingAdmin": "Esperando la app del admin…",
@@ -75,6 +78,7 @@
     "unread_one": "{{count}} mensaje sin leer",
     "unread_other": "{{count}} mensajes sin leer"
   },
+  "searchLabel": "Buscar chats",
   "searchPlaceholder": "Buscar chats...",
   "settings": "Ajustes",
   "sharedIdentity": "Compartió una identidad",

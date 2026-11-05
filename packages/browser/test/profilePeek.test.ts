@@ -125,6 +125,21 @@ it("skips a profile that reads the network another way, and says why", async () 
   await w.c.stop();
 });
 
+it("on the Desktop, a profile with Hide my IP from contacts on reads through the relays alone, not the running one's DHT", async () => {
+  const w = await pairedThenAway();
+  const hidden = { relays: ["https://a.example"], relayOnly: true };
+  const peek = new ProfilePeek(host(w.dht.transport, () => [w.stored()], { read: async () => ({ links: [w.stored()], settings: hidden }) }));
+  const reads = w.dht.resolve.mock.calls.length;
+  expect(await peek.peek("b", "ghostly_b")).toEqual({ status: "path", reads: 0, chats: [] });
+  expect(w.dht.resolve.mock.calls.length, "no read of its chats over the DHT").toBe(reads);
+  // Its path is its relays, whatever "Also use Pkarr relays" says: the same as another such profile's, not the DHT's.
+  expect(readPathOf(hidden, true)).toBe(readPathOf({ ...hidden, readRelays: true }, true));
+  expect(readPathOf(hidden, true)).not.toBe(readPathOf({ relays: hidden.relays, readRelays: true }, true));
+  // In a browser the switch changes nothing of the path: relays either way.
+  expect(readPathOf(hidden, false)).toBe(readPathOf({ relays: hidden.relays }, false));
+  await w.c.stop();
+});
+
 it("keeps each profile within its own budget, chats taken in turn", async () => {
   const dht = fakeDht();
   const links = Array.from({ length: 10 }, (_, i) => {

@@ -129,12 +129,66 @@ it("dials a Desktop through its relay without the dot its record has, so one on 
   const desktop = { id: "e".repeat(64), relay: "https://use1-1.relay.n0.iroh.link./", addresses: ["192.0.2.1:4433"] };
   const browser = { id: "d".repeat(64), relay: "https://euc1-1.relay.n0.iroh.link/", addresses: [], relayed: true };
   const local = { id: "f".repeat(64), relay: "http://127.0.0.1:47085/", addresses: [] };
-  for (const descriptor of [desktop, browser, local]) await endpoint.connect(descriptor);
+  const onLocal = await createIrohWebEndpoint(seed, { load: wasm.load, relays: ["http://127.0.0.1:47085"] });
+  for (const descriptor of [desktop, browser]) await endpoint.connect(descriptor);
+  await onLocal.connect(local);
   expect(wasm.dialled).toEqual([{ ...desktop, relay: "https://use1-1.relay.n0.iroh.link/" }, browser, local]);
   // The Desktop's relay is this endpoint's own, to the letter: the wasm keys its relay connections by that text.
   expect((wasm.dialled[0] as { relay: string }).relay).toBe(wasm.started[0][0]);
   noDottedHost(wasm.dialled.map(d => (d as { relay: string }).relay));
-  await endpoint.close();
+  await Promise.all([endpoint.close(), onLocal.close()]);
+});
+
+/**
+ * The relay a contact's descriptor names is dialled by this device on its own, again on each redial: only https at a
+ * public name or address, or one of this endpoint's own relays (a private network's, a test's). Never this machine or
+ * its network, which would take requests the contact chose the host and port of.
+ */
+it("dials a contact through a public relay or one of its own, never one on this machine or its network", async () => {
+  const wasm = fakeWasm();
+  const endpoint = await createIrohWebEndpoint(seed, { load: wasm.load });
+  const onLan = await createIrohWebEndpoint(seed, { load: wasm.load, relays: ["https://relay.example.com/", "https://10.0.0.2/", "http://localhost:4600"] });
+  const contact = (relay: string | null) => ({ id: "f".repeat(64), relay, addresses: [] });
+  for (const relay of ["http://127.0.0.1:4601", "http://localhost:4601/", "http://[::1]:4601/", "https://10.0.0.1/", "https://[::1]/", "https://192.168.1.2/",
+    "https://169.254.169.254/", "https://100.64.0.1/", "https://[fd00::1]/", "https://localhost/", "https://router/", "https://nas.local/", "https://wiki.internal./"]) {
+    await expect(endpoint.connect(contact(relay)), relay).rejects.toThrow("not one this device dials");
+    await expect(onLan.connect(contact(relay)), relay).rejects.toThrow("not one this device dials");
+  }
+  expect(wasm.dialled).toEqual([]);
+  // A public relay, or none (a direct address alone).
+  for (const relay of ["https://relay.contact.example/", "https://iroh.miguelmedeiros.dev/", "https://8.8.8.8/", null]) await endpoint.connect(contact(relay));
+  // The person's own relays, in either spelling.
+  for (const relay of ["https://10.0.0.2", "http://localhost:4600/", "https://relay.example.com./"]) await onLan.connect(contact(relay));
+  expect(wasm.dialled.map(d => (d as { relay: string | null }).relay)).toEqual([
+    "https://relay.contact.example/", "https://iroh.miguelmedeiros.dev/", "https://8.8.8.8/", null, "https://10.0.0.2", "http://localhost:4600/", "https://relay.example.com/"]);
+  await Promise.all([endpoint.close(), onLan.close()]);
+});
+
+/**
+ * Hide my IP from contacts (WISP 100 § Relay only): the wasm reaches a contact through the relay its descriptor names,
+ * so a contact who runs that relay would see this profile's address there. With `ownRelaysOnly` a contact is dialled
+ * only on one of this endpoint's relays (either spelling), and nothing is opened toward any other.
+ */
+it("with ownRelaysOnly, dials a contact only through one of this endpoint's own relays", async () => {
+  const wasm = fakeWasm({ home: 1 });
+  const own = ["https://relay.example.com/", "https://use1-1.relay.n0.iroh.link/"];
+  const endpoint = await createIrohWebEndpoint(seed, { load: wasm.load, relays: own, ownRelaysOnly: true });
+  const later = await createIrohWebEndpoint(Buffer.alloc(32, 2).toString("base64url"), { load: wasm.load, relays: own, ownRelaysOnly: true });
+  const onOwn = { id: "e".repeat(64), relay: "https://use1-1.relay.n0.iroh.link./", addresses: ["192.0.2.1:4433"] };
+  const onTheirs = { id: "d".repeat(64), relay: "https://relay.contact.example/", addresses: [], relayed: true };
+  const noRelay = { id: "f".repeat(64), relay: null, addresses: ["192.0.2.2:4433"] };
+  await endpoint.connect(onOwn);
+  await expect(endpoint.connect(onTheirs)).rejects.toThrow("not on one of this profile's Iroh relays");
+  await expect(endpoint.connect(noRelay)).rejects.toThrow("not on one of this profile's Iroh relays");
+  // One that started on the measured home alone still takes the whole list as its own.
+  expect(wasm.started[wasm.started.length - 1]).toEqual([own[1]]);
+  await later.connect({ ...onOwn, relay: own[0] });
+  expect(wasm.dialled).toEqual([{ ...onOwn, relay: "https://use1-1.relay.n0.iroh.link/" }, { ...onOwn, relay: own[0] }]);
+  // Without it (a link to the profile's own device), any relay is dialled as before.
+  const device = await createIrohWebEndpoint(Buffer.alloc(32, 3).toString("base64url"), { load: wasm.load, relays: own });
+  await device.connect(onTheirs);
+  expect(wasm.dialled[wasm.dialled.length - 1]).toEqual(onTheirs);
+  await Promise.all([endpoint.close(), later.close(), device.close()]);
 });
 
 /**

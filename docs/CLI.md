@@ -72,6 +72,8 @@ step (keep the profile running with `ghostly daemon --detach`, then `ghostly cha
 ## Profiles
 
 A profile is a folder, `~/.ghostly/profiles/<name>/` (0700, files 0600), with its own chats, keys and wallets.
+The keys are not encrypted on disk: any program running as your user can read them. To keep them from an agent's
+tools, run Ghostly as an OS user of its own ([threat model](https://ghostly.tools/developers/agents/threat-model#apart)).
 
 | Command or option | What |
 |---|---|
@@ -161,7 +163,7 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
   meanwhile (past 10,000 events or 16 MiB, an `events.gap` says what was dropped).
 
 Main types: `message.received`, `message.sent`, `message.delivery`, `message.edited`, `chat.pairing`, `chat.connection`, `chat.joined`,
-`typing.started` (with `kind` and `status`) and `typing.stopped` (`group.typing.started` and `group.typing.stopped` in a private group, with `member`), `message.reaction` and `group.reaction`, `group.message.edited`,
+`typing.started` (with `kind` and `status`) and `typing.stopped` (`group.typing.started` and `group.typing.stopped` in a private group, with `member`; all live only, never replayed), `message.reaction` and `group.reaction`, `group.message.edited`,
 `group.message` and `group.sent` (with `messageId`, `member`, `nick` from the roster, and `mentioned`), `group.mentioned`
 (a mention of this profile learned after its `group.message`, once), `group.members`,
 `file.offered`, `file.done` and `file.failed` (with the file's `messageId`), `payment.created`, `payment.updated`,
@@ -178,7 +180,7 @@ ghostly listen --from alice --from bob --group team --exec ./bot.sh
   chat made after `listen` started, and only ever the chat of that key (a contact's own name never stands for a key).
   A prefix of a chat's id or the name its contact gave itself is refused, with the chat it found: another contact
   could call itself that. Name the chat first (`ghostly chat rename <chat> <name>`). `--group` takes a group (id,
-  prefix or name). Names are turned into ids once, at the
+  prefix or name; one that fits more than one group is refused, with their ids). Names are turned into ids once, at the
   start, so a contact who renames themselves later changes nothing. A name that matches nothing is an error (exit 3).
 - With either flag, an event of any other chat or group never reaches `--exec`, `--webhook` or stdout. The message
   itself is kept in the chat as always, and the cursor moves past it. Events of the profile itself
@@ -226,7 +228,7 @@ reactions, typing).
 | Invites and chats | `invite create\|join` (`join` with no invite reads it from stdin), `chat list\|show\|history\|wait\|rename\|remove\|verify`, `send` (argument or `--stdin`; `--reply <message>` quotes one), `edit <chat> <message>` (a status updated in place), `message retry\|delete\|details` (`delete --everyone` takes one of yours off every member's device too), `react <chat> <message> <emoji>` (`--remove` takes yours back), `forward <chat> <message>… --to <chat\|group>…` (up to 5; files from the bytes here), `typing <chat> [--kind typing\|recording\|thinking] [--status <text>] [--for s] [--stop]` |
 | Transports | `chat transport <chat> auto\|dht\|webrtc\|iroh\|hyperdht`, `chat connect\|disconnect`, `chat disconnect <chat> --hold <minutes>` (off the direct link that long, on the DHT; `settings online false` is the whole profile); relays and ICE servers with `settings set` (the CLI reaches TURN over UDP only: a `turns:` or `?transport=tcp` server is kept for the apps, unused here, and the answer says so) |
 | Files and voice | `file send <chat\|group> <path>` (to a group: up to 100 MiB, fetched by each member's app from a member who has it), `file send … --voice [ms]` (length and waveform measured from the file), `file send … --reply <message>` (quotes it), `file accept\|decline\|pause\|resume\|cancel\|resend\|request [<chat>] <file>` (a resent file goes on from what the receiver holds), `file wait <file>`, `file save <file> [--wait]`. Files over 25 MiB wait for `file accept`, and so does a group's file that did not come by itself (over 8 MiB). `message.received` carries the file (`id`, and a voice note's `duration` and `peaks`); `file.*` events name its `messageId` |
-| Groups | `group create <name>` (a community link) or `--mesh` (private), `group join` (with no link, from stdin), `group send … --mention <member> --reply <message>` (answers with the message id), `group history` (each message names its author), `group react`, `group edit <group> <message>` (a status updated in place), `group typing <group>` (private groups: typing, recording, thinking or a status line), `--wait sent` on both (until an edge took it); admin: `group invite\|remove\|admin\|rotate\|link\|picture\|hub\|rename` (`group rename <group> <name…>` keeps the picture) |
+| Groups | `group create <name>` (a community link) or `--mesh` (private), `group join` (with no link, from stdin), `group send … --mention <member> --reply <message>` (answers with the message id), `group history` (each message names its author), `group react`, `group edit <group> <message>` (a status updated in place), `group typing <group>` (private groups: typing, recording, thinking or a status line), `--wait sent` on both (until an edge took it); `group accept\|decline <group>`, `group auto on --from <chat>` (the daemon accepts that chat's invitations by itself); admin: `group invite\|remove\|admin\|rotate\|link\|picture\|hub\|rename` (`group rename <group> <name…>` keeps the picture) |
 | Wallets | `wallet create cashu\|lightning\|arkade\|spark\|bitcoin\|fedimint\|usdt` (`fedimint --invite <code>`; Spark on Mainnet with your Breez API key; `--stdin` takes secret fields as `name=value` lines, `api-key=…` too, out of `ps` and the shell's history), `wallet add-mint`, `wallet list`, `wallet faucet` (test coins), `wallet receive\|address\|redeem\|history` (`wallet redeem` with no token or `-` reads it from stdin), `wallet remove` (refused while it holds or awaits money), several `lightning` cards |
 | Payments | `chat pay <chat> <sats>`, `chat request`, `chat pay-request`, `chat accept`, `pay <invoice\|address\|lnurl>`, `payment list\|check\|reclaim` |
 | Identities | `identity providers\|list\|add\|complete\|cancel\|remove` (`add --stdin` takes a signer's fields as `name=value` lines, a NIP-46 `bunker://` link out of `ps` and the shell's history), `identity share\|withdraw\|recheck <chat> <id>`, `identity contact <chat>` |
@@ -234,7 +236,7 @@ reactions, typing).
 | Voice calls | `call start <chat>`, `call answer`, `call auto on [--from <chat>]`, `call hangup\|list\|flush`, `call pipe`: the audio as raw PCM on a Unix socket per call, for a program of yours |
 
 A chat is named by its id, its contact's key, the label you gave it, or (only when no label matches) a unique prefix
-of its id or the name the contact gave itself; a group by its id, its name, or (only when no name matches) a unique
+of its id or the name the contact gave itself; a group by its id, its name, or a unique
 prefix of its id; a member by its key, a unique prefix or its name. **Names are a convenience for people**: a contact chooses its own name, a group's admin the
 group's and a member its own, so a bot or a script addresses by id (`<chat id>`, `group:<group id>`, a member's whole
 key), which every answer and event carries. What the CLI does when names meet:
@@ -243,9 +245,15 @@ key), which every answer and event carries. What the CLI does when names meet:
   chat found only by a prefix of its id or the name its contact gave itself never takes what also names a group. The group's id is the
   group; a prefix of it or the name of a group you are in is refused (exit 1, `bad_request`, `details.chat` and `details.groups`):
   use the chat's id or `group:<id>`. A label you gave the chat still wins.
-- A label you gave a chat, or a group's name, wins over an id prefix: a contact can choose how a chat's id begins
-  (yours is made from their invite code), and a group's creator its id. A prefix that fits one chat and the name a
-  contact gave another is refused.
+- A label you gave a chat wins over an id prefix: a contact can choose how a chat's id begins (yours is made from
+  their invite code). A prefix that fits one chat and the name a contact gave another is refused.
+- Where a command moves money or gives something lasting to a chat (`chat pay`, `chat pay-request`, `pay --chat`,
+  `identity share|withdraw`, `service share`, `group invite`, `call auto on --from`), only the chat's id, its contact's
+  key or a label you gave it names the chat. A prefix of its id or the name its contact gave itself is refused (exit 1,
+  `bad_request`, `details.chat` and `details.contact`), and nothing is paid, shared or withdrawn: `ghostly chat rename
+  <chat> <name>` gives it a label.
+- A group's creator chooses both its name and its id, so neither wins: a ref that is one group's name and a prefix of
+  another's id is refused (exit 1, `bad_request`, `details.matches` with both ids). Use its id, or `group:<id>`.
 - A group you are in wins over an invitation with the same name or id prefix; an invitation is found by its id, and
   by a name or prefix none of your groups has.
 - A member's whole key is that member, whatever another member calls itself. A prefix or a name that fits two members
@@ -256,11 +264,14 @@ Safety rules the CLI enforces:
 - **Real money.** Wallets default to Testnet. A Mainnet spend needs `--network mainnet --confirm-real`; without the
   flag it exits with code 5. `pay` never guesses Mainnet from an invoice.
 - **Secret guard.** `send` (and `edit`, `forward`, the task, routine and usage cards, the memo of `chat pay` and
-  `chat request`, the comment of `pay` to a Lightning address, and the engine's own `sendMessage`,
-  `sendGroupMessage`, `editMessage`, `forwardMessages`, `sendGroupFile` caption, payment memos of `sendPayment`,
-  `requestPayment`, `requestGroupPayment`, `askToPay` and `preparePayment`, `fedimintInvoice`'s memo and
-  `lnurlInvoice`'s comment through `ghostly engine`) refuses text that looks like a recovery phrase, a private key or a Cashu token (exit 5)
-  unless `--force`.
+  `chat request`, the comment of `pay` to a Lightning address, the name of `group create` and `group rename`, the
+  name contacts see in `profile set`, `profile create --name` and `settings set nick`, the `--name` of `file send`,
+  the `--reason` of `app revoke`, and the engine's own `sendMessage`, `sendGroupMessage`, `editMessage`,
+  `forwardMessages`, `sendGroupFile` caption and file name, `sendFile`'s file name, payment memos of `sendPayment`,
+  `requestPayment`, `requestGroupPayment`, `askToPay` and `preparePayment`, `fedimintInvoice`'s memo,
+  `lnurlInvoice`'s comment, the name of `createGroup` and `renameGroup` and `updateSettings`' nick through
+  `ghostly engine`) refuses text that looks like a recovery phrase, a private key or a Cashu token (exit 5) unless
+  `--force`, before anything is sent or asked of a server.
 - **Secrets stay hidden.** Seeds, keys, wallet phrases, backups, group entry links and a pending chat's invite code are printed only with `--show-secret` (or `group link`, for a group's link, and `invite create`, for the invite it makes).
 
 Errors print `{"error":{"code","message"}}` and exit with 1 (failed), 2 (usage), 3 (not found), 4 (timed out),
@@ -321,6 +332,14 @@ ghostly listen --type message.received --cursor "${GHOSTLY_HOME:-$HOME/.ghostly}
   Not in a release yet ([WISP 1100 · Apps as a bot](wisps/1100-headless.md#apps-as-a-bot)).
 - A voice bot: [examples/call-echo.mjs](../packages/cli/examples/call-echo.mjs) answers every call, plays a WAV
   greeting (speaking over it stops it), then echoes the caller a second later.
+- A bot that joins its owner's groups: `ghostly group auto on --from <chat>` (again for more chats). The daemon then
+  accepts an invitation that comes over one of those chats at once, as `group accept` would, and on start the ones
+  that came while it was down; any other invitation waits for `group accept` as before. `group auto` alone prints the
+  setting, `group list` shows it as `autoJoin`, `group auto off` turns it off. There is no "from anyone": `on` needs a
+  chat, named as for `call auto on --from` (its id, its contact's key or a label given here). It is kept in the
+  profile's `groups.json` (0600) with each chat's contact key: removing the chat takes it off the list, and a chat
+  whose contact's key is no longer that one loses it. Each accept is a line in the daemon's log (the group's id and
+  the chat).
 
 ## Voice calls
 
@@ -337,7 +356,8 @@ ghostly listen --type call.              # call.connected carries {"audio":{"soc
 auto-answer off rather than leaving an empty list, which would answer everyone.
 
 A ready one: [ghostly-voice-agent](https://github.com/MiguelMedeiros/ghostly-voice-agent) answers calls by voice (speech to text, Claude,
-text to speech) on this socket. Clone it; its `AGENTS.md` takes an AI agent through the setup.
+text to speech) on this socket. Clone it; its `AGENTS.md` takes an AI agent through the setup. What you need, the
+costs and where the audio goes: [Talk to an AI by voice](VOICE-AGENT.md).
 
 The audio contract, one Unix socket per call:
 

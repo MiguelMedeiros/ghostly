@@ -45,7 +45,8 @@ function Words({ text, className = "", from = 0 }: { text: string; className?: s
  * The ending of the story. The title, the lead and the button are there the
  * moment the reader arrives; above them Boo and Casper meet, talk, and Casper
  * leaves, so Boo turns to you. Below, the download panel: one card per desktop
- * platform (the reader's machine first), the extension and the CLI. Without
+ * platform (the reader's machine first), the extension and the CLI; on an
+ * Android phone, the Android app's card leads. Without
  * scripts, or with reduced motion, the final frame is simply there.
  */
 export function Finale({ t, version }: { t: HomeCopy["finale"]; version: string }) {
@@ -175,8 +176,9 @@ export function Finale({ t, version }: { t: HomeCopy["finale"]; version: string 
   const booLook = state === "play" ? { x: 0.8, y: 0.1 } : { x: 0, y: 0.2 };
   const casperLook = state === "play" ? { x: -0.8, y: 0.1 } : { x: -0.6, y: 0.15 };
 
-  // The reader's platform leads the panel; phones and unknown machines get the natural order.
-  const hot = installer ? platformOf(installer) : undefined;
+  // The reader's platform leads the panel; an Android phone gets the APK's card first, other phones and unknown machines the natural order.
+  const android = installer === "androidApk";
+  const hot = installer && installer !== "androidApk" ? platformOf(installer) : undefined;
   const platforms = hot ? [...PLATFORMS.filter((p) => p.id === hot), ...PLATFORMS.filter((p) => p.id !== hot)] : PLATFORMS;
   const speaker = (side: string) => (side === "boo" ? "Boo" : "Casper");
 
@@ -257,6 +259,20 @@ export function Finale({ t, version }: { t: HomeCopy["finale"]; version: string 
             </a>
           </div>
           <div className="fin-cards">
+            {/* Only on Android: a computer has nothing to do with the APK. */}
+            {android && (
+              <div className="card fin-card fin-card--wide" data-hot>
+                <div className="fin-card-text">
+                  <h4 className="fin-card-title">
+                    <Icon name="phone" /> {t.android.title}
+                  </h4>
+                  <p className="fin-card-body">{t.android.body}</p>
+                </div>
+                <a className="btn fin-dl" href={links.androidApk} aria-current="true">
+                  <Icon name="download" /> {t.android.cta} <span className="fin-dl-ext">.apk</span>
+                </a>
+              </div>
+            )}
             {platforms.map((p) => (
               <div key={p.id} className="card fin-card" data-hot={p.id === hot || undefined}>
                 <div className="fin-card-head">

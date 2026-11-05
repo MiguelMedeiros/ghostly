@@ -1,4 +1,4 @@
-import { fromBase64Url, irohDescriptor, irohRelayUrl, type BoundChannel, type FrameChannel, type NativeBinding, type NativeEndpoint } from "@ghostly/core";
+import { dialableIrohRelay, fromBase64Url, irohDescriptor, irohRelayUrl, type BoundChannel, type FrameChannel, type NativeBinding, type NativeEndpoint } from "@ghostly/core";
 
 /**
  * Iroh (WISP 102) in a browser: the same QUIC/TLS session and binding as the
@@ -96,6 +96,11 @@ export interface IrohWebOptions {
   onlineMs?: number;
   connectMs?: number;
   load?: () => Promise<IrohWasm>;
+  /**
+   * Dial only through one of `relays` (Hide my IP from contacts, WISP 100 § Relay only): the wasm reaches a peer through
+   * the relay its descriptor names, and a contact who runs that relay would see this profile's address there.
+   */
+  ownRelaysOnly?: boolean;
 }
 
 const SEND_BUDGET = 120 * 1024;
@@ -182,6 +187,13 @@ async function startNode(wasm: IrohWasm, homesOfList: Map<string, Promise<string
   }
 }
 
+/** Whether a descriptor (in `BROWSER_SPELLING`) names one of these relays, whichever way its URL is written. */
+function onOwnRelay(descriptor: unknown, relays: readonly string[]): boolean {
+  const relay = (descriptor as { relay?: unknown } | null | undefined)?.relay;
+  if (typeof relay !== "string") return false;
+  try { return relays.some(own => new URL(own).href === new URL(relay).href); } catch { return false; }
+}
+
 /** A NativeEndpoint for `iroh/1`, as the Desktop's is, for one chat's transport seed. */
 export async function createIrohWebEndpoint(seedB64: string, options: IrohWebOptions = {}): Promise<NativeEndpoint> {
   const seed = fromBase64Url(seedB64);
@@ -211,7 +223,10 @@ export async function createIrohWebEndpoint(seedB64: string, options: IrohWebOpt
     set onConnection(value) { handler = value; if (value) for (const bound of early.splice(0)) value(bound); },
     async connect(descriptor) {
       if (stopped) throw new Error("Iroh endpoint is stopped");
-      const conn = await node.connect(irohDescriptor(descriptor, BROWSER_SPELLING), options.connectMs ?? 20_000);
+      if (!dialableIrohRelay((descriptor as { relay?: unknown } | null)?.relay, relays)) throw new Error("The contact's Iroh relay is not one this device dials");
+      const dialled = irohDescriptor(descriptor, BROWSER_SPELLING);
+      if (options.ownRelaysOnly && !onOwnRelay(dialled, relays)) throw new Error("The contact is not on one of this profile's Iroh relays");
+      const conn = await node.connect(dialled, options.connectMs ?? 20_000);
       if (stopped) { conn.close(); throw new Error("Iroh endpoint is stopped"); }
       return bind(conn);
     },

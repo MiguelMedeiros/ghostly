@@ -31,6 +31,13 @@ export function languageName(code: string, language: Language): string {
 
 export const textDirection =(language: Language): "ltr" | "rtl" => (RIGHT_TO_LEFT.has(language) ? "rtl" : "ltr");
 
+/**
+ * A field's `dir` for what a person is writing in it: "auto" once it holds a letter, so it reads from its first one, as
+ * its bubble will (an English draft left to right in the Arabic app). Empty or with no letter yet, none: "auto" would
+ * make it left to right, so the field keeps the app's direction, placeholder included.
+ */
+export const draftDirection = (text: string): "auto" | undefined => (/\p{L}/u.test(text) ? "auto" : undefined);
+
 /** Sets `<html lang>` and `<html dir>` for `language`. The entry points call it before the first render, the I18nProvider on every change. */
 export function applyDocumentLanguage(language: Language, root: HTMLElement = document.documentElement): void {
   root.lang = languageTag(language);

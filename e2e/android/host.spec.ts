@@ -90,6 +90,30 @@ test("text shared from another app opens the Share to… picker", { tag: ["@feat
   await expect(app.page.getByTestId("share-text")).toHaveText(text);
 });
 
+/** The app's view of `id` in its activity's view hierarchy (`dumpsys activity`), as shown (V), or null when there is none. */
+function shownView(adb: Adb, id: string): boolean | null {
+  const line = adb.shell(`dumpsys activity ${PKG}/.MainActivity`).split("\n").find((entry) => entry.trimEnd().endsWith(`app:id/${id}}`));
+  return line ? /\{[0-9a-f]+ V/.test(line) : null;
+}
+
+test("with the lock screen on, the app switcher shows the app's cover: its mark and one line", { tag: ["@feature:android.host.switcher-cover", "@gated"] }, async ({ app }) => {
+  const { page, adb } = app;
+  await page.evaluate(() => { location.hash = "#/settings/privacy"; });
+  await page.getByTestId("settings-lock").click();
+  const passwords = page.getByTestId("settings-password-form").locator("input[type=password]");
+  await passwords.nth(0).fill("switcher-cover");
+  await passwords.nth(1).fill("switcher-cover");
+  await page.getByRole("button", { name: "Set password" }).click();
+  await expect(page.getByTestId("settings-lock-now")).toBeVisible();
+  adb.shell("input keyevent KEYCODE_APP_SWITCH");
+  // The switcher shows the app's live window: the cover is over the page there, with the app's mark and its line.
+  await expect.poll(() => shownView(adb, "lock_cover"), { timeout: 20_000, message: "the cover shown in the switcher" }).toBe(true);
+  expect(shownView(adb, "lock_cover_mark"), "the app's mark on the cover").toBe(true);
+  expect(shownView(adb, "lock_cover_line"), "the cover's line").toBe(true);
+  app.foreground();
+  await expect.poll(() => shownView(adb, "lock_cover"), { timeout: 20_000, message: "the cover gone once the app is back" }).toBe(false);
+});
+
 /**
  * Sign-in on Android (A1, apps/desktop/src/oidc.rs): there is no loopback listener on a phone, so
  * `oidc_loopback_start` answers port 0 and `oidc_loopback_wait` opens the provider in the browser and waits for the

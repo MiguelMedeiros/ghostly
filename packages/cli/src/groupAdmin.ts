@@ -2,8 +2,9 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, MAX_GROUP_NAME_LENGTH, NO_PICTURE_METADATA, groupName, sanitizeAvatar, stripPictureMetadata } from "@ghostly/core";
 import type { GroupView } from "@ghostly/browser/shared/types";
-import { bool, chatOf, groupOf, node, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, findOwnNamedChat, groupOf, node, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError, localFileError } from "./errors";
+import { guardText } from "./secretGuard";
 import { groupJson } from "./views";
 
 /**
@@ -72,7 +73,8 @@ const view = (ctx: ApiContext, id: string, params: Params) => groupJson(state(ct
 export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   async "group.invite"(ctx, params) {
     const group = groupOf(ctx, params);
-    const link = chatOf(ctx, params);
+    // The one invited reads the group from then on: a contact's own name or a prefix of its id never names it.
+    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
     await node(ctx).inviteToGroup({ groupId: group.id, linkId: link.id });
     return view(ctx, group.id, params);
   },
@@ -97,6 +99,8 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
     const group = groupOf(ctx, params, "chat rename <chat> <name...>");
     const name = groupName(str(params, "name", true));
     if (!name) throw new CliError("bad_request", `A group's name is 1 to ${MAX_GROUP_NAME_LENGTH} characters on one line`);
+    // Every member reads it, and a community's anyone who opens its link (docs/CLI.md § Safety).
+    guardText(name, bool(params, "force"), "group's name", "rename it");
     await node(ctx).renameGroup({ groupId: group.id, name });
     return view(ctx, group.id, params);
   },

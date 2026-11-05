@@ -83,6 +83,8 @@
     "fedimintNotInvite": "Fedimint の招待コードではありません。fed1 で始まります",
     "fedimintRealOnTestnet": "このフェデレーションは実際のビットコインを保持しています",
     "fedimintRealOnTestnetNext": "Mainnet の Fedimint ウォレットに追加してください。",
+    "fedimintRedeemUnheard": "このノートについてフェデレーションから応答がありません",
+    "fedimintRedeemUnheardNext": "しばらくしても残高に反映されない場合は、もう一度貼り付けてください。",
     "fedimintTestOnMainnet": "このフェデレーションはテストネットワーク {{chain}} 上にあります",
     "fedimintTestOnMainnetNext": "Testnet の Fedimint ウォレットに追加してください。",
     "feeAboveLimit": "手数料が上限を超えています",
@@ -235,7 +237,6 @@
     "adminRename": "グループ名を変更できるのは管理者だけです",
     "adminRotate": "グループのシークレットを更新できるのは管理者だけです",
     "adminShares": "グループのリンクを共有できるのは管理者だけです",
-    "alreadyJoining": "このグループにはすでに参加中です",
     "alreadyMember": "この連絡先はすでにメンバーです",
     "chainFull": "このグループのメンバー履歴がいっぱいです",
     "chainFullNext": "新しいグループを作成してください。",
@@ -602,6 +603,16 @@
     "useHttps": "https:// のリレーアドレスを使ってください：{{address}}",
     "useWss": "wss:// のリレーアドレスを使ってください"
   },
+  "services": {
+    "addressNext": "localhost:3400 のような、このパソコン上のアドレスを使ってください。",
+    "badAddress": "そのアドレスは読み取れません",
+    "name": "サービスに名前を付けてください",
+    "noCredentials": "アドレスにユーザー名やパスワードは含められません",
+    "noQuery": "アドレスに ? や # の部分は含められません",
+    "portZero": "ポート 0 で待ち受けるウェブアプリはありません",
+    "thisComputer": "共有できるのはこのパソコン上のサービスだけです",
+    "webOnly": "共有できるのはウェブアドレス（http または https）だけです"
+  },
   "startAgain": "最初からやり直す",
   "transport": {
     "adapterFailed": "開始できませんでした。このチャットを開き直して再試行してください。",
@@ -625,6 +636,8 @@
     "hyperdhtUnreachable": "HyperDHTリレーに接続できません",
     "hyperdhtUnreachableNext": "設定 → ネットワーク でアドレスを確認してください。このアプリを受け入れていない可能性もあるため、運営者にも確認してください。",
     "irohStopped": "Irohエンドポイントが停止しています",
+    "irohUnreachable": "Irohリレーに接続できません",
+    "irohUnreachableNext": "設定、ネットワークでIrohリレーを確認するか、別のトランスポートを使ってください。",
     "listenerGiven": "より活発なチャットのため一時停止中。このチャットを開くと再開します。",
     "listenerReleased": "別のチャットのため一時停止中。このチャットを開くと再開します。",
     "noAddress": "このトランスポートでの連絡先のアドレスがまだわかりません",

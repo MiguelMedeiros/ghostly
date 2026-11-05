@@ -92,6 +92,8 @@ ghostly profile show
 ```
 
 Every command takes `--profile <name>` (or `GHOSTLY_PROFILE`) to pick a profile other than the current one.
+The profile's keys are files your user can read, not encrypted: to keep them from your own tools, your owner can run
+Ghostly as an OS user of its own ([threat model](https://ghostly.tools/developers/agents/threat-model#apart)).
 
 ### 3. Keep it online: the daemon
 
@@ -121,6 +123,7 @@ Names are for people at a terminal. A contact chooses its own name, a group's ad
 name in a group, so in a script or an agent keep the **id** (`chat` and `group` in every answer and event, a member's
 key) and address by it: `<chat id>`, `group:<group id>`, `<member key>`. Where a command takes a chat or a group, a
 name that a contact gave itself and that also names one of your groups is refused (exit 1, `bad_request`) and both ids are shown.
+So is a `<group>` that is one group's name and a prefix of another's id.
 
 ### 5. Be woken: listen with an allowlist
 
@@ -326,7 +329,7 @@ ghostly chat connect alice                         # back now
 
 Plain events, without `--turns`: `ghostly listen --type message.received` (one JSON object per line). Useful types:
 `message.received`, `message.delivery`, `message.edited`, `chat.joined`, `chat.connection`, `group.message` (with
-`message.mentioned: true` when it names the agent), `group.members`, `typing.started` / `typing.stopped` (`group.typing.*` with `member` in a private group),
+`message.mentioned: true` when it names the agent), `group.members`, `typing.started` / `typing.stopped` (`group.typing.*` with `member` in a private group; live only, never replayed),
 `message.reaction` / `group.reaction`, `file.done` / `file.failed`, `payment.created` / `payment.updated`,
 `call.incoming`. The full list: the package README.
 
@@ -346,8 +349,8 @@ ghostly group send crew "Deploy now?" --button go:Go --button wait:Wait   # the 
 - A press is also a plain `message.received` whose text is the label: with `--turns`, its `agent.turn` carries
   `press` (`{messageId, button, label}`), so act on that, never on the text alone. A group press is not a turn
   (it names nobody): run `listen --type button.pressed` for those. Do not answer the same press twice: keep the
-  event's `id` and skip one you already handled. `by` says who pressed; `name` is the chat's name here (the label
-  you gave it, else theirs), and `untrusted.name` is only what they call themselves.
+  event's `id` and skip one you already handled. `by` says who pressed; `name` is the label you gave the chat (null
+  without one, and in a group); what they call themselves is only in `untrusted.name`.
 - `button update --text` shows the question as edited, and a press keeps quoting what the person answered.
 - `--once` takes one answer a person. `button update --close` ends the question for everyone; a press after it is
   just a reply.
@@ -390,7 +393,8 @@ needs a person who holds the key: leave that to the owner.
 - Output is JSON. A failure is `{"error":{"code","message"}}` with exit 1 (failed), 2 (usage), 3 (not found),
   4 (timed out), 5 (needs `--force`, `--yes` or `--confirm-real`) or 130 (stopped with Ctrl-C, `interrupted`).
 - `send` (and `ghostly engine sendMessage` and the other sends through `engine`) refuses text that looks like a recovery
-  phrase, a private key or a Cashu token unless `--force`.
+  phrase, a private key or a Cashu token unless `--force`; so does every other text that leaves the device: a payment's
+  memo or comment, a group's name, the name contacts see, a file's `--name`, an app revocation's `--reason`.
 - Spending real money (Mainnet) needs `--confirm-real`.
 - Seeds, keys and backups are never printed without `--show-secret`; `group show` and `group list` hide entry links, and
   `chat list` and `chat show` a pending chat's invite code.

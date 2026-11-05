@@ -1,6 +1,6 @@
 import { getBrowserHost, type EngineConnection } from "../host";
 import type { AppFrameEvent } from "@ghostly/core";
-import type { AppRangeAsk, AttentionEvent, EngineApi, EngineEvent, EngineMethod, RpcResponse } from "../shared/rpc";
+import type { AppRangeAsk, AttentionEvent, EngineApi, EngineMethod, PostedEvent, PostedState } from "../shared/rpc";
 import type { EngineState, LinkView, StoredMessage } from "../shared/types";
 import { applyMessageChanges, type MessageChanges } from "../shared/messageChanges";
 import type { ProfileOpenFailure } from "../shared/idb";
@@ -14,6 +14,12 @@ type Result<M extends EngineMethod> = Awaited<ReturnType<EngineApi[M]>>;
  * whole history again for each.
  */
 export const MESSAGE_CHANGES_TICK_MS = 50;
+
+/**
+ * The longest a page waits between two tries to connect again after the peer went away: each try that fails doubles the
+ * wait, from half a second up to this, until one succeeds (a tab in the background calls nothing that would reconnect it).
+ */
+export const RECONNECT_MAX_MS = 30_000;
 
 /**
  * What changed in a chat's list since `from`, the list its listeners last heard: the rows added or changed, as they are
@@ -53,6 +59,11 @@ class EngineClient {
    * shows the standby screen and nothing of the profile. State listeners hear of it.
    */
   deviceGate: DeviceGateView | null = null;
+  /**
+   * Set while the peer went away and a try to connect again failed: the page waits for the next one, and nothing it
+   * shows is current until one succeeds. Cleared once connected again. State listeners hear of it.
+   */
+  reconnecting = false;
 
   private connection: EngineConnection | null = null;
   private connecting: Promise<void> | null = null;
@@ -229,17 +240,32 @@ class EngineClient {
           this.held.clear();
           for (const pending of this.pending.values()) pending.reject(new Error("Lost the Ghostly peer"));
           this.pending.clear();
-          setTimeout(() => void this.connect().catch(() => {}), 500);
+          this.reconnect(500);
         },
       )
       .then((connection) => {
         this.connection = connection;
+        this.setReconnecting(false);
       })
       .finally(() => (this.connecting = null));
     return this.connecting;
   }
 
-  private handle(message: EngineEvent | RpcResponse): void {
+  /** Connects again after `delay`, and again after twice as long while the tries fail. */
+  private reconnect(delay: number): void {
+    setTimeout(() => void this.connect().catch(() => {
+      this.setReconnecting(true);
+      this.reconnect(Math.min(delay * 2, RECONNECT_MAX_MS));
+    }), delay);
+  }
+
+  private setReconnecting(reconnecting: boolean): void {
+    if (this.reconnecting === reconnecting) return;
+    this.reconnecting = reconnecting;
+    for (const listener of this.stateListeners) listener();
+  }
+
+  private handle(message: PostedEvent): void {
     switch (message.kind) {
       case "attention":
         for (const listener of this.attentionListeners) listener(message.event);
@@ -256,7 +282,7 @@ class EngineClient {
         // A peer that runs (the extension's, started again) takes the notice away.
         this.startFailure = null;
         this.deviceGate = null;
-        this.state = message.state;
+        this.state = keptState(message.state, this.state);
         for (const listener of this.stateListeners) listener();
         break;
       case "messages":
@@ -337,6 +363,13 @@ class EngineClient {
       for (const listener of this.messageListeners) listener(linkId, messages, changes);
     }
   }
+}
+
+/** A state the peer sent, whole: what it left out (`PostedState`) is what this page has from the state before. */
+function keptState(state: PostedState, before: EngineState | null): EngineState {
+  const payments = "payments" in state ? undefined : before?.payments, wallet = "wallet" in state ? undefined : before?.wallet;
+  if (!payments && !wallet) return state as EngineState;
+  return { ...state, ...(payments ? { payments } : {}), ...(wallet ? { wallet } : {}) } as EngineState;
 }
 
 export const engine = new EngineClient();

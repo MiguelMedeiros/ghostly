@@ -82,7 +82,7 @@ export function NameStep() {
       <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); save(); }}>
         <input ref={input} data-testid="name-step-input" aria-label={t("profile.nameStep.title")} className={field} autoFocus
           placeholder={t("profile.nameStep.placeholder")} value={name} onChange={nameField.onChange}
-          onCompositionStart={nameField.onCompositionStart} onCompositionEnd={nameField.onCompositionEnd} />
+          onCompositionStart={nameField.onCompositionStart} onCompositionEnd={nameField.onCompositionEnd} dir={nameField.dir} />
         <button type="submit" data-testid="name-step-save" className={primaryButton} disabled={!chosen}>{t("profile.nameStep.save")}</button>
         <button type="button" data-testid="name-step-skip" onClick={done}
           className="mx-auto block min-h-10 px-2 text-sm text-text-secondary underline underline-offset-4 hover:text-accent cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded">

@@ -1,6 +1,7 @@
 import { QRCodeSVG } from "qrcode.react";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../contexts/I18nContext";
+import { useSameValue } from "../hooks/useSameValue";
 import { copyText } from "../lib/shareLink";
 import { CopiedStatus } from "./chat/LinkQrDialog";
 
@@ -25,6 +26,9 @@ export function QRCodeDisplay({ value, qr, label, copyLabel }: QRCodeDisplayProp
   const canShare = typeof navigator.share === "function";
   // A refused copy leaves the link on screen, to select and copy by hand.
   const [refused, setRefused] = useState(false);
+  // qrcode.react encodes again for every other array, even one with the same segments: the invite card and Add device
+  // (each second, for its time left) hand a new one at every draw.
+  const encoded = useSameValue(qr ?? value);
 
   const handleCopy = async () => {
     setError(""); setCopied(false); clearTimeout(copiedTimer.current);
@@ -49,7 +53,7 @@ export function QRCodeDisplay({ value, qr, label, copyLabel }: QRCodeDisplayProp
       )}
       <div data-testid="invite-qr" className="bg-white p-4 rounded-xl max-w-full [&_svg]:max-w-full [&_svg]:h-auto">
         <QRCodeSVG
-          value={qr ?? value}
+          value={encoded}
           size={232}
           marginSize={2}
           title={t("invite.qrTitle")}
