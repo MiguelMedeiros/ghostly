@@ -14,7 +14,7 @@
     "mutual": "Follows {{name}}, and {{name}} follows them",
     "notShown": "Not shown.",
     "notShownWhy": "Not shown: {{reason}}.",
-    "off": "Public profiles are off (Settings → Security).",
+    "off": "Public profiles are off ({{settings}} → {{section}}).",
     "open": "Open",
     "openIn": "Open in {{network}}",
     "openPostIn": "Open this post in {{network}}",
