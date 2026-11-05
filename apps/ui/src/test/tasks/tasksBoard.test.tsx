@@ -404,6 +404,21 @@ describe("richer task cards on the board", () => {
     expect(screen.getByTestId("where")).toHaveTextContent("/tasks");
   });
 
+  it("gives a card's tag and pull request chips a 24 px tall box on a phone, keeping the pill's look, and its parts toggle 24 px", async () => {
+    profile([
+      row("link-1", task({ id: "b", tags: ["core"], pr: pr() })),
+      row("link-1", task({ id: "part", title: "Part", parent: "b" })),
+    ]);
+    await loaded();
+    const card = screen.getByTestId("tasks-board").querySelector<HTMLElement>('[data-testid="board-card"][data-card-id="b"]')!;
+    // An 18 px pill in a transparent 3 px border on each side: the box is 24 px, the colour stays on the pill.
+    for (const target of [within(card).getByTestId("board-card-tag"), within(card).getByTestId("board-card-pr")]) {
+      expect(target).toHaveClass("max-md:border-y-[3px]", "border-transparent", "bg-clip-padding");
+      expect(target).not.toHaveClass("border-none");
+    }
+    expect(within(card).getByTestId("board-card-stack-toggle")).toHaveClass("min-h-6", "max-md:min-h-8");
+  });
+
   it("stacks a task's parts under it with how many are done; a part opens its own message", async () => {
     const rows = [
       row("group:g1", task({ id: "epic", title: "Relay rework" }), { member: "hermes-key" }),
