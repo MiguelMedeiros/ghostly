@@ -240,6 +240,8 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
       onClose();
     } catch (e) { setError(appErrorView(e, t)); } finally { setBusy(false); }
   };
+  // While Install runs, the screen stays: closed, the install went on all the same, and opened the app after a Cancel.
+  const close = () => { if (!busy) onClose(); };
 
   const shownTitle = preview?.manifest.title ?? title ?? t("apps.title");
   const blocked = preview && (preview.run.status === "revoked" || preview.run.status === "removed" || preview.install === "rollback" || preview.install === "equivocation" || preview.install === "same");
@@ -247,7 +249,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
     : preview.install === "equivocation" ? t("apps.install.equivocation", { sequence: String(preview.manifest.sequence) })
       : preview.install === "same" ? t("apps.install.same") : null));
   return (
-    <Shell titleId={titleId} onClose={onClose} testId="app-install">
+    <Shell titleId={titleId} onClose={close} testId="app-install">
       <Head titleId={titleId} title={shownTitle} version={preview?.manifest.version} tagline={preview?.manifest.tagline} icon={preview?.icon} />
       {!preview && !error && <p className="text-sm text-text-muted" data-testid="app-install-checking">{t("apps.install.fetching")}</p>}
       {preview && (
@@ -263,7 +265,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
       {/* Too wide for one line (a phone at a large text size), the buttons wrap: unwrapped, "Install and open" pushed
           Cancel off the screen's start, where nothing scrolls to it. */}
       <div className="flex flex-wrap justify-end gap-2">
-        <Button onClick={onClose}>{t("common.cancel")}</Button>
+        <Button disabled={busy} onClick={onClose}>{t("common.cancel")}</Button>
         {preview && !blocked && (
           <Button variant="primary" data-testid="app-install-confirm" loading={busy} onClick={() => void install()}>
             {preview.install === "update" ? t("apps.install.update")
