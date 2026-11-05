@@ -194,6 +194,7 @@
     "dhtWaitingFor": "Sur la DHT · en attente de {{transport}}",
     "discoveryUnavailable": "Découverte indisponible",
     "held": "Absent · messages en attente",
+    "heldPlain": "Messages en attente",
     "identityMismatch": "Identité différente",
     "issue": "Problème de connexion",
     "noContact": "Pas encore de contact",
