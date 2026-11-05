@@ -136,6 +136,7 @@ macro_rules! commands {
             clipboard::read_clipboard_text,
             clipboard::read_pasted_bytes,
             commands::bitcoind_rpc,
+            commands::call_service,
             commands::close_service_windows,
             commands::create_keypair,
             commands::decrypt_text,
