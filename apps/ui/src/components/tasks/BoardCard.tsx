@@ -24,6 +24,8 @@ const CHECKS_MARK: Record<PrChecks, { mark: string; tone: string }> = {
 };
 
 const chip = "inline-flex min-w-0 items-center gap-1 rounded-full bg-text-primary/[0.07] px-1.5 py-px text-[11px] leading-4 text-text-secondary";
+/** A chip that takes a tap: on a phone a clear 3 px border above and below makes its box 24 px tall; the pill keeps its look. */
+const chipTarget = "pointer-events-auto relative z-10 border-transparent bg-clip-padding max-md:border-y-[3px] hover:bg-text-primary/[0.14] hover:text-text-primary focus-visible:outline-2 focus-visible:outline-accent";
 
 export function BoardCard({ task, grouping, face, now, onOpen, onOpenPart, onKeys, onTag }: {
   task: BoardTask;
@@ -76,7 +78,7 @@ export function BoardCard({ task, grouping, face, now, onOpen, onOpenPart, onKey
     ...(card.pr ? [
       // The only thing on a card that leaves the app: an https link (the reader's rule), opened outside, by its host.
       <a key="pr" data-testid="board-card-pr" data-state={card.pr.state} {...externalLinkProps(card.pr.url)} title={prTitle}
-        className={`${chip} pointer-events-auto relative z-10 shrink-0 no-underline hover:bg-text-primary/[0.14] hover:text-text-primary focus-visible:outline-2 focus-visible:outline-accent`}>
+        className={`${chip} ${chipTarget} shrink-0 no-underline`}>
         {card.pr.checks && (
           <span data-testid="board-card-checks" data-checks={card.pr.checks} className={`font-semibold ${CHECKS_MARK[card.pr.checks].tone}`}>
             <span aria-hidden="true">{CHECKS_MARK[card.pr.checks].mark}</span>
@@ -93,7 +95,7 @@ export function BoardCard({ task, grouping, face, now, onOpen, onOpenPart, onKey
       </a>] : []),
     ...(card.tags ?? []).map((tag) => (
       <button key={`tag ${tag}`} type="button" data-testid="board-card-tag" onClick={() => onTag?.(tag)} title={t("cards.board.tagFilter", { tag })}
-        className={`${chip} pointer-events-auto relative z-10 cursor-pointer border-none hover:bg-text-primary/[0.14] hover:text-text-primary focus-visible:outline-2 focus-visible:outline-accent`}>
+        className={`${chip} ${chipTarget} cursor-pointer`}>
         <bdi className="min-w-0 truncate">{tag}</bdi>
       </button>)),
   ].slice(0, 3);
@@ -143,7 +145,7 @@ export function BoardCard({ task, grouping, face, now, onOpen, onOpenPart, onKey
           <div data-testid="board-card-stack" data-open={stackOpen ? "" : undefined} className="mt-1.5 ps-4">
             {/* The tasks that are parts of this one, stacked under it: how many are done, and the parts on a tap. */}
             <button type="button" data-testid="board-card-stack-toggle" aria-expanded={stackOpen} aria-controls={stackId} onClick={() => setStackOpen(!stackOpen)}
-              className="pointer-events-auto relative z-10 -ms-1 inline-flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 text-[11px] font-medium text-text-secondary hover:bg-text-primary/10 hover:text-text-primary focus-visible:outline-2 focus-visible:outline-accent max-md:min-h-8">
+              className="pointer-events-auto relative z-10 -ms-1 inline-flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 text-[11px] font-medium text-text-secondary hover:bg-text-primary/10 hover:text-text-primary focus-visible:outline-2 focus-visible:outline-accent min-h-6 max-md:min-h-8">
               <svg aria-hidden="true" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"
                 className={`transition-transform motion-reduce:transition-none ${stackOpen ? "rotate-90" : "rtl:-scale-x-100"}`}><path d="m9 6 6 6-6 6" /></svg>
               <span data-testid="board-card-parts">{t("cards.board.card.parts", parts)}</span>
