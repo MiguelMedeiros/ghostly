@@ -188,6 +188,13 @@ const arkSats=(network:string)=>network==="bitcoin"?"sats":"test sats";
 const satsOn=(network:WalletNetwork)=>network==="testnet"?"test sats":"sats";
 type AskMethod = "arkade" | "usdt" | "bark" | "bitcoin" | "spark" | "fedimint";
 const ENDPOINT_OF: Record<Exclude<AskMethod, "usdt" | "fedimint">, string> = { arkade: ENDPOINT.arkade, bark: ENDPOINT.bark, bitcoin: ENDPOINT.bitcoin, spark: ENDPOINT.spark };
+/**
+ * Every USDT request carries the wallet's one address: a transfer to it says which request it pays only by its amount.
+ * So each asks for a little more than typed, 1 to USDT_TAG_SPAN-1 base units (under a thousandth of a USDT), an amount
+ * no other open request of that network asks for; a transfer settles only the request of its exact amount.
+ */
+const USDT_TAG_SPAN = 1000;
+const USDT_TX_USED = "This transaction already paid another request";
 /** A `pay` frame that carries no receipt, only "I paid this from another wallet: look now". */
 const CHECK_PAYLOAD = JSON.stringify({ check: true });
 const isCheck = (payload: string) => { try { return JSON.parse(payload)?.check === true; } catch { return false; } };
@@ -439,9 +446,10 @@ export class PaymentDesk {
       if(usdt.configured===false)throw new Error(mine("USDT"));
       const target=await usdt.target();
       const unit=target.asset === "USDT" ? "usdt" : "testusdt";
-      await this.save({id,linkId:params.linkId,kind:"request",direction:"out",amount:params.amount,unit,memo,state:"pending",createdAt:params.timestamp,target,ask:params.ask,network});
-      await this.host.storeMessage({linkId:params.linkId,id:`me_${params.timestamp}`,text:`Requested ${formatPaymentAmount(params.amount,target.decimals)} ${target.asset}`,sender:"me",timestamp:params.timestamp,via:"datalink",paymentId:id});
-      await link.sendPaymentRequest({id,timestamp:params.timestamp,amount:{value:String(params.amount),asset:unit},memo,endpoints:[[ENDPOINT.usdt,JSON.stringify(target)]],ask:params.ask,network});
+      const amount=this.uniqueUsdtAmount(params.amount,target.network);
+      await this.save({id,linkId:params.linkId,kind:"request",direction:"out",amount,unit,memo,state:"pending",createdAt:params.timestamp,target,ask:params.ask,network});
+      await this.host.storeMessage({linkId:params.linkId,id:`me_${params.timestamp}`,text:`Requested ${formatPaymentAmount(amount,target.decimals)} ${target.asset}`,sender:"me",timestamp:params.timestamp,via:"datalink",paymentId:id});
+      await link.sendPaymentRequest({id,timestamp:params.timestamp,amount:{value:String(amount),asset:unit},memo,endpoints:[[ENDPOINT.usdt,JSON.stringify(target)]],ask:params.ask,network});
       return {paymentId:id};
     }
     if (params.method === "arkade") {
@@ -815,7 +823,9 @@ export class PaymentDesk {
   private answering(linkId: string, request: PaymentRequest, method: AskMethod, amount: number, network: WalletNetwork): string | undefined {
     const ask = request.ask ? this.asks.get(request.ask) : undefined;
     // An answer on the other network is not what was asked: it is an ordinary request, not paid by the ask's card.
-    if (!ask || ask.linkId !== linkId || ask.method !== method || ask.amount !== amount || ask.expiresAt < Date.now() || network !== ask.network) return undefined;
+    // A USDT answer asks a little more than was asked, under USDT_TAG_SPAN base units: its own amount.
+    if (!ask || ask.linkId !== linkId || ask.method !== method || ask.expiresAt < Date.now() || network !== ask.network) return undefined;
+    if (method === "usdt" ? amount < ask.amount || amount >= ask.amount + USDT_TAG_SPAN : amount !== ask.amount) return undefined;
     this.asks.delete(request.ask!);
     return request.ask;
   }
@@ -1356,15 +1366,31 @@ export class PaymentDesk {
     let txid:string;try{txid=JSON.parse(payment.endpoint[1]).txid;}catch{return;}
     if(typeof txid!=='string'||!/^0x[a-fA-F0-9]{64}$/.test(txid))return;
     if(this.repeatedReceipt(this.host.getLink(linkId),request,payment.id))return;
-    // One transaction pays one request, however its hash is spelled.
+    // One transaction pays one request, however its hash is spelled. One that already paid another is said here, not
+    // dropped; one only named for another (not paid yet) holds nothing: the chain says whose amount it carries.
     txid=txid.toLowerCase();
-    if([...this.payments.values()].some(p=>p.txid?.toLowerCase()===txid&&(p.linkId!==linkId||(p.kind==='request'?p.id!==request.id:p.requestId!==request.id))))return;
+    const used=this.usdtTxUsed(txid,request.id);
     const paid=request.state==='settled';
-    await this.save({id:payment.id,linkId,kind:'payment',direction:'in',amount:request.amount,unit:request.unit,state:'pending',createdAt:payment.timestamp,target:request.target,requestId:request.id,txid});
-    await this.host.storeMessage({linkId,id:`peer_${payment.timestamp}`,text:`${formatPaymentAmount(request.amount,request.target.decimals)} ${request.target.asset} — checking chain`,sender:'peer',timestamp:payment.timestamp,via:'datalink',paymentId:payment.id});
-    await this.reconcileUsdtReceipts();
+    await this.save({id:payment.id,linkId,kind:'payment',direction:'in',amount:request.amount,unit:request.unit,state:used?'failed':'pending',error:used?USDT_TX_USED:undefined,createdAt:payment.timestamp,target:request.target,requestId:request.id,txid});
+    await this.host.storeMessage({linkId,id:`peer_${payment.timestamp}`,text:`${formatPaymentAmount(request.amount,request.target.decimals)} ${request.target.asset} — ${used?USDT_TX_USED.toLowerCase():'checking chain'}`,sender:'peer',timestamp:payment.timestamp,via:'datalink',paymentId:payment.id});
+    if(!used)await this.reconcileUsdtReceipts();
     // Paid already (its wallet saw the money before the receipt came): said at once, so the payer stops saying it.
     if(paid)this.host.getLink(linkId)?.sendPaymentResult({id:request.id,ok:true});
+  }
+  /** Whether a USDT transaction already paid a request other than `requestId`. */
+  private usdtTxUsed(txid:string,requestId:string|undefined):boolean {
+    return [...this.payments.values()].some(p=>p.state==='settled'&&p.txid?.toLowerCase()===txid.toLowerCase()&&(p.kind==='request'?p.id!==requestId:p.requestId!==requestId));
+  }
+  /** An amount of `amount` plus 1 to USDT_TAG_SPAN-1 base units that no open USDT request of `network` asks for. */
+  private uniqueUsdtAmount(amount:number,network:PaymentTarget["network"]):number {
+    const taken=new Set<number>();
+    for(const p of this.payments.values())if(p.kind==='request'&&p.direction==='out'&&p.state==='pending'&&p.target?.method==='usdt'&&p.target.network===network)taken.add(p.amount);
+    const free:number[]=[];
+    for(let tag=1;tag<USDT_TAG_SPAN;tag++)if(!taken.has(amount+tag))free.push(amount+tag);
+    if(!free.length)throw new Error("Too many open USDT requests of this amount: wait for one to be paid");
+    const unique=free[randomBytes(4).reduce((n,b)=>n*256+b,0)%free.length];
+    assertTokenUnits(unique);
+    return unique;
   }
   async reconcileUsdtReceipts() {
     if(this.checkingUsdt||!this.usdt)return;
@@ -1376,6 +1402,8 @@ export class PaymentDesk {
         const adapter=this.usdt[walletNetworkOf(payment.target.network)].adapter;if(!adapter)continue;
         const result=await adapter.receipt(payment.txid,{...payment.target,amount:payment.amount}).catch(()=>null);
         if(!result?.settled&&!result?.failed)continue;
+        // Named for two requests of one amount (older ones, from before each asked its own): the first pays, never both.
+        if(result.settled&&this.usdtTxUsed(payment.txid,payment.requestId)){await this.save({...payment,state:'failed',error:USDT_TX_USED});continue;}
         await this.save({...payment,state:result.settled?'settled':'failed',error:result.error});
         if(result.settled){const request=payment.requestId?this.payments.get(payment.requestId):undefined;if(request?.linkId===payment.linkId)await this.save({...request,state:'settled',txid:payment.txid});}
       }

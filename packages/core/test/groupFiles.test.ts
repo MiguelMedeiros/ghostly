@@ -190,39 +190,30 @@ describe("a file in a private group", () => {
     expect(bob.couldRead(alice.myKey, id)).toBe(true);
   });
 
-  it("given its time, could be read by a member let in after its epoch but before it was written (said again to them), not by one let in after it", async () => {
-    const tick = () => new Promise(r => setTimeout(r, 5));
+  it("could be read by a member let in later only in the epoch it reached a holder under (said again), whatever two clocks say", async () => {
     const net = mesh();
     const alice = net.add(GroupSession.create("Ghosts"));
-    const bob = await net.admit(alice);
-    // Bob, behind on the chain, writes under epoch 1 after Dave (epoch 2) and Erin (epoch 3) were let in.
-    const id = `${bob.myKey}:1:0`;
-    await tick();
-    const before = Date.now();
-    await tick();
-    const dave = await net.admit(alice);
-    const erinSeed = createIdentity().seedB64, erin = await net.admit(alice, erinSeed);
-    await tick();
-    const written = Date.now();
-    expect(alice.couldRead(dave.myKey, id)).toBe(false);
-    expect(alice.couldRead(dave.myKey, id, written)).toBe(true);
-    expect(alice.couldRead(erin.myKey, id, written)).toBe(true);
-    // Written before they were let in: never said again to them.
-    expect(alice.couldRead(dave.myKey, id, before)).toBe(false);
-    // Erin removed: out of the roster now, so no.
-    await tick();
+    const bob = await net.admit(alice), carol = await net.admit(alice);
+    // Bob's clock is two minutes ahead: his message is dated after the add that lets Dave in a moment later.
+    const { id } = await bob.sendText("the report", Date.now() + 120_000, [], undefined, undefined, undefined, pdf) as { id: string };
+    await net.settle();
+    const erinSeed = createIdentity().seedB64;
+    const dave = await net.admit(alice), erin = await net.admit(alice, erinSeed);
+    expect(alice.state.chain.at(-2)!.ts).toBeLessThan(bob.state.sent.at(-1)!.ts);
+    // The author, and a holder it reached under its own epoch: not Dave.
+    expect(bob.couldRead(dave.myKey, id)).toBe(false);
+    expect(carol.couldRead(dave.myKey, id, 2)).toBe(false);
+    expect(carol.couldRead(bob.myKey, id)).toBe(true);
+    // Said again under Dave's epoch (3), it reached him and the holder that got that copy: Dave, not Erin (epoch 4).
+    expect(carol.couldRead(dave.myKey, id, 3)).toBe(true);
+    expect(carol.couldRead(erin.myKey, id, 3)).toBe(false);
+    // Erin, in the epoch it reached a holder under, removed: out of the roster now, so no; let in again later, still no.
+    expect(carol.couldRead(erin.myKey, id, 4)).toBe(true);
     await alice.remove(erin.myKey);
     await net.settle();
-    expect(alice.couldRead(erin.myKey, id, written)).toBe(false);
-    // Let in again after a second message written while she was out: not in the epoch either would be said again under
-    // (the removal's), though she was in an earlier one.
-    await tick();
-    const whileOut = Date.now();
-    await tick();
+    expect(carol.couldRead(erin.myKey, id, 4)).toBe(false);
     await net.admit(alice, erinSeed);
-    expect(alice.couldRead(erin.myKey, `${bob.myKey}:1:1`, whileOut)).toBe(false);
-    expect(alice.couldRead(erin.myKey, id, written)).toBe(false);
-    expect(alice.couldRead(dave.myKey, `${bob.myKey}:1:1`, whileOut)).toBe(true);
+    expect(carol.couldRead(erin.myKey, id, 3)).toBe(false);
   });
 });
 

@@ -38,6 +38,7 @@ const COMMANDS: &[&str] = &[
     "get_profile",
     "get_public_key",
     "hide_from_switcher",
+    "hold_fetch",
     "incoming_share_done",
     "incoming_share_take",
     "keep_awake",

@@ -1,7 +1,7 @@
 import {
-  contactDay, createChatInvite, createIdentity, identityFromSeedB64, knockSlotIdentity, knockSlotOf, knockSlotRecords, makeStampPaced, mergeContactKnocks,
-  readContactLink, readKnockSlot, readLinkRecord, requestRecords, seenEntry, ContactRequestError, REQUEST_LIFETIME_MS, STAMP_BITS_DEFAULT,
-  type ContactRequest, type GhostRecord, type Identity,
+  contactAskerFrame, contactDay, createChatInvite, createIdentity, identityFromSeedB64, knockSlotIdentity, knockSlotOf, knockSlotRecords, makeStampPaced,
+  mergeContactKnocks, readContactLink, readKnockSlot, readLinkRecord, requestRecords, seenEntry, ContactRequestError, REQUEST_LIFETIME_MS, STAMP_BITS_DEFAULT,
+  type ContactAskerChat, type ContactAskerFrame, type ContactRequest, type GhostRecord, type Identity,
 } from "@ghostly/core";
 import { STORES, store, wrap } from "../shared/idb";
 import type { ContactAskView } from "../shared/types";
@@ -113,6 +113,16 @@ export class ContactAsks {
         await this.host.publish(await this.identity(ask), []);
       } catch { /* the record fades from the DHT in hours: nothing republishes it */ }
     });
+  }
+
+  /**
+   * The proof that this profile asked, for the chat a request of its started (WISP 8xx § Accept): said on each live
+   * session of that chat, so the owner's app shows the request's text as confirmed. Undefined for any other chat.
+   */
+  async proof(chatId: string, chat: ContactAskerChat): Promise<ContactAskerFrame | undefined> {
+    const ask = this.asks.find(a => a.chatId === chatId);
+    if (!ask) return undefined;
+    return contactAskerFrame((await this.identity(ask)).seedB64, ask.link, chat);
   }
 
   /** Looks after every request not yet seen once (the timer does this at its pace). */

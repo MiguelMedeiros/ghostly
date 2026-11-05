@@ -14,8 +14,11 @@ const root = fileURLToPath(new URL("../../../", import.meta.url));
 const source = resolve(root, "packages", "core", "src");
 const destination = resolve(root, "apps", "website", "lib", "store-core");
 
-/** The readers' closure in packages/core/src: the index, the bundle, their signatures, canonical JSON, bytes, the icon's size. */
-export const FILES = ["appStore.ts", "appBundle.ts", "appStatements.ts", "canonicalJson.ts", "bytes.ts", "image.ts"];
+/**
+ * The readers' closure in packages/core/src: the index, the bundle, their signatures, canonical JSON, bytes, the icon's
+ * size, and the display-text rule their one-line texts follow.
+ */
+export const FILES = ["appStore.ts", "appBundle.ts", "appStatements.ts", "canonicalJson.ts", "bytes.ts", "image.ts", "text.ts"];
 
 const note = (file) => `// Copied from packages/core/src/${file} by apps/website/scripts/sync-store-core.mjs. Edit core's file, then run npm run sync:store-core.\n`;
 const copyOf = (file) => note(file) + readFileSync(resolve(source, file), "utf8");

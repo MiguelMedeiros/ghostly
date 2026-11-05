@@ -812,6 +812,81 @@ it("holds a client's handshakes only while they wait on it, and its signatures o
   }
 }, 90_000);
 
+it("keeps a client's other chats reachable, both ways, while one chat's contact dials it over and over", async () => {
+  const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
+  const { default: DHT } = await import("hyperdht");
+  const { createHyperEndpoint } = await import("../../../native/transports/hyperdht/endpoint.mjs");
+  const net = await import("node:net");
+  const reasons: string[] = [];
+  const own = await startRelay({ testnet: 3, log: (...words: string[]) => { reasons.push(words.join(" ")); } });
+  const bootstrap = own.bootstrap.map((node: string) => { const [host, port] = node.split(":"); return { host, port: Number(port) }; });
+  // The browser's one relay connection, 150 ms each way: its handshakes wait on it as long as a far browser's do.
+  const links: import("node:net").Socket[] = [];
+  const delayed = (from: import("node:net").Socket, to: import("node:net").Socket) => from.on("data", data => { setTimeout(() => { if (!to.destroyed) to.write(data); }, 150); });
+  const proxy = net.createServer(down => {
+    const up = net.connect(own.port, "127.0.0.1");
+    for (const socket of [up, down]) socket.on("error", () => {});
+    delayed(down, up); delayed(up, down);
+    up.on("close", () => down.destroy());
+    down.on("close", () => up.destroy());
+    links.push(up, down);
+  });
+  await new Promise<void>(resolve => proxy.listen(0, "127.0.0.1", resolve));
+  const url = `ws://127.0.0.1:${(proxy.address() as { port: number }).port}`;
+  // Two chats of one browser on that connection; chat 2's contact runs a Desktop.
+  const [chat1, chat2] = await Promise.all([createRelayedHyperEndpoint(seed(), url), createRelayedHyperEndpoint(seed(), url)]);
+  chat1.onConnection = bound => bound.channel.close();
+  const contact = await createHyperEndpoint(crypto.getRandomValues(new Uint8Array(32)), { bootstrap, host: "127.0.0.1" }) as NativeEndpoint;
+  // Chat 1's contact dials chat 1 in 300 loops, each again as soon as the last ends.
+  const flooder = new DHT({ bootstrap, host: "127.0.0.1", firewalled: false });
+  const key1 = Buffer.from((chat1.descriptor as { publicKey: string }).publicKey, "hex");
+  let flooding = true;
+  const loops = Array.from({ length: 300 }, async () => {
+    while (flooding) {
+      await new Promise<void>(resolve => {
+        const socket = flooder.connect(key1);
+        socket.on("error", () => {});
+        socket.on("open", () => socket.destroy());
+        socket.on("close", () => resolve());
+      });
+    }
+  });
+  // One at a time: each waits for its own connection at the far end.
+  const dials = async (from: NativeEndpoint, to: NativeEndpoint) => {
+    const results: string[] = [];
+    for (let round = 0; round < 6; round++) {
+      try {
+        const accepted = incoming(to);
+        const dialled = await from.connect(to.descriptor);
+        await accepted;
+        dialled.channel.close();
+        results.push("ok");
+      } catch (error) {
+        results.push(String((error as Error)?.message ?? error));
+      }
+    }
+    return results;
+  };
+  try {
+    // The flood holds all chat 1 may hold waiting on the browser (a quarter of `handshakes`), and more before.
+    await vi.waitFor(() => expect(own.stats().held.handshakes).toBeGreaterThanOrEqual(16), { timeout: 20_000 });
+    const out = await dials(chat2, contact);
+    const into = await dials(contact, chat2);
+    expect({ out, into }).toEqual({ out: Array(6).fill("ok"), into: Array(6).fill("ok") });
+    // The flood is refused past chat 1's share, and the operator sees it; nobody is dropped.
+    expect(reasons).toContain("refused handshake listen share");
+    expect(own.stats().dropped).toBe(0);
+  } finally {
+    flooding = false;
+    await Promise.allSettled(loops);
+    await flooder.destroy();
+    await Promise.allSettled([chat1.close(), chat2.close(), contact.close()]);
+    for (const socket of links) socket.destroy();
+    proxy.close();
+    await own.close();
+  }
+}, 120_000);
+
 it("carries a whole paired chat between two browsers with WebRTC off, pinned as on any transport", async () => {
   const invitation = createLink();
   const params = [invitation.mine, invitation.invite];

@@ -282,7 +282,6 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["This is not a link to a group", `${BROWSER}/engine/groups.ts`],
   ["There are no digits to confirm", `${BROWSER}/devices/enroll.ts`],
   ["Only an enrollment that did not finish is removed here", `${BROWSER}/devices/links.ts`],
-  ["You are already joining this group", `${BROWSER}/engine/groups.ts`],
   ["This group is joined with its current link", `${BROWSER}/engine/groups.ts`],
   ["You have an invitation to this group. Answer it first.", `${BROWSER}/engine/groups.ts`],
   ["You are out of this group and its history is still here. Delete it from this device to join with a link.", `${BROWSER}/engine/groups.ts`],

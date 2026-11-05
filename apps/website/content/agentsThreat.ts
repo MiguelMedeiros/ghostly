@@ -80,8 +80,65 @@ export const threat = {
       // apps/ui/src/contexts/LockScreenContext.tsx (the app lock); packages/cli/src/commands/chats.ts (chat remove).
       { id: "device", title: "Your own device", body: "Whoever holds your unlocked phone, or your Ghostly keys, can give orders as you. Lock the app, and if a device is lost, remove the chat on the agent's side with ghostly chat remove." },
       { id: "persuasion", title: "Persuasion", body: "A language model can be talked into things by text it reads. The controls decide who can write to it, not what it will do with what it reads. An agent with tools takes orders from you only." },
-      // packages/cli/src/profiles.ts and src/runtime/storage.ts (0700 folder, 0600 files).
-      { id: "machine", title: "The agent's machine", body: "The profile's keys are files only your user can read. Anyone who can act as that user can act as the agent." },
+      // packages/cli/src/profiles.ts and src/runtime/storage.ts (0700 folder, 0600 files, nothing encrypted at rest).
+      { id: "machine", title: "The agent's machine", body: "The profile's keys are files only your user can read, not encrypted. Any program running as that user can read them and act as the agent, so keep them under a user of their own (below)." },
+    ],
+  },
+  // packages/cli/src/profiles.ts and src/runtime/storage.ts (0700 folder, 0600 files); packages/cli/src/host.ts and
+  // src/daemonProof.ts (a command reads daemon.secret in the profile folder, so it runs as the profile's user).
+  apart: {
+    eyebrow: "Keys at rest",
+    title: "Give Ghostly a user of its own",
+    lead: "A CLI profile's keys, the identity seed and each wallet's seed, are files in a folder only your user can open (0700, files 0600). They are not encrypted, and the CLI has no lock password as the app has: any program running as your user can read them, the agent's own shell tools and the packages in its project too. To keep them out of that reach, run Ghostly as another OS user.",
+    steps: [
+      { id: "user", title: "A user that owns the profile", body: "Make a system user for Ghostly, keep its data folder in that user's home, and set the profile up as that user. Your user cannot open the folder." },
+      { id: "hook", title: "Ghostly and its hook run as it", body: "ghostly listen runs as that user and starts your hook for each turn. The hook hands the turn to your agent as your user, through one sudo rule, and sends what the agent prints." },
+      { id: "tools", title: "The agent's tools run as you", body: "The model, its shell and your project stay under your user. Give your user no way to run commands as the Ghostly user: whoever can run ghostly as it can do anything the profile can. The agent then speaks in the chat only through what the hook sends." },
+    ],
+    examples: [
+      {
+        id: "linux",
+        title: "Linux, with systemd",
+        code: `sudo useradd --system --create-home --home-dir /var/lib/ghostly --shell /usr/sbin/nologin ghostly
+sudo -u ghostly ghostly invite create --label owner --home /var/lib/ghostly/.ghostly   # open it in your app
+
+# /etc/sudoers.d/ghostly (sudo visudo -f): the ghostly user may run your agent, nothing more
+ghostly ALL=(alice) NOPASSWD: /home/alice/agent/answer.sh
+
+#!/bin/sh
+# /var/lib/ghostly/on-turn.sh, owned by root, mode 0755
+turn="$(cat)"
+chat="$(printf '%s' "$turn" | jq -r .chat)"
+printf '%s' "$turn" | sudo -u alice /home/alice/agent/answer.sh |
+  ghostly send "$chat" --stdin --home /var/lib/ghostly/.ghostly
+
+# /etc/systemd/system/ghostly-agent.service, then: sudo systemctl enable --now ghostly-agent
+[Service]
+User=ghostly
+ExecStart=/usr/bin/env ghostly listen --turns --from owner --home /var/lib/ghostly/.ghostly --exec /var/lib/ghostly/on-turn.sh
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target`,
+      },
+      {
+        id: "mac",
+        title: "macOS, with launchd",
+        code: `sudo sysadminctl -addUser ghostly -password -   # then the same sudo rule and hook, under /Users/ghostly
+
+<!-- /Library/LaunchDaemons/tools.ghostly.agent.plist, then:
+     sudo launchctl bootstrap system /Library/LaunchDaemons/tools.ghostly.agent.plist -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>tools.ghostly.agent</string>
+  <key>UserName</key><string>ghostly</string>
+  <key>ProgramArguments</key><array>
+    <string>/usr/local/bin/ghostly</string><string>listen</string><string>--turns</string>
+    <string>--from</string><string>owner</string><string>--home</string><string>/Users/ghostly/.ghostly</string>
+    <string>--exec</string><string>/Users/ghostly/on-turn.sh</string>
+  </array>
+  <key>KeepAlive</key><true/>
+</dict></plist>`,
+      },
     ],
   },
   gaps: {
@@ -96,6 +153,7 @@ export const threat = {
       "A chat invite that expires or can be withdrawn. Removing the chat is the way to stop one. A group's link can be turned off or replaced already, with group link --off or --reset.",
       "A switch that turns payments off for a profile. It has no wallet unless you create one, and wallet remove takes one away.",
       "A forward mark on agent.turn.",
+      "A passphrase that keeps a CLI profile's keys encrypted on disk. Today a user of its own is the way to keep them apart.",
     ],
   },
   more: {

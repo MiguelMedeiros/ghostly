@@ -70,7 +70,7 @@ For people who already run NIP-05. The statement is signed by a Nostr key exactl
    - **HTTPS / NIP-05**: first A and AAAA through the same resolver; the domain must have an address and **every** address must be public (no loopback, private, link-local, CGNAT, multicast, reserved or unspecified, including IPv4 embedded in IPv6). Then one GET of the file, UTF-8, 16 KiB. 404/410 mean "not published".
 4. **Match**: the record names this proof key and this statement id (NIP-05: the signing key). The failure message says which of "not published", "names another key: replaced or removed", "another proof of this key", "unreachable", "redirect", "too large", "private network" happened.
 
-Re-checks: the provider declares `recheck: { afterSeconds: 86400 }`; the contact's app offers "Check again" after a day and shows a failed re-check as not confirmed, without deleting the proof. Removing the record therefore withdraws the proof from every contact at their next check.
+Re-checks: the provider declares `recheck: { afterSeconds: 86400 }`; the contact's app offers "Check again" after a day, and checks again by itself about a day after its last check (a few proofs at a time, online only; a check that could not reach a server changes nothing and is tried later). It shows a failed re-check as not confirmed, without deleting the proof. Removing the record therefore withdraws the proof from every contact within about a day.
 
 Caching: DNS answers are shared between checks for their TTL, capped at 30 s, which is never staler than the resolver itself; files are shared only while one fetch is in flight. Publish with a TTL of 300 s or less so a removal is seen quickly; resolvers may keep an old answer for up to the TTL.
 
