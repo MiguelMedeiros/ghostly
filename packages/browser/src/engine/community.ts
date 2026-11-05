@@ -725,7 +725,8 @@ export class Communities {
     if (!left || !s || !raw || typeof raw !== "object") return;
     const f = raw as Record<string, unknown>;
     let fresh = false;
-    if (f.t === "group-leave") { if (typeof f.s === "string" && f.s !== s.myKey && !left.heard.has(f.s)) { left.heard.add(f.s); fresh = true; } }
+    // A leave counts, and goes on, only signed by its member: one unsigned would steer the role to whoever sent it.
+    if (f.t === "group-leave") { const by = f.s !== s.myKey && !left.heard.has(f.s as string) ? s.signedLeave(f) : undefined; if (by) { left.heard.add(by); fresh = true; } }
     else fresh = await s.handle(from, raw) && f.t === "group-commit";
     // While I am still in, what moves the chain or says a leave goes on, once, to my other edges: a member whose only
     // edge is to me (I was its hub) reaches the group through me, its hand-on of the role and its leave too.

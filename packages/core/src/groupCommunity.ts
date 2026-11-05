@@ -2149,6 +2149,19 @@ export class CommunitySession {
     });
   }
 
+  /**
+   * The member a leave frame is from, when that member signed it and is in this admission (as `receiveLeave` checks);
+   * else undefined. For an app that left and follows the chain (`followAfterLeave`): it holds no requests, and a leave
+   * it counts takes that member out of whom a role that reached it goes on to.
+   */
+  signedLeave(frame: Record<string, unknown>): string | undefined {
+    const s = frame.s, ls = frame.ls;
+    if (typeof s !== "string" || !MEMBER_KEY.test(s) || typeof ls !== "string" || !SIG.test(ls) || !rosterHas(this.roster, s)) return undefined;
+    const ls3 = typeof frame.ls3 === "string" && SIG.test(frame.ls3) ? frame.ls3 : undefined;
+    if (!verify(fromBase64Url(ls), leaveStatement(this.id, s), publicKeyFromZ32(s))) return undefined;
+    return leaveStands({ g: this.id, s, ls, ls3 }, this.ancestry(this.topHash)) ? s : undefined;
+  }
+
   private receiveLeave(frame: Record<string, unknown>): boolean {
     const s = frame.s, ls = frame.ls;
     if (typeof s !== "string" || !MEMBER_KEY.test(s) || typeof ls !== "string" || !SIG.test(ls) || !rosterHas(this.roster, s)) return false;
