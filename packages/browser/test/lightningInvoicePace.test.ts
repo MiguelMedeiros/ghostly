@@ -5,7 +5,7 @@ import type { CashuWallet } from "../src/engine/wallet";
 import { cashuMint, CASHU_MINT_SOURCE } from "../src/engine/paymentAdapters/providers/cashuMint";
 import type { LightningProviderDescriptor } from "../src/engine/paymentAdapters/providers/lightning";
 import { LightningService, lightningJournalWritten, type LightningEvents } from "../src/engine/paymentAdapters/providers/lightningService";
-import { FakeLightningProvider, fakeLightning } from "../src/engine/paymentAdapters/providers/testing";
+import { FakeLightningProvider, fakeInvoice, fakeLightning } from "../src/engine/paymentAdapters/providers/testing";
 // covers: wallet.lightning.sources
 
 /**
@@ -18,9 +18,9 @@ const HOUR = 3_600_000;
  * Fake time, a second at a time. IndexedDB (fake-indexeddb) answers on real macrotasks, which fake timers do not run:
  * each step lets them, so a pass ends at the fake second it started in.
  */
-async function advance(ms: number) {
-  for (let left = ms; left > 0; left -= 1000) {
-    await vi.advanceTimersByTimeAsync(Math.min(1000, left));
+async function advance(ms: number, step = 1000) {
+  for (let left = ms; left > 0; left -= step) {
+    await vi.advanceTimersByTimeAsync(Math.min(step, left));
     for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
   }
 }
@@ -37,8 +37,8 @@ afterEach(async () => {
 });
 
 /** A card whose source nobody pays: its invoices stay open for their hour. */
-async function card(closed = new Set<string>()) {
-  const provider = new FakeLightningProvider({ settleMs: 10 * HOUR });
+async function card(closed = new Set<string>(), behaviour: "settle" | "hang" = "settle") {
+  const provider = new FakeLightningProvider({ settleMs: 10 * HOUR, behaviour });
   const status = vi.spyOn(provider, "invoiceStatus");
   const events = { changed: vi.fn(), received: vi.fn(), resolved: vi.fn(), requestClosed: (id: string) => closed.has(id) } satisfies LightningEvents;
   const descriptor: LightningProviderDescriptor = { ...fakeLightning, fields: [], validate: undefined, create: async () => provider };
@@ -115,4 +115,35 @@ describe("a payer's \"I paid\" for one invoice of a card with 100 open", () => {
     await advance(5_000);
     expect(events.received, "fast while the payment settles").toHaveBeenCalledOnce();
   });
+});
+
+describe("a card payment whose answer was lost, and its source keeps it pending or cannot be reached", () => {
+  for (const [what, answer] of [["pending", "pending"], ["unreachable", "lost"]] as const) {
+    it(`${what}: asked every 15 s at first, then less and less often, every 30 min at most, and settled once it answers`, async () => {
+      const { lightning, provider, events } = await card(new Set(), "hang");
+      const asked = vi.spyOn(provider, "paymentStatus");
+      if (answer === "pending") asked.mockResolvedValue({ state: "pending" });
+      else asked.mockRejectedValue(new TypeError("Failed to fetch"));
+      expect(await lightning.pay((await lightning.quote(fakeInvoice(10, crypto.getRandomValues(new Uint8Array(32))))).quote)).toBe(false);
+      await advance(5 * 60_000);
+      const early = asked.mock.calls.length;
+      expect(early, "every 15 s while it is new").toBeGreaterThanOrEqual(15);
+      await advance(24 * HOUR, 15_000);
+      if (process.env.INVOICE_PACE) console.log(`card payment ${what}, 24 h: ${asked.mock.calls.length} asks`);
+      // At most every 30 min: 48 a day. Every 15 s, it was 5,760.
+      expect(asked.mock.calls.length - early, "not every 15 s for a day").toBeLessThan(70);
+      expect((await lightning.list())[0].state).toBe("unknown");
+
+      // The wallet's refresh asks at once, whatever the pace.
+      asked.mockClear();
+      await lightning.reconcile();
+      expect(asked).toHaveBeenCalledOnce();
+
+      asked.mockReset();
+      asked.mockResolvedValue({ state: "paid", fee: 0 });
+      await advance(30 * 60_000 + 15_000, 15_000);
+      expect(events.resolved).toHaveBeenCalledWith(expect.anything(), true);
+      expect((await lightning.list())[0].state).toBe("paid");
+    }, 120_000);
+  }
 });
