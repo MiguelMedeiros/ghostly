@@ -6,7 +6,7 @@ import { ENGINE_ERRORS, engineText, type EngineErrorCode } from "@ghostly/core";
 import { ERROR_RULES, errorText, knownErrorParts, rawError } from "../../lib/errorText";
 import { english } from "../../lib/english";
 import { failedReason, failedStatus } from "../../lib/fileStatus";
-import { problemText } from "../../lib/problemText";
+import { problemLine, problemText } from "../../lib/problemText";
 import type { TranslationKey } from "../../contexts/I18nContext";
 import { translateWith } from "../../locales/translate";
 import { LANGUAGES, LOCALES } from "./locales";
@@ -141,6 +141,14 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["This device has no room left to save this", `${BROWSER}/shared/idb.ts`],
   ["Ghostly is still starting. Try again in a moment.", `${BROWSER}/platform/services.ts`],
   ["Ghostly needs your permission to reach that local address", `${BROWSER}/platform/services.ts`],
+  // The Share form's address checks (core http.ts parseLocalTarget) and its name check (engine node.ts addService).
+  ["Not a valid URL", `${CORE}/http.ts`],
+  ["Only http and https targets are supported", `${CORE}/http.ts`],
+  ["Credentials in the target URL are not supported", `${CORE}/http.ts`],
+  ["Only services on this machine can be shared (localhost, 127.0.0.1 or [::1])", `${CORE}/http.ts`],
+  ["The target cannot contain a query or fragment", `${CORE}/http.ts`],
+  ["Port 0 is not a port a web app can listen on", `${CORE}/http.ts`],
+  ["Give the service a name", `${BROWSER}/engine/node.ts`],
   ["Pick a Lightning card first", `${BROWSER}/platform/services.ts`],
   ["This client cannot install updates", `${BROWSER}/platform/updates.ts`],
   ["Connect to an updated peer to send files", `${BROWSER}/platform/services.ts`],
@@ -802,6 +810,19 @@ describe("errors in the app's language", () => {
     expect(errorText(new Error("Relay said: rate limited"), translators.pt)).toBe("Relay said: rate limited");
     expect(errorText("plain", translators.fr)).toBe("plain");
     expect(errorText(42, translators.fr)).toBe("42");
+  });
+
+  // The Share form showed these as "Something went wrong." and the engine's English, in every language.
+  it("the Share form's address and name refusals read in the language, with what to type", () => {
+    const pt = translators.pt;
+    const next = "Use um endereço deste computador, como localhost:3400.";
+    expect(problemLine(new Error("Not a valid URL"), pt)).toBe(`Não deu para ler esse endereço. ${next}`);
+    expect(problemLine(new Error("Only http and https targets are supported"), pt)).toBe(`Só endereços web (http ou https) podem ser compartilhados. ${next}`);
+    expect(problemLine(new Error("Credentials in the target URL are not supported"), pt)).toBe(`O endereço não pode ter usuário nem senha. ${next}`);
+    expect(problemLine(new Error("Only services on this machine can be shared (localhost, 127.0.0.1 or [::1])"), pt)).toBe(`Só serviços deste computador podem ser compartilhados. ${next}`);
+    expect(problemLine(new Error("The target cannot contain a query or fragment"), pt)).toBe(`O endereço não pode ter uma parte com ? ou #. ${next}`);
+    expect(problemLine(new Error("Port 0 is not a port a web app can listen on"), pt)).toBe(`Nenhum app web escuta na porta 0. ${next}`);
+    expect(problemLine(new Error("Give the service a name"), pt)).toBe("Dê um nome ao serviço");
   });
 });
 

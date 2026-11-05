@@ -246,6 +246,27 @@ describe("a share, on the page's side", () => {
     expect(carryIncomingShare()).toBe(false);
   });
 
+  it("a share into the same window replaces the page: the shares in its picker go back to the worker, once, ahead of the new one", async () => {
+    listenForShares();
+    await vi.waitFor(() => expect(registration.active!.posted).toHaveLength(1));
+    const shown = { title: "", text: "shown", url: "", files: [] };
+    const behind = { title: "", text: "behind", url: "", files: [] };
+    for (const item of [shown, behind]) container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "share", item } }));
+    window.dispatchEvent(new Event("pagehide"));
+    expect(registration.active!.posted.slice(1)).toEqual([{ type: "share-keep", item: shown }, { type: "share-keep", item: behind }]);
+    // Handed back, they are the next page's: a profile switch that carried them already, then the page going, gives them once.
+    expect(incomingShare()).toBeNull();
+    expect(carryIncomingShare()).toBe(false);
+    window.dispatchEvent(new Event("pagehide"));
+    expect(registration.active!.posted).toHaveLength(3);
+  });
+
+  it("the shares the worker could not keep are said with the share shown", () => {
+    listenForShares();
+    container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "share", item: { title: "", text: "one", url: "", files: [] }, dropped: 2 } }));
+    expect(incomingShare()).toMatchObject({ text: "one", dropped: 2 });
+  });
+
   it("a wake-up's chat is not this listener's: a tab hears taps before it takes shares (listenForTaps)", () => {
     listenForShares();
     container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "open-chat", path: "/chat/abc", profile: activeProfileId() } }));

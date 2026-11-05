@@ -603,6 +603,16 @@
     "useHttps": "Use an https:// relay address: {{address}}",
     "useWss": "Use a wss:// relay address"
   },
+  "services": {
+    "addressNext": "Use an address on this computer, like localhost:3400.",
+    "badAddress": "That address cannot be read",
+    "name": "Give the service a name",
+    "noCredentials": "The address cannot hold a user name or password",
+    "noQuery": "The address cannot have a ? or # part",
+    "portZero": "No web app listens on port 0",
+    "thisComputer": "Only services on this computer can be shared",
+    "webOnly": "Only web addresses (http or https) can be shared"
+  },
   "startAgain": "Start again",
   "transport": {
     "adapterFailed": "Couldn't start. Reopen this chat to retry.",

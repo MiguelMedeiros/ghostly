@@ -127,6 +127,15 @@ const RULES: readonly Rule[] = [
   // A call refused in limited mode (packages/browser/src/engine/node.ts LIMITED_MODE_ERROR): the banner's own words, and what to do.
   exact("Ghostly could not check which device is active yet. This works once it can.", "devices.limited.title", "errors.app.limitedNext"),
   exact("Ghostly needs your permission to reach that local address", "errors.app.localAddress"),
+  // The Share form's address checks (packages/core http.ts parseLocalTarget; the CLI matches the English) and its name
+  // check (engine/node.ts addService): what is wrong, then what to type.
+  exact("Not a valid URL", "errors.services.badAddress", "errors.services.addressNext"),
+  exact("Only http and https targets are supported", "errors.services.webOnly", "errors.services.addressNext"),
+  exact("Credentials in the target URL are not supported", "errors.services.noCredentials", "errors.services.addressNext"),
+  exact("Only services on this machine can be shared (localhost, 127.0.0.1 or [::1])", "errors.services.thisComputer", "errors.services.addressNext"),
+  exact("The target cannot contain a query or fragment", "errors.services.noQuery", "errors.services.addressNext"),
+  exact("Port 0 is not a port a web app can listen on", "errors.services.portZero", "errors.services.addressNext"),
+  exact("Give the service a name", "errors.services.name"),
   exact("Pick a Lightning card first", "errors.app.pickCard"),
   exact("This client cannot install updates", "errors.app.installUpdates"),
   exact("That update is no longer available", "errors.app.updateGone"),
