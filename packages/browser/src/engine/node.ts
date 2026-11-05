@@ -759,9 +759,9 @@ export interface NodeOptions {
    */
   deferGroups?: boolean;
   /**
-   * Leave the chats this run finds saved unstarted; a chat made or joined in the run starts as usual: a headless
-   * one-shot that makes or joins one chat, whose records the saved chats' publishes would hold back for the relays' next
-   * minute.
+   * Leave the chats this run finds saved unstarted; a chat made or joined in the run starts as usual, and a saved one
+   * once the command names it (`startDeferredChat`): a headless one-shot about one chat, or that makes or joins one,
+   * whose records the saved chats' publishes would hold back for the relays' next minute.
    */
   deferChats?: boolean;
   /**
@@ -8223,6 +8223,15 @@ export class GhostlyNode implements EngineImplementation {
       started?.(linkId);
       await pause();
     }
+  }
+
+  /**
+   * Starts a chat this run left unstarted (`NodeOptions.deferChats`): the one a one-shot names, once the command has
+   * found it. Any other chat, or one already started, is left as it is.
+   */
+  startDeferredChat(linkId: string): void {
+    if (!this.deferredChats.delete(linkId)) return;
+    if (this.networkOn && !this.shuttingDown) this.startLink(linkId);
   }
 
   private startLink(linkId: string): void {
