@@ -166,6 +166,10 @@ test("a bot's tasks from two chats on one board: columns by status, live updates
     await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
     await expect(column(page, "running").getByTestId("board-card")).toBeInViewport();
     await expect(column(page, "blocked").getByTestId("board-card")).not.toBeInViewport();
+    // Tab from the chosen tab goes into its column, not to the first column off screen (which then scrolled back in).
+    await page.keyboard.press("Tab");
+    await expect(column(page, "running").getByTestId("board-card-open")).toBeFocused();
+    await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.waitForTimeout(500); // the column's slide: the picture after it
     await shot(page, "board-phone.png");
