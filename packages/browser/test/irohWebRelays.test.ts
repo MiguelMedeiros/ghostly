@@ -138,6 +138,33 @@ it("dials a Desktop through its relay without the dot its record has, so one on 
 });
 
 /**
+ * Hide my IP from contacts (WISP 100 § Relay only): the wasm reaches a contact through the relay its descriptor names,
+ * so a contact who runs that relay would see this profile's address there. With `ownRelaysOnly` a contact is dialled
+ * only on one of this endpoint's relays (either spelling), and nothing is opened toward any other.
+ */
+it("with ownRelaysOnly, dials a contact only through one of this endpoint's own relays", async () => {
+  const wasm = fakeWasm({ home: 1 });
+  const own = ["https://relay.example.com/", "https://use1-1.relay.n0.iroh.link/"];
+  const endpoint = await createIrohWebEndpoint(seed, { load: wasm.load, relays: own, ownRelaysOnly: true });
+  const later = await createIrohWebEndpoint(Buffer.alloc(32, 2).toString("base64url"), { load: wasm.load, relays: own, ownRelaysOnly: true });
+  const onOwn = { id: "e".repeat(64), relay: "https://use1-1.relay.n0.iroh.link./", addresses: ["192.0.2.1:4433"] };
+  const onTheirs = { id: "d".repeat(64), relay: "https://relay.contact.example/", addresses: [], relayed: true };
+  const noRelay = { id: "f".repeat(64), relay: null, addresses: ["192.0.2.2:4433"] };
+  await endpoint.connect(onOwn);
+  await expect(endpoint.connect(onTheirs)).rejects.toThrow("not on one of this profile's Iroh relays");
+  await expect(endpoint.connect(noRelay)).rejects.toThrow("not on one of this profile's Iroh relays");
+  // One that started on the measured home alone still takes the whole list as its own.
+  expect(wasm.started[wasm.started.length - 1]).toEqual([own[1]]);
+  await later.connect({ ...onOwn, relay: own[0] });
+  expect(wasm.dialled).toEqual([{ ...onOwn, relay: "https://use1-1.relay.n0.iroh.link/" }, { ...onOwn, relay: own[0] }]);
+  // Without it (a link to the profile's own device), any relay is dialled as before.
+  const device = await createIrohWebEndpoint(Buffer.alloc(32, 3).toString("base64url"), { load: wasm.load, relays: own });
+  await device.connect(onTheirs);
+  expect(wasm.dialled[wasm.dialled.length - 1]).toEqual(onTheirs);
+  await Promise.all([endpoint.close(), later.close(), device.close()]);
+});
+
+/**
  * Each endpoint pings every relay in its list about 1.3 times a minute, and an app runs up to 16 of them on one
  * network. The first measures; the others, started at the same time or later, home on its relay alone.
  */
