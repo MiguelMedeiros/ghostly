@@ -3479,8 +3479,11 @@ export class GhostlyNode implements EngineImplementation {
       await db.patchLink(linkId, { wakeToken: token });
       this.emitState();
     }
-    // Unless turned off, the contact is asked to say when it comes online while this app is closed (`o`).
-    live.link.sendWake({ ...own, token, ...(this.settings.wakeOnline !== false && { online: true as const }) });
+    // Unless turned off, the contact is asked to say when it comes online while this app is closed (`o`). Not while
+    // the subscription is another device's of this profile (WISP 06 § Push and the phone): that device is on standby
+    // and shows no online notice, and a push that shows nothing may cost it the subscription in Safari.
+    const online = this.settings.wakeOnline !== false && wakeOwnerOf(own, this.ownDeviceKey) !== "away";
+    live.link.sendWake({ ...own, token, ...(online && { online: true as const }) });
   }
 
   /**

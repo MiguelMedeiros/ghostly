@@ -313,6 +313,21 @@ describe("online notices: a contact whose app is closed hears that this one came
     expect(await db.getSettings()).not.toHaveProperty("wakeOnline");
   });
 
+  it("is not asked for while the subscription is another device's of this profile, which shows no online notice", async () => {
+    const node = engine();
+    const a = stubLink();
+    const chat = await addChat(node, a);
+    const inside = node as unknown as { ownDeviceKey: string | null; settings: { wake?: WakeSubscription } };
+    inside.ownDeviceKey = "desktop";
+    await node.setWakeSubscription({ subscription: browserSubscription().subscription });
+    await vi.waitFor(() => expect(a.sendWake).toHaveBeenCalledTimes(1));
+    expect((a.sendWake.mock.lastCall as unknown as [WakeTarget])[0].online).toBe(true);
+    // The phone's subscription, carried by this desktop while it is the active one.
+    inside.settings = { ...inside.settings, wake: { ...inside.settings.wake!, device: "phone" } };
+    await node["shareWake"](chat.id);
+    expect((a.sendWake.mock.lastCall as unknown as [WakeTarget])[0]).not.toHaveProperty("online");
+  });
+
   it("an away contact that asked gets one, with its token and nothing else, living five minutes", async () => {
     const pushSend = vi.fn(async () => 201);
     const node = engine({ pushSend });
