@@ -424,6 +424,31 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     await listenB.stop();
   });
 
+  it("`call pipe` whose reader goes away (`| head -c`, a player closed) leaves with exit 0, and the call goes on", async () => {
+    const listenA = await listenTo(alice, "--type", "call.");
+    ok(await as(alice, "call", "auto", "on", "--from", "bob"));
+    try {
+      const placed = ok(await as(bob, "call", "start", "alice")) as { call: string; audio: { socket: string } };
+      await listenA.waitFor((e) => e.type === "call.connected");
+      const program = connect(placed.audio.socket);
+      program.write(tone(440, 48000, 3000));
+      const pipe = spawn(process.execPath, [BIN, "--home", alice, "call", "pipe", "bob"], { env: testEnv(env), stdio: ["pipe", "pipe", "pipe"] });
+      let said = "", read = 0;
+      pipe.stderr.on("data", (d) => (said += d));
+      // The reader takes a little and goes, as `head -c` does.
+      pipe.stdout.on("data", (d: Buffer) => { read += d.length; if (read > 1920 * 10) pipe.stdout.destroy(); });
+      const code = await new Promise((r) => pipe.once("exit", r));
+      expect({ code, said }).toMatchObject({ code: 0, said: expect.not.stringContaining("EPIPE") });
+      await expect.poll(async () => ok(await as(alice, "call", "list")).calls, { timeout: 10_000 }).toMatchObject([{ state: "connected", stats: { programConnected: false } }]);
+      ok(await as(bob, "call", "hangup"));
+      await listenA.waitFor((e) => e.type === "call.ended");
+      program.destroy();
+    } finally {
+      ok(await as(alice, "call", "auto", "off"));
+      await listenA.stop();
+    }
+  });
+
   // The README runs it beside `call auto on`: the daemon answers then, and the example takes the call once it connects.
   it.each([["answers", false], ["takes an auto-answered call", true]])("the call-echo example %s, greets with its WAV, and echoes the caller a second later", async (_, auto) => {
     if (auto) ok(await as(alice, "call", "auto", "on", "--from", "bob"));

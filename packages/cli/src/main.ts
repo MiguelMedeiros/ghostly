@@ -1445,6 +1445,12 @@ async function callPipeCommand(argv: string[]): Promise<void> {
   // A clip that ends (`ffmpeg -t 3 … | ghostly call pipe`) is queued and played, and the contact's audio goes on
   // coming: the end of stdin never closes the socket, whose daemon side would close the call's audio with it.
   process.stdin.pipe(socket, { end: false });
+  // Nobody reads the contact's audio any more (`call pipe | head -c …`, a player closed): the pipe leaves, exit 0, and
+  // the call goes on (another program may take its audio). It died on an EPIPE nobody handled, with a stack trace.
+  onReaderGone(() => {
+    process.stderr.write(`ghostly: call ${call.call}: nothing reads its audio any more; the call goes on\n`);
+    socket.destroy();
+  });
   socket.pipe(process.stdout);
   socket.on("close", () => exit(0));
   socket.on("error", () => exit(1));
