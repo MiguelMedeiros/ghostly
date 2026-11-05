@@ -507,7 +507,10 @@ describe("ecash a profile restore brought back", () => {
       await vi.advanceTimersByTimeAsync(60_000);
       expect(rows<StoredProof>("proofs").map((p) => [p.secret, !!p.unchecked])).toEqual([["a", true], ["b", false]]);
 
+      // Still no answer for one of them: asked twice as late.
       mint.checkProofsStates.mockResolvedValueOnce([{ state: "SPENT" }]);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mint.checkProofsStates).toHaveBeenCalledTimes(2);
       await vi.advanceTimersByTimeAsync(60_000);
       expect(balance()).toBe(32);
       expect(mint.checkProofsStates).toHaveBeenCalledTimes(3);

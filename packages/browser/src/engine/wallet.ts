@@ -15,6 +15,7 @@ import { STORES, newestWalletTx, openDb, store, transact, wrap, committed } from
 import { openRow, openRows, RowSeals, sealRow, sealedStore } from "./sealedRows";
 import { LIMITS, PaymentPreflightError, decodeBolt11, engineError, engineText, type PaymentReview, type WalletNetwork } from "@ghostly/core";
 import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS, mintRefused } from "./paymentAdapters/cashu";
+import { AskBackoff } from "./askBackoff";
 import { INVOICE_PACE, nextInvoiceAsk } from "./invoicePace";
 import { BITCOIN_INVOICE_ON_TESTNET, fakesLightning, isTestMint, mintNetwork, mintUrlSpelling, paysItsOwnInvoices } from "../shared/mints";
 import type {
@@ -64,6 +65,8 @@ const TEST_COINS_WAIT_MS = 30_000;
 const HISTORY_SHOWN = 100;
 /** How long before a mint that could not say which restored ecash is spent is asked again. */
 const RESTORED_POLL_MS = 60_000;
+/** Asked twice as late each time it still cannot say, up to this. */
+const RESTORED_SLOW_POLL_MS = 1_800_000;
 /** How long before a mint that could not say where a swap stands is asked again. */
 const SWAP_POLL_MS = 30_000;
 /** The same, for a swap that holds nothing any more or whose mint cannot give signatures back: asked now and then. */
@@ -330,10 +333,14 @@ export class CashuWallet {
   private readonly quoteWatched = new Map<string, number>();
   private meltTimer: ReturnType<typeof setTimeout> | null = null;
   /** Per pending melt: when it is asked about next and the wait before that, in this run (a restart asks at once). */
-  private readonly meltAsk = new Map<string, { at: number; wait: number }>();
+  private readonly meltAsk = new AskBackoff(MELT_POLL_MS, MELT_SLOW_POLL_MS);
   private restoredTimer: ReturnType<typeof setTimeout> | null = null;
   private swapTimer: ReturnType<typeof setTimeout> | null = null;
   private swapTimerAt = 0;
+  /** Per open swap whose mint did not answer past its overdue time: as `meltAsk`, in this run (a restart asks at once). */
+  private readonly swapAsk = new AskBackoff(SWAP_POLL_MS, SWAP_SLOW_POLL_MS);
+  /** Per mint that could not say which restored ecash is spent, or holds some pending: as `meltAsk`. */
+  private readonly restoredAsk = new AskBackoff(RESTORED_POLL_MS, RESTORED_SLOW_POLL_MS);
   /** Per melt quote that ended unpaid: the sats the mint kept all the same (the fee of the split before the melt). */
   private readonly failedFees = new Map<string, number>();
   /** Melt quotes that ended unpaid with proofs the mint read spent: ecash spent somewhere else, said as such. */
@@ -432,15 +439,21 @@ export class CashuWallet {
    * (by the profile it was copied from, or by this one before it was restored) still counted in the balance, for good,
    * and every payment that picked one of those proofs failed with the mint's "Token already spent". Each mint is asked
    * once which of them it still reads unspent: a spent proof is dropped, an unspent one is checked for good, and one
-   * the mint holds pending, or a mint that cannot be asked, is asked again later.
+   * the mint holds pending, or a mint that cannot be asked, is asked again later: after RESTORED_POLL_MS, then twice
+   * as late each time up to RESTORED_SLOW_POLL_MS (`restoredAsk`). `paced`: only the mints whose time came (the timer);
+   * a start or a restore asks every one now.
    */
-  private async checkRestored(): Promise<void> {
+  private async checkRestored(paced = false): Promise<void> {
     if (this.restoredTimer) clearTimeout(this.restoredTimer);
     this.restoredTimer = null;
     if (this.stopped) return;
     const waiting = (p: StoredProof) => !!p.unchecked && !p.reserved;
-    let again = false, changed = false;
-    for (const mint of new Set((await this.allProofs()).filter(waiting).map((p) => p.mint))) {
+    let changed = false, next = Infinity;
+    const mints = new Set((await this.allProofs()).filter(waiting).map((p) => p.mint));
+    this.restoredAsk.keepOnly(mints);
+    for (const mint of mints) {
+      if (paced && !this.restoredAsk.due(mint, Date.now())) { next = Math.min(next, this.restoredAsk.at(mint, Date.now())); continue; }
+      let again = false;
       try {
         await this.locked(mint, async () => {
           const proofs = (await this.allProofs()).filter((p) => p.mint === mint && waiting(p));
@@ -460,9 +473,11 @@ export class CashuWallet {
       } catch {
         again = true;
       }
+      if (again) next = Math.min(next, Date.now() + this.restoredAsk.missed(mint, Date.now()));
+      else this.restoredAsk.forget(mint);
     }
     if (changed) this.events.onChange();
-    if (again && !this.stopped) this.restoredTimer = setTimeout(() => void this.checkRestored(), RESTORED_POLL_MS);
+    if (next < Infinity && !this.stopped) this.restoredTimer = setTimeout(() => void this.checkRestored(true), Math.max(0, next - Date.now()));
   }
 
   /** Talks to the mint before it is added: a typo should not become a place to keep money. */
@@ -1369,10 +1384,13 @@ export class CashuWallet {
       if (this.stopped) return;
     }
     const open = (await this.readSwaps()).filter((s) => !mints || mints.includes(s.mint));
+    if (!mints) this.swapAsk.keepOnly(new Set(open.map((s) => s.id)));
     let again = 0;
     const later = (ms: number) => { again = again ? Math.min(again, ms) : ms; };
     // One swap at a time under its mint's lock, read again inside it: the user's own payments there go in between.
     for (const { id, mint } of open) {
+      // A mint that has not answered for a while is asked less and less often; a wallet's removal asks it now.
+      if (!mints && !this.swapAsk.due(id, Date.now())) { later(this.swapAsk.at(id, Date.now()) - Date.now()); continue; }
       await this.locked(mint, async () => {
         let swap = await openRow(STORES.swaps, await wrap<PendingSwap | undefined>((await store(STORES.swaps, "readonly")).get(id)));
         if (!swap) return;
@@ -1392,6 +1410,7 @@ export class CashuWallet {
             await this.putSwap(swap);
           }
           const outcome = await this.swapOutcome(swap);
+          this.swapAsk.forget(id);
           if (outcome.state === "open") {
             // Its inputs went back, and an hour on the mint still cannot say more: nothing of it is held here.
             if (swap.released && Date.now() >= swap.createdAt + SWAP_WATCH_MS) { await this.dropSwap(swap, new Set()); return; }
@@ -1467,7 +1486,11 @@ export class CashuWallet {
           // Mint unreachable, or its answer was an error: asked again on the next round. One that holds nothing
           // any more is not asked about past its hour.
           if (swap.released && Date.now() >= swap.createdAt + SWAP_WATCH_MS) await this.dropSwap(swap, new Set()).catch(() => {});
-          else later(swap.released ? SWAP_SLOW_POLL_MS : SWAP_POLL_MS);
+          else if (swap.released) later(SWAP_SLOW_POLL_MS);
+          else {
+            // Every 30 s while a request may still reach the mint, then less and less often, as melts are.
+            later(this.swapAsk.missed(id, Date.now(), Date.now() < swapOverdueAt(swap)));
+          }
         }
       }).catch(() => { later(SWAP_POLL_MS); });
     }
@@ -1645,8 +1668,7 @@ export class CashuWallet {
     const melts = await this.readMelts();
 
     for (const melt of melts) {
-      const pace = this.meltAsk.get(melt.quote);
-      if (pace && Date.now() < pace.at) continue;
+      if (!this.meltAsk.due(melt.quote, Date.now())) continue;
       try {
         const outcome = await this.locked(melt.mint, async () => {
           // It may have been settled while this waited for the lock.
@@ -1662,15 +1684,14 @@ export class CashuWallet {
       } catch {
         // mint unreachable: try again on the next round
       }
-      const wait = Date.now() < meltOverdueAt(melt) ? MELT_POLL_MS : Math.min((pace?.wait ?? MELT_POLL_MS) * 2, MELT_SLOW_POLL_MS);
-      this.meltAsk.set(melt.quote, { at: Date.now() + wait, wait });
+      this.meltAsk.missed(melt.quote, Date.now(), Date.now() < meltOverdueAt(melt));
     }
 
     const remaining = new Set((await this.readMelts()).map((m) => m.quote));
-    for (const quote of this.meltAsk.keys()) if (!remaining.has(quote)) this.meltAsk.delete(quote);
+    this.meltAsk.keepOnly(remaining);
     if (remaining.size === 0 || this.stopped) return;
     // A melt written down since this round began has no pace yet: it is asked at once.
-    const next = Math.min(...[...remaining].map((quote) => this.meltAsk.get(quote)?.at ?? 0));
+    const next = Math.min(...[...remaining].map((quote) => this.meltAsk.at(quote, 0)));
     if (this.meltTimer) clearTimeout(this.meltTimer);
     this.meltTimer = setTimeout(() => void this.pollMelts(), Math.max(0, next - Date.now()));
   }
