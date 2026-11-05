@@ -193,7 +193,7 @@ export interface EngineApi {
   appSend(params: { linkId: string; ref: string; data: unknown; digest?: string }): { error: import("@ghostly/core").AppSendError | null };
   /**
    * The read lane (`app-ranges/1`, WISP 1200 § A read lane to the contact): lets the contact's app read `file` (this
-   * side's linked file id) while both have the app open on this session. The serve id, or why not (`not-open`,
+   * side's linked file id) while both have the app open, across a reconnect. The serve id, or why not (`not-open`,
    * `offline`, `peer-closed`). Each range the contact asks comes as an `app-range` event, answered by `appRangeAnswer`.
    */
   appServe(params: { linkId: string; ref: string; file: string; digest?: string }): { serve: string } | { error: "not-open" | "offline" | "peer-closed" };
