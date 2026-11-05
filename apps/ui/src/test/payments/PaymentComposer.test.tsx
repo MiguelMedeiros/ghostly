@@ -709,3 +709,26 @@ describe("sending on Ark, Bark, on-chain and USDT", () => {
     expect(send()).toHaveTextContent("Send");
   });
 });
+
+describe("PaymentComposer: the keys on a phone", () => {
+  const viewport = (width: number, height = 800) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });
+  afterEach(() => { viewport(1024, 768); });
+
+  it("keeps Tab and Shift+Tab in the sheet, never on the page behind its backdrop", async () => {
+    // The sheet covers the chat with its backdrop, as a dialog does: Tab from its last control went on to the chat
+    // under it, Shift+Tab from its first to the composer's buttons, the sheet still open.
+    viewport(390, 844);
+    fakeEngine.setState({ links: [linkView()], wallet: everyWallet() });
+    const { user } = renderApp(<><button>Before</button>
+      <PaymentComposer balance={1_000} onSend={async () => null} onRequest={async () => null} onClose={() => {}} reviewContext={reviewContext()} contact="Alice" />
+      <button>After</button></>);
+    const sheet = screen.getByTestId("payment-composer");
+    act(() => screen.getByTestId("payment-use").focus());
+    for (const shift of [false, true]) {
+      for (let i = 0; i < 12; i++) {
+        await user.tab({ shift });
+        expect(sheet).toContainElement(document.activeElement as HTMLElement);
+      }
+    }
+  });
+});

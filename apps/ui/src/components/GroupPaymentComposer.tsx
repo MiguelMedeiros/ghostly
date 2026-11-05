@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { pairLinkId } from "@ghostly/browser/shared/payLinks";
 import type { GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
-import { useOutsideDismiss } from "../hooks/useDismiss";
+import { useOutsideDismiss, useTabTrap } from "../hooks/useDismiss";
+import { useIsMobile } from "../hooks/useIsMobile";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { useI18n } from "../contexts/I18nContext";
 import { edgeDot, memberName } from "../lib/groups";
@@ -28,6 +29,8 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
   const [to, setTo] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   useOutsideDismiss(ref, to === null, onClose);
+  // On a phone the list of members is a sheet over a backdrop, as the payment sheet after it: Tab stays in it.
+  useTabTrap(ref, useIsMobile() && to === null);
   const others = group.members.filter(m => !m.me);
   const community = group.profile === "community";
   // A community member is reached through the group: a link the engine lists once their ways of paying are known.
