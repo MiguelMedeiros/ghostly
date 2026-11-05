@@ -19,7 +19,7 @@ import { readPushDeviceView } from "./deviceState";
 import { deviceNoticeWords } from "./deviceWords";
 import { takeWakeSlot } from "./wakeLimit";
 import { readWake } from "../../../../packages/core/src/pairedWake";
-import { MAX_HELD_SHARES, OPEN_ASK_MS, SHARE_HOLD_MS, type FromWorker, type ToWorker, type WindowSays } from "./messages";
+import { MAX_HELD_SHARES, OPEN_ASK_MS, SHARE_HOLD_MS, SHARE_LOCK_LOOK_MS, type FromWorker, type ToWorker, type WindowSays } from "./messages";
 
 declare const __SW_BUILD__: string;
 declare const __SW_PRECACHE__: string[];
@@ -36,6 +36,8 @@ interface NotificationEvent extends ExtendableEvent { notification: Shown }
 interface MessageEvent_ extends ExtendableEvent { data: unknown; source: WindowClient | null }
 interface WorkerScope {
   location: Location;
+  /** Web Locks, where the browser has them in workers: who holds which lock, by window id. */
+  navigator?: { locks?: { query(): Promise<{ held?: { name?: string; clientId?: string }[] }> } };
   skipWaiting(): Promise<void>;
   registration: { scope: string; showNotification(title: string, options: object): Promise<void>; getNotifications(filter?: { tag?: string }): Promise<Shown[]> };
   clients: {
@@ -128,8 +130,13 @@ let dropped = 0;
  * forgot them): the first page of it that says it is there gets them. `profile` null: a page that did not say its own.
  */
 let forwardFor: { profile: string | null } | null = null;
-/** The app's pages that take shares (they hold the peer), by window id: their profile, and when they were last in front. */
-const sharePages = new Map<string, { profile: string; at: number }>();
+/** The tabs that asked to forward the shares held now: told once those are handed over (they say so), or dropped. */
+let forwarding: WindowClient[] = [];
+/**
+ * The app's pages that take shares (they hold the peer), by window id: their profile, when they were last in front,
+ * and the holder of their peer lock as Web Locks names it (Chromium's is not the window id).
+ */
+const sharePages = new Map<string, { profile: string; at: number; lock?: string }>();
 let inFront = 0;
 
 /**
@@ -149,7 +156,7 @@ function hold(item: SharedItem, done: () => void, kept = false): void {
   setTimeout(() => {
     if (!held.includes(entry)) return;
     held = held.filter((other) => other !== entry);
-    if (!held.length) { forwardFor = null; dropped = 0; }
+    if (!held.length) { forwardFor = null; dropped = 0; tellForwarding({ type: "share-none" }); }
     done();
   }, SHARE_HOLD_MS);
 }
@@ -163,6 +170,68 @@ function handOver(client: WindowClient): void {
   forwardFor = null;
   taken.forEach(({ item }, at) => client.postMessage({ type: "share", item, ...(lost > 0 && at === taken.length - 1 && { dropped: lost }) } satisfies FromWorker));
   for (const { done } of taken) done();
+  // The tab that asked for them took them itself (it is the app now): nothing went elsewhere to tell it about.
+  forwarding = forwarding.filter((asked) => asked.id !== client.id);
+  tellForwarding({ type: "share-forwarded" });
+}
+
+/**
+ * The holders of a profile's peer lock (`ghostly-peer`, `ghostly-peer-<ns>`): the app's live pages, as each said it is
+ * named (`share-here`). The browser lets go of it by itself when a page dies or is closed, which a page that goes does
+ * not always get to say. Null: this browser has no Web Locks in workers, or would not answer.
+ */
+async function peerHolders(): Promise<Set<string> | null> {
+  const locks = worker.navigator?.locks;
+  if (!locks) return null;
+  const state = await locks.query().catch(() => null);
+  if (!state) return null;
+  const peers = (state.held ?? []).filter(({ name }) => name === "ghostly-peer" || name?.startsWith("ghostly-peer-"));
+  return new Set(peers.flatMap(({ clientId }) => (clientId ? [clientId] : [])));
+}
+
+/**
+ * The window a share `source` asks to forward goes to now: the app's page of the same profile that was in front last,
+ * of those that hold their peer's lock. Never every window of the origin, and never another profile's: a share is the
+ * person's, for the profile they opened it in.
+ */
+async function forwardTarget(source: WindowClient, profile: string | null): Promise<WindowClient | undefined> {
+  const [all, holders] = await Promise.all([worker.clients.matchAll({ type: "window" }), peerHolders()]);
+  const open = new Set(all.map((client) => client.id));
+  for (const id of sharePages.keys()) if (!open.has(id)) sharePages.delete(id);
+  return all
+    .filter((client) => client.id !== source.id && sharePages.has(client.id))
+    .filter((client) => {
+      const page = sharePages.get(client.id)!;
+      return (profile === null || page.profile === profile) && (holders === null || (page.lock !== undefined && holders.has(page.lock)));
+    })
+    .sort((a, b) => sharePages.get(b.id)!.at - sharePages.get(a.id)!.at)[0];
+}
+
+/**
+ * Hands the shares held to the app's page `source` asks for, once that page held its lock on two looks
+ * `SHARE_LOCK_LOOK_MS` apart: a share into the same window replaced a page that holds it a moment longer as it goes.
+ * No such page: the shares stay held, for whichever page asks next (`source`, once it is the app, or one of the
+ * profile that says it is there).
+ */
+async function forward(source: WindowClient, profile: string | null): Promise<void> {
+  let before: string | undefined;
+  for (let look = 0; look < 3; look++) {
+    if (look) await new Promise((resolve) => setTimeout(resolve, SHARE_LOCK_LOOK_MS));
+    if (!held.length) return;
+    const to = await forwardTarget(source, profile);
+    if (!held.length) return;
+    if (!to) break;
+    if (to.id === before) { handOver(to); return; }
+    before = to.id;
+  }
+  forwardFor = { profile };
+}
+
+/** The tabs that asked for a forward hear what came of it, once. */
+function tellForwarding(message: FromWorker): void {
+  const asked = forwarding;
+  forwarding = [];
+  for (const client of asked) client.postMessage(message);
 }
 
 function share(event: FetchEvent): void {
@@ -209,27 +278,21 @@ worker.addEventListener("message", (event) => {
   }
   if (message.type === "share-here") {
     if (PUSH_PROFILE !== null || typeof message.profile !== "string") return;
-    sharePages.set(source.id, { profile: message.profile, at: ++inFront });
+    sharePages.set(source.id, { profile: message.profile, at: ++inFront, ...(typeof message.lock === "string" && { lock: message.lock }) });
     if (held.length && forwardFor && (forwardFor.profile === null || forwardFor.profile === message.profile)) handOver(source);
+    return;
+  }
+  if (message.type === "share-away") {
+    // Gone before a forward could reach it (a share into its own window, which the tab opened for it waits behind):
+    // the worker need not wait for its lock to go. Often never said (a phone kills the page): the lock decides then.
+    sharePages.delete(source.id);
     return;
   }
   if (message.type === "share-forward") {
     if (!held.length) { source.postMessage({ type: "share-none" }); return; }
-    const profile = typeof message.profile === "string" ? message.profile : null;
-    event.waitUntil(worker.clients.matchAll({ type: "window" }).then((all) => {
-      const open = new Set(all.map((client) => client.id));
-      for (const id of sharePages.keys()) if (!open.has(id)) sharePages.delete(id);
-      // One window only: the app's page of the same profile that was in front last. Never every window of the origin,
-      // and never another profile's: a share is the person's, for the profile they opened it in.
-      const [to] = all
-        .filter((client) => client.id !== source.id && sharePages.has(client.id) && (profile === null || sharePages.get(client.id)!.profile === profile))
-        .sort((a, b) => sharePages.get(b.id)!.at - sharePages.get(a.id)!.at);
-      if (!held.length) return;
-      // No such page: the shares stay held, for whichever page asks next (this one, once it is the app, or one of the
-      // profile that says it is there).
-      if (!to) { forwardFor = { profile }; return; }
-      handOver(to);
-    }));
+    // It says "Sent" only once they are handed over: closed before, nothing would have asked for them again.
+    if (!forwarding.some((asked) => asked.id === source.id)) forwarding.push(source);
+    event.waitUntil(forward(source, typeof message.profile === "string" ? message.profile : null));
   }
 });
 

@@ -18,6 +18,7 @@
   "reloadUnreachable": "Não foi possível acessar o servidor do Ghostly. Verifique sua conexão e recarregue.",
   "shared": "Enviado ao Ghostly na sua outra aba.",
   "sharedHint": "Escolha a conversa lá. Pode fechar esta.",
+  "sharing": "Enviando ao Ghostly na sua outra aba…",
   "title": "O Ghostly não roda neste navegador",
   "tryOther": "Saia do modo privado e permita dados do site, atualize o navegador, ou abra o Ghostly em outro.",
   "trySecure": "Abra o Ghostly pelo endereço https://."
