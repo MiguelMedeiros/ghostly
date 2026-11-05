@@ -10,6 +10,7 @@ import { measureRecords } from "../src/pkarr";
 import { fromBase64Url } from "../src/bytes";
 import type { PairingState } from "../src/pairedSession";
 import type { NativeTransport, PairedTransport, TransportDescriptors } from "../src/pairedTransports";
+import type { PkarrTransport } from "../src/transport";
 import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, fakePeerConnection, killRtc, rtc, useFakeWorld, yieldToLoop } from "./support/pairingWorld";
 import { NativeWorld } from "./support/nativeWorld";
 // covers: groups.native-links, groups.send
@@ -41,6 +42,8 @@ interface Member {
   kept: Kept;
   /** The WebRTC connections this app made (an offer out, or an answer). */
   rtcMade: number;
+  /** How many times the edge started again with no WebRTC (node.ts `edgeWithoutRtc`). */
+  wentNative: number;
   /** The app quits (a goodbye, its endpoints closed), if it has not, and starts again with what it kept; `change`: what differs in that run. */
   restart(change?: Partial<MemberOptions>): Promise<void>;
   quit(): Promise<void>;
@@ -56,6 +59,8 @@ interface MemberOptions {
   neverRetracts?: boolean;
   /** The group's transport was chosen on this app (node.ts `setGroupTransport`): it says what it runs from its first packet. */
   chose?: boolean;
+  /** The app's relay client, when not the shared one as is (a relay budget that holds this app's reads back). */
+  transport?: () => PkarrTransport;
 }
 
 function member(name: string, group: string, me: Identity, peer: Identity, options: MemberOptions): Member {
@@ -85,7 +90,7 @@ function member(name: string, group: string, me: Identity, peer: Identity, optio
     ...(options.entry ? { oneShot: true, firstPublish: options.entry === "host" ? "after-first-poll" as const : "at-start" as const } : {}),
     packetTransports: true,
     packetTransportsSaid: (!!kept.seeds && !options.neverRetracts) || !!options.chose,
-    transport: pkarr.transport(),
+    transport: options.transport?.() ?? pkarr.transport(),
     pollIntervals: RELAY_POLL_INTERVALS,
     autoConnect: true,
     groupsSupport: true,
@@ -117,6 +122,7 @@ function member(name: string, group: string, me: Identity, peer: Identity, optio
   const withoutRtc = () => {
     if (!options.offAfterFailure || !rtcOn) return;
     rtcOn = false;
+    result.wentNative++;
     const old = result.link;
     void old.stop(false).then(() => {
       result.link = make();
@@ -132,7 +138,7 @@ function member(name: string, group: string, me: Identity, peer: Identity, optio
     void result.link.stop().then(() => { over = true; });
     while (!over) await run(250);
   };
-  const result: Member = { name, link: make(), states, frames, heard, gone: 0, kept, rtcMade: 0, quit,
+  const result: Member = { name, link: make(), states, frames, heard, gone: 0, kept, rtcMade: 0, wentNative: 0, quit,
     restart: async (change = {}) => {
       if (!quitted) await quit();
       Object.assign(options, change);
@@ -255,6 +261,41 @@ describe("a group's edge with a member whose app has no WebRTC", () => {
     console.log(`GROUP_EDGE_NATIVE WebRTC failed on ${failing}: live in ${took / 1000} s`);
     expect(took).toBeLessThan(15_000);
     expect(liveOn(dials)).toBe("iroh/1");
+  }, 120_000);
+
+  it("an answer read late connects nothing and the edge offers again: WebRTC stays on at both ends, and it goes live over it", async () => {
+    // A hub back from a restart has its reads of the member held back by the relays' budget for a minute (agents#971):
+    // they answer what the relay gave before, the member's packet from before its answer. The member answers at once,
+    // its ICE gives up 31 s later with no reply, and it answers again, twice. The answer the hub reads at last finds the
+    // member's ICE given up on it (`rtc.lateAnswerMs`), as the CLI lab saw: neither side may take that for a network
+    // that lets nothing through. Before, both went native, each for the rest of its run.
+    rtc.answerFailsAfterMs = 31_000;
+    rtc.lateAnswerMs = 30_000;
+    const group = toBase64Url(randomBytes(16));
+    let [one, two] = [createIdentity(), createIdentity()];
+    const edgeKey = (me: Identity, peer: Identity) => edgeParams(group, me.seed, me.pubKeyZ32, peer.pubKeyZ32).peerPubKeyZ32;
+    if (edgeKey(two, one) > edgeKey(one, two)) [one, two] = [two, one];
+    const memberKey = edgeKey(one, two);
+    const heldUntil = Date.now() + 70_000;
+    let before: Awaited<ReturnType<PkarrTransport["resolve"]>> | undefined;
+    const held = (): PkarrTransport => {
+      const inner = pkarr.transport();
+      return { ...inner, resolve: async (key, options) => {
+        const packet = await inner.resolve(key, options);
+        if (key !== memberKey || Date.now() >= heldUntil) return packet;
+        if (before === undefined && packet) before = packet;
+        return before ?? packet;
+      } };
+    };
+    const hub = member("hub", group, one, two, { rtc: true, offAfterFailure: true, transport: held });
+    const answers = member("member", group, two, one, { rtc: true, offAfterFailure: true });
+    const took = await untilLive(hub, answers, 3 * 60_000);
+    console.log(`GROUP_EDGE_NATIVE answer read late: live in ${took / 1000} s on ${liveOn(hub)}, native: hub ${hub.wentNative}, member ${answers.wentNative}`);
+    expect([hub.wentNative, answers.wentNative]).toEqual([0, 0]);
+    // The new offer goes 6 s after the late answer went in; the member reads it at its pace, and answers at once.
+    expect(took).toBeLessThan(2 * 60_000);
+    expect(liveOn(hub)).toBe("webrtc/1");
+    expect(liveOn(answers)).toBe("webrtc/1");
   }, 120_000);
 
   it("two apps with no WebRTC go live over a native transport too", async () => {
