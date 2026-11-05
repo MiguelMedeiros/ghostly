@@ -387,7 +387,7 @@ export const home = {
         name: "Bluesky",
         kind: "AT Protocol account",
         body: "Proves you control a Bluesky (AT Protocol) account, with one record in its own repository.",
-        limits: "Approved once on your server, asking only for Ghostly's records. The record is public, and contacts check it without logging in.",
+        limits: "Approved once on your server, asking only for Ghostly's records, or for the whole account if your server refuses that. The record is public, and contacts check it without logging in.",
       },
     ],
   },
