@@ -819,7 +819,7 @@ html[data-standalone="true"] {
   .now-playing-top {
     padding-top: calc(0.375rem + env(safe-area-inset-top));
   }
-  .now-playing-top + main .header-safe {
+  .now-playing-top ~ main .header-safe {
     height: 3.5rem;
     padding-top: 0;
   }
