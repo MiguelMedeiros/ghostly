@@ -60,6 +60,15 @@ export const DEFAULT_LIMITS = Object.freeze({
 })
 
 /**
+ * The congestion window of the relay's one HyperDHT node: requests it may have out per 750 ms tick before the rest wait
+ * in its queue, for every client together. dht-rpc's default (80) is sized for one app, and each listen's announcer pings
+ * its 3 nodes every 3 s, about one request a second per listen: measured on loopback, 80 keeps up with about 1,000
+ * listens and 320 with 4,096, so a window of listens / 12 sends them all. At the defaults 512 × 16 / 12 = 683. Never
+ * below dht-rpc's 80; at most 2048 (24,576 listens), past which a relay is better split in two.
+ */
+export const relayWindow = ({ clients, listens }) => Math.min(2048, Math.max(80, Math.ceil(clients * listens / 12)))
+
+/**
  * dht-relay 0.4.3 (its latest release) hands a browser the announce record where the browser expects the
  * record's relay addresses, so signing an announcement throws and nobody can reach a browser that listens.
  * The browser signs `{ publicKey, relayAddresses }` itself; this gives it the list it signs.
@@ -441,7 +450,7 @@ export async function startRelay(options = {}) {
   // A new node counts itself firewalled until its first network check, about 20 minutes in (dht-rpc's STABLE_TICKS).
   // Until then two browsers on this relay reach each other only by holepunching the relay's own socket, which on
   // loopback often fails. On loopback nothing stands between the nodes, so the relay says so from the start.
-  const dht = options.dht ?? new DHT(bootstrap.length ? { bootstrap, ...(loopback ? { host: '127.0.0.1', firewalled: false } : {}) } : {})
+  const dht = options.dht ?? new DHT({ maxWindow: relayWindow(limits), ...(bootstrap.length ? { bootstrap, ...(loopback ? { host: '127.0.0.1', firewalled: false } : {}) } : {}) })
   // When another node last answered this one. With no outgoing UDP (a firewall, a tunnel, a container network) none
   // ever does: the node is up, its routing table stays empty, and a browser's listen through it still resolves.
   let answeredAt = null
