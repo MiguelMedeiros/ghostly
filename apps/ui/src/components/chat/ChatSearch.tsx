@@ -2,6 +2,7 @@ import { useId, useState, type ReactNode } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import type { ChatSearch } from "../../hooks/useChatSearch";
 import { matchRanges } from "../../lib/chatSearch";
+import { draftDirection } from "../../lib/documentLanguage";
 import { useComposition } from "../../hooks/useComposition";
 
 /**
@@ -62,6 +63,7 @@ export function ChatSearchBar({ search }: { search: ChatSearch }) {
           type="search"
           data-testid="chat-search-input"
           value={search.query}
+          dir={draftDirection(search.query)}
           onChange={(e) => search.setQuery(e.target.value)}
           {...composition.inputProps}
           onKeyDown={(e) => {

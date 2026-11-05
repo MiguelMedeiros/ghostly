@@ -5,6 +5,7 @@ import { PageHeader } from "../components/layout";
 import { MemberFace } from "../components/chat/SenderAvatar";
 import { BoardCard } from "../components/tasks/BoardCard";
 import { useI18n } from "../contexts/I18nContext";
+import { draftDirection } from "../lib/documentLanguage";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { JUMP_TO } from "../hooks/useJumpTo";
@@ -281,7 +282,7 @@ export function Tasks() {
                 </div>
                 <label className="ms-auto flex min-w-36 flex-1 items-center gap-2 rounded-lg bg-search-bg px-2.5 py-1 md:max-w-64">
                   <svg {...icon} width={14} height={14} className="shrink-0 text-text-muted"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
-                  <input type="search" data-testid="tasks-filter" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("cards.board.filter")} aria-label={t("cards.board.filter")}
+                  <input type="search" data-testid="tasks-filter" value={filter} dir={draftDirection(filter)} onChange={(e) => setFilter(e.target.value)} placeholder={t("cards.board.filter")} aria-label={t("cards.board.filter")}
                     className="min-w-0 flex-1 border-none bg-transparent py-0.5 text-sm text-text-primary placeholder-text-muted focus:outline-none" />
                 </label>
               </>

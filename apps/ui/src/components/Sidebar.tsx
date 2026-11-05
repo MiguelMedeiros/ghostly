@@ -60,6 +60,7 @@ import { RAIL_WIDTH, RailAction, RailChat, RailGroup, RailToggle } from "./ChatR
 import { useRailShortcut } from "../hooks/useRailShortcut";
 import { useOpenRowInView } from "../hooks/useOpenRowInView";
 import { useComposition } from "../hooks/useComposition";
+import { draftDirection } from "../lib/documentLanguage";
 import { useEngineValue } from "../lib/engineState";
 
 const NO_GROUPS: NonNullable<typeof engine.state>["groups"] = [];
@@ -508,6 +509,7 @@ export function Sidebar() {
           <input
             type="search"
             value={search}
+            dir={draftDirection(search)}
             onChange={(e) => setSearch(e.target.value)}
             {...composition.inputProps}
             onKeyDown={(e) => {
