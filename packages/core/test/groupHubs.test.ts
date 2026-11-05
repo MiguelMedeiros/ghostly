@@ -145,6 +145,60 @@ describe("what a session hands a hub to pass on", { timeout: 60_000 }, () => {
     expect(dave.readableEpochs).toContain(alice.epoch);
   });
 
+  it("a commit with the epoch's secret sealed to each member it goes on to, when the hub holds it; again once it comes, if it did not", async () => {
+    const { mesh, alice, bob, carol, dave } = await hubbed();
+    // Bob takes the commit from Carol's side without its secret (his own copy from Alice is lost), and asks nobody.
+    for (const k of [alice.myKey, carol.myKey]) mesh.setEdge(k, bob.myKey, false);
+    await alice.rotate(); await mesh.settle();
+    const toBob = mesh.sentFrames.filter(f => f.from === alice.myKey && f.to === bob.myKey && f.frame.t === "group-commit").pop()!.frame as GroupCommitFrame;
+    const bare: GroupCommitFrame = { t: "group-commit", g: alice.id, commit: toBob.commit };
+    const taken = await bob.handle(carol.myKey, clone(bare));
+    expect(taken).toEqual([bare]);
+    expect(bob.readableEpochs).not.toContain(alice.epoch);
+    // Without the secret, the commit goes on as it came.
+    expect(bob.handOnTo(dave.myKey, taken[0])).toEqual(bare);
+    // The secret comes in answer to his sync: the commit goes on again, now with the secret sealed for each member.
+    await alice.handle(bob.myKey, bob.syncFrame([], alice.myKey));
+    const secrets = mesh.sentFrames.filter(f => f.from === alice.myKey && f.to === bob.myKey && f.frame.t === "group-secrets").pop()!.frame;
+    const again = await bob.handle(alice.myKey, clone(secrets));
+    expect(bob.readableEpochs).toContain(alice.epoch);
+    expect(again).toEqual([bare]);
+    const sealed = bob.handOnTo(dave.myKey, again[0]) as GroupCommitFrame;
+    expect(sealed.secret).toBeDefined();
+    // Dave, who had it without the secret, takes the secret from this copy; Carol, who had not, takes both.
+    mesh.setEdge(bob.myKey, dave.myKey, false);
+    await dave.handle(bob.myKey, clone(bare)); await mesh.settle();
+    expect(dave.readableEpochs).not.toContain(alice.epoch);
+    await dave.handle(bob.myKey, clone(sealed)); await mesh.settle();
+    expect(dave.readableEpochs).toContain(alice.epoch);
+    await carol.handle(bob.myKey, clone(bob.handOnTo(carol.myKey, again[0]))); await mesh.settle();
+    expect(carol.readableEpochs).toContain(alice.epoch);
+    // Once he holds it, a copy again takes nothing and goes on no more.
+    expect(await bob.handle(alice.myKey, clone(toBob))).toEqual([]);
+  });
+
+  it("a member that took a commit without its secret takes it from a later copy, the admin's own, or asks the next member that hands it on", async () => {
+    const { mesh, alice, bob, carol, dave } = await hubbed();
+    // Carol's ask to the hub that handed it on is lost.
+    mesh.setEdge(bob.myKey, carol.myKey, false);
+    await alice.rotate(); await mesh.settle();
+    const direct = (to: string) => mesh.sentFrames.filter(f => f.from === alice.myKey && f.to === to && f.frame.t === "group-commit").pop()!.frame as GroupCommitFrame;
+    const bare: GroupCommitFrame = { t: "group-commit", g: alice.id, commit: direct(carol.myKey).commit };
+    await carol.handle(bob.myKey, clone(bare)); await mesh.settle();
+    expect(carol.epoch).toBe(alice.epoch);
+    expect(carol.readableEpochs).not.toContain(alice.epoch);
+    // The admin's own copy comes after the hub's: its secret is taken.
+    await carol.handle(alice.myKey, clone(direct(carol.myKey))); await mesh.settle();
+    expect(carol.readableEpochs).toContain(alice.epoch);
+    // Dave took it from Bob too, and his ask is lost; Carol hands it on, without his secret: he asks her, and she seals it.
+    mesh.setEdge(bob.myKey, dave.myKey, false);
+    await dave.handle(bob.myKey, clone(bare)); await mesh.settle();
+    expect(dave.readableEpochs).not.toContain(alice.epoch);
+    mesh.setEdge(carol.myKey, dave.myKey, true);
+    await dave.handle(carol.myKey, clone(bare)); await mesh.settle();
+    expect(dave.readableEpochs).toContain(alice.epoch);
+  });
+
   it("nothing of a member the chain took out, even for an epoch it was in", async () => {
     const { mesh, alice, bob, carol } = await hubbed();
     await carol.sendText("before"); await mesh.settle();
