@@ -466,6 +466,10 @@
   "typing": "正在输入…",
   "typingRecording": "正在录音…",
   "typingThinking": "正在思考…",
+  "unconfirmed": {
+    "hint": "随联系请求一起发送。对方的应用尚未确认这是它发送的。",
+    "label": "未确认"
+  },
   "video": {
     "arriving": "正在接收",
     "cantPlay": "此设备无法播放此视频（{{format}}）。请下载后观看。",

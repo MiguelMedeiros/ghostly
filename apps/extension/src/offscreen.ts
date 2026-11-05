@@ -113,7 +113,7 @@ async function handleHttpRequest(message: Extract<RuntimeMessage, { type: "http-
     // its side ("The local service is not reachable."): the tab says it in the profile's language, from this side.
     const hostCode = response.headers.find(([name]) => name.toLowerCase() === "x-ghostly-error")?.[1];
     if (hostCode !== undefined) {
-      const app = serviceName(peer, message.peerPubKeyZ32, message.serviceId);
+      const app = serviceName(peer, message.peerPubKeyZ32, message.serviceId) ?? message.app ?? message.serviceId;
       const shown = await (await import("./viewerWords")).hostErrorShown(response.headers, app);
       return { ok: false, code: hostCode, message: hostCode, status: response.status, shown };
     }
@@ -124,13 +124,16 @@ async function handleHttpRequest(message: Extract<RuntimeMessage, { type: "http-
   }
 }
 
-/** The name the contact gave the service they share, as the chat shows it; its id while the peer has none. */
-function serviceName(peer: EngineServer, peerPubKeyZ32: string, serviceId: string): string {
+/**
+ * The name the contact gave the service they share, as the chat shows it now. None once they took it back: the tab
+ * then names it as it was when it opened.
+ */
+function serviceName(peer: EngineServer, peerPubKeyZ32: string, serviceId: string): string | undefined {
   try {
     const links = peer.node.getState().links.filter((link) => link.peerPubKeyZ32 === peerPubKeyZ32);
-    return links.flatMap((link) => link.peerServices ?? []).find((service) => service.id === serviceId)?.name ?? serviceId;
+    return links.flatMap((link) => link.peerServices ?? []).find((service) => service.id === serviceId)?.name;
   } catch {
-    return serviceId;
+    return undefined;
   }
 }
 

@@ -128,9 +128,12 @@ export function Sidebar() {
   const isMobile = useIsMobile();
   const { settings: { chatListDensity: density, chatListCollapsed }, updateChatListCollapsed } = useSettings();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [search, setSearch] = useState("");
+  const [typed, setSearch] = useState("");
   // Folded to a rail of pictures, where there is a side list; a phone's list is the whole screen and never folds.
   const collapsed = !isMobile && chatListCollapsed;
+  // The rail has no search: it shows every chat. A phone turned on its side into a folded list keeps what was typed in
+  // its search for the way back.
+  const search = collapsed ? "" : typed;
   const sidebarRef = useRef<HTMLDivElement>(null), toggleRef = useRef<HTMLButtonElement>(null);
   // The button that folded or unfolded the list goes with it: the focus goes to the one that takes its place (in the
   // header, or at the top of the rail). A shortcut pressed elsewhere (the message field) leaves the focus where it is.

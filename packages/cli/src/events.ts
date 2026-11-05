@@ -66,6 +66,8 @@ export class EventHub {
   private marked = false;
   /** Whether `dropped` is ahead of `<journal>.dropped` (a full disk refused it): the next event's write tries it again. */
   private markOwed = false;
+  /** Typing changes told this run: a change's id carries it, as it takes no seq of its own (`emitLive`). */
+  private typingChanges = 0;
   private journalLines = 0;
   private journalBytes = 0;
   private readonly listeners = new Set<Listener>();
@@ -314,7 +316,7 @@ export class EventHub {
 
   /**
    * An event for the listeners only, never the journal: a contact's app frames, live only (WISP 1200), which at the
-   * receiver's rate would push every other chat's events out of it in seconds. It takes no seq of its own but the last
+   * receiver's rate would push every other chat's events out of it in seconds, and typing, which lasts seconds. It takes no seq of its own but the last
    * event's (as an `agent.turn` takes its source's): a cursor that handled it resumes after that event, a replay never
    * gives it, and a restart never numbers an event again.
    */
@@ -435,11 +437,13 @@ export class EventHub {
       this.pinned("chat", id, before.pin, shape.pin);
       // The contact started or stopped writing (WISP 401 § Typing): it stops by itself 6 s after its last word. What
       // it is doing (typing, recording, thinking, a bot's status) goes with the start, and a change while it lasts
-      // is a start again (its id then carries the sequence, so two changes in one millisecond stay apart).
+      // is a start again (its id then carries a count, so two changes in one millisecond stay apart). Live only, as app
+      // frames are: it lasts seconds, and at the rate a contact may change it, it would push the other chats' events out
+      // of the journal.
       if (shape.typing !== before.typing) {
-        this.emit(shape.typing ? "typing.started" : "typing.stopped", `typing.${shape.typing ? "started" : "stopped"}:${id}:${this.now()}`, { chat: id, ...(shape.typing ? typingFields(shape) : {}) });
+        this.emitLive(shape.typing ? "typing.started" : "typing.stopped", `typing.${shape.typing ? "started" : "stopped"}:${id}:${this.now()}`, { chat: id, ...(shape.typing ? typingFields(shape) : {}) });
       } else if (shape.typing && (shape.typingKind !== before.typingKind || shape.typingStatus !== before.typingStatus)) {
-        this.emit("typing.started", `typing.started:${id}:${this.now()}:${this.seq + 1}`, { chat: id, ...typingFields(shape) });
+        this.emitLive("typing.started", `typing.started:${id}:${this.now()}:${++this.typingChanges}`, { chat: id, ...typingFields(shape) });
       }
     }
     const removedChats = [...this.chats.keys()].filter((id) => !links.has(id));
@@ -461,14 +465,15 @@ export class EventHub {
       const left = before.members.filter((key) => !shape.members.includes(key));
       if (joined.length || left.length) this.emit("group.members", `group.members:${id}:${this.now()}`, { group: id, joined, left });
       this.pinned("group", id, before.pin, shape.pin);
-      // A member started or stopped writing in a private group (WISP 902 · Group Mesh § Typing), as `typing.*` in a chat.
+      // A member started or stopped writing in a private group (WISP 902 · Group Mesh § Typing), as `typing.*` in a chat,
+      // live only too.
       for (const [member, word] of Object.entries(shape.typing)) {
         const was = before.typing[member];
         if (was && was.kind === word.kind && was.status === word.status) continue;
-        this.emit("group.typing.started", `group.typing.started:${id}:${member}:${this.now()}${was ? `:${this.seq + 1}` : ""}`, { group: id, member, ...word });
+        this.emitLive("group.typing.started", `group.typing.started:${id}:${member}:${this.now()}${was ? `:${++this.typingChanges}` : ""}`, { group: id, member, ...word });
       }
       for (const member of Object.keys(before.typing)) {
-        if (!shape.typing[member]) this.emit("group.typing.stopped", `group.typing.stopped:${id}:${member}:${this.now()}`, { group: id, member });
+        if (!shape.typing[member]) this.emitLive("group.typing.stopped", `group.typing.stopped:${id}:${member}:${this.now()}`, { group: id, member });
       }
     }
     const removedGroups = [...this.groups.keys()].filter((id) => !groups.has(id));

@@ -5,6 +5,7 @@ import type { Language } from "../../lib/settings";
 import type { LinkView, WalletInstanceView, WalletView } from "@ghostly/browser/shared/types";
 import type { WalletNetwork } from "@ghostly/core";
 import { PaymentComposer } from "../../components/PaymentComposer";
+import { FLIP_MS } from "../../components/deck/useCardFlip";
 import { rememberNetwork, rememberRail, rememberedRail } from "../../lib/chatPayments";
 import { fakeEngine, linkView, paymentView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -636,6 +637,73 @@ describe("sending Cashu from the chat's wallet", () => {
     await view.user.click(send());
     expect(await screen.findByRole("alert")).toHaveTextContent("Mint is offline");
     expect(send()).toHaveTextContent("Send");
+  });
+});
+
+// The memo reaches the contact as a message's text does, and the CLI's `chat pay`/`chat request` guard it: the sheet
+// sent a seed typed there with no question, where the composer asks.
+describe("a memo that looks like a seed or a key", () => {
+  const SEED = `${"abandon ".repeat(11)}about`;
+  const memo = () => screen.getByRole("textbox", { name: "What for? (optional)" });
+
+  it("asks before a request carries it; Cancel keeps it here, Send anyway sends it", async () => {
+    const { user, onRequest } = open();
+    await user.click(tab("mainnet"));
+    await user.click(card("lightning-mainnet"));
+    await user.type(amount(), "12");
+    await user.type(memo(), SEED);
+    await user.click(request());
+    expect(await screen.findByTestId("secret-guard")).toHaveAttribute("data-kind", "mnemonic");
+    await user.click(screen.getByTestId("secret-guard-cancel"));
+    expect(screen.queryByTestId("secret-guard")).not.toBeInTheDocument();
+    expect(onRequest).not.toHaveBeenCalled();
+    await user.click(request());
+    await user.click(await screen.findByTestId("secret-guard-send"));
+    expect(onRequest).toHaveBeenCalledWith(12, SEED, "cashu", "lightning", "mainnet");
+  });
+
+  it("asks before a send carries it, and prepares nothing until it is answered", async () => {
+    const view = open({ wallet: everyWallet({ mints: [mint(TEST_MINT, 500)], balance: 500 }) });
+    view.engine.on("preparePayment", reviewOf);
+    await view.user.click(tab("testnet"));
+    await view.user.click(card("cashu-testnet"));
+    await view.user.type(amount(), "30");
+    await view.user.type(memo(), "my nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5 for you");
+    await view.user.click(send());
+    expect(await screen.findByTestId("secret-guard")).toHaveAttribute("data-kind", "nsec");
+    expect(view.engine.callsTo("preparePayment")).toEqual([]);
+    await view.user.click(screen.getByTestId("secret-guard-send"));
+    await screen.findByRole("region", { name: "Payment review" });
+    expect(view.engine.callsTo("preparePayment")).toEqual([expect.objectContaining({ memo: expect.stringContaining("nsec1") })]);
+  });
+
+  // The sheet's Escape (back to the cards) listens first, on the document: it took the guard's Escape, turned the card
+  // back to the deck behind the dialog, and the browser's own Escape on the dialog never came, so the guard stayed.
+  it("leaves Escape to the guard: the card stays turned, the sheet open", async () => {
+    const view = open({ wallet: everyWallet({ mints: [mint(TEST_MINT, 500)], balance: 500 }) });
+    await view.user.click(tab("testnet"));
+    await view.user.click(card("cashu-testnet"));
+    await view.user.type(amount(), "30");
+    await view.user.type(memo(), SEED);
+    await view.user.click(send());
+    await screen.findByTestId("secret-guard");
+    await view.user.keyboard("{Escape}");
+    // Longer than a turn back takes.
+    await new Promise((resolve) => setTimeout(resolve, FLIP_MS + 100));
+    expect(screen.queryByRole("radiogroup", { name: "Pay with" })).not.toBeInTheDocument();
+    expect(amount()).toHaveValue("30");
+    expect(view.onClose).not.toHaveBeenCalled();
+  });
+
+  it("asks nothing of an ordinary memo", async () => {
+    const { user, onRequest } = open();
+    await user.click(tab("mainnet"));
+    await user.click(card("lightning-mainnet"));
+    await user.type(amount(), "12");
+    await user.type(memo(), "pizza");
+    await user.click(request());
+    expect(screen.queryByTestId("secret-guard")).not.toBeInTheDocument();
+    expect(onRequest).toHaveBeenCalledWith(12, "pizza", "cashu", "lightning", "mainnet");
   });
 });
 

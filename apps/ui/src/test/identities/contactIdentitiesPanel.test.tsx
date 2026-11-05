@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, screen, within } from "@testing-library/react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
@@ -166,6 +169,74 @@ describe("ContactIdentitiesPanel", () => {
       const card = await turnOver(user, 0);
       expect(card).toHaveTextContent("Domain · Alice Liddell");
       expect(within(card).getByTestId("chat-identity-received-name-source")).toHaveTextContent("Name: keys.openpgp.org");
+    });
+
+    it("says whole where a name came from: the caveat at its end is never cut", async () => {
+      // An OpenPGP key's user ID: one line with an ellipsis showed "Name: User ID on the key, written by its holder: not …".
+      const source = "User ID on the key, written by its holder: not proof that the name or email is theirs";
+      const { user } = open(withReceived([receivedView({ provider: "openpgp", display: { name: "Satoshi Nakamoto <satoshi@example.org>", source, fetchedAt: now() } })]));
+      const line = within(await turnOver(user, 0)).getByTestId("chat-identity-received-name-source");
+      expect(line).toHaveTextContent(`Name: ${source}`);
+      expect(line).toHaveClass("id-card-back-meta-whole");
+      const css = readFileSync(join(fileURLToPath(import.meta.url), "../../../components/identities/composer-identities.css"), "utf8");
+      const rule = /\.id-card-back-meta-whole\{([^}]*)\}/.exec(css)?.[1] ?? "";
+      expect(rule).toContain("white-space:normal");
+      expect(rule).toContain("text-overflow:clip");
+    });
+
+    describe("says where a name came from, and the keyserver's button, in the app's language", () => {
+      const key = "0123456789ABCDEF0123456789ABCDEF01234567";
+      const backIn = async (language: "ar" | "pt", r: ReceivedIdentityView) => {
+        const { user, engine } = renderApp(<ContactIdentitiesPanel peerKey="peer" name="Alice" onClose={vi.fn()} />, { language });
+        document.documentElement.dataset.reduceMotion = "true";
+        act(() => engine.update(withReceived([r])));
+        return turnOver(user, 0);
+      };
+      const pgp = (source: string) => receivedView({ provider: "openpgp", subject: key, verified: { subject: key, source: "OpenPGP signature" },
+        display: { name: "Satoshi Nakamoto <satoshi@example.org>", source, fetchedAt: now() } });
+      const google = (source: string) => receivedView({ provider: "oidc", subject: "https://accounts.google.com",
+        verified: { subject: "https://accounts.google.com#42", source: "ID token signed by accounts.google.com", attester: "accounts.google.com" },
+        display: { name: "alice@example.org", source, fetchedAt: now() } });
+      const nameLine = (card: HTMLElement) => within(card).getByTestId("chat-identity-received-name-source");
+
+      it("an OpenPGP key's user ID, and its lookup button, in Arabic", async () => {
+        const card = await backIn("ar", pgp("User ID on the key, written by its holder: not proof that the name or email is theirs"));
+        expect(nameLine(card)).toHaveTextContent("الاسم: معرّف المستخدم على المفتاح، كتبه صاحبه: ليس دليلًا على أن الاسم أو البريد الإلكتروني له");
+        expect(nameLine(card)).not.toHaveTextContent(/User ID|holder/);
+        expect(within(card).getByTestId("chat-identity-lookup")).toHaveTextContent("التحقق من البريد الإلكتروني عبر keys.openpgp.org");
+      });
+
+      it("an OpenPGP key's user ID, and its lookup button, in Portuguese", async () => {
+        const card = await backIn("pt", pgp("User ID on the key, written by its holder: not proof that the name or email is theirs"));
+        expect(nameLine(card)).toHaveTextContent("Nome: ID de usuário na chave, escrito por quem a tem: não prova que o nome ou o e-mail são dessa pessoa");
+        expect(within(card).getByTestId("chat-identity-lookup")).toHaveTextContent("Verificar e-mails com keys.openpgp.org");
+      });
+
+      it("an email keys.openpgp.org confirmed", async () => {
+        const card = await backIn("pt", pgp("Email confirmed to keys.openpgp.org by its owner: the keyserver's check, not Ghostly's"));
+        expect(nameLine(card)).toHaveTextContent("Nome: e-mail confirmado ao keys.openpgp.org por quem o tem: verificação do servidor de chaves, não do Ghostly");
+      });
+
+      it("a sign-in provider's name with an email it did not check, in Arabic", async () => {
+        const card = await backIn("ar", google("Signed by Google; email not verified by Google"));
+        expect(nameLine(card)).toHaveTextContent("الاسم: موقَّع من Google؛ لم تتحقق Google من البريد الإلكتروني");
+        expect(nameLine(card)).not.toHaveTextContent(/Signed|verified/);
+      });
+
+      it("a sign-in provider's name with an email it checked, in Portuguese", async () => {
+        const card = await backIn("pt", google("Signed by Google; email verified by Google"));
+        expect(nameLine(card)).toHaveTextContent("Nome: assinado por Google; e-mail verificado por Google");
+      });
+
+      it("a sign-in provider's name without an email", async () => {
+        const card = await backIn("pt", google("Signed by GitLab"));
+        expect(nameLine(card)).toHaveTextContent("Nome: assinado por GitLab");
+      });
+
+      it("any other source as written", async () => {
+        const card = await backIn("pt", google("Signed by Google; email verified by Microsoft"));
+        expect(nameLine(card)).toHaveTextContent("Nome: Signed by Google; email verified by Microsoft");
+      });
     });
 
     it("checks again on request, but not what was withdrawn or revoked", async () => {

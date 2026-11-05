@@ -109,6 +109,15 @@ describe("the host the app page runs on", () => {
     });
   });
 
+  it("hands the worker the app's name as the chat lists it, for when the contact takes it back", async () => {
+    const { extensionHost } = await load();
+    const { engine } = await world.load("page", () => import("@ghostly/browser/platform/engine"));
+    vi.spyOn(engine, "linkByPeer").mockReturnValue({ peerPubKeyZ32: PEER, peerServices: [{ id: SERVICE, name: "Atlas" }] } as unknown as ReturnType<typeof engine.linkByPeer>);
+    await extensionHost.openService!(PEER, SERVICE, TAG);
+    const [tabId] = [...world.tabs.keys()];
+    expect(world.session.get(`viewer:${tabId}`)).toMatchObject({ page: { app: "Atlas" } });
+  });
+
   it("reports the manifest's version", async () => {
     const { extensionHost } = await load();
     expect(extensionHost.version).toBe(manifest.version);

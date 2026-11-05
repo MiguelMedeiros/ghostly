@@ -36,6 +36,22 @@ describe("community rendezvous: beacon and lobbies", () => {
     expect(mergeBeacon(existing, me, null, now).map(h => h.key)).toEqual([c, a]);
   });
 
+  it("merges: a full beacon dated ahead of now crowds out neither my entry nor the hubs of the roster", () => {
+    const now = Date.now(), [me, other, writer] = keys(3), strangers = keys(COMMUNITY_TOPOLOGY.maxHubs - 1);
+    const roster = new Set([me, other, writer]);
+    // Eight entries half a minute ahead: one member saying it is empty, seven keys of nobody saying they are full.
+    const full: Hub[] = [{ key: writer, ts: now + 30_000, load: 0 }, ...strangers.map(key => ({ key, ts: now + 30_000, load: 255 }))];
+    const existing: Hub[] = [...full, { key: other, ts: now - 5_000, load: 3 }];
+    const merged = mergeBeacon(existing, me, { key: me, ts: now, load: 4 }, now, () => true, key => roster.has(key));
+    expect(merged).toHaveLength(COMMUNITY_TOPOLOGY.maxHubs);
+    expect(merged.map(h => h.key).slice(0, 3)).toEqual([me, writer, other]);
+    // Kept as written: a hub's entry carries its own clock.
+    expect(merged.find(h => h.key === writer)!.ts).toBe(now + 30_000);
+    // My entry stays even without a roster to tell the keys apart; an entry ahead of now ranks as one of now.
+    expect(mergeBeacon(full, me, { key: me, ts: now, load: 4 }, now)[0].key).toBe(me);
+    expect(mergeBeacon([{ key: other, ts: now, load: 0 }, { key: writer, ts: now + 30_000, load: 0 }], me, null, now).map(h => h.key)).toEqual([other, writer]);
+  });
+
   it("lobbies hold the latest few requests, per hub", () => {
     const now = Date.now(), [hub, other] = keys(2);
     let entries: { key: string; ts: number }[] = [];

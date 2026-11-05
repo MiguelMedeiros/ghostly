@@ -52,10 +52,10 @@ are in WISP 103, "Browser profile".
 | ping, dropped when the last went unanswered | every 30 s | `GHOSTLY_RELAY_PING_MS` |
 | a connection's request before it upgrades | 15 s | `GHOSTLY_RELAY_REQUEST_MS` |
 | a client's part of a handshake (its answer) | 15 s | `GHOSTLY_RELAY_HANDSHAKE_MS` |
-| handshakes waiting on one client's answer at once (its dials and incoming ones) | 64 | `GHOSTLY_RELAY_HANDSHAKES` |
+| handshakes waiting on one client's answer at once (its dials and incoming ones; one key's incoming ones at most a quarter, and a quarter kept for its dials) | 64 | `GHOSTLY_RELAY_HANDSHAKES` |
 
 Past a limit the client is dropped, or its socket is paused (the byte rate), or an incoming stream past
-`streams` is closed. Topic lookups and announcements
+`streams` is closed, or a handshake past `handshakes` is refused (`refused handshake <why>` in the log). Topic lookups and announcements
 are refused: Ghostly never makes them, and they would make the relay an open crawler.
 
 Other settings:

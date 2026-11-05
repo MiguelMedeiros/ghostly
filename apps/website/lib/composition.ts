@@ -59,7 +59,7 @@ const D = " · ";
 
 export const BLOCKS: Block[] = [
   // Rendezvous, keys & negotiation
-  b("core", "base", "Ghost core", ["01-ghost-core"], "Find a peer through small signed records on Pkarr / Mainline DHT. Desktop reads and writes the DHT itself; the web app, extension and CLI go through Pkarr relays, each behind a breaker."),
+  b("core", "base", "Ghost core", ["01-ghost-core"], "Find a peer through small signed records on Pkarr / Mainline DHT. Desktop reads and writes the DHT itself, and the CLI does too, beside Pkarr relays; the web app and extension go through Pkarr relays, each behind a breaker."),
   b("keys", "base", "Peer keys", ["02-peer-keys"], "A fresh participation key per connection; every chat pins the other side's key."),
   b("invite", "base", "Invitations", ["800-invite-join", "801-invitation-profiles"], "Turn a private link or code into a mutually admitted connection. A copy of an invite cannot stop a chat that is already paired."),
   b("qrinvite", "base", "QR invitations", ["801-invitation-profiles"], "The invitation as a QR code to scan: the same code as the one you copy."),
@@ -124,7 +124,7 @@ export const BLOCKS: Block[] = [
   b("storage", "keep", `Storage: file${D}S3`, ["1000-storage", "1001-local-storage", "1002-s3-storage"], "Where sealed bundles wait: a file you keep or an S3-compatible bucket, which also holds messages for an away contact."),
 
   // Groups
-  b("groups", "groups", "Groups", ["900-group-sessions", "902-group-mesh", "903-group-community", "503-group-files"], "Two kinds: a private group of up to 32, and a community of up to 256 whose link anyone can open, let in by any member through hubs the members elect. Text, a picture, payments between members, and files and voice messages fetched from a member who has them; no calls. Keys change whenever someone leaves, so whoever is out reads nothing after. Web, extension and desktop."),
+  b("groups", "groups", "Groups", ["900-group-sessions", "902-group-mesh", "903-group-community", "503-group-files"], "Two kinds: a private group of up to 32, and a community of up to 256 whose link anyone can open, let in by any member through hubs the members elect. Text, a picture, payments between members, and files and voice messages fetched from a member who has them; no calls. Keys change whenever someone leaves, so whoever is out reads nothing after. Web, extension, desktop and CLI."),
   b("gossipsub", "groups", "GossipSub", ["901-gossipsub"], "A candidate distribution layer for larger groups, off the DHT."),
   b("mls", "groups", "MLS", [], "Group encryption by the MLS standard, for groups larger than the mesh or members who renew their own keys. Being considered, not planned.", ["adapter-roadmap"], "candidate-mls-group-encryption"),
 
@@ -156,7 +156,7 @@ export const PRESETS: { id: PresetId; blocks: (bl: Block) => boolean; title: str
     id: "cli",
     blocks: (bl) => CLI_BLOCKS.includes(bl.id),
     title: "The headless CLI",
-    blurb: "The app's engine without a screen, for bots: chats, groups, files, wallets and proofs through JSON events. No calls; Bark stays in the app.",
+    blurb: "The app's engine without a screen, for bots: chats, groups, files, wallets, proofs and voice calls through JSON events. No video; Bark stays in the app.",
   },
   {
     id: "today",
