@@ -214,7 +214,7 @@ export const developers = {
     steps: [
       {
         title: "Understand the core",
-        body: "Signed Pkarr records: at most 1000 bytes, a 300-second TTL.",
+        body: "Signed Pkarr records: at most 1000 bytes, a TTL set per record: 300 seconds by default, 3600 for _caps, 7200 for did:dht.",
         links: [
           { label: "WISP 01 · Ghost Core", href: "/wisps/01-ghost-core" },
           { label: "The Ghost Protocol", href: "/wisps/protocol" },
