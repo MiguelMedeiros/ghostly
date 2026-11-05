@@ -286,8 +286,8 @@ describe("the cards", () => {
     const { user, onClose } = open();
     await user.click(card("arkade-testnet"));
     expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
-    const cards = screen.getByRole("button", { name: "Back to the cards" });
-    expect(cards).toHaveTextContent("Cards");
+    const cards = screen.getByRole("button", { name: "Cards" });
+    expect(cards).toHaveAccessibleDescription("Back to the cards");
     // It leads the card's head, before the mark and the name: where a way back is looked for.
     expect(cards.parentElement!.firstElementChild).toBe(cards);
     await user.click(cards);
@@ -325,7 +325,7 @@ describe("the cards", () => {
     expect(onClose).not.toHaveBeenCalled();
     expect(await screen.findByRole("radiogroup", { name: "Pay with" })).toBeInTheDocument();
     await user.click(card("arkade-testnet"));
-    await user.click(screen.getByRole("button", { name: "Back to the cards" }));
+    await user.click(screen.getByRole("button", { name: "Cards" }));
     await user.keyboard("{Escape}");
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -350,7 +350,7 @@ describe("the cards", () => {
     await user.click(card("arkade-testnet"));
     await user.click(hint());
     await user.click(screen.getByTestId("payment-back"));
-    await user.click(screen.getByRole("button", { name: "Back to the cards" }));
+    await user.click(screen.getByRole("button", { name: "Cards" }));
     await screen.findByRole("radiogroup", { name: "Pay with" });
     expect(onClose).not.toHaveBeenCalled();
   });
