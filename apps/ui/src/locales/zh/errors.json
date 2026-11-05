@@ -602,6 +602,16 @@
     "useHttps": "请使用 https:// 中继地址：{{address}}",
     "useWss": "请使用 wss:// 中继地址"
   },
+  "services": {
+    "addressNext": "请使用这台电脑上的地址，例如 localhost:3400。",
+    "badAddress": "无法识别该地址",
+    "name": "请给服务起个名字",
+    "noCredentials": "地址中不能包含用户名或密码",
+    "noQuery": "地址中不能包含 ? 或 # 部分",
+    "portZero": "没有网页应用会监听端口 0",
+    "thisComputer": "只能共享这台电脑上的服务",
+    "webOnly": "只能共享网页地址（http 或 https）"
+  },
   "startAgain": "重新开始",
   "transport": {
     "adapterFailed": "无法启动。重新打开此聊天以重试。",

@@ -602,6 +602,16 @@
     "useHttps": "Utilisez une adresse de relais https:// : {{address}}",
     "useWss": "Utilisez une adresse de relais wss://"
   },
+  "services": {
+    "addressNext": "Utilisez une adresse de cet ordinateur, comme localhost:3400.",
+    "badAddress": "Cette adresse est illisible",
+    "name": "Donnez un nom au service",
+    "noCredentials": "L’adresse ne peut pas contenir de nom d’utilisateur ni de mot de passe",
+    "noQuery": "L’adresse ne peut pas contenir de partie avec ? ou #",
+    "portZero": "Aucune app web n’écoute sur le port 0",
+    "thisComputer": "Seuls les services de cet ordinateur peuvent être partagés",
+    "webOnly": "Seules les adresses web (http ou https) peuvent être partagées"
+  },
   "startAgain": "Recommencer",
   "transport": {
     "adapterFailed": "Démarrage impossible. Rouvrez cette discussion pour réessayer.",

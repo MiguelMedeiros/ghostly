@@ -602,6 +602,16 @@
     "useHttps": "Usa https:// nell'indirizzo del relay: {{address}}",
     "useWss": "Usa wss:// nell'indirizzo del relay"
   },
+  "services": {
+    "addressNext": "Usa un indirizzo di questo computer, come localhost:3400.",
+    "badAddress": "Impossibile leggere questo indirizzo",
+    "name": "Dai un nome al servizio",
+    "noCredentials": "L'indirizzo non può contenere nome utente o password",
+    "noQuery": "L'indirizzo non può avere una parte con ? o #",
+    "portZero": "Nessuna app web ascolta sulla porta 0",
+    "thisComputer": "Si possono condividere solo servizi di questo computer",
+    "webOnly": "Si possono condividere solo indirizzi web (http o https)"
+  },
   "startAgain": "Ricomincia",
   "transport": {
     "adapterFailed": "Avvio non riuscito. Riapri questa chat per riprovare.",
