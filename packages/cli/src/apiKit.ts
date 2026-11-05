@@ -20,6 +20,11 @@ export interface ApiContext {
   version: string;
   /** The daemon asks to stop (answered first). */
   stop?: () => void;
+  /**
+   * Aborted when the daemon stops (`serve().close`): a wait still open answers with what it knows (`waits.ts`), as a
+   * timeout with `details.reason: "daemon-stopped"`, before the connections end.
+   */
+  stopping?: AbortSignal;
   /** The daemon is a `listen` that found none and runs the profile itself: a stop ends that listen too. */
   listen?: true;
 }
