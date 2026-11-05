@@ -117,7 +117,7 @@ setBrowserHost(webHost);
 if (gate.full) {
   startSessionSync();
   // Shares for this tab: the one it opened for, and any another tab forwards while this one is the app.
-  listenForShares();
+  listenForShares(peerLock);
   askForShare();
   // Links another tab of this profile opened: here, as if this tab's address had changed to them.
   takeLinks(peerLock, (route) => { window.location.hash = route; });

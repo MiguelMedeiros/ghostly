@@ -240,6 +240,22 @@ describe("a share, on the page's side", () => {
     expect(registration.active!.posted[1]).toEqual({ type: "share-here", profile: activeProfileId() });
   });
 
+  it("says how Web Locks names it as its peer lock's holder, which the worker checks before it forwards a share here", async () => {
+    const query = vi.fn(async () => ({ held: [{ name: "ghostly-peer-work", clientId: "other-tab", mode: "exclusive" }, { name: "ghostly-peer", clientId: "this-tab", mode: "exclusive" }] }));
+    Object.defineProperty(navigator, "locks", { configurable: true, value: { query } });
+    try {
+      listenForShares("ghostly-peer");
+      await vi.waitFor(() => expect(registration.active!.posted).toEqual([{ type: "share-here", profile: activeProfileId(), lock: "this-tab" }]));
+      window.dispatchEvent(new Event("focus"));
+      // (Pages of the tests before listen too: only this one's say the lock.)
+      await vi.waitFor(() => expect(registration.active!.posted.filter((message) => (message as { lock?: string }).lock === "this-tab")).toHaveLength(2));
+      // Asked once: the page holds that lock for as long as it lives.
+      expect(query).toHaveBeenCalledTimes(1);
+    } finally {
+      Reflect.deleteProperty(navigator, "locks");
+    }
+  });
+
   it("the app's page on its way out tells the worker, so no share is forwarded to it", async () => {
     listenForShares();
     await vi.waitFor(() => expect(registration.active!.posted).toHaveLength(1));

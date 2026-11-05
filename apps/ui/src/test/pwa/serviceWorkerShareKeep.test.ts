@@ -1,4 +1,5 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { SHARE_LOCK_LOOK_MS } from "../../../../web/src/sw/messages";
 
 // covers: app.pwa.share-target
 
@@ -8,14 +9,22 @@ import { afterEach, expect, it, vi } from "vitest";
  * The worker's own script runs here against a stand-in for its scope.
  */
 
+// A forward waits between its looks at the peer locks: the clock is moved by hand (`looked`).
+beforeEach(() => { vi.useFakeTimers(); });
+
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.resetModules();
 });
 
 type Message = { data: unknown; source: { id: string; postMessage(message: unknown): void } | null; waitUntil(promise: Promise<unknown>): void };
 
-async function startWorker(scope = "https://app.ghostly.tools/", windows: { id: string }[] = []) {
+/**
+ * `locks`: the peer lock each window holds, by window id, as the browser keeps it (it lets go of a page's by itself when
+ * the page dies). Left out: a browser with no Web Locks in workers.
+ */
+async function startWorker(scope = "https://app.ghostly.tools/", windows: { id: string }[] = [], locks?: Map<string, string>) {
   const listeners = new Map<string, (event: Message) => void>();
   vi.stubGlobal("__SW_BUILD__", "test-1");
   vi.stubGlobal("__SW_PRECACHE__", []);
@@ -23,6 +32,7 @@ async function startWorker(scope = "https://app.ghostly.tools/", windows: { id: 
     location: new URL("https://app.ghostly.tools/sw.js"),
     registration: { scope },
     clients: { matchAll: async () => windows },
+    ...(locks && { navigator: { locks: { query: async () => ({ held: [...locks].map(([clientId, name]) => ({ name, clientId, mode: "exclusive" })) }) } } }),
     addEventListener: (type: string, listener: (event: Message) => void) => { listeners.set(type, listener); },
   });
   await import("../../../../web/src/sw/sw");
@@ -37,7 +47,12 @@ async function startWorker(scope = "https://app.ghostly.tools/", windows: { id: 
     listeners.get("fetch")!({ request, respondWith: (answer: Promise<unknown>) => { answered = answer; }, waitUntil: (promise: Promise<unknown>) => { waits.push(promise); } } as never);
     await answered.catch(() => {});
   };
-  return { say, post, waits };
+  /** Every forward asked for so far has looked at the locks as often as it does, and is over. */
+  const looked = async () => {
+    await vi.advanceTimersByTimeAsync(3 * SHARE_LOCK_LOOK_MS);
+    await Promise.all(waits.slice(1));
+  };
+  return { say, post, waits, looked };
 }
 
 const item = (text: string) => ({ title: "", text, url: "", files: [] });
@@ -134,7 +149,7 @@ it("a share forwarded goes to one window: the app's page of the same profile foc
   worker.say({ type: "share-keep", item }, opened);
 
   worker.say({ type: "share-forward", profile: "home" }, opened);
-  await Promise.all(worker.waits.slice(1));
+  await worker.looked();
   expect(home.heard).toEqual([{ type: "share", item }]);
   expect(older.heard).toEqual([]);
   expect(work.heard).toEqual([]);
@@ -151,7 +166,7 @@ it("no page of the profile to forward it to: it waits, and goes to the first of 
   const item = { title: "", text: "for Ana", url: "", files: [] };
   worker.say({ type: "share-keep", item }, opened);
   worker.say({ type: "share-forward", profile: "home" }, opened);
-  await Promise.all(worker.waits.slice(1));
+  await worker.looked();
   expect(work.heard).toEqual([]);
 
   // The worker stopped and started again meanwhile, or the profile's page was not there yet: it says so when it is.
@@ -169,7 +184,7 @@ it("the tab that asked for a forward is told once the share is handed over, and 
   worker.say({ type: "share-keep", item: item("for Ana") }, opened);
   worker.say({ type: "share-forward", profile: "home" }, opened);
   expect(opened.heard).toEqual([]);
-  await Promise.all(worker.waits.slice(1));
+  await worker.looked();
   expect(home.heard).toEqual([{ type: "share", item: item("for Ana") }]);
   expect(opened.heard).toEqual([{ type: "share-forwarded" }]);
 });
@@ -180,7 +195,7 @@ it("no page to forward to yet: the tab that asked hears it went once one says it
   const worker = await startWorker(undefined, [opened, home]);
   worker.say({ type: "share-keep", item: item("for Ana") }, opened);
   worker.say({ type: "share-forward", profile: "home" }, opened);
-  await Promise.all(worker.waits.slice(1));
+  await worker.looked();
   expect(opened.heard).toEqual([]);
   worker.say({ type: "share-here", profile: "home" }, home);
   expect(home.heard).toEqual([{ type: "share", item: item("for Ana") }]);
@@ -191,17 +206,91 @@ it("no page to forward to yet: the tab that asked hears it went once one says it
   expect(late.heard).toEqual([{ type: "share-none" }]);
 });
 
+it("the app's page that went without a word (no pagehide, no share-away) lets go of its lock: the share goes to the live app tab", async () => {
+  const gone = page("gone");
+  const live = page("live");
+  const opened = page("opened");
+  const locks = new Map([["lock-gone", "ghostly-peer-home"]]);
+  const worker = await startWorker(undefined, [live, gone, opened], locks);
+  worker.say({ type: "share-here", profile: "home", lock: "lock-live" }, live);
+  worker.say({ type: "share-here", profile: "home", lock: "lock-gone" }, gone);
+  // The phone killed it: still listed a moment, in front last, but the browser let go of its lock, which `live` took.
+  locks.clear();
+  locks.set("lock-live", "ghostly-peer-home");
+  worker.say({ type: "share-keep", item: item("for Ana") }, opened);
+  worker.say({ type: "share-forward", profile: "home" }, opened);
+  await worker.looked();
+  expect(gone.heard).toEqual([]);
+  expect(live.heard).toEqual([{ type: "share", item: item("for Ana") }]);
+  // The waiting tab says "Sent…".
+  expect(opened.heard).toEqual([{ type: "share-forwarded" }]);
+});
+
+it("the only app's page went without a word: the share is kept for the next app page, and the waiting tab hears it went", async () => {
+  const gone = page("gone");
+  const opened = page("opened");
+  const next = page("next");
+  const locks = new Map([["lock-gone", "ghostly-peer"]]);
+  const worker = await startWorker(undefined, [gone, opened, next], locks);
+  worker.say({ type: "share-here", profile: "home", lock: "lock-gone" }, gone);
+  locks.clear();
+  worker.say({ type: "share-keep", item: item("for Ana") }, opened);
+  worker.say({ type: "share-forward", profile: "home" }, opened);
+  await worker.looked();
+  expect(gone.heard).toEqual([]);
+  expect(opened.heard).toEqual([]);
+  locks.set("lock-next", "ghostly-peer");
+  worker.say({ type: "share-here", profile: "home", lock: "lock-next" }, next);
+  expect(next.heard).toEqual([{ type: "share", item: item("for Ana") }]);
+  expect(opened.heard).toEqual([{ type: "share-forwarded" }]);
+});
+
+it("a share into the same window, nothing said by the page it replaces: never forwarded to it while it still holds its lock on the way out", async () => {
+  const leaving = page("leaving");
+  const opened = page("opened");
+  const locks = new Map([["lock-leaving", "ghostly-peer-home"]]);
+  const worker = await startWorker(undefined, [leaving, opened], locks);
+  worker.say({ type: "share-here", profile: "home", lock: "lock-leaving" }, leaving);
+  worker.say({ type: "share-keep", item: item("for Ana") }, opened);
+  worker.say({ type: "share-forward", profile: "home" }, opened);
+  // Its lock goes before the worker looks again: the tab opened for the share takes it, and asks for the share itself.
+  await vi.advanceTimersByTimeAsync(SHARE_LOCK_LOOK_MS / 2);
+  locks.clear();
+  locks.set("lock-opened", "ghostly-peer-home");
+  await worker.looked();
+  expect(leaving.heard).toEqual([]);
+  worker.say({ type: "share-ready" }, opened);
+  expect(opened.heard).toEqual([{ type: "share", item: item("for Ana") }]);
+});
+
+it("an app tab that keeps its lock gets the share forwarded", async () => {
+  const home = page("home");
+  const opened = page("opened");
+  const worker = await startWorker(undefined, [home, opened], new Map([["lock-home", "ghostly-peer-home"], ["lock-other", "ghostly-peer-work"]]));
+  // Web Locks names it otherwise than the worker does (Chromium): as the page said.
+  worker.say({ type: "share-here", profile: "home", lock: "lock-home" }, home);
+  worker.say({ type: "share-keep", item: item("for Ana") }, opened);
+  worker.say({ type: "share-forward", profile: "home" }, opened);
+  await vi.advanceTimersByTimeAsync(0);
+  // Not before it held the lock on a second look.
+  expect(home.heard).toEqual([]);
+  await worker.looked();
+  expect(home.heard).toEqual([{ type: "share", item: item("for Ana") }]);
+  expect(opened.heard).toEqual([{ type: "share-forwarded" }]);
+});
+
 it("a share forwarded never goes to the app's page on its way out (a share into the same window replaced it)", async () => {
   const leaving = page("leaving");
   const opened = page("opened");
   const next = page("next");
-  const worker = await startWorker(undefined, [leaving, opened, next]);
-  worker.say({ type: "share-here", profile: "home" }, leaving);
+  // It said it goes: the worker need not wait for the lock it still holds.
+  const worker = await startWorker(undefined, [leaving, opened, next], new Map([["lock-leaving", "ghostly-peer-home"]]));
+  worker.say({ type: "share-here", profile: "home", lock: "lock-leaving" }, leaving);
   worker.say({ type: "share-away" }, leaving);
   worker.say({ type: "share-keep", item: item("for Ana") }, opened);
   // The tab opened for it goes before its wait is over: it forwards at once.
   worker.say({ type: "share-forward", profile: "home" }, opened);
-  await Promise.all(worker.waits.slice(1));
+  await worker.looked();
   expect(leaving.heard).toEqual([]);
   // Held for the next page of the profile instead.
   worker.say({ type: "share-here", profile: "home" }, next);

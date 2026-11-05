@@ -8,8 +8,11 @@ export type ToWorker =
   | { type: "share-ready" }
   /** This page opened for a share but another tab of `profile` holds the peer: give the share to that one. */
   | { type: "share-forward"; profile: string }
-  /** This page holds `profile`'s peer and takes shares: said when it starts and whenever it comes to the front. */
-  | { type: "share-here"; profile: string }
+  /**
+   * This page holds `profile`'s peer and takes shares: said when it starts and whenever it comes to the front. `lock`:
+   * the holder of that peer lock as Web Locks names it, which a forward checks is still held.
+   */
+  | { type: "share-here"; profile: string; lock?: string }
   /** This page that took shares goes (a share into the same window replaces it): none is forwarded to it on its way out. */
   | { type: "share-away" }
   /** This page restarts (a profile switch) with a share still in its picker: hold it again for the page that loads next. */
@@ -40,6 +43,12 @@ export const OPEN_ASK_MS = 500;
 
 /** How long a shared item waits for the app to ask for it. Past that it is dropped, never stored. */
 export const SHARE_HOLD_MS = 2 * 60_000;
+
+/**
+ * A share is forwarded only to the app's page that holds its profile's peer lock on two looks this far apart: a page
+ * on its way out (a share into its own window replaced it) lets go of the lock by then, a live one still holds it.
+ */
+export const SHARE_LOCK_LOOK_MS = 1000;
 
 /**
  * Most shares held at once, the worker's and a page's picker's each: one past that is dropped, never one that waits,
