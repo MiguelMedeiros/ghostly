@@ -22,6 +22,8 @@
     "unreadCount": "{{count}} unread in {{name}}",
     "unreadOne": "1 unread in {{name}}"
   },
+  "foundCount": "{{count}} chats found",
+  "foundOne": "1 chat found",
   "group": {
     "adminAnswered": "The admin's app answered…",
     "answerFailed": "That did not go through. Try again.",
@@ -76,6 +78,7 @@
     "unread_one": "{{count}} unread message",
     "unread_other": "{{count}} unread messages"
   },
+  "searchLabel": "Search chats",
   "searchPlaceholder": "Search chats...",
   "settings": "Settings",
   "sharedIdentity": "Shared an identity",

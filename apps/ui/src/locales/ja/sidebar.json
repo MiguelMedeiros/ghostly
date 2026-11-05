@@ -22,6 +22,8 @@
     "unreadCount": "{{name}} に未読 {{count}} 件",
     "unreadOne": "{{name}} に未読 1 件"
   },
+  "foundCount": "{{count}}件のチャットが見つかりました",
+  "foundOne": "1件のチャットが見つかりました",
   "group": {
     "adminAnswered": "管理者のアプリが応答しました…",
     "answerFailed": "うまくいきませんでした。もう一度お試しください。",
@@ -76,6 +78,7 @@
     "unread_one": "未読メッセージ {{count}} 件",
     "unread_other": "未読メッセージ {{count}} 件"
   },
+  "searchLabel": "チャットを検索",
   "searchPlaceholder": "チャットを検索...",
   "settings": "設定",
   "sharedIdentity": "IDを共有しました",

@@ -22,6 +22,8 @@
     "unreadCount": "{{name}} 中有 {{count}} 条未读",
     "unreadOne": "{{name}} 中有 1 条未读"
   },
+  "foundCount": "找到 {{count}} 个聊天",
+  "foundOne": "找到 1 个聊天",
   "group": {
     "adminAnswered": "管理员的应用已回应…",
     "answerFailed": "没有成功。请重试。",
@@ -76,6 +78,7 @@
     "unread_one": "{{count}} 条未读消息",
     "unread_other": "{{count}} 条未读消息"
   },
+  "searchLabel": "搜索聊天",
   "searchPlaceholder": "搜索聊天...",
   "settings": "设置",
   "sharedIdentity": "分享了一个身份",
