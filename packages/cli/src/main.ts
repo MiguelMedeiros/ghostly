@@ -4,6 +4,7 @@ import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "
 import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, type OptionSpec, type Parsed } from "./args";
 import { connectDaemon, DaemonClient, isNotTheDaemon } from "./client";
+import { childEnv, dropSecretEnv } from "./childEnv";
 import { COMMANDS, idSlot, noMoreThan, positionals, takesText, TEXT_COMMANDS } from "./commands";
 import { here, inRange, INPUT_BYTES, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS } from "./engineMethods";
@@ -782,14 +783,16 @@ async function runDaemon(g: Globals, seconds: number): Promise<void> {
   requireProfile(g);
   const detached = process.env[DETACHED_CHILD] === "1";
   delete process.env[DETACHED_CHILD]; // not handed to the hooks it runs
+  dropSecretEnv(); // a backup's passphrase comes as a call parameter: nothing the daemon runs gets it
   const { keepServing, openHost, serve } = await engineHost();
   const until = performance.now() + seconds * 1000;
   let host: Host;
   for (;;) {
-    if (await connectDaemon(g.paths)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
+    if (await connectDaemon(g.paths)) throw childAnswer(detached, new CliError("busy", `A daemon already runs profile ${g.profile}`));
     try { host = await openHost(g.paths, "daemon", VERSION); break; }
     catch (error) {
-      if (detached || !(error instanceof CliError) || error.code !== "busy" || performance.now() >= until) throw error;
+      if (detached) throw childAnswer(detached, error);
+      if (!(error instanceof CliError) || error.code !== "busy" || performance.now() >= until) throw error;
       await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(100, until - performance.now()))));
     }
   }
@@ -801,6 +804,16 @@ async function runDaemon(g: Globals, seconds: number): Promise<void> {
   onStopSignals(stop);
   host.ctx.hub.emit("daemon.started", `daemon.started:${process.pid}:${Date.now()}`, { pid: process.pid, version: VERSION });
   print({ daemon: "ready", profile: g.profile, pid: process.pid, socket: g.paths.socket, lastSeq: host.ctx.hub.lastSeq });
+}
+
+/**
+ * A detached child's busy answer carries its own pid (`child`): its parent reads it in `daemon.log`, where every
+ * daemon of the profile writes, and another detach's child that lost the profile writes busy too.
+ */
+function childAnswer(detached: boolean, error: unknown): unknown {
+  if (!detached) return error;
+  const failure = asCliError(error);
+  return failure.code === "busy" ? new CliError("busy", failure.message, { ...failure.details, child: process.pid }) : error;
 }
 
 async function daemonCommand(argv: string[]): Promise<void> {
@@ -983,7 +996,7 @@ async function startDetached(g: Globals, seconds: number) {
 /** `startDetached`'s child, or null when another process took the profile ahead of it and there is time to try again. */
 async function spawnDaemon(g: Globals, until: number) {
   const log = openSync(g.paths.log, "a", 0o600), logFrom = fstatSync(log).size;
-  const child = spawn(process.execPath, [...process.execArgv, process.argv[1], "daemon", "--home", g.home, "--profile", g.profile], { detached: true, stdio: ["ignore", log, log], env: { ...process.env, [DETACHED_CHILD]: "1" } });
+  const child = spawn(process.execPath, [...process.execArgv, process.argv[1], "daemon", "--home", g.home, "--profile", g.profile], { detached: true, stdio: ["ignore", log, log], env: { ...childEnv(process.env), [DETACHED_CHILD]: "1" } });
   closeSync(log); // the child has its own
   child.unref();
   const spawned = { error: null as Error | null };
@@ -1003,8 +1016,10 @@ async function spawnDaemon(g: Globals, until: number) {
   }
   if (!client) {
     // Another process took the profile between the look and the child's start: it holds it still, or the child's
-    // answer in the log says so (a one-shot that already ended). Tried again while there is time.
-    const lost = !spawned.error && (![null, child.pid].includes(lockOwner(g.paths)) || lostTheProfile(g.paths.log, logFrom));
+    // answer in the log says so (a one-shot that already ended). Tried again while there is time. Only a child that
+    // ended busy lost it: one that exited 0 or by a signal had it and was stopped (`daemon stop`), and stays stopped.
+    const lost = !spawned.error && child.exitCode === EXIT.busy && child.pid !== undefined
+      && (![null, child.pid].includes(lockOwner(g.paths)) || lostTheProfile(g.paths.log, logFrom, child.pid));
     if (lost && performance.now() < until) return null;
     heldBy(g, child.pid);
     // Alive still: it is starting (a large profile takes seconds), not failed, and the profile is its own now.
@@ -1017,15 +1032,21 @@ async function spawnDaemon(g: Globals, until: number) {
   return { daemon: "started", profile: g.profile, pid: child.pid, socket: g.paths.socket, log: g.paths.log };
 }
 
-/** Whether a daemon's answer written to the log from byte `from` on is `busy`: it found the profile taken. */
-function lostTheProfile(log: string, from: number): boolean {
+/**
+ * Whether the answer the detached child `pid` wrote to the log from byte `from` on is `busy`: it found the profile
+ * taken. Another child's busy line (a detach started at the same time) is not its own.
+ */
+function lostTheProfile(log: string, from: number, pid: number): boolean {
   let fd: number;
   try { fd = openSync(log, "r"); } catch { return false; }
   try {
     const buffer = Buffer.alloc(64 * 1024);
     const text = buffer.subarray(0, readSync(fd, buffer, 0, buffer.length, from)).toString("utf8");
     return text.split("\n").some((line) => {
-      try { return (JSON.parse(line) as { error?: { code?: string } }).error?.code === "busy"; } catch { return false; }
+      try {
+        const { error } = JSON.parse(line) as { error?: { code?: string; details?: { child?: number } } };
+        return error?.code === "busy" && error.details?.child === pid;
+      } catch { return false; }
     });
   } finally { closeSync(fd); }
 }

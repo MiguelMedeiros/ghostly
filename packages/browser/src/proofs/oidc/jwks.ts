@@ -25,7 +25,8 @@ const DEFAULT_TTL_MS = 60 * 60_000;
 /** A missing `kid` refetches at most this often per URL. */
 export const REFETCH_INTERVAL_MS = 60_000;
 
-interface Entry { keys: Jwk[]; expires: number; fetched: number }
+/** `tried`: the last early refetch for an unknown `kid`, answered or not, so a failing endpoint is not asked on every call. */
+interface Entry { keys: Jwk[]; expires: number; fetched: number; tried?: number }
 
 function allowedUrl(url: string): boolean {
   try {
@@ -76,7 +77,9 @@ export class JwksCache {
     let entry = this.entries.get(url);
     if (!entry || entry.expires <= this.now()) entry = await this.load(url, fetcher);
     let found = entry.keys.find(k => k.kid === kid);
-    if (!found && this.now() - entry.fetched >= REFETCH_INTERVAL_MS) {
+    if (!found && this.now() - Math.max(entry.fetched, entry.tried ?? 0) >= REFETCH_INTERVAL_MS) {
+      // Counted before it is asked: a refetch that fails (an error status, the network down) still waits out the minute.
+      entry.tried = this.now();
       entry = await this.load(url, fetcher);
       found = entry.keys.find(k => k.kid === kid);
     }

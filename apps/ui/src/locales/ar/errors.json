@@ -83,6 +83,8 @@
     "fedimintNotInvite": "هذا ليس رمز دعوة Fedimint: فهو يبدأ بـ fed1",
     "fedimintRealOnTestnet": "يحتفظ هذا الاتحاد ببيتكوين حقيقي",
     "fedimintRealOnTestnetNext": "أضفه إلى محفظة Fedimint على Mainnet.",
+    "fedimintRedeemUnheard": "لم يرد الاتحاد بشأن هذه الأوراق",
+    "fedimintRedeemUnheardNext": "إذا لم تظهر في رصيدك قريبًا، فالصقها مرة أخرى.",
     "fedimintTestOnMainnet": "هذا الاتحاد على {{chain}}، وهي شبكة تجريبية",
     "fedimintTestOnMainnetNext": "أضفه إلى محفظة Fedimint على Testnet.",
     "feeAboveLimit": "الرسوم تتجاوز الحد الذي وضعته",
@@ -605,6 +607,16 @@
     "notAddress": "ليس عنوان مرحّل: {{address}}",
     "useHttps": "استخدم https:// في عنوان المرحّل: {{address}}",
     "useWss": "استخدم wss:// في عنوان المرحّل"
+  },
+  "services": {
+    "addressNext": "استخدم عنوانًا على هذا الكمبيوتر، مثل localhost:3400.",
+    "badAddress": "تعذّرت قراءة هذا العنوان",
+    "name": "أعطِ الخدمة اسمًا",
+    "noCredentials": "لا يمكن أن يتضمن العنوان اسم مستخدم أو كلمة مرور",
+    "noQuery": "لا يمكن أن يحتوي العنوان على جزء فيه ? أو #",
+    "portZero": "لا يستمع أي تطبيق ويب على المنفذ 0",
+    "thisComputer": "يمكن مشاركة الخدمات الموجودة على هذا الكمبيوتر فقط",
+    "webOnly": "يمكن مشاركة عناوين الويب فقط (http أو https)"
   },
   "startAgain": "ابدأ من جديد",
   "transport": {

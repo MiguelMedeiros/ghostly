@@ -193,7 +193,7 @@ export interface EngineApi {
   appSend(params: { linkId: string; ref: string; data: unknown; digest?: string }): { error: import("@ghostly/core").AppSendError | null };
   /**
    * The read lane (`app-ranges/1`, WISP 1200 § A read lane to the contact): lets the contact's app read `file` (this
-   * side's linked file id) while both have the app open on this session. The serve id, or why not (`not-open`,
+   * side's linked file id) while both have the app open, across a reconnect. The serve id, or why not (`not-open`,
    * `offline`, `peer-closed`). Each range the contact asks comes as an `app-range` event, answered by `appRangeAnswer`.
    */
   appServe(params: { linkId: string; ref: string; file: string; digest?: string }): { serve: string } | { error: "not-open" | "offline" | "peer-closed" };
@@ -697,3 +697,11 @@ export type EngineEvent =
    * every engine call fails.
    */
   | { kind: "device-gate"; gate: import("../devices/gate").DeviceGateView };
+
+/**
+ * A state as a client across a copying boundary gets it (`copyingSink`, the extension's port): `payments` and `wallet`
+ * are left out when they are the ones that client was sent last, and the page keeps those.
+ */
+export type PostedState = Omit<EngineState, "payments" | "wallet"> & Partial<Pick<EngineState, "payments" | "wallet">>;
+/** What a page hears from the peer: an event, a state that may leave out what it already has, or an answer. */
+export type PostedEvent = Exclude<EngineEvent, { kind: "state" }> | { kind: "state"; state: PostedState } | RpcResponse;

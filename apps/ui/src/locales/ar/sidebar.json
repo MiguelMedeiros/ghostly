@@ -22,6 +22,11 @@
     "unreadCount": "{{count}} غير مقروءة في {{name}}",
     "unreadOne": "1 غير مقروءة في {{name}}"
   },
+  "foundCount": "وُجدت {{count}} محادثات",
+  "foundCount_many": "وُجدت {{count}} محادثة",
+  "foundCount_other": "وُجدت {{count}} محادثة",
+  "foundCount_two": "وُجدت محادثتان",
+  "foundOne": "وُجدت محادثة واحدة",
   "group": {
     "adminAnswered": "أجاب تطبيق المشرف…",
     "answerFailed": "لم ينجح ذلك. حاول مرة أخرى.",
@@ -79,6 +84,7 @@
     "unread_two": "رسالتان غير مقروءتين",
     "unread_zero": "لا رسائل غير مقروءة"
   },
+  "searchLabel": "البحث في المحادثات",
   "searchPlaceholder": "بحث في المحادثات...",
   "settings": "الإعدادات",
   "sharedIdentity": "شارك هوية",

@@ -366,7 +366,7 @@ async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string,
   await chrome.tabs.update(tab.id, { url });
 }
 
-function errorPage(page: ViewerPage, text: string): string {
+function errorPage(page: Pick<ViewerPage, "lang" | "dir">, text: string): string {
   const escape = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
   return `<!doctype html><html lang="${escape(page.lang)}" dir="${page.dir}"><meta charset="utf-8"><title>Ghostly</title>
 <body style="font:16px system-ui;background:#0b0b12;color:#d8d8e8;display:grid;place-items:center;height:100vh;margin:0">
@@ -430,17 +430,19 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
 
   const gone = UNREACHABLE_CODES.has(reply.code);
   // As on the Desktop: the person reads a sentence in their language, the engine's English goes to the console.
-  if (!gone) console.warn("Service request failed:", reply.code, reply.message);
+  if (!gone && !reply.shown) console.warn("Service request failed:", reply.code, reply.message);
   const { page } = binding;
+  // The contact's machine answered in place of their app: the peer said why, from this side (viewerWords.ts).
+  const html = reply.shown ? errorPage(reply.shown, reply.shown.text) : errorPage(page, gone ? page.unreachable : page.failed);
   await devtools(tabId, "Fetch.fulfillRequest", {
     requestId: paused.requestId,
-    responseCode: gone ? 503 : 502,
+    responseCode: reply.status ?? (gone ? 503 : 502),
     responseHeaders: [
       { name: "content-type", value: "text/html; charset=utf-8" },
       { name: "cache-control", value: "no-store" },
       { name: "x-ghostly-error", value: reply.code },
     ],
-    body: toBase64(utf8Encode(errorPage(page, gone ? page.unreachable : page.failed))),
+    body: toBase64(utf8Encode(html)),
   });
 }
 

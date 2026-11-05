@@ -408,8 +408,11 @@ export interface CommunityState {
   /** My next sequence number under the commit `seqH` (full hash). */
   seq: number;
   seqH: string;
-  /** Sender → `e:h16` → highest seen and the window below it. */
-  seen: Record<string, Record<string, { high: number; window: number[] }>>;
+  /**
+   * Sender → `e:h16` → highest seen and the window below it. `gap`: the lowest number missing below it, how many syncs
+   * asked for it and when the last did (`haveOf`); `floor`: what is missing at or below it is given up.
+   */
+  seen: Record<string, Record<string, { high: number; window: number[]; gap?: [number, number, number]; floor?: number }>>;
   nicks: Record<string, string>;
   /** Recent frames from everyone (mine included), oldest first. */
   store: CommunityMessageFrame[];
@@ -429,6 +432,12 @@ export interface CommunityState {
    * Absent in older states.
    */
   alone?: string[];
+  /**
+   * My texts saved here (counter, frame in `store`) whose message row may not be stored or whose frame may not have gone
+   * yet, as `e:h16:n`, oldest first: an app killed in between stores and says them when it opens again (`resume`), so the
+   * number is never given to another text. Absent in older states.
+   */
+  unsaid?: string[];
   /** Leave requests waiting for a member to commit them. */
   pendingLeaves: { s: string; ls: string; ls3?: string }[];
   /** Leave commit (full hash) → its mark, as its committer signed it (`group-left`), oldest first. Absent in older states. */
@@ -593,6 +602,9 @@ function readOriginal(o: unknown, frame: { e: number; h: string }): { e: number;
   if (e === frame.e && h === frame.h) return null;
   return { e: e as number, h, n: n as number };
 }
+/** Syncs that ask for a sender's missing frame, at least `GAP_ASK_MS` apart, before it is given up (`haveOf`). */
+const GAP_ASKS = 3;
+const GAP_ASK_MS = 5_000;
 /** Whether a frame, by its identity, is one this state took already (or is too old to be taken again). */
 function seenIn(seen: CommunityState["seen"], f: { s: string; e: number; h: string; n: number }): boolean {
   const entry = seen[f.s]?.[seenKey(f.e, f.h)];
@@ -662,6 +674,14 @@ export class CommunitySession {
   private asked = new Map<string, number>();
   /** Per member: until when what comes over its edge may be its answer to my sync (`ANSWER_WINDOW_MS`). In memory only. */
   private readonly answering = new Map<string, number>();
+  /**
+   * Per member asked: what my sync said I have (`have`), the highest number its answer handed per author and commit
+   * (`top`), and whether anything of the answer came (`heard`). Once the answer is over (`settleGaps`), what it did
+   * not fill below those is nobody's to hand (a hint, never kept; a frame out of every store). In memory only.
+   */
+  private readonly answerOf = new Map<string, { have: Record<string, Record<string, number>>; top: Record<string, Record<string, number>>; heard: boolean }>();
+  /** Author → `e:h16` → the number up to which a gap is gone (`settleGaps`), not on its way: `missing` leaves it out. In memory only. */
+  private readonly gapsGone: Record<string, Record<string, number>> = {};
   /** The message frames given to `handle` that came live here (`CommunityIncomingMessage.live`): `passOn` marks them. */
   private readonly cameLive = new WeakSet<object>();
   /** Syncs answered per member, a few a minute (`COMMUNITY_LIMITS.syncAnswers`). In memory only. */
@@ -684,6 +704,10 @@ export class CommunitySession {
   private readonly onRows = new Map<string, string>();
   /** The oldest epoch whose seen marks are kept, as of the last `pruneSeen`. In memory only. */
   private seenFrom = -1;
+  /** The secret of the epoch I left in (`leave`), for `followAfterLeave`. In memory only. */
+  private leftSecret: { h: string; s: string } | undefined;
+  /** After my leave, still taking commits and secrets (`followAfterLeave`). In memory only. */
+  private following = false;
 
   /** `rows`: the frames the app holds with the messages it stored (`CommunityIncomingMessage.frame`). They join the store. */
   constructor(state: CommunityState, private readonly hooks: CommunitySessionHooks, rows: readonly { id: string; frame: CommunityMessageFrame }[] = []) {
@@ -982,11 +1006,44 @@ export class CommunitySession {
     }
     return chain.slice(start, out + 1).map(commit => ({ t: "group-commit" as const, v: 2 as const, g: this.id, commit }));
   }
+  /**
+   * How many of a member's messages under the current commit are known to be missing: on their way, not gone (a
+   * finished answer did not fill it, `settleGaps`; or syncs gave it up, `haveOf`). A hint spends its author's number
+   * and is never kept (WISP 903), so a member who was away counted it missing until the commit changed.
+   */
   missing(sender: string): number {
-    const entry = this.state.seen[sender]?.[seenKey(this.epoch, shortHash(this.topHash))];
+    this.settleGaps();
+    const key = seenKey(this.epoch, shortHash(this.topHash));
+    const entry = this.state.seen[sender]?.[key];
     if (!entry) return 0;
-    const lowest = Math.max(0, entry.high - COMMUNITY_LIMITS.replay + 1);
+    const lowest = Math.max(0, entry.high - COMMUNITY_LIMITS.replay + 1, (entry.floor ?? -1) + 1, (this.gapsGone[sender]?.[key] ?? -1) + 1);
     return Math.max(0, entry.high - lowest + 1 - (1 + entry.window.filter(n => n >= lowest).length));
+  }
+
+  /**
+   * Gaps that the answers now over did not fill count as gone: an answer hands every frame its member holds above what
+   * my sync said I have, so a number below my mark then, or below the highest it handed, that is still not here is
+   * held by nobody. Returns whether some became gone (the members view changes). A sync nobody answered settles nothing.
+   */
+  settleGaps(): boolean {
+    const now = this.hooks.clock?.() ?? Date.now();
+    let changed = false;
+    for (const [from, answer] of this.answerOf) {
+      if ((this.answering.get(from) ?? 0) > now) continue;
+      this.answerOf.delete(from);
+      if (!answer.heard) continue;
+      for (const marks of [answer.have, answer.top]) for (const [sender, byKey] of Object.entries(marks)) for (const [key, upTo] of Object.entries(byKey)) {
+        if (!this.state.seen[sender]?.[key] || upTo <= (this.gapsGone[sender]?.[key] ?? -1)) continue;
+        (this.gapsGone[sender] ??= {})[key] = upTo;
+        changed = true;
+      }
+    }
+    // Only for authors and commits still seen: the rest is pruned with them.
+    for (const [sender, byKey] of Object.entries(this.gapsGone)) {
+      for (const key of Object.keys(byKey)) if (!this.state.seen[sender]?.[key]) delete byKey[key];
+      if (!Object.keys(byKey).length) delete this.gapsGone[sender];
+    }
+    return changed;
   }
 
   // -- the tree of commits -------------------------------------------------------------------------
@@ -1560,9 +1617,10 @@ export class CommunitySession {
 
   /**
    * Leaves: a signed request any other member commits, and my secrets go now. The admin must
-   * hand over the role first (the engine does it for a leaving admin).
+   * hand over the role first (the engine does it for a leaving admin). `follow`: commits and secrets are still taken
+   * after (`followAfterLeave`).
    */
-  leave(): Promise<CommunityLeaveFrame | null> {
+  leave(follow = false): Promise<CommunityLeaveFrame | null> {
     return this.serialize(async () => {
       if (this.state.status !== "active") return null;
       if (this.isAdmin && this.others.length) throw new Error("Make someone else the admin before leaving");
@@ -1573,10 +1631,44 @@ export class CommunitySession {
         break;
       }
       this.hooks.broadcast(frame);
+      const tip = this.state.secrets[this.topHash];
+      this.leftSecret = tip ? { h: this.topHash, s: tip } : undefined;
       this.out("left", "You left this group");
+      this.following = follow;
       await this.persist();
       this.hooks.changed();
       return frame;
+    });
+  }
+
+  /**
+   * After I left with `follow` (WISP 903 § Leaving, "A role that reaches a leave"): commits and secrets are taken still,
+   * as a member whose admission lost takes them, so a hand-over that crossed my leave reaches me (`handOnAfterLeave`).
+   * Once the app has forgotten the group (nothing is saved any more), the secret of the epoch I left in comes back, in
+   * memory only, for the epochs derived from it. Nothing else is heard.
+   */
+  followAfterLeave(): Promise<void> {
+    return this.serialize(async () => {
+      if (!this.following || this.state.status !== "left") return;
+      const kept = this.leftSecret;
+      if (!kept) return;
+      this.state.secrets[kept.h] = kept.s;
+      for (const [child, c] of this.known) if (c.p === kept.h) this.takeDerived(child);
+    });
+  }
+
+  /**
+   * After I left, a chain that names me the admin (a hand-over that crossed my leave): the role goes on to
+   * `pick(<the signer of my tip>)` with a `role` commit of mine, as an admin's leave hands it. True when it went; false
+   * while the secret of my tip has not come (it is tried again).
+   */
+  handOnAfterLeave(pick: (by: string) => string | undefined, now = Date.now()): Promise<boolean> {
+    return this.serialize(async () => {
+      if (!this.following || this.state.status !== "left" || this.admin !== this.myKey || !this.state.secrets[this.topHash]) return false;
+      const next = pick(this.top.by);
+      if (!next || next === this.myKey || !rosterHas(this.roster, next)) return false;
+      await this.commit("role", { s: next }, now);
+      return true;
     });
   }
 
@@ -1588,7 +1680,13 @@ export class CommunitySession {
       // Not confirmed as the active device: the requests wait, untouched, for the next try (or another hub).
       if (this.state.pendingLeaves.length && this.hooks.adminTurn && !(await this.hooks.adminTurn())) return 0;
       let done = 0;
+      // A hand-over that crossed the new admin's leave (its request is here, and never committed): the member who handed
+      // it the role, leaving too, stays in until the role goes on. Its app follows the chain after it left, and may be the
+      // only edge the new admin's app has to hand the role on over (WISP 903 § Leaving, "A role that reaches a leave").
+      // The admin's request is kept, not committed: once its app hands the role on, it is a member's.
+      const handedBy = this.state.pendingLeaves.some(r => r.s === this.admin) ? [...this.state.chain].reverse().find(c => c.k === "role")?.by : undefined;
       for (const request of [...this.state.pendingLeaves]) {
+        if ((request.s === handedBy || request.s === this.admin) && request.s !== this.myKey && rosterHas(this.roster, request.s)) continue;
         if (!rosterHas(this.roster, request.s) || request.s === this.myKey || request.s === this.admin) { this.state.pendingLeaves = this.state.pendingLeaves.filter(r => r !== request); continue; }
         try { const { hash } = await this.commit("leave", { s: request.s, ls: request.ls, ...(request.ls3 ? { ls3: request.ls3 } : {}) }, now); this.markLeft(hash, request.s); done++; } catch { /* not allowed right now */ }
         this.state.pendingLeaves = this.state.pendingLeaves.filter(r => r !== request);
@@ -1613,6 +1711,7 @@ export class CommunitySession {
     this.state.statusReason = reason;
     this.state.secrets = {};
     this.state.store = [];
+    delete this.state.unsaid;
     for (const id of this.onRows.values()) this.hooks.forgetFrame?.(id);
     this.onRows.clear();
     delete this.state.lasting;
@@ -1641,11 +1740,36 @@ export class CommunitySession {
       const fileBytes = described ? utf8Encode(JSON.stringify(described)).length + 8 : 0;
       const hops = readForwarded(forwarded);
       if (utf8Encode(trimmed).length + mentionsBytes(named) + replyBytes + fileBytes + (hops ? 16 : 0) + (card ? statusCardBytes(card) + 8 : 0) > COMMUNITY_LIMITS.textBytes) return { error: "Message exceeds 16 KiB" };
+      // A text an app killed mid-send left saved but not stored or said goes first, in its place.
+      await this.sayUnsaid();
       const sent = await this.sendPayload(() => ({ text: trimmed, ...(named.length ? { m: named } : {}), ...(answers ? { r: answers } : {}), ...(hops ? { fw: hops } : {}), ...(card ? { sc: card } : {}), ...(described ? { fl: described } : {}) }), nick, now);
       if ("error" in sent) return sent;
-      const onRow = await this.hooks.message({ id: sent.id, sender: this.myKey, epoch: sent.frame.e, seq: sent.frame.n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}), ...(answers ? { reply: answers } : {}), ...(hops ? { forwarded: hops } : {}), ...(card ? { card } : {}), ...(described ? { file: described } : {}), frame: sent.frame });
+      // The counter and the frame are saved before the row is stored: an app killed after the row but before the save
+      // gave the next text this same id, and the members held one text or the other under it, or dropped the next as
+      // seen. Until the row is stored and the frame said, the number is `unsaid`, and an app opened again does both (`resume`).
+      const key = frameKey(sent.frame);
+      this.state.unsaid = [...(this.state.unsaid ?? []), key];
+      this.markUnheard(sent.frame);
+      const unsend = async () => {
+        this.state.store = this.state.store.filter(f => f !== sent.frame);
+        this.state.unsaid = (this.state.unsaid ?? []).filter(k => k !== key);
+        this.state.unheard = (this.state.unheard ?? []).filter(k => k !== key);
+        await this.persist().catch(() => {});
+      };
+      try { await this.persist(); } catch (error) { await unsend(); throw error; }
+      let onRow: boolean | void;
+      try {
+        onRow = await this.hooks.message({ id: sent.id, sender: this.myKey, epoch: sent.frame.e, seq: sent.frame.n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}), ...(answers ? { reply: answers } : {}), ...(hops ? { forwarded: hops } : {}), ...(card ? { card } : {}), ...(described ? { file: described } : {}), frame: sent.frame });
+      } catch (error) {
+        // Never said, so not sent. A row the app stored before it failed brings its frame, and a counter above it, back
+        // when the app opens again (`takeRows`).
+        await unsend();
+        throw error;
+      }
       if (onRow === true) this.onRows.set(storeKey(sent.frame), sent.id);
-      await this.say(sent.frame);
+      this.state.unsaid = (this.state.unsaid ?? []).filter(k => k !== key);
+      // Said once more after a kill before this save: members take a frame they hold as already seen.
+      await this.say(sent.frame, true);
       return { id: sent.id };
     });
   }
@@ -1758,20 +1882,68 @@ export class CommunitySession {
   /**
    * Saves, then says my frame on every edge. One no edge took (none is up: I just joined, or my app just opened) is
    * remembered until a member it was written for is handed it: I may be behind on the chain without knowing, and the
-   * first member I reach may be one let in since, who cannot read it but can carry it (`receiveSync`).
+   * first member I reach may be one let in since, who cannot read it but can carry it (`receiveSync`). `saved`: the
+   * caller marked it unheard and saved it (`sendText`).
    */
-  private async say(frame: CommunityMessageFrame): Promise<void> {
+  private async say(frame: CommunityMessageFrame, saved = false): Promise<void> {
     const inStore = new Set(this.state.store.filter(f => f.s === this.myKey).map(frameKey));
-    this.state.unheard = [...(this.state.unheard ?? []).filter(key => inStore.has(key)), frameKey(frame)].slice(-UNHEARD_KEPT);
-    await this.persist();
+    if (!saved) {
+      this.markUnheard(frame);
+      await this.persist();
+    }
     if (this.hooks.broadcast(frame) === 0) {
       // Said alone: I may be behind on the chain without knowing (`resealBehind`).
       this.state.alone = rememberAlone(this.state.alone, frameKey(frame), key => inStore.has(key));
       this.persistSoon();
       return;
     }
-    this.state.unheard = this.state.unheard.filter(key => key !== frameKey(frame));
+    this.state.unheard = (this.state.unheard ?? []).filter(key => key !== frameKey(frame));
     this.persistSoon();
+  }
+  /** My frame in `unheard`, before it is said: the frames of mine the store no longer holds leave it. */
+  private markUnheard(frame: CommunityMessageFrame): void {
+    const inStore = new Set(this.state.store.filter(f => f.s === this.myKey).map(frameKey));
+    this.state.unheard = [...(this.state.unheard ?? []).filter(key => inStore.has(key) && key !== frameKey(frame)), frameKey(frame)].slice(-UNHEARD_KEPT);
+  }
+
+  /**
+   * Stores and says what an app killed mid-send left `unsaid`: its counter and frame were saved, its row or its sending
+   * may not have happened. A row stored already is not stored twice (the app's store takes one row per id), a frame
+   * that went already is taken by the members as one they hold. The engine calls this on each tick; a send does first.
+   */
+  resume(): Promise<void> {
+    if (!this.state.unsaid?.length) return Promise.resolve();
+    return this.serialize(() => this.sayUnsaid());
+  }
+
+  private async sayUnsaid(): Promise<void> {
+    for (const key of [...this.state.unsaid ?? []]) {
+      const frame = this.isMember ? this.state.store.find(f => f.s === this.myKey && frameKey(f) === key) : undefined;
+      const row = frame && this.ownRow(frame);
+      // Stored before it leaves the list: a store that fails keeps it there, for the next tick.
+      if (frame && row) {
+        let onRow: boolean | void;
+        try { onRow = await this.hooks.message(row); } catch { return; }
+        if (onRow === true) this.onRows.set(storeKey(frame), row.id);
+      }
+      this.state.unsaid = (this.state.unsaid ?? []).filter(k => k !== key);
+      if (frame && row) await this.say(frame); else await this.persist();
+    }
+  }
+
+  /** The row of one of my own texts, as `sendText` stored it, opened from its frame; none for anything else, or one deleted for everyone. */
+  private ownRow(f: CommunityMessageFrame): CommunityIncomingMessage | undefined {
+    const found = this.commitByShort(f.e, f.h), secret = found && this.state.secrets[found.hash];
+    const plain = secret ? decryptText(epochKeys(fromBase64Url(secret), this.id, f.e).message, messageAad(f), f.nn, f.c) : null;
+    let parsed: unknown = null;
+    try { parsed = plain === null ? null : JSON.parse(plain); } catch { /* not a payload */ }
+    if (!isObject(parsed) || typeof parsed.text !== "string" || parsed.o !== undefined) return undefined;
+    const id = communityMessageId(this.myKey, f.e, f.h, f.n);
+    if (this.hooks.removed?.(id)) return undefined;
+    const text = parsed.text, mentions = validMentions(parsed.m, text, false), reply = parsed.r === undefined ? undefined : readReply(parsed.r, groupReplyAuthor);
+    const forwarded = readForwarded(parsed.fw), card = parsed.sc === undefined ? undefined : readStatusCard(parsed.sc), file = parsed.fl === undefined ? undefined : readGroupFileMeta(parsed.fl) ?? undefined;
+    return { id, sender: this.myKey, epoch: f.e, seq: f.n, timestamp: f.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}),
+      ...(forwarded ? { forwarded } : {}), ...(card ? { card } : {}), ...(file ? { file } : {}), frame: f };
   }
 
   /**
@@ -1823,6 +1995,8 @@ export class CommunitySession {
     for (const { id, frame } of rows) {
       this.onRows.set(storeKey(frame), id);
       if (!inRecord.has(storeKey(frame))) this.state.store.push(frame);
+      // My counter goes above a row of mine an older app stored before it was killed mid-send, its counter unsaved.
+      if (frame.s === this.myKey && frame.h === shortHash(this.state.seqH) && frame.n >= this.state.seq && frame.n < OWN_FRAME_LIMIT) this.state.seq = frame.n + 1;
     }
     this.state.store.sort((a, b) => a.ts - b.ts);
     this.trimStore();
@@ -1948,15 +2122,20 @@ export class CommunitySession {
     if (to) { const now = this.hooks.clock?.() ?? Date.now(); this.asked.set(to, now); this.answering.set(to, now + ANSWER_WINDOW_MS); }
     const have: Record<string, Record<string, number>> = {};
     const recent = new Set(this.state.store.map(f => seenKey(f.e, f.h)));
+    const now = this.hooks.clock?.() ?? Date.now();
     for (const [sender, byKey] of Object.entries(this.state.seen)) for (const [key, entry] of Object.entries(byKey)) {
       if (!recent.has(key)) continue;
-      (have[sender] ??= {})[key] = entry.high;
+      (have[sender] ??= {})[key] = this.haveOf(entry, now);
     }
     // The lasting frames I hold too: once their epoch has no frame left in the store, every answer handed me the pin
     // again, dropped as a duplicate (2026-10-16).
     for (const f of Object.values(this.state.lasting ?? {})) {
       const key = seenKey(f.e, f.h);
-      (have[f.s] ??= {})[key] = Math.max(f.n, have[f.s][key] ?? -1, this.state.seen[f.s]?.[key]?.high ?? -1);
+      (have[f.s] ??= {})[key] ??= Math.max(f.n, this.state.seen[f.s]?.[key]?.high ?? -1);
+    }
+    if (to) {
+      const open = this.answerOf.get(to);
+      this.answerOf.set(to, { have: Object.fromEntries(Object.entries(have).map(([sender, byKey]) => [sender, { ...byKey }])), top: open?.top ?? {}, heard: open?.heard ?? false });
     }
     const secrets = this.state.chain.slice(-COMMUNITY_LIMITS.window - 1).map(c => communityCommitHash(c)).filter(h => this.state.secrets[h]).map(shortHash);
     const loc: string[] = [];
@@ -1977,9 +2156,14 @@ export class CommunitySession {
       if (frame.g !== this.id || frame.v !== 2) return false;
       // A frame of an answer to my sync keeps it open: the answer goes a slice at a time.
       const now = this.hooks.clock?.() ?? Date.now();
-      if ((this.answering.get(from) ?? 0) > now) this.answering.set(from, now + ANSWER_WINDOW_MS);
-      // A member who lost its admission still hears commits: the next one may take it in.
-      if (this.state.status !== "active" && !(this.state.status === "lost" && (frame.t === "group-commit" || frame.t === "group-secret" || frame.t === "group-secrets"))) return false;
+      if ((this.answering.get(from) ?? 0) > now) {
+        this.answering.set(from, now + ANSWER_WINDOW_MS);
+        const answer = this.answerOf.get(from);
+        if (answer) answer.heard = true;
+      }
+      // A member who lost its admission still hears commits: the next one may take it in. One that left, while it
+      // follows its chain (`followAfterLeave`): the next one may hand it the role.
+      if (this.state.status !== "active" && !((this.state.status === "lost" || this.following) && (frame.t === "group-commit" || frame.t === "group-secret" || frame.t === "group-secrets"))) return false;
       switch (frame.t) {
         case "group-msg": return this.receiveMessage(from, raw);
         case "group-commit": return this.receiveCommit(from, frame.commit);
@@ -2056,7 +2240,7 @@ export class CommunitySession {
     if (live) this.cameLive.add(input);
     // One I took already (from a second hub, or in a catch-up answer) is dropped before its signature is checked: it
     // would be dropped below whether the signature holds or not.
-    if (this.isDuplicate(raw)) return false;
+    if (this.isDuplicate(raw)) { this.handedInAnswer(from, raw, now); return false; }
     // Signed by its author before anything else, so a frame no member wrote never takes a place among those waiting.
     if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return false;
     // Someone removed is heard no more, even for an epoch it was in (whose secret it still holds); one who left, for
@@ -2071,6 +2255,7 @@ export class CommunitySession {
     let pace = this.messagePace.get(raw.s);
     if (!pace) this.messagePace.set(raw.s, pace = new MessagePace());
     if (!pace.take(seenKey(raw.e, raw.h), raw.n, raw.c.length, this.hooks.clock?.() ?? Date.now())) return false;
+    this.handedInAnswer(from, raw, now);
     // From before I was let in: nothing for me to read, but its author may have reached nobody else yet (it wrote
     // before it heard of me, with no edge up, and I am its hub). Kept and passed on like any frame, never opened, so
     // the members it was written for get it; the store hands it to those only.
@@ -2166,6 +2351,32 @@ export class CommunitySession {
     this.persistSoon();
   }
   private isDuplicate(f: { s: string; e: number; h: string; n: number }): boolean { return seenIn(this.state.seen, f); }
+  /**
+   * What a sync says I have of a sender under a commit: below the lowest number missing, not the highest seen. A live
+   * frame raises the highest above that sender's frames still coming in a catch-up answer, and when the rest of the
+   * answer never came (my app closed or my edge dropped, or the hub's app closed), every later sync said I had them:
+   * they were lost for good (2026-10-18). A gap asked for by `GAP_ASKS` syncs at least `GAP_ASK_MS` apart that none
+   * filled (the stores rolled past it, a leaver's frames) is given up: each answer hands what is stored above it again.
+   */
+  private haveOf(entry: CommunityState["seen"][string][string], now: number): number {
+    const got = new Set(entry.window);
+    let gap = -1;
+    for (let n = Math.max(0, entry.high - COMMUNITY_LIMITS.replay + 1, (entry.floor ?? -1) + 1); n < entry.high; n++) if (!got.has(n)) { gap = n; break; }
+    if (gap < 0) { if (entry.gap) { delete entry.gap; this.persistSoon(); } return entry.high; }
+    const [asked, times, at] = entry.gap ?? [-1, 0, 0];
+    if (asked === gap && now - at < GAP_ASK_MS) return gap - 1;
+    this.persistSoon();
+    if (asked === gap && times >= GAP_ASKS) { delete entry.gap; entry.floor = entry.high; return entry.high; }
+    entry.gap = [gap, asked === gap ? times + 1 : 1, now];
+    return gap - 1;
+  }
+  /** A frame (known to be its author's) from a member whose answer to my sync is open: the highest it handed (`settleGaps`). */
+  private handedInAnswer(from: string, f: { s: string; e: number; h: string; n: number }, now: number): void {
+    const answer = (this.answering.get(from) ?? 0) > now ? this.answerOf.get(from) : undefined;
+    if (!answer) return;
+    const byKey = (answer.top[f.s] ??= {}), key = seenKey(f.e, f.h);
+    byKey[key] = Math.max(f.n, byKey[key] ?? -1);
+  }
   private markSeen(f: CommunityMessageFrame): void {
     const bySender = (this.state.seen[f.s] ??= {});
     const entry = (bySender[seenKey(f.e, f.h)] ??= { high: -1, window: [] });
@@ -2202,9 +2413,7 @@ export class CommunitySession {
   private question(from: string): CommunitySyncFrame | null {
     const now = this.hooks.clock?.() ?? Date.now();
     if (now - (this.asked.get(from) ?? 0) < 5_000) return null;
-    this.asked.set(from, now);
-    this.answering.set(from, now + ANSWER_WINDOW_MS);
-    return this.syncFrame();
+    return this.syncFrame(from);
   }
 
   private async replayWaiting(): Promise<void> {

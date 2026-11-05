@@ -59,6 +59,7 @@ import { openJoinProfile } from "../lib/devices";
 import { RAIL_WIDTH, RailAction, RailChat, RailGroup, RailToggle } from "./ChatRail";
 import { useRailShortcut } from "../hooks/useRailShortcut";
 import { useOpenRowInView } from "../hooks/useOpenRowInView";
+import { useComposition } from "../hooks/useComposition";
 import { useEngineValue } from "../lib/engineState";
 
 const NO_GROUPS: NonNullable<typeof engine.state>["groups"] = [];
@@ -290,6 +291,8 @@ export function Sidebar() {
     return messagesFound(s.messages, query, t) || foundInEngine.has(s.id);
   });
   const shownGroups = groupsFound(groups, search);
+  const foundCount = filtered.length + shownGroups.length;
+  const composition = useComposition();
   // The person's folders, first in the list and in their order; a search shows what it finds as one list, with no folders.
   const { folders, folderOf, othersFolded, orderOf } = useChatFolders();
   const shownFolders = search ? [] : folders;
@@ -497,12 +500,22 @@ export function Sidebar() {
             <circle cx="11" cy="11" r="8" />
             <path d="m21 21-4.35-4.35" />
           </svg>
+          {/* Named apart from its placeholder, which is gone once typed in. Escape clears it, the focus staying here, as
+              the search inside a chat closes on it; with nothing to clear, Escape goes on to whatever else takes it. */}
           <input
-            type="text"
+            type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-                  placeholder={t("sidebar.searchPlaceholder")}
-            className="flex-1 bg-transparent border-none text-sm text-text-primary placeholder-text-muted outline-none py-1"
+            {...composition.inputProps}
+            onKeyDown={(e) => {
+              if (e.key !== "Escape" || composition.composing(e) || !search) return;
+              e.preventDefault();
+              e.stopPropagation();
+              setSearch("");
+            }}
+            placeholder={t("sidebar.searchPlaceholder")}
+            aria-label={t("sidebar.searchLabel")}
+            className="flex-1 bg-transparent border-none text-sm text-text-primary placeholder-text-muted outline-none py-1 [&::-webkit-search-cancel-button]:hidden"
           />
         </div>
       </div>
@@ -569,13 +582,16 @@ export function Sidebar() {
           </div>
         )}
 
-        {/* Nothing matches the search: neither a chat nor a group. */}
-        {filtered.length === 0 && shownGroups.length === 0 && (sessions.length > 0 || groups.length > 0) && (
-          <div className="flex items-center justify-center py-10 px-8">
-            <p className="text-text-muted text-sm">{t("sidebar.noResults")}</p>
-          </div>
-        )}
         </>}
+        {/* What the search found, read out as it changes: a screen reader hears nothing of the rows coming and going.
+            Nothing matches it, neither a chat nor a group: that shows too. */}
+        <div role="status" aria-live="polite" data-testid="chat-list-search-status">
+          {listReady && search && (foundCount === 0 && (sessions.length > 0 || groups.length > 0) ? (
+            <div className="flex items-center justify-center py-10 px-8">
+              <p className="text-text-muted text-sm">{t("sidebar.noResults")}</p>
+            </div>
+          ) : foundCount > 0 && <span className="sr-only">{t(foundCount === 1 ? "sidebar.foundOne" : "sidebar.foundCount", { count: String(foundCount) })}</span>)}
+        </div>
       </div>
       </>}
 
