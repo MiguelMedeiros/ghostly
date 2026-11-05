@@ -703,6 +703,25 @@ describe("DHT delivery: sending and lifecycle", () => {
     await h.bob.stop();
   });
 
+  it("reads as signaling once this side leaves DHT only while the contact still says DHT only: three reads in all, not one the budget held back", async () => {
+    // mx-47d9d4bb (2026-11-05): this side read the contact's mailbox once as it left DHT only, a moment before the
+    // contact's envelope saying it left too got there, and the relays' minute was spent: the next read waited 41 s.
+    const h = setup({ pollMs: null, state: { ...emptyDhtDeliveryState(), peerMode: "dht" }, bobCredentials: pinned() }); await h.bob.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const options = () => (h.transport.resolve.mock.calls as unknown[][]).slice(before).map(([, o]) => (o as { signal?: boolean } | undefined)?.signal ?? false);
+    let before = h.transport.resolve.mock.calls.length;
+    await h.bob.setMode("stream"); await vi.advanceTimersByTimeAsync(0);
+    expect(options()).toEqual([true]);
+    // Held back (a refused write goes first): it asked the relays nothing, and goes again when the budget frees a request.
+    h.transport.resolve.mockImplementationOnce(async () => { throw new DiscoveryBudgetError(1_000); });
+    for (const [ms, signal] of [[4_010, true], [1_010, true], [4_000, true], [4_000, false]] as const) {
+      before = h.transport.resolve.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(ms);
+      expect(options()).toEqual([signal]);
+    }
+    await h.bob.stop();
+  });
+
   it("keeps reading as signaling while a contact leaving DHT only still says DHT only, and stops once it says it left", async () => {
     // mx-d707d8d5 (2026-09-30): the contact's first fresh link packet made this side read its mailbox as signaling, and
     // it still said DHT only; the envelope saying it left landed 0.4 s later. The relays' minute was spent, so every
