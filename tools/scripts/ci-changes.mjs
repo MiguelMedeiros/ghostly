@@ -111,6 +111,9 @@ export const WEBSITE_INPUTS = [
   // first-pairing.test.mjs checks the site's text against it.
   "packages/core/src/ghostlink.ts",
   "packages/core/src/capsRecord.ts",
+  // pkarr-ttl.test.mjs checks the site's text against it.
+  "packages/core/src/didDht.ts",
+  "packages/core/src/pkarr.ts",
   // The jobs themselves.
   ".github/workflows/ci.yml",
 ];
