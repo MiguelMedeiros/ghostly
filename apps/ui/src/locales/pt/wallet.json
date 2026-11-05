@@ -160,6 +160,7 @@
       "usdtLocal": "EVM local · token de teste",
       "usdtSepolia": "Sepolia · token de teste"
     },
+    "sameBalance": "Mesmo saldo do seu cartão {{name}}",
     "status": {
       "away": "Em outro lugar",
       "checkSettings": "Verifique os ajustes",

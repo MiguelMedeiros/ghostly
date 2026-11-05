@@ -160,6 +160,7 @@
       "usdtLocal": "ローカル EVM · テストトークン",
       "usdtSepolia": "Sepolia · テストトークン"
     },
+    "sameBalance": "{{name}} カードと同じ残高",
     "status": {
       "away": "別の場所",
       "checkSettings": "設定を確認",

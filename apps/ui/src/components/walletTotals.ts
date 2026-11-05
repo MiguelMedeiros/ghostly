@@ -126,9 +126,13 @@ export function walletTotals(state: WalletState, network: WalletNetwork, cards: 
  * never reads as twice what there is. Ids and order stay; only `network`'s cards are looked at.
  */
 export function sharedBalanceCards<C extends InstanceCard>(state: WalletState, network: WalletNetwork, cards: C[], t: Translate): C[] {
-  const shared = new Map((walletTotals(state, network, cards).bitcoin?.rows ?? []).filter((r) => r.state === "shared").map((r) => [r.id, r.sharedWith ?? ""]));
+  const shared = sharedSources(state, network, cards);
   return shared.size ? cards.map((c) => shared.has(c.id) ? { ...c, balance: t("wallet.cards.balance.shared", { name: shared.get(c.id)! }) } : c) : cards;
 }
+
+/** `network`'s cards that spend another card's balance, by id, with that card's name (`Cashu`, `Spark`). */
+export const sharedSources = (state: WalletState, network: WalletNetwork, cards: InstanceCard[]): Map<string, string> =>
+  new Map((walletTotals(state, network, cards).bitcoin?.rows ?? []).filter((r) => r.state === "shared").map((r) => [r.id, r.sharedWith ?? ""]));
 
 const uncounted = (row: TotalRow<unknown>) => row.state === "unknown" || row.state === "away";
 

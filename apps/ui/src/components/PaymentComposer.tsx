@@ -11,6 +11,7 @@ import { PaymentReview } from "./PaymentReview";
 import { WalletMark, type ChatRail } from "./WalletCards";
 import { CardDeck, WalletCardFace } from "./WalletDeck";
 import { ONCHAIN_FEE_CAP, byNetwork, cardNotSetUp, cardWallet, networkState, receivingFirst, spendable, walletCards, type InstanceCard } from "./walletCardData";
+import { sharedBalanceCards } from "./walletTotals";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { ComposerSheet, ComposerSheetHead, ForwardArrow } from "./ComposerSheet";
 import { CardFlip, FlipTurnButton } from "./deck/Flip";
@@ -210,7 +211,13 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   const blocked = card ? unavailable(card) : undefined;
   const turning = !!card && !atRest;
   // A card that cannot be used says so on its face, briefly; its title says why in full.
-  const shown = netPayCards.map((c) => { const why = blockedBy(c); return !why || !c.ready ? c : { ...c, status: t(why.contact ? "payments.composer.cardStatus.notAccepted" : "payments.composer.cardStatus.offHere") }; });
+  /**
+   * The cards' faces: a card that spends another card's balance (Lightning through the Cashu mints) says "Uses your
+   * Cashu balance" where its amount was, as on the wallet page, so the deck never reads as twice the balance. The back
+   * of a turned card keeps its number: it is the only one shown there.
+   */
+  const faces = (cs: InstanceCard[]) => state ? WALLET_NETWORKS.reduce((acc, n) => sharedBalanceCards(state, n, acc, t), cs) : cs;
+  const shown = faces(netPayCards.map((c) => { const why = blockedBy(c); return !why || !c.ready ? c : { ...c, status: t(why.contact ? "payments.composer.cardStatus.notAccepted" : "payments.composer.cardStatus.offHere") }; }));
 
   /** Turn the chosen card over, and back to the cards. */
   const use = (next: string) => {
@@ -424,7 +431,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
           {/* Not keyed by the network: Accept keeps both networks' switches while the tab changes. Each deck is. */}
           <div role="tabpanel" id="payment-tab-panel" aria-labelledby={`payment-tab-${net}`} data-testid="payment-tab-panel" data-network={net}
             className="payment-tab-panel wallet-network-view" data-swap={swap ?? undefined} onAnimationEnd={(e) => { if (e.target === e.currentTarget) setSwap(null); }}>
-          {accepting && onSaveMethods ? <ChatPaymentAccept peer={peer} contact={who} cards={acceptCards} network={net} onSave={onSaveMethods} empty={noWallet} />
+          {accepting && onSaveMethods ? <ChatPaymentAccept peer={peer} contact={who} cards={faces(acceptCards)} network={net} onSave={onSaveMethods} empty={noWallet} />
           : !mine.includes(net) ? noWallet
           : !shown.length && onSaveMethods ? <div className="payment-none" data-testid="payment-none">
             <p className="composer-sheet-hint">{t("payments.none.text")}</p>
@@ -443,7 +450,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
           </>}
           </div>
         </>}
-      </> : card ? <CardFlip className="payment" flipped={flipped} onSettle={setAtRest} tone={`wallet-card-${card.rail}`} front={<WalletCardFace card={card} tagAll />} back={back} /> : back}
+      </> : card ? <CardFlip className="payment" flipped={flipped} onSettle={setAtRest} tone={`wallet-card-${card.rail}`} front={<WalletCardFace card={faces([card])[0]} tagAll />} back={back} /> : back}
     </ComposerSheet>
   );
 }

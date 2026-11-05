@@ -18,7 +18,7 @@ import { RemoveWalletSection } from "../components/wallet/RemoveWallet";
 import { TestCoins } from "../components/wallet/TestCoins";
 import { WalletAway } from "../components/wallet/WalletAway";
 import { WalletTotals } from "../components/wallet/WalletTotals";
-import { sharedBalanceCards } from "../components/walletTotals";
+import { sharedBalanceCards, sharedSources } from "../components/walletTotals";
 import { BackupReminder } from "../components/wallet/BackupReminder";
 import { useBackupDue } from "../hooks/useBackupDue";
 import { useAppNavigation } from "../hooks/useAppNavigation";
@@ -242,7 +242,7 @@ export function Wallet() {
               {panel && awayWallet(state, panel) && <WalletAway wallet={awayWallet(state, panel)!} platform={cardWallet(wallet, parseCardId(panel)!)} />}
               {/* Test coins only when asked for: Receive never fills a Testnet wallet by itself. */}
               {panel && !awayWallet(state, panel) && parseCardId(panel)?.network === "testnet" && <TestCoins key={`coins-${panel}`} rail={parseCardId(panel)!.rail} network="testnet" wallet={cardWallet(wallet, parseCardId(panel)!)} state={networkState(state, "testnet", parseCardId(panel)!.card)} />}
-              {panel && !awayWallet(state, panel) && <WalletPanel id={panel} wallet={wallet} state={state} focus={focusPanel} backup={backup === panel} onOpen={select} />}
+              {panel && !awayWallet(state, panel) && <WalletPanel id={panel} wallet={wallet} state={state} sharedWith={parseCardId(panel) && sharedSources(state, parseCardId(panel)!.network, cards).get(panel)} focus={focusPanel} backup={backup === panel} onOpen={select} />}
               {panel && !awayWallet(state, panel) && parseCardId(panel) && <RemoveWalletSection key={panel} type={parseCardId(panel)!.rail} network={parseCardId(panel)!.network} card={parseCardId(panel)!.card} wallet={wallet} state={state} onOpen={select} onRemoved={() => removed(panel)} />}
             </div>}
           </div>
@@ -265,13 +265,13 @@ function awayWallet(state: WalletState, id: string): WalletInstanceView | undefi
 }
 
 /** The chosen wallet's panel, on its own network: its calls and its state are that network's. */
-function WalletPanel({ id, wallet, state, focus, backup, onOpen }: { id: string; wallet: WalletPlatform; state: WalletState; focus: boolean; backup: boolean; onOpen: (id: InstanceCard["id"]) => void }) {
+function WalletPanel({ id, wallet, state, sharedWith, focus, backup, onOpen }: { id: string; wallet: WalletPlatform; state: WalletState; sharedWith?: string; focus: boolean; backup: boolean; onOpen: (id: InstanceCard["id"]) => void }) {
   const card = parseCardId(id);
   if (!card) return null;
   const { rail, network } = card;
   const scoped = cardWallet(wallet, card), shown = networkState(state, network, card.card);
   switch (rail) {
-    case "cashu": case "lightning": return <CashuWallet key={id} wallet={scoped} state={shown} rail={rail} onOpenCashu={() => onOpen(cardId("cashu", network))} focusAmount={focus} />;
+    case "cashu": case "lightning": return <CashuWallet key={id} wallet={scoped} state={shown} rail={rail} sharedWith={sharedWith} onOpenCashu={() => onOpen(cardId("cashu", network))} focusAmount={focus} />;
     case "arkade": return <ArkWalletPanel key={id} wallet={scoped} state={shown} backupNow={backup} />;
     case "bark": return <BarkWalletPanel key={id} wallet={scoped} state={shown} backupNow={backup} />;
     case "spark": return <SparkWalletPanel key={id} wallet={scoped} state={shown} backupNow={backup} />;

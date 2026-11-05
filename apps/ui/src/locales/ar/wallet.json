@@ -176,6 +176,7 @@
       "usdtLocal": "EVM محلية · رمز تجريبي",
       "usdtSepolia": "Sepolia · رمز تجريبي"
     },
+    "sameBalance": "نفس رصيد بطاقة {{name}}",
     "status": {
       "away": "في مكان آخر",
       "checkSettings": "تحقق من الإعدادات",

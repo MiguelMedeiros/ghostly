@@ -160,6 +160,7 @@
       "usdtLocal": "本地 EVM · 测试代币",
       "usdtSepolia": "Sepolia · 测试代币"
     },
+    "sameBalance": "与你的 {{name}} 卡余额相同",
     "status": {
       "away": "在别处",
       "checkSettings": "检查设置",
