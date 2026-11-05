@@ -83,6 +83,8 @@
     "fedimintNotInvite": "这不是 Fedimint 邀请码：它以 fed1 开头",
     "fedimintRealOnTestnet": "这个联盟持有真实的比特币",
     "fedimintRealOnTestnetNext": "请把它添加到 Mainnet Fedimint 钱包。",
+    "fedimintRedeemUnheard": "联盟没有回复这些票据的情况",
+    "fedimintRedeemUnheardNext": "如果它们没有很快出现在余额里，请再粘贴一次。",
     "fedimintTestOnMainnet": "这个联盟在测试网络 {{chain}} 上",
     "fedimintTestOnMainnetNext": "请把它添加到 Testnet Fedimint 钱包。",
     "feeAboveLimit": "手续费超出你的上限",
