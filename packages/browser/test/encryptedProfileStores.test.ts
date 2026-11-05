@@ -9,7 +9,7 @@ import { openRow } from "../src/engine/sealedRows";
 import { CashuWallet, SwapUnsettledError } from "../src/engine/wallet";
 import { createProfileKey } from "../src/shared/profileKey";
 import { STORES, clearProfileStores, openDb, transact, wrap } from "../src/shared/idb";
-import type { PendingSwap, StoredGroup, StoredLink, StoredPayment, StoredQuote } from "../src/shared/types";
+import type { GroupLive, PendingSwap, StoredGroup, StoredLink, StoredPayment, StoredQuote } from "../src/shared/types";
 // covers: wallet.cashu.receive-token, payments.cashu.send
 
 /*
@@ -125,6 +125,15 @@ describe("groups and communities", () => {
     setDataKey(await dataKey());
     await db.putGroup(group);
     expect(await db.getGroups()).toEqual([group]);
+    expect(await leaks(SECRETS)).toEqual([]);
+  });
+
+  it("and so when the record is written with its small row, in one transaction", async () => {
+    setDataKey(await dataKey());
+    const live: GroupLive = { top: "", state: { seq: 0, seqEpoch: 0, seen: {}, sent: [], nicks: {} } };
+    await db.putGroup(group, live);
+    expect(await db.getGroups()).toEqual([group]);
+    expect((await db.getGroupLive()).get("g1")).toEqual(live);
     expect(await leaks(SECRETS)).toEqual([]);
   });
 
