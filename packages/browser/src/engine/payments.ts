@@ -1919,6 +1919,11 @@ export class PaymentDesk {
     }
     for (const payment of this.payments.values()) {
       if (payment.linkId !== linkId || payment.direction !== "out" || this.reclaims.has(payment.id)) continue;
+      // A request of ours our wallet saw paid is said so again while fresh (as a receipt is, `receiptOwed`), whatever
+      // its rail: the answer `settleRequest` sent is dropped with the chat down, and a request paid from another wallet
+      // (a Fedimint request's invoice, an address paid from outside) has no token or receipt the payer says again, so
+      // its copy would stay open with a Pay button that pays it twice.
+      if (payment.kind === "request" && payment.state === "settled" && !payment.group && Date.now() - payment.createdAt < RECEIPT_FRESH_MS) { link.sendPaymentResult({ id: payment.id, ok: true }); continue; }
       if(payment.target?.method==='usdt') {
         if(!link.supportsUsdtPayments)continue;
         if(payment.kind==='request'&&payment.state==='pending'&&payment.target.expiresAt>Date.now())await link.sendPaymentRequest({id:payment.id,timestamp:payment.createdAt,amount:{value:String(payment.amount),asset:payment.unit},memo:payment.memo,endpoints:[[ENDPOINT.usdt,JSON.stringify(payment.target)]],ask:payment.ask});
@@ -1956,10 +1961,6 @@ export class PaymentDesk {
         else if(payment.kind==="payment" && payment.txid && payment.state==="settled" && this.receiptOwed(payment))await this.sendTo(link, {id:payment.id,timestamp:payment.createdAt,requestId:payment.requestId,amount:{value:String(payment.amount),asset:UNIT},endpoint:[ENDPOINT.arkade,JSON.stringify({txid:payment.txid})]});
         continue;
       }
-      // A request of ours our wallet saw paid is said so again while fresh (as a receipt is, `receiptOwed`): the answer
-      // `settleRequest` sent is dropped with the chat down, and a request paid over Lightning has no token or receipt the
-      // payer says again, so its copy would stay open with a Pay button that pays it twice.
-      if (payment.kind === "request" && payment.state === "settled" && payment.invoice && !payment.group && Date.now() - payment.createdAt < RECEIPT_FRESH_MS) { link.sendPaymentResult({ id: payment.id, ok: true }); continue; }
       if(payment.state !== "pending")continue;
       if (payment.kind === "payment" && payment.token) await this.sendTo(link, {
         id: payment.id, timestamp: payment.createdAt, requestId: payment.requestId,
