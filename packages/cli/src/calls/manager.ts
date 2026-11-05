@@ -511,7 +511,8 @@ export class CallManager {
 
   setAuto(next: { on: boolean; from?: string[]; rate?: unknown }): AutoAnswer {
     // The daemon answers these chats' calls from now on: never one found only by a name its contact chose.
-    const from = (next.from ?? []).map((ref) => findOwnNamedChat(this.host.engine.getState().links, ref).id);
+    const { links, groups } = this.host.engine.getState();
+    const from = (next.from ?? []).map((ref) => findOwnNamedChat(links, ref, groups).id);
     this.auto = { on: next.on, from: next.on ? from : [], rate: rateOf(next.rate, next.on ? this.auto.rate : DEFAULT_RATE) };
     this.saveAuto();
     return this.getAuto();
@@ -789,9 +790,10 @@ export class CallManager {
     return this.host.engine.getState().links.find((l) => l.id === chat);
   }
 
-  /** A chat by id, contact key, prefix or name (the API's rules, `findChat`). */
+  /** A chat by id, contact key, prefix or name (the API's rules, `findChat`); a group's says it is one. */
   private chatId(ref: string): string {
-    return findChat(this.host.engine.getState().links, ref).id;
+    const { links, groups } = this.host.engine.getState();
+    return findChat(links, ref, groups).id;
   }
 
   /** The chat, if a call can go in it now; else why not (the engine's reason). */

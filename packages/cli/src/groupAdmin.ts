@@ -74,7 +74,7 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   async "group.invite"(ctx, params) {
     const group = groupOf(ctx, params);
     // The one invited reads the group from then on: a contact's own name or a prefix of its id never names it.
-    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true));
+    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
     await node(ctx).inviteToGroup({ groupId: group.id, linkId: link.id });
     return view(ctx, group.id, params);
   },

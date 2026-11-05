@@ -102,14 +102,27 @@ export const CONTACT_KEY = {
  * A chat by its id; by its contact's key (only by the key: a name is never taken for one); by the label this side gave
  * it; and only when no label matches, by a unique prefix of its id or the name the contact gave itself. The contact
  * controls both of those (a joiner's chat id is made from the inviter's code), so neither wins over a label, and a ref
- * that fits one chat's prefix and another's name is refused.
+ * that fits one chat's prefix and another's name is refused. A ref that names no chat but one of `groups` says it is a
+ * group (see `noChat`).
  */
-export function findChat(links: readonly LinkView[], ref: string): LinkView {
-  return chatBy(links, ref).link;
+export function findChat(links: readonly LinkView[], ref: string, groups: readonly GroupView[] = []): LinkView {
+  return chatBy(links, ref, groups).link;
+}
+
+/**
+ * No chat by `ref`. A group's id, prefix or name (or `group:<id>`) says it is a group, as `groupOf` says a chat is one:
+ * `chat connect`, `identity share`, `call start` and the other commands that take only a 1:1 chat read `No chat "Crew"`,
+ * as if nothing had that name.
+ */
+function noChat(ref: string, groups: readonly GroupView[]): CliError {
+  let group: GroupView | undefined;
+  try { group = findGroup(groups, ref.startsWith("group:") ? ref.slice("group:".length) : ref); } catch { /* no group, or more than one */ }
+  if (group) return new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat (ghostly chat list)`, { group: group.id });
+  return new CliError("not_found", `No chat ${JSON.stringify(ref)} (ghostly chat list)`);
 }
 
 /** `findChat`, and whether only what the contact controls (`theirName`: a prefix of the id, its own name) found the chat. */
-function chatBy(links: readonly LinkView[], ref: string): { link: LinkView; theirName: boolean } {
+function chatBy(links: readonly LinkView[], ref: string, groups: readonly GroupView[] = []): { link: LinkView; theirName: boolean } {
   // "" (an unset variable in a script) is a prefix of every id: it took the only chat.
   if (!ref.trim()) throw new CliError("bad_request", `${JSON.stringify(ref)} names no chat`);
   const exact = links.find((link) => link.id === ref);
@@ -126,7 +139,7 @@ function chatBy(links: readonly LinkView[], ref: string): { link: LinkView; thei
   const found = byLabel.length ? byLabel : [...new Set([...links.filter((link) => link.id.startsWith(ref)), ...links.filter((link) => named(link.peerNick))])];
   if (found.length === 1) return { link: found[0], theirName: !byLabel.length };
   if (found.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: found.map((link) => link.id) });
-  throw new CliError("not_found", `No chat ${JSON.stringify(ref)} (ghostly chat list)`);
+  throw noChat(ref, groups);
 }
 
 /**
@@ -134,8 +147,8 @@ function chatBy(links: readonly LinkView[], ref: string): { link: LinkView; thei
  * label this side gave it name the chat. A prefix of its id or the name its contact gave itself is refused, with the
  * chat it found: the contact chose those, so another contact could take the grant by calling itself that name.
  */
-export function findOwnNamedChat(links: readonly LinkView[], ref: string): LinkView {
-  const chat = chatBy(links, ref);
+export function findOwnNamedChat(links: readonly LinkView[], ref: string, groups: readonly GroupView[] = []): LinkView {
+  const chat = chatBy(links, ref, groups);
   if (chat.theirName) throw namedByThem(ref, { chat: chat.link.id, name: chat.link.peerNick ?? null, contact: chat.link.peerPubKeyZ32 });
   return chat.link;
 }
@@ -212,7 +225,7 @@ export function startNamedChats(ctx: ApiContext, params: Params): void {
   }
 }
 
-export const chatOf = (ctx: ApiContext, params: Params) => findChat(state(ctx).links, str(params, "chat", true));
+export const chatOf = (ctx: ApiContext, params: Params) => findChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
 
 /**
  * A chat whose invite nobody took yet: nobody is there to pay or to dial, and its stage says so. Before, `chat pay`

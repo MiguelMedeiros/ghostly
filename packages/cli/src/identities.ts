@@ -207,7 +207,7 @@ export const IDENTITY_METHODS: Record<string, Method> = {
 
   async "identity.share"(ctx, params) {
     // The contact keeps the proof: a contact's own name or a prefix of its id never names the chat.
-    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true));
+    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
     const id = str(params, "id", true);
     if (!state(ctx).identityProofs.some((p) => p.id === id)) throw new CliError("not_found", `No identity proof ${JSON.stringify(id)} (ghostly identity list)`);
     await node(ctx).shareIdentityProof({ linkId: link.id, id });
