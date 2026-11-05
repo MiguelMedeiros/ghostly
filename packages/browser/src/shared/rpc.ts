@@ -213,8 +213,9 @@ export interface EngineApi {
   /**
    * Deletes a message of mine for everyone (WISP 400 § Delete for everyone): gone here at once, and from every member's
    * device as its last edit. A chat's or a group's (`group:<id>`); refused for someone else's, a payment or a notice.
+   * In a group, `e` is the removal's edit number, for `groupTaken`.
    */
-  removeMessage(params: { linkId: string; messageId: string }): { error: string | null; refused?: boolean };
+  removeMessage(params: { linkId: string; messageId: string }): { error: string | null; refused?: boolean; e?: number };
   /** Link secrets, for a UI that keeps its own session list in the same profile. */
   exportLinks(): { deliveryMode?: DeliveryMode; profile?: "paired-chat/1"; seedB64: string; peerPubKeyZ32: string; encKeyB64: string; createdAt: number; inviteCode?: string; label?: string }[];
   /** Sends a file whose bytes the caller already put in the `files` store. Progress shows up in `transfers`. */

@@ -1024,7 +1024,7 @@ describe("deleting many of my group messages for everyone", () => {
     vi.spyOn(host, "send").mockImplementation(async (_group, edit) => { sent.push(edit); return null; });
     const reads = vi.spyOn(db, "getMessage");
     cleanup.push(async () => { inner.groupEdits.stop(); reads.mockRestore(); });
-    for (const id of ids) expect(await inner.groupEdits.removeMine(g, id)).toEqual({ error: null, messageId: id });
+    for (const id of ids) expect(await inner.groupEdits.removeMine(g, id)).toEqual({ error: null, messageId: id, e: 1 });
     expect(reads.mock.calls.filter(([linkId]) => linkId === chat).length).toBeLessThanOrEqual(ids.length);
     expect(await db.getMessages(chat)).toEqual([]);
     // The first window's go now, the rest at the pace; each read as the removal it is.
@@ -1051,7 +1051,7 @@ describe("deleting many of my group messages for everyone", () => {
     vi.spyOn(host, "membership").mockReturnValue({ me, members: new Set([me, bob]), community: false, admin: true });
     vi.spyOn(host, "send").mockImplementation(async () => null);
     cleanup.push(async () => { inner.groupEdits.stop(); });
-    expect(await inner.groupEdits.removeMine(g, myOriginal)).toEqual({ error: null, messageId: myOriginal });
+    expect(await inner.groupEdits.removeMine(g, myOriginal)).toEqual({ error: null, messageId: myOriginal, e: 1 });
     expect(await inner.groupEdits.receive(g, bob, { id: bobsOriginal, e: 1, ts: 1, m: REMOVED_TEXT, rm: true })).toBe("applied");
     expect((await db.getMessages(chat)).map(m => m.id)).toEqual([bobsReply, myReply]);
     // The second within the sweep's time goes when it is up (`QuoteSweeps`).
