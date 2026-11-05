@@ -90,6 +90,7 @@ describe("IdentityProofsSection", () => {
     expect(chosen()).toEqual([cards()[0]]);
     expect(panel()).toHaveAttribute("aria-labelledby", "identity-tab-a");
     expect(within(panel()).getByTestId("identity-panel-subject")).toHaveTextContent("example.com");
+    expect(within(panel()).getByTestId("identity-panel-subject")).toHaveAttribute("dir", "ltr");
     expect(panel()).toHaveTextContent("DNS TXT record. Only the holder of this key could have made this proof.");
 
     await user.click(cards()[1]);

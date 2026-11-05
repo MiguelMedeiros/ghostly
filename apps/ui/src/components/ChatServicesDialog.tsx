@@ -49,9 +49,10 @@ export function ChatServicesDialog({ peerPubKey, name, onClose }: { peerPubKey: 
               return (
                 <div key={service.id} className="flex items-center gap-3 px-4 py-3" data-testid="chat-service-grant">
                   <span className={`shrink-0 grid place-items-center w-9 h-9 rounded-lg ${on && service.enabled ? "bg-accent/15 text-accent" : "bg-surface-alt text-text-muted"}`}>{GLOBE}</span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm text-text-primary truncate">{service.name}</p>
-                    <p className="text-[11px] text-text-muted font-mono truncate">{service.target.replace(/^https?:\/\//, "")}</p>
+                  {/* Name and address in their own direction, each as wide as its words: in Arabic a Latin one keeps its start. */}
+                  <div className="min-w-0 flex-1 flex flex-col items-start">
+                    <p dir="auto" className="max-w-full text-sm text-text-primary truncate">{service.name}</p>
+                    <p dir="auto" className="max-w-full text-[11px] text-text-muted font-mono truncate">{service.target.replace(/^https?:\/\//, "")}</p>
                     <p className="text-[11px] text-text-secondary">{note}</p>
                   </div>
                   <Switch label={t("chat.services.let", { name, service: service.name })} testId="chat-service-toggle" checked={on} onChange={(next) => void platform.setServiceShared(service.id, peerPubKey, next)} />
@@ -74,7 +75,7 @@ export function ChatServicesDialog({ peerPubKey, name, onClose }: { peerPubKey: 
                 <div key={service.id} data-testid="chat-service-from" className="px-4 py-3 space-y-2">
                   <div className="flex items-center gap-3">
                     <span className="shrink-0 grid place-items-center w-9 h-9 rounded-lg bg-accent/15 text-accent">{GLOBE}</span>
-                    <p className="flex-1 text-sm text-text-primary truncate">{service.name ?? service.id}</p>
+                    <p className="flex-1 min-w-0 flex"><span dir="auto" className="min-w-0 text-sm text-text-primary truncate">{service.name ?? service.id}</span></p>
                     {platform.features.openServices
                       ? <button type="button" data-testid="chat-service-open" onClick={() => {
                         setRefused(null);

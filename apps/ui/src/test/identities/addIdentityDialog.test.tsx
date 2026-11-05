@@ -1,10 +1,11 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { newIdentityBinding } from "@ghostly/core";
 import type { BrowserHost } from "@ghostly/browser/host";
 import { OIDC_PROVIDERS } from "@ghostly/browser/proofs/oidc/providers";
 import { IDENTITY_PROVIDERS } from "@ghostly/browser/proofs/registry";
 import { AddIdentityDialog } from "../../components/identities/AddIdentityDialog";
+import en from "../../locales/en";
 import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
 import { proofView } from "./views";
@@ -149,6 +150,22 @@ describe("AddIdentityDialog", () => {
       expect(screen.getByText(provider("bitcoin").privacy, { exact: false })).toBeInTheDocument();
       await user.click(screen.getByRole("button", { name: "Back" }));
       expect(screen.getByRole("list", { name: "Kinds of identity" })).toBeInTheDocument();
+    });
+
+    it("says a built-in provider's words in the app's language, on its card, its details and its form", async () => {
+      // The words a language has for the SSH key provider (identities.providers.ssh); the ones it lacks stay English.
+      const area = en.identities as Record<string, unknown>;
+      area.providers = { ssh: { label: "SSH-Schlüssel", summary: "Einmal mit ssh-keygen signieren", description: "Beweist, dass du einen SSH-Schlüssel hältst.", subject: { help: "Dein öffentlicher Schlüssel." } } };
+      try {
+        const { user } = dialog();
+        const card = screen.getByTestId("add-identity-card-ssh");
+        expect(card).toHaveTextContent("SSH-Schlüssel");
+        expect(within(card).getByTestId("add-identity-summary")).toHaveTextContent("Einmal mit ssh-keygen signieren");
+        await user.click(screen.getByTestId("add-identity-ssh"));
+        expect(screen.getByTestId("add-identity-about")).toHaveTextContent("Beweist, dass du einen SSH-Schlüssel hältst.");
+        expect(screen.getByText("Dein öffentlicher Schlüssel.")).toBeInTheDocument();
+        expect(screen.getByText(provider("ssh").privacy, { exact: false })).toBeInTheDocument();
+      } finally { delete area.providers; }
     });
 
     it("offers the validity periods up to the provider's maximum, starting on its default", async () => {
@@ -331,6 +348,28 @@ describe("AddIdentityDialog", () => {
       expect(group).toHaveAttribute("data-value", "https://login.microsoftonline.com/{tenantid}/v2.0");
     });
 
+    it("are one Tab stop, the chosen provider, the arrows moving and choosing", async () => {
+      restore = configureOidc();
+      const { user } = dialog();
+      await user.click(screen.getByTestId("add-identity-oidc"));
+      const group = screen.getByRole("radiogroup", { name: "Provider" });
+      const [google, microsoft] = within(group).getAllByRole("radio");
+      expect([google.tabIndex, microsoft.tabIndex]).toEqual([0, -1]);
+      google.focus();
+      await user.keyboard("{ArrowRight}");
+      expect(microsoft).toHaveFocus();
+      expect(microsoft).toHaveAttribute("aria-checked", "true");
+      expect([google.tabIndex, microsoft.tabIndex]).toEqual([-1, 0]);
+      await user.keyboard("{ArrowDown}");
+      expect(google).toHaveFocus();
+      expect(google).toHaveAttribute("aria-checked", "true");
+      await user.keyboard("{End}");
+      expect(microsoft).toHaveFocus();
+      await user.keyboard("{Home}");
+      expect(google).toHaveFocus();
+      expect(group).toHaveAttribute("data-value", "https://accounts.google.com");
+    });
+
     it("keep proofs short-lived and begin with the chosen issuer", async () => {
       restore = configureOidc();
       const { user, engine } = dialog();
@@ -380,6 +419,8 @@ describe("AddIdentityDialog", () => {
       await user.type(screen.getByTestId("add-identity-subject"), "example.com");
       await user.click(screen.getByTestId("add-identity-start"));
       expect(await screen.findByTestId("add-identity-copy-0")).toBeInTheDocument();
+      // What is typed into a DNS host's form reads left to right in every language (in Arabic "_ghostly." ended "ghostly._").
+      for (const code of screen.getAllByTestId(/^add-identity-copy-\d+$/)) expect(code).toHaveAttribute("dir", "ltr");
       await user.click(screen.getByRole("button", { name: "Check and save" }));
       expect(engine.callsTo("completeIdentityProof")).toEqual([{ draftId: "draft-1", evidence: expect.anything() }]);
       expect(onClose).toHaveBeenCalledOnce();
@@ -395,8 +436,59 @@ describe("AddIdentityDialog", () => {
       await user.type(screen.getByTestId("add-identity-subject"), "example.com");
       await user.click(screen.getByTestId("add-identity-start"));
       await user.click(await screen.findByRole("button", { name: "Cancel" }));
+      await user.click(within(screen.getByTestId("add-identity-leave")).getByRole("button", { name: "Close" }));
       expect(engine.callsTo("cancelIdentityProof")).toEqual([{ draftId: "draft-1" }]);
       expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    /**
+     * The record or file is published elsewhere, and slowly: a stray Escape, a tap beside the sheet or Cancel would
+     * throw its value away, and the next try gives another one. Each asks first; the question's own Escape keeps the steps.
+     */
+    it.each([
+      ["Escape", async (user: ReturnType<typeof dialog>["user"]) => { await user.keyboard("{Escape}"); }],
+      ["a tap beside the sheet", async (user: ReturnType<typeof dialog>["user"]) => { await user.pointer({ keys: "[MouseLeft]", target: screen.getByTestId("add-identity").parentElement! }); }],
+      ["Cancel", async (user: ReturnType<typeof dialog>["user"]) => { await user.click(screen.getByRole("button", { name: "Cancel" })); }],
+      ["the close button", async (user: ReturnType<typeof dialog>["user"]) => { await user.click(screen.getByRole("button", { name: "Close" })); }],
+    ])("asks before %s throws away the value being published", async (_, leave) => {
+      const { user, engine, onClose } = dialog();
+      answerBegin();
+      engine.on("cancelIdentityProof", () => undefined);
+      await user.click(screen.getByTestId("add-identity-domain"));
+      await user.type(screen.getByTestId("add-identity-subject"), "example.com");
+      await user.click(screen.getByTestId("add-identity-start"));
+      const value = (await screen.findByTestId("add-identity-copy-1")).textContent;
+      await leave(user);
+      const question = screen.getByRole("group", { name: "Close without saving?" });
+      expect(question).toHaveAccessibleDescription("The value shown works only with these steps. Once they are closed, a new try gives a new value, and the one you published must be replaced.");
+      expect(within(question).getByRole("button", { name: "Keep open" })).toHaveFocus();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(engine.callsTo("cancelIdentityProof")).toEqual([]);
+      // Escape answers the question: the steps stay, with the same value.
+      await user.keyboard("{Escape}");
+      expect(screen.queryByTestId("add-identity-leave")).not.toBeInTheDocument();
+      expect(screen.getByTestId("add-identity-steps")).toHaveFocus();
+      expect(screen.getByTestId("add-identity-copy-1")).toHaveTextContent(value!);
+      expect(onClose).not.toHaveBeenCalled();
+      // Asked again, Keep open does the same.
+      await leave(user);
+      await user.click(screen.getByRole("button", { name: "Keep open" }));
+      expect(screen.getByTestId("add-identity-finish")).toBeInTheDocument();
+      expect(engine.callsTo("cancelIdentityProof")).toEqual([]);
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("closes an external tool's steps at once: nothing was published", async () => {
+      const { user, engine, onClose } = dialog();
+      answerBegin();
+      engine.on("cancelIdentityProof", () => undefined);
+      await user.click(screen.getByTestId("add-identity-ssh"));
+      await user.type(screen.getByTestId("add-identity-subject"), "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl");
+      await user.click(screen.getByTestId("add-identity-start"));
+      await screen.findByTestId("add-identity-steps");
+      await user.keyboard("{Escape}");
+      expect(onClose).toHaveBeenCalledOnce();
+      expect(engine.callsTo("cancelIdentityProof")).toEqual([{ draftId: "draft-1" }]);
     });
 
     it("needs a pasted signature from an external tool, and says when it is not one", async () => {
@@ -432,6 +524,22 @@ describe("AddIdentityDialog", () => {
       expect(await screen.findByTestId("add-identity-error")).toHaveTextContent("TXT record not found");
       expect(finish).toHaveFocus();
     });
+
+    it("says the check out loud while it runs, from a status that was there before it", async () => {
+      const { user, engine } = dialog();
+      answerBegin();
+      engine.on("completeIdentityProof", () => new Promise(() => {}));
+      await user.click(screen.getByTestId("add-identity-domain"));
+      await user.type(screen.getByTestId("add-identity-subject"), "example.com");
+      await user.click(screen.getByTestId("add-identity-start"));
+      await screen.findByTestId("add-identity-finish");
+      const status = screen.getByTestId("add-identity-progress-live");
+      expect(status).toHaveAttribute("role", "status");
+      expect(status).toHaveTextContent(/^$/);
+      await user.click(screen.getByTestId("add-identity-finish"));
+      expect(status).toHaveTextContent("Checking it the way your contacts will…");
+      expect(screen.getByTestId("add-identity-progress-live")).toBe(status);
+    });
   });
 
   /**
@@ -456,7 +564,7 @@ describe("AddIdentityDialog", () => {
       const { user, command, step } = await openCommand();
       vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new DOMException("Write permission denied.", "NotAllowedError"));
       document.execCommand = vi.fn(() => false);
-      await user.click(within(step).getByRole("button", { name: "Copy" }));
+      await user.click(within(step).getByRole("button", { name: "Copy step 1" }));
       expect(await within(step).findByTestId("add-identity-copy-error")).toHaveTextContent("Could not copy. Select the text above and copy it yourself.");
       expect(within(step).queryByRole("button", { name: "Copied" })).not.toBeInTheDocument();
       expect(command).toHaveClass("select-all");
@@ -468,7 +576,7 @@ describe("AddIdentityDialog", () => {
       const copied: string[] = [];
       // The older route copies from a textarea it adds at the end of the page for the moment.
       document.execCommand = vi.fn(() => { copied.push(document.body.querySelector<HTMLTextAreaElement>(":scope > textarea:last-of-type")!.value); return true; });
-      await user.click(within(step).getByRole("button", { name: "Copy" }));
+      await user.click(within(step).getByRole("button", { name: "Copy step 1" }));
       expect(await within(step).findByRole("button", { name: "Copied" })).toBeInTheDocument();
       expect(copied).toEqual([command.textContent]);
       expect(within(step).queryByTestId("add-identity-copy-error")).not.toBeInTheDocument();
@@ -478,13 +586,39 @@ describe("AddIdentityDialog", () => {
       const { user, command, step } = await openCommand();
       vi.spyOn(navigator.clipboard, "writeText").mockRejectedValueOnce(new DOMException("Document is not focused.", "NotAllowedError"));
       document.execCommand = vi.fn(() => false);
-      await user.click(within(step).getByRole("button", { name: "Copy" }));
+      await user.click(within(step).getByRole("button", { name: "Copy step 1" }));
       await within(step).findByTestId("add-identity-copy-error");
       const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
-      await user.click(within(step).getByRole("button", { name: "Copy" }));
+      await user.click(within(step).getByRole("button", { name: "Copy step 1" }));
       expect(await within(step).findByRole("button", { name: "Copied" })).toBeInTheDocument();
       expect(writeText).toHaveBeenCalledWith(command.textContent);
       expect(within(step).queryByTestId("add-identity-copy-error")).not.toBeInTheDocument();
+    });
+
+    it("each Copy names its step, so a button list or a voice command tells them apart",async () => {
+      const { user } = dialog();
+      answerBegin();
+      await user.click(screen.getByTestId("add-identity-domain"));
+      await user.type(screen.getByTestId("add-identity-subject"), "example.com");
+      await user.click(screen.getByTestId("add-identity-start"));
+      const steps = await screen.findByTestId("add-identity-steps");
+      const names = (list: HTMLElement) => within(list).getAllByRole("button").map(b => b.getAttribute("aria-label") ?? b.textContent);
+      expect(names(steps)).toEqual(["Copy step 1", "Copy step 2"]);
+      // The visible "Copy" starts each name, for "click Copy step 2".
+      expect(within(steps).getByRole("button", { name: "Copy step 2" })).toHaveTextContent(/^Copy$/);
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+    });
+
+    it("says Copied once from a status beside the button, which keeps its step as its name", async () => {
+      const { user, step } = await openCommand();
+      vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+      const status = within(step).getByRole("status");
+      expect(status).toHaveTextContent(/^$/);
+      await user.click(within(step).getByRole("button", { name: "Copy step 1" }));
+      expect(await within(step).findByText("Copied!", { selector: "[role=status]" })).toBe(status);
+      expect(within(step).getByRole("button", { name: "Copied" })).toBeInTheDocument();
+      await waitFor(() => expect(within(step).getByRole("button", { name: "Copy step 1" })).toBeInTheDocument(), { timeout: 3000 });
+      expect(status).toHaveTextContent(/^$/);
     });
   });
 });

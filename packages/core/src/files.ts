@@ -83,6 +83,19 @@ const BLANK = /[\u034F\u115F\u1160\u2800\u3164\uFFA0]/gu;
 const SPACE_RUN = /(?:\s\p{M}*)+/gu;
 
 /**
+ * A run of characters meant to draw nothing (variation selectors, the Khmer inherent vowels, the Mongolian free
+ * variation selectors). WebKit draws some of them as wide blanks after a letter, so "Invoice.pdf" + 150 of one +
+ * ".exe" reads as a PDF there. A letter keeps one variation selector (its variant form); the rest go.
+ */
+const IGNORABLE_RUN = /\p{Default_Ignorable_Code_Point}+/gu;
+const VARIATION_SELECTOR = /^\p{Variation_Selector}/u;
+
+function dropIgnorable(run: string, offset: number, text: string): string {
+  const kept = VARIATION_SELECTOR.exec(run)?.[0];
+  return kept && offset > 0 && !/\s/u.test(text[offset - 1]) ? kept : "";
+}
+
+/**
  * Names Windows keeps for devices, whatever the case, with any extension, and with spaces before the dot:
  * "CON", "nul.txt", "COM1 .log" open a device there, not a file.
  */
@@ -101,7 +114,8 @@ function shorten(name: string): string {
 
 /** A file name is display text and a download suggestion, never a path. */
 export function sanitizeFileName(name: string): string {
-  const visible = name.replace(INVISIBLE, "").replace(BLANK, "").replace(/[/\\:]/g, "").replace(SPACE_RUN, " ");
+  const visible = name.replace(INVISIBLE, "").replace(BLANK, "").replace(/[/\\:]/g, "")
+    .replace(IGNORABLE_RUN, dropIgnorable).replace(SPACE_RUN, " ");
   // Whitespace before the dots must not hide them: " .bashrc" is a dotfile too.
   const clean = shorten(visible.replace(/^[\s.]+/, "").trim());
   if (WINDOWS_DEVICE.test(clean)) return shorten("_" + clean);

@@ -94,6 +94,16 @@ it("deleting a profile takes its device record with it, and leaves another profi
   await closeDevicesDb();
 });
 
+it("deleting a profile has the host forget what the contacts' apps it opened kept on this device, and only its", async () => {
+  const { setBrowserHost } = await import("../src/host");
+  const forgotten: unknown[] = [];
+  setBrowserHost({ forgetServices: async (which: unknown) => { forgotten.push(which); } } as unknown as import("../src/host").BrowserHost);
+  const gone = registerProfile("svcgone001", "Gone");
+  registerProfile("svckept001", "Kept");
+  await deleteProfile(gone.id);
+  expect(forgotten).toEqual([{ profile: gone.id }]);
+});
+
 it("deleting a profile forgets what another profile's peek saw of it, and keeps the others' (WISP 04)", async () => {
   const { mergePeek, peekFresh, storeKey } = await import("../../../apps/ui/src/lib/profilePeek");
   const gone = registerProfile("peekgone01", "Gone"), kept = registerProfile("peekkept01", "Kept");

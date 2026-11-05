@@ -1,9 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, MAX_GROUP_NAME_LENGTH, groupName, sanitizeAvatar } from "@ghostly/core";
+import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, MAX_GROUP_NAME_LENGTH, NO_PICTURE_METADATA, groupName, sanitizeAvatar, stripPictureMetadata } from "@ghostly/core";
 import type { GroupView } from "@ghostly/browser/shared/types";
-import { bool, chatOf, groupOf, node, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, findOwnNamedChat, groupOf, node, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError, localFileError } from "./errors";
+import { guardText } from "./secretGuard";
 import { groupJson } from "./views";
 
 /**
@@ -12,36 +13,48 @@ import { groupJson } from "./views";
  */
 
 /**
- * A member by key, unique key prefix or name; never this profile itself. A whole key is that member, whatever another
- * member calls itself; a prefix and a name stand side by side (two members is an error, not a guess).
+ * A member by key, unique key prefix or name; never this profile itself (`myName`: its name, which its own row lacks).
+ * A whole key is that member, whatever another member calls itself; a prefix and a name stand side by side (two
+ * members is an error, not a guess).
  */
-export function findMember(group: GroupView, ref: string) {
+export function findMember(group: GroupView, ref: string, myName?: string) {
   const lower = ref.toLowerCase();
   const others = group.members.filter((m) => !m.me);
   const byKey = others.filter((m) => m.key === ref);
   const matches = byKey.length ? byKey : others.filter((m) => m.key.startsWith(ref) || m.nick?.trim().toLowerCase() === lower);
   if (matches.length === 1) return matches[0];
-  throw matches.length ? new CliError("bad_request", `${JSON.stringify(ref)} names more than one member`) : noMember(group, ref);
+  throw matches.length ? new CliError("bad_request", `${JSON.stringify(ref)} names more than one member`) : noMember(group, ref, myName);
 }
 
 /**
- * A ref no other member answers to. When it is this profile's own key (or a prefix of it), it says so: "No member"
- * read as if this profile were not in the group.
+ * A ref no other member answers to. When it is this profile's own key (or a prefix of it), or its own name, it says
+ * so: "No member" read as if this profile were not in the group.
  */
-export function noMember(group: GroupView, ref: string): CliError {
-  if (group.members.some((m) => m.me && m.key.startsWith(ref))) return new CliError("bad_request", `${JSON.stringify(ref)} is you: name another member of ${group.name}`);
+export function noMember(group: GroupView, ref: string, myName?: string): CliError {
+  const mine = !!myName?.trim() && myName.trim().toLowerCase() === ref.toLowerCase();
+  if (mine || group.members.some((m) => m.me && m.key.startsWith(ref))) return new CliError("bad_request", `${JSON.stringify(ref)} is you: name another member of ${group.name}`);
   return new CliError("not_found", `No member ${JSON.stringify(ref)} in ${group.name}`);
 }
 
 /**
  * A picture as Ghostly sends it: a square JPEG data URL, checked as a contact would check it. The app scales and
  * crops any image to 128×128; here the file must already be a JPEG within the bounds (no image library on Node).
+ * It goes without its metadata (where it was taken, the device, the time), as the app's re-encoded one does; a
+ * picture whose metadata cannot be removed is refused, never sent as it was.
  */
 export async function pictureFrom(path: string): Promise<string> {
   let bytes: Buffer;
   // A folder or a file this user may not read is named as such, not "No file" for a path that is there.
   try { bytes = await readFile(resolve(path)); } catch (error) { throw localFileError(error, path) ?? new CliError("not_found", `No file ${path}`); }
-  const url = `data:image/jpeg;base64,${bytes.toString("base64")}`;
+  let parts: Uint8Array[] | undefined;
+  try {
+    // Told apart by its bytes, not a type: a file that is no picture at all stays the bad_request below.
+    parts = stripPictureMetadata(bytes, "application/octet-stream");
+  } catch (error) {
+    if (error instanceof Error && error.message === NO_PICTURE_METADATA) throw new CliError("refused", NO_PICTURE_METADATA);
+    throw error;
+  }
+  const url = `data:image/jpeg;base64,${(parts ? Buffer.concat(parts) : bytes).toString("base64")}`;
   const checked = sanitizeAvatar(url);
   if (!checked) throw new CliError("bad_request", `A picture is a JPEG of at most ${MAX_AVATAR_SIDE}×${MAX_AVATAR_SIDE} px and about ${Math.floor(MAX_AVATAR_LENGTH * 0.74 / 1000)} KB (128×128 is what the app sends): resize it first`);
   return checked;
@@ -52,36 +65,42 @@ async function picture(params: Params): Promise<string | null> {
   return pictureFrom(str(params, "path", true));
 }
 
+/** The member `params.member` names in `group`, this profile's own name said to be it. */
+const member = (ctx: ApiContext, group: GroupView, params: Params) => findMember(group, str(params, "member", true), state(ctx).settings.nick);
+
 const view = (ctx: ApiContext, id: string, params: Params) => groupJson(state(ctx).groups.find((g) => g.id === id) ?? groupOf(ctx, { group: id }), bool(params, "showSecret"));
 
 export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   async "group.invite"(ctx, params) {
     const group = groupOf(ctx, params);
-    const link = chatOf(ctx, params);
+    // The one invited reads the group from then on: a contact's own name or a prefix of its id never names it.
+    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
     await node(ctx).inviteToGroup({ groupId: group.id, linkId: link.id });
     return view(ctx, group.id, params);
   },
   async "group.remove"(ctx, params) {
     const group = groupOf(ctx, params);
-    await node(ctx).removeGroupMember({ groupId: group.id, key: findMember(group, str(params, "member", true)).key });
+    await node(ctx).removeGroupMember({ groupId: group.id, key: member(ctx, group, params).key });
     return view(ctx, group.id, params);
   },
   async "group.admin"(ctx, params) {
     const group = groupOf(ctx, params);
-    await node(ctx).makeGroupAdmin({ groupId: group.id, key: findMember(group, str(params, "member", true)).key });
+    await node(ctx).makeGroupAdmin({ groupId: group.id, key: member(ctx, group, params).key });
     return view(ctx, group.id, params);
   },
   async "group.hub"(ctx, params) {
     const group = groupOf(ctx, params);
     const role = str(params, "role") ?? "auto";
     if (!["pin", "exclude", "auto"].includes(role)) throw new CliError("bad_request", "role is pin, exclude or auto");
-    await node(ctx).setGroupHub({ groupId: group.id, key: findMember(group, str(params, "member", true)).key, role: role === "auto" ? null : role as "pin" | "exclude" });
+    await node(ctx).setGroupHub({ groupId: group.id, key: member(ctx, group, params).key, role: role === "auto" ? null : role as "pin" | "exclude" });
     return view(ctx, group.id, params);
   },
   async "group.rename"(ctx, params) {
     const group = groupOf(ctx, params, "chat rename <chat> <name...>");
     const name = groupName(str(params, "name", true));
     if (!name) throw new CliError("bad_request", `A group's name is 1 to ${MAX_GROUP_NAME_LENGTH} characters on one line`);
+    // Every member reads it, and a community's anyone who opens its link (docs/CLI.md § Safety).
+    guardText(name, bool(params, "force"), "group's name", "rename it");
     await node(ctx).renameGroup({ groupId: group.id, name });
     return view(ctx, group.id, params);
   },

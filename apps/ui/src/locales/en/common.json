@@ -13,6 +13,7 @@
     "turnBack": "Cards"
   },
   "delete": "Delete",
+  "deleteChatCallOn": "A call is on in this chat. End it first, then delete the chat.",
   "deleteChatLocal": "This deletes the chat and its history from this device. Your contact’s copy is not deleted.",
   "deleteChatTitle": "Delete chat?",
   "error": "Error",
@@ -24,12 +25,14 @@
     "show": "Show",
     "title": "Waiting for you"
   },
+  "notCopied": "Not copied",
   "save": "Save",
   "size": {
     "b": "{{n}} B",
     "gb": "{{n}} GB",
     "kb": "{{n}} KB",
-    "mb": "{{n}} MB"
+    "mb": "{{n}} MB",
+    "tb": "{{n}} TB"
   },
   "success": "Success",
   "unnamedContact": "Contact · {{key}}",

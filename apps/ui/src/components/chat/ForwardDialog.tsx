@@ -6,10 +6,15 @@ import { FORWARD_MAX_TARGETS, forwardMessages, forwardSecret, type ForwardOutcom
 import type { SecretFinding } from "../../lib/parse/secrets";
 import type { ChatMessage } from "../../lib/types";
 import { SecretGuardDialog } from "../SecretGuardDialog";
-import { ChatTargetRow } from "./ChatTargets";
+import { ChatTargetRow, ChatTargetSearch } from "./ChatTargets";
+import { chatTargetKeys, findChatTargets } from "../../lib/chatTargets";
 import { useChatTargets, type ChatTarget } from "../../hooks/useChatTargets";
 import { rawError } from "../../lib/errorText";
 import { problemLine } from "../../lib/problemText";
+import { listParts, listText } from "../../lib/listText";
+import type { Translate } from "../../locales/translate";
+import { useBackCloses } from "../../hooks/useDismiss";
+import { SearchStatus } from "../ui/SearchStatus";
 
 /**
  * "Forward to…" (WISP 400 § Forwards): the chats and groups to send messages on to, most recent first, found by name,
@@ -27,12 +32,13 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
   const { t } = useI18n();
   const nav = useAppNavigation();
   const id = useId();
-  const dialog = useRef<HTMLDialogElement>(null), search = useRef<HTMLInputElement>(null);
+  const dialog = useRef<HTMLDialogElement>(null), search = useRef<HTMLInputElement>(null), list = useRef<HTMLUListElement>(null);
   const targets = useChatTargets().filter(target => !!target.target);
   const [query, setQuery] = useState("");
   const [chosen, setChosen] = useState<ChatTarget[]>([]);
   const [secret, setSecret] = useState<SecretFinding | null>(null);
   const [busy, setBusy] = useState(false);
+  useBackCloses(() => { if (!busy) onClose(); });
   const [problems, setProblems] = useState<{ name: string; partial?: string; error: string }[]>([]);
   /** The chats a send that others refused went to: out of the selection, so Send again does not send them it twice. */
   const [sentTo, setSentTo] = useState<string[]>([]);
@@ -49,11 +55,10 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
     return () => { element.close(); if (previous?.isConnected) previous.focus(); };
   }, []);
 
-  const shown = useMemo(() => {
-    const words = query.trim().toLocaleLowerCase();
-    return words ? targets.filter(target => target.name.toLocaleLowerCase().includes(words)) : targets;
-  }, [targets, query]);
+  const shown = useMemo(() => findChatTargets(targets, query), [targets, query]);
   const isChosen = (target: ChatTarget) => chosen.some(c => c.target === target.target);
+  /** As many chosen as a forward takes: the other rows wait, and the line under the list says why. */
+  const full = chosen.length >= FORWARD_MAX_TARGETS;
   const toggle = (target: ChatTarget) => setChosen(now => isChosen(target) ? now.filter(c => c.target !== target.target) : now.length >= FORWARD_MAX_TARGETS ? now : [...now, target]);
 
   const [sentBefore, sentAfter = ""] = t("chat.forward.sentTo").split("{{names}}");
@@ -104,13 +109,14 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
   };
 
   return createPortal(<dialog ref={dialog} data-testid="forward-dialog" aria-labelledby={`${id}-title`}
-    onCancel={(e) => { e.preventDefault(); if (!busy) onClose(); }}
+    // Not a cancel from the seed question over it (SecretGuardDialog): React hands it here too, and it is the question's.
+    onCancel={(e) => { e.preventDefault(); if (!busy && e.target === e.currentTarget) onClose(); }}
     className="m-auto w-[calc(100%_-_2rem)] max-w-md max-h-[min(640px,calc(100dvh_-_2rem))] flex-col rounded-2xl border border-border bg-sidebar-bg p-0 text-text-primary shadow-2xl backdrop:bg-black/60 open:flex">
     <div className="px-4 pt-4 pb-2 space-y-2">
       <h2 id={`${id}-title`} className="text-base font-semibold">{t("chat.forward.title")}</h2>
       {messages.length > 1 && <p className="m-0 text-xs text-text-muted" data-testid="forward-count">{t("chat.forward.messages", { count: String(messages.length) })}</p>}
-      <input ref={search} type="search" data-testid="forward-search" value={query} onChange={e => setQuery(e.target.value)} placeholder={t("chat.forward.search")} aria-label={t("chat.forward.search")}
-        className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus-visible:ring-2 focus-visible:ring-focus-ring" />
+      <ChatTargetSearch inputRef={search} list={list} testId="forward-search" value={query} onChange={setQuery} />
+      <SearchStatus testId="forward-found" text={!query.trim() ? "" : shown.length ? t("chat.forward.found", { count: shown.length }) : t(targets.length ? "chat.forward.noMatch" : "chat.forward.noChats")} />
     </div>
     {/* As tall as its rows, shrinking and scrolling within the dialog's max height: `flex-1` (a basis of 0) in a
         dialog as tall as its content leaves WebKit a list of no height at all, with no chat to pick. */}
@@ -118,11 +124,11 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
       {shown.length === 0 ? (
         <p className="px-2 py-3 text-sm text-text-muted" data-testid="forward-none">{t(targets.length ? "chat.forward.noMatch" : "chat.forward.noChats")}</p>
       ) : (
-        <ul className="rounded-xl bg-surface divide-y divide-border overflow-hidden m-0 p-0 list-none" aria-label={t("chat.forward.title")}>
+        <ul ref={list} onKeyDown={chatTargetKeys(search)} className="rounded-xl bg-surface divide-y divide-border overflow-hidden m-0 p-0 list-none" aria-label={t("chat.forward.title")}>
           {shown.map(target => (
             <li key={target.chat}>
               <ChatTargetRow target={target} testId="forward-target" checked={isChosen(target)} onClick={() => toggle(target)}
-                disabled={busy || (!isChosen(target) && chosen.length >= FORWARD_MAX_TARGETS)} />
+                disabled={busy} unavailable={full && !isChosen(target)} describedBy={`${id}-limit`} />
             </li>
           ))}
         </ul>
@@ -133,11 +139,19 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
         {problems.map((p, i) => <li key={i} className="text-xs text-danger">{p.name ? <><bdi>{p.name}</bdi>{p.partial}: {p.error}</> : p.error}</li>)}
       </ul>
     )}
-    {sentTo.length > 0 && <p className="m-0 mx-4 mt-1 text-xs text-text-muted" data-testid="forward-sent">{sentBefore}<Names names={sentTo} />{sentAfter}</p>}
+    {sentTo.length > 0 && <p className="m-0 mx-4 mt-1 line-clamp-2 break-words text-xs text-text-muted" data-testid="forward-sent"
+      title={namesTitle(sentTo, t)}>{sentBefore}<NameList names={sentTo} />{sentAfter}</p>}
     <div className="flex items-center gap-2 px-4 py-3">
-      <p className="m-0 min-w-0 flex-1 truncate text-xs text-text-muted" data-testid="forward-chosen">
-        {chosen.length ? <Names names={chosen.map(c => c.name)} /> : t("chat.forward.pick", { count: String(FORWARD_MAX_TARGETS) })}
-      </p>
+      <div className="min-w-0 flex-1 text-xs text-text-muted">
+        {/* Two lines at most, then cut: the whole list is in its title and read aloud (NameList). */}
+        <p className="m-0 line-clamp-2 break-words" data-testid="forward-chosen" title={chosen.length ? namesTitle(chosen.map(c => c.name), t) : undefined}>
+          {chosen.length ? <NameList names={chosen.map(c => c.name)} /> : t("chat.forward.pick", { count: String(FORWARD_MAX_TARGETS) })}
+        </p>
+        {/* There, empty, from the start: its text appearing at the limit is read once, and the rows that wait name it. */}
+        <p id={`${id}-limit`} className="m-0 break-words" aria-live="polite" data-testid="forward-limit">
+          {full ? t("chat.forward.limit", { count: String(FORWARD_MAX_TARGETS) }) : ""}
+        </p>
+      </div>
       <button type="button" data-testid="forward-cancel" onClick={onClose} disabled={busy}
         className="min-h-10 rounded-lg px-3 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent cursor-pointer">{t("common.cancel")}</button>
       {/* Not disabled while it runs: a focused button that turns disabled drops the focus to the page, and a refusal
@@ -149,14 +163,38 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
       </button>
     </div>
     {/* The guard's title is a string: each name isolated there by FSI…PDI. */}
-    {secret && <SecretGuardDialog finding={secret} recipient={chosen.map(c => `⁨${c.name}⁩`).join(", ")} onCancel={() => setSecret(null)} onConfirm={() => { setSecret(null); void send(true); }} />}
+    {secret && <SecretGuardDialog finding={secret} recipient={namesTitle(chosen.map(c => c.name), t)} onCancel={() => setSecret(null)} onConfirm={() => { setSecret(null); void send(true); }} />}
   </dialog>, document.body);
 }
 
+/** Names a line shows in full; more than this shows the first ones and how many more. */
+const NAMES_IN_FULL = 3;
+
+/** A list of names as a title: each isolated by FSI…PDI, as a string cannot hold a `<bdi>`. */
+const namesTitle = (names: readonly string[], t: Translate) => listText(names.map(name => `\u2068${name}\u2069`), t);
+
 /**
  * Chats' names, each in its own direction as in the rows: in one Arabic string "Ana!" read "!Ana" and the names ran in
- * English order.
+ * English order. Listed the way the app's language lists them ("Ana وBo", "Ana、Bo"), not with an English comma.
+ * `more`: said last, in the app's language, outside any name's isolation.
  */
-function Names({ names }: { names: readonly string[] }) {
-  return names.map((name, i) => <Fragment key={i}>{i > 0 && ", "}<bdi>{name}</bdi></Fragment>);
+function Names({ names, more }: { names: readonly string[]; more?: string }) {
+  const { t } = useI18n();
+  let item = 0;
+  return listParts(more === undefined ? names : [...names, more], t).map((part, i) =>
+    !part.item ? <Fragment key={i}>{part.text}</Fragment> : item++ < names.length ? <bdi key={i}>{part.text}</bdi> : <Fragment key={i}>{part.text}</Fragment>);
+}
+
+/**
+ * The chats a forward goes or went to, in a line too narrow for long names (204 px on a phone): up to three in full;
+ * more than that shows the first two and how many more ("Ana, Bo, 3 more"), and a screen reader hears every name.
+ */
+export function NameList({ names }: { names: readonly string[] }) {
+  const { t } = useI18n();
+  if (names.length <= NAMES_IN_FULL) return <Names names={names} />;
+  const shown = names.slice(0, NAMES_IN_FULL - 1);
+  return <>
+    <span aria-hidden="true" data-testid="names-short"><Names names={shown} more={t("chat.forward.more", { count: String(names.length - shown.length) })} /></span>
+    <span className="sr-only" data-testid="names-full"><Names names={names} /></span>
+  </>;
 }

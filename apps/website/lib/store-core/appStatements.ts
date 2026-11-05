@@ -4,6 +4,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { fromBase64Url, fromZ32, toBase64Url, toZ32, utf8Encode } from "./bytes";
 import { canonicalJsonBytes, readCanonicalJson, type CanonicalJsonRefusal, type JsonValue } from "./canonicalJson";
 import type { Signer } from "./signer";
+import { hasVisible, stripHidden } from "./text";
 
 /*
  * Signed statements of WISP 1200 (Apps · Signatures): every signed object is signed the same way, Ed25519 over the
@@ -197,7 +198,18 @@ export interface SignedAppRevocation { statement: AppRevokeStatement; signature:
 export type AppRevocationRefusal = "bad-revocation" | AppSignatureRefusal;
 
 const isSequence = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 1;
-const isPlainLine = (v: unknown, max: number): v is string => typeof v === "string" && [...v].length <= max && !/\p{Cc}/u.test(v);
+
+/**
+ * One line of an app's text, from `min` to `max` code points: a title, a tagline, a store's name, a removal's or a
+ * revocation's reason. It is shown alone (a heading, a window title), so it holds no control character and none of
+ * what `stripHidden` takes from a nickname (invisible and direction-changing characters, line and paragraph
+ * separators), and when it is not empty it shows something (`hasVisible`). The joiners an emoji or a script needs stay.
+ */
+export const isAppLine = (v: unknown, max: number, min = 0): v is string => {
+  if (typeof v !== "string") return false;
+  const length = [...v].length;
+  return length >= min && length <= max && stripHidden(v) === v && (v === "" || hasVisible(v));
+};
 
 /** Checks a revocation statement's shape; the reason it is refused, or null. */
 export function checkAppRevokeStatement(value: unknown): string | null {
@@ -212,7 +224,7 @@ export function checkAppRevokeStatement(value: unknown): string | null {
     if (!Array.isArray(d) || d.length < 1 || d.length > APP_STATEMENT_LIMITS.revokeDigests) return "digests is not 1 to 64 digests";
     if (!d.every(isAppHash) || new Set(d).size !== d.length) return "digests holds a bad or repeated digest";
   } else if (!isSequence(v.upTo)) return "upTo is not a sequence";
-  if (v.reason !== undefined && !isPlainLine(v.reason, APP_STATEMENT_LIMITS.reason)) return "reason is not one line of 200 characters";
+  if (v.reason !== undefined && !isAppLine(v.reason, APP_STATEMENT_LIMITS.reason)) return "reason is not one line of 200 characters";
   return null;
 }
 

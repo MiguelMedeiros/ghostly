@@ -46,8 +46,16 @@ worker-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 
 /// The largest request an app may send the broker (WISP 1200: 64 KiB), as JSON.
 const MAX_REQUEST_BYTES: usize = 64 * 1024;
+/// The largest IPC message an app window may post: its largest request with room for Tauri's envelope. Tauri
+/// drops a larger one unread (`message_limit`), as parsing it would hold the main thread, every window's; the
+/// runner refuses such a request first, so an app that calls `window.ghostly` still gets "too-large".
+const MAX_MESSAGE_BYTES: usize = 2 * MAX_REQUEST_BYTES;
 /// The most requests an app may send the broker in a second (WISP 1200: 50), every call counted.
 const MAX_REQUESTS_PER_SECOND: usize = 50;
+/// What a window keeps of what it was refused: the last few, each cut short, so an app that keeps asking to
+/// leave does not grow the Ghostly process.
+const MAX_REFUSED: usize = 64;
+const MAX_REFUSED_BYTES: usize = 256;
 /// The largest id a request may carry: a safe integer in JavaScript.
 const MAX_ID: u64 = (1 << 53) - 1;
 /// How long a request waits for the Ghostly window's broker (a file read included), a file pick excepted
@@ -90,10 +98,14 @@ const RUNNER: &str = r#"<!doctype html>
   if (Object.getOwnPropertyNames(window).some((name) => /^(webkit)?RTC/.test(name))) return stop("webrtc");
 
   const invoke = internals.invoke.bind(internals);
+  const clockNow = Date.now;
   // Every answer and event comes as its JSON text, parsed here (`json_response`, `event_script`): evaluated as a
   // JavaScript literal, a `__proto__` member would set the object's prototype instead of staying a key, as the web
   // broker keeps it (jsonValueOf).
   const parse = JSON.parse;
+  const stringify = JSON.stringify;
+  const encoder = new TextEncoder();
+  const utf8 = encoder.encode.bind(encoder);
   const jsonOf = (text) => {
     if (typeof text !== "string") return undefined;
     try { return parse(text); } catch (error) { return undefined; }
@@ -135,7 +147,10 @@ const RUNNER: &str = r#"<!doctype html>
   const send = (type, args) => {
     if (!isJson(args, 0)) return Promise.reject(refusal("bad-request"));
     const id = nextId++;
-    return broker({ id, type, args }).then((answer) => {
+    const request = { id, type, args };
+    // Over the broker's 64 KiB (MAX_REQUEST_BYTES) here: far over it, Tauri would drop the call unanswered.
+    if (utf8(stringify(request)).length > 65536) return Promise.reject(refusal("too-large"));
+    return broker(request).then((answer) => {
       if (!answer || typeof answer !== "object" || answer.id !== id) throw refusal("failed");
       if (answer.ok !== true) throw refusal(answer.error);
       return typeof answer.bytes === "string" ? bytesOf(answer.bytes) : answer.value;
@@ -178,6 +193,20 @@ const RUNNER: &str = r#"<!doctype html>
   // On Linux the window's filter goes in just after it is made: until then the broker says "Not ready".
   const begin = (tries) => broker({ type: "start" }).then((entry) => send("writing", []).then(() => {
     document.open();
+    // The person's taps and keys in this window never reach the Ghostly window, whose lock screen would lock them out
+    // of a game longer than its time: the runner says `activity` for a trusted one, at most every 5 seconds, which the
+    // broker counts while this window has the focus. Added before the app's code, which cannot name it to remove it;
+    // the app can say `activity` too, which counts only just after the system's own input here (`admit`).
+    let said = -Infinity;
+    const heard = (event) => {
+      if (event.isTrusted !== true) return;
+      const at = clockNow();
+      if (at - said < 5000 && at >= said) return;
+      said = at;
+      try { send("activity", []).catch(() => {}); } catch (error) {}
+    };
+    addEventListener("pointerdown", heard, true);
+    addEventListener("keydown", heard, true);
     document.write(entry);
     document.close();
   }, () => stop("broker")), (error) => {
@@ -342,8 +371,11 @@ struct AppWindow {
     recent: VecDeque<Instant>,
     /// Requests the Ghostly window's broker has not answered yet, by the app's id.
     pending: HashMap<u64, oneshot::Sender<Value>>,
-    /// What the window was refused (navigations and new windows), for the spike's measurements.
-    refused: Vec<String>,
+    /// When the system last gave the window's webview a tap or key (`heard_input`), which no script can make.
+    input: Option<Instant>,
+    /// What the window was refused (navigations and new windows), for the spike's measurements: the last
+    /// `MAX_REFUSED`, each at most `MAX_REFUSED_BYTES` of its URL.
+    refused: VecDeque<String>,
     /// Its first size.
     view: AppView,
 }
@@ -360,9 +392,23 @@ impl AppWindow {
             brokered,
             recent: VecDeque::new(),
             pending: HashMap::new(),
-            refused: Vec::new(),
+            input: None,
+            refused: VecDeque::new(),
             view: AppView::Chat,
         }
+    }
+
+    /// Notes a refusal: the oldest goes past `MAX_REFUSED`, and the URL is cut to `MAX_REFUSED_BYTES`.
+    fn refuse(&mut self, what: &str, to: &url::Url) {
+        let to = to.as_str();
+        let mut end = to.len().min(MAX_REFUSED_BYTES);
+        while !to.is_char_boundary(end) {
+            end -= 1;
+        }
+        if self.refused.len() == MAX_REFUSED {
+            self.refused.pop_front();
+        }
+        self.refused.push_back(format!("{what} {}", &to[..end]));
     }
 }
 
@@ -377,6 +423,22 @@ impl AppSandboxState {
     }
 }
 
+/// How long after the system's own tap or key in an app window its runner's `activity` still counts: the runner
+/// says it for that same input, so it comes within milliseconds; this leaves room for a busy main thread.
+const INPUT_FRESH: Duration = Duration::from_secs(2);
+
+/// The system gave the app window `label`'s webview a tap or key (GTK's or AppKit's own event, on the main thread),
+/// which a script in the page cannot make: its runner's `activity` counts for a moment (`admit`).
+#[cfg_attr(
+    any(test, not(any(target_os = "linux", target_os = "macos"))),
+    allow(dead_code)
+)]
+fn heard_input<R: Runtime>(app: &AppHandle<R>, label: &str) {
+    if let Some(state) = app.try_state::<AppSandboxState>() {
+        state.with(label, |window| window.input = Some(Instant::now()));
+    }
+}
+
 /// Whether `label` names an app window. Exactly the prefix and something after it.
 pub fn is_app_label(label: &str) -> bool {
     label.len() > LABEL_PREFIX.len()
@@ -384,6 +446,12 @@ pub fn is_app_label(label: &str) -> bool {
         && label[LABEL_PREFIX.len()..]
             .chars()
             .all(|c| c.is_ascii_alphanumeric())
+}
+
+/// The largest IPC message the webview `label` may post, for `tauri::ipc::set_post_message_limit`: an app
+/// window's is bounded, the Ghostly window's is not.
+pub fn message_limit(label: &str) -> Option<usize> {
+    is_app_label(label).then_some(MAX_MESSAGE_BYTES)
 }
 
 /// Whether `url` is the runner, in either spelling: `ghostly-app://localhost/` on macOS and Linux, and
@@ -506,6 +574,18 @@ fn window_title(title: &str) -> String {
 }
 
 /// The window, with every layer that does not depend on the platform.
+/// An app window's answer to a permission request: never the microphone, the camera, the screen or the location.
+fn capture_answer(kind: tauri::webview::PermissionKind) -> tauri::webview::PermissionResponse {
+    use tauri::webview::{PermissionKind, PermissionResponse};
+    match kind {
+        PermissionKind::Microphone
+        | PermissionKind::Camera
+        | PermissionKind::DisplayCapture
+        | PermissionKind::Geolocation => PermissionResponse::Deny,
+        _ => PermissionResponse::Default,
+    }
+}
+
 fn window_builder<'a, R: Runtime>(
     app: &'a AppHandle<R>,
     label: &str,
@@ -531,7 +611,7 @@ fn window_builder<'a, R: Runtime>(
                 .with(&nav_label, |window| {
                     let allowed = !window.guard.lock || may_navigate(to, window.started);
                     if !allowed {
-                        window.refused.push(format!("navigation {to}"));
+                        window.refuse("navigation", to);
                     }
                     allowed
                 })
@@ -541,13 +621,15 @@ fn window_builder<'a, R: Runtime>(
         .on_new_window(move |to, _| {
             new_app
                 .state::<AppSandboxState>()
-                .with(&new_label, |window| {
-                    window.refused.push(format!("new window {to}"))
-                });
+                .with(&new_label, |window| window.refuse("new window", &to));
             tauri::webview::NewWindowResponse::Deny
         })
         // Never a file saved by the window itself.
         .on_download(|_, event| crate::viewer::may_download(&event))
+        // No app permission covers capture or location: refused outright. Without an answer of ours the webview
+        // decides alone, and on macOS it grants the microphone and the camera with no question. Anything else keeps
+        // the platform's own answer (on Linux an unanswered request is how pointer lock works today).
+        .on_permission_request(|_, kind| capture_answer(kind))
         .inner_size(width, height);
     #[cfg(any(test, feature = "e2e-driver"))]
     if guard.proxy {
@@ -600,6 +682,8 @@ fn build_window<R: Runtime>(
     window
         .with_webview(move |platform| {
             let webview = platform.inner();
+            let (heard_app, heard_label) = (handle.clone(), label.clone());
+            webkitgtk::watch_input(&webview, move || heard_input(&heard_app, &heard_label));
             webkitgtk::harden(&webview, guard, internet, &store, move |result| {
                 let state = handle.state::<AppSandboxState>();
                 match result {
@@ -645,8 +729,20 @@ fn build_window<R: Runtime>(
                     builder.with_webview_configuration(webkit::configuration(guard, internet)?);
             }
             let window = builder.build().map_err(|e| format!("Window: {e}"))?;
+            // wry turns element full screen on as it builds the webview: off again, before the runner runs.
+            window
+                .with_webview(|platform| webkit::no_element_fullscreen(platform.inner()))
+                .map_err(|e| format!("Window: {e}"))?;
             // Mouse look: WKWebView gives the pointer lock only when asked (webkit::allow_pointer_lock).
             let _ = window.with_webview(|platform| webkit::allow_pointer_lock(platform.inner()));
+            let (heard_app, heard_label) = (handle.clone(), label.clone());
+            window
+                .with_webview(move |platform| {
+                    webkit::watch_input(platform.inner(), move || {
+                        heard_input(&heard_app, &heard_label)
+                    })
+                })
+                .map_err(|e| format!("Window: {e}"))?;
             Ok(())
         })();
         let _ = tx.send(built);
@@ -660,7 +756,7 @@ fn build_window<R: Runtime>(
 #[cfg_attr(not(feature = "e2e-driver"), allow(dead_code))]
 pub fn refused<R: Runtime>(app: &AppHandle<R>, label: &str) -> Option<Vec<String>> {
     app.state::<AppSandboxState>()
-        .with(label, |window| window.refused.clone())
+        .with(label, |window| window.refused.iter().cloned().collect())
 }
 
 /// Drops a window's state, and with it every request still waiting (each gets "No answer"). True when it had
@@ -744,7 +840,11 @@ pub fn handle<R: Runtime>(
         .header("x-content-type-options", "nosniff")
         .header("referrer-policy", "no-referrer")
         .header("x-dns-prefetch-control", "off")
-        .header("cache-control", "no-store");
+        .header("cache-control", "no-store")
+        .header(
+            "permissions-policy",
+            "camera=(), microphone=(), display-capture=(), geolocation=()",
+        );
     if guard.header {
         let policy = if internet { NET_RUNNER_CSP } else { RUNNER_CSP };
         response = response.header("content-security-policy", policy);
@@ -832,6 +932,16 @@ pub fn admit(
                             }
                             _ => Err("No broker".into()),
                         };
+                    }
+                    // The runner says `activity` for the person's trusted taps and keys, but the app shares its realm
+                    // and can call `app_broker` with it too. It reaches the lock screen only just after the system's
+                    // own input in this window (`heard_input`); otherwise it is answered here, and goes no further.
+                    if kind == Some("activity")
+                        && window
+                            .input
+                            .is_none_or(|at| now.saturating_duration_since(at) >= INPUT_FRESH)
+                    {
+                        return Ok(Admitted::Answer(json!({ "id": id, "ok": true })));
                     }
                     if window.pending.contains_key(&id) {
                         return Err("bad-request".into());
@@ -1229,6 +1339,95 @@ mod webkit {
         let _: () = unsafe { msg_send![webview, setUIDelegate: &*delegate] };
     }
 
+    /// An app window `watch_input` hears, by its `NSWindow`'s address, and what it calls on that window's input.
+    type Heard = (usize, Box<dyn Fn()>);
+
+    thread_local! {
+        /// The app windows `watch_input` hears, by their `NSWindow` (main thread only): a later window at the same
+        /// address takes its place, and one whose state is gone hears nothing (`heard_input`).
+        static WATCHED: RefCell<Vec<Heard>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// `heard` on every mouse-down or key-down AppKit is about to hand the web view's window, before the page gets
+    /// it: the system's input, which no script in the page can make (`heard_input`). One local monitor for the whole
+    /// app, added once; every event goes on as it came.
+    pub fn watch_input(webview: *mut std::ffi::c_void, heard: impl Fn() + 'static) {
+        let Some(webview) = (unsafe { (webview as *mut AnyObject).as_ref() }) else {
+            return;
+        };
+        let window: *mut AnyObject = unsafe { msg_send![webview, window] };
+        if window.is_null() {
+            crate::diagnostics::log("app window: no NSWindow, its input not heard");
+            return;
+        }
+        let first = WATCHED.with(|watched| {
+            let mut watched = watched.borrow_mut();
+            let first = watched.is_empty();
+            watched.retain(|(at, _)| *at != window as usize);
+            watched.push((window as usize, Box::new(heard)));
+            first
+        });
+        if !first {
+            return;
+        }
+        let Some(class) = AnyClass::get(c"NSEvent") else {
+            return;
+        };
+        // NSEventMask: left, right and other mouse down, key down.
+        let mask: u64 = (1 << 1) | (1 << 3) | (1 << 10) | (1 << 25);
+        let handler = block2::RcBlock::new(|event: *mut AnyObject| -> *mut AnyObject {
+            if let Some(event) = unsafe { event.as_ref() } {
+                let window: *mut AnyObject = unsafe { msg_send![event, window] };
+                WATCHED.with(|watched| {
+                    for (at, heard) in watched.borrow().iter() {
+                        if *at == window as usize {
+                            heard();
+                        }
+                    }
+                });
+            }
+            event
+        });
+        let monitor: Option<Retained<AnyObject>> = unsafe {
+            msg_send![class, addLocalMonitorForEventsMatchingMask: mask, handler: &*handler]
+        };
+        // AppKit keeps the monitor for as long as the app runs; it is never removed.
+        std::mem::forget(monitor);
+    }
+
+    /// Element full screen off in an app window: its title bar, with "(Ghostly)", stays. wry turns it on for every
+    /// webview it builds (macOS 12.3+), so this runs after the build, on the live preferences the configuration
+    /// shares (as `fullscreen::install` does to turn it on in the Ghostly window).
+    pub fn no_element_fullscreen(webview: *mut std::ffi::c_void) {
+        let Some(webview) = (unsafe { (webview as *mut AnyObject).as_ref() }) else {
+            return;
+        };
+        let configuration: Option<Retained<AnyObject>> =
+            unsafe { msg_send![webview, configuration] };
+        let preferences: Option<Retained<AnyObject>> =
+            configuration.and_then(|c| unsafe { msg_send![&*c, preferences] });
+        match preferences {
+            Some(preferences) => forbid_fullscreen(&preferences),
+            None => {
+                crate::diagnostics::log("app window: no preferences, full screen left as it is")
+            }
+        }
+    }
+
+    /// The public switch (macOS 12.3+) off, or on older WebKit the private key wry sets.
+    pub fn forbid_fullscreen(preferences: &AnyObject) {
+        let public: Bool = unsafe {
+            msg_send![preferences, respondsToSelector: objc2::sel!(setElementFullscreenEnabled:)]
+        };
+        if public.as_bool() {
+            let _: () = unsafe { msg_send![preferences, setElementFullscreenEnabled: Bool::NO] };
+        } else {
+            let no = objc2_foundation::NSNumber::new_bool(false);
+            let key = NSString::from_str("fullScreenEnabled");
+            let _: () = unsafe { msg_send![preferences, setValue: &*no, forKey: &*key] };
+        }
+    }
+
     /// Whether a web view shows the runner (`ghostly-app://`), which alone may hold the pointer.
     pub fn is_runner_view(webview: &AnyObject) -> bool {
         let url: Option<Retained<AnyObject>> = unsafe { msg_send![webview, URL] };
@@ -1310,6 +1509,21 @@ mod webkit {
     }
 }
 
+/// An app window's `WebKitSettings` on Linux. Never element full screen, whatever the guard: it would take the
+/// title bar, and with it "(Ghostly)", and WebKitGTK 2.50 aborts the whole app on it (`fullscreen.rs`).
+#[cfg(target_os = "linux")]
+fn app_settings(settings: &webkit2gtk::Settings, guard: Guard) {
+    use webkit2gtk::SettingsExt;
+    settings.set_enable_fullscreen(false);
+    if guard.prefs {
+        settings.set_enable_dns_prefetching(false);
+        settings.set_enable_webrtc(false);
+    }
+    if guard.webrtc {
+        settings.set_enable_webrtc(true);
+    }
+}
+
 /// The WebKitGTK side of an app window on Linux, the counterpart of `webkit`: a user content filter made from
 /// the same rule list (public API, required), and `WebKitSettings` for DNS prefetch and WebRTC (public API,
 /// best effort). WebKitGTK has no switch for `<link rel=preconnect>`: the filter is what is measured for it.
@@ -1319,7 +1533,7 @@ mod webkitgtk {
     use std::cell::RefCell;
     use std::path::Path;
     use webkit2gtk::glib::translate::{FromGlibPtrFull, ToGlibPtr};
-    use webkit2gtk::{ffi, gio, glib, SettingsExt, WebViewExt};
+    use webkit2gtk::{ffi, gio, glib, WebViewExt};
 
     /// A filter, kept with a reference of its own.
     struct Filter(*mut ffi::WebKitUserContentFilter);
@@ -1342,6 +1556,29 @@ mod webkitgtk {
         Ok(())
     }
 
+    /// `heard` on every tap, click or key GTK hands the webview itself, before the page gets it: the system's input,
+    /// which no script in the page can make (`heard_input`). The page still gets each one.
+    pub fn watch_input(webview: &webkit2gtk::WebView, heard: impl Fn() + 'static) {
+        use gtk::prelude::WidgetExt;
+        let heard = std::rc::Rc::new(heard);
+        let pressed = heard.clone();
+        webview.connect_button_press_event(move |_, _| {
+            pressed();
+            glib::Propagation::Proceed
+        });
+        let typed = heard.clone();
+        webview.connect_key_press_event(move |_, _| {
+            typed();
+            glib::Propagation::Proceed
+        });
+        webview.connect_touch_event(move |_, event| {
+            if event.event_type() == gtk::gdk::EventType::TouchBegin {
+                heard();
+            }
+            glib::Propagation::Proceed
+        });
+    }
+
     /// Settings now, the filter now or once it is made; then `done`.
     pub fn harden(
         webview: &webkit2gtk::WebView,
@@ -1351,13 +1588,7 @@ mod webkitgtk {
         done: impl FnOnce(Result<(), String>) + 'static,
     ) {
         if let Some(settings) = WebViewExt::settings(webview) {
-            if guard.prefs {
-                settings.set_enable_dns_prefetching(false);
-                settings.set_enable_webrtc(false);
-            }
-            if guard.webrtc {
-                settings.set_enable_webrtc(true);
-            }
+            super::app_settings(&settings, guard);
         }
         if !guard.rules {
             return done(Ok(()));
@@ -1678,6 +1909,45 @@ mod tests {
         }
     }
 
+    /// No microphone, camera, screen or location for an app: no app permission covers them. Without a handler wry
+    /// grants a capture on macOS with no question, so every app window carries one that refuses, and the runner is
+    /// served with a policy that turns the features off.
+    #[test]
+    fn an_app_window_never_captures() {
+        let source = include_str!("app_sandbox.rs");
+        let start = source.find("fn window_builder<").unwrap();
+        let body = &source[start..start + source[start..].find("\n}\n").unwrap()];
+        assert!(body.contains(".on_permission_request("), "window_builder");
+        use tauri::webview::{PermissionKind, PermissionResponse};
+        for kind in [
+            PermissionKind::Microphone,
+            PermissionKind::Camera,
+            PermissionKind::DisplayCapture,
+            PermissionKind::Geolocation,
+        ] {
+            assert!(matches!(capture_answer(kind), PermissionResponse::Deny));
+        }
+        assert!(matches!(
+            capture_answer(PermissionKind::PointerLock),
+            PermissionResponse::Default
+        ));
+        let app = app();
+        app.state::<AppSandboxState>()
+            .windows
+            .lock()
+            .unwrap()
+            .insert("app-1".into(), window("ana/chess", true, true));
+        let request = Request::builder()
+            .uri("ghostly-app://localhost/")
+            .body(Vec::new())
+            .unwrap();
+        let served = handle(app.handle(), "app-1", &request);
+        assert_eq!(
+            served.headers()["permissions-policy"],
+            "camera=(), microphone=(), display-capture=(), geolocation=()"
+        );
+    }
+
     #[test]
     fn the_policies_are_the_wisps() {
         for policy in [RUNNER_CSP, NET_RUNNER_CSP] {
@@ -1804,6 +2074,25 @@ mod tests {
         );
     }
 
+    /// An app window's IPC message is bounded before Tauri parses it, with room for the broker's largest request
+    /// in Tauri's envelope; the Ghostly window's is not. `run()` sets the bound before any window opens.
+    #[test]
+    fn an_app_windows_message_is_bounded_before_tauri_parses_it() {
+        let request = json!({"id": MAX_ID, "type": "storage.set", "args": ["k", "x".repeat(MAX_REQUEST_BYTES)]});
+        let message = json!({
+            "cmd": "app_broker", "callback": u32::MAX, "error": u32::MAX, "payload": {"request": request},
+            "options": {"headers": {}, "customProtocolIpcBlocked": true}, "__TAURI_INVOKE_KEY__": "k".repeat(64),
+        });
+        let limit = message_limit("app-0123456789abcdef").unwrap();
+        assert!(serde_json::to_vec(&message).unwrap().len() <= limit);
+        assert!(limit <= 256 * 1024, "parsed in a few milliseconds");
+        for label in ["main", "svc-1", "app-", "App-1", "xapp-1"] {
+            assert_eq!(message_limit(label), None, "{label}");
+        }
+        assert!(include_str!("lib.rs")
+            .contains("tauri::ipc::set_post_message_limit(app_sandbox::message_limit);"));
+    }
+
     /// WISP 1200: 50 requests a second per app, every call counted, refused ones too; the 51st inside the
     /// second is refused, and the window's next second is new. Another window has its own count.
     #[test]
@@ -1856,6 +2145,55 @@ mod tests {
             .unwrap_err(),
             "too-fast"
         );
+    }
+
+    /// The app can call `app_broker` itself and say `activity` with no one there: the Ghostly window hears it only
+    /// just after the window's webview had a tap or key from the system, which no script can make.
+    #[test]
+    fn activity_reaches_the_broker_only_after_the_systems_own_input() {
+        let state = state(&[("app-1", "ana/chess")]);
+        let start = Instant::now();
+        let at = |ms: u64| start + Duration::from_millis(ms);
+        assert!(admit(&state, "app-1", &json!({"type": "start"}), at(0)).is_ok());
+        let activity = |id: u64| json!({"id": id, "type": "activity", "args": []});
+        // Said by the app alone: answered here, and the broker never hears it.
+        let unheard = |id: u64, ms: u64, label: &str| {
+            let admitted = admit(&state, label, &activity(id), at(ms)).unwrap();
+            match admitted {
+                Admitted::Answer(answer) => assert_eq!(answer, json!({"id": id, "ok": true})),
+                other => panic!("{other:?}"),
+            }
+        };
+        unheard(1, 10, "app-1");
+        assert!(state.with("app-1", |w| w.pending.is_empty()).unwrap());
+        // Just after the system's own tap or key in the window, the runner's `activity` goes to the broker.
+        state.with("app-1", |w| w.input = Some(at(1_000)));
+        assert!(matches!(
+            admit(&state, "app-1", &activity(2), at(1_005)),
+            Ok(Admitted::Relay(2, _))
+        ));
+        // Long after it, the app's own does not, nor does input in another window count for this one.
+        unheard(3, 1_000 + INPUT_FRESH.as_millis() as u64, "app-1");
+        state.with("app-1", |w| w.input = None);
+        let other = state
+            .windows
+            .lock()
+            .unwrap()
+            .insert("app-2".into(), window("bob/snake", true, true));
+        assert!(other.is_none());
+        assert!(admit(&state, "app-2", &json!({"type": "start"}), at(3_000)).is_ok());
+        state.with("app-2", |w| w.input = Some(at(3_000)));
+        unheard(4, 3_010, "app-1");
+        // Any other request goes on as before.
+        assert!(matches!(
+            admit(
+                &state,
+                "app-1",
+                &json!({"id": 5, "type": "context", "args": []}),
+                at(3_020)
+            ),
+            Ok(Admitted::Relay(5, _))
+        ));
     }
 
     #[test]
@@ -2088,6 +2426,33 @@ mod tests {
         assert!(RUNNER.contains("delete window[name]"));
     }
 
+    /// Both runners say `activity` for the person's trusted taps and keys, so the lock screen counts input in an app,
+    /// and listen before the app's code runs (after `document.open`, which drops a window's listeners).
+    #[test]
+    fn the_runners_say_activity_for_trusted_taps_and_keys() {
+        let web = include_str!("../../web/public/app-frame.html");
+        for (name, runner) in [("desktop", RUNNER), ("web", web)] {
+            assert!(
+                runner.contains("if (event.isTrusted !== true) return;"),
+                "{name}"
+            );
+            assert!(runner.contains("send(\"activity\", [])"), "{name}");
+            for event in ["\"pointerdown\", heard, true", "\"keydown\", heard, true"] {
+                let at = runner
+                    .find(event)
+                    .unwrap_or_else(|| panic!("{name}: {event}"));
+                assert!(
+                    runner.find("document.open()").unwrap() < at,
+                    "{name}: {event}"
+                );
+            }
+        }
+        assert!(
+            RUNNER.find("\"keydown\", heard, true").unwrap()
+                < RUNNER.find("document.write(entry)").unwrap()
+        );
+    }
+
     #[test]
     fn apps_get_every_layer_and_the_driver_can_take_them_off_one_by_one() {
         assert_eq!(
@@ -2156,6 +2521,49 @@ mod tests {
                 "PeerConnectionEnabled",
             ]
         );
+    }
+
+    /// An app window never goes full screen on its own (WebKitGTK has `enable-fullscreen` on by default): its
+    /// title bar, with "(Ghostly)", stays, and WebKitGTK 2.50 does not abort the app (`fullscreen.rs`). Whatever
+    /// the guard: the test driver's windows too.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_app_window_on_linux_has_no_element_full_screen() {
+        use webkit2gtk::glib::translate::from_glib_full;
+        use webkit2gtk::SettingsExt;
+        // A WebKitSettings reads GTK's own settings, and GTK stops the process without a display (CI's runners).
+        if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
+            eprintln!("an_app_window_on_linux_has_no_element_full_screen: no display, not run");
+            return;
+        }
+        for guard in ["full", "full+webrtc", "control"] {
+            // A plain GObject: no display, so not `Settings::new`, which wants GTK started.
+            let settings: webkit2gtk::Settings =
+                unsafe { from_glib_full(webkit2gtk::ffi::webkit_settings_new()) };
+            assert!(settings.enables_fullscreen(), "WebKitGTK's default");
+            app_settings(&settings, Guard::parse(guard).unwrap());
+            assert!(!settings.enables_fullscreen(), "{guard}");
+        }
+    }
+
+    /// The same on macOS, where wry turns it on at build: what `webkit::no_element_fullscreen` does to a
+    /// window's preferences.
+    /// WebKit stops the process (SIGTRAP) when WKPreferences is made off the main thread, and the test harness runs
+    /// every test on a thread of its own: run it by hand only from a harness on the main thread. The app calls
+    /// `no_element_fullscreen` from `with_webview`, on the main thread.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "WKPreferences needs the main thread; libtest runs tests on others"]
+    fn an_app_window_on_macos_has_no_element_full_screen() {
+        use objc2::msg_send;
+        use objc2::rc::Retained;
+        use objc2::runtime::{AnyClass, AnyObject, Bool};
+        let class = AnyClass::get(c"WKPreferences").unwrap();
+        let preferences: Retained<AnyObject> = unsafe { msg_send![class, new] };
+        let _: () = unsafe { msg_send![&*preferences, setElementFullscreenEnabled: Bool::YES] };
+        webkit::forbid_fullscreen(&preferences);
+        let on: Bool = unsafe { msg_send![&*preferences, isElementFullscreenEnabled] };
+        assert!(!on.as_bool());
     }
 
     /// The runner's "Not ready" asks do not count against the app: a slow filter leaves it its 50.
@@ -2248,6 +2656,45 @@ mod tests {
         assert_eq!(refused(app.handle(), &label), Some(Vec::new()));
         forget_window(app.handle(), &label);
         assert_eq!(refused(app.handle(), &label), None);
+    }
+
+    /// An app that keeps asking to leave, with long URLs, while its window stays open: the window keeps only
+    /// the last `MAX_REFUSED` refusals, each cut to `MAX_REFUSED_BYTES` of its URL.
+    #[test]
+    fn what_a_window_was_refused_stays_bounded() {
+        let mut window = window("ana/chess", true, true);
+        window.started = true;
+        let long = format!("https://x.example/{}", "a".repeat(2 << 20));
+        let long: url::Url = long.parse().unwrap();
+        for i in 0..10_000 {
+            let what = if i % 2 == 0 {
+                "navigation"
+            } else {
+                "new window"
+            };
+            window.refuse(what, &long);
+        }
+        assert_eq!(window.refused.len(), MAX_REFUSED);
+        for entry in &window.refused {
+            assert!(
+                entry.len() <= "new window ".len() + MAX_REFUSED_BYTES,
+                "{}",
+                entry.len()
+            );
+            assert!(
+                entry.starts_with("navigation https://x.example/")
+                    || entry.starts_with("new window https://x.example/")
+            );
+        }
+        assert!(window.refused.back().unwrap().starts_with("new window "));
+        // A short one is kept whole.
+        let short: url::Url = "https://x.example/a".parse().unwrap();
+        window.refuse("navigation", &short);
+        assert_eq!(
+            window.refused.back().unwrap(),
+            "navigation https://x.example/a"
+        );
+        assert_eq!(window.refused.len(), MAX_REFUSED);
     }
 
     /// Opened again in a chat where it runs: its window comes to the front. Only an app window, and one gone is

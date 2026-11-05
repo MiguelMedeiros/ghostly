@@ -5,7 +5,7 @@ import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { SharePicker } from "../../pages/SharePicker";
 import { groupChat } from "../../lib/chatMute";
-import { incomingShare, receiveShare, resetIncomingShare, sendShareTo, shareText, takeShareFor, type IncomingShare } from "../../lib/incomingShare";
+import { incomingShare, receiveShare, resetIncomingShare, sendShareTo, sharePreview, shareText, takeShareFor, type IncomingShare } from "../../lib/incomingShare";
 import { saveSession, setSessionDraft } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
 import { engineState, fakeEngine, groupView } from "../fakeEngine";
@@ -30,6 +30,15 @@ describe("the text a share puts in the draft", () => {
     expect(shareText(share({ url: "https://a.example", title: "A page" }))).toBe("https://a.example");
     expect(shareText(share({ title: "Only a title" }))).toBe("Only a title");
     expect(shareText(share())).toBe("");
+  });
+
+  it("the picker previews the start of a long text, never half a character, and the draft gets it whole", () => {
+    expect(sharePreview(share({ text: "Look", url: "https://a.example" }))).toBe("Look\nhttps://a.example");
+    // A pair astride the preview's end is left out whole.
+    const text = `${"a".repeat(2047)}👻${"b".repeat(100_000)}`;
+    expect(sharePreview(share({ text }))).toBe(`${"a".repeat(2047)}…`);
+    expect(sharePreview(share({ text: `${"a".repeat(2046)}👻${"b".repeat(10)}` }))).toBe(`${"a".repeat(2046)}👻…`);
+    expect(shareText(share({ text })).length).toBe(102_049);
   });
 
   it("an empty share is dropped; a picked one waits for its chat's composer, once", () => {
@@ -318,6 +327,28 @@ describe("the Share to… picker", () => {
     expect(screen.getByTestId("share-no-room-title")).toHaveTextContent("No room on this device for: VID_1.mp4, VID_2.mp4");
     expect(screen.getByTestId("share-no-room-next")).toHaveTextContent("Free some space, then share it again.");
     expect(screen.queryByTestId("share-unread")).toBeNull();
+  });
+
+  it("a share past the three that can wait is never dropped without a word: the share shown says how many were not kept", async () => {
+    for (const text of ["one", "two", "three", "four", "five"]) receiveShare(share({ text }), { queue: true });
+    const { user } = picker();
+    expect(screen.getByTestId("share-text")).toHaveTextContent("one");
+    expect(screen.getByTestId("share-dropped-title")).toHaveTextContent("2 more shares couldn't be kept: 3 were already waiting.");
+    expect(screen.getByTestId("share-dropped-next")).toHaveTextContent("Send or cancel the ones waiting, then share the rest again.");
+    // Said once, with the share it came beside: the next one shown is the next share, nothing more.
+    await user.click(screen.getByTestId("share-cancel"));
+    expect(screen.getByTestId("share-text")).toHaveTextContent("two");
+    expect(screen.queryByTestId("share-dropped")).toBeNull();
+  });
+
+  it("shares the web app's worker could not keep before any reached the page are said too, one alone in its own words", () => {
+    // The worker held three already: a fourth was not kept, and it says so with the last it hands over.
+    receiveShare(share({ text: "one" }), { queue: true });
+    receiveShare(share({ text: "two", dropped: 1 }), { queue: true });
+    picker();
+    expect(screen.getByTestId("share-text")).toHaveTextContent("one");
+    expect(screen.getByTestId("share-dropped-title")).toHaveTextContent("1 more share couldn't be kept: 3 were already waiting.");
+    expect(incomingShare()?.dropped).toBe(1);
   });
 
   it("with nothing shared, it says so once it has waited", () => {

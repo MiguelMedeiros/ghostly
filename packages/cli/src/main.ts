@@ -2,22 +2,26 @@ import { spawn } from "node:child_process";
 import { connect } from "node:net";
 import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
-import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
-import { connectDaemon, isNotTheDaemon, type DaemonClient } from "./client";
-import { COMMANDS, idSlot, noMoreThan, positionals, TEXT_COMMANDS } from "./commands";
-import { here, inRange, since as sinceOf, timeout, translate } from "./commands/shared";
+import { GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, type OptionSpec, type Parsed } from "./args";
+import { connectDaemon, DaemonClient, isNotTheDaemon } from "./client";
+import { childEnv, dropSecretEnv } from "./childEnv";
+import { COMMANDS, idSlot, noMoreThan, positionals, takesText, TEXT_COMMANDS } from "./commands";
+import { here, inRange, INPUT_BYTES, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS } from "./engineMethods";
 import { asCliError, CliError, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import { jsonOut } from "./jsonOut";
+import { ownProfile } from "./privateFolder";
+import { waitNotice, waitsFor, type WaitNotice } from "./waitNotice";
 import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, readCursor } from "./listen";
 import { format } from "node:util";
-import { completeWithPipedEvidence, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, textFromStdin } from "./secretInput";
+import { completeWithPipedEvidence, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, settingValue, textFromStdin } from "./secretInput";
 import type { Translator } from "./translate";
 import {
   checkProfileName, checkShownName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
+  startingDaemon,
   type ProfilePaths,
 } from "./profiles";
 
@@ -80,8 +84,11 @@ function knownProfile(g: Globals): void {
   if (g.profile !== DEFAULT_PROFILE && !profileExists(g.home, g.profile)) throw noProfile(g);
 }
 
-/** A way to call the API: the daemon's socket when one runs the profile, else the profile in this process. */
-interface Session { mode: "daemon" | "one-shot"; call(method: string, params?: unknown): Promise<unknown>; close(): Promise<void> }
+/**
+ * A way to call the API: the daemon's socket when one runs the profile, else the profile in this process. `abort` is
+ * Ctrl-C's way out: the daemon's connection dropped at once, a one-shot's profile closed (its lock released).
+ */
+interface Session { mode: "daemon" | "one-shot"; call(method: string, params?: unknown): Promise<unknown>; close(): Promise<void>; abort(): Promise<void> }
 
 /** `1.2.3`, with an optional `v`, an optional `-beta.1` prerelease and an optional `+build` that never orders. */
 const RELEASE = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
@@ -156,11 +163,22 @@ function settlesWithin(promise: Promise<unknown>, ms: number): Promise<boolean> 
  * waited for the next minute (60 s and more instead of 3 to 5).
  */
 export function chatOnly(method: string, params: Record<string, unknown>): boolean {
-  // A status card's `chat` may name a group as well (WISP 405 · Status Cards): its sessions must start.
-  if (method.startsWith("task.") || method.startsWith("routine.") || method.startsWith("button.")) return false;
-  // A usage report to every 1:1 chat (`--all`) needs no group; one to a named chat may name a group.
+  // A usage report to every 1:1 chat (`--all`) needs no group.
   if (method === "usage.send") return params.all === true;
+  if (chatOrGroup(method, params)) return false;
   return method.startsWith("chat.") || (params.chat !== undefined && params.group === undefined && !method.startsWith("group."));
+}
+
+/** A command whose `chat` may name a group as well: a one-shot for it starts the groups' sessions. */
+function chatOrGroup(method: string, params: Record<string, unknown>): boolean {
+  // A status card's or a button's (WISP 405 · Status Cards), and a usage report's to a named chat.
+  if (method.startsWith("task.") || method.startsWith("routine.") || method.startsWith("button.") || method === "usage.send") return true;
+  // So may `message delete --everyone`'s: a group's removal goes over its members' edges, which a one-shot that left
+  // the groups unstarted never opened (it waited its whole timeout, and the members kept the message).
+  if (method === "chat.delete" && params.everyone === true) return true;
+  // And `pin`'s and `forward --to`'s: a group's pin or forwarded copy goes over the same edges (the pin never went,
+  // and a forward's wait could only time out).
+  return method === "chat.pin" || method === "chat.forward";
 }
 
 /**
@@ -171,6 +189,17 @@ export function chatOnly(method: string, params: Record<string, unknown>): boole
  */
 export function newChatOnly(method: string): boolean {
   return method === "invite.create" || method === "invite.join";
+}
+
+/**
+ * A command about the 1:1 chat it names, or one that makes or joins a new chat (`newChatOnly`): a one-shot for it leaves
+ * the other saved chats unstarted too, and starts only the chat a call names (`startNamedChats`). Started, each saved
+ * chat put its records and its leave packet on the relays: with 12 invites saved one `send` took the relays' 30
+ * requests a minute, and a text to a contact who is away, or the next one-shot, waited behind them. So does a command
+ * whose chat may name a group (`chatOrGroup`: a bot's `task send`): the groups start for it, the other 1:1 chats do not.
+ */
+export function oneChatOnly(method: string, params: Record<string, unknown>): boolean {
+  return newChatOnly(method) || ((chatOnly(method, params) || chatOrGroup(method, params)) && typeof params.chat === "string");
 }
 
 /**
@@ -230,63 +259,68 @@ export function answerWithin(method: string, params: Record<string, unknown>): n
   return undefined;
 }
 
-/**
- * The seconds a call without `--timeout` waits for the contact: the daemon's defaults (`num(params, "timeout", …)` in
- * api.ts, files.ts, buttons.ts and statusCards.ts), so that a bot's `chat wait` or `send --wait sent` on a daemon that
- * stopped answering ends when the wait would have. A call that does not wait is none.
- */
-function waitsFor(method: string, params: Record<string, unknown>): number | undefined {
-  if (method === "chat.wait") return 60;
-  if (method === "file.wait" || (method === "file.save" && params.wait === true)) return 300;
-  // send, edit, forward, a button, a task or routine card: `--wait sent|confirmed|delivered`, 30 s each.
-  if (typeof params.wait === "string" && params.wait !== "none") return 30;
-  return undefined;
-}
-
 async function session(g: Globals, options: RuntimeOptions): Promise<Session> {
   requireProfile(g);
   const client = await connectDaemon(g.paths);
-  if (client) {
-    // The version check goes on the same connection as the command, ahead of it, not before it, and with no deadline
-    // of its own: a daemon that does not answer costs the command its own deadline and nothing else (a read gave up
-    // after 30 s, not 15; then every command gave up at the check's 15 s, whatever its own). `close` waits for the
-    // check's answer: a daemon that answered the command answered the check sent before it.
-    const warned = warnVersion(client);
-    const call = async (m: string, p?: unknown): Promise<unknown> => {
-      const timeoutMs = answerWithin(m, (p ?? {}) as Record<string, unknown>);
-      // A call with no deadline of its own (a send, a rename, an invite) goes only once the check is answered: a daemon
-      // that has not answered `status` in 15 s does not answer, and the call, never written, cannot happen when it
-      // wakes (a daemon stopped with Ctrl+Z reads its socket again on SIGCONT). It used to wait for ever with no word.
-      if (timeoutMs === undefined && !await settlesWithin(warned, ANSWER_MS)) {
-        client.destroy();
-        throw new CliError("timeout", `The daemon did not answer in ${ANSWER_MS / 1000} s; nothing was done: \`ghostly daemon restart\` starts a fresh one`, { method: m });
-      }
-      return client.call(m, p, { timeoutMs });
-    };
-    return { mode: "daemon", call, close: async () => { await warned; client.close(); } };
-  }
-  const [, { callApi }] = await Promise.all([engineHost(), engineApi()]);
+  if (client) return throughDaemon(client);
+  const [, { callApi, startNamedChats }] = await Promise.all([engineHost(), engineApi()]);
   const host = await openOneShot(g, options);
-  return { mode: "one-shot", call: (m, p) => callApi(host.ctx, m, p ?? {}), close: () => host.close() };
+  if (host instanceof DaemonClient) return throughDaemon(host);
+  const call = (m: string, p?: unknown) => {
+    if (options.deferChats && p && typeof p === "object") startNamedChats(host.ctx, p as Record<string, unknown>);
+    return callApi(host.ctx, m, p ?? {});
+  };
+  return { mode: "one-shot", call, close: () => host.close(), abort: () => host.close() };
+}
+
+function throughDaemon(client: DaemonClient): Session {
+  // The version check goes on the same connection as the command, ahead of it, not before it, and with no deadline
+  // of its own: a daemon that does not answer costs the command its own deadline and nothing else (a read gave up
+  // after 30 s, not 15; then every command gave up at the check's 15 s, whatever its own). `close` waits for the
+  // check's answer: a daemon that answered the command answered the check sent before it.
+  const warned = warnVersion(client);
+  const call = async (m: string, p?: unknown): Promise<unknown> => {
+    const timeoutMs = answerWithin(m, (p ?? {}) as Record<string, unknown>);
+    // A call with no deadline of its own (a send, a rename, an invite) goes only once the check is answered: a daemon
+    // that has not answered `status` in 15 s does not answer, and the call, never written, cannot happen when it
+    // wakes (a daemon stopped with Ctrl+Z reads its socket again on SIGCONT). It used to wait for ever with no word.
+    if (timeoutMs === undefined && !await settlesWithin(warned, ANSWER_MS)) {
+      client.destroy();
+      throw new CliError("timeout", `The daemon did not answer in ${ANSWER_MS / 1000} s; nothing was done: \`ghostly daemon restart\` starts a fresh one`, { method: m });
+    }
+    return client.call(m, p, { timeoutMs });
+  };
+  return { mode: "daemon", call, close: async () => { await warned; client.close(); }, abort: async () => { client.destroy(); } };
 }
 
 /** How long a one-shot waits for another process to let go of the profile: a one-shot leaves in well under a second. */
 const HOLDER_WAIT_MS = 5_000;
+/** How long it waits for the profile's daemon that is starting (`startingDaemon`): its engine takes seconds on a large profile. */
+const STARTING_WAIT_MS = 30_000;
 
 /**
  * Opens the profile in this process for a one-shot command. Another one that holds it (a script's `&`, a second
  * terminal) is waited for: both used to fail at once, and a backgrounded send was lost unless the script checked its
- * exit code. One still holding it after HOLDER_WAIT_MS is answered with the next step.
+ * exit code. One still holding it after HOLDER_WAIT_MS is answered with the next step. A daemon takes the profile before
+ * its socket listens (its engine starts in between, seconds on a large profile): once one answers there, the command
+ * goes through it, its client the answer. Only the lock was looked at again, and a command run while the daemon started
+ * failed busy, told to start the daemon that was running. A daemon that marked its start is waited for up to
+ * STARTING_WAIT_MS, and named as the holder. A `listen` with no daemon opens it the same way, as the daemon (`mode`).
  */
-async function openOneShot(g: Globals, options: RuntimeOptions = {}): Promise<Host> {
+async function openOneShot(g: Globals, options: RuntimeOptions = {}, mode: Host["ctx"]["mode"] = "one-shot"): Promise<Host | DaemonClient> {
   const { openHost } = await engineHost();
-  const until = Date.now() + HOLDER_WAIT_MS;
+  const from = performance.now();
   for (;;) {
-    try { return await openHost(g.paths, "one-shot", VERSION, options); }
+    try { return await openHost(g.paths, mode, VERSION, options); }
     catch (error) {
       if (!(error instanceof CliError) || error.code !== "busy") throw error;
-      const left = until - Date.now();
+      // Read before the socket is tried: a daemon whose socket listens in between is found by the try.
+      const starting = startingDaemon(g.paths);
+      const client = await connectDaemon(g.paths);
+      if (client) return client;
+      const left = from + (starting === null ? HOLDER_WAIT_MS : STARTING_WAIT_MS) - performance.now();
       if (left <= 0) {
+        if (starting !== null) throw new CliError("busy", `Profile ${g.profile} is in use by its daemon (process ${starting}), which was still starting after ${STARTING_WAIT_MS / 1000} s: ghostly daemon status shows when it is up`, { pid: starting });
         const pid = error.details?.pid;
         throw new CliError("busy", `Profile ${g.profile} is in use by ${pid ? `process ${pid}, another ghostly command,` : "another ghostly command"} and was not free after ${HOLDER_WAIT_MS / 1000} s: run the commands one after another, or start \`ghostly daemon --detach\` so they can run at once`, error.details);
       }
@@ -297,12 +331,63 @@ async function openOneShot(g: Globals, options: RuntimeOptions = {}): Promise<Ho
 
 /**
  * How a one-shot opens the profile: `deferGroups` when the command is about one 1:1 chat (`chatOnly`) and needs
- * nothing of the groups, `deferChats` too when it makes a new chat (`newChatOnly`), `offline` when it only reads or
- * changes only this device (`offlineCall`).
+ * nothing of the groups, `deferChats` too when it names that chat or makes or joins a new one (`oneChatOnly`), `offline`
+ * when it only reads or changes only this device (`offlineCall`).
  */
 async function withSession<T>(g: Globals, work: (s: Session) => Promise<T>, options: RuntimeOptions = {}): Promise<T> {
   const s = await session(g, options);
-  try { return await work(s); } finally { await s.close(); }
+  const stops = interruptible(s);
+  try { return await stops.run(work); } finally { await s.close(); stops.off(); }
+}
+
+/** How long a wait goes on before a terminal is told what it waits for: a command done by then says nothing. */
+export const WAIT_NOTICE_MS = 1_000;
+/** How long Ctrl-C gives the profile to close before the command leaves anyway (a second Ctrl-C leaves at once). */
+const INTERRUPT_CLOSE_MS = 10_000;
+
+/**
+ * Ctrl-C while a session's command runs (agents#2354): the command stops where it is, a one-shot's profile closes (its
+ * lock released, as `daemon` does in `stopper`), one line on stderr says what became of what it waited on, stdout has
+ * the `interrupted` error, and the exit is 130. Killed by SIGINT, it said nothing, left `daemon.lock` behind, and the
+ * person did not learn that the message still goes (and sent it again). Ctrl-C once the work is done (the profile
+ * closing) only lets the answer out. A wait that goes on past WAIT_NOTICE_MS says what it waits for, on a terminal only:
+ * stderr of a bot's pipe stays clean.
+ */
+function interruptible(s: Session): { run<T>(work: (s: Session) => Promise<T>): Promise<T>; off(): void } {
+  let interrupted = false, done = false, left = false;
+  const pending = new Set<{ method: string; notice: WaitNotice | null }>();
+  const onSignal = () => {
+    if (interrupted) process.exit(EXIT.interrupted);
+    interrupted = true;
+    if (done) return;
+    const [first] = pending, waiting = [...pending].find((call) => call.notice)?.notice;
+    const words = waiting ? `stopped waiting (Ctrl-C): ${waiting.stopped}` : "stopped (Ctrl-C) before the command answered";
+    const leave = () => {
+      if (left) return;
+      left = true;
+      process.stderr.write(`ghostly: ${words}\n`);
+      print({ error: new CliError("interrupted", words[0].toUpperCase() + words.slice(1), first ? { method: first.method } : undefined).toJSON() });
+      exit(EXIT.interrupted);
+    };
+    setTimeout(leave, INTERRUPT_CLOSE_MS).unref();
+    void s.abort().catch(() => {}).then(leave);
+  };
+  process.on("SIGINT", onSignal);
+  // Once interrupted, what the work answers late is nobody's: the command leaves with its own answer.
+  const held = <T>(promise: Promise<T>): Promise<T> => new Promise<T>((resolve, reject) => {
+    promise.then((value) => { if (!interrupted || done) resolve(value); }, (error: unknown) => { if (!interrupted || done) reject(error); });
+  });
+  const call = (method: string, params?: unknown): Promise<unknown> => {
+    const entry = { method, notice: waitNotice(method, (params ?? {}) as Record<string, unknown>, s.mode) };
+    pending.add(entry);
+    const notice = entry.notice;
+    const timer = notice && process.stderr.isTTY ? setTimeout(() => process.stderr.write(`ghostly: ${notice.waiting}\n`), WAIT_NOTICE_MS) : undefined;
+    return held(s.call(method, params).finally(() => { clearTimeout(timer); pending.delete(entry); }));
+  };
+  return {
+    run: (work) => held(work({ ...s, call }).finally(() => { if (!interrupted) done = true; })),
+    off: () => { process.off("SIGINT", onSignal); },
+  };
 }
 
 /**
@@ -319,9 +404,21 @@ export async function oneShotJoinWait(s: Pick<Session, "call">, result: Record<s
   return { answer, note: `Not paired yet: the inviter's app is offline. It pairs when both are online: keep this profile running (ghostly daemon --detach), then ghostly chat wait ${ref} --until paired` };
 }
 
+/**
+ * Stdin up to `INPUT_BYTES` (commands/shared.ts, as `readInput` reads it where a command reads it at once); more is refused as it comes. It was read to its end first: `send bob --stdin < big.log`
+ * with 1 GiB took 3 GB and answered V8's "Cannot create a string longer than 0x1fffffe8 characters", 128 MiB to
+ * `settings set nick -` ran the CLI out of memory, an endless pipe never ended, and past 16 MiB a daemon cut the line,
+ * answered "The daemon went away".
+ */
 async function readStdin(onData?: () => void): Promise<string> {
   const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) { onData?.(); chunks.push(chunk as Buffer); }
+  let bytes = 0;
+  for await (const chunk of process.stdin) {
+    onData?.();
+    bytes += (chunk as Buffer).length;
+    if (bytes > INPUT_BYTES) throw new CliError("bad_request", STDIN_TOO_BIG);
+    chunks.push(chunk as Buffer);
+  }
   return Buffer.concat(chunks).toString("utf8");
 }
 
@@ -331,11 +428,11 @@ const o = (type: OptionSpec["type"], description: string): OptionSpec => ({ type
 
 /** Commands with their own flow (main.ts), as help shows them. */
 const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionSpec>][] = [
-  ["profile create <name> [--use] [--name <shown name>]", "Make a profile (its own keys, chats and wallets)", { use: o("boolean", "Make it the current profile"), name: o("string", "The name contacts see") }],
+  ["profile create <name> [--use] [--name <shown name>]", "Make a profile (its own keys, chats and wallets)", { use: o("boolean", "Make it the current profile"), name: o("string", "The name contacts see"), force: o("boolean", "Use --name even if it looks like a seed, a key or ecash") }],
   ["profile list", "Profiles, and which one is current"],
   ["profile use <name>", "Make a profile the current one"],
   ["profile show", "The name contacts see, and whether it is shared"],
-  ["profile set [--name <name>] [--share-profile | --no-share-profile]", "Change the name contacts see", { name: o("string", "The name contacts see"), "share-profile": o("boolean", "Share the name and picture with contacts (--no-share-profile: do not)") }],
+  ["profile set [--name <name>] [--share-profile | --no-share-profile]", "Change the name contacts see", { name: o("string", "The name contacts see"), "share-profile": o("boolean", "Share the name and picture with contacts (--no-share-profile: do not)"), force: o("boolean", "Use --name even if it looks like a seed, a key or ecash") }],
   ["profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]", "A backup of the profile, encrypted with a passphrase (from a file or GHOSTLY_BACKUP_PASSPHRASE); --no-passphrase makes one anyone can read", { out: o("string", "The backup file to write"), "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), passphrase: { ...o("boolean", "Do not encrypt. The file then holds the profile's keys and wallet secrets in the clear"), negatedOnly: true }, light: o("boolean", "Leave out files over 1 MB (voice messages over 4 MB); their messages stay") }],
   ["profile restore <file> <new profile> [--passphrase-file f] [--use]", "A backup into a new profile (a backup made with --no-passphrase needs none)", { "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), use: o("boolean", "Make it the current profile") }],
   ["daemon [--detach] [--timeout s]", "Keep the profile online (foreground; --detach runs it in the background)", { detach: o("boolean", "Run in the background (log in the profile folder)"), timeout: o("number", "Seconds it waits for a command that holds the profile, and --detach for it to start (default 60)") }],
@@ -353,7 +450,7 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
     translate,
   }],
   ["settings get [--show-secret]", "The profile's settings", { "show-secret": o("boolean", "Show credentials too") }],
-  ["settings set <key> <json-value>", "Change one: relays, irohRelays, hyperdhtRelay, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, nick"],
+  ["settings set <key> <json-value>", "Change one: relays, irohRelays, hyperdhtRelay, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, nick. <json-value> - (or none, piped) reads it from stdin: a TURN password stays out of ps", { force: o("boolean", "Set a nick even if it looks like a seed, a key or ecash") }],
   ["engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes] [--force]", "Any call of the app's engine, with its own parameters (engine --list --verbose names them)", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets"), yes: o("boolean", "Confirm a call that deletes chats or groups"), force: o("boolean", "Send a text that looks like a secret") }],
   ["engine --list [--verbose]", "The engine's calls", { verbose: o("boolean", "With what each call takes: { linkId, label }, ? for an optional one") }],
   ["call pipe [<chat|call>]", "A call's audio on stdin/stdout: raw s16le mono PCM at the call's rate (e.g. with sox or ffmpeg)"],
@@ -384,7 +481,65 @@ function beside(rows: [string, string][], more: [string, string][]): [string, st
   return out;
 }
 
-function help(): string {
+/**
+ * The width the help is laid out to: $COLUMNS, else the terminal's when stdout is one (80 when it says nothing), else
+ * none: piped, each row stays one line for grep. At a fixed 58-column usage, 170 of the 195 lines of `ghostly help` passed
+ * 80 columns, and an 80-column terminal broke every summary mid-word into column 0.
+ */
+function helpColumns(): number | undefined {
+  const given = Number(process.env.COLUMNS);
+  if (Number.isInteger(given) && given > 0) return given;
+  return process.stdout.isTTY ? process.stdout.columns || 80 : undefined;
+}
+
+/** `prefix`, then `text`'s words in lines of at most `columns` (a longer word alone), each after the first `indent` in. */
+function wrap(prefix: string, text: string, columns: number, indent: number): string[] {
+  const lines: string[] = [];
+  let line = prefix, started = false;
+  for (const word of text.trim().match(/\S+ */g) ?? []) {
+    if (started && (line + word.trimEnd()).length > columns) { lines.push(line.trimEnd()); line = " ".repeat(indent); }
+    line += word;
+    started = true;
+  }
+  return [...lines, line.trimEnd()];
+}
+
+/** Lines of text as written, or, laid out to `columns` and one of them wider, as one paragraph wrapped at their indent. */
+function paragraph(lines: string[], columns: number | undefined): string[] {
+  if (columns === undefined || lines.every((line) => line.length <= columns)) return lines;
+  const indent = lines[0].length - lines[0].trimStart().length;
+  return wrap(" ".repeat(indent), lines.join(" "), columns, indent);
+}
+
+/**
+ * A help row: `label` (a usage or an option, with its indent), its `text` from column `at`, or under the label when the
+ * label takes that room. Laid out to `columns`, the text wraps at its column; with under 40 columns left for it (an
+ * 80-column terminal beside the 58 of a usage), it goes under its label, 2 further in.
+ */
+function helpRow(label: string, text: string, at: number, columns: number | undefined): string[] {
+  const long = label.length > at - 2;
+  if (columns === undefined) return [long ? `${label}\n${" ".repeat(at)}${text}` : label.padEnd(at) + text];
+  const indent = label.length - label.trimStart().length;
+  const labelLines = wrap(" ".repeat(indent), label, columns, indent + 4);
+  if (columns - at < 40) return [...labelLines, ...wrap(" ".repeat(indent + 2), text, columns, indent + 2)];
+  if (long) return [...labelLines, ...wrap(" ".repeat(at), text, columns, at)];
+  return wrap(label.padEnd(at), text, columns, at);
+}
+
+/**
+ * What `ghostly` says first in a Ghostly folder with no profile yet: where to start, as the README's "Five minutes"
+ * does, before the whole list. `$ ` keeps the lines apart from the list's commands.
+ */
+const FIRST_STEPS = [
+  "First steps:",
+  "  $ ghostly invite create --label alice   make an invite for a contact",
+  "  $ ghostly invite join -                 join one (pasted on stdin)",
+  "  $ ghostly daemon --detach               keep the profile online",
+  "  $ ghostly help <command>                one command and its options",
+];
+
+function help(firstSteps = false): string {
+  const columns = helpColumns();
   const rows: [string, string][] = [
     ...beside([
       ...SPECIAL.slice(0, 7).map(([usage, summary]) => [usage, summary] as [string, string]),
@@ -397,26 +552,31 @@ function help(): string {
   ];
   const width = 58;
   return [
-    `ghostly ${VERSION}: Ghostly for bots and terminals, the app's own engine without a screen.`,
+    ...paragraph([`ghostly ${VERSION}: Ghostly for bots and terminals, the app's own engine without a screen.`], columns),
     "",
-    "Usage: ghostly <command> [options]   (JSON on stdout; errors as {\"error\":{code,message}} with an exit code)",
+    ...(firstSteps ? [...FIRST_STEPS, ""] : []),
+    ...paragraph(["Usage: ghostly <command> [options]   (JSON on stdout; errors as {\"error\":{code,message}} with an exit code)"], columns),
     "",
-    ...rows.map(([usage, summary]) => `  ${usage.length > width ? usage + "\n  " + " ".repeat(width) : usage.padEnd(width)}  ${summary}`),
+    ...rows.flatMap(([usage, summary]) => helpRow(`  ${usage}`, summary, width + 4, columns)),
     "",
     "Options for every command:",
-    ...Object.entries(GLOBAL_OPTIONS).map(([name, o]) => `  --${name}${o.short ? `, -${o.short}` : ""}`.padEnd(24) + o.description),
+    ...Object.entries(GLOBAL_OPTIONS).flatMap(([name, o]) => helpRow(`  --${name}${o.short ? `, -${o.short}` : ""}`, o.description, 24, columns)),
     "",
-    "A <chat> is its id, a unique prefix of it, or its name; a <group> the same. Exit codes: 0 done, 1 failed,",
-    "2 usage, 3 not found, 4 timed out, 5 needs --force/--yes/--confirm-real.",
-    "More: https://ghostly.tools/cli, or the README.md beside this CLI.",
+    ...paragraph([
+      "A <chat> is its id, a unique prefix of it, or its name; a <group> the same. Exit codes: 0 done, 1 failed,",
+      "2 usage, 3 not found, 4 timed out, 5 needs --force/--yes/--confirm-real, 130 stopped with Ctrl-C.",
+    ], columns),
+    ...paragraph(["More: https://ghostly.tools/cli, or the README.md beside this CLI."], columns),
   ].join("\n");
 }
 
+const EVERY_COMMAND = "Options for every command: --profile, -p <name>  --home <dir>  --pretty  --help, -h";
+
 /** What `ghostly help help` answers. */
-const HELP_USAGE = [
+const helpUsage = (columns: number | undefined) => [
   "Usage: ghostly help [<command>...]", "",
-  "  Help for every command, or for one command or a group of them (also ghostly <command> --help)", "",
-  "Options for every command: --profile, -p <name>  --home <dir>  --pretty  --help, -h",
+  ...paragraph(["  Help for every command, or for one command or a group of them (also ghostly <command> --help)"], columns), "",
+  ...paragraph([EVERY_COMMAND], columns),
 ].join("\n");
 
 /** Every command's help row: usage, summary and, for the table and text commands, their options. */
@@ -444,14 +604,15 @@ function commandWords(usage: string): string[] {
  */
 export function commandHelp(words: readonly string[]): string {
   // `help` is no command of the tables: its own usage, rather than "Unknown command: help".
-  if (words[0] === "help") return HELP_USAGE;
+  const columns = helpColumns();
+  if (words[0] === "help") return helpUsage(columns);
   const named = (list: readonly string[]) => helpRows().filter((row) => { const own = commandWords(row.usage); return list.every((word, i) => own[i] === word); });
   // Arguments after the command's words (`ghostly send bob hi --help`) are not part of its name.
   const given = words;
   let rows = named(words);
   while (!rows.length && words.length > 1) rows = named(words = words.slice(0, -1));
   const asked = words.join(" ");
-  if (!rows.length) throw new CliError("usage", `Unknown command: ${asked || '""'} (ghostly help)`);
+  if (!rows.length) throw unknownCommand(given[0], given[1], given[2]);
   const exact = rows.filter((row) => commandWords(row.usage).join(" ") === asked);
   // Words dropped down to a group, not a command (`help chat histroy`): a word the group does not take, as `chat histroy`
   // says, not the group's list with exit 0.
@@ -460,29 +621,29 @@ export function commandHelp(words: readonly string[]): string {
   // The command asked for first, also when others extend its words (`daemon`, then `daemon stop`…): before, `daemon`'s
   // own options were shown nowhere.
   for (const row of exact) {
-    lines.push(`Usage: ghostly ${row.usage}`, "", `  ${row.summary}`);
+    lines.push(...(columns === undefined ? [`Usage: ghostly ${row.usage}`] : wrap("Usage: ghostly ", row.usage, columns, 4)), "", ...paragraph([`  ${row.summary}`], columns));
     const options = Object.entries(row.options ?? {}).filter(([, o]) => o.description);
     if (options.length) {
       lines.push("", "Options:");
       const labels = options.map(([name, o]) => `  --${o.negatedOnly ? "no-" : ""}${name}${o.type === "boolean" ? "" : ` <${o.type === "number" ? "n" : "value"}>`}`);
       // At least two spaces between an option and its text, however long the option.
       const width = Math.max(26, ...labels.map((label) => label.length + 2));
-      options.forEach(([, o], i) => lines.push(labels[i].padEnd(width) + o.description));
+      options.forEach(([, o], i) => lines.push(...helpRow(labels[i], o.description, width, columns)));
     }
     // A text that starts with a dash goes after `--`, and so does everything else on the line.
     if (Object.values(TEXT_COMMANDS).includes(row as (typeof TEXT_COMMANDS)[string]))
-      lines.push("", "  -- ends the options: everything after it is the text, options included (\"-- -1 --wait sent\" sends", "  all of it). Put options before --.");
+      lines.push("", ...paragraph(["  -- ends the options: everything after it is the text, options included (\"-- -1 --wait sent\" sends", "  all of it). Put options before --."], columns));
     lines.push("");
   }
   const rest = rows.filter((row) => !exact.includes(row));
   if (rest.length) {
     const width = Math.min(58, Math.max(...rest.map((row) => row.usage.length)));
     const count = `${rest.length}${exact.length ? " more" : ""} command${rest.length === 1 ? "" : "s"}`;
-    lines.push(`ghostly ${asked}: ${count} (ghostly help ${asked} <command> for one)`, "");
-    for (const row of rest) lines.push(`  ${row.usage.length > width ? row.usage + "\n  " + " ".repeat(width) : row.usage.padEnd(width)}  ${row.summary}`);
+    lines.push(...paragraph([`ghostly ${asked}: ${count} (ghostly help ${asked} <command> for one)`], columns), "");
+    for (const row of rest) lines.push(...helpRow(`  ${row.usage}`, row.summary, width + 4, columns));
     lines.push("");
   }
-  lines.push("Options for every command: --profile, -p <name>  --home <dir>  --pretty  --help, -h");
+  lines.push(...paragraph([EVERY_COMMAND], columns));
   return lines.join("\n");
 }
 
@@ -490,12 +651,12 @@ export function commandHelp(words: readonly string[]): string {
 
 async function profileCommand(sub: string | undefined, argv: string[]): Promise<void> {
   const specs: Record<string, Record<string, OptionSpec>> = {
-    create: { use: { type: "boolean", description: "" }, name: { type: "string", description: "" } },
+    create: { use: { type: "boolean", description: "" }, name: { type: "string", description: "" }, force: { type: "boolean", description: "" } },
     backup: { out: { type: "string", description: "" }, "passphrase-file": { type: "string", description: "" }, passphrase: { type: "boolean", description: "" }, light: { type: "boolean", description: "" } },
     restore: { "passphrase-file": { type: "string", description: "" }, use: { type: "boolean", description: "" } },
-    set: { name: { type: "string", description: "" }, "share-profile": { type: "boolean", description: "", eitherWay: true } },
+    set: { name: { type: "string", description: "" }, "share-profile": { type: "boolean", description: "", eitherWay: true }, force: { type: "boolean", description: "" } },
   };
-  const parsed = parseArgs(argv, specs[sub ?? ""] ?? {});
+  const parsed = parseArgs(argv, specs[sub ?? ""] ?? {}, undefined, { command: commandOf("profile", sub) });
   const g = globals(parsed);
   pretty = g.pretty;
   switch (sub) {
@@ -506,11 +667,13 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       // A command that fails changes nothing: the name is checked before the folder is made, and the profile is made
       // current only once it holds it. Before, the retry with a good name was refused "Profile <name> exists".
       const shownName = parsed.options.name === undefined ? undefined : checkShownName(parsed.options.name);
+      const force = parsed.options.force === true;
+      if (shownName) (await import("./secretGuard")).guardText(shownName, force, "name", "set it");
       const paths = createProfile(g.home, name);
       let shown: unknown = null;
       if (shownName !== undefined) {
         try {
-          shown = await withSession({ ...g, profile: name, paths }, (s) => s.call("profile.set", { name: shownName }));
+          shown = await withSession({ ...g, profile: name, paths }, (s) => s.call("profile.set", { name: shownName, force }));
         } catch (e) {
           rmSync(paths.dir, { recursive: true, force: true });
           throw e;
@@ -544,6 +707,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       if (parsed.options.name !== undefined) params.name = parsed.options.name;
       if (parsed.options["share-profile"] !== undefined) params.shareProfile = parsed.options["share-profile"];
       if (!Object.keys(params).length) throw new CliError("usage", "Nothing to change: ghostly profile set [--name <name>] [--share-profile | --no-share-profile]");
+      if (parsed.options.force === true) params.force = true;
       print(await withSession(g, (s) => s.call("profile.set", params)));
       return;
     }
@@ -637,15 +801,17 @@ async function runDaemon(g: Globals, seconds: number): Promise<void> {
   requireProfile(g);
   const detached = process.env[DETACHED_CHILD] === "1";
   delete process.env[DETACHED_CHILD]; // not handed to the hooks it runs
+  dropSecretEnv(); // a backup's passphrase comes as a call parameter: nothing the daemon runs gets it
   const { keepServing, openHost, serve } = await engineHost();
-  const until = Date.now() + seconds * 1000;
+  const until = performance.now() + seconds * 1000;
   let host: Host;
   for (;;) {
-    if (await connectDaemon(g.paths)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
+    if (await connectDaemon(g.paths)) throw childAnswer(detached, new CliError("busy", `A daemon already runs profile ${g.profile}`));
     try { host = await openHost(g.paths, "daemon", VERSION); break; }
     catch (error) {
-      if (detached || !(error instanceof CliError) || error.code !== "busy" || Date.now() >= until) throw error;
-      await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(100, until - Date.now()))));
+      if (detached) throw childAnswer(detached, error);
+      if (!(error instanceof CliError) || error.code !== "busy" || performance.now() >= until) throw error;
+      await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(100, until - performance.now()))));
     }
   }
   let served: Awaited<ReturnType<typeof serve>>;
@@ -658,9 +824,19 @@ async function runDaemon(g: Globals, seconds: number): Promise<void> {
   print({ daemon: "ready", profile: g.profile, pid: process.pid, socket: g.paths.socket, lastSeq: host.ctx.hub.lastSeq });
 }
 
+/**
+ * A detached child's busy answer carries its own pid (`child`): its parent reads it in `daemon.log`, where every
+ * daemon of the profile writes, and another detach's child that lost the profile writes busy too.
+ */
+function childAnswer(detached: boolean, error: unknown): unknown {
+  if (!detached) return error;
+  const failure = asCliError(error);
+  return failure.code === "busy" ? new CliError("busy", failure.message, { ...failure.details, child: process.pid }) : error;
+}
+
 async function daemonCommand(argv: string[]): Promise<void> {
   const sub = argv[0] && !argv[0].startsWith("-") ? argv[0] : undefined;
-  const parsed = parseArgs(sub ? argv.slice(1) : argv, { detach: { type: "boolean", description: "" }, timeout: { type: "number", description: "" } });
+  const parsed = parseArgs(sub ? argv.slice(1) : argv, { detach: { type: "boolean", description: "" }, timeout: { type: "number", description: "" } }, undefined, { command: commandOf("daemon", sub) });
   const g = globals(parsed);
   pretty = g.pretty;
   if (!sub || ["status", "stop", "restart"].includes(sub)) noMoreThan(0, parsed.positionals, sub ? `daemon ${sub} [--timeout s]` : "daemon [--detach] [--timeout s]");
@@ -669,7 +845,12 @@ async function daemonCommand(argv: string[]): Promise<void> {
     const client = await connectDaemon(g.paths);
     // The socket, running or not: a program on the socket API (examples/*.mjs) finds it here. It is in the profile's
     // folder, or in /tmp/ghostly-<hash>/ when that path is too long for a socket, so a program cannot guess it.
-    if (!client) { print({ running: false, profile: g.profile, socket: g.paths.socket }); return; }
+    // A daemon still starting (its engine, before its socket listens) holds the profile already: it is no one-shot's.
+    if (!client) {
+      const starting = startingDaemon(g.paths);
+      print({ running: false, ...(starting === null ? {} : { starting: true, pid: starting }), profile: g.profile, socket: g.paths.socket });
+      return;
+    }
     try { print({ running: true, ...(await client.call("status", {}, { timeoutMs: seconds(parsed, 15) * 1000 }) as object), socket: g.paths.socket }); } finally { client.close(); }
     return;
   }
@@ -678,20 +859,25 @@ async function daemonCommand(argv: string[]): Promise<void> {
     const stopFor = seconds(parsed, 20);
     // A daemon of an older release never greets: what does not prove itself is stopped as the process that holds the
     // profile (`stopDaemon`), as the stop asked. One of this release that greets late is busy: the stop's deadline waits.
-    const client = await connectDaemon(g.paths);
+    const client = await connectDaemon(g.paths) ?? await startedDaemon(g, stopFor);
     if (!client) throw new CliError("not_found", `No daemon runs profile ${g.profile}`);
-    print({ stopped: true, pid: await stopDaemon(g, client, stopFor) });
+    const { pid, listen } = await stopDaemon(g, client, stopFor);
+    if (listen) process.stderr.write(listenEnded(pid));
+    print({ stopped: true, pid, ...(listen && { listen: true }) });
     return;
   }
   if (sub === "restart") {
     // The running one stops (if one runs), and this command's own code starts in the background.
     const stopFor = seconds(parsed, 20), startFor = seconds(parsed, 60);
-    const client = await connectDaemon(g.paths);
+    const client = await connectDaemon(g.paths) ?? await startedDaemon(g, stopFor);
     // The version it ran is asked ahead of the stop, on the same connection, with no deadline of its own: cosmetic,
     // and the stop's deadline ends it (a deadline here, 15 s, closed the connection under a longer stop, which then
     // failed as `unavailable` and never reached the signals).
     const probe = client ? client.call("status").catch(() => null) as Promise<{ version?: string } | null> : null;
-    const stopped = client ? await stopDaemon(g, client, stopFor) : null;
+    const ended = client ? await stopDaemon(g, client, stopFor) : null;
+    const stopped = ended?.pid ?? null;
+    // A listen that ran the profile ended with it: the daemon started below has no reader until one listens again.
+    if (ended?.listen) process.stderr.write(listenEnded(ended.pid));
     const before = (await probe)?.version ?? null;
     let started: Awaited<ReturnType<typeof startDetached>>;
     try { started = await startDetached(g, startFor); }
@@ -702,13 +888,33 @@ async function daemonCommand(argv: string[]): Promise<void> {
     }
     const older = restartWarning(before, VERSION);
     if (older) process.stderr.write(older + "\n");
-    print({ restarted: true, stopped, before, version: VERSION, ...started });
+    print({ restarted: true, stopped, ...(ended?.listen && { listen: true }), before, version: VERSION, ...started });
     return;
   }
   if (sub) throw unknownCommand("daemon", sub);
   const startFor = seconds(parsed, 60);
   if (!parsed.options.detach) { await runDaemon(g, startFor); return; }
   print(await startDetached(g, startFor));
+}
+
+/**
+ * The profile's daemon that is starting (`startingDaemon`: it holds the profile, its socket does not listen yet), once
+ * its socket answers, waited for up to `seconds`; null when none is starting. One still starting then is the answer,
+ * `timeout` with its pid. `daemon stop` said no daemon ran, and the daemon came up a moment later; `daemon restart`
+ * failed busy and left the old code running.
+ */
+async function startedDaemon(g: Globals, seconds: number): Promise<DaemonClient | null> {
+  const until = performance.now() + seconds * 1000;
+  for (;;) {
+    // Read before the socket is tried: a daemon whose socket listens in between is found by the try.
+    const pid = startingDaemon(g.paths);
+    const client = await connectDaemon(g.paths);
+    if (client) return client;
+    if (pid === null) return null;
+    const left = until - performance.now();
+    if (left <= 0) throw new CliError("timeout", `The daemon (process ${pid}) is still starting after ${seconds} s; ghostly daemon status shows when it is up`, { pid });
+    await new Promise((resolve) => setTimeout(resolve, Math.min(100, left)));
+  }
 }
 
 /** `--timeout <s>`, or `fallback` without one: seconds above 0 (0 or less would not wait at all). */
@@ -726,9 +932,9 @@ function seconds(parsed: Parsed, fallback: number): number {
  * as the timeout error promises. The pid is the profile lock's holder, which a daemon writes itself. On Windows
  * `process.kill` with either name is TerminateProcess: the first signal ends it, there is no second.
  */
-async function stopDaemon(g: Globals, client: DaemonClient, seconds: number): Promise<number> {
-  let pid: number, answered = true;
-  try { ({ pid } = await client.call("daemon.stop", {}, { timeoutMs: seconds * 1000 }) as { pid: number }); }
+async function stopDaemon(g: Globals, client: DaemonClient, seconds: number): Promise<{ pid: number; listen: boolean }> {
+  let pid: number, answered = true, listen = false;
+  try { ({ pid, listen = false } = await client.call("daemon.stop", {}, { timeoutMs: seconds * 1000 }) as { pid: number; listen?: boolean }); }
   catch (error) {
     // What answers on the socket and does not prove it is the profile's daemon is told nothing: a daemon of an older
     // release (it cannot prove it) is stopped as the process that holds the profile's lock, which only this user
@@ -747,22 +953,27 @@ async function stopDaemon(g: Globals, client: DaemonClient, seconds: number): Pr
   client.close();
   const running = () => lockOwner(g.paths) === pid || processAlive(pid);
   const gone = async () => {
-    const until = Date.now() + seconds * 1000;
+    const until = performance.now() + seconds * 1000;
     while (running()) {
-      const left = until - Date.now();
+      const left = until - performance.now();
       if (left <= 0) break;
       await new Promise((resolve) => setTimeout(resolve, Math.min(100, left)));
     }
     return !running();
   };
-  if (await gone()) return pid;
+  if (await gone()) return { pid, listen };
   // A wedged event loop runs no SIGTERM handler either.
   if (!answered) {
     process.stderr.write(`ghostly: the daemon (process ${pid}) did not stop on SIGTERM in ${seconds} s: killing it\n`);
     signal(pid, "SIGKILL");
-    if (await gone()) return pid;
+    if (await gone()) return { pid, listen };
   }
   throw new CliError("timeout", `The daemon (process ${pid}) has not stopped yet`, { pid });
+}
+
+/** What `daemon stop` and `restart` say of a daemon that was a `listen` running the profile: that listen is over. */
+function listenEnded(pid: number): string {
+  return `ghostly: the daemon (process ${pid}) was a ghostly listen running the profile: it ended with it. Start ghostly daemon --detach, then listen through it, so that a restart does not end the listen\n`;
 }
 
 /** Throws busy, with its pid, when a process other than `except` holds the profile. */
@@ -788,22 +999,24 @@ function processAlive(pid: number): boolean {
  */
 async function startDetached(g: Globals, seconds: number) {
   requireProfile(g);
-  const until = Date.now() + seconds * 1000;
+  // Before the log is opened in the profile's folder; the child checks again before it takes the profile (`openHost`).
+  ownProfile(g.paths.dir);
+  const until = performance.now() + seconds * 1000;
   for (;;) {
     if (await connectDaemon(g.paths)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
     if (lockOwner(g.paths) === null) {
       const started = await spawnDaemon(g, until);
       if (started) return started;
     }
-    if (Date.now() >= until) { heldBy(g); throw new CliError("engine", `The daemon did not start; see ${g.paths.log}`); }
-    await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(100, until - Date.now()))));
+    if (performance.now() >= until) { heldBy(g); throw new CliError("engine", `The daemon did not start; see ${g.paths.log}`); }
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(100, until - performance.now()))));
   }
 }
 
 /** `startDetached`'s child, or null when another process took the profile ahead of it and there is time to try again. */
 async function spawnDaemon(g: Globals, until: number) {
   const log = openSync(g.paths.log, "a", 0o600), logFrom = fstatSync(log).size;
-  const child = spawn(process.execPath, [...process.execArgv, process.argv[1], "daemon", "--home", g.home, "--profile", g.profile], { detached: true, stdio: ["ignore", log, log], env: { ...process.env, [DETACHED_CHILD]: "1" } });
+  const child = spawn(process.execPath, [...process.execArgv, process.argv[1], "daemon", "--home", g.home, "--profile", g.profile], { detached: true, stdio: ["ignore", log, log], env: { ...childEnv(process.env), [DETACHED_CHILD]: "1" } });
   closeSync(log); // the child has its own
   child.unref();
   const spawned = { error: null as Error | null };
@@ -815,17 +1028,19 @@ async function spawnDaemon(g: Globals, until: number) {
   // waiting one 200 ms poll first (the first try finds no socket yet and returns at once). A child that exited or was
   // killed (SIGABRT on a V8 out-of-memory, the OOM killer) ends the wait too, instead of polling to the deadline.
   while (child.exitCode === null && child.signalCode === null && !spawned.error) {
-    const left = until - Date.now();
+    const left = until - performance.now();
     if (left <= 0) break;
     client = await connectDaemon(g.paths, Math.min(500, left));
     if (client) break;
-    await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(200, until - Date.now()))));
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(200, until - performance.now()))));
   }
   if (!client) {
     // Another process took the profile between the look and the child's start: it holds it still, or the child's
-    // answer in the log says so (a one-shot that already ended). Tried again while there is time.
-    const lost = !spawned.error && (![null, child.pid].includes(lockOwner(g.paths)) || lostTheProfile(g.paths.log, logFrom));
-    if (lost && Date.now() < until) return null;
+    // answer in the log says so (a one-shot that already ended). Tried again while there is time. Only a child that
+    // ended busy lost it: one that exited 0 or by a signal had it and was stopped (`daemon stop`), and stays stopped.
+    const lost = !spawned.error && child.exitCode === EXIT.busy && child.pid !== undefined
+      && (![null, child.pid].includes(lockOwner(g.paths)) || lostTheProfile(g.paths.log, logFrom, child.pid));
+    if (lost && performance.now() < until) return null;
     heldBy(g, child.pid);
     // Alive still: it is starting (a large profile takes seconds), not failed, and the profile is its own now.
     if (child.exitCode === null && child.signalCode === null && child.pid !== undefined && processAlive(child.pid)) {
@@ -837,15 +1052,21 @@ async function spawnDaemon(g: Globals, until: number) {
   return { daemon: "started", profile: g.profile, pid: child.pid, socket: g.paths.socket, log: g.paths.log };
 }
 
-/** Whether a daemon's answer written to the log from byte `from` on is `busy`: it found the profile taken. */
-function lostTheProfile(log: string, from: number): boolean {
+/**
+ * Whether the answer the detached child `pid` wrote to the log from byte `from` on is `busy`: it found the profile
+ * taken. Another child's busy line (a detach started at the same time) is not its own.
+ */
+function lostTheProfile(log: string, from: number, pid: number): boolean {
   let fd: number;
   try { fd = openSync(log, "r"); } catch { return false; }
   try {
     const buffer = Buffer.alloc(64 * 1024);
     const text = buffer.subarray(0, readSync(fd, buffer, 0, buffer.length, from)).toString("utf8");
     return text.split("\n").some((line) => {
-      try { return (JSON.parse(line) as { error?: { code?: string } }).error?.code === "busy"; } catch { return false; }
+      try {
+        const { error } = JSON.parse(line) as { error?: { code?: string; details?: { child?: number } } };
+        return error?.code === "busy" && error.details?.child === pid;
+      } catch { return false; }
     });
   } finally { closeSync(fd); }
 }
@@ -871,7 +1092,7 @@ async function listenCommand(argv: string[]): Promise<void> {
     exec: { type: "string", description: "" }, webhook: { type: "string", description: "" }, print: { type: "boolean", description: "" },
     from: { type: "list", description: "" }, group: { type: "list", description: "" }, turns: { type: "boolean", description: "" },
     translate: { type: "string", description: "" },
-  });
+  }, undefined, { command: "listen" });
   // Before the profile opens: `listen bob` (meant as `--from bob`) streams nobody's events instead of everybody's.
   noMoreThan(0, parsed.positionals, SPECIAL.find(([usage]) => usage.startsWith("listen "))![0]);
   // Before the profile opens: a unit file's `--webhook "$URL"` with URL unset ran a plain listen, no hook and no word.
@@ -924,9 +1145,13 @@ async function listenCommand(argv: string[]): Promise<void> {
     });
   };
   requireProfile(g);
-  const client = await connectDaemon(g.paths);
-  if (client) await warnVersion(client);
-  if (client) {
+  // With no daemon, this process becomes it (the socket too, so hooks can answer with `ghostly send`). A profile held
+  // is waited for as a one-shot waits (`openOneShot`): a daemon starting answers on its socket in a moment, and is
+  // followed. A listen started a second too early used to die busy, while one started after followed it for good.
+  const opened = await connectDaemon(g.paths) ?? await openOneShot(g, {}, "daemon");
+  if (opened instanceof DaemonClient) {
+    const client = opened;
+    await warnVersion(client);
     // The subscription takes the connection: a chat's contact key is asked on a connection of its own.
     const handle = await start((m, p) => client.call(m, p), async (chat) => {
       const c = await connectDaemon(g.paths, 1000);
@@ -944,9 +1169,8 @@ async function listenCommand(argv: string[]): Promise<void> {
     process.on("SIGTERM", stop);
     return;
   }
-  // No daemon: this process becomes it (the socket too, so hooks can answer with `ghostly send`).
-  const [{ keepServing, openHost, serve }, { callApi }] = await Promise.all([engineHost(), engineApi()]);
-  const host: Host = await openHost(g.paths, "daemon", VERSION);
+  const [{ keepServing, serve }, { callApi }] = await Promise.all([engineHost(), engineApi()]);
+  const host = opened;
   const call = (m: string, p: Record<string, unknown>) => callApi(host.ctx, m, p);
   const handle = await start(call, async (chat) => ((await call("chat.get", { chat })) as { peer?: string }).peer || null).catch(async (error) => { await host.close(); throw error; });
   const served = await serve(host).catch(async (error) => { await host.close(); throw error; });
@@ -956,7 +1180,15 @@ async function listenCommand(argv: string[]): Promise<void> {
     setTimeout(() => process.exit(code), 20_000).unref();
     void served.close().then(() => host.close()).finally(() => process.exit(code));
   };
-  host.ctx.stop = stop;
+  // Asked to stop over the socket (`daemon stop`, `daemon restart`, the profile cleared): the events stop with it, so
+  // the listen says so and fails. An exit 0 read as "done": a service manager restarted nothing, and no line said why.
+  host.ctx.listen = true;
+  host.ctx.stop = () => {
+    const message = `This listen ran profile ${g.profile} as its daemon, and was stopped over the socket (ghostly daemon stop or restart, or the profile was cleared)`;
+    process.stderr.write(`ghostly: ${message}. Start ghostly daemon --detach first, then listen through it: a restart then does not end the listen\n`);
+    print({ error: new CliError("unavailable", message).toJSON() });
+    quit(EXIT.unavailable);
+  };
   onStopSignals(stop);
   onReaderGone(stop);
   // The hub's listener comes off while the feed is paused, and back after a replay from the last event taken. What a
@@ -982,7 +1214,7 @@ async function listenCommand(argv: string[]): Promise<void> {
 }
 
 async function engineCommand(argv: string[]): Promise<void> {
-  const parsed = parseArgs(argv, { "confirm-real": { type: "boolean", description: "" }, "show-secret": { type: "boolean", description: "" }, yes: { type: "boolean", description: "" }, force: { type: "boolean", description: "" }, list: { type: "boolean", description: "" }, verbose: { type: "boolean", description: "" } });
+  const parsed = parseArgs(argv, { "confirm-real": { type: "boolean", description: "" }, "show-secret": { type: "boolean", description: "" }, yes: { type: "boolean", description: "" }, force: { type: "boolean", description: "" }, list: { type: "boolean", description: "" }, verbose: { type: "boolean", description: "" } }, undefined, { command: "engine" });
   const g = globals(parsed);
   pretty = g.pretty;
   if (parsed.options.list) {
@@ -1015,19 +1247,24 @@ async function engineCommand(argv: string[]): Promise<void> {
 }
 
 async function settingsCommand(sub: string | undefined, argv: string[]): Promise<void> {
-  const parsed = parseArgs(argv, { "show-secret": { type: "boolean", description: "" } });
+  // A JSON value may start with a dash (`settings set k -- -1`).
+  const parsed = parseArgs(argv, { "show-secret": { type: "boolean", description: "" }, force: { type: "boolean", description: "" } }, undefined, { command: commandOf("settings", sub), text: sub === "set" });
   const g = globals(parsed);
   pretty = g.pretty;
   if (sub === "get") { noMoreThan(0, parsed.positionals, "settings get [--show-secret]"); print(await withSession(g, (s) => s.call("settings.get", { showSecret: parsed.options["show-secret"] === true }), { offline: true })); return; }
   if (sub === "set") {
-    const [key, value] = parsed.positionals;
-    if (!key || value === undefined) throw new CliError("usage", `Missing <${key ? "json-value" : "key"}>: ghostly settings set <key> <json-value>`);
+    const [key, given] = parsed.positionals;
+    if (!key) throw new CliError("usage", "Missing <key>: ghostly settings set <key> <json-value>");
     noMoreThan(2, parsed.positionals, "settings set <key> <json-value>");
+    // `-`, or no value on a pipe: the value from stdin, out of ps and the shell's history (a TURN password).
+    const { value, warning } = await settingValue(key, given, readStdin, process.stdin.isTTY === true, (note) => process.stderr.write(`ghostly: ${note}\n`));
+    if (warning) process.stderr.write(`ghostly: ${warning}\n`);
     let parsedValue: unknown;
     try { parsedValue = JSON.parse(value); } catch { parsedValue = value; }
     // A text setting (nick) keeps the word as given when it reads as JSON of another kind (2024, true, null).
     if ((await engineApi()).SETTABLE[key] === "string" && typeof parsedValue !== "string") parsedValue = value;
-    printAnswer(await withSession(g, (s) => s.call("settings.set", { [key]: parsedValue }), { offline: LOCAL_SETTINGS.has(key) }) as Record<string, unknown>);
+    const force = parsed.options.force === true ? { force: true } : {};
+    printAnswer(await withSession(g, (s) => s.call("settings.set", { [key]: parsedValue, ...force }), { offline: LOCAL_SETTINGS.has(key) }) as Record<string, unknown>);
     return;
   }
   throw unknownCommand("settings", sub);
@@ -1035,7 +1272,7 @@ async function settingsCommand(sub: string | undefined, argv: string[]): Promise
 
 async function textCommand(name: string, argv: string[]): Promise<void> {
   const spec = TEXT_COMMANDS[name];
-  const parsed = parseArgs(argv, spec.options, idSlot(spec));
+  const parsed = parseArgs(argv, spec.options, idSlot(spec), { command: name, text: true });
   const g = globals(parsed);
   pretty = g.pretty;
   const [target, ...rest] = parsed.positionals;
@@ -1071,7 +1308,7 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
       if (parsed.options.timeout !== undefined) params.timeout = parsed.options.timeout;
     }
     return s.call(spec.method, params);
-  }, { deferGroups: spec.target === "chat" }));
+  }, { deferGroups: spec.target === "chat", deferChats: spec.target === "chat" }));
 }
 
 /**
@@ -1082,7 +1319,7 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
 async function identityAddCommand(argv: string[]): Promise<void> {
   const parsed = parseArgs(argv, {
     signer: { type: "string", description: "" }, field: { type: "list", description: "" }, stdin: { type: "boolean", description: "" }, days: { type: "number", description: "" }, timeout: { type: "number", description: "" },
-  });
+  }, undefined, { command: "identity add" });
   const g = globals(parsed);
   pretty = g.pretty;
   const [provider, ...subject] = parsed.positionals;
@@ -1103,17 +1340,18 @@ async function identityAddCommand(argv: string[]): Promise<void> {
   const tell = (event: GhostlyEvent) => {
     if (event.type === "identity.approval" || event.type === "identity.progress") process.stderr.write(JSON.stringify(event) + "\n");
   };
-  requireProfile(g);
-  const client = await connectDaemon(g.paths);
-  if (client) {
+  const addThroughDaemon = async (client: DaemonClient) => {
     await warnVersion(client);
     const watcher = await connectDaemon(g.paths);
     await watcher?.subscribe(undefined, tell);
     try { print(await client.call("identity.add", params)); } finally { client.close(); watcher?.close(); }
-    return;
-  }
+  };
+  requireProfile(g);
+  const client = await connectDaemon(g.paths);
+  if (client) { await addThroughDaemon(client); return; }
   const [, { callApi }] = await Promise.all([engineHost(), engineApi()]);
   const host = await openOneShot(g);
+  if (host instanceof DaemonClient) { await addThroughDaemon(host); return; }
   const off = host.ctx.hub.onEvent(tell);
   try {
     const result = await callApi(host.ctx, "identity.add", params) as { done: boolean; draft?: string };
@@ -1127,7 +1365,7 @@ async function identityAddCommand(argv: string[]): Promise<void> {
 
 async function tableCommand(name: string, argv: string[]): Promise<void> {
   const command = COMMANDS[name];
-  const parsed = parseArgs(argv, command.options ?? {}, idSlot(command));
+  const parsed = parseArgs(argv, command.options ?? {}, idSlot(command), { command: name, text: takesText(command) });
   const g = globals(parsed);
   pretty = g.pretty;
   const args = positionals(command, parsed.positionals);
@@ -1143,15 +1381,15 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
   const pipedEvidence = command.method === "identity.complete" && !params.evidenceFile && !params.stdin && process.stdin.isTTY !== true;
   if (command.method === "identity.complete") {
     if (params.evidenceFile) {
-      try { params.evidence = readFileSync(params.evidenceFile as string, "utf8"); } catch (error) { throw localFileError(error, params.evidenceFile as string) ?? error; }
+      try { params.evidence = readInput(params.evidenceFile as string); } catch (error) { throw localFileError(error, params.evidenceFile as string) ?? error; }
     }
     else if (params.stdin) params.evidence = await readStdin();
     delete params.evidenceFile; delete params.stdin;
   }
   if (command.method === "x401.credential.add") {
-    try { params.credential = params.file === "-" ? await readStdin() : readFileSync(params.file as string, "utf8"); }
+    try { params.credential = params.file === "-" ? await readStdin() : readInput(params.file as string); }
     // A file not there, a folder, one not allowed: said as every other file the CLI reads.
-    catch (error) { throw localFileError(error, params.file as string) ?? new CliError("usage", `Cannot read the credential: ${error instanceof Error ? error.message : String(error)}`); }
+    catch (error) { throw (error instanceof CliError && error) || localFileError(error, params.file as string) || new CliError("usage", `Cannot read the credential: ${error instanceof Error ? error.message : String(error)}`); }
     // Nothing read is said of the file or stdin given, not as the API's missing `credential`; nothing on stdin as a
     // join or a redeem says it, a usage error.
     if (!params.credential && params.file === "-") throw new CliError("usage", "Missing <file|->: give the SD-JWT VC on stdin (… | ghostly x401 credential add -) or as a file");
@@ -1179,7 +1417,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
       return joined.answer;
     }
     return result;
-  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: newChatOnly(command.method), offline: offlineCall(command.method, params) });
+  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: oneChatOnly(command.method, params), offline: offlineCall(command.method, params) });
   if (translator) {
     try { printAnswer(await (await import("./translate")).translateAnswer(result, translator)); } finally { translator.close(); }
     return;
@@ -1192,21 +1430,29 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
  * contact's, raw PCM); what the command says goes to stderr. It ends when the call does.
  */
 async function callPipeCommand(argv: string[]): Promise<void> {
-  const parsed = parseArgs(argv, {}, idSlot({ args: ["call...?"] }));
+  const parsed = parseArgs(argv, {}, idSlot({ args: ["call...?"] }), { command: "call pipe" });
   const g = globals(parsed);
   const ref = parsed.positionals.join(" ") || undefined;
   const client = await connectDaemon(g.paths);
   if (!client) throw new CliError("unavailable", `No daemon runs profile ${g.profile}: calls need one (ghostly daemon --detach)`);
-  let call: { call: string; audio: { socket: string; rate: number } | null };
+  let call: { call: string; audio: { socket: string; token: string; rate: number } | null };
   try { call = await client.call("call.get", ref ? { call: ref } : {}, { timeoutMs: ANSWER_MS }) as typeof call; } finally { client.close(); }
   const audio = call.audio;
   if (!audio) throw new CliError("unavailable", "That call has no audio yet: answer it first");
   const socket = connect(audio.socket);
   await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
+  // The call's token first: until it comes, the socket is nobody's (WISP 1100 § Calls).
+  socket.write(`${audio.token}\n`);
   process.stderr.write(`ghostly: call ${call.call}: s16le mono ${audio.rate} Hz on stdin/stdout\n`);
   // A clip that ends (`ffmpeg -t 3 … | ghostly call pipe`) is queued and played, and the contact's audio goes on
   // coming: the end of stdin never closes the socket, whose daemon side would close the call's audio with it.
   process.stdin.pipe(socket, { end: false });
+  // Nobody reads the contact's audio any more (`call pipe | head -c …`, a player closed): the pipe leaves, exit 0, and
+  // the call goes on (another program may take its audio). It died on an EPIPE nobody handled, with a stack trace.
+  onReaderGone(() => {
+    process.stderr.write(`ghostly: call ${call.call}: nothing reads its audio any more; the call goes on\n`);
+    socket.destroy();
+  });
   socket.pipe(process.stdout);
   socket.on("close", () => exit(0));
   socket.on("error", () => exit(1));
@@ -1216,26 +1462,55 @@ async function callPipeCommand(argv: string[]): Promise<void> {
 
 /**
  * The command's words when the line asks for help (`help <words>`, or `--help`/`--help=true`/`-h` before any `--`), else
- * null. `--help=false` asks for none: the command runs.
+ * null. `--help=false` asks for none: the command runs. A `-h` or `--help` that is an option's value, as the parser
+ * reads it (`profile set --name --help`, `edit … --text "$NEW"`), asks for none either: it printed the help with exit 0
+ * and changed nothing.
  */
 function helpAsked(argv: readonly string[]): string[] | null {
   const end = argv.indexOf("--");
   const head = end === -1 ? argv : argv.slice(0, end);
   const words = (list: readonly string[]) => { const out: string[] = []; for (const word of list) { if (word.startsWith("-")) break; out.push(word); } return out; };
   if (head[0] === "help") return words(head.slice(1));
-  if (head.some((word) => word === "--help" || word === "--help=true" || word === "-h")) return words(head);
+  const options = optionsOf(words(head));
+  for (let i = 0; i < head.length; i++) {
+    const word = head[i];
+    if (word === "--help" || word === "--help=true" || word === "-h") return words(head);
+    const option = word.startsWith("--") ? (word.includes("=") ? undefined : options[word.slice(2)]) : word.length === 2 && word.startsWith("-") ? Object.values(options).find((o) => o.short === word.slice(1)) : undefined;
+    if (!option || option.type === "boolean") continue;
+    if (option.optionalValue && !(i + 1 < head.length && head[i + 1] !== "" && Number.isFinite(Number(head[i + 1])))) continue;
+    i++;
+  }
   return null;
+}
+
+/** The options of the command `words` name (its longest command), with the global ones: what takes a value on its line. */
+function optionsOf(words: readonly string[]): Record<string, OptionSpec> {
+  for (let n = words.length; n > 0; n--) {
+    const asked = words.slice(0, n).join(" ");
+    const row = helpRows().find((r) => commandWords(r.usage).join(" ") === asked);
+    if (row) return { ...GLOBAL_OPTIONS, ...row.options };
+  }
+  return GLOBAL_OPTIONS;
+}
+
+/** No profile yet in the Ghostly folder these global options name: `ghostly`'s first run there. */
+function newHome(argv: readonly string[]): boolean {
+  try {
+    return listProfiles(ghostlyHome(parseArgs([...argv], {}).options.home as string | undefined)).length === 0;
+  } catch {
+    return false;
+  }
 }
 
 export async function main(input: string[]): Promise<number> {
   const argv = liftGlobals(input);
   // Global options alone (`ghostly --pretty`, `ghostly -p bot`) name no command: lifted, one of them comes first.
   const helpFor = argv.length === 0 || globalOption(argv[0]) ? [] : helpAsked(argv);
-  if (helpFor) { process.stdout.write((helpFor.length ? commandHelp(helpFor) : help()) + "\n"); return 0; }
+  if (helpFor) { process.stdout.write((helpFor.length ? commandHelp(helpFor) : help(argv[0] !== "help" && newHome(argv))) + "\n"); return 0; }
   if (argv[0] === "--version" || argv[0] === "version") {
     // Global options come after the command once lifted: `--pretty` indents this answer too. Anything else is refused,
     // as every command refuses it: `version --json` (a typo) answered the version.
-    const parsed = parseArgs(argv.slice(1), {});
+    const parsed = parseArgs(argv.slice(1), {}, undefined, { command: "version" });
     noMoreThan(0, parsed.positionals, "version");
     pretty = parsed.options.pretty === true;
     print({ version: VERSION });
@@ -1265,18 +1540,32 @@ export async function main(input: string[]): Promise<number> {
  * A command line that names no command. The words of a group (`ghostly chat`, `ghostly wallet frob`, `ghostly x401
  * credential`) are answered with the group's commands, as `ghostly help chat` lists them; before, it was only "Unknown
  * command: chat". The longest group the words name answers: `x401 credential frob` lists add, list and remove.
+ * A word near one of them is a typo: `chat lst` and `sned hi` say the command meant (`chat list`, `send`) and its help.
  */
 export function unknownCommand(first: string | undefined, second?: string, third?: string): CliError {
   const asked = [first, second, third].filter((word): word is string => !!word);
   const all = helpRows().map((row) => commandWords(row.usage));
+  const takes = (group: readonly string[]) => [...new Set(all.filter((words) => words.length > group.length && group.every((word, i) => words[i] === word)).map((words) => words[group.length]))];
+  const meant = (typed: readonly string[], words: readonly string[]) => new CliError("usage", `Unknown command: ${typed.join(" ")} (did you mean ${words.join(" ")}? ghostly help ${words.join(" ")})`);
   for (let depth = Math.min(asked.length, 2); depth >= 1; depth--) {
     const group = asked.slice(0, depth), name = group.join(" "), extra = asked[depth];
-    const subs = [...new Set(all.filter((words) => words.length > depth && group.every((word, i) => words[i] === word)).map((words) => words[depth]))];
+    const subs = takes(group);
     if (!subs.length) continue;
+    const near = extra === undefined ? undefined : nearest(extra, subs);
+    if (near) return meant([...group, extra!], [...group, near]);
     const list = `${subs.slice(0, -1).join(", ")}${subs.length > 1 ? " or " : ""}${subs.at(-1)}`;
     return new CliError("usage", extra ? `Unknown command: ${name} ${extra}: ghostly ${name} takes ${list} (ghostly help ${name})` : `ghostly ${name} takes a command: ${list} (ghostly help ${name})`);
   }
-  return new CliError("usage", `Unknown command: ${asked.slice(0, 2).join(" ") || '""'} (ghostly help)`);
+  // A first word that names no command: the words after it are its arguments (`sned hi`), unless they are a command
+  // word of the one it meant (`chta list`).
+  const near = asked[0] === undefined ? undefined : nearest(asked[0], takes([]));
+  if (!near) return new CliError("usage", `Unknown command: ${asked[0] ?? '""'} (ghostly help)`);
+  return asked[1] !== undefined && takes([near]).includes(asked[1]) ? meant(asked.slice(0, 2), [near, asked[1]]) : meant([asked[0]], [near]);
+}
+
+/** The command a group's word names (`profile set`), for its usage errors; the group itself for a word it does not take. */
+function commandOf(group: string, sub: string | undefined): string {
+  return sub !== undefined && helpRows().some((row) => commandWords(row.usage).join(" ") === `${group} ${sub}`) ? `${group} ${sub}` : group;
 }
 
 /** Leaves once what was printed reached stdout (a pipe drains asynchronously). */

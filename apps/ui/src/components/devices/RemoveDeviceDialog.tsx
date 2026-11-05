@@ -69,7 +69,7 @@ export function LostChecklist({ device, onClose, onRemove }: { device?: string; 
           { testId: "device-lost-chats", title: t("devices.lost.chats"), hint: t("devices.lost.chatsHint") },
         ].filter((line): line is { testId: string; title: string; hint?: string } => !!line).map((line, index) => <Line key={`${line.testId}:${line.title}`} n={index + 1} {...line} />)}
       </ol>
-      {onRemove && device && <button type="button" data-testid="device-lost-remove" onClick={onRemove} className={primaryButton}>{fillNames(t("devices.lost.remove"), { device })}</button>}
+      {onRemove && device && <button type="button" data-testid="device-lost-remove" onClick={onRemove} className={primaryButton}><span>{fillNames(t("devices.lost.remove"), { device })}</span></button>}
       <button type="button" data-testid="device-lost-done" onClick={onClose} className={quietButton}>{t("devices.lost.done")}</button>
     </DeviceDialog>
   );

@@ -1,5 +1,14 @@
 {
   "announce": {
+    "fileAccepted": "{{name}} ha accettato {{file}}",
+    "fileArrived": "{{file}} è arrivato, pronto da salvare",
+    "fileCancelled": "{{name}} ha annullato {{file}}",
+    "fileDeclined": "{{name}} ha rifiutato {{file}}",
+    "fileDelivered": "{{name}} ha ricevuto {{file}}",
+    "fileFailed": "{{file}}: {{status}}",
+    "fileOffer": "{{name}} vuole inviare {{file}} ({{size}}) · in attesa della tua risposta",
+    "filePaused": "{{name}} ha messo in pausa {{file}}",
+    "fileResumed": "{{name}} ha ripreso {{file}}",
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} nuovi messaggi",
     "messagesFrom": "{{count}} nuovi messaggi da {{name}}",
@@ -165,8 +174,11 @@
     "restoring": "Caricamento… · {{size}}",
     "resume": "Riprendi",
     "roomDevice": "{{size}} liberi su questo dispositivo",
+    "senderOnly": "Non ancora presso le tue connessioni",
+    "senderOnlyHint": "In un gruppo così grande la tua app si collega tramite pochi membri, non a chi l'ha inviato. Arriva da solo quando uno di loro lo scarica, oppure chiedi a chi l'ha inviato di mandartelo in una chat.",
     "stalled": "Fermo · {{progress}}",
     "verifying": "Verifica del file… {{size}}",
+    "verifyingThere": "Arrivato, {{name}} lo sta verificando… {{size}}",
     "viewPicture": "Vedi {{name}}",
     "waitingDone": "In attesa di connessione · {{done}} completato",
     "waitingSize": "In attesa di connessione · {{size}}",
@@ -178,8 +190,15 @@
   "forward": {
     "forward": "Inoltra",
     "forwarded": "Inoltrato",
+    "found": "{{count}} chat",
+    "found_one": "{{count}} chat",
+    "found_other": "{{count}} chat",
+    "limit": "Puoi inoltrare a {{count}} chat alla volta",
+    "limit_one": "Puoi inoltrare a {{count}} chat alla volta",
     "many": "Inoltrato molte volte",
     "messages": "{{count}} messaggi",
+    "more": "altre {{count}}",
+    "more_one": "un'altra",
     "noChats": "Ancora nessuna chat",
     "noMatch": "Nessuna chat con questo nome",
     "partial": "{{sent}} di {{count}} inviati",
@@ -256,8 +275,10 @@
   "message": {
     "cancelSending": "Annulla invio",
     "copied": "Copiato",
+    "copyFailed": "Impossibile copiare. Seleziona il testo qui sotto e copialo.",
     "copyHint": "Clicca per copiare",
     "copyJson": "Copia tutto come JSON",
+    "copyText": "Testo del messaggio",
     "details": "Dettagli",
     "detailsClose": "Chiudi",
     "detailsTitle": "Dettagli del messaggio",
@@ -309,11 +330,14 @@
     "invoice": "⚡ Fattura Lightning",
     "lightningAddress": "Indirizzo Lightning",
     "lightningOffer": "⚡ Offerta Lightning",
+    "moneroAddress": "Indirizzo Monero",
     "payment": "⚡ {{what}} {{amount}}",
     "realMoney": "Denaro reale",
     "sats": "{{amount}} sats",
+    "sats_one": "{{amount}} sat",
     "testMoney": "Denaro di prova",
     "testSats": "{{amount}} sats di prova",
+    "testSats_one": "{{amount}} sat di prova",
     "usdtAddress": "Indirizzo USDT",
     "video": "🎬 Video ({{duration}})",
     "voice": "🎤 Messaggio vocale ({{duration}})"
@@ -325,6 +349,14 @@
     "noteMine": "Hai reagito con {{emoji}} a \"{{snippet}}\"",
     "notice": "Qualcuno ha reagito al tuo messaggio",
     "react": "Reagisci"
+  },
+  "refused": {
+    "fedimint": "Impossibile ricevere l'ecash Fedimint: {{reason}}",
+    "payment": "Impossibile ricevere un pagamento: {{reason}}",
+    "sats": "Impossibile ricevere {{amount}} sats: {{reason}}",
+    "satsFedimint": "Impossibile ricevere {{amount}} sats su Fedimint: {{reason}}",
+    "testSats": "Impossibile ricevere {{amount}} sats di prova: {{reason}}",
+    "testSatsFedimint": "Impossibile ricevere {{amount}} sats di prova su Fedimint: {{reason}}"
   },
   "reply": {
     "cancel": "Annulla risposta",
@@ -435,6 +467,10 @@
   "typing": "sta scrivendo…",
   "typingRecording": "sta registrando un audio…",
   "typingThinking": "sta pensando…",
+  "unconfirmed": {
+    "hint": "Inviato con una richiesta di contatto. La sua app non ha ancora confermato di averlo inviato.",
+    "label": "Non confermato"
+  },
   "video": {
     "arriving": "In arrivo",
     "cantPlay": "Questo dispositivo non può riprodurre questo video ({{format}}). Scaricalo per guardarlo.",

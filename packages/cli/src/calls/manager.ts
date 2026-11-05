@@ -48,8 +48,11 @@ export interface CallHost {
   callPaceMs?: number;
 }
 
-/** The audio contract of one call, as commands and events report it. */
-export interface AudioInfo { socket: string; rate: CallRate; channels: 1; format: "s16le"; frameMs: typeof FRAME_MS }
+/**
+ * The audio contract of one call, as commands and events report it. `token` is the call's secret, which a program sends
+ * first on the socket (`AudioSocket`): only the daemon's own clients are told it.
+ */
+export interface AudioInfo { socket: string; token: string; rate: CallRate; channels: 1; format: "s16le"; frameMs: typeof FRAME_MS }
 
 /** An outgoing call rings this long, then ends as `unanswered`. */
 export const RING_MS = 60_000;
@@ -336,8 +339,10 @@ export class CallManager {
    */
   private prepare(call: Call): void {
     if (this.host.answers === false || call.ended || call.state !== "ringing") return;
-    const iceServers = this.host.engine.getState().settings?.iceServers ?? [];
-    if (callUsesTurn(callIceServers(iceServers))) return;
+    const settings = this.host.engine.getState().settings;
+    const iceServers = settings?.iceServers ?? [];
+    // Hide my IP from contacts: no call is answered here (`callable`), so none is made ahead either.
+    if (settings?.relayOnly === true || callUsesTurn(callIceServers(iceServers))) return;
     this.stopEarly(call);
     call.earlyTimer = setTimeout(() => this.prepare(call), this.host.earlyAnswerMs ?? EARLY_ANSWER_MS);
     call.earlyTimer.unref?.();
@@ -478,7 +483,8 @@ export class CallManager {
 
   setAuto(next: { on: boolean; from?: string[]; rate?: unknown }): AutoAnswer {
     // The daemon answers these chats' calls from now on: never one found only by a name its contact chose.
-    const from = (next.from ?? []).map((ref) => findOwnNamedChat(this.host.engine.getState().links, ref).id);
+    const { links, groups } = this.host.engine.getState();
+    const from = (next.from ?? []).map((ref) => findOwnNamedChat(links, ref, groups).id);
     this.auto = { on: next.on, from: next.on ? from : [], rate: rateOf(next.rate, next.on ? this.auto.rate : DEFAULT_RATE) };
     this.saveAuto();
     return this.getAuto();
@@ -706,7 +712,7 @@ export class CallManager {
   }
 
   private audioInfo(call: Call): AudioInfo | null {
-    return call.socket ? { socket: call.socket.path, rate: call.rate, channels: 1, format: "s16le", frameMs: FRAME_MS } : null;
+    return call.socket ? { socket: call.socket.path, token: call.socket.token, rate: call.rate, channels: 1, format: "s16le", frameMs: FRAME_MS } : null;
   }
 
   private view(call: Call): Record<string, unknown> {
@@ -744,9 +750,10 @@ export class CallManager {
     return this.host.engine.getState().links.find((l) => l.id === chat);
   }
 
-  /** A chat by id, contact key, prefix or name (the API's rules, `findChat`). */
+  /** A chat by id, contact key, prefix or name (the API's rules, `findChat`); a group's says it is one. */
   private chatId(ref: string): string {
-    return findChat(this.host.engine.getState().links, ref).id;
+    const { links, groups } = this.host.engine.getState();
+    return findChat(links, ref, groups).id;
   }
 
   /** The chat, if a call can go in it now; else why not (the engine's reason). */
@@ -757,6 +764,7 @@ export class CallManager {
     if (this.host.answers === false) throw new CliError("unavailable", CALLS_NEED_DAEMON);
     if (!link.profile) throw new CliError("unavailable", "Calls are in chats made since 0.4 (the chat session): this is a compatibility chat");
     if (link.callsUnavailable) throw new CliError("unavailable", link.callsUnavailable);
+    if (this.host.engine.getState().settings?.relayOnly === true) throw new CliError("unavailable", CALLS_OFF_RELAY_ONLY);
     return link;
   }
 
@@ -766,6 +774,13 @@ export class CallManager {
 }
 
 const CALLS_NEED_DAEMON = "Calls need the daemon (a call outlives this command): start it with `ghostly daemon --detach`";
+/**
+ * Hide my IP from contacts (`relayOnly`, WISP 601 Relay only): libdatachannel's relay policy only keeps the other
+ * candidates out of the signal; its ICE still checks from this machine's own sockets, and a call connected on a direct
+ * pair in a local lab. So the CLI places and answers no call while it is on, as the apps do with media that cannot keep
+ * to the relay.
+ */
+const CALLS_OFF_RELAY_ONLY = "Calls are off while Hide my IP from contacts is on: this headless Ghostly cannot keep a call to the relay";
 
 function nameOf(link: LinkView): string | null {
   return link.label?.trim() || link.peerNick?.trim() || null;

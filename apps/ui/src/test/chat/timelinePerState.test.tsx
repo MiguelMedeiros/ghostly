@@ -26,7 +26,7 @@ vi.mock("../../lib/transportEvents", async (importOriginal) => {
     return (...args: Parameters<typeof merge>) => { merges.count++; return merge(...args); };
   } };
 });
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const PEER = "peer".padEnd(52, "p");
 const COUNT = 300;

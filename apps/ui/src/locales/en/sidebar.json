@@ -22,6 +22,8 @@
     "unreadCount": "{{count}} unread in {{name}}",
     "unreadOne": "1 unread in {{name}}"
   },
+  "foundCount": "{{count}} chats found",
+  "foundOne": "1 chat found",
   "group": {
     "adminAnswered": "The admin's app answered…",
     "answerFailed": "That did not go through. Try again.",
@@ -31,6 +33,7 @@
     "inviterAwayUnknown": "The contact who invited you is not connected yet. Try again in a moment.",
     "letting": "A member is letting you in…",
     "linkUnanswered": "The link did not answer",
+    "others": "Another group has this id: pick one",
     "takenBack": "Invitation taken back",
     "unanswered": "No answer from the inviter's app. Accept again, or decline.",
     "waitingAdmin": "Waiting for the admin's app…",
@@ -40,6 +43,7 @@
   "joinChat": "Join chat",
   "new": "New",
   "newChat": "New chat",
+  "newChatShort": "New",
   "newMenu": {
     "chat": "Chat",
     "chatHint": "One person, with an invite",
@@ -64,6 +68,17 @@
     "unreadCount": "{{name}}, {{count}} unread messages",
     "unreadOne": "{{name}}, 1 unread message"
   },
+  "row": {
+    "mention": "you were mentioned",
+    "muted": "notifications muted",
+    "pinned": "pinned",
+    "separator": ", ",
+    "unread": "{{count}} unread messages",
+    "unreadSome": "unread messages",
+    "unread_one": "{{count}} unread message",
+    "unread_other": "{{count}} unread messages"
+  },
+  "searchLabel": "Search chats",
   "searchPlaceholder": "Search chats...",
   "settings": "Settings",
   "sharedIdentity": "Shared an identity",

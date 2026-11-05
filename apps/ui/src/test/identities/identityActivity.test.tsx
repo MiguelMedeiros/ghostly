@@ -5,6 +5,7 @@ import { IdentityActivity } from "../../components/identities/IdentityActivity";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { saveSession } from "../../lib/storage";
+import { LANGUAGES, lookup } from "../i18n/locales";
 
 // covers: proofs.public-activity, proofs.public-activity.graph, proofs.public-profile.setting
 
@@ -107,6 +108,26 @@ describe("a contact's identity: profile, people you know, posts", () => {
     expect(engine.callsTo("loadPublicPosts").slice(-1)[0]).toEqual({ provider: "pubky", subject: "z".repeat(52), force: true });
   });
 
+  it("relays that do not answer are said in the reader's language, as a first page or a next one", async () => {
+    const pt = renderApp(<IdentityActivity provider="nostr" subject={"a".repeat(64)} links={links} />, { language: "pt" });
+    pt.engine.on("loadPublicGraph", () => null);
+    pt.engine.on("loadPublicPosts", () => { throw new Error("No relay answered"); });
+    const error = await within(pt.container).findByTestId("contact-activity-error");
+    expect(error).toHaveTextContent("Não foi possível carregar as publicações: Os relays não responderam. Verifique sua conexão e tente de novo.");
+    expect(error).not.toHaveTextContent("No relay answered");
+    expect(within(pt.container).getByTestId("contact-activity-retry")).toBeInTheDocument();
+    pt.unmount();
+
+    const ja = renderApp(<IdentityActivity provider="nostr" subject={"b".repeat(64)} links={links} />, { language: "ja" });
+    ja.engine.on("loadPublicGraph", () => null);
+    ja.engine.on("loadPublicPosts", () => posts());
+    const more = await within(ja.container).findByTestId("contact-activity-more");
+    ja.engine.on("loadPublicPosts", () => { throw new Error("No relay answered"); });
+    await ja.user.click(more);
+    const later = await within(ja.container).findByTestId("contact-activity-error");
+    expect(later).toHaveTextContent("投稿を読み込めませんでした: リレーが応答しませんでした。接続を確認して、もう一度お試しください。");
+  });
+
   it("with Load public profiles off, nothing is asked", async () => {
     const { engine } = renderApp(<IdentityActivity provider="pubky" subject={KEY} profile={profile()} links={links} />);
     act(() => engine.update({ settings: { ...engine.state.settings, publicProfiles: false } }));
@@ -117,6 +138,15 @@ describe("a contact's identity: profile, people you know, posts", () => {
     await act(async () => {});
     expect(engine.callsTo("loadPublicPosts").length).toBe(asked);
     expect(screen.queryByTestId("contact-activity-posts")).toBeNull();
+  });
+
+  it.each(LANGUAGES)("with public profiles off, the note names the Settings section the menu shows (%s)", async (language) => {
+    const { engine, unmount } = renderApp(<IdentityActivity provider="pubky" subject={KEY} profile={profile()} links={links} />, { language });
+    act(() => engine.update({ settings: { ...engine.state.settings, publicProfiles: false } }));
+    const note = await screen.findByTestId("contact-activity-off");
+    expect(note).toHaveTextContent(lookup(language, "settings.title")!);
+    expect(note).toHaveTextContent(lookup(language, "settings.security")!);
+    unmount();
   });
 
   it("a network without posts shows nothing", () => {

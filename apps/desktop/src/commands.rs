@@ -5,6 +5,7 @@ use tauri::State;
 use crate::bitcoind_rpc::{self, RpcError};
 use crate::crypto;
 use crate::diagnostics;
+use crate::hold_fetch::{self, HoldResponse};
 use crate::link_preview::{self, PreviewResponse};
 use crate::lnd::{self, LndRequest, LndResponse};
 use crate::local_access::{self, LocalAccess, Reason};
@@ -123,12 +124,21 @@ pub async fn publish_records(
     records::publish(&state.pkarr, &keypair, &records).await
 }
 
-/// Settings, Network: the Pkarr relays written to, and whether reads may use them too ("Also use Pkarr relays").
+/// Settings, Network: the Pkarr relays written to, whether reads may use them too ("Also use Pkarr relays"), and
+/// whether the DHT is reached directly at all (`dht_direct`: false with Hide my IP from contacts, reads and writes
+/// then keep to the relays; absent leaves it as it is).
 #[tauri::command]
-pub fn set_pkarr_relays(state: State<'_, AppState>, relays: Vec<String>, read_relays: bool) {
-    state
-        .pkarr
-        .configure(crate::pkarr_network::relay_urls(&relays), read_relays);
+pub fn set_pkarr_relays(
+    state: State<'_, AppState>,
+    relays: Vec<String>,
+    read_relays: bool,
+    dht_direct: Option<bool>,
+) {
+    state.pkarr.configure(
+        crate::pkarr_network::relay_urls(&relays),
+        read_relays,
+        dht_direct,
+    );
 }
 
 /// The network changed (the WebView went back online, another Wi-Fi, a VPN): every relay is asked again.
@@ -325,6 +335,12 @@ pub async fn link_preview_fetch(url: String, kind: String) -> Result<PreviewResp
     link_preview::fetch(url, kind).await
 }
 
+/// A held item or manifest from the storage a contact chose (WISP 404): public addresses only, see `hold_fetch`.
+#[tauri::command]
+pub async fn hold_fetch(url: String) -> Result<HoldResponse, String> {
+    hold_fetch::fetch(url).await
+}
+
 /// Opens a web link from a message (a link preview, a location card) in the
 /// system's browser or maps app. http(s) only; the page never names a program.
 #[tauri::command]
@@ -508,6 +524,60 @@ pub fn system_bars(color: String, dark: bool) -> Result<(), String> {
     }
 }
 
+/// While the app lock is on (`on`), Android's app switcher keeps no picture of the app: it takes one before the page
+/// hears the app is going, so the lock's cover would come too late for it. Nothing elsewhere: the cover is drawn in time.
+#[tauri::command]
+pub fn hide_from_switcher(on: bool) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        crate::android::hide_from_switcher(on)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = on;
+        Ok(())
+    }
+}
+
+/// The call on in the Android app: who it is with, as the chat shows them, and whether it sends the camera's picture.
+#[derive(Debug, serde::Deserialize)]
+pub struct CallNotice {
+    name: String,
+    video: bool,
+}
+
+/// At most this many characters of the name go into the call's notification.
+const CALL_NAME_MAX: usize = 64;
+
+/// The name as the notification shows it: no control characters, at most `CALL_NAME_MAX` characters, trimmed.
+fn call_name(name: &str) -> String {
+    let name: String = name
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(CALL_NAME_MAX)
+        .collect();
+    name.trim().to_string()
+}
+
+/// Android: while a call is on (`call`), a foreground service of type microphone (camera too, while it sends the
+/// camera's picture) with an ongoing "Call with …" notification keeps the call going with the app out of sight
+/// (Android silences the microphone of an app out of sight otherwise); `None` stops it. Whether this start went
+/// through. Elsewhere nothing held: `Ok(false)`.
+// Off the main thread: the Kotlin plugin is waited for.
+#[tauri::command(async)]
+pub fn call_service(call: Option<CallNotice>) -> Result<bool, String> {
+    let call = call.map(|call| (call_name(&call.name), call.video));
+    #[cfg(target_os = "android")]
+    {
+        crate::android::call_service(call)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = call;
+        Ok(false)
+    }
+}
+
 /// `#rrggbb` as 0xRRGGBB.
 fn hex_color(color: &str) -> Option<u32> {
     let hex = color.strip_prefix('#')?;
@@ -517,8 +587,8 @@ fn hex_color(color: &str) -> Option<u32> {
     u32::from_str_radix(hex, 16).ok()
 }
 
-/// A `lightning:` or `bitcoin:` payment link, handed to whatever wallet the system has for it. Nothing
-/// else: only those two schemes, only the characters a payment URI is made of, and never a file or a
+/// A `lightning:`, `bitcoin:` or `monero:` payment link, handed to whatever wallet the system has for it.
+/// Nothing else: only those schemes, only the characters a payment URI is made of, and never a file or a
 /// web page.
 #[tauri::command]
 pub fn open_payment_link(url: String) -> Result<(), String> {
@@ -529,7 +599,8 @@ pub fn open_payment_link(url: String) -> Result<(), String> {
 }
 
 fn is_payment_link(url: &str) -> bool {
-    let scheme_ok = url.starts_with("lightning:") || url.starts_with("bitcoin:");
+    let scheme_ok =
+        url.starts_with("lightning:") || url.starts_with("bitcoin:") || url.starts_with("monero:");
     let chars_ok = url.len() <= 4096
         && url
             .bytes()
@@ -673,6 +744,19 @@ mod project_link_tests {
     }
 
     #[test]
+    fn the_call_notification_takes_a_plain_short_name() {
+        assert_eq!(super::call_name("Alice"), "Alice");
+        assert_eq!(super::call_name("  Al\u{0}ice\n "), "Alice");
+        assert_eq!(super::call_name(&"é".repeat(100)), "é".repeat(64));
+        assert_eq!(super::call_name(""), "");
+        // Nothing held on a desktop: the page asks the same everywhere.
+        let call =
+            serde_json::from_value(serde_json::json!({ "name": "Alice", "video": true })).unwrap();
+        assert_eq!(super::call_service(Some(call)), Ok(false));
+        assert_eq!(super::call_service(None), Ok(false));
+    }
+
+    #[test]
     fn the_page_leaves_public_stun_out_only_with_ghostly_stun_0() {
         assert!(!super::test_network_in(Some("0")).stun);
         for stun in [None, Some(""), Some("1"), Some("false")] {
@@ -765,7 +849,7 @@ mod tests {
     }
 
     #[test]
-    fn payment_links_are_lightning_or_bitcoin_uris_made_of_payment_characters() {
+    fn payment_links_are_lightning_bitcoin_or_monero_uris_made_of_payment_characters() {
         let longest = format!("lightning:{}", "a".repeat(4096 - "lightning:".len()));
         for url in [
             "lightning:lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypq",
@@ -773,6 +857,8 @@ mod tests {
             "bitcoin:BC1QAR0SRRR7XFKVY5L643LYDNW9RE59GTZZWF5MDQ?ark=tark1q",
             // A label and message as the app writes them (apps/ui/src/lib/parse/money-bitcoin.ts bip21Uri).
             "bitcoin:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq?amount=0.0001&label=Bob%27s%20%28Tue%29&message=Thanks%21%2A%7E",
+            // As apps/ui/src/lib/parse/money-monero.ts writes it.
+            "monero:4AzKEX4gXdJdNeM6dfiBFL7kqund3HYGvMBF3ttsNd9SfzgYB6L7ep1Yg1osYJzLdaKAYSLVh6e6jKnAuzj3bw1oGy9kXCb?tx_amount=0.25&recipient_name=Bob%27s&tx_description=Rent%20%28May%29",
             longest.as_str(),
             // Nothing after the scheme opens only the wallet (the extension asks for one character more).
             "lightning:",
@@ -794,6 +880,9 @@ mod tests {
             "web+lightning:lnbc1",
             "lightningx:lnbc1",
             "lightning:lnbç",
+            "monero:4AzKEX4g;rm -rf /",
+            "MONERO:4AzKEX4g",
+            "moneroX:4AzKEX4g",
         ] {
             assert!(!is_payment_link(url), "{url}");
         }

@@ -5,6 +5,7 @@ import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { useAnchorHome, useAppNavigation } from "../../hooks/useAppNavigation";
 import { HOME, anchorTarget, plan, readNav, stackOf } from "../../lib/navigation";
+import { saveSession } from "../../lib/storage";
 import { SETTINGS_INDEX, searchSettings, sectionInView, settingsSection } from "../../lib/settingsSections";
 import { Settings } from "../../pages/Settings";
 import { renderApp } from "../render";
@@ -246,6 +247,45 @@ describe("Settings on a wide screen", () => {
     expect(screen.getByTestId("settings-index-privacy")).toHaveAttribute("aria-current", "true");
     // Still the whole page.
     expect(screen.getByTestId("settings-sounds")).toBeInTheDocument();
+  });
+
+  it("with the keys: Clear and Delete all chats' confirms take the focus in, and their Cancel gives it back to the button", async () => {
+    windowIs(false);
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: "a".repeat(52), encKeyB64: "a2V5", messages: [], createdAt: 1_700_000_000_000 });
+    const { user } = renderSettings("/settings/storage");
+
+    screen.getByTestId("clear-all-data").focus();
+    await user.keyboard("{Enter}");
+    const list = screen.getByTestId("clear-all-data-list");
+    expect(within(list).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("clear-all-data-list")).not.toBeInTheDocument();
+    expect(screen.getByTestId("clear-all-data")).toHaveFocus();
+
+    const remove = await screen.findByTestId("delete-all-chats");
+    await vi.waitFor(() => expect(remove).toBeEnabled());
+    remove.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("delete-all-chats-confirm")).toHaveFocus();
+    await user.tab();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("delete-all-chats")).toHaveFocus();
+  });
+
+  it("Delete all chats' Confirm says the chats are gone, and hands the focus to the next control, not to the page", async () => {
+    windowIs(false);
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: "a".repeat(52), encKeyB64: "a2V5", messages: [], createdAt: 1_700_000_000_000 });
+    const { user } = renderSettings("/settings/storage");
+
+    const remove = await screen.findByTestId("delete-all-chats");
+    await vi.waitFor(() => expect(remove).toBeEnabled());
+    remove.focus();
+    await user.keyboard("{Enter}");
+    await user.keyboard("{Enter}");
+    // The result, not the button's words again.
+    expect(await screen.findByTestId("settings-notice")).toHaveTextContent("All chats deleted");
+    expect(screen.getByTestId("delete-all-chats")).toBeDisabled();
+    expect(screen.getByTestId("clear-all-data")).toHaveFocus();
   });
 
   it("an old address shows the whole page too", async () => {

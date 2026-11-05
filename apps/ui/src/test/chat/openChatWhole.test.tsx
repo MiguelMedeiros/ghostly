@@ -20,7 +20,7 @@ import { renderApp } from "../render";
 
 // The real sync (the setup stubs it out).
 vi.unmock("@ghostly/browser/platform/sync");
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const NOW = Date.now();
 const N = 1_000;

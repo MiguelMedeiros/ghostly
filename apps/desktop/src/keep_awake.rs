@@ -4,7 +4,8 @@
 //!
 //! Each system's own way, and nothing that outlives the app:
 //! - macOS: `caffeinate -i -w <this process>`, which also ends by itself when the app does;
-//! - Linux: `systemd-inhibit --what=idle:sleep` around `tail --pid=<this process>`, which ends with the app too;
+//! - Linux: `systemd-inhibit --what=sleep` around `tail --pid=<this process>`, which ends with the app too (not
+//!   `idle`: screen lockers that honour a logind idle lock would then never blank or lock the screen);
 //! - Windows: `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)` on a thread kept for it, which the system
 //!   lets go of when that thread ends.
 
@@ -51,6 +52,23 @@ fn first_present(paths: &[&'static str]) -> Option<&'static str> {
         .find(|path| std::path::Path::new(path).exists())
 }
 
+/// What `systemd-inhibit` is asked to hold around `tail`: logind's `sleep` lock only, which its IdleAction and the
+/// desktops' automatic suspend go through. Never `idle`: that is what idle daemons build dimming, blanking and screen
+/// locking on, and the screen of an unattended computer must still lock.
+#[cfg(target_os = "linux")]
+fn inhibit_args(tail: &'static str, pid: &str) -> [String; 8] {
+    [
+        "--what=sleep".into(),
+        "--who=Ghostly".into(),
+        "--why=Keeps this computer awake for a handoff".into(),
+        "--mode=block".into(),
+        tail.into(),
+        format!("--pid={pid}"),
+        "-f".into(),
+        "/dev/null".into(),
+    ]
+}
+
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 impl Hold {
     fn start() -> Option<Hold> {
@@ -65,16 +83,7 @@ impl Hold {
             let inhibit = first_present(&["/usr/bin/systemd-inhibit", "/bin/systemd-inhibit"])?;
             let tail = first_present(&["/usr/bin/tail", "/bin/tail"])?;
             std::process::Command::new(inhibit)
-                .args([
-                    "--what=idle:sleep",
-                    "--who=Ghostly",
-                    "--why=Keeps this computer awake for a handoff",
-                    "--mode=block",
-                    tail,
-                    &format!("--pid={pid}"),
-                    "-f",
-                    "/dev/null",
-                ])
+                .args(inhibit_args(tail, &pid))
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .spawn()
@@ -178,6 +187,16 @@ mod tests {
         assert!(held.is_some());
         // Let go: the helper is ended, not left behind.
         drop(held);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn on_linux_only_sleep_is_held_so_the_screen_still_locks() {
+        let args = inhibit_args("/usr/bin/tail", "42");
+        assert_eq!(args[0], "--what=sleep");
+        assert!(args.iter().all(|arg| !arg.contains("idle")));
+        assert_eq!(args[3], "--mode=block");
+        assert_eq!(args[4..], ["/usr/bin/tail", "--pid=42", "-f", "/dev/null"]);
     }
 
     /// One test: the hold is one for the whole app, so two tests at once would let go of each other's.

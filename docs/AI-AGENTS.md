@@ -84,7 +84,7 @@ also named `ghostly`, so install it or the CLI's skill above under that name, no
 | `ghostly routine send` / `routine update` | a routine card for a scheduled job: its schedule, last run and next run |
 | `ghostly group create` / `group send` | take part in a group, with `@mentions` (`group send --mention <member>`) |
 | `ghostly file send` / `file send --voice` | send a file or a voice note |
-| `ghostly call auto on --from <chat>` / `call start` | take or make a voice call, its audio as raw PCM on a Unix socket ([ghostly-voice-agent](https://github.com/MiguelMedeiros/ghostly-voice-agent) answers by voice: speech to text, Claude, text to speech) |
+| `ghostly call auto on --from <chat>` / `call start` | take or make a voice call, its audio as raw PCM on a Unix socket ([ghostly-voice-agent](https://github.com/MiguelMedeiros/ghostly-voice-agent) answers by voice: speech to text, Claude, text to speech; set it up with [Talk to an AI by voice](VOICE-AGENT.md)) |
 | `ghostly chat request` / `chat pay` | ask for a payment or pay, on Testnet unless told otherwise |
 
 Task and routine cards need a `ghostly` newer than 1.0.0 (`ghostly help task` tells).
@@ -189,7 +189,8 @@ while sleep 900; do
 done
 ```
 
-`--resets` takes milliseconds or a date, so the seconds get three zeros. Set `CLAUDE_ACCOUNT` to a short name
+`--resets` takes milliseconds or a date, so the seconds get three zeros. A date with no zone (`2026-10-07` or
+`2026-10-07 18:00`) is local time, a date alone local midnight; `Z` or `+02:00` keep theirs. Set `CLAUDE_ACCOUNT` to a short name
 for the account in use, so the card says which one is running low.
 
 ## The older skill

@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostLink, REACTION_LIMITS, createIdentity, createLink, identityFromSeedB64, type PairingState, type WireReaction } from "@ghostly/core";
-import { GhostlyNode, type NodeEvents } from "../src/engine/node";
+import { FEEDBACK_KEPT, GhostlyNode, type NodeEvents } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { Reactions, latestReaction, noteIfStanding } from "../src/engine/reactions";
 import { STORES, fileStore, transact } from "../src/shared/idb";
@@ -162,6 +162,24 @@ describe("reacting over the live link", () => {
     expect(t.attention.filter(e => e.type === "message")).toEqual([]);
   });
 
+  it("a contact flipping its reaction is heard each time, and what this engine keeps to hear a fact once stays bounded", async () => {
+    const t = await setup();
+    await t.agreed();
+    const sent = await t.node.sendMessage({ linkId: t.id, text: "lunch?" });
+    const mine = (await t.messages()).find(m => m.id === sent.messageId)!;
+    for (let n = 1; n <= 6; n++) expect(t.contact.sendReaction({ id: mine.wireId!, e: n % 2 ? "👍" : "❤️", n })).toBeNull();
+    await vi.waitFor(() => expect(t.receipts).toContain(6));
+    expect(t.attention.filter(e => e.type === "reaction")).toHaveLength(6);
+    // Past the window, the next ones: each is a new fact, so what is kept to hear it once forgets the oldest.
+    const heard = t.node as unknown as { feedbackIds: Set<string>; feedback(type: AttentionEvent["type"], id: string, linkId?: string): void };
+    for (let n = 7; n <= 3 * FEEDBACK_KEPT; n++) heard.feedback("reaction", `${t.id}:${mine.id}:peer:${n}`, t.id);
+    expect(heard.feedbackIds.size).toBe(FEEDBACK_KEPT);
+    expect(t.attention.filter(e => e.type === "reaction")).toHaveLength(3 * FEEDBACK_KEPT);
+    // The newest are still heard once.
+    heard.feedback("reaction", `${t.id}:${mine.id}:peer:${3 * FEEDBACK_KEPT}`, t.id);
+    expect(t.attention.filter(e => e.type === "reaction")).toHaveLength(3 * FEEDBACK_KEPT);
+  });
+
   it("a reaction taken back leaves the chat list's line: the one before it is shown again, or none", async () => {
     const t = await setup();
     await t.agreed();
@@ -201,10 +219,46 @@ describe("reacting over the live link", () => {
     await says(dinner, "", 50);
     await vi.waitFor(() => expect(t.view().lastReaction).toMatchObject({ by: "peer", emoji: "😂", snippet: "breakfast?" }));
     expect(reads()).toBe(0);
-    // Past what this run showed, the history says whether an older one is left.
+    // Past what this run showed, none is left: the chat had none at start, and each since was shown here.
     await says(breakfast, "", 60);
     await vi.waitFor(() => expect(t.view().lastReaction).toBeUndefined());
-    expect(reads()).toBe(1);
+    expect(reads()).toBe(0);
+    whole.mockRestore();
+  });
+
+  it("a contact flipping the chat's only reaction on and off never reads the chat whole: none stood at start or since", async () => {
+    const t = await setup({ onMessageChanges: () => {} });
+    await t.agreed();
+    const texts = Array.from({ length: 10 }, (_, i) => `meal ${i}?`);
+    for (const text of texts) await t.node.sendMessage({ linkId: t.id, text });
+    const rows = await Promise.all(texts.map(text => t.row(text)));
+    let n = 0;
+    const says = async (to: StoredMessage, e: string) => {
+      t.contact.sendReaction({ id: to.wireId!, e, n: ++n });
+      await vi.waitFor(() => expect(t.receipts).toContain(n));
+    };
+    const whole = vi.spyOn(db, "getMessages");
+    const reads = () => whole.mock.calls.filter(([chat]) => chat === t.id).length;
+    // 28 frames in all: within the 30 a window takes.
+    for (let i = 0; i < 3; i++) {
+      await says(rows[0]!, "👍");
+      await vi.waitFor(() => expect(t.view().lastReaction).toMatchObject({ emoji: "👍", snippet: "meal 0?" }));
+      await says(rows[0]!, "");
+      await vi.waitFor(() => expect(t.view().lastReaction).toBeUndefined());
+    }
+    expect(reads()).toBe(0);
+    // Past the notes this run keeps, the oldest is known only to the history: read once for it, and once to find none left.
+    for (const row of rows) await says(row, "🙏");
+    for (const row of [...rows].reverse()) {
+      await says(row, "");
+      const left = rows.indexOf(row) - 1;
+      await vi.waitFor(() => expect(t.view().lastReaction?.snippet).toBe(left < 0 ? undefined : `meal ${left}?`));
+    }
+    expect(reads()).toBe(2);
+    await says(rows[3]!, "👍");
+    await says(rows[3]!, "");
+    await vi.waitFor(() => expect(t.view().lastReaction).toBeUndefined());
+    expect(reads()).toBe(2);
     whole.mockRestore();
   });
 
@@ -610,7 +664,8 @@ describe("the reactions store", () => {
     expect(numbers.slice(2)).toEqual([7_002, 7_003, 9_002, 9_501, 9_502]);
     // What takes no reaction, or is not here, is refused without the whole group either.
     expect(await mine("group:g", "k:0:3", "👍")).toMatch(/takes no reaction/);
-    expect(await mine("group:g", "k:0:9", "👍")).toMatch(/not in this chat/);
+    // A group's refusal names the group, not a chat.
+    expect(await mine("group:g", "k:0:9", "👍")).toBe("That message is not in this group, or takes no reaction");
     expect(whole).not.toHaveBeenCalled();
     expect(rows.map(r => r.reactions?.me?.e)).toEqual(["", "👍", "", "😂", undefined]);
 

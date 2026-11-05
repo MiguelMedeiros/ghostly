@@ -13,7 +13,7 @@ import type { ProfileChoice } from '../profiles/public';
 import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core";
 import type { LinkParams, LinkPreview, PairedTransport, DeliveryMode } from "@ghostly/core";
 import type { CardIndexRow, CashuInspection, EngineState, MessageDetailsView, MessageFile, MessagePage, PublicGraphView, PublicPostImageView, PublicPostsView, SavedMessage, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, WalletType, TestCoinsResult, WakeSubscription } from "./types";
-import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from "../nostr/types";
+import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrNoteView, NostrPublishResult } from "../nostr/types";
 import type { MessageChanges } from "./messageChanges";
 
 /** UI → engine calls. The extension carries them over a runtime port, the web app calls the peer in the same page. */
@@ -119,6 +119,10 @@ export interface EngineApi {
   nostrForgetContact(params: { linkId: string; subject: string }): void;
   /** The person's own profile, follows and mute list for one of their proven keys. */
   nostrLoadOwn(params: { subject: string }): void;
+  /** The keys one of the person's own Nostr follow lists names, as last loaded; the engine state carries only their count. Empty for a key not theirs or a list not loaded. */
+  nostrOwnFollows(params: { subject: string }): string[];
+  /** The posts a contact's Nostr card shows, newest first, past the person's mute lists; the chat's view carries only their count. Empty for a key the contact has not proved there or before any are loaded. */
+  nostrContactNotes(params: { linkId: string; subject: string }): NostrNoteView[];
   /** A key's profile or a note that a message names, on the person's tap, from the person's relays. Not stored. */
   nostrLookup(params: NostrLookupRequest): NostrLookupResult;
   /** Publication, step 1: the unsigned event and the notice to confirm. Refused unless publication is on. */
@@ -159,13 +163,13 @@ export interface EngineApi {
    * here or the id both sides know it by, `emoji` one emoji, or "" to take this side's reaction back. One reaction per
    * person per message: a new one replaces the old.
    */
-  react(params: { linkId: string; messageId: string; emoji: string }): { error: string | null; refused?: boolean };
+  react(params: { linkId: string; messageId: string; emoji: string }): { error: string | null; refused?: boolean; n?: number };
   /**
    * Pins a message (WISP 400 § Pinned message), or unpins with `remove`: `linkId` a chat's link or `group:<id>`,
    * `messageId` the message's id here or the id both sides know it by. One per chat: a new pin replaces the old. In a
-   * community only the admin pins.
+   * community only the admin pins. In a group, `n` is the pin's number, for `groupTaken`.
    */
-  pinMessage(params: { linkId: string; messageId?: string; remove?: boolean }): { error: string | null; refused?: boolean };
+  pinMessage(params: { linkId: string; messageId?: string; remove?: boolean }): { error: string | null; refused?: boolean; n?: number };
   /**
    * Mini-apps in a paired 1:1 chat (`apps/1`, WISP 1200 § In a chat), refused while the apps feature is off. `ref` is
    * the app reference `<publisher key in z-base32>/<name>`; the contact's frames (`app-frame` events) name the app by
@@ -189,7 +193,7 @@ export interface EngineApi {
   appSend(params: { linkId: string; ref: string; data: unknown; digest?: string }): { error: import("@ghostly/core").AppSendError | null };
   /**
    * The read lane (`app-ranges/1`, WISP 1200 § A read lane to the contact): lets the contact's app read `file` (this
-   * side's linked file id) while both have the app open on this session. The serve id, or why not (`not-open`,
+   * side's linked file id) while both have the app open, across a reconnect. The serve id, or why not (`not-open`,
    * `offline`, `peer-closed`). Each range the contact asks comes as an `app-range` event, answered by `appRangeAnswer`.
    */
   appServe(params: { linkId: string; ref: string; file: string; digest?: string }): { serve: string } | { error: "not-open" | "offline" | "peer-closed" };
@@ -209,8 +213,9 @@ export interface EngineApi {
   /**
    * Deletes a message of mine for everyone (WISP 400 § Delete for everyone): gone here at once, and from every member's
    * device as its last edit. A chat's or a group's (`group:<id>`); refused for someone else's, a payment or a notice.
+   * In a group, `e` is the removal's edit number, for `groupTaken`.
    */
-  removeMessage(params: { linkId: string; messageId: string }): { error: string | null; refused?: boolean };
+  removeMessage(params: { linkId: string; messageId: string }): { error: string | null; refused?: boolean; e?: number };
   /** Link secrets, for a UI that keeps its own session list in the same profile. */
   exportLinks(): { deliveryMode?: DeliveryMode; profile?: "paired-chat/1"; seedB64: string; peerPubKeyZ32: string; encKeyB64: string; createdAt: number; inviteCode?: string; label?: string }[];
   /** Sends a file whose bytes the caller already put in the `files` store. Progress shows up in `transfers`. */
@@ -268,6 +273,8 @@ export interface EngineApi {
   walletRemoveMint(params: { url: string; acceptLoss?: boolean }): void;
   /** A Lightning invoice from the active source (`via: "cashu"`: from the mints, landing as ecash). */
   walletReceiveLightning(params: { amount: number; via?: "cashu"; network?:WalletNetwork; card?: string }): { quote: string; invoice: string; expiresAt: number | null; paymentHash?: string; source: string };
+  /** The screen shows this invoice of ours: it is asked about every few seconds for a while (agents#2447). Say it again while it shows. */
+  walletWatchInvoice(params: { invoice: string; network?: WalletNetwork }): void;
   walletQuoteInvoice(params: { invoice: string; via?: "cashu"; network?:WalletNetwork; card?: string; amount?: number }): { quote: string; mint: string; amount: number; feeReserve: number; source?: string };
   /** `note`: what the payment was for, kept with the wallet's own record of it (a Lightning address, for one). */
   /** `confirmedReal`: required to pay a quote of a Mainnet wallet (real money), refused without it. */
@@ -297,8 +304,11 @@ export interface EngineApi {
   bitcoinReconfigureSource(params: { values: Record<string, string>; network?:WalletNetwork }): void;
   bitcoinReceiveAddress(params?: { network?:WalletNetwork }): string;
   bitcoinRefresh(params?: { network?:WalletNetwork }): void;
-  /** Redeems a token pasted by the user. Only mints the user added are accepted. */
-  walletReceiveToken(params: { token: string }): { amount: number };
+  /**
+   * Redeems a token pasted by the user. Only mints the user added are accepted. `amount`: what arrived; `fee`: what the
+   * mint kept of the token's face value to take it in (absent from an engine older than agents#2255: none said).
+   */
+  walletReceiveToken(params: { token: string }): { amount: number; fee?: number };
   walletInspectCashu(params: { text: string }): { inspection: CashuInspection | null };
   /** Everything held, as tokens: the only backup there is for now. */
   walletExport(params?: { network?: WalletNetwork }): { mint: string; token: string; amount: number }[];
@@ -374,6 +384,10 @@ export interface EngineApi {
   inviteToGroup(params: { groupId: string; linkId: string }): void;
   acceptGroupInvitation(params: { groupId: string }): void;
   declineGroupInvitation(params: { groupId: string }): void;
+  /** Another group came under this one's id (`GroupView.others`): the one held is the real one; the others' inviters are told no. */
+  keepGroup(params: { groupId: string }): void;
+  /** Another group under this one's id is the real one (`to`: its `linkId`, or its `link`): the one held goes, as Delete takes it. */
+  switchGroup(params: { groupId: string; to: string }): void;
   /** Turns the group's link on (or replaces it with a new one: the old one stops working). Admin only. */
   enableGroupLink(params: { groupId: string; reset?: boolean }): { link: string };
   disableGroupLink(params: { groupId: string }): void;
@@ -385,8 +399,11 @@ export interface EngineApi {
   sendGroupMessage(params: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string; card?: StatusCard }): { error: string | null; messageId?: string; refused?: boolean };
   /** A press on a button of someone else's message in a chat or a group (`group:<id>`), WISP 406 · Message Buttons. */
   pressButton(params: { linkId: string; messageId: string; buttonId: string }): { error: string | null; refused?: boolean; paced?: true; messageId?: string };
-  /** How many edges took my message `messageId` (or its edit number `edit`): members' edges in a private group, hubs' in a community. */
-  groupTaken(params: { groupId: string; messageId: string; edit?: number }): number;
+  /**
+   * How many edges took my message `messageId` (or its edit number `edit`, or my reaction numbered `reaction`, the `n`
+   * of `react`, or my pin numbered `pin`, the `n` of `pinMessage`): members' edges in a private group, hubs' in a community.
+   */
+  groupTaken(params: { groupId: string; messageId: string; edit?: number; reaction?: number; pin?: number }): number;
   /** The numbers of my reactions and of my pin in a 1:1 chat that the contact has not confirmed yet. */
   chatUnconfirmed(params: { linkId: string }): { reactions: number[]; pin: number | null };
   groupMessages(params: { groupId: string }): StoredMessage[];
@@ -516,6 +533,12 @@ export interface EngineApi {
    * start with `remove-<reason>:`.
    */
   deviceRemove(params: { key: string }): import("../devices/links").DeviceSetView;
+  /**
+   * Rename (WISP 06 § User experience), on the active device: the device with this signing key gets this name in the
+   * set's next record, which every device reads. The name is trimmed; one the record would change (empty, over 16 bytes,
+   * a control, invisible or direction-changing character) is refused. Errors start with `rename-<reason>:`.
+   */
+  deviceRename(params: { key: string; name: string }): import("../devices/links").DeviceSetView;
   /** "New device secret": the set moves to a new device-set secret with nobody removed. */
   deviceNewSecret(): import("../devices/links").DeviceSetView;
   /** The offer of a new device secret after a takeover, answered without making one. */
@@ -663,6 +686,8 @@ export type EngineEvent =
   /** What changed in a history the client was sent whole already (`applyMessageChanges`): only those rows. */
   | ({ kind: "message-changes"; linkId: string } & MessageChanges)
   | { kind: "call-signal"; linkId: string; signal: string }
+  /** Another page on this engine answered or declined the contact's call ringing in that chat: it rings here no more. */
+  | { kind: "call-handled"; linkId: string }
   /** A contact's mini-app frame in a 1:1 chat (`apps/1`, WISP 1200 § In a chat), already checked; never stored. */
   | { kind: "app-frame"; linkId: string; event: import("@ghostly/core").AppFrameEvent }
   /** The contact's app asks for a range of a file this side's app serves (`appServe`): the page that served it answers. */
@@ -680,3 +705,11 @@ export type EngineEvent =
    * every engine call fails.
    */
   | { kind: "device-gate"; gate: import("../devices/gate").DeviceGateView };
+
+/**
+ * A state as a client across a copying boundary gets it (`copyingSink`, the extension's port): `payments` and `wallet`
+ * are left out when they are the ones that client was sent last, and the page keeps those.
+ */
+export type PostedState = Omit<EngineState, "payments" | "wallet"> & Partial<Pick<EngineState, "payments" | "wallet">>;
+/** What a page hears from the peer: an event, a state that may leave out what it already has, or an answer. */
+export type PostedEvent = Exclude<EngineEvent, { kind: "state" }> | { kind: "state"; state: PostedState } | RpcResponse;

@@ -6,6 +6,9 @@ import type { AuthFlow, GrantAuthFlow, Session } from "@synonymdev/pubky";
 import type { ApprovalRequest, IdentityFetch } from "./contract";
 import { assertPublicHost, chosenResolver, type DohResolverId } from "./domain";
 import { getBrowserHost, type PubkyCookieSession } from "../host";
+import { PUBKY_RELAYS } from "./pubkyRelays";
+
+export { PUBKY_RELAYS };
 
 /**
  * Pubky, browser side: reading a key's records and files the way a contact's app does (through the proof
@@ -15,24 +18,26 @@ import { getBrowserHost, type PubkyCookieSession } from "../host";
 
 // -- reading ---------------------------------------------------------------------------------------
 
-/** Pkarr relays the records are read from: Pubky's own, the ones the Pubky SDK uses. */
-export const PUBKY_RELAYS: readonly string[] = ["https://pkarr.pubky.org", "https://pkarr.pubky.app"];
 
 /**
  * The newest DNS packet the relays hold for `key`, its signature checked against `key`. Every relay is asked; one
- * that is down, answers garbage or holds an older packet does not count. Throws when none has a valid one.
+ * that is down, answers garbage or holds an older packet does not count. Throws when none has a valid one: as
+ * IdentityCheckUnavailable when none answered (not reached, or an error status), since that says nothing of the key.
  */
 export async function pubkyRecords(key: string, fetch: IdentityFetch, signal?: AbortSignal, relays: readonly string[] = PUBKY_RELAYS): Promise<Uint8Array> {
   const failed: unknown[] = [];
+  let answered = false;
   const answers = await Promise.all(relays.map(async relay => {
     let r;
     try { r = await fetch(`${relay.replace(/\/+$/, "")}/${key}`, { maxBytes: RELAY_PAYLOAD_MAX_BYTES, signal }); }
     catch (e) { failed.push(e); return undefined; }
+    if (r.status === 200 || r.status === 404) answered = true;
     try { return r.status === 200 ? openRelayPayload(key, r.bytes) : undefined; } catch { return undefined; }
   }));
   const newest = answers.filter(a => !!a).sort((a, b) => (b.seq > a.seq ? 1 : b.seq < a.seq ? -1 : 0))[0];
-  // No relay answered at all (offline, a time-out): say that, not that the key has no records.
-  if (!newest && failed.length === relays.length && failed[0] instanceof Error) throw failed[0];
+  // No relay answered at all (offline, a time-out, an error status): say that, not that the key has no records.
+  if (!newest && failed.length === relays.length && (failed[0] instanceof IdentityCheckUnavailable || /too large/i.test(String(failed[0])))) throw failed[0];
+  if (!newest && !answered) throw new IdentityCheckUnavailable("No relay answered");
   if (!newest) throw new NoPkarrRecords("This Pubky key has no records on the Pkarr relays");
   return newest.dnsPacket;
 }

@@ -11,16 +11,31 @@ import { fromBase64Url, irohDescriptor, irohRelayUrl, type BoundChannel, type Fr
  */
 
 /**
- * n0's public relays, the same ones the Desktop's Iroh homes on by default. Iroh itself names them with the trailing
- * dot of a full domain name (`use1-1.relay.n0.iroh.link.`), and compares relay URLs as text; here they have none,
- * because WebKit opens no host name that ends in a dot. `BROWSER_SPELLING` is what keeps the two one relay.
+ * n0's public relays, the same ones the Desktop's Iroh homes on by default, then Ghostly's own (`iroh-relay` behind a
+ * Cloudflare tunnel) as one more fallback. Iroh homes on the one with the lowest latency it measures, not the first.
+ * Iroh itself names n0's with the trailing dot of a full domain name (`use1-1.relay.n0.iroh.link.`), and compares relay
+ * URLs as text; here they have none, because WebKit opens no host name that ends in a dot. `BROWSER_SPELLING` is what
+ * keeps the two one relay. Ghostly's stays plain everywhere: the tunnel in front of it answers the dotted name with 404.
+ * At most `MAX_IROH_RELAYS`, the wasm's own limit.
  */
 export const DEFAULT_IROH_RELAYS = [
   "https://use1-1.relay.n0.iroh.link/",
   "https://euc1-1.relay.n0.iroh.link/",
   "https://aps1-1.relay.n0.iroh.link/",
   "https://usw1-1.relay.n0.iroh.link/",
+  "https://iroh.miguelmedeiros.dev/",
 ] as const;
+
+/** The most relays an endpoint homes on: the wasm refuses more (`native/transports/iroh-web`), as does the Desktop. */
+export const MAX_IROH_RELAYS = 5;
+
+/**
+ * Whether one of these relays is n0's public ones (`*.iroh.link`, either spelling): those refused six of sixteen
+ * listeners started at once, so an app that may home on one keeps the listener count they took.
+ */
+export function onPublicIrohRelay(relays: readonly string[]): boolean {
+  return relays.some(relay => { try { return /(^|\.)iroh\.link\.?$/.test(new URL(relay).hostname); } catch { return false; } });
+}
 
 /**
  * The spelling of every relay URL handed to the wasm Iroh (`irohRelayUrl`): the relays it homes on and a contact's
@@ -81,10 +96,17 @@ export interface IrohWebOptions {
   onlineMs?: number;
   connectMs?: number;
   load?: () => Promise<IrohWasm>;
+  /**
+   * Dial only through one of `relays` (Hide my IP from contacts, WISP 100 § Relay only): the wasm reaches a peer through
+   * the relay its descriptor names, and a contact who runs that relay would see this profile's address there.
+   */
+  ownRelaysOnly?: boolean;
 }
 
 const SEND_BUDGET = 120 * 1024;
 const MAX_FRAME = 60 * 1024;
+/** How often an endpoint reads which relay it is homed on (`createIrohWebEndpoint`). */
+const HOME_CHECK_MS = 5_000;
 
 /** One paired channel over one QUIC stream. Sends are queued in order. */
 class IrohWebChannel implements FrameChannel {
@@ -131,14 +153,58 @@ class IrohWebChannel implements FrameChannel {
   }
 }
 
+/**
+ * The relay the first endpoint on a relay list homed on, per wasm loader and list. Each endpoint keeps measuring
+ * every relay in its list (a `GET /ping` to each, about 1.3 a minute), and all the endpoints in one app share one
+ * network, so the first measures for all: the others start on its home relay alone, which is also the one their
+ * descriptor names. Dialling a contact on another relay still works; only the measuring is skipped.
+ */
+const homes = new WeakMap<object, Map<string, Promise<string | null>>>();
+
+/** Starts a node on the home relay the first endpoint found, or on every relay when there is none or it fails. */
+async function startNode(wasm: IrohWasm, homesOfList: Map<string, Promise<string | null>>, seed: Uint8Array, relays: string[], onlineMs: number): Promise<WasmNode> {
+  const key = relays.join(" ");
+  const found = relays.length > 1 ? homesOfList.get(key) : undefined;
+  const home = found ? await found : null;
+  if (found && home) {
+    try { return await wasm.IrohNode.start(seed, [home], onlineMs); } catch {
+      // That relay stopped answering: measure again, from the next endpoint on.
+      if (homesOfList.get(key) === found) homesOfList.delete(key);
+    }
+  }
+  let settle = (_home: string | null) => {};
+  const mine = relays.length > 1 && !homesOfList.has(key) ? new Promise<string | null>(resolve => { settle = resolve; }) : null;
+  if (mine) homesOfList.set(key, mine);
+  try {
+    const node = await wasm.IrohNode.start(seed, relays, onlineMs);
+    const homed = node.address().relay;
+    settle(relays.find(relay => homed && new URL(relay).href === new URL(homed).href) ?? null);
+    return node;
+  } catch (error) {
+    if (mine && homesOfList.get(key) === mine) homesOfList.delete(key);
+    settle(null);
+    throw error;
+  }
+}
+
+/** Whether a descriptor (in `BROWSER_SPELLING`) names one of these relays, whichever way its URL is written. */
+function onOwnRelay(descriptor: unknown, relays: readonly string[]): boolean {
+  const relay = (descriptor as { relay?: unknown } | null | undefined)?.relay;
+  if (typeof relay !== "string") return false;
+  try { return relays.some(own => new URL(own).href === new URL(relay).href); } catch { return false; }
+}
+
 /** A NativeEndpoint for `iroh/1`, as the Desktop's is, for one chat's transport seed. */
 export async function createIrohWebEndpoint(seedB64: string, options: IrohWebOptions = {}): Promise<NativeEndpoint> {
   const seed = fromBase64Url(seedB64);
   if (seed.length !== 32) throw new Error("Invalid transport seed");
   // Either spelling of a relay (with or without the trailing dot) homes on it under the one a browser opens.
   const relays = [...new Set((options.relays?.length ? options.relays : DEFAULT_IROH_RELAYS).map(relay => irohRelayUrl(relay, BROWSER_SPELLING)))];
-  const wasm = await (options.load ?? loadIrohWasm)();
-  const node = await wasm.IrohNode.start(seed, relays, options.onlineMs ?? 10_000);
+  const load = options.load ?? loadIrohWasm;
+  const wasm = await load();
+  let homesOfList = homes.get(load);
+  if (!homesOfList) homes.set(load, homesOfList = new Map());
+  const node = await startNode(wasm, homesOfList, seed, relays, options.onlineMs ?? 10_000);
   const channels = new Set<IrohWebChannel>();
   let stopped = false;
   let handler: NativeEndpoint["onConnection"] = null;
@@ -157,18 +223,32 @@ export async function createIrohWebEndpoint(seedB64: string, options: IrohWebOpt
     set onConnection(value) { handler = value; if (value) for (const bound of early.splice(0)) value(bound); },
     async connect(descriptor) {
       if (stopped) throw new Error("Iroh endpoint is stopped");
-      const conn = await node.connect(irohDescriptor(descriptor, BROWSER_SPELLING), options.connectMs ?? 20_000);
+      const dialled = irohDescriptor(descriptor, BROWSER_SPELLING);
+      if (options.ownRelaysOnly && !onOwnRelay(dialled, relays)) throw new Error("The contact is not on one of this profile's Iroh relays");
+      const conn = await node.connect(dialled, options.connectMs ?? 20_000);
       if (stopped) { conn.close(); throw new Error("Iroh endpoint is stopped"); }
       return bind(conn);
     },
     async close() {
       if (stopped) return;
       stopped = true;
+      clearInterval(watching);
       for (const channel of [...channels]) channel.close();
       for (const bound of early.splice(0)) bound.channel.close();
       await node.close().catch(() => {});
     },
   };
+  // Iroh moves its home to another of the relays when the one it homed on goes away or another answers faster, and a
+  // contact reaches it only through the relay its record names (the one left: no answer, every time). The wasm says
+  // nothing when it moves, so its address is read again (`HOME_CHECK_MS`) and a new home is published, as the
+  // Desktop's own Iroh does (`onDescriptor`). Between two homes it has none: the last stays published.
+  const watching = setInterval(() => {
+    let now: IrohWebDescriptor;
+    try { now = node.address(); } catch { return; }
+    if (stopped || !now.relay || now.relay === (endpoint.descriptor as IrohWebDescriptor).relay) return;
+    endpoint.descriptor = { ...now, relayed: true };
+    endpoint.onDescriptor?.();
+  }, HOME_CHECK_MS);
   void (async () => {
     while (!stopped) {
       let conn: WasmConn | undefined;

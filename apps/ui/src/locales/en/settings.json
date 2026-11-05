@@ -7,6 +7,7 @@
     "compact": "Compact"
   },
   "chatListDensity": "Chat list",
+  "chatsDeleted": "All chats deleted",
   "clear": "Clear",
   "clearAllData": "Clear all data",
   "clearAllDataConfirm": "This erases for good:",
@@ -55,7 +56,9 @@
   "dataCleared": "All data cleared",
   "defaultNickname": "Name in chats",
   "defaultNicknameHint": "Used when you start a new chat",
+  "deleteAllChatsCallOn": "A call is on in a chat. End it first, then delete all chats.",
   "deleteAllChatsConfirm": "Delete all {{count}} chats?",
+  "deleteAllChatsConfirm_one": "Delete your only chat?",
   "deleteAllChatsHint": "Messages and files go. Settings and wallets stay.",
   "groupDownloads": {
     "always": "Always",

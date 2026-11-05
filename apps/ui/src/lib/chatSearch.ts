@@ -1,9 +1,11 @@
 import { foldText } from "@ghostly/browser/shared/fold";
 import { englishT, type Translate } from "../locales/translate";
+import { parseMessage, type Block, type ListBlock, type MdLinkData, type Segment } from "./parse";
 import type { ChatFile, ChatMessage } from "./types";
 
 /**
- * Search inside a chat: only what this device keeps of it, never the network. A message's text, or a file's name for a
+ * Search inside a chat: only what this device keeps of it, never the network. A message's text as it reads (its
+ * formatting's markers left out), or a file's name for a
  * file (not the line its message carries), matched whatever the case and the accents ("cafe" finds "Café"). A voice
  * message, a video or a picture is also found by what it is, in the profile's language and in English: the recorder
  * names a voice message in English ("Voice message …webm"), and a Portuguese profile looks for "voz".
@@ -17,6 +19,49 @@ export interface Searchable {
 
 /** Lower case, accents off: "Ação" reads "acao". The engine's chat search folds the same way (`chatsFound`). */
 export { foldText };
+
+/** A character that may start inline formatting or a `[label](link)`: a text without one reads as it is written. */
+const MARKUP = /[*_~|`[]/;
+
+/**
+ * A text as its bubble reads (lib/parse), so "**hello** world" is found by "hello world" and not by "**". A spoiler's
+ * words count (they show once tapped); a `[label](link)` is found by its label in place and by its address, after the
+ * rest, so the address never runs into the words around the label.
+ */
+function shownText(text: string): string {
+  if (!MARKUP.test(text)) return text;
+  let shown = shownCache.get(text);
+  if (shown === undefined) {
+    // An open search folds the chat again for each message that comes: a formatted text is parsed once, not each time.
+    if (shownCache.size >= SHOWN_CACHE_MAX) shownCache.clear();
+    shown = parsedText(text);
+    shownCache.set(text, shown);
+  }
+  return shown;
+}
+const SHOWN_CACHE_MAX = 20_000;
+const shownCache = new Map<string, string>();
+
+function parsedText(text: string): string {
+  const links: string[] = [];
+  const segments = (list: readonly Segment[]): string => list.map((segment) => {
+    if (segment.type === "span") return segments(segment.children);
+    if (segment.type !== "atom" || segment.kind !== "md-link") return segment.text;
+    const data = segment.data as MdLinkData;
+    links.push(data.url);
+    return segments(data.label);
+  }).join("");
+  const list = (part: ListBlock): string => part.items.map((item) => [`${item.marker} ${segments(item.segments)}`, ...item.children.map(list)].join("\n")).join("\n");
+  const block = (part: Block): string => {
+    switch (part.type) {
+      case "codeblock": return part.code;
+      case "paragraph": case "heading": return segments(part.segments);
+      case "quote": return part.blocks.map(block).join("\n");
+      case "list": return list(part);
+    }
+  };
+  return [...parseMessage(text).map(block), ...links].join("\n");
+}
 
 /** A file's kind in words, the same the app shows for it: a voice message, a video, a picture; none for other files. */
 export function fileKindWords(file: ChatFile, t: Translate): string | undefined {
@@ -32,7 +77,7 @@ export function fileKindWords(file: ChatFile, t: Translate): string | undefined 
  */
 export function searchText(message: ChatMessage, t: Translate = englishT): string | undefined {
   if (message.sender === "system" || message.systemEvent || message.callEvent || message.paymentId) return undefined;
-  if (!message.file) return message.text;
+  if (!message.file) return shownText(message.text);
   const words = new Set([fileKindWords(message.file, t), fileKindWords(message.file, englishT)]);
   return [message.file.name, ...words].filter(Boolean).join("\n");
 }

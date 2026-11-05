@@ -2,8 +2,8 @@ import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fromBase64Url, RTC_CONFIG, setLinkTraceSink } from "@ghostly/core";
-import { irohRelayProblem } from "@ghostly/browser/platform/irohWeb";
+import { DAEMON_WATCH_PEER_IDLE_MS, fromBase64Url, RTC_CONFIG, setLinkTraceSink } from "@ghostly/core";
+import { MAX_IROH_RELAYS, irohRelayProblem } from "@ghostly/browser/platform/irohWeb";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { loadCallStack } from "../calls/media";
 import { CliError } from "../errors";
@@ -84,6 +84,8 @@ export function irohRelays(env = process.env): string[] | null {
   if (!relays.length) return null;
   const bad = relays.map((url) => irohRelayProblem(url)).find(Boolean);
   if (bad) throw new CliError("usage", `GHOSTLY_IROH_RELAYS: ${bad}`);
+  // More than the endpoint takes left every chat's Iroh refused, the profile running with none.
+  if (relays.length > MAX_IROH_RELAYS) throw new CliError("usage", `GHOSTLY_IROH_RELAYS: use at most ${MAX_IROH_RELAYS} Iroh relays, not ${relays.length}`);
   return relays;
 }
 
@@ -121,8 +123,8 @@ export function mainlineNetwork(env = process.env): { off: true } | { off: false
 
 /**
  * WebRTC for the engine (WISP 101): libdatachannel through node-datachannel's W3C polyfill. Chats go live over it with
- * browsers directly, and groups need it (their links use WebRTC alone). A native module: without it, or with
- * `GHOSTLY_WEBRTC=0`, the CLI runs without WebRTC and says so.
+ * browsers directly, and calls need it. A native module: without it, or with `GHOSTLY_WEBRTC=0`, the CLI runs without
+ * WebRTC and says so; its groups' links go over Iroh or HyperDHT (WISP 902 § Transports).
  */
 async function installWebRtc(): Promise<boolean> {
   if (!envSwitch("GHOSTLY_WEBRTC", true)) return false;
@@ -199,9 +201,9 @@ function irohWasmBytes(): Buffer {
 
 /**
  * How a runtime starts: `deferGroups` leaves the groups' sessions unstarted (a one-shot for one chat); `deferChats` leaves
- * the saved chats unstarted (a one-shot that makes or joins one); `offline` starts no chat or group and publishes nothing
- * (a one-shot that only reads); `logJoins` says the steps of a join through a group's link on stderr (a daemon, whose
- * log that is: `joinLog.ts`).
+ * the saved chats unstarted until a call names one (a one-shot for one chat, or one that makes or joins one); `offline`
+ * starts no chat or group and publishes nothing (a one-shot that only reads); `logJoins` says the steps of a join
+ * through a group's link on stderr (a daemon, whose log that is: `joinLog.ts`).
  */
 export interface RuntimeOptions { deferGroups?: boolean; deferChats?: boolean; offline?: boolean; logJoins?: boolean }
 
@@ -305,6 +307,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     apps: apps ? "wire" : false,
     // A daemon stays online: a hub of the large private groups it is in (WISP 902 · Group Mesh § Hubs), unless GHOSTLY_HUB=0.
     staysOnline: envSwitch("GHOSTLY_HUB", true),
+    // A contact that left (a phone that put the app to sleep) is read every 10 s for 5 minutes, not every 30 s past 2.
+    watchPeerIdleMs: DAEMON_WATCH_PEER_IDLE_MS,
     localFetch: nodeLocalFetch,
     // A wake-up goes to a push service only, on public addresses only (./pushSend.ts), as the Desktop's does.
     pushSend: (request) => nodePushSend(request),

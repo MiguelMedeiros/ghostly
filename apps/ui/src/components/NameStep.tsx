@@ -1,23 +1,35 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { knownDeviceGate } from "@ghostly/browser/devices/gate";
 import { useI18n } from "../contexts/I18nContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { JOIN_OPEN_EVENT, DEVICE_LINK_EVENT, deviceLinkOffered } from "../lib/devices";
+import { useFittedNameField } from "../hooks/useGroupNameField";
 import { nameStepAllowed, nameStepDone, nameStepPending } from "../lib/nameStep";
+import { cleanOwnName, fitsOwnName } from "../lib/ownName";
+import { closedByArrival } from "../lib/layerHistory";
 import { currentProfile } from "../lib/profiles";
+import { touchOnly } from "../lib/touchOnly";
 import { DeviceDialog, field, primaryButton } from "./devices/DeviceDialog";
 
 /**
  * Where the focus goes once the step closes. It opened as the app started, with nothing focused before it, so the
- * dialog gives the focus back to the page's body: New instead, the first thing a new person does, where the page has it
- * (the chat list); else the page's main area (a wide screen). Never away from something that took the focus in the meantime.
+ * dialog gives the focus back to the page's body. Over a chat (an invite link opens one) its message field, or on a
+ * touch screen, where that brings up the keyboard, its back button (a phone's header); else New, the first thing a new
+ * person does, where the page shows it; else the page's main area. Only what is on screen: a phone keeps the chat list,
+ * New in it, mounted but hidden under an open chat, where focus() does nothing. Never away from something that took
+ * the focus in the meantime.
  */
 function focusAfter() {
   const active = document.activeElement;
   if (active && active !== document.body) return;
-  const next = document.querySelector<HTMLElement>("[data-testid='sidebar-new-chat']");
-  if (next) next.focus();
-  else document.querySelector<HTMLElement>("main[tabindex]")?.focus();
+  const places = [...(touchOnly() ? [] : ["textarea.composer-textarea:not([disabled])"]), "[data-testid='chat-back']", "[data-testid='sidebar-new-chat']", "main[tabindex]"];
+  for (const place of places) {
+    for (const next of document.querySelectorAll<HTMLElement>(place)) {
+      if (next.closest("[hidden], [inert]") || !(next.checkVisibility?.() ?? true)) continue;
+      next.focus();
+      if (document.activeElement === next) return;
+    }
+  }
 }
 
 /**
@@ -31,7 +43,9 @@ export function NameStep() {
   const { settings, updateDefaultNickname } = useSettings();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
-  const input = useRef<HTMLInputElement>(null);
+  // Counted in characters as seen, never cut inside an emoji (`fitsOwnName`).
+  const nameField = useFittedNameField(name, setName, fitsOwnName);
+  const input = nameField.ref;
 
   useEffect(() => {
     if (!nameStepPending() || settings.defaultNickname.trim() || currentProfile().restored || deviceLinkOffered() || knownDeviceGate()?.full === false) return;
@@ -50,22 +64,26 @@ export function NameStep() {
     if (!open) return;
     const frame = requestAnimationFrame(() => input.current?.focus());
     return () => cancelAnimationFrame(frame);
-  }, [open]);
+  }, [open, input]);
 
   if (!open) return null;
   const done = () => { nameStepDone(); setOpen(false); requestAnimationFrame(focusAfter); };
+  // A link that reaches this page (another tab's, the installed app's launch) is no answer: it stays over the chat the
+  // link opens, as on a first visit with the link, and Back has an entry to close it again (`useBackCloses`).
+  const close = () => { if (!closedByArrival()) done(); };
+  const chosen = cleanOwnName(name);
   const save = () => {
-    const chosen = name.replace(/\s+/g, " ").trim().slice(0, 20);
     if (!chosen) return;
     updateDefaultNickname(chosen);
     done();
   };
   return (
-    <DeviceDialog title={t("profile.nameStep.title")} onClose={done} testId="name-step">
+    <DeviceDialog title={t("profile.nameStep.title")} onClose={close} testId="name-step">
       <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); save(); }}>
-        <input ref={input} data-testid="name-step-input" aria-label={t("profile.nameStep.title")} className={field} autoFocus maxLength={20}
-          placeholder={t("profile.nameStep.placeholder")} value={name} onChange={(event) => setName(event.target.value)} />
-        <button type="submit" data-testid="name-step-save" className={primaryButton} disabled={!name.trim()}>{t("profile.nameStep.save")}</button>
+        <input ref={input} data-testid="name-step-input" aria-label={t("profile.nameStep.title")} className={field} autoFocus
+          placeholder={t("profile.nameStep.placeholder")} value={name} onChange={nameField.onChange}
+          onCompositionStart={nameField.onCompositionStart} onCompositionEnd={nameField.onCompositionEnd} dir={nameField.dir} />
+        <button type="submit" data-testid="name-step-save" className={primaryButton} disabled={!chosen}>{t("profile.nameStep.save")}</button>
         <button type="button" data-testid="name-step-skip" onClick={done}
           className="mx-auto block min-h-10 px-2 text-sm text-text-secondary underline underline-offset-4 hover:text-accent cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded">
           {t("profile.nameStep.skip")}

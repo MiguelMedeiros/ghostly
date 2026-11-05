@@ -40,9 +40,15 @@
 //! `DHT_SILENT_LOOKUPS` of them in a row reads go to the relays as if "Also use Pkarr relays" were on,
 //! until a lookup hears from a node again (every read still starts one). Without it the app published
 //! through the relays and read nothing back: no chat connected, and none said why.
+//!
+//! With Hide my IP from contacts on (`relayOnly`, WISP 100 § Relay only), reads and writes keep to the relays: the
+//! DHT nodes are closed, so no UDP goes to a DHT node, and a contact running nodes near a chat's keys does not see
+//! this app poll them (`configure`'s `dht_direct`). Turned off, the nodes are made again. The choice is remembered
+//! in the app's folder, so the next start opens no node before the engine says (`Pkarr::start`).
 
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddrV4;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -147,6 +153,10 @@ const DHT_NEWER_PUT_FOR: Duration = Duration::from_secs(30);
 
 /// Lookups in a row that heard from no DHT node at all before reads go to the relays too (see the module's notes).
 const DHT_SILENT_LOOKUPS: u32 = 2;
+
+/// The file in the app's folder that says the last choice was relays only (Hide my IP from contacts): the next start
+/// makes no DHT node until the engine says otherwise (`Pkarr::start`).
+const RELAYS_ONLY_FILE: &str = "pkarr-relays-only";
 
 /// The puts of one key under way on a `MainlineNode`.
 struct PutsUnderWay {
@@ -351,6 +361,13 @@ impl Dht {
         )
     }
 
+    /// What makes a node of the Mainline DHT through `bootstrap`, each time it is called (`Inner::make_dht`).
+    fn mainline_maker(bootstrap: Option<Vec<SocketAddrV4>>) -> MakeDht {
+        Box::new(move || {
+            Dht::mainline(bootstrap.clone()).expect("making a Mainline node returns at once")
+        })
+    }
+
     async fn publish(&self, packet: &SignedPacket) -> Result<(), String> {
         match self {
             Dht::Mainline(node, _) => node.put(packet).await,
@@ -448,9 +465,17 @@ pub struct Pkarr {
     inner: Arc<Inner>,
 }
 
+/// Makes the DHT this app reads directly: at the start, and again each time Hide my IP from contacts is turned off.
+type MakeDht = Box<dyn Fn() -> Dht + Send + Sync>;
+
 struct Inner {
-    /// Looks keys up, and is published to. The DHT in the app.
-    lookup: Option<Dht>,
+    /// Makes the DHT keys are looked up on and published to; none where there is no DHT (relays of one's own).
+    make_dht: Option<MakeDht>,
+    /// The DHT, while it is made: none before `start`, and none while reads and writes keep to the relays (Hide my IP
+    /// from contacts, `configure`). Dropping it closes its nodes and their UDP sockets once the last request ends.
+    lookup: Mutex<Option<Dht>>,
+    /// The file that says the last choice was relays only (`RELAYS_ONLY_FILE`), once `start` named the app's folder.
+    remembered: Mutex<Option<PathBuf>>,
     http: reqwest::Client,
     /// READS_PER_MINUTE for the public relays; none for relays of one's own.
     reads_per_minute: usize,
@@ -472,8 +497,10 @@ struct State {
     /// The relays, read and written with plain HTTP (`READ_TIMEOUT` / `WRITE_TIMEOUT`, `If-Match` on
     /// writes, the relay's rate-limit headers read on every answer).
     relays: Vec<Relay>,
-    /// Reads may go to the relays ("Also use Pkarr relays"); always, where there is no DHT.
+    /// Reads may go to the relays ("Also use Pkarr relays"); always, where there is no DHT (or it is closed).
     read_relays: bool,
+    /// "Also use Pkarr relays" as Settings say it, whatever the DHT: `read_relays` again once the DHT is back.
+    read_relays_chosen: bool,
     turn: usize,
     /// Where the last read went.
     path: Option<Path>,
@@ -699,6 +726,8 @@ impl Pkarr {
     /// URLs) names the relays, and alone means those relays and nothing else, which is how the scenario matrix
     /// pairs Desktop with its other peers offline; `GHOSTLY_PKARR_DHT_BOOTSTRAP` (comma-separated `ip:port`)
     /// joins a DHT of one's own through those nodes instead of the public one.
+    ///
+    /// The DHT node is made by `start`, once the app's folder says whether the last run kept to the relays.
     pub fn desktop() -> Result<Self, String> {
         let relays = private_relays(std::env::var("GHOSTLY_PKARR_RELAYS").ok().as_deref())?;
         let bootstrap =
@@ -713,7 +742,8 @@ impl Pkarr {
                         .to_vec()
                 });
                 Self::build(
-                    Some(Dht::mainline(bootstrap)?),
+                    Some(Dht::mainline_maker(bootstrap)),
+                    false,
                     &relays,
                     READS_PER_MINUTE,
                     false,
@@ -726,13 +756,34 @@ impl Pkarr {
     /// Relays of one's own and nothing else: no DHT, and no read budget, since
     /// the budget is there for the public relays' limits.
     pub fn private(relays: &[Url]) -> Result<Self, String> {
-        Self::build(None, relays, usize::MAX, true, true)
+        Self::build(None, false, relays, usize::MAX, true, true)
     }
 
     /// The DHT read directly, `relays` written to; relay reads wait for `configure`.
     #[cfg(test)]
     pub fn direct(dht: Dht, relays: &[Url]) -> Result<Self, String> {
-        Self::build(Some(dht), relays, READS_PER_MINUTE, false, false)
+        Self::build(
+            Some(Box::new(move || dht.clone())),
+            true,
+            relays,
+            READS_PER_MINUTE,
+            false,
+            false,
+        )
+    }
+
+    /// As the app's: Mainline nodes joining through `bootstrap`, made by `start` and again each time the DHT is
+    /// turned back on, `relays` written to.
+    #[cfg(test)]
+    pub fn mainline(bootstrap: Vec<SocketAddrV4>, relays: &[Url]) -> Result<Self, String> {
+        Self::build(
+            Some(Dht::mainline_maker(Some(bootstrap))),
+            false,
+            relays,
+            READS_PER_MINUTE,
+            false,
+            false,
+        )
     }
 
     /// Relays read first, with `lookup` (a stand-in for the slow, complete source) behind them: what
@@ -740,7 +791,8 @@ impl Pkarr {
     #[cfg(test)]
     pub fn new(lookup: Option<Client>, relays: &[Url]) -> Result<Self, String> {
         Self::build(
-            lookup.map(Dht::StandIn),
+            lookup.map(|client| Box::new(move || Dht::StandIn(client.clone())) as MakeDht),
+            true,
             relays,
             READS_PER_MINUTE,
             true,
@@ -748,8 +800,10 @@ impl Pkarr {
         )
     }
 
+    /// `made`: the DHT is made at once (tests), not by `start`.
     fn build(
-        lookup: Option<Dht>,
+        make_dht: Option<MakeDht>,
+        made: bool,
         relays: &[Url],
         reads_per_minute: usize,
         read_relays: bool,
@@ -760,6 +814,11 @@ impl Pkarr {
             .connect_timeout(CONNECT_TIMEOUT)
             .build()
             .map_err(|e| format!("HTTP client: {e}"))?;
+        let lookup = if made {
+            make_dht.as_ref().map(|make| make())
+        } else {
+            None
+        };
         let state = State {
             newest: HashMap::new(),
             dated: HashMap::new(),
@@ -772,6 +831,7 @@ impl Pkarr {
                 })
                 .collect(),
             read_relays: read_relays || lookup.is_none(),
+            read_relays_chosen: read_relays,
             turn: 0,
             path: None,
             last_all_down_probe: None,
@@ -779,7 +839,9 @@ impl Pkarr {
         };
         Ok(Self {
             inner: Arc::new(Inner {
-                lookup,
+                make_dht,
+                lookup: Mutex::new(lookup),
+                remembered: Mutex::new(None),
                 http,
                 reads_per_minute,
                 fixed_relays,
@@ -793,10 +855,7 @@ impl Pkarr {
     /// Where the turn record is read and put (WISP 06): the DHT, where this app has one, and every relay of
     /// Settings. Its own path (`turn_network.rs`): nothing of the budgets, the caches or the retries here.
     pub fn turn_sources(&self) -> TurnSources<'_> {
-        let dht = match &self.inner.lookup {
-            Some(Dht::Mainline(_, turn)) => Some(turn.as_ref()),
-            _ => None,
-        };
+        let dht = self.turn_dht();
         let relays = self
             .inner
             .state
@@ -815,17 +874,82 @@ impl Pkarr {
 
     /// The turn's own DHT node, to make ahead of the first read (a profile that has a device set).
     pub fn turn_dht(&self) -> Option<Arc<TurnDht>> {
-        match &self.inner.lookup {
-            Some(Dht::Mainline(_, turn)) => Some(turn.clone()),
+        match self.dht() {
+            Some(Dht::Mainline(_, turn)) => Some(turn),
             _ => None,
         }
     }
 
-    /// Settings, Network: the relays written to, and whether reads may use them. Relays named by
+    /// The DHT, while it is made.
+    fn dht(&self) -> Option<Dht> {
+        self.inner.lookup.lock().unwrap().clone()
+    }
+
+    /// The app has started: `dir` is its folder. The DHT node is made now, unless the last run's choice was relays
+    /// only (Hide my IP from contacts): then none is made, and no UDP goes to a DHT node, until the engine turns the
+    /// DHT back on (`configure`).
+    pub fn start(&self, dir: Option<PathBuf>) {
+        let file = dir.map(|dir| dir.join(RELAYS_ONLY_FILE));
+        let relays_only = file.as_ref().is_some_and(|file| file.exists());
+        *self.inner.remembered.lock().unwrap() = file;
+        if relays_only {
+            diagnostics::log(
+                "pkarr: relays only, as the last run (Hide my IP from contacts): no DHT node",
+            );
+        } else {
+            self.dht_direct(true);
+        }
+    }
+
+    /// Reads and writes reach the DHT directly (`on`), or keep to the relays (Hide my IP from contacts, WISP 100 §
+    /// Relay only): the DHT is dropped, which closes its nodes' UDP sockets once the requests they carry end. The
+    /// choice is remembered for the next start. Nothing changes where there is no DHT to make.
+    fn dht_direct(&self, on: bool) {
+        let Some(make) = &self.inner.make_dht else {
+            return;
+        };
+        let mut lookup = self.inner.lookup.lock().unwrap();
+        if lookup.is_some() == on {
+            return;
+        }
+        let closed = if on {
+            *lookup = Some(make());
+            None
+        } else {
+            lookup.take()
+        };
+        drop(lookup);
+        {
+            let mut state = self.inner.state.lock().unwrap();
+            state.read_relays = state.read_relays_chosen || !on;
+            state.dht_silent = 0;
+        }
+        drop(closed);
+        if let Some(file) = self.inner.remembered.lock().unwrap().as_ref() {
+            let _ = if on {
+                std::fs::remove_file(file)
+            } else {
+                std::fs::write(file, b"1")
+            };
+        }
+        diagnostics::log(if on {
+            "pkarr: the DHT is read directly again"
+        } else {
+            "pkarr: relays only (Hide my IP from contacts): the DHT node is closed"
+        });
+    }
+
+    /// Settings, Network: the relays written to, whether reads may use them, and whether the DHT is reached at all
+    /// (`dht_direct`, off with Hide my IP from contacts; `None` leaves it as it is). Relays named by
     /// `GHOSTLY_PKARR_RELAYS` stay; without a DHT, reads always use the relays.
-    pub fn configure(&self, relays: Vec<Url>, read_relays: bool) {
+    pub fn configure(&self, relays: Vec<Url>, read_relays: bool, dht_direct: Option<bool>) {
+        if let Some(on) = dht_direct {
+            self.dht_direct(on);
+        }
+        let has_dht = self.dht().is_some();
         let mut state = self.inner.state.lock().unwrap();
-        state.read_relays = read_relays || self.inner.lookup.is_none();
+        state.read_relays_chosen = read_relays;
+        state.read_relays = read_relays || !has_dht;
         if self.inner.fixed_relays {
             return;
         }
@@ -952,7 +1076,7 @@ impl Pkarr {
                     Box::pin(async move { this.relay_put(&url, &packet).await }) as _,
                 )
             })
-            .chain(inner.lookup.clone().map(|dht| {
+            .chain(self.dht().map(|dht| {
                 let packet = packet.clone();
                 (
                     "dht".to_string(),
@@ -1164,7 +1288,7 @@ impl Pkarr {
             }
             self.went(Path::Dht);
             source = "dht";
-        } else if background && self.inner.lookup.is_some() && !dht_silent {
+        } else if background && lookup.is_some() && !dht_silent {
             // (With no DHT, a private network's relays are all there is: a background read asks them too, or it
             // would only ever hand back what is known, and a key watched in the background never changed.)
             if self.newest(key).is_none() {
@@ -1274,7 +1398,7 @@ impl Pkarr {
 
     /// The lookup running for `key`, started if none is.
     fn look_up(&self, key: &PublicKey) -> Option<watch::Receiver<u8>> {
-        let dht = self.inner.lookup.clone()?;
+        let dht = self.dht()?;
         let mut state = self.inner.state.lock().unwrap();
         if let Some(progress) = state.lookups.get(key) {
             return Some(progress.clone());
@@ -2657,6 +2781,238 @@ mod direct {
         assert_eq!(requests(&relay, "GET"), 0);
     }
 
+    /// The only way into a local testnet for the app under test: a UDP address that counts every datagram it is sent
+    /// and passes it on to a testnet node, with the answers back. Every node the app could learn of is learnt through
+    /// it, so a count of 0 means no datagram reached the testnet.
+    struct CountedEntry {
+        addr: SocketAddrV4,
+        seen: Arc<std::sync::atomic::AtomicUsize>,
+        stop: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl CountedEntry {
+        fn to(node: &str) -> Self {
+            use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+            let front = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+            front.set_nonblocking(true).unwrap();
+            let std::net::SocketAddr::V4(addr) = front.local_addr().unwrap() else {
+                unreachable!()
+            };
+            let node = node.to_string();
+            let (seen, stop) = (
+                Arc::new(AtomicUsize::new(0)),
+                Arc::new(AtomicBool::new(false)),
+            );
+            let (counted, stopped) = (seen.clone(), stop.clone());
+            std::thread::spawn(move || {
+                // One socket toward the node per sender (the app's read node and put node), for its answers.
+                let mut backs: HashMap<std::net::SocketAddr, std::net::UdpSocket> = HashMap::new();
+                let mut buf = [0u8; 2048];
+                while !stopped.load(Ordering::Relaxed) {
+                    let mut idle = true;
+                    while let Ok((n, from)) = front.recv_from(&mut buf) {
+                        idle = false;
+                        counted.fetch_add(1, Ordering::SeqCst);
+                        let back = backs.entry(from).or_insert_with(|| {
+                            let back = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+                            back.connect(&node).unwrap();
+                            back.set_nonblocking(true).unwrap();
+                            back
+                        });
+                        let _ = back.send(&buf[..n]);
+                    }
+                    for (app, back) in &backs {
+                        while let Ok(n) = back.recv(&mut buf) {
+                            idle = false;
+                            let _ = front.send_to(&buf[..n], app);
+                        }
+                    }
+                    if idle {
+                        std::thread::sleep(Duration::from_millis(2));
+                    }
+                }
+            });
+            CountedEntry { addr, seen, stop }
+        }
+
+        fn seen(&self) -> usize {
+            self.seen.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl Drop for CountedEntry {
+        fn drop(&mut self) {
+            self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// The UDP addresses the app's DHT nodes are bound to (its read node and its put node), while it has them.
+    async fn dht_sockets(pkarr: &Pkarr) -> Vec<SocketAddrV4> {
+        let Some(Dht::Mainline(node, _)) = pkarr.dht() else {
+            return vec![];
+        };
+        let mut sockets = vec![];
+        for made_node in [&node.0, &node.3] {
+            if let Ok(client) = made(made_node).await {
+                sockets.push(client.info().await.local_addr());
+            }
+        }
+        sockets
+    }
+
+    /// Waits for every one of `sockets` to be free again: the node that held it is gone.
+    async fn closed(sockets: &[SocketAddrV4]) -> bool {
+        for _ in 0..200 {
+            if sockets
+                .iter()
+                .all(|socket| std::net::UdpSocket::bind(socket).is_ok())
+            {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        false
+    }
+
+    fn app_folder(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "ghostly-pkarr-{name}-{}-{}",
+            std::process::id(),
+            Keypair::random().public_key().to_z32()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Hide my IP from contacts (WISP 100 § Relay only): with the DHT off, no datagram reaches the testnet while the app
+    /// publishes and reads, from the start on; both go to the relay. Turned off, the DHT is used again (datagrams, a
+    /// put a node of the testnet finds, relay reads off); on again, the nodes' sockets close and the testnet hears
+    /// nothing more. The choice is remembered for the next start.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn relays_only_sends_no_datagram_to_the_dht_and_reads_and_writes_through_the_relays() {
+        let testnet = mainline::Testnet::builder(8).build().unwrap();
+        let entry = CountedEntry::to(&testnet.bootstrap[0]);
+        let relay = pkarr_relay().await;
+        let relays: Vec<Url> = vec![relay.url.parse().unwrap()];
+        let dir = app_folder("relays-only");
+        std::fs::write(dir.join(RELAYS_ONLY_FILE), b"1").unwrap();
+        let pkarr = Pkarr::mainline(vec![entry.addr], &relays).unwrap();
+
+        // Started after a run that kept to the relays: no node, before and after the engine says so again.
+        pkarr.start(Some(dir.clone()));
+        assert!(pkarr.dht().is_none() && pkarr.turn_sources().dht.is_none());
+        pkarr.configure(relays.clone(), false, Some(false));
+        let (me, contact) = (Keypair::random(), Keypair::random());
+        put(&relay, &packet(&contact, "from the contact"));
+        pkarr.publish(&packet(&me, "1")).await.unwrap();
+        let read = pkarr.resolve(&contact.public_key()).await;
+        assert_eq!(value(&read.expect("the relay's copy")), "from the contact");
+        assert!(pkarr
+            .resolve_with(&Keypair::random().public_key(), true, false)
+            .await
+            .is_none());
+        tokio::time::sleep(Duration::from_millis(1_500)).await;
+        assert_eq!(entry.seen(), 0, "no datagram reached the testnet");
+        assert!(dht_sockets(&pkarr).await.is_empty());
+        assert_eq!(requests(&relay, "PUT"), 1);
+        assert!(
+            requests(&relay, "GET") >= 2,
+            "every read, a background one too"
+        );
+        assert!(relay
+            .packets
+            .lock()
+            .unwrap()
+            .contains_key(&me.public_key().to_z32()));
+        assert!(dir.join(RELAYS_ONLY_FILE).exists());
+
+        // Off: the DHT again, as before the switch.
+        pkarr.configure(relays.clone(), false, Some(true));
+        assert!(!dir.join(RELAYS_ONLY_FILE).exists());
+        pkarr.publish(&packet(&me, "2")).await.unwrap();
+        let reader = Dht::mainline(Some(
+            testnet
+                .bootstrap
+                .iter()
+                .map(|node| node.parse().unwrap())
+                .collect(),
+        ))
+        .unwrap();
+        let mut on_the_dht = None;
+        for _ in 0..40 {
+            on_the_dht = reader.resolve(&me.public_key(), |_| {}).await.0;
+            if on_the_dht.as_ref().is_some_and(|p| value(p) == "2") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        assert_eq!(
+            on_the_dht.map(|p| value(&p)),
+            Some("2".into()),
+            "a node of the testnet has the put"
+        );
+        let gets = requests(&relay, "GET");
+        assert!(pkarr
+            .resolve(&Keypair::random().public_key())
+            .await
+            .is_none());
+        assert_eq!(
+            requests(&relay, "GET"),
+            gets,
+            "reads go to the DHT, not the relay"
+        );
+        let heard = entry.seen();
+        assert!(heard > 0, "the testnet hears the app");
+        let sockets = dht_sockets(&pkarr).await;
+        assert_eq!(sockets.len(), 2);
+
+        // On again: the nodes close, and the testnet hears nothing more.
+        lookups_over(&pkarr).await;
+        pkarr.configure(relays.clone(), false, Some(true));
+        assert_eq!(
+            dht_sockets(&pkarr).await,
+            sockets,
+            "the same nodes while it stays off"
+        );
+        pkarr.configure(relays.clone(), false, Some(false));
+        assert!(dir.join(RELAYS_ONLY_FILE).exists());
+        assert!(closed(&sockets).await, "the DHT nodes' sockets are closed");
+        let after = entry.seen();
+        pkarr.publish(&packet(&me, "3")).await.unwrap();
+        let _ = pkarr.resolve(&contact.public_key()).await;
+        tokio::time::sleep(Duration::from_millis(1_500)).await;
+        assert_eq!(entry.seen(), after, "nothing more reached the testnet");
+        assert_eq!(requests(&relay, "PUT"), 3);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Off (the default), nothing changes: the DHT node is made at the start, reads go to it and not to the relays,
+    /// and no file says relays only.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn without_relays_only_the_app_starts_on_the_dht_as_before() {
+        let testnet = mainline::Testnet::builder(8).build().unwrap();
+        let entry = CountedEntry::to(&testnet.bootstrap[0]);
+        let relay = pkarr_relay().await;
+        let relays: Vec<Url> = vec![relay.url.parse().unwrap()];
+        let dir = app_folder("dht");
+        let pkarr = Pkarr::mainline(vec![entry.addr], &relays).unwrap();
+        assert!(pkarr.dht().is_none(), "nothing before the start");
+        pkarr.start(Some(dir.clone()));
+        assert!(pkarr.dht().is_some() && pkarr.turn_sources().dht.is_some());
+        // As the engine says it of a profile without the switch; an older one says nothing of the DHT.
+        pkarr.configure(relays.clone(), false, Some(true));
+        pkarr.configure(relays.clone(), false, None);
+        assert!(pkarr
+            .resolve(&Keypair::random().public_key())
+            .await
+            .is_none());
+        assert_eq!(requests(&relay, "GET"), 0);
+        assert!(entry.seen() > 0);
+        assert_eq!(dht_sockets(&pkarr).await.len(), 2);
+        assert!(!dir.join(RELAYS_ONLY_FILE).exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     fn packet_timestamp(relay: &Relay, key: &str) -> pkarr::Timestamp {
         let bytes = relay.packets.lock().unwrap().get(key).cloned().unwrap();
         let timestamp = u64::from_be_bytes(bytes[64..72].try_into().unwrap());
@@ -2706,7 +3062,7 @@ mod direct {
         );
         *dht.delay.lock().unwrap() = Duration::from_secs(2);
         let pkarr = native(&relay, &dht);
-        pkarr.configure(vec![relay.url.parse().unwrap()], true);
+        pkarr.configure(vec![relay.url.parse().unwrap()], true, None);
         assert!(pkarr.resolve(&keypair.public_key()).await.is_some());
         assert_eq!(requests(&relay, "GET"), 1);
         assert_eq!(
@@ -2716,7 +3072,7 @@ mod direct {
             })
         );
 
-        pkarr.configure(vec![relay.url.parse().unwrap()], false);
+        pkarr.configure(vec![relay.url.parse().unwrap()], false, None);
         pkarr.resolve(&keypair.public_key()).await;
         assert_eq!(requests(&relay, "GET"), 1, "off again: the DHT alone");
     }
@@ -2729,7 +3085,7 @@ mod direct {
             pkarr_relay().await,
         );
         let pkarr = native(&a, &dht);
-        pkarr.configure(vec![b.url.parse().unwrap()], false);
+        pkarr.configure(vec![b.url.parse().unwrap()], false, None);
         pkarr
             .publish(&packet(&Keypair::random(), "1"))
             .await
@@ -2739,7 +3095,7 @@ mod direct {
 
         // GHOSTLY_PKARR_RELAYS alone: those relays are the network, read every time, whatever Settings say.
         let private = Pkarr::private(&[a.url.parse().unwrap()]).unwrap();
-        private.configure(vec![b.url.parse().unwrap()], false);
+        private.configure(vec![b.url.parse().unwrap()], false, None);
         let keypair = Keypair::random();
         private.publish(&packet(&keypair, "1")).await.unwrap();
         assert!(private.resolve(&keypair.public_key()).await.is_some());
@@ -2935,6 +3291,7 @@ mod direct {
         pkarr.configure(
             vec![down.url.parse().unwrap(), failing.url.parse().unwrap()],
             true,
+            None,
         );
         let error = pkarr.publish(&packet(&keypair, "fails")).await.unwrap_err();
         assert!(error.starts_with("Publish error: "), "{error}");
@@ -3552,7 +3909,7 @@ mod live {
         for read_relays in [false, true] {
             let (inviter, joiner) = (Pkarr::desktop().unwrap(), Pkarr::desktop().unwrap());
             for app in [&inviter, &joiner] {
-                app.configure(relays.clone(), read_relays);
+                app.configure(relays.clone(), read_relays, None);
             }
             tokio::time::sleep(Duration::from_secs(3)).await; // the DHT nodes bootstrap
             let mut steps: [Vec<f64>; 6] = Default::default();

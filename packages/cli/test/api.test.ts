@@ -101,6 +101,40 @@ describe("chats", () => {
     expect(findChat([impostor], "alice").id).toBe("chatImpostor");
   });
 
+  it("a name is found by the string that set it: cleaned as the engine cleans a name it stores (agents#2907)", () => {
+    // `chat rename X "bot "` stores "bot", `group create "Team  "` stores "Team": the same string given back finds it.
+    // Trailing and doubled spaces, a zero-width space, a bidi mark, and a decomposed "é" (e + U+0301) against the
+    // precomposed one (and back), for a label, a contact's own name and a group's name.
+    const refs: [stored: string, typed: string][] = [
+      ["bot", "bot "], ["bot", " bot "], ["my bot", "my  bot"], ["my bot", "my\tbot"], ["bot", "b\u200bot"],
+      ["rtl", "rtl\u202e"], ["rtl", "\u200frtl"], ["Jos\u00e9", "Jose\u0301"], ["Jose\u0301", "jos\u00e9"],
+    ];
+    for (const [stored, typed] of refs) {
+      expect(findChat([link("chatOther", { label: "other" }), link("chatLabel", { label: stored })], typed).id).toBe("chatLabel");
+      expect(findChat([link("chatOther", { label: "other" }), link("chatNick", { peerNick: stored })], typed).id).toBe("chatNick");
+      const named = { ...group, id: "n".repeat(22), name: stored, status: "active" } as unknown as GroupView;
+      const other = { ...group, id: "o".repeat(22), name: "other", status: "active" } as unknown as GroupView;
+      expect(findGroup([other, named], typed).id).toBe(named.id);
+      expect(findChatOrGroup([link("chatOther", { label: "other" })], [other, named], typed)).toEqual({ group: named });
+      // A contact's own name still never takes a group's name, however it was typed.
+      expect(() => findChatOrGroup([link("chatNick", { peerNick: stored })], [named], typed)).toThrow(/and a group/);
+    }
+    // Two chats whose names clean to one stay ambiguous; a ref with nothing visible left names nothing.
+    expect(() => findChat([link("chatA", { label: "my bot" }), link("chatB", { label: "My  Bot" })], "my bot ")).toThrow(expect.objectContaining({ code: "bad_request", details: { matches: ["chatA", "chatB"] } }));
+    expect(() => findChat([link("chatA", { label: "bot" })], "\u200b")).toThrow(/No chat/);
+    expect(() => findGroup([{ ...group, id: "n".repeat(22), name: "bot" } as unknown as GroupView], "\u202e")).toThrow(/No group/);
+    // Ids, keys and prefixes stay exact: nothing is cleaned off them.
+    const chat = link("chatExact", { label: "bot" });
+    expect(findChat([chat], "chatExact").id).toBe("chatExact");
+    expect(findChat([chat], "chatEx").id).toBe("chatExact");
+    expect(() => findChat([chat], "chatExact ")).toThrow(/No chat/);
+    expect(() => findChat([chat], "chat\u200bExact")).toThrow(/No chat/);
+    const room = { ...group, id: "r".repeat(22), name: "Team" } as unknown as GroupView;
+    expect(findGroup([room], room.id).id).toBe(room.id);
+    expect(() => findGroup([room], `${room.id} `)).toThrow(/No group/);
+    expect(() => findGroup([room], "rrr\u200b")).toThrow(/No group/);
+  });
+
   it("a contact's own name never takes what names a group: the group's id is the group, its name or a prefix is refused", () => {
     const GROUP = "g".repeat(22);
     const room = { ...group, id: GROUP, name: "Team Room", status: "active" } as unknown as GroupView;
@@ -127,9 +161,9 @@ describe("chats", () => {
     // An ambiguous name stays what it is, from either side; group:<id> is a group only.
     expect(refused([link("chatA", { label: "Twin" }), link("chatB", { label: "Twin" })], "twin")).toMatchObject({ code: "bad_request", message: expect.stringMatching(/more than one chat/) });
     expect(() => findChatOrGroup([], [room, { ...room, id: "h".repeat(22) } as unknown as GroupView], "team room")).toThrow(/more than one group/);
-    expect(refused([asName], "group:zed")).toEqual({ code: "not_found", message: 'No group "zed"' });
+    expect(refused([asName], "group:zed")).toEqual({ code: "not_found", message: 'No group "zed" (ghostly group list)' });
     const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o";
-    expect(refused([asName], KEY)).toMatchObject({ code: "not_found", message: `No chat with "${KEY}"` });
+    expect(refused([asName], KEY)).toMatchObject({ code: "not_found", message: `No chat with "${KEY}" (ghostly chat list)` });
     // The same bytes with the last character respelled: no key, and never a name (a contact calling itself that is not found by it).
     const respelled = KEY.slice(0, 51) + "t";
     expect(refused([link("chatMallory", { peerNick: respelled })], respelled)).toMatchObject({ code: "bad_request", message: expect.stringMatching(/not a contact key/) });
@@ -150,17 +184,37 @@ describe("chats", () => {
     const teamChat = link("team9qmhjx8j1equ", { label: "mallory" });
     expect(() => findChatOrGroup([teamChat], [team], "team")).toThrow(expect.objectContaining({ code: "bad_request", details: { chat: teamChat.id, groups: [team.id] } }));
     expect(findChatOrGroup([teamChat, link("chatMine", { label: "team" })], [team], "team")).toEqual({ link: expect.objectContaining({ id: "chatMine" }) });
-    // A group's id is its creator's to choose: a name wins over a prefix, among groups this profile is in too.
+    // A group's id is its creator's to choose: a prefix never takes a name, among groups this profile is in too; a ref
+    // that fits both is refused, with both ids.
     const theirs = { ...team, id: "team" + "x".repeat(18), name: "Mallory's" } as unknown as GroupView;
-    expect(findGroup([theirs, team], "team").id).toBe(team.id);
+    expect(() => findGroup([theirs, team], "team")).toThrow(expect.objectContaining({ code: "bad_request", details: { matches: [theirs.id, team.id] } }));
     expect(findGroup([theirs, team], "teamx").id).toBe(theirs.id);
-    // listen --from bob: the allowlist holds Bob's chat, never the one whose id starts with "bob".
+    // listen --from bob: the allowlist holds Bob's chat, never the one whose id starts with "bob"; --group team is refused.
     const ctx = { runtime: { server: { node: { getState: () => ({ links: [mallory, bob], groups: [team, theirs] }) } } } } as unknown as ApiContext;
-    const list = await allowlist(["bob"], ["team"], (method, params) => callApi(ctx, method, params), async () => null);
+    await expect(allowlist(["bob"], ["team"], (method, params) => callApi(ctx, method, params), async () => null)).rejects.toMatchObject({ code: "bad_request" });
+    const list = await allowlist(["bob"], [team.id], (method, params) => callApi(ctx, method, params), async () => null);
     const event = (chat: string) => ({ seq: 1, id: "e", type: "message.received", at: 1, chat, message: { id: "m", text: "hi", timestamp: 1 } }) as GhostlyEvent;
     expect(await list.allows(event(bob.id))).toBe(true);
     expect(await list.allows(event(mallory.id))).toBe(false);
     expect(await list.allows({ seq: 2, id: "g", type: "group.message", at: 1, group: theirs.id } as GhostlyEvent)).toBe(false);
+  });
+
+  it("a group's name (its admin chooses it) never takes another group's id prefix: a ref that fits both is refused", async () => {
+    // Mallory, admin of a group this profile is in and a member of Team, renames her group to the start of Team's id.
+    const team = { ...group, id: "Tm4q9ZkLx2PdR7sVw0Yb3A", name: "Team", status: "active" } as unknown as GroupView;
+    const theirs = { ...group, id: "Qz8uE1hJc5NnFo6Gk2Mt7B", name: "Tm4q9Z", status: "active" } as unknown as GroupView;
+    const both = { code: "bad_request", message: expect.stringMatching(/names more than one group: use its id/), details: { matches: expect.arrayContaining([team.id, theirs.id]) } };
+    expect(() => findGroup([team, theirs], "Tm4q9Z")).toThrow(expect.objectContaining(both));
+    expect(() => findGroup([team, theirs], "tm4q9z")).not.toThrow(/more than one/);
+    expect(() => findChatOrGroup([], [team, theirs], "Tm4q9Z")).toThrow(expect.objectContaining(both));
+    // Each still by its id, by a ref only one fits, and before the rename the prefix is Team.
+    expect(findGroup([team, theirs], team.id).id).toBe(team.id);
+    expect(findGroup([team, theirs], theirs.id).id).toBe(theirs.id);
+    expect(findGroup([team, theirs], "Tm4q9Zk").id).toBe(team.id);
+    expect(findGroup([team, { ...theirs, name: "Book club" } as unknown as GroupView], "Tm4q9Z").id).toBe(team.id);
+    // listen --group Tm4q9Z: refused, never Mallory's group in the allowlist.
+    const ctx = { runtime: { server: { node: { getState: () => ({ links: [], groups: [team, theirs] }) } } } } as unknown as ApiContext;
+    await expect(allowlist([], ["Tm4q9Z"], (method, params) => callApi(ctx, method, params), async () => null)).rejects.toMatchObject(both);
   });
 
   it("listen --from takes a chat only by its id, its contact's key or a label given here, as call auto on --from", async () => {
@@ -178,6 +232,35 @@ describe("chats", () => {
     const list = await allowlist(["owner"], [], (method, params) => callApi(named, method, params), async () => null);
     expect(await list.allows(event(owner.id))).toBe(true);
     expect(await list.allows(event(mallory.id))).toBe(false);
+  });
+
+  it("a ref that is one group's name and a prefix of another group's id is refused, with both ids, by every command", async () => {
+    // Mine, addressed by a prefix of its id; another member made the second one and named it with that prefix.
+    const mine = { ...group, id: "k3x9q2abcdefghijklmnop", name: "Team", status: "active" } as unknown as GroupView;
+    const named = { ...group, id: "z".repeat(22), name: "k3x9q2", status: "active" } as unknown as GroupView;
+    const groups = [mine, named];
+    const refusal = { code: "bad_request", message: '"k3x9q2" names more than one group: use its id', details: { matches: [mine.id, named.id] } };
+    const refused = expect.objectContaining(refusal);
+    expect(() => findGroup(groups, "k3x9q2")).toThrow(refused);
+    expect(() => findChatOrGroup([], groups, "k3x9q2")).toThrow(refused);
+    expect(() => findChatOrGroup([], groups, "group:k3x9q2")).toThrow(refused);
+    // Its id (as is, or group:<id>), a prefix only it fits, and a name only one group has still name it.
+    expect(findGroup(groups, mine.id).id).toBe(mine.id);
+    expect(findChatOrGroup([], groups, `group:${mine.id}`)).toEqual({ group: mine });
+    expect(findGroup(groups, "k3x9q2a").id).toBe(mine.id);
+    expect(findGroup(groups, "team").id).toBe(mine.id);
+    // What a command makes of it: group send (group.get, as every group command), send, listen --group.
+    const node = { getState: () => ({ links: [], groups }), sendGroupMessage: vi.fn(), sendMessage: vi.fn() };
+    const ctx = { runtime: { server: { node } } } as unknown as ApiContext;
+    const call = (method: string, params: Record<string, unknown>) => callApi(ctx, method, params);
+    await expect(call("group.get", { group: "k3x9q2" })).rejects.toMatchObject(refusal);
+    expect(() => chatOrGroup(ctx, "k3x9q2")).toThrow(refused);
+    await expect(allowlist([], ["k3x9q2"], call, async () => null)).rejects.toMatchObject(refusal);
+    const list = await allowlist([], [mine.id], call, async () => null);
+    const event = (id: string) => ({ seq: 1, id: "g", type: "group.message", at: 1, group: id } as GhostlyEvent);
+    expect(await list.allows(event(mine.id))).toBe(true);
+    expect(await list.allows(event(named.id))).toBe(false);
+    expect(node.sendGroupMessage).not.toHaveBeenCalled();
   });
 
   it("\"\" (and \"group:\" alone) names no chat and no group, even where it is a prefix of the only one's id", async () => {
@@ -225,6 +308,10 @@ describe("chats", () => {
     const { ctx, node } = fake([msg("me_1", 5, { sender: "me", delivery: "sending" })]);
     await expect(callApi(ctx, "chat.send", { chat: "Alice", text: "cashuAeyJ0b2tlbiI6W3sicHJvb2ZzIjpbXX1dfQ" })).rejects.toMatchObject({ code: "confirm" });
     await expect(callApi(ctx, "chat.send", { chat: "Alice", text: "legal winner thank year wave sausage worth useful legal winner thank yellow" })).rejects.toMatchObject({ code: "confirm" });
+    // BIP39's Portuguese list, entropy 0x7f repeated: the app's other languages' lists are the guard's too.
+    await expect(callApi(ctx, "chat.send", { chat: "Alice", text: "imitador vinheta sogro xerife veleiro pomar volumoso tratador imitador vinheta sogro xingar" })).rejects.toMatchObject({ code: "confirm" });
+    // Monero's own Portuguese test seed (tests/unit_tests/mnemonics.cpp): Monero's lists in them too.
+    await expect(callApi(ctx, "chat.send", { chat: "Alice", text: "cinzento luxuriante leonardo gnostico digressao cupula fifa broxar iniquo louvor ovario dorsal ideologo besuntar decurso rosto susto lemure unheiro pagodeiro nitroglicerina eclusa mazurca bigorna gnostico" })).rejects.toMatchObject({ code: "confirm" });
     expect(node.sendMessage).not.toHaveBeenCalled();
     expect(await callApi(ctx, "chat.send", { chat: "Alice", text: "hi" })).toEqual({ chat: "chat-one", messageId: "me_1", delivery: "sending" });
     await callApi(ctx, "chat.send", { chat: "Alice", text: "legal winner thank year wave sausage worth useful legal winner thank yellow", force: true });
@@ -499,6 +586,14 @@ describe("chats", () => {
     expect(await callApi(ctx, "chat.remove", { chat: "Alice", yes: true })).toEqual({ removed: "chat-one" });
     expect(ctx.calls.forgetChat).toHaveBeenCalledWith("chat-one");
   });
+
+  // "pass yes (--yes)" put the socket's name first: a person at a terminal types the flag.
+  it("each confirm refusal names the flag first, the socket's name after it", async () => {
+    const { ctx } = fake();
+    for (const [method, params] of [["chat.remove", { chat: "Alice" }], ["group.leave", { group: "g1" }], ["group.forget", { group: "g1" }]] as const) {
+      await expect(callApi(ctx, method, params)).rejects.toMatchObject({ code: "confirm", message: expect.stringMatching(/; pass --yes \(yes: true over the socket\) to go on$/) });
+    }
+  });
 });
 
 describe("group leave", () => {
@@ -507,7 +602,7 @@ describe("group leave", () => {
     const { ctx, node } = fake();
     const leaveGroup = vi.fn(async () => ({}));
     Object.assign(node, { leaveGroup });
-    await expect(callApi(ctx, "group.leave", { group: "g1" })).rejects.toMatchObject({ code: "confirm", message: expect.stringMatching(/history and files on this device; pass yes \(--yes\)/) });
+    await expect(callApi(ctx, "group.leave", { group: "g1" })).rejects.toMatchObject({ code: "confirm", message: expect.stringMatching(/history and files on this device; pass --yes \(yes: true over the socket\) to go on/) });
     expect(leaveGroup).not.toHaveBeenCalled();
     expect(await callApi(ctx, "group.leave", { group: "g1", yes: true })).toEqual({ left: "g1" });
     expect(leaveGroup).toHaveBeenCalledWith({ groupId: "g1" });
@@ -540,7 +635,9 @@ describe("chat wait", () => {
       hub: { onEvent: () => () => {}, onState: (l: (s: EngineState) => void) => { listeners.add(l); return () => listeners.delete(l); }, lastSeq: 0, replay: () => [] },
       mode: "daemon", version: "test",
     } as unknown as ApiContext;
-    return { ctx, set: (next: LinkView) => { links = [next]; for (const l of listeners) l(stateOf()); } };
+    // As the daemon's hub does (EventHub.setState): a listener that throws is its own business.
+    const hand = () => { for (const l of listeners) { try { l(stateOf()); } catch { /* its own */ } } };
+    return { ctx, set: (next: LinkView) => { links = [next]; hand(); }, remove: () => { links = []; hand(); } };
   }
   /** Live when the app last ran (its history ends on a live stretch, WISP 100), and no session in this run yet. */
   const remembered = (fields: Partial<LinkView> = {}) => link("chat-one", {
@@ -595,6 +692,19 @@ describe("chat wait", () => {
     expect(await callApi(ctx, "chat.wait", { chat: "Alice", until: "paired", timeout: 1 })).toMatchObject({ live: false });
     set(remembered(session));
     expect(await callApi(ctx, "chat.wait", { chat: "Alice", until: "paired", timeout: 1 })).toMatchObject({ live: true });
+  });
+
+  it("a chat removed while it is waited for answers not_found at once, not a timeout at the end", async () => {
+    // The check's not_found was thrown inside the hub's state listener, which swallows it: the wait went on to its
+    // --timeout (up to a day) and answered "Timed out … to be live", exit 4.
+    const { ctx, remove } = moving(remembered());
+    const from = Date.now();
+    const waiting = callApi(ctx, "chat.wait", { chat: "Alice", until: "live", timeout: 5 });
+    waiting.catch(() => {});
+    await new Promise((r) => setTimeout(r, 20));
+    remove();
+    await expect(waiting).rejects.toMatchObject({ code: "not_found", message: "Chat chat-one was removed" });
+    expect(Date.now() - from).toBeLessThan(1000);
   });
 });
 
@@ -976,7 +1086,7 @@ describe("settings", () => {
     // Each was `engine` (exit 1), in the app's words ("Enter at least one relay address").
     const { ctx, node } = fake();
     const refusals: [Record<string, unknown>, string, string][] = [
-      [{ relays: ["notaurl"] }, "Enter at least one relay address (https://…)", "relays: give at least one relay address (https://…)"],
+      [{ relays: [] }, "Enter at least one relay address (https://…)", "relays: give at least one relay address (https://…)"],
       [{ irohRelays: ["x"] }, "Not a relay address: x", "irohRelays: not a relay address: x"],
       [{ hyperdhtRelay: "nope" }, "Enter a relay address (wss://…)", "hyperdhtRelay: give a relay address (wss://…)"],
       // A relay address with the wrong scheme (irohWeb.ts irohRelayProblem, hyperdhtRelay.ts hyperdhtRelayProblem).
@@ -987,6 +1097,23 @@ describe("settings", () => {
       node.updateSettings.mockRejectedValueOnce(new Error(engine));
       await expect(callApi(ctx, "settings.set", patch)).rejects.toMatchObject({ code: "bad_request", message: said });
     }
+  });
+
+  it("name the Pkarr relay it can't use, as the app's Settings does, and ask for one only for an empty list", async () => {
+    // The engine says "Enter at least one relay address" for any list it can't use: the one given went unnamed.
+    const { ctx, node } = fake();
+    const refusals: [string[], string][] = [
+      [["ftp://x"], "relays: not a relay address: ftp://x"],
+      [["ftp://relay.example.org"], "relays: use an https:// relay address: ftp://relay.example.org"],
+      [["wss://relay.example.org", "notaurl"], "relays: use an https:// relay address: wss://relay.example.org"],
+    ];
+    for (const [relays, said] of refusals) {
+      await expect(callApi(ctx, "settings.set", { relays })).rejects.toMatchObject({ code: "bad_request", message: said });
+    }
+    expect(node.updateSettings).not.toHaveBeenCalled();
+    // A usable one next to them is the engine's to keep (it drops the rest), as before.
+    await callApi(ctx, "settings.set", { relays: ["https://relay.example.org", "ftp://x"] });
+    expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { relays: ["https://relay.example.org", "ftp://x"] } });
   });
 
   it("take TCP and TLS TURN servers for the apps, and say the CLI does not use them", async () => {
@@ -1028,5 +1155,44 @@ describe("a name every object has", () => {
   it("is no method: not found, as any other unknown one", async () => {
     const { ctx } = fake();
     for (const name of [...NAMES, "nope"]) await expect(callApi(ctx, name, {}), name).rejects.toMatchObject({ code: "not_found", message: `No method ${name}` });
+  });
+});
+
+/**
+ * `chat transport` toward a contact whose app has no WebRTC (`GHOSTLY_WEBRTC=0`) kept the choice and answered the chat
+ * still on HyperDHT, with nothing waiting: a bot could not tell it never would be. For one this app lacks, the engine
+ * answered `engine`, "Transport unavailable". The Connection menu offers neither; the CLI refuses them the same way.
+ */
+describe("chat transport", () => {
+  const withChat = (fields: Partial<LinkView>) => {
+    const made = fake();
+    made.node.getState = () => ({ links: [link("chat-one", { label: "Alice", ...fields })], groups: [], settings: {} }) as unknown as EngineState;
+    return made;
+  };
+
+  it("refuses a transport the contact's app lacks, and the engine is not asked", async () => {
+    const { ctx, node } = withChat({ availableTransports: ["webrtc/1", "hyperdht/1", "iroh/1"], peerTransports: ["hyperdht/1", "iroh/1"] });
+    await expect(callApi(ctx, "chat.transport", { chat: "Alice", transport: "webrtc" })).rejects.toMatchObject({
+      code: "refused", message: "Your contact's app doesn't have WebRTC: choose another, or auto", details: { reason: "contact-lacks", transport: "webrtc/1" },
+    });
+    expect(node.setChatTransport).not.toHaveBeenCalled();
+    await callApi(ctx, "chat.transport", { chat: "Alice", transport: "hyperdht" });
+    expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-one", transport: "hyperdht/1" });
+  });
+
+  it("refuses one this app lacks, with why it is not running", async () => {
+    const { ctx, node } = withChat({ availableTransports: ["hyperdht/1"], peerTransports: ["webrtc/1", "hyperdht/1", "iroh/1"], transportErrors: { "iroh/1": "Iroh relay unreachable" } });
+    await expect(callApi(ctx, "chat.transport", { chat: "Alice", transport: "webrtc" })).rejects.toMatchObject({ code: "refused", message: "This app has no WebRTC running", details: { reason: "app-lacks" } });
+    await expect(callApi(ctx, "chat.transport", { chat: "Alice", transport: "iroh" })).rejects.toMatchObject({ code: "refused", message: "This app has no Iroh running: Iroh relay unreachable", details: { reason: "app-lacks" } });
+    expect(node.setChatTransport).not.toHaveBeenCalled();
+  });
+
+  it("takes any on DHT only that this app can start, auto and dht always, and any while the contact's are not known", async () => {
+    const dhtOnly = withChat({ deliveryMode: "dht", availableTransports: [], runnableTransports: ["webrtc/1", "iroh/1"], peerTransports: ["webrtc/1", "iroh/1"] });
+    await callApi(dhtOnly.ctx, "chat.transport", { chat: "Alice", transport: "iroh" });
+    await expect(callApi(dhtOnly.ctx, "chat.transport", { chat: "Alice", transport: "hyperdht" })).rejects.toMatchObject({ details: { reason: "app-lacks" } });
+    const unknown = withChat({ availableTransports: ["webrtc/1", "hyperdht/1"], peerTransports: [] });
+    for (const transport of ["webrtc", "auto", "dht"]) await callApi(unknown.ctx, "chat.transport", { chat: "Alice", transport });
+    expect(unknown.node.setChatTransport).toHaveBeenCalledTimes(3);
   });
 });

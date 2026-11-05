@@ -1,6 +1,7 @@
 package tools.ghostly.app
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -16,8 +17,10 @@ import android.net.LinkProperties
 import android.net.Network
 import android.net.Uri
 import android.os.Build
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.provider.Settings
+import android.view.WindowManager
 import android.webkit.WebView
 import androidx.activity.result.ActivityResult
 import androidx.core.app.NotificationCompat
@@ -79,6 +82,18 @@ class AwakeArgs {
 }
 
 @InvokeArg
+class CallArgs {
+  var on: Boolean = false
+  var name: String = ""
+  var video: Boolean = false
+}
+
+@InvokeArg
+class HideArgs {
+  var on: Boolean = false
+}
+
+@InvokeArg
 class SaveArgs {
   lateinit var path: String
   lateinit var name: String
@@ -131,7 +146,7 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     private val sharesSwept = AtomicBoolean(false)
   }
 
-  /** Rust (src/android.rs): `kind` is "oidc", "share", "notification" or "network". */
+  /** Rust (src/android.rs): `kind` is "oidc", "share", "notification", "network", "visibility" or "call". */
   private external fun received(kind: String, value: String)
 
   private val pendingSave = SaveSlot<SaveArgs>()
@@ -144,6 +159,8 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     }
     take(activity.intent)
     watchNetwork()
+    // The call notification's Hang up (CallService.kt): the page ends the call.
+    CallService.hangUp = { activity.runOnUiThread { received("call", "hangUp") } }
   }
 
   override fun onNewIntent(intent: Intent) {
@@ -571,13 +588,13 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       return
     }
     thread(name = "ghostly-save") {
-      try {
-        val out = activity.contentResolver.openOutputStream(target, "wt") ?: throw IllegalStateException("No output")
-        out.use { to -> File(args.path).inputStream().use { it.copyTo(to) } }
-        invoke.resolve(JSObject().put("saved", true))
-      } catch (e: Exception) {
-        invoke.reject("The file could not be saved there")
-      }
+      val resolver = activity.contentResolver
+      val saved = SaveCopy.copy(
+        File(args.path),
+        { resolver.openOutputStream(target, "wt") },
+        { DocumentsContract.deleteDocument(resolver, target) },
+      )
+      if (saved) invoke.resolve(JSObject().put("saved", true)) else invoke.reject("The file could not be saved there")
     }
   }
 
@@ -591,6 +608,20 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
   fun keepAwake(invoke: Invoke) {
     val on = invoke.parseArgs(AwakeArgs::class.java).on
     val held = if (on) TransferService.start(activity) else false.also { TransferService.stop(activity) }
+    invoke.resolve(JSObject().put("held", held))
+  }
+
+  // ---- A call out of sight ----
+
+  /**
+   * While a call is on (`on`, Rust's `call_service`), the call service (CallService.kt) keeps its microphone, and its
+   * camera while it sends the camera's picture, with the app out of sight; it stops with the call. Told again when
+   * the name or the camera changes. `held`: whether this start went through.
+   */
+  @Command
+  fun callService(invoke: Invoke) {
+    val args = invoke.parseArgs(CallArgs::class.java)
+    val held = if (args.on) CallService.start(activity, args.name, args.video) else false.also { CallService.stop(activity) }
     invoke.resolve(JSObject().put("held", held))
   }
 
@@ -614,6 +645,30 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       val controller = WindowCompat.getInsetsController(window, window.decorView)
       controller.isAppearanceLightStatusBars = !args.dark
       controller.isAppearanceLightNavigationBars = !args.dark
+      invoke.resolve()
+    }
+  }
+
+  // ---- The app switcher ----
+
+  /**
+   * While the app lock is on (`on`), the app switcher keeps no picture of the app (SwitcherPicture): Android takes it
+   * before the page hears the app is going, so the lock's cover would come too late for it. The activity's cover goes
+   * over the app's live window there too (MainActivity.lockOn). Off again with the lock.
+   */
+  // SwitcherPicture takes setRecentsScreenshotEnabled only on Android 13 and up.
+  @SuppressLint("NewApi")
+  @Command
+  fun hideFromSwitcher(invoke: Invoke) {
+    val on = invoke.parseArgs(HideArgs::class.java).on
+    activity.runOnUiThread {
+      when (SwitcherPicture.way(Build.VERSION.SDK_INT)) {
+        SwitcherPicture.Way.NO_RECENTS_PICTURE -> activity.setRecentsScreenshotEnabled(!on)
+        SwitcherPicture.Way.SECURE_WINDOW ->
+          if (on) activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+          else activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+      }
+      (activity as? MainActivity)?.lockOn = on
       invoke.resolve()
     }
   }

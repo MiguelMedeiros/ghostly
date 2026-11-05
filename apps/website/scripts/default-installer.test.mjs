@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { defaultInstaller } from "../lib/release.ts";
+import { assetNames, defaultInstaller, downloads } from "../lib/release.ts";
 
 // The download panel marks one installer as the reader's (defaultInstaller, lib/release.ts). A release has Linux files
 // for amd64 only (assetNames), so a Linux machine that says it is ARM gets none marked: neither file runs there.
@@ -33,5 +33,16 @@ test("the other systems keep their installer", () => {
   assert.equal(defaultInstaller(chrome("Macintosh; Intel Mac OS X 10_15_7"), "MacIntel", "arm"), "macArm");
   assert.equal(defaultInstaller(chrome("Windows NT 10.0; Win64; x64"), "Win32"), "windowsExe");
   assert.equal(defaultInstaller(chrome("Windows NT 10.0; ARM64"), "Win32"), "windowsExe");
-  assert.equal(defaultInstaller(chrome("Linux; Android 16; Pixel 9"), "Linux armv81"), undefined);
+});
+
+// Every release since 1.6.0 attaches the native Android app, so an Android phone is led to its APK; an iPhone gets none.
+test("an Android phone gets the release's APK, an iPhone nothing", () => {
+  assert.equal(defaultInstaller(chrome("Linux; Android 16; Pixel 9").replace("Safari", "Mobile Safari"), "Linux armv81", undefined, 5), "androidApk");
+  assert.equal(defaultInstaller(firefox("Android 16; Mobile"), "Linux aarch64", undefined, 5), "androidApk");
+  assert.equal(defaultInstaller("Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) Mobile/15E148 Safari/604.1", "iPhone", undefined, 5), undefined);
+});
+
+test("the APK's name and link follow the version, as the Release workflow names it", () => {
+  assert.equal(assetNames("1.10.0").androidApk, "ghostly-1.10.0-android-arm64.apk");
+  assert.equal(downloads("2.0.1").androidApk, "https://github.com/MiguelMedeiros/ghostly/releases/download/v2.0.1/ghostly-2.0.1-android-arm64.apk");
 });

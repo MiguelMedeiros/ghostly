@@ -5,6 +5,9 @@
 // plugin), and what Android hands the app (deep links, shares, notification taps, network changes).
 #[cfg(target_os = "android")]
 mod android;
+// Which of Android's reports have the app look at its network again (built for tests on every host).
+#[cfg(any(target_os = "android", test))]
+mod android_network;
 // The share another app made on Android, until the page takes it (built for tests on every host).
 #[cfg(any(target_os = "android", test))]
 mod android_share;
@@ -23,6 +26,7 @@ mod crypto;
 mod device_state;
 mod diagnostics;
 mod downloads;
+mod dropped_files;
 // The macOS end-to-end tests' way into the page (debug builds with `--features e2e-driver` only).
 #[cfg(any(test, feature = "e2e-driver"))]
 #[cfg_attr(not(feature = "e2e-driver"), allow(dead_code))]
@@ -30,7 +34,10 @@ mod e2e_driver;
 mod file_store;
 mod file_stream;
 #[cfg(desktop)]
+mod forget_origins;
+#[cfg(desktop)]
 mod fullscreen;
+mod hold_fetch;
 #[cfg(desktop)]
 mod hyperdht;
 #[cfg(desktop)]
@@ -76,7 +83,9 @@ mod viewer;
 
 use commands::AppState;
 #[cfg(mobile)]
-use mobile::{app_sandbox, hyperdht, keep_awake, share, translate, translate_models, viewer};
+use mobile::{
+    app_sandbox, forget_origins, hyperdht, keep_awake, share, translate, translate_models, viewer,
+};
 use pkarr_network::Pkarr;
 use tauri::Manager;
 #[cfg(desktop)]
@@ -128,6 +137,7 @@ macro_rules! commands {
             clipboard::read_clipboard_text,
             clipboard::read_pasted_bytes,
             commands::bitcoind_rpc,
+            commands::call_service,
             commands::close_service_windows,
             commands::create_keypair,
             commands::decrypt_text,
@@ -136,6 +146,8 @@ macro_rules! commands {
             commands::generate_enc_key,
             commands::get_profile,
             commands::get_public_key,
+            commands::hide_from_switcher,
+            commands::hold_fetch,
             commands::link_preview_fetch,
             commands::lnd_request,
             commands::local_fetch,
@@ -168,6 +180,7 @@ macro_rules! commands {
             commands::webkit_version,
             device_state::device_state_read,
             device_state::device_state_write,
+            dropped_files::read_dropped_files,
             file_store::file_bytes_append,
             file_store::file_bytes_close,
             file_store::file_bytes_digest,
@@ -182,6 +195,7 @@ macro_rules! commands {
             file_store::file_bytes_usage,
             file_stream::file_bytes_stream_close,
             file_stream::file_bytes_stream_open,
+            forget_origins::forget_service_origins,
             hyperdht::paired_hyperdht_address,
             hyperdht::paired_hyperdht_close,
             hyperdht::paired_hyperdht_connect,
@@ -275,6 +289,9 @@ pub fn run() {
     if single_instance::hand_over(&context.config().identifier) {
         return;
     }
+    // Before any window: an app window's IPC message is bounded before Tauri parses it (on the main thread on Linux).
+    #[cfg(desktop)]
+    tauri::ipc::set_post_message_limit(app_sandbox::message_limit);
     let builder = tauri::Builder::default();
     #[cfg(target_os = "linux")]
     let builder = single_instance::register(builder, &context.config().identifier);
@@ -324,6 +341,9 @@ pub fn run() {
             app_window::on_menu_event(app, event.id().as_ref());
         })
         .on_page_load(on_page_load);
+    // What a contact's app kept, cleared in a hidden window of its origin when the page forgets it.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    let builder = builder.manage(forget_origins::ForgetState::default());
 
     // Android's own host, before the app's setup: what started the app (a share, a sign-in's link) comes with it.
     #[cfg(target_os = "android")]
@@ -332,7 +352,7 @@ pub fn run() {
         .manage(android::Incoming::default())
         .manage(android::NotificationTap::default());
 
-    builder
+    let app = builder
         // The Ghostly window stays on the app's own pages, whatever is dropped on it.
         .plugin(navigation::guard())
         .plugin(tauri_plugin_process::init())
@@ -344,11 +364,16 @@ pub fn run() {
         .manage(clipboard_source())
         .manage(paste_source())
         .manage(clipboard::PasteShelf::default())
+        .manage(dropped_files::DroppedFiles::default())
         .setup(|app| {
             // The app's log, where the peer and the Pkarr client say how a link is doing.
             if let Ok(dir) = app.path().app_log_dir() {
                 diagnostics::init(&dir);
             }
+            // The DHT node, unless the last run kept to the relays (Hide my IP from contacts).
+            app.state::<AppState>()
+                .pkarr
+                .start(app.path().app_data_dir().ok());
             notifications::install(app.handle());
             #[cfg(target_os = "linux")]
             {
@@ -377,6 +402,8 @@ pub fn run() {
                 microphone::install(&main);
                 // A file is saved through the app's own Save only, never by the WebView's own menu.
                 downloads::install(&main);
+                // A file dragged in from a file manager reaches the chat (WebKitGTK hands the page its address only).
+                dropped_files::install(&main);
             }
             #[cfg(feature = "e2e-driver")]
             {
@@ -414,8 +441,12 @@ pub fn run() {
         )
         .invoke_handler(only_main(commands!()))
         .build(context)
-        .expect("error while running tauri application")
-        .run(on_run_event);
+        .expect("error while running tauri application");
+    // Before any window (they are made when the app runs): the files a contact's app forgotten last time left behind,
+    // which WebKit no longer holds open now.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    forget_origins::clean_at_launch(app.handle());
+    app.run(on_run_event);
 }
 
 /// Android: rustls-platform-verifier checks every HTTPS certificate with Android's own verifier, through the JVM, and
@@ -473,6 +504,10 @@ fn page_started<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(links) = app.try_state::<linked_files::LinkedFiles>() {
         links.page_started();
     }
+    // The cookie jars of its Pubky approvals, which it can no longer close (`pubky_session::page_started`).
+    pubky_session::page_started();
+    // Its cameras, microphone meters and calls (Linux): stopped, and its device watch no longer told.
+    native_call::page_started();
 }
 
 /// How long the page gets to say goodbye to its contacts before an exit it can be told about goes on.
@@ -1164,6 +1199,24 @@ mod tests {
         page_started(app.handle());
         assert_eq!(serve(), tauri::http::StatusCode::NOT_FOUND);
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// The Pubky sessions of the page before this one, which it never closed, are forgotten: their ids were its own.
+    #[test]
+    fn a_new_page_forgets_the_pubky_sessions_the_page_before_left_open() {
+        let app = app();
+        // A session is open once its first request is in; a bad address is refused before that.
+        tauri::async_runtime::block_on(pubky_session::fetch(
+            "session-000000000001".into(),
+            "http://127.0.0.1:9/session".into(),
+            "GET".into(),
+            vec![],
+            None,
+        ))
+        .ok();
+        assert_eq!(pubky_session::open_sessions(), 1);
+        page_started(app.handle());
+        assert_eq!(pubky_session::open_sessions(), 0);
     }
 
     /// The Ghostly window closed on Linux or Windows ends the app. By the exit, Tauri has dropped the window and its

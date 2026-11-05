@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { GhostlyHttpError, LIMITS, parseLocalTarget, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
-import { bool, chatOf, node, num, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, findOwnNamedChat, node, num, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 import { isLive } from "./views";
 
@@ -106,14 +106,34 @@ export interface OpenedService {
 
 /**
  * Added to every answer of a contact's app, next to any policy the contact sends (a browser enforces both): its
- * scripts, forms, pictures, frames, fonts, media, styles and workers reach its own origin and public https sites
- * (and inline, data: and blob: content), never plain http. The page is served from `<random>.localhost`, which Chrome
- * counts as this machine, so its own guard for requests to local addresses (Local Network Access) would not ask
- * before the page reached another service on 127.0.0.1 or the local network. Inline scripts and styles stay allowed:
- * this policy bounds where the page reaches, not how the app is written. A top-level navigation is not covered: no
- * browser lets a policy bound it.
+ * requests (fetch, XHR, beacons, WebSockets, EventSource) and forms reach only its own origin, the contact's server;
+ * its scripts, pictures, frames, fonts, media, styles and workers its own origin and https sites (and inline, data:
+ * and blob: content), never plain http. The page is served from `<random>.localhost`, which Chrome counts as this
+ * machine, so its own guard for requests to local addresses (Local Network Access) would not ask before the page
+ * reached another service on 127.0.0.1 or the local network, and a policy cannot tell a public https site from one
+ * here or on the local network with a trusted certificate: requests that can read an answer or post go nowhere else.
+ * Inline scripts and styles stay allowed: this policy bounds where the page reaches, not how the app is written. A
+ * top-level navigation is not covered: no browser lets a policy bound it.
  */
-export const OPENED_SERVICE_CSP = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https: wss:; form-action 'self' https:";
+export const OPENED_SERVICE_CSP = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
+
+/**
+ * The contact's headers that are not passed on: each makes the browser send something to a place it names, outside
+ * `connect-src` (violation and network-error reports, and the endpoints they go to; `Link` preloads, prefetches and
+ * early connections). Only the contact's server is reached.
+ */
+export const OPENED_SERVICE_DROPPED_HEADERS = ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link"];
+
+/** The directives of a contact's policy that send reports to a URL it names, dropped from it. */
+export const OPENED_SERVICE_DROPPED_DIRECTIVES = ["report-uri", "report-to"];
+
+/** A contact's `Content-Security-Policy` value (one policy or several joined by commas) without its report directives. */
+export function withoutReports(value: string): string {
+  return value.split(",")
+    .map((policy) => policy.split(";").filter((directive) => !OPENED_SERVICE_DROPPED_DIRECTIVES.includes(directive.trim().split(/\s+/)[0].toLowerCase())).join(";").trim())
+    .filter((policy) => policy.replaceAll(";", "").trim())
+    .join(", ");
+}
 
 function plain(response: ServerResponse, status: number, text: string, headers: Record<string, string> = {}): void {
   response.writeHead(status, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", ...headers });
@@ -174,14 +194,16 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
     const out: Record<string, string | string[]> = {};
     for (const [name, value] of answer.headers) {
       const lower = name.toLowerCase();
-      if (lower === "transfer-encoding" || lower === "connection") continue;
+      if (lower === "transfer-encoding" || lower === "connection" || OPENED_SERVICE_DROPPED_HEADERS.includes(lower)) continue;
       if (lower === "set-cookie") {
         const cookie = hostOnlyCookie(value);
         if (!cookie) continue;
         if (cookies.size < MAX_COOKIE_NAMES) cookies.add(setCookieName(cookie)!);
         out[lower] = [...((out[lower] as string[] | undefined) ?? []), cookie];
-      } else if (lower === "content-security-policy") out[lower] = [...((out[lower] as string[] | undefined) ?? []), value];
-      else out[lower] = value;
+      } else if (lower === "content-security-policy") {
+        const policy = withoutReports(value);
+        if (policy) out[lower] = [...((out[lower] as string[] | undefined) ?? []), policy];
+      } else out[lower] = value;
     }
     out["content-security-policy"] = [...((out["content-security-policy"] as string[] | undefined) ?? []), OPENED_SERVICE_CSP];
     response.writeHead(answer.status, out);
@@ -250,7 +272,8 @@ export const SERVICE_METHODS: Record<string, Method> = {
     return { service: serviceId, enabled: !bool(params, "off") };
   },
   async "service.share"(ctx, params) {
-    const link = chatOf(ctx, params);
+    // A grant the contact keeps using: only what this side chose names its chat, as for `call auto --from`.
+    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
     const shared = !bool(params, "off");
     const serviceId = serviceOf(ctx, params);
     await node(ctx).setServiceShared({ serviceId, peerPubKeyZ32: link.peerPubKeyZ32, shared });

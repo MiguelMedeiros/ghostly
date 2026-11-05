@@ -86,10 +86,23 @@ test("/developers/agents: how it works and the steps are below the prompt", asyn
 test("the threat model page: linked from the security model, its sections, no sideways scroll on a phone", async ({ page }) => {
   await page.goto("/developers/agents", { waitUntil: "networkidle" });
   await expect(page.getByTestId("agent-security").locator('a[href="/developers/agents/threat-model"]')).toBeAttached();
+  await expect(page.getByTestId("agent-security")).toContainText("--once takes one answer from each person");
+  await expect(page.getByTestId("agent-security")).not.toContainText("Only the person in the chat can press");
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/developers/agents/threat-model", { waitUntil: "networkidle" });
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("What a message can make your agent do");
-  for (const id of ["threat-who", "threat-cannot", "threat-controls", "threat-limits", "threat-gaps"]) await expect(page.getByTestId(id)).toBeAttached();
+  for (const id of ["threat-who", "threat-cannot", "threat-controls", "threat-limits", "threat-apart", "threat-gaps"]) await expect(page.getByTestId(id)).toBeAttached();
+  // A CLI profile's keys are files, not encrypted (packages/cli/src/runtime/storage.ts): the page says so and shows how
+  // to keep them under an OS user of their own.
+  await expect(page.getByTestId("threat-apart")).toContainText("They are not encrypted");
+  await expect(page.getByTestId("threat-apart")).toContainText("User=ghostly");
+  await expect(page.getByTestId("threat-apart")).toContainText("<key>UserName</key>");
+  // What the code does: --once counts per person (packages/browser/src/shared/buttons.ts, answered), a group's link
+  // turns off or is replaced (group link --off|--reset), and a received file is kept in the profile under an id.
+  await expect(page.getByTestId("threat-controls")).toContainText("--once takes one answer from each person");
+  await expect(page.getByTestId("threat-gaps")).toContainText("A chat invite that expires");
+  await expect(page.getByTestId("threat-gaps")).toContainText("group link --off or --reset");
+  await expect(page.getByTestId("threat-cannot")).toContainText("Save a file under its own name");
   const doc = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }));
   expect(doc.sw, "the page scrolls sideways").toBeLessThanOrEqual(doc.cw);
   const description = await page.locator('meta[name="description"]').getAttribute("content");

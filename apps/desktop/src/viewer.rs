@@ -24,13 +24,65 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tokio::sync::oneshot;
 
 pub const SCHEME: &str = "ghostly-svc";
-const REQUEST_EVENT: &str = "ghostly-svc-request";
+pub(crate) const REQUEST_EVENT: &str = "ghostly-svc-request";
 #[cfg(not(test))]
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 /// Short here so a test that expects a request to be refused fails at once when
 /// the refusal is missing, instead of waiting out the real timeout.
 #[cfg(test)]
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// Added to every answer a contact's app gets served, after the contact's own
+/// policies: a WebView enforces every policy it is sent, so the contact's own
+/// cannot widen it. Its requests and forms reach only its own origin, the
+/// contact's server; its scripts, pictures, frames and the rest its own origin
+/// and https sites (and inline, data: and blob: content), never plain http. A
+/// policy cannot tell a public https site from a service on this machine or the
+/// local network with a trusted certificate, which WebKitGTK has no guard of its
+/// own against. The same value as `OPENED_SERVICE_CSP` in
+/// `packages/cli/src/services.ts` (`service open`).
+const SERVICE_CSP: &str = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
+
+/// The contact's headers that are not passed on: each makes the WebView send
+/// something to a place it names, outside `connect-src` (violation and
+/// network-error reports, and the endpoints they go to; `Link` preloads,
+/// prefetches and early connections). The same list as
+/// `OPENED_SERVICE_DROPPED_HEADERS` in `packages/cli/src/services.ts`.
+const DROPPED_HEADERS: [&str; 5] = [
+    "content-security-policy-report-only",
+    "reporting-endpoints",
+    "report-to",
+    "nel",
+    "link",
+];
+
+/// The directives of a contact's policy that send reports to a URL it names,
+/// dropped from it. The same list as `OPENED_SERVICE_DROPPED_DIRECTIVES`.
+const DROPPED_DIRECTIVES: [&str; 2] = ["report-uri", "report-to"];
+
+/// A contact's `Content-Security-Policy` value (one policy or several joined by
+/// commas) without its report directives: `withoutReports` in the CLI.
+fn without_reports(value: &str) -> String {
+    value
+        .split(',')
+        .map(|policy| {
+            policy
+                .split(';')
+                .filter(|directive| {
+                    let name = directive.split_whitespace().next().unwrap_or("");
+                    !DROPPED_DIRECTIVES
+                        .iter()
+                        .any(|dropped| dropped.eq_ignore_ascii_case(name))
+                })
+                .collect::<Vec<_>>()
+                .join(";")
+                .trim()
+                .to_string()
+        })
+        .filter(|policy| !policy.replace(';', "").trim().is_empty())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 #[derive(Default)]
 pub struct ViewerState {
@@ -88,14 +140,14 @@ fn unreachable_text(said: Option<String>) -> String {
         .unwrap_or_else(|| UNREACHABLE.to_string())
 }
 
-fn is_label_safe(value: &str) -> bool {
+pub(crate) fn is_label_safe(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
         && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 /// A chat's tag as `viewerTag` makes it: 16 characters of z-base-32.
-fn is_tag(value: &str) -> bool {
+pub(crate) fn is_tag(value: &str) -> bool {
     value.len() == 16
         && value
             .chars()
@@ -242,7 +294,14 @@ pub fn open<R: tauri::Runtime>(
         .map_err(|e| format!("URL: {}", e))?;
     let (link_site, link_service) = (site.clone(), service.clone());
     let opened_outside = Mutex::new(OpenedOutside::default());
-    WebviewWindowBuilder::new(app, &label, WebviewUrl::CustomProtocol(url))
+    #[allow(unused_mut)]
+    let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::CustomProtocol(url));
+    // On Windows the app keeps its storage in a WebView2 profile of its own, gone whole once it is forgotten.
+    #[cfg(windows)]
+    if let Some(folder) = crate::forget_origins::app_folder(app, &format!("{service}.{site}")) {
+        builder = builder.data_directory(folder);
+    }
+    builder
         .title(format!("{} — Ghostly", title))
         // The window itself never leaves its origin: a plain link to another site, a script or a frame that
         // goes there is refused, with no click to tell them apart.
@@ -288,6 +347,11 @@ pub async fn handle<R: tauri::Runtime>(
     label: String,
     request: Request<Vec<u8>>,
 ) -> Response<Vec<u8>> {
+    // A hidden window clearing an origin (`forget_origins`): served the app's cleaning page, never the contact's.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if let Some(response) = crate::forget_origins::serve(&app, &label, &request) {
+        return response;
+    }
     let state = app.state::<ViewerState>();
     let Some(Bound {
         peer,
@@ -355,9 +419,27 @@ pub async fn handle<R: tauri::Runtime>(
     };
 
     let mut response = Response::builder().status(answer.status);
+    // One header, its policies joined by commas: on macOS wry keeps only the
+    // last of two headers with the same name.
+    let mut policies = Vec::new();
     for (name, value) in &answer.headers {
-        response = response.header(name.as_str(), value.as_str());
+        if DROPPED_HEADERS
+            .iter()
+            .any(|dropped| dropped.eq_ignore_ascii_case(name))
+        {
+            continue;
+        }
+        if name.eq_ignore_ascii_case("content-security-policy") {
+            let policy = without_reports(value);
+            if !policy.is_empty() {
+                policies.push(policy);
+            }
+        } else {
+            response = response.header(name.as_str(), value.as_str());
+        }
     }
+    policies.push(SERVICE_CSP.to_string());
+    response = response.header("content-security-policy", policies.join(", "));
     response
         .body(STANDARD.decode(answer.body_b64).unwrap_or_default())
         .unwrap_or_else(|_| {
@@ -388,6 +470,38 @@ pub fn close_all<R: tauri::Runtime>(app: &AppHandle<R>) {
             let _ = window.close();
         }
     }
+}
+
+/// The windows showing one of `hosts` (`<service>.<peer>.<tag>`) close, their bindings dropped first as in
+/// `close_all`: what their app kept there is being forgotten (`forget_origins`).
+pub fn close_showing<R: tauri::Runtime>(app: &AppHandle<R>, hosts: &[String]) {
+    let Some(state) = app.try_state::<ViewerState>() else {
+        return;
+    };
+    for label in forget_showing(&state, hosts) {
+        if let Some(window) = app.get_webview_window(&label) {
+            let _ = window.close();
+        }
+    }
+}
+
+/// Drops the bindings of the windows showing one of `hosts`, and names those windows.
+fn forget_showing(state: &ViewerState, hosts: &[String]) -> Vec<String> {
+    let Ok(mut windows) = state.windows.lock() else {
+        return Vec::new();
+    };
+    let labels: Vec<String> = windows
+        .iter()
+        .filter(|(_, bound)| {
+            let own = format!("{}.{}", bound.service, bound.site);
+            hosts.iter().any(|host| host.eq_ignore_ascii_case(&own))
+        })
+        .map(|(label, _)| label.clone())
+        .collect();
+    for label in &labels {
+        windows.remove(label);
+    }
+    labels
 }
 
 /// Drops every binding and every request still waiting, and names the windows.
@@ -850,13 +964,28 @@ mod routing_tests {
             carried["id"].as_u64().unwrap(),
             ServiceResponse {
                 status: 201,
-                headers: vec![("x-served-by".into(), "atlas".into())],
+                headers: vec![
+                    ("x-served-by".into(), "atlas".into()),
+                    ("Content-Security-Policy".into(), "default-src *".into()),
+                    ("content-security-policy".into(), "img-src *".into()),
+                ],
                 body_b64: STANDARD.encode(b"created"),
             },
         );
         let response = tauri::async_runtime::block_on(pending).unwrap();
         assert_eq!(response.status(), StatusCode::CREATED);
         assert_eq!(response.headers()["x-served-by"], "atlas");
+        // The contact's policies stay, and Ghostly's comes after them: all are enforced.
+        let policies: Vec<_> = response
+            .headers()
+            .get_all("content-security-policy")
+            .iter()
+            .map(|value| value.to_str().unwrap())
+            .collect();
+        assert_eq!(
+            policies,
+            [format!("default-src *, img-src *, {SERVICE_CSP}")]
+        );
         assert_eq!(response.body(), b"created");
         assert!(app
             .state::<ViewerState>()
@@ -864,6 +993,101 @@ mod routing_tests {
             .lock()
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn no_header_sends_reports_or_early_requests_elsewhere_and_requests_stay_on_the_contact() {
+        let app = app();
+        bind(&app, "svc-1");
+        let asked = requests(&app);
+        let pending = tauri::async_runtime::spawn(handle(
+            app.handle().clone(),
+            "svc-1".into(),
+            request("GET", &format!("{SCHEME}://atlas.{PEER}.{TAG}/"), b""),
+        ));
+        let carried = asked.recv_timeout(Duration::from_secs(5)).unwrap();
+        let headers = [
+            (
+                "Content-Security-Policy",
+                "default-src 'self'; report-uri http://127.0.0.1:9/r; img-src *; Report-To main",
+            ),
+            (
+                "content-security-policy",
+                "report-uri https://localhost/r, script-src 'self';report-to main",
+            ),
+            (
+                "content-security-policy-report-only",
+                "default-src 'none'; report-uri http://127.0.0.1:9/r",
+            ),
+            ("Reporting-Endpoints", "main=\"http://127.0.0.1:9/r\""),
+            (
+                "report-to",
+                "{\"group\":\"main\",\"endpoints\":[{\"url\":\"http://127.0.0.1:9/r\"}]}",
+            ),
+            ("NEL", "{\"report_to\":\"main\",\"max_age\":86400}"),
+            (
+                "link",
+                "<https://127.0.0.1:8443/admin>; rel=preload; as=fetch; crossorigin",
+            ),
+            (
+                "Link",
+                "<https://nas.local/>; rel=preconnect, </s.css>; rel=\"dns-prefetch prefetch\"",
+            ),
+            ("x-served-by", "atlas"),
+        ];
+        respond(
+            app.handle(),
+            carried["id"].as_u64().unwrap(),
+            ServiceResponse {
+                status: 200,
+                headers: headers
+                    .iter()
+                    .map(|(name, value)| (name.to_string(), value.to_string()))
+                    .collect(),
+                body_b64: STANDARD.encode(b"hi"),
+            },
+        );
+        let response = tauri::async_runtime::block_on(pending).unwrap();
+        assert_eq!(response.headers()["x-served-by"], "atlas");
+        for name in [
+            "content-security-policy-report-only",
+            "reporting-endpoints",
+            "report-to",
+            "nel",
+            "link",
+        ] {
+            assert!(response.headers().get(name).is_none(), "{name}");
+        }
+        assert_eq!(
+            response.headers()["content-security-policy"],
+            format!("default-src 'self'; img-src *, script-src 'self', {SERVICE_CSP}").as_str()
+        );
+        // What can read an answer or post goes to the contact's own origin only: https: also names
+        // this machine and the local network.
+        assert!(SERVICE_CSP.ends_with("; connect-src 'self'; form-action 'self'"));
+    }
+
+    #[test]
+    fn the_policy_is_the_one_service_open_adds() {
+        let cli = include_str!("../../../packages/cli/src/services.ts");
+        assert!(cli.contains(&format!(
+            "export const OPENED_SERVICE_CSP = \"{SERVICE_CSP}\";"
+        )));
+        let list = |names: &[&str]| {
+            names
+                .iter()
+                .map(|name| format!("\"{name}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        assert!(cli.contains(&format!(
+            "export const OPENED_SERVICE_DROPPED_HEADERS = [{}];",
+            list(&DROPPED_HEADERS)
+        )));
+        assert!(cli.contains(&format!(
+            "export const OPENED_SERVICE_DROPPED_DIRECTIVES = [{}];",
+            list(&DROPPED_DIRECTIVES)
+        )));
     }
 
     #[test]
@@ -963,6 +1187,35 @@ mod routing_tests {
             assert_eq!(response.status(), StatusCode::FORBIDDEN, "{label}");
         }
         assert!(asked.try_recv().is_err(), "nothing reached the main window");
+    }
+
+    #[test]
+    fn forgetting_an_origin_closes_the_windows_showing_it_and_no_other() {
+        let app = app();
+        for service in ["atlas", "notes", "atlas"] {
+            open(
+                app.handle(),
+                PEER.into(),
+                service.into(),
+                TAG.into(),
+                "t".into(),
+                None,
+            )
+            .unwrap();
+        }
+        close_showing(app.handle(), &[format!("ATLAS.{PEER}.{TAG}")]);
+        let bound = app.state::<ViewerState>().windows.lock().unwrap().clone();
+        assert_eq!(bound.keys().collect::<Vec<_>>(), ["svc-1"]);
+        assert_eq!(bound["svc-1"].service, "notes");
+        // Its next request is refused: it never reaches the page.
+        let asked = requests(&app);
+        let response = tauri::async_runtime::block_on(handle(
+            app.handle().clone(),
+            "svc-0".into(),
+            request("GET", &format!("{SCHEME}://atlas.{PEER}.{TAG}/"), b""),
+        ));
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert!(asked.try_recv().is_err());
     }
 
     #[test]

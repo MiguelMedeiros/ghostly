@@ -148,7 +148,7 @@ describe("the sheet's Change row", () => {
     await user.click(row);
     const menu = screen.getByTestId("chat-language-menu");
     // The chat's own language first, then the app's.
-    const items = within(menu).getAllByRole("menuitemcheckbox").map((item) => item.getAttribute("data-language"));
+    const items = within(menu).getAllByRole("checkbox").map((item) => item.getAttribute("data-language"));
     expect(items.slice(0, 4)).toEqual([null, "it", "en", "pt"]);
     expect(within(menu).getByTestId("chat-language-auto").getAttribute("aria-checked")).toBe("true");
     await user.click(within(menu).getByText("French"));

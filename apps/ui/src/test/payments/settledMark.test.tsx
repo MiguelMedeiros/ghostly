@@ -48,6 +48,19 @@ describe("the Redeemed mark of an ecash token", () => {
     expect(await screen.findByTestId("token-redeemed")).toBeInTheDocument();
   });
 
+  // agents#2255: the card showed the token's face value and "Redeemed ✓" while the mint had kept part of it as its fee.
+  it("says what the mint kept as its fee when it kept one, and only Redeemed when it kept none", async () => {
+    fakeEngine.setState({ links: [linkView()] });
+    fakeEngine.on("walletInspectCashu", () => ({ inspection: { kind: "token", amount: 3, unit: "sat", mint: "https://mint.example.com", accepted: true } }));
+    const view = renderApp(<><MessageBubble message={message("m1", `cashuBa${"f".repeat(60)}`)} peerPubKey="peer" /><MessageBubble message={message("m2", `cashuBa${"n".repeat(60)}`)} peerPubKey="peer" /></>);
+    view.engine.on("walletReceiveToken", ({ token }: { token: string }) => (token.endsWith("f") ? { amount: 1, fee: 2 } : { amount: 3, fee: 0 }));
+    const [feeCard, freeCard] = await screen.findAllByTestId("cashu-token-bubble");
+    await view.user.click(within(feeCard!).getByTestId("token-redeem"));
+    await waitFor(() => expect(within(feeCard!).getByTestId("token-redeemed")).toHaveTextContent("Redeemed ✓ (the mint kept 2 as its fee)"));
+    await view.user.click(within(freeCard!).getByTestId("token-redeem"));
+    await waitFor(() => expect(within(freeCard!).getByTestId("token-redeemed")).toHaveTextContent(/^Redeemed ✓$/));
+  });
+
   // agents#1588: the same token in two messages: the second card offered Redeem still, and pressed said "Already spent"
   // for a token this device had just redeemed.
   it("turns every card of the same token Redeemed when one of them is redeemed here, not Already spent", async () => {
@@ -125,5 +138,39 @@ describe("the Paid mark of a Lightning invoice", () => {
     expect(within(card).getByTestId("money-amount")).toHaveTextContent("50,000");
     expect(within(card).queryByTestId("invoice-paid")).not.toBeInTheDocument();
     expect(within(card).getByTestId("invoice-pay")).toBeInTheDocument();
+  });
+
+  const refusedBy = (reason: string) => {
+    fakeEngine.setState({ links: [linkView()], wallet: { lightning: lightningSource({ mode: "testnet", providerId: "fake-lightning" }) } });
+    const text = fakeInvoice(100, new Uint8Array(32).fill(9));
+    const view = renderApp(<MessageBubble message={message("m1", text)} peerPubKey="peer" />);
+    view.engine.on("walletQuoteInvoice", () => ({ quote: "quote-A", mint: "", amount: 100, feeReserve: 1, source: "fake-lightning" })).on("walletPayQuote", () => {
+      throw new Error(reason);
+    });
+    return { view, text };
+  };
+  const pay = async (view: ReturnType<typeof renderApp>) => {
+    await view.user.click(within(screen.getByTestId("invoice-bubble")).getByTestId("invoice-pay"));
+    await view.user.click(await screen.findByTestId("invoice-confirm"));
+  };
+
+  it("is shown when the mint refuses because the invoice was already paid: there is nothing left to pay", async () => {
+    const { view } = refusedBy("Invoice already paid");
+    await pay(view);
+    expect(await screen.findByTestId("invoice-paid")).toBeInTheDocument();
+  });
+
+  it("is not shown when the recipient refused an invoice it does not know: nothing was paid", async () => {
+    // LND's FAILURE_REASON_INCORRECT_PAYMENT_DETAILS: the recipient's node does not take the payment, which it says for
+    // an invoice it never made, cancelled or settled alike. Nothing left the wallet, and nobody is known to have paid.
+    const { view, text } = refusedBy("The recipient refused the payment (unknown or already paid invoice)");
+    await pay(view);
+    const card = screen.getByTestId("invoice-bubble");
+    expect(await within(card).findByText("The recipient refused the payment (unknown or already paid invoice)")).toBeInTheDocument();
+    expect(within(card).queryByTestId("invoice-paid")).not.toBeInTheDocument();
+    view.unmount();
+
+    renderApp(<MessageBubble message={message("m2", text)} peerPubKey="peer" />);
+    expect(within(screen.getByTestId("invoice-bubble")).queryByTestId("invoice-paid")).not.toBeInTheDocument();
   });
 });

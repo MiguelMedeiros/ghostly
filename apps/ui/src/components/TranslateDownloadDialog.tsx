@@ -6,6 +6,7 @@ import type { Problem } from "../lib/problemText";
 import { sizeIn } from "../lib/sizeText";
 import { translateEnabled } from "../lib/translateFlag";
 import { Notice } from "./ui/Notice";
+import { useBackCloses } from "../hooks/useDismiss";
 
 interface Question {
   /** The pair's languages, as ISO 639 codes. */
@@ -39,6 +40,7 @@ function DownloadQuestion({ from, to, back, bytes, engine, busy = false, problem
   const { t } = useI18n();
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null), notNow = useRef<HTMLButtonElement>(null);
+  useBackCloses(onNotNow);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const element = dialog.current!;

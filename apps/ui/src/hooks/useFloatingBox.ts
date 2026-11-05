@@ -28,13 +28,19 @@ const NO_INSETS: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
  */
 let insets: Insets = NO_INSETS;
 function readInsets(): void {
-  if (typeof document === "undefined" || !document.body) return;
+  insets = safeAreaInsets();
+}
+
+/** The safe area's insets now, in px (`env(safe-area-inset-*)` read through a probe). */
+export function safeAreaInsets(): Insets {
+  if (typeof document === "undefined" || !document.body) return insets;
   const probe = document.createElement("div");
   probe.style.cssText = "position:fixed;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)";
   document.body.appendChild(probe);
   const style = getComputedStyle(probe);
-  insets = { top: parseFloat(style.paddingTop) || 0, right: parseFloat(style.paddingRight) || 0, bottom: parseFloat(style.paddingBottom) || 0, left: parseFloat(style.paddingLeft) || 0 };
+  const read = { top: parseFloat(style.paddingTop) || 0, right: parseFloat(style.paddingRight) || 0, bottom: parseFloat(style.paddingBottom) || 0, left: parseFloat(style.paddingLeft) || 0 };
   probe.remove();
+  return read;
 }
 
 /** Keeps a box whole inside the window and clear of its safe area: first small enough, then moved back in. */

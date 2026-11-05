@@ -1,17 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FAREWELL_KEPT_MS, FAREWELL_OPEN_MS, Groups, type GroupStore, type GroupsHost } from "../src/engine/groups";
-import { createIdentity, encodeGroupEntryLink, decodeGroupEntryLink, knockIdentity, readKnocks, identityFromSeedB64, randomBytes, toBase64Url, type GhostRecord, type GroupState } from "@ghostly/core";
-import type { StoredGroup, StoredMessage } from "../src/shared/types";
+import { createIdentity, encodeGroupEntryLink, decodeGroupEntryLink, knockIdentity, knockRecords, readKnocks, identityFromSeedB64, randomBytes, toBase64Url, type GhostRecord, type GroupState } from "@ghostly/core";
+import type { GroupLive, StoredGroup, StoredMessage } from "../src/shared/types";
 // covers: groups.picture.set, groups.rename, groups.create, groups.invite, groups.send, groups.leave, groups.forget, groups.link.enable, groups.link.join, groups.link.replace, groups.protocol.entry, groups.protocol.mentions
 
-/** One peer's database, in memory. */
+/** One peer's database, in memory, with the private groups' small rows (`GroupLive`). */
 function memoryStore(messages: StoredMessage[]): GroupStore {
-  const groups = new Map<string, StoredGroup>();
+  const groups = new Map<string, StoredGroup>(), live = new Map<string, GroupLive>();
   return {
     getGroups: async () => [...groups.values()].map(g => structuredClone(g)),
-    putGroup: async g => { groups.set(g.id, structuredClone(g)); },
-    deleteGroup: async id => { groups.delete(id); for (let i = messages.length - 1; i >= 0; i--) if (messages[i].linkId === `group:${id}`) messages.splice(i, 1); },
+    putGroup: async (g, row) => {
+      groups.set(g.id, structuredClone(g));
+      if (row) live.set(g.id, structuredClone(row)); else if (row === null) live.delete(g.id);
+    },
+    deleteGroup: async id => { groups.delete(id); live.delete(id); for (let i = messages.length - 1; i >= 0; i--) if (messages[i].linkId === `group:${id}`) messages.splice(i, 1); },
     getMessages: async linkId => messages.filter(m => m.linkId === linkId).sort((a, b) => a.timestamp - b.timestamp),
+    getGroupLive: async () => structuredClone(live),
+    putGroupLive: async (id, row) => { live.set(id, structuredClone(row)); },
   };
 }
 
@@ -200,6 +205,28 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     await again.load();
     expect(again.views()[0]).toMatchObject({ id: groupId, status: "active", epoch: 1 });
     expect((await again.messages(groupId)).map(m => m.event)).toEqual(["joined"]);
+  });
+  it("a row of mine an older app stored before it was killed, its counter unsaved: after a restart the next text takes a new id", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob");
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    await alice.load(); await bob.load();
+    const groupId = await alice.create("Ghosts", "mesh");
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    await bob.accept(groupId); await world.settle();
+    await world.meet();
+    const store = world.peers.get("alice")!.store;
+    // The group as saved before the send: an app killed after the row was stored and before its state was saved.
+    const before = (await store.getGroups()).find(g => g.id === groupId)!;
+    const residue = await alice.send(groupId, "residue", []);
+    await world.settle();
+    await store.putGroup(before);
+    const again = new Groups({ ...(alice as unknown as { host: GroupsHost }).host, emit: vi.fn() }, store);
+    await again.load();
+    const probe = await again.send(groupId, "probe", []);
+    expect(probe.messageId).toBeDefined();
+    expect(probe.messageId).not.toBe(residue.messageId);
+    expect((await again.messages(groupId)).filter(m => !m.event).map(m => m.text)).toEqual(["residue", "probe"]);
   });
   it("what makes a group unread: another member's message, never mine nor a membership line, also after a restart", async () => {
     const world = new World();
@@ -447,6 +474,40 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     // pace, every five seconds as before: 9.6 s, 16 s, 22.4 s, 28.8 s. Read back every time, it would be twenty writes.
     for (let s = 1; s <= 20; s++) await carol.tick(t0 + s * 1_600);
     expect(writes).toHaveBeenCalledTimes(7);
+  });
+
+  it("tells the admin a link whose knocks keep coming from keys no app answers for lets nobody in, until it is replaced", async () => {
+    const world = new World();
+    const alice = world.add("alice"), carol = world.add("carol");
+    await alice.load(); await carol.load();
+    const groupId = await alice.create("Ghosts", "mesh");
+    const code = await alice.enableLink(groupId);
+    const link = decodeGroupEntryLink(code)!, knockKey = knockIdentity(link).pubKeyZ32;
+    const made = (n: number, ts: number) => Array.from({ length: n }, () => ({ key: createIdentity().pubKeyZ32, ts }));
+    const jammed = () => !!alice.views().find(g => g.id === groupId)!.entryJammed;
+    const t0 = Date.now();
+    // A joiner who gets in, and three who knocked and closed their app: what a shared link sees. No word to the admin.
+    await carol.joinByLink(code);
+    await vi.waitFor(() => expect(readKnocks(link, world.pkarr.get(knockKey) ?? [])).toHaveLength(1));
+    world.pkarr.set(knockKey, knockRecords(link, [...readKnocks(link, world.pkarr.get(knockKey)!), ...made(3, t0)]));
+    await alice.tick(t0); await world.settle(); await world.meetEntries();
+    expect(carol.views()[0].status).toBe("active");
+    for (let s = 1; s <= 120; s++) { await alice.tick(t0 + s * 2_000); await world.settle(); }
+    expect(jammed()).toBe(false);
+    // Then the record is written every 2 s with six fresh keys nobody's app holds a side for: nobody else can get in.
+    const t1 = t0 + 242_000;
+    let warnedAt = -1;
+    for (let s = 0; s <= 300 && warnedAt < 0; s++) {
+      const now = t1 + s * 2_000;
+      world.pkarr.set(knockKey, knockRecords(link, made(6, now)));
+      await alice.tick(now); await world.settle();
+      if (jammed()) warnedAt = now - t1;
+    }
+    expect(warnedAt).toBeGreaterThan(0);
+    expect(warnedAt).toBeLessThanOrEqual(8 * 60_000);
+    // A new link: the old one reaches nobody, and the warning goes with it.
+    await alice.enableLink(groupId, true);
+    expect(jammed()).toBe(false);
   });
 
   it("tells the joiner how far a join through a link got: knocking, knocked, answered, admitted", async () => {
@@ -750,6 +811,24 @@ describe("group engine: admission over a contact chat, edges from the roster", (
         // Commits only, and none carries a secret.
         expect(sent.length).toBeGreaterThan(1);
         expect(sent.every(f => (f as { t: string }).t === "group-commit" && !("secret" in (f as object)))).toBe(true);
+      });
+
+      it("that missed a member's leave reads that the member left, not that the admin removed them", async () => {
+        const { world, alice, bob, carol, groupId, key, edge } = await trio();
+        const bobKey = key(bob);
+        edge("alice", bob, false); edge("carol", bob, false);
+        world.chats.delete("chat-ab");
+        // Carol leaves on her own while Bob is away, then the admin removes Bob.
+        await carol.leave(groupId); await world.settle();
+        expect(world.events("alice")).toContain("left");
+        await alice.remove(groupId, bobKey); await world.settle();
+        edge("alice", bob, true);
+        await world.meet(); await world.settle();
+        expect(bob.views()[0]).toMatchObject({ status: "removed" });
+        // The commits between come over the admin's kept edge, each with the mark that says the member left.
+        const lines = (await bob.messages(groupId)).filter(m => m.event === "left" || m.event === "gone");
+        expect(lines.map(m => [m.event, m.member, m.by])).toEqual([["left", key(carol), undefined]]);
+        expect(lines[0].text).toMatch(/ left$/);
       });
 
       it("is still told after the admin's app restarts, and is given up after a week", async () => {

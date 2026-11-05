@@ -47,7 +47,7 @@ _ghostly.example.com.  300  TXT  "v=ghostly1; key=<52-character z-base-32 proof 
 
 - A tag list in the style of DKIM (RFC 6376 §3.2): tag names are case-insensitive, `v=ghostly1` MUST come first, `key` and `proof` are required and must be canonical, a duplicated tag or a bare word invalidates the string, unknown tags are ignored.
 - The value is about 140 octets, one character-string; multi-string records are concatenated (RFC 7208 §3.3).
-- Several TXT records at the name are allowed (several proofs, a renewal in progress); the one naming this key and statement suffices. Other TXT strings are ignored; at most 32 strings are read and 8 records kept; a string over 1024 octets is ignored. A CNAME is followed as the resolver's answer gives it, up to 8 hops.
+- Several TXT records at the name are allowed (several proofs, a renewal in progress); the one naming this key and statement suffices. Other TXT strings are ignored; at most 32 strings are read, and the record is looked for among all of them (a TXT set has no order); a string over 1024 octets is ignored. A CNAME is followed as the resolver's answer gives it, up to 8 hops.
 
 ### `https`: `https://<domain>/.well-known/ghostly.json`
 
@@ -55,7 +55,7 @@ _ghostly.example.com.  300  TXT  "v=ghostly1; key=<52-character z-base-32 proof 
 { "ghostly": 1, "proofs": [ { "key": "<proof key>", "proof": "<statement id>" } ] }
 ```
 
-`ghostly` MUST be `1`; entries it does not understand are skipped; at most 8 kept; 16 KiB. The server MUST send `Access-Control-Allow-Origin: *` (apps read it cross-origin) and serve it at exactly that URL: redirects are refused, including `example.com` → `www.example.com`.
+`ghostly` MUST be `1`; entries it does not understand are skipped; at most 32 entries are read (an app writes at most 8); 16 KiB. The server MUST send `Access-Control-Allow-Origin: *` (apps read it cross-origin) and serve it at exactly that URL: redirects are refused, including `example.com` → `www.example.com`.
 
 ### `nip05`: an existing NIP-05 `nostr.json`
 
@@ -70,7 +70,7 @@ For people who already run NIP-05. The statement is signed by a Nostr key exactl
    - **HTTPS / NIP-05**: first A and AAAA through the same resolver; the domain must have an address and **every** address must be public (no loopback, private, link-local, CGNAT, multicast, reserved or unspecified, including IPv4 embedded in IPv6). Then one GET of the file, UTF-8, 16 KiB. 404/410 mean "not published".
 4. **Match**: the record names this proof key and this statement id (NIP-05: the signing key). The failure message says which of "not published", "names another key: replaced or removed", "another proof of this key", "unreachable", "redirect", "too large", "private network" happened.
 
-Re-checks: the provider declares `recheck: { afterSeconds: 86400 }`; the contact's app offers "Check again" after a day and shows a failed re-check as not confirmed, without deleting the proof. Removing the record therefore withdraws the proof from every contact at their next check.
+Re-checks: the provider declares `recheck: { afterSeconds: 86400 }`; the contact's app offers "Check again" after a day, and checks again by itself about a day after its last check (a few proofs at a time, online only; a check that could not reach a server changes nothing and is tried later). It shows a failed re-check as not confirmed, without deleting the proof. Removing the record therefore withdraws the proof from every contact within about a day.
 
 Caching: DNS answers are shared between checks for their TTL, capped at 30 s, which is never staler than the resolver itself; files are shared only while one fetch is in flight. Publish with a TTL of 300 s or less so a removal is seen quickly; resolvers may keep an old answer for up to the TTL.
 

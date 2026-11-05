@@ -7,7 +7,7 @@ import { MeshHubs, removalEpoch } from "../src/engine/meshHubs";
 import { db } from "../src/engine/db";
 import { STORES, transact } from "../src/shared/idb";
 import type { StoredLink } from "../src/shared/types";
-// covers: groups.remove-member, groups.payments.group-request, groups.payments.notes, groups.protocol.reactions, groups.protocol.pins
+// covers: groups.remove-member, groups.payments.group-request, groups.payments.notes, groups.protocol.reactions, groups.protocol.pins, groups.connection.auto-reconnect
 
 /**
  * What a private group says goes to its members as the roster has them now, and to nobody else (WISP 902 · Group Mesh
@@ -266,6 +266,78 @@ describe("a private group's traffic goes to its current members only", () => {
   }, 30_000);
 });
 
+describe("the app back in front reconnects its group's dropped edges at once (WISP 100 § Background retry)", () => {
+  interface Edge { myPubKeyZ32: string; autoConnectFailures: number; lastAutoConnectAt: number; session: { events: { onPresence(presence: unknown): void } } }
+
+  it("each edge down forgets its wait, reads its member now, and the side whose turn it is dials as soon as that read says it is there", async () => {
+    const a = await adminOf([]);
+    // One member whose edge this app dials (its key the lower), one whose edge waits for the member's offer.
+    const edges: { link: GhostLink; dials: number }[] = [];
+    const dials = (link: GhostLink) => link.myPubKeyZ32 < (link as unknown as { options: { params: { peerPubKeyZ32: string } } }).options.params.peerPubKeyZ32;
+    while (edges.length < 2 || edges.every(e => dials(e.link)) || edges.every(e => !dials(e.link))) {
+      const member = await a.admit(false);
+      edges.push({ link: (await startedEdge(() => a.edgeOf(member.key))).link, dials: 0 });
+    }
+    const asked: string[] = [], offersAwaited: string[] = [], published: string[] = [];
+    for (const edge of edges) {
+      const { link } = edge, inner = link as unknown as Edge;
+      // Away a while: three failed dials (the next one 160 s off), and the member's last packet says it is gone.
+      inner.autoConnectFailures = 3;
+      inner.lastAutoConnectAt = Date.now();
+      let presence = { online: false, lastPacketAt: 1, seenAt: Date.now() - 600_000, services: [] };
+      vi.spyOn(link.session, "peerPresence", "get").mockImplementation(() => presence);
+      // The read the wake asks for finds the member there, fresh.
+      vi.spyOn(link.session, "pollNow").mockImplementation(() => {
+        asked.push(link.myPubKeyZ32);
+        presence = { online: true, lastPacketAt: Date.now(), seenAt: Date.now(), services: [] };
+        inner.session.events.onPresence(presence);
+      });
+      vi.spyOn(link.session, "expectPeer").mockImplementation(() => { offersAwaited.push(link.myPubKeyZ32); });
+      vi.spyOn(link.session, "publishedRecently").mockReturnValue(false);
+      vi.spyOn(link.session, "refreshAdvertisement").mockImplementation(async () => { published.push(link.myPubKeyZ32); });
+      vi.spyOn(link as unknown as { dial(): Promise<void> }, "dial").mockImplementation(async () => { edge.dials++; });
+    }
+
+    a.node.wake();
+
+    for (const edge of edges) {
+      const { link } = edge, inner = link as unknown as Edge, dialler = dials(link);
+      expect(asked.filter(k => k === link.myPubKeyZ32)).toHaveLength(1);
+      expect(inner.autoConnectFailures, "the wait starts over").toBe(dialler ? 1 : 0);
+      // The dialling side dials at once; the other says it is here and looks fast for the member's offer.
+      expect(edge.dials).toBe(dialler ? 1 : 0);
+      if (!dialler) {
+        expect(published).toContain(link.myPubKeyZ32);
+        expect(offersAwaited).toContain(link.myPubKeyZ32);
+      }
+    }
+  }, 30_000);
+
+  it("back after a restart, a member live then whose packet no read finds is reconnecting only for presence's window", async () => {
+    const a = await adminOf(["bob"]);
+    const [bob] = a.members;
+    await vi.waitFor(async () => expect((await db.getLinks()).find(l => l.id === bob.linkId)?.edgeLive).toBe(true));
+    await a.node.shutdown();
+    nodes.splice(nodes.indexOf(a.node), 1);
+
+    // The app starts again; the member's app stays closed and the relays hold no packet of it (`resolve` finds none).
+    const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() } as never, { transport, automaticWallets: false });
+    nodes.push(node);
+    await node.start();
+    const inner = node as unknown as Inner;
+    await startedEdge(() => [...inner.links.values()].find(live => live.stored.id === bob.linkId));
+    const edge = () => node.getState().groups.find(g => g.id === a.groupId)?.members.find(m => m.key === bob.key)?.edge;
+    // The resume is under way: its reads and its dial go in the first seconds.
+    expect(edge()?.reconnecting).toBe(true);
+    // Ten minutes on, nothing of the member read: it is not dialled (no presence), so not "Reconnecting…" for good.
+    const later = Date.now() + 11 * 60_000;
+    vi.spyOn(Date, "now").mockReturnValue(later);
+    try { expect(edge()).not.toHaveProperty("reconnecting"); }
+    finally { vi.mocked(Date.now).mockRestore(); }
+  }, 30_000);
+});
+
 describe("a profile no longer in a private group", () => {
   it("is refused a pin with the group's reason, as a reaction is, and nothing is pinned", async () => {
     const { node, inner, groupId } = await adminOf([]);
@@ -281,6 +353,21 @@ describe("a profile no longer in a private group", () => {
     vi.restoreAllMocks();
     expect(inner.groups.view(groupId)?.pin).toBeUndefined();
   }, 30_000);
+
+  it("is refused an edit and a delete for everyone with the group's reason, and the message stays as it was", async () => {
+    const { node, inner, groupId } = await adminOf([]);
+    const chat = `group:${groupId}`;
+    const said = await node.sendGroupMessage({ groupId, text: "before" });
+    const messageId = (said as { messageId: string }).messageId;
+    const view = inner.groups.view(groupId)!;
+    vi.spyOn(inner.groups, "view").mockImplementation(id => id === groupId ? { ...view, status: "removed", statusReason: "You were removed from this group", canSend: false } : undefined);
+    expect(await node.editMessage({ linkId: chat, messageId, text: "after" })).toEqual({ error: "You were removed from this group", refused: true });
+    expect(await node.removeMessage({ linkId: chat, messageId })).toEqual({ error: "You were removed from this group", refused: true });
+    vi.restoreAllMocks();
+    const kept = await node.getMessage(chat, messageId);
+    expect(kept?.text).toBe("before");
+    expect(kept?.removed).toBeFalsy();
+  }, 30_000);
 });
 
 describe("a hub and an edge to someone out of the roster", () => {
@@ -289,7 +376,8 @@ describe("a hub and an edge to someone out of the roster", () => {
   const roster = (...keys: string[]) => keys.map((key, i) => [key, i ? "member" : "admin"]);
   const chain = [roster(admin), roster(admin, hub, gone), roster(admin, hub, gone, member), roster(admin, hub, member), roster(admin, hub, member)]
     .map((m, e) => ({ e, m, by: admin })) as unknown as GroupCommit[];
-  const session = { roster: chain[4].m, myKey: hub, state: { chain } } as unknown as GroupSession;
+  const session = { roster: chain[4].m, myKey: hub, state: { chain },
+    handOnTo: (to: string, frame: GroupEdgeFrame) => frame.t === "group-commit" ? { ...frame, secret: `sealed for ${to}` } : frame } as unknown as GroupSession;
 
   function hubs() {
     const sent: { to: string; frame: { t: string; commit?: { e: number } } }[] = [];
@@ -315,6 +403,13 @@ describe("a hub and an edge to someone out of the roster", () => {
     mesh.passOn("g", session, admin, [commit(3), commit(4), message]);
     expect(sent.filter(s => s.to === "e-gone").map(s => [s.frame.t, s.frame.commit?.e])).toEqual([["group-commit", 3]]);
     expect(sent.filter(s => s.to === "e-member").map(s => s.frame.t)).toEqual(["group-commit", "group-commit", "group-msg"]);
+  });
+
+  it("passes a commit on to a member with the epoch's secret sealed for it, and none to someone taken out", () => {
+    const { mesh, sent } = hubs();
+    mesh.passOn("g", session, admin, [{ t: "group-commit", g: "g", commit: chain[3] } as unknown as GroupEdgeFrame]);
+    const secrets = Object.fromEntries(sent.map(s => [s.to, (s.frame as { secret?: string }).secret]));
+    expect(secrets).toEqual({ "e-member": `sealed for ${member}`, "e-gone": undefined });
   });
 
   it("does not tell it whom the hub reaches", () => {
@@ -360,4 +455,58 @@ describe("a member's pins in a private group are paced, and one that changes not
     expect(checks).toHaveBeenCalledTimes(PIN_LIMITS.receive);
     expect(shown()?.id).toBe(absent);
   });
+});
+
+/**
+ * A group has no receipts: `group react --wait sent` waits for an edge to take my reaction (`groupTaken`), as `group
+ * send` does for a message. A one-shot's reaction counted for nothing, so the CLI could only leave before it went.
+ */
+describe("my reaction in a private group counts once an edge took it", () => {
+  it("each open edge that takes it counts; one that was down counts when it opens and hears it again", async () => {
+    const { node, groupId, members: [bob, away] } = await adminOf(["bob", "away"]);
+    const chat = `group:${groupId}`;
+    const { messageId } = await node.sendGroupMessage({ groupId, text: "react to me" }) as { messageId: string };
+    const first = await node.react({ linkId: chat, messageId, emoji: "👍" });
+    expect(first).toEqual({ error: null, n: expect.any(Number) });
+    const taken = (n: number) => node.groupTaken({ groupId, messageId, reaction: n });
+    expect(frames(bob).filter(f => f.t === "group-react")).toHaveLength(1);
+    expect(taken(first.n!)).toBe(1);
+    // A new reaction is a new number: the old one taken says nothing of it, and it is not taken while nobody is there.
+    bob.wire.open = false;
+    bob.events.onDataLinkState("closed");
+    const second = await node.react({ linkId: chat, messageId, emoji: "🎉" });
+    expect(second.n).toBeGreaterThan(first.n!);
+    expect(taken(second.n!)).toBe(0);
+    // The member that was away comes up and hears my latest reaction again: that edge took it.
+    await away.comeUp();
+    await vi.waitFor(() => expect(taken(second.n!)).toBe(1));
+    expect(frames(away).filter(f => f.t === "group-react")).toMatchObject([{ n: second.n, e: "🎉" }]);
+  }, 30_000);
+});
+
+/**
+ * `pin <group> --wait sent` waits for an edge to take my pin (`groupTaken` with its number), as `group react` does for
+ * a reaction. A one-shot's pin counted for nothing, so the CLI answered before it went and the pin left with it.
+ */
+describe("my pin in a private group counts once an edge took it", () => {
+  it("each open edge that takes it counts; one that was down counts when it opens and hears it", async () => {
+    const { node, groupId, members: [bob, away] } = await adminOf(["bob", "away"]);
+    const chat = `group:${groupId}`;
+    const { messageId } = await node.sendGroupMessage({ groupId, text: "pin me" }) as { messageId: string };
+    const first = await node.pinMessage({ linkId: chat, messageId });
+    expect(first).toEqual({ error: null, n: expect.any(Number) });
+    const taken = (n: number) => node.groupTaken({ groupId, messageId, pin: n });
+    expect(frames(bob).filter(f => f.t === "group-pin")).toHaveLength(1);
+    expect(taken(first.n!)).toBe(1);
+    // An unpin is a new number: the pin taken says nothing of it, and it is not taken while nobody is there.
+    bob.wire.open = false;
+    bob.events.onDataLinkState("closed");
+    const second = await node.pinMessage({ linkId: chat, remove: true });
+    expect(second.n).toBeGreaterThan(first.n!);
+    expect(taken(second.n!)).toBe(0);
+    // The member that was away comes up and hears the group's pin: that edge took it.
+    await away.comeUp();
+    await vi.waitFor(() => expect(taken(second.n!)).toBe(1));
+    expect(frames(away).filter(f => f.t === "group-pin")).toMatchObject([{ n: second.n, id: "" }]);
+  }, 30_000);
 });

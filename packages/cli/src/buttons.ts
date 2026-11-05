@@ -3,7 +3,7 @@ import type { LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import type { Parsed } from "./args";
 import { bool, chatOrGroup, messageOf, node, num, oneOf, str, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
-import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
+import { findSecret, secretWords } from "./secretGuard";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 
 /*
@@ -103,7 +103,7 @@ async function updateButtons(ctx: Parameters<Method>[0], params: Params): Promis
   // A new text is a message like any other: the same guard as `send` and `edit`.
   if (newText !== undefined && !bool(params, "force")) {
     const secret = findSecret(newText);
-    if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; update with --force if you mean to`, { kind: secret.kind });
+    if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; update with --force if you mean to`, { kind: secret.kind });
   }
   const message = buttonsMessage(await messageOf(ctx, target.linkId, ref, (m) => m.sender === "me"), ref, target.group);
   if ((message.edit?.seq ?? 0) >= STATUS_CARD_LIMITS.edits)

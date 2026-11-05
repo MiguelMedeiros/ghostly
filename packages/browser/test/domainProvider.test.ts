@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { schnorr } from "@noble/curves/secp256k1.js";
 import {
-  createIdentity, domainTxtRecord, domainWellKnownFile, identityStatement, newIdentityBinding, type DomainRecord, type IdentityStatement,
+  createIdentity, domainTxtRecord, domainWellKnownFile, IdentityCheckUnavailable, identityStatement, newIdentityBinding, type DomainRecord, type IdentityStatement,
 } from "@ghostly/core";
 import type { IdentityFetch, VerifyContext } from "../src/proofs/contract";
-import { domain, type DomainEvidence } from "../src/proofs/providers/domain";
+import { domain, shortDomain, type DomainEvidence } from "../src/proofs/providers/domain";
 import { IDENTITY_PROVIDERS } from "../src/proofs/registry";
 import { verifyIdentity } from "../src/proofs/verify";
 import { clearDomainCache } from "../src/proofs/domain";
@@ -123,6 +123,31 @@ describe("domain provider", () => {
     expect(net.asked.some(u => u.startsWith(`https://${SUBJECT}/`))).toBe(false);
   });
 
+  it("keeps what this side's network saw from the contact: an unreachable server, its status, a resolver that failed", async () => {
+    const s = statement();
+    for (const status of [403, 451, 500, 301]) {
+      clearDomainCache();
+      const net = testNetwork();
+      const fetch: IdentityFetch = async (url, o) => url.startsWith(`https://${SUBJECT}/`) ? { status, contentType: "text/html", text: "", bytes: new Uint8Array() } : net.fetch(url, o);
+      const failure = await verifyIdentity([domain], s, { method: "https" }, ctx(fetch)).catch((e: unknown) => e);
+      expect(failure, String(status)).toBeInstanceOf(IdentityCheckUnavailable);
+    }
+    clearDomainCache();
+    const net = testNetwork();
+    const down: IdentityFetch = async (url, o) => url.startsWith(`https://${SUBJECT}/`) ? Promise.reject(new TypeError("Failed to fetch")) : net.fetch(url, o);
+    await expect(verifyIdentity([domain], s, { method: "https" }, ctx(down))).rejects.toThrow(IdentityCheckUnavailable);
+    for (const method of ["dns", "https"] as const) {
+      clearDomainCache();
+      const noResolver: IdentityFetch = async () => { throw new TypeError("Failed to fetch"); };
+      await expect(verifyIdentity([domain], s, { method }, ctx(noResolver)), method).rejects.toThrow(IdentityCheckUnavailable);
+    }
+    // A record that is not there is about the proof: the contact is told.
+    clearDomainCache();
+    const missing = await verifyIdentity([domain], s, { method: "dns" }, ctx(testNetwork().fetch)).catch((e: unknown) => e);
+    expect(missing).toBeInstanceOf(Error);
+    expect(missing).not.toBeInstanceOf(IdentityCheckUnavailable);
+  });
+
   it("refuses a statement whose domain is not canonical, before any lookup", async () => {
     const net = testNetwork();
     const s = identityStatement({ ...newIdentityBinding({ provider: "domain", subject: SUBJECT, validitySeconds: 86_400 }).binding, subject: "Proofs.Example.com" });
@@ -154,5 +179,21 @@ describe("domain provider", () => {
     const evidence: DomainEvidence = { method: "nip05", event: signNostr(statement(), signer) };
     await expect(verifyIdentity([domain], s, evidence, ctx(net.fetch))).rejects.toThrow();
     expect(net.asked).toHaveLength(0);
+  });
+});
+
+describe("a domain, short (badges and the ID card's face)", () => {
+  it("is shown whole while it fits, and by its end once long: the end names who owns it, the start is the owner's to choose", () => {
+    expect(domain.subject.short!("proofs.example.com")).toBe("proofs.example.com");
+    expect(shortDomain("github.com.account-security-verification-and-login-session-check.e2e-jq01xlo0.ghostly.tools")).toBe("…ghostly.tools");
+    expect(shortDomain("a.b.c.d.e.f.g.h.i.j.k.l.m.example.com")).toBe("…h.i.j.k.l.m.example.com");
+    // Whole labels that would leave less than half the room (…example.org, …co.uk): the end's characters instead.
+    expect(shortDomain("github.com.login.alice-and-bob.example.org")).toBe("…ice-and-bob.example.org");
+    expect(shortDomain("github.com.averyveryverylongcompanyname.co.uk")).toBe("…rylongcompanyname.co.uk");
+    for (const name of ["github.com.account-security-verification-and-login-session-check.e2e-jq01xlo0.ghostly.tools", "github.com.averyveryverylongcompanyname.co.uk", "a.b.c.d.e.f.g.h.i.j.k.l.m.example.com"]) {
+      const short = shortDomain(name);
+      expect(short.length, short).toBeLessThanOrEqual(24);
+      expect(name.endsWith(short.slice(1)), short).toBe(true);
+    }
   });
 });

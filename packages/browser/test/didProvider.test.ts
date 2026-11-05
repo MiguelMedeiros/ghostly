@@ -4,7 +4,7 @@ import { p256 } from "@noble/curves/nist.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { base58 } from "@scure/base";
 import {
-  createIdentity, didDhtDocument, didGhostlyServiceEntry, didWebFile, encodeDidDhtPacket, identityStatement, newIdentityBinding, sign, signDidDhtPacket,
+  createIdentity, didDhtDocument, didGhostlyServiceEntry, IdentityCheckUnavailable, didWebFile, encodeDidDhtPacket, identityStatement, newIdentityBinding, sign, signDidDhtPacket,
   toBase64Url, utf8Encode, type DidDhtDocument, type IdentityStatement,
 } from "@ghostly/core";
 import type { IdentityFetch, IdentityFetchOptions, IdentityProofProvider, VerifyContext } from "../src/proofs/contract";
@@ -298,6 +298,32 @@ describe("resolving a did:web", () => {
     expect(net.asked.some(a => a.url.startsWith(`https://${HOST}/`))).toBe(false);
   });
 
+  it("keeps what this side's network saw from the contact: any host and port, unreachable, an error status, a redirect, a private address", async () => {
+    // The contact chooses the did:web, so the host and the port: their answers here are only this side's to see.
+    const web = `did:web:${HOST}%3A8443`;
+    const net = webNetwork();
+    const unreachable = await resolveDid(`did:web:${HOST}%3A22`, opts(async (url, o) => url.includes(":22/") ? Promise.reject(new TypeError("Failed to fetch")) : net.fetch(url, o))).catch((e: unknown) => e);
+    expect(unreachable).toBeInstanceOf(IdentityCheckUnavailable);
+    expect(String(unreachable)).toMatch(/could not be reached/);
+    for (const [status, message] of [[403, /answered 403/], [451, /answered 451/], [302, /redirect/]] as const) {
+      clearDidCache();
+      net.files.set("/.well-known/did.json", { status } as never);
+      const failure = await resolveDid(web, opts(net.fetch)).catch((e: unknown) => e);
+      expect(failure, String(status)).toBeInstanceOf(IdentityCheckUnavailable);
+      expect(String(failure), String(status)).toMatch(message);
+    }
+    clearDidCache();
+    net.zone.a = { [HOST]: ["10.0.0.8"] };
+    await expect(resolveDid(web, opts(net.fetch))).rejects.toThrow(IdentityCheckUnavailable);
+    // What the owner's server says about its own file is about the proof, and still said.
+    clearDidCache();
+    net.zone.a = { [HOST]: ["203.0.113.7"] };
+    net.files.delete("/.well-known/did.json");
+    const missing = await resolveDid(web, opts(net.fetch)).catch((e: unknown) => e);
+    expect(missing).not.toBeInstanceOf(IdentityCheckUnavailable);
+    expect(String(missing)).toMatch(/No DID document/);
+  });
+
   it("refuses an oversize document, a missing one, one that is not JSON, and one for another DID", async () => {
     const net = webNetwork();
     net.files.set("/.well-known/did.json", JSON.stringify({ ...document(WEB, [{ fragment: "k", jwk: k.jwk }]), pad: "x".repeat(70 * 1024) }));
@@ -332,5 +358,20 @@ describe("resolving a did:dht", () => {
     clearDidCache();
     const deactivated = async () => ({ document: net.document, metadata: { versionId: "1", updated: "", deactivated: true as const }, relay: "x" });
     await expect(resolveDid(net.didDht, { fetch: net.fetch, dht: deactivated })).rejects.toThrow(/deactivated/);
+  });
+
+  it("marks relays it could not read as this side's network, not the DID's record: none reached, or none answering", async () => {
+    const net = dhtNetwork();
+    net.publish(net.document);
+    const down: IdentityFetch = async () => { throw new TypeError("Failed to fetch"); };
+    await expect(resolveDid(net.didDht, { fetch: down })).rejects.toThrow(IdentityCheckUnavailable);
+    clearDidCache();
+    const failing: IdentityFetch = async () => ({ status: 503, contentType: "", text: "", bytes: new Uint8Array() });
+    await expect(resolveDid(net.didDht, { fetch: failing })).rejects.toThrow(IdentityCheckUnavailable);
+    // A relay that answers "not here" is an answer about the DID.
+    clearDidCache();
+    const missing = await resolveDid(`did:dht:${createIdentity().pubKeyZ32}`, { fetch: net.fetch }).catch((e: unknown) => e);
+    expect(missing).not.toBeInstanceOf(IdentityCheckUnavailable);
+    expect(String(missing)).toMatch(/No document is published/);
   });
 });

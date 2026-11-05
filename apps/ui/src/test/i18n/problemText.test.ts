@@ -105,8 +105,8 @@ describe("problemLine: a problem where only a line fits", () => {
     ["That signature was made by SHA256:AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdefg, not the key you entered (SHA256:x)", /made by another key\. Not the key you entered\./],
     ["GitHub: octo-cat does not list the key that signed (SHA256:AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdefg)", /octo-cat doesn't list the key that signed/],
     ["Enter at least one relay address (https://…)", /at least one relay/],
+    ["The TXT record at _ghostly.example.com names another Ghostly key: this proof was replaced or removed", /TXT record names another Ghostly key\. The record must hold this proof's value\./],
     // None of these is known: their words stay after the title.
-    ["The TXT record at _ghostly.example.com names another Ghostly key: this proof was replaced or removed", /_ghostly\.example\.com names another Ghostly key/],
     ["https://example.com/.well-known/nostr.json names another Nostr key for example.com", /names another Nostr key/],
     ["Key SHA256:AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdefg is not allowed here", /is not allowed here/],
   ];

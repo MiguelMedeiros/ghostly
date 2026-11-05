@@ -18,6 +18,11 @@
   "notNow": "Agora não",
   "offline": "Offline",
   "offlineHint": "Suas conversas estão aqui. Nada sai até você voltar a ficar online.",
+  "reconnecting": "Reconectando…",
+  "reconnectingHint": "Esta aba perdeu o Ghostly e continua tentando. As mensagens novas aparecem aqui quando ele voltar.",
+  "shareDropped": "Mais {{count}} compartilhamentos não puderam ser guardados: {{waiting}} já estavam esperando.",
+  "shareDroppedNext": "Envie ou cancele os que estão esperando, depois compartilhe o resto de novo.",
+  "shareDroppedOne": "Mais 1 compartilhamento não pôde ser guardado: {{waiting}} já estavam esperando.",
   "shareFiles": "{{count}} arquivos",
   "shareFrom": "Veio de outro app ou site. Nada é enviado até você enviar.",
   "shareHint": "Escolha uma conversa. Você confere e envia lá.",
@@ -45,6 +50,7 @@
   "wakeHint": "Os apps dos contatos podem acordar este com um push. Nada da mensagem vai nele.",
   "wakeInfo": "Passa pelo serviço de push do seu navegador (Google, Apple ou Mozilla), que fica sabendo quando. Seus contatos ficam sabendo seu endereço de push; Novo endereço cria outro.",
   "wakeMoveHere": "{{device}} quer mover este perfil para cá. Abra o Ghostly.",
+  "wakeNoPushService": "Este navegador não tem serviço de push, então o Ghostly não pode ser acordado com o app fechado. No GrapheneOS, instale o Google Play em sandbox ou use outro navegador.",
   "wakeNotice": "Nova mensagem",
   "wakeOnHint": "Ligado. Uma mensagem enviada com o Ghostly fechado mostra \"Nova mensagem\".",
   "wakeRotate": "Novo endereço",
@@ -53,5 +59,6 @@
   "wakeStandbyCallUnnamed": "Chamada para você. Abra o Ghostly no seu dispositivo ativo.",
   "wakeStandbyUnnamed": "Nova mensagem. Abra o Ghostly no seu dispositivo ativo.",
   "wakeTakeover": "{{device}} quer assumir. Abra o Ghostly.",
+  "wakeTryAgain": "Tentar de novo",
   "wakeUnavailable": "Este navegador não consegue acordar o Ghostly enquanto ele está fechado."
 }

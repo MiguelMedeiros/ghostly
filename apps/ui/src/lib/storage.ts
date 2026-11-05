@@ -416,7 +416,8 @@ export function addMessages(
 
   for (const message of fresh) {
     if ((message.sender === "peer" || message.sender === "system") && message.id.startsWith("peer_")) {
-      const joinMatch = message.nick ? null : message.text.match(/^👋 (.+) joined$/);
+      // Named by the words of the chat's joined line only (`systemEvent`): a message of theirs in those words names nobody.
+      const joinMatch = message.nick || message.systemEvent?.type !== "join" ? null : message.text.match(/^👋 (.+) joined$/);
       const nick = peerDisplayName(message.nick ?? joinMatch?.[1]);
       if (nick && session.nickSource !== "profile") session.nick = nick;
     }
@@ -491,6 +492,8 @@ export function deleteSession(sessionId: string): void {
   whole.delete(sessionId);
   inEngine.delete(sessionId);
   gaveRoom.delete(sessionId);
+  // A draft typed in its last moments is not written back after it.
+  unsavedDrafts.delete(sessionId);
   for (const key of [
     // So do the card and network tab the payment sheet last used with them (lib/chatPayments.ts), kept by their key.
     ...(lastOfPeer ? [`${getPrefix()}face_${peer}`, `${getPrefix()}payment_rail_${peer}`, `${getPrefix()}payment_network_${peer}`] : []),
@@ -531,10 +534,29 @@ export function deleteAllSessions(): void {
   for (const session of listSessions()) deleteSession(session.id);
 }
 
+/**
+ * Drafts typed and not written yet (the composer writes after a pause in the typing): each one's write, run once, then
+ * or on demand. A draft written or cleared meanwhile (sent, its chat deleted, its group left) drops its pending write,
+ * so a cleared draft is never written back.
+ */
+const unsavedDrafts = new Map<string, () => void>();
+export function setSessionDraftLater(id: string, write: () => void): void {
+  unsavedDrafts.set(id, write);
+}
+/** The draft's pending write, now (the pause over, the page going, the chat closed). */
+export function flushSessionDraft(id: string): void {
+  const write = unsavedDrafts.get(id);
+  if (!write) return;
+  unsavedDrafts.delete(id);
+  write();
+}
+
 export function getSessionDraft(id: string): string {
+  flushSessionDraft(id);
   try { return localStorage.getItem(`${getPrefix()}draft_${id}`) ?? ""; } catch { return ""; }
 }
 export function setSessionDraft(id: string, text: string): void {
+  unsavedDrafts.delete(id);
   try { const key=`${getPrefix()}draft_${id}`; if(text) localStorage.setItem(key,text); else localStorage.removeItem(key); } catch { /* Keep the in-memory draft if storage is unavailable. */ }
 }
 

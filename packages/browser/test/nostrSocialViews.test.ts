@@ -51,23 +51,25 @@ it("keeps the shown posts between states, until a list behind them changes", asy
   const { social, contacts } = engine();
   await social.load();
   const first = social.linkView("chat")![0];
-  expect(first.notes).toMatchObject({ hidden: 2 });
-  expect(first.notes!.notes.map(n => n.content)).toEqual(["hello"]);
+  const shown = () => social.contactNotes({ linkId: "chat", subject: THEM }).map(n => n.content);
+  expect(first.notes).toMatchObject({ hidden: 2, count: 1 });
+  expect(shown()).toEqual(["hello"]);
   expect(first.follows!.hints).toEqual({ followsYou: true, youFollow: true, mutual: 1, myKey: ME, myFollowsAt: fetched.fetchedAt });
 
   const second = social.linkView("chat")![0];
-  expect(second.notes!.notes).toBe(first.notes!.notes);
+  expect(second.notes).toBe(first.notes);
   expect(second.follows!.hints).toBe(first.follows!.hints);
 
   // The person's own lists loaded again: fewer words muted, nobody followed.
   await putOwn(ownCache([], []));
   await social.load();
   const reloaded = social.linkView("chat")![0];
-  expect(reloaded.notes).toMatchObject({ hidden: 1 });
-  expect(reloaded.notes!.notes.map(n => n.content)).toEqual(["hello", "buy at the casino"]);
+  expect(reloaded.notes).toMatchObject({ hidden: 1, count: 2 });
+  expect(shown()).toEqual(["hello", "buy at the casino"]);
   expect(reloaded.follows!.hints).toMatchObject({ youFollow: false, mutual: 0 });
 
   // The contact's posts loaded again.
   contacts[THEM] = { ...contacts[THEM], notes: { ...fetched, exhausted: true, notes: [note(4, "new")] } } as NostrContactCache;
-  expect(social.linkView("chat")![0].notes!.notes.map(n => n.content)).toEqual(["new"]);
+  expect(social.linkView("chat")![0].notes!.count).toBe(1);
+  expect(shown()).toEqual(["new"]);
 });

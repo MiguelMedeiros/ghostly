@@ -150,7 +150,7 @@ test("a declined offer says so to the sender; a transfer cancelled by the sender
   await expect(refused.getByTestId("file-status")).toHaveText("Declined");
   // Who declined it is behind the ⓘ; a declined file has no ↻.
   await refused.getByTestId("file-why").click();
-  await expect(refused.getByTestId("file-why-text")).toHaveText("Declined by your contact");
+  await expect(refused.getByTestId("file-why-text")).toHaveText("Your contact declined it.");
   await expect(refused.getByTestId("file-retry")).toHaveCount(0);
 
   const second = testInfo.outputPath("changed my mind.bin");
@@ -167,6 +167,78 @@ test("a declined offer says so to the sender; a transfer cancelled by the sender
   await expect.poll(async () => Object.keys(await opfsFiles(bob)).length).toBe(0);
 });
 
+/**
+ * Records every line the chat's live region is given (`chat-announcement`), in order, from now on: what a screen
+ * reader is told. Read it back with `heard`.
+ */
+async function listen(p: Peer): Promise<void> {
+  await p.page.evaluate(() => {
+    const said: string[] = [];
+    (window as unknown as { __heard: string[] }).__heard = said;
+    new MutationObserver(() => {
+      const text = document.querySelector("[data-testid=chat-announcement]")?.textContent ?? "";
+      if (text && text !== said[said.length - 1]) said.push(text);
+    }).observe(document.body, { childList: true, characterData: true, subtree: true });
+  });
+}
+const heard = (p: Peer) => p.page.evaluate(() => [...(window as unknown as { __heard: string[] }).__heard]);
+const times = (lines: string[], line: RegExp) => lines.filter((l) => line.test(l)).length;
+
+// agents#2509: a screen reader heard a file once, as "📎 name" when it came; nothing said that it waited for an answer,
+// and the contact's pause, cancel or decline, and its arrival, were never read out.
+test("a screen reader hears each step of a file once: the offer waits for an answer, the contact's answer, pause and resume, its arrival, a decline; never its progress", { tag: ["@feature:files.large.offer", "@feature:files.large.resume", "@feature:app.accessibility"] }, async ({ peer }, testInfo) => {
+  test.setTimeout(240_000);
+  const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
+  await link(alice, bob);
+  await connect(alice, bob);
+  await Promise.all([listen(alice), listen(bob)]);
+
+  const name = "minutes.bin";
+  const path = testInfo.outputPath(name);
+  await generate(path, 200 * 1024 * 1024);
+  await alice.page.getByTestId("file-input").setInputFiles(path);
+  const incoming = bob.page.getByTestId("file-bubble").filter({ hasText: name });
+  const outgoing = alice.page.getByTestId("file-bubble").filter({ hasText: name });
+  await expect.poll(() => heard(bob), { timeout: 60_000 }).toContainEqual(expect.stringMatching(/ wants to send minutes\.bin \(200\.0 MB\) · waiting for your answer$/));
+  await incoming.getByTestId("file-accept").click();
+  await expect.poll(() => heard(alice), { timeout: 30_000 }).toContainEqual(expect.stringMatching(/ accepted minutes\.bin$/));
+
+  // The bar is a progress bar, named by its file.
+  const bar = incoming.getByRole("progressbar", { name });
+  await expect(bar).toHaveAttribute("aria-valuemax", "100");
+  await expect.poll(async () => Number(await bar.getAttribute("aria-valuenow")), { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
+  await expect(bar).toHaveAttribute("aria-valuetext", /^\d+% of 200\.0\sMB$/);
+
+  // Bob pauses and goes on: Alice hears each, once.
+  await incoming.getByTestId("file-pause").click();
+  await expect(outgoing.getByTestId("file-status")).toContainText("Paused by", { timeout: 30_000 });
+  await expect.poll(() => heard(alice), { timeout: 30_000 }).toContainEqual(expect.stringMatching(/ paused minutes\.bin$/));
+  await incoming.getByTestId("file-resume").click();
+  await expect.poll(() => heard(alice), { timeout: 30_000 }).toContainEqual(expect.stringMatching(/ resumed minutes\.bin$/));
+
+  await expect(incoming.getByTestId("file-save")).toBeVisible({ timeout: 150_000 });
+  await expect.poll(() => heard(bob), { timeout: 30_000 }).toContain("minutes.bin arrived, ready to save");
+  await expect.poll(() => heard(alice), { timeout: 60_000 }).toContainEqual(expect.stringMatching(/ received minutes\.bin$/));
+
+  // A decline: the sender hears it; the receiver, who pressed it, does not hear it again.
+  const declined = "no thanks.bin";
+  const second = testInfo.outputPath(declined);
+  await generate(second, 30 * 1024 * 1024);
+  await alice.page.getByTestId("file-input").setInputFiles(second);
+  await expect.poll(() => heard(bob), { timeout: 60_000 }).toContainEqual(expect.stringMatching(/ wants to send no thanks\.bin \(30\.0 MB\) · waiting for your answer$/));
+  await bob.page.getByTestId("file-bubble").filter({ hasText: declined }).getByTestId("file-decline").click();
+  await expect.poll(() => heard(alice), { timeout: 30_000 }).toContainEqual(expect.stringMatching(/ declined no thanks\.bin$/));
+  await bob.page.waitForTimeout(3_000);
+
+  const [a, b] = [await heard(alice), await heard(bob)];
+  testInfo.annotations.push({ type: "heard", description: JSON.stringify({ alice: a, bob: b }) });
+  // Each step once; Bob's own Accept, Pause, Resume and Decline are not read back to him; no percent is ever read.
+  for (const line of [/ accepted minutes\.bin$/, / paused minutes\.bin$/, / resumed minutes\.bin$/, / received minutes\.bin$/, / declined no thanks\.bin$/]) expect(times(a, line), String(line)).toBe(1);
+  for (const line of [/ wants to send minutes\.bin /, /^minutes\.bin arrived/, / wants to send no thanks\.bin /]) expect(times(b, line), String(line)).toBe(1);
+  expect(b.filter((l) => /paused|resumed|declined|accepted/.test(l))).toEqual([]);
+  expect([...a, ...b].filter((l) => /\d%/.test(l))).toEqual([]);
+});
+
 /** Ghostly's own Offline switch, on the Services page, then back to the chat: the link goes, or may come back. */
 async function setOnline(p: Peer, online: boolean): Promise<void> {
   await p.page.getByTestId("account-services").click();
@@ -176,6 +248,35 @@ async function setOnline(p: Peer, online: boolean): Promise<void> {
   await p.page.goBack();
   await expect(p.page.getByPlaceholder("Message…")).toBeVisible();
 }
+
+/**
+ * Lets the test hold what a page sends its contacts over WebRTC (`hold`), from now and after each reload: while held,
+ * frames wait in the page; let go, those whose channel is still open go out, in order, and the others are dropped
+ * with their channel. A cut is pressed while the sender's frames are held: the receiver stops within one file window
+ * (2 MiB) of where the test saw it, not wherever the transfer got in the second the Offline switch took. Here, a whole
+ * 150 MB file went by in that second, and a cut meant for mid-way came after the last byte.
+ */
+async function holdable(p: Peer): Promise<void> {
+  const install = () => {
+    const send = RTCDataChannel.prototype.send as (this: RTCDataChannel, data: unknown) => void;
+    const held: [RTCDataChannel, unknown][] = [];
+    const hold = { on: false, release() { hold.on = false; for (const [channel, data] of held.splice(0)) if (channel.readyState === "open") send.call(channel, data); } };
+    (window as unknown as { __e2eHold: typeof hold }).__e2eHold = hold;
+    RTCDataChannel.prototype.send = function (this: RTCDataChannel, data: unknown) {
+      if (hold.on) held.push([this, data]);
+      else send.call(this, data);
+    } as RTCDataChannel["send"];
+  };
+  await p.context.addInitScript(install);
+  await p.page.evaluate(install);
+}
+const hold = (p: Peer, on: boolean) => p.page.evaluate((on) => {
+  const held = (window as unknown as { __e2eHold: { on: boolean; release(): void } }).__e2eHold;
+  if (on) held.on = true;
+  else held.release();
+}, on);
+/** Polled every 100 ms: at 1 s, the last ten percent of the file could come and go between two looks. */
+const often = { intervals: [100] };
 
 test("cut mid-way, a file goes on by itself; restarted, the sender can Send again and the receiver Ask again, one bubble each", { tag: ["@feature:files.large.resume", "@feature:files.large.resend", "@feature:files.large.request"] }, async ({ peer }, testInfo) => {
   test.setTimeout(420_000);
@@ -190,22 +291,27 @@ test("cut mid-way, a file goes on by itself; restarted, the sender can Send agai
   await alice.page.getByTestId("file-input").setInputFiles(path);
   const incoming = () => bob.page.getByTestId("file-bubble").filter({ hasText: name });
   const outgoing = () => alice.page.getByTestId("file-bubble").filter({ hasText: name });
+  await holdable(alice);
   await incoming().getByTestId("file-accept").click({ timeout: 60_000 });
 
   // 1. Cut (Bob goes offline), then back: it goes on by itself, with nothing to press.
-  await expect.poll(() => percent(incoming()), { timeout: 120_000 }).toBeGreaterThanOrEqual(10);
+  await expect.poll(() => percent(incoming()), { timeout: 120_000, ...often }).toBeGreaterThanOrEqual(10);
+  await hold(alice, true);
   await setOnline(bob, false);
   await expect(outgoing().getByTestId("file-status")).toContainText("Waiting for connection", { timeout: 90_000 });
   const cut = await percent(incoming());
+  await hold(alice, false);
   await setOnline(bob, true);
-  await expect.poll(() => percent(incoming()), { timeout: 150_000 }).toBeGreaterThan(cut + 5);
+  await expect.poll(() => percent(incoming()), { timeout: 150_000, ...often }).toBeGreaterThan(cut + 5);
   await expect(outgoing().getByTestId("file-resend")).toHaveCount(0);
 
   // 2. Cut again, and Alice's app restarts: unfinished since it started, her bubble offers Send again.
-  await expect.poll(() => percent(incoming()), { timeout: 120_000 }).toBeGreaterThanOrEqual(40);
+  await expect.poll(() => percent(incoming()), { timeout: 120_000, ...often }).toBeGreaterThanOrEqual(40);
+  await hold(alice, true);
   await setOnline(bob, false);
   await expect(outgoing().getByTestId("file-status")).toContainText("Waiting for connection", { timeout: 90_000 });
   const second = await percent(incoming());
+  // Her restart drops what was held, and nothing is held after it.
   await alice.page.reload();
   await expect(outgoing().getByTestId("file-resend")).toBeVisible({ timeout: 30_000 });
   // What she sees is what Bob confirmed, kept across the restart: not zero.
@@ -213,13 +319,19 @@ test("cut mid-way, a file goes on by itself; restarted, the sender can Send agai
   await outgoing().getByTestId("file-resend").click();
   await expect(outgoing().getByRole("alert")).toHaveCount(0);
   await setOnline(bob, true);
-  await expect.poll(() => percent(incoming()), { timeout: 150_000 }).toBeGreaterThan(second + 5);
+  await expect.poll(() => percent(incoming()), { timeout: 150_000, ...often }).toBeGreaterThan(second + 5);
   await expect(outgoing().getByTestId("file-resend")).toHaveCount(0, { timeout: 30_000 });
 
   // 3. Cut from Alice's side this time, and Bob's app restarts: his bubble offers Ask again.
-  await expect.poll(() => percent(incoming()), { timeout: 120_000 }).toBeGreaterThanOrEqual(70);
+  await expect.poll(() => percent(incoming()), { timeout: 120_000, ...often }).toBeGreaterThanOrEqual(70);
+  await hold(alice, true);
   await setOnline(alice, false);
   await expect(incoming().getByTestId("file-status")).toContainText("Waiting for connection", { timeout: 90_000 });
+  // Cut short of its last byte: with every byte here, Bob checks the file and waits for Alice's sum, with no Ask again.
+  const third = await percent(incoming());
+  testInfo.annotations.push({ type: "cuts", description: `${cut}% ${second}% ${third}%` });
+  expect(third, "the cut left the file unfinished").toBeLessThan(100);
+  await hold(alice, false);
   await bob.page.reload();
   await expect(incoming().getByTestId("file-request")).toBeVisible({ timeout: 30_000 });
   await incoming().getByTestId("file-request").click();

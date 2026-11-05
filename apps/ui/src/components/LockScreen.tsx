@@ -1,4 +1,4 @@
-import { useState, useEffect, useId, useRef } from "react";
+import { useState, useEffect, useId, useLayoutEffect, useRef } from "react";
 import { useLockScreen, type LockedCall } from "../contexts/LockScreenContext";
 import { useI18n } from "../contexts/I18nContext";
 import { currentProfile, listProfiles } from "../lib/profiles";
@@ -23,7 +23,7 @@ const Spinner = () => (
 );
 
 export function LockScreen() {
-  const { isLocked, unlock, retryAt, ringing } = useLockScreen();
+  const { isLocked, covered, unlock, retryAt, ringing } = useLockScreen();
   const { t } = useI18n();
   const [password, setPassword] = useState("");
   const [error, setError] = useState(false);
@@ -35,6 +35,7 @@ export function LockScreen() {
   const call = isLocked ? ringing?.[0] ?? null : null;
   const [answering, setAnswering] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
+  const screenRef = useRef<HTMLDialogElement>(null);
   const waitSeconds = retryAt ? Math.max(0, Math.ceil((retryAt - now) / 1000)) : 0;
 
   // Counts the wait down after too many wrong passwords, and stops with it: a locked app left alone runs no timer.
@@ -47,6 +48,51 @@ export function LockScreen() {
     }, 250);
     return () => clearInterval(timer);
   }, [retryAt]);
+
+  // A modal dialog, last in the browser's top layer: drawn over every layer of the app, whatever its z-index or wherever
+  // it is portalled (a dialog, a sheet, the camera left open), and those are inert under it. Escape does not close it;
+  // a close the page can't refuse (Back, Escape pressed again with no other input) shows it again at once. A dialog or
+  // popover opened while locked goes under it the same way.
+  useLayoutEffect(() => {
+    const lockScreen = screenRef.current;
+    if (!isLocked || !lockScreen) return;
+    const show = () => {
+      if (lockScreen.open) return;
+      try {
+        lockScreen.showModal();
+      } catch {
+        lockScreen.setAttribute("open", ""); // no modal dialog: its z-index stands
+      }
+    };
+    // The field being typed into keeps the focus.
+    const raise = () => {
+      const focused = lockScreen.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
+      lockScreen.close();
+      show();
+      if (focused?.isConnected && document.activeElement !== focused) focused.focus();
+    };
+    const refuse = (e: Event) => e.preventDefault();
+    const opened = new MutationObserver((records) => {
+      if (records.some(({ target }) => target !== lockScreen && target instanceof HTMLDialogElement && target.open)) raise();
+    });
+    const toggled = (e: Event) => {
+      const target = e.target as HTMLElement;
+      if ((e as ToggleEvent).newState !== "open" || lockScreen.contains(target) || target.hasAttribute?.(COVER)) return;
+      raise();
+    };
+    show();
+    lockScreen.addEventListener("cancel", refuse);
+    lockScreen.addEventListener("close", show);
+    opened.observe(document.body, { subtree: true, attributeFilter: ["open"] });
+    document.addEventListener("toggle", toggled, true);
+    return () => {
+      lockScreen.removeEventListener("cancel", refuse);
+      lockScreen.removeEventListener("close", show);
+      opened.disconnect();
+      document.removeEventListener("toggle", toggled, true);
+      lockScreen.close();
+    };
+  }, [isLocked]);
 
   useEffect(() => {
     if (isLocked && inputRef.current) {
@@ -104,16 +150,18 @@ export function LockScreen() {
     setIsUnlocking(false);
   };
 
-  if (!isLocked) return null;
+  if (!isLocked) return covered ? <AwayCover /> : null;
   // With several profiles, which one this password opens: each has its own lock.
   const profile = listProfiles().length > 1 ? currentProfile() : null;
 
   return (
-    <div
-      // Over everything the lock hides, the call window included.
-      className="fixed inset-0 z-[60] bg-app-bg"
-      role="dialog"
-      aria-modal="true"
+    <>
+    {/* Away while locked too: a layer the lock screen does not reach (a dialog left open) stays out of the picture. */}
+    {covered && <AwayCover />}
+    <dialog
+      ref={screenRef}
+      // Over everything the lock hides, the call window included: the whole window, not the card a dialog draws.
+      className="fixed inset-0 z-[60] m-0 h-full w-full max-h-none max-w-none border-0 p-0 bg-app-bg text-text-primary backdrop:bg-app-bg"
       aria-label={t("lockScreen.title")}
     >
       <LockViewport />
@@ -211,6 +259,53 @@ export function LockScreen() {
           animation: shake 0.5s ease-in-out;
         }
       `}</style>
+    </dialog>
+    </>
+  );
+}
+
+/** Marks the away cover, which goes over the lock screen: the lock screen does not go back over it. */
+const COVER = "data-lock-cover";
+
+/**
+ * Puts `el` last in the browser's top layer, over every other layer the page draws: whatever its z-index, a modal
+ * dialog, a select's list. Where there is no popover API, its z-index (the highest there is) does what it can.
+ */
+function raiseToTop(el: HTMLElement | null) {
+  if (!el?.isConnected || typeof el.showPopover !== "function") return;
+  try {
+    el.hidePopover();
+    el.showPopover();
+  } catch {
+    // unsupported: the z-index stands
+  }
+}
+
+/**
+ * What the system's app switcher keeps of the app while it is away with the lock on: the lock screen's background and
+ * its icon, nothing of the content. Taken away on return, once the lock has decided whether the time away was up.
+ * Drawn over every other layer, at once (it is up before the picture is taken), and again over any opened meanwhile.
+ */
+function AwayCover() {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const cover = ref.current;
+    raiseToTop(cover);
+    const again = (e: Event) => { if (e.target !== cover) raiseToTop(cover); };
+    // A dialog opened modal says so by its `open`; a popover (and, in newer browsers, a dialog) by `toggle`.
+    const opened = new MutationObserver(() => raiseToTop(cover));
+    opened.observe(document.body, { subtree: true, attributeFilter: ["open"] });
+    document.addEventListener("toggle", again, true);
+    return () => {
+      opened.disconnect();
+      document.removeEventListener("toggle", again, true);
+    };
+  }, []);
+  return (
+    <div ref={ref} popover="manual" data-lock-cover="" className="fixed inset-0 z-[2147483647] w-full h-full bg-app-bg flex items-center justify-center" aria-hidden="true" data-testid="lock-cover">
+      <div className="w-20 h-20 rounded-full bg-surface flex items-center justify-center">
+        <LockIcon className="w-10 h-10 text-accent" />
+      </div>
     </div>
   );
 }

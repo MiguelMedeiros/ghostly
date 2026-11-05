@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import type { WalletView } from "@ghostly/browser/shared/types";
 import { DevicesSection } from "../../components/devices/DevicesSection";
@@ -44,6 +44,48 @@ describe("Remove, on the active device", () => {
     expect(removed).toHaveTextContent("Removed");
   });
 
+  it("once the device is removed, the keyboard focus is on its Removed row, not on the page", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    let devices = activeSet().devices;
+    engine.on("deviceSet", () => activeSet({ devices }));
+    engine.on("deviceRemove", () => { devices = devices.slice(0, 2); return activeSet({ devices }); });
+    await user.click((await screen.findAllByTestId("device-menu"))[1]);
+    await user.click(screen.getByTestId("device-remove-open"));
+    await user.click(screen.getByTestId("device-remove-go"));
+    const removed = await screen.findByTestId("device-removed");
+    // The ⋮ that opened the dialog went with the Tablet's row.
+    await waitFor(() => expect(screen.getAllByTestId("device-row")).toHaveLength(2), { timeout: 3_000 });
+    await waitFor(() => expect(removed).toHaveFocus());
+    expect(removed).toHaveTextContent("Tablet");
+  });
+
+  it("the removed device's row goes in the same render as its Removed row comes, not at the next read of the set", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "setTimeout"] });
+    try {
+      const { engine } = renderApp(<DevicesSection />);
+      let devices = activeSet().devices;
+      engine.on("deviceSet", () => activeSet({ devices }));
+      engine.on("deviceRemove", () => { devices = devices.slice(0, 2); return activeSet({ devices }); });
+      const later = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+      await later(0);
+      const tablet = screen.getAllByTestId("device-row")[2];
+      expect(within(tablet).getByTestId("device-move")).toHaveTextContent("Move to Tablet");
+      act(() => within(tablet).getByTestId("device-menu").click());
+      act(() => screen.getByTestId("device-remove-open").click());
+      act(() => screen.getByTestId("device-remove-go").click());
+      // deviceRemove answered; the 3-second read of the set has not come yet.
+      await later(0);
+      expect(screen.getByTestId("device-removed")).toHaveTextContent("Tablet");
+      expect(screen.getAllByTestId("device-row").map((row) => row.textContent)).not.toContainEqual(expect.stringContaining("Tablet"));
+      expect(screen.queryAllByTestId("device-move")).toHaveLength(0);
+      expect(screen.getAllByTestId("device-menu")).toHaveLength(1);
+      // The next read says the same: still one Removed row and no Tablet row.
+      await later(3_000);
+      expect(screen.getAllByTestId("device-row")).toHaveLength(2);
+      expect(screen.getAllByTestId("device-removed")).toHaveLength(1);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("says why it could not, and changes nothing", async () => {
     const { user, engine } = renderApp(<DevicesSection />);
     engine.on("deviceSet", () => activeSet());
@@ -79,7 +121,7 @@ describe("Remove, on the active device", () => {
 
   it("after a takeover offers to remove the device that stopped, the checklist when it was lost, or not now", async () => {
     const { user, engine } = renderApp(<DevicesSection />);
-    engine.on("deviceSet", () => activeSet({ secretOffer: { device: "Phone", lost: true } }));
+    engine.on("deviceSet", () => activeSet({ secretOffer: { key: PHONE, device: "Phone", lost: true } }));
     engine.on("deviceSecretOfferDismiss", () => undefined);
     expect(await screen.findByTestId("device-secret-offer")).toHaveTextContent("You took over from Phone.");
     expect(screen.getByTestId("device-secret-offer-remove")).toHaveTextContent("Remove Phone");
@@ -88,6 +130,30 @@ describe("Remove, on the active device", () => {
     await user.click(screen.getByTestId("device-lost-done"));
     await user.click(screen.getByTestId("device-secret-offer-dismiss"));
     await waitFor(() => expect(engine.callsTo("deviceSecretOfferDismiss")).toHaveLength(1));
+  });
+
+  it("after a takeover, Remove and the checklist's Remove take out the device that stopped by its key, whatever the names", async () => {
+    // A lost "Phone" (stopped) and another "Phone" listed before it.
+    const OTHER = "O".repeat(43);
+    const devices = [activeSet().devices[0], { key: OTHER, name: "Phone", slot: 1, self: false, active: false, status: "live" as const }, { ...activeSet().devices[1], slot: 2 }];
+    for (const [i, via] of [["device-secret-offer-remove"], ["device-secret-offer-lost", "device-lost-remove"]].entries()) {
+      const { user, engine, unmount } = renderApp(<DevicesSection />);
+      engine.on("deviceSet", () => activeSet({ devices, secretOffer: { key: PHONE, device: "Phone", lost: true } }));
+      engine.on("deviceRemove", () => activeSet({ devices }));
+      await screen.findByTestId("device-secret-offer-remove");
+      for (const testId of via) await user.click(screen.getByTestId(testId));
+      await user.click(screen.getByTestId("device-remove-go"));
+      await waitFor(() => expect(engine.callsTo("deviceRemove")).toEqual(Array(i + 1).fill({ key: PHONE })));
+      unmount();
+    }
+  });
+
+  it("after a takeover whose stopped device is not known, offers a new device secret and removes nothing by name", async () => {
+    const { engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => activeSet({ secretOffer: { device: "Phone" } }));
+    expect(await screen.findByTestId("device-secret-offer")).toHaveTextContent("You took over from another device.");
+    expect(screen.queryByTestId("device-secret-offer-remove")).toBeNull();
+    expect(screen.getByTestId("device-secret-offer-new")).toBeInTheDocument();
   });
 
   it("on a standby offers no Remove and no new secret", async () => {
@@ -121,6 +187,14 @@ describe("the money checklist", () => {
     expect(await screen.findByTestId("device-lost-storage")).toHaveTextContent("Change your storage keys");
     expect(screen.getByTestId("device-lost-lines").firstElementChild).toBe(screen.getByTestId("device-lost-storage"));
     expect(screen.queryByTestId("device-lost-remove")).toBeNull();
+  });
+
+  it("Remove <device> keeps its space: the sentence is one inline piece inside the flex button", () => {
+    renderApp(<LostChecklist device="Hunt Phone" onClose={() => {}} onRemove={() => {}} />);
+    const button = screen.getByTestId("device-lost-remove");
+    // In a flex box "Remove " and the name's <bdi> would be two flex items, and the item's trailing space is not drawn.
+    expect([...button.childNodes].map((node) => node.nodeName)).toEqual(["SPAN"]);
+    expect(button).toHaveTextContent("Remove Hunt Phone");
   });
 });
 
@@ -184,6 +258,31 @@ describe("the standby screen after a removal", () => {
     expect(screen.getByTestId("device-standby-title")).toHaveTextContent("This device was removed");
     expect(screen.getByTestId("device-standby")).toHaveTextContent("Add it again from Desktop.");
     expect(screen.getByTestId("device-standby-reenroll")).toHaveTextContent("Add this device to my profile");
+  });
+
+  it("removed while its screen is open: the keyboard focus on Use here goes to Add this device, not to the page", async () => {
+    const { rerender } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "Desktop" }} />);
+    act(() => screen.getByTestId("handoff-use-here").focus());
+    rerender(<DeviceStandby gate={{ state: "removed", activeDevice: "Desktop" }} />);
+    expect(screen.queryByTestId("handoff-use-here")).toBeNull();
+    await waitFor(() => expect(screen.getByTestId("device-standby-reenroll")).toHaveFocus());
+  });
+
+  it("removed while the Use here dialog is open: the focus in its password goes to Add this device", async () => {
+    const { user, rerender } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "Desktop" }} />);
+    await user.click(screen.getByTestId("handoff-use-here"));
+    const dialog = screen.getByTestId("handoff-use-here-dialog");
+    const field = dialog.querySelector<HTMLElement>("input") ?? within(dialog).getAllByRole("button")[0]!;
+    act(() => field.focus());
+    rerender(<DeviceStandby gate={{ state: "removed", activeDevice: "Desktop" }} />);
+    expect(screen.queryByTestId("handoff-use-here-dialog")).toBeNull();
+    await waitFor(() => expect(screen.getByTestId("device-standby-reenroll")).toHaveFocus());
+  });
+
+  it("a screen that opens already removed leaves the focus where it is", async () => {
+    renderApp(<DeviceStandby gate={{ state: "removed", activeDevice: "Desktop" }} />);
+    await act(async () => {});
+    expect(screen.getByTestId("device-standby-reenroll")).not.toHaveFocus();
   });
 });
 

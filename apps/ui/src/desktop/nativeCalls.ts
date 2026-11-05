@@ -152,14 +152,24 @@ class Picture {
 
   /**
    * Frames that come while one is being decoded replace each other: only the newest is drawn. A decode that has
-   * not settled in `DECODE_MS` holds the next ones back no more, and is not drawn when it does.
+   * not settled in `DECODE_MS` holds the next ones back no more, and is not drawn when it does. While the window is
+   * out of sight, once a first frame is drawn, nothing is decoded: each frame replaces the one before, and the newest
+   * is drawn when the window is back (two pictures took a fifth of a core of WebKitGTK's, hidden, for nobody).
    */
   show(jpeg: Uint8Array): void {
     if (this.drawing) {
       this.waiting = jpeg;
       return;
     }
+    if (this.drawn && document.hidden) {
+      if (!this.waiting) document.addEventListener("visibilitychange", this.back);
+      this.waiting = jpeg;
+      return;
+    }
     this.drawing = true;
+    // Shown again before the window said so: what it held is older than this one.
+    document.removeEventListener("visibilitychange", this.back);
+    this.waiting = null;
     let over = false;
     const next = () => {
       if (over) return;
@@ -191,6 +201,15 @@ class Picture {
       .catch(() => {})
       .finally(next);
   }
+
+  /** The window is in sight again: the newest frame that came while it was not is drawn, unless the picture ended. */
+  private readonly back = () => {
+    if (document.hidden) return;
+    document.removeEventListener("visibilitychange", this.back);
+    const waiting = this.waiting;
+    this.waiting = null;
+    if (waiting && this.track.readyState !== "ended") this.show(waiting);
+  };
 }
 
 /** The camera behind each camera track this file made. */
@@ -238,10 +257,33 @@ function reporting(track: MediaStreamTrack, wanted: string | null): void {
   track.getSettings = () => ({ ...(settings?.() ?? {}), deviceId: usedOf.get(track) ?? "default" });
 }
 
+/**
+ * Ends a track as a browser ends one whose device stopped (unplugged, failing mid-call): stopped, with an `ended`
+ * event, once. The call's device check (`useCallDevices`) then says so and goes on with the default.
+ */
+function lost(track: MediaStreamTrack): void {
+  if (track.readyState === "ended") return;
+  track.stop();
+  track.dispatchEvent(new Event("ended"));
+}
+
+/** Whether Rust said this device stopped: `{"ended":"camera"}` or `{"ended":"microphone"}`. */
+function endedOf(bytes: Uint8Array, device: "camera" | "microphone"): boolean {
+  try {
+    return (JSON.parse(new TextDecoder().decode(bytes)) as { ended?: unknown } | null)?.ended === device;
+  } catch {
+    return false;
+  }
+}
+
 async function openCamera(device: string | null = null): Promise<MediaStreamTrack> {
   const picture = new Picture();
   const frames = new CallChannel();
-  frames.onmessage = (message) => picture.show(bytesOf(message));
+  frames.onmessage = (message) => {
+    const bytes = bytesOf(message);
+    if (isJpeg(bytes)) picture.show(bytes);
+    else if (endedOf(bytes, "camera")) lost(picture.track);
+  };
   let camera: number;
   let used: string | null;
   try {
@@ -342,6 +384,15 @@ export class NativePeerConnection extends EventTarget {
   private readonly remoteStream = new MediaStream([this.remote.track]);
   private readonly opened: Promise<void>;
   private started = false;
+  /** Rust has the call (its first description came back): devices changed before that wait for it (`catchUp`). */
+  private described = false;
+  /** The speaker the call was told to play on (`playOn`; null: the default), before Rust had it too. */
+  private speaker: string | null | undefined;
+  /**
+   * The microphone track Rust sends, once it said so: a microphone failing mid-call is this one, not one picked that
+   * Rust is still opening (it sends the old one until the new one plays).
+   */
+  private sending: MediaStreamTrack | null = null;
   private closed = false;
   private muted = false;
   private offer: string | null = null;
@@ -401,19 +452,36 @@ export class NativePeerConnection extends EventTarget {
   }
 
   /** What Rust starts the call with, besides the camera: the microphone and the speaker, by name. */
-  private devices(): { camera: number | null; microphone: string | null; speaker: string | null } {
+  private devices(): Devices {
     const track = this.audio.sender.track;
     return {
       camera: this.camera(),
       microphone: track ? wantedOf.get(track) ?? null : null,
-      speaker: deviceName("audiooutput", loadDeviceChoices().audiooutput?.id),
+      speaker: this.speaker !== undefined ? this.speaker : deviceName("audiooutput", loadDeviceChoices().audiooutput?.id),
     };
   }
 
-  /** Rust started the call: which microphone it is. */
-  private using(microphone: string | null): void {
-    const track = this.audio.sender.track;
+  /** Rust sends `track` now (it started the call with it, or switched to it): which microphone it is. */
+  private using(track: MediaStreamTrack | null, microphone: string | null): void {
+    this.sending = track;
     if (track) usedOf.set(track, microphone);
+  }
+
+  /**
+   * Rust started the call with `sent`: a camera turned on or switched, a microphone or a speaker picked while it did
+   * (up to its gathering's few seconds) had no call to go to, and goes now.
+   */
+  private async catchUp(sent: Devices): Promise<void> {
+    this.described = true;
+    if (this.closed) return;
+    const now = this.devices();
+    const track = this.audio.sender.track;
+    // Each as its own command would have done it: one that fails leaves the call as Rust started it.
+    if (now.camera !== sent.camera) await invoke("native_call_camera", { id: this.id, camera: now.camera }).catch(() => {});
+    if (now.speaker !== sent.speaker) await invoke("native_call_speaker", { id: this.id, device: now.speaker }).catch(() => {});
+    if (now.microphone !== sent.microphone) {
+      await invoke<string | null>("native_call_microphone", { id: this.id, device: now.microphone }).then((used) => this.using(track, used), () => {});
+    }
   }
 
   /**
@@ -451,9 +519,12 @@ export class NativePeerConnection extends EventTarget {
       return { type: "offer", sdp };
     }
     this.started = true;
-    const { sdp, microphone } = await this.hold(() => invoke<Described>("native_call_offer", { id: this.id, ...this.devices() }));
-    this.using(microphone);
+    const sent = this.devices();
+    const track = this.audio.sender.track;
+    const { sdp, microphone } = await this.hold(() => invoke<Described>("native_call_offer", { id: this.id, ...sent }));
+    this.using(track, microphone);
     if (this.muted) await this.mute(true);
+    await this.catchUp(sent);
     return { type: "offer", sdp };
   }
 
@@ -467,9 +538,12 @@ export class NativePeerConnection extends EventTarget {
       return { type: "answer", sdp };
     }
     this.started = true;
-    const { sdp, microphone } = await this.hold(() => invoke<Described>("native_call_answer", { id: this.id, offer, ...this.devices() }));
-    this.using(microphone);
+    const sent = this.devices();
+    const track = this.audio.sender.track;
+    const { sdp, microphone } = await this.hold(() => invoke<Described>("native_call_answer", { id: this.id, offer, ...sent }));
+    this.using(track, microphone);
     if (this.muted) await this.mute(true);
+    await this.catchUp(sent);
     this.negotiated(offer);
     return { type: "answer", sdp };
   }
@@ -521,7 +595,7 @@ export class NativePeerConnection extends EventTarget {
   /** Sends this camera's picture, or none. */
   private async send(track: MediaStreamTrack | null): Promise<void> {
     this.video.sender.track = track;
-    if (this.started && !this.closed) await invoke("native_call_camera", { id: this.id, camera: this.camera() });
+    if (this.described && !this.closed) await invoke("native_call_camera", { id: this.id, camera: this.camera() });
   }
 
   /** Sends this microphone in place of the one on (the call's device menu); Rust relaunches the capture. */
@@ -530,14 +604,15 @@ export class NativePeerConnection extends EventTarget {
     callOf.set(track, this);
     this.muted = !track.enabled;
     this.audio.sender.track = track;
-    if (!this.started || this.closed) return;
+    if (!this.described || this.closed) return;
     const used = await invoke<string | null>("native_call_microphone", { id: this.id, device: wantedOf.get(track) ?? null });
-    usedOf.set(track, used);
+    this.using(track, used);
   }
 
   /** Plays the call on the speaker named `device` (null: the default). */
   async playOn(device: string | null): Promise<void> {
-    if (this.started && !this.closed) await invoke("native_call_speaker", { id: this.id, device });
+    this.speaker = device;
+    if (this.described && !this.closed) await invoke("native_call_speaker", { id: this.id, device });
   }
 
   async mute(muted: boolean): Promise<void> {
@@ -556,6 +631,10 @@ export class NativePeerConnection extends EventTarget {
     if (this.closed) return;
     if (isJpeg(bytes)) {
       this.remote.show(bytes);
+      return;
+    }
+    if (endedOf(bytes, "microphone")) {
+      if (this.sending) lost(this.sending);
       return;
     }
     let said: { ice?: unknown; levels?: unknown };
@@ -603,6 +682,9 @@ export class NativePeerConnection extends EventTarget {
     void this.opened.then(() => invoke("native_call_close", { id: this.id })).catch(() => {});
   }
 }
+
+/** The devices a call goes on: the camera opened, the microphone and the speaker by name (null: the default). */
+interface Devices { camera: number | null; microphone: string | null; speaker: string | null }
 
 /** What Rust gives back for a description: it, and the microphone the call sends (null: the default). */
 interface Described { sdp: string; microphone: string | null }

@@ -4,7 +4,7 @@ import { useFocusKept } from "../hooks/useFocusKept";
 import { useTransfer } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
 import { downloadFile } from "../lib/fileDownload";
-import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, stalledAction, statusSize } from "../lib/fileStatus";
+import { canRetryFile, failedReason, fileHeld, filePercent, fileStatus, groupFileHint, isGroupFile, sentWhole, stalledAction, statusSize } from "../lib/fileStatus";
 import { knownPictureSize, pictureBox, PLACEHOLDER_BOX, rememberPictureSize, sameShape } from "../lib/pictureBox";
 import { forgetPicture, readPicture, type HeldPicture } from "../lib/pictureReads";
 import type { FileAction } from "../lib/platform";
@@ -166,14 +166,16 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
 
   /** The picture is drawn, so it can open large. */
   const drawn = !!blobUrl && loaded?.url === blobUrl && loaded.ok;
-  const status = restoring ? t("chat.file.restoring", { size: statusSize(file.size) }) : fileStatus(file, transfer, named, missing, t);
+  const status = restoring ? t("chat.file.restoring", { size: statusSize(file.size, t) }) : fileStatus(file, transfer, named, missing, t);
   const moving = transfer?.state === "transferring";
   // A group's file (WISP 503) is downloaded or not: no Decline, no pause or cancel.
   const group = isGroupFile(file);
   const controls = moving && !!transfer.direction && !!platform?.fileAction;
   const offered = controls && transfer.direction === "in" && transfer.stage === "asking";
   const pausedHere = moving && transfer.stage === "paused" && transfer.pausedBy !== "peer";
-  const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking";
+  // Sent whole: too late to pause or cancel, the contact keeps it.
+  const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking" && !sentWhole(transfer);
+  const canCancel = controls && !sentWhole(transfer);
   const canRetry = canRetryFile(file, transfer, platform);
   const stuck = platform?.fileAction ? stalledAction(transfer, t) : null;
   const failed = transfer?.state === "failed";
@@ -223,7 +225,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
             onClick={() => again(() => platform!.fileAction!(file.id, stuck.action))} />
         ) : (
           <span className="w-9 h-9 rounded-full bg-black/20 flex items-center justify-center shrink-0">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
               <polyline points="14 2 14 8 20 8" />
             </svg>
@@ -262,18 +264,18 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
       {offered && group && (
         <div className="px-2 pb-1.5" data-testid="file-offer">
           <button type="button" className="text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none cursor-pointer"
-            data-testid="file-accept" onClick={() => act("accept")}>{t("chat.media.downloadSize", { size: formatFileSize(file.size) })}</button>
+            data-testid="file-accept" onClick={() => act("accept")}>{t("chat.media.downloadSize", { size: formatFileSize(file.size, t) })}</button>
         </div>
       )}
       {offered && !group && (
         <div className="px-2 pb-1.5" data-testid="file-offer">
           {/* A name with nothing to break at (one long word) wraps anywhere, or it runs out of the bubble. */}
           <p className="text-[12px] m-0 mb-1 [overflow-wrap:anywhere]">
-            {t("chat.file.wantsToSend", { name: peerName, file: file.name, size: formatFileSize(file.size) })}
+            {t("chat.file.wantsToSend", { name: peerName, file: file.name, size: formatFileSize(file.size, t) })}
           </p>
           {typeof transfer.room === "number" && (
             <p className={`text-[11px] m-0 mb-1 ${transfer.room < file.size ? "text-danger-ink" : "text-text-primary/65"}`} data-testid="file-room">
-              {transfer.room < file.size ? t("chat.file.noRoomDevice", { size: formatFileSize(transfer.room) }) : t("chat.file.roomDevice", { size: formatFileSize(transfer.room) })}
+              {transfer.room < file.size ? t("chat.file.noRoomDevice", { size: formatFileSize(transfer.room, t) }) : t("chat.file.roomDevice", { size: formatFileSize(transfer.room, t) })}
             </p>
           )}
           <div className="flex gap-2">
@@ -283,16 +285,20 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
           </div>
         </div>
       )}
-      {(controls && !offered && !group) && (
+      {(controls && !offered && !group && (canPause || pausedHere || canCancel)) && (
         <div className="flex gap-1.5 px-2 pb-1">
           {canPause && <button type="button" className={linkButton} data-testid="file-pause" onClick={() => act("pause")}>{t("chat.file.pause")}</button>}
           {pausedHere && <button type="button" className={linkButton} data-testid="file-resume" onClick={() => act("resume")}>{t("chat.file.resume")}</button>}
-          <button type="button" className={linkButton} data-testid="file-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>
+          {canCancel && <button type="button" className={linkButton} data-testid="file-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>}
         </div>
       )}
       {(reason || hint) && why && <WhyText id={whyId} testId="file-why-text" english={reason?.english}>{reason?.text ?? hint}</WhyText>}
       {moving && transfer.stage !== "asking" && (
-        <div className="h-1 mx-2 mb-1 rounded-full bg-black/20 overflow-hidden" data-testid="file-progress">
+        // A progress bar to a screen reader too, named by its file, read as the status says it ("62% of 4.2 GB").
+        // Not live: what is said as it goes is each step it takes (MessageAnnouncer), never each percent.
+        <div className="h-1 mx-2 mb-1 rounded-full bg-black/20 overflow-hidden" data-testid="file-progress"
+          role="progressbar" aria-label={file.name} aria-valuemin={0} aria-valuemax={100} aria-valuenow={filePercent(transfer)}
+          aria-valuetext={t("chat.file.of", { done: `${filePercent(transfer)}%`, size: statusSize(file.size, t) })}>
           <div
             className={`h-full origin-left rtl:origin-right ${transfer.stage === "paused" || transfer.stage === "waiting" ? "bg-text-primary/40" : "bg-accent"}`}
             style={{ transform: `scaleX(${Math.min(1, transfer.transferred / Math.max(1, transfer.size))})` }}

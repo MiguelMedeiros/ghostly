@@ -1,7 +1,8 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Amount, HttpResponseError, MintOperationError, OutputData, getEncodedToken, getTokenMetadata, type Proof, type SerializedSwapPreview, type SwapPreview } from "@cashu/cashu-ts";
+import { Amount, HttpResponseError, MintOperationError, OutputData, PaymentRequest, getEncodedToken, getTokenMetadata, type Proof, type SerializedSwapPreview, type SwapPreview } from "@cashu/cashu-ts";
 import { CashuWallet, SwapUnsettledError } from "../src/engine/wallet";
+import { isTestMint } from "../src/shared/mints";
 import { fakeInvoice } from "../src/engine/paymentAdapters/providers/testing";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
 import { removalRisksFunds, walletRemoval } from "../src/shared/walletRemoval";
@@ -152,6 +153,25 @@ describe("redeeming a token", () => {
     expect(await all<WalletTx>(STORES.walletTx)).toEqual([]);
     expect(await all<StoredPayment>(STORES.payments)).toEqual([]);
     expect(await balance()).toBe(72);
+  });
+
+  it("ecash or a request that names one of this wallet's mints in another spelling is for that mint", async () => {
+    // Another Cashu wallet writes the mint as its user typed it. Before, these were refused as "Ecash from mint.example
+    // is not accepted" and "You share no mint with this contact".
+    mintApi.completeSwap.mockImplementation(async () => receiveAnswer());
+    const { wallet } = setup();
+    for (const spelling of ["HTTPS://Mint.Example", "https://mint.example:443/"]) {
+      const token = getEncodedToken({ mint: spelling, unit: "sat", proofs: [proof(64, `t-${spelling}`)] });
+      await expect(wallet.inspect(token)).resolves.toMatchObject({ kind: "token", mint: MINT, accepted: true });
+      const request = new PaymentRequest(undefined, "r1", 5, "sat", [spelling]).toEncodedRequest();
+      await expect(wallet.inspect(request)).resolves.toMatchObject({ kind: "request", mints: [MINT] });
+    }
+    const token = getEncodedToken({ mint: "HTTPS://Mint.Example:443/", unit: "sat", proofs: [proof(64, "t1")] });
+    await expect(wallet.receiveToken(token, "ecash-in", undefined, { payment: incoming })).resolves.toEqual({ amount: 62, mint: MINT, fee: 2 });
+    expect(mintApi.prepareReceive.mock.calls[0][0], "the token is redeemed as it was sent").toBe(token);
+    mintApi.completeSwap.mockImplementation(async () => sendAnswer());
+    await expect(wallet.createToken(40, ["HTTPS://MINT.example:443"])).resolves.toMatchObject({ mint: MINT });
+    expect(isTestMint("HTTPS://TestNut.Cashu.Space:443/")).toBe(true);
   });
 
   it("an answer that never arrives is asked for again on the spot, and the ecash is in the wallet", async () => {
@@ -416,12 +436,13 @@ describe("redeeming a token", () => {
     // An answer that covers only some of the outputs is no answer either.
     const [kept] = await swaps();
     const whole = signed(kept);
+    // Past its overdue time a mint that only errs is asked less often: within 10 min, and a round.
     mintApi.restore.mockResolvedValue({ outputs: whole.outputs.slice(1), signatures: whole.signatures.slice(1) });
-    await pass(30_000);
+    await pass(630_000);
     expect(await swaps()).toHaveLength(1);
 
     mintApi.restore.mockResolvedValue(whole);
-    await pass(30_000);
+    await pass(630_000);
     expect(events.onSwapSettled).toHaveBeenCalledWith(expect.objectContaining({ id: kept.id }), true);
     expect(await balance()).toBe(72 + 62);
     expect(await all<StoredPayment>(STORES.payments)).toMatchObject([{ id: "p1", state: "settled" }]);
@@ -567,6 +588,47 @@ describe("redeeming a token", () => {
   });
 });
 
+describe("restored ecash at a mint that cannot say what is spent", () => {
+  for (const [what, answer] of [["does not answer", "lost"], ["holds it pending", "pending"]] as const) {
+    it(`${what}: asked every minute at first, then less and less often, every 30 min at most, and checked once it says`, async () => {
+      await transact([STORES.proofs], (s) => { s[STORES.proofs].put(stored(16, "u", { unchecked: true })); });
+      if (answer === "lost") mintApi.checkProofsStates.mockRejectedValue(lost());
+      else mintApi.checkProofsStates.mockImplementation(async (asked: unknown[]) => asked.map(() => ({ state: "PENDING" })));
+      const { wallet } = setup();
+      wallet.start();
+      await pass(5 * 60_000, 60_000);
+      const early = mintApi.checkProofsStates.mock.calls.length;
+      expect(early, "asked at once on a start").toBeGreaterThanOrEqual(1);
+      await pass(24 * 3_600_000, 60_000);
+      // At most every 30 min: 48 a day. Every minute, it was 1,440.
+      expect(mintApi.checkProofsStates.mock.calls.length - early, "not every minute for a day").toBeLessThan(60);
+      expect((await proofs()).find((p) => p.secret === "u")?.unchecked).toBe(true);
+
+      mintApi.checkProofsStates.mockReset();
+      mintApi.checkProofsStates.mockImplementation(async (asked: unknown[]) => asked.map(() => ({ state: "UNSPENT" })));
+      await pass(30 * 60_000 + 60_000, 60_000);
+      expect((await proofs()).find((p) => p.secret === "u")?.unchecked).toBeUndefined();
+      expect(await balance()).toBe(72 + 16);
+      await wallet.stop();
+    }, 120_000);
+  }
+
+  it("a mint asked less often is asked at once on the next start", async () => {
+    await transact([STORES.proofs], (s) => { s[STORES.proofs].put(stored(16, "u", { unchecked: true })); });
+    mintApi.checkProofsStates.mockRejectedValue(lost());
+    const first = setup();
+    first.wallet.start();
+    await pass(3_600_000, 60_000);
+    await first.wallet.stop();
+    mintApi.checkProofsStates.mockReset();
+    mintApi.checkProofsStates.mockImplementation(async (asked: unknown[]) => asked.map(() => ({ state: "SPENT" })));
+    const next = await reopened();
+    expect(mintApi.checkProofsStates).toHaveBeenCalledOnce();
+    expect(await balance()).toBe(72);
+    await next.wallet.stop();
+  });
+});
+
 describe("splitting ecash for a token", () => {
   const outbox = (token: string, mint: string): StoredPayment => ({ id: "out1", linkId: "l1", kind: "payment", direction: "out", amount: 40, unit: "sat", state: "pending", createdAt: 1, mint, token });
 
@@ -636,6 +698,43 @@ describe("splitting ecash for a token", () => {
     await reopened();
     await pass(SETTLED_MS);
     expect(await balance(), "stored once").toBe(72 - 8);
+  });
+
+  it("a mint that stops answering is asked about less and less often, every 10 min at most, and the swap is settled once it answers", async () => {
+    mintApi.completeSwap.mockRejectedValue(lost());
+    mintApi.restore.mockRejectedValue(lost());
+    mintApi.checkProofsStates.mockRejectedValue(lost());
+    const { wallet, events } = setup();
+    await expect(wallet.createToken(40, undefined, undefined, outbox)).rejects.toBeInstanceOf(SwapUnsettledError);
+    wallet.start();
+    await pass(SETTLED_MS);
+    expect(mintApi.restore.mock.calls.length, "every 30 s while a request may still reach the mint").toBeGreaterThanOrEqual(10);
+    const early = mintApi.restore.mock.calls.length;
+    await pass(24 * 3_600_000);
+    // At most every 10 min: 144 a day. Every 30 s, it was 2,880.
+    expect(mintApi.restore.mock.calls.length - early, "not every 30 s for a day").toBeLessThan(160);
+    expect(await swaps(), "still written down: the mint never said").toHaveLength(1);
+
+    const [kept] = await swaps();
+    mintApi.restore.mockImplementation(async () => signed(kept));
+    await pass(600_000 + 30_000);
+    expect(events.onSwapSettled).toHaveBeenCalledWith(expect.objectContaining({ id: kept.id }), true);
+    expect(await swaps()).toEqual([]);
+    expect(await balance()).toBe(72 - 8);
+  }, 120_000);
+
+  it("a mint asked less often is asked at once when its wallet is removed", async () => {
+    mintApi.completeSwap.mockRejectedValue(lost());
+    mintApi.restore.mockRejectedValue(lost());
+    mintApi.checkProofsStates.mockRejectedValue(lost());
+    const { wallet } = setup();
+    await expect(wallet.createToken(40, undefined, undefined, outbox)).rejects.toBeInstanceOf(SwapUnsettledError);
+    wallet.start();
+    await pass(3_600_000);
+    const [kept] = await swaps();
+    mintApi.restore.mockImplementation(async () => signed(kept));
+    await wallet.settleSwaps([MINT]);
+    expect(await swaps()).toEqual([]);
   });
 
   it("the app closed while the mint was being asked: the next start settles it either way", async () => {

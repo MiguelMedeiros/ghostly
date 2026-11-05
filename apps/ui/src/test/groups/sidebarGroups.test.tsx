@@ -102,6 +102,11 @@ describe("Sidebar: groups in the chat list", () => {
     ["a link the admin answered", invitation({ accepted: true, viaLink: true }), "Joining…"],
     ["a community's link, knocked", { ...invitation({ accepted: true, viaLink: true, admin: "", stage: "knocked" }), profile: "community" as const }, "Waiting to be let in…"],
     ["a community's link a member answers", { ...invitation({ accepted: true, viaLink: true, admin: "", stage: "answered" }), profile: "community" as const }, "A member is letting you in…"],
+    ["a full community", { ...invitation({ accepted: true, viaLink: true, admin: "", stage: "full", full: { n: 256, max: 256 } }), profile: "community" as const }, "This group is full"],
+    ["a full private group", invitation({ accepted: true, viaLink: true, admin: "", stage: "full", full: { n: 32, max: 32 } }), "This group is full"],
+    ["a private group waiting for its members' updates", invitation({ accepted: true, viaLink: true, admin: "", stage: "blocked", full: { n: 8, max: 32 } }), "This group is waiting for updates"],
+    // As the page says it: nothing more is waited on, only the current link gets in.
+    ["a community's link replaced while it was let in", { ...invitation({ accepted: true, viaLink: true, admin: "", stage: "replaced" }), profile: "community" as const }, "This link was replaced or turned off"],
   ])("says it is joining for %s, with nothing to answer", (_, group, status) => {
     sidebar([group]);
     expect(row()).toHaveTextContent(status);
@@ -182,7 +187,7 @@ describe("Sidebar: groups in the chat list", () => {
   it("says why a group is over in the app's language", () => {
     fakeEngine.update({ groups: [groupView({ id: "g-removed", name: "Old", status: "removed", statusReason: "You were removed from this group" })] });
     renderApp(<UpdateProvider><Sidebar /><Routes><Route path="*" element={<Where />} /></Routes></UpdateProvider>, { language: "pt" });
-    expect(row("g-removed")).toHaveTextContent("Você foi removido deste grupo");
+    expect(row("g-removed")).toHaveTextContent("Removeram você deste grupo");
   });
 
   it("opens a group", async () => {

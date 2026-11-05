@@ -27,10 +27,12 @@ import type { EngineServer } from "@ghostly/browser/engine/server";
 import { createInPageHost } from "@ghostly/browser/inPageHost";
 import { defaultWalletsAllowed } from "@ghostly/browser/platform/walletSetupSwitch";
 import { getIdentifier } from "@tauri-apps/api/app";
-import type { PubkyCookieSession } from "@ghostly/browser/host";
+import type { ClipboardFile, PubkyCookieSession } from "@ghostly/browser/host";
+import { followPlatformDrags } from "../lib/pastedFiles";
 import type { NodeOptions } from "@ghostly/browser/engine/node";
 import { createIrohEndpoint, createHyperEndpoint } from "./nativeTransports";
 import { desktopUpdates } from "./updates";
+import { desktopHoldFetch } from "./holdFetch";
 import { desktopLnurlFetch } from "./lnurlFetch";
 import { desktopOidc } from "./oidc";
 import { desktopAtprotoHost } from "./atproto";
@@ -42,6 +44,7 @@ import { setSoundsRelease, type SoundsRelease } from "../lib/sounds";
 import { knownErrorText } from "../lib/errorText";
 import { english } from "../lib/english";
 import { loadSettings } from "../lib/settings";
+import { chatNamesForPeer } from "../lib/storage";
 import { translatorFor } from "../locales";
 import type { Translate } from "../locales/translate";
 import { webkitGtkSoundsRelease } from "../lib/webkitGtk";
@@ -50,12 +53,14 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { fileSpace, registerFileBytes } from "@ghostly/browser/shared/fileBytes";
 import { NativeFileBytes, type NativeInvoke } from "@ghostly/browser/shared/fileBytesNative";
 import { setWindowThemeSink } from "../lib/windowTheme";
-import { hostErrorText, setServiceWindowsCloser } from "../lib/serviceWindows";
+import { hostErrorText, serviceFraming, setServiceWindowsCloser } from "../lib/serviceWindows";
 import { setNameStepUnderTest } from "../lib/nameStep";
 import { appsTestFetch } from "./appsTestFetch";
 import { appsPlatform } from "../lib/apps/flag";
 import { builtInAppOption } from "../lib/apps/builtIns";
 import { androidApp } from "../lib/touchOnly";
+import { activeProfileId } from "../lib/profiles";
+import { openedServices, type Opened } from "../lib/openedServices";
 
 /**
  * Ghostly Desktop runs the same peer as the browser clients, in its WebView,
@@ -137,8 +142,9 @@ export function createTauriTransport(): PkarrTransport {
         for (const listener of listeners) listener("recovered");
       }).catch(() => {});
     },
-    configure({ relays, readRelays }) {
-      void invoke("set_pkarr_relays", { relays, readRelays }).then(() => { askedAt = 0; refresh(); }).catch(() => {});
+    // `dhtDirect: false` (Hide my IP from contacts): Rust closes its DHT nodes, and reads and writes go to the relays.
+    configure({ relays, readRelays, dhtDirect }) {
+      void invoke("set_pkarr_relays", { relays, readRelays, ...(dhtDirect !== undefined ? { dhtDirect } : {}) }).then(() => { askedAt = 0; refresh(); }).catch(() => {});
     },
     discovery: () => status ?? { path: null, relays: [] },
     subscribe(listener) {
@@ -251,14 +257,44 @@ export async function answerServiceWindow(server: Pick<EngineServer, "ready" | "
   }
 }
 
+/** A contact's app this device opened in a viewer window, by what names its origin (`ghostly-svc://<service>.<peer>.<tag>`). */
+export interface OpenedServiceWindow extends Opened { service: string; peer: string }
+/** A service id or a key as `viewer.rs` takes them (`is_label_safe`); a tag is `viewerTag`'s 16 characters of z-base-32. */
+const SERVICE_LABEL = /^[A-Za-z0-9-]{1,64}$/;
+const TAG = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{16}$/;
+export const openedServiceWindows = openedServices<OpenedServiceWindow>(
+  (o) => typeof o.service === "string" && SERVICE_LABEL.test(o.service) && typeof o.peer === "string" && SERVICE_LABEL.test(o.peer) && TAG.test(o.tag as string),
+  (a, b) => a.service === b.service && a.peer === b.peer && a.tag === b.tag,
+);
+
+/**
+ * What the contacts' apps opened from one chat or by one profile kept on their origins, forgotten by Rust
+ * (`forget_service_origins`): their windows close, and each origin cleared leaves the list. One Rust did not clear (it
+ * failed, or this platform clears none yet) stays on it, for the next clear.
+ */
+export function forgetServiceWindows(which: { tag: string } | { profile: string }): Promise<void> {
+  return openedServiceWindows.forget(which, async ({ service, peer, tag }) =>
+    (await invoke<boolean[]>("forget_service_origins", { origins: [{ service, peer, tag }] }))[0] === true);
+}
+
 /** `t()` in the profile's language, as it is now. */
 const profileT = (): Translate => translatorFor(loadSettings().language);
+
+/** The name each contact's app had when its window opened, by `<peer> <service>`. */
+const openedNames = new Map<string, string>();
+
+/**
+ * The name a contact gave the app a window shows: as the chat lists it now, else as it was when the window opened.
+ * Their machine says they took it back (`services.window.unshared`) just when the chat no longer lists it.
+ */
+function serviceWindowName(peer: string, service: string): string | undefined {
+  return engine.linkByPeer(peer)?.peerServices?.find((s) => s.id === service)?.name ?? openedNames.get(`${peer} ${service}`);
+}
 
 /** Requests from a service window arrive here and leave over the contact's data link. */
 function serveServiceWindows(server: EngineServer): void {
   void listen<ServiceRequest>("ghostly-svc-request", async ({ payload }) => {
-    const name = engine.linkByPeer(payload.peer)?.peerServices?.find((s) => s.id === payload.service)?.name;
-    const response = await answerServiceWindow(server, payload, profileT(), name);
+    const response = await answerServiceWindow(server, payload, profileT(), serviceWindowName(payload.peer, payload.service));
     await invoke("service_respond", { id: payload.id, response });
   });
 }
@@ -329,6 +365,21 @@ export function desktopApps(runsApps: boolean) {
   };
 }
 
+/** A file Rust put on its paste shelf (a paste's, a drop's): read by token, never by path. */
+interface ShelvedItem { token: string; name: string | null; size: number; mime: string | null }
+
+/** Shelved files as the page reads them. Once read (or not), Rust lets them go (`incoming_share_done`). */
+function shelved(items: ShelvedItem[]): ClipboardFile[] {
+  return items.map(({ token, ...item }) => ({
+    ...item,
+    read: async (offset: number, length: number) => {
+      const bytes = await invoke<ArrayBuffer | number[]>("read_pasted_bytes", { token, offset, length });
+      return bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : new Uint8Array(bytes);
+    },
+    done: () => void invoke("incoming_share_done", { tokens: [token] }).catch(() => {}),
+  }));
+}
+
 /**
  * `calls`: what Rust says about calls on this machine (`nativeCallSupport`), for `nativeCallOptions`. It may still be
  * coming: on Linux it starts GStreamer, 0.6 s on a first launch, and the page is drawn meanwhile. The engine starts
@@ -354,12 +405,18 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   registerFileBytes("native", async () => new NativeFileBytes(invoke as NativeInvoke, { jsonIpc: androidApp() }), true);
   // The unread count, as the web app's icon has it (muted chats left out), on the Dock icon.
   setAppBadgeTarget(dockBadge());
+  // WebKitGTK names another app's dragged files to the page by their address only: Rust says when such a drag is over
+  // the window and holds the files of its drop, which the page reads as a paste's (Linux; elsewhere it never says).
+  const draggedOver = followPlatformDrags(async () => shelved(await invoke<ShelvedItem[]>("read_dropped_files")));
+  void listen<boolean>("file-drag", ({ payload }) => draggedOver(payload === true)).catch(() => {});
   const apps = desktopApps(appsPlatform());
   const node: NodeOptions = { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, nativeIrohRelays: true, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke,
     // Wake-ups go from Rust: push services answer without CORS, which a WebView would enforce (WISP 401 § Wake-up push).
     pushSend: (request) => invoke<number>("push_send", { url: request.url, headers: Object.entries(request.headers), body: toBase64Url(request.body) }),
     // A Lightning address whose service redirects is asked from Rust, which checks every hop before following it.
     lnurlFetch: desktopLnurlFetch(invoke),
+    // Held items are read from the contact's storage on public addresses only, which Rust checks and a WebView cannot.
+    holdFetch: desktopHoldFetch(invoke),
     // A new profile gets its default Mainnet wallets; never under an e2e suite (desktopUnderTest).
     defaultWallets: defaultWalletsAllowed(desktopUnderTest),
     ...apps.node, ...macPeerBudget() };
@@ -392,6 +449,8 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     // "Keep this computer awake" (WISP 06): Rust holds the system's own sleep assertion, and it ends with the app. On
     // Android a foreground service while files move (`files`).
     keepAwake: (on, files) => invoke<boolean>("keep_awake", { on, files }),
+    // Android's switcher takes its picture before the page hears it is going: with the lock on, the app keeps out of it.
+    ...(androidApp() && { hideFromSwitcher: (on: boolean) => invoke<void>("hide_from_switcher", { on }) }),
     // WKWebView has no Web Share API; the system's share sheet is shown by Rust (macOS; elsewhere false: the page copies).
     shareText: (text, anchor) => invoke<boolean>("share_text", { text, anchor }),
     // WKWebView's readText() shows a "Paste" callout that needs a second click; Rust reads the text (main window only, bounded).
@@ -399,24 +458,24 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     // A paste the webview showed the page nothing of (no files, no text): Rust looks for copied files or a picture.
     // Their bytes stay in Rust, read by token; the page never names a path. Once the page has them, Rust lets them
     // go (`incoming_share_done`, named after a share, takes a paste's tokens too): a pasted picture's PNG is not kept.
-    readClipboardFiles: async () => (await invoke<{ token: string; name: string | null; size: number; mime: string | null }[]>("read_clipboard_files"))
-      .map(({ token, ...item }) => ({
-        ...item,
-        read: async (offset: number, length: number) => {
-          const bytes = await invoke<ArrayBuffer | number[]>("read_pasted_bytes", { token, offset, length });
-          return bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : new Uint8Array(bytes);
-        },
-        done: () => void invoke("incoming_share_done", { tokens: [token] }).catch(() => {}),
-      })),
+    readClipboardFiles: async () => shelved(await invoke<ShelvedItem[]>("read_clipboard_files")),
     // Rust asks in a native dialog naming the exact address (the page can neither draw nor answer it), and keeps the
     // answer per profile: `local_fetch` reaches only an address allowed there. The dialog is in the page's language.
     requestLocalAccess: (_pattern, origin) => invoke<boolean>("local_service_allow", { space: fileSpace(), origin, lang: dialogLanguage() }),
     forgetLocalAccess: (origin) => invoke<void>("local_service_forget", { space: fileSpace(), origin }),
     async openService(peerPubKeyZ32, serviceId, tag) {
       const service = engine.linkByPeer(peerPubKeyZ32)?.peerServices?.find((s) => s.id === serviceId);
+      if (service?.name) openedNames.set(`${peerPubKeyZ32} ${serviceId}`, service.name);
+      // Noted first: what the app keeps on its origin goes with the chat, its data or its profile (`forgetServices`).
+      // Android opens none (`viewer` is Desktop's).
+      if (!androidApp()) openedServiceWindows.note({ profile: activeProfileId(), tag, service: serviceId, peer: peerPubKeyZ32 });
+      const t = profileT();
+      // Its window is titled "<title> — Ghostly": the title says whose app it is, never the contact's name for it alone.
+      const { label } = serviceFraming(service?.name ?? serviceId, chatNamesForPeer(peerPubKeyZ32), peerPubKeyZ32, t);
       // Rust says `unreachable` itself for a request this page never answered: the sentence goes with the window.
-      await invoke("open_service_window", { peer: peerPubKeyZ32, service: serviceId, tag, title: service?.name ?? serviceId, unreachable: profileT()("services.window.unreachable") });
+      await invoke("open_service_window", { peer: peerPubKeyZ32, service: serviceId, tag, title: label, unreachable: t("services.window.unreachable") });
     },
+    forgetServices: forgetServiceWindows,
   });
   const connect = host.connect;
   return Object.defineProperties(host, {

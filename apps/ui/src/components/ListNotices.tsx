@@ -1,5 +1,6 @@
 import { UpdateBanner } from "./UpdateBanner";
 import { OfflineBanner } from "./OfflineBanner";
+import { ReconnectingBanner } from "./ReconnectingBanner";
 import { StorageFullBanner } from "./StorageFullBanner";
 import { LimitedBanner } from "./devices/LimitedStart";
 
@@ -12,6 +13,7 @@ export function ListNotices() {
     <>
       <UpdateBanner />
       <OfflineBanner />
+      <ReconnectingBanner />
       <StorageFullBanner />
       <LimitedBanner />
     </>

@@ -1,6 +1,6 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readStatusCard, statusCardText, type RoutineCard, type TaskCard } from "@ghostly/core";
 import type { CardIndexRow, StoredMessage } from "@ghostly/browser/shared/types";
 import { SidebarTasks } from "../../components/tasks/SidebarTasks";
@@ -211,6 +211,30 @@ describe("the Tasks board", () => {
     expect(screen.getByTestId("tasks-no-match")).toHaveTextContent("No task matches");
   });
 
+  it("has Group by as one Tab stop, the chosen grouping, the arrows moving and choosing", async () => {
+    const { user } = profile(rowsOfThree());
+    await loaded();
+    const group = screen.getByRole("radiogroup", { name: "Group by" });
+    const radio = (g: string) => screen.getByTestId(`tasks-group-${g}`);
+    const headings = () => screen.getAllByTestId("board-column").map((c) => within(c).getByRole("heading").textContent);
+    expect(within(group).getAllByRole("radio").map((r) => r.tabIndex)).toEqual([0, -1, -1]);
+    radio("status").focus();
+    await user.keyboard("{ArrowRight}");
+    expect(radio("bot")).toHaveFocus();
+    expect(radio("bot")).toHaveAttribute("aria-checked", "true");
+    expect(headings()).toEqual(["Hermes One2", "Coordinator1"]);
+    expect(within(group).getAllByRole("radio").map((r) => r.tabIndex)).toEqual([-1, 0, -1]);
+    await user.keyboard("{End}");
+    expect(radio("chat")).toHaveFocus();
+    expect(radio("chat")).toHaveAttribute("aria-checked", "true");
+    await user.keyboard("{ArrowDown}");
+    expect(radio("status")).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(radio("chat")).toHaveFocus();
+    await user.keyboard("{Home}");
+    expect(radio("status")).toHaveAttribute("aria-checked", "true");
+  });
+
   it("keeps finished tasks for a day, with older ones behind Show older", async () => {
     const { user } = profile([
       row("link-1", task({ id: "fresh", status: "done" })),
@@ -380,6 +404,21 @@ describe("richer task cards on the board", () => {
     expect(screen.getByTestId("where")).toHaveTextContent("/tasks");
   });
 
+  it("gives a card's tag and pull request chips a 24 px tall box on a phone, keeping the pill's look, and its parts toggle 24 px", async () => {
+    profile([
+      row("link-1", task({ id: "b", tags: ["core"], pr: pr() })),
+      row("link-1", task({ id: "part", title: "Part", parent: "b" })),
+    ]);
+    await loaded();
+    const card = screen.getByTestId("tasks-board").querySelector<HTMLElement>('[data-testid="board-card"][data-card-id="b"]')!;
+    // An 18 px pill in a transparent 3 px border on each side: the box is 24 px, the colour stays on the pill.
+    for (const target of [within(card).getByTestId("board-card-tag"), within(card).getByTestId("board-card-pr")]) {
+      expect(target).toHaveClass("max-md:border-y-[3px]", "border-transparent", "bg-clip-padding");
+      expect(target).not.toHaveClass("border-none");
+    }
+    expect(within(card).getByTestId("board-card-stack-toggle")).toHaveClass("min-h-6", "max-md:min-h-8");
+  });
+
   it("stacks a task's parts under it with how many are done; a part opens its own message", async () => {
     const rows = [
       row("group:g1", task({ id: "epic", title: "Relay rework" }), { member: "hermes-key" }),
@@ -501,6 +540,52 @@ describe("the Tasks board on a phone", () => {
     expect(tabs[0]).toHaveAttribute("aria-selected", "true");
   });
 
+  it("keeps the columns off screen out of Tab and the screen reader: Tab from a tab goes into its own column", async () => {
+    viewport(375, 740);
+    const { user } = profile(rowsOfThree());
+    await loaded();
+    const tabs = within(screen.getByRole("tablist", { name: "Columns" })).getAllByRole("tab");
+    const inert = () => [...screen.getByTestId("tasks-board").querySelectorAll("[data-board-column]")].map((panel) => panel.hasAttribute("inert"));
+    expect(inert()).toEqual([false, true, true, true, true]);
+    await user.click(tabs[3]);
+    expect(inert()).toEqual([true, true, true, false, true]);
+    // What Tab can reach on the board (user-event's Tab does not know inert; tasks-board.spec.ts presses the real one).
+    const reachable = [...screen.getByTestId("tasks-board").querySelectorAll("button, a[href]")].filter((el) => !el.closest("[inert]"));
+    expect(new Set(reachable.map((el) => el.closest("[data-testid=board-card]")?.getAttribute("data-card-id")))).toEqual(new Set(["ci"]));
+  });
+
+  it("a tab's slide past other columns keeps its tab chosen, and its column out of inert, all the way", async () => {
+    viewport(375, 740);
+    const { user } = profile(rowsOfThree());
+    await loaded();
+    const board = screen.getByTestId("tasks-board");
+    Object.defineProperty(board, "clientWidth", { configurable: true, value: 375 });
+    const tabs = within(screen.getByRole("tablist", { name: "Columns" })).getAllByRole("tab");
+    await user.click(tabs[3]);
+    // The slide on its way, over Running: Done stays chosen.
+    act(() => { board.scrollLeft = 375; board.dispatchEvent(new Event("scroll")); });
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(tabs[3]).toHaveAttribute("aria-selected", "true");
+    expect(column("done")).not.toHaveAttribute("inert");
+    act(() => { board.scrollLeft = 375 * 3; board.dispatchEvent(new Event("scroll")); });
+    await waitFor(() => expect(tabs[3]).toHaveAttribute("aria-selected", "true"));
+    // Then a swipe of the person's own chooses where it ends.
+    act(() => { board.dispatchEvent(new Event("pointerdown", { bubbles: true })); board.scrollLeft = 375; board.dispatchEvent(new Event("scroll")); });
+    await waitFor(() => expect(tabs[1]).toHaveAttribute("aria-selected", "true"));
+  });
+
+  it("the arrow keys to another column choose its tab and take the focus there", async () => {
+    viewport(375, 740);
+    const { user } = profile(rowsOfThree());
+    await loaded();
+    const tabs = within(screen.getByRole("tablist", { name: "Columns" })).getAllByRole("tab");
+    within(column("queued")).getByTestId("board-card-open").focus();
+    await user.keyboard("{ArrowRight}");
+    expect(tabs[1]).toHaveAttribute("aria-selected", "true");
+    expect(column("running")).not.toHaveAttribute("inert");
+    expect(document.activeElement?.closest("[data-testid=board-card]")).toHaveAttribute("data-card-id", "relay");
+  });
+
   it("a swipe to another column chooses its tab, on a page opened before its cards were read", async () => {
     // The page draws the board only once the cards are read, after its first render: the swipe is heard on the board
     // it draws then (tasks-board.spec.ts, 3 runs in 10 on a Mac: the tab stayed on Running with Done on screen).
@@ -514,6 +599,25 @@ describe("the Tasks board on a phone", () => {
     await waitFor(() => expect(tabs[3]).toHaveAttribute("aria-selected", "true"));
     act(() => { board.scrollLeft = 375; board.dispatchEvent(new Event("scroll")); });
     await waitFor(() => expect(tabs[1]).toHaveAttribute("aria-selected", "true"));
+  });
+
+  it("a swipe to another column brings its tab into view in the tab row", async () => {
+    // Six tabs of about 80 px don't fit a 375 px row: after a swipe to the last column its tab was off screen.
+    viewport(375, 740);
+    profile(rowsOfThree());
+    await loaded();
+    const board = screen.getByTestId("tasks-board");
+    Object.defineProperty(board, "clientWidth", { configurable: true, value: 375 });
+    const tabs = within(screen.getByRole("tablist", { name: "Columns" })).getAllByRole("tab");
+    const shown = tabs.map((tab) => (tab.scrollIntoView = vi.fn()));
+    act(() => { board.scrollLeft = 375 * 4; board.dispatchEvent(new Event("scroll")); });
+    await waitFor(() => expect(tabs[4]).toHaveAttribute("aria-selected", "true"));
+    expect(shown[4]).toHaveBeenCalledWith(expect.objectContaining({ block: "nearest", inline: "nearest" }));
+    expect(shown.filter((call, i) => i !== 4 && call.mock.calls.length)).toHaveLength(0);
+    // A scroll that stays on the same column leaves the tab row alone.
+    act(() => { board.scrollLeft = 375 * 4 + 10; board.dispatchEvent(new Event("scroll")); });
+    await new Promise((done) => requestAnimationFrame(() => done(undefined)));
+    expect(shown[4]).toHaveBeenCalledTimes(1);
   });
 });
 

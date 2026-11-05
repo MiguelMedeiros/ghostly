@@ -23,6 +23,13 @@ export const GROUP_FILE_LIMITS = {
   serveMoveBytes: 16 * 1024,
   /** How long a served transfer keeps its place while all are taken and another member asks: past it, the place is theirs. */
   servePlaceMs: 5 * 60_000,
+  /**
+   * A served transfer's pace is what it confirmed in the last `servePaceMs` (at most twice that), counted from its offer.
+   * While all places are taken and a member holding none asks or waits, the slowest served that long gives it its place,
+   * if at its pace more is left to go than it has been served and than `servePaceMs`: members on fast links do not wait
+   * for slow ones that asked first. Each member's transfer of a file loses its place so once per holder.
+   */
+  servePaceMs: 10_000,
   /** File announcements a member sends to one group in a minute. */
   announcePerMinute: 8,
   /** File announcements of one member of a group fetched by themselves in `announceWindowMs`; past it, kept for a Download. */
@@ -49,6 +56,14 @@ export const GROUP_FILE_LIMITS = {
    */
   haveFramesTaken: 20,
   communityHaveEveryMs: 60_000,
+  /**
+   * `group-want` frames an edge sends in `wantWindowMs`, and takes from its member, the rest dropped before anything is
+   * looked up: twice what it may send, as for `group-have`. A member back from away in a group of 16 asked one member
+   * for at most 47 in 10 seconds, its files coming as fast as the network lets them.
+   */
+  wantFrames: 50,
+  wantFramesTaken: 100,
+  wantWindowMs: 10_000,
   /**
    * How long a want waits for an offer before the next holder is asked; a transfer that does not move for as long is
    * left for the next holder too.

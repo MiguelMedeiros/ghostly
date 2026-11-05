@@ -90,7 +90,7 @@ describe("a video in the chat", () => {
     expect(screen.getByRole("group", { name: "Vídeo, 0:12" })).toBeInTheDocument();
     view.unmount();
     renderApp(<VideoBubble file={video({ video: undefined })} sender="peer" peerName="Ana" />, { language: "pt" });
-    expect(screen.getByRole("group", { name: "Vídeo, 35.0 MB" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Vídeo, 35,0 MB" })).toBeInTheDocument();
   });
 
   it("plays in place when tapped, from its bytes, with the browser's controls", async () => {
@@ -408,6 +408,34 @@ describe("a video in the chat", () => {
     expect(fullscreenWindow.mock.calls.filter(([on]) => on)).toHaveLength(4);
   });
 
+  it("filling the window (Desktop on Linux), it goes on playing though the chat list no longer sees it", async () => {
+    let seen: ((entries: { isIntersecting: boolean }[]) => void) | null = null;
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(callback: (entries: { isIntersecting: boolean }[]) => void) { seen = callback; }
+      observe() {}
+      disconnect() {}
+    });
+    fakeEngine.fullscreenWindow = vi.fn(async () => {});
+    show(video());
+    act(() => seen!([{ isIntersecting: true }]));
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    const player = screen.getByTestId("video-player");
+    fireEvent.click(screen.getByRole("button", { name: "Full screen" }));
+    // Fixed over the window, it is out of the list's containing blocks: WebKitGTK reports it out of the list's view.
+    act(() => seen!([{ isIntersecting: false }]));
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 1600)));
+    expect(screen.getByTestId("video-player")).toBe(player);
+    expect(screen.getByTestId("video-frame")).toHaveAttribute("data-theater", "true");
+    expect(fakeEngine.fullscreenWindow).not.toHaveBeenLastCalledWith(false);
+    // Back in the chat, where the list sees it again: it plays on.
+    fireEvent.click(screen.getByRole("button", { name: "Exit full screen" }));
+    act(() => seen!([{ isIntersecting: true }]));
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 1600)));
+    expect(screen.getByTestId("video-player")).toBe(player);
+    vi.unstubAllGlobals();
+  });
+
   it("where the engine has full screen (macOS, Windows, the web), the player's own button does it", async () => {
     fakeEngine.fullscreenWindow = vi.fn(async () => {});
     Object.defineProperty(document, "fullscreenEnabled", { configurable: true, value: true });
@@ -491,6 +519,19 @@ describe("a video not here yet", () => {
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("pause"));
     fireEvent.click(screen.getByTestId("video-cancel"));
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("cancel"));
+  });
+
+  it("one sent from here that arrived whole, the contact checking it, has no Cancel: too late", () => {
+    const file = video({ id: "chat1-out-late" });
+    show(file, { state: "transferring", stage: "verifying", direction: "out", transferred: file.size, size: file.size });
+    expect(screen.queryByTestId("video-cancel")).toBeNull();
+  });
+
+  it("one sent from here that arrived whole, offered again, has no Pause or Cancel: paused, it could be cancelled", () => {
+    const file = video({ id: "chat1-out-again" });
+    show(file, { state: "transferring", direction: "out", transferred: file.size, size: file.size });
+    expect(screen.queryByTestId("video-pause-transfer")).toBeNull();
+    expect(screen.queryByTestId("video-cancel")).toBeNull();
   });
 
   it("once in, it plays", () => {

@@ -117,6 +117,16 @@ anything is signed: the dialog shows the subject field first, then the preview's
 domain and keys) or its error, and only then the signers, keeping those whose ids the preview lists in
 `signers` (a did:key cannot publish a file). It runs in the UI, on the person's own identity.
 
+**Words in the app's language (`ProviderSay`).** A provider writes its words in English. For a built-in provider the
+UI reads each fixed word in the app's language under `identities.providers.<id>.<path>` (`label`, `summary`,
+`description`, `limits`, `privacy`, `lookupLabel`, `unpublish.description`, `subject.label|placeholder|help`,
+`signers.<signer id>.label|description|action`, `signers.<signer id>.fields.<name>.label|placeholder|help`), and
+keeps the English where that language has none. A line worked out when the provider runs (a step naming the domain,
+a progress line, an approval's words) goes through `say(key, english, values)`: `instructions(statement, say)`,
+`ctx.say` for signers and `unpublish.run`, `options.say` for `subject.preview`; `english` writes each value as
+`{{name}}`, and `say` is `englishSay` when nobody hands one (the CLI). A plugin's provider always gets its own
+English back. Errors are not said this way: the UI says the ones it knows (`apps/ui/src/lib/errorText.ts`).
+
 ### Signers: how the evidence is made
 
 A provider has one or more signers; the UI shows the ones whose `platforms` include this one and whose
@@ -168,7 +178,7 @@ so you do not repeat these, but you must not contradict them:
   (a PGP key's expiry). `display` only for name/picture the evidence itself carries (OIDC `name` claim),
   with its `source`; avatars must already be sanitized `data:image/png|jpeg` URLs.
 - Use `ctx.now` (seconds) for time and `ctx.signal` for cancellation.
-- Results are bounded again by `boundVerifiedIdentity` in core (lengths, control characters, https URLs).
+- Results are bounded again by `boundVerifiedIdentity` in core (lengths, control, format and line-separator characters, https URLs).
 
 The same `verify` runs twice: on the person's device before saving, and on each contact's device when it
 is shared. The contact's app never trusts the sender's check.
