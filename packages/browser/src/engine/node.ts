@@ -8871,7 +8871,9 @@ export class GhostlyNode implements EngineImplementation {
    * The native transports this engine runs for its contacts: the host's, Iroh's browser build where it runs in the
    * page, and HyperDHT through a relay where one is set and the host has no HyperDHT of its own. While "Hide my IP from
    * contacts" is on, not the host's own: its endpoints tell a contact this device's addresses (an Iroh descriptor lists
-   * them, HyperDHT connects directly); HyperDHT then goes through the relay, as in a browser.
+   * them, HyperDHT connects directly); HyperDHT then goes through the relay, as in a browser. Iroh's browser build stays,
+   * dialling a contact only on one of the person's own Iroh relays: through the relay the contact names, a contact who
+   * runs it would see this device's address.
    */
   private get nativeFactories(): Partial<Record<NativeTransport, (seedB64: string) => Promise<NativeEndpoint>>> {
     return this.nativeFactoriesFor(this.settings.relayOnly === true);
@@ -8888,7 +8890,7 @@ export class GhostlyNode implements EngineImplementation {
       ...(relayOnly ? {} : this.options.nativeTransports),
       // The host's own Iroh on the person's Iroh relays, read when the endpoint starts; on its own defaults without.
       ...(this.ownIrohRelays && !relayOnly ? { "iroh/1": (seedB64: string) => this.options.nativeTransports!["iroh/1"]!(seedB64, this.settings.irohRelays?.length ? { relays: [...this.settings.irohRelays] } : {}) } : {}),
-      ...(this.options.irohWeb ? { "iroh/1": (seedB64: string) => createIrohWebEndpoint(seedB64, { relays: this.irohRelays }) } : {}),
+      ...(this.options.irohWeb ? { "iroh/1": (seedB64: string) => createIrohWebEndpoint(seedB64, { relays: this.irohRelays, ...(relayOnly && { ownRelaysOnly: true }) }) } : {}),
     };
   }
   /** The host runs Iroh itself and homes it on the relays it is given (the Desktop). */
