@@ -1551,7 +1551,8 @@ export class GhostLink {
     traceLink(this.myPubKeyZ32, "unblocked", { held: !!this.heldSignal });
     this.autoConnectFailures = 0;
     this.lastAutoConnectAt = 0;
-    this.session.expectPeer();
+    // The contact's offer is due now, out already if it left first: its first reads are signaling (`SIGNAL_DUE_READS`).
+    this.session.expectPeer(false, true);
     const held = this.heldSignal;
     this.heldSignal = null;
     if (held) this.handleRtcSignal(held.signal, held.sight);
