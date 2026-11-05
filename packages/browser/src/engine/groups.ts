@@ -740,6 +740,7 @@ export class Groups {
         edges: groupId => host.edges(groupId),
         ready: linkId => host.linkReady(linkId, GROUP_VERSION_FILES),
         membership: groupId => this.fileMembership(groupId),
+        out: groupId => this.fileOut(groupId),
         sendApp: (groupId, frame) => this.communities.sendApp(groupId, frame),
         changed: () => host.emit(),
         now: () => this.now(),
@@ -1223,6 +1224,13 @@ export class Groups {
     const session = this.sessions.get(groupId);
     if (session?.status !== "active") return undefined;
     return { me: session.myKey, community: false, onHubs: this.hubs.active(groupId, session, this.now()), inRoster: key => rosterHas(session.roster, key), couldRead: (key, messageId, ts) => session.couldRead(key, messageId, ts) };
+  }
+
+  /** Why this device is out of the group for good, as `fileCheck` says it; undefined while it is in it, or not loaded. */
+  private fileOut(groupId: string): string | undefined {
+    const session = this.isCommunity(groupId) ? this.communities.session(groupId) : this.sessions.get(groupId);
+    if (!session || session.status === "active") return undefined;
+    return session.state.statusReason ?? "You are no longer in this group";
   }
 
   /**
