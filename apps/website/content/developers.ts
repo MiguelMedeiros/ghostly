@@ -201,7 +201,7 @@ export const developers = {
     off: "Stays off",
     fail: "No live line",
     failBody: "The chat stays on DHT text and keeps trying. Nothing bridges one transport to another.",
-    first: "Before a key is pinned, a new chat dials WebRTC only. After the pin, Iroh and HyperDHT can carry it too: their descriptors travel in the capability record on the DHT, so a web chat reaches a desktop over relayed Iroh. A chat with no path at all stays on the DHT.",
+    first: "A first pairing dials WebRTC, and Iroh and HyperDHT when WebRTC is missing on either side or connects nothing: their descriptors travel in the capability record on the DHT, sealed with the invite key until the pin, so a Linux Desktop pairs and a web chat reaches a desktop over relayed Iroh. A chat with no path at all stays on the DHT.",
     rule: "Same rule as rankTransports() in packages/core/src/pairedTransports.ts",
     simplified: "offers simplified",
     status: "Every chat: web, desktop, extension and CLI",
