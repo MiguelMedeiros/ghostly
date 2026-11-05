@@ -279,11 +279,21 @@ export function forgetServiceWindows(which: { tag: string } | { profile: string 
 /** `t()` in the profile's language, as it is now. */
 const profileT = (): Translate => translatorFor(loadSettings().language);
 
+/** The name each contact's app had when its window opened, by `<peer> <service>`. */
+const openedNames = new Map<string, string>();
+
+/**
+ * The name a contact gave the app a window shows: as the chat lists it now, else as it was when the window opened.
+ * Their machine says they took it back (`services.window.unshared`) just when the chat no longer lists it.
+ */
+function serviceWindowName(peer: string, service: string): string | undefined {
+  return engine.linkByPeer(peer)?.peerServices?.find((s) => s.id === service)?.name ?? openedNames.get(`${peer} ${service}`);
+}
+
 /** Requests from a service window arrive here and leave over the contact's data link. */
 function serveServiceWindows(server: EngineServer): void {
   void listen<ServiceRequest>("ghostly-svc-request", async ({ payload }) => {
-    const name = engine.linkByPeer(payload.peer)?.peerServices?.find((s) => s.id === payload.service)?.name;
-    const response = await answerServiceWindow(server, payload, profileT(), name);
+    const response = await answerServiceWindow(server, payload, profileT(), serviceWindowName(payload.peer, payload.service));
     await invoke("service_respond", { id: payload.id, response });
   });
 }
@@ -454,6 +464,7 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     forgetLocalAccess: (origin) => invoke<void>("local_service_forget", { space: fileSpace(), origin }),
     async openService(peerPubKeyZ32, serviceId, tag) {
       const service = engine.linkByPeer(peerPubKeyZ32)?.peerServices?.find((s) => s.id === serviceId);
+      if (service?.name) openedNames.set(`${peerPubKeyZ32} ${serviceId}`, service.name);
       // Noted first: what the app keeps on its origin goes with the chat, its data or its profile (`forgetServices`).
       // Android opens none (`viewer` is Desktop's).
       if (!androidApp()) openedServiceWindows.note({ profile: activeProfileId(), tag, service: serviceId, peer: peerPubKeyZ32 });
