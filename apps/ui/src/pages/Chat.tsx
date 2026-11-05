@@ -829,11 +829,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           <span className="block text-text-secondary">{t(webrtc.mediaProblem === "denied" && mediaDeniedText() === "settings.media.deniedIos" ? "settings.media.deniedIos" : MEDIA_PROBLEM_TEXT[webrtc.mediaProblem][1])}</span>
         </div>
       )}
-      {/* Our call found no path to the contact (a VPN or firewall that blocks UDP, on either side): where a TURN server
-          is set, and the guide. */}
-      {(webrtc.noPath || noPathShown) && !webrtc.mediaProblem && (
-        <CallNoPathNotice iceServers={engine.state?.settings.iceServers} onClose={() => { webrtc.dismissNoPath(); setCallNoPath(sessionId, false); }} />
-      )}
       {/* The system paused our microphone in a call (an iPhone's Home Screen app while the screen is locked): the
           contact hears nothing until Ghostly is back on screen, and the call is still on. */}
       {webrtc.micPaused && !webrtc.mediaProblem && (
@@ -1071,6 +1066,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
       {/* On a phone the chat list's offline notice is on another screen: what is written here waits too. */}
       <OfflineBanner inChat />
+      {/* Our call found no path to the contact (a VPN or firewall that blocks UDP, on either side): where a TURN server
+          is set, and the guide. It stays until closed, so it is a line under the header, never over its controls. */}
+      {(webrtc.noPath || noPathShown) && !webrtc.mediaProblem && (
+        <CallNoPathNotice iceServers={engine.state?.settings.iceServers} onClose={() => { webrtc.dismissNoPath(); setCallNoPath(sessionId, false); }} />
+      )}
       <ChatSearchBar search={search} />
       {appHere && <ChatAppResume linkId={appHere} />}
       <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} returnFocus={optionsRef} />
