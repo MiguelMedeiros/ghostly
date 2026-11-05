@@ -194,6 +194,7 @@
     "dhtWaitingFor": "在 DHT 上 · 等待 {{transport}}",
     "discoveryUnavailable": "无法发现",
     "held": "不在线 · 消息已暂存",
+    "heldPlain": "消息已暂存",
     "identityMismatch": "身份不匹配",
     "issue": "连接问题",
     "noContact": "还没有联系人",

@@ -6,7 +6,9 @@ import { goesOn as goesOnIn } from "./waitNotice";
 
 /*
  * Waiting on what a command sent (WISP 1100): a message's delivery, an edit's confirmation, a group frame taken by an
- * edge. Shared by the chat, group and status card methods.
+ * edge. Shared by the chat, group and status card methods. A deadline counts on `performance.now()`: on `Date.now()`
+ * a wall clock set back while a wait ran (NTP, a person fixing the time) stretched it by as much, past the client's
+ * own deadline, which told the bot to restart a sound daemon.
  */
 
 const DELIVERY_RANK: Record<string, number> = { sending: 0, waiting: 1, queued: 1, held: 2, sent: 2, delivered: 3 };
@@ -32,21 +34,21 @@ const known = (ctx: ApiContext, details: Record<string, unknown>) => stopped(ctx
 
 /** Waits until the contact confirmed the latest edit of one of my messages (it is no longer pending). */
 export async function waitForEdit(ctx: ApiContext, chat: string, messageId: string, ms: number): Promise<StoredMessage> {
-  const until = Date.now() + ms;
+  const until = performance.now() + ms;
   for (;;) {
     const message = await node(ctx).getMessage(chat, messageId);
     if (!message) throw new CliError("not_found", `No message ${messageId} in this chat`);
     if (!message.edit?.pending) return message;
-    if (Date.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the contact has not confirmed the edit yet (it needs a live chat and a contact's app that shows edits). It ${goesOn(ctx)}`, known(ctx, { messageId, edits: message.edit.seq }));
+    if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the contact has not confirmed the edit yet (it needs a live chat and a contact's app that shows edits). It ${goesOn(ctx)}`, known(ctx, { messageId, edits: message.edit.seq }));
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }
 
 /** Waits until the contact confirmed my removal of a message, which is already gone here. */
 export async function waitForRemoval(ctx: ApiContext, chat: string, messageId: string, ms: number): Promise<void> {
-  const until = Date.now() + ms;
+  const until = performance.now() + ms;
   while (node(ctx).removalPending({ linkId: chat, messageId })) {
-    if (Date.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the message is gone here and the contact has not confirmed yet. Its removal ${goesOn(ctx)}`, known(ctx, { messageId }));
+    if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the message is gone here and the contact has not confirmed yet. Its removal ${goesOn(ctx)}`, known(ctx, { messageId }));
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }
@@ -56,11 +58,11 @@ export async function waitForRemoval(ctx: ApiContext, chat: string, messageId: s
  * as far as the author sees): a member's edge in a private group, an edge to one of my hubs in a community.
  */
 export async function waitForGroupFrame(ctx: ApiContext, groupId: string, messageId: string, edit: number | undefined, ms: number): Promise<number> {
-  const until = Date.now() + ms;
+  const until = performance.now() + ms;
   for (;;) {
     const taken = node(ctx).groupTaken({ groupId, messageId, ...(edit ? { edit } : {}) });
     if (taken > 0) return taken;
-    if (Date.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: no member's edge took it yet (it stays in the group and goes when one opens). It ${goesOn(ctx)}`, known(ctx, { messageId, ...(edit ? { edits: edit } : {}) }));
+    if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: no member's edge took it yet (it stays in the group and goes when one opens). It ${goesOn(ctx)}`, known(ctx, { messageId, ...(edit ? { edits: edit } : {}) }));
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }
@@ -79,9 +81,9 @@ export const ONE_SHOT_RECEIPT_MS = 2_000;
  * envelopes; one not confirmed in time is kept and said again.
  */
 export async function waitForConfirmed(ctx: ApiContext, chat: string, what: "reaction" | "pin", pending: (left: { reactions: number[]; pin: number | null }) => boolean, ms: number): Promise<void> {
-  const until = Date.now() + ms;
+  const until = performance.now() + ms;
   while (pending(node(ctx).chatUnconfirmed({ linkId: chat }))) {
-    if (Date.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the contact has not confirmed the ${what} yet. It is kept here and ${goesOn(ctx)}`, known(ctx, { chat }));
+    if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the contact has not confirmed the ${what} yet. It is kept here and ${goesOn(ctx)}`, known(ctx, { chat }));
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }

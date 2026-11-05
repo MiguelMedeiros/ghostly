@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fromBase64Url, RTC_CONFIG, setLinkTraceSink } from "@ghostly/core";
+import { DAEMON_WATCH_PEER_IDLE_MS, fromBase64Url, RTC_CONFIG, setLinkTraceSink } from "@ghostly/core";
 import { MAX_IROH_RELAYS, irohRelayProblem } from "@ghostly/browser/platform/irohWeb";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { loadCallStack } from "../calls/media";
@@ -201,9 +201,9 @@ function irohWasmBytes(): Buffer {
 
 /**
  * How a runtime starts: `deferGroups` leaves the groups' sessions unstarted (a one-shot for one chat); `deferChats` leaves
- * the saved chats unstarted (a one-shot that makes or joins one); `offline` starts no chat or group and publishes nothing
- * (a one-shot that only reads); `logJoins` says the steps of a join through a group's link on stderr (a daemon, whose
- * log that is: `joinLog.ts`).
+ * the saved chats unstarted until a call names one (a one-shot for one chat, or one that makes or joins one); `offline`
+ * starts no chat or group and publishes nothing (a one-shot that only reads); `logJoins` says the steps of a join
+ * through a group's link on stderr (a daemon, whose log that is: `joinLog.ts`).
  */
 export interface RuntimeOptions { deferGroups?: boolean; deferChats?: boolean; offline?: boolean; logJoins?: boolean }
 
@@ -307,6 +307,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     apps: apps ? "wire" : false,
     // A daemon stays online: a hub of the large private groups it is in (WISP 902 · Group Mesh § Hubs), unless GHOSTLY_HUB=0.
     staysOnline: envSwitch("GHOSTLY_HUB", true),
+    // A contact that left (a phone that put the app to sleep) is read every 10 s for 5 minutes, not every 30 s past 2.
+    watchPeerIdleMs: DAEMON_WATCH_PEER_IDLE_MS,
     localFetch: nodeLocalFetch,
     // A wake-up goes to a push service only, on public addresses only (./pushSend.ts), as the Desktop's does.
     pushSend: (request) => nodePushSend(request),
