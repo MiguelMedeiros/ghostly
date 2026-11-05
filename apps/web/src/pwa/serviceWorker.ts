@@ -1,4 +1,4 @@
-import { incomingShare, receiveShare, type IncomingShare } from "../../../ui/src/lib/incomingShare";
+import { carryIncomingShare, incomingShare, receiveShare, type IncomingShare } from "../../../ui/src/lib/incomingShare";
 import { activeProfileId, listProfiles, switchProfile } from "../../../ui/src/lib/profiles";
 import type { FromWorker, ToWorker, WindowSays } from "../sw/messages";
 
@@ -175,12 +175,16 @@ export function listenForShares(): void {
       return true;
     };
     // Any website can post to the share target: a share waits behind one already in the picker, never in its place,
-    // and only one that is shown at once opens the picker.
+    // and only one that is shown at once opens the picker. Those the worker could not keep are said with it.
     const shown = !!incomingShare();
-    receiveShare({ ...(item as IncomingShare), carry }, { queue: true });
+    const dropped = typeof message.dropped === "number" && message.dropped > 0 ? message.dropped : 0;
+    receiveShare({ ...(item as IncomingShare), carry, ...(dropped > 0 && { dropped }) }, { queue: true });
     if (!shown && incomingShare() && !openedForShare()) window.location.hash = "#/shared";
   });
   workers.startMessages();
+  // A share into this same window replaces this page with one opened for it: the shares still in the picker go back
+  // to the worker, which hands them to that page ahead of the new one, instead of going with this page.
+  addEventListener("pagehide", () => { carryIncomingShare(); });
   // This page takes the shares forwarded to its profile: the worker gives one to the page of the profile in front last.
   const here = () => tellReady({ type: "share-here", profile: activeProfileId() });
   here();
