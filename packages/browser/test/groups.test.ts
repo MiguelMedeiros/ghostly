@@ -1,17 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FAREWELL_KEPT_MS, FAREWELL_OPEN_MS, Groups, type GroupStore, type GroupsHost } from "../src/engine/groups";
 import { createIdentity, encodeGroupEntryLink, decodeGroupEntryLink, knockIdentity, knockRecords, readKnocks, identityFromSeedB64, randomBytes, toBase64Url, type GhostRecord, type GroupState } from "@ghostly/core";
-import type { StoredGroup, StoredMessage } from "../src/shared/types";
+import type { GroupLive, StoredGroup, StoredMessage } from "../src/shared/types";
 // covers: groups.picture.set, groups.rename, groups.create, groups.invite, groups.send, groups.leave, groups.forget, groups.link.enable, groups.link.join, groups.link.replace, groups.protocol.entry, groups.protocol.mentions
 
-/** One peer's database, in memory. */
+/** One peer's database, in memory, with the private groups' small rows (`GroupLive`). */
 function memoryStore(messages: StoredMessage[]): GroupStore {
-  const groups = new Map<string, StoredGroup>();
+  const groups = new Map<string, StoredGroup>(), live = new Map<string, GroupLive>();
   return {
     getGroups: async () => [...groups.values()].map(g => structuredClone(g)),
-    putGroup: async g => { groups.set(g.id, structuredClone(g)); },
-    deleteGroup: async id => { groups.delete(id); for (let i = messages.length - 1; i >= 0; i--) if (messages[i].linkId === `group:${id}`) messages.splice(i, 1); },
+    putGroup: async (g, row) => {
+      groups.set(g.id, structuredClone(g));
+      if (row) live.set(g.id, structuredClone(row)); else if (row === null) live.delete(g.id);
+    },
+    deleteGroup: async id => { groups.delete(id); live.delete(id); for (let i = messages.length - 1; i >= 0; i--) if (messages[i].linkId === `group:${id}`) messages.splice(i, 1); },
     getMessages: async linkId => messages.filter(m => m.linkId === linkId).sort((a, b) => a.timestamp - b.timestamp),
+    getGroupLive: async () => structuredClone(live),
+    putGroupLive: async (id, row) => { live.set(id, structuredClone(row)); },
   };
 }
 

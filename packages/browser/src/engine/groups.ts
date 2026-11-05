@@ -5,11 +5,12 @@ import {
   GROUP_HAVE_FRAME, GROUP_VERSION_FILES, GROUP_WANT_FRAME, GROUP_WANT_NO_FRAME, type GroupFileMeta,
   type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
-import type { GroupEvent, GroupJoinStage, GroupView, OtherGroup, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
+import type { GroupEvent, GroupJoinStage, GroupLive, GroupView, OtherGroup, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
 import type { Removal } from "./removals";
 import { groupReply } from "../shared/replies";
 import { droppedPin, pinOfFormerMember, pinView } from "./pins";
 import { db } from "./db";
+import { GroupRows } from "./groupRows";
 import { traceJoin } from "./joinTrace";
 import { COMMUNITY_TIMINGS, Communities, dialedKey, metaLines, type CommunityTimings } from "./community";
 import { MESH_HUB_TIMINGS, MeshHubs, removalEpoch, type MeshHubTimings } from "./meshHubs";
@@ -209,9 +210,16 @@ export class FramesTaken {
 /** Where groups and their history are kept: the engine's database, or a test's memory. */
 export interface GroupStore {
   getGroups(): Promise<StoredGroup[]>;
-  putGroup(group: StoredGroup): Promise<void>;
+  /** `live`: a private group's small row too, in the same write (`null` deletes it); only with `putGroupLive`. */
+  putGroup(group: StoredGroup, live?: GroupLive | null): Promise<void>;
   deleteGroup(groupId: string): Promise<void>;
   getMessages(linkId: string): Promise<StoredMessage[]>;
+  /**
+   * The private groups' small rows (`engine/groupRows.ts`): what a message changes is written there alone. A store
+   * without them writes the whole record at every save, as before.
+   */
+  getGroupLive?(): Promise<Map<string, GroupLive>>;
+  putGroupLive?(groupId: string, live: GroupLive): Promise<void>;
 }
 
 const MESSAGE_LINK = (groupId: string) => `group:${groupId}`;
@@ -727,7 +735,13 @@ export class Groups {
   /** Files and voice messages in every group, private or community (WISP 503 · Group Files). */
   readonly files?: GroupFileDesk;
 
-  constructor(private readonly host: GroupsHost, private readonly store: GroupStore = db, private readonly timings: EntryTimings = ENTRY_TIMINGS, communityTimings: CommunityTimings = COMMUNITY_TIMINGS, random?: () => number, hubTimings: MeshHubTimings = MESH_HUB_TIMINGS) {
+  /** Where private groups are written: a message writes the group's small row, a commit its record too (`GroupRows`). */
+  private readonly rows: GroupRows;
+  private readonly store: GroupStore;
+
+  constructor(private readonly host: GroupsHost, store: GroupStore = db, private readonly timings: EntryTimings = ENTRY_TIMINGS, communityTimings: CommunityTimings = COMMUNITY_TIMINGS, random?: () => number, hubTimings: MeshHubTimings = MESH_HUB_TIMINGS) {
+    this.rows = new GroupRows(store);
+    this.store = this.rows.store;
     this.communities = new Communities(host, store, communityTimings, random);
     this.hubs = new MeshHubs(host, { stored: id => this.stored.get(id), save: group => { if (this.stored.get(group.id) === group) void this.store.putGroup(group).catch(() => {}); } }, hubTimings);
     this.typings = new GroupTypings(host);
@@ -788,6 +802,7 @@ export class Groups {
   /** `asItIs`: a copy that must stay as it was stored (limited mode, WISP 06), so nothing left over is cleared from it. */
   async load(asItIs = false): Promise<void> {
     const all = await this.store.getGroups();
+    await this.rows.load(all);
     await this.communities.load(all.filter(g => g.community || g.joining));
     for (const group of all.filter(g => !g.community && !g.joining)) {
       this.stored.set(group.id, group);
@@ -3070,7 +3085,7 @@ export class Groups {
         // A save that was due when the group was forgotten (`GROUP_LIMITS.saveWithinMs`) is not one of the group joined again.
         if (!group || this.sessions.get(state.id) !== session) return;
         group.state = next;
-        await this.store.putGroup(group);
+        await this.rows.save(group);
       },
       send: (to, frame: GroupEdgeFrame) => {
         const edge = this.host.edges(state.id).get(to);

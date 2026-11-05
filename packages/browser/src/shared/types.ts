@@ -271,6 +271,13 @@ export interface StoredGroup {
    * device, where that is later than the message's own time (`cameAt`): what makes the group unread survives a restart.
    */
   came?: { peer?: number; mention?: number };
+  /**
+   * Where `state.seq` was raised to when `state` was last written whole (`engine/groupRows.ts`), in epoch `e`: the numbers
+   * below `n` are this app's to send at, and the group's small row (`GroupLive`) says how far it went. An app from before
+   * reads `state` alone and sends from `n` on, above everything said here. A `state.seq` other than `n` is one such an app
+   * wrote since.
+   */
+  seqReserved?: { e: number; n: number };
   /** A community group (`group-community/1`) I am in: its session state. Mesh groups use `state`. */
   community?: CommunityState;
   /**
@@ -278,6 +285,17 @@ export interface StoredGroup {
    * race: my member seed, the entry session, and what arrived of the welcome.
    */
   joining?: { g: string; host: string; seedB64: string; linkId: string; name: string; inviter: string; invitedAt?: number; pieces: unknown[]; since: number; check?: boolean; replaced?: boolean };
+}
+
+/**
+ * What a message sent or received changes of a private group's state, in a row of its own (settings store,
+ * `groupLiveKey`): written alone at each message, while the group's record (its chain, its secrets) is written only when
+ * they change (`engine/groupRows.ts`). `top`: the signature of the last commit of the chain it goes with.
+ */
+export interface GroupLive {
+  top: string;
+  state: Pick<GroupState, "seq" | "seqEpoch" | "seen" | "sent" | "alone" | "provisional" | "nicks" | "unsaid">;
+  came?: StoredGroup["came"];
 }
 
 export interface GroupMemberView {
