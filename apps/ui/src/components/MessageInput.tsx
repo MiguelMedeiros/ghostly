@@ -1,4 +1,4 @@
-import { getSessionDraft, setSessionDraft } from "../lib/storage";
+import { flushSessionDraft, getSessionDraft, setSessionDraft, setSessionDraftLater } from "../lib/storage";
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useId, type ClipboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { PaymentComposer } from "./PaymentComposer";
@@ -143,6 +143,8 @@ const DEFAULT_MAX = 500;
 const TOAST_DURATION = 5_000;
 /** How often the line takes a video conversion's progress: the converter tells each sample. */
 const PROGRESS_EVERY_MS = 250;
+/** The pause in the typing after which the draft is written (and the secret guard reads it). */
+const DRAFT_SAVE_PAUSE = 400;
 
 /** The same file on disk, picked again: a picker gives a new File each time. */
 
@@ -311,10 +313,26 @@ export function MessageInput({
   }, [editKey]);
 
   const editing = !!edit;
+  // The draft is written after a pause in the typing (the guard reads all of it: per key, a long draft cost a frame on a
+  // slow phone), and at once as the page goes or is hidden, or the chat closes. Sent or cleared meanwhile (its chat
+  // deleted, its group left), it is not written back (storage.ts setSessionDraftLater).
   useEffect(() => {
     // A draft holding a seed or a key is not written to storage; ecash is, since the draft may be its only copy.
     // Not while editing: the draft is the one kept aside.
-    if (draftId && !editing) { const found = findSecret(text); setSessionDraft(draftId, found && found.kind !== "cashu" ? "" : text); }
+    if (!draftId) return;
+    if (!editing) setSessionDraftLater(draftId, () => { const found = findSecret(text); setSessionDraft(draftId, found && found.kind !== "cashu" ? "" : text); });
+    const pause = setTimeout(() => flushSessionDraft(draftId), DRAFT_SAVE_PAUSE);
+    return () => clearTimeout(pause);
+  }, [draftId,text,editing]);
+  useEffect(() => {
+    if (!draftId) return;
+    const flush = () => flushSessionDraft(draftId);
+    const hidden = () => { if (document.visibilityState === "hidden") flush(); };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", hidden);
+    return () => { window.removeEventListener("pagehide", flush); document.removeEventListener("visibilitychange", hidden); flush(); };
+  }, [draftId]);
+  useEffect(() => {
     // Text put in by the app (an emoji, an edit, a share): the field fits it. A keystroke was fitted already.
     // Emptied by the app (an edit ended, saved or not) after it grew: back to one line.
     const input=textareaRef.current;
