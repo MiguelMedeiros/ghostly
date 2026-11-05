@@ -684,6 +684,10 @@ export class CommunitySession {
   private readonly onRows = new Map<string, string>();
   /** The oldest epoch whose seen marks are kept, as of the last `pruneSeen`. In memory only. */
   private seenFrom = -1;
+  /** The secret of the epoch I left in (`leave`), for `followAfterLeave`. In memory only. */
+  private leftSecret: { h: string; s: string } | undefined;
+  /** After my leave, still taking commits and secrets (`followAfterLeave`). In memory only. */
+  private following = false;
 
   /** `rows`: the frames the app holds with the messages it stored (`CommunityIncomingMessage.frame`). They join the store. */
   constructor(state: CommunityState, private readonly hooks: CommunitySessionHooks, rows: readonly { id: string; frame: CommunityMessageFrame }[] = []) {
@@ -1560,9 +1564,10 @@ export class CommunitySession {
 
   /**
    * Leaves: a signed request any other member commits, and my secrets go now. The admin must
-   * hand over the role first (the engine does it for a leaving admin).
+   * hand over the role first (the engine does it for a leaving admin). `follow`: commits and secrets are still taken
+   * after (`followAfterLeave`).
    */
-  leave(): Promise<CommunityLeaveFrame | null> {
+  leave(follow = false): Promise<CommunityLeaveFrame | null> {
     return this.serialize(async () => {
       if (this.state.status !== "active") return null;
       if (this.isAdmin && this.others.length) throw new Error("Make someone else the admin before leaving");
@@ -1573,10 +1578,44 @@ export class CommunitySession {
         break;
       }
       this.hooks.broadcast(frame);
+      const tip = this.state.secrets[this.topHash];
+      this.leftSecret = tip ? { h: this.topHash, s: tip } : undefined;
       this.out("left", "You left this group");
+      this.following = follow;
       await this.persist();
       this.hooks.changed();
       return frame;
+    });
+  }
+
+  /**
+   * After I left with `follow` (WISP 903 § Leaving, "A role that reaches a leave"): commits and secrets are taken still,
+   * as a member whose admission lost takes them, so a hand-over that crossed my leave reaches me (`handOnAfterLeave`).
+   * Once the app has forgotten the group (nothing is saved any more), the secret of the epoch I left in comes back, in
+   * memory only, for the epochs derived from it. Nothing else is heard.
+   */
+  followAfterLeave(): Promise<void> {
+    return this.serialize(async () => {
+      if (!this.following || this.state.status !== "left") return;
+      const kept = this.leftSecret;
+      if (!kept) return;
+      this.state.secrets[kept.h] = kept.s;
+      for (const [child, c] of this.known) if (c.p === kept.h) this.takeDerived(child);
+    });
+  }
+
+  /**
+   * After I left, a chain that names me the admin (a hand-over that crossed my leave): the role goes on to
+   * `pick(<the signer of my tip>)` with a `role` commit of mine, as an admin's leave hands it. True when it went; false
+   * while the secret of my tip has not come (it is tried again).
+   */
+  handOnAfterLeave(pick: (by: string) => string | undefined, now = Date.now()): Promise<boolean> {
+    return this.serialize(async () => {
+      if (!this.following || this.state.status !== "left" || this.admin !== this.myKey || !this.state.secrets[this.topHash]) return false;
+      const next = pick(this.top.by);
+      if (!next || next === this.myKey || !rosterHas(this.roster, next)) return false;
+      await this.commit("role", { s: next }, now);
+      return true;
     });
   }
 
@@ -1588,7 +1627,13 @@ export class CommunitySession {
       // Not confirmed as the active device: the requests wait, untouched, for the next try (or another hub).
       if (this.state.pendingLeaves.length && this.hooks.adminTurn && !(await this.hooks.adminTurn())) return 0;
       let done = 0;
+      // A hand-over that crossed the new admin's leave (its request is here, and never committed): the member who handed
+      // it the role, leaving too, stays in until the role goes on. Its app follows the chain after it left, and may be the
+      // only edge the new admin's app has to hand the role on over (WISP 903 § Leaving, "A role that reaches a leave").
+      // The admin's request is kept, not committed: once its app hands the role on, it is a member's.
+      const handedBy = this.state.pendingLeaves.some(r => r.s === this.admin) ? [...this.state.chain].reverse().find(c => c.k === "role")?.by : undefined;
       for (const request of [...this.state.pendingLeaves]) {
+        if ((request.s === handedBy || request.s === this.admin) && request.s !== this.myKey && rosterHas(this.roster, request.s)) continue;
         if (!rosterHas(this.roster, request.s) || request.s === this.myKey || request.s === this.admin) { this.state.pendingLeaves = this.state.pendingLeaves.filter(r => r !== request); continue; }
         try { const { hash } = await this.commit("leave", { s: request.s, ls: request.ls, ...(request.ls3 ? { ls3: request.ls3 } : {}) }, now); this.markLeft(hash, request.s); done++; } catch { /* not allowed right now */ }
         this.state.pendingLeaves = this.state.pendingLeaves.filter(r => r !== request);
@@ -1978,8 +2023,9 @@ export class CommunitySession {
       // A frame of an answer to my sync keeps it open: the answer goes a slice at a time.
       const now = this.hooks.clock?.() ?? Date.now();
       if ((this.answering.get(from) ?? 0) > now) this.answering.set(from, now + ANSWER_WINDOW_MS);
-      // A member who lost its admission still hears commits: the next one may take it in.
-      if (this.state.status !== "active" && !(this.state.status === "lost" && (frame.t === "group-commit" || frame.t === "group-secret" || frame.t === "group-secrets"))) return false;
+      // A member who lost its admission still hears commits: the next one may take it in. One that left, while it
+      // follows its chain (`followAfterLeave`): the next one may hand it the role.
+      if (this.state.status !== "active" && !((this.state.status === "lost" || this.following) && (frame.t === "group-commit" || frame.t === "group-secret" || frame.t === "group-secrets"))) return false;
       switch (frame.t) {
         case "group-msg": return this.receiveMessage(from, raw);
         case "group-commit": return this.receiveCommit(from, frame.commit);
