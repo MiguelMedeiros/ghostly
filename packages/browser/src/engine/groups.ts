@@ -1,7 +1,7 @@
 import {
   GroupSession, GROUP_EDIT_FRAME, GROUP_PIN_FRAME, GROUP_REACTION_FRAME, GROUP_REACTED_FRAME, GROUP_TYPING_FRAME, readReaction, MAX_GROUP_CHAIN, parseGroupCommit, GROUP_MEMBER_CAP, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_VERSION_SIGNALS, GROUP_SIGNAL_FRAME, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, PIN_LIMITS, ReactionWindow, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
   EXPECT_PEER_MS, presenceSeenAt, groupName, knockIdentity, knockRecords, mentionsMember, pinIsNewer, readPin, receivedTimestamp, mergeKnocks, readKnocks, rosterAdmin, rosterHas, verifyCommitSignature, decodeCommunityLink, commitHash,
-  GROUP_ADMIN_OFF_ERROR, GROUP_LIMITS, frameBytes, type GroupMessageFrame,
+  GROUP_ADMIN_OFF_ERROR, GROUP_LIMITS, frameBytes, meshMessageRef, type GroupMessageFrame,
   GROUP_HAVE_FRAME, GROUP_VERSION_FILES, GROUP_WANT_FRAME, GROUP_WANT_NO_FRAME, type GroupFileMeta,
   type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
@@ -783,6 +783,8 @@ export class Groups {
       this.framesKept.set(group.id, framed.map(m => ({ id: m.id, bytes: frameBytes(m.frame as GroupMessageFrame) })));
       // The session hands on from the frames its messages' rows hold (`StoredMessage.frame`), not from its own record.
       if (group.state) this.attach(group.state, framed.map(m => m.frame as GroupMessageFrame));
+      // My counter goes above every row of mine stored here: one an older app stored before it was killed mid-send.
+      this.ownRows(group.id, history);
       if (group.invited) this.invited.set(group.id, new Set(Object.keys(group.invited)));
       loadMarks(this.marks, group, history);
       this.host.loaded?.(group.id, history);
@@ -2886,6 +2888,8 @@ export class Groups {
       if (session.status !== "active" || this.stored.get(groupId)?.left) continue;
       // What I wrote while behind on the chain, for the members let in meanwhile (WISP 902 § Catch-up).
       void session.reseal().catch(() => {});
+      // A text of mine an app killed mid-send saved but did not store or say (WISP 902 § Messages).
+      void session.resume().catch(() => {});
       // My name, to members that may have no edge with me: once per start and on a rename (WISP 902 § Messages).
       void session.sayName().catch(() => {});
       this.farewellsTick(groupId, session, now);
@@ -2967,6 +2971,18 @@ export class Groups {
     const session = this.sessions.get(groupId);
     if (!session) throw new Error("Group not found");
     return session;
+  }
+
+  /** Tells a group's session the numbers its own rows hold (`GroupSession.ownRows`). */
+  private ownRows(groupId: string, history: readonly StoredMessage[]): void {
+    const session = this.sessions.get(groupId);
+    if (!session) return;
+    const rows: { epoch: number; seq: number }[] = [];
+    for (const m of history) {
+      const ref = m.sender === "me" ? meshMessageRef(m.id) : null;
+      if (ref && ref.s === session.myKey) rows.push({ epoch: ref.e, seq: ref.n });
+    }
+    session.ownRows(rows);
   }
 
   /** `frames`: what the group's rows hold to hand on, oldest first (none yet for a group just made, joined or given back). */
