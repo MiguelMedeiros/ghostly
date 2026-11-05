@@ -83,6 +83,8 @@
     "fedimintNotInvite": "Questo non è un codice di invito Fedimint: inizia con fed1",
     "fedimintRealOnTestnet": "Questa federazione detiene bitcoin reali",
     "fedimintRealOnTestnetNext": "Aggiungila a un portafoglio Fedimint Mainnet.",
+    "fedimintRedeemUnheard": "La federazione non ha risposto su queste note",
+    "fedimintRedeemUnheardNext": "Se non compaiono presto nel tuo saldo, incollale di nuovo.",
     "fedimintTestOnMainnet": "Questa federazione è su {{chain}}, una rete di test",
     "fedimintTestOnMainnetNext": "Aggiungila a un portafoglio Fedimint Testnet.",
     "feeAboveLimit": "La commissione supera il tuo limite",
@@ -235,7 +237,6 @@
     "adminRename": "Solo l'admin può rinominare il gruppo",
     "adminRotate": "Solo l'admin può rinnovare il segreto del gruppo",
     "adminShares": "Solo l'admin può condividere un link al gruppo",
-    "alreadyJoining": "Stai già entrando in questo gruppo",
     "alreadyMember": "Questo contatto è già un membro",
     "chainFull": "La cronologia dei membri del gruppo è piena",
     "chainFullNext": "Crea un nuovo gruppo.",
@@ -601,6 +602,16 @@
     "notAddress": "Non è un indirizzo di relay: {{address}}",
     "useHttps": "Usa https:// nell'indirizzo del relay: {{address}}",
     "useWss": "Usa wss:// nell'indirizzo del relay"
+  },
+  "services": {
+    "addressNext": "Usa un indirizzo di questo computer, come localhost:3400.",
+    "badAddress": "Impossibile leggere questo indirizzo",
+    "name": "Dai un nome al servizio",
+    "noCredentials": "L'indirizzo non può contenere nome utente o password",
+    "noQuery": "L'indirizzo non può avere una parte con ? o #",
+    "portZero": "Nessuna app web ascolta sulla porta 0",
+    "thisComputer": "Si possono condividere solo servizi di questo computer",
+    "webOnly": "Si possono condividere solo indirizzi web (http o https)"
   },
   "startAgain": "Ricomincia",
   "transport": {

@@ -1,4 +1,4 @@
-import { NO_PICTURE_METADATA, PICTURE_METADATA_LIMITS, isStrippedPicture, stripPictureMetadata } from "@ghostly/core";
+import { NO_PICTURE_METADATA, PICTURE_METADATA_LIMITS, isStrippedPicture, stripPictureMetadata, videoMetadataPatches, withoutVideoMetadata, type VideoPatch } from "@ghostly/core";
 import { FileAppender, storedSize } from "../shared/storedFiles";
 import { SMALL_FILE_BYTES, blobDigest, fileBytes, fileBytesOf } from "../shared/fileBytes";
 import { errorLine, fileStore, type StoredFile } from "../shared/idb";
@@ -55,14 +55,47 @@ async function bytesHere(file: StoredFile): Promise<number> {
   return (await bytes?.size(file.id)) ?? 0;
 }
 
+type Read = (offset: number, length: number) => Promise<Uint8Array>;
+
+/** `read` with the parts `patches` replace (zeros where a patch has no bytes). */
+function patchedRead(read: Read, patches: VideoPatch[]): Read {
+  return async (offset, length) => {
+    const part = (await read(offset, length)).slice();
+    const end = offset + part.length;
+    for (const { start, end: until, bytes } of patches) {
+      if (until <= offset || start >= end) continue;
+      const from = Math.max(start, offset), to = Math.min(until, end);
+      if (bytes) part.set(bytes.subarray(from - start, to - start), from - offset);
+      else part.fill(0, from - offset, to - offset);
+    }
+    return part;
+  };
+}
+
 /**
- * A received picture as it goes on: without its metadata (one from an app that sent it with them keeps where its author
- * took it, the device, the time), read whole; undefined for any other file, copied as it is. Refused with
- * `NO_PICTURE_METADATA` when its metadata cannot be removed, as a picture sent from here is.
+ * A received picture or video as it goes on: without its metadata (one from an app that sent it with them keeps where
+ * its author took it, the device, the time), as one sent from here; undefined for any other file, copied as it is. A
+ * picture is read whole; a video's stripped bytes are a Blob when it is kept in one, else read through the parts
+ * changed. Refused with `NO_PICTURE_METADATA` or `NO_VIDEO_METADATA` when its metadata cannot be removed.
  */
-async function withoutMetadata(source: StoredFile, size: number, file: MessageFile, read: (offset: number, length: number) => Promise<Uint8Array>): Promise<Blob | undefined> {
-  if (file.voice || file.video || !size) return undefined;
-  if (!isStrippedPicture(await read(0, Math.min(PICTURE_METADATA_LIMITS.headBytes, size)), file.mime)) return undefined;
+async function withoutMetadata(source: StoredFile, size: number, file: MessageFile, read: Read): Promise<Blob | Read | undefined> {
+  if (file.voice || !size) return undefined;
+  if (file.video || !isStrippedPicture(await read(0, Math.min(PICTURE_METADATA_LIMITS.headBytes, size)), file.mime)) {
+    if (source.blob) return withoutVideoMetadata(source.blob, file.mime);
+    // A whole box at a time: a storage's read can return fewer bytes than asked before the end.
+    const readFully: Read = async (offset, length) => {
+      const whole = new Uint8Array(Math.max(0, Math.min(length, size - offset)));
+      for (let at = 0; at < whole.length;) {
+        const part = await read(offset + at, whole.length - at);
+        if (!part.length) break;
+        whole.set(part, at);
+        at += part.length;
+      }
+      return whole;
+    };
+    const patches = await videoMetadataPatches({ size, read: readFully }, file.mime);
+    return patches && patchedRead(read, patches);
+  }
   if (size > PICTURE_METADATA_LIMITS.maxBytes) throw new Error(NO_PICTURE_METADATA);
   const whole = new Uint8Array(size);
   for (let offset = 0; offset < size;) {
@@ -76,8 +109,9 @@ async function withoutMetadata(source: StoredFile, size: number, file: MessageFi
 
 /**
  * A copy of a file on this device, for sending in another chat under `file.id`: a small one whole, a larger one a
- * step at a time, never whole in memory; a picture without its metadata, read whole. Refused while it is still
- * arriving, or when its bytes are gone. Resolves to `file` as it goes: a stripped picture's size is its copy's.
+ * step at a time, never whole in memory; a picture without its metadata, read whole, and a video without its. Refused
+ * while it is still arriving, or when its bytes are gone. Resolves to `file` as it goes: a stripped file's size is its
+ * copy's.
  */
 export async function copyForForward(sourceId: string, target: { linkId: string; wireId: string; timestamp: number; file: MessageFile }): Promise<MessageFile> {
   const source = await fileStore.get(sourceId);
@@ -89,10 +123,11 @@ export async function copyForForward(sourceId: string, target: { linkId: string;
   if (source.direction === "in" && !checked || await bytesHere(source) !== stored)
     throw new Error("The file has not arrived yet");
   const from = source.bytes ? await fileBytesOf(source.bytes) : null;
-  const read = async (offset: number, length: number) => source.blob ? new Uint8Array(await source.blob.slice(offset, offset + length).arrayBuffer()) : from!.read(source.id, offset, length);
+  const read: Read = async (offset, length) => source.blob ? new Uint8Array(await source.blob.slice(offset, offset + length).arrayBuffer()) : from!.read(source.id, offset, length);
   // The bytes it is copied from, and their digest: the stripped copy's, computed on what is sent, never the original's.
   const stripped = await withoutMetadata(source, stored, target.file, read);
-  const blob = stripped ?? source.blob, size = stripped?.size ?? stored;
+  const blob = typeof stripped === "function" ? undefined : stripped ?? source.blob, size = blob && stripped ? blob.size : stored;
+  const readCopy = typeof stripped === "function" ? stripped : read;
   const known = stripped ? undefined : source.digest;
   const { linkId, wireId, timestamp } = target, file = stripped ? { ...target.file, size } : target.file;
   const metadata = { name: file.name, size: file.size, mime: file.mime, timestamp, voice: file.voice, video: file.video, image: file.image };
@@ -109,7 +144,7 @@ export async function copyForForward(sourceId: string, target: { linkId: string;
   try {
     const appender = new FileAppender(bytes, file.id);
     for (let offset = 0; offset < size;) {
-      const part = blob ? new Uint8Array(await blob.slice(offset, offset + 1024 * 1024).arrayBuffer()) : await read(offset, Math.min(1024 * 1024, size - offset));
+      const part = blob ? new Uint8Array(await blob.slice(offset, offset + 1024 * 1024).arrayBuffer()) : await readCopy(offset, Math.min(1024 * 1024, size - offset));
       if (!part.length) throw new Error("The file is shorter than it says");
       await appender.append(part);
       offset += part.length;

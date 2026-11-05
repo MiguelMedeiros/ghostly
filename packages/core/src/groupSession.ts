@@ -627,23 +627,19 @@ export class GroupSession {
   get others(): string[] { return this.roster.map(([k]) => k).filter(k => k !== this.myKey); }
   /**
    * Whether `key` could read message `messageId` (`<s>:<e>:<n>`) and still can: in the roster now, and in the roster of
-   * its epoch or, given the message's time `ts`, in the roster of the epoch its author, behind on the chain, said it
-   * again under (`saidAgainEpoch`): the newest after its own that comes before any `add` dated later than it. That
-   * member read it under its first id. A holder serves a group file only to such a member (WISP 503 § Asking).
+   * its epoch, or of an epoch it was said again under (its author was behind, `resealBehind`): `arrived`, the one its
+   * copy reached this device under, or, for a message of mine, one I said it again under. That member read it under its
+   * first id. Decided by the epochs a frame was sealed under, never by comparing two devices' clocks. A holder serves a
+   * group file only to such a member (WISP 503 § Asking).
    */
-  couldRead(key: string, messageId: string, ts?: number): boolean {
-    const e = Number(messageId.split(":")[1]);
-    const then = this.state.chain.find(c => c.e === e);
-    if (!then || !rosterHas(this.roster, key)) return false;
+  couldRead(key: string, messageId: string, arrived?: number): boolean {
+    const ref = meshMessageRef(messageId);
+    const then = ref && this.state.chain[ref.e];
+    if (!ref || !then || !rosterHas(this.roster, key)) return false;
     if (rosterHas(then.m, key)) return true;
-    if (ts === undefined) return false;
-    let again: GroupCommit | undefined;
-    for (let later = e + 1; later <= this.epoch; later++) {
-      const c = this.state.chain[later];
-      if (!c || (c.k === "add" && c.ts > ts)) break;
-      again = c;
-    }
-    return !!again && rosterHas(again.m, key);
+    const again = ref.s === this.myKey ? this.state.sent.filter(f => f.o?.e === ref.e && f.o.n === ref.n).map(f => f.e) : [];
+    if (arrived !== undefined && arrived > ref.e) again.push(arrived);
+    return again.some(e => rosterHas(this.state.chain[e]?.m ?? [], key));
   }
   role(key: string): GroupRole | undefined { return this.roster.find(([k]) => k === key)?.[1]; }
   /** The group's picture, if it has one. */
@@ -890,7 +886,9 @@ export class GroupSession {
     this.chainMovedAt = this.clock();
     this.state.secrets[epoch] = toBase64Url(secret);
     this.pruneSecrets();
+    this.pruneSeen();
     this.pruneRelay();
+    this.pruneNames();
     this.state.seq = 0; this.state.seqEpoch = epoch;
     await this.persist();
     // The old roster hears about it, the one removed included (without a secret). A key respelled in its last character
@@ -955,6 +953,11 @@ export class GroupSession {
   private pruneSecrets(): void {
     const epochs = Object.keys(this.state.secrets).map(Number).sort((a, b) => a - b);
     for (const e of epochs.slice(0, Math.max(0, epochs.length - GROUP_LIMITS.secrets))) delete this.state.secrets[e];
+  }
+
+  /** Someone out of the roster is named by no record of theirs, mine as the admin's: let in again, theirs start over. */
+  private pruneNames(): void {
+    for (const key of Object.keys(this.state.names ?? {})) if (!rosterHas(this.roster, key)) delete this.state.names![key];
   }
 
   /**
@@ -1798,6 +1801,16 @@ export class GroupSession {
     // Epochs older than what I can read are not worth a replay window.
     for (const e of Object.keys(bySender)) if (Number(e) < this.epoch - GROUP_LIMITS.secrets) delete bySender[e];
   }
+  /**
+   * The same for every sender, as the chain moves: `markSeen` prunes only the sender that writes, and a member who left
+   * never writes again. Each sync carries what is left here (`have`, `miss`), on every edge.
+   */
+  private pruneSeen(): void {
+    for (const [sender, bySender] of Object.entries(this.state.seen)) {
+      for (const e of Object.keys(bySender)) if (Number(e) < this.epoch - GROUP_LIMITS.secrets) delete bySender[e];
+      if (!Object.keys(bySender).length) delete this.state.seen[sender];
+    }
+  }
 
   private park(from: string, frame: GroupMessageFrame): void {
     if (frame.e > this.epoch + GROUP_LIMITS.secrets) return;
@@ -1916,9 +1929,9 @@ export class GroupSession {
     }
     if (sealed) this.takeSecret(commit.e, sealed);
     this.pruneSecrets();
+    this.pruneSeen();
     this.pruneRelay();
-    // Someone out of the roster is named by no record of theirs: let in again, theirs start over.
-    for (const key of Object.keys(this.state.names ?? {})) if (!rosterHas(commit.m, key)) delete this.state.names![key];
+    this.pruneNames();
     // Saved like the messages that come with it: a member back after many joins and leaves wrote its whole state, the
     // chain growing each time, once per commit it caught up (39.5 MB for 200). A save lost only means the commits are
     // asked for again at the next sync; my own commits, sends and status changes are still saved at once.
@@ -2085,10 +2098,16 @@ export class GroupSession {
     });
   }
 
-  /** Signs a body under my current commit, keeps it and sends it to every member. Inside `serialize`. */
-  private async publishMeta(body: string, now: number): Promise<void> {
+  /**
+   * Signs a body under my current commit, keeps it and sends it to every member. Inside `serialize`. Like a commit, only
+   * with admin work on and a good turn read (WISP 06 § Forced takeover): refused otherwise, or, `quiet`, not made.
+   */
+  private async publishMeta(body: string, now: number, quiet = false): Promise<void> {
+    const refused = this.hooks.adminWork?.() === false ? new Error(GROUP_ADMIN_OFF_ERROR)
+      : this.hooks.adminTurn && !(await this.hooks.adminTurn()) ? engineError("groupTurnUnconfirmed") : undefined;
+    if (refused) { if (quiet) return; throw refused; }
     const before = this.state.meta;
-    const meta = signGroupMeta({ g: this.id, e: this.epoch, h: commitHash(this.top), r: nextGroupMetaRevision(before, this.epoch), ts: now }, body, this.identity.seed, this.myKey);
+    const meta = signGroupMeta({ g: this.id, e: this.epoch, h: commitHash(this.top), r: nextGroupMetaRevision(before, this.epoch, this.seqFloor()), ts: now }, body, this.identity.seed, this.myKey);
     this.state.meta = meta;
     this.state.metaPast = keepPastGroupMeta(this.state.metaPast, before, meta);
     await this.persist();
@@ -2164,7 +2183,7 @@ export class GroupSession {
     if (pending) await this.receiveMeta(pending.from, pending.frame);
     // Joiners accept only the current admin's statement: a new admin signs the picture again.
     // Dated when it was set: a member holding nothing tells it from a change of mine by that (`metaAuthor`).
-    if (this.isAdmin && this.state.meta && this.state.meta.by !== this.myKey) await this.publishMeta(this.state.meta.body, this.state.meta.ts);
+    if (this.isAdmin && this.state.meta && this.state.meta.by !== this.myKey) await this.publishMeta(this.state.meta.body, this.state.meta.ts, true);
   }
 
   private async fork(reason: string): Promise<void> {

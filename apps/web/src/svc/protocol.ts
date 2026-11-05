@@ -14,6 +14,8 @@
 export const BRIDGE_DIR = "/_ghostly-svc/";
 export const BRIDGE_PAGE = `${BRIDGE_DIR}bridge.html`;
 export const BRIDGE_SCRIPT = `${BRIDGE_DIR}bridge.js`;
+/** Answered by the server with `Clear-Site-Data: "cookies"` (nginx-services.conf): the one way to every cookie's path. */
+export const CLEAR_COOKIES = `${BRIDGE_DIR}clear-cookies`;
 /** At the root, so its scope can be the whole origin without a `Service-Worker-Allowed` header. */
 export const WORKER_SCRIPT = "/ghostly-services-sw.js";
 

@@ -1,6 +1,9 @@
 import { CliError } from "../errors";
 import { type Command, groupWait, here, showSecret, secret, cursor, pageLimit, timeout, typingFor, typingKind } from "./shared";
 
+const nameForce = { type: "boolean", description: "Use the name even if it looks like a seed, a key or ecash" } as const;
+const forced = (options: Record<string, unknown>) => (options.force === true ? { force: true } : {});
+
 /** Groups: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
   "group accept": { method: "group.accept", usage: "group accept <group>", summary: "Accept an invitation to a group", args: ["group"], params: (_, { group }) => ({ group }) },
@@ -9,9 +12,9 @@ export const commands: Record<string, Command> = {
     options: showSecret, params: ({ options }, a) => ({ group: a.group, member: a.member, ...secret(options) }),
   },
   "group create": {
-    method: "group.create", usage: "group create <name...> [--mesh]", summary: "A community (a link anyone can open) or, with --mesh, a private group of up to 32",
-    args: ["name..."], options: { mesh: { type: "boolean", description: "A private mesh of contacts instead of a community" } },
-    params: ({ options }, { name }) => ({ name, profile: options.mesh ? "mesh" : "community" }),
+    method: "group.create", usage: "group create <name...> [--mesh] [--force]", summary: "A community (a link anyone can open) or, with --mesh, a private group of up to 32",
+    args: ["name..."], options: { mesh: { type: "boolean", description: "A private mesh of contacts instead of a community" }, force: nameForce },
+    params: ({ options }, { name }) => ({ name, profile: options.mesh ? "mesh" : "community", ...forced(options) }),
   },
   "group decline": { method: "group.decline", usage: "group decline <group>", summary: "Decline an invitation to a group", args: ["group"], params: (_, { group }) => ({ group }) },
   "group forget": {
@@ -74,8 +77,8 @@ export const commands: Record<string, Command> = {
     options: showSecret, params: ({ options }, a) => ({ group: a.group, member: a.member, ...secret(options) }),
   },
   "group rename": {
-    method: "group.rename", usage: "group rename <group> <name...> [--show-secret]", summary: "Rename the group (admin; the picture stays)", args: ["group", "name..."],
-    options: showSecret, params: ({ options }, a) => ({ group: a.group, name: a.name, ...secret(options) }),
+    method: "group.rename", usage: "group rename <group> <name...> [--force] [--show-secret]", summary: "Rename the group (admin; the picture stays)", args: ["group", "name..."],
+    options: { ...showSecret, force: nameForce }, params: ({ options }, a) => ({ group: a.group, name: a.name, ...forced(options), ...secret(options) }),
   },
   "group rotate": {
     method: "group.rotate", usage: "group rotate <group> [--show-secret]", summary: "A fresh group secret, members unchanged (admin)", args: ["group"],

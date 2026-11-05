@@ -9,9 +9,11 @@ import { removeStored, waitingGroupFile } from "@ghostly/browser/shared/storedFi
 import { replyRef } from "@ghostly/browser/shared/replies";
 import type { FileTransferView, GroupView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
 import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
+import { childEnv } from "./childEnv";
 import { bool, chatOf, findChatOrGroup, list, node, num, oneOf, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
 import { groupSendRefused } from "./api";
 import { CliError } from "./errors";
+import { guardText } from "./secretGuard";
 import { endTyping } from "./typing";
 import { measureVoice } from "./voicePeaks";
 
@@ -259,7 +261,7 @@ async function markDownloaded(path: string): Promise<void> {
   if (process.platform === "darwin") {
     // Flags 0x0001 (downloaded) and 0x0080, as browsers write them; then time and agent.
     const value = `0081;${Math.floor(Date.now() / 1000).toString(16).padStart(8, "0")};Ghostly;`;
-    await new Promise<void>((done) => execFile("/usr/bin/xattr", ["-w", "com.apple.quarantine", value, path], { timeout: 10_000 }, () => done()));
+    await new Promise<void>((done) => execFile("/usr/bin/xattr", ["-w", "com.apple.quarantine", value, path], { timeout: 10_000, env: childEnv() }, () => done()));
   } else if (process.platform === "win32") {
     await writeFile(`${path}:Zone.Identifier`, "[ZoneTransfer]\r\nZoneId=3\r\n").catch(() => {});
   }
@@ -269,6 +271,8 @@ const ACTIONS = ["accept", "decline", "pause", "resume", "cancel", "resend", "re
 
 export const FILE_METHODS: Record<string, Method> = {
   async "file.send"(ctx, params) {
+    // The contact (or every member) reads its name as a message's text (docs/CLI.md § Safety).
+    guardText(str(params, "name"), bool(params, "force"), "file's name", "send it");
     const target = chatOrGroupOf(ctx, params);
     const path = resolve(str(params, "path", true));
     let info;

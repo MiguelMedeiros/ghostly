@@ -396,9 +396,10 @@ export class IdentityExchange {
 
   /**
    * Run the checks again on a received proof: its revocation record, then (unless `revocationOnly`) the
-   * provider's check (a domain record may be gone).
+   * provider's check (a domain record may be gone). `keepUnavailable`: a check that could not run (IdentityCheckUnavailable)
+   * is thrown, and the proof is left as it was, for a check this side started on its own.
    */
-  async recheck(id: string, { revocationOnly = false } = {}): Promise<ReceivedIdentity> {
+  async recheck(id: string, { revocationOnly = false, keepUnavailable = false } = {}): Promise<ReceivedIdentity> {
     const r = this.options.storage.read().received.find(x => x.id === id);
     if (!r) throw new Error("Unknown identity");
     if (r.status === "revoked") return r;
@@ -413,6 +414,7 @@ export class IdentityExchange {
       if (verified.subject !== r.verified.subject) throw new Error("The identity changed");
       outcome = x => ({ ...x, verified: { ...verified, display: verified.display ?? x.verified.display }, checkedAt: this.now(), status: "verified", error: undefined });
     } catch (e) {
+      if (keepUnavailable && e instanceof IdentityCheckUnavailable) throw e;
       const error = shortError(e);
       outcome = x => ({ ...x, checkedAt: this.now(), status: "unconfirmed", error });
     }

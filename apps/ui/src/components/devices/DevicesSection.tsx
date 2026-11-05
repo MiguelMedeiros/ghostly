@@ -92,8 +92,9 @@ export function DevicesSection() {
   const devices = (view?.devices ?? []).filter((device) => device.key !== gone);
   const { answers: checked, check } = useConnectionCheck(devices);
   const full = devices.length >= MAX_DEVICES;
-  // The device a takeover stopped, while it is still in the set: what "Remove <device>" after the offer removes.
-  const stopped = view?.secretOffer?.device ? devices.find((device) => !device.self && device.name === view.secretOffer!.device) : undefined;
+  // The device a takeover stopped, while it is still in the set: what "Remove <device>" after the offer removes. Found by
+  // its key: two devices may have the same name.
+  const stopped = view?.secretOffer?.key ? devices.find((device) => !device.self && device.key === view.secretOffer!.key) : undefined;
   const waiting = listNamesFor(view?.waiting?.map((w) => w.name) ?? [], language);
   // The handoff keeps the name the device had when it started: the set has its name after a Rename.
   const handoffDevice = handoff ? devices.find((device) => device.key === handoff.key)?.name || handoff.device : "";
@@ -134,7 +135,7 @@ export function DevicesSection() {
       {view?.waiting?.length ? <Row testId="device-waiting" label={fillNames(t("devices.section.waiting", { devices: waiting[0] }), waiting[1])} /> : null}
       {view?.foreignSet && <Row testId="device-foreign-set" label={t("devices.section.foreign")} />}
       {thisActive && view?.secretOffer && (
-        <Row testId="device-secret-offer" label={view.secretOffer.device ? fillNames(t("devices.secret.offer"), { device: view.secretOffer.device }) : t("devices.secret.offerUnnamed")} info={t("devices.secret.info")}>
+        <Row testId="device-secret-offer" label={stopped ? fillNames(t("devices.secret.offer"), { device: stopped.name }) : t("devices.secret.offerUnnamed")} info={t("devices.secret.info")}>
           {view.secretOffer.lost && <Button data-testid="device-secret-offer-lost" onClick={() => setLost(true)}>{t("devices.remove.lost")}</Button>}
           {stopped
             ? <Button variant="primary" data-testid="device-secret-offer-remove" onClick={() => setRemoving({ key: stopped.key, name: stopped.name })}>{fillNames(t("devices.secret.removeOffer"), { device: stopped.name })}</Button>

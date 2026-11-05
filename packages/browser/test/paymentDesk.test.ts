@@ -346,9 +346,17 @@ describe("requests we send", () => {
   it("a USDT request carries the payee's address in token units, and needs USDT on both sides", async () => {
     const { desk, link, sent, state, texts } = setup();
     const { paymentId } = await desk.request({ linkId: "l", amount: 1_500_000, timestamp: 1, method: "usdt" });
+    // Asked: a little more than typed (its own amount, under a thousandth), stored and shown as asked.
+    const asked = state(paymentId)!.amount;
+    expect(asked).toBeGreaterThan(1_500_000);
+    expect(asked).toBeLessThan(1_501_000);
     expect(state(paymentId)).toMatchObject({ unit: "testusdt", target: { method: "usdt" }, state: "pending" });
-    expect(sent[0].frame).toMatchObject({ amount: { value: "1500000", asset: "testusdt" }, endpoints: [[ENDPOINT.usdt, JSON.stringify(state(paymentId)!.target)]] });
-    expect(texts()).toEqual(["Requested 1.5 TEST-USDT"]);
+    expect(sent[0].frame).toMatchObject({ amount: { value: String(asked), asset: "testusdt" }, endpoints: [[ENDPOINT.usdt, JSON.stringify(state(paymentId)!.target)]] });
+    expect(texts()).toHaveLength(1);
+    expect(texts()[0]).toMatch(/^Requested 1\.50[0-9]*[1-9] TEST-USDT$/);
+    // Every open request asks its own amount.
+    const others = await Promise.all([2, 3, 4].map((timestamp) => desk.request({ linkId: "l", amount: 1_500_000, timestamp, method: "usdt" })));
+    expect(new Set([asked, ...others.map((o) => state(o.paymentId)!.amount)]).size).toBe(4);
     link.supportsUsdtPayments = false;
     await expect(desk.request({ linkId: "l", amount: 1, timestamp: 2, method: "usdt" })).rejects.toThrow("Both peers need USDT");
     link.supportsArkPayments = false;
@@ -627,7 +635,9 @@ describe("asks to pay without a request", () => {
     await desk.onPaymentAsk("l", { id: "ask_000001", timestamp: 1, amount: { value: "1000000", asset: "sat" }, method: "usdt" });
     await desk.onPaymentAsk("l2", { id: "ask_000002", timestamp: 1, amount: { value: "1000000", asset: "usdtbase" }, method: "usdt" });
     expect(sent.map((s) => s.frame.ask)).toEqual(["ask_000002"]);
-    expect(sent[0].frame).toMatchObject({ amount: { value: "1000000", asset: "testusdt" } });
+    expect(sent[0].frame).toMatchObject({ amount: { asset: "testusdt" } });
+    expect(Number(sent[0].frame.amount.value) - 1_000_000, "the answer asks its own amount, under a thousandth more").toBeGreaterThan(0);
+    expect(Number(sent[0].frame.amount.value) - 1_000_000).toBeLessThan(1000);
     net.online = false;
     await desk.onPaymentAsk("l3", { id: "ask_000003", timestamp: 1, amount: { value: "10", asset: "sat" }, method: "arkade" });
     expect(sent).toHaveLength(1);
@@ -640,6 +650,12 @@ describe("asks to pay without a request", () => {
     expect(sent[0].frame.amount).toEqual({ value: "2000000", asset: "usdtbase" });
     await desk.onPaymentRequest("l", { id: "u1", timestamp: 2, amount: { value: "2000000", asset: "testusdt" }, endpoints: [[ENDPOINT.usdt, JSON.stringify(usdt())]], ask: usdtAsk });
     expect(desk.payment("u1")?.ask).toBe(usdtAsk);
+    // A newer app's answer asks a little more (its own amount): still the ask's; a thousandth more is not.
+    const { askId: tagged } = await desk.ask({ linkId: "l", amount: 2_000_000, method: "usdt", timestamp: 1, network: "testnet" });
+    await desk.onPaymentRequest("l", { id: "u2", timestamp: 2, amount: { value: "2001000", asset: "testusdt" }, endpoints: [[ENDPOINT.usdt, JSON.stringify(usdt())]], ask: tagged });
+    expect(desk.payment("u2")?.ask).toBeUndefined();
+    await desk.onPaymentRequest("l", { id: "u3", timestamp: 2, amount: { value: "2000347", asset: "testusdt" }, endpoints: [[ENDPOINT.usdt, JSON.stringify(usdt())]], ask: tagged });
+    expect(desk.payment("u3")?.ask).toBe(tagged);
 
     const { askId } = await desk.ask({ linkId: "l", amount: 700, method: "arkade", timestamp: 1, network: "testnet" });
     await desk.onPaymentRequest("l", { id: "b1", timestamp: 2, amount: { value: "700", asset: "sat" }, endpoints: [[ENDPOINT.bitcoin, JSON.stringify(btc())]], ask: askId });

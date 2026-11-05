@@ -909,6 +909,22 @@ describe("GroupChat: the options menu", () => {
     expect(within(screen.getByRole("dialog")).getByTestId("group-leave-successor")).toHaveTextContent("You are the admin: Alice becomes the admin when you leave.");
   });
 
+  it("tells a community's admin when joiners through the link never answer, and replaces the link in one tap", async () => {
+    const entryLink = "ghostly://c/group-1";
+    const { user, engine } = openGroup(active({ profile: "community", isAdmin: true, entryLink, community: { hub: true, hubs: 1, connected: 0, unansweredKnocks: 16 } }));
+    engine.on("enableGroupLink", () => ({ link: entryLink }));
+    expect(screen.getByTestId("group-knocks-unanswered")).toHaveTextContent("People opening the link may not be getting in");
+    await user.click(screen.getByTestId("group-knocks-reset"));
+    expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: "group-1", reset: true }]);
+    // The new link is to share again: its sheet opens.
+    expect(await screen.findByTestId("group-share-dialog")).toBeInTheDocument();
+  });
+
+  it("says nothing of unanswered joiners to a member, or with none", async () => {
+    openGroup(active({ profile: "community", community: { hub: true, hubs: 1, connected: 0, unansweredKnocks: 16 } }));
+    expect(screen.queryByTestId("group-knocks-unanswered")).toBeNull();
+  });
+
   it("deletes a community nobody is connected to anyway, and says the others still list the person", async () => {
     // Members who never open the app again kept it here for good: Delete was greyed while nobody could take the leave.
     const { user, engine } = openGroup(active({ profile: "community", community: { hub: false, hubs: 0, connected: 0 } }));

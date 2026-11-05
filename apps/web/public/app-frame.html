@@ -8,6 +8,7 @@
   Before any app code:
   - the WebRTC constructors are deleted from this realm;
   - so are History's methods and the Navigation API: the frame shares the page's session history;
+  - `execCommand` refuses the clipboard's commands (copy, cut, paste);
   - the runner refuses to run unless its origin is "null" and it has a parent;
   - the page is locked with a nonce: a second policy, `script-src 'nonce-N' 'wasm-unsafe-eval'`, where N is random and
     lives only in this script's closure (never in an attribute). A frame the app makes (srcdoc, about:blank) has
@@ -40,6 +41,24 @@
       if (name !== "constructor") { try { delete Navigation.prototype[name]; } catch (e) { /* stays: refused below */ } }
     }
   }
+  // The frame's `allow=""` refuses the Clipboard API, but `execCommand("copy")` writes the system clipboard for as long
+  // as a tap in the frame lasts (in Chromium, seconds, from a timer too). An app has no clipboard permission (WISP
+  // 1200), so its clipboard commands answer false; editing commands work on. The wrapper asks nothing the app can
+  // change: it may have changed every prototype by the time it calls.
+  const execCommand = Document.prototype.execCommand;
+  let commands = execCommand;
+  if (typeof execCommand === "function") {
+    const apply = Reflect.apply;
+    const lower = String.prototype.toLowerCase;
+    commands = function (command, showUI, value) {
+      if (arguments.length === 0) return apply(execCommand, this, []);
+      const name = typeof command === "string" ? command : "" + command;
+      const named = apply(lower, name, []);
+      if (named === "copy" || named === "cut" || named === "paste") return false;
+      return apply(execCommand, this, arguments.length > 2 ? [name, showUI, value] : arguments.length > 1 ? [name, showUI] : [name]);
+    };
+    Object.defineProperty(Document.prototype, "execCommand", { configurable: true, writable: true, value: commands });
+  }
   const stop = (why) => {
     document.documentElement.textContent = "This app cannot run here.";
     document.documentElement.setAttribute("data-ghostly-refused", why);
@@ -47,6 +66,7 @@
   if (self.origin !== "null" || window.parent === window) return stop("origin");
   if (Object.getOwnPropertyNames(window).some((name) => /^(webkit)?RTC/.test(name))) return stop("webrtc");
   if (HISTORY.some((name) => name in history) || "navigation" in window) return stop("history");
+  if (document.execCommand !== commands) return stop("clipboard");
 
   // What the runner keeps for itself, taken before the app can touch a prototype.
   const nonceProperty = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "nonce");

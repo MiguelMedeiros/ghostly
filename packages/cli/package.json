@@ -1,6 +1,6 @@
 {
   "name": "@ghostlytools/cli",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "type": "module",
   "description": "Ghostly for bots and terminals: the app's own engine, headless on Node, behind a daemon and a `ghostly` command with JSON output.",
   "license": "MIT",
@@ -53,7 +53,7 @@
     "@secondts/bark": "0.25.0",
     "@serenity-kit/opaque": "1.1.0",
     "@synonymdev/pubky": "0.16.2",
-    "@tetherto/wdk-wallet-evm": "1.0.0-beta.20",
+    "@tetherto/wdk-wallet-evm": "1.0.0-beta.24",
     "b4a": "1.9.0",
     "bittorrent-dht": "11.0.12",
     "ethers": "6.17.0",

@@ -51,6 +51,7 @@ import { CALLS_CAPABILITY, FILES_CAPABILITY, FILES_BINARY_CAPABILITY, KNOWN_SESS
 import { APP_DATA_MAX_BYTES, APP_FRAME, APP_RESUME_GRACE_MS, AppSessions, appDataBytes, appCloseFrame, appDataFrame, appOpenFrame, type AppFrameEvent, type AppSendError } from "./pairedApps";
 import { APP_RANGE_DATA_KIND, APP_RANGE_FRAMES, APP_RANGE_LIMITS, AppRanges, appRangeChunk, appRangeDataFrame, appRangeErrorFrame, decodeAppRangeData, encodeAppRangeData, readAppRangeFrame, type AppRangeTask } from "./pairedAppRanges";
 import { WAKE_FRAME, parseWakeFrame, wakeFrame, type WakeTarget } from "./pairedWake";
+import { CONTACT_ASKER_FRAME, type ContactAskerFrame } from "./contactRecords";
 import { REACTED_FRAME, REACTION_FRAME, REACTION_LIMITS, ReactionWindow, parseReactedFrame, parseReactionFrame, reactedFrame, reactionFrame, type WireReaction } from "./reactions";
 import { PINNED_FRAME, PIN_FRAME, PIN_LIMITS, parsePinFrame, parsePinnedFrame, pinFrame, pinnedFrame, type WirePin } from "./pins";
 import { TYPING_FRAME, TypingReceiver, TypingSender, type TypingActivity } from "./pairedTyping";
@@ -228,7 +229,7 @@ export const LIVENESS_MISSED_PINGS = 3;
 const YIELD_BYE_MS = 300;
 const QUIET_FRAMES = new Set(["paired-ping", "paired-pong", "paired-bye", "paired-policy", "paired-switch-plan", "paired-switch-ready",
   "paired-switch-failed", "paired-switch-keep", "paired-rtc", "paired-adapters", "paired-nick", "paired-avatar", "paired-capabilities",
-  "paired-wake", "paired-hold", "paired-payments", "paired-groups", "paired-services", "paired-reconnect", "paired-reconnect-ack"]);
+  "paired-wake", "paired-hold", "paired-payments", "paired-groups", "paired-services", "paired-reconnect", "paired-reconnect-ack", CONTACT_ASKER_FRAME]);
 /**
  * A ping with nothing at all back this long after it went: the contact may have crashed and started again, with its new
  * offer waiting on the relays, while this side still holds the old session and reads them at a live chat's pace (30 s).
@@ -517,6 +518,11 @@ export interface GhostLinkEvents {
   onPeerWake?(target: WakeTarget | null): void;
   /** Both sides offer `wake/1` on the open session (true), or no longer (false): the moment to share this side's. */
   onWakeSupport?(supported: boolean): void;
+  /**
+   * The contact said it holds the asker key of the contact request that started this chat (WISP 8xx § Accept), not
+   * checked yet: only the caller knows which key it waits for. With this chat's two participation keys.
+   */
+  onContactAsker?(frame: unknown, keys: { mine: string; peer: string }): void;
   /**
    * The contact's app opened, closed or sent data in one of this chat's mini-apps (`apps/1`, WISP 1200 § In a chat),
    * already checked against the receiver's limits; or, as a `close` with `offline`, the session ended while it had one
@@ -896,6 +902,8 @@ export class GhostLink {
   /** Edit frames the contact may send per window; the rest go unconfirmed and come again. */
   private readonly editsReceived = new RateWindow(EDIT_RECEIVE_LIMIT, EDIT_RATE_WINDOW_MS);
   private readonly wakeReceived = new RateWindow(6, 60_000);
+  /** Said once a session by the requester's app: a few a minute at most. */
+  private readonly askerReceived = new RateWindow(4, 60_000);
   /**
    * The contact's name and picture, its word on held items, its ways of paying and its transport descriptors, each saved
    * on this side when it changes: said once a session and when changed, so a handful a minute each. Past that only the
@@ -3525,6 +3533,23 @@ export class GhostLink {
     if (!this.channel || !this.supportsWake) return false;
     try { this.channel.send(JSON.stringify(wakeFrame(target))); return true; } catch { return false; }
   }
+  /**
+   * This side's participation key and the pinned contact's, on a paired session that is open and ready: what the asker's
+   * proof of a contact request is made for (WISP 8xx § Accept). Undefined otherwise.
+   */
+  get participationKeys(): { mine: string; peer: string } | undefined {
+    const credentials = this.options.pairing?.credentials;
+    if (!this.options.params.profile || !credentials?.peerKey || !this.channel || !this.isDataLinkOpen || this.paired?.state.status !== "ready") return undefined;
+    return { mine: credentials.signer ? toZ32(credentials.signer.publicKey) : identityFromSeedB64(credentials.seedB64).pubKeyZ32, peer: credentials.peerKey };
+  }
+  /**
+   * Says on the live session that this side asked through the contact's link (WISP 8xx § Accept). No capability: an app
+   * that does not know the frame drops it. False when it could not go now: the caller says it again on the next session.
+   */
+  sendContactAsker(frame: ContactAskerFrame): boolean {
+    if (!this.channel || !this.participationKeys) return false;
+    try { this.channel.send(JSON.stringify(frame)); return true; } catch { return false; }
+  }
   /** Both sides offer `pin/1` on the open session: a pin can be said and confirmed. */
   get supportsPins(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(PIN_CAPABILITY); }
   /**
@@ -3602,7 +3627,8 @@ export class GhostLink {
   closeApp(app: string): void {
     const frame = JSON.stringify(appCloseFrame(app));
     if (!this.apps.open.delete(app)) return;
-    this.appRanges.closeApp(app, "offline");
+    // Its page is gone, so nothing reads for the contact any more: the places it held free now.
+    this.appRanges.closeApp(app, "offline", true);
     if (this.supportsApps && this.channel) try { this.channel.send(frame); } catch { /* the session is going: the contact hears it ended */ }
   }
   /**
@@ -3658,8 +3684,8 @@ export class GhostLink {
     return this.supportsAppRanges && this.apps.peerOpen.has(app) ? null : "peer-closed";
   }
   /**
-   * Lets the contact's `app` read `file` (what this side's app calls it) for as long as both have the app open on this
-   * session: the serve id to tell it, or why not.
+   * Lets the contact's `app` read `file` (what this side's app calls it) for as long as both have the app open, across
+   * a session change the apps are held across: the serve id to tell it, or why not.
    */
   serveAppFile(app: string, file: string): { serve: string } | { error: "not-open" | "offline" | "peer-closed" } {
     const error = this.appRangesRefusal(app);
@@ -3667,7 +3693,7 @@ export class GhostLink {
   }
   /** Ends a serve; false when it was not served (any more). */
   unserveAppFile(serve: string): boolean { return this.appRanges.unserve(serve); }
-  /** The serve ids `app` has given out on this session. */
+  /** The serve ids `app` has given out and not ended. */
   appServes(app: string): string[] { return this.appRanges.servesOf(app); }
   /**
    * Reads `length` bytes at `offset` of what the contact's `app` serves as `serve`: the bytes (fewer at the end of the
@@ -3711,7 +3737,7 @@ export class GhostLink {
   }
   /** `task`'s file cannot be read: `changed` or `gone` goes in place of its bytes (nothing once it is no longer live, but its place frees). */
   failAppRange(task: AppRangeTask, error: "changed" | "gone"): void { this.appRanges.fail(task, error); }
-  /** Whether `task` still waits for an answer on this session (`AppRanges.holds`): one that does not needs none. */
+  /** Whether `task` still holds a place until it is answered (`AppRanges.holds`): one that does not needs no answer. */
   holdsAppRange(task: AppRangeTask): boolean { return this.appRanges.holds(task); }
   /** An `ar-*` frame from the contact, on a session that agreed `app-ranges/1`. */
   private receiveAppRange(frame: Record<string, unknown>): void {
@@ -3748,8 +3774,8 @@ export class GhostLink {
    * gives what it held its own grace: a later one's apps do not close at an earlier one's time.
    */
   private appsSuspended(): void {
-    // Serve ids and requests last one session, even where the apps are held across it.
-    this.appRanges.reset();
+    // Requests last one session; serve ids are held with the apps, and end when an app closes (WISP 1200).
+    this.appRanges.suspend();
     this.apps.sessionSuspended(this.options.appResumeGraceMs ?? APP_RESUME_GRACE_MS);
     this.armAppsGrace();
   }
@@ -3760,7 +3786,10 @@ export class GhostLink {
     if (until === undefined) return;
     this.appsGrace = setTimeout(() => {
       this.appsGrace = null;
-      for (const event of this.apps.heldExpired()) this.options.events?.onAppFrame?.(event);
+      for (const event of this.apps.heldExpired()) {
+        if ("o" in event && event.o === "close") this.appRanges.closeApp(event.app, "offline");
+        this.options.events?.onAppFrame?.(event);
+      }
       this.armAppsGrace();
     }, Math.max(0, until - Date.now()));
   }
@@ -4412,6 +4441,11 @@ export class GhostLink {
             if (target !== undefined) this.options.events?.onPeerWake?.(target);
             return;
           }
+          if (frame?.t === CONTACT_ASKER_FRAME) {
+            const keys = this.participationKeys;
+            if (keys && this.askerReceived.take()) this.options.events?.onContactAsker?.(frame, keys);
+            return;
+          }
           if (frame?.t === TYPING_FRAME) {
             // Only on the authenticated session with the pinned contact, and only once both said typing/1.
             if (this.supportsTyping) this.typingReceiver.receive(frame);
@@ -4427,7 +4461,7 @@ export class GhostLink {
             return;
           }
           if (APP_RANGE_FRAMES.has(String(frame?.t))) {
-            // Only once both said app-ranges/1; every request is checked against this session's serves (WISP 1200).
+            // Only once both said app-ranges/1; every request is checked against the serves not ended (WISP 1200).
             if (this.supportsAppRanges) this.receiveAppRange(frame);
             return;
           }

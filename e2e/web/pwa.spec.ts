@@ -163,7 +163,49 @@ test.describe("service worker", () => {
     await ana.page.goto("/#/shared");
     await expect(ana.page.getByTestId("share-none")).toHaveText("Nothing was shared, or it was already picked up.", { timeout: 15_000 });
   });
+
+  test("a share into the same window waits behind the one in the picker, and shares past the three that can wait are said, never dropped without a word", { tag: ["@feature:app.pwa.share-target"] }, async ({ peer }) => {
+    const ana = await peer("Ana", { serviceWorkers: "allow" });
+    const bo = await peer("Bo");
+    await link(ana, bo);
+    await controlled(ana.page);
+    await ana.page.goto("/#/");
+    const text = (page: Page) => page.getByTestId("share-text");
+
+    // One window, two shares: the second replaces the page, which hands the first to the next one, ahead of it.
+    await postShare(ana.page, "share number 1");
+    await expect(text(ana.page)).toHaveText("share number 1");
+    await postShare(ana.page, "share number 2");
+    await expect(text(ana.page)).toHaveText("share number 1");
+
+    // Three more, each from a tab of its own, as a desktop system delivers them: one fits, two do not.
+    for (const n of [3, 4, 5]) {
+      const tab = await ana.context.newPage();
+      await tab.goto("/");
+      await postShare(tab, `share number ${n}`);
+      await expect(tab.getByTestId("other-tab")).toHaveAttribute("data-state", "shared");
+    }
+    await expect(ana.page.getByTestId("share-dropped-title")).toHaveText("2 more shares couldn't be kept: 3 were already waiting.", { timeout: 15_000 });
+    await expect(text(ana.page)).toHaveText("share number 1");
+    for (const n of [2, 3]) {
+      await ana.page.getByTestId("share-cancel").click();
+      await expect(text(ana.page)).toHaveText(`share number ${n}`);
+      await expect(ana.page.getByTestId("share-dropped")).toBeHidden();
+    }
+    await ana.page.getByTestId("share-cancel").click();
+    await expect(ana.page).toHaveURL(/#\/$/);
+  });
 });
+
+/** What the system does when a person shares text into the installed app: a navigation of `page` that posts the manifest's form. */
+async function postShare(page: Page, text: string): Promise<void> {
+  await page.evaluate((value) => {
+    const form = Object.assign(document.createElement("form"), { method: "post", enctype: "multipart/form-data", action: "/share-target" });
+    form.append(Object.assign(document.createElement("input"), { type: "hidden", name: "text", value }));
+    document.body.append(form);
+    form.submit();
+  }, text);
+}
 
 test("a web+ghostly: link opens the invite and leaves the address", { tag: ["@feature:app.pwa.protocol"] }, async ({ peer }) => {
   const ana = await peer("Ana");

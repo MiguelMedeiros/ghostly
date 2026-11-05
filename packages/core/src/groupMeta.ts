@@ -200,10 +200,11 @@ export function groupMetaNewer(a: { e: number; r: number }, b: { e: number; r: n
 /**
  * The revision of the next statement signed under `epoch`: one past the held statement's under the same epoch, else 1.
  * Counting on from a statement of an earlier epoch would let a former admin who signed the highest safe revision leave
- * every later admin with a revision no member accepts.
+ * every later admin with a revision no member accepts. Never under `floor` (WISP 06 § Raised counters): a copy started
+ * from older state signs above every revision the device it replaced may have signed under the same commit.
  */
-export function nextGroupMetaRevision(before: { e: number; r: number } | undefined, epoch: number): number {
-  return before && before.e === epoch ? before.r + 1 : 1;
+export function nextGroupMetaRevision(before: { e: number; r: number } | undefined, epoch: number, floor = 0): number {
+  return Math.max(before && before.e === epoch ? before.r + 1 : 1, Number.isSafeInteger(floor) ? floor : 0);
 }
 
 /**

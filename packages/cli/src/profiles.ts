@@ -3,6 +3,7 @@ import { closeSync, existsSync, linkSync, lstatSync, mkdirSync, openSync, readdi
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { childEnv } from "./childEnv";
 import { CliError } from "./errors";
 import { runtimePath } from "./privateFolder";
 
@@ -226,7 +227,7 @@ export function processStart(pid: number): string | null {
     }
     if (process.platform === "win32") return null;
     const lstart = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
-      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 2_000, env: { ...process.env, LC_ALL: "C" },
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 2_000, env: { ...childEnv(), LC_ALL: "C" },
     }).trim();
     return lstart || null;
   } catch {

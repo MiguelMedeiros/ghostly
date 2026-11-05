@@ -201,16 +201,35 @@ describe("an opened service's host and link", () => {
     expect(seen[1].headers?.find(([name]) => name === "cookie")?.[1]).toBe("sid=abc; theme=dark");
   });
 
-  it("adds a policy that keeps the page's requests and forms off plain http (this machine, the local network), next to the contact's", async () => {
+  it("adds a policy that keeps the page's requests and forms on its own origin (not this machine, the local network or any https host), next to the contact's", async () => {
     const { service, cookie } = await opened(async (request) => answer(200, request.path === "/own"
       ? [["content-type", "text/html"], ["content-security-policy", "default-src 'self'"], ["content-security-policy", "img-src *"]]
       : [["content-type", "text/html"]], ["<p>hi</p>"]));
-    expect(OPENED_SERVICE_CSP).toBe("default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https: wss:; form-action 'self' https:");
+    expect(OPENED_SERVICE_CSP).toBe("default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'");
     const page = await get(service, "/", { cookie });
     expect(page.headers["content-security-policy"]).toBe(OPENED_SERVICE_CSP);
     // Node joins repeated headers with ", ": each policy is still there, and a browser enforces every one.
     const own = await get(service, "/own", { cookie });
     expect(own.headers["content-security-policy"]).toBe(`default-src 'self', img-src *, ${OPENED_SERVICE_CSP}`);
+  });
+
+  it("passes on no header that makes the browser send reports or early requests elsewhere, and drops report directives from the contact's policy", async () => {
+    const { service, cookie } = await opened(async () => answer(200, [
+      ["content-type", "text/html"],
+      ["Content-Security-Policy", "default-src 'self'; report-uri http://127.0.0.1:9/r; img-src *; Report-To main"],
+      ["content-security-policy", "report-uri https://localhost/r, script-src 'self';report-to main"],
+      ["content-security-policy-report-only", "default-src 'none'; report-uri http://127.0.0.1:9/r"],
+      ["Reporting-Endpoints", "main=\"http://127.0.0.1:9/r\""],
+      ["report-to", "{\"group\":\"main\",\"max_age\":86400,\"endpoints\":[{\"url\":\"http://127.0.0.1:9/r\"}]}"],
+      ["NEL", "{\"report_to\":\"main\",\"max_age\":86400}"],
+      ["link", "<https://127.0.0.1:8443/admin>; rel=preload; as=fetch; crossorigin"],
+      ["Link", "<https://nas.local/>; rel=preconnect, </style.css>; rel=\"dns-prefetch prefetch\""],
+      ["x-served-by", "atlas"],
+    ], ["<p>hi</p>"]));
+    const page = await get(service, "/", { cookie });
+    expect(page.headers["x-served-by"]).toBe("atlas");
+    for (const name of ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link"]) expect(page.headers[name], name).toBeUndefined();
+    expect(page.headers["content-security-policy"]).toBe(`default-src 'self'; img-src *, script-src 'self', ${OPENED_SERVICE_CSP}`);
   });
 
   it("the policy keeps pictures, frames and every other load off plain http too, and leaves inline scripts and styles working", () => {
@@ -226,9 +245,12 @@ describe("an opened service's host and link", () => {
     for (const [load, chain] of Object.entries(chains)) {
       const sources = policy.get(chain.find((name) => policy.has(name)) ?? "");
       expect(sources, load).toBeDefined();
-      // Only its own origin, https/wss, inline and local data: no `*`, no http:, no host (127.0.0.1, a LAN address).
-      for (const source of sources!) expect(["'self'", "https:", "wss:", "data:", "blob:", "'unsafe-inline'", "'unsafe-eval'"], `${load}: ${source}`).toContain(source);
+      // Only its own origin, https, inline and local data: no `*`, no http:, no host (127.0.0.1, a LAN address).
+      for (const source of sources!) expect(["'self'", "https:", "data:", "blob:", "'unsafe-inline'", "'unsafe-eval'"], `${load}: ${source}`).toContain(source);
     }
+    // What can read an answer or post goes to its own origin only: https: also names this machine and the local network.
+    expect(policy.get("connect-src")).toEqual(["'self'"]);
+    expect(policy.get("form-action")).toEqual(["'self'"]);
     expect(policy.get("default-src")).toEqual(expect.arrayContaining(["'unsafe-inline'", "'unsafe-eval'"]));
   });
 });

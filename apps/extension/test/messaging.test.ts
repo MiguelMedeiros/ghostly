@@ -309,7 +309,7 @@ describe("viewer tabs", () => {
       postData: '{"name":"ç"}',
     });
     expect(answer.method).toBe("Fetch.fulfillRequest");
-    expect(answer.params).toMatchObject({ responseCode: 201, responseHeaders: [{ name: "content-type", value: "text/html" }] });
+    expect(answer.params).toMatchObject({ responseCode: 201, responseHeaders: [{ name: "content-type", value: "text/html" }, { name: "content-security-policy", value: expect.any(String) }] });
     expect(bodyText(answer.params)).toBe("<h1>atlas</h1>");
 
     const [request] = engine().requests;
@@ -318,6 +318,26 @@ describe("viewer tabs", () => {
     expect(request.init).toMatchObject({ method: "POST", path: "/api/items?limit=5", headers: [["Content-Type", "application/json"]] });
     expect(new TextDecoder().decode(request.init.body!)).toBe('{"name":"ç"}');
     expect(request.init.maxResponseBytes).toBe(32 * 1024 * 1024);
+  });
+
+  it("serves every answer with Ghostly's connection policy after the contact's own, the error page's too", async () => {
+    const policy = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
+    const policies = (params: Record<string, unknown>) =>
+      (params.responseHeaders as { name: string; value: string }[]).filter(({ name }) => name.toLowerCase() === "content-security-policy").map(({ value }) => value);
+    const tabId = await openViewer(world);
+    const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/`;
+
+    engineControl().respond = async () => okResponse("<h1>atlas</h1>", 200, [["content-type", "text/html"]]);
+    expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([policy]);
+
+    engineControl().respond = async () => okResponse("<h1>atlas</h1>", 200, [["Content-Security-Policy", "default-src * http: ws:"], ["content-security-policy", "img-src *"]]);
+    expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([`default-src * http: ws:, img-src *, ${policy}`]);
+
+    const offline = await httpError("offline", "offline");
+    engineControl().respond = async () => {
+      throw offline;
+    };
+    expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([policy]);
   });
 
   it("joins a body DevTools hands over in several pieces", async () => {
@@ -378,6 +398,7 @@ describe("viewer tabs", () => {
       { name: "Set-Cookie", value: "sid=1; Path=/" },
       { name: "Set-Cookie", value: "other=2; path=/; HttpOnly" },
       { name: "X-Domain", value: "Domain=kept" },
+      { name: "content-security-policy", value: expect.any(String) },
     ]);
   });
 
@@ -399,6 +420,7 @@ describe("viewer tabs", () => {
     expect(answer.params.responseHeaders).toEqual([
       { name: "Content-Type", value: "text/html" },
       { name: "X-Kept", value: "fine; really" },
+      { name: "content-security-policy", value: expect.any(String) },
     ]);
   });
 
@@ -450,6 +472,29 @@ describe("viewer tabs", () => {
     const gone = await pauseRequest(world, tabId, { url: `https://${SERVICE}.${PEER}.${TAG}.invalid/` });
     expect(bodyText(gone.params)).toContain('<html lang="en" dir="ltr">');
     expect(bodyText(gone.params)).toContain("This service is not reachable. Services exist while their ghost is online.");
+  });
+
+  it("says in the profile's language and from this side why the contact's machine answered in place of their app", async () => {
+    world.storage.set("ghostly_app_settings", JSON.stringify({ language: "ar" }));
+    // The contact chose the app's name: it goes into the page escaped.
+    engineControl().links = [{ peerPubKeyZ32: PEER, peerServices: [{ id: SERVICE, name: "<b>Atlas</b>" }] }];
+    const tabId = await openViewer(world);
+    const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/`;
+    const { default: ar } = await import("../../ui/src/locales/ar/services.json");
+    // Arabic's chunk transformed once here, so the peer's own `loadLocale` is not slower than `pauseRequest` waits.
+    await import("../../ui/src/locales/ar/index.ts");
+    const named = (text: string) => text.replace("{{app}}", "&#60;b&#62;Atlas&#60;/b&#62;");
+
+    // The contact's machine answered in place of their app, which is not running there (docs/PROTOCOL.md "Host errors").
+    engineControl().respond = async () =>
+      okResponse("The local service is not reachable.\n", 502, [["content-type", "text/plain; charset=utf-8"], ["x-ghostly-error", "unreachable"]]);
+    const down = await pauseRequest(world, tabId, { url });
+    expect(down.params).toMatchObject({ responseCode: 502 });
+    expect(down.params.responseHeaders).toContainEqual({ name: "x-ghostly-error", value: "unreachable" });
+    const downHtml = bodyText(down.params);
+    expect(downHtml).toContain(named(ar.window.notAnswering));
+    expect(downHtml).not.toContain("The local service");
+    expect(downHtml).toContain('<html lang="ar" dir="rtl">');
   });
 
   it("stops intercepting once the tab leaves the virtual origin, and only then", async () => {

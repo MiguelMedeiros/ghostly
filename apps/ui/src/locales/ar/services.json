@@ -1,4 +1,5 @@
 {
+  "added": "أُضيف {{app}}. اختر من يمكنه فتحه من «الأشخاص».",
   "fromContacts": "من جهات اتصالك",
   "fromContactsEmpty": "تظهر هنا التطبيقات التي تشاركها جهات اتصالك.",
   "ghostlyOnline": "Ghostly متصل",
@@ -19,6 +20,9 @@
   "peopleDone": "تم",
   "remove": "إزالة",
   "removeNamed": "أزل {{app}}",
+  "removeText": "لن تتمكن جهات الاتصال التي شاركته معها من فتحه بعد الآن.",
+  "removeTitle": "إزالة {{app}}؟",
+  "removed": "أُزيل {{app}}.",
   "requestCount": "· {{count}} طلبات",
   "requestCount_many": "· {{count}} طلبًا",
   "requestCount_one": "· طلب واحد",

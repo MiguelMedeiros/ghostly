@@ -235,6 +235,23 @@ describe("[text](url) links", () => {
     expect(link("[paypal\u034f.com](https://evil.example/)")).toMatchObject({ data: { showUrl: true } });
   });
 
+  it("shows the address when formatting splits the text's host, as the bubble joins it again", () => {
+    for (const label of [
+      "paypal.**com**", "paypal._com_", "paypal.*com*", "paypal.__com__", "paypal.~~com~~", "paypal.||com||",
+      "**pay**pal.com", "paypal͏.**com**", "paypal.**c­om**", "pay​pal._com_",
+    ]) {
+      expect(link(`[${label}](https://evil.example/login)`), label).toMatchObject({ data: { showUrl: true } });
+      expect(plainText(`[${label}](https://evil.example/login)`), label).toBe("https://evil.example/login");
+    }
+    expect(link("[ghostly.**tools**](https://ghostly.tools/docs)")).toMatchObject({ data: { showUrl: false } });
+  });
+
+  it("shows the text when its bold or italic words are not a host", () => {
+    for (const label of ["**the plan**", "read _this_ first", "v1.**2** notes", "**Node**.js docs", "e.g. *this*", "the **docs**."]) {
+      expect(link(`[${label}](https://ghostly.tools/p)`), label).toMatchObject({ data: { showUrl: false } });
+    }
+  });
+
   it("shows the text when its only hidden characters are an emoji's own", () => {
     for (const label of [
       "Donate \u2764\ufe0f", "\u2600\ufe0f Sunny day", "\u2714\ufe0f Done", "\u26a0\ufe0f Read this", "1\ufe0f\u20e3 First step",
