@@ -14,7 +14,7 @@
     "mutual": "{{name}} をフォローしており、{{name}} もこのアカウントをフォローしています",
     "notShown": "表示されません。",
     "notShownWhy": "表示されません: {{reason}}。",
-    "off": "公開プロフィールはオフです (設定 → セキュリティ)。",
+    "off": "公開プロフィールはオフです ({{settings}} → {{section}})。",
     "open": "開く",
     "openIn": "{{network}} で開く",
     "openPostIn": "この投稿を {{network}} で開く",

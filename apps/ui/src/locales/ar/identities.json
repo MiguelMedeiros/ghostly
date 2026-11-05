@@ -19,7 +19,7 @@
     "mutual": "يتابع {{name}}، و{{name}} يتابعه",
     "notShown": "غير معروضة.",
     "notShownWhy": "غير معروضة: {{reason}}.",
-    "off": "الملفات العامة متوقفة (الإعدادات ← الأمان).",
+    "off": "الملفات العامة متوقفة ({{settings}} ← {{section}}).",
     "open": "فتح",
     "openIn": "فتح في {{network}}",
     "openPostIn": "فتح هذا المنشور في {{network}}",
