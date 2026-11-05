@@ -349,8 +349,9 @@ export class EventHub {
   /**
    * What was removed here leaves the journal too: the events that name it are blanked, or the journal is written again
    * without them (a line that names it and cannot be read goes as well), and a journal set aside as unreadable, which
-   * cannot be sorted, is deleted. `ids`: what was removed (a message's id, a chat's or a group's); `gone`: whether an event is of it;
-   * `unquote`: an event that stays, written again without what it quotes of the removed (a reply's event), else none.
+   * cannot be sorted, is deleted. `ids`: what was removed (a message's id, a chat's or a group's); `gone`: whether an
+   * event is of it; `unquote`: an event that stays, written again without what it quotes of the removed (a reply's
+   * event), else none.
    */
   private forget(ids: readonly string[], gone: (event: GhostlyEvent) => boolean, unquote: (event: GhostlyEvent) => GhostlyEvent | undefined = () => undefined): void {
     if (!ids.length) return;
