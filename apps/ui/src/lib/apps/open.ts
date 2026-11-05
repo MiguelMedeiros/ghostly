@@ -71,8 +71,25 @@ export function appsRunning(): boolean {
   return running.size > 0;
 }
 
+/** Why an open that the profile's lock overtook did not start. */
+export const LOCKED = "The profile locked before the app started";
+
+/** How many times the profile locked (`stopRunningApps`): an open still on its way when it locks never starts. */
+let locks = 0;
+
+/**
+ * Read by an opener before its first wait: the returned function says whether the profile locked since. An app is
+ * registered only once its entry is there (and on Desktop its window), so a lock in between stops nothing of it: the
+ * opener asks after every wait, and one that finds it locked stops what it made and does not start the app.
+ */
+export function lockedSince(): () => boolean {
+  const at = locks;
+  return () => locks !== at;
+}
+
 /** Stops every running app and says nothing: the profile locked, and nothing of it answers an app behind the lock. */
 export function stopRunningApps(): void {
+  locks += 1;
   for (const entry of [...running]) entry.stop();
 }
 
