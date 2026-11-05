@@ -105,6 +105,9 @@ export const WEBSITE_INPUTS = [
   "docs/assets/social-preview.png",
   // shots-version.test.mjs checks lib/release.ts's version against the app's.
   "package.json",
+  // agents-webrtc.test.mjs checks the site's text against it.
+  "packages/cli/src/runtime/engine.ts",
+  "packages/browser/src/engine/node.ts",
   // The jobs themselves.
   ".github/workflows/ci.yml",
 ];
