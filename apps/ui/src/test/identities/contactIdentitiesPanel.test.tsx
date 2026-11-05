@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, screen, within } from "@testing-library/react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
@@ -166,6 +169,19 @@ describe("ContactIdentitiesPanel", () => {
       const card = await turnOver(user, 0);
       expect(card).toHaveTextContent("Domain · Alice Liddell");
       expect(within(card).getByTestId("chat-identity-received-name-source")).toHaveTextContent("Name: keys.openpgp.org");
+    });
+
+    it("says whole where a name came from: the caveat at its end is never cut", async () => {
+      // An OpenPGP key's user ID: one line with an ellipsis showed "Name: User ID on the key, written by its holder: not …".
+      const source = "User ID on the key, written by its holder: not proof that the name or email is theirs";
+      const { user } = open(withReceived([receivedView({ provider: "openpgp", display: { name: "Satoshi Nakamoto <satoshi@example.org>", source, fetchedAt: now() } })]));
+      const line = within(await turnOver(user, 0)).getByTestId("chat-identity-received-name-source");
+      expect(line).toHaveTextContent(`Name: ${source}`);
+      expect(line).toHaveClass("id-card-back-meta-whole");
+      const css = readFileSync(join(fileURLToPath(import.meta.url), "../../../components/identities/composer-identities.css"), "utf8");
+      const rule = /\.id-card-back-meta-whole\{([^}]*)\}/.exec(css)?.[1] ?? "";
+      expect(rule).toContain("white-space:normal");
+      expect(rule).toContain("text-overflow:clip");
     });
 
     it("checks again on request, but not what was withdrawn or revoked", async () => {
