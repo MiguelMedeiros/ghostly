@@ -163,14 +163,19 @@ function settlesWithin(promise: Promise<unknown>, ms: number): Promise<boolean> 
  * waited for the next minute (60 s and more instead of 3 to 5).
  */
 export function chatOnly(method: string, params: Record<string, unknown>): boolean {
-  // A status card's `chat` may name a group as well (WISP 405 · Status Cards): its sessions must start.
-  if (method.startsWith("task.") || method.startsWith("routine.") || method.startsWith("button.")) return false;
+  // A usage report to every 1:1 chat (`--all`) needs no group.
+  if (method === "usage.send") return params.all === true;
+  if (chatOrGroup(method, params)) return false;
+  return method.startsWith("chat.") || (params.chat !== undefined && params.group === undefined && !method.startsWith("group."));
+}
+
+/** A command whose `chat` may name a group as well: a one-shot for it starts the groups' sessions. */
+function chatOrGroup(method: string, params: Record<string, unknown>): boolean {
+  // A status card's or a button's (WISP 405 · Status Cards), and a usage report's to a named chat.
+  if (method.startsWith("task.") || method.startsWith("routine.") || method.startsWith("button.") || method === "usage.send") return true;
   // So may `message delete --everyone`'s: a group's removal goes over its members' edges, which a one-shot that left
   // the groups unstarted never opened (it waited its whole timeout, and the members kept the message).
-  if (method === "chat.delete" && params.everyone === true) return false;
-  // A usage report to every 1:1 chat (`--all`) needs no group; one to a named chat may name a group.
-  if (method === "usage.send") return params.all === true;
-  return method.startsWith("chat.") || (params.chat !== undefined && params.group === undefined && !method.startsWith("group."));
+  return method === "chat.delete" && params.everyone === true;
 }
 
 /**
@@ -187,10 +192,11 @@ export function newChatOnly(method: string): boolean {
  * A command about the 1:1 chat it names, or one that makes or joins a new chat (`newChatOnly`): a one-shot for it leaves
  * the other saved chats unstarted too, and starts only the chat a call names (`startNamedChats`). Started, each saved
  * chat put its records and its leave packet on the relays: with 12 invites saved one `send` took the relays' 30
- * requests a minute, and a text to a contact who is away, or the next one-shot, waited behind them.
+ * requests a minute, and a text to a contact who is away, or the next one-shot, waited behind them. So does a command
+ * whose chat may name a group (`chatOrGroup`: a bot's `task send`): the groups start for it, the other 1:1 chats do not.
  */
 export function oneChatOnly(method: string, params: Record<string, unknown>): boolean {
-  return newChatOnly(method) || (chatOnly(method, params) && typeof params.chat === "string");
+  return newChatOnly(method) || ((chatOnly(method, params) || chatOrGroup(method, params)) && typeof params.chat === "string");
 }
 
 /**
@@ -1406,7 +1412,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
       return joined.answer;
     }
     return result;
-  }, { deferGroups: chatOnly(command.method, params) || oneChatOnly(command.method, params), deferChats: oneChatOnly(command.method, params), offline: offlineCall(command.method, params) });
+  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: oneChatOnly(command.method, params), offline: offlineCall(command.method, params) });
   if (translator) {
     try { printAnswer(await (await import("./translate")).translateAnswer(result, translator)); } finally { translator.close(); }
     return;
