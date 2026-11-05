@@ -451,6 +451,11 @@ export interface GhostLinkEvents {
    * forgotten here, and the owner forgets what it kept of it.
    */
   onPacketTransportsGone?(): void;
+  /**
+   * With `packetTransports`: the member's packet carries no `_tr` where the last one read did (`true`), or one again
+   * (`false`). News only: what it said before is kept, and on a device link only a signed value counts.
+   */
+  onPacketTransportsUnsaid?(unsaid: boolean): void;
   onPairingState?(state: PairingState): void;
   /** How far a first pairing got (`pairingProgress` option): every change, up to `live`. */
   onPairingProgress?(progress: PairingProgress): void;
@@ -1259,6 +1264,7 @@ export class GhostLink {
         onPeerClock: (packetAt, readBefore, readAt) => events.onPeerClock?.(packetAt, readBefore, readAt),
         onPeerTransports: value => this.peerPacketTransports(value),
         onPeerTransportsGone: () => this.peerPacketTransportsGone(),
+        onPeerTransportsUnsaid: (unsaid) => { if (options.packetTransports && !this.stopped) events.onPacketTransportsUnsaid?.(unsaid); },
         onDiscoveryError: error => events.onDiscoveryError?.(error),
         onStatus: (status) => events.onStatus?.(status),
         onPoll: (poll) => events.onPoll?.(poll),
