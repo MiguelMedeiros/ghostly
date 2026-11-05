@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowserHost, EngineConnection } from "../src/host";
 import type { EngineEvent, RpcRequest, RpcResponse } from "../src/shared/rpc";
 import type { EngineState } from "../src/shared/types";
-// covers: extension.engine
+// covers: extension.engine, extension.reconnecting
 
 /**
  * The page's side of the RPC: a scripted host stands in for the extension port
@@ -151,6 +151,46 @@ describe("calling the peer", () => {
     const call = engine.call("usdtLock");
     await vi.advanceTimersByTimeAsync(0);
     expect(scripted.connections[1].sent).toEqual([{ kind: "request", id: 1, method: "usdtLock", params: undefined }]);
+    scripted.connections[1].deliver({ kind: "response", id: 1, result: null });
+    await expect(call).resolves.toBeNull();
+  });
+
+  it("says it is reconnecting between failed tries, and stops saying so once connected again", async () => {
+    vi.useFakeTimers();
+    await engine.connect();
+    const heard: boolean[] = [];
+    engine.subscribe(() => heard.push(engine.reconnecting));
+    scripted.refuseWith(new Error("The offscreen document did not start"));
+    scripted.connections[0].drop();
+    // The first try comes half a second later: a peer that is back by then shows nothing.
+    expect(engine.reconnecting).toBe(false);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(engine.reconnecting).toBe(true);
+    expect(heard).toEqual([true]);
+    // More failed tries: still reconnecting, and the listeners are not told it again.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(scripted.connect.mock.calls.length).toBeGreaterThan(3);
+    expect(engine.reconnecting).toBe(true);
+    expect(heard).toEqual([true]);
+
+    scripted.refuseWith(null);
+    await vi.advanceTimersByTimeAsync(RECONNECT_MAX_MS);
+    expect(scripted.connections).toHaveLength(2);
+    expect(engine.reconnecting).toBe(false);
+    expect(heard).toEqual([true, false]);
+  });
+
+  it("stops saying it is reconnecting when a call of the page connects before the next try", async () => {
+    vi.useFakeTimers();
+    await engine.connect();
+    scripted.refuseWith(new Error("down"));
+    scripted.connections[0].drop();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(engine.reconnecting).toBe(true);
+    scripted.refuseWith(null);
+    const call = engine.call("usdtLock");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(engine.reconnecting).toBe(false);
     scripted.connections[1].deliver({ kind: "response", id: 1, result: null });
     await expect(call).resolves.toBeNull();
   });

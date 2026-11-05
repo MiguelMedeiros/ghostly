@@ -18,6 +18,8 @@
   "notNow": "Ahora no",
   "offline": "Sin conexión",
   "offlineHint": "Tus chats están aquí. Nada sale hasta que vuelvas a estar en línea.",
+  "reconnecting": "Reconectando…",
+  "reconnectingHint": "Esta pestaña perdió Ghostly y sigue intentándolo. Los mensajes nuevos aparecerán aquí cuando vuelva.",
   "shareDropped": "No se pudieron guardar {{count}} contenidos compartidos más: ya había {{waiting}} esperando.",
   "shareDroppedNext": "Envía o cancela los que esperan y luego comparte el resto de nuevo.",
   "shareDroppedOne": "No se pudo guardar 1 contenido compartido más: ya había {{waiting}} esperando.",
