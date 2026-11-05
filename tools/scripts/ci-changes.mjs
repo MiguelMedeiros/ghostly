@@ -94,6 +94,10 @@ export const WEBSITE_INPUTS = [
   "packages/core/src/text.ts",
   // privacy-hosts.test.mjs checks the privacy page's resolver list against the app's DoH resolvers.
   "packages/browser/src/proofs/domain.ts",
+  // privacy-settings.test.mjs checks the privacy page's Settings paths against the app's section names.
+  "apps/ui/src/lib/settingsSections.ts",
+  "apps/ui/src/locales/en/settings.json",
+  "apps/ui/src/locales/en/network.json",
   // The launch checklist (e2e/launch-checklist.spec.ts) checks the repository's social preview's size.
   "docs/assets/social-preview.png",
   // shots-version.test.mjs checks lib/release.ts's version against the app's.
