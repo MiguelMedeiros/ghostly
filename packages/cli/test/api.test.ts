@@ -100,6 +100,40 @@ describe("chats", () => {
     expect(findChat([impostor], "alice").id).toBe("chatImpostor");
   });
 
+  it("a name is found by the string that set it: cleaned as the engine cleans a name it stores (agents#2907)", () => {
+    // `chat rename X "bot "` stores "bot", `group create "Team  "` stores "Team": the same string given back finds it.
+    // Trailing and doubled spaces, a zero-width space, a bidi mark, and a decomposed "é" (e + U+0301) against the
+    // precomposed one (and back), for a label, a contact's own name and a group's name.
+    const refs: [stored: string, typed: string][] = [
+      ["bot", "bot "], ["bot", " bot "], ["my bot", "my  bot"], ["my bot", "my\tbot"], ["bot", "b\u200bot"],
+      ["rtl", "rtl\u202e"], ["rtl", "\u200frtl"], ["Jos\u00e9", "Jose\u0301"], ["Jose\u0301", "jos\u00e9"],
+    ];
+    for (const [stored, typed] of refs) {
+      expect(findChat([link("chatOther", { label: "other" }), link("chatLabel", { label: stored })], typed).id).toBe("chatLabel");
+      expect(findChat([link("chatOther", { label: "other" }), link("chatNick", { peerNick: stored })], typed).id).toBe("chatNick");
+      const named = { ...group, id: "n".repeat(22), name: stored, status: "active" } as unknown as GroupView;
+      const other = { ...group, id: "o".repeat(22), name: "other", status: "active" } as unknown as GroupView;
+      expect(findGroup([other, named], typed).id).toBe(named.id);
+      expect(findChatOrGroup([link("chatOther", { label: "other" })], [other, named], typed)).toEqual({ group: named });
+      // A contact's own name still never takes a group's name, however it was typed.
+      expect(() => findChatOrGroup([link("chatNick", { peerNick: stored })], [named], typed)).toThrow(/and a group/);
+    }
+    // Two chats whose names clean to one stay ambiguous; a ref with nothing visible left names nothing.
+    expect(() => findChat([link("chatA", { label: "my bot" }), link("chatB", { label: "My  Bot" })], "my bot ")).toThrow(expect.objectContaining({ code: "bad_request", details: { matches: ["chatA", "chatB"] } }));
+    expect(() => findChat([link("chatA", { label: "bot" })], "\u200b")).toThrow(/No chat/);
+    expect(() => findGroup([{ ...group, id: "n".repeat(22), name: "bot" } as unknown as GroupView], "\u202e")).toThrow(/No group/);
+    // Ids, keys and prefixes stay exact: nothing is cleaned off them.
+    const chat = link("chatExact", { label: "bot" });
+    expect(findChat([chat], "chatExact").id).toBe("chatExact");
+    expect(findChat([chat], "chatEx").id).toBe("chatExact");
+    expect(() => findChat([chat], "chatExact ")).toThrow(/No chat/);
+    expect(() => findChat([chat], "chat\u200bExact")).toThrow(/No chat/);
+    const room = { ...group, id: "r".repeat(22), name: "Team" } as unknown as GroupView;
+    expect(findGroup([room], room.id).id).toBe(room.id);
+    expect(() => findGroup([room], `${room.id} `)).toThrow(/No group/);
+    expect(() => findGroup([room], "rrr\u200b")).toThrow(/No group/);
+  });
+
   it("a contact's own name never takes what names a group: the group's id is the group, its name or a prefix is refused", () => {
     const GROUP = "g".repeat(22);
     const room = { ...group, id: GROUP, name: "Team Room", status: "active" } as unknown as GroupView;
