@@ -163,7 +163,7 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
   meanwhile (past 10,000 events or 16 MiB, an `events.gap` says what was dropped).
 
 Main types: `message.received`, `message.sent`, `message.delivery`, `message.edited`, `chat.pairing`, `chat.connection`, `chat.joined`,
-`typing.started` (with `kind` and `status`) and `typing.stopped` (`group.typing.started` and `group.typing.stopped` in a private group, with `member`), `message.reaction` and `group.reaction`, `group.message.edited`,
+`typing.started` (with `kind` and `status`) and `typing.stopped` (`group.typing.started` and `group.typing.stopped` in a private group, with `member`; all live only, never replayed), `message.reaction` and `group.reaction`, `group.message.edited`,
 `group.message` and `group.sent` (with `messageId`, `member`, `nick` from the roster, and `mentioned`), `group.mentioned`
 (a mention of this profile learned after its `group.message`, once), `group.members`,
 `file.offered`, `file.done` and `file.failed` (with the file's `messageId`), `payment.created`, `payment.updated`,

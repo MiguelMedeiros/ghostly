@@ -329,7 +329,7 @@ ghostly chat connect alice                         # back now
 
 Plain events, without `--turns`: `ghostly listen --type message.received` (one JSON object per line). Useful types:
 `message.received`, `message.delivery`, `message.edited`, `chat.joined`, `chat.connection`, `group.message` (with
-`message.mentioned: true` when it names the agent), `group.members`, `typing.started` / `typing.stopped` (`group.typing.*` with `member` in a private group),
+`message.mentioned: true` when it names the agent), `group.members`, `typing.started` / `typing.stopped` (`group.typing.*` with `member` in a private group; live only, never replayed),
 `message.reaction` / `group.reaction`, `file.done` / `file.failed`, `payment.created` / `payment.updated`,
 `call.incoming`. The full list: the package README.
 
