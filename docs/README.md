@@ -6,4 +6,4 @@
 | Using it | [Features](FEATURES.md) · [Chat](CHAT.md) · [Wallets](WALLETS.md) · [Identities](IDENTITIES.md) · [Several devices](DEVICES.md) |
 | How it works | [Architecture](ARCHITECTURE.md) · [Transports](TRANSPORTS.md) · [DHT delivery](DHT-DELIVERY.md) · [Protocol](PROTOCOL.md) · [WISPs](wisps/README.md) |
 | Building on it | [SDK](SDK.md) · [Apps and the official store](APPS.md) · [AI agents and bots](AI-AGENTS.md) · [Talk to an AI by voice](VOICE-AGENT.md) · [USDT integration](USDT-INTEGRATION.md) · [OpenID Connect providers](OIDC-PROVIDERS.md) |
-| Working on it | [Contributing](../.github/CONTRIBUTING.md) · [Testing](TESTING.md) · [The native Android app (planned, not released)](ANDROID.md) · [Auto-translation](AUTO-TRANSLATE.md) · [Releasing](RELEASING.md) · [Security review](SECURITY-REVIEW.md) · [Security policy](../.github/SECURITY.md) |
+| Working on it | [Contributing](../.github/CONTRIBUTING.md) · [Testing](TESTING.md) · [The native Android app](ANDROID.md) · [Auto-translation](AUTO-TRANSLATE.md) · [Releasing](RELEASING.md) · [Security review](SECURITY-REVIEW.md) · [Security policy](../.github/SECURITY.md) |

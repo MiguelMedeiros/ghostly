@@ -406,8 +406,9 @@ describe("the rest", () => {
     const cases: [string, string][] = [
       ["README.md", "readme.test.ts"],
       ["docs/INSTALLATION.md", "readme.test.ts"],
-      ["docs/WEB.md", "androidNotReleased.test.ts"],
-      ["apps/website/content/home.ts", "androidNotReleased.test.ts"],
+      ["docs/WEB.md", "androidReleased.test.ts"],
+      ["docs/ANDROID.md", "androidReleased.test.ts"],
+      ["apps/website/content/home.ts", "androidReleased.test.ts"],
       ["docs/RELEASING.md", "chromeWebStore.test.ts"],
       ["docs/RELEASING.md", "npmPublish.test.ts"],
       ["docs/RELEASING.md", "webLatest.test.ts"],

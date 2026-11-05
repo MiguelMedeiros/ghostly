@@ -97,9 +97,9 @@ export const UNIT_PROJECTS = [
     // Docs, crates and configs a few of its tests read from disk: a change there runs those tests, not the suite.
     // affected.test.ts fails on a test that reads a repository file by name and is in neither list.
     reads: {
-      "README.md": ["readme", "androidNotReleased"],
-      "docs/INSTALLATION.md": ["readme", "androidNotReleased", "bumpVersion"],
-      "{docs/README.md,docs/FEATURES.md,docs/WEB.md,docs/APPS.md,docs/wisps/ADAPTER-ROADMAP.md,apps/website/content/*.ts}": ["androidNotReleased"],
+      "README.md": ["readme", "androidReleased"],
+      "docs/INSTALLATION.md": ["readme", "androidReleased", "bumpVersion"],
+      "{docs/README.md,docs/FEATURES.md,docs/WEB.md,docs/APPS.md,docs/ANDROID.md,docs/wisps/ADAPTER-ROADMAP.md,apps/website/content/*.ts}": ["androidReleased"],
       "docs/RELEASING.md": ["chromeWebStore", "npmPublish", "webLatest"],
       "{CHANGELOG.md,apps/desktop/Cargo.toml,apps/website/lib/release.ts,apps/extension/public/manifest.json,packages/browser/src/shared/features.ts}": ["bumpVersion"],
       "packages/cli/package.json": ["npmPublish"],
