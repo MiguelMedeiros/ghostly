@@ -1,10 +1,17 @@
 import "fake-indexeddb/auto";
-import { beforeEach, describe, expect, it } from "vitest";
-import { canonicalJsonBytes } from "@ghostly/core";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { canonicalJsonBytes, readAppRevocationShape } from "@ghostly/core";
+import type * as core from "@ghostly/core";
 import { APP_REVOCATIONS_KEY } from "../src/engine/apps";
 import { PROFILE_SETTINGS_KEYS } from "../src/shared/idb";
-import { BUNDLE_URL, FakeNet, REPO, STORE_URL, apps, appRows, bundle, emptyProfile, listing, revocation, storeFiles } from "./appsSupport";
+import { BUNDLE_URL, FakeNet, PUBLISHER, REPO, STORE_URL, apps, appRows, bundle, emptyProfile, keyOf, listing, revocation, storeFiles } from "./appsSupport";
 // covers: apps.engine.installed
+
+vi.mock("@ghostly/core", async (importOriginal) => {
+  const actual = await importOriginal<typeof core>();
+  return { ...actual, readAppRevocationShape: vi.fn(actual.readAppRevocationShape) };
+});
+const shapeChecks = vi.mocked(readAppRevocationShape);
 
 /*
  * A client keeps every revocation it verified (WISP 1200 § Revocation): kept by app reference beside the installed list,
@@ -111,5 +118,34 @@ describe("revocations an app's uninstall leaves", () => {
     expect(await store.runCheck({ ref: v2.ref })).toEqual({ status: "ok" });
     expect(await appRows()).toEqual([expect.objectContaining({ digest: v2.digest, revocations: [revoked] })]);
     expect(PROFILE_SETTINGS_KEYS).toContain(APP_REVOCATIONS_KEY);
+  });
+});
+
+describe("what reading them costs", () => {
+  it("an install screen and Install check only the kept revocations of the app shown, not every app's", async () => {
+    // Four other apps of the publisher, each revoked twice, then uninstalled: their revocations are kept.
+    const others = await Promise.all([0, 1, 2, 3].map((i) => bundle({ name: `other${i}` })));
+    const store = apps(net);
+    for (const [i, other] of others.entries()) {
+      net.put(`${REPO}/other${i}.ghostlyapp`, other.bytes);
+      await store.preview({ url: `${REPO}/other${i}.ghostlyapp` });
+      await store.install({ digest: other.digest, grant: ["chat"] });
+    }
+    net.put(`${REPO}/ghostly-revoke.json`, canonicalJsonBytes(await Promise.all(others.flatMap((o) => [revocation(o.ref, [o.digest], "Leaked key"), revocation(o.ref, [o.digest], "Lost key")]))));
+    await store.checkUpdates();
+    for (const other of others) await store.uninstall({ ref: other.ref });
+    net.files.delete(`${REPO}/ghostly-revoke.json`);
+    expect(others.every((o) => o.ref.startsWith(`${keyOf(PUBLISHER)}/`))).toBe(true);
+
+    const v1 = await bundle();
+    net.put(BUNDLE_URL, v1.bytes);
+    shapeChecks.mockClear();
+    expect((await store.preview({ url: BUNDLE_URL })).run).toEqual({ status: "ok" });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    expect(shapeChecks).not.toHaveBeenCalled();
+    // The others' are still kept, and still refuse a copy of a version they name.
+    net.put(`${REPO}/copy.ghostlyapp`, others[0]!.bytes);
+    expect((await store.preview({ url: `${REPO}/copy.ghostlyapp` })).run).toEqual({ status: "revoked", reason: expect.stringMatching(/key$/) });
+    expect(shapeChecks).toHaveBeenCalledTimes(2);
   });
 });
