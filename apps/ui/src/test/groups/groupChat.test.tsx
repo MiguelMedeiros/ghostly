@@ -1155,7 +1155,8 @@ describe("GroupChat: history and sending", () => {
       stored({ id: "m2", member: "gone".padEnd(52, "y"), text: "bye" }),
       stored({ id: "m3", sender: "me", member: ME, text: "hello" }),
     ]);
-    expect(await screen.findByText("Alice joined")).toBeInTheDocument();
+    // Alice is the admin: her name in the line carries the admin's mark.
+    expect((await screen.findAllByTestId("group-event"))[0]).toHaveTextContent(/^Alice admin joined$/);
     expect(screen.getByText("You are now the admin")).toBeInTheDocument();
     expect(screen.getByText("~Alice")).toBeInTheDocument();
     // Someone no longer in the roster: named by their key.
