@@ -909,15 +909,29 @@ describe("GroupChat: the options menu", () => {
     expect(within(screen.getByRole("dialog")).getByTestId("group-leave-successor")).toHaveTextContent("You are the admin: Alice becomes the admin when you leave.");
   });
 
-  it("tells a community's admin when joiners through the link never answer, and replaces the link in one tap", async () => {
+  it("tells a community's admin when joiners through the link never answer, and asks before replacing the link", async () => {
+    // Every other New link asks first: the link shared so far, wherever it was posted, stops letting people in.
     const entryLink = "ghostly://c/group-1";
     const { user, engine } = openGroup(active({ profile: "community", isAdmin: true, entryLink, community: { hub: true, hubs: 1, connected: 0, unansweredKnocks: 16 } }));
     engine.on("enableGroupLink", () => ({ link: entryLink }));
     expect(screen.getByTestId("group-knocks-unanswered")).toHaveTextContent("People opening the link may not be getting in");
     await user.click(screen.getByTestId("group-knocks-reset"));
+    expect(screen.getByTestId("group-link-ask-dialog")).toHaveAttribute("data-kind", "reset");
+    expect(engine.callsTo("enableGroupLink")).toEqual([]);
+    await user.click(screen.getByTestId("group-link-ask-confirm"));
     expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: "group-1", reset: true }]);
     // The new link is to share again: its sheet opens.
     expect(await screen.findByTestId("group-share-dialog")).toBeInTheDocument();
+  });
+
+  it("keeps the link when the unanswered joiners' New link question is cancelled", async () => {
+    const { user, engine } = openGroup(active({ profile: "community", isAdmin: true, entryLink: "ghostly://c/group-1", community: { hub: true, hubs: 1, connected: 0, unansweredKnocks: 16 } }));
+    engine.on("enableGroupLink", () => ({ link: "ghostly://c/group-1" }));
+    await user.click(screen.getByTestId("group-knocks-reset"));
+    await user.click(within(screen.getByTestId("group-link-ask-dialog")).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByTestId("group-link-ask-dialog")).toBeNull();
+    expect(engine.callsTo("enableGroupLink")).toEqual([]);
+    expect(screen.queryByTestId("group-share-dialog")).toBeNull();
   });
 
   it("replaces the link once when the unanswered joiners' New link is pressed again while it works", async () => {
@@ -927,7 +941,10 @@ describe("GroupChat: the options menu", () => {
     let done = () => {};
     engine.on("enableGroupLink", () => new Promise(resolve => { done = () => resolve({ link: entryLink }); }));
     await user.click(screen.getByTestId("group-knocks-reset"));
+    await user.click(screen.getByTestId("group-link-ask-confirm"));
     await user.click(screen.getByTestId("group-knocks-reset"));
+    // Pressed while it works, it asks nothing again.
+    expect(screen.queryByTestId("group-link-ask-dialog")).toBeNull();
     expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: "group-1", reset: true }]);
     expect(screen.getByTestId("group-knocks-reset")).toHaveAttribute("aria-busy", "true");
     await act(async () => { done(); });
