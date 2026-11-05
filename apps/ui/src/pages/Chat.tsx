@@ -226,7 +226,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     setNick,
   } = useChat(params);
   // The composer's Translate, in a chat that translates and has a language of its own.
-  const composerTranslation = useComposerTranslation(sessionId);
+  const { translation: composerTranslation, question: translateQuestion } = useComposerTranslation(sessionId);
 
   // Only what contacts may see: the join notice names nobody while this profile does not share its name.
   useEffect(() => {
@@ -1229,6 +1229,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         apps={appsOn && paired && chatLink ? { onOpen: () => setShowApps(true), hint: appsComposerHint(platform?.getPeer(params.peerPubKeyB64), shownName, t) ?? undefined } : undefined}
       />
       </div>
+      {/* Translate's question for a model that is not here yet. */}
+      {translateQuestion}
 
       {/* Incoming call notification */}
       {/* Incoming call notification: over whatever is on screen, since this chat may not be. */}
