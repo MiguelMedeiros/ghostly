@@ -222,7 +222,7 @@ export const IDENTITY_METHODS: Record<string, Method> = {
 
   async "identity.withdraw"(ctx, params) {
     // As `identity.share`: a contact's own name or a prefix of its id never names the chat.
-    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true));
+    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
     const id = str(params, "id", true);
     if (!link.identities?.shared.some((s) => s.id === id)) throw new CliError("not_found", `No identity proof ${JSON.stringify(id)} shared in this chat (ghostly identity contact ${link.id})`);
     await node(ctx).withdrawIdentityProof({ linkId: link.id, id });
