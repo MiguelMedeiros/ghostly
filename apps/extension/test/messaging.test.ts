@@ -497,6 +497,18 @@ describe("viewer tabs", () => {
     expect(downHtml).toContain('<html lang="ar" dir="rtl">');
   });
 
+  it("names an app the contact took back as it was named when the tab opened, not by its id", async () => {
+    const page = { lang: "en", dir: "ltr", unreachable: "a", failed: "b", app: "Atlas" };
+    const tabId = await openViewer(world, PEER, SERVICE, TAG, page);
+    // Taken back: the peer's state lists it no more, and their machine says so for it.
+    engineControl().links = [{ peerPubKeyZ32: PEER, peerServices: [] }];
+    engineControl().respond = async () =>
+      okResponse("This peer does not share that service.\n", 404, [["content-type", "text/plain; charset=utf-8"], ["x-ghostly-error", "unknown-service"]]);
+    const gone = await pauseRequest(world, tabId, { url: `https://${SERVICE}.${PEER}.${TAG}.invalid/` });
+    expect(gone.params).toMatchObject({ responseCode: 404 });
+    expect(bodyText(gone.params)).toContain(">Atlas is no longer shared with you.<");
+  });
+
   it("stops intercepting once the tab leaves the virtual origin, and only then", async () => {
     const tabId = await openViewer(world);
     const navigate = (frame: { url: string; parentId?: string }) =>

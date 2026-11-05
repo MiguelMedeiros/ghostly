@@ -308,13 +308,13 @@ interface ViewerBinding {
 /** The English page, for a request that came without one. */
 const ENGLISH_PAGE: ViewerPage = { lang: "en", dir: "ltr", unreachable: servicesEn.window.unreachable, failed: servicesEn.window.failed };
 
-/** What the page sent, if it is a page: short texts, a language tag and a direction; else English. */
+/** What the page sent, if it is a page: short texts, a language tag and a direction; else English. An app name only if short text. */
 function viewerPageOf(page: unknown): ViewerPage {
   const text = (value: unknown) => typeof value === "string" && value.length > 0 && value.length <= 500;
   if (typeof page !== "object" || page === null) return ENGLISH_PAGE;
-  const { lang, dir, unreachable, failed } = page as Record<string, unknown>;
+  const { lang, dir, unreachable, failed, app } = page as Record<string, unknown>;
   if (typeof lang !== "string" || !/^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(lang) || (dir !== "ltr" && dir !== "rtl") || !text(unreachable) || !text(failed)) return ENGLISH_PAGE;
-  return { lang, dir, unreachable: unreachable as string, failed: failed as string };
+  return { lang, dir, unreachable: unreachable as string, failed: failed as string, ...(text(app) ? { app: app as string } : {}) };
 }
 
 // Session storage outlives the service worker, which the browser stops whenever it is idle.
@@ -414,6 +414,7 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
     path: parsed.path,
     headers: Object.entries(paused.request.headers),
     bodyB64,
+    ...(binding.page.app ? { app: binding.page.app } : {}),
   };
 
   let reply: HttpRequestReply;

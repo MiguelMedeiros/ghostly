@@ -28,6 +28,8 @@ export type RuntimeMessage =
       path: string;
       headers: [string, string][];
       bodyB64: string | null;
+      /** The app's name when its tab opened (`ViewerPage.app`), for when the peer's state no longer lists it. */
+      app?: string;
     };
 
 /**
@@ -42,6 +44,11 @@ export interface ViewerPage {
   unreachable: string;
   /** Any other failure (`services.window.failed`); the engine's own words go to the console. */
   failed: string;
+  /**
+   * The app's name as the chat listed it when the tab opened: the peer's state no longer has it once the contact took
+   * the app back, which is when the tab says so by name (`services.window.unshared`).
+   */
+  app?: string;
 }
 
 export type HttpRequestReply =
