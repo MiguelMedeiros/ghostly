@@ -217,6 +217,49 @@ test("on a phone the browser's Back with the app over the chat goes back to the 
   await expect(ana.page).not.toHaveURL(/#\/chat\//);
 });
 
+for (const [language, words] of [["ar", "العودة إلى"], ["ja", "に戻る"]] as const) {
+  test(`in ${language} on a phone, "Back to" a long app title shows the title's first letters and its words whole`, { tag: ["@feature:apps.view", "@feature:app.i18n"] }, async ({ peer }) => {
+    // The bar was one line cut as a whole: in Arabic a Latin title lost its first letters ("achturnier… Pro"), and in
+    // Japanese ("<title> に戻る") a long title pushed out the words that say what the bar does.
+    const title = "Schachturnierorganisationsverwaltung Pro";
+    const [ana] = await setUp(peer, { title });
+    await ana.page.evaluate((language) => localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}"), language })), language);
+    await ana.page.reload();
+    await ana.page.setViewportSize({ width: 320, height: 640 });
+    await openChess(ana);
+    const app = ana.page.getByTestId("mini-app");
+    await expect(app).toBeVisible();
+    await app.getByTestId("mini-app-back").click();
+    const resume = ana.page.getByTestId("mini-app-resume");
+    await expect(resume).toBeVisible();
+
+    // Whether `text` (from `start`, `length` characters) is drawn whole: inside every box that clips it, up to the bar.
+    const whole = (text: string, start: number, length: number) => resume.evaluate((bar, [text, start, length]) => {
+      const walker = document.createTreeWalker(bar, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const at = node.textContent!.indexOf(text);
+        if (at < 0) continue;
+        const range = document.createRange();
+        range.setStart(node, at + start);
+        range.setEnd(node, at + start + length);
+        const drawn = range.getBoundingClientRect();
+        let left = drawn.left, right = drawn.right;
+        for (let box = node.parentElement; box && bar.contains(box); box = box.parentElement) {
+          if (getComputedStyle(box).overflowX === "visible") continue;
+          const clip = box.getBoundingClientRect();
+          left = Math.max(left, clip.left); right = Math.min(right, clip.right);
+        }
+        return right - left >= drawn.width - 1;
+      }
+      return null;
+    }, [text, start, length] as const);
+    // The title is cut, at its end: its first letter is drawn whole, its last is not. The words are drawn whole.
+    expect(await whole(title, 0, 1)).toBe(true);
+    expect(await whole(title, title.length - 1, 1)).toBe(false);
+    expect(await whole(words, 0, words.length)).toBe(true);
+  });
+}
+
 test("a chat app's Open on the Apps page asks which chat, and opens it there, never alone", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
   const [ana, bob] = await setUp(peer);
   await ana.page.setViewportSize({ width: 1280, height: 800 });
