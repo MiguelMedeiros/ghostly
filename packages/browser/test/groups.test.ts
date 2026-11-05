@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FAREWELL_KEPT_MS, FAREWELL_OPEN_MS, Groups, type GroupStore, type GroupsHost } from "../src/engine/groups";
-import { createIdentity, encodeGroupEntryLink, decodeGroupEntryLink, knockIdentity, readKnocks, identityFromSeedB64, randomBytes, toBase64Url, type GhostRecord, type GroupState } from "@ghostly/core";
+import { createIdentity, encodeGroupEntryLink, decodeGroupEntryLink, knockIdentity, knockRecords, readKnocks, identityFromSeedB64, randomBytes, toBase64Url, type GhostRecord, type GroupState } from "@ghostly/core";
 import type { StoredGroup, StoredMessage } from "../src/shared/types";
 // covers: groups.picture.set, groups.rename, groups.create, groups.invite, groups.send, groups.leave, groups.forget, groups.link.enable, groups.link.join, groups.link.replace, groups.protocol.entry, groups.protocol.mentions
 
@@ -469,6 +469,40 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     // pace, every five seconds as before: 9.6 s, 16 s, 22.4 s, 28.8 s. Read back every time, it would be twenty writes.
     for (let s = 1; s <= 20; s++) await carol.tick(t0 + s * 1_600);
     expect(writes).toHaveBeenCalledTimes(7);
+  });
+
+  it("tells the admin a link whose knocks keep coming from keys no app answers for lets nobody in, until it is replaced", async () => {
+    const world = new World();
+    const alice = world.add("alice"), carol = world.add("carol");
+    await alice.load(); await carol.load();
+    const groupId = await alice.create("Ghosts", "mesh");
+    const code = await alice.enableLink(groupId);
+    const link = decodeGroupEntryLink(code)!, knockKey = knockIdentity(link).pubKeyZ32;
+    const made = (n: number, ts: number) => Array.from({ length: n }, () => ({ key: createIdentity().pubKeyZ32, ts }));
+    const jammed = () => !!alice.views().find(g => g.id === groupId)!.entryJammed;
+    const t0 = Date.now();
+    // A joiner who gets in, and three who knocked and closed their app: what a shared link sees. No word to the admin.
+    await carol.joinByLink(code);
+    await vi.waitFor(() => expect(readKnocks(link, world.pkarr.get(knockKey) ?? [])).toHaveLength(1));
+    world.pkarr.set(knockKey, knockRecords(link, [...readKnocks(link, world.pkarr.get(knockKey)!), ...made(3, t0)]));
+    await alice.tick(t0); await world.settle(); await world.meetEntries();
+    expect(carol.views()[0].status).toBe("active");
+    for (let s = 1; s <= 120; s++) { await alice.tick(t0 + s * 2_000); await world.settle(); }
+    expect(jammed()).toBe(false);
+    // Then the record is written every 2 s with six fresh keys nobody's app holds a side for: nobody else can get in.
+    const t1 = t0 + 242_000;
+    let warnedAt = -1;
+    for (let s = 0; s <= 300 && warnedAt < 0; s++) {
+      const now = t1 + s * 2_000;
+      world.pkarr.set(knockKey, knockRecords(link, made(6, now)));
+      await alice.tick(now); await world.settle();
+      if (jammed()) warnedAt = now - t1;
+    }
+    expect(warnedAt).toBeGreaterThan(0);
+    expect(warnedAt).toBeLessThanOrEqual(8 * 60_000);
+    // A new link: the old one reaches nobody, and the warning goes with it.
+    await alice.enableLink(groupId, true);
+    expect(jammed()).toBe(false);
   });
 
   it("tells the joiner how far a join through a link got: knocking, knocked, answered, admitted", async () => {

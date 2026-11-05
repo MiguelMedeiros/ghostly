@@ -13,6 +13,7 @@ import { GroupMembersDialog } from "../components/GroupMembersDialog";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { LeaveGroupDialog } from "../components/LeaveGroupDialog";
 import { GroupShareDialog } from "../components/GroupLinkPanel";
+import { GroupLinkAskDialog } from "../components/GroupLinkAskDialog";
 import { GroupConnection } from "../components/GroupConnection";
 import { TasksButton } from "../components/chat/TasksButton";
 import { useJumpTo } from "../hooks/useJumpTo";
@@ -34,6 +35,7 @@ import { groupChat } from "../lib/chatMute";
 import { forgetSentOriginal } from "../lib/sentOriginals";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { GroupInvitationCard, focusPastRow, rowAfter } from "../components/GroupInvitation";
+import { GroupOthers } from "../components/GroupOthers";
 import { authorName, forgetGroupLocal, groupPath, groupReadAt, groupStatusText, groupUnreadAt, markGroupRead, memberName, memberPhoto } from "../lib/groups";
 import { NowPlayingChat, stopPlayingFrom } from "../lib/nowPlaying";
 import { clearChatNotification } from "../lib/notifications";
@@ -790,6 +792,14 @@ export function GroupChat() {
         {community ? t("group.chat.connectingCommunity") : t("group.chat.connectingMembers")}
       </div>}
       {group.adminOff && group.status === "active" && (group.isAdmin || group.profile === "community") && <ManageHere groupId={group.id} />}
+      {group.entryJammed && group.isAdmin && group.status === "active" && <LinkJammed groupId={group.id} onReplaced={() => setSharing("share")} />}
+      {/* Joiners the door let in whose side never came up, many lately: real ones may not get in. One tap replaces the
+          link, and its share sheet opens on the new one. */}
+      {group.isAdmin && group.status === "active" && !!community?.unansweredKnocks && <div role="status" data-testid="group-knocks-unanswered" className="flex flex-wrap items-center gap-2 px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
+        <span className="min-w-0 flex-1">{t("group.link.unanswered")}</span>
+        <button type="button" data-testid="group-knocks-reset" onClick={() => void act(async () => { await engine.call("enableGroupLink", { groupId, reset: true }); setSharing("share"); })}
+          className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer max-md:min-h-11 max-md:px-3">{t("group.link.reset")}</button>
+      </div>}
       {(error || (group.status && group.status !== "active")) && <div ref={noticeRef} tabIndex={-1} role="status" data-testid="group-notice" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
         {error && <Notice problem={error} className="text-xs" />}
         {/* Knocking again: how far the knock got, and a way to stop asking that keeps the group here (a decline, not a delete). */}
@@ -804,6 +814,7 @@ export function GroupChat() {
         </div>
         : !error && (group.profile === "community" && group.status === "removed" ? t("group.chat.removedCommunity") : outOfIt)}
       </div>}
+      <GroupOthers group={group} act={act} />
 
 
       {invited && !invitedFresh && <GroupInvitationCard group={group} compact returnFocus={optionsRef} />}
@@ -907,6 +918,35 @@ export function GroupChat() {
     </MemberColorsProvider>
     </NowPlayingChat.Provider>
     </CueChat.Provider>
+  );
+}
+
+/**
+ * The group's link lets nobody in: its knocks keep coming from apps that never connect, and they take the places a
+ * joiner is answered in (`GroupView.entryJammed`). A new link, asked as the link panel's is, reaches none of them; the
+ * new link is shown to share again.
+ */
+function LinkJammed({ groupId, onReplaced }: { groupId: string; onReplaced(): void }) {
+  const { t } = useI18n();
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<Problem | null>(null);
+  const confirm = () => {
+    setAsking(false);
+    if (busy) return;
+    setBusy(true); setProblem(null);
+    void engine.call("enableGroupLink", { groupId, reset: true }).then(onReplaced, e => setProblem(problemText(e, t))).finally(() => setBusy(false));
+  };
+  return (
+    <div role="status" data-testid="group-link-jammed" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border space-y-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="min-w-0 flex-1 text-warn-ink">{t("group.link.jammed")}</span>
+        <button type="button" data-testid="group-link-jammed-reset" {...working(busy)} onClick={() => { if (!busy) setAsking(true); }}
+          className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer data-[loading]:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.link.reset")}</button>
+      </div>
+      {asking && <GroupLinkAskDialog kind="reset" onClose={() => setAsking(false)} onConfirm={confirm} />}
+      {problem && <Notice problem={problem} className="text-xs" />}
+    </div>
   );
 }
 

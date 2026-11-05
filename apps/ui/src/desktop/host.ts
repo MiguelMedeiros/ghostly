@@ -32,6 +32,7 @@ import { followPlatformDrags } from "../lib/pastedFiles";
 import type { NodeOptions } from "@ghostly/browser/engine/node";
 import { createIrohEndpoint, createHyperEndpoint } from "./nativeTransports";
 import { desktopUpdates } from "./updates";
+import { desktopHoldFetch } from "./holdFetch";
 import { desktopLnurlFetch } from "./lnurlFetch";
 import { desktopOidc } from "./oidc";
 import { desktopAtprotoHost } from "./atproto";
@@ -403,6 +404,8 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     pushSend: (request) => invoke<number>("push_send", { url: request.url, headers: Object.entries(request.headers), body: toBase64Url(request.body) }),
     // A Lightning address whose service redirects is asked from Rust, which checks every hop before following it.
     lnurlFetch: desktopLnurlFetch(invoke),
+    // Held items are read from the contact's storage on public addresses only, which Rust checks and a WebView cannot.
+    holdFetch: desktopHoldFetch(invoke),
     // A new profile gets its default Mainnet wallets; never under an e2e suite (desktopUnderTest).
     defaultWallets: defaultWalletsAllowed(desktopUnderTest),
     ...apps.node, ...macPeerBudget() };

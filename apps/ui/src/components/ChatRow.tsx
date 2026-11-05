@@ -435,7 +435,8 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
   const mentionQuiet = muted && !mentionsNotify(groupChat(group.id));
   const { busy, refused, answer } = useInvitationAnswer(group);
   const members = (count: number) => count === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count });
-  const status = invitation ? invitationStatus(group, t)
+  // Another group came under its id: said first, as the person has to pick on its page (`GroupOthers`).
+  const status = group.others?.length ? t("sidebar.group.others") : invitation ? invitationStatus(group, t)
     : group.status !== "active" ? (group.statusReason ? problemText(group.statusReason, t).title : group.status && groupStatusText(group.status, t)) : members(group.members.length);
   // The latest reaction, while nothing was said after it (WISP 400 § Reactions).
   const reacted = !invitation && group.status === "active" && group.lastReaction && group.lastReaction.at > group.lastMessageAt ? group.lastReaction : undefined;

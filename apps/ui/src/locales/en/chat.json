@@ -466,6 +466,10 @@
   "typing": "typing…",
   "typingRecording": "recording audio…",
   "typingThinking": "thinking…",
+  "unconfirmed": {
+    "hint": "Sent with a contact request. Their app has not confirmed yet that it sent this.",
+    "label": "Not confirmed"
+  },
   "video": {
     "arriving": "Arriving",
     "cantPlay": "This device can't play this video ({{format}}). Download it to watch.",
