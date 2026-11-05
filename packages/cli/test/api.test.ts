@@ -1051,7 +1051,7 @@ describe("settings", () => {
     // Each was `engine` (exit 1), in the app's words ("Enter at least one relay address").
     const { ctx, node } = fake();
     const refusals: [Record<string, unknown>, string, string][] = [
-      [{ relays: ["notaurl"] }, "Enter at least one relay address (https://…)", "relays: give at least one relay address (https://…)"],
+      [{ relays: [] }, "Enter at least one relay address (https://…)", "relays: give at least one relay address (https://…)"],
       [{ irohRelays: ["x"] }, "Not a relay address: x", "irohRelays: not a relay address: x"],
       [{ hyperdhtRelay: "nope" }, "Enter a relay address (wss://…)", "hyperdhtRelay: give a relay address (wss://…)"],
       // A relay address with the wrong scheme (irohWeb.ts irohRelayProblem, hyperdhtRelay.ts hyperdhtRelayProblem).
@@ -1062,6 +1062,23 @@ describe("settings", () => {
       node.updateSettings.mockRejectedValueOnce(new Error(engine));
       await expect(callApi(ctx, "settings.set", patch)).rejects.toMatchObject({ code: "bad_request", message: said });
     }
+  });
+
+  it("name the Pkarr relay it can't use, as the app's Settings does, and ask for one only for an empty list", async () => {
+    // The engine says "Enter at least one relay address" for any list it can't use: the one given went unnamed.
+    const { ctx, node } = fake();
+    const refusals: [string[], string][] = [
+      [["ftp://x"], "relays: not a relay address: ftp://x"],
+      [["ftp://relay.example.org"], "relays: use an https:// relay address: ftp://relay.example.org"],
+      [["wss://relay.example.org", "notaurl"], "relays: use an https:// relay address: wss://relay.example.org"],
+    ];
+    for (const [relays, said] of refusals) {
+      await expect(callApi(ctx, "settings.set", { relays })).rejects.toMatchObject({ code: "bad_request", message: said });
+    }
+    expect(node.updateSettings).not.toHaveBeenCalled();
+    // A usable one next to them is the engine's to keep (it drops the rest), as before.
+    await callApi(ctx, "settings.set", { relays: ["https://relay.example.org", "ftp://x"] });
+    expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { relays: ["https://relay.example.org", "ftp://x"] } });
   });
 
   it("take TCP and TLS TURN servers for the apps, and say the CLI does not use them", async () => {
