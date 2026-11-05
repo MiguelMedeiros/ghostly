@@ -398,6 +398,8 @@ export function GroupChat() {
   // A new group opens on its link (the sidebar says so in the navigation's state); the header's Share link opens it again.
   const location = useLocation();
   const [sharing, setSharing] = useState<"" | "created" | "share">("");
+  /** The unanswered joiners' New link while it works: a reset seals a fresh key to every member, and a second press made another. */
+  const [resetting, setResetting] = useState(false);
   // Its dialog waits for the link (a new group's, or one just turned on, comes with the state that follows), then stays
   // until it is closed: turned off in it, the link says so there, and one turned on again later opens nothing by itself.
   const [shareShown, setShareShown] = useState(false);
@@ -807,8 +809,12 @@ export function GroupChat() {
           link, and its share sheet opens on the new one. */}
       {group.isAdmin && group.status === "active" && !!community?.unansweredKnocks && <div role="status" data-testid="group-knocks-unanswered" className="flex flex-wrap items-center gap-2 px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
         <span className="min-w-0 flex-1">{t("group.link.unanswered")}</span>
-        <button type="button" data-testid="group-knocks-reset" onClick={() => void act(async () => { await engine.call("enableGroupLink", { groupId, reset: true }); setSharing("share"); })}
-          className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer max-md:min-h-11 max-md:px-3">{t("group.link.reset")}</button>
+        <button type="button" data-testid="group-knocks-reset" {...working(resetting)} onClick={() => {
+          if (resetting) return;
+          setResetting(true);
+          void act(async () => { await engine.call("enableGroupLink", { groupId, reset: true }); setSharing("share"); }).finally(() => setResetting(false));
+        }}
+          className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer data-[loading]:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.link.reset")}</button>
       </div>}
       {(error || (group.status && group.status !== "active")) && <div ref={noticeRef} tabIndex={-1} role="status" data-testid="group-notice" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
         {error && <Notice problem={error} className="text-xs" />}
