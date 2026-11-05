@@ -90,7 +90,7 @@ describe("a video in the chat", () => {
     expect(screen.getByRole("group", { name: "Vídeo, 0:12" })).toBeInTheDocument();
     view.unmount();
     renderApp(<VideoBubble file={video({ video: undefined })} sender="peer" peerName="Ana" />, { language: "pt" });
-    expect(screen.getByRole("group", { name: "Vídeo, 35.0 MB" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Vídeo, 35,0 MB" })).toBeInTheDocument();
   });
 
   it("plays in place when tapped, from its bytes, with the browser's controls", async () => {

@@ -115,6 +115,8 @@
     "answered": "The admin's app saw you knock and is connecting to you. You are in in a moment.",
     "answeredCommunity": "A member's app saw you knock and is connecting to you. You are in in a moment.",
     "answeredTitleCommunity": "A member is letting you in",
+    "blocked": "This group is waiting for updates",
+    "blockedBody": "It takes new members again once everyone in it has an updated Ghostly. You get in then: keep the app open.",
     "cancel": "Cancel joining",
     "full": "This group is full",
     "fullBody": "It has {{n}} of {{max}} members. You get in once someone leaves: keep the app open.",

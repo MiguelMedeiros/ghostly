@@ -435,15 +435,15 @@ describe("the event stream", () => {
     await h.open();
     const longest = Math.max(0, ...decode.mock.results.map((r) => (typeof r.value === "string" ? r.value.length : 0)));
     decode.mockRestore();
-    // A torn last line: the seq is the last whole one's.
-    expect(h.lastSeq).toBe(1_000);
+    // A torn last line: cut off, and the seq it names (told to listeners before the cut) is not given again.
+    expect(h.lastSeq).toBe(1_001);
     expect(longest).toBeLessThan(10_000);
-    // The torn line counts as one, as the trim counts it.
+    // A torn line with no seq: the last whole one's. It is cut off, and the trim counts what is left.
     const many = join(dir, "many.jsonl");
-    writeFileSync(many, Array.from({ length: 20_000 }, (_, i) => JSON.stringify({ seq: i + 1, id: `x:${i + 1}`, type: "x", at: 1 }) + "\n").join("") + "torn");
+    writeFileSync(many, Array.from({ length: 20_001 }, (_, i) => JSON.stringify({ seq: i + 1, id: `x:${i + 1}`, type: "x", at: 1 }) + "\n").join("") + "torn");
     const full = new EventHub(many, () => 1000, "many");
     await full.open();
-    expect(full.lastSeq).toBe(20_000);
+    expect(full.lastSeq).toBe(20_001);
     expect(readFileSync(many, "utf8").trim().split("\n")).toHaveLength(10_000);
   });
 

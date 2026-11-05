@@ -1,4 +1,4 @@
-import { appendFileSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, fstatSync, ftruncateSync, openSync, readFileSync, readSync, renameSync, rmSync, truncateSync, writeFileSync, writeSync } from "node:fs";
 import type { AppFrameEvent } from "@ghostly/core";
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { EngineEvent, RpcResponse } from "@ghostly/browser/shared/rpc";
@@ -64,6 +64,8 @@ export class EventHub {
   private dropped = 0;
   /** Whether `<journal>.dropped` is written: before `forget` first takes a journal's first events, it must be. */
   private marked = false;
+  /** Whether `dropped` is ahead of `<journal>.dropped` (a full disk refused it): the next event's write tries it again. */
+  private markOwed = false;
   private journalLines = 0;
   private journalBytes = 0;
   private readonly listeners = new Set<Listener>();
@@ -104,7 +106,7 @@ export class EventHub {
     try {
       const dropped = readDropped(this.journalPath + ".dropped");
       if (existsSync(this.journalPath)) {
-        const { seq, first, lines, size } = journalEnd(this.journalPath);
+        const { seq, first, lines, size, tail } = journalEnd(this.journalPath);
         this.journalLines = lines;
         this.journalBytes = size;
         this.seq = seq;
@@ -112,7 +114,19 @@ export class EventHub {
         // missing before its first event counts as dropped.
         this.dropped = dropped ?? (first === undefined ? seq : first - 1);
         this.marked = dropped !== undefined;
-        if (size > JOURNAL_MAX_BYTES || lines > JOURNAL_KEEP * 2) this.trimJournal();
+        // A last line with no newline (a power cut mid-write): the next event must not be appended to it. A whole event
+        // is ended; a cut one goes, and its seq, told to listeners before the cut, is not given again: a replay past it
+        // says `events.gap`.
+        let ended = false;
+        if (tail?.whole) try { appendFileSync(this.journalPath, "\n"); this.journalBytes++; ended = true; } catch { /* cut instead */ }
+        if (tail && !ended) {
+          truncateSync(this.journalPath, tail.at);
+          this.journalLines--;
+          this.journalBytes = tail.at;
+          const lost = tail.whole ? seq : tail.seq !== undefined && tail.seq > seq ? tail.seq : undefined;
+          if (lost !== undefined) { this.seq = lost; this.markDropped(Math.max(this.dropped, lost)); }
+        }
+        if (this.journalBytes > JOURNAL_MAX_BYTES || this.journalLines > JOURNAL_KEEP * 2) this.trimJournal();
       } else if (dropped !== undefined) rmSync(this.journalPath + ".dropped", { force: true });
     } catch (error) {
       process.stderr.write(`ghostly: the event journal could not be read, a new one begins: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -231,17 +245,28 @@ export class EventHub {
   onAppFrame(listener: (chat: string, frame: AppFrameEvent) => void): () => void { this.appListeners.add(listener); return () => this.appListeners.delete(listener); }
 
   /**
-   * Events after `since` still in the journal; a gap event first when older ones were dropped (`dropped`). The events of
-   * what the person removed (`forget`) are no gap: they are not here on purpose.
+   * Events after `since` still in the journal; a gap event where ones up to `dropped` are missing (a trim, a full disk
+   * that took none of them). The events of what the person removed (`forget`) after it are no gap: they are not here on
+   * purpose.
    */
   replay(since: number): GhostlyEvent[] {
-    if (!existsSync(this.journalPath) || since >= this.seq) return [];
+    if (since >= this.seq) return [];
     const out: GhostlyEvent[] = [];
-    for (const line of journalTail(this.journalPath).lines) {
-      try { const event = JSON.parse(line) as GhostlyEvent; if (event.seq > since) out.push(event); } catch { /* torn */ }
+    let before = since;
+    const gapTo = (next: number) => {
+      if (next > before + 1 && before < this.dropped)
+        out.push({ seq: before, id: `events.gap:${before}:${next}`, type: "events.gap", at: this.now(), from: before + 1, to: Math.min(this.dropped, next - 1) });
+    };
+    if (existsSync(this.journalPath)) for (const line of journalTail(this.journalPath).lines) {
+      let event: GhostlyEvent;
+      try { event = JSON.parse(line) as GhostlyEvent; } catch { continue; /* torn */ }
+      if (event.seq <= before) continue;
+      gapTo(event.seq);
+      out.push(event);
+      before = event.seq;
     }
-    if (out.length && out[0].seq > since + 1 && since < this.dropped)
-      out.unshift({ seq: since, id: `events.gap:${since}:${out[0].seq}`, type: "events.gap", at: this.now(), from: since + 1, to: Math.min(this.dropped, out[0].seq - 1) });
+    // The last events, never written: a gap up to the next one.
+    gapTo(Math.min(this.dropped, this.seq) + 1);
     return out;
   }
 
@@ -251,8 +276,16 @@ export class EventHub {
    */
   private markDropped(seq: number): void {
     this.dropped = seq;
-    try { writeFileSync(this.journalPath + ".dropped", String(seq), { mode: 0o600 }); this.marked = true; }
-    catch (error) { process.stderr.write(`ghostly: event journal error: ${error instanceof Error ? error.message : String(error)}\n`); }
+    // Through a copy: a full disk leaves the mark it had, never an empty one (no mark, a gap not said).
+    try {
+      writeFileSync(this.journalPath + ".dropped.tmp", String(seq), { mode: 0o600 });
+      renameSync(this.journalPath + ".dropped.tmp", this.journalPath + ".dropped");
+      this.marked = true;
+      this.markOwed = false;
+    } catch (error) {
+      this.markOwed = true;
+      process.stderr.write(`ghostly: event journal error: ${error instanceof Error ? error.message : String(error)}\n`);
+    }
   }
 
   get lastSeq(): number { return this.seq; }
@@ -261,13 +294,19 @@ export class EventHub {
   emit(type: string, id: string, fields: Record<string, unknown> = {}): GhostlyEvent {
     const event: GhostlyEvent = { seq: ++this.seq, id, type, at: this.now(), ...fields };
     // The journal failing never keeps an event from the listeners.
+    let written = false;
     try {
-      const line = JSON.stringify(event) + "\n";
-      appendFileSync(this.journalPath, line, { mode: 0o600 });
-      this.journalBytes += Buffer.byteLength(line);
+      // A mark a full disk refused goes first, as `markDropped` would have it: ahead of the journal.
+      if (this.markOwed) this.markDropped(this.dropped);
+      const line = Buffer.from(JSON.stringify(event) + "\n");
+      appendWhole(this.journalPath, line);
+      written = true;
+      this.journalBytes += line.length;
       if (++this.journalLines > JOURNAL_KEEP * 2 || this.journalBytes > JOURNAL_MAX_BYTES) this.trimJournal();
     } catch (error) {
       process.stderr.write(`ghostly: event journal error: ${error instanceof Error ? error.message : String(error)}\n`);
+      // Not in the journal (a full disk): a replay past it says `events.gap`.
+      if (!written) this.markDropped(Math.max(this.dropped, event.seq));
     }
     this.tell(event);
     return event;
@@ -803,7 +842,7 @@ function journalTail(path: string): { lines: string[]; size: number } {
  * What opening needs of the journal: its last seq, its number of lines (as `journalTail` counts them) and its size. The
  * lines are counted by their bytes and only the last whole one is made into text.
  */
-function journalEnd(path: string): { seq: number; first: number | undefined; lines: number; size: number } {
+function journalEnd(path: string): { seq: number; first: number | undefined; lines: number; size: number; tail: JournalTail | undefined } {
   const { bytes, start, size } = journalWindow(path);
   let lines = 0;
   for (let from = start; from < bytes.length;) {
@@ -819,16 +858,26 @@ function journalEnd(path: string): { seq: number; first: number | undefined; lin
     if (stop > from) first = firstSeq([bytes.toString("utf8", from, stop)]);
     from = stop + 1;
   }
-  let seq = 0;
+  let seq = 0, read = -1;
   for (let stop = bytes.length; stop > start;) {
     const from = Math.max(start, bytes.lastIndexOf(0x0a, stop - 1) + 1);
     if (from < stop) {
-      try { seq = (JSON.parse(bytes.toString("utf8", from, stop)) as GhostlyEvent).seq; break; } catch { /* a torn last line */ }
+      try { seq = (JSON.parse(bytes.toString("utf8", from, stop)) as GhostlyEvent).seq; read = from; break; } catch { /* a torn last line */ }
     }
     stop = from - 1;
   }
-  return { seq, first, lines, size };
+  let tail: JournalTail | undefined;
+  if (bytes.length > start && bytes[bytes.length - 1] !== 0x0a) {
+    const from = Math.max(start, bytes.lastIndexOf(0x0a) + 1);
+    // Only the start of a cut line is made into text, for the seq it names.
+    const named = /^\{"seq":(\d+)[,}]/.exec(bytes.toString("latin1", from, Math.min(bytes.length, from + 32)))?.[1];
+    tail = { at: size - bytes.length + from, whole: read === from, seq: named === undefined ? undefined : Number(named) };
+  }
+  return { seq, first, lines, size, tail };
 }
+
+/** The journal's last line when it has no newline: where it begins, whether it is a whole event, and the seq it names. */
+interface JournalTail { at: number; whole: boolean; seq: number | undefined }
 
 /** The seq of the first of these lines that can be read. */
 function firstSeq(lines: readonly string[]): number | undefined {
@@ -844,6 +893,24 @@ function readDropped(path: string): number | undefined {
     const seq = Number(readFileSync(path, "utf8").trim());
     return Number.isSafeInteger(seq) && seq >= 0 ? seq : undefined;
   } catch { return undefined; }
+}
+
+/**
+ * Appends a line whole or not at all: what a full disk took of it is cut back (as the store's journal does), so the
+ * next line, once there is room, starts a line of its own instead of making one no reader can parse with it.
+ */
+function appendWhole(path: string, line: Buffer): void {
+  const fd = openSync(path, "a", 0o600);
+  let whole = -1;
+  try {
+    whole = fstatSync(fd).size;
+    for (let at = 0; at < line.length;) at += writeSync(fd, line, at);
+  } catch (error) {
+    if (whole >= 0) try { ftruncateSync(fd, whole); } catch { /* the next start cuts it (`open`) */ }
+    throw error;
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /** The bytes of the journal's last `JOURNAL_MAX_BYTES`, `start` where its first whole line begins in them, and its size. */

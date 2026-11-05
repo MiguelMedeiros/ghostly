@@ -179,6 +179,16 @@ export function newChatOnly(method: string): boolean {
 }
 
 /**
+ * A command about the 1:1 chat it names, or one that makes or joins a new chat (`newChatOnly`): a one-shot for it leaves
+ * the other saved chats unstarted too, and starts only the chat a call names (`startNamedChats`). Started, each saved
+ * chat put its records and its leave packet on the relays: with 12 invites saved one `send` took the relays' 30
+ * requests a minute, and a text to a contact who is away, or the next one-shot, waited behind them.
+ */
+export function oneChatOnly(method: string, params: Record<string, unknown>): boolean {
+  return newChatOnly(method) || (chatOnly(method, params) && typeof params.chat === "string");
+}
+
+/**
  * Calls that only read what the profile stores: a one-shot for one opens it offline (`RuntimeOptions.offline`).
  * Opened online, `status` or `chat list` started every chat, put the profile's records on the relays again and waited
  * for its leave packet to be taken: 0.25 s became 3.3 s with a relay that takes 1.5 s, and 10 s with one that does not
@@ -237,10 +247,14 @@ async function session(g: Globals, options: RuntimeOptions): Promise<Session> {
   requireProfile(g);
   const client = await connectDaemon(g.paths);
   if (client) return throughDaemon(client);
-  const [, { callApi }] = await Promise.all([engineHost(), engineApi()]);
+  const [, { callApi, startNamedChats }] = await Promise.all([engineHost(), engineApi()]);
   const host = await openOneShot(g, options);
   if (host instanceof DaemonClient) return throughDaemon(host);
-  return { mode: "one-shot", call: (m, p) => callApi(host.ctx, m, p ?? {}), close: () => host.close(), abort: () => host.close() };
+  const call = (m: string, p?: unknown) => {
+    if (options.deferChats && p && typeof p === "object") startNamedChats(host.ctx, p as Record<string, unknown>);
+    return callApi(host.ctx, m, p ?? {});
+  };
+  return { mode: "one-shot", call, close: () => host.close(), abort: () => host.close() };
 }
 
 function throughDaemon(client: DaemonClient): Session {
@@ -279,7 +293,7 @@ const STARTING_WAIT_MS = 30_000;
  */
 async function openOneShot(g: Globals, options: RuntimeOptions = {}, mode: Host["ctx"]["mode"] = "one-shot"): Promise<Host | DaemonClient> {
   const { openHost } = await engineHost();
-  const from = Date.now();
+  const from = performance.now();
   for (;;) {
     try { return await openHost(g.paths, mode, VERSION, options); }
     catch (error) {
@@ -288,7 +302,7 @@ async function openOneShot(g: Globals, options: RuntimeOptions = {}, mode: Host[
       const starting = startingDaemon(g.paths);
       const client = await connectDaemon(g.paths);
       if (client) return client;
-      const left = from + (starting === null ? HOLDER_WAIT_MS : STARTING_WAIT_MS) - Date.now();
+      const left = from + (starting === null ? HOLDER_WAIT_MS : STARTING_WAIT_MS) - performance.now();
       if (left <= 0) {
         if (starting !== null) throw new CliError("busy", `Profile ${g.profile} is in use by its daemon (process ${starting}), which was still starting after ${STARTING_WAIT_MS / 1000} s: ghostly daemon status shows when it is up`, { pid: starting });
         const pid = error.details?.pid;
@@ -301,8 +315,8 @@ async function openOneShot(g: Globals, options: RuntimeOptions = {}, mode: Host[
 
 /**
  * How a one-shot opens the profile: `deferGroups` when the command is about one 1:1 chat (`chatOnly`) and needs
- * nothing of the groups, `deferChats` too when it makes a new chat (`newChatOnly`), `offline` when it only reads or
- * changes only this device (`offlineCall`).
+ * nothing of the groups, `deferChats` too when it names that chat or makes or joins a new one (`oneChatOnly`), `offline`
+ * when it only reads or changes only this device (`offlineCall`).
  */
 async function withSession<T>(g: Globals, work: (s: Session) => Promise<T>, options: RuntimeOptions = {}): Promise<T> {
   const s = await session(g, options);
@@ -769,14 +783,14 @@ async function runDaemon(g: Globals, seconds: number): Promise<void> {
   const detached = process.env[DETACHED_CHILD] === "1";
   delete process.env[DETACHED_CHILD]; // not handed to the hooks it runs
   const { keepServing, openHost, serve } = await engineHost();
-  const until = Date.now() + seconds * 1000;
+  const until = performance.now() + seconds * 1000;
   let host: Host;
   for (;;) {
     if (await connectDaemon(g.paths)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
     try { host = await openHost(g.paths, "daemon", VERSION); break; }
     catch (error) {
-      if (detached || !(error instanceof CliError) || error.code !== "busy" || Date.now() >= until) throw error;
-      await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(100, until - Date.now()))));
+      if (detached || !(error instanceof CliError) || error.code !== "busy" || performance.now() >= until) throw error;
+      await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(100, until - performance.now()))));
     }
   }
   let served: Awaited<ReturnType<typeof serve>>;
@@ -859,14 +873,14 @@ async function daemonCommand(argv: string[]): Promise<void> {
  * failed busy and left the old code running.
  */
 async function startedDaemon(g: Globals, seconds: number): Promise<DaemonClient | null> {
-  const until = Date.now() + seconds * 1000;
+  const until = performance.now() + seconds * 1000;
   for (;;) {
     // Read before the socket is tried: a daemon whose socket listens in between is found by the try.
     const pid = startingDaemon(g.paths);
     const client = await connectDaemon(g.paths);
     if (client) return client;
     if (pid === null) return null;
-    const left = until - Date.now();
+    const left = until - performance.now();
     if (left <= 0) throw new CliError("timeout", `The daemon (process ${pid}) is still starting after ${seconds} s; ghostly daemon status shows when it is up`, { pid });
     await new Promise((resolve) => setTimeout(resolve, Math.min(100, left)));
   }
@@ -908,9 +922,9 @@ async function stopDaemon(g: Globals, client: DaemonClient, seconds: number): Pr
   client.close();
   const running = () => lockOwner(g.paths) === pid || processAlive(pid);
   const gone = async () => {
-    const until = Date.now() + seconds * 1000;
+    const until = performance.now() + seconds * 1000;
     while (running()) {
-      const left = until - Date.now();
+      const left = until - performance.now();
       if (left <= 0) break;
       await new Promise((resolve) => setTimeout(resolve, Math.min(100, left)));
     }
@@ -954,15 +968,15 @@ function processAlive(pid: number): boolean {
  */
 async function startDetached(g: Globals, seconds: number) {
   requireProfile(g);
-  const until = Date.now() + seconds * 1000;
+  const until = performance.now() + seconds * 1000;
   for (;;) {
     if (await connectDaemon(g.paths)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
     if (lockOwner(g.paths) === null) {
       const started = await spawnDaemon(g, until);
       if (started) return started;
     }
-    if (Date.now() >= until) { heldBy(g); throw new CliError("engine", `The daemon did not start; see ${g.paths.log}`); }
-    await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(100, until - Date.now()))));
+    if (performance.now() >= until) { heldBy(g); throw new CliError("engine", `The daemon did not start; see ${g.paths.log}`); }
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(100, until - performance.now()))));
   }
 }
 
@@ -981,17 +995,17 @@ async function spawnDaemon(g: Globals, until: number) {
   // waiting one 200 ms poll first (the first try finds no socket yet and returns at once). A child that exited or was
   // killed (SIGABRT on a V8 out-of-memory, the OOM killer) ends the wait too, instead of polling to the deadline.
   while (child.exitCode === null && child.signalCode === null && !spawned.error) {
-    const left = until - Date.now();
+    const left = until - performance.now();
     if (left <= 0) break;
     client = await connectDaemon(g.paths, Math.min(500, left));
     if (client) break;
-    await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(200, until - Date.now()))));
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(200, until - performance.now()))));
   }
   if (!client) {
     // Another process took the profile between the look and the child's start: it holds it still, or the child's
     // answer in the log says so (a one-shot that already ended). Tried again while there is time.
     const lost = !spawned.error && (![null, child.pid].includes(lockOwner(g.paths)) || lostTheProfile(g.paths.log, logFrom));
-    if (lost && Date.now() < until) return null;
+    if (lost && performance.now() < until) return null;
     heldBy(g, child.pid);
     // Alive still: it is starting (a large profile takes seconds), not failed, and the profile is its own now.
     if (child.exitCode === null && child.signalCode === null && child.pid !== undefined && processAlive(child.pid)) {
@@ -1252,7 +1266,7 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
       if (parsed.options.timeout !== undefined) params.timeout = parsed.options.timeout;
     }
     return s.call(spec.method, params);
-  }, { deferGroups: spec.target === "chat" }));
+  }, { deferGroups: spec.target === "chat", deferChats: spec.target === "chat" }));
 }
 
 /**
@@ -1361,7 +1375,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
       return joined.answer;
     }
     return result;
-  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: newChatOnly(command.method), offline: offlineCall(command.method, params) });
+  }, { deferGroups: chatOnly(command.method, params) || oneChatOnly(command.method, params), deferChats: oneChatOnly(command.method, params), offline: offlineCall(command.method, params) });
   if (translator) {
     try { printAnswer(await (await import("./translate")).translateAnswer(result, translator)); } finally { translator.close(); }
     return;
