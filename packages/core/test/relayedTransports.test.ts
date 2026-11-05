@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { checkedDescriptors, rankTransports, relayedTransports, TRANSPORTS, type PairedTransport, type TransportDescriptors } from "../src/pairedTransports";
+import { checkedDescriptors, dialableIrohRelay, rankTransports, relayUrl, relayedTransports, TRANSPORTS, type PairedTransport, type TransportDescriptors } from "../src/pairedTransports";
 import { TransportSwitch, type TransportPolicy } from "../src/transportSwitch";
 // covers: transport.relayed, transport.preference, transport.switch
 
@@ -118,4 +118,17 @@ it("keeps a contact's descriptors only in the shape the adapters make", () => {
   expect(checkedDescriptors({ "hyperdht/1": { publicKey, relayed: true, relay: "wss://relay.test/@path" } })["hyperdht/1"]).toBeDefined();
   for (const none of [undefined, null, "x", 7, [], [{ "iroh/1": { id, relay: null, addresses: [] } }]]) expect(checkedDescriptors(none)).toEqual({});
   expect(checkedDescriptors({ "webrtc/1": "w", "evil/9": { x: 1 }, "hyperdht/1": { publicKey, more: { x: 1 } } })).toEqual({ "hyperdht/1": { publicKey } });
+});
+
+it("dials a contact's Iroh relay only at a public https address, or when it is one of the endpoint's own", () => {
+  const local = ["http://127.0.0.1:4601", "http://localhost:4601/", "http://[::1]:4601/", "https://10.0.0.1/", "https://[::1]/", "https://192.168.1.2/",
+    "https://169.254.169.254/", "https://100.64.0.1/", "https://[fd00::1]/", "https://localhost/", "https://router/", "https://nas.local/", "wss://relay.test/", 7, ""];
+  for (const relay of local) expect(dialableIrohRelay(relay, []), String(relay)).toBe(false);
+  for (const relay of [null, undefined, "https://relay.test/", "https://use1-1.relay.n0.iroh.link./", "https://8.8.8.8/"]) expect(dialableIrohRelay(relay, []), String(relay)).toBe(true);
+  // The person's own relays stay theirs to name, in either spelling; another port on the same host is not one.
+  const own = ["http://127.0.0.1:4600", "https://10.0.0.1/", "https://relay.lan.example./"];
+  for (const relay of ["http://127.0.0.1:4600/", "https://10.0.0.1", "https://relay.lan.example/"]) expect(dialableIrohRelay(relay, own), relay).toBe(true);
+  for (const relay of ["http://127.0.0.1:4601/", "https://10.0.0.2/", "http://127.0.0.1:4600/?x=1"]) expect(dialableIrohRelay(relay, own), relay).toBe(false);
+  // What the relay settings take is unchanged: plain http on loopback is still a relay of one's own.
+  for (const relay of ["http://127.0.0.1:4600", "http://localhost:4600/", "https://10.0.0.1/"]) expect(relayUrl(relay), relay).toBe(true);
 });
