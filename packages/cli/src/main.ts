@@ -179,6 +179,16 @@ export function newChatOnly(method: string): boolean {
 }
 
 /**
+ * A command about the 1:1 chat it names, or one that makes or joins a new chat (`newChatOnly`): a one-shot for it leaves
+ * the other saved chats unstarted too, and starts only the chat a call names (`startNamedChats`). Started, each saved
+ * chat put its records and its leave packet on the relays: with 12 invites saved one `send` took the relays' 30
+ * requests a minute, and a text to a contact who is away, or the next one-shot, waited behind them.
+ */
+export function oneChatOnly(method: string, params: Record<string, unknown>): boolean {
+  return newChatOnly(method) || (chatOnly(method, params) && typeof params.chat === "string");
+}
+
+/**
  * Calls that only read what the profile stores: a one-shot for one opens it offline (`RuntimeOptions.offline`).
  * Opened online, `status` or `chat list` started every chat, put the profile's records on the relays again and waited
  * for its leave packet to be taken: 0.25 s became 3.3 s with a relay that takes 1.5 s, and 10 s with one that does not
@@ -237,10 +247,14 @@ async function session(g: Globals, options: RuntimeOptions): Promise<Session> {
   requireProfile(g);
   const client = await connectDaemon(g.paths);
   if (client) return throughDaemon(client);
-  const [, { callApi }] = await Promise.all([engineHost(), engineApi()]);
+  const [, { callApi, startNamedChats }] = await Promise.all([engineHost(), engineApi()]);
   const host = await openOneShot(g, options);
   if (host instanceof DaemonClient) return throughDaemon(host);
-  return { mode: "one-shot", call: (m, p) => callApi(host.ctx, m, p ?? {}), close: () => host.close(), abort: () => host.close() };
+  const call = (m: string, p?: unknown) => {
+    if (options.deferChats && p && typeof p === "object") startNamedChats(host.ctx, p as Record<string, unknown>);
+    return callApi(host.ctx, m, p ?? {});
+  };
+  return { mode: "one-shot", call, close: () => host.close(), abort: () => host.close() };
 }
 
 function throughDaemon(client: DaemonClient): Session {
@@ -301,8 +315,8 @@ async function openOneShot(g: Globals, options: RuntimeOptions = {}, mode: Host[
 
 /**
  * How a one-shot opens the profile: `deferGroups` when the command is about one 1:1 chat (`chatOnly`) and needs
- * nothing of the groups, `deferChats` too when it makes a new chat (`newChatOnly`), `offline` when it only reads or
- * changes only this device (`offlineCall`).
+ * nothing of the groups, `deferChats` too when it names that chat or makes or joins a new one (`oneChatOnly`), `offline`
+ * when it only reads or changes only this device (`offlineCall`).
  */
 async function withSession<T>(g: Globals, work: (s: Session) => Promise<T>, options: RuntimeOptions = {}): Promise<T> {
   const s = await session(g, options);
@@ -1252,7 +1266,7 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
       if (parsed.options.timeout !== undefined) params.timeout = parsed.options.timeout;
     }
     return s.call(spec.method, params);
-  }, { deferGroups: spec.target === "chat" }));
+  }, { deferGroups: spec.target === "chat", deferChats: spec.target === "chat" }));
 }
 
 /**
@@ -1361,7 +1375,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
       return joined.answer;
     }
     return result;
-  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: newChatOnly(command.method), offline: offlineCall(command.method, params) });
+  }, { deferGroups: chatOnly(command.method, params) || oneChatOnly(command.method, params), deferChats: oneChatOnly(command.method, params), offline: offlineCall(command.method, params) });
   if (translator) {
     try { printAnswer(await (await import("./translate")).translateAnswer(result, translator)); } finally { translator.close(); }
     return;
