@@ -184,10 +184,10 @@ function Head({ titleId, title, version, tagline, icon, installed }: { titleId: 
     <div className="flex items-center gap-3">
       <AppIcon size={48} icon={icon} installed={installed} />
       <div className="min-w-0">
-        <h2 id={titleId} dir="auto" className="text-lg font-medium text-text-primary break-words">{title}</h2>
+        <h2 id={titleId} dir="auto" className="text-match-parent text-lg font-medium text-text-primary break-words">{title}</h2>
         {version && <p className="text-xs text-text-muted">{t("apps.app.version", { version })}</p>}
         {/* A link or a long word breaks anywhere: unbroken, it pushed the screen sideways on a phone, and cut it off in Arabic. */}
-        {tagline && <p dir="auto" className="text-sm text-text-secondary [overflow-wrap:anywhere]">{tagline}</p>}
+        {tagline && <p dir="auto" className="text-match-parent text-sm text-text-secondary [overflow-wrap:anywhere]">{tagline}</p>}
       </div>
     </div>
   );
