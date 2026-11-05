@@ -302,6 +302,13 @@ export function MessageInput({
     setText(draft);
     edit?.onClose();
   };
+  // The edit taken away (its message deleted meanwhile): it ends as Cancel ends it, the draft set aside back in the field.
+  useEffect(() => {
+    if (editKey || draftAside.current === null) return;
+    const draft = draftAside.current;
+    draftAside.current = null;
+    setText(draft);
+  }, [editKey]);
 
   const editing = !!edit;
   useEffect(() => {
