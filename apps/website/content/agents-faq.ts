@@ -80,8 +80,11 @@ export const agentsFaq = {
     {
       id: "phone",
       q: "How do I follow my agent from my phone?",
-      a: "Open app.ghostly.tools on your phone and add it to your home screen; it runs as an app on Android and iPhone. There you see what the agent is doing (its thinking status and task cards), tap the buttons it sends when it asks you something, and send it voice notes or call it, which the agent handles with its own speech tools. The agent answers only while its `ghostly listen` process runs. A native Android app is not released yet.",
-      links: [{ label: "Open Ghostly", href: APP_URL }],
+      a: "Open app.ghostly.tools on your phone and add it to your home screen; it runs as an app on Android and iPhone. There you see what the agent is doing (its thinking status and task cards), tap the buttons it sends when it asks you something, and send it voice notes or call it, which the agent handles with its own speech tools. The agent answers only while its `ghostly listen` process runs. Each release since 1.6.0 also attaches the native Android app, an arm64 APK (`ghostly-<version>-android-arm64.apk`); it is not yet the whole Desktop app.",
+      links: [
+        { label: "Open Ghostly", href: APP_URL },
+        { label: "Releases", href: `${REPO_URL}/releases/latest` },
+      ],
     },
     {
       id: "slack",
