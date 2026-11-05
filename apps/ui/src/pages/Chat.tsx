@@ -532,8 +532,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (!request) return;
     void openAppInChat(request.app, appHere, request.options).catch((e: unknown) => { setAppsError(appErrorText(e, t)); setShowApps(true); });
   }, [visible, appHere, openRequested, t]);
-  /** The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. */
-  const [editing, setEditing] = useState<ChatMessage | null>(null);
+  /**
+   * The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. Only while the chat has it: deleted
+   * meanwhile (from its own ⋮, or for everyone), the edit ends, its words with it, and the draft set aside comes back.
+   */
+  const [chosenEdit, setEditing] = useState<ChatMessage | null>(null);
+  const editing = chosenEdit && heldOriginal(chosenEdit, quoteIndex) ? chosenEdit : null;
+  useEffect(() => { if (chosenEdit && !editing) setEditing(null); }, [chosenEdit, editing]);
   // Opened from the Tasks board: on the card's message, once it is here.
   useJumpTo(visible, id => messages.some(m => m.id === id));
   // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
