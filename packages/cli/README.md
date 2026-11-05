@@ -277,7 +277,8 @@ A spend on Mainnet needs the engine's `confirmedReal` (the app asks the person).
 
 SSH (`ssh-keygen`), OpenPGP (`gpg`) and Bitcoin (a wallet's "sign message") proofs are made with the tool: `identity
 add` prints the statement and the command, `identity complete` takes its output. A domain or a DID publishes a record,
-then `identity complete` asks the engine to look it up. In-app signers (a Nostr signer over NIP-46, Pubky) run in one
+then `identity complete` asks the engine to look it up. The last of the steps `identity add` answers is that `identity
+complete` command, with its draft (the app's "press Check" and "paste it into Ghostly" point to it). In-app signers (a Nostr signer over NIP-46, Pubky) run in one
 `identity add`, with their fields in `--field` (a NIP-46 `bunker://` link on stdin: `printf 'bunker=%s\n' "$LINK" | ghostly
 identity add nostr --signer nip46 --stdin`), and print what they wait on (a link, a code) to stderr. OpenID Connect,
 AT Protocol and a NIP-07 browser extension need a browser window: make those proofs in the app. `identity providers`
