@@ -158,8 +158,10 @@ export class IdentityProofs {
   /** Background work: republish revocations, look up the contacts' proofs for revocations. */
   start(): void {
     this.running = true;
+    // A round under way at `stop` plans no next one: `stop` cleared the timers before it ended.
+    const stops = this.stops;
     const every = (ms: number, first: number, work: () => Promise<void>) => {
-      const tick = () => { void work().catch(() => {}).finally(() => { this.timers.push(setTimeout(tick, ms)); }); };
+      const tick = () => { void work().catch(() => {}).finally(() => { if (this.stops === stops) this.timers.push(setTimeout(tick, ms)); }); };
       this.timers.push(setTimeout(tick, first));
     };
     every(REPUBLISH_MS, 5_000, () => this.republish());
@@ -384,7 +386,10 @@ export class IdentityProofs {
       for (const r of this.revocations) if (!live.includes(r)) { this.seeds.get(r.id)?.fill(0); this.seeds.delete(r.id); }
       await this.save((proofs, revocations) => [proofs, revocations.filter(r => r.expiresAt > now())]);
     }
-    for (const r of live) await this.publishRevocation(r).catch(() => {});
+    for (const r of live) {
+      if (!this.running) return;
+      await this.publishRevocation(r).catch(() => {});
+    }
   }
   /**
    * Looks up the contacts' proofs for a revocation (the Pkarr record only, not the provider): the ones standing, and the
@@ -463,7 +468,7 @@ export class IdentityProofs {
       }
     }
     for (const { linkId, r } of due.sort((a, b) => a.r.checkedAt - b.r.checkedAt).slice(0, AUTO_RECHECK_BATCH)) {
-      if (this.ended || !this.host.online()) return;
+      if (this.ended || !this.running || !this.host.online()) return;
       const key = `${linkId}|${r.id}`;
       try {
         await this.exchange(linkId)?.recheck(r.id, { keepUnavailable: true });
