@@ -644,7 +644,7 @@ describe("a limited start (WISP 06 § When a device checks)", () => {
     expect(await screen.findByTestId("sidebar")).toBeInTheDocument();
     expect(screen.queryByTestId("limited-start")).toBeNull();
     expect(screen.queryByTestId("limited-banner")).toBeNull();
-    const typing = screen.getAllByRole("textbox")[0];
+    const typing = screen.getByRole("searchbox", { name: "Search chats" });
     act(() => typing.focus());
     // No source answered: a limited start, but the person is already using the app, so it is not taken away.
     act(() => fakeEngine.setState({ limited: true }));
