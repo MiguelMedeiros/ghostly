@@ -144,7 +144,8 @@
     "noStores": "Aucune boutique. Ajoutez-en une par son lien.",
     "none": "Aucune app pour l'instant.",
     "open": "Ouvrir",
-    "stores": "Boutiques"
+    "stores": "Boutiques",
+    "tryAgain": "Réessayer"
   },
   "pick": {
     "hint": "Elle fonctionne dans une discussion, avec votre contact.",
