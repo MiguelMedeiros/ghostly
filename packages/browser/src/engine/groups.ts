@@ -343,25 +343,26 @@ export function newestMarked(history: StoredMessage[]): { last?: StoredMessage; 
  * chat): the marks it moved go back to the newest line still kept, as `load` reads them, and the record's `came` it
  * raised goes too. A mark a newer line moved stays, and the history is read only when the message moved one
  * (`markedBy`): removals go at the pace of edits. `history`: the group's rows, with it gone. True when `came` changed
- * (the record is to be saved).
+ * (the record is to be saved). `mentionOnly`: an edit took my mention out of it: the message is still there, so only
+ * the "@" goes back.
  */
-export async function unmark(marks: GroupMarks, group: Pick<StoredGroup, "came"> | undefined, groupId: string, history: () => Promise<StoredMessage[]>, removed: StoredMessage): Promise<boolean> {
+export async function unmark(marks: GroupMarks, group: Pick<StoredGroup, "came"> | undefined, groupId: string, history: () => Promise<StoredMessage[]>, removed: StoredMessage, mentionOnly = false): Promise<boolean> {
   const by = marks.by.get(groupId);
-  if (!by || ![by.last, by.peer, by.mention].includes(removed.id)) return false;
+  const last = !mentionOnly && by?.last === removed.id, peer = !mentionOnly && by?.peer === removed.id, mention = by?.mention === removed.id;
+  if (!by || !(last || peer || mention)) return false;
   const newest = newestMarked((await history()).filter(m => m.id !== removed.id));
   const back = (map: Map<string, number>, row: StoredMessage | undefined) => { if (row) map.set(groupId, row.timestamp); else map.delete(groupId); };
   let came = false;
-  if (by.last === removed.id) back(marks.lastMessageAt, newest.last);
-  if (by.peer === removed.id) {
+  if (last) back(marks.lastMessageAt, newest.last);
+  if (peer) {
     back(marks.lastPeerMessageAt, newest.peer);
     if (group?.came?.peer !== undefined) { group.came = { ...group.came, peer: undefined }; came = true; }
   }
-  if (by.mention === removed.id) {
+  if (mention) {
     back(marks.lastMentionAt, newest.mention);
     if (group?.came?.mention !== undefined) { group.came = { ...group.came, mention: undefined }; came = true; }
   }
-  marks.by.set(groupId, { last: by.last === removed.id ? newest.last?.id : by.last, peer: by.peer === removed.id ? newest.peer?.id : by.peer,
-    mention: by.mention === removed.id ? newest.mention?.id : by.mention });
+  marks.by.set(groupId, { last: last ? newest.last?.id : by.last, peer: peer ? newest.peer?.id : by.peer, mention: mention ? newest.mention?.id : by.mention });
   return came;
 }
 
@@ -1506,10 +1507,11 @@ export class Groups {
     return by.last === messageId || by.peer === messageId || by.mention === messageId;
   }
 
-  async unmark(groupId: string, removed: StoredMessage): Promise<void> {
-    if (this.isCommunity(groupId)) return this.communities.unmark(groupId, removed);
+  /** `mentionOnly`: an edit took my mention out of the message, which stays: its "@" alone goes back. */
+  async unmark(groupId: string, removed: StoredMessage, mentionOnly = false): Promise<void> {
+    if (this.isCommunity(groupId)) return this.communities.unmark(groupId, removed, mentionOnly);
     const group = this.stored.get(groupId);
-    if (await unmark(this.marks, group, groupId, () => this.store.getMessages(MESSAGE_LINK(groupId)), removed) && group) await this.store.putGroup(group);
+    if (await unmark(this.marks, group, groupId, () => this.store.getMessages(MESSAGE_LINK(groupId)), removed, mentionOnly) && group) await this.store.putGroup(group);
   }
 
   /** The connection of an edge opened. One kept to tell a removed member closes a while after, whatever its app says or does not say. */
