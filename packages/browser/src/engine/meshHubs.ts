@@ -1,5 +1,5 @@
 import {
-  COMMUNITY_TOPOLOGY, MESH_HUBS, beaconKeys, isDiscoveryBudgetError, beaconRecords, lobbyKeys, lobbyRecords, mayBeHub, meshHubs, mergeBeacon, mergeLobby, pickMeshHubs, readBeacon, readLobby, rosterHas,
+  COMMUNITY_TOPOLOGY, MESH_HUBS, beaconKeys, isDiscoveryBudgetError, beaconRecords, hubRank, lobbyKeys, lobbyRecords, mayBeHub, meshHubs, mergeBeacon, mergeLobby, pickMeshHubs, readBeacon, readLobby, rosterHas,
   type GhostRecord, type GroupCommit, type GroupEdgeFrame, type GroupReactedFrame, type GroupSession, type Hub,
 } from "@ghostly/core";
 import type { StoredGroup } from "../shared/types";
@@ -40,10 +40,13 @@ export interface MeshHubTimings {
   keepMetMs: number;
   /** A hub says whom it reaches (`group-reach`) at most this often. */
   reachEveryMs: number;
+  /** A member no hub has reached this long is said in a hub's `group-reach` (`u`), and gets its stand-ins' edges. */
+  standInAfterMs: number;
 }
 export const MESH_HUB_TIMINGS: MeshHubTimings = {
   beaconReadMs: 60_000, beaconEveryMs: COMMUNITY_TOPOLOGY.beaconEveryMs, lobbyPollMs: 6_000, lobbyIdlePollMs: 30_000, lobbyBusyMs: 60_000, lobbyWriteMs: 20_000,
   hubWaitMs: 60_000, memberGoneMs: 5 * 60_000, firstReadMs: 30_000, graceMs: 3 * 60_000, keepMetMs: 2 * 60_000, reachEveryMs: 5_000,
+  standInAfterMs: 30_000,
 };
 
 /** A hub says whom it reaches this often even when nothing changed: members that cannot read the beacon learn it is one. */
@@ -73,9 +76,38 @@ const STEP_UP_MARGIN = 2;
 const STEP_UP_DELAY_MS = 60_000;
 /** The longest a write of my entry waits for the budget it was told of: within an entry's freshness (90 s). */
 const PUBLISH_WAIT_MAX_MS = 30_000;
+/** Members that keep an edge for a member no hub reaches (WISP 902 · Group Mesh § Hubs, Stand-ins). */
+export const STAND_INS = MESH_HUBS.hubsPerMember;
+/** The most members one member stands in for at a time: what a hub's `u` can cost a member's relays, however long it is. */
+export const STAND_IN_MAX = 4;
+/** The most members a hub says nobody reaches (`u`), the latest lost first; a longer `u` is not taken. */
+export const UNREACHED_SAID = 16;
 
-/** What a hub says to its edges: the members it has an edge up with, and the members whose apps take no hubs. */
-export interface GroupReachFrame { t: "group-reach"; g: string; k: string[]; l?: string[] }
+/**
+ * Who stands in for whom (WISP 902 · Group Mesh § Hubs, Stand-ins): the members nobody reaches, in key order, each get
+ * the first `STAND_INS` of `standing` by rendezvous rank for their key (`hubRank`, as hubs are ranked) that do not stand
+ * in for `STAND_IN_MAX` members already. Every member reads the same roster and the same `u`, so each works out the
+ * same answer on its own. Keyed by stand-in, the members it keeps an edge for.
+ */
+export function standInDuty(lost: readonly string[], standing: readonly string[]): Map<string, string[]> {
+  const duty = new Map<string, string[]>();
+  for (const subject of [...new Set(lost)].sort()) {
+    const rank = new Map(standing.map(key => [key, hubRank(subject, key)]));
+    const order = [...rank.keys()].filter(key => key !== subject).sort((a, b) => { const ra = rank.get(a)!, rb = rank.get(b)!; return ra < rb ? 1 : ra > rb ? -1 : 0; });
+    let taken = 0;
+    for (const key of order) {
+      if (taken === STAND_INS) break;
+      const mine = duty.get(key) ?? [];
+      if (mine.length >= STAND_IN_MAX) continue;
+      duty.set(key, [...mine, subject]);
+      taken++;
+    }
+  }
+  return duty;
+}
+
+/** What a hub says to its edges: the members it has an edge up with, the members whose apps take no hubs, and those nobody reaches. */
+export interface GroupReachFrame { t: "group-reach"; g: string; k: string[]; l?: string[]; u?: string[] }
 
 /** Per private group, in memory: its hubs as this device sees and plays them. */
 interface HubLive {
@@ -145,6 +177,12 @@ interface HubLive {
   need: number;
   /** Members that said on their own edge that they leave (`group-bye`): no hub of mine, whatever the beacon says, until the commit takes them out. */
   departed: Set<string>;
+  /** As a hub: members neither I nor any hub I hear from reaches, since when (`nobodyReaches`). */
+  unreached: Map<string, number>;
+  /** What each hub said nobody reaches (`u`): in memory, while that hub counts. */
+  reachNone: Map<string, Set<string>>;
+  /** The stand-in duty last worked out (`standInDuty`), for which members nobody reaches and which standing: mine of it. */
+  standFor: { at: string; mine: string[] };
 }
 
 /**
@@ -177,7 +215,7 @@ export class MeshHubs {
       const clocks = new HubClocks(() => live!.me, HUB_CLOCK_READ_GAP_MS);
       this.live.set(groupId, (live = { started: now, epoch: -1, beacon: [], clocks, me: "", firstRead: false, epochRead: false, lastRead: 0, lastWrite: 0, lastTry: 0, publishAfter: 0, readAt: 0, stepUpAt: 0, hub: false, hubSince: 0,
       members: new Map(), lastLobbyPoll: 0, lobbyBusyUntil: 0, myHubs: [], lobbyWrites: new Map(), hubWaits: new Map(), avoided: new Map(), hubsUp: new Set(),
-      seenHubs: new Map(), claimed: new Map(), reach: new Map(), reachLegacy: new Map(), reachHeard: new Map(), takesHubs: new Set(), sentReach: "", lastReach: 0, met: new Map(), expect: new Set(), wantedSize: 0, primed: false, gone: new Map(), reactions: new Map(), need: 0, departed: new Set() }));
+      seenHubs: new Map(), claimed: new Map(), reach: new Map(), reachLegacy: new Map(), reachHeard: new Map(), takesHubs: new Set(), sentReach: "", lastReach: 0, met: new Map(), expect: new Set(), wantedSize: 0, primed: false, gone: new Map(), reactions: new Map(), need: 0, departed: new Set(), unreached: new Map(), reachNone: new Map(), standFor: { at: "", mine: [] } }));
     }
     return live;
   }
@@ -253,6 +291,7 @@ export class MeshHubs {
     const was = live.seenHubs.delete(key) || live.myHubs.includes(key) || live.beacon.some(h => h.key === key);
     live.reach.delete(key);
     live.reachLegacy.delete(key);
+    live.reachNone.delete(key);
     live.claimed.delete(key);
     live.hubsUp.delete(key);
     live.myHubs = live.myHubs.filter(k => k !== key);
@@ -324,6 +363,7 @@ export class MeshHubs {
         const admin = session.admin, mine = this.host.edges(groupId);
         const hubUp = live.myHubs.some(key => { const id = mine.get(key); return !!id && this.host.linkReady(id); });
         if (admin && (legacy.includes(admin) || !hubUp)) out.add(admin);
+        for (const key of this.standIns(groupId, session, live, hubs, legacy)) out.add(key);
       }
       if (session.isAdmin) for (const key of legacy) out.add(key);
     }
@@ -333,6 +373,55 @@ export class MeshHubs {
     const edges = this.host.edges(groupId);
     for (const [key, until] of live.gone) if (until <= now) live.gone.delete(key); else if (edges.has(key)) out.add(key);
     return out;
+  }
+
+  /**
+   * The members I keep an edge for as one of their stand-ins (WISP 902 · Group Mesh § Hubs, Stand-ins): those the hubs of
+   * my beacon reading, on edges that are up, say nobody reaches (`u`), when `standInDuty` gives them to me: at most
+   * `STAND_IN_MAX`, among the first `STAND_INS` by rendezvous rank for their key of the members that are reached and no
+   * hubs (nor apps without hubs). A member back behind the chain whose hubs all left or closed while it was away reads a
+   * beacon no hub writes any more and dials every member it knows; those keep their hubs' edges only, and the hub it has
+   * not heard of yet opens an edge it does not open, not knowing it. An edge needs both sides: nobody ever opened the
+   * other (agents#2491). Its stand-ins do; it catches up over them (the commits, the secrets) and finds its hubs. Only
+   * hubs can say who nobody reaches: a hub's reach is the members that picked it, and hubs hear each other's.
+   */
+  private standIns(groupId: string, session: GroupSession, live: HubLive, hubs: string[], legacy: string[]): string[] {
+    const edges = this.host.edges(groupId), me = session.myKey, none = new Set<string>();
+    for (const hub of hubs) {
+      const id = edges.get(hub), said = live.reachNone.get(hub);
+      if (said && id && this.host.linkReady(id)) for (const key of said) none.add(key);
+    }
+    if (!none.size || none.has(me)) return [];
+    const lost = [...none].filter(key => rosterHas(session.roster, key) && !legacy.includes(key)).sort();
+    const standing = session.roster.map(([key]) => key).filter(key => !none.has(key) && !hubs.includes(key) && !legacy.includes(key) && !live.departed.has(key));
+    // A hash per pair: worked out again only when who is lost or who stands changes.
+    const at = `${lost.join(",")}|${standing.join(",")}`;
+    if (live.standFor.at !== at) live.standFor = { at, mine: lost.length ? standInDuty(lost, standing).get(me) ?? [] : [] };
+    return live.standFor.mine;
+  }
+
+  /**
+   * As a hub: the members that neither I (on an edge that is up) nor any hub I hear from (its `group-reach`, on its edge
+   * with me) has reached for `standInAfterMs`, but apps without hubs (the admin keeps their edges): what I say in `u`.
+   */
+  private nobodyReaches(groupId: string, session: GroupSession, live: HubLive, up: string[], now: number): string[] {
+    const edges = this.host.edges(groupId), hubs = this.hubs(groupId, session, now);
+    const reached = new Set([...up, ...hubs, session.myKey]);
+    for (const hub of hubs) {
+      const id = edges.get(hub), keys = live.reach.get(hub);
+      if (keys && id && this.host.linkReady(id)) for (const key of keys) reached.add(key);
+    }
+    const legacy = new Set(this.legacyOf(groupId)), out: string[] = [];
+    for (const [key] of session.roster) {
+      if (reached.has(key) || legacy.has(key) || live.departed.has(key)) { live.unreached.delete(key); continue; }
+      const since = live.unreached.get(key) ?? now;
+      live.unreached.set(key, since);
+      if (now - since >= this.timings.standInAfterMs) out.push(key);
+    }
+    for (const key of live.unreached.keys()) if (!rosterHas(session.roster, key)) live.unreached.delete(key);
+    // At most `UNREACHED_SAID`, the latest lost first: one away for weeks is not why a member back now waits.
+    const since = (key: string) => live.unreached.get(key)!;
+    return out.sort((a, b) => since(b) - since(a) || (a < b ? -1 : 1)).slice(0, UNREACHED_SAID).sort();
   }
 
   /**
@@ -395,10 +484,11 @@ export class MeshHubs {
     if (!short || live.hub) live.stepUpAt = 0;
     else if (!live.stepUpAt) live.stepUpAt = needed ? now : now + stepUpDelay(me, session.epoch);
     if (!live.hub && may && fits && (policy.pin.includes(me) || (short && now >= live.stepUpAt && (needed || live.readAt >= live.stepUpAt)))) {
-      live.hub = true; live.hubSince = now; live.myHubs = []; live.need = session.others.length;
+      // Whom nobody reaches is counted afresh: what I saw before I stepped down is no hub's word now.
+      live.hub = true; live.hubSince = now; live.myHubs = []; live.need = session.others.length; live.unreached.clear();
       await this.publish(groupId, session, live, now, true).catch(() => {});
     } else if (live.hub && (!may || !fits || this.full(live, session, now))) {
-      live.hub = false; live.members.clear();
+      live.hub = false; live.members.clear(); live.unreached.clear();
       // One hub too many is not in the beacon: nothing to take out of it.
       if (!may || !fits) await this.publish(groupId, session, live, now, false).catch(() => {});
     } else if (live.hub && now - live.lastTry >= 5_000 && now >= live.publishAfter && (now - live.lastWrite >= this.timings.beaconEveryMs || !live.beacon.some(h => h.key === me))) {
@@ -590,14 +680,15 @@ export class MeshHubs {
   private sayReach(groupId: string, session: GroupSession, live: HubLive, now: number, only?: string): void {
     const edges = this.host.edges(groupId);
     const up = [...edges].filter(([key, id]) => rosterHas(session.roster, key) && this.host.linkReady(id)).map(([key]) => key).sort();
-    const said = up.join(",");
+    const none = this.nobodyReaches(groupId, session, live, up, now);
+    const said = `${up.join(",")}|${none.join(",")}`;
     // Said when it changed (at most every `reachEveryMs`), and once a minute anyway: it is also how members that could
     // not read the beacon know I am a hub.
     if (!only && ((said === live.sentReach && now - live.lastReach < REACH_AGAIN_MS) || now - live.lastReach < this.timings.reachEveryMs)) return;
     if (!only) { live.sentReach = said; live.lastReach = now; }
     // Only of my own edges: that is all a hub can know of members' apps (and all a member takes from it).
     const legacy = this.legacyOf(groupId).filter(key => up.includes(key));
-    const frame: GroupReachFrame = { t: "group-reach", g: groupId, k: up, ...(legacy.length ? { l: legacy } : {}) };
+    const frame: GroupReachFrame = { t: "group-reach", g: groupId, k: up, ...(legacy.length ? { l: legacy } : {}), ...(none.length ? { u: none } : {}) };
     for (const [key, id] of edges) {
       if ((only && key !== only) || !rosterHas(session.roster, key) || !this.host.linkReady(id)) continue;
       try { this.host.sendOnLink(id, frame); } catch { /* closing */ }
@@ -673,6 +764,11 @@ export class MeshHubs {
     }
     live.reach.set(from, reach);
     live.seenHubs.set(from, now);
+    // Whom nobody reaches, by this hub's word (a hub of the beacon only, as above): members of the roster it does not reach
+    // itself, not me (my edge with it is up). A longer list than a hub says is not taken.
+    const none = Array.isArray(frame.u) && frame.u.length <= Math.min(UNREACHED_SAID, session.roster.length)
+      ? frame.u.filter((key): key is string => typeof key === "string" && key !== session.myKey && !reach.has(key) && rosterHas(session.roster, key)) : [];
+    if (none.length) live.reachNone.set(from, new Set(none)); else live.reachNone.delete(from);
     if (!Array.isArray(frame.l) || frame.l.length > session.roster.length) { live.reachLegacy.delete(from); return; }
     // A hub knows only of the members whose edges it holds.
     const legacy = frame.l.filter((key): key is string => typeof key === "string" && key !== session.myKey && reach.has(key) && !live.takesHubs.has(key));

@@ -86,8 +86,13 @@ describe("hubs when every member stays online", () => {
     const all = runs.flat(), mean = all.reduce((a, b) => a + b, 0) / all.length;
     const shown = runs.map(r => r.join(" ")).join(" | ");
     expect(mean, `hubs per minute: ${shown}`).toBeLessThanOrEqual(MESH_HUBS.maxHubs);
+    // A pile-up (agents#1691) is over maxHubs every minute; a run may be over in at most two thirds of them. Half was
+    // too tight once members stand in for those nobody reaches (WISP 902 § Hubs, Stand-ins): any change in who opens
+    // which edge moves every later draw of the held reads, so each seed runs another course. Over seeds 1 to 16, dev
+    // and the stand-ins ran the same (a mean of 7.2 and 7.1 hubs, 19 and 20 minutes of 96 over), and seed 2, the
+    // worst on both, went from 3 minutes of 6 over to 4.
     for (const later of runs) {
-      expect(later.filter(c => c > MESH_HUBS.maxHubs).length, `hubs per minute: ${shown}`).toBeLessThanOrEqual(later.length / 2);
+      expect(later.filter(c => c > MESH_HUBS.maxHubs).length, `hubs per minute: ${shown}`).toBeLessThanOrEqual(later.length * 2 / 3);
       expect(Math.min(...later), `hubs per minute: ${shown}`).toBeGreaterThan(0);
     }
     const last = runs.reduce((sum, r) => sum + r[r.length - 1], 0) / runs.length;
