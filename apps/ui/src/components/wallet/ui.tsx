@@ -16,7 +16,7 @@ export { Notice };
  * alone vanish there. In that mode only, both are drawn in system colours: an outlined track with a ButtonText knob when
  * off, a Highlight track with a HighlightText knob when on. The knob moves in by the border's pixel so it stays centred.
  */
-const switchTrack = (checked: boolean) => `relative w-12 h-6 rounded-full transition-colors shrink-0 ${checked ? "bg-accent" : "bg-border-bright"} forced-colors:forced-color-adjust-none forced-colors:border forced-colors:border-[color:ButtonText] ${checked ? "forced-colors:bg-[color:Highlight]" : "forced-colors:bg-[color:Canvas]"}`;
+const switchTrack = (checked: boolean) => `relative w-12 h-6 rounded-full transition-colors shrink-0 ${checked ? "bg-accent" : "bg-switch-off"} forced-colors:forced-color-adjust-none forced-colors:border forced-colors:border-[color:ButtonText] ${checked ? "forced-colors:bg-[color:Highlight]" : "forced-colors:bg-[color:Canvas]"}`;
 const SwitchKnob = ({ checked }: { checked: boolean }) => <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${checked ? "translate-x-6" : "translate-x-0"} forced-colors:top-[3px] forced-colors:left-[3px] ${checked ? "forced-colors:bg-[color:HighlightText]" : "forced-colors:bg-[color:ButtonText]"}`} />;
 
 /**
