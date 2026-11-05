@@ -33,6 +33,21 @@
   color: var(--color-text-secondary);
   border-bottom: 1px solid rgb(127 127 127 / 0.2);
 }
+.rich-codeblock-hidden {
+  margin: 0;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid rgb(127 127 127 / 0.2);
+}
+/* A direction control or an invisible character in code, drawn as its code point (CodeBlock.tsx showInvisible). */
+.rich-hidden-char {
+  font-size: 0.85em;
+  padding: 0 2px;
+  border-radius: 3px;
+  color: var(--color-text-secondary);
+  background: rgb(127 127 127 / 0.22);
+}
 .rich-codeblock pre {
   margin: 0;
   padding: 6px 8px 8px;
