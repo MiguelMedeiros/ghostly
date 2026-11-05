@@ -102,7 +102,7 @@ export function Spinner({ size = 14 }: { size?: number }) {
   );
 }
 
-export const input = "w-full min-w-0 bg-surface-alt text-text-primary px-3 py-2 max-md:min-h-11 rounded-lg border border-border text-sm placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent";
+export const input = "w-full min-w-0 bg-surface-alt text-text-primary px-3 py-2 max-md:min-h-11 rounded-lg border border-field-border text-sm placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent";
 
 export type Action = "receive" | "send" | "history";
 const ACTION_ICON: Record<Action, ReactNode> = {
