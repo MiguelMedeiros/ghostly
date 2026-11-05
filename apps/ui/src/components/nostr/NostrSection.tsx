@@ -5,6 +5,7 @@ import { useEngineValue } from "../../lib/engineState";
 import { sameValue } from "../../lib/sameValue";
 import { agoIn } from "../../lib/relativeTime";
 import { useI18n } from "../../contexts/I18nContext";
+import { draftDirection } from "../../lib/documentLanguage";
 import { Block, Button, Notice, Row, Section, Switch, input } from "../wallet/ui";
 import { FieldGrid, InputGroup } from "../layout";
 import { NostrPublishDialog } from "./NostrPublishDialog";
@@ -123,7 +124,7 @@ function OwnKey({ view, publish, onPublish, onError }: { view: NostrOwnView; pub
         <form className="space-y-2" onSubmit={e => { e.preventDefault(); onPublish({ subject: view.subject, action: "profile", fields: { displayName: fields.displayName, name: fields.name, about: fields.about, nip05: fields.nip05, website: fields.website, ...(fields.picture ? { picture: fields.picture } : {}) } }); setMode(""); }}>
           {!view.profile && <Notice>{t("identities.nostr.loadFirst")}</Notice>}
           <FieldGrid>
-            <input data-testid="nostr-profile-name" aria-label={t("identities.nostr.name")} placeholder={t("identities.nostr.name")} maxLength={64} value={fields.displayName} onChange={e => setFields({ ...fields, displayName: e.target.value })} className={input} />
+            <input data-testid="nostr-profile-name" aria-label={t("identities.nostr.name")} placeholder={t("identities.nostr.name")} maxLength={64} value={fields.displayName} dir={draftDirection(fields.displayName)} onChange={e => setFields({ ...fields, displayName: e.target.value })} className={input} />
             <input data-testid="nostr-profile-handle" aria-label={t("identities.nostr.handle")} placeholder={t("identities.nostr.handle")} maxLength={64} value={fields.name} onChange={e => setFields({ ...fields, name: e.target.value })} {...exactText} className={input} />
             <input data-testid="nostr-profile-nip05" aria-label={t("identities.nostr.nip05")} placeholder={t("identities.nostr.nip05Placeholder")} maxLength={253} value={fields.nip05} onChange={e => setFields({ ...fields, nip05: e.target.value })} {...exactText} className={input} />
             <input data-testid="nostr-profile-website" aria-label={t("identities.nostr.website")} placeholder="https://…" maxLength={512} value={fields.website} onChange={e => setFields({ ...fields, website: e.target.value })} {...exactText} className={input} />

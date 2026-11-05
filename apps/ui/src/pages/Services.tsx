@@ -12,6 +12,7 @@ import { useToast } from "../hooks/useToast";
 import { useFocusLanding } from "../hooks/useFocusLanding";
 import { Toast } from "../components/ui/Toast";
 import { useI18n, type Translate } from "../contexts/I18nContext";
+import { draftDirection } from "../lib/documentLanguage";
 import { problemLine } from "../lib/problemText";
 const GLOBE = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>;
 
@@ -140,7 +141,7 @@ export function Services() {
           <Block>
             <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void shareThenLand(); }}>
               <FieldGrid>
-                <input data-testid="service-name" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t("services.namePlaceholder")} maxLength={48} className={input} />
+                <input data-testid="service-name" autoFocus value={name} dir={draftDirection(name)} onChange={(e) => setName(e.target.value)} placeholder={t("services.namePlaceholder")} maxLength={48} className={input} />
                 <input data-testid="service-target" value={target} onChange={(e) => setTarget(e.target.value)} placeholder="localhost:3400" className={`${input} font-mono`} />
               </FieldGrid>
               <Notice>{t("services.nobodyYet")}</Notice>
