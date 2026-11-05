@@ -109,7 +109,8 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
   };
 
   return createPortal(<dialog ref={dialog} data-testid="forward-dialog" aria-labelledby={`${id}-title`}
-    onCancel={(e) => { e.preventDefault(); if (!busy) onClose(); }}
+    // Not a cancel from the seed question over it (SecretGuardDialog): React hands it here too, and it is the question's.
+    onCancel={(e) => { e.preventDefault(); if (!busy && e.target === e.currentTarget) onClose(); }}
     className="m-auto w-[calc(100%_-_2rem)] max-w-md max-h-[min(640px,calc(100dvh_-_2rem))] flex-col rounded-2xl border border-border bg-sidebar-bg p-0 text-text-primary shadow-2xl backdrop:bg-black/60 open:flex">
     <div className="px-4 pt-4 pb-2 space-y-2">
       <h2 id={`${id}-title`} className="text-base font-semibold">{t("chat.forward.title")}</h2>
