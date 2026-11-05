@@ -13,8 +13,11 @@ export interface ComposerTranslation {
   languages?: readonly string[];
   /** The draft's language detector. Without it, a draft is taken to be in the app's language. */
   detect?: DetectLanguages;
-  /** The model `pair` is not downloaded: asks whether to (the download question). True once it is there. */
-  askModel?: (pair: string) => Promise<boolean>;
+  /**
+   * The model `pair` is not downloaded: asks whether to (the download question). True once it is there, false on Not
+   * now, undefined when nothing here could download it (the composer says it is missing).
+   */
+  askModel?: (pair: string) => Promise<boolean | undefined>;
   /** Translates `texts` for `pair` (`<from>-<to>`): the Desktop app's runtime unless given. */
   translate?: (pair: string, texts: string[]) => Promise<string[]>;
 }
@@ -74,12 +77,14 @@ export function useDraftTranslation({ config, appLanguage, onFailure }: {
         const why = cause instanceof TranslateError ? cause.reason : "failed";
         // No runtime for this computer yet reads like none installed: either way nothing here can translate.
         const reason: DraftTranslationFailure = why === "off" ? "failed" : why === "unavailable" ? "not-installed" : why;
-        // The reverse model, asked for the first time: downloaded, it runs again; "Not now" leaves the draft as it is.
+        // The reverse model, asked for the first time: downloaded, it runs again; "Not now" leaves the draft as it is;
+        // nothing to ask is said as missing.
         if (reason === "no-model" && !asked && config.askModel) {
           asked = true;
-          if (await config.askModel(pair).catch(() => false)) { if (current()) continue; return; }
-          if (current()) setState(null);
-          return;
+          const answer = await config.askModel(pair).catch(() => false);
+          if (!current()) return;
+          if (answer) continue;
+          if (answer === false) { setState(null); return; }
         }
         setState(null);
         failRef.current(reason, pair);
