@@ -247,6 +247,11 @@ key), which every answer and event carries. What the CLI does when names meet:
   use the chat's id or `group:<id>`. A label you gave the chat still wins.
 - A label you gave a chat wins over an id prefix: a contact can choose how a chat's id begins (yours is made from
   their invite code). A prefix that fits one chat and the name a contact gave another is refused.
+- Where a command moves money or gives something lasting to a chat (`chat pay`, `chat pay-request`, `pay --chat`,
+  `identity share|withdraw`, `service share`, `group invite`, `call auto on --from`), only the chat's id, its contact's
+  key or a label you gave it names the chat. A prefix of its id or the name its contact gave itself is refused (exit 1,
+  `bad_request`, `details.chat` and `details.contact`), and nothing is paid, shared or withdrawn: `ghostly chat rename
+  <chat> <name>` gives it a label.
 - A group's creator chooses both its name and its id, so neither wins: a ref that is one group's name and a prefix of
   another's id is refused (exit 1, `bad_request`, `details.matches` with both ids). Use its id, or `group:<id>`.
 - A group you are in wins over an invitation with the same name or id prefix; an invitation is found by its id, and
