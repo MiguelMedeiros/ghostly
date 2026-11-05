@@ -46,6 +46,7 @@ function fake(messages: StoredMessage[] = []) {
     runtime: { server: { node }, paths: { name: "default" } },
     hub: { onEvent: (l: (e: GhostlyEvent) => void) => { listeners.add(l); return () => listeners.delete(l); }, onState: () => () => {}, lastSeq: 0, replay: () => [] },
     calls: { list: () => [], forgetChat: vi.fn() },
+    groupAuto: { get: () => ({ on: false, from: [] }), forgetChat: vi.fn() },
     mode: "daemon", version: "test",
   } as unknown as ApiContext;
   return { ctx, node, emit: (e: GhostlyEvent) => { for (const l of listeners) l(e); } };

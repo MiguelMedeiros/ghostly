@@ -109,15 +109,17 @@ export interface NetworkSettings {
   /** The push relay (https://) wake-ups go through when this app may not post them itself; empty for none. */
   pushRelay: string;
   /**
+   * "Hide my IP from contacts" (WISP 100 § Relay only): calls, chat connections and group links go through the TURN
+   * server only, and this app's own direct Iroh and HyperDHT endpoints are not offered. Needs `turn`. Where the DHT
+   * is reached directly (Desktop), reads and writes then go through the Pkarr relays alone, and nothing goes to the
+   * DHT itself.
+   */
+  relayOnly?: boolean;
+  /**
    * Present where the DHT is reached directly (Desktop): whether reads use the relays too, "Also use Pkarr
    * relays". Writes go to the relays either way, so contacts on the web see this app's packets.
    */
   readRelays?: boolean;
-  /**
-   * Hide my IP from contacts is on where the DHT is reached directly (Desktop): reads and writes go through the Pkarr
-   * relays alone, and nothing goes to the DHT itself (WISP 100 § Relay only).
-   */
-  relayOnly?: boolean;
   /** This device's own attempts say direct connections are blocked on its network (a VPN, a firewall): chats go through relays. */
   directBlocked?: boolean;
   /** This device's clock seems to be off by this much (ms, positive when it is ahead), as relays and several contacts say. */
@@ -657,7 +659,7 @@ export interface ServicesPlatform {
   wallet: WalletPlatform;
   getNetwork(): NetworkSettings | null;
   /** Saves the network settings given; `turn` left out keeps the TURN server as it is. */
-  setNetwork(settings: Pick<NetworkSettings, "relays"> & { irohRelays?: string[] } & Partial<Pick<NetworkSettings, "turn" | "hyperdhtRelay" | "readRelays" | "pushRelay">>): Promise<void>;
+  setNetwork(settings: Pick<NetworkSettings, "relays"> & { irohRelays?: string[] } & Partial<Pick<NetworkSettings, "turn" | "hyperdhtRelay" | "readRelays" | "pushRelay" | "relayOnly">>): Promise<void>;
 }
 
 export const servicesPlatform: ServicesPlatform | null = null;
