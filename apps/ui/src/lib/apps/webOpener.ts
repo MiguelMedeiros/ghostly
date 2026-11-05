@@ -107,7 +107,7 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     // and the notch (index.css), or Close sits under them and cannot be pressed (the installed web app on an iPhone).
     bar.className = "alone-bar flex items-center gap-2 border-b border-border px-3 py-2 text-sm";
     const title = document.createElement("span");
-    title.className = "flex-1 truncate font-medium";
+    title.className = "text-match-parent flex-1 truncate font-medium";
     title.setAttribute("data-testid", "mini-app-title");
     title.dir = "auto";
     title.textContent = entry.title;

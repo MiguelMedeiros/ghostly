@@ -44,7 +44,7 @@ function appHint(app: InstalledAppView, t: Translate): { lead?: string; text: st
  * and only the tagline is cut: in Arabic an English tagline in the same run took "Ghostly" and its start off the line.
  */
 function HintLine({ lead, text, testId, className }: { lead?: string; text: string; testId: string; className: string }) {
-  if (!lead) return <span dir="auto" data-testid={testId} className={`block text-xs truncate ${className}`}>{text}</span>;
+  if (!lead) return <span dir="auto" data-testid={testId} className={`text-match-parent block text-xs truncate ${className}`}>{text}</span>;
   return (
     <span data-testid={testId} className={`flex min-w-0 text-xs ${className}`}>
       <span className="shrink-0 whitespace-pre">{`${lead} · `}</span>
@@ -67,8 +67,9 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
         aria-label={t("apps.page.details", { title: shown })}>
         <AppIcon installed={app} />
         <span className="min-w-0">
-          {/* A long title is cut alone: the version stays whole after it. */}
-          <span dir="auto" className="flex items-baseline gap-1 text-sm text-text-primary">
+          {/* A long title is cut alone: the version stays whole after it. The row goes the page's way, from the icon;
+              only the title reads in its own direction. */}
+          <span className="flex items-baseline gap-1 text-sm text-text-primary">
             <span dir="auto" className="truncate min-w-0">{app.title}</span>{" "}
             <span className="shrink-0 whitespace-nowrap text-text-muted text-xs">{app.version}</span>
           </span>
@@ -104,7 +105,7 @@ function BuiltInRow({ app, busy, onOpen, onRemove }: { app: BuiltInAppOffer; bus
       <div className="flex items-center gap-3 min-w-0 flex-[1_1_12rem]">
         <AppIcon />
         <span className="min-w-0">
-          <span dir="auto" className="block text-sm text-text-primary truncate">{app.title}</span>
+          <span dir="auto" className="text-match-parent block text-sm text-text-primary truncate">{app.title}</span>
           <HintLine testId="built-in-app-hint" className="text-text-muted" lead={t("apps.builtIn.hint")} text={app.tagline} />
         </span>
       </div>
@@ -269,8 +270,8 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
                 <span className="flex items-center gap-3 min-w-0 flex-[1_1_12rem]">
                   <AppIcon size={32} installed={app} />
                   <span className="min-w-0 flex-1">
-                    <span dir="auto" className="block text-sm text-text-primary truncate">{listing.title}</span>
-                    <span dir="auto" className="block text-xs text-text-muted truncate">{removed ? t("apps.install.removed", { store: store.name ?? "", reason: removed.reason }) : listing.tagline}</span>
+                    <span dir="auto" className="text-match-parent block text-sm text-text-primary truncate">{listing.title}</span>
+                    <span dir="auto" className="text-match-parent block text-xs text-text-muted truncate">{removed ? t("apps.install.removed", { store: store.name ?? "", reason: removed.reason }) : listing.tagline}</span>
                   </span>
                 </span>
                 {app ? <span className="ms-auto text-xs text-text-muted">{t("apps.store.installed")}</span>
