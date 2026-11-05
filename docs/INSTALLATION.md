@@ -15,9 +15,9 @@ Open **https://app.ghostly.tools** in any modern browser.
 
 ## Android
 
-On an Android phone, Ghostly is the web app: open [app.ghostly.tools](https://app.ghostly.tools) in Chrome, Edge or Brave and install it (⋮, *Install app*), as [above](#web-app-nothing-to-install). It then opens from the home screen in a window of its own.
+Each release since 1.6.0 attaches the native Android app, for arm64 phones on Android 8.0 or newer: `ghostly-<version>-android-arm64.apk` on the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest), signed with Ghostly's upload key and listed in `SHA256SUMS.txt`. Open it on the phone and allow your browser (or Files) to install unknown apps when Android asks. A newer release installs over it, and the app tells you when one is out. It is not yet the whole Desktop app: what it leaves out, and how to check and install the APK over USB, are in [ANDROID.md](ANDROID.md#install-it).
 
-A native Android app is planned and not released: no release has an APK. Where its work stands, for developers: [ANDROID.md](ANDROID.md).
+Or use the web app: open [app.ghostly.tools](https://app.ghostly.tools) in Chrome, Edge or Brave and install it (⋮, *Install app*), as [above](#web-app-nothing-to-install). It then opens from the home screen in a window of its own.
 
 ## Browser extension (Chrome, Brave, Edge)
 

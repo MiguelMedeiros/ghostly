@@ -434,6 +434,11 @@ export const home = {
         linuxAppImage: "Any distro",
       },
     },
+    android: {
+      title: "Android",
+      body: "The native app, for arm64 phones on Android 8 or newer. It comes as an APK: when Android asks, allow your browser to install unknown apps.",
+      cta: "Download",
+    },
     extension: {
       title: "Browser extension",
       body: "Chrome, Brave, Edge",
