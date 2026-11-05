@@ -59,7 +59,7 @@ import { servicesPlatform } from "../lib/platform";
 import { useEngineValue } from "../lib/engineState";
 import { formatFileSize } from "../lib/format";
 import { videoMetaOf } from "../lib/videoPoster";
-import { messageSnippet, quoteFor, replyIndexer, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
+import { heldOriginal, messageSnippet, quoteFor, replyIndexer, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
 import { buttonsViews, compactPresses } from "../lib/buttons";
 import { useForwarding } from "../hooks/useForwarding";
 import { useChatSearch } from "../hooks/useChatSearch";
@@ -354,19 +354,29 @@ export function GroupChat() {
   // A group with a history whose rows have not come yet (shown at start, the engine still starting): it says it is
   // loading, not an empty group.
   const reading = loaded.groupId !== groupId && !engine.messages.has(`group:${groupId}`) && (group?.lastMessageAt ?? 0) > 0;
-  /** The message the composer answers (WISP 902 § Replies). */
-  const [replyingTo, setReplyingTo] = useState<StoredMessage | null>(null);
+  const [readReplies] = useState(() => replyIndexer(true));
+  const quoteIndex = useMemo(() => readReplies(messages), [messages, readReplies]);
+  /**
+   * The message the composer answers (WISP 902 § Replies), read as the group has it now (as a 1:1 chat's, Chat.tsx): an
+   * edit shows in the bar, and a message deleted (for everyone, by its author or an admin) lets the bar go.
+   */
+  const [chosenReply, setReplyingTo] = useState<StoredMessage | null>(null);
+  const replyingTo = useMemo(() => (chosenReply && heldOriginal(chosenReply, quoteIndex, true)) ?? null, [chosenReply, quoteIndex]);
+  useEffect(() => { if (chosenReply && !replyingTo) setReplyingTo(null); }, [chosenReply, replyingTo]);
   /**
    * The reply as it is when a message goes, not as a render's closure saw it: the composer sends what was queued one
    * after the other, and only the first of them after Reply carries it.
    */
   const replyingRef = useRef(replyingTo);
   replyingRef.current = replyingTo;
-  /** The message of mine the composer edits (WISP 902 § Edits). */
-  const [editing, setEditing] = useState<StoredMessage | null>(null);
+  /**
+   * The message of mine the composer edits (WISP 902 § Edits). Only while the group has it: deleted meanwhile, the edit
+   * ends, its words with it, and the draft set aside comes back.
+   */
+  const [chosenEdit, setEditing] = useState<StoredMessage | null>(null);
+  const editing = chosenEdit && heldOriginal(chosenEdit, quoteIndex, true) ? chosenEdit : null;
+  useEffect(() => { if (chosenEdit && !editing) setEditing(null); }, [chosenEdit, editing]);
   useEffect(() => { setReplyingTo(null); setEditing(null); }, [groupId]);
-  const [readReplies] = useState(() => replyIndexer(true));
-  const quoteIndex = useMemo(() => readReplies(messages), [messages, readReplies]);
   // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
   const [pickButtonRow] = useState(() => rowPicker<StoredMessage, StoredMessage>(m => m.card?.kind === "buttons" || m.replyTo ? m : undefined));
   const buttonRows = useMemo(() => pickButtonRow(messages), [pickButtonRow, messages]);
@@ -530,8 +540,8 @@ export function GroupChat() {
       const { error, messageId } = await engine.call("sendGroupMessage", { groupId, text, ...(mentions?.length && { mentions }), ...(answering && { replyTo: answering.id }) });
       if (!error && messageId && extra?.translated) keepSentOriginal(`group:${groupId}`, messageId, extra.translated);
       if (!error && answering) {
-        if (replyingRef.current === answering) replyingRef.current = null;
-        setReplyingTo(current => current === answering ? null : current);
+        if (replyingRef.current?.id === answering.id) replyingRef.current = null;
+        setReplyingTo(current => current?.id === answering.id ? null : current);
       }
       // The engine says why in English: said here in the app's language (lib/errorText.ts).
       return error && problemLine(error, t);
@@ -552,8 +562,8 @@ export function GroupChat() {
       const video = !voice && isPlayableVideoType(source.type) ? await videoMetaOf(source).catch(() => undefined) : undefined;
       await platform.sendGroupFile(groupId, source, { ...(voice && { voice }), ...(video && { video }), ...(answering && { replyTo: answering.id }) });
       if (answering) {
-        if (replyingRef.current === answering) replyingRef.current = null;
-        setReplyingTo(current => current === answering ? null : current);
+        if (replyingRef.current?.id === answering.id) replyingRef.current = null;
+        setReplyingTo(current => current?.id === answering.id ? null : current);
       }
       return null;
     } catch (e) { return problemLine(e, t); }
