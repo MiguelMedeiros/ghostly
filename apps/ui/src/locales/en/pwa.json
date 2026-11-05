@@ -18,6 +18,8 @@
   "notNow": "Not now",
   "offline": "Offline",
   "offlineHint": "Your chats are here. Nothing goes out until you're back online.",
+  "reconnecting": "Reconnecting…",
+  "reconnectingHint": "This tab lost Ghostly and keeps trying. New messages show here once it's back.",
   "shareDropped": "{{count}} more shares couldn't be kept: {{waiting}} were already waiting.",
   "shareDroppedNext": "Send or cancel the ones waiting, then share the rest again.",
   "shareDroppedOne": "1 more share couldn't be kept: {{waiting}} were already waiting.",

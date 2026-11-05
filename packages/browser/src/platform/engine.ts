@@ -59,6 +59,11 @@ class EngineClient {
    * shows the standby screen and nothing of the profile. State listeners hear of it.
    */
   deviceGate: DeviceGateView | null = null;
+  /**
+   * Set while the peer went away and a try to connect again failed: the page waits for the next one, and nothing it
+   * shows is current until one succeeds. Cleared once connected again. State listeners hear of it.
+   */
+  reconnecting = false;
 
   private connection: EngineConnection | null = null;
   private connecting: Promise<void> | null = null;
@@ -240,6 +245,7 @@ class EngineClient {
       )
       .then((connection) => {
         this.connection = connection;
+        this.setReconnecting(false);
       })
       .finally(() => (this.connecting = null));
     return this.connecting;
@@ -247,7 +253,16 @@ class EngineClient {
 
   /** Connects again after `delay`, and again after twice as long while the tries fail. */
   private reconnect(delay: number): void {
-    setTimeout(() => void this.connect().catch(() => this.reconnect(Math.min(delay * 2, RECONNECT_MAX_MS))), delay);
+    setTimeout(() => void this.connect().catch(() => {
+      this.setReconnecting(true);
+      this.reconnect(Math.min(delay * 2, RECONNECT_MAX_MS));
+    }), delay);
+  }
+
+  private setReconnecting(reconnecting: boolean): void {
+    if (this.reconnecting === reconnecting) return;
+    this.reconnecting = reconnecting;
+    for (const listener of this.stateListeners) listener();
   }
 
   private handle(message: PostedEvent): void {
