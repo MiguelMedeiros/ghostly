@@ -164,6 +164,21 @@ describe("the header's meter", () => {
     expect(screen.getByTestId("chat-usage-open")).toHaveFocus();
   });
 
+  it("in Arabic, cuts a long Latin name in the details' title in the name's own direction, so it keeps its start", async () => {
+    // The title cut the name in the page's direction with the name in a <bdi> inside it: in Arabic a Latin name longer
+    // than the sheet lost its start. The <bdi> (dir=auto) is the box that cuts, as the Tasks button's names are.
+    const long = "Claude Max (work account";
+    const rendered = renderApp(<Header peer="peer-hermes" />, { language: "ar" });
+    rendered.engine.on("statusCardIndex", () => [row("link-1", usage({ label: long }))]).setState({ links: [linkView({ id: "link-1", peerPubKeyZ32: "peer-hermes" })], groups: [] });
+    await rendered.user.click(await screen.findByTestId("chat-usage-open"));
+    const title = within(screen.getByTestId("chat-usage-panel")).getByRole("heading");
+    const name = title.querySelector("bdi")!;
+    expect(name).toHaveTextContent(long);
+    expect(name).toHaveClass("block", "truncate");
+    expect(title).toHaveClass("min-w-0");
+    expect(title).not.toHaveClass("truncate");
+  });
+
   it("is not there without a usage card from the contact", async () => {
     const rendered = renderApp(<Header peer="peer-hermes" />);
     rendered.engine.on("statusCardIndex", () => [row("link-1", usage(), { sender: "me" })]).setState({ links: [linkView({ id: "link-1", peerPubKeyZ32: "peer-hermes" })], groups: [] });

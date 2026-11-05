@@ -416,6 +416,23 @@ describe("richer task cards on the board", () => {
     expect(screen.getByTestId("where")).toHaveTextContent("/tasks");
   });
 
+  it("in Arabic, cuts a long Latin tag to filter by in the tag's own direction, so it keeps its start", async () => {
+    // The pill cut the tag in the page's direction with the tag in a <bdi> inside it: in Arabic a Latin tag longer than
+    // the pill's 160 px lost its start. The <bdi> (dir=auto) is the box that cuts, as a card's own tag chip is.
+    const long = "infrastructure-releasing";
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", messages: [], createdAt: 1_700_000_000_000, nick: "Coordinator" });
+    const rendered = renderApp(<Tasks />, { route: "/tasks", language: "ar" });
+    rendered.engine.on("statusCardIndex", () => [row("link-1", task({ id: "a", tags: [long] }))]).setState({ links: [linkView({ id: "link-1", peerPubKeyZ32: PEER, peerNick: "Coordinator" })], groups: [] });
+    await loaded();
+    const pill = within(screen.getByTestId("tasks-tags")).getByTestId("tasks-tag");
+    const name = pill.querySelector("bdi")!;
+    expect(name).toHaveTextContent(long);
+    expect(name).toHaveClass("min-w-0", "truncate");
+    // The pill lays the tag out at 160 px at most and does not cut it in the page's direction itself.
+    expect(pill).toHaveClass("max-w-40");
+    expect(pill).not.toHaveClass("truncate");
+  });
+
   it("gives a card's tag and pull request chips a 24 px tall box on a phone, keeping the pill's look, and its parts toggle 24 px", async () => {
     profile([
       row("link-1", task({ id: "b", tags: ["core"], pr: pr() })),
