@@ -57,7 +57,7 @@ test("the contact opens a shared app from Services, and it is gone once removed"
     await expect(b.page.getByTestId("open-service")).toHaveCount(0);
     // And the page B still had open is refused, not served.
     await viewer.reload();
-    await expect(viewer.getByText("This peer does not share that service")).toBeVisible();
+    await expect(viewer.getByText(/is no longer shared with you/)).toBeVisible();
   } finally {
     atlas.server.close();
   }

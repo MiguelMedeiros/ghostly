@@ -9,6 +9,7 @@ import { UI_PORT, type EngineStatus, type HttpRequestReply, type RuntimeMessage 
 import { activeNamespace, databaseFor, peerLockFor } from "./profile";
 import { activeProfileId } from "../../ui/src/lib/profiles";
 import { fromOwnPage } from "./shared/sender";
+import { setStorageProfile } from "../../ui/src/lib/storage";
 
 /**
  * The offscreen document is the Ghostly peer. Service workers have no
@@ -32,6 +33,8 @@ const ATTACH_NEWEST = 400;
  */
 const profile = activeNamespace();
 setDatabaseName(databaseFor(profile));
+// Its settings' names, read for the language a viewer tab is told things in (viewerWords.ts).
+setStorageProfile(profile);
 
 /**
  * The peer starts once it holds its profile's lock, released only when this document goes away: were a
@@ -103,10 +106,29 @@ async function handleHttpRequest(message: Extract<RuntimeMessage, { type: "http-
       body: message.bodyB64 ? fromBase64(message.bodyB64) : null,
       maxResponseBytes: VIEWER_MAX_RESPONSE_BYTES,
     });
-    return { ok: true, status: response.status, headers: response.headers, bodyB64: toBase64(await response.bytes()) };
+    const body = await response.bytes();
+    // The contact's machine answered in place of their app (docs/PROTOCOL.md "Host errors"), in its English and from
+    // its side ("The local service is not reachable."): the tab says it in the profile's language, from this side.
+    const hostCode = response.headers.find(([name]) => name.toLowerCase() === "x-ghostly-error")?.[1];
+    if (hostCode !== undefined) {
+      const app = serviceName(peer, message.peerPubKeyZ32, message.serviceId);
+      const shown = await (await import("./viewerWords")).hostErrorShown(response.headers, app);
+      return { ok: false, code: hostCode, message: hostCode, status: response.status, shown };
+    }
+    return { ok: true, status: response.status, headers: response.headers, bodyB64: toBase64(body) };
   } catch (error) {
     const code = error instanceof GhostlyHttpError ? error.code : "error";
     return { ok: false, code, message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** The name the contact gave the service they share, as the chat shows it; its id while the peer has none. */
+function serviceName(peer: EngineServer, peerPubKeyZ32: string, serviceId: string): string {
+  try {
+    const links = peer.node.getState().links.filter((link) => link.peerPubKeyZ32 === peerPubKeyZ32);
+    return links.flatMap((link) => link.peerServices ?? []).find((service) => service.id === serviceId)?.name ?? serviceId;
+  } catch {
+    return serviceId;
   }
 }
 
