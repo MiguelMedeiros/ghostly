@@ -1,12 +1,15 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Amount, OutputData, getEncodedToken, type Proof, type SerializedSwapPreview, type SwapPreview } from "@cashu/cashu-ts";
+import { Amount, OutputData, getEncodedToken, type Proof, type SerializedOutputData, type SerializedSwapPreview, type SwapPreview } from "@cashu/cashu-ts";
+import type { PaymentReview } from "@ghostly/core";
 import { db } from "../src/engine/db";
 import { dropDataKey, setDataKey } from "../src/engine/dataKey";
+import { intentRepository } from "../src/engine/paymentAdapters/persistence";
+import { openRow } from "../src/engine/sealedRows";
 import { CashuWallet, SwapUnsettledError } from "../src/engine/wallet";
 import { createProfileKey } from "../src/shared/profileKey";
 import { STORES, clearProfileStores, openDb, transact, wrap } from "../src/shared/idb";
-import type { PendingSwap, StoredGroup, StoredLink } from "../src/shared/types";
+import type { PendingSwap, StoredGroup, StoredLink, StoredPayment, StoredQuote } from "../src/shared/types";
 // covers: wallet.cashu.receive-token, payments.cashu.send
 
 /*
@@ -17,6 +20,7 @@ import type { PendingSwap, StoredGroup, StoredLink } from "../src/shared/types";
 
 const mintApi = vi.hoisted(() => ({
   sendOffline: vi.fn(), prepareSend: vi.fn(), prepareReceive: vi.fn(), completeSwap: vi.fn(), restore: vi.fn(), getKeys: vi.fn(), checkProofsStates: vi.fn(),
+  checkMintQuote: vi.fn(), prepareMint: vi.fn(), completeMint: vi.fn(),
 }));
 vi.mock("@cashu/cashu-ts", async (importOriginal) => {
   const real = await importOriginal<typeof import("@cashu/cashu-ts")>();
@@ -35,6 +39,10 @@ vi.mock("@cashu/cashu-ts", async (importOriginal) => {
       completeSwap = (preview: unknown) => mintApi.completeSwap(preview);
       mint = { restore: (request: unknown) => mintApi.restore(request), getKeys: () => mintApi.getKeys() };
       checkProofsStates = (proofs: unknown) => mintApi.checkProofsStates(proofs);
+      checkMintQuoteBolt11 = (quote: string) => mintApi.checkMintQuote(quote);
+      prepareMint = (...args: unknown[]) => mintApi.prepareMint(...args);
+      completeMint = (preview: unknown) => mintApi.completeMint(preview);
+      ops = { send: (amount: number, proofs: unknown) => ({ includeFees: () => ({ prepare: () => mintApi.prepareSend(amount, proofs) }) }) };
     },
   };
 });
@@ -59,7 +67,7 @@ const leaks = async (secrets: readonly string[]) => { const raw = await rawDatab
 beforeEach(async () => {
   dropDataKey();
   await clearProfileStores();
-  await transact([STORES.proofs, STORES.payments, STORES.walletTx, STORES.swaps, STORES.melts, STORES.quotes], (s) => { for (const name of Object.keys(s)) s[name].clear(); });
+  await transact([STORES.proofs, STORES.payments, STORES.walletTx, STORES.swaps, STORES.melts, STORES.quotes, STORES.intents], (s) => { for (const name of Object.keys(s)) s[name].clear(); });
 });
 afterEach(() => { dropDataKey(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
@@ -199,6 +207,69 @@ describe("the Cashu wallet", () => {
     expect(now).not.toContain(RECEIVED[0]);
     expect(await leaks([...now, RECEIVED[0]])).toEqual([]);
     await next.wallet.stop();
+  });
+
+  it("with the data key, the token of a chat payment kept for Take it back is sealed in its payment record", async () => {
+    setDataKey(await dataKey());
+    const SENT = ["sent-coin-16", "sent-coin-4"];
+    mintApi.completeSwap.mockResolvedValueOnce({ keep: RECEIVED.map((secret, i) => proof(32 >> i, secret)), send: [] });
+    const { wallet } = setup();
+    await wallet.receiveToken(TOKEN, "ecash-in");
+    mintApi.completeSwap.mockResolvedValueOnce({ keep: [proof(8, "kept-coin-8")], send: [proof(16, SENT[0]), proof(4, SENT[1])] });
+    const record = (token: string, mint: string): StoredPayment =>
+      ({ id: "p1", linkId: "l1", kind: "payment", direction: "out", amount: 20, unit: "sat", state: "pending", createdAt: 1, mint, token });
+    const { token } = await wallet.createToken(20, undefined, undefined, record);
+    expect(await leaks([token, ...SENT])).toEqual([]);
+    const raw = await wrap<StoredPayment>((await openDb()).transaction(STORES.payments, "readonly").objectStore(STORES.payments).get("p1"));
+    expect(await openRow(STORES.payments, raw)).toEqual(record(token, MINT));
+  });
+
+  it("with the data key, the outputs written down for a paid invoice are sealed, and minted from as they were", async () => {
+    setDataKey(await dataKey());
+    const quote: StoredQuote = { quote: "q1", mint: MINT, amount: 13, invoice: "lnbc130n1throwaway", createdAt: Date.now(), expiresAt: null };
+    await transact([STORES.quotes], (s) => { s[STORES.quotes].put(quote); });
+    const made = outputs(8, 4, 1);
+    mintApi.checkMintQuote.mockResolvedValue({ quote: "q1", state: "PAID" });
+    mintApi.prepareMint.mockImplementation(async () => ({ outputData: made }));
+    // The mint's answer never arrives: the paid quote keeps its outputs for the next round.
+    mintApi.completeMint.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    const { wallet } = setup();
+    await wallet.checkQuotes([MINT]);
+    const [kept] = await wallet.quotes();
+    const written = kept.outputs as SerializedOutputData[];
+    expect(written.map((o) => o.secret)).toEqual(made.map((o) => OutputData.serialize(o).secret));
+    expect(await leaks(written.flatMap((o) => [o.secret, o.blindingFactor]))).toEqual([]);
+
+    // The next round mints from the sealed outputs, the very ones written down.
+    mintApi.completeMint.mockImplementationOnce(async (preview: { outputData: OutputData[] }) =>
+      preview.outputData.map((o) => ({ id: KEYSET, amount: Amount.from(o.blindedMessage.amount), secret: new TextDecoder().decode(o.secret), C })));
+    await wallet.checkQuotes([MINT]);
+    expect(await wallet.quotes()).toEqual([]);
+    expect(await wallet.balance()).toBe(13);
+    expect(await leaks(written.map((o) => o.secret))).toEqual([]);
+  });
+
+  it("with the data key, the coins a Cashu review set aside and the token it made are sealed in its intent", async () => {
+    setDataKey(await dataKey());
+    mintApi.completeSwap.mockResolvedValueOnce({ keep: RECEIVED.map((secret, i) => proof(32 >> i, secret)), send: [] });
+    const { wallet } = setup();
+    await wallet.receiveToken(TOKEN, "ecash-in");
+    const { fee, prepared } = await wallet.prepareReviewedCashu(MINT, 20);
+    const review = { id: "r1", method: "cashu", provider: MINT, linkId: "l1", payee: "Ana", amount: 20, fee, feeCap: 10, createdAt: 1, state: "pending" } as PaymentReview;
+    await intentRepository.put({ review, prepared });
+    const swapSecrets = [...prepared.swap.inputs, ...(prepared.swap.keepOutputs ?? []), ...(prepared.swap.sendOutputs ?? [])].map((o) => o.secret);
+    expect(swapSecrets).toContain(RECEIVED[0]);
+    expect(await leaks(swapSecrets)).toEqual([]);
+    expect(await intentRepository.get("r1")).toEqual({ review, prepared });
+    expect((await intentRepository.list()).map((i) => i.prepared)).toEqual([prepared]);
+
+    // Approved: the claimed intent is opened, and the token it keeps once sent is sealed too.
+    const claimed = await intentRepository.claim("r1");
+    expect(claimed.prepared).toEqual(prepared);
+    const token = getEncodedToken({ mint: MINT, unit: "sat", proofs: [proof(16, "sent-coin-of-a-review")] });
+    await intentRepository.put({ ...claimed, prepared: { ...prepared, token } });
+    expect(await leaks([token, ...swapSecrets])).toEqual([]);
+    expect((await intentRepository.get("r1"))?.prepared).toEqual({ ...prepared, token });
   });
 
   it("without it, the wallet's rows are stored as they always were", async () => {
