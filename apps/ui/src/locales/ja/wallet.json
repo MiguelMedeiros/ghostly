@@ -137,6 +137,7 @@
       "needsKey": "キーが必要",
       "noFederation": "フェデレーションなし",
       "noSource": "ソースなし",
+      "shared": "{{name}} の残高を使います",
       "unavailable": "利用不可"
     },
     "deck": {

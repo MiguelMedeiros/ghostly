@@ -91,6 +91,20 @@ describe("the totals over the deck", () => {
     expect(total).toHaveFocus();
   });
 
+  it("shows a shared balance's number on one card only: Lightning through the mints says it uses Cashu's", async () => {
+    const { user } = await openOn("mainnet");
+    expect(screen.getByTestId("wallet-card-cashu-mainnet")).toHaveTextContent("1,000 sats");
+    const lightning = screen.getByTestId("wallet-card-lightning-mainnet");
+    expect(lightning).toHaveTextContent("Uses your Cashu balance");
+    expect(lightning).not.toHaveTextContent("1,000");
+    expect(lightning).not.toHaveTextContent(/\bsats\b/);
+    // The total and where it comes from are as they were: counted once, the row still says so with its amount.
+    expect(screen.getByTestId("wallet-total-bitcoin-amount")).toHaveTextContent("1,000sats");
+    await user.click(screen.getByTestId("wallet-total-bitcoin"));
+    expect(row("lightning-mainnet")).toHaveTextContent("Same balance as Cashu, counted once");
+    expect(within(row("lightning-mainnet")).getByTestId("wallet-total-line-amount")).toHaveTextContent("1,000 sats");
+  });
+
   it("opens USDT's own breakdown, with no ready line, and closes from its button", async () => {
     const { user } = await openOn("testnet");
     await user.click(screen.getByTestId("wallet-total-usdt"));

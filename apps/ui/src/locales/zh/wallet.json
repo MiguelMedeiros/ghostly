@@ -137,6 +137,7 @@
       "needsKey": "需要密钥",
       "noFederation": "没有联盟",
       "noSource": "没有来源",
+      "shared": "使用你的 {{name}} 余额",
       "unavailable": "不可用"
     },
     "deck": {

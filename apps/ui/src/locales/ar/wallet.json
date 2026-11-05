@@ -149,6 +149,7 @@
       "needsKey": "تحتاج إلى مفتاح",
       "noFederation": "لا يوجد اتحاد",
       "noSource": "لا يوجد مصدر",
+      "shared": "يستخدم رصيد {{name}}",
       "unavailable": "غير متاحة"
     },
     "deck": {

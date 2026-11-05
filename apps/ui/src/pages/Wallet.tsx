@@ -18,6 +18,7 @@ import { RemoveWalletSection } from "../components/wallet/RemoveWallet";
 import { TestCoins } from "../components/wallet/TestCoins";
 import { WalletAway } from "../components/wallet/WalletAway";
 import { WalletTotals } from "../components/wallet/WalletTotals";
+import { sharedBalanceCards } from "../components/walletTotals";
 import { BackupReminder } from "../components/wallet/BackupReminder";
 import { useBackupDue } from "../hooks/useBackupDue";
 import { useAppNavigation } from "../hooks/useAppNavigation";
@@ -225,7 +226,7 @@ export function Wallet() {
             <div key={network} className="wallet-network-view space-y-3" data-swap={swap ?? undefined} onAnimationEnd={(e) => { if (e.target === e.currentTarget) setSwap(null); }}>
               <p className="text-xs text-text-muted" data-testid="wallet-network-about">{t(network === "mainnet" ? "wallet.page.about.mainnet" : "wallet.page.about.testnet")}</p>
               {selected && <WalletTotals state={state} network={network} cards={shown} />}
-              {selected ? <WalletDeck network={network} cards={shown} selected={selected.id} marks={marks} onSelect={(id) => select(id, false)} onChoose={() => setFocusPanel(true)} /> : (
+              {selected ? <WalletDeck network={network} cards={sharedBalanceCards(state, network, shown, t)} selected={selected.id} marks={marks} onSelect={(id) => select(id, false)} onChoose={() => setFocusPanel(true)} /> : (
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-border px-4 py-3" data-testid={`wallet-network-${network}-empty`}>
                   <p className="text-sm text-text-secondary">{t("wallet.page.none", { network: NETWORK_NAME[network] })}</p>
                   <Button data-testid={`wallet-network-${network}-new`} onClick={() => setCreating(network)}>{t("wallet.page.new", { network: NETWORK_NAME[network] })}</Button>

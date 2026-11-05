@@ -137,6 +137,7 @@
       "needsKey": "Serve una chiave",
       "noFederation": "Nessuna federazione",
       "noSource": "Nessuna fonte",
+      "shared": "Usa il tuo saldo {{name}}",
       "unavailable": "Non disponibile"
     },
     "deck": {

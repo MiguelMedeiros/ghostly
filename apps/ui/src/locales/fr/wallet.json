@@ -137,6 +137,7 @@
       "needsKey": "Clé requise",
       "noFederation": "Aucune fédération",
       "noSource": "Aucune source",
+      "shared": "Utilise votre solde {{name}}",
       "unavailable": "Indisponible"
     },
     "deck": {

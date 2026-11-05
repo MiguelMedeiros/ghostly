@@ -1,3 +1,4 @@
+import type { Translate } from "../contexts/I18nContext";
 import type { WalletNetwork, WalletState } from "../lib/platform";
 import { CASHU_MINT_SOURCE, deckId, networkState, type InstanceCard } from "./walletCardData";
 import type { WalletRail } from "./walletCardTypes";
@@ -117,6 +118,16 @@ export function walletTotals(state: WalletState, network: WalletNetwork, cards: 
     out.usdt = { network, total, decimals: decimals ?? 6, test, rows: usdt, uncounted: usdt.filter(uncounted).length };
   }
   return out;
+}
+
+/**
+ * The deck's cards with a shared balance said in words: a card that spends another card's balance (`shared` in the
+ * totals) says "Uses your Cashu balance" where its amount was, so the number shows on one card only and the deck
+ * never reads as twice what there is. Ids and order stay; only `network`'s cards are looked at.
+ */
+export function sharedBalanceCards<C extends InstanceCard>(state: WalletState, network: WalletNetwork, cards: C[], t: Translate): C[] {
+  const shared = new Map((walletTotals(state, network, cards).bitcoin?.rows ?? []).filter((r) => r.state === "shared").map((r) => [r.id, r.sharedWith ?? ""]));
+  return shared.size ? cards.map((c) => shared.has(c.id) ? { ...c, balance: t("wallet.cards.balance.shared", { name: shared.get(c.id)! }) } : c) : cards;
 }
 
 const uncounted = (row: TotalRow<unknown>) => row.state === "unknown" || row.state === "away";
