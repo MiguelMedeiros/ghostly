@@ -355,6 +355,202 @@
     "sourceAsked": "Consultado a {{from}} {{time}}. La consulta le reveló a ese servidor la dirección IP de este dispositivo.",
     "sourceFound": "Cargado desde {{from}} {{time}}. Es lo que la cuenta dice de sí misma, no forma parte de la prueba. La consulta le reveló a ese servidor la dirección IP de este dispositivo."
   },
+  "providers": {
+    "atproto": {
+      "progress": {
+        "approve": "Aprueba en {{server}} en la ventana que se abrió…",
+        "deleting": "Borrando el registro en {{server}}…",
+        "lookingUp": "Buscando {{account}}…",
+        "publishing": "Publicando la prueba en {{server}}…"
+      }
+    },
+    "bitcoin": {
+      "paste": {
+        "label": "Firma",
+        "placeholder": "smp… (BIP-322) o la firma base64 que muestra tu cartera"
+      },
+      "scripts": {
+        "p2pkh": "heredada (1…)",
+        "p2sh": "SegWit anidado (3…)",
+        "p2tr": "Taproot (bc1p…)",
+        "p2wpkh": "SegWit nativo (bc1q…)",
+        "p2wsh": "script / multifirma (P2WSH)",
+        "witness-unknown": "versión futura de SegWit"
+      },
+      "steps": {
+        "address": "Con esta dirección:",
+        "cannotSign": "{{wallet}} no puede firmar para una dirección {{type}} en un formato que Ghostly acepte. Usa una cartera que firme BIP-322.",
+        "cannotSignTry": "{{wallet}} no puede firmar para una dirección {{type}} en un formato que Ghostly acepte. Prueba {{others}}, u otra cartera que firme BIP-322.",
+        "command": "Línea de comandos:",
+        "commandTestnet": "Línea de comandos (añade -signet, -testnet4 o -regtest):",
+        "either": "{{a}} o {{b}}",
+        "limits": "Esto muestra que puedes firmar por la dirección. No muestra un saldo, un pago pasado, ni que pagarías.",
+        "statement": "Firma exactamente esta declaración, como una sola línea, sin añadir un salto de línea:",
+        "testnet": "Redes de prueba: {{how}}"
+      },
+      "wallets": {
+        "bitcoin-core": {
+          "step1": "Bitcoin Core firma mensajes solo en el formato heredado, para una dirección heredada (1… en mainnet, m… o n… en redes de prueba). Crea una en la pestaña Receive con el tipo Base58 (Legacy), o con `getnewaddress \"\" legacy`.",
+          "step2": "Interfaz: File → Sign message…; pega la dirección, pega la declaración, Sign Message, copia la firma.",
+          "step3": "Línea de comandos: bitcoin-cli signmessage \"<dirección>\" '<declaración>' (las comillas simples conservan las comillas dobles de la declaración).",
+          "testnet": "Ejecútalo con -signet, -testnet4 o -regtest; añade la misma opción a bitcoin-cli."
+        },
+        "coldcard": {
+          "note": "Los firmwares antiguos firman solo en el formato heredado (Ghostly lo acepta para una dirección heredada 1…) y limitan la longitud y los caracteres del mensaje.",
+          "step1": "Sigue la guía BIP-322 de COLDCARD para tu firmware: firma la declaración para una de sus direcciones por MicroSD, NFC o QR, según el modelo.",
+          "step2": "Dale la declaración exactamente como la muestra Ghostly y la dirección que estás probando.",
+          "step3": "Pega en Ghostly la firma que produzca."
+        },
+        "electrum": {
+          "step1": "Electrum firma en el formato heredado, que Ghostly acepta solo para una dirección heredada 1… (m…/n… en redes de prueba); sus carteras bc1… por defecto necesitan otra cartera.",
+          "step2": "Pestaña Addresses (View → Show Addresses), clic derecho en la dirección → Sign/verify message.",
+          "step3": "Pega la declaración en Message, haz clic en Sign, copia la Signature y pégala en Ghostly.",
+          "testnet": "Inicia Electrum con --testnet o --signet."
+        },
+        "other": {
+          "step1": "Busca \"Firmar mensaje\" (Sign message) en la cartera. Elige BIP-322 cuando pida un formato.",
+          "step2": "Firma la declaración exactamente como la muestra Ghostly, con la dirección que estás probando.",
+          "step3": "Una dirección SegWit anidada (3…, o 2… en redes de prueba) necesita una firma BIP-322 completa (empieza por ful…).",
+          "step4": "Pega la firma en Ghostly; te avisa al momento si no coincide."
+        },
+        "sparrow": {
+          "note": "Sparrow ofrece BIP322 (Simple) solo para carteras de software; una cartera de hardware conectada firma en el formato Standard (Electrum), que Ghostly acepta solo para una dirección heredada 1….",
+          "step1": "Abre la cartera que tiene la dirección y luego Tools → Sign/Verify Message.",
+          "step2": "Address: pega la dirección que estás probando.",
+          "step3": "Message: pega la declaración que muestra Ghostly, exactamente como está.",
+          "step4": "Format: BIP322 (Simple) para una dirección bc1q… o bc1p… (tb1… en redes de prueba). Para una dirección heredada 1…, Standard (Electrum).",
+          "step5": "Sign Message, luego copia la Signature entera (empieza por smp…) y pégala en Ghostly.",
+          "testnet": "Tools → Restart In → Testnet o Signet, con una cartera en esa red."
+        },
+        "trezor": {
+          "step1": "Trezor firma mensajes en el formato heredado; Ghostly lo acepta para una dirección de una cuenta Legacy (1…).",
+          "step2": "Abre la cuenta Legacy y elige Sign & verify en su menú.",
+          "step3": "Pega la declaración en Message, elige la dirección, Sign, confirma en el dispositivo, copia la firma en Ghostly."
+        }
+      }
+    },
+    "did": {
+      "file": {
+        "check": "Luego pulsa Comprobar. El archivo sigue siendo público mientras la prueba esté en uso; borrarlo retira esta prueba de todos los contactos en su próxima comprobación.",
+        "content": "Con exactamente este contenido:",
+        "create": "Crea este archivo en tu servidor web, junto a tu did.json:",
+        "serve": "Sírvelo por HTTPS exactamente en esa dirección, sin ninguna redirección, y con esta cabecera para que los navegadores puedan leerlo (tu did.json también la necesita):"
+      },
+      "paste": {
+        "label": "JWS o firma",
+        "placeholder": "eyJhbGciOi… o la firma en hexadecimal"
+      },
+      "preview": {
+        "document": "Documento",
+        "domain": "Dominio",
+        "key": "Clave",
+        "keyIsIdentifier": "{{method}}, la clave es el identificador",
+        "keys": "Claves",
+        "method": "Método",
+        "noKeys": "ninguna que pueda firmar: publica en su lugar",
+        "notUsable": "No utilizables",
+        "relay": "Relay",
+        "unusable": "{{count}} claves: otra curva, o no son para authentication ni assertionMethod",
+        "unusableOne": "1 clave: otra curva, o no es para authentication ni assertionMethod"
+      },
+      "service": {
+        "add": "Añade esta entrada a la lista \"service\" de tu did.json:",
+        "addAt": "Añade esta entrada a la lista \"service\" de tu did.json ({{url}}):",
+        "check": "Luego pulsa Comprobar. Quitar la entrada retira esta prueba de todos los contactos en su próxima comprobación."
+      },
+      "steps": {
+        "anyKey": "una clave listada en authentication o assertionMethod",
+        "jose": "Con jose (Node.js 20 o posterior), un JWS: guarda esto como sign.mjs y ejecútalo con tu clave privada {{curve}} como archivo JWK.",
+        "noble": "Con @noble/curves (Node.js), una firma en bruto: guarda esto como sign.mjs y ejecútalo con tu clave privada {{curve}} en hexadecimal.",
+        "openssl": "O con OpenSSL 3 y tu clave {{curve}} en PEM:",
+        "paste": "Pega lo que muestre: un JWS compacto ({{alg}}, adjunto o separado), o la firma en hexadecimal o base64. Si tu DID lista varias claves, puedes escribir antes el id de la clave: #key-1 <firma>.",
+        "sign": "Firma esta declaración con la clave privada de {{key}}. Es una sola línea, sin salto de línea al final:"
+      }
+    },
+    "domain": {
+      "dns": {
+        "name": "Abre los ajustes de DNS de {{domain}} en tu registrador o proveedor de DNS y añade un registro TXT con este nombre. Algunos proveedores añaden el dominio por sí mismos: entonces escribe solo la parte antes de {{domain}}.",
+        "public": "El registro sigue siendo público mientras la prueba esté en uso. Quitarlo retira esta prueba de todos los contactos en su próxima comprobación.",
+        "ttl": "Pon el TTL en 300 segundos o menos, para que quitar el registro surta efecto pronto. Luego pulsa Comprobar: los cambios de DNS pueden tardar unos minutos en aparecer.",
+        "value": "Valor (una sola cadena, exactamente como se muestra):"
+      },
+      "https": {
+        "check": "Luego pulsa Comprobar. El archivo sigue siendo público mientras la prueba esté en uso; borrarlo retira esta prueba de todos los contactos en su próxima comprobación.",
+        "content": "Con exactamente este contenido:",
+        "file": "Crea este archivo en el servidor web de {{domain}}:",
+        "serve": "Sírvelo por HTTPS exactamente en esa dirección, sin ninguna redirección (ni siquiera a www), y con esta cabecera para que los navegadores puedan leerlo:"
+      },
+      "nip05": {
+        "approve": "Aprueba la declaración de identidad de Ghostly en tu firmante."
+      }
+    },
+    "nostr": {
+      "approve": "Aprueba la declaración de identidad de Ghostly en tu firmante."
+    },
+    "oidc": {
+      "signIn": "Inicia sesión con {{provider}} en la ventana que se abrió."
+    },
+    "openpgp": {
+      "paste": {
+        "signed": "Declaración firmada",
+        "signedAndKey": "Declaración firmada y clave pública"
+      },
+      "steps": {
+        "card": "En una YubiKey u otra tarjeta OpenPGP, gpg pide el PIN de la tarjeta, y un toque si la tarjeta lo requiere. Sin una terminal, guarda la declaración de abajo en un archivo de texto y firma ese archivo.",
+        "save": "Guarda la declaración en un archivo (es una sola línea, sin salto de línea al final):",
+        "sign": "Fírmala, luego copia todo lo que esto muestre:",
+        "signExport": "Fírmala y exporta tu clave pública, luego copia todo lo que esto muestre:"
+      }
+    },
+    "pubky": {
+      "approval": {
+        "googleNote": "Una identidad que Passport crea con Google se recupera con Google más Passport: hacen falta los dos, ninguno solo puede.",
+        "passport": "Aprobar en el navegador (Pubky Passport)",
+        "passportAbout": "Abre Pubky Passport. ¿Aún no tienes una identidad de Passport? Ofrece “Continuar con Google” y crea una.",
+        "qrNote": "El código es tu solicitud: escanéalo tú, y no lo compartas.",
+        "ring": "O escanea con Pubky Ring"
+      },
+      "progress": {
+        "approved": "Aprobado. Comprobando lo que concedió Pubky…",
+        "deleting": "Borrando el archivo de la prueba de tu homeserver…",
+        "popupBlocked": "Tu navegador bloqueó la ventana de Passport: permite las ventanas emergentes para Ghostly y pulsa el botón otra vez, o escanea el código con Pubky Ring.",
+        "writing": "Escribiendo la prueba en tu homeserver…"
+      }
+    },
+    "ssh": {
+      "paste": {
+        "label": "Firma SSH"
+      },
+      "steps": {
+        "orSave": "O guarda esta declaración en un archivo, ejecuta ssh-keygen -Y sign -n {{namespace}} -f <tu clave> <archivo> y pega el <archivo>.sig que escribe.",
+        "paste": "Pega la firma entera que muestra, de -----BEGIN SSH SIGNATURE----- a -----END SSH SIGNATURE-----. Tu clave privada nunca sale de tu ordenador.",
+        "run": "Ejecuta esto en una terminal (macOS, Linux, o Git Bash/WSL en Windows). Si tu clave no es ~/.ssh/id_ed25519, cambia la ruta después de -f; una ruta .pub sirve cuando la clave privada está en ssh-agent o en una llave de seguridad.",
+        "save": "Guarda esta declaración en un archivo, ejecuta ssh-keygen -Y sign -n {{namespace}} -f <tu clave> <archivo> y pega el <archivo>.sig que escribe."
+      }
+    },
+    "ssh-github": {
+      "paste": {
+        "label": "Firma SSH"
+      },
+      "steps": {
+        "orSave": "O guarda esta declaración en un archivo, ejecuta ssh-keygen -Y sign -n {{namespace}} -f <tu clave> <archivo> y pega el <archivo>.sig que escribe.",
+        "paste": "Pega la firma entera que muestra, de -----BEGIN SSH SIGNATURE----- a -----END SSH SIGNATURE-----. Tu clave privada nunca sale de tu ordenador.",
+        "run": "Ejecuta esto en una terminal (macOS, Linux, o Git Bash/WSL en Windows). Si tu clave no es ~/.ssh/id_ed25519, cambia la ruta después de -f; una ruta .pub sirve cuando la clave privada está en ssh-agent o en una llave de seguridad.",
+        "save": "Guarda esta declaración en un archivo, ejecuta ssh-keygen -Y sign -n {{namespace}} -f <tu clave> <archivo> y pega el <archivo>.sig que escribe."
+      }
+    },
+    "ssh-gitlab": {
+      "paste": {
+        "label": "Firma SSH"
+      },
+      "steps": {
+        "orSave": "O guarda esta declaración en un archivo, ejecuta ssh-keygen -Y sign -n {{namespace}} -f <tu clave> <archivo> y pega el <archivo>.sig que escribe.",
+        "paste": "Pega la firma entera que muestra, de -----BEGIN SSH SIGNATURE----- a -----END SSH SIGNATURE-----. Tu clave privada nunca sale de tu ordenador.",
+        "run": "Ejecuta esto en una terminal (macOS, Linux, o Git Bash/WSL en Windows). Si tu clave no es ~/.ssh/id_ed25519, cambia la ruta después de -f; una ruta .pub sirve cuando la clave privada está en ssh-agent o en una llave de seguridad.",
+        "save": "Guarda esta declaración en un archivo, ejecuta ssh-keygen -Y sign -n {{namespace}} -f <tu clave> <archivo> y pega el <archivo>.sig que escribe."
+      }
+    }
+  },
   "received": {
     "checked": "{{category}} · comprobada el {{time}}",
     "title": "De tus contactos"

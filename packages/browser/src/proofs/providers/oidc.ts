@@ -1,5 +1,5 @@
 import { IDENTITY_CLOCK_SKEW, type IdentityStatement } from "@ghostly/core";
-import type { IdentityProofProvider, IdentityPlatform, RedirectSigner } from "../contract";
+import { englishSay, type IdentityProofProvider, type IdentityPlatform, type RedirectSigner } from "../contract";
 import { getBrowserHost, type OidcHost } from "../../host";
 import { audiences, isConfigured, oidcProviders, providerForIssuer, type OidcProvider, type OidcReveal } from "../oidc/providers";
 import { signInForProof } from "../oidc/flow";
@@ -56,7 +56,7 @@ export function createOidcIdentityProvider(options: OidcIdentityOptions = {}): I
         if (!h || !opening) throw new Error("Signing in with a provider is not available here.");
         const provider = providerForIssuer(statement.binding.subject, providers());
         if (!provider || !isConfigured(provider, h.platform)) { void opening.then(w => w.close(), () => {}); throw new Error("This provider is not set up in this Ghostly build."); }
-        ctx.onProgress(`Sign in with ${provider.name} in the window that opened.`);
+        ctx.onProgress((ctx.say ?? englishSay)("signIn", "Sign in with {{provider}} in the window that opened.", { provider: provider.name }));
         const token = await signInForProof({
           provider, platform: h.platform, nonce: statement.id, window: await opening, signal: ctx.signal, fetch: options.fetch,
           // What the provider cannot put in its token is not asked for.

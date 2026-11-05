@@ -355,6 +355,202 @@
     "sourceAsked": "Asked {{from}} {{time}}. Asking told that server this device’s IP address.",
     "sourceFound": "Loaded from {{from}} {{time}}. What the account says about itself, not part of the proof. Asking told that server this device’s IP address."
   },
+  "providers": {
+    "atproto": {
+      "progress": {
+        "approve": "Approve on {{server}} in the window that opened…",
+        "deleting": "Deleting the record on {{server}}…",
+        "lookingUp": "Looking up {{account}}…",
+        "publishing": "Publishing the proof on {{server}}…"
+      }
+    },
+    "bitcoin": {
+      "paste": {
+        "label": "Signature",
+        "placeholder": "smp… (BIP-322) or the base64 signature your wallet shows"
+      },
+      "scripts": {
+        "p2pkh": "legacy (1…)",
+        "p2sh": "nested SegWit (3…)",
+        "p2tr": "Taproot (bc1p…)",
+        "p2wpkh": "native SegWit (bc1q…)",
+        "p2wsh": "script / multisig (P2WSH)",
+        "witness-unknown": "future SegWit version"
+      },
+      "steps": {
+        "address": "With this address:",
+        "cannotSign": "{{wallet}} cannot sign for a {{type}} address in a format Ghostly accepts. Use a wallet that signs BIP-322.",
+        "cannotSignTry": "{{wallet}} cannot sign for a {{type}} address in a format Ghostly accepts. Try {{others}}, or another wallet that signs BIP-322.",
+        "command": "Command line:",
+        "commandTestnet": "Command line (add -signet, -testnet4 or -regtest):",
+        "either": "{{a}} or {{b}}",
+        "limits": "This shows you can sign for the address. It does not show a balance, a past payment, or that you would pay.",
+        "statement": "Sign exactly this statement, as one line, without adding a line break:",
+        "testnet": "Test networks: {{how}}"
+      },
+      "wallets": {
+        "bitcoin-core": {
+          "step1": "Bitcoin Core signs messages in the legacy format only, for a legacy address (1… on mainnet, m… or n… on test networks). Make one in the Receive tab with the Base58 (Legacy) type, or with `getnewaddress \"\" legacy`.",
+          "step2": "GUI: File → Sign message…; paste the address, paste the statement, Sign Message, copy the signature.",
+          "step3": "Command line: bitcoin-cli signmessage \"<address>\" '<statement>' (single quotes keep the statement's double quotes intact).",
+          "testnet": "Run it with -signet, -testnet4 or -regtest; add the same flag to bitcoin-cli."
+        },
+        "coldcard": {
+          "note": "Older firmware signs only the legacy format (Ghostly accepts that for a legacy 1… address) and limits message length and characters.",
+          "step1": "Follow COLDCARD's BIP-322 guide for your firmware: it signs the statement for one of its addresses via MicroSD, NFC or QR, depending on the model.",
+          "step2": "Give it the statement exactly as Ghostly shows it and the address you are proving.",
+          "step3": "Paste the signature it produces into Ghostly."
+        },
+        "electrum": {
+          "step1": "Electrum signs in the legacy format, which Ghostly accepts only for a legacy 1… address (m…/n… on test networks); its default bc1… wallets need another wallet.",
+          "step2": "Addresses tab (View → Show Addresses), right-click the address → Sign/verify message.",
+          "step3": "Paste the statement into Message, click Sign, copy the Signature and paste it into Ghostly.",
+          "testnet": "Start Electrum with --testnet or --signet."
+        },
+        "other": {
+          "step1": "Look for \"Sign message\" in the wallet. Choose BIP-322 when it asks for a format.",
+          "step2": "Sign the statement exactly as Ghostly shows it, with the address you are proving.",
+          "step3": "A nested SegWit address (3…, or 2… on test networks) needs a full BIP-322 signature (it starts with ful…).",
+          "step4": "Paste the signature into Ghostly; it tells you right away if it does not match."
+        },
+        "sparrow": {
+          "note": "Sparrow offers BIP322 (Simple) for software wallets only; a connected hardware wallet signs the Standard (Electrum) format, which Ghostly accepts only for a legacy 1… address.",
+          "step1": "Open the wallet that holds the address, then Tools → Sign/Verify Message.",
+          "step2": "Address: paste the address you are proving.",
+          "step3": "Message: paste the statement Ghostly shows, exactly as it is.",
+          "step4": "Format: BIP322 (Simple) for a bc1q… or bc1p… address (tb1… on test networks). For a legacy 1… address, Standard (Electrum).",
+          "step5": "Sign Message, then copy the whole Signature (it starts with smp…) and paste it into Ghostly.",
+          "testnet": "Tools → Restart In → Testnet or Signet, with a wallet on that network."
+        },
+        "trezor": {
+          "step1": "Trezor signs messages in the legacy format; Ghostly accepts it for an address of a Legacy account (1…).",
+          "step2": "Open the Legacy account and choose Sign & verify in its menu.",
+          "step3": "Paste the statement into Message, pick the address, Sign, confirm on the device, copy the signature into Ghostly."
+        }
+      }
+    },
+    "did": {
+      "file": {
+        "check": "Then press Check. The file stays public while the proof is in use; deleting it withdraws this proof from every contact at their next check.",
+        "content": "With exactly this content:",
+        "create": "Create this file on your web server, beside your did.json:",
+        "serve": "Serve it over HTTPS at exactly that address, without any redirect, and with this header so browsers may read it (your did.json needs it too):"
+      },
+      "paste": {
+        "label": "JWS or signature",
+        "placeholder": "eyJhbGciOi… or the signature in hex"
+      },
+      "preview": {
+        "document": "Document",
+        "domain": "Domain",
+        "key": "Key",
+        "keyIsIdentifier": "{{method}}, the key is the identifier",
+        "keys": "Keys",
+        "method": "Method",
+        "noKeys": "none that can sign: publish instead",
+        "notUsable": "Not usable",
+        "relay": "Relay",
+        "unusable": "{{count}} keys: another curve, or not for authentication or assertionMethod",
+        "unusableOne": "1 key: another curve, or not for authentication or assertionMethod"
+      },
+      "service": {
+        "add": "Add this entry to the \"service\" list of your did.json:",
+        "addAt": "Add this entry to the \"service\" list of your did.json ({{url}}):",
+        "check": "Then press Check. Removing the entry withdraws this proof from every contact at their next check."
+      },
+      "steps": {
+        "anyKey": "a key listed under authentication or assertionMethod",
+        "jose": "With jose (Node.js 20 or later), a JWS: save this as sign.mjs and run it with your {{curve}} private key as a JWK file.",
+        "noble": "With @noble/curves (Node.js), a raw signature: save this as sign.mjs and run it with your {{curve}} private key in hex.",
+        "openssl": "Or with OpenSSL 3 and your {{curve}} key in PEM:",
+        "paste": "Paste what it prints: a compact JWS ({{alg}}, attached or detached), or the signature in hex or base64. If your DID lists several keys, you may write the key id first: #key-1 <signature>.",
+        "sign": "Sign this statement with the private key of {{key}}. It is one line, with no newline at the end:"
+      }
+    },
+    "domain": {
+      "dns": {
+        "name": "Open the DNS settings of {{domain}} at your registrar or DNS host and add a TXT record with this name. Some hosts add the domain themselves: then enter only the part before {{domain}}.",
+        "public": "The record stays public while the proof is in use. Removing it withdraws this proof from every contact at their next check.",
+        "ttl": "Set the TTL to 300 seconds or less, so removing the record takes effect quickly. Then press Check: DNS changes can take a few minutes to appear.",
+        "value": "Value (one string, exactly as shown):"
+      },
+      "https": {
+        "check": "Then press Check. The file stays public while the proof is in use; deleting it withdraws this proof from every contact at their next check.",
+        "content": "With exactly this content:",
+        "file": "Create this file on the web server of {{domain}}:",
+        "serve": "Serve it over HTTPS at exactly that address, without any redirect (not even to www), and with this header so browsers may read it:"
+      },
+      "nip05": {
+        "approve": "Approve the Ghostly identity statement in your signer."
+      }
+    },
+    "nostr": {
+      "approve": "Approve the Ghostly identity statement in your signer."
+    },
+    "oidc": {
+      "signIn": "Sign in with {{provider}} in the window that opened."
+    },
+    "openpgp": {
+      "paste": {
+        "signed": "Signed statement",
+        "signedAndKey": "Signed statement and public key"
+      },
+      "steps": {
+        "card": "On a YubiKey or another OpenPGP card, gpg asks for the card's PIN, and for a touch if the card requires one. Without a shell, save the statement below in a text file and sign that file.",
+        "save": "Save the statement to a file (it is one line, with no newline at the end):",
+        "sign": "Sign it, then copy everything this prints:",
+        "signExport": "Sign it and export your public key, then copy everything this prints:"
+      }
+    },
+    "pubky": {
+      "approval": {
+        "googleNote": "An identity Passport makes with Google is recovered with Google plus Passport: both are needed, neither alone can.",
+        "passport": "Approve in your browser (Pubky Passport)",
+        "passportAbout": "Opens Pubky Passport. No Passport identity yet? It offers “Continue with Google” and makes one.",
+        "qrNote": "The code is your request: scan it yourself, and do not share it.",
+        "ring": "Or scan with Pubky Ring"
+      },
+      "progress": {
+        "approved": "Approved. Checking what Pubky granted…",
+        "deleting": "Deleting the proof file from your homeserver…",
+        "popupBlocked": "Your browser blocked the Passport window: allow pop-ups for Ghostly and press the button again, or scan the code with Pubky Ring.",
+        "writing": "Writing the proof to your homeserver…"
+      }
+    },
+    "ssh": {
+      "paste": {
+        "label": "SSH signature"
+      },
+      "steps": {
+        "orSave": "Or save this statement to a file, run ssh-keygen -Y sign -n {{namespace}} -f <your key> <file>, and paste the <file>.sig it writes.",
+        "paste": "Paste the whole signature it prints, from -----BEGIN SSH SIGNATURE----- to -----END SSH SIGNATURE-----. Your private key never leaves your computer.",
+        "run": "Run this in a terminal (macOS, Linux, or Git Bash/WSL on Windows). If your key is not ~/.ssh/id_ed25519, change the path after -f; a .pub path works when the private key is in ssh-agent or on a security key.",
+        "save": "Save this statement to a file, run ssh-keygen -Y sign -n {{namespace}} -f <your key> <file>, and paste the <file>.sig it writes."
+      }
+    },
+    "ssh-github": {
+      "paste": {
+        "label": "SSH signature"
+      },
+      "steps": {
+        "orSave": "Or save this statement to a file, run ssh-keygen -Y sign -n {{namespace}} -f <your key> <file>, and paste the <file>.sig it writes.",
+        "paste": "Paste the whole signature it prints, from -----BEGIN SSH SIGNATURE----- to -----END SSH SIGNATURE-----. Your private key never leaves your computer.",
+        "run": "Run this in a terminal (macOS, Linux, or Git Bash/WSL on Windows). If your key is not ~/.ssh/id_ed25519, change the path after -f; a .pub path works when the private key is in ssh-agent or on a security key.",
+        "save": "Save this statement to a file, run ssh-keygen -Y sign -n {{namespace}} -f <your key> <file>, and paste the <file>.sig it writes."
+      }
+    },
+    "ssh-gitlab": {
+      "paste": {
+        "label": "SSH signature"
+      },
+      "steps": {
+        "orSave": "Or save this statement to a file, run ssh-keygen -Y sign -n {{namespace}} -f <your key> <file>, and paste the <file>.sig it writes.",
+        "paste": "Paste the whole signature it prints, from -----BEGIN SSH SIGNATURE----- to -----END SSH SIGNATURE-----. Your private key never leaves your computer.",
+        "run": "Run this in a terminal (macOS, Linux, or Git Bash/WSL on Windows). If your key is not ~/.ssh/id_ed25519, change the path after -f; a .pub path works when the private key is in ssh-agent or on a security key.",
+        "save": "Save this statement to a file, run ssh-keygen -Y sign -n {{namespace}} -f <your key> <file>, and paste the <file>.sig it writes."
+      }
+    }
+  },
   "received": {
     "checked": "{{category}} · checked {{time}}",
     "title": "From your contacts"
