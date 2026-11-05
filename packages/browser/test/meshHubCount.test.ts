@@ -79,20 +79,20 @@ describe("hubs when every member stays online", () => {
     // Before: 12 16 18 19 19 19 18 20, nobody ever stepping down. Now a hub may still come up a minute too many (a
     // reading short of hubs whose writes were held) and step down again, so one run's minutes swing (2 to 12 over 40
     // seeds, a run's mean 5.7 to 8.3, its last minute 2 to 12): a bound on one run failed one seed in five.
-    // Over three seeds the mean holds (7.0 over 40 seeds), and each run steps down.
-    const seeds = (process.env.HUB_SEEDS ?? "1,2,3").split(",").map(Number);
+    // Over four seeds the mean holds (7.0 over 40 seeds), and each run steps down.
+    const seeds = (process.env.HUB_SEEDS ?? "1,2,3,4").split(",").map(Number);
     const runs: number[][] = [];
     for (const seed of seeds) runs.push((await heldBack(seed)).slice(2));
     const all = runs.flat(), mean = all.reduce((a, b) => a + b, 0) / all.length;
     const shown = runs.map(r => r.join(" ")).join(" | ");
     expect(mean, `hubs per minute: ${shown}`).toBeLessThanOrEqual(MESH_HUBS.maxHubs);
-    // A pile-up (agents#1691) is over maxHubs every minute; a run may be over in at most two thirds of them. Half was
-    // too tight once members stand in for those nobody reaches (WISP 902 § Hubs, Stand-ins): any change in who opens
-    // which edge moves every later draw of the held reads, so each seed runs another course. Over seeds 1 to 16, dev
-    // and the stand-ins ran the same (a mean of 7.2 and 7.1 hubs, 19 and 20 minutes of 96 over), and seed 2, the
-    // worst on both, went from 3 minutes of 6 over to 4.
+    // A pile-up (agents#1691) is over maxHubs every minute; over the seeds together, at most half the minutes may be.
+    // Counted over all the seeds, not per run: any change in who opens which edge moves every later draw of the held
+    // reads, so one seed alone runs another course (seed 2 went from 3 minutes of 6 over to 4 once members stand in
+    // for those nobody reaches, WISP 902 § Hubs, Stand-ins, while seeds 1 to 16 ran the same as before).
+    const over = all.filter(c => c > MESH_HUBS.maxHubs).length;
+    expect(over, `hubs per minute: ${shown}`).toBeLessThanOrEqual(all.length / 2);
     for (const later of runs) {
-      expect(later.filter(c => c > MESH_HUBS.maxHubs).length, `hubs per minute: ${shown}`).toBeLessThanOrEqual(later.length * 2 / 3);
       expect(Math.min(...later), `hubs per minute: ${shown}`).toBeGreaterThan(0);
     }
     const last = runs.reduce((sum, r) => sum + r[r.length - 1], 0) / runs.length;
