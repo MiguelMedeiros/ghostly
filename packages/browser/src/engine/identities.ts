@@ -243,20 +243,25 @@ export class IdentityProofs {
    * that could not run, and the contact is told only that.
    */
   private verifyContact = async (statement: IdentityStatement, evidence: unknown) => {
-    if (!this.host.relayOnly?.()) return this.verify(statement, evidence);
-    const { fixedIdentityHosts } = await import("../proofs/fixedHosts");
-    const fixed = fixedIdentityHosts();
     let refused: string | undefined;
-    const fetch: IdentityFetch = async (url, options) => {
-      const host = new URL(url).host;
-      if (!fixed.has(host)) { refused ??= host; throw new IdentityCheckUnavailable(`${host} was not contacted`); }
-      return this.fetch(url, options);
-    };
+    let fetch = this.fetch;
+    if (this.host.relayOnly?.()) {
+      const { fixedIdentityHosts } = await import("../proofs/fixedHosts");
+      const fixed = fixedIdentityHosts();
+      fetch = async (url, options) => {
+        const host = new URL(url).host;
+        if (!fixed.has(host)) { refused ??= host; throw new IdentityCheckUnavailable(`${host} was not contacted`); }
+        return this.fetch(url, options);
+      };
+    }
+    const ctx = this.ctx(fetch);
     try {
-      return await verifyIdentity(this.providers(), statement, evidence, this.ctx(fetch));
+      return await verifyIdentity(this.providers(), statement, evidence, ctx);
     } catch (e) {
       // A provider words a failed fetch its own way ("could not be reached"): this says why it was not tried.
       if (refused) throw new IdentityCheckUnavailable(`Hide my IP from contacts is on: ${refused}, a server your contact chose, was not contacted`);
+      // Out of time (servers that hang): the check could not run, which says nothing of the proof.
+      if (ctx.signal.aborted && !(e instanceof IdentityCheckUnavailable)) throw new IdentityCheckUnavailable(e instanceof Error ? e.message : String(e));
       throw e;
     }
   };
