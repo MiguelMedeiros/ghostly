@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { build, type Plugin } from "vite";
-import { BRIDGE_PAGE, BRIDGE_SCRIPT, WORKER_SCRIPT, parseServicesHost } from "./src/svc/protocol";
+import { BRIDGE_PAGE, BRIDGE_SCRIPT, CLEAR_COOKIES, WORKER_SCRIPT, parseServicesHost } from "./src/svc/protocol";
 
 const WORKER_ENTRY = fileURLToPath(new URL("./src/svc/worker.ts", import.meta.url));
 const BRIDGE_ENTRY = fileURLToPath(new URL("./src/svc/bridge.ts", import.meta.url));
@@ -12,7 +12,7 @@ const BRIDGE_ENTRY = fileURLToPath(new URL("./src/svc/bridge.ts", import.meta.ur
 export function bridgeHtml(): string {
   return `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; frame-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; frame-src 'self'; connect-src 'self'">
 <meta name="referrer" content="no-referrer">
 <title>Ghostly</title>
 <style>html,body{margin:0;height:100%;background:#fff;font:14px system-ui,sans-serif}iframe{border:0;width:100%;height:100%;display:block}body>p{padding:16px}</style>
@@ -37,15 +37,24 @@ async function script(entry: string, define: Record<string, string>): Promise<st
  * Opening a contact's shared app on the web (src/svc/): the services worker, the bridge's page and its script, built
  * when the build is given a services host (`VITE_SERVICES_HOST`, e.g. `https://*.svc.example`) and the app's own
  * origin (`VITE_SERVICES_APP_ORIGIN`), the only page that may hand the bridge its port. Without both, nothing is
- * emitted and the web app opens no contact's app, as before.
+ * emitted and the web app opens no contact's app, as before. `vite preview` answers the bridge's clear of the cookies as
+ * the server does (nginx-services.conf).
  */
 export function servicesBridge(): Plugin {
   // As the app reads them (`import.meta.env`): the environment, or a .env file at the root.
   let env: Record<string, string | undefined> = {};
   return {
     name: "ghostly-services-bridge",
-    apply: "build",
+    apply: (_config, { command, isPreview }) => command === "build" || !!isPreview,
     configResolved(config) { env = config.env; },
+    configurePreviewServer(server) {
+      server.middlewares.use(CLEAR_COOKIES, (_request, response) => {
+        response.statusCode = 204;
+        response.setHeader("Clear-Site-Data", "\"cookies\"");
+        response.setHeader("Cache-Control", "no-store");
+        response.end();
+      });
+    },
     async generateBundle() {
       const host = env.VITE_SERVICES_HOST ?? "";
       const appOrigin = env.VITE_SERVICES_APP_ORIGIN ?? "";

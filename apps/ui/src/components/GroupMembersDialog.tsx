@@ -157,7 +157,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
             : <form className="flex items-center gap-2 max-md:gap-3" onSubmit={e => { e.preventDefault(); void rename(); }}>
               <h2 id={`${id}-title`} className="sr-only">{live.name}</h2>
               {/* While the engine renames, the field is read-only and Save does nothing: disabled, they would drop the focus to the page. */}
-              <input autoFocus data-testid="group-rename-input" aria-label={t("group.rename.label")} aria-describedby={`${id}-rename-hint`} ref={namingField.ref} value={naming} readOnly={busy !== null}
+              <input autoFocus data-testid="group-rename-input" aria-label={t("group.rename.label")} aria-describedby={`${id}-rename-hint`} ref={namingField.ref} value={naming} dir={namingField.dir} readOnly={busy !== null}
                 onChange={namingField.onChange} onCompositionStart={namingField.onCompositionStart} onCompositionEnd={namingField.onCompositionEnd} onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); endNaming(); } }}
                 className="min-w-0 flex-1 rounded-md border border-border bg-surface-alt px-2 py-1 text-sm focus:border-accent focus:outline-none read-only:opacity-60 max-md:min-h-11" />
               <button type="submit" data-testid="group-rename-save" disabled={!groupName(naming)} aria-disabled={busy !== null || undefined}

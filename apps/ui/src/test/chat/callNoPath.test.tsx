@@ -52,6 +52,14 @@ describe("the note when a call found no path to the contact", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("A TURN server gets them through.");
   });
 
+  it("gives its links a 44 px hit area, as its ×, without making them look any bigger", () => {
+    renderApp(<CallNoPathNotice onClose={() => {}} />);
+    const note = screen.getByRole("alert");
+    for (const name of ["Network settings", "How to fix it"])
+      expect(within(note).getByRole("link", { name })).toHaveClass("relative", "before:absolute", "before:-inset-y-3");
+    expect(within(note).getByRole("button", { name: "Close" })).toHaveClass("before:-inset-3");
+  });
+
   it("is in every language", () => {
     renderApp(<CallNoPathNotice onClose={() => {}} />, { language: "pt" });
     const note = screen.getByRole("alert");

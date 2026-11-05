@@ -117,6 +117,19 @@ describe("a member's name record", { timeout: 60_000 }, () => {
     expect(bob.state.nicks[carol.myKey]).toBe("Caz");
   });
 
+  it("is forgotten by the admin too, in its saved group, once its own commit takes the member out", async () => {
+    for (const left of [false, true]) {
+      const { mesh, alice, bob, carol } = await hubbed();
+      expect(alice.state.names?.[carol.myKey]?.nm).toBe("Carol");
+      await alice.remove(carol.myKey, Date.now(), { left });
+      await mesh.settle();
+      expect(alice.state.names?.[carol.myKey]).toBeUndefined();
+      expect(mesh.add(clone(alice.state)).state.names?.[carol.myKey]).toBeUndefined();
+      // Bob, still a member, keeps his.
+      expect(alice.state.names?.[bob.myKey]?.nm).toBe("Bob");
+    }
+  });
+
   it("is kept across a restart, and an older one handed over afterwards changes nothing", async () => {
     const { mesh, alice, bob, carol } = await hubbed();
     const older = nameFramesOf(mesh, carol)[0].frame;

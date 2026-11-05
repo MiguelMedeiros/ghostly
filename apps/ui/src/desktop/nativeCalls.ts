@@ -152,14 +152,24 @@ class Picture {
 
   /**
    * Frames that come while one is being decoded replace each other: only the newest is drawn. A decode that has
-   * not settled in `DECODE_MS` holds the next ones back no more, and is not drawn when it does.
+   * not settled in `DECODE_MS` holds the next ones back no more, and is not drawn when it does. While the window is
+   * out of sight, once a first frame is drawn, nothing is decoded: each frame replaces the one before, and the newest
+   * is drawn when the window is back (two pictures took a fifth of a core of WebKitGTK's, hidden, for nobody).
    */
   show(jpeg: Uint8Array): void {
     if (this.drawing) {
       this.waiting = jpeg;
       return;
     }
+    if (this.drawn && document.hidden) {
+      if (!this.waiting) document.addEventListener("visibilitychange", this.back);
+      this.waiting = jpeg;
+      return;
+    }
     this.drawing = true;
+    // Shown again before the window said so: what it held is older than this one.
+    document.removeEventListener("visibilitychange", this.back);
+    this.waiting = null;
     let over = false;
     const next = () => {
       if (over) return;
@@ -191,6 +201,15 @@ class Picture {
       .catch(() => {})
       .finally(next);
   }
+
+  /** The window is in sight again: the newest frame that came while it was not is drawn, unless the picture ended. */
+  private readonly back = () => {
+    if (document.hidden) return;
+    document.removeEventListener("visibilitychange", this.back);
+    const waiting = this.waiting;
+    this.waiting = null;
+    if (waiting && this.track.readyState !== "ended") this.show(waiting);
+  };
 }
 
 /** The camera behind each camera track this file made. */

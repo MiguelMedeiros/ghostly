@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { parseSshPublicKey } from '@ghostly/core';
+import { IdentityCheckUnavailable, parseSshPublicKey } from '@ghostly/core';
 import type { IdentityFetch } from '../src/proofs/contract';
 import { checkSshForge, validForgeLogin } from '../src/proofs/sshForges';
 import fixture from '../../core/test/fixtures/sshsig/sshsig-vectors.json';
@@ -42,6 +42,12 @@ describe('SSH key lookups on GitHub and GitLab', () => {
     const fetch = serve(() => answer([]));
     await expect(checkSshForge('github', '../users/x', mine, fetch)).rejects.toThrow(/Not a GitHub username/);
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('a forge that could not be asked says nothing about the key: the check could not run', async () => {
+    for (const fetch of [serve(() => answer({}, 429)), serve(() => answer({}, 502)), serve(() => answer(null, 200, '<html>')), vi.fn<IdentityFetch>(async () => { throw new TypeError('Failed to fetch'); })])
+      await expect(checkSshForge('github', 'x', mine, fetch)).rejects.toBeInstanceOf(IdentityCheckUnavailable);
+    await expect(checkSshForge('github', 'x', mine, serve(() => answer([{ key: other.line }])))).resolves.toBe('not-listed');
   });
 
   it('accepts only real account names', () => {

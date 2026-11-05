@@ -15,6 +15,7 @@ import android.widget.Button
 import android.widget.TextView
 import androidx.activity.enableEdgeToEdge
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsAnimationCompat
@@ -161,18 +162,24 @@ class MainActivity : TauriActivity() {
     updateCover()
   }
 
-  /** The cover over the page, plain in the page's background colour (`system_bars` set it), shown or hidden. */
+  /**
+   * The cover over the page (layout/lock_cover: the app's mark and one line), shown or hidden. It takes the page's
+   * background colour (`system_bars` set it), and a line that reads on it: the app's own prompts (a permission, the
+   * share sheet) show over it, so it says whose screen it is.
+   */
   private fun updateCover() {
     val show = SwitcherPicture.covered(lockOn, resumed, focused)
     if (!show && cover == null) return
-    val view = cover ?: View(this).also {
-      it.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+    val view = cover ?: layoutInflater.inflate(R.layout.lock_cover, null).also {
       // Above the WebView (and the update screen): the content view's last child.
       addContentView(it, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
       cover = it
     }
     if (show) {
-      view.setBackgroundColor((window.decorView.background as? ColorDrawable)?.color ?: themeBackground())
+      val background = (window.decorView.background as? ColorDrawable)?.color ?: themeBackground()
+      view.setBackgroundColor(background)
+      val dark = ColorUtils.calculateLuminance(background) < 0.5
+      view.findViewById<TextView>(R.id.lock_cover_line).setTextColor(if (dark) 0xDEFFFFFF.toInt() else 0xDE000000.toInt())
       view.bringToFront()
     }
     view.visibility = if (show) View.VISIBLE else View.GONE

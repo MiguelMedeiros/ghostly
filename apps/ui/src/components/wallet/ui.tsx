@@ -16,7 +16,7 @@ export { Notice };
  * alone vanish there. In that mode only, both are drawn in system colours: an outlined track with a ButtonText knob when
  * off, a Highlight track with a HighlightText knob when on. The knob moves in by the border's pixel so it stays centred.
  */
-const switchTrack = (checked: boolean) => `relative w-12 h-6 rounded-full transition-colors shrink-0 ${checked ? "bg-accent" : "bg-border-bright"} forced-colors:forced-color-adjust-none forced-colors:border forced-colors:border-[color:ButtonText] ${checked ? "forced-colors:bg-[color:Highlight]" : "forced-colors:bg-[color:Canvas]"}`;
+const switchTrack = (checked: boolean) => `relative w-12 h-6 rounded-full transition-colors shrink-0 ${checked ? "bg-accent" : "bg-switch-off"} forced-colors:forced-color-adjust-none forced-colors:border forced-colors:border-[color:ButtonText] ${checked ? "forced-colors:bg-[color:Highlight]" : "forced-colors:bg-[color:Canvas]"}`;
 const SwitchKnob = ({ checked }: { checked: boolean }) => <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${checked ? "translate-x-6" : "translate-x-0"} forced-colors:top-[3px] forced-colors:left-[3px] ${checked ? "forced-colors:bg-[color:HighlightText]" : "forced-colors:bg-[color:ButtonText]"}`} />;
 
 /**
@@ -102,7 +102,7 @@ export function Spinner({ size = 14 }: { size?: number }) {
   );
 }
 
-export const input = "w-full min-w-0 bg-surface-alt text-text-primary px-3 py-2 max-md:min-h-11 rounded-lg border border-border text-sm placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent";
+export const input = "w-full min-w-0 bg-surface-alt text-text-primary px-3 py-2 max-md:min-h-11 rounded-lg border border-field-border text-sm placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent";
 
 export type Action = "receive" | "send" | "history";
 const ACTION_ICON: Record<Action, ReactNode> = {

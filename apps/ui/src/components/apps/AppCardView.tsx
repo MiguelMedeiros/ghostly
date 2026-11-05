@@ -41,6 +41,9 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
   const [installing, setInstalling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [removed, setRemoved] = useState(false);
+  // Open on its way: an app whose files are missing here (a restored profile) fetches them first, which a slow link
+  // makes long. The pressed button turns busy so the press shows, and a second press opens nothing more.
+  const [opening, setOpening] = useState<"open" | "anyway" | null>(null);
   const app = useInstalledApp(card.ref);
   // Installed here: the app's own checked title and version, the one Open starts, never the sender's words for it.
   const title = app ? app.title : card.title;
@@ -50,8 +53,10 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
     : aroundName(t(card.opened ? "apps.card.opened" : "apps.card.shared", { name: NAME }), contact, "app-card-name");
   const waiting = appsUnavailable(block, title, contact, t);
   const open = (runAnyway = false) => {
-    setError(null); setRemoved(false);
-    void openApp(card.ref, linkId, { runAnyway }).catch((e: unknown) => { setError(appErrorText(e, t)); setRemoved(appErrorCode(e) === "removed"); });
+    if (opening) return;
+    setError(null); setRemoved(false); setOpening(runAnyway ? "anyway" : "open");
+    void openApp(card.ref, linkId, { runAnyway }).catch((e: unknown) => { setError(appErrorText(e, t)); setRemoved(appErrorCode(e) === "removed"); })
+      .finally(() => setOpening(null));
   };
   return (
     <div className="px-3 py-2.5 space-y-2" data-testid="app-card" data-ref={card.ref}>
@@ -73,10 +78,10 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
       {waiting && <p className="text-xs text-text-secondary" data-testid="app-card-waiting">{waiting}</p>}
       {error && <p role="alert" className="text-xs text-danger" data-testid="app-card-error">{error}</p>}
       <div className="flex items-center gap-2">
-        {app ? <Button variant="primary" data-testid="app-card-open" onClick={() => open()}>{t("apps.page.open")}</Button>
+        {app ? <Button variant="primary" data-testid="app-card-open" loading={opening === "open"} onClick={() => open()}>{t("apps.page.open")}</Button>
           : card.url ? <Button variant="primary" data-testid="app-card-install" onClick={() => setInstalling(true)}>{t("apps.card.join")}</Button>
             : <span className="text-xs text-text-muted" data-testid="app-card-ask">{mine ? t("apps.card.noLink") : t("apps.card.ask", { name: contact })}</span>}
-        {app && removed && <Button data-testid="app-card-run-anyway" onClick={() => open(true)}>{t("apps.app.runAnyway")}</Button>}
+        {app && removed && <Button data-testid="app-card-run-anyway" loading={opening === "anyway"} onClick={() => open(true)}>{t("apps.app.runAnyway")}</Button>}
         <span className="ms-auto flex items-center gap-1 text-[11px] text-text-muted">{time}{marks}</span>
       </div>
       {installing && card.url && (

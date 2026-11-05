@@ -130,6 +130,40 @@ describe("ChatConnection: what the header says", () => {
       banner({ ...onDht, ...history });
       expect(header()).toMatchObject({ kind: "dht", name: "On DHT · retrying live", dot: "bg-text-muted", pulse: true });
     });
+
+    // With held messages on, the same close said "Away · messages are held" with Reconnect at once: the contact was
+    // online, and the engine refuses the dial while they keep DHT only.
+    describe("with messages held", () => {
+      const held: Partial<LinkView> = { textDelivery: "hold", dataLink: "idle", peerOnline: true, peerParticipationKey: "saved", pairing: { status: "connecting", peerKey: "peer" } as Pairing };
+      const downHeld = (at: number) => down(at, { text: "hold" });
+      const reconnect = () => screen.queryByRole("button", { name: "Reconnect" });
+
+      it("says the messages are held, not that the contact is away, and offers no Reconnect for the first seconds", () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        try {
+          banner({ ...held, ...downHeld(Date.now() - 2_000) });
+          expect(header()).toMatchObject({ name: "Messages are held", popover: "Messages are held", pulse: false });
+          expect(reconnect()).not.toBeInTheDocument();
+          act(() => { vi.advanceTimersByTime(13_000); });
+          expect(header()).toMatchObject({ kind: "waiting", name: "Away · messages are held" });
+          expect(reconnect()).toBeInTheDocument();
+        } finally { vi.useRealTimers(); }
+      });
+
+      it("is DHT only, chosen by the contact, with no Reconnect, as soon as its envelope says so", () => {
+        const view = banner({ ...held, ...downHeld(Date.now() - 2_000) });
+        act(() => view.engine.update({ links: [linkView({ availableTransports: all, ...held, ...downHeld(Date.now() - 3_000),
+          dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } })] }));
+        expect(header()).toMatchObject({ kind: "dht", name: "DHT only · chosen by your contact", dot: null, pulse: false });
+        expect(reconnect()).not.toBeInTheDocument();
+      });
+
+      it("says the contact is away when the link closed long ago", () => {
+        banner({ ...held, ...downHeld(Date.now() - 20_000) });
+        expect(header()).toMatchObject({ kind: "waiting", name: "Away · messages are held" });
+        expect(reconnect()).toBeInTheDocument();
+      });
+    });
   });
 
   it("is back to what the connection says once the device is online again", () => {
@@ -215,7 +249,7 @@ describe("ChatConnection: what the header says", () => {
     expect(screen.getByText("Iroh: UDP blocked")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Iroh" })).toHaveAttribute("title", "Iroh: UDP blocked");
     expect(screen.getByRole("radio", { name: "Iroh" })).toBeDisabled();
-    expect(screen.getByRole("radio", { name: "HyperDHT" })).toHaveAttribute("title", "HyperDHT: Your contact's app doesn't support HyperDHT");
+    expect(screen.getByRole("radio", { name: "HyperDHT" })).toHaveAttribute("title", "Your contact's app doesn't support HyperDHT");
     expect(screen.getByRole("radio", { name: "HyperDHT" })).toBeDisabled();
   });
 
@@ -226,7 +260,7 @@ describe("ChatConnection: what the header says", () => {
       "iroh/1": "All native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.",
     } })] }));
     const [hyperdht, iroh] = screen.getAllByTestId("connection-transport-error");
-    expect(within(hyperdht!).getByTestId("connection-transport-error-title")).toHaveTextContent("HyperDHT: Relay HyperDHT inacessível");
+    expect(within(hyperdht!).getByTestId("connection-transport-error-title")).toHaveTextContent(/^Relay HyperDHT inacessível$/);
     expect(within(hyperdht!).getByTestId("connection-transport-error-next")).toHaveTextContent("Confira o endereço em Ajustes → Rede. Ele também pode não aceitar este app: pergunte a quem o mantém.");
     expect(within(iroh!).getByTestId("connection-transport-error-title")).toHaveTextContent("Iroh: Todas as conexões nativas em uso");
     expect(within(iroh!).getByTestId("connection-transport-error-next")).toHaveTextContent("Desconecte a conexão nativa de outra conversa, ou espere uma ficar ociosa.");
@@ -235,7 +269,40 @@ describe("ChatConnection: what the header says", () => {
     expect(option).toHaveAttribute("title", "Iroh: Todas as conexões nativas em uso");
     expect(option).toHaveAttribute("aria-description", "Todas as conexões nativas em uso");
     expect(option).toHaveTextContent("Todas as conexões nativas em uso");
-    expect(screen.getByRole("radio", { name: "HyperDHT" })).toHaveAttribute("title", "HyperDHT: Relay HyperDHT inacessível");
+    expect(screen.getByRole("radio", { name: "HyperDHT" })).toHaveAttribute("title", "Relay HyperDHT inacessível");
+  });
+
+  it.each<[string, string, Record<string, string>]>([
+    ["en", "en", {
+      "Could not reach the HyperDHT relay": "HyperDHT relay unreachable",
+      "The HyperDHT relay did not answer": "HyperDHT relay not answering",
+      "The HyperDHT relay closed the connection": "HyperDHT relay closed the connection",
+      "The HyperDHT relay did not let this chat listen": "HyperDHT relay refused this chat",
+    }],
+    ["ja", "ja", {
+      "Could not reach the HyperDHT relay": "HyperDHTリレーに接続できません",
+      "The HyperDHT relay did not answer": "HyperDHTリレーが応答しません",
+      "The HyperDHT relay closed the connection": "HyperDHTリレーが接続を閉じました",
+      "The HyperDHT relay did not let this chat listen": "HyperDHTリレーがこのチャットを拒否しました",
+    }],
+  ])("names HyperDHT once for a relay error, below and on its option (%s)", (_, language, said) => {
+    for (const [error, title] of Object.entries(said)) {
+      const view = renderApp(<ChatConnection peerKey="peer" />, { language: language as "en" | "ja" });
+      act(() => view.engine.update({ links: [linkView({ availableTransports: ["webrtc/1"], pairing: ready(), transportErrors: { "hyperdht/1": error } })] }));
+      expect(screen.getByTestId("connection-transport-error-title")).toHaveTextContent(new RegExp(`^${title}$`));
+      expect(screen.getByRole("radio", { name: "HyperDHT" })).toHaveAttribute("title", title);
+      view.unmount();
+    }
+  });
+
+  it("says the Iroh WASM's relay error in the app's language, pointing to Settings, Network", () => {
+    const view = renderApp(<ChatConnection peerKey="peer" />, { language: "ar" });
+    act(() => view.engine.update({ links: [linkView({ availableTransports: ["webrtc/1"], pairing: ready(), transportErrors: { "iroh/1": "Iroh relay unreachable" } })] }));
+    const notice = screen.getByTestId("connection-transport-error");
+    // The reason names Iroh already, so the line does not put "Iroh:" before it.
+    expect(within(notice).getByTestId("connection-transport-error-title")).toHaveTextContent(/^تعذّر الوصول إلى مُرحِّل Iroh$/);
+    expect(within(notice).getByTestId("connection-transport-error-next")).toHaveTextContent("تحقّق من مرحّلات Iroh في الإعدادات، الشبكة، أو استخدم وسيلة نقل أخرى.");
+    expect(notice).not.toHaveTextContent("Iroh relay unreachable");
   });
 
   it.each<[string, Partial<LinkView>, string]>([
@@ -412,7 +479,7 @@ describe("ChatConnection: what the panel does", () => {
     expect(screen.getByRole("radio", { name: "WebRTC" })).toBeEnabled();
     for (const native of ["Iroh", "HyperDHT"]) {
       expect(screen.getByRole("radio", { name: native })).toBeDisabled();
-      expect(screen.getByRole("radio", { name: native })).toHaveAttribute("title", `${native}: ${native} needs Ghostly Desktop${native === "HyperDHT" ? ", or a HyperDHT relay in Settings" : ""}`);
+      expect(screen.getByRole("radio", { name: native })).toHaveAttribute("title", `${native} needs Ghostly Desktop${native === "HyperDHT" ? ", or a HyperDHT relay in Settings" : ""}`);
     }
     await user.click(screen.getByRole("radio", { name: "WebRTC" }));
     expect(engine.callsTo("setChatTransport")).toEqual([]);

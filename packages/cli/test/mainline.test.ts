@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { DiscoveryBudgetError, FRESH_READ_MS, GhostLink, createIdentity, edgeParams, randomBytes, toBase64Url, type Identity, type PollIntervals } from "@ghostly/core";
+import { DiscoveryBudgetError, FRESH_READ_MS, GhostLink, RelaysFailedError, createIdentity, edgeParams, randomBytes, toBase64Url, type Identity, type PollIntervals } from "@ghostly/core";
 import { createSocket, type Socket } from "node:dgram";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -139,6 +139,26 @@ describe("Pkarr over the Mainline DHT, beside the relays", { timeout: 60_000 }, 
       expect(b.discovery().path).toEqual({ via: "dht" });
       await new Promise((r) => setTimeout(r, 1_000));
     }
+  });
+
+  it("relays that answered, then fail, with the DHT failing too: a read that asks says so, carrying their last copy", async () => {
+    const store = { down: false, packets: new Map<string, Uint8Array>() };
+    const fetchFn = relays(store);
+    const a = new RelaysAndDht(await peer(bootstrap), { relays: RELAYS.slice(0, 1), fetch: fetchFn, log: () => {} });
+    // Its DHT is out of reach as well (UDP blocked, say).
+    const unreachable = Object.assign(Object.create(Mainline.prototype) as Mainline, { get: async () => { throw new Error("DHT unreachable"); } });
+    const b = new RelaysAndDht(unreachable, { relays: RELAYS.slice(0, 1), fetch: fetchFn, log: () => {} });
+    const me = createIdentity();
+    await a.publish(me, [{ label: "_x", value: "last" }]);
+    expect((await b.resolve(me.pubKeyZ32))?.records[0].value).toBe("last");
+    store.down = true;
+    await new Promise((r) => setTimeout(r, FRESH_READ_MS + 100));
+    // A link reads with `keptOnFailure` false: the failure carries the copy, so the link can say it could not read.
+    const failed = await b.resolve(me.pubKeyZ32, {}, false).then(() => null, (error: unknown) => error);
+    expect(failed).toBeInstanceOf(RelaysFailedError);
+    expect((failed as RelaysFailedError).kept.records[0].value).toBe("last");
+    // Any other read still takes that copy as the answer.
+    expect((await b.resolve(me.pubKeyZ32))?.records[0].value).toBe("last");
   });
 
   // agents#1594: with the relay 2 s to answer (far, loaded, or fetching from the DHT itself), the hedge took whichever

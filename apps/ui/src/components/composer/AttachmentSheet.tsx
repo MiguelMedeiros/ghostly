@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
 import { decodablePicture } from "../../lib/decodablePicture";
+import { draftDirection } from "../../lib/documentLanguage";
 import { formatFileSize } from "../../lib/format";
 import { DocumentGlyph } from "./icons";
 import { useComposition } from "../../hooks/useComposition";
@@ -96,7 +97,7 @@ export function AttachmentSheet({ files, alert, status, returnFocus, onPaste, on
             {/* The name is cut in its own direction, at its end, as in the file rows; the size stays whole beside it. */}
             <figcaption className="px-4 pt-2 text-xs text-text-muted flex min-w-0" data-testid="attachment-name">
               <span dir="auto" className="min-w-0 truncate">{single.name}</span>
-              <span className="shrink-0 whitespace-pre"> · {formatFileSize(single.size)}</span>
+              <span className="shrink-0 whitespace-pre"> · {formatFileSize(single.size, t)}</span>
             </figcaption>
           </figure>
         ) : (
@@ -108,7 +109,7 @@ export function AttachmentSheet({ files, alert, status, returnFocus, onPaste, on
                     <span className="shrink-0" aria-hidden="true"><DocumentGlyph /></span>
                     <span className={`min-w-0 ${single ? "" : "w-full"}`}>
                       <span dir="auto" className="block text-xs text-text-primary truncate">{file.name}</span>
-                      <span className="block text-[11px] text-text-muted">{formatFileSize(file.size)}</span>
+                      <span className="block text-[11px] text-text-muted">{formatFileSize(file.size, t)}</span>
                     </span>
                   </div>}
                 {files.length > 1 && (
@@ -126,7 +127,7 @@ export function AttachmentSheet({ files, alert, status, returnFocus, onPaste, on
           {alert && <div role="alert" className="animate-fade-in">{alert}</div>}
           <input ref={captionRef} type="text" value={caption} onChange={(e) => setCaption(e.target.value)} data-testid="attachment-caption"
             {...composition.inputProps} onKeyDown={(e) => { if (composition.composing(e)) return; if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-            placeholder={t("composer.caption")} aria-label={t("composer.caption")} maxLength={4000}
+            placeholder={t("composer.caption")} aria-label={t("composer.caption")} maxLength={4000} dir={draftDirection(caption)}
             className="w-full min-h-10 px-3 rounded-lg bg-surface-alt border border-border text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent" />
           <div className="flex items-center justify-end gap-2">
             <button type="button" data-testid="attachment-cancel" onClick={onCancel} className={`${button} bg-surface-alt text-text-primary border border-border`}>{t("common.cancel")}</button>

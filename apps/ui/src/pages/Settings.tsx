@@ -108,7 +108,7 @@ function SettingsGroup({ id, view, children }: { id: SettingsSection; view: Sect
 export function Settings() {
   const nav = useAppNavigation();
   const { settings, updateColorScheme, updateLanguage, updateLockScreen, updateNotifications,
-    updateReduceMotion, updateChatListDensity, updateCheckForUpdates, updateLinkPreviews, updateProfilePeek, randomizeNickname } =
+    updateReduceMotion, updateChatListDensity, updateCheckForUpdates, updateLinkPreviews, updateProfilePeek, randomizeNickname, followStored } =
     useSettings();
   const nickname = useOwnNameField();
   const { t, languageNotLoaded, retryLanguage } = useI18n();
@@ -226,6 +226,11 @@ export function Settings() {
   const [timeoutMinutes, setTimeoutMinutes] = useState(
     settings.lockScreen.timeoutMinutes
   );
+  // The lock as another tab of the app may have changed it since this page opened.
+  useEffect(() => {
+    setLockEnabled(settings.lockScreen.enabled);
+    setTimeoutMinutes(settings.lockScreen.timeoutMinutes);
+  }, [settings.lockScreen.enabled, settings.lockScreen.timeoutMinutes]);
   // What a password or data action says: a floating card near where the person is looking, not a line at the top of the page.
   const notice = useToast();
   // A refused password: which field, and why, shown right under it.
@@ -373,8 +378,10 @@ export function Settings() {
     setPasswordBusy(true);
     try {
       const deviceSet = await hasDeviceSet();
-      // The current one first: nothing changes for someone who does not know it.
-      if (hasPassword && !(await verifyPassword(currentPassword, settings.lockScreen.passwordHash!))) {
+      // The current one first, as stored (another tab may have set or changed it): nothing changes for someone who
+      // does not know it.
+      const storedHash = followStored().lockScreen.passwordHash;
+      if (storedHash && !(await verifyPassword(currentPassword, storedHash))) {
         refusePassword("current", t("settings.incorrectPassword"), title);
         return;
       }
@@ -394,7 +401,7 @@ export function Settings() {
       });
       // A profile on several devices: a pull proves this password now, so its verifier is made again while it is typed (WISP 06).
       let verifierFailed = false;
-      if (deviceSet) await engine.call("deviceHandoffVerifier", { password: newPassword, current: hasPassword ? currentPassword : undefined }).catch(() => { verifierFailed = true; });
+      if (deviceSet) await engine.call("deviceHandoffVerifier", { password: newPassword, current: storedHash ? currentPassword : undefined }).catch(() => { verifierFailed = true; });
 
       setLockEnabled(true);
       setNewPassword("");
@@ -403,7 +410,7 @@ export function Settings() {
       closePasswordFormTo(hasPassword ? "edit" : "lock");
       // The lock changed, and a pull would still need a proof that could not be made: said, not hidden.
       if (verifierFailed) notice.show(t("devices.handoff.verifierFailed"));
-      else notice.show(hasPassword ? t("settings.passwordChanged") : t("settings.passwordSet"), { tone: "success" });
+      else notice.show(storedHash ? t("settings.passwordChanged") : t("settings.passwordSet"), { tone: "success" });
     } finally {
       setPasswordBusy(false);
     }
@@ -418,7 +425,8 @@ export function Settings() {
         notice.show(t("devices.password.keep"), { title });
         return;
       }
-      if (hasPassword && !(await verifyPassword(currentPassword, settings.lockScreen.passwordHash!))) {
+      const storedHash = followStored().lockScreen.passwordHash;
+      if (storedHash && !(await verifyPassword(currentPassword, storedHash))) {
         refusePassword("current", t("settings.incorrectPassword"), title);
         return;
       }
@@ -437,7 +445,7 @@ export function Settings() {
     }
   };
 
-  const field = "w-full min-w-0 px-3 py-2 min-h-10 bg-input-bg border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent transition-colors";
+  const field = "w-full min-w-0 px-3 py-2 min-h-10 bg-input-bg border border-field-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent transition-colors";
   const lockOn = lockEnabled && hasPassword;
   const systemOn = settings.notifications.systemEnabled && noticePermission === "granted";
   const systemSettings = noticeSettings();

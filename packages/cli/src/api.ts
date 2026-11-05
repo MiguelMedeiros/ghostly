@@ -1,7 +1,7 @@
-import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, ownInviteRefusal, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
-import { findSecret } from "./secretGuard";
+import { findSecret, guardText, secretWords } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
 import {
@@ -212,6 +212,8 @@ const METHODS: Record<string, Method> = {
   async "profile.set"(ctx, params) {
     const patch: Partial<Settings> = {};
     if (params.name !== undefined) patch.nick = checkShownName(params.name);
+    // Every contact reads it, as a message's text.
+    guardText(patch.nick, bool(params, "force"), "name", "set it");
     if (params.shareProfile !== undefined) patch.shareProfile = bool(params, "shareProfile");
     await node(ctx).updateSettings({ settings: patch });
     return METHODS["profile.get"](ctx, {});
@@ -224,6 +226,7 @@ const METHODS: Record<string, Method> = {
     const patch: Record<string, unknown> = {};
     let warning: string | undefined;
     for (const [key, value] of Object.entries(params)) {
+      if (key === "force") continue;
       // The table's own keys only: every object has `constructor` and `toString`, which are no settings.
       const kind = Object.hasOwn(SETTABLE, key) ? SETTABLE[key] : undefined;
       // The app's "Also use Pkarr relays": the CLI reads the relays first whatever it says (README § Network), and a
@@ -233,8 +236,13 @@ const METHODS: Record<string, Method> = {
       if (kind === "strings" && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) throw new CliError("bad_request", `${key} must be a list of strings`);
       if (kind === "string" && typeof value !== "string") throw new CliError("bad_request", `${key} must be a string`);
       if (kind === "boolean" && typeof value !== "boolean") throw new CliError("bad_request", `${key} must be true or false`);
+      // The engine says "Enter at least one relay address" for any list it can't use (node.ts `updateSettings`): the
+      // address given is named here, in the app's Settings words; an empty list stays the engine's to refuse.
+      if (key === "relays" && (value as string[]).length && !(value as string[]).some(normalizeRelayUrl)) {
+        throw relayRefused(new Error(relayUrlProblem((value as string[])[0]) ?? ""), { relays: value });
+      }
       // The name contacts see: `profile set --name`'s rule.
-      if (key === "nick") { patch.nick = checkShownName(value, key); continue; }
+      if (key === "nick") { patch.nick = checkShownName(value, key); guardText(patch.nick, bool(params, "force"), "nick", "set it"); continue; }
       if (kind === "ice") {
         if (!(Array.isArray(value) && value.every((v) => v && typeof v === "object"))) throw new CliError("bad_request", `${key} must be a list of ICE servers`);
         // WebRTC's own form (`urls` a list) is taken; a server without urls is said here, not as the engine's TypeError.
@@ -315,7 +323,7 @@ const METHODS: Record<string, Method> = {
     checkTextSize(text);
     if (!bool(params, "force")) {
       const secret = findSecret(text);
-      if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; send it with --force if you mean to`, { kind: secret.kind });
+      if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; send it with --force if you mean to`, { kind: secret.kind });
     }
     const wait = oneOf(params, "wait", ["none", "sent", "delivered"] as const, "none");
     // Read before anything is sent, as `wait` is: a timeout refused after the send made a retry send it again.
@@ -343,7 +351,7 @@ const METHODS: Record<string, Method> = {
     const text = str(params, "text", true);
     if (!bool(params, "force")) {
       const secret = findSecret(text);
-      if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; edit with --force if you mean to`, { kind: secret.kind });
+      if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; edit with --force if you mean to`, { kind: secret.kind });
     }
     const wait = oneOf(params, "wait", ["none", "confirmed"] as const, "none");
     const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
@@ -396,16 +404,27 @@ const METHODS: Record<string, Method> = {
   /**
    * WISP 400 § Pinned message: one per chat or group, a new pin replaces it; `remove` unpins. In a community only the
    * admin pins. Answers the chat (or group) and the message now pinned (null once unpinned). In a 1:1 chat `wait:
-   * confirmed` (a one-shot's default) stays until the contact confirmed it, and `confirmed` says whether it has.
+   * confirmed` (a one-shot's default) stays until the contact confirmed it, and `confirmed` says whether it has. A
+   * group has no receipts: `wait: sent` (a one-shot's default) stays until an edge took it, and `edges` and `sent` say
+   * how many did, as for `group react`.
    */
   async "chat.pin"(ctx, params) {
     const target = chatOrGroup(ctx, str(params, "chat", true));
     const remove = bool(params, "remove"), messageId = remove ? str(params, "message") : str(params, "message", true);
-    if (target.group && params.wait === "confirmed") throw new CliError("bad_request", "A group has no receipts: wait confirmed is for a 1:1 chat");
-    const { wait, ms } = confirmWait(ctx, params);
+    if (target.group && params.wait === "confirmed") throw new CliError("bad_request", "A group has no receipts: wait confirmed is for a 1:1 chat (wait sent waits until a member's edge took it)");
+    if (!target.group && params.wait === "sent") throw new CliError("bad_request", "wait sent is for a group: a 1:1 chat's pin waits with wait confirmed");
+    const { wait, ms } = target.group
+      ? { wait: oneOf(params, "wait", ["none", "sent"] as const, ctx.mode === "one-shot" ? "sent" : "none"), ms: num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000 }
+      : confirmWait(ctx, params);
     const result = await node(ctx).pinMessage({ linkId: target.linkId, ...(messageId && { messageId }), remove });
     if (result.error) throw new CliError(result.refused || /Only the admin/.test(result.error) ? "refused" : /not in this (?:chat|group)|Nothing is pinned/.test(result.error) ? "not_found" : "bad_request", result.error);
-    if (target.group) return { group: target.id, messageId: remove ? null : messageId, removed: remove };
+    if (target.group) {
+      // A one-shot leaves once its command is done, and its groups with it: what no edge took yet went nowhere.
+      const n = result.n, pinned = remove ? null : messageId;
+      const edges = !n ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, target.id, messageId ?? "", { pin: n }, ms)
+        : node(ctx).groupTaken({ groupId: target.id, messageId: messageId ?? "", pin: n });
+      return { group: target.id, messageId: pinned, removed: remove, sent: edges > 0, edges };
+    }
     // The chat's one pin of mine waiting for the contact is this one (none: the contact confirmed it already).
     const mine = node(ctx).chatUnconfirmed({ linkId: target.linkId }).pin;
     const pending = (left: { pin: number | null }) => mine !== null && left.pin === mine;
@@ -456,16 +475,29 @@ const METHODS: Record<string, Method> = {
     }
     if (!bool(params, "force")) for (const message of chosen) {
       const secret = message.file ? null : findSecret(message.text);
-      if (secret) throw new CliError("confirm", `A message looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; forward it with --force if you mean to`, { kind: secret.kind, messageId: message.id });
+      if (secret) throw new CliError("confirm", `A message looks like ${secretWords(secret)}; forward it with --force if you mean to`, { kind: secret.kind, messageId: message.id });
     }
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
+    // A one-shot leaves once its command is done, and its groups with it: a group's copy waits for an edge by default,
+    // as `group send` does.
+    const groupWait = params.wait === undefined && ctx.mode === "one-shot" ? "sent" : wait;
     const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     let results;
     try { ({ results } = await node(ctx).forwardMessages({ linkId: from.linkId, messageIds, to: to.map((t) => t.linkId) })); }
     catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
-    const out = results.map((result, i) => ({ to: to[i]!.id, kind: to[i]!.group ? "group" as const : "chat" as const, messageIds: result.messageIds, sent: result.sent, error: result.error }));
+    const out: { to: string; kind: "group" | "chat"; messageIds: string[]; sent: string[]; error: string | null; edges?: number }[] =
+      results.map((result, i) => ({ to: to[i]!.id, kind: to[i]!.group ? "group" as const : "chat" as const, messageIds: result.messageIds, sent: result.sent, error: result.error }));
+    // A group's `edges`: how many took each of its copies so far (the fewest), as `group send` says it.
+    for (const [i, result] of out.entries()) if (to[i]!.group) {
+      let edges: number | undefined;
+      for (const messageId of result.messageIds) {
+        const took = groupWait === "sent" ? await waitForGroupFrame(ctx, to[i]!.id, messageId, undefined, ms) : node(ctx).groupTaken({ groupId: to[i]!.id, messageId });
+        edges = Math.min(edges ?? took, took);
+      }
+      result.edges = edges ?? 0;
+    }
     if (wait === "sent") for (const [i, result] of out.entries()) for (const messageId of result.messageIds) {
-      if (to[i]!.group) { await waitForGroupFrame(ctx, to[i]!.id, messageId, undefined, ms); continue; }
+      if (to[i]!.group) continue;
       const sent = await node(ctx).getMessage(to[i]!.id, messageId);
       if (sent?.file) await FILE_METHODS["file.wait"](ctx, { chat: to[i]!.id, file: sent.file.id, timeout: ms / 1000 });
       else await waitForMessage(ctx, to[i]!.id, messageId, "sent", ms);
@@ -490,9 +522,11 @@ const METHODS: Record<string, Method> = {
     // For everyone (WISP 400 § Delete for everyone): a message of mine, in a chat or a group, gone from every device.
     if (bool(params, "everyone")) {
       const target = chatOrGroup(ctx, str(params, "chat", true));
-      // A one-shot leaves once its command is done, and the removal with it: by default it stays until the contact has it.
-      const wait = oneOf(params, "wait", ["none", "confirmed"] as const, !target.group && ctx.mode === "one-shot" ? "confirmed" : "none");
-      if (target.group && wait !== "none") throw new CliError("bad_request", "A group has no receipts: --wait confirmed is for a chat");
+      // A one-shot leaves once its command is done, and the removal with it: by default it stays until the contact has it,
+      // or in a group (no receipts) until a member's edge took it.
+      const wait = oneOf(params, "wait", ["none", "confirmed", "sent"] as const, ctx.mode !== "one-shot" ? "none" : target.group ? "sent" : "confirmed");
+      if (target.group && wait === "confirmed") throw new CliError("bad_request", "A group has no receipts: --wait confirmed is for a chat (--wait sent waits until a member's edge took it)");
+      if (!target.group && wait === "sent") throw new CliError("bad_request", "--wait sent is for a group: a chat's removal waits with --wait confirmed");
       const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
       const ref = str(params, "message", true);
       const message = await messageOf(ctx, target.linkId, ref, (m) => m.sender === "me");
@@ -501,7 +535,11 @@ const METHODS: Record<string, Method> = {
       if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
       // `messageId`, as every command that makes or changes a message names it; `deleted` kept for callers that read
       // it (agents#1582).
-      if (target.group) return { group: target.id, messageId: message.id, deleted: message.id, everyone: true };
+      if (target.group) {
+        const e = result.e;
+        const edges = !e ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, target.id, message.id, e, ms) : node(ctx).groupTaken({ groupId: target.id, messageId: message.id, edit: e });
+        return { group: target.id, messageId: message.id, deleted: message.id, everyone: true, sent: edges > 0, edges };
+      }
       if (wait === "confirmed") await waitForRemoval(ctx, target.linkId, message.id, ms);
       return { chat: target.id, messageId: message.id, deleted: message.id, everyone: true, confirmed: !node(ctx).removalPending({ linkId: target.linkId, messageId: message.id }) };
     }
@@ -600,6 +638,8 @@ const METHODS: Record<string, Method> = {
     // As `group rename` checks it: a name a group cannot have is said here, before anything is made.
     const name = groupName(str(params, "name", true));
     if (!name) throw new CliError("bad_request", `A group's name is 1 to ${MAX_GROUP_NAME_LENGTH} characters on one line`);
+    // Every member reads it, and a community's anyone who opens its link.
+    guardText(name, bool(params, "force"), "group's name", "create it");
     const profile = oneOf(params, "profile", ["community", "mesh"] as const, "community");
     const { groupId } = await node(ctx).createGroup({ name, profile });
     let link: string | null = null;
@@ -663,7 +703,7 @@ const METHODS: Record<string, Method> = {
     const text = str(params, "text", true);
     if (!bool(params, "force")) {
       const secret = findSecret(text);
-      if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; edit with --force if you mean to`, { kind: secret.kind });
+      if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; edit with --force if you mean to`, { kind: secret.kind });
     }
     const mentions = mentionsFor(text, list(params, "mentions"), group);
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
@@ -683,9 +723,18 @@ const METHODS: Record<string, Method> = {
     // Before 2026-11-01 `sent` was also true for an edit no edge had taken, once it no longer waited for the pace.
     return { group: group.id, messageId, edits, sent: edges > 0, edges };
   },
+  /**
+   * WISP 400 § Reactions in a group, which has no receipts: `edges` says how many took it, `sent` whether one did.
+   * `wait: sent` (a one-shot's default: what is not said yet leaves with the process) stays until an edge took it.
+   */
   async "group.react"(ctx, params) {
     const group = groupOf(ctx, params, "react <chat> <message> <emoji>");
-    return { group: group.id, ...(await react(ctx, `group:${group.id}`, params)) };
+    const wait = oneOf(params, "wait", ["none", "sent"] as const, ctx.mode === "one-shot" ? "sent" : "none");
+    const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
+    const { n, ...said } = await react(ctx, `group:${group.id}`, params);
+    const edges = !n ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, group.id, said.messageId, { reaction: n }, ms)
+      : node(ctx).groupTaken({ groupId: group.id, messageId: said.messageId, reaction: n });
+    return { group: group.id, ...said, sent: edges > 0, edges };
   },
   /**
    * WISP 902 · Group Mesh § Typing: `chat.typing` in a private group, said on the edges that are open (`reached`: to
@@ -816,7 +865,8 @@ async function clearProfile(ctx: ApiContext): Promise<{ cleared: { chats: number
 }
 
 /**
- * The engine's calls that send a text this side writes (a message, a file's caption, a payment's memo): `engine.call`
+ * The engine's calls that send a text this side writes (a message, a file's caption, a payment's memo, a name others
+ * read): `engine.call`
  * runs the secret guard of `send`, `edit` and `forward` on them too (docs/CLI.md § Safety), so a raw call is no way around it. `force: true` (`--force`) sends it.
  */
 const ENGINE_SENDS: ReadonlySet<string> = new Set([
@@ -826,10 +876,14 @@ const ENGINE_SENDS: ReadonlySet<string> = new Set([
   // The payment sheet's own path (its memo goes out with the token), an invoice's description the payer reads, and a
   // Lightning address's comment its owner reads (agents#1624).
   "preparePayment", "fedimintInvoice", "lnurlInvoice",
+  // A group's name, the name contacts see and a file's name, as `group create`, `group rename`, `profile set` and
+  // `file send` guard them.
+  "createGroup", "renameGroup", "updateSettings", "sendFile",
 ]);
 
 async function guardEngineSend(ctx: ApiContext, method: string, args: Params): Promise<void> {
-  let texts: unknown = [args.text, args.card, args.caption, args.memo, args.comment];
+  const of = (value: unknown, key: string) => (value && typeof value === "object" ? (value as Params)[key] : undefined);
+  let texts: unknown = [args.text, args.card, args.caption, args.memo, args.comment, args.name, of(args.settings, "nick"), of(args.file, "name")];
   if (method === "forwardMessages") {
     const ids = Array.isArray(args.messageIds) ? args.messageIds.filter((id): id is string => typeof id === "string") : [];
     const linkId = args.linkId;
@@ -839,7 +893,7 @@ async function guardEngineSend(ctx: ApiContext, method: string, args: Params): P
     })) : [];
   }
   const secret = secretIn(texts);
-  if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; call ${method} with --force if you mean to`, { kind: secret.kind });
+  if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; call ${method} with --force if you mean to`, { kind: secret.kind });
 }
 
 /**
@@ -851,15 +905,18 @@ function confirmWait(ctx: ApiContext, params: Params): { wait: "none" | "confirm
   return { wait, ms: num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000 };
 }
 
-/** Reacts to a message of a chat or a group (`group:<id>`): `emoji`, or `remove` for "" (WISP 400 § Reactions). */
-async function react(ctx: ApiContext, linkId: string, params: Params): Promise<{ messageId: string; emoji: string | null; removed: boolean }> {
+/**
+ * Reacts to a message of a chat or a group (`group:<id>`): `emoji`, or `remove` for "" (WISP 400 § Reactions). In a
+ * group, `n` is the reaction's number, for `groupTaken`.
+ */
+async function react(ctx: ApiContext, linkId: string, params: Params): Promise<{ messageId: string; emoji: string | null; removed: boolean; n?: number }> {
   const messageId = str(params, "message", true);
   const removed = bool(params, "remove");
   const emoji = removed ? "" : str(params, "emoji");
   if (!removed && !emoji) throw new CliError("usage", "Give one emoji, or --remove to take yours back");
   const result = await node(ctx).react({ linkId, messageId, emoji: emoji ?? "" });
   if (result.error) throw new CliError(result.refused ? "refused" : /not in this (?:chat|group)|No reaction of yours/.test(result.error) ? "not_found" : "bad_request", result.error);
-  return { messageId, emoji: emoji || null, removed };
+  return { messageId, emoji: emoji || null, removed, ...(result.n ? { n: result.n } : {}) };
 }
 
 /**
@@ -1013,7 +1070,7 @@ function quoteChecked(json: MessageJson, message: StoredMessage, originals: Orig
   return { ...json, replyTo: { ...json.replyTo, snippet: replySnippet(original.text) } };
 }
 
-export { findChat, findGroup } from "./apiKit";
+export { findChat, findGroup, startNamedChats } from "./apiKit";
 export type { ApiContext } from "./apiKit";
 export const API_METHODS: readonly string[] = Object.keys(METHODS);
 

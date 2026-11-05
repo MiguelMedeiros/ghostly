@@ -278,6 +278,18 @@ describe("GroupChat: joining through a link", () => {
     expect(screen.queryByTestId("group-joining-stale")).not.toBeInTheDocument();
   });
 
+  it("a private group waiting for its members' updates: says so, with the knock left, and never that the link may be old", async () => {
+    openGroup(groupView({ createdAt: Date.now() - 2 * 60_000 + 400, canSend: false,
+      invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "blocked", full: { n: 8, max: 32 } } }));
+    const card = screen.getByTestId("group-joining");
+    expect(card).toHaveTextContent("This group is waiting for updates");
+    expect(card).toHaveTextContent("It takes new members again once everyone in it has an updated Ghostly.");
+    expect(screen.getByTestId("group-joining-live")).toHaveTextContent("This group is waiting for updates");
+    expect(within(card).getByTestId("group-joining-steps").querySelector("li")).toHaveAttribute("data-state", "done");
+    await new Promise(resolve => setTimeout(resolve, 600));
+    expect(screen.queryByTestId("group-joining-stale")).not.toBeInTheDocument();
+  });
+
   it("a knock someone answered is not told the link may be old", () => {
     openGroup(groupView({ createdAt: Date.now() - 10 * 60_000, canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "answered" } }));
     expect(screen.getByTestId("group-joining")).toHaveTextContent("The admin's app saw you knock");
@@ -895,6 +907,53 @@ describe("GroupChat: the options menu", () => {
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("group-forget"));
     expect(within(screen.getByRole("dialog")).getByTestId("group-leave-successor")).toHaveTextContent("You are the admin: Alice becomes the admin when you leave.");
+  });
+
+  it("tells a community's admin when joiners through the link never answer, and asks before replacing the link", async () => {
+    // Every other New link asks first: the link shared so far, wherever it was posted, stops letting people in.
+    const entryLink = "ghostly://c/group-1";
+    const { user, engine } = openGroup(active({ profile: "community", isAdmin: true, entryLink, community: { hub: true, hubs: 1, connected: 0, unansweredKnocks: 16 } }));
+    engine.on("enableGroupLink", () => ({ link: entryLink }));
+    expect(screen.getByTestId("group-knocks-unanswered")).toHaveTextContent("People opening the link may not be getting in");
+    await user.click(screen.getByTestId("group-knocks-reset"));
+    expect(screen.getByTestId("group-link-ask-dialog")).toHaveAttribute("data-kind", "reset");
+    expect(engine.callsTo("enableGroupLink")).toEqual([]);
+    await user.click(screen.getByTestId("group-link-ask-confirm"));
+    expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: "group-1", reset: true }]);
+    // The new link is to share again: its sheet opens.
+    expect(await screen.findByTestId("group-share-dialog")).toBeInTheDocument();
+  });
+
+  it("keeps the link when the unanswered joiners' New link question is cancelled", async () => {
+    const { user, engine } = openGroup(active({ profile: "community", isAdmin: true, entryLink: "ghostly://c/group-1", community: { hub: true, hubs: 1, connected: 0, unansweredKnocks: 16 } }));
+    engine.on("enableGroupLink", () => ({ link: "ghostly://c/group-1" }));
+    await user.click(screen.getByTestId("group-knocks-reset"));
+    await user.click(within(screen.getByTestId("group-link-ask-dialog")).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByTestId("group-link-ask-dialog")).toBeNull();
+    expect(engine.callsTo("enableGroupLink")).toEqual([]);
+    expect(screen.queryByTestId("group-share-dialog")).toBeNull();
+  });
+
+  it("replaces the link once when the unanswered joiners' New link is pressed again while it works", async () => {
+    // A reset seals a fresh key to every member, a slice at a time: the button is pressed again before it ends.
+    const entryLink = "ghostly://c/group-1";
+    const { user, engine } = openGroup(active({ profile: "community", isAdmin: true, entryLink, community: { hub: true, hubs: 1, connected: 0, unansweredKnocks: 16 } }));
+    let done = () => {};
+    engine.on("enableGroupLink", () => new Promise(resolve => { done = () => resolve({ link: entryLink }); }));
+    await user.click(screen.getByTestId("group-knocks-reset"));
+    await user.click(screen.getByTestId("group-link-ask-confirm"));
+    await user.click(screen.getByTestId("group-knocks-reset"));
+    // Pressed while it works, it asks nothing again.
+    expect(screen.queryByTestId("group-link-ask-dialog")).toBeNull();
+    expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: "group-1", reset: true }]);
+    expect(screen.getByTestId("group-knocks-reset")).toHaveAttribute("aria-busy", "true");
+    await act(async () => { done(); });
+    expect(await screen.findByTestId("group-share-dialog")).toBeInTheDocument();
+  });
+
+  it("says nothing of unanswered joiners to a member, or with none", async () => {
+    openGroup(active({ profile: "community", community: { hub: true, hubs: 1, connected: 0, unansweredKnocks: 16 } }));
+    expect(screen.queryByTestId("group-knocks-unanswered")).toBeNull();
   });
 
   it("deletes a community nobody is connected to anyway, and says the others still list the person", async () => {

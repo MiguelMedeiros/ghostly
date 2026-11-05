@@ -8,6 +8,7 @@ import type { GhostRecord, SignedPacket } from "../src/pkarr";
 import type { PkarrTransport } from "../src/transport";
 import type { FrameChannel } from "../src/frames";
 import type { NativeEndpoint } from "../src/pairedTransports";
+import { RelayTransport } from "../src/relay";
 
 // covers: invite.delivery-mode, chat.paired.reconnect, transport.webrtc
 
@@ -116,12 +117,12 @@ function side(params: LinkParams, me: Identity, peer: Identity, mode: "dht" | "s
 
 const links: GhostLink[] = [];
 /** `advertises: false`: its link packets carry no presence, as an offer's packet with no room left for it. */
-function open(s: Side, pkarr: MemoryPkarr, active: boolean, advertises = true): GhostLink {
+function open(s: Side, pkarr: MemoryPkarr | PkarrTransport, active: boolean, advertises = true): GhostLink {
   const link = new GhostLink({
     params: s.params,
     pairing: { credentials: { seedB64: s.seedB64, peerKey: s.peerKey, requireSignedSignals: true }, pinPeer: async () => {}, trustOnFirstUse: true },
     dht: { state: s.state, save: async state => { s.state = state; } },
-    transport: pkarr.transport(),
+    transport: pkarr instanceof MemoryPkarr ? pkarr.transport() : pkarr,
     pollIntervals: RELAY_POLL_INTERVALS,
     autoConnect: true,
     createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
@@ -183,6 +184,47 @@ describe("leaving DHT-only after the contact reloaded", () => {
       await a.setDeliveryMode("stream");
       const took = await untilLive(a, b, 60_000);
       expect(took, "live after both left DHT-only").toBeLessThanOrEqual(10_000);
+    }, 60_000);
+  }
+});
+
+/**
+ * The matrix's extension chat back from DHT only with each side's relay minute spent just before (E2E full,
+ * 2026-11-05): the side that does not dial read the contact's link once, and its next reads, plain chat reads, waited
+ * 41 s for the minute, so the offer out since then was never read (mx-d7d53ebb). The side that dials read the contact's
+ * mailbox once a moment before the contact's envelope saying it left got there, and its next reads waited as long, so
+ * it never dialled (mx-47d9d4bb). Each side has its own budget on one relay they share, as the e2e's.
+ */
+describe("leaving DHT-only with the relay minute spent", () => {
+  function relayFetch(): typeof fetch {
+    const stored = new Map<string, Uint8Array>();
+    return (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const key = new URL(String(input)).pathname.slice(1);
+      if (init?.method === "PUT") { stored.set(key, new Uint8Array(init.body as ArrayBuffer)); return new Response(null, { status: 204 }); }
+      const body = stored.get(key);
+      return body ? new Response(body as BodyInit, { status: 200 }) : new Response(null, { status: 404 });
+    }) as typeof fetch;
+  }
+
+  for (const dialer of ["a", "b"] as const) for (const first of ["a", "b"] as const) for (const gap of [0, 3_000]) {
+    it(`is live in seconds · ${dialer.toUpperCase()} dials · ${first.toUpperCase()} leaves ${gap / 1000} s first`, async () => {
+      const fetch = relayFetch();
+      const relay = { a: new RelayTransport({ relays: ["https://relay.test"], log: () => {}, fetch }),
+        b: new RelayTransport({ relays: ["https://relay.test"], log: () => {}, fetch }) };
+      const pair = pairWhere(dialer);
+      const a = open(pair.a, relay.a, false), b = open(pair.b, relay.b, false);
+      await run(10_000);
+      const [one, two] = first === "a" ? [a, b] : [b, a];
+      await one.setDeliveryMode("stream");
+      await run(gap);
+      await two.setDeliveryMode("stream");
+      // The switch's first read and its envelope go; what else each profile asks the relay for (its other chats, its
+      // groups) spends the rest of its minute then.
+      await run(500);
+      const other = createIdentity();
+      for (const side of [relay.a, relay.b]) for (let i = 0; i < 40; i++) await side.publish(other, [{ label: "_x", value: `${i}` }]).catch(() => {});
+      const took = await untilLive(a, b, 60_000);
+      expect(took, "live after both left DHT-only").toBeLessThanOrEqual(15_000);
     }, 60_000);
   }
 });

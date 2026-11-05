@@ -24,7 +24,8 @@ afterEach(() => {
 
 describe("what the extension may do, as the manifest declares it", () => {
   it("asks only for what the peer needs up front", () => {
-    expect(manifest.permissions).toEqual(["offscreen", "storage", "debugger"]);
+    // `alarms` wakes the worker to bring the peer back (background.ts); Chrome shows no warning for it.
+    expect(manifest.permissions).toEqual(["offscreen", "storage", "debugger", "alarms"]);
     expect(manifest.optional_permissions).toEqual(["notifications", "identity"]);
     expect(manifest).not.toHaveProperty("host_permissions");
   });
@@ -106,6 +107,15 @@ describe("the host the app page runs on", () => {
     expect(world.session.get(`viewer:${tabId}`)).toMatchObject({
       page: { lang: "ar", dir: "rtl", unreachable: servicesAr.window.unreachable, failed: servicesAr.window.failed },
     });
+  });
+
+  it("hands the worker the app's name as the chat lists it, for when the contact takes it back", async () => {
+    const { extensionHost } = await load();
+    const { engine } = await world.load("page", () => import("@ghostly/browser/platform/engine"));
+    vi.spyOn(engine, "linkByPeer").mockReturnValue({ peerPubKeyZ32: PEER, peerServices: [{ id: SERVICE, name: "Atlas" }] } as unknown as ReturnType<typeof engine.linkByPeer>);
+    await extensionHost.openService!(PEER, SERVICE, TAG);
+    const [tabId] = [...world.tabs.keys()];
+    expect(world.session.get(`viewer:${tabId}`)).toMatchObject({ page: { app: "Atlas" } });
   });
 
   it("reports the manifest's version", async () => {

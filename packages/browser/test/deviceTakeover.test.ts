@@ -93,6 +93,8 @@ describe("a forced takeover through the turn keeper", () => {
     expect(phone.store.record).toMatchObject({ state: "active", takeovers: 1, raise: { why: "takeover", takeovers: 1 } });
     expect(phone.store.record.copy).toBeUndefined();
     expect(phone.store.record.handoff).toBeUndefined();
+    // The offer of a new device secret keeps the device that stopped by its key: names change, and two may be the same.
+    expect(phone.store.record.secretOffer).toMatchObject({ why: "takeover", key: toBase64Url(devices[0].publicKey), device: "Desktop" });
   });
 
   it("takes the name as the person sees and types it: a character that draws nothing is not asked for", async () => {

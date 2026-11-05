@@ -201,8 +201,8 @@ export class RelaysAndDht implements PkarrTransport {
     }
   }
 
-  async resolve(pubKeyZ32: string, options: PkarrRequestOptions = {}): Promise<SignedPacket | null> {
-    if (!this.dht) return this.relays.resolve(pubKeyZ32, options);
+  async resolve(pubKeyZ32: string, options: PkarrRequestOptions = {}, keptOnFailure = true): Promise<SignedPacket | null> {
+    if (!this.dht) return this.relays.resolve(pubKeyZ32, options, keptOnFailure);
     let fromRelays: SignedPacket | null = null, failed: unknown = null;
     // Every relay left alone for failing: the relays answer from what they last saw, if anything; the DHT is asked.
     const down = () => this.relays.discovery().relays.every((relay) => relay.state === "failing");
@@ -242,7 +242,9 @@ export class RelaysAndDht implements PkarrTransport {
       this.lastVia = "dht";
       return newerPacket(fromRelays, fromDht);
     } catch (error) {
-      if (fromRelays) return fromRelays;
+      // Nothing answered, the DHT neither: the relays' last copy is the answer, or, for a caller that asks, the failure
+      // that carries it (`keptOnFailure`).
+      if (fromRelays && (keptOnFailure || !(failed instanceof RelaysFailedError))) return fromRelays;
       throw failed ?? error;
     }
   }

@@ -18,6 +18,8 @@
 /* The whole of a long name (a domain), broken where it must: a cut would hide either its start or its end. */
 .id-card-back-subject-whole{overflow:visible;white-space:normal;overflow-wrap:anywhere;text-overflow:clip}
 .id-card-back-meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:rgba(255,255,255,.62)}
+/* Where a name came from, whole: its caveat is at its end ("…: not proof that the name or email is theirs"). */
+.id-card-back-meta-whole{overflow:visible;white-space:normal;overflow-wrap:anywhere;text-overflow:clip}
 .id-card-back-state{margin:0;font-size:12px;line-height:1.35;color:rgba(255,255,255,.72)}
 .id-card-back-note{margin:-4px 0 0;font-size:11px;line-height:1.35;color:rgba(255,255,255,.55)}
 /* Done: in the action's place, in the card's ink, until the card turns face up again. */

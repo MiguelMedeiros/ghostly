@@ -1,4 +1,5 @@
 {
+  "added": "{{app}} を追加しました。開ける人を「相手」で選んでください。",
   "fromContacts": "連絡先から",
   "fromContactsEmpty": "連絡先が共有したアプリがここに表示されます。",
   "ghostlyOnline": "Ghostly オンライン",
@@ -19,6 +20,9 @@
   "peopleDone": "完了",
   "remove": "削除",
   "removeNamed": "{{app}} を削除",
+  "removeText": "共有している連絡先は開けなくなります。",
+  "removeTitle": "{{app}} を削除しますか？",
+  "removed": "{{app}} を削除しました。",
   "requestCount": "· {{count}} 件のリクエスト",
   "requestCount_one": "· {{count}} 件のリクエスト",
   "share": "共有",

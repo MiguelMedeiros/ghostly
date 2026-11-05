@@ -1,5 +1,6 @@
 import { GhostlyHttpError, fromBase64, toBase64 } from "@ghostly/core";
 import type { EngineServer, EngineClientSink } from "@ghostly/browser/engine/server";
+import { copyingSink } from "@ghostly/browser/engine/copyingSink";
 import { createPeerServer } from "@ghostly/browser/devices/peer";
 import type { PeerServer } from "@ghostly/browser/devices/linkOnly";
 import type { ClientMessage } from "@ghostly/browser/shared/rpc";
@@ -9,6 +10,7 @@ import { UI_PORT, type EngineStatus, type HttpRequestReply, type RuntimeMessage 
 import { activeNamespace, databaseFor, peerLockFor } from "./profile";
 import { activeProfileId } from "../../ui/src/lib/profiles";
 import { fromOwnPage } from "./shared/sender";
+import { setStorageProfile } from "../../ui/src/lib/storage";
 
 /**
  * The offscreen document is the Ghostly peer. Service workers have no
@@ -32,6 +34,8 @@ const ATTACH_NEWEST = 400;
  */
 const profile = activeNamespace();
 setDatabaseName(databaseFor(profile));
+// Its settings' names, read for the language a viewer tab is told things in (viewerWords.ts).
+setStorageProfile(profile);
 
 /**
  * The peer starts once it holds its profile's lock, released only when this document goes away: were a
@@ -67,7 +71,8 @@ chrome.runtime.onConnect.addListener((port) => {
   }
   // TODO(apps, WISP 1200 § Per client, Extension): this port carries JSON, so the app calls that answer bytes (`appFile`,
   // `appPreview`'s `icon`) need another shape before the extension runs apps. The extension is out of phase 1.
-  const client: EngineClientSink = { post: (message) => port.postMessage(message) };
+  // Each message is copied on its way: a state carries the payments and the wallet only when they changed.
+  const client: EngineClientSink = copyingSink((message) => port.postMessage(message));
   // Listeners go on at once, so nothing a page sends while the peer waits for its lock is lost.
   withPeer((s) => {
     const engine = engineOf(s);
@@ -103,10 +108,32 @@ async function handleHttpRequest(message: Extract<RuntimeMessage, { type: "http-
       body: message.bodyB64 ? fromBase64(message.bodyB64) : null,
       maxResponseBytes: VIEWER_MAX_RESPONSE_BYTES,
     });
-    return { ok: true, status: response.status, headers: response.headers, bodyB64: toBase64(await response.bytes()) };
+    const body = await response.bytes();
+    // The contact's machine answered in place of their app (docs/PROTOCOL.md "Host errors"), in its English and from
+    // its side ("The local service is not reachable."): the tab says it in the profile's language, from this side.
+    const hostCode = response.headers.find(([name]) => name.toLowerCase() === "x-ghostly-error")?.[1];
+    if (hostCode !== undefined) {
+      const app = serviceName(peer, message.peerPubKeyZ32, message.serviceId) ?? message.app ?? message.serviceId;
+      const shown = await (await import("./viewerWords")).hostErrorShown(response.headers, app);
+      return { ok: false, code: hostCode, message: hostCode, status: response.status, shown };
+    }
+    return { ok: true, status: response.status, headers: response.headers, bodyB64: toBase64(body) };
   } catch (error) {
     const code = error instanceof GhostlyHttpError ? error.code : "error";
     return { ok: false, code, message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * The name the contact gave the service they share, as the chat shows it now. None once they took it back: the tab
+ * then names it as it was when it opened.
+ */
+function serviceName(peer: EngineServer, peerPubKeyZ32: string, serviceId: string): string | undefined {
+  try {
+    const links = peer.node.getState().links.filter((link) => link.peerPubKeyZ32 === peerPubKeyZ32);
+    return links.flatMap((link) => link.peerServices ?? []).find((service) => service.id === serviceId)?.name;
+  } catch {
+    return undefined;
   }
 }
 

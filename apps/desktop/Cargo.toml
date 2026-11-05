@@ -1,6 +1,6 @@
 [package]
 name = "ghostly"
-version = "1.9.0"
+version = "1.10.0"
 edition = "2021"
 
 # The app is a library (src/lib.rs) that src/main.rs runs on Desktop; Android and iOS load it as a shared or static
@@ -58,6 +58,11 @@ tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "net", "
 tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "system-proxy"] }
 # `image-data`: a picture on the clipboard, for a paste of files (clipboard.rs).
 arboard = { version = "3.6.1", default-features = false, features = ["image-data", "wayland-data-control"] }
+
+# A linked file is opened name by name below what was picked, never through a symbolic link (src/linked_files.rs):
+# openat with O_NOFOLLOW.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 # Android: HTTPS from Rust (reqwest, so the Pkarr relays, link previews and push) checks certificates with Android's
 # own verifier, which needs the JVM and the app's context before the first request (src/lib.rs `android_tls`). Its
