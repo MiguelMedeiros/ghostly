@@ -93,7 +93,7 @@ describe("the Tasks board", () => {
     const card = screen.getByTestId("board-card");
     expect(within(card).getByTestId("board-card-chips").children).toHaveLength(3);
     const pr = within(card).getByTestId("board-card-pr");
-    expect(pr).toHaveTextContent("PR #612+123−45");
+    expect(pr).toHaveTextContent("PR #612github.com+123−45");
     expect(pr).toHaveAttribute("href", "https://github.com/o/r/pull/612");
     expect(pr).toHaveAttribute("target", "_blank");
     expect(pr).toHaveAttribute("rel", "noopener noreferrer");
@@ -376,6 +376,18 @@ describe("richer task cards on the board", () => {
     expect(within(card("wait")).getByTestId("board-card-pr-standing")).toHaveTextContent("Draft · Checks pending");
   });
 
+  it("the pull request's chip shows where it goes on the card, in its name and in Details, not only on hover", async () => {
+    const { user } = profile([row("link-1", task({ pr: { url: "https://evil.example/github.com/o/r/pull/612", number: 612, additions: 3, deletions: 1 } }))]);
+    await loaded();
+    const card = screen.getByTestId("board-card");
+    const chip = within(card).getByTestId("board-card-pr");
+    expect(chip).toHaveAttribute("href", "https://evil.example/github.com/o/r/pull/612");
+    expect(within(chip).getByTestId("board-card-pr-host")).toHaveTextContent(/^evil\.example$/);
+    expect(chip).toHaveAccessibleName("PR #612 · Open on evil.example");
+    await user.click(within(card).getByRole("button", { name: "Details" }));
+    expect(within(card).getByTestId("board-card-pr-standing")).toHaveTextContent(/^evil\.example$/);
+  });
+
   it("shows tags as chips (three chips at most, all of them in Details) and filters by one", async () => {
     const { user } = profile([
       row("link-1", task({ id: "a", tags: ["core", "web"] })),
@@ -503,6 +515,28 @@ describe("a card a bot sent to several chats", () => {
     expect(screen.getAllByTestId("board-column").map((c) => within(c).getByRole("heading").textContent)).toEqual(["Coordinator2"]);
     await user.click(screen.getByTestId("tasks-group-chat"));
     expect(screen.getAllByTestId("board-column").map((c) => within(c).getByRole("heading").textContent).sort()).toEqual(["Coordinator2", "Phone1", "Sala de Máquinas1"]);
+  });
+
+  it("a member of another group who takes the bot's name and card id has a card of their own, under that group", async () => {
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", messages: [], createdAt: 1_700_000_000_000, nick: "Coordinator" });
+    const state = {
+      links: [linkView({ id: "link-1", peerPubKeyZ32: PEER, peerNick: "Coordinator" })],
+      groups: [groupView({ id: "town", name: "Town square", status: "active", members: [{ key: "me-key", me: true, nick: "Me" }, { key: "namesake", me: false, nick: "Coordinator" }] as never })],
+    };
+    const rows = [
+      row("link-1", task({ id: "deploy", title: "Deploy to prod" }), { id: "in-chat", timestamp: NOW - 60_000 }),
+      row("group:town", task({ id: "deploy", title: "Approve the deploy at the link", status: "blocked" }), { id: "in-town", member: "namesake", timestamp: NOW - 50_000 }),
+    ];
+    const { engine } = renderApp(<Tasks />, { route: "/tasks" });
+    engine.on("statusCardIndex", () => rows).setState(state);
+    await loaded();
+    expect(cardIds("running")).toEqual(["deploy"]);
+    expect(cardIds("blocked")).toEqual(["deploy"]);
+    const real = column("running").querySelector<HTMLElement>('[data-card-id="deploy"]')!;
+    expect(real).toHaveTextContent("Deploy to prod");
+    expect(real).not.toHaveTextContent("Town square");
+    expect(within(column("blocked")).getByTestId("board-card-chat")).toHaveTextContent("Town square");
+    expect(screen.getByTestId("tasks-summary")).toHaveTextContent("2 active · 2 tasks");
   });
 
   it("counts once on the way to the board", async () => {

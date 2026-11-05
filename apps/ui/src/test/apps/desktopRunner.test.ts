@@ -22,6 +22,11 @@ type Window = Json & {
   __ghostlyEvent(text: unknown): void;
 };
 
+/** The window's `Document`: its `execCommand` edits, as a browser's does (the runner keeps it for every other command). */
+class Document {
+  execCommand(): boolean { return true; }
+}
+
 /** The runner in a window of its own; `answer` is the JSON text of Rust's answer to a request. */
 function open(answer: (request: { type: string; id?: number }) => string, clock = { t: 1_000 }, sent: unknown[] = []) {
   const written: string[] = [];
@@ -34,7 +39,11 @@ function open(answer: (request: { type: string; id?: number }) => string, clock 
     Date: { now: () => clock.t },
     addEventListener: (type: string, listener: (event: { isTrusted: boolean }) => void) => { listeners[type] = listener; },
     TextEncoder,
-    document: { documentElement: { setAttribute() {}, textContent: "" }, open() {}, write: (html: string) => written.push(html), close() {} },
+    // A document of its own class, as WebKit's is: the runner wraps `Document.prototype.execCommand` before any app code.
+    Document,
+    document: Object.assign(Object.create(Document.prototype) as object, {
+      documentElement: { setAttribute() {}, textContent: "" }, open() {}, write: (html: string) => written.push(html), close() {},
+    }),
     __TAURI_INTERNALS__: {
       metadata: { currentWindow: { label: "app-1" } },
       // Rust sends the answer's JSON text as a JSON string (`json_response`), which Tauri evaluates into the window

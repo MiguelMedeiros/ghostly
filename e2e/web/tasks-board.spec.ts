@@ -95,7 +95,7 @@ test("a bot's tasks from two chats on one board: columns by status, live updates
     await expect(ci.getByTestId("board-card-bot")).toHaveText(/Coordinator$/);
     await expect(ci.getByTestId("board-card-chat")).toHaveText(/Sala de Máquinas$/);
     await expect(ci.getByTestId("board-card-pr")).toHaveAttribute("href", "https://github.com/MiguelMedeiros/ghostly/pull/612");
-    await expect(ci.getByTestId("board-card-pr")).toHaveText("PR #612+123−45");
+    await expect(ci.getByTestId("board-card-pr")).toHaveText("PR #612github.com+123−45");
     await expect(ci.getByTestId("board-card-progress")).toHaveAttribute("aria-valuenow", "60");
     const relayCard = board.locator('[data-testid="board-card"][data-card-id="relay"]');
     await expect(relayCard.getByTestId("board-card-open")).toHaveAccessibleName(/^Fix relay rotation, Running, 1 of 4, in Coordinator, updated /);
