@@ -138,7 +138,7 @@ describe("pin in a group waits for an edge, as group react does", () => {
 describe("chat show and group show say the pin", () => {
   const ctxOf = (chatPin?: PinView, groupPin?: PinView) => ({
     runtime: { server: { node: { getState: () => ({ links: [link("chat-one", { label: "Alice", ...(chatPin && { pin: chatPin }) })], groups: [group(groupPin && { pin: groupPin })], settings: {}, transport: {} }) as unknown as EngineState } }, paths: { name: "default" } },
-    hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test",
+    hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, groupAuto: { get: () => ({ on: false, from: [] }) }, mode: "daemon", version: "test",
   }) as unknown as ApiContext;
 
   it("with the fields chat.pinned and group.pinned carry, or null when nothing is pinned", async () => {
