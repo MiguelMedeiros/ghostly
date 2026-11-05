@@ -888,6 +888,7 @@ export class GroupSession {
     this.pruneSecrets();
     this.pruneSeen();
     this.pruneRelay();
+    this.pruneNames();
     this.state.seq = 0; this.state.seqEpoch = epoch;
     await this.persist();
     // The old roster hears about it, the one removed included (without a secret). A key respelled in its last character
@@ -952,6 +953,11 @@ export class GroupSession {
   private pruneSecrets(): void {
     const epochs = Object.keys(this.state.secrets).map(Number).sort((a, b) => a - b);
     for (const e of epochs.slice(0, Math.max(0, epochs.length - GROUP_LIMITS.secrets))) delete this.state.secrets[e];
+  }
+
+  /** Someone out of the roster is named by no record of theirs, mine as the admin's: let in again, theirs start over. */
+  private pruneNames(): void {
+    for (const key of Object.keys(this.state.names ?? {})) if (!rosterHas(this.roster, key)) delete this.state.names![key];
   }
 
   /**
@@ -1925,8 +1931,7 @@ export class GroupSession {
     this.pruneSecrets();
     this.pruneSeen();
     this.pruneRelay();
-    // Someone out of the roster is named by no record of theirs: let in again, theirs start over.
-    for (const key of Object.keys(this.state.names ?? {})) if (!rosterHas(commit.m, key)) delete this.state.names![key];
+    this.pruneNames();
     // Saved like the messages that come with it: a member back after many joins and leaves wrote its whole state, the
     // chain growing each time, once per commit it caught up (39.5 MB for 200). A save lost only means the commits are
     // asked for again at the next sync; my own commits, sends and status changes are still saved at once.
