@@ -429,22 +429,21 @@ export const APP_REVOCATIONS_KEY = "appRevocations";
 const REVOCATIONS_KEPT = { each: 64, all: 1024 } as const;
 
 /**
- * The revocations as kept, by reference, in the order they were last added to: read with nothing taken on trust but
- * their signatures (checked before they were kept), so an entry that is not one of that app's publisher is none.
+ * The revocations as kept, by reference, in the order they were last added to (`all`), and those of `ref` (`mine`), read
+ * with nothing taken on trust but their signatures (checked before they were kept), so an entry that is not one of that
+ * app's publisher is none. The other apps' lists are left as kept, unread: each is read when its own app asks (a
+ * revocation's read is about 0.15 ms, and the 1024 kept at most held the page's thread 160 ms at every install screen).
  */
-function keptRevocations(kept: unknown): Map<string, SignedAppRevocation[]> {
-  const out = new Map<string, SignedAppRevocation[]>();
-  if (!Array.isArray(kept)) return out;
-  for (const entry of kept) {
-    if (!Array.isArray(entry) || !isAppRef(entry[0]) || !Array.isArray(entry[1])) continue;
-    const ref = entry[0];
-    const list = entry[1].flatMap((r: unknown) => {
-      const read = readAppRevocationShape(r);
-      return read.ok && read.revocation.statement.app === ref && read.revocation.signature.key === appRefPublisher(ref) ? [read.revocation] : [];
-    });
-    if (list.length) out.set(ref, list);
+function keptRevocations(kept: unknown, ref: string): { mine: SignedAppRevocation[]; all: Map<string, unknown[]> } {
+  const all = new Map<string, unknown[]>();
+  if (Array.isArray(kept)) {
+    for (const entry of kept) if (Array.isArray(entry) && isAppRef(entry[0]) && Array.isArray(entry[1]) && entry[1].length) all.set(entry[0], entry[1]);
   }
-  return out;
+  const mine = (all.get(ref) ?? []).flatMap((r: unknown) => {
+    const read = readAppRevocationShape(r);
+    return read.ok && read.revocation.statement.app === ref && read.revocation.signature.key === appRefPublisher(ref) ? [read.revocation] : [];
+  });
+  return { mine, all };
 }
 
 /** Queues, on the settings store of an open transaction, these revocations of `ref` kept with the others (each once). */
@@ -452,8 +451,7 @@ function keepRevocations(settings: IDBObjectStore, ref: string, add: readonly Si
   if (!add.length) return;
   const read = settings.get(APP_REVOCATIONS_KEY);
   read.onsuccess = () => {
-    const kept = keptRevocations(read.result);
-    const before = kept.get(ref) ?? [];
+    const { mine: before, all: kept } = keptRevocations(read.result, ref);
     const merged = new Map(before.map((r) => [canonicalJson(r), r]));
     for (const r of add) if (r.statement.app === ref) merged.set(canonicalJson(r), r);
     if (merged.size === before.length) return;
@@ -758,7 +756,7 @@ export class Apps {
   }
   /** The revocations of this app this profile verified and keeps (`APP_REVOCATIONS_KEY`), installed or not. */
   private async keptRevocationsOf(ref: string): Promise<SignedAppRevocation[]> {
-    return keptRevocations(await wrap((await store(STORES.settings, "readonly")).get(APP_REVOCATIONS_KEY))).get(ref) ?? [];
+    return keptRevocations(await wrap((await store(STORES.settings, "readonly")).get(APP_REVOCATIONS_KEY)), ref).mine;
   }
 
   /**
