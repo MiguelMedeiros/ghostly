@@ -98,6 +98,8 @@ export function NetworkSettings() {
   // A TURN server restored from a backup comes without its credential (backups leave it out): calls skip it until then.
   const credentialGone = !!network.turn?.urls && !network.turn.credential && !turn.credential;
   const direct = network.readRelays !== undefined;
+  // Hide my IP from contacts: this app reads and writes through the relays alone, whatever the switch below says.
+  const relayOnly = direct && network.relayOnly === true;
 
   const refuse = (refused: Problems) => { focusFirst.current = true; setProblems(refused); };
   // An edit of a refused field takes its error away; the others stay until the next Save.
@@ -162,8 +164,8 @@ export function NetworkSettings() {
     <Section title={t("network.title")}>
       {network.clockOffMs !== undefined && <Row label={t("connection.clockOff.title")} {...clockOffTexts(t, network.clockOffMs, language)} testId="network-clock-off" />}
       {network.directBlocked && <Row label={t("connection.directBlocked.title")} hint={t("connection.directBlocked.hint")} info={t("connection.directBlocked.info")} testId="network-direct-blocked" />}
-      {direct && <Row label={t("network.readRelays")} hint={t("network.readRelaysHint")} info={t("network.readRelaysInfo")} testId="network-read-relays-row">
-        <Switch label={t("network.readRelays")} checked={network.readRelays === true} disabled={switching} onChange={(on) => void readRelays(on)} testId="network-read-relays" />
+      {direct && <Row label={t("network.readRelays")} hint={t(relayOnly ? "network.readRelaysRelayOnly" : "network.readRelaysHint")} info={t("network.readRelaysInfo")} testId="network-read-relays-row">
+        <Switch label={t("network.readRelays")} checked={network.readRelays === true || relayOnly} disabled={switching || relayOnly} onChange={(on) => void readRelays(on)} testId="network-read-relays" />
       </Row>}
       <Field testId="network-relays-field" label={t("network.relays")} htmlFor="network-relays" hint={t("network.relaysHint")} info={t(direct ? "network.relaysInfoDirect" : "network.relaysInfoWeb")}
         trailing={<button onClick={() => setRelays(network.defaultRelays.join("\n"))} aria-label={t("network.resetRelays")} className={reset}>{t("network.reset")}</button>}>

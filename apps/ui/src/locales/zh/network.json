@@ -19,6 +19,7 @@
   "readRelays": "同时使用 Pkarr 中继",
   "readRelaysHint": "更快找到首个联系人。中继能看到查询了哪些密钥。",
   "readRelaysInfo": "本应用直接读取 Mainline DHT。开启：还会通过下方的 Pkarr 中继读取。如果 DHT 被拦截，即使关闭也会通过这些中继读取。",
+  "readRelaysRelayOnly": "隐藏 IP 已开启：此应用只通过这些中继读写，从不直接访问 DHT。",
   "relays": "Pkarr 中继",
   "relaysHint": "每行一个。它们只能看到已签名的加密数据包。",
   "relaysInfoDirect": "网页版和扩展中的联系人无法访问 Mainline DHT,只能通过中继读取,因此本应用也会写入中继。",

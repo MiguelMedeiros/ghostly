@@ -1,0 +1,1 @@
+Relay only, rule 3: an app that reads the DHT itself (the Desktop) reads and writes Pkarr through the Pkarr relays alone while Hide my IP from contacts is on, and sends no UDP to a DHT node; it remembers the choice, so the next start opens no DHT node. Built so far now includes it; only the setting in Settings comes later. No wire change.

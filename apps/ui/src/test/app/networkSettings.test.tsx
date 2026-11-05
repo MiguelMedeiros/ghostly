@@ -35,6 +35,18 @@ describe("Settings, Network: Pkarr relays", () => {
     expect(await info(user, screen.getByTestId("network-relays-field"))).toHaveTextContent(/this app writes to them too/);
   });
 
+  it("on the Desktop with Hide my IP on, relay reads show on and stay so: nothing goes to the DHT directly", async () => {
+    const { engine } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport: { protocol: "Mainline DHT (BEP44) — Direct UDP", relays: [], direct: true }, settings: { relays: RELAYS, relayOnly: true } }));
+    const toggle = screen.getByTestId("network-read-relays");
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(toggle).toBeDisabled();
+    expect(screen.getByTestId("network-read-relays-row")).toHaveTextContent("Hide my IP is on: this app reads and writes through these relays only");
+    act(() => engine.update({ settings: { relays: RELAYS } }));
+    expect(screen.getByTestId("network-read-relays")).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByTestId("network-read-relays")).toBeEnabled();
+  });
+
   it("in a browser there is no switch: the relays are the only way to the DHT", async () => {
     const { engine, user } = renderApp(<NetworkSettings />);
     act(() => engine.update({ transport: { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: RELAYS }, settings: { relays: RELAYS } }));
