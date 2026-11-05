@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { open, type FileHandle } from "node:fs/promises";
 import { VOICE_LIMITS, VOICE_METER, downsamplePeaks, voiceLevel } from "@ghostly/core";
+import { childEnv } from "./childEnv";
 
 /**
  * The waveform and length of a voice note sent from a file (`file send --voice`), measured as the apps measure their
@@ -568,7 +569,7 @@ export async function decodeWithFfmpeg(path: string, command = process.env.GHOST
  */
 export function streamFfmpeg(path: string, sink: SoundSink, command = process.env.GHOSTLY_FFMPEG || "ffmpeg"): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, ["-v", "error", "-nostdin", "-i", path, "-vn", "-f", "wav", "-c:a", "pcm_f32le", "-"], { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, ["-v", "error", "-nostdin", "-i", path, "-vn", "-f", "wav", "-c:a", "pcm_f32le", "-"], { stdio: ["ignore", "pipe", "pipe"], env: childEnv() });
     let errors = "", pending: Buffer = Buffer.alloc(0), header: ReturnType<typeof wavHeader> = null, done = false, failed: Error | null = null;
     let read: ((at: number) => number) | undefined, left = Infinity, timedOut = false;
     const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, FFMPEG_TIMEOUT_MS);

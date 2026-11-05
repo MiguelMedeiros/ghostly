@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { CONTACT_KEY, namedByThem } from "./apiKit";
+import { childEnv } from "./childEnv";
 import { connectDaemon, type DaemonAddress, type DaemonClient } from "./client";
 import { CliError, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
@@ -244,9 +245,7 @@ export function checkTypes(types: readonly string[], warn: (line: string) => voi
 
 /** The environment a hook runs in: this one's, less the backup passphrase (a hook, and what it runs, never needs it). */
 export function hookEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const rest = { ...env };
-  delete rest.GHOSTLY_BACKUP_PASSPHRASE;
-  return rest;
+  return childEnv(env);
 }
 
 /** Runs `command` through the shell with the event on stdin (never in its arguments); resolves with its exit code. */
