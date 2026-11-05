@@ -554,7 +554,8 @@ export interface GhostLinkEvents {
   onAnswersRefused?(): void;
   /**
    * A group link's WebRTC offer of this side's was answered and nothing connected `RACE_ANSWERED_MS` later: there is no
-   * direct path, as a chat's race takes it (`scheduleRace`). Said once per offer; the attempt itself goes on.
+   * direct path, as a chat's race takes it (`scheduleRace`). Said once per offer; the attempt itself goes on. Not for an
+   * answer read late (`LATE_ANSWER_MS`): the link gives that attempt up and offers again.
    */
   onRtcStalled?(): void;
   /** The contact's packet came between two reads of its record: its clock against this one (`LinkSessionEvents.onPeerClock`). */
@@ -1361,6 +1362,16 @@ export class GhostLink {
           // up (15 s in Chromium, the attempt's 90 s where the connection never says `failed`), then for the `_tr` both ways.
           if (options.packetTransports) setTimeout(() => {
             if (this.answeredAt !== answeredAt || this.channel || this.stopped || this.dataLink.state !== "connecting") return;
+            // An answer read late (`LATE_ANSWER_MS`): the member's ICE may have given up on it meanwhile, which says
+            // nothing about the network. The attempt is given up and the edge offers again, WebRTC left on: taken for
+            // a network that blocks, the edge went native on both sides after a restart, and past the native slots the
+            // member stayed unreachable for the whole of a 12-minute lab (agents#971).
+            if (this.dataLink.answerLate) {
+              traceLink(this.myPubKeyZ32, "rtc-stalled", { late: true });
+              this.dataLink.abandon();
+              this.redial();
+              return;
+            }
             traceLink(this.myPubKeyZ32, "rtc-stalled", {});
             events.onRtcStalled?.();
           }, RACE_ANSWERED_MS);
