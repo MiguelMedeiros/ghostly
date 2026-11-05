@@ -399,16 +399,27 @@ const METHODS: Record<string, Method> = {
   /**
    * WISP 400 § Pinned message: one per chat or group, a new pin replaces it; `remove` unpins. In a community only the
    * admin pins. Answers the chat (or group) and the message now pinned (null once unpinned). In a 1:1 chat `wait:
-   * confirmed` (a one-shot's default) stays until the contact confirmed it, and `confirmed` says whether it has.
+   * confirmed` (a one-shot's default) stays until the contact confirmed it, and `confirmed` says whether it has. A
+   * group has no receipts: `wait: sent` (a one-shot's default) stays until an edge took it, and `edges` and `sent` say
+   * how many did, as for `group react`.
    */
   async "chat.pin"(ctx, params) {
     const target = chatOrGroup(ctx, str(params, "chat", true));
     const remove = bool(params, "remove"), messageId = remove ? str(params, "message") : str(params, "message", true);
-    if (target.group && params.wait === "confirmed") throw new CliError("bad_request", "A group has no receipts: wait confirmed is for a 1:1 chat");
-    const { wait, ms } = confirmWait(ctx, params);
+    if (target.group && params.wait === "confirmed") throw new CliError("bad_request", "A group has no receipts: wait confirmed is for a 1:1 chat (wait sent waits until a member's edge took it)");
+    if (!target.group && params.wait === "sent") throw new CliError("bad_request", "wait sent is for a group: a 1:1 chat's pin waits with wait confirmed");
+    const { wait, ms } = target.group
+      ? { wait: oneOf(params, "wait", ["none", "sent"] as const, ctx.mode === "one-shot" ? "sent" : "none"), ms: num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000 }
+      : confirmWait(ctx, params);
     const result = await node(ctx).pinMessage({ linkId: target.linkId, ...(messageId && { messageId }), remove });
     if (result.error) throw new CliError(result.refused || /Only the admin/.test(result.error) ? "refused" : /not in this (?:chat|group)|Nothing is pinned/.test(result.error) ? "not_found" : "bad_request", result.error);
-    if (target.group) return { group: target.id, messageId: remove ? null : messageId, removed: remove };
+    if (target.group) {
+      // A one-shot leaves once its command is done, and its groups with it: what no edge took yet went nowhere.
+      const n = result.n, pinned = remove ? null : messageId;
+      const edges = !n ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, target.id, messageId ?? "", { pin: n }, ms)
+        : node(ctx).groupTaken({ groupId: target.id, messageId: messageId ?? "", pin: n });
+      return { group: target.id, messageId: pinned, removed: remove, sent: edges > 0, edges };
+    }
     // The chat's one pin of mine waiting for the contact is this one (none: the contact confirmed it already).
     const mine = node(ctx).chatUnconfirmed({ linkId: target.linkId }).pin;
     const pending = (left: { pin: number | null }) => mine !== null && left.pin === mine;
@@ -462,13 +473,26 @@ const METHODS: Record<string, Method> = {
       if (secret) throw new CliError("confirm", `A message looks like ${secretWords(secret)}; forward it with --force if you mean to`, { kind: secret.kind, messageId: message.id });
     }
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
+    // A one-shot leaves once its command is done, and its groups with it: a group's copy waits for an edge by default,
+    // as `group send` does.
+    const groupWait = params.wait === undefined && ctx.mode === "one-shot" ? "sent" : wait;
     const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     let results;
     try { ({ results } = await node(ctx).forwardMessages({ linkId: from.linkId, messageIds, to: to.map((t) => t.linkId) })); }
     catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
-    const out = results.map((result, i) => ({ to: to[i]!.id, kind: to[i]!.group ? "group" as const : "chat" as const, messageIds: result.messageIds, sent: result.sent, error: result.error }));
+    const out: { to: string; kind: "group" | "chat"; messageIds: string[]; sent: string[]; error: string | null; edges?: number }[] =
+      results.map((result, i) => ({ to: to[i]!.id, kind: to[i]!.group ? "group" as const : "chat" as const, messageIds: result.messageIds, sent: result.sent, error: result.error }));
+    // A group's `edges`: how many took each of its copies so far (the fewest), as `group send` says it.
+    for (const [i, result] of out.entries()) if (to[i]!.group) {
+      let edges: number | undefined;
+      for (const messageId of result.messageIds) {
+        const took = groupWait === "sent" ? await waitForGroupFrame(ctx, to[i]!.id, messageId, undefined, ms) : node(ctx).groupTaken({ groupId: to[i]!.id, messageId });
+        edges = Math.min(edges ?? took, took);
+      }
+      result.edges = edges ?? 0;
+    }
     if (wait === "sent") for (const [i, result] of out.entries()) for (const messageId of result.messageIds) {
-      if (to[i]!.group) { await waitForGroupFrame(ctx, to[i]!.id, messageId, undefined, ms); continue; }
+      if (to[i]!.group) continue;
       const sent = await node(ctx).getMessage(to[i]!.id, messageId);
       if (sent?.file) await FILE_METHODS["file.wait"](ctx, { chat: to[i]!.id, file: sent.file.id, timeout: ms / 1000 });
       else await waitForMessage(ctx, to[i]!.id, messageId, "sent", ms);

@@ -179,7 +179,7 @@ export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
   joinGroupByLink: "{ link }",
   sendGroupMessage: "{ groupId, text, mentions?, replyTo?, card? }",
   pressButton: "{ linkId, messageId, buttonId }",
-  groupTaken: "{ groupId, messageId, edit?, reaction? }",
+  groupTaken: "{ groupId, messageId, edit?, reaction?, pin? }",
   chatUnconfirmed: "{ linkId }",
   groupMessages: "{ groupId }",
   messagePage: "{ linkId, limit?, before?, after? }",

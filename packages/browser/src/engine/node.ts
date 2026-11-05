@@ -207,7 +207,7 @@ import { TEST_COINS_SATS, faucetError } from "./paymentAdapters/testCoins";
 import { composeDetails, fileWire, pathSnapshot, withSend, type PathSnapshot } from "./messageDetails";
 import { db } from "./db";
 import { settleAhead } from "./arrival";
-import { Groups, meshEdgeIntervals, otherEndSeen, reactionKey } from "./groups";
+import { Groups, meshEdgeIntervals, otherEndSeen, pinKey, reactionKey } from "./groups";
 import { AUTHOR_ORDER_ROOM } from "./groupAuthorOrder";
 import { edgeView } from "./groupEdges";
 import { GroupPayments } from "./groupPayments";
@@ -5534,10 +5534,12 @@ export class GhostlyNode implements EngineImplementation {
     return { results };
   }
   /**
-   * How many edges took my message (or its edit number `edit`, or my reaction numbered `reaction`, as `react` gave it)
-   * so far: what `group send` and `group react --wait sent` wait for.
+   * How many edges took my message (or its edit number `edit`, or my reaction numbered `reaction`, as `react` gave it,
+   * or my pin numbered `pin`, as `pinMessage` gave it) so far: what `group send`, `group react` and `pin --wait sent` wait for.
    */
-  groupTaken({ groupId, messageId, edit, reaction }: { groupId: string; messageId: string; edit?: number; reaction?: number }): number { return this.groups.taken(groupId, messageId, edit, reaction); }
+  groupTaken({ groupId, messageId, edit, reaction, pin }: { groupId: string; messageId: string; edit?: number; reaction?: number; pin?: number }): number {
+    return this.groups.taken(groupId, messageId, edit, reaction, pin);
+  }
   /** The numbers of my reactions and of my pin in a 1:1 chat that the contact has not confirmed: what `react` and `pin` wait for. */
   chatUnconfirmed({ linkId }: { linkId: string }): { reactions: number[]; pin: number | null } {
     const stored = this.links.get(linkId)?.stored;
@@ -5689,9 +5691,9 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * Pins a message of a chat or a group, or unpins (WISP 400 § Pinned message): one per chat, the last pin winning. A
    * 1:1 chat keeps it until the contact confirms it on a live session; a group sends it to its members, where the rule
-   * (`mayPin`) allows it.
+   * (`mayPin`) allows it. In a group, `n` is the pin's number, for `groupTaken`.
    */
-  async pinMessage({ linkId, messageId, remove }: { linkId: string; messageId?: string; remove?: boolean }): Promise<{ error: string | null; refused?: boolean }> {
+  async pinMessage({ linkId, messageId, remove }: { linkId: string; messageId?: string; remove?: boolean }): Promise<{ error: string | null; refused?: boolean; n?: number }> {
     if (typeof linkId !== "string" || !linkId) return { error: "No chat to pin in" };
     const host = this.pinsHost;
     if (linkId.startsWith("group:")) {
@@ -5702,16 +5704,16 @@ export class GhostlyNode implements EngineImplementation {
       const pin = await myPin(host, linkId, messageId, !!remove, this.groups.pinOf(groupId));
       if ("error" in pin) return pin;
       if (this.groups.isCommunityGroup(groupId)) {
-        try { await this.groups.sendCommunityApp(groupId, { t: COMMUNITY_PIN_FRAME, id: pin.id, n: pin.n }); } catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
+        try { await this.groups.sendCommunityApp(groupId, { t: COMMUNITY_PIN_FRAME, id: pin.id, n: pin.n }, pinKey(pin.n)); } catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
         await this.groups.setPin(groupId, pin);
-        return { error: null };
+        return { error: null, n: pin.n };
       }
       const frame = this.groups.pinFrame(groupId, pin);
       if (!frame) return { error: "You are not in this group" };
       await this.groups.setPin(groupId, { ...pin, k: frame.k, sig: frame.sig });
       // An edge that is down hears it when it opens (`edgeUp`).
       for (const member of this.memberEdges(groupId).keys()) this.sendGroupPinFrame(groupId, member);
-      return { error: null };
+      return { error: null, n: pin.n };
     }
     const live = this.links.get(linkId);
     if (!live || live.stored.group) return { error: "No such chat" };
@@ -5978,13 +5980,19 @@ export class GhostlyNode implements EngineImplementation {
     for (const key of this.memberEdges(groupId).keys()) if (key !== via.from && key !== member) this.sendGroupPinFrame(groupId, key);
   }
 
-  /** A private group's pin, as its pinner signed it, over the edge to `member`; nothing when it is down (said when it opens). */
+  /**
+   * A private group's pin, as its pinner signed it, over the edge to `member`; nothing when it is down (said when it
+   * opens). An edge that took my own pin counts for `groupTaken` (`pinKey`).
+   */
   private sendGroupPinFrame(groupId: string, member: string): void {
     const pin = this.groups.pinOf(groupId), edge = this.memberEdges(groupId).get(member);
     // One whose number does not hold counts as none: no member takes it.
     if (!pin?.k || !pin.sig || !edge || this.groups.isCommunityGroup(groupId) || !pinNumberHolds(pin.n)) return;
     const frame: GroupPinFrame = { t: "group-pin", g: groupId, id: pin.id, n: pin.n, k: pin.k, sig: pin.sig };
-    try { this.links.get(edge)?.link?.sendGroupFrame(frame); } catch { /* said again when it opens */ }
+    const link = this.links.get(edge)?.link;
+    if (!link) return;
+    try { link.sendGroupFrame(frame); } catch { return; /* said again when it opens */ }
+    if (pin.by === "me") this.groups.noteTaken(groupId, pinKey(pin.n));
   }
   /** `admin`: the member a leaving admin handed the role to. */
   async leaveGroup({ groupId }: { groupId: string }): Promise<{ admin?: string }> { const admin = await this.groups.leave(groupId); return admin ? { admin } : {}; }
