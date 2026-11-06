@@ -134,3 +134,21 @@ export function localFileError(error: unknown, file?: string): CliError | undefi
   }
   return undefined;
 }
+
+/**
+ * A received file this device had no room for, as the engine's record says it: core's `storeFailure` writes "Could not
+ * store the file: QuotaExceededError…" (a write's ENOSPC, or the profile store's own refusal), the name kept on
+ * purpose for the app's matcher (errorText.ts), so the stored text stays as it is and only the CLI says it otherwise.
+ */
+const STORED_NO_ROOM = /^Could not store the file: QuotaExceededError\b/;
+/** The CLI's no-room words for such a file: nothing here goes on with it, it comes again once asked for. */
+export const FILE_NO_ROOM = "No room left on the disk for this file: free some space, then ask for it again";
+
+/**
+ * A failed transfer's error as the CLI says it: a received file the disk had no room for in the CLI's words with
+ * `reason: "no_space"`, as every other full disk (`localFileError`); any other in its own words. Before, `file wait`,
+ * `file list` and `file.failed` showed Node's raw "ENOSPC: no space left on device, write" or the DOM class name.
+ */
+export function transferFailure(error: string | undefined): { error: string | undefined; reason?: "no_space" } {
+  return error !== undefined && STORED_NO_ROOM.test(error) ? { error: FILE_NO_ROOM, reason: "no_space" } : { error };
+}

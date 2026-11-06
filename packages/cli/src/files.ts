@@ -12,7 +12,7 @@ import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
 import { childEnv } from "./childEnv";
 import { bool, chatOf, findChatOrGroup, list, node, num, oneOf, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
 import { groupSendRefused } from "./api";
-import { CliError } from "./errors";
+import { CliError, transferFailure } from "./errors";
 import { guardText } from "./secretGuard";
 import { endTyping } from "./typing";
 import { measureVoice } from "./voicePeaks";
@@ -88,11 +88,22 @@ function stageWords(transfer: FileTransferView): string {
 
 /**
  * A transfer that waits for a person's decision (`asking`), with whose: `me` (`file accept` takes it here) or `contact`
- * (theirs). A received file's `transferring` alone read as if it were moving.
+ * (theirs). A received file's `transferring` alone read as if it were moving. One that failed for want of room here
+ * says so in the CLI's words, with `reason: "no_space"` (`transferFailure`).
  */
-function withWaitingFor(transfer: FileTransferView | undefined): (FileTransferView & { waitingFor?: "me" | "contact" }) | undefined {
+function withWaitingFor(transfer: FileTransferView | undefined): (FileTransferView & { waitingFor?: "me" | "contact"; reason?: "no_space" }) | undefined {
+  if (transfer?.state === "failed") { const said = transferFailure(transfer.error); return said.reason ? { ...transfer, ...said } : transfer; }
   if (transfer?.state !== "transferring" || transfer.stage !== "asking") return transfer;
   return { ...transfer, waitingFor: transfer.direction === "in" ? "me" : "contact" };
+}
+
+/**
+ * A refusal of a transfer that ended (failed): "It ended: <why>", in the CLI's words for a file this device had no room
+ * for, with `reason: "no_space"`.
+ */
+function endedError(transfer: FileTransferView, more = ""): CliError {
+  const said = transferFailure(transfer.error);
+  return new CliError("refused", `It ended: ${said.error ?? "failed"}${more}`, said.reason && { reason: said.reason });
 }
 
 /** The chat or the group a file command names (`findChatOrGroup`). */
@@ -367,7 +378,7 @@ export const FILE_METHODS: Record<string, Method> = {
       if (outgoing !== (action === "resend")) throw new CliError("bad_request", outgoing ? "A file sent from here is sent again: file resend" : "A received file is asked for again: file request");
       const transfer = state(ctx).transfers[fileId];
       if (!transfer || transfer.state === "done") throw new CliError("refused", outgoing ? "Nothing to send again: it arrived whole" : "Nothing to ask for: the file is all here");
-      if (transfer.state === "failed" && (!outgoing || !transfer.retry)) throw new CliError("refused", `It ended: ${transfer.error ?? "failed"}`);
+      if (transfer.state === "failed" && (!outgoing || !transfer.retry)) throw endedError(transfer);
     } else {
       const outgoing = fileId.startsWith(`${linkId}-out-`);
       if (outgoing && (action === "accept" || action === "decline")) throw new CliError("bad_request", "A file sent from here is not accepted or declined: file cancel stops it");
@@ -376,7 +387,7 @@ export const FILE_METHODS: Record<string, Method> = {
       const transfer = state(ctx).transfers[fileId] ?? (await fileStore.get(fileId).catch(() => undefined))?.transfer;
       // Being checked (sent: the contact checks it; received: its digest here): the engine takes no pause and it ends done.
       if (action === "pause" && transfer?.stage === "verifying") throw new CliError("refused", "Too late to pause: it is being checked");
-      if (transfer?.state === "failed") throw new CliError("refused", `It ended: ${transfer.error ?? "failed"}${outgoing && transfer.retry ? " (file resend sends it again)" : ""}`);
+      if (transfer?.state === "failed") throw endedError(transfer, outgoing && transfer.retry ? " (file resend sends it again)" : "");
       // Sent whole (the engine's `sentWhole`): the engine takes no cancel or pause and it ends done, so it is refused, not echoed.
       const whole = outgoing && transfer?.state === "transferring" && (transfer.stage === "verifying"
         || (transfer.size > 0 && transfer.transferred >= transfer.size && transfer.stage !== "asking" && transfer.stage !== "queued" && transfer.stage !== "paused"));
@@ -389,7 +400,9 @@ export const FILE_METHODS: Record<string, Method> = {
 
   /**
    * Until a transfer ends: done answers, failed is an `engine` error with the transfer's words (and whether `file
-   * resend` can go on). A file whose transfer this run has not seen answers from the file store.
+   * resend` can go on). A received file this device had no room for is `unavailable` with the CLI's no-room words and
+   * `reason: "no_space"`, as every other full disk; before, it was `engine` with Node's raw ENOSPC text. A file whose
+   * transfer this run has not seen answers from the file store.
    */
   async "file.wait"(ctx, params) {
     const fileId = str(params, "file", true);
@@ -408,7 +421,10 @@ export const FILE_METHODS: Record<string, Method> = {
       if (error instanceof CliError && error.code === "timeout" && now) throw new CliError("timeout", `${error.message} (${now.transferred} of ${now.size} bytes${now.stage ? `, ${stageWords(now)}` : ""})`, { file: fileId, transferred: now.transferred, size: now.size, stage: now.stage ?? null });
       throw error;
     });
-    if (transfer.state === "failed") throw new CliError("engine", transfer.error ?? "The transfer failed", { file: fileId, ...where, retry: !!transfer.retry });
+    if (transfer.state === "failed") {
+      const said = transferFailure(transfer.error);
+      throw new CliError(said.reason ? "unavailable" : "engine", said.error ?? "The transfer failed", { file: fileId, ...where, retry: !!transfer.retry, ...(said.reason && { reason: said.reason }) });
+    }
     if (transfer.state !== "done") {
       const name = (stored ?? await fileStore.get(fileId).catch(() => undefined))?.metadata?.name ?? "The file";
       throw new CliError("confirm", `${name} (${megabytes(transfer.size)}) waits for you to take it: ghostly file accept ${fileId} (or file decline)`, { file: fileId, ...where, size: transfer.size, stage: "asking" });
@@ -431,7 +447,7 @@ export const FILE_METHODS: Record<string, Method> = {
     // A sent file's bytes were staged whole at send: its transfer is the contact's download, not bytes missing here.
     const transfer = stored.direction === "out" ? undefined : state(ctx).transfers[fileId] ?? stored.transfer;
     // One that ended will not come: its partial bytes were dropped, so "not all here yet" would have a script wait for good.
-    if (transfer?.state === "failed") throw new CliError("refused", `It ended: ${transfer.error ?? "failed"}`);
+    if (transfer?.state === "failed") throw endedError(transfer);
     if (transfer && transfer.state !== "done") throw new CliError("unavailable", `The file is not all here yet (${transfer.transferred} of ${transfer.size} bytes)`);
     const named = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), saveName(stored.metadata.voice ? voiceDownloadName(stored.metadata.mime, await voiceTime(ctx, stored)) : stored.metadata.name));
     const force = bool(params, "force");
