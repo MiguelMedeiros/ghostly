@@ -724,6 +724,11 @@ export interface NodeOptions {
    * Mesh § Hubs). Default: the Desktop app; the CLI says so itself; a browser tab only when the admin pins it.
    */
   staysOnline?: boolean;
+  /**
+   * Whether this app accepts the group invitations that come over this contact chat by itself (the CLI's `group auto on
+   * --from`, `GroupsHost.autoJoins`): one that comes while 32 wait takes the place of another chat's. Default: none.
+   */
+  autoJoins?: (linkId: string) => boolean;
   /** How long a chat reads a contact that left a live session no slower than the idle pace (GhostLink `watchPeerIdleMs`): the CLI's daemon, `DAEMON_WATCH_PEER_IDLE_MS`. */
   watchPeerIdleMs?: number;
   /**
@@ -1752,6 +1757,7 @@ export class GhostlyNode implements EngineImplementation {
     adminTurn: (_groupId, options) => this.confirmTurn({ within: options?.wait === false ? 0 : GhostlyNode.TURN_CONFIRM_WAIT_MS }),
     // An app with no WebRTC (the Linux Desktop) reaches members over native listeners, a few of them
     // (`groupNativeSlots`): it does not offer to be a private group's hub, which keeps an edge with everyone.
+    autoJoins: linkId => !!this.options.autoJoins?.(linkId),
     staysOnline: () => this.options.staysOnline ?? (this.options.platform === "desktop" && typeof RTCPeerConnection !== "undefined"),
     peerRoom: groupId => {
       // With no WebRTC, a group's links are native ones, and all the groups together hold what the transport with

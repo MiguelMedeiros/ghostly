@@ -205,7 +205,11 @@ function irohWasmBytes(): Buffer {
  * starts no chat or group and publishes nothing (a one-shot that only reads); `logJoins` says the steps of a join
  * through a group's link on stderr (a daemon, whose log that is: `joinLog.ts`).
  */
-export interface RuntimeOptions { deferGroups?: boolean; deferChats?: boolean; offline?: boolean; logJoins?: boolean }
+export interface RuntimeOptions {
+  deferGroups?: boolean; deferChats?: boolean; offline?: boolean; logJoins?: boolean;
+  /** The chats whose group invitations this profile accepts by itself (`group auto`, `NodeOptions.autoJoins`). */
+  autoJoins?: (linkId: string) => boolean;
+}
 
 /**
  * Starts the app's engine on this profile (WISP 1100 § Runtime): IndexedDB on disk, WebRTC through libdatachannel,
@@ -316,6 +320,7 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     holdFetch: nodeHoldFetch(),
     callsSupport: callsUnavailable === null,
     ...(callsUnavailable ? { callsUnavailable } : {}),
+    ...(options.autoJoins ? { autoJoins: options.autoJoins } : {}),
     ...(options.deferGroups ? { deferGroups: true } : {}),
     ...(options.deferChats ? { deferChats: true } : {}),
     ...(options.offline ? { offline: true } : {}),
