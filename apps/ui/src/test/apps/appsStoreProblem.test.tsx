@@ -53,6 +53,8 @@ describe("a store's last read that failed", () => {
     [{ problem: "status", problemStatus: 404 }, "Nothing found at that link."],
     [{ problem: "store-key" }, "That store is signed by a different key."],
     [{ problem: "not-json" }, "That link holds no valid store."],
+    [{ problem: "rollback" }, "This store's link now holds an older list than yours. Ghostly kept yours."],
+    [{ problem: "too-large" }, "This store's list is too large for Ghostly to read."],
   ])("says its cause: %o", async (problem, line) => {
     expect(await problemLine(store(problem))).toBe(line);
   });
@@ -70,6 +72,10 @@ describe("a store's last read that failed", () => {
 
   it("says its cause in the app's language", async () => {
     expect(await problemLine(store({ problem: "offline" }), "pt")).toBe("Você está offline.");
+  });
+
+  it("says an older list in the store's words, in the app's language", async () => {
+    expect(await problemLine(store({ problem: "rollback" }), "pt")).toBe("O link desta loja agora tem uma lista mais antiga que a sua. O Ghostly manteve a sua.");
   });
 
   it("says so when a Refresh fails again", async () => {

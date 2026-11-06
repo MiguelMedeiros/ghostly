@@ -34,6 +34,12 @@ const KEYS: Record<string, TranslationKey> = {
   storage: "apps.errors.storage",
 };
 
+/** A store's list held older or too large: said of the store's list, not of an app's version. */
+const STORE_KEYS: Record<string, TranslationKey> = {
+  rollback: "apps.store.rollback",
+  "too-large": "apps.store.tooLarge",
+};
+
 /** The longer story behind an ⓘ beside an error's line, for the errors that have one. */
 const INFO: Record<string, TranslationKey> = {
   storage: "apps.errors.storageInfo",
@@ -58,10 +64,12 @@ export function appErrorView(error: unknown, t: Translate): AppErrorView {
 
 /**
  * An error of reading or adding a store (Add): a store refused (not JSON, a bad field, a bad signature) says the link holds
- * no valid store, its refusal as it came behind the ⓘ, rather than an app Ghostly won't install.
+ * no valid store, its refusal as it came behind the ⓘ, rather than an app Ghostly won't install. An older or too large
+ * list is said of the store.
  */
 export function appStoreErrorView(error: unknown, t: Translate): AppErrorView {
   const code = appErrorCode(error);
+  if (code && STORE_KEYS[code]) return { text: t(STORE_KEYS[code]) };
   if (!code || (KEYS[code] && KEYS[code] !== "apps.errors.notSigned")) return appErrorView(error, t);
   return { text: t("apps.errors.notStore"), info: error instanceof Error ? error.message : String(error) };
 }
