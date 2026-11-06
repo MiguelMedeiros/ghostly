@@ -53,6 +53,9 @@ export const extensionHost: BrowserHost = {
   },
 
   async restartEngine() {
+    // Another tab switched while this page cleared its profile: the peer that runs now is the other profile's, just
+    // started, and this page starts again as that profile once its clear is over (`finishBeforeSwitching`).
+    if (!pageProfileIsCurrent()) return;
     const reply = await chrome.runtime.sendMessage({ target: "background", type: "restart-engine" } satisfies RuntimeMessage);
     if (!reply?.ok) throw new Error(reply?.error ?? "The Ghostly peer did not start again. Reopen the extension to retry.");
     // Every other tab of the extension is on the new peer now, still showing what the old one told it.
