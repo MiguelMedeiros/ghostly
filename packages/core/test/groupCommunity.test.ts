@@ -1165,11 +1165,15 @@ describe("a key let in only on a branch that lost", () => {
     alice.online = true;
     await net.meet(alice, bob);
     expect(bob.session.topHash).toBe(alice.session.topHash);
-    // Carol is told her admission lost (the link commit is what makes it lose) and asks again by the link she knew.
+    // The link commit is what makes her admission lose, and it carries the new link: no member sends it to her, so
+    // nothing she holds names the new link, and she is not told she lost.
     await net.meet(bob, carol);
-    expect(carol.session.status).toBe("lost");
+    await net.meet(alice, carol);
+    expect(JSON.stringify(carol.session.state)).not.toContain(entry);
+    expect(carol.session.state.chain.some(c => c.k === "link")).toBe(false);
+    expect(carol.session.status).toBe("active");
+    expect(carol.session.entryKey).toBe(old);
     expect(carol.session.lostEntryKey).toBe(old);
-    expect(carol.session.lostEntryKey).not.toBe(entry);
   });
 });
 

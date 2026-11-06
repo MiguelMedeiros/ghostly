@@ -2422,9 +2422,13 @@ export class CommunitySession {
     if (!answered.take()) return;
     // Let in only on a branch that lost: the commits from where it parts up to the one that makes it lose, and nothing
     // else (no secret, no frame, no later link), as `farewell` tells one taken out. Its app then knows to ask again.
+    // A new link's commit is never among them: its `x` is the link. When it is what makes the branch lose, the answer
+    // stops before it, and the key is not told it lost.
     if (lost) {
       const at = this.mainIndex.get(frame.h);
-      const commits = this.state.chain.slice(at !== undefined ? at + 1 : lost.fork + 1, lost.end + 1);
+      let commits = this.state.chain.slice(at !== undefined ? at + 1 : lost.fork + 1, lost.end + 1);
+      const link = commits.findIndex(c => c.k === "link" && !!c.x);
+      if (link >= 0) commits = commits.slice(0, link);
       if (commits.length) this.answers.handOut(from, commits.map(commit => ({ t: "group-commit" as const, v: 2 as const, g: this.id, commit })));
       return;
     }
