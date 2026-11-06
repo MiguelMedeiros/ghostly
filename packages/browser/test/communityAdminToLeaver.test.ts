@@ -13,15 +13,15 @@ describe("a community's admin role handed to a member whose leave is on its way"
   let restore: (() => void) | null = null;
   afterEach(() => { restore?.(); restore = null; });
 
-  async function group(seed: number) {
+  async function group(seed: number, names = ["carol", "bob", "dave", "erin"]) {
     const world = new CommunityWorld(undefined, null, seededRandom(seed));
     restore = sameRun(world, seed);
-    const peers = ["carol", "bob", "dave", "erin"].map(n => world.add(n));
+    const peers = names.map(n => world.add(n));
     const [carol, ...rest] = peers;
     const id = await carol.groups.create("Race");
     const link = await carol.groups.enableLink(id);
     for (const p of rest) { await p.groups.joinByLink(link); await world.until(() => world.member(p, id), 3 * 60_000); }
-    await world.until(() => peers.every(p => world.view(p, id)?.members.length === 4), 2 * 60_000);
+    await world.until(() => peers.every(p => world.view(p, id)?.members.length === names.length), 2 * 60_000);
     await world.run(20_000);
     const keyOf = new Map(peers.map(p => [world.view(p, id)!.myKey!, p] as const));
     const key = (p: Peer) => [...keyOf].find(([, q]) => q === p)![0];
@@ -44,6 +44,21 @@ describe("a community's admin role handed to a member whose leave is on its way"
     await admin.groups.remove(id, key(other));
     const left = stay.filter(p => p !== other);
     await world.until(() => left.every(p => world.view(p, id)?.name === "Still here" && world.view(p, id)!.members.length === left.length), 2 * 60_000, 1000, what);
+  }
+
+  /**
+   * A hub on an app from before (1.10.x), as its leave rule goes: the admin's request is dropped, and that of the member
+   * who handed it the role is committed at its next tick (the leaver is no hub to it any more, so it is the one that
+   * commits), not kept until the role goes on. Here at once, as that tick came before the new admin's hand-on.
+   */
+  async function olderHubCommits(world: CommunityWorld, hubs: Peer[], id: string): Promise<void> {
+    await world.settle();
+    for (const p of hubs) {
+      const s = p.groups.communities.session(id)!;
+      s.state.pendingLeaves = s.state.pendingLeaves.filter(r => r.s !== s.admin);
+      await s.commitPendingLeaves(world.now);
+    }
+    await world.settle();
   }
 
   for (const seed of [11, 22, 33]) {
@@ -73,6 +88,18 @@ describe("a community's admin role handed to a member whose leave is on its way"
       // The role goes back to carol, who handed it to bob: dave's lies took carol and erin out of bob's pick.
       expect(peerOf(world.view(carol, id)!.members.find(m => m.role === "admin")!.key).name).toBe("carol");
       expect(passedOn).toEqual([]);
+    });
+
+    // The commit of the old admin's leave reached its app first: its app stopped following, and its edges closed, the only
+    // one the new admin's app had among them (it was that member's hub). The role stayed with a leaver for good.
+    it(`seed ${seed}: the admin and the member its app picked leave at the same moment, with the other hubs on an older app`, async () => {
+      const { world, id, peers, carol, key, peerOf } = await group(seed, ["carol", "bob", "dave", "erin", "fay"]);
+      const next = peerOf(carol.groups.successor(id)!), stay = peers.filter(p => p !== carol && p !== next);
+      const hubs = stay.filter(p => world.view(p, id)?.community?.hub);
+      expect(hubs.length).toBeGreaterThan(0);
+      await Promise.allSettled([carol.groups.leave(id), next.groups.leave(id)]);
+      await olderHubCommits(world, hubs, id);
+      await converged(world, id, stay, key);
     });
 
     it(`seed ${seed}: control, the member leaves a second after the role reached it`, async () => {
