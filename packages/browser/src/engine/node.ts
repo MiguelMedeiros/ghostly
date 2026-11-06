@@ -992,8 +992,12 @@ export class GhostlyNode implements EngineImplementation {
   }
   /** The newest time written in each chat while this engine runs: a message written well before it is a catch-up. */
   private readonly newestAt = new Map<string, number>();
-  /** The chats deleted while this engine runs (`removeLink`): a row that comes for one later is not stored. */
-  private readonly removedChats = new Set<string>();
+  /**
+   * The chats deleted while this engine runs (`removeLink`), with how many times each was: a row that comes for one
+   * later is not stored, nor one whose store was under way as it was deleted (`storeNewMessage`), the same invite
+   * joined again meanwhile or not.
+   */
+  private readonly removedChats = new Map<string, number>();
   /** The chats whose contact's joined line came while this engine runs (`firstContactRow`), whatever `stored` says. */
   private readonly contactSpoke = new WeakSet<LiveLink>();
   /** Per group: when the last message written well before it came, came. What comes after it, as old, is its catch-up. */
@@ -3771,7 +3775,7 @@ export class GhostlyNode implements EngineImplementation {
     // Gone before its link stops: the link's closing events find no chat to make an outbox or files for again, and
     // nothing the link hears until it stops is taken (`whileChat`). Nor is a row stored for the chat later on.
     this.links.delete(linkId);
-    this.removedChats.add(linkId);
+    this.removedChats.set(linkId, (this.removedChats.get(linkId) ?? 0) + 1);
     if (filesEnded) setTimeout(() => void live.link?.stop(true), FILES_END_MS);
     else void live.link?.stop(true);
     void live.caps?.stop();
@@ -4009,8 +4013,12 @@ export class GhostlyNode implements EngineImplementation {
     const reply = message.replyTo;
     if (!reply || reply.messageId) return message;
     const group = message.linkId.startsWith("group:");
+    // A chat deleted in this run has no history left to look in, and its row is not stored (`storeNewMessage`).
+    const gone = () => !group && !this.links.has(message.linkId) && this.removedChats.has(message.linkId);
+    if (gone()) return message;
     let original: StoredMessage | undefined, history: StoredMessage[] | undefined;
     for (const rowId of group ? [reply.id] : [`peer_${reply.id}`, `me_${reply.id}`, ...await this.rowsNamed(message.linkId, reply.id)]) {
+      if (gone()) return message;
       const row = rowId === message.id ? undefined : await db.getMessage(message.linkId, rowId);
       if (row && replyRef(row, group) === reply.id) { original = row; break; }
     }
@@ -4029,7 +4037,7 @@ export class GhostlyNode implements EngineImplementation {
       const id = (await this.unkeyedRowsOf(this.links.get(message.linkId)!)).get(reply.id);
       const row = id === undefined || id === message.id ? undefined : await db.getMessage(message.linkId, id);
       if (row && replyRef(row) === reply.id) original = row;
-    } else if (!original && !group) {
+    } else if (!original && !group && !gone()) {
       history = await db.getMessages(message.linkId);
       original = history.find(m => m.id !== message.id && replyRef(m) === reply.id);
     }
@@ -9896,8 +9904,13 @@ export class GhostlyNode implements EngineImplementation {
     // Its place, in the order rows come (before anything is awaited).
     message = this.placed(message, place);
     const live = this.links.get(message.linkId);
-    // A chat deleted in this run takes no row again: none would ever be shown, nor deleted with it.
-    if (!live && this.removedChats.has(message.linkId)) return false;
+    // A chat deleted in this run takes no row again: none would ever be shown, nor deleted with it. Nor does one deleted
+    // while this store is under way (its reply looked for, its row written), even when the same invite was joined again
+    // meanwhile under the same id: checked after every wait below (`kept`).
+    const deletes = this.removedChats.get(message.linkId);
+    if (!live && deletes !== undefined) return false;
+    const chat = message.linkId;
+    const kept = () => this.removedChats.get(chat) === deletes;
     // The peer republishes what it sent for a few minutes: what was deleted here stays deleted.
     if (live?.stored.deletedIds?.includes(message.id)) return false;
     // A member's message its author deleted for everyone, coming again with a catch-up or handed on: it stays gone.
@@ -9913,7 +9926,7 @@ export class GhostlyNode implements EngineImplementation {
       const at = Date.now();
       message = { ...message, details: { ...withSend(message.details, { at, ...pathSnapshot(live, message.via), result: "sent" }), sentAt: at } };
     }
-    if (!(await db.addMessage(message))) return false;
+    if (!(await this.addRowWhile(message, kept))) return false;
     // It waits for the live link: `sendWaiting` finds it by its id (a list not read yet reads it from the history).
     if (live && waitsForLive(message)) void live.waitingSends?.then(known => known.add(message.id), () => {});
     // A row a reply names by another id than its own: `resolveReply` finds it by that id.
@@ -9931,14 +9944,29 @@ export class GhostlyNode implements EngineImplementation {
     const early = message.sender === "peer" && message.id.startsWith("peer_") ? this.editBuffer.take(message.linkId, message.id.slice(5)) : undefined;
     if (early) {
       await this.applyPeerEdit(message.linkId, message, early);
+      if (!kept()) return false;
       live?.link?.confirmEdit(early.id, early.e);
     }
     await this.messagesChanged(message.linkId, [message.id]);
+    if (!kept()) return false;
     this.emitState();
     // Reactions that came before it are shown now, and a member's edit.
     await this.reactions.stored(message);
     await this.groupEdits.stored(message);
     return true;
+  }
+
+  /**
+   * Writes a new message's row while `kept` says its chat is still the one its store began for, checked right before
+   * the write and again once it is done: a chat deleted while the row was being written loses it again, as the
+   * chat's other rows went (`db.deleteLink`). False when it was there already, or its chat went.
+   */
+  private async addRowWhile(message: StoredMessage, kept: () => boolean): Promise<boolean> {
+    if (!kept()) return false;
+    if (!(await db.addMessage(message))) return false;
+    if (kept()) return true;
+    await db.deleteMessage(message.linkId, message.id).catch(() => {});
+    return false;
   }
 
   private servicesChanged(): void {
