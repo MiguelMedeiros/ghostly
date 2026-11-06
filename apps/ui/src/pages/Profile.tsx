@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { hasVisible } from "@ghostly/core";
 import { InputGroup, LinkRow, Page } from "../components/layout";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
@@ -190,7 +191,7 @@ export function Profile() {
           <Block>
             <InputGroup as="form" onSubmit={(e) => { e.preventDefault(); if (!opening.current) attempt(() => { const entry = createProfile(newName); askNameIn(entry.id); switchProfile(entry.id, { route: "/profile" }); opening.current = true; setOpened(true); }); }}>
               <input data-testid="profile-new-name" autoFocus className={input} placeholder={t("profile.name")} value={newName} {...newNameField} />
-              <Button type="submit" variant="primary" data-testid="profile-create" disabled={!newName.trim() || opened}>{t("profile.create")}</Button>
+              <Button type="submit" variant="primary" data-testid="profile-create" disabled={!hasVisible(newName) || opened}>{t("profile.create")}</Button>
               <Button onClick={() => { setCreating(false); setNewName(""); setCancelled(true); }}>{t("common.cancel")}</Button>
             </InputGroup>
           </Block>
