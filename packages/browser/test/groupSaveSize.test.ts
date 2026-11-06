@@ -4,8 +4,9 @@ import { createIdentity, type GroupSession } from "@ghostly/core";
 import { db } from "../src/engine/db";
 import { Groups, type GroupStore, type GroupsHost } from "../src/engine/groups";
 import { SEQ_BLOCK } from "../src/engine/groupRows";
-import { STORES, clearProfileStores, groupLiveKey, store, wrap } from "../src/shared/idb";
-import type { StoredGroup } from "../src/shared/types";
+import { openRows } from "../src/engine/sealedRows";
+import { STORES, clearProfileStores, committed, groupLightKey, groupLiveKey, store, wrap } from "../src/shared/idb";
+import type { GroupLight, StoredGroup } from "../src/shared/types";
 // covers: groups.send
 
 /*
@@ -227,6 +228,48 @@ describe("a private group's saves", () => {
     expect(third.groups.pinOf(one)).toMatchObject({ id: m1, n: at + 3 });
     expect(third.groups.isRemoved(one, "member:0:2")).toBe(true);
     expect(third.groups.isRemoved(one, "member:0:3")).toBe(true);
+  });
+
+  it("v1.10.1 loads a group whose small row carries `of` as if the row were not there; a row without `of`, from builds before, still counts here", async () => {
+    await clearProfileStores();
+    const now = engine();
+    await now.groups.load();
+    const id = await grown(now.groups, 3, 0);
+    const sent = (await now.groups.send(id, "pin me")).messageId!;
+    const at = Date.now();
+    await now.groups.setPin(id, { id: sent, n: at, by: "me", at });
+    await now.groups.removed(id, "member:0:1");
+    await now.groups.flush();
+    const getLight = async () => wrap((await store(STORES.settings, "readonly")).get(groupLightKey(id))) as Promise<GroupLight>;
+    const putLight = async (light: GroupLight) => committed((await store(STORES.settings, "readwrite")).put(light, groupLightKey(id)));
+    const light = await getLight();
+    expect(light.of, "the row carries `of`").toEqual(expect.any(String));
+    expect(light).toMatchObject({ pin: { id: sent }, removedIds: ["member:0:1"] });
+
+    // v1.10.1's db.getGroups (`git show v1.10.1:packages/browser/src/engine/db.ts`): the groups store alone.
+    const getGroupsV1101 = async () => openRows(STORES.groups, await wrap((await store(STORES.groups, "readonly")).getAll()) as StoredGroup[]);
+    const read = await getGroupsV1101();
+    await committed((await store(STORES.settings, "readwrite")).delete(groupLightKey(id)));
+    expect(await getGroupsV1101(), "the row and its `of` change nothing it reads").toEqual(read);
+    await putLight(light);
+
+    // A row as builds before `of` wrote it: this one takes its pin and deletion, as it did.
+    const { of: _, ...withoutOf } = light;
+    await putLight(withoutOf);
+    const back = engine();
+    await back.groups.load();
+    expect(back.groups.pinOf(id)).toMatchObject({ id: sent, n: at });
+    expect(back.groups.isRemoved(id, "member:0:1")).toBe(true);
+    await putLight(light);
+
+    // v1.10.1 itself: the group loads, without the pin and deletion it never saw, and goes on sending.
+    const v1101: GroupStore = { getGroups: getGroupsV1101, putGroup: group => db.putGroup(group), deleteGroup: groupId => db.deleteGroup(groupId), getMessages: linkId => db.getMessages(linkId) };
+    const old = engine(v1101);
+    await old.groups.load();
+    expect(old.groups.pinOf(id)).toBeUndefined();
+    expect(old.groups.isRemoved(id, "member:0:1")).toBe(false);
+    await old.groups.send(id, "from 1.10.1");
+    expect(old.said[0]).toBeGreaterThan(Math.max(...now.said));
   });
 
   it("killed right after a send saved its counter and frame: that save went to the small row, and opened again the text is stored and said", async () => {
