@@ -1071,11 +1071,15 @@ export class GhostLink {
     // During migration the authenticated channel already reaches the peer.
     // Carry signed ICE signaling there instead of waiting for DHT polling.
     if (this.switcher?.pending?.choices.includes("webrtc/1") && this.channel && this.paired?.state.status === "ready") {
-      if (signed) this.channel.send(JSON.stringify({ t: "paired-rtc", signal: signed }));
+      if (signed) { this.channel.send(JSON.stringify({ t: "paired-rtc", signal: signed })); this.rtcViaChannel = true; }
       return;
     }
+    if (!signed) this.rtcViaChannel = false;
     void this.session.setRtcSignal(signed, !!this.options.params.profile).catch(report);
   }
+
+  /** A WebRTC signal of this attempt went over the authenticated channel (a migration), not the relays. */
+  private rtcViaChannel = false;
 
   /** This app is going away (`depart`): no more dials. */
   private leaving = false;
@@ -1321,6 +1325,8 @@ export class GhostLink {
       offerStanding: ts => !this.leaving && !this.stopped && !this.streamBlocked && this.peerOfferTs() === ts,
       onAnswerReplaced: () => this.redial(),
       onDirect: evidence => events.onDirectEvidence?.(evidence),
+      // An answer the relays' budget held back for the whole attempt never reached the offerer (agents#1637).
+      signalOut: () => this.rtcViaChannel || this.session.rtcSignalPublished,
       onAnswersRefused: () => this.answersRefused(),
       onOpen: channel => {
         if (this.streamBlocked || this.keyStopped) { channel.close(); return; }

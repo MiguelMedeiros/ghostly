@@ -420,6 +420,9 @@ export class LinkSession {
     return this.presence;
   }
 
+  /** The packet the relays last took carries a WebRTC signal of this side: the attempt's answer, or an earlier one of it. */
+  get rtcSignalPublished(): boolean { return this.rtcSignalOut !== null; }
+
   /** The `_rtc` signal the peer's packet carries, as last read: null when it carries none. */
   get peerSignal(): string | null {
     return this.peerRtcSignal;
