@@ -77,6 +77,19 @@ describe("file save to a folder", () => {
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", dir: file })).rejects.toMatchObject({ code: "not_found", message: `${file} is a file, not a folder` });
   });
 
+  it("a --path that ends in a separator names a folder, never the file's name, whether the folder is there or not", async () => {
+    // Before, resolve() dropped the slash: "--path downloads/" with no downloads folder left a file named downloads.
+    const missing = join(dir, "newfolder");
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: `${missing}/` })).rejects.toMatchObject({
+      code: "bad_request", message: `${missing}/ names a folder: name a file, or use --dir ${missing} (dir over the socket)`,
+    });
+    const file = join(dir, "slash.txt");
+    writeFileSync(file, "x");
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: `${file}/`, force: true })).rejects.toMatchObject({ code: "bad_request" });
+    expect(readdirSync(dir)).not.toContain("newfolder");
+    expect(readFileSync(file, "utf8")).toBe("x");
+  });
+
   it("a voice message goes into --dir under the name Ghostly makes for it, never the sender's", async () => {
     const folder = join(dir, "voice");
     mkdirSync(folder);
@@ -140,5 +153,7 @@ describe("file save to a folder", () => {
     expect(() => params(["chat-one-in-r", "--path", ""])).toThrow(expect.objectContaining({ code: "usage", message: "--path needs a file" }));
     expect(() => params(["chat-one-in-r", "--dir", ""])).toThrow(expect.objectContaining({ code: "usage", message: "--dir needs a folder" }));
     expect(params(["chat-one-in-r", "--path", "out.txt"])).toMatchObject({ path: join(process.cwd(), "out.txt") });
+    // The separator that makes it a folder reaches the daemon.
+    expect(params(["chat-one-in-r", "--path", "downloads/"])).toMatchObject({ path: `${join(process.cwd(), "downloads")}/` });
   });
 });

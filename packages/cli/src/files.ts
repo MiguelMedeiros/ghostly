@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { openAsBlob } from "node:fs";
 import { access, constants, copyFile, link, open, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { GROUP_FILE_LIMITS, LIMITS, NO_PICTURE_METADATA, NO_VIDEO_METADATA, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, claimedTime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, voiceDownloadName, withoutPictureMetadata, withoutVideoMetadata, type VoiceMeta } from "@ghostly/core";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
 import { fileStore } from "@ghostly/browser/shared/idb";
@@ -435,6 +435,12 @@ export const FILE_METHODS: Record<string, Method> = {
     if (transfer && transfer.state !== "done") throw new CliError("unavailable", `The file is not all here yet (${transfer.transferred} of ${transfer.size} bytes)`);
     const named = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), saveName(stored.metadata.voice ? voiceDownloadName(stored.metadata.mime, await voiceTime(ctx, stored)) : stored.metadata.name));
     const force = bool(params, "force");
+    // A --path that ends in a separator names a folder: resolve() dropped the slash, and "--path downloads/" with no
+    // downloads folder left a file named downloads. A folder that is there is answered below, as without the slash.
+    const path = str(params, "path");
+    if (path && (path.endsWith("/") || path.endsWith(sep)) && !(await stat(named).catch(() => undefined))?.isDirectory()) {
+      throw new CliError("bad_request", `${path} names a folder: name a file, or use --dir ${named} (dir over the socket)`);
+    }
     // A voice message's name is Ghostly's, down to the second its sender claims: two of one second took one name, and
     // the --force the confirm hinted at replaced the first recording with the other. In --dir it steps to a free
     // "<name> (2)", as a browser's Download does; a --path the user named is never renamed.
