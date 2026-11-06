@@ -12,6 +12,7 @@ import { activeNamespace, databaseFor, peerLockFor } from "./profile";
 import { activeProfileId } from "../../ui/src/lib/profiles";
 import { fromOwnPage } from "./shared/sender";
 import { setStorageProfile } from "../../ui/src/lib/storage";
+import { allowedLocalFetch } from "./localAllowList";
 
 /**
  * The offscreen document is the Ghostly peer. Service workers have no
@@ -56,7 +57,9 @@ const server = new Promise<PeerServer>((resolve, reject) => {
     // A new profile gets its default Mainnet wallets; never in a test build or an automated browser.
     // No mini-app runner here yet (WISP 1200 § Per client: Extension, and the TODO below): the engine offers no apps/1
     // and refuses the app calls, whatever the build's APPS_ENABLED says.
-    void createPeerServer({ platform: "extension", irohWeb: true, apps: false, defaultWallets: defaultWalletsAllowed(() => import.meta.env.MODE === "e2e") }).then((peer) => {
+    // A contact reaches only the local addresses this profile's person allowed in this browser, as the worker reads them
+    // (localAllowList.ts: this document has no `chrome.storage` nor `chrome.permissions`).
+    void createPeerServer({ platform: "extension", irohWeb: true, apps: false, defaultWallets: defaultWalletsAllowed(() => import.meta.env.MODE === "e2e"), localFetch: allowedLocalFetch(profile) }).then((peer) => {
       running = peer;
       // Only in `vite build --mode e2e` (test/attacks.mjs plays a malicious peer through it); gone from real builds.
       if (import.meta.env.MODE === "e2e") Object.assign(globalThis, { __ghostly: running });

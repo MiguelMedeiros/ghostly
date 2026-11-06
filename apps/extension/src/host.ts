@@ -7,9 +7,10 @@ import { extensionAtproto } from "./atproto";
 import { loadSettings } from "../../ui/src/lib/settings";
 import { languageTag, textDirection } from "../../ui/src/lib/documentLanguage";
 import { translatorFor } from "../../ui/src/locales";
-import { markEngineRestart, pageProfileIsCurrent, startAsProfileInUse } from "./profile";
+import { activeNamespace, markEngineRestart, pageProfileIsCurrent, startAsProfileInUse } from "./profile";
 import { setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
 import { forgetLocalAccess, releaseUnusedLocalAccess } from "./localAccess";
+import { allowLocalOrigin, localOriginAllowed } from "./localAllowList";
 
 // A contact's app tabs close when the profile locks, as Desktop's windows do: the worker serves them, page or not.
 setServiceWindowsCloser(() => void chrome.runtime.sendMessage({ target: "background", type: "close-services" } satisfies RuntimeMessage).catch(() => {}));
@@ -62,8 +63,14 @@ export const extensionHost: BrowserHost = {
     markEngineRestart();
   },
 
-  // Chrome's own prompt, and only from a user gesture.
-  requestLocalAccess: (originPattern) => chrome.permissions.request({ origins: [originPattern] }),
+  // Chrome's own prompt, and only from a user gesture: it comes first. The exact address goes on this profile's list,
+  // the only addresses its peer reaches (localAllowList.ts).
+  async requestLocalAccess(originPattern, origin) {
+    const granted = await chrome.permissions.request({ origins: [originPattern] });
+    if (granted) await allowLocalOrigin(activeNamespace(), origin);
+    return granted;
+  },
+  localAccessAllowed: (origin) => localOriginAllowed(activeNamespace(), origin),
   // Given back once no app of any profile is at that host, on any port (localAccess.ts).
   forgetLocalAccess,
   releaseUnusedLocalAccess,
