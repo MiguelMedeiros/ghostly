@@ -117,6 +117,18 @@ export function nameKey(name: string | null | undefined): string {
   return (sanitizeDisplayText(name.replace(/\s+/gu, " "), Infinity)?.replace(/ {2,}/g, " ") ?? "").normalize("NFC").toLowerCase();
 }
 
+/**
+ * A name this side writes (a chat's label, the profile's name, a group's name) cleaned as the engine stores a name
+ * (`renameLink`, `groupName`): any run of whitespace (a tab, a line break) one space, invisible and direction-changing
+ * characters dropped, trimmed, in NFC: `nameKey` without the case. Counted after that, in code points as the engine
+ * counts: undefined past `max`, "" when nothing visible is left. Every command that writes a name checks it here, so a
+ * tab is a space and not a second line, and a name is never refused at a length it does not have once stored.
+ */
+export function cleanName(name: string, max: number): string | undefined {
+  const clean = (sanitizeDisplayText(name.replace(/\s+/gu, " "), Infinity)?.replace(/ {2,}/g, " ") ?? "").normalize("NFC");
+  return [...clean].length > max ? undefined : clean;
+}
+
 /** Whether `name` is the one `key` (a ref's `nameKey`) names. */
 const namedAs = (key: string, name: string | null | undefined) => key !== "" && nameKey(name) === key;
 

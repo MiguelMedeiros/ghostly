@@ -5,7 +5,7 @@ import { findSecret, guardText, secretWords } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
 import {
-  bool, chatOf, chatOrGroup, dhtOnly, findChat, findGroup, groupOf, inviteTaken, list, messageOf, node, num, oneOf, state, str, transportOffered, waitForState,
+  bool, chatOf, chatOrGroup, cleanName, dhtOnly, findChat, findGroup, groupOf, inviteTaken, list, messageOf, node, num, oneOf, state, str, transportOffered, waitForState,
   type ApiContext, type Method, type Params,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -87,20 +87,22 @@ function relayRefused(error: unknown, patch: Record<string, unknown>): unknown {
 
 // ---------- chat names ----------
 
-/** The engine keeps a chat's name to 48 UTF-16 units (renameLink). */
-const CHAT_NAME_UNITS = 48;
+/** The engine keeps a chat's name to 48 characters (code points: `renameLink`). */
+const CHAT_NAME_LENGTH = 48;
 
 /**
- * A chat's name on this side (`chat rename`, an invite's `--label`): what the engine keeps whole, on one line, refused
- * with the rule as a profile's or a group's name is. Taken as given, the engine cut it at 48 UTF-16 units without a
- * word (half an emoji left as a lone surrogate) and kept line breaks. Counted as the engine counts: an emoji is two.
+ * A chat's name on this side (`chat rename`, an invite's `--label`), as the engine stores it (`cleanName`): a tab or a
+ * line break is a space, invisible characters go, and what is left is counted. Longer than the engine keeps whole is
+ * refused, not cut. An empty name (or spaces) is the documented one of `chat rename` (the contact's own name) and no
+ * label for an invite; a name with nothing that shows is refused: given as is, the engine cleared the chat's name.
  */
 function chatName(params: Params, name: string): string | undefined {
   const value = str(params, name);
-  if (value !== undefined && (value.trim().length > CHAT_NAME_UNITS || /\p{Cc}/u.test(value.trim()))) {
-    throw new CliError("bad_request", `A chat's name is up to ${CHAT_NAME_UNITS} characters on one line (an emoji counts as two)`);
-  }
-  return value;
+  if (value === undefined || !value.trim()) return value === undefined ? undefined : "";
+  const clean = cleanName(value, CHAT_NAME_LENGTH);
+  if (clean === undefined) throw new CliError("bad_request", `A chat's name is up to ${CHAT_NAME_LENGTH} characters on one line`);
+  if (!clean) throw new CliError("bad_request", `A chat's name needs a character that shows (an empty name gives back the contact's own)`);
+  return clean;
 }
 
 // ---------- mentions ----------
@@ -637,7 +639,8 @@ const METHODS: Record<string, Method> = {
 
   async "group.create"(ctx, params) {
     // As `group rename` checks it: a name a group cannot have is said here, before anything is made.
-    const name = groupName(str(params, "name", true));
+    const clean = cleanName(str(params, "name", true), MAX_GROUP_NAME_LENGTH);
+    const name = clean && groupName(clean);
     if (!name) throw new CliError("bad_request", `A group's name is 1 to ${MAX_GROUP_NAME_LENGTH} characters on one line`);
     // Every member reads it, and a community's anyone who opens its link.
     guardText(name, bool(params, "force"), "group's name", "create it");
