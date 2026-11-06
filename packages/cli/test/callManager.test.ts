@@ -1092,6 +1092,53 @@ describe("two call managers", { timeout: 60_000 }, () => {
         await until(() => counted.open() === 0);
       });
     });
+
+    // The daemon's log (daemon.log) only grows: a line per call a contact's loop places would fill the disk at its pace.
+    it("a contact ringing and hanging up over and over writes one line to the daemon's log for the burst, not one per call", async () => {
+      const at = Date.now();
+      const { caller, offer, hangUp } = await offered();
+      const callee = lone("chat-ba", { now: () => at });
+      const logged: string[] = [];
+      const write = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => { logged.push(String(chunk)); return true; });
+      try {
+        for (let i = 0; i < 200; i++) {
+          callee.side.calls.onSignal("chat-ba", offer());
+          callee.side.calls.onSignal("chat-ba", hangUp());
+        }
+        await new Promise((r) => setTimeout(r, 50));
+      } finally {
+        write.mockRestore();
+      }
+      expect(callee.side.events.filter((e) => e.type === "call.incoming")).toHaveLength(1);
+      expect(logged.filter((line) => line.includes("kept as missed"))).toHaveLength(1);
+      await caller.side.calls.stopAll();
+      await callee.side.calls.stopAll();
+    });
+
+    it("an answered call that never connects says once in the daemon's log that it ignores the caller's further offers", async () => {
+      await withEnv({ GHOSTLY_STUN: "0" }, async () => {
+        const { caller, offer } = await offered();
+        await caller.side.calls.stopAll();
+        const counted = countingStack();
+        const callee = lone("chat-ba", { stack: counted });
+        callee.side.calls.onSignal("chat-ba", offer());
+        await callee.side.calls.answer(undefined, {});
+        const logged: string[] = [];
+        const write = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => { logged.push(String(chunk)); return true; });
+        try {
+          for (let i = 0; i < 200; i++) {
+            callee.side.calls.onSignal("chat-ba", offer());
+            if (i < 2 * MAX_REDIALS) await new Promise((r) => setTimeout(r, 150));
+          }
+        } finally {
+          write.mockRestore();
+        }
+        expect(signalsOf(callee.side, "a")).toHaveLength(1 + MAX_REDIALS);
+        expect(logged.filter((line) => line.includes("past the last start-over"))).toHaveLength(1);
+        await callee.side.calls.stopAll();
+        await until(() => counted.open() === 0);
+      });
+    });
   });
 
   it("an answer refused as its connection closes: both sides start over once, on new connections and the same sockets", async () => {

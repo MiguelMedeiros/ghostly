@@ -111,6 +111,8 @@ interface Call {
   redials: number;
   /** How many times this side answered the contact's newer offer on a new connection (`reanswer`). */
   reanswers: number;
+  /** The log said the contact's offers past the last start-over are ignored: it says so once a call. */
+  ignoring: boolean;
   /** Counts the connections made for the call: one that comes back after a newer one was asked for is closed. */
   attempt: number;
   /** The attempt whose connection has the contact's answer (0: none yet), and when it went in (Date.now()). */
@@ -157,6 +159,11 @@ export class CallManager {
   private readonly missedAt = new Map<string, number>();
   /** Per chat: the contact's last call held back (`QUICK_REDIAL_MS`) until its hang-up, and when it came. */
   private readonly held = new Map<string, { offer: CallSignal; at: number }>();
+  /**
+   * The chats whose contact's calls are being held back (`QUICK_REDIAL_MS`) since the last that rang: the log says so for
+   * the first only. A detached daemon's log only grows, and a contact's loop would set its pace.
+   */
+  private readonly bursts = new Set<string>();
   /** The early answers being made, those of ended calls too (MAX_EARLY_ANSWERS). */
   private readonly makings = new Set<Making>();
   private auto: AutoAnswer;
@@ -203,8 +210,9 @@ export class CallManager {
       this.lastSignal.set(chat, signal.ts);
       if (this.quickRedial(chat)) {
         // Placed faster than a person redials (QUICK_REDIAL_MS), as the apps hold it: kept as missed, with no ring, no
-        // event and no answer, auto-answer's included. A burst rings once.
-        process.stderr.write(`ghostly: chat ${chat}: a call came right after a missed one that barely rang: kept as missed\n`);
+        // event and no answer, auto-answer's included. A burst rings once, and is one line in the log.
+        if (!this.bursts.has(chat)) process.stderr.write(`ghostly: chat ${chat}: a call came right after a missed one that barely rang: kept as missed, and the next ones that come as fast\n`);
+        this.bursts.add(chat);
         this.missedAt.set(chat, this.now);
         this.held.set(chat, { offer: signal, at: this.now });
       } else {
@@ -223,10 +231,13 @@ export class CallManager {
     } else if (signal.t === "o" && call?.direction === "in" && call.state === "connecting" && call.media && signal.ts > (call.offer?.ts ?? 0)) {
       // The contact's side offered again on a new connection (see `redial`): the answered call starts over on one, up
       // to MAX_REDIALS times, as the apps do (MAX_RESTARTS). Past it the offer is ignored, and the call that did not
-      // connect ends as `failed` at its timer.
+      // connect ends as `failed` at its timer. The log says so once.
       this.lastSignal.set(chat, signal.ts);
       if (call.reanswers < this.maxRedials) void this.reanswer(call, signal);
-      else process.stderr.write(`ghostly: call ${call.id}: the contact offered again past the last start-over: ignored\n`);
+      else if (!call.ignoring) {
+        call.ignoring = true;
+        process.stderr.write(`ghostly: call ${call.id}: the contact offered again past the last start-over: ignored, and its next offers on this call\n`);
+      }
     } else if (signal.t === "v") {
       this.lastSignal.set(chat, signal.ts);
     } else if (signal.t === "h") {
@@ -258,6 +269,7 @@ export class CallManager {
 
   private incoming(chat: string, offer: CallSignal): void {
     this.held.delete(chat);
+    this.bursts.delete(chat);
     const link = this.link(chat);
     const call = this.add(chat, "in", this.auto.rate);
     call.offer = offer;
@@ -554,7 +566,7 @@ export class CallManager {
     if (clearing) { clearTimeout(clearing); this.clearing.delete(chat); }
     const call: Call = {
       id: randomBytes(6).toString("hex"), chat, direction, state: "ringing", rate, video: false, offer: null, offerTs: 0,
-      offering: false, redials: 0, reanswers: 0, attempt: 0, answered: 0, answeredAt: 0, media: null, early: null, making: null, earlyTimer: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, timer: null,
+      offering: false, redials: 0, reanswers: 0, ignoring: false, attempt: 0, answered: 0, answeredAt: 0, media: null, early: null, making: null, earlyTimer: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, timer: null,
       watcher: null, stalledFrom: null, stalls: 0, ended: false,
     };
     this.calls.set(call.id, call);
