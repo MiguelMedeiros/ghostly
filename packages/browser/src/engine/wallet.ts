@@ -56,6 +56,12 @@ function amountlessUnderOptions(info: GetInfoResponse): GetInfoResponse {
   const moved = info.nuts[5].methods.map((method) => (saysAmountlessBeside(method) ? { ...method, options: { ...method.options, amountless: true } } : method));
   return { ...info, nuts: { ...info.nuts, 5: { ...info.nuts[5], methods: moved } } };
 }
+/**
+ * An invoice from the mint, with `label` as its description when the mint says it takes one. NUT-04's `description` is
+ * optional: cashu-ts refuses to ask a mint that leaves it out for an invoice with one, and the label is only a label.
+ */
+const mintInvoice = (wallet: Wallet, amount: number, label: string) =>
+  wallet.createMintQuoteBolt11(amount, wallet.getMintInfo().supportsNut04Description?.("bolt11", UNIT) === false ? undefined : label);
 /** A Lightning payment can stay in flight for minutes or hours; the mint is asked again this often. */
 const MELT_POLL_MS = 30_000;
 /** Once its request can no longer land, a payment still pending is asked twice as late each time, up to this. */
@@ -537,7 +543,7 @@ export class CashuWallet {
     let lastError: unknown = new Error("No mint configured");
     for (const candidate of this.getMints(network)) {
       try {
-        created = { mint: candidate, response: await within(MINT_TIMEOUT_MS, (await this.wallet(candidate)).createMintQuoteBolt11(amount, "Ghostly"), candidate) };
+        created = { mint: candidate, response: await within(MINT_TIMEOUT_MS, mintInvoice(await this.wallet(candidate), amount, "Ghostly"), candidate) };
         break;
       } catch (error) {
         lastError = error;
@@ -612,7 +618,7 @@ export class CashuWallet {
     assertAmount(amount);
     const mint = this.getMints(network).find(paysItsOwnInvoices);
     if (!mint) throw new Error("This wallet has no test mint to ask for test coins");
-    const response = await within(MINT_TIMEOUT_MS, (await this.wallet(mint)).createMintQuoteBolt11(amount, "Ghostly test coins"), mint);
+    const response = await within(MINT_TIMEOUT_MS, mintInvoice(await this.wallet(mint), amount, "Ghostly test coins"), mint);
     const quote: StoredQuote = {
       quote: response.quote,
       mint,
