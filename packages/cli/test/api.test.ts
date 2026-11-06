@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AWAITING_PEER_MS, OwnInviteError, type PairingProgress } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, findChat, findGroup, hideStateSecrets, mentionsFor, redactSettings, type ApiContext } from "../src/api";
-import { chatOrGroup, findChatOrGroup } from "../src/apiKit";
+import { chatOrGroup, findChatOrGroup, findOwnNamedChat } from "../src/apiKit";
 import { parseArgs } from "../src/args";
 import { COMMANDS } from "../src/commands";
 import { ENGINE_PARAMS } from "../src/engineMethods";
@@ -284,6 +284,24 @@ describe("chats", () => {
     const list = await allowlist(["owner"], [], (method, params) => callApi(named, method, params), async () => null);
     expect(await list.allows(event(owner.id))).toBe(true);
     expect(await list.allows(event(mallory.id))).toBe(false);
+  });
+
+  it("listen --from takes a label given here in every form send and call auto on --from take it (a tab, a trailing space, decomposed accents)", async () => {
+    // Stored as `chat rename` stores them: a tab as a space, in NFC. The contact chose no name; Mallory calls herself "owner".
+    const ops = link("chatOpsxxxxxxxxx", { label: "ops bot" }), cafe = link("chatCafexxxxxxxx", { label: "Café" }), mallory = link("chatMalloryxxxxx", { peerNick: "owner" });
+    const links = [ops, cafe, mallory];
+    const ctx = { runtime: { server: { node: { getState: () => ({ links, groups: [] }) } } } } as unknown as ApiContext;
+    const call = (method: string, params: Record<string, unknown>) => callApi(ctx, method, params);
+    const event = (chat: string) => ({ seq: 1, id: "e", type: "message.received", at: 1, chat, message: { id: "m", text: "hi", timestamp: 1 } }) as GhostlyEvent;
+    for (const [ref, chat] of [["ops\tbot", ops], ["Café ", cafe], ["café", cafe]] as const) {
+      expect(findChat(links, ref).id).toBe(chat.id);
+      expect(findOwnNamedChat(links, ref).id).toBe(chat.id);
+      const list = await allowlist([ref], [], call, async () => null);
+      expect(await list.allows(event(chat.id))).toBe(true);
+      expect(await list.allows(event(mallory.id))).toBe(false);
+    }
+    // A name only the contact chose is still refused, as before.
+    await expect(allowlist(["owner "], [], call, async () => null)).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/ghostly chat rename/), details: { chat: mallory.id, name: "owner", contact: mallory.peerPubKeyZ32 } });
   });
 
   it("a ref that is one group's name and a prefix of another group's id is refused, with both ids, by every command", async () => {
