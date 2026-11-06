@@ -27,6 +27,14 @@ export function mintRefused(error:unknown):boolean{
  if(error.name==='StaleKeysetError')return mintRefused((error as {cause?:unknown}).cause);
  return error.name==='MintOperationError' && 'code' in error;
 }
+/**
+ * The mint refused outputs for their keyset: one it retired, or does not know, since they were made. No request with
+ * those outputs is ever signed; new ones on the keyset it signs with now can be. cashu-ts says it in its own English,
+ * which is never shown to a person.
+ */
+export function keysetRefused(error:unknown):boolean{
+ return error instanceof Error && error.name==='StaleKeysetError' && mintRefused(error);
+}
 export const NEVER_REACHED_MINT="The payment never reached the mint: nothing was sent, and the sats are back in your wallet. You can pay again.";
 
 export class CashuAdapter implements PaymentAdapter<CashuPrepared> {
