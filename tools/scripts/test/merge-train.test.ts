@@ -71,6 +71,9 @@ function fakeRepo() {
   /** Whether the train may merge a batch's pull requests past dev's rule, and the ones GitHub would squash to other files. */
   const rules = { bypass: true };
   const skewed = new Set<number>();
+  /** What `GET /pulls/<n>` answers as mergeable_state, one per read and the last kept (unset: clean), and each such read. */
+  const mergeStates = new Map<number, string[]>();
+  const pullReads: number[] = [];
   /** A lone pull request merges only at its head, and only while that head sits on the base's tip. */
   const mergeAlone = (p: Pr, sha: string) => {
     if (p.sha !== sha || sitsOn.get(sha) !== tips[p.base]) return { ok: false, message: "HTTP 405 not up to date" };
@@ -140,7 +143,12 @@ function fakeRepo() {
       if (state) return state.prs.filter((m: { commit?: string }) => made.has(m.commit!)).map((m: { commit: string }) => ({ sha: m.commit, commit: { message: made.get(m.commit)!.message, tree: { sha: made.get(m.commit)!.tree } } }));
       return (commits.get(n) ?? [`part one of ${n}`, `part two of ${n}\n\nIts body.`]).map((message) => ({ commit: { message } }));
     },
-    pull: async (n: number) => ({ ...pulls.get(n)!, labels: [...pulls.get(n)!.labels], merged: !!pulls.get(n)!.merged }),
+    pull: async (n: number) => {
+      pullReads.push(n);
+      const states = mergeStates.get(n) ?? [];
+      const mergeState = (states.length > 1 ? states.shift() : states[0]) ?? "clean";
+      return { ...pulls.get(n)!, labels: [...pulls.get(n)!.labels], merged: !!pulls.get(n)!.merged, mergeState };
+    },
     commit: async (sha: string) => ({ verified: !unsigned.has(sha), reason: unsigned.has(sha) ? "unsigned" : "valid", tree: treeOf(sha) }),
     /**
      * GitHub's squash merge: one new commit on the base (`s<n>`), written and signed by GitHub, holding the base's
@@ -255,7 +263,7 @@ function fakeRepo() {
   const flight = () => (batch() ? members() : [...pulls.values()].filter((p) => p.open && alone(p.number)?.sha === p.sha).map((p) => p.number));
   let stamp = 0;
   const run = (opts = {}) => tick({ gh, git, base: "dev", login: "train", stamp: String(stamp++), pause: async () => {}, ...opts });
-  return { gh, git, pulls, events, comments, runs, earlier, kinds, meta, files, drafts, going, cancelled, cancelAccess, pushed, moves, tips, landed, conflicts, unrebasable, missing, moved, pushes, sitsOn, merges, squashes, commits, unsigned, trees, made, rules, skewed, add, settle, batch, members, alone, flight, run };
+  return { gh, git, pulls, events, comments, runs, earlier, kinds, meta, files, drafts, going, cancelled, cancelAccess, pushed, moves, tips, landed, conflicts, unrebasable, missing, moved, pushes, sitsOn, merges, squashes, commits, unsigned, trees, made, rules, skewed, mergeStates, pullReads, add, settle, batch, members, alone, flight, run };
 }
 
 describe("the line", () => {
@@ -294,6 +302,15 @@ describe("the line", () => {
     expect(waiting(pr(1, { ci: "pending" }))).toMatch(/not passed/);
     const line = [pr(1), pr(2, { ci: "pending" }), ...Array.from({ length: 13 }, (_, i) => pr(i + 3))];
     expect(pickBatch(line).map((p) => p.number)).toEqual([1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+  });
+
+  it("puts a conflict with the base before every reason but a hold or a draft", () => {
+    const pr = (extra = {}) => ({ number: 1, ci: "failure", draft: false, fork: false, base: "epic/x", conflict: true, labels: [LABEL.queue], ...extra });
+    expect(waiting(pr())).toBe("it conflicts with `epic/x`, and GitHub runs no CI on a pull request until its conflict with the base is resolved; merge `origin/epic/x` into it. It keeps its place until then; after that push it leaves the line and joins it again at the back once it is reviewed and queued");
+    for (const extra of [{ ci: "pending", fast: "failure" }, { ci: "pending", misplanned: true }, { fork: true }, { unread: "events" }]) expect(waiting(pr(extra))).toMatch(/^it conflicts with `epic\/x`/);
+    expect(waiting(pr({ draft: true }))).toBe("it is a draft");
+    expect(waiting(pr({ labels: [LABEL.queue, HOLD] }))).toMatch(/on hold/);
+    expect(waiting(pr({ conflict: false }))).toMatch(/^CI Success is red/);
   });
 
   it("lets a ready pull request board on its fast tier alone, unless CI Success is red", () => {
@@ -427,6 +444,64 @@ describe("a run of the train", () => {
     expect(repo.members()).toEqual([11, 13]);
     expect(repo.pulls.get(12)!.labels).toEqual([LABEL.conflict]);
     expect(repo.comments.get(12)!.map((c) => c.body)).toEqual([expect.stringMatching(/conflicts with `dev`/)]);
+  });
+
+  const conflictSaid = /Waiting: it conflicts with `dev`, and GitHub runs no CI on a pull request until its conflict with the base is resolved; merge `origin\/dev` into it\. It keeps its place until then; after that push it leaves the line and joins it again at the back once it is reviewed and queued\.$/;
+
+  it("says first that a queued pull request that waits conflicts with its base, which GitHub runs no CI on, and keeps it in line", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { ci: running });
+    repo.add(12, { ci: red });
+    for (const n of [11, 12]) repo.mergeStates.set(n, ["dirty"]);
+    const r = await repo.run();
+    expect(repo.pullReads).toEqual([11, 12]);
+    expect(repo.comments.get(11)![0].body).toMatch(/1st\*\*\. /);
+    expect(repo.comments.get(11)![0].body).toMatch(conflictSaid);
+    // Before its red CI too: no re-run starts while it conflicts.
+    expect(repo.comments.get(12)![0].body).toMatch(/2nd\*\*\. /);
+    expect(repo.comments.get(12)![0].body).toMatch(conflictSaid);
+    // Only the reason changes: no label, no drop, and nobody boards.
+    for (const n of [11, 12]) expect(repo.pulls.get(n)!.labels).toEqual([LABEL.queue]);
+    expect(r.dropped).toEqual([]);
+    expect(repo.batch()).toBeUndefined();
+  });
+
+  it("asks once more when GitHub has not worked out whether a waiting pull request conflicts yet", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { ci: running });
+    repo.mergeStates.set(11, ["unknown", "dirty"]);
+    repo.add(12, { ci: running });
+    repo.mergeStates.set(12, ["unknown", "unknown", "dirty"]);
+    const pauses: number[] = [];
+    await repo.run({ pause: async (ms: number) => void pauses.push(ms) });
+    expect(repo.pullReads).toEqual([11, 11, 12, 12]);
+    expect(pauses).toEqual([2000, 2000]);
+    expect(repo.comments.get(11)![0].body).toMatch(conflictSaid);
+    // Still unknown after the second ask: today's reason, and the next run asks again.
+    expect(repo.comments.get(12)![0].body).toMatch(/2nd\*\*\. Waiting: CI Success has not passed on its last commit yet\. It keeps its place\.$/);
+  });
+
+  it("reads no mergeable state for a pull request that boards, or one that waits on a draft or a hold", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12]) repo.add(n);
+    repo.add(13, { ci: running, draft: true });
+    for (const n of [11, 12, 13]) repo.mergeStates.set(n, ["dirty"]);
+    await repo.run();
+    expect(repo.members()).toEqual([11, 12]);
+    expect(repo.pullReads).toEqual([]);
+    expect(repo.comments.get(13)![0].body).toMatch(/Waiting: it is a draft\. It keeps its place\.$/);
+  });
+
+  it("keeps today's reasons for a waiting pull request that does not conflict", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { ci: running });
+    repo.mergeStates.set(11, ["blocked"]);
+    repo.add(12, { ci: red });
+    repo.mergeStates.set(12, ["clean"]);
+    await repo.run();
+    expect(repo.pullReads).toEqual([11, 12]);
+    expect(repo.comments.get(11)![0].body).toMatch(/1st\*\*\. Waiting: CI Success has not passed on its last commit yet\. It keeps its place\.$/);
+    expect(repo.comments.get(12)![0].body).toMatch(/2nd\*\*\. Waiting: CI Success is red on its last commit\. A re-run/);
   });
 
   it("drops a pull request git cannot fetch with queue:failed and one comment, and boards the rest (2026-10-19: one stopped the line)", async () => {
@@ -3043,6 +3118,14 @@ describe("GitHub over REST", () => {
   it("keeps the status of an HTML error page readable once retries run out", async () => {
     const gh = restLayer("t", "o/r", { fetchImpl: async () => reply(502, "<html>bad gateway</html>"), wait: async () => {} });
     await expect(gh.branchSha("dev")).rejects.toThrow(/HTTP 502 <html>bad gateway/);
+  });
+
+  it("keeps a pull request's mergeable state as GitHub answers it for one pull request", async () => {
+    const one = { number: 7, title: "t", body: "", draft: false, head: { sha: "abc", ref: "fix-7", repo: { full_name: "o/r" } }, labels: [], created_at: "", state: "open", base: { ref: "dev" }, user: { login: "a" }, merged: false };
+    const answers = [reply(200, { ...one, mergeable_state: "dirty" }), reply(200, [one])];
+    const gh = restLayer("t", "o/r", { fetchImpl: async () => answers.shift(), wait: async () => {} });
+    expect(await gh.pull(7)).toMatchObject({ number: 7, mergeState: "dirty", merged: false });
+    expect((await gh.pulls("dev"))[0].mergeState).toBeUndefined(); // a list leaves it out
   });
 
   it("asks for a squash merge at a head with a title and a message, and reads back what GitHub made", async () => {
