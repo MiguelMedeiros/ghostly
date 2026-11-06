@@ -583,6 +583,22 @@ pub fn native_call_mute(id: String, muted: bool) -> Result<(), String> {
     }
 }
 
+/// The page is in sight, or out of it (`document.hidden`): out of sight, the cameras' previews and the call's
+/// pictures are not made JPEGs for it past the first ([`engine::PAGE_HIDDEN`]).
+#[tauri::command]
+pub fn native_pictures_shown(shown: bool) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        engine::PAGE_HIDDEN.store(!shown, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = shown;
+        Err(ELSEWHERE.into())
+    }
+}
+
 /// Sends this camera's picture in the call, or none (`camera` null).
 #[tauri::command]
 pub fn native_call_camera(id: String, camera: Option<u32>) -> Result<(), String> {
@@ -678,11 +694,12 @@ pub async fn native_call_close(id: String) -> Result<(), String> {
 /// meters and calls here by ids only it knew, and nothing would close them. They close as `native_call_close`,
 /// `native_camera_close` and `native_microphone_meter_close` close them, and its device watch stops being told.
 /// The ids go on counting: an id the page before had is never the next one's. A camera or meter still opening for
-/// the page before is closed as it opens (`page`).
+/// the page before is closed as it opens (`page`). The new page is taken as in sight until it says otherwise.
 pub fn page_started() {
     #[cfg(target_os = "linux")]
     {
         devices::page_started();
+        engine::PAGE_HIDDEN.store(false, std::sync::atomic::Ordering::Relaxed);
         let (cameras, meters, live) = {
             let mut calls = calls().lock().unwrap();
             calls.page += 1;
