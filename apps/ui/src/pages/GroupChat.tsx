@@ -48,6 +48,7 @@ import { MemberColorsProvider } from "../contexts/MemberColorsContext";
 import { chatsByPeer } from "../lib/storage";
 import { useContactFaces, withContactFaces } from "../components/identities/contactFace";
 import type { ChatMessage } from "../lib/types";
+import { useIsLocked } from "../contexts/LockScreenContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { GroupAvatar } from "../components/GroupAvatar";
 import { AvatarViewer } from "../components/AvatarViewer";
@@ -550,24 +551,26 @@ export function GroupChat() {
   const myJoins = useMemo(() => pickMyJoin(messages), [pickMyJoin, messages]);
   const jump = useChatScroll({ rows: scrollRows, chat: groupId, window: rowWindow });
   const search = useChatSearch({ messages: shown, chat: groupId, active: !!group && !(group.invitation && (!group.invitation.viaLink || !group.status)), t, returnFocus: optionsRef });
-  // Read while the page shows; in a hidden window what comes stays unread (usePageShown).
+  // Read while the page shows; in a hidden window what comes stays unread (usePageShown), and under the lock screen too
+  // (the app stays mounted there): read once unlocked, as a chat's is.
   // Written only when something new was read, as a chat's is: every write wakes the other pages of the app (`storage`).
   const pageShown = usePageShown();
+  const locked = useIsLocked();
   // Up to the newest of what the list calls unread: after a restart a message written before the mark but handed over
   // later has lastMessageAt at its writing, lastPeerMessageAt and lastMentionAt at its arrival.
   const readGroupId = group?.id;
   const readUpTo = group && Math.max(group.lastMessageAt, groupUnreadAt(group), group.lastMentionAt ?? 0);
   useEffect(() => {
-    if (!readGroupId || readUpTo === undefined || !pageShown || groupReadAt(readGroupId) >= readUpTo) return;
+    if (!readGroupId || readUpTo === undefined || !pageShown || locked || groupReadAt(readGroupId) >= readUpTo) return;
     markGroupRead(readGroupId, Math.max(readUpTo, Date.now()));
-  }, [readGroupId, readUpTo, pageShown]);
-  // Its notification goes once the window has the focus too, as a chat's does (Chat.tsx).
+  }, [readGroupId, readUpTo, pageShown, locked]);
+  // Its notification goes once the window has the focus too, and not under the lock, as a chat's does (Chat.tsx).
   const away = useWindowAway();
   useEffect(() => {
-    if (!group || windowAway()) return;
+    if (!group || locked || windowAway()) return;
     clearChatNotification(`group:${group.id}`);
     closeWakeNotices(groupPath(group.id));
-  }, [group?.id, group?.lastMessageAt, group, away]);
+  }, [group?.id, group?.lastMessageAt, group, away, locked]);
 
   /** `extra.translated`: a translation from the composer's preview, whose original is kept beside it on this device. */
   const send = useCallback(async (text: string, mentions?: GroupMention[], extra?: { translated?: SentTranslation }): Promise<string | null> => {
