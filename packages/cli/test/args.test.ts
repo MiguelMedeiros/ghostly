@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { liftGlobals, nearest, parseArgs } from "../src/args";
-import { idSlot, positionals, COMMANDS, TEXT_COMMANDS } from "../src/commands";
+import { idSlot, numberSlot, positionals, COMMANDS, TEXT_COMMANDS } from "../src/commands";
 import { GhostlyHttpError, TYPING_KINDS, engineError } from "@ghostly/core";
 import { asCliError, CliError, EXIT } from "../src/errors";
 // covers: headless.cli
@@ -97,6 +97,26 @@ describe("the argument parser", () => {
     // Only where text comes, and only for a word with one dash: there is no text to put after `--` in these.
     expect(() => parseArgs(["-x"], {}, undefined, { command: "version" })).toThrow(new CliError("usage", "Unknown option -x for ghostly version (ghostly help version)"));
     expect(() => parseArgs(["bob", "--nope"], send.options, idSlot(send), { command: "send", text: true })).toThrow(new CliError("usage", "Unknown option --nope for ghostly send (ghostly help send)"));
+  });
+
+  it("takes a negative number where the command takes a number, and refuses it there as <sats>", () => {
+    // Before, `wallet receive -5` was "Unknown option -5": an option nobody has, not the amount.
+    const params = (name: string, argv: string[]) => {
+      const command = COMMANDS[name];
+      const parsed = parseArgs(argv, command.options ?? {}, idSlot(command), { command: name, number: numberSlot(command) });
+      return command.params!(parsed, positionals(command, parsed.positionals));
+    };
+    for (const [name, argv, shown] of [["wallet receive", ["-5"], "-5"], ["chat pay", ["bob", "-1"], "-1"], ["chat request", ["bob", "-20", "--memo", "x"], "-20"], ["wallet receive", ["0"], "0"], ["wallet receive", ["x"], "\"x\""]] as const)
+      expect(() => params(name, [...argv]), `${name} ${argv.join(" ")}`).toThrow(new CliError("usage", `<sats> takes a whole number from 1 up, not ${shown}`));
+    expect(params("wallet receive", ["1000"])).toMatchObject({ amount: 1000 });
+    expect(params("chat pay", ["bob", "21", "--memo", "-x"])).toMatchObject({ chat: "bob", amount: 21, memo: "-x" });
+    // Only a word that starts with a dash and a digit, only in a number's place, and never over a real option.
+    expect(numberSlot(COMMANDS["chat pay"])(0)).toBe(false);
+    expect(numberSlot(COMMANDS["chat pay"])(1)).toBe(true);
+    expect(() => params("chat pay", ["-1", "5"])).toThrow(/^Unknown option -1 for ghostly chat pay/);
+    expect(() => params("wallet receive", ["-x"])).toThrow(/^Unknown option -x for ghostly wallet receive/);
+    expect(() => params("wallet receive", ["5", "-6"])).toThrow(/^Unknown option -6 for ghostly wallet receive/);
+    expect(parseArgs(["-5"], { five: { type: "boolean", short: "5", description: "" } }, undefined, { command: "x", number: () => true })).toEqual({ positionals: [], options: { five: true } });
   });
 
   it("names the nearest option of the command for a typo, and none for a word near nothing", () => {
