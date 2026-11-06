@@ -3,7 +3,7 @@ import { connect } from "node:net";
 import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, type OptionSpec, type Parsed } from "./args";
-import { connectDaemon, DaemonClient, isNotTheDaemon } from "./client";
+import { connectDaemon, DaemonClient, endedUnanswered, isNotTheDaemon } from "./client";
 import { childEnv, dropSecretEnv } from "./childEnv";
 import { COMMANDS, idSlot, noMoreThan, positionals, takesText, TEXT_COMMANDS } from "./commands";
 import { here, inRange, INPUT_BYTES, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
@@ -259,13 +259,15 @@ export function answerWithin(method: string, params: Record<string, unknown>): n
   return undefined;
 }
 
-async function session(g: Globals, options: RuntimeOptions): Promise<Session> {
+/** `again`: whether a read the daemon left unanswered as it stopped is asked once more (`throughDaemon`). */
+async function session(g: Globals, options: RuntimeOptions, again = true): Promise<Session> {
   requireProfile(g);
+  const anew = again ? () => session(g, options, false) : undefined;
   const client = await connectDaemon(g.paths);
-  if (client) return throughDaemon(client);
+  if (client) return throughDaemon(client, anew);
   const [, { callApi, startNamedChats }] = await Promise.all([engineHost(), engineApi()]);
   const host = await openOneShot(g, options);
-  if (host instanceof DaemonClient) return throughDaemon(host);
+  if (host instanceof DaemonClient) return throughDaemon(host, anew);
   const call = (m: string, p?: unknown) => {
     if (options.deferChats && p && typeof p === "object") startNamedChats(host.ctx, p as Record<string, unknown>);
     return callApi(host.ctx, m, p ?? {});
@@ -273,13 +275,21 @@ async function session(g: Globals, options: RuntimeOptions): Promise<Session> {
   return { mode: "one-shot", call, close: () => host.close(), abort: () => host.close() };
 }
 
-function throughDaemon(client: DaemonClient): Session {
+/**
+ * `again`: a session of its own, for a read (`readOnly`) whose connection ended unanswered (`endedUnanswered`): the
+ * daemon stopped or restarted under it. The read is asked once more there, through the daemon that answers now or on
+ * the profile itself, and so is every call after it. It failed as a timeout told to check `ghostly chat history` for
+ * a message that was never sent (exit 4), as "The daemon went away" (exit 1), or refused as a daemon of an older
+ * release (exit 1), while a command started a moment later answered.
+ */
+function throughDaemon(client: DaemonClient, again?: () => Promise<Session>): Session {
   // The version check goes on the same connection as the command, ahead of it, not before it, and with no deadline
   // of its own: a daemon that does not answer costs the command its own deadline and nothing else (a read gave up
   // after 30 s, not 15; then every command gave up at the check's 15 s, whatever its own). `close` waits for the
   // check's answer: a daemon that answered the command answered the check sent before it.
   const warned = warnVersion(client);
-  const call = async (m: string, p?: unknown): Promise<unknown> => {
+  let next: Promise<Session> | null = null, aborted = false;
+  const first = async (m: string, p?: unknown): Promise<unknown> => {
     const timeoutMs = answerWithin(m, (p ?? {}) as Record<string, unknown>);
     // A call with no deadline of its own (a send, a rename, an invite) goes only once the check is answered: a daemon
     // that has not answered `status` in 15 s does not answer, and the call, never written, cannot happen when it
@@ -290,7 +300,28 @@ function throughDaemon(client: DaemonClient): Session {
     }
     return client.call(m, p, { timeoutMs });
   };
-  return { mode: "daemon", call, close: async () => { await warned; client.close(); }, abort: async () => { client.destroy(); } };
+  const call = async (m: string, p?: unknown): Promise<unknown> => {
+    if (next) return (await next).call(m, p);
+    try { return await first(m, p); }
+    catch (error) {
+      if (!again || aborted || !endedUnanswered(error) || !readOnly(m, (p ?? {}) as Record<string, unknown>)) throw error;
+      next ??= again();
+      try { return await (await next).call(m, p); }
+      catch (failure) {
+        // The daemon asked once more went away as well: a read changed nothing, so it says so, and not to check a chat.
+        // A listener refused again is one that does not prove itself, and is named so.
+        if (endedUnanswered(failure) && !isNotTheDaemon(failure)) throw new CliError("unavailable", `The daemon went away before it answered ${m}, twice; a read changes nothing: run it again`, { method: m });
+        throw failure;
+      }
+    }
+  };
+  const settled = async (then: (s: Session) => Promise<void>) => { if (next) await next.then(then, () => {}); };
+  return {
+    mode: "daemon",
+    call,
+    close: async () => { await warned; client.close(); await settled((s) => s.close()); },
+    abort: async () => { aborted = true; client.destroy(); await settled((s) => s.abort()); },
+  };
 }
 
 /** How long a one-shot waits for another process to let go of the profile: a one-shot leaves in well under a second. */
