@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { EngineState, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
-import { EventHub, JOURNAL_KEEP_BYTES, JOURNAL_MAX_BYTES, type GhostlyEvent } from "../src/events";
+import { EventHub, JOURNAL_KEEP_BYTES, JOURNAL_MAX_BYTES, SEEN_KEEP_MS, type GhostlyEvent } from "../src/events";
 import { toTurn } from "../src/listen";
 import { turnRef } from "../src/turnRefs";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
@@ -757,6 +757,90 @@ describe("the event stream", () => {
         again.h.baseline(state([link("c1")]), history());
         await again.h.ended(async () => ({ direction: "in", transfer: { state: "done", transferred: 900, size: 900 } }) as never);
         expect(again.events).toEqual([]);
+      });
+
+      /**
+       * v1.10.1 reading a seen set with the `files:` notes (a downgrade): its whole read and its `sweep` are copied below
+       * from `git show v1.10.1:packages/cli/src/events.ts` (open, lines 144-154; sweep, 197-214; stateIn/timeIn/settled/
+       * splitState, 773-813). Nothing else there reads the set but by a chat's, group's, `reactions:` or `said:` key, and
+       * `files:` is none (as `format:`). A note `yes` has no `@time`: its sweep keeps it, and drops the others as ever.
+       */
+      it("v1.10.1 keeps the under-way notes, reports nothing of them, and sweeps the others as ever", async () => {
+        await underWay("ended-v1101.jsonl");
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+          const request = indexedDB.open("ended-v1101.jsonl", 1);
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        const persist = (chat: string, changes: [string, string | null][]) => new Promise<void>((resolve, reject) => {
+          const tx = db.transaction("seen", "readwrite");
+          for (const [id, note] of changes) {
+            if (note === null) tx.objectStore("seen").delete([chat, id]);
+            else tx.objectStore("seen").put(note, [chat, id]);
+          }
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        });
+        const read = async () => {
+          const store = db.transaction("seen").objectStore("seen");
+          const all = <T>(request: IDBRequest<T[]>) => new Promise<T[]>((resolve, reject) => {
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+          });
+          const [keys, values] = await Promise.all([all(store.getAllKeys()), all(store.getAll() as IDBRequest<string[]>)]);
+          const seen = new Map<string, Map<string, string>>();
+          for (let i = 0; i < keys.length; i++) {
+            const [chat, id] = keys[i] as [string, string];
+            if (!seen.has(chat)) seen.set(chat, new Map());
+            seen.get(chat)!.set(id, values[i]);
+          }
+          return seen;
+        };
+        const seen = await read();
+        expect([...seen.get("files:")!.entries()]).toEqual([["c1-in-v", "yes"], ["c1-out-w", "yes"]]);
+
+        // v1.10.1's sweep, as it is there, a month past every note's time.
+        const now = 1000 + SEEN_KEEP_MS + 1;
+        const stateIn = (note: string) => { const at = note.lastIndexOf("@"); return at === -1 ? note : note.slice(0, at); };
+        const timeIn = (note: string) => { const at = note.lastIndexOf("@"); return at === -1 ? undefined : parseInt(note.slice(at + 1), 36); };
+        const splitState = (state: string): [string, number] => { const at = state.lastIndexOf("#e"); return at === -1 ? [state, 0] : [state.slice(0, at), Number(state.slice(at + 2)) || 0]; };
+        const settled = (state: string) => { const delivery = splitState(state)[0].split("+")[0]; return delivery === "received" || delivery === "delivered"; };
+        const writes: Promise<void>[] = [];
+        const sweep = () => {
+          const cutoff = now - SEEN_KEEP_MS;
+          let dropped = 0;
+          for (const [chat, known] of seen) {
+            if (chat === "format:" || chat.startsWith("said:")) continue;
+            const reactions = chat.startsWith("reactions:");
+            const gone: [string, null][] = [];
+            for (const [id, note] of known) {
+              const at = timeIn(note);
+              if (at === undefined || at >= cutoff || (!reactions && !settled(stateIn(note)))) continue;
+              known.delete(id);
+              gone.push([id, null]);
+            }
+            if (gone.length) { writes.push(persist(chat, gone)); dropped += gone.length; }
+            if (!known.size) seen.delete(chat);
+          }
+          return dropped;
+        };
+        // The message received a month ago goes; mine still `sent` stays; the under-way notes stay, in memory and stored.
+        expect(sweep()).toBe(1);
+        await Promise.all(writes);
+        const after = await read();
+        db.close();
+        for (const kept of [seen, after]) {
+          expect([...kept.get("files:")!.entries()]).toEqual([["c1-in-v", "yes"], ["c1-out-w", "yes"]]);
+          expect([...kept.get("c1")!.keys()]).toEqual(["me_8"]);
+          expect(kept.get("format:")!.get("ages")).toBe("yes");
+        }
+
+        // Back on this version, the ends are still told from the files' records (its clock is not a month on: the swept
+        // message is news to it, which is not what this pins).
+        const { h, events } = await hub("ended-v1101.jsonl");
+        h.baseline(state([link("c1")]), history());
+        await h.ended(async (id) => ({ direction: id.includes("-in-") ? "in" : "out", transfer: { state: "done", transferred: 9, size: 9 } }) as never);
+        expect(events.filter((e) => e.type.startsWith("file.")).map((e) => [e.type, e.file])).toEqual([["file.done", "c1-in-v"], ["file.done", "c1-out-w"]]);
       });
     });
 
