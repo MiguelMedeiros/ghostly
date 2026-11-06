@@ -53,7 +53,8 @@ async function replaceEngine(next?: string): Promise<void> {
     await chrome.runtime.sendMessage({ target: "engine", type: "stop" } satisfies RuntimeMessage).catch(() => {});
     await chrome.offscreen.closeDocument().catch(() => {});
     await createEngineDocument();
-    const status = await waitForEngine();
+    // Just made: one that does not answer is replaced at the next start (`waitForEngine`).
+    const status = (await answerOf()) ?? notStarted();
     if (status.profile === status.active) return;
     next = status.activeId;
   }
@@ -84,8 +85,25 @@ async function createEngineDocument(): Promise<void> {
     });
 }
 
-/** The document exists before its script listens; wait until the peer answers. */
+/**
+ * The peer's answer. A document that never gives one (its script threw as it loaded, a chunk did not load) is no peer,
+ * and nothing else closes it: every later try (a page's, a new tab's, the minute check) would wait on it again. It goes,
+ * and a new one is waited on before the start fails; one that does not answer either goes at the next try.
+ */
 async function waitForEngine(): Promise<EngineStatus> {
+  const status = await answerOf();
+  if (status) return status;
+  await chrome.offscreen.closeDocument().catch(() => {});
+  await createEngineDocument();
+  return (await answerOf()) ?? notStarted();
+}
+
+function notStarted(): never {
+  throw new Error("The Ghostly peer did not start. Reopen the extension to retry.");
+}
+
+/** The document exists before its script listens; wait until the peer answers, or 5 seconds. */
+async function answerOf(): Promise<EngineStatus | undefined> {
   for (let attempt = 0; attempt < 100; attempt++) {
     try {
       const status = (await chrome.runtime.sendMessage({ target: "engine", type: "ping" } satisfies RuntimeMessage)) as EngineStatus | undefined;
@@ -95,7 +113,7 @@ async function waitForEngine(): Promise<EngineStatus> {
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error("The Ghostly peer did not start. Reopen the extension to retry.");
+  return undefined;
 }
 
 chrome.runtime.onStartup.addListener(() => void ensureEngine());
