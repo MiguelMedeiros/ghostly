@@ -16,6 +16,8 @@
   "pushRelay": "Push relay (optional)",
   "pushRelayHint": "For waking contacts from a browser. Empty: none.",
   "pushRelayInfo": "A browser cannot post to a push service; this relay does. It sees your IP address and when you wake someone, never the message.",
+  "pushRelayRefused": "The last wake-up through this relay failed: it did not answer as a push relay (HTTP {{http}}). Contacts whose app is closed are not woken through it.",
+  "pushRelayRefusedSaid": "The relay said: “{{text}}”",
   "readRelays": "Also use Pkarr relays",
   "readRelaysHint": "Finds a first contact sooner. Relays see which keys it looks up.",
   "readRelaysInfo": "This app reads the Mainline DHT directly. On: it also asks the Pkarr relays below. If the DHT is blocked, it asks them anyway.",
