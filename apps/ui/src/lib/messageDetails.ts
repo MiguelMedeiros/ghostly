@@ -241,6 +241,8 @@ function build(message: ChatMessage, view: MessageDetailsView | null | undefined
   const duration = (ms: number) => formatDuration(ms, t);
   const time = (at: number) => formatTime(at, language);
   const path = (step: Pick<MessageSend, "path" | "relayed" | "relays">) => pathWords(step, t);
+  // A send's outcome in the app's language; the engine's reason for a failure stays as it came.
+  const sendWords = (s: MessageSend) => s.result === "failed" && s.error ? t("messageDetails.send.failedBecause", { error: s.error }) : t(`messageDetails.send.${s.result ?? "sending"}`);
   const timeRow = (label: string, at: number): DetailRow => ({ label: L(label), value: time(at), mono: true, copy: new Date(at).toISOString() });
   const keyRow = (label: string, key: string): DetailRow => ({ label: L(label), value: publicKeyLabel(key), mono: true, copy: key });
   const idRow = (label: string, id: string): DetailRow => ({ label: L(label), value: id.length > 28 ? `${id.slice(0, 12)}…${id.slice(-8)}` : id, mono: true, copy: id });
@@ -272,7 +274,7 @@ function build(message: ChatMessage, view: MessageDetailsView | null | undefined
     step ? { label: L(mine ? "sentOver" : "receivedOver"), value: path(step) } : undefined,
     step?.relays?.length ? { label: L("relay"), value: step.relays.join(", "), mono: true, copy: step.relays.join(", ") } : undefined,
     step?.rttMs !== undefined ? { label: L("roundTripThen"), value: duration(step.rttMs) } : undefined,
-    d?.sends && d.sends.length > 1 ? { label: L("sends"), value: d.sends.map((s, i) => `${d.attempts && d.attempts > d.sends!.length && i > 0 ? "…" : ""}${time(s.at)} ${path(s)} (${s.result ?? "sending"}${s.error ? `: ${s.error}` : ""})`).join("\n"), mono: true } : undefined,
+    d?.sends && d.sends.length > 1 ? { label: L("sends"), value: d.sends.map((s, i) => `${d.attempts && d.attempts > d.sends!.length && i > 0 ? "…" : ""}${time(s.at)} ${path(s)} (${sendWords(s)})`).join("\n"), mono: true } : undefined,
     link?.transportNow ? { label: L("connectionNow"), value: link.rttNowMs !== undefined
       ? V("connectionNow", { path: path({ path: link.transportNow, relayed: link.relayedNow }), rtt: duration(link.rttNowMs) })
       : path({ path: link.transportNow, relayed: link.relayedNow }) } : undefined,

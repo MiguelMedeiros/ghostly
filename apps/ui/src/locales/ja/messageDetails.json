@@ -162,6 +162,12 @@
     "voice": "音声",
     "wire": "通信形式"
   },
+  "send": {
+    "failed": "失敗",
+    "failedBecause": "失敗：{{error}}",
+    "sending": "送信中",
+    "sent": "送信済み"
+  },
   "storage": {
     "blob": "ファイル全体を IndexedDB に",
     "idb": "IndexedDB に分割して",
