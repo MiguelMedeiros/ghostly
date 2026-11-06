@@ -175,6 +175,19 @@ function showUntilPaired(ctx: ApiContext, linkId: string): void {
   inviteShown.set(ctx, stop);
 }
 
+/**
+ * `invite create`'s `reason` when no relay took the invite. The engine's words ("Publish failed on every relay: Error:
+ * http://… did not answer a moment ago; retry shortly; Error: …") read as the CLI failing, a class name per relay, beside
+ * a `note` that says the invite is good: the relays are named, and nothing is asked of whoever reads it.
+ */
+function inviteNotOut(detail: string): string {
+  if (!detail.startsWith("Publish failed on every relay:")) return detail;
+  const hosts = [...new Set([...detail.matchAll(/\bhttps?:\/\/[^\s;,]+/g)].map(([url]) => URL.canParse(url) ? new URL(url).host : url))];
+  const named = hosts.length ? ` (${hosts.join(", ")})` : "";
+  // A relay that answered with an error status took the request: "did not answer" would not be true of it.
+  return `${/ responded \d{3}\b/.test(detail) ? "No relay took the invite" : "No relay answered"}${named}: it goes out once one does`;
+}
+
 /** V8's words for reading what a value does not have: an `engine.call` given a parameter of the wrong kind. */
 const BAD_VALUE = /^Cannot (destructure|read properties of (undefined|null))|is not (a function|iterable)/;
 
@@ -281,7 +294,7 @@ const METHODS: Record<string, Method> = {
     return {
       ...answer,
       ...(waitUntil !== undefined && { retryInMs: Math.max(0, waitUntil - Date.now()) }),
-      ...(progress?.detail && { reason: progress.detail }),
+      ...(progress?.detail && { reason: inviteNotOut(progress.detail) }),
       note: "The invite is good: it goes out by itself once a relay answers, while a daemon runs for this profile",
     };
   },
