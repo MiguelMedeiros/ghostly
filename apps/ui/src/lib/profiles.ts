@@ -1,3 +1,4 @@
+import { hasVisible, stripHidden } from "@ghostly/core";
 import { knownDeviceGate } from "@ghostly/browser/devices/gate";
 import { fitText } from "./fitText";
 import { carryIncomingShare } from "./incomingShare";
@@ -101,7 +102,7 @@ function nameAndMark(id: string, raw: string): { name: string; marked: boolean }
   // The first profile is never a restored one: its name is left as it is. The word comes off before the name is cut to
   // its 32 characters, which could cut the word in half.
   if (!id) return { name: cleanName(raw), marked: false };
-  const collapsed = raw.replace(/\s+/g, " ").trim();
+  const collapsed = stripHidden(raw).replace(/\s+/g, " ").trim();
   // Composed first, so "restauré" typed as e + accent is the word too.
   const { name, marked } = withoutRestoredWord(collapsed.normalize("NFC"));
   return { name: cleanName(marked ? name : collapsed), marked };
@@ -149,8 +150,15 @@ export const PROFILE_NAME_MAX = 32;
  * dangling joiner in the name.
  */
 export const fitsProfileName = (name: string): boolean => [...name].length <= PROFILE_NAME_MAX;
-/** Cleaned and cut to what fits; a joiner left at the end (an emoji typed a part at a time into the last room) goes. */
-const cleanName = (name: string) => fitText(name.replace(/\s+/g, " ").trim(), fitsProfileName).replace(/\u200d+$/u, "").trim();
+/**
+ * Cleaned as the name in chats is (`cleanOwnName`): hidden and direction-changing characters gone (an emoji's joiners
+ * kept), spaces collapsed, cut to what fits; a joiner left at the end (an emoji typed a part at a time into the last
+ * room) goes. Empty when nothing visible is left: a name of zero-width spaces is no name.
+ */
+const cleanName = (name: string) => {
+  const clean = fitText(stripHidden(name).replace(/\s+/g, " ").trim(), fitsProfileName).replace(/\u200d+$/u, "").trim();
+  return hasVisible(clean) ? clean : "";
+};
 
 export function listProfiles(): ProfileEntry[] { return read().profiles.map(shown); }
 
