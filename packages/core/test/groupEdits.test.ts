@@ -191,6 +191,46 @@ describe("group-edit frames (a private group)", () => {
     });
   }
 
+  for (const via of ["a member", "a hub let in after it"] as const) {
+    it(`one member's many edits of messages that are not there push out only its own: a removal kept for one away still reaches it (through ${via})`, async () => {
+      const { mesh, alice, bob, carol } = await trio();
+      const dave = await admit(mesh, alice);
+      const gone = ((await carol.sendText("secret oops")) as { id: string }).id;
+      await mesh.settle();
+      const epoch = carol.epoch;
+      // On hubs: one let in after the message, which Carol and Bob count on; it cannot open what was said before it.
+      const hub = via === "a member" ? alice : await admit(mesh, alice);
+      if (hub !== alice) { mesh.hubs.add(hub.myKey); for (const s of [carol, bob]) mesh.carriers.set(s.myKey, [hub.myKey]); }
+      // Dave is away; Carol deletes her message for everyone, then is gone (out of the group; on hubs, offline: a hub
+      // carries what it cannot open only while its author is a member).
+      for (const s of [alice, bob, carol, hub]) mesh.setEdge(dave, s, false);
+      expect(await carol.sendEdit(gone, { v: 1, ts: 1, text: REMOVED_TEXT, remove: true })).toHaveProperty("sent");
+      await mesh.settle();
+      if (hub === alice) await carol.leave(); else for (const s of [alice, bob, hub]) mesh.setEdge(carol, s, false);
+      await mesh.settle();
+      // Bob edits, with the longest text, as many messages of his as the log holds, none of which he ever sent.
+      for (let n = 1_000; n < 1_064; n++) {
+        expect(await bob.sendEdit(groupMessageId(bob.myKey, epoch, n), { v: 1, ts: 2, text: "x".repeat(16 * 1024 - 64) })).toHaveProperty("sent");
+      }
+      await mesh.settle();
+      // Dave is back on an edge to the hub alone and catches up: Carol's removal is still there for him.
+      mesh.setEdge(dave, hub, true);
+      await hub.handle(dave.myKey, clone(dave.syncFrame(hub === alice ? [] : [carol.myKey])));
+      await mesh.settle();
+      expect(mesh.of(dave).filter(e => e.id === gone && e.rm)).toHaveLength(1);
+    });
+  }
+
+  it("an author's own burst of edits is kept as before: the latest of each, as many as the log holds", async () => {
+    const { mesh, alice, bob } = await trio();
+    const ids: string[] = [];
+    for (let i = 0; i < 70; i++) ids.push(((await bob.sendText(`line ${i}`)) as { id: string }).id);
+    for (const id of ids) await bob.sendEdit(id, { v: 1, ts: 1, text: "edited" });
+    await bob.sendEdit(ids[69], { v: 2, ts: 2, text: "edited again" });
+    await mesh.settle();
+    expect((alice.state.relayEdits ?? []).map(f => [f.n, f.v])).toEqual(ids.slice(-64).map((id, i) => [meshMessageRef(id)!.n, i === 63 ? 2 : 1]));
+  });
+
   it("someone admitted after the message is not sent its edits, and could not open them", async () => {
     const { mesh, alice, bob, carol } = await trio();
     const id = ((await bob.sendText("old news")) as { id: string }).id;

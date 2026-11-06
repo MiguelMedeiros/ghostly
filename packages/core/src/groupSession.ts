@@ -940,16 +940,29 @@ export class GroupSession {
     try { return (JSON.parse(plain) as { rm?: unknown } | null)?.rm === true; } catch { return false; }
   }
 
-  /** Another member's edit, kept to hand on: the latest per message; the oldest go once the log is full. False: one as new was kept. */
+  /**
+   * Another member's edit, kept to hand on: the latest per message. Full (in count or in bytes), the oldest of the author
+   * who holds the most of it goes (the one just kept's own on a tie): an author's edits of messages that are not there,
+   * which no keeper can tell (a hub cannot even open them), as many as it likes, push out only its own. False: one as
+   * new was kept, or this one went.
+   */
   private keepEdit(frame: GroupEditFrame): boolean {
     const same = (f: GroupEditFrame) => f.s === frame.s && f.e === frame.e && f.n === frame.n;
     const log = this.state.relayEdits ?? [];
     if (log.some(f => same(f) && f.v >= frame.v)) return false;
-    const next = [...log.filter(f => !same(f)), cleanEdit(frame)];
+    const kept = cleanEdit(frame);
+    const next = [...log.filter(f => !same(f)), kept];
     let bytes = next.reduce((sum, f) => sum + f.c.length, 0);
-    while (next.length > GROUP_LIMITS.relayEdits || bytes > GROUP_LIMITS.relayEditBytes) bytes -= next.shift()!.c.length;
+    while (next.length > GROUP_LIMITS.relayEdits || bytes > GROUP_LIMITS.relayEditBytes) {
+      const byCount = next.length > GROUP_LIMITS.relayEdits;
+      const held = new Map<string, number>();
+      for (const f of next) held.set(f.s, (held.get(f.s) ?? 0) + (byCount ? 1 : f.c.length));
+      let most = frame.s;
+      for (const [author, amount] of held) if (amount > held.get(most)!) most = author;
+      bytes -= next.splice(next.findIndex(f => f.s === most), 1)[0].c.length;
+    }
     this.state.relayEdits = next;
-    return true;
+    return next.includes(kept);
   }
 
   /** A frame of another member, kept to hand on; the oldest go once the log is full. */
