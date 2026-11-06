@@ -116,28 +116,35 @@ export function rateKey (address) {
 }
 
 /**
- * Refusals as counts, so a flood of them stays quiet: the first of a kind in a quiet minute is logged at once
- * (`refused rate`), the rest of that minute as one line when `flush` runs (`refused rate 41 more`). `detail` goes on
- * that first line only (`refused origin "https://app.example"`): it names one case, the count covers the rest.
+ * Events of one `word` as counts, so a flood of them stays quiet: the first of a kind in a quiet minute is logged at
+ * once (`refused rate`, `forwarded 201`), the rest of that minute as one line when `flush` runs (`refused rate 41 more`).
+ * `detail` goes on that first line only (`refused origin "https://app.example"`): it names one case, the count covers
+ * the rest.
  */
-export function refusalLog (log) {
-  // Kind → refusals since its last line. Present: a line for it went out in this minute.
+export function countedLog (log, word) {
+  // Kind → events since its last line. Present: a line for it went out in this minute.
   const pending = new Map()
   let total = 0
   return {
-    /** Refusals since the start, of every kind. */
+    /** Events since the start, of every kind. */
     total: () => total,
-    refuse: (why, detail) => {
+    count: (kind, detail) => {
       total++
-      if (pending.has(why)) pending.set(why, pending.get(why) + 1)
-      else { pending.set(why, 0); log('refused', why, ...(detail === undefined ? [] : [detail])) }
+      if (pending.has(kind)) pending.set(kind, pending.get(kind) + 1)
+      else { pending.set(kind, 0); log(word, kind, ...(detail === undefined ? [] : [detail])) }
     },
     flush: () => {
-      for (const [why, more] of pending) {
-        if (more) { log('refused', why, `${more} more`); pending.set(why, 0) } else pending.delete(why)
+      for (const [kind, more] of pending) {
+        if (more) { log(word, kind, `${more} more`); pending.set(kind, 0) } else pending.delete(kind)
       }
     },
   }
+}
+
+/** Refusals as counts (countedLog): `refused <kind>`. */
+export function refusalLog (log) {
+  const { total, count, flush } = countedLog(log, 'refused')
+  return { total, refuse: count, flush }
 }
 
 export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts = PUSH_HOSTS, limits = {}, proxies = 0, log = () => {} } = {}) {
@@ -148,8 +155,11 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
   let pruned = 0
   const prune = now => { pruned = now; for (const [ip, times] of recent) if (!times.some(t => now - t < 60_000)) recent.delete(ip) }
   const refusals = refusalLog(log)
-  const stats = { forwarded: 0, failed: 0 }
-  const pruning = setInterval(() => { prune(Date.now()); refusals.flush() }, 60_000)
+  // A line per status and per cause a minute, like refusals: one per forward would grow the log with the traffic.
+  const forwards = countedLog(log, 'forwarded')
+  const failures = countedLog(log, 'failed')
+  const flush = () => { refusals.flush(); forwards.flush(); failures.flush() }
+  const pruning = setInterval(() => { prune(Date.now()); flush() }, 60_000)
   pruning.unref?.()
   // Once per start: a proxy in front the relay was not told about makes every client count as that proxy.
   let hinted = false
@@ -168,7 +178,7 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     // An operator's check (curl, a monitor): up, with counts since the start, and nothing about any client.
     if (req.method === 'GET' && req.url.split('?')[0] === '/healthz') {
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
-      res.end(JSON.stringify({ ok: true, ...stats, refused: refusals.total(), tracked: recent.size }))
+      res.end(JSON.stringify({ ok: true, forwarded: forwards.total(), failed: failures.total(), refused: refusals.total(), tracked: recent.size }))
       return
     }
     // The preflight is answered, not refused: the POST after it is the one refusal of that page's attempt.
@@ -208,14 +218,12 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
       if (request.error) return refuse(request.error.endsWith(' twice') ? 'header twice' : request.error, 400, { error: request.error })
       try {
         const response = await fetch(request.endpoint, { method: 'POST', headers: request.headers, body: request.body, redirect: 'error', signal: AbortSignal.timeout(10_000) })
-        stats.forwarded++
-        log('forwarded', response.status)
+        forwards.count(response.status)
         answer(200, { status: response.status })
       } catch (error) {
         // `fetch` refusing what it was handed, before any connection, is a refusal of the request, not a failed forward.
         if (refusedByFetch(error)) return refuse('Not a request fetch can send', 400, { error: 'Not a request fetch can send' })
-        stats.failed++
-        log('failed', failure(error))
+        failures.count(failure(error))
         answer(502, { error: 'The push service did not answer' })
       }
     })
@@ -233,7 +241,7 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
       // close for as long as it stays: a request still open after `stopMs` (a forward in flight, a slow client) is cut.
       close: ({ stopMs = 3000 } = {}) => new Promise(done => {
         clearInterval(pruning)
-        refusals.flush()
+        flush()
         const cut = setTimeout(() => server.closeAllConnections(), stopMs)
         server.close(() => { clearTimeout(cut); done() })
       }),
