@@ -208,18 +208,38 @@ async function forwardTarget(source: WindowClient, profile: string | null): Prom
 }
 
 /**
+ * The windows no page said `share-here` from in this worker's life are asked where they are: one that takes shares
+ * says it again. The browser stops an idle worker and starts it afresh, with `sharePages` empty, while the app's page
+ * stays open and says it otherwise only when it comes to the front.
+ */
+async function askSharePages(source: WindowClient): Promise<void> {
+  const all = await worker.clients.matchAll({ type: "window" });
+  for (const client of all) if (client.id !== source.id && !sharePages.has(client.id)) client.postMessage({ type: "share-where" } satisfies FromWorker);
+}
+
+/**
  * Hands the shares held to the app's page `source` asks for, once that page held its lock on two looks
  * `SHARE_LOCK_LOOK_MS` apart: a share into the same window replaced a page that holds it a moment longer as it goes.
- * No such page: the shares stay held, for whichever page asks next (`source`, once it is the app, or one of the
- * profile that says it is there).
+ * None on the first look: the windows are asked where they are (`askSharePages`), and looked at again. Still none:
+ * the shares stay held, for whichever page asks next (`source`, once it is the app, or one of the profile that says it
+ * is there).
  */
 async function forward(source: WindowClient, profile: string | null): Promise<void> {
   let before: string | undefined;
-  for (let look = 0; look < 3; look++) {
+  let asked = false;
+  let looks = 3;
+  for (let look = 0; look < looks; look++) {
     if (look) await new Promise((resolve) => setTimeout(resolve, SHARE_LOCK_LOOK_MS));
     if (!held.length) return;
     const to = await forwardTarget(source, profile);
     if (!held.length) return;
+    if (!to && !asked) {
+      // The page that answers holds its lock on two looks after this one, as any other.
+      asked = true;
+      looks += 1;
+      await askSharePages(source);
+      continue;
+    }
     if (!to) break;
     if (to.id === before) { handOver(to); return; }
     before = to.id;
