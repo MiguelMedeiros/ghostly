@@ -31,15 +31,19 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
   const { t } = useI18n();
   const titleId = useId();
   const fieldId = useId();
-  const backdrop = useBackdropDismiss(onClose);
-  const ref = useRef<HTMLDivElement>(null);
-  useDialogFocus(ref, onClose);
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const focusBack = useFocusBack(busy);
   const [error, setError] = useState<AppErrorView | null>(null);
   const [app, setApp] = useState<{ url: string; preview: AppPreview } | null>(null);
   const [store, setStore] = useState<AppStorePreview | null>(null);
+  // While Add store runs, Add stays, as the install screen's: closed, the store was added all the same. A Check may be
+  // left: it adds nothing.
+  const adding = busy && !!store;
+  const close = () => { if (!adding) onClose(); };
+  const backdrop = useBackdropDismiss(close);
+  const ref = useRef<HTMLDivElement>(null);
+  useDialogFocus(ref, close);
   // Which check is the field's: a link edited while Check runs drops the answer for the link it no longer holds.
   const asked = useRef(0);
   // The store's question takes the place of Check: the focus Check had would fall to the page, so it goes to the
@@ -138,7 +142,7 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
             {!held && <Notice>{t("apps.add.storeReads", { host: hostOf(store.url) })}</Notice>}
             {/* Wraps rather than push Cancel off the screen (a phone at a large text size), as the install screen's. */}
             <div className="flex flex-wrap justify-end gap-2">
-              <Button ref={storeCancel} onClick={onClose}>{offered ? t("common.cancel") : t("common.close")}</Button>
+              <Button ref={storeCancel} disabled={adding} onClick={onClose}>{offered ? t("common.cancel") : t("common.close")}</Button>
               {offered && <Button variant="primary" data-testid="apps-add-store-confirm" loading={busy} onClick={() => void addStore()}>{held ? t("apps.add.updateStore") : t("apps.add.addStore")}</Button>}
             </div>
           </div>
