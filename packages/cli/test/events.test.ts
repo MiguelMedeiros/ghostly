@@ -233,6 +233,8 @@ describe("the event stream", () => {
     first.h.baseline(state([link("c1")]), new Map([["c1", []]]));
     first.h.sink.post({ kind: "messages", linkId: "c1", messages: [message("c1", "m1")] });
     expect(first.events.map((e) => e.seq)).toEqual([1]);
+    // The daemon stops: the seqs it reserved and did not use go back (`release`), so the next start goes on by one.
+    first.h.release();
 
     const second = await hub("b.jsonl");
     // m2 came while nothing derived events (a crash): it is news; m1 is not.
@@ -403,6 +405,7 @@ describe("the event stream", () => {
       }
     };
     check(h);
+    h.release();
     const again = new EventHub(path, () => 1000, "holes-again");
     await again.open();
     check(again);
@@ -425,6 +428,7 @@ describe("the event stream", () => {
       for (const since of [10_001, 10_002, 10_003]) expect(hub.replay(since)[0].seq).toBe(10_004);
     };
     check(h);
+    h.release();
     const again = new EventHub(path, () => 1000, "trimmed-holes-again");
     await again.open();
     check(again);
@@ -612,6 +616,7 @@ describe("the event stream", () => {
         expect(replayed.at(-1)!.id).toBe("message.deleted:c1:m5");
       };
       check(h);
+      h.release();
       const again = new EventHub(path, () => 1000, "in-place-again");
       await again.open();
       expect(again.lastSeq).toBe(h.lastSeq);

@@ -14,6 +14,11 @@ export interface GhostlyEvent { seq: number; id: string; type: string; at: numbe
 
 /** Events the journal keeps for `listen --since`. */
 export const JOURNAL_KEEP = 10_000;
+/**
+ * Seqs reserved ahead in `<journal>.reserved` (`EventHub.reserve`): a new reservation is written when fewer than half
+ * of them are left, so the mark is rewritten once per 128 events, and a full disk that refuses it still leaves 128.
+ */
+export const SEQS_RESERVED = 256;
 /** Bytes the journal keeps at most: a contact's long texts never make it too large to read. */
 export const JOURNAL_KEEP_BYTES = 16 * 1024 * 1024;
 /** A journal past this is trimmed, and only this much of its end is ever read. */
@@ -66,6 +71,12 @@ export class EventHub {
   private marked = false;
   /** Whether `dropped` is ahead of `<journal>.dropped` (a full disk refused it): the next event's write tries it again. */
   private markOwed = false;
+  /**
+   * The highest seq `<journal>.reserved` holds: no event is told a seq past it before the mark says so, and a start
+   * numbers on from it. A full disk can take an event and its `.dropped` mark both, after it was told; the next start
+   * then never gives its seq again, and a replay across it says `events.gap`. A stop gives back what it did not use.
+   */
+  private reserved = 0;
   /** Typing changes told this run: a change's id carries it, as it takes no seq of its own (`emitLive`). */
   private typingChanges = 0;
   private journalLines = 0;
@@ -105,6 +116,7 @@ export class EventHub {
   /** Loads the journal's last seq and the seen set; call before `sink` is attached. */
   async open(): Promise<void> {
     // A journal that cannot be read never keeps the profile from opening: it is set aside and a new one begins.
+    const reserved = readDropped(this.journalPath + ".reserved") ?? 0;
     try {
       const dropped = readDropped(this.journalPath + ".dropped");
       if (existsSync(this.journalPath)) {
@@ -136,6 +148,13 @@ export class EventHub {
       this.journalLines = 0;
       this.journalBytes = 0;
       this.markDropped(this.seq);
+    }
+    // Seqs the last run reserved and did not give back (a crash, or a stop that could not write): some may have been told
+    // with no line here. None is given again, and a replay across them says `events.gap`.
+    this.reserved = reserved;
+    if (reserved > this.seq) {
+      this.seq = reserved;
+      this.markDropped(Math.max(this.dropped, reserved));
     }
     this.db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(this.seenDb, 1);
@@ -285,7 +304,43 @@ export class EventHub {
       this.marked = true;
       this.markOwed = false;
     } catch (error) {
-      this.markOwed = true;
+      // A full disk refuses the copy (a new file), not a rewrite of the mark there: that takes no new block.
+      try {
+        writeMark(this.journalPath + ".dropped", seq, false);
+        this.marked = true;
+        this.markOwed = false;
+      } catch {
+        this.markOwed = true;
+        process.stderr.write(`ghostly: event journal error: ${error instanceof Error ? error.message : String(error)}\n`);
+      }
+    }
+  }
+
+  /**
+   * Reserves seqs ahead of the one about to be told, in `<journal>.reserved`, rewritten where it is (no new block, so a
+   * full disk takes it): written before the event goes anywhere, as `markDropped` is. Refused, the event still goes
+   * (the reservation made before covers the next ones), and the next event tries again.
+   */
+  private reserve(): void {
+    if (this.reserved - this.seq >= SEQS_RESERVED / 2) return;
+    try {
+      writeMark(this.journalPath + ".reserved", this.seq + SEQS_RESERVED, true);
+      this.reserved = this.seq + SEQS_RESERVED;
+    } catch (error) {
+      process.stderr.write(`ghostly: event journal error: ${error instanceof Error ? error.message : String(error)}\n`);
+    }
+  }
+
+  /**
+   * At a stop: the seqs reserved past the last one told are given back, so the next start numbers on from it, with no
+   * jump. Not written (a disk that takes no rewrite either), the next start numbers past the reservation instead.
+   */
+  release(): void {
+    if (this.reserved <= this.seq) return;
+    try {
+      writeMark(this.journalPath + ".reserved", this.seq, true);
+      this.reserved = this.seq;
+    } catch (error) {
       process.stderr.write(`ghostly: event journal error: ${error instanceof Error ? error.message : String(error)}\n`);
     }
   }
@@ -295,6 +350,7 @@ export class EventHub {
   /** Emits an event the host makes itself (`daemon.started`). */
   emit(type: string, id: string, fields: Record<string, unknown> = {}): GhostlyEvent {
     const event: GhostlyEvent = { seq: ++this.seq, id, type, at: this.now(), ...fields };
+    this.reserve();
     // The journal failing never keeps an event from the listeners.
     let written = false;
     try {
@@ -913,12 +969,35 @@ function firstSeq(lines: readonly string[]): number | undefined {
   return undefined;
 }
 
-/** The journal's dropped mark (`EventHub.dropped`), or undefined when there is none (a journal from before it). */
+/**
+ * The journal's dropped mark (`EventHub.dropped`) or its reserved one (`EventHub.reserved`), or undefined when there is
+ * none (a journal from before it).
+ */
 function readDropped(path: string): number | undefined {
   try {
     const seq = Number(readFileSync(path, "utf8").trim());
     return Number.isSafeInteger(seq) && seq >= 0 ? seq : undefined;
   } catch { return undefined; }
+}
+
+/**
+ * Writes a mark over the one there, as a line of fixed width (`000…0042`, which `readDropped` reads, v1.10's too): a
+ * rewrite never grows the file past its first block, so a full disk takes it, and one cut short leaves the new mark's
+ * first digits before the old one's last, never a number below the old one when the mark grows. `create`: a file that
+ * is not there is made (a first start).
+ */
+function writeMark(path: string, seq: number, create: boolean): void {
+  const line = Buffer.from(String(seq).padStart(19, "0") + "\n");
+  let fd: number;
+  try { fd = openSync(path, "r+"); } catch (error) {
+    if (!create || (error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    fd = openSync(path, "wx", 0o600);
+  }
+  try {
+    for (let at = 0; at < line.length;) at += writeSync(fd, line, at, line.length - at, at);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /**
