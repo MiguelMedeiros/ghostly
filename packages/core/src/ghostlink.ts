@@ -1492,7 +1492,8 @@ export class GhostLink {
     const tracker = this.tracker;
     if (!tracker || tracker.done) return;
     if (state === "answering") tracker.offerReceived();
-    else if (state === "connecting" && was === "offering") tracker.answerReceived();
+    // On a busy page the channel opens before the answer is applied (`DataLink.handleSignal`): the answer came all the same.
+    else if ((state === "connecting" || state === "open") && was === "offering") tracker.answerReceived();
     else if (state === "idle") {
       if (was === "offering") tracker.failed("timeout", true);
       else if (was === "answering" || was === "connecting") tracker.failed("transport", true);
