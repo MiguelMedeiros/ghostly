@@ -4,7 +4,7 @@ import { STORES, openDb } from "./idb";
  * What a restore changes in the money a backup carries (WISP 05 § Restoring). A bundle holds the wallet as it stood
  * when the backup was made, and the profile it came from may have gone on since: none of it is taken at its word.
  */
-export const RESTORED_WALLET_STORES: readonly string[] = [STORES.proofs, STORES.swaps, STORES.intents];
+export const RESTORED_WALLET_STORES: readonly string[] = [STORES.proofs, STORES.swaps, STORES.melts, STORES.quotes, STORES.intents];
 
 /** One row of `store` as a restore writes it. A row of any other store, or one that is not what it should be, is kept as it is. */
 export function restoredWalletRow(store: string, value: unknown): unknown {
@@ -14,8 +14,10 @@ export function restoredWalletRow(store: string, value: unknown): unknown {
     const proof = value as { secret?: unknown; reserved?: boolean };
     return typeof proof.secret === "string" && !proof.reserved ? { ...proof, unchecked: true } : value;
   }
-  // A swap as it stood when the backup was made: what it brings is checked like the copy's ecash.
-  if (store === STORES.swaps) return { ...value, restored: true };
+  // A swap, a Lightning payment or an invoice as it stood when the backup was made: the profile it came from may have
+  // finished it since and spent what it brought (the change of a payment, the ecash of an invoice). What it brings here
+  // is checked like the copy's ecash.
+  if (store === STORES.swaps || store === STORES.melts || store === STORES.quotes) return { ...value, restored: true };
   if (store === STORES.intents) {
     // An older copy cannot prove an unfinished attempt was never sent; it may not authorize a new one.
     const intent = value as { review?: { state?: string; method?: string } };
