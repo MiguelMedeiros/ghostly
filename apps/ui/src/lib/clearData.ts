@@ -25,8 +25,19 @@ export const CLEAR_ENGINE_MS = 15_000;
  *    On the web and Desktop, what the contacts' apps it opened kept on their own origins goes too (`forgetServices`);
  *    in the extension, Chrome's access to each local host it shared an app at, unless another profile shares one there.
  * 5. A host whose peer outlives the page starts a new one. The caller then reloads.
+ *
+ * All of it is the profile's this page runs as, should another tab switch to another profile meanwhile.
  */
-export async function clearAllData(): Promise<void> {
+export function clearAllData(): Promise<void> {
+  clearing ??= clearProfile(activeProfileId()).finally(() => { clearing = null; });
+  return clearing;
+}
+
+/** The clear this page runs, if one does: a page that starts again for a switch in another tab waits for it. */
+export const clearInProgress = (): Promise<void> | null => clearing;
+let clearing: Promise<void> | null = null;
+
+async function clearProfile(profileId: string): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const stopped = await Promise.race([
     engine.call("clearProfileData").then(() => true, () => false),
@@ -48,12 +59,12 @@ export async function clearAllData(): Promise<void> {
   await removeFileBytes().catch(() => {});
   await new Promise<void>((resolve) => {
     try {
-      const request = indexedDB.deleteDatabase(linkedFilesDatabase(profileDatabase(activeProfileId())));
+      const request = indexedDB.deleteDatabase(linkedFilesDatabase(profileDatabase(profileId)));
       request.onsuccess = request.onerror = request.onblocked = () => resolve();
     } catch { resolve(); }
   });
-  await pushPlatform()?.unsubscribe(activeProfileId()).catch(() => {});
-  await forgetServicesOf({ profile: activeProfileId() });
+  await pushPlatform()?.unsubscribe(profileId).catch(() => {});
+  await forgetServicesOf({ profile: profileId });
   // Its shared apps went with its database: the extension gives back the local hosts no other profile shares one at.
   await releaseUnusedLocalAccessOf();
   let host: ReturnType<typeof getBrowserHost> | null = null;
