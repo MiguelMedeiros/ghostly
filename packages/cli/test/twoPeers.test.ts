@@ -1032,4 +1032,25 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const saved = ok(await as(bob, "file", "save", file!.file.id, "--path", join(bob, "from-a-one-shot.bin")));
     expect(sha(saved.path as string)).toBe(sha(path));
   });
+
+  it("a chat paired before is paired while its contact is away: chat wait --until paired answers at once, as a one-shot or from a daemon", async () => {
+    // Before, with the contact's daemon stopped and the pairing made in an earlier run, it waited its whole timeout and
+    // answered `timeout` (exit 4): a bot's start-up guard failed for a chat whose texts go out over the DHT.
+    for (const dir of [alice, bob]) {
+      if (!ok(await as(dir, "daemon", "status")).running) continue;
+      ok(await as(dir, "daemon", "stop"));
+      expect(await daemons[dir].exited()).toBe(0);
+    }
+    const paired = async () => {
+      const asked = Date.now();
+      expect(ok(await as(alice, "chat", "wait", "bob", "--until", "paired", "--timeout", "10"))).toMatchObject({ id: chatA, live: false });
+      expect(Date.now() - asked).toBeLessThan(5_000);
+    };
+    await paired();
+    await startDaemon(alice);
+    expect(ok(await as(alice, "chat", "show", "bob"))).toMatchObject({ live: false, pairing: "connecting" });
+    await paired();
+    // Live still means the contact is there now.
+    error(await as(alice, "chat", "wait", "bob", "--until", "live", "--timeout", "2"), "timeout", 4);
+  });
 });
