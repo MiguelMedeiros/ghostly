@@ -239,6 +239,8 @@ const LEFT_FOLLOW_MS = 10 * 60_000;
  */
 const LEFT_HAND_ON_MS = 1_000;
 const MESSAGE_LINK = (groupId: string) => `group:${groupId}`;
+/** The newest hand-over in a chain. */
+const lastRole = (chain: readonly { k: string; by: string; s?: string }[]) => { for (let i = chain.length - 1; i >= 0; i--) if (chain[i].k === "role") return chain[i]; return undefined; };
 
 /**
  * A member key for a joiner whose entry session the member's side dials. Of a paired session's two
@@ -799,11 +801,25 @@ export class Communities {
   private async leftMoved(groupId: string, now: number): Promise<void> {
     const left = this.leftBehind.get(groupId), s = left?.session;
     if (!left || !s) return;
-    if (!rosterHas(s.roster, s.myKey)) await this.dropLeftBehind(groupId);
+    // Out, but the role I handed is still with a member whose leave I heard (an older hub committed my leave at once):
+    // its app may reach the group only through me, so I follow on until its hand-on comes (`handedToLeaver`).
+    if (!rosterHas(s.roster, s.myKey) && !this.handedToLeaver(left)) await this.dropLeftBehind(groupId);
     else if (now - left.since > LEFT_FOLLOW_MS) await this.dropLeftBehind(groupId);
+    else if (!rosterHas(s.roster, s.myKey)) left.handOnAt = undefined;
     else if (s.admin !== s.myKey) left.handOnAt = undefined;
     else if (left.handOnAt === undefined) left.handOnAt = now + LEFT_HAND_ON_MS;
     else if (now >= left.handOnAt) await this.handOn(groupId, now);
+  }
+
+  /**
+   * The role I handed on before I left is still with the member I gave it to, and that member's leave reached me: its
+   * hand-on (`handOn`) may reach the group only through my edges, even once a hub committed my own leave (WISP 903,
+   * "A role that reaches a leave": an older hub does not keep my request while the admin's waits).
+   */
+  private handedToLeaver(left: { session: CommunitySession; heard: Set<string> }): boolean {
+    const s = left.session, admin = s.admin, role = lastRole(s.state.chain);
+    return !!admin && admin !== s.myKey && role?.by === s.myKey && role.s === admin
+      && (left.heard.has(admin) || s.state.pendingLeaves.some(r => r.s === admin));
   }
 
   /**
