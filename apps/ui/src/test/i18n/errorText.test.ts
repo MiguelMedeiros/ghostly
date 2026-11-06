@@ -409,6 +409,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Switch to another profile first", "apps/ui/src/lib/profiles.ts"],
   ["Unknown profile", "apps/ui/src/lib/profiles.ts"],
   ["This profile is open in another window. Close it, then try again.", "apps/ui/src/lib/profileData.ts"],
+  ["Could not delete this profile's data", "apps/ui/src/lib/profileData.ts"],
   ["Wrong lock password for that profile", "apps/ui/src/lib/profileData.ts"],
   ["Too many attempts. Try again in 4 s", "apps/ui/src/lib/lockAttempts.ts", "Too many attempts. Try again in "],
   ["This backup does not hold a profile", "apps/ui/src/lib/profileBackup.ts"],

@@ -485,6 +485,8 @@
     "noRoom": "No hay espacio para esta copia",
     "noRoomNext": "Libera espacio y vuelve a intentarlo.",
     "notABackup": "Esta copia de seguridad no contiene un perfil",
+    "notDeleted": "No se pudieron eliminar los datos de este perfil",
+    "notDeletedNext": "No se eliminó nada. Inténtalo de nuevo.",
     "notGhostlyBackup": "Esto no es una copia de Ghostly. Elige un archivo .ghostly-backup.",
     "openElsewhere": "Este perfil está abierto en otra ventana. Ciérrala e inténtalo de nuevo.",
     "shortPassphrase": "Usa al menos 12 caracteres para la frase de la copia.",

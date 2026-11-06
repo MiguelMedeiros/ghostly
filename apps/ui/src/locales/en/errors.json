@@ -485,6 +485,8 @@
     "noRoom": "No room for this backup",
     "noRoomNext": "Free some space, then try again.",
     "notABackup": "This backup does not hold a profile",
+    "notDeleted": "Could not delete this profile's data",
+    "notDeletedNext": "Nothing was deleted. Try again.",
     "notGhostlyBackup": "This is not a Ghostly backup. Choose a .ghostly-backup file.",
     "openElsewhere": "This profile is open in another window. Close it, then try again.",
     "shortPassphrase": "Use at least 12 characters for the backup passphrase.",
