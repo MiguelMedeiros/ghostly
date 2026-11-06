@@ -139,6 +139,8 @@
     "inUse": "In use",
     "needsDesktop": "{{transport}} needs Ghostly Desktop",
     "noWebrtc": "This app has no WebRTC",
+    "relayOnlyHyperdht": "With Hide my IP on, HyperDHT needs a HyperDHT relay · Settings, Network",
+    "relayOnlyOff": "Off while Hide my IP is on · Settings, Network",
     "relayUnreached": "{{transport}} couldn't reach its relay · Settings, Network",
     "throughRelay": "Through a relay · used when nothing direct connects",
     "waiting": "Waiting"

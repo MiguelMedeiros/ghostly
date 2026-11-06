@@ -139,6 +139,8 @@
     "inUse": "使用中",
     "needsDesktop": "{{transport}} 需要 Ghostly Desktop",
     "noWebrtc": "此应用没有 WebRTC",
+    "relayOnlyHyperdht": "隐藏 IP 开启时，HyperDHT 需要 HyperDHT 中继 · 设置，网络",
+    "relayOnlyOff": "隐藏 IP 开启时已关闭 · 设置，网络",
     "relayUnreached": "{{transport}} 无法连接其中继 · 设置，网络",
     "throughRelay": "经中继 · 无法直连时使用",
     "waiting": "等待中"
