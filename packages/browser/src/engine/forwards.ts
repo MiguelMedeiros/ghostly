@@ -123,10 +123,13 @@ type ForwardTarget = { linkId: string; wireId: string; timestamp: number; file: 
  * for everyone by its sender, which takes its file: `messageGone`, asked only once the copy failed) is
  * `FORWARD_MESSAGE_GONE`, its record gone with the message still here is "not on this device any more". Only bytes
  * missing from a source still kept whole on record stay "shorter than it says".
+ *
+ * `digests`, one per forward: a stripped copy's digest by its source's id. Its bytes are the same for every chat of the
+ * forward (they depend only on the source and its type), so only the first copy is read back to be hashed.
  */
-export async function copyForForward(sourceId: string, target: ForwardTarget, messageGone?: () => Promise<boolean>): Promise<MessageFile> {
+export async function copyForForward(sourceId: string, target: ForwardTarget, messageGone?: () => Promise<boolean>, digests?: Map<string, string>): Promise<MessageFile> {
   try {
-    return await copyFile(sourceId, target);
+    return await copyFile(sourceId, target, digests);
   } catch (error) {
     if (await messageGone?.().catch(() => false)) throw Object.assign(new Error(FORWARD_MESSAGE_GONE), { cause: error });
     if (!(await fileStore.get(sourceId).catch(() => ({ metadata: true })))?.metadata) throw Object.assign(new Error("The file is not on this device any more"), { cause: error });
@@ -134,7 +137,7 @@ export async function copyForForward(sourceId: string, target: ForwardTarget, me
   }
 }
 
-async function copyFile(sourceId: string, target: ForwardTarget): Promise<MessageFile> {
+async function copyFile(sourceId: string, target: ForwardTarget, digests?: Map<string, string>): Promise<MessageFile> {
   const source = await fileStore.get(sourceId);
   if (!source?.metadata) throw new Error("The file is not on this device any more");
   const stored = storedSize(source);
@@ -149,7 +152,7 @@ async function copyFile(sourceId: string, target: ForwardTarget): Promise<Messag
   const stripped = await withoutMetadata(source, stored, target.file, read);
   const blob = typeof stripped === "function" ? undefined : stripped ?? source.blob, size = blob && stripped ? blob.size : stored;
   const readCopy = typeof stripped === "function" ? stripped : read;
-  const known = stripped ? undefined : source.digest;
+  const known = stripped ? digests?.get(sourceId) : source.digest;
   const { linkId, wireId, timestamp } = target, file = stripped ? { ...target.file, size } : target.file;
   const metadata = { name: file.name, size: file.size, mime: file.mime, timestamp, voice: file.voice, video: file.video, image: file.image };
   const record = { id: file.id, linkId, createdAt: timestamp, direction: "out" as const, wireId, metadata, transfer: { state: "transferring" as const, transferred: 0, size: file.size } };
@@ -158,6 +161,7 @@ async function copyFile(sourceId: string, target: ForwardTarget): Promise<Messag
     // gone for both once either record is deleted (see `fileStore`).
     const copy = new Blob([await blob.slice(0, size).arrayBuffer()], { type: blob.type });
     const digest = known ?? (stripped ? await blobDigest(copy) : undefined);
+    if (stripped && digest) digests?.set(sourceId, digest);
     await fileStore.put({ ...record, blob: copy, ...(digest && { digest }) });
     return file;
   }
@@ -171,8 +175,10 @@ async function copyFile(sourceId: string, target: ForwardTarget): Promise<Messag
       offset += part.length;
     }
     await appender.close();
-    // The same bytes, so the same digest: read back only when the original never had one written down (or was stripped).
+    // The same bytes, so the same digest: read back only when the original never had one written down (or was stripped,
+    // once per forward).
     const digest = known ?? await bytes.digest(file.id);
+    if (stripped) digests?.set(sourceId, digest);
     await fileStore.put({ ...record, bytes: bytes.kind, digest });
     return file;
   } catch (error) {

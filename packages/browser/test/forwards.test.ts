@@ -309,6 +309,45 @@ describe("a received video or audio file", () => {
         expect(hasPlace(await copied(id))).toBe(true);
       });
 
+  // 20 chats as four Forwards of five: each copy is read once to be made; its digest, the same for every chat (the
+  // stripped bytes depend only on the source and its type), is read back from storage once per Forward, not per chat.
+  it("copied for 20 chats, a 24 MiB video is hashed once per Forward, as a plain file is copied: the same bytes and digest in every copy", { timeout: 60_000 }, async () => {
+    const size = 24 * 1024 * 1024;
+    const tail = new Uint8Array(size - recorded.length);
+    tail.set(new TextEncoder().encode(PLACE), tail.length - PLACE.length);
+    const padded = Buffer.concat([recorded, tail]);
+    const storage = await fileBytes();
+    const stripped = await bytesOf((await withoutVideoMetadata(new Blob([padded]), "video/mp4"))!);
+    const strippedDigest = createHash("sha256").update(stripped).digest("base64url");
+    // A plain file is no video by its bytes either: one that is would be stripped as one.
+    for (const [bytes, name, mime, video, digest] of [
+      [padded, "VID_0004.mp4", "video/mp4", { duration: 1000, width: 64, height: 64 }, strippedDigest],
+      [pattern(0, size), "data.bin", "application/octet-stream", undefined, digestOf(size)],
+    ] as const) {
+      const { id, target } = await received(bytes, name, mime, "storage", video);
+      const digests = vi.spyOn(storage, "digest"), reads = vi.spyOn(storage, "read");
+      const copies: string[] = [];
+      for (let forward = 0; forward < 4; forward++) {
+        const same = new Map<string, string>();
+        for (let chat = 0; chat < 5; chat++) {
+          const file = { ...target.file, id: `link-b-out-${crypto.randomUUID()}` };
+          await copyForForward(id, { ...target, file }, undefined, same);
+          copies.push(file.id);
+        }
+      }
+      const read = reads.mock.results.length ? (await Promise.all(reads.mock.results.map(r => r.value as Promise<Uint8Array>))).reduce((n, part) => n + part.length, 0) : 0;
+      // `digest` reads the whole copy again (by itself, not through `read`).
+      expect({ digests: digests.mock.calls.length, copiesRead: Math.round(read / size) }).toEqual({ digests: video ? 4 : 0, copiesRead: 20 });
+      digests.mockRestore();
+      reads.mockRestore();
+      for (const copy of copies) expect(await fileStore.get(copy)).toMatchObject({ digest, metadata: { size: video ? stripped.length : size } });
+      // The bytes stored are the ones the digest says, the last copy as the first.
+      for (const copy of [copies[0]!, copies.at(-1)!]) expect(createHash("sha256").update(await copied(copy)).digest("base64url")).toBe(digest);
+      for (const copy of copies) await removeStored(copy);
+      await removeStored(id);
+    }
+  });
+
   it("whose metadata cannot be removed is refused as one sent from here is, and no copy is kept", async () => {
     for (const kept of ["blob", "storage"] as const) {
       const { id, target } = await received(recorded.subarray(0, 500), "cut.mp4", "video/mp4", kept, { duration: 1000, width: 64, height: 64 });

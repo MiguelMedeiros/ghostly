@@ -5868,6 +5868,8 @@ export class GhostlyNode implements EngineImplementation {
     let last = 0;
     const now = () => (last = Math.max(Date.now(), last + 1));
     const results: ForwardResult[] = [];
+    // A file without its metadata is the same bytes for every chat: hashed once (`copyForForward`).
+    const digests = new Map<string, string>();
     for (const to of targets) {
       const result: ForwardResult = { to, messageIds: [], sent: [], error: null };
       results.push(result);
@@ -5899,7 +5901,7 @@ export class GhostlyNode implements EngineImplementation {
             const original = message.file!, picked: MessageFile = { id: groupFileId(groupId, "out"), name: original.name, size: original.size, mime: original.mime,
               ...(original.voice && { voice: original.voice }), ...(original.video && { video: original.video }), ...(original.image && { image: original.image }) };
             // As it goes: a picture without its metadata, its size the copy's.
-            const file = await copyForForward(original.id, { linkId: to, wireId: picked.id.slice(`group-${groupId}-out-`.length), timestamp: now(), file: picked }, gone);
+            const file = await copyForForward(original.id, { linkId: to, wireId: picked.id.slice(`group-${groupId}-out-`.length), timestamp: now(), file: picked }, gone, digests);
             const sent = await this.sendGroupFile({ groupId, file, forwarded: hops });
             if (sent.error) { await removeStored(file.id).catch(() => {}); note(sent.error); continue; }
             if (sent.messageId) result.messageIds.push(sent.messageId);
@@ -5910,7 +5912,7 @@ export class GhostlyNode implements EngineImplementation {
           const original = message.file!, wireId = toBase64Url(randomBytes(12)), timestamp = now();
           const picked: MessageFile = { id: GhostlyNode.outgoingFileId(to, wireId), name: original.name, size: original.size, mime: original.mime,
             ...(original.voice && { voice: original.voice }), ...(original.video && { video: original.video }), ...(original.image && { image: original.image }) };
-          const file = await copyForForward(original.id, { linkId: to, wireId, timestamp, file: picked }, gone);
+          const file = await copyForForward(original.id, { linkId: to, wireId, timestamp, file: picked }, gone, digests);
           try {
             await this.sendFile({ linkId: to, file, timestamp, forwarded: hops });
           } catch (error) {
