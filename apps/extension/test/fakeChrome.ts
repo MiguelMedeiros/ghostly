@@ -320,8 +320,8 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
     notifications: undefined as unknown,
     permissions: {
       onAdded: event<(permissions: chrome.permissions.Permissions) => void>(),
-      async contains({ permissions }: chrome.permissions.Permissions) {
-        return (permissions ?? []).every((p) => p === "notifications" && chromeApi.notifications !== undefined);
+      async contains({ permissions, origins }: chrome.permissions.Permissions) {
+        return (permissions ?? []).every((p) => p === "notifications" && chromeApi.notifications !== undefined) && (origins ?? []).every((o) => world.hostAccess.has(o));
       },
       async request(request: chrome.permissions.Permissions) {
         record("permissions.request", request);
