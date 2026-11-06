@@ -44,7 +44,7 @@ import { useWindowAway, windowAway } from "../lib/windowAway";
 import { authorsMemo, type MessageAuthor } from "../lib/senderRuns";
 import { rowDaysReader } from "../lib/chatDays";
 import { MemberColorsProvider } from "../contexts/MemberColorsContext";
-import { chatNamesForPeer } from "../lib/storage";
+import { chatsByPeer } from "../lib/storage";
 import { useContactFaces, withContactFaces } from "../components/identities/contactFace";
 import type { ChatMessage } from "../lib/types";
 import { useSettings } from "../contexts/SettingsContext";
@@ -341,11 +341,14 @@ export function GroupChat() {
   const links = useEngineValue(state => state?.links.map(({ id, peerPubKeyZ32, peerAvatar }) => ({ id, peerPubKeyZ32, peerAvatar })));
   // Members who are contacts go by the identity they are shown as, if one was chosen (identities/contactFace.ts).
   const faceOf = useContactFaces();
-  // A member's nickname from that contact's chat, read only for members who are contacts and parsed again only when the
+  // A member's nickname from that contact's chat, read only when a member is a contact and parsed again only when the
   // chat changed: every engine state comes through here, and a read of every chat each time grew with the chat list.
+  // One look through the stored chats for the whole roster, not one per member: each walks every key of the page's
+  // storage, and this runs again at each message in the group.
   const group = useMemo(() => {
     if (!rosterGroup) return undefined;
-    return withContactFaces(rosterGroup, links, faceOf, peerKey => chatNamesForPeer(peerKey)?.label);
+    let chats: ReturnType<typeof chatsByPeer> | undefined;
+    return withContactFaces(rosterGroup, links, faceOf, peerKey => (chats ??= chatsByPeer()).get(peerKey)?.label);
   }, [rosterGroup, links, faceOf]);
   // The history of this group only: the page stays mounted from one group to the next, and for the render that changes
   // groups the last one's messages would still be here (the timeline would open on them, and never find where this
