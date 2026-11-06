@@ -69,7 +69,7 @@ export function ConnectionHistory({ events, contact }: { events: readonly Transp
     : formatAt(at, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }, language);
   return (
     <details className="mt-2 border-t border-border pt-1 text-[11px]" data-testid="connection-history">
-      <summary className={`w-fit cursor-pointer rounded-md py-2 pr-2 text-text-secondary ${focus}`}>{t("connection.history.title", { count: events.length })}</summary>
+      <summary className={`w-fit cursor-pointer rounded-md py-2 pe-2 text-text-secondary ${focus}`}>{t("connection.history.title", { count: events.length })}</summary>
       <ol className="space-y-1 pb-2" aria-label={t("connection.history.list")}>
         {shown.map((e, i) => (
           <li key={`${e.at}-${i}`} className="grid grid-cols-[auto_1fr] gap-x-2" data-testid="connection-history-event" data-kind={e.kind}>
