@@ -584,6 +584,7 @@ const RULES: readonly Rule[] = [
   exact("Switch to another profile first", "errors.profile.switchFirst"),
   exact("Unknown profile", "errors.profile.unknown"),
   exact("This profile is open in another window. Close it, then try again.", "errors.profile.openElsewhere"),
+  exact("Could not delete this profile's data", "errors.profile.notDeleted", "errors.profile.notDeletedNext"),
   exact("Wrong lock password for that profile", "errors.profile.wrongPassword"),
   { match: /^Too many attempts\. Try again in (?<seconds>\d+) s$/, key: "lockScreen.tooManyAttempts" },
   exact("This backup does not hold a profile", "errors.profile.notABackup"),

@@ -1317,7 +1317,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </div>
         ) : message.paymentId ? (
           <div className="clearfix">
-            <PaymentBubble paymentId={message.paymentId} peerPubKey={peerPubKey} fallbackText={message.text} />
+            <PaymentBubble paymentId={message.paymentId} peerPubKey={peerPubKey} fallbackText={message.text} mine={isMe} />
             {timestampEl}
           </div>
         ) : message.file?.voice ? (
