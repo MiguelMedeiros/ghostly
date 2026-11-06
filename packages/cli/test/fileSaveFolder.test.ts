@@ -8,6 +8,7 @@ import type { EngineState } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
 import { parseArgs } from "../src/args";
 import { COMMANDS, positionals } from "../src/commands";
+import { asCliError } from "../src/errors";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 // covers: headless.files
 
@@ -75,6 +76,18 @@ describe("file save to a folder", () => {
     const file = join(dir, "plain.txt");
     writeFileSync(file, "x");
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", dir: file })).rejects.toMatchObject({ code: "not_found", message: `${file} is a file, not a folder` });
+  });
+
+  // Root writes into any folder: nothing to refuse.
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("a folder it may not write is named, never the save's own hidden temporary file", async () => {
+    const folder = join(dir, "readonly");
+    mkdirSync(folder, { mode: 0o555 });
+    // As the socket and the CLI answer it.
+    const save = (params: Record<string, unknown>) => callApi(ctx, "file.save", params).catch((error: unknown) => { throw asCliError(error); });
+    const message = `Not allowed to write or read ${folder}`;
+    await expect(save({ file: "chat-one-in-r", dir: folder })).rejects.toMatchObject({ code: "refused", message });
+    await expect(save({ file: "chat-one-in-r", path: join(folder, "x.txt") })).rejects.toMatchObject({ code: "refused", message });
+    expect(readdirSync(folder)).toEqual([]);
   });
 
   it("a voice message goes into --dir under the name Ghostly makes for it, never the sender's", async () => {
