@@ -1,7 +1,7 @@
 import { emptyIdentityLedger, emptyProofLedger, type IdentityLedger, type ProofLedger } from "@ghostly/core";
-import { APP_STORAGE_CHAT_INDEX, CARD_INDEX, GROUP_LIVE_RANGE, STORES, fileStore, groupLiveKey, store, wrap, committed, openDb } from "../shared/idb";
+import { APP_STORAGE_CHAT_INDEX, CARD_INDEX, GROUP_LIGHT_RANGE, GROUP_LIVE_RANGE, STORES, fileStore, groupLightKey, groupLiveKey, store, wrap, committed, openDb } from "../shared/idb";
 import { removeFileBytes } from "../shared/fileBytes";
-import type { GroupLive, MessagePage, Settings, StoredGroup, StoredLink, StoredMessage, StoredService } from "../shared/types";
+import type { GroupLight, GroupLive, MessagePage, Settings, StoredGroup, StoredLink, StoredMessage, StoredService } from "../shared/types";
 import { openRow, openRows, RowSeals, sealRow } from "./sealedRows";
 
 /**
@@ -346,7 +346,8 @@ export const db = {
   },
   /**
    * `live`: the group's small row (`GroupLive`) in the same transaction, or `null` to delete it. It holds none of the
-   * fields the encrypted profile seals; the record's are sealed before the transaction opens.
+   * fields the encrypted profile seals; the record's are sealed before the transaction opens. The record holds the
+   * group's pin and deletions for everyone again: their row (`GroupLight`) goes.
    */
   async putGroup(group: StoredGroup, live?: GroupLive | null): Promise<void> {
     const row = await sealRow(STORES.groups, group);
@@ -354,6 +355,7 @@ export const db = {
     const tx = (await openDb()).transaction([STORES.groups, STORES.settings], "readwrite");
     tx.objectStore(STORES.groups).put(row);
     const settings = tx.objectStore(STORES.settings);
+    settings.delete(groupLightKey(group.id));
     if (live) await committed(settings.put(live, groupLiveKey(group.id)));
     else await committed(settings.delete(groupLiveKey(group.id)));
   },
@@ -366,10 +368,20 @@ export const db = {
   async putGroupLive(groupId: string, live: GroupLive): Promise<void> {
     await committed((await store(STORES.settings, "readwrite")).put(live, groupLiveKey(groupId)));
   },
+  /** Every private group's pin and deletions for everyone that its record is behind on, by group id. */
+  async getGroupLight(): Promise<Map<string, GroupLight>> {
+    const settings = await store(STORES.settings, "readonly");
+    const [keys, rows] = await Promise.all([wrap(settings.getAllKeys(GROUP_LIGHT_RANGE())), wrap(settings.getAll(GROUP_LIGHT_RANGE()))]);
+    return new Map(keys.map((key, i) => [String(key).slice(groupLightKey("").length), rows[i] as GroupLight]));
+  },
+  async putGroupLight(groupId: string, light: GroupLight): Promise<void> {
+    await committed((await store(STORES.settings, "readwrite")).put(light, groupLightKey(groupId)));
+  },
   /** The group and its history. */
   async deleteGroup(groupId: string): Promise<void> {
     const tx = (await openDb()).transaction([STORES.groups, STORES.settings], "readwrite");
     tx.objectStore(STORES.groups).delete(groupId);
+    tx.objectStore(STORES.settings).delete(groupLightKey(groupId));
     await committed(tx.objectStore(STORES.settings).delete(groupLiveKey(groupId)));
     // By key range, as a chat's (`deleteLink`): one request, not one per message of a long group.
     const link = `group:${groupId}`;
