@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { createIdentity } from "@ghostly/core";
 import { CommunityWorld, sameRun, seededRandom, type Peer } from "./communityWorld";
 // covers: groups.leave, groups.admin-change
 
@@ -100,6 +101,18 @@ describe("a community's admin role handed to a member whose leave is on its way"
       await Promise.allSettled([carol.groups.leave(id), next.groups.leave(id)]);
       await olderHubCommits(world, hubs, id);
       await converged(world, id, stay, key);
+    });
+
+    // A member's commit on top of the `role` before the leaver's hand-on (an ordinary admission here) made its signer the
+    // leaver's tip, and the role went to it: to a member nobody chose, instead of back to the one who handed it.
+    it(`seed ${seed}: a member that lets someone in before the leaver hands the role on does not take it`, async () => {
+      const { world, id, peers, carol, key, peerOf } = await group(seed);
+      const [, bob, dave] = peers;
+      await Promise.allSettled([carol.groups.makeAdmin(id, key(bob)), bob.groups.leave(id)]);
+      await world.until(() => world.view(dave, id)?.members.find(m => m.role === "admin")?.key === key(bob), 60_000, 10);
+      await dave.groups.communities.session(id)!.admit(createIdentity().pubKeyZ32, world.now);
+      await world.run(120_000);
+      for (const p of peers.filter(p => p !== bob)) expect(peerOf(world.view(p, id)!.members.find(m => m.role === "admin")!.key)?.name, p.name).toBe("carol");
     });
 
     it(`seed ${seed}: control, the member leaves a second after the role reached it`, async () => {
