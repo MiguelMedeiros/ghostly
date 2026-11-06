@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import DHT from "bittorrent-dht";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import {
-  HEDGE_MISSING_MS, HEDGE_MS, RelayTransport, RelaysFailedError, SLOW_MS, isDiscoveryBudgetError, newerPacket, parseRelayPayload, publicKeyFromZ32,
-  type DiscoveryBudgetError, type DiscoveryStatus, type GhostRecord, type Identity, type PkarrRequestOptions, type PkarrTransport, type RelayTransportOptions, type SignedPacket,
+  BACKGROUND_REQUESTS_PER_MINUTE, DiscoveryBudgetError, HEDGE_MISSING_MS, HEDGE_MS, RelayTransport, RelaysFailedError, SLOW_MS, isDiscoveryBudgetError, newerPacket, parseRelayPayload, publicKeyFromZ32,
+  type DiscoveryStatus, type GhostRecord, type Identity, type PkarrRequestOptions, type PkarrTransport, type RelayTransportOptions, type SignedPacket,
 } from "@ghostly/core";
 
 /**
@@ -125,10 +125,59 @@ export class Mainline {
 /** Keys a `RelaysAndDht` remembers as found nowhere (`missing`). */
 const MISSING_KEPT = 256;
 
+/** How long a key that asked for a background DHT read counts among those that share the budget (`DhtBackgroundBudget`). */
+const ASKERS_WINDOW_MS = 2 * 60_000;
+const MINUTE_MS = 60_000;
+
+/**
+ * Background reads that go to the DHT in the relays' place (every relay failing, or failing this read), within the share
+ * the relays would have given them (`BACKGROUND_REQUESTS_PER_MINUTE` a minute on each relay): a minute's lookups at
+ * most, and each key in its turn, no sooner than the keys asking share that minute (`n` keys at `perMinute` a minute:
+ * once every `n / perMinute` minutes). Without it, a daemon looked up every contact away on the DHT four times a minute
+ * for as long as the relays failed (200 lookups a minute at 50 contacts, 1,200 at 300), where with the relays up it
+ * made 26-54 relay reads a minute in all; each lookup on the real DHT is dozens of UDP queries.
+ * Reads someone waits on (not `background`, or `urgent`, `signal`, `door`, `resume`) never wait for it, nor count.
+ */
+export class DhtBackgroundBudget {
+  private readonly spent: number[] = [];
+  /** Per key, when it last asked (oldest first) and when its last lookup went. */
+  private readonly askedAt = new Map<string, number>();
+  private readonly lookedAt = new Map<string, number>();
+
+  constructor(private readonly perMinute: () => number) {}
+
+  /** 0: the lookup goes now (counted). Otherwise how long until this key's turn, in ms; nothing is counted. */
+  take(pubKeyZ32: string, now = Date.now()): number {
+    this.askedAt.delete(pubKeyZ32);
+    this.askedAt.set(pubKeyZ32, now);
+    for (const [key, at] of this.askedAt) {
+      if (now - at < ASKERS_WINDOW_MS) break;
+      this.askedAt.delete(key);
+      this.lookedAt.delete(key);
+    }
+    while (this.spent.length && now - this.spent[0]! >= MINUTE_MS) this.spent.shift();
+    const limit = Math.max(1, this.perMinute());
+    const turn = Math.ceil(this.askedAt.size * MINUTE_MS / limit);
+    const last = this.lookedAt.get(pubKeyZ32);
+    const ownTurn = last === undefined ? 0 : last + turn - now;
+    // The minute's lookups are spent (keys new to it, all at once): this key's turn, or the minute's next free one if later.
+    const minute = this.spent.length >= limit ? this.spent[0]! + MINUTE_MS - now : 0;
+    if (ownTurn > 0 || minute > 0) return Math.max(ownTurn, minute, last === undefined ? turn : 0);
+    this.spent.push(now);
+    this.lookedAt.set(pubKeyZ32, now);
+    return 0;
+  }
+}
+
+/** A read nobody waits on: what the relays' budget calls background, and what the DHT's (`DhtBackgroundBudget`) holds. */
+const waitable = (options: PkarrRequestOptions): boolean =>
+  !!options.background && !options.urgent && !options.signal && !options.door && !options.resume;
+
 /**
  * The relays first, as the web app reaches Pkarr (its contacts read only the relays), and the DHT beside them: every
  * packet also goes to the DHT, and a read goes there when every relay is failing, the read failed, or this app's own
- * request budget held it back (the DHT has no budget). A background read the budget holds waits for it.
+ * request budget held it back (the DHT has no budget). A background read the budget holds waits for it. Background reads
+ * the DHT answers in the relays' place keep to the relays' background share (`DhtBackgroundBudget`).
  *
  * `pinned`: the relays given are the only ones (`GHOSTLY_PKARR_RELAYS`, a private network): the profile's `relays`
  * setting does not replace them. With no DHT (`dht` null), the relays alone carry every packet.
@@ -141,6 +190,8 @@ export class RelaysAndDht implements PkarrTransport {
    * hedges late too (`HEDGE_MISSING_MS`), not only once that 404 lands. The newest `MISSING_KEPT`.
    */
   private readonly missing = new Set<string>();
+  /** Background reads on the DHT in the relays' place, at their background share (`DhtBackgroundBudget`). */
+  private readonly dhtBackground = new DhtBackgroundBudget(() => BACKGROUND_REQUESTS_PER_MINUTE * this.relays.describe().relays.length);
 
   constructor(private readonly dht: Mainline | null, relays: RelayTransportOptions = {}, private readonly pinned = false) {
     this.relays = new RelayTransport(relays);
@@ -238,6 +289,12 @@ export class RelaysAndDht implements PkarrTransport {
       if (!failed && !down()) return fromRelays;
     }
     try {
+      // A background read the DHT answers instead of the relays waits its turn there (`DhtBackgroundBudget`), as it did
+      // on them: held back, as their budget holds one. With no relay set at all the DHT is the only way, not a stand-in.
+      if (waitable(options) && this.relays.describe().relays.length > 0) {
+        const wait = this.dhtBackground.take(pubKeyZ32);
+        if (wait > 0) throw new DiscoveryBudgetError(wait, "Background DHT reads in the relays' place are at their share; retry shortly");
+      }
       const fromDht = await this.fromDht(pubKeyZ32);
       this.lastVia = "dht";
       return newerPacket(fromRelays, fromDht);
