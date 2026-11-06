@@ -86,6 +86,11 @@ export function oneOf<T extends string>(params: Params, name: string, values: re
 
 const KEY_SHAPED = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
 /**
+ * A chat's id as the engine makes it (the first 16 characters of a z-base-32 key) and the CLI prints it as `chat`. A ref
+ * so shaped is only ever an id: tested on its `nameKey`, so that a case, a space or an invisible character more is too.
+ */
+const CHAT_ID_SHAPED = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{16}$/;
+/**
  * A contact key as chats show it (`peer`): 52 characters of z-base-32, in its one canonical spelling. The same 52
  * characters with the last one respelled decode to the same bytes but are no key (WISP 02): refused here, so that
  * they never fall through to a chat's name, which its contact chooses.
@@ -128,7 +133,8 @@ const namedAs = (key: string, name: string | null | undefined) => key !== "" && 
  * A chat by its id; by its contact's key (only by the key: a name is never taken for one); by the label this side gave
  * it; and only when no label matches, by a unique prefix of its id or the name the contact gave itself. The contact
  * controls both of those (a joiner's chat id is made from the inviter's code), so neither wins over a label, and a ref
- * that fits one chat's prefix and another's name is refused. `group:<ref>` is never a chat (a group, as everywhere). A ref
+ * that fits one chat's prefix and another's name is refused. A ref shaped as a chat's id is only ever an id, or a label
+ * given here. `group:<ref>` is never a chat (a group, as everywhere). A ref
  * that names no chat but one of `groups` says it is a group (see `noChat`).
  */
 export function findChat(links: readonly LinkView[], ref: string, groups: readonly GroupView[] = []): LinkView {
@@ -173,6 +179,10 @@ function chatBy(links: readonly LinkView[], ref: string, groups: readonly GroupV
     if (byLabel.length && !groupNamed(ref, groups)) throw new CliError("not_found", `${JSON.stringify(ref)} names a group, never a chat: name the chat labelled so by its id, and give it another name (ghostly chat rename <chat> <name>)`, { matches: byLabel.map((link) => link.id) });
     throw noChat(ref, groups);
   }
+  // A chat's id no chat has (one removed since: a bot kept it from an event) is no chat. Its contact and whoever saw its
+  // invite know it, so another contact could call itself that and take every later command sent by it. A label given
+  // here still names the chat: only this side chooses it.
+  if (!byLabel.length && CHAT_ID_SHAPED.test(key)) throw noChat(ref, groups);
   const found = byLabel.length ? byLabel : [...new Set([...links.filter((link) => link.id.startsWith(ref)), ...links.filter((link) => named(link.peerNick))])];
   if (found.length === 1) return { link: found[0], theirName: !byLabel.length };
   if (found.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: found.map((link) => link.id) });
@@ -243,6 +253,9 @@ export function findChatOrGroup(links: readonly LinkView[], groups: readonly Gro
     chat = chatBy(links, ref);
   } catch (error) {
     if (!(error instanceof CliError) || error.code !== "not_found") throw error;
+    // Nor is it a group's name or a prefix of a group's id (its admin and its creator chose those; a group's own id is
+    // longer): `group:<ref>` names a group.
+    if (CHAT_ID_SHAPED.test(nameKey(ref))) throw error;
     try { return { group: findGroup(groups, ref) }; } catch (inner) {
       if (!(inner instanceof CliError) || inner.code !== "not_found") throw inner;
       if (CONTACT_KEY.test(ref)) throw error;
