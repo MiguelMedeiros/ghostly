@@ -31,11 +31,18 @@ export const fitGroupNameEdit = (before: string, after: string, caret: number | 
   fitTextEdit(before, after, caret, fitsGroupName);
 
 /**
- * A name as two are compared: told apart by neither case, width, spacing nor the key's end a name already shows
- * ("Alice (…3r69cg)", isolated as `withKeyEnd` shows it or not), so "alice " and "Alice (…k1p0aa)" are both "Alice".
+ * What a name may hold that draws nothing by itself, and that `sanitizeNick` keeps since a name may need it beside
+ * something else: the joiners, the fillers, the variation selectors and the other default-ignorable code points, and
+ * the blank Braille pattern.
+ */
+const DRAWS_NOTHING = /[\p{Default_Ignorable_Code_Point}⠀]/gu;
+
+/**
+ * A name as two are compared: told apart by neither case, width, spacing, what draws nothing (`DRAWS_NOTHING`) nor the
+ * key's end a name already shows ("Alice (…3r69cg)"), so "alice ", "Ali‍ce" and "Alice (…k1p0aa)" are all "Alice".
  */
 const sameNameForm = (nick: string) =>
-  nick.normalize("NFKC").replace(/[\u2066-\u2069]/gu, "").replace(/\s*\(\s*\.\.\.[^()]*\)\s*$/u, "").replace(/\s+/gu, " ").trim().toLocaleLowerCase();
+  nick.normalize("NFKC").replace(DRAWS_NOTHING, "").replace(/\s*\(\s*\.\.\.[^()]*\)\s*$/u, "").replace(/\s+/gu, " ").trim().toLocaleLowerCase();
 
 /** `sameNamed` of a roster already read: a page names many of its rows, each by the same roster. */
 const sameNamedOf = new WeakMap<readonly object[], ReadonlySet<string>>();
