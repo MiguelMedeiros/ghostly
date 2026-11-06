@@ -22,6 +22,8 @@ import {
   utf8Encode,
   viewerResponseHeaders,
   VIEWER_SERVICE_CSP,
+  VIEWER_SERVICE_CSP_RELAY_ONLY,
+  viewerServicePolicy,
   withViewerPolicy,
   type FrameChannel,
   type LocalFetch,
@@ -214,6 +216,24 @@ describe("header hygiene", () => {
     const literal = `"${VIEWER_SERVICE_CSP}"`;
     expect(readFileSync(new URL("../../cli/src/services.ts", import.meta.url), "utf8")).toContain(`export const OPENED_SERVICE_CSP = ${literal};`);
     expect(readFileSync(new URL("../../../apps/desktop/src/viewer.rs", import.meta.url), "utf8")).toContain(`const SERVICE_CSP: &str = ${literal};`);
+    const relayOnly = `"${VIEWER_SERVICE_CSP_RELAY_ONLY}"`;
+    expect(readFileSync(new URL("../../cli/src/services.ts", import.meta.url), "utf8")).toContain(`export const OPENED_SERVICE_CSP_RELAY_ONLY = ${relayOnly};`);
+    expect(readFileSync(new URL("../../../apps/desktop/src/viewer.rs", import.meta.url), "utf8")).toContain(`const SERVICE_CSP_RELAY_ONLY: &str = ${relayOnly};`);
+  });
+
+  it("keeps a viewer's page on its own origin while Hide my IP from contacts is on, and as it was while it is off", () => {
+    // covers: settings.network.relay-only
+    expect(viewerServicePolicy(false)).toBe(VIEWER_SERVICE_CSP);
+    expect(viewerServicePolicy(true)).toBe(VIEWER_SERVICE_CSP_RELAY_ONLY);
+    expect(withViewerPolicy([["Content-Security-Policy", "img-src *"]], true)).toEqual([["content-security-policy", `img-src *, ${VIEWER_SERVICE_CSP_RELAY_ONLY}`]]);
+    expect(withViewerPolicy([["Content-Security-Policy", "img-src *"]], false)).toEqual([["content-security-policy", `img-src *, ${VIEWER_SERVICE_CSP}`]]);
+    // No https: (a picture, script, font or frame from a server the contact names would show it this device's address);
+    // its own origin, inline, data: and blob: content as before, and requests and forms on its own origin.
+    const policy = new Map(VIEWER_SERVICE_CSP_RELAY_ONLY.split(";").map((part) => part.trim().split(/\s+/)).map(([name, ...sources]) => [name, sources]));
+    expect(policy.get("default-src")).toEqual(["'self'", "data:", "blob:", "'unsafe-inline'", "'unsafe-eval'"]);
+    expect(policy.get("connect-src")).toEqual(["'self'"]);
+    expect(policy.get("form-action")).toEqual(["'self'"]);
+    expect([...policy.keys()]).toEqual(["default-src", "connect-src", "form-action"]);
   });
 });
 

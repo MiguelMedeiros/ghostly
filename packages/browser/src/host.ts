@@ -92,8 +92,12 @@ export interface BrowserHost {
    * access no profile on this device still needs. The extension's host permissions are every profile's at once.
    */
   releaseUnusedLocalAccess?(): Promise<void>;
-  /** `tag` (`viewerTag` of this side's key for the chat) goes in the app's origin, so each profile's storage for it is its own. */
-  openService(peerPubKeyZ32: string, serviceId: string, tag: string): Promise<void>;
+  /**
+   * `tag` (`viewerTag` of this side's key for the chat) goes in the app's origin, so each profile's storage for it is its own.
+   * `relayOnly`: Hide my IP from contacts is on, and the app loads nothing but its own origin while open
+   * (`viewerServicePolicy`): a picture or script from a server the contact names would show it this device's address.
+   */
+  openService(peerPubKeyZ32: string, serviceId: string, tag: string, relayOnly: boolean): Promise<void>;
   /**
    * Erases what the contacts' apps opened from one chat (`tag`, as `openService` was given it) or by one profile
    * (`profile`, its id) kept on this device: their origins' storage, caches and worker. The web app clears its own

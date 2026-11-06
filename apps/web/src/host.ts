@@ -132,7 +132,7 @@ export const webHost = createInPageHost({
   oidc: { platform: "web", open: async () => popupWindow() },
   // The same popup and callback page, for an AT Protocol server (Bluesky or another PDS).
   atproto: { platform: "web", open: async () => atprotoPopupWindow() },
-  openService: async (peerPubKeyZ32, serviceId, tag) => {
+  openService: async (peerPubKeyZ32, serviceId, tag, relayOnly) => {
     const node = peer?.node;
     if (!servicesHost || !node) throw new Error("Opening a contact's web app needs the Ghostly browser extension or desktop app.");
     const t = translatorFor(loadSettings().language);
@@ -145,7 +145,7 @@ export const webHost = createInPageHost({
     // request is answered as unreachable at once, rather than waiting on a connection that is not coming.
     const offline = () => { const link = engine.linkByPeer(peerPubKeyZ32); return !link || link.peerServices === null; };
     await openServiceView({
-      host: servicesHost, tag, peer: peerPubKeyZ32, service: serviceId, title,
+      host: servicesHost, tag, peer: peerPubKeyZ32, service: serviceId, title, relayOnly,
       send: (request) => offline() ? Promise.reject(new GhostlyHttpError("offline", "Your contact is offline")) : node.request(peerPubKeyZ32, serviceId, request),
       presence: { offline, watch: (changed) => engine.subscribe(changed) },
       words: {
