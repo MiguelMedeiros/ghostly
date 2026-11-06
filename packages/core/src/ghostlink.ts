@@ -5030,8 +5030,9 @@ export class GhostLink {
     this.applicationOpen = false;
     this.dht?.setLive(false);
     // A replacement still authenticating may yet carry the chat. Without one, the session a plan meant to move is
-    // gone, and so is the plan: its dial must not go on and open a session of its own, or settle the next one.
-    if (!this.candidate) { this.cancelCandidate(); this.switcher.stop(); }
+    // gone, and so is the plan: its dial must not go on and open a session of its own, or settle the next one. Its
+    // target goes too, or the chat's native listeners are held (`canReleaseEndpoint`) until the contact is back.
+    if (!this.candidate) { this.cancelCandidate(); this.switcher.stop(); this.transitionTarget = this.transitionError = undefined; }
     this.activeBinding = undefined;
     this.paired?.stop();
     this.paired = null;
