@@ -32,6 +32,17 @@ describe("the online notice switch", () => {
     expect(screen.queryByTestId("settings-wake-online")).toBeNull();
   });
 
+  it("is found by the search only while this profile is woken, as the switch is there only then", async () => {
+    setPushPlatform(platform());
+    fakeEngine.setState(engineState({ settings }));
+    const { user } = renderSettings();
+    const search = await screen.findByTestId("settings-index-search");
+    await user.type(search, "comes online");
+    expect(screen.getByTestId("settings-search-empty")).toBeInTheDocument();
+    await act(async () => { fakeEngine.setState(engineState({ settings: { ...settings, wake: { ...keys, vapid: generateVapidKeys() } } })); });
+    expect(screen.getAllByTestId("settings-search-result").map((row) => row.textContent)).toEqual(["Notify me when a contact comes onlineNotifications"]);
+  });
+
   it("sits right under Wake me while closed, on by default, and turns off through the engine", async () => {
     setPushPlatform(platform());
     fakeEngine.on("setWakeSubscription", () => undefined);
