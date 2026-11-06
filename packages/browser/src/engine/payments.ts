@@ -187,6 +187,9 @@ class NoEcashError extends Error {
 const arkSats=(network:string)=>network==="bitcoin"?"sats":"test sats";
 /** The English line kept with a payment message (the CLI and older apps show it): test sats say so. */
 const satsOn=(network:WalletNetwork)=>network==="testnet"?"test sats":"sats";
+/** The sender's chat line of ecash sent in a chat, from its record: one id, whether written as it goes or on a later start. */
+const ecashLine=(payment:StoredPayment):StoredMessage=>({linkId:payment.linkId,id:`me_${payment.createdAt}`,text:`⚡ ${payment.amount.toLocaleString()} ${satsOn(paymentNetwork(payment))}`,
+  sender:"me",timestamp:payment.createdAt,via:"datalink",paymentId:payment.id});
 type AskMethod = "arkade" | "usdt" | "bark" | "bitcoin" | "spark" | "fedimint";
 const ENDPOINT_OF: Record<Exclude<AskMethod, "usdt" | "fedimint">, string> = { arkade: ENDPOINT.arkade, bark: ENDPOINT.bark, bitcoin: ENDPOINT.bitcoin, spark: ENDPOINT.spark };
 /**
@@ -1829,28 +1832,18 @@ export class PaymentDesk {
       requestId: params.requestId,
       network: mintNetwork(mint),
     });
-    let token: string;
-    let paidFrom: string;
+    let sent: StoredPayment;
     try {
       // Written down in the same transaction that takes the ecash out of the wallet: from here on the
       // token is the only copy of that money.
       const created = await this.wallet.createToken(params.amount, params.mints, memo, record, params.network);
-      token = created.token;
-      paidFrom = created.mint;
-      this.payments.set(id, record(created.token, created.mint));
+      sent = record(created.token, created.mint);
+      this.payments.set(id, sent);
     } catch (error) {
       throw new NoEcashError(error);
     }
     this.host.onChange();
-    await this.host.storeMessage({
-      linkId: params.linkId,
-      id: `me_${params.timestamp}`,
-      text: `⚡ ${params.amount.toLocaleString()} ${satsOn(mintNetwork(paidFrom))}`,
-      sender: "me",
-      timestamp: params.timestamp,
-      via: "datalink",
-      paymentId: id,
-    });
+    await this.host.storeMessage(ecashLine(sent));
 
     try {
       await this.sendTo(link, {
@@ -1859,7 +1852,7 @@ export class PaymentDesk {
         requestId: params.requestId,
         amount: { value: String(params.amount), asset: UNIT },
         memo,
-        endpoint: [ENDPOINT.cashu, token],
+        endpoint: [ENDPOINT.cashu, sent.token!],
       });
     } catch (error) {
       await this.reclaim(id).catch(() => {});
@@ -1963,10 +1956,15 @@ export class PaymentDesk {
         continue;
       }
       if(payment.state !== "pending")continue;
-      if (payment.kind === "payment" && payment.token) await this.sendTo(link, {
-        id: payment.id, timestamp: payment.createdAt, requestId: payment.requestId,
-        amount: { value: String(payment.amount), asset: UNIT }, memo: payment.memo, endpoint: [ENDPOINT.cashu, payment.token],
-      });
+      if (payment.kind === "payment" && payment.token) {
+        // Its line, when the app ended after the token was written down and before the line was: a line already
+        // there (or deleted here) stays as it is.
+        await this.host.storeMessage(ecashLine(payment));
+        await this.sendTo(link, {
+          id: payment.id, timestamp: payment.createdAt, requestId: payment.requestId,
+          amount: { value: String(payment.amount), asset: UNIT }, memo: payment.memo, endpoint: [ENDPOINT.cashu, payment.token],
+        });
+      }
       else if (payment.kind === "request" && (payment.invoice || payment.mints?.length)) await link.sendPaymentRequest({
         id: payment.id, timestamp: payment.createdAt, amount: { value: String(payment.amount), asset: UNIT }, memo: payment.memo, network: paymentNetwork(payment),
         endpoints: [...(payment.invoice ? [[ENDPOINT.bolt11, payment.invoice] as [string, string]] : []), ...(payment.mints?.length ? [[ENDPOINT.cashu, cashuRequestPayload(payment.mints)] as [string, string]] : [])],
