@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { writeWakeEntries } from "../../../../web/src/sw/wakeStore";
 import { resetWakeLimitMemory } from "../../../../web/src/sw/wakeLimit";
 
-// covers: push.wake.notify, push.wake.call
+// covers: push.wake.notify, push.wake.call, push.wake.online
 
 /**
  * Every push the profile's push worker (`apps/web/src/sw/sw.ts`) takes shows a notification. A push that shows nothing
@@ -15,7 +15,11 @@ import { resetWakeLimitMemory } from "../../../../web/src/sw/wakeLimit";
 const ORIGIN = "https://app.ghostly.tools";
 const TOKEN = "tok-known-aaaaaaaaaaaa";
 const MUTED = "tok-muted-aaaaaaaaaaaa";
-const TEXT = { title: "Ghostly", body: "New message", call: "Incoming call" };
+const GROUP = "tok-group-aaaaaaaaaaaa";
+// The worker's limit is kept in IndexedDB for the whole file: each online test has a chat of its own.
+const ANA = "tok-ana-aaaaaaaaaaaaaa";
+const BEA = "tok-bea-aaaaaaaaaaaaaa";
+const TEXT = { title: "Ghostly", body: "New message", call: "Incoming call", online: "{name} is online", onlineUnnamed: "A contact is online" };
 
 interface Shown { title: string; options: { tag?: string; silent?: boolean; body?: string }; closed: boolean }
 
@@ -61,7 +65,10 @@ async function startPushWorker(appVisible = false) {
 const wake = (token: string, extra: object = {}) => JSON.stringify({ wake: 1, k: token, ...extra });
 
 beforeEach(async () => {
-  await writeWakeEntries("", [{ token: TOKEN, path: "/chat/abc" }, { token: MUTED, path: "/chat/quiet", mutedUntil: "forever" }], TEXT);
+  await writeWakeEntries("", [
+    { token: TOKEN, path: "/chat/abc" }, { token: MUTED, path: "/chat/quiet", mutedUntil: "forever" }, { token: GROUP, path: "/group/g1" },
+    { token: ANA, path: "/chat/ana", name: "Ana" }, { token: BEA, path: "/chat/bea", name: "Bea" },
+  ], TEXT);
 });
 
 afterEach(() => {
@@ -100,5 +107,33 @@ describe("every push the worker takes shows a notification", () => {
     expect(await push(wake(TOKEN))).toBe(1);
     expect(await push(wake("tok-nobody-knows-aaaaaa"))).toBe(1);
     expect(onScreen()).toHaveLength(0);
+  });
+
+  it("an online notice shows under its own tag; one with nothing of its own to say (an unknown token, a muted chat, a group) shows the quiet notice", async () => {
+    const { push, shown } = await startPushWorker();
+    expect(await push(wake(ANA, { o: 1 }))).toBe(1);
+    expect(shown[0]).toMatchObject({ options: { body: "Ana is online", tag: "wake-online::/chat/ana" } });
+    expect(shown[0]!.options.silent).toBeUndefined();
+    for (const body of [wake("tok-nobody-knows-aaaaaa", { o: 1 }), wake(MUTED, { o: 1 }), wake(GROUP, { o: 1 })]) {
+      const before = shown.length;
+      expect(await push(body), body).toBe(1);
+      expect(shown[before]).toMatchObject({ options: { tag: "quiet:", body: "", silent: true } });
+    }
+  });
+
+  it("an online notice inside its 30-minute gap: the one on screen again, silently, or the quiet notice once it was dismissed", async () => {
+    const { push, shown, onScreen } = await startPushWorker();
+    expect(await push(wake(BEA, { o: 1 }))).toBe(1);
+    expect(shown[0]).toMatchObject({ options: { body: "Bea is online", tag: "wake-online::/chat/bea" } });
+    expect(await push(wake(BEA, { o: 1 }))).toBe(1);
+    expect(shown[1]).toMatchObject({ options: { tag: "wake-online::/chat/bea", silent: true } });
+    for (const notice of shown) notice.closed = true;
+    expect(await push(wake(BEA, { o: 1 }))).toBe(1);
+    expect(shown[2]).toMatchObject({ options: { tag: "quiet:", silent: true } });
+    expect(onScreen()).toHaveLength(1);
+    // Its own count: a message from the same chat still shows, with sound.
+    expect(await push(wake(BEA))).toBe(1);
+    expect(shown[3]).toMatchObject({ options: { body: "New message" } });
+    expect(shown[3]!.options.silent).toBeUndefined();
   });
 });
