@@ -106,6 +106,17 @@ describe("Settings, Network: the transport line", () => {
       });
     }
   }
+
+  // Hide my IP from contacts closes the Desktop's DHT node: every read and write goes through the relays.
+  it("on the Desktop with Hide my IP on, says it reaches the DHT through the relays, not directly", () => {
+    const { engine } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport: transports.direct, settings: { relays: RELAYS, relayOnly: true } }));
+    const line = screen.getByTestId("network-protocol");
+    expect(line.textContent).toBe("Reaches the Mainline DHT (BEP44) through Pkarr relays (HTTP)");
+    expect(line).toHaveAttribute("data-kind", "relays");
+    act(() => engine.update({ settings: { relays: RELAYS } }));
+    expect(screen.getByTestId("network-protocol").textContent).toBe("Reaches the Mainline DHT (BEP44) directly (UDP) and Pkarr relays (HTTP)");
+  });
 });
 
 describe("Settings, Network: Iroh relays", () => {
