@@ -169,6 +169,15 @@ describe("group rename", () => {
   });
 });
 
+describe("other groups under the same id", () => {
+  it("are shown beside the group held, a link hidden unless asked for", () => {
+    expect(groupJson(group)).not.toHaveProperty("others");
+    const view = { ...group, others: [{ linkId: "chat-zed", contact: "zed-key", name: "Crew", members: 3 }, { link: LINK }] };
+    expect(groupJson(view).others).toEqual([{ chat: "chat-zed", name: "Crew", members: 3 }, { link: "<hidden>" }]);
+    expect(groupJson(view, true).others).toEqual([{ chat: "chat-zed", name: "Crew", members: 3 }, { link: LINK }]);
+  });
+});
+
 describe("the entry link is a join secret", () => {
   it("is hidden in show, list and the admin commands unless asked for", async () => {
     const { ctx } = fake();

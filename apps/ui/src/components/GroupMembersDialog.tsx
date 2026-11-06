@@ -5,7 +5,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { useBackdropDismiss, useBackCloses } from "../hooks/useDismiss";
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
-import { edgeDot, edgeLabel, groupStatusText, memberName, memberPhoto } from "../lib/groups";
+import { edgeDot, edgeLabel, groupStatusText, memberName, memberPhoto, sameNamed } from "../lib/groups";
 import { useGroupNameField } from "../hooks/useGroupNameField";
 import { agoIn } from "../lib/relativeTime";
 import { GroupLinkPanel } from "./GroupLinkPanel";
@@ -157,7 +157,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
             : <form className="flex items-center gap-2 max-md:gap-3" onSubmit={e => { e.preventDefault(); void rename(); }}>
               <h2 id={`${id}-title`} className="sr-only">{live.name}</h2>
               {/* While the engine renames, the field is read-only and Save does nothing: disabled, they would drop the focus to the page. */}
-              <input autoFocus data-testid="group-rename-input" aria-label={t("group.rename.label")} aria-describedby={`${id}-rename-hint`} ref={namingField.ref} value={naming} readOnly={busy !== null}
+              <input autoFocus data-testid="group-rename-input" aria-label={t("group.rename.label")} aria-describedby={`${id}-rename-hint`} ref={namingField.ref} value={naming} dir={namingField.dir} readOnly={busy !== null}
                 onChange={namingField.onChange} onCompositionStart={namingField.onCompositionStart} onCompositionEnd={namingField.onCompositionEnd} onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); endNaming(); } }}
                 className="min-w-0 flex-1 rounded-md border border-border bg-surface-alt px-2 py-1 text-sm focus:border-accent focus:outline-none read-only:opacity-60 max-md:min-h-11" />
               <button type="submit" data-testid="group-rename-save" disabled={!groupName(naming)} aria-disabled={busy !== null || undefined}
@@ -217,9 +217,9 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
       {contacts.some(link => !link.groups && !invited.has(link.id)) && <p data-testid="group-invite-why" className="mt-1 text-xs text-text-muted">{t("group.members.needsBothHint")}</p>}
     </div>}
     {error && <Notice problem={error} className="mt-3 text-sm" />}
-    {removing && <RemoveMemberDialog name={memberName(removing, t)} linkOn={!!live.entryLink} returnFocus={list} onClose={() => setRemoving(null)}
+    {removing && <RemoveMemberDialog name={memberName(removing, t, sameNamed(live.members))} linkOn={!!live.entryLink} returnFocus={list} onClose={() => setRemoving(null)}
       onConfirm={() => { const key = removing.key; setRemoving(null); void run(key, () => engine.call("removeGroupMember", { groupId: live.id, key })); }} />}
-    {promoting && <MakeAdminDialog name={memberName(promoting, t)} linkEnds={!!live.entryLink && live.profile !== "community"} returnFocus={list} onClose={() => setPromoting(null)}
+    {promoting && <MakeAdminDialog name={memberName(promoting, t, sameNamed(live.members))} linkEnds={!!live.entryLink && live.profile !== "community"} returnFocus={list} onClose={() => setPromoting(null)}
       onConfirm={() => { const key = promoting.key; setPromoting(null); void run(key, () => engine.call("makeGroupAdmin", { groupId: live.id, key })); }} />}
     <p data-testid="group-read-note" className="mt-4 rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed text-text-secondary">{live.profile === "community" ? t("group.readNoteCommunity", { count: COMMUNITY_LIMITS.store }) : t("group.readNote", { count: GROUP_LIMITS.relay })}</p>
   </dialog>, document.body);

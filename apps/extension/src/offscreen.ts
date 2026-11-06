@@ -1,4 +1,5 @@
-import { GhostlyHttpError, fromBase64, toBase64 } from "@ghostly/core";
+import { GhostlyHttpError, fromBase64, parseLocalTarget, toBase64 } from "@ghostly/core";
+import { localAccessPattern } from "@ghostly/browser/host";
 import type { EngineServer, EngineClientSink } from "@ghostly/browser/engine/server";
 import { copyingSink } from "@ghostly/browser/engine/copyingSink";
 import { createPeerServer } from "@ghostly/browser/devices/peer";
@@ -83,7 +84,12 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener((request: ClientMessage) => withPeer((s) => {
     // A chat's whole history the page asked for; a device that is not the active one has none.
     if (request?.kind === "history") void engineOf(s)?.history(client, request.linkId);
-    else void s.handle(client, request);
+    else {
+      const handled = s.handle(client, request);
+      // "Clear all data" stops the peer for good (`clearProfileData`): once it is over, the worker replaces this document
+      // at the next start it is asked for, should the page go away before it asks for a new peer (`restart-engine`).
+      if (request?.kind === "request" && request.method === "clearProfileData") void handled.finally(() => { cleared = true; });
+    }
   }));
 });
 
@@ -113,7 +119,7 @@ async function handleHttpRequest(message: Extract<RuntimeMessage, { type: "http-
     // its side ("The local service is not reachable."): the tab says it in the profile's language, from this side.
     const hostCode = response.headers.find(([name]) => name.toLowerCase() === "x-ghostly-error")?.[1];
     if (hostCode !== undefined) {
-      const app = serviceName(peer, message.peerPubKeyZ32, message.serviceId);
+      const app = serviceName(peer, message.peerPubKeyZ32, message.serviceId) ?? message.app ?? message.serviceId;
       const shown = await (await import("./viewerWords")).hostErrorShown(response.headers, app);
       return { ok: false, code: hostCode, message: hostCode, status: response.status, shown };
     }
@@ -124,19 +130,45 @@ async function handleHttpRequest(message: Extract<RuntimeMessage, { type: "http-
   }
 }
 
-/** The name the contact gave the service they share, as the chat shows it; its id while the peer has none. */
-function serviceName(peer: EngineServer, peerPubKeyZ32: string, serviceId: string): string {
+/**
+ * The name the contact gave the service they share, as the chat shows it now. None once they took it back: the tab
+ * then names it as it was when it opened.
+ */
+function serviceName(peer: EngineServer, peerPubKeyZ32: string, serviceId: string): string | undefined {
   try {
     const links = peer.node.getState().links.filter((link) => link.peerPubKeyZ32 === peerPubKeyZ32);
-    return links.flatMap((link) => link.peerServices ?? []).find((service) => service.id === serviceId)?.name ?? serviceId;
+    return links.flatMap((link) => link.peerServices ?? []).find((service) => service.id === serviceId)?.name;
   } catch {
-    return serviceId;
+    return undefined;
+  }
+}
+
+/**
+ * Chrome no longer lets the extension reach `patterns` (`http://127.0.0.1/*`): every app this profile shares at one of
+ * those hosts, on any port, is turned off ("Share" off, `setServiceEnabled`), so contacts no longer see it and are
+ * answered as for any app not shared. Turning it on again is the person's to do.
+ */
+async function turnOffAppsAt(patterns: string[]): Promise<void> {
+  const peer = engineOf(await server);
+  if (!peer) return;
+  await peer.ready;
+  const gone = new Set(patterns);
+  for (const service of peer.node.getState().services) {
+    if (!service.enabled) continue;
+    let pattern: string;
+    try { pattern = localAccessPattern(parseLocalTarget(service.target).origin); } catch { continue; }
+    if (gone.has(pattern)) peer.node.setServiceEnabled({ serviceId: service.id, enabled: false });
   }
 }
 
 let stopping: Promise<void> | null = null;
-/** Stops the peer, once: before the worker closes this document for a switch, or as the page goes away. */
-const stopPeer = () => (stopping ??= (running ? running.stop() : server.then((s) => s.stop())).catch(() => {}));
+/** A page's "Clear all data" stopped the peer: it does not run again in this document. */
+let cleared = false;
+/**
+ * Stops the peer, once: before the worker closes this document for a switch, or as the page goes away. One "Clear all
+ * data" stopped is not stopped again: nothing it held is written over the emptied database.
+ */
+const stopPeer = () => (stopping ??= cleared ? Promise.resolve() : (running ? running.stop() : server.then((s) => s.stop())).catch(() => {}));
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {
   if (message?.target !== "engine" || !fromOwnPage(sender)) return false;
@@ -144,7 +176,8 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     // Which profile runs, and which one the registry names now: they differ once a page switched.
     // Answered too when the peer did not start (its database did not open): the pages connect and are told why
     // (`start-failed`). Before, no answer came and the page got "The Ghostly peer did not start" after five seconds.
-    void server.then((s) => s.ready.catch(() => {}), () => {}).then(() => sendResponse({ profile, active: activeNamespace(), activeId: activeProfileId() } satisfies EngineStatus));
+    // A peer that stopped for good says so, and the worker starts another in its place.
+    void server.then((s) => s.ready.catch(() => {}), () => {}).then(() => sendResponse({ profile, active: activeNamespace(), activeId: activeProfileId(), stopped: cleared || stopping !== null } satisfies EngineStatus));
     return true;
   }
   if (message.type === "stop") {
@@ -154,6 +187,11 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
   }
   if (message.type === "http-request") {
     void handleHttpRequest(message).then(sendResponse);
+    return true;
+  }
+  if (message.type === "local-access-removed") {
+    const origins = Array.isArray(message.origins) ? message.origins.filter((o): o is string => typeof o === "string") : [];
+    void turnOffAppsAt(origins).then(() => sendResponse(true), () => sendResponse(false));
     return true;
   }
   return false;

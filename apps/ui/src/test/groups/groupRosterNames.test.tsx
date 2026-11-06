@@ -12,7 +12,7 @@ import { renderApp } from "../render";
 const names = vi.hoisted(() => ({ count: 0 }));
 vi.mock("../../lib/groups", async original => {
   const actual = await original<typeof import("../../lib/groups")>();
-  const memberName: typeof actual.memberName = (m, t) => { names.count++; return actual.memberName(m, t); };
+  const memberName: typeof actual.memberName = (...args) => { names.count++; return actual.memberName(...args); };
   return { ...actual, memberName };
 });
 

@@ -2,6 +2,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { ANSWER_BY_MS, CookieJar, openServiceView, serve, serviceLabel } from "../../../../web/src/svc/opener";
 import { closeServiceWindows, hostErrorText, serviceFraming, setServiceWindowsCloser } from "../../lib/serviceWindows";
 import { loadLocale, translatorFor } from "../../locales";
+import { onAppInput } from "../../lib/apps/open";
 import { BRIDGE_READY, HEAD_TIMEOUT_MS, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
 import { GhostlyHttpError, type ClientRequest, type ClientResponse } from "@ghostly/core";
 
@@ -220,6 +221,41 @@ describe("a contact's app shown over the app", () => {
     // Closed, it hears nothing more.
     view.querySelector<HTMLButtonElement>("[data-testid=service-view-close]")!.click();
     expect(listeners.size).toBe(0);
+  });
+
+  it("counts the person's taps and keys in the app for the lock screen, as the browser's activation says, and only while it is open", async () => {
+    // Real input in a frame activates every frame above it, this page too; no script, the contact's included, can.
+    const activation = { isActive: false };
+    Object.defineProperty(navigator, "userActivation", { configurable: true, value: activation });
+    let heard = 0;
+    const stop = onAppInput(() => { heard += 1; });
+    vi.useFakeTimers();
+    try {
+      await open("demo");
+      vi.advanceTimersByTime(10_000);
+      expect(heard, "no input, nothing").toBe(0);
+      // The contact's page saying so itself counts for nothing.
+      const frame = document.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+      window.dispatchEvent(new MessageEvent("message", { data: { type: "activity" }, origin: new URL(frame.src).origin, source: frame.contentWindow }));
+      vi.advanceTimersByTime(10_000);
+      expect(heard).toBe(0);
+      activation.isActive = true;
+      vi.advanceTimersByTime(1_000);
+      expect(heard).toBeGreaterThan(0);
+      activation.isActive = false;
+      const before = heard;
+      vi.advanceTimersByTime(10_000);
+      expect(heard).toBe(before);
+      // Closed: the page's own listeners hear its input again, and nothing is counted twice.
+      closeServiceView();
+      activation.isActive = true;
+      vi.advanceTimersByTime(10_000);
+      expect(heard).toBe(before);
+    } finally {
+      vi.useRealTimers();
+      stop();
+      delete (navigator as { userActivation?: unknown }).userActivation;
+    }
   });
 
   it("opens on the notice when the contact is already offline", async () => {

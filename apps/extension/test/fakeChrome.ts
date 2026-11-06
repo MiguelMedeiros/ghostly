@@ -120,6 +120,11 @@ export interface FakeWorld {
    * `permissions.onAdded` fires. Until then it is undefined, as in Chrome.
    */
   grantNotifications(): void;
+  /**
+   * The person turns off the extension's site access to a host (`chrome://extensions` → Site access, or the puzzle
+   * menu): Chrome drops the pattern and fires `permissions.onRemoved`, as it does for the extension's own `remove`.
+   */
+  revokeHostAccess(pattern: string): void;
   /** The origin's localStorage, shared by every context. */
   storage: Map<string, string>;
   /** Web Locks held now, by name, with the context holding each. */
@@ -320,6 +325,7 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
     notifications: undefined as unknown,
     permissions: {
       onAdded: event<(permissions: chrome.permissions.Permissions) => void>(),
+      onRemoved: event<(permissions: chrome.permissions.Permissions) => void>(),
       async contains({ permissions }: chrome.permissions.Permissions) {
         return (permissions ?? []).every((p) => p === "notifications" && chromeApi.notifications !== undefined);
       },
@@ -331,7 +337,8 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
       async remove(request: chrome.permissions.Permissions) {
         record("permissions.remove", request);
         const held = (request.origins ?? []).every((origin) => world.hostAccess.has(origin));
-        for (const origin of request.origins ?? []) world.hostAccess.delete(origin);
+        const gone = (request.origins ?? []).filter((origin) => world.hostAccess.delete(origin));
+        if (gone.length) chromeApi.permissions.onRemoved.dispatch({ permissions: [], origins: gone } as never);
         return held;
       },
       async getAll() {
@@ -365,6 +372,10 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
       },
     };
     chromeApi.permissions.onAdded.dispatch({ permissions: ["notifications"] } as never);
+  };
+  world.revokeHostAccess = (pattern) => {
+    if (!world.hostAccess.delete(pattern)) return;
+    chromeApi.permissions.onRemoved.dispatch({ permissions: [], origins: [pattern] } as never);
   };
 
   world.chrome = chromeApi as unknown as typeof chrome;

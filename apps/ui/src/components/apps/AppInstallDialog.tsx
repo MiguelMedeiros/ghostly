@@ -8,7 +8,7 @@ import { useI18n, type Translate, type TranslationKey } from "../../contexts/I18
 import { Button } from "../wallet/ui";
 import { InfoButton } from "../layout";
 import { AppIcon, Fingerprint } from "./AppIcon";
-import { appErrorText, appErrorView, type AppErrorView } from "../../lib/apps/errors";
+import { appErrorCode, appErrorText, appErrorView, type AppErrorView } from "../../lib/apps/errors";
 import { refreshInstalledApps } from "../../lib/apps/installed";
 import { saveAppData } from "../../lib/apps/exportData";
 import { webKitAppLeak } from "../../lib/apps/flag";
@@ -184,10 +184,10 @@ function Head({ titleId, title, version, tagline, icon, installed }: { titleId: 
     <div className="flex items-center gap-3">
       <AppIcon size={48} icon={icon} installed={installed} />
       <div className="min-w-0">
-        <h2 id={titleId} dir="auto" className="text-lg font-medium text-text-primary break-words">{title}</h2>
+        <h2 id={titleId} dir="auto" className="text-match-parent text-lg font-medium text-text-primary break-words">{title}</h2>
         {version && <p className="text-xs text-text-muted">{t("apps.app.version", { version })}</p>}
         {/* A link or a long word breaks anywhere: unbroken, it pushed the screen sideways on a phone, and cut it off in Arabic. */}
-        {tagline && <p dir="auto" className="text-sm text-text-secondary [overflow-wrap:anywhere]">{tagline}</p>}
+        {tagline && <p dir="auto" className="text-match-parent text-sm text-text-secondary [overflow-wrap:anywhere]">{tagline}</p>}
       </div>
     </div>
   );
@@ -234,20 +234,28 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
     focusBack();
     setBusy(true); setError(null);
     try {
-      const app = await engine.call("appInstall", { digest: preview.digest, grant: [...preview.manifest.permissions] });
+      const app = await engine.call("appInstall", { digest: preview.digest, grant: [...preview.manifest.permissions], asks: [...preview.asks] });
       await refreshInstalledApps();
       onInstalled?.(app);
       onClose();
-    } catch (e) { setError(appErrorView(e, t)); } finally { setBusy(false); }
+    } catch (e) {
+      // It asks for more than this screen listed (the app uninstalled since it opened, a version that dropped a permission
+      // installed by the check): the screen shows what it asks now, and Install grants only that.
+      const again = appErrorCode(e) === "permissions-changed" ? await engine.call("appPreview", source).catch(() => null) : null;
+      if (again) setPreview(again);
+      setError(again ? { text: t(again.install === "update" ? "apps.errors.permissionsChanged" : "apps.install.asksChanged") } : appErrorView(e, t));
+    } finally { setBusy(false); }
   };
+  // While Install runs, the screen stays: closed, the install went on all the same, and opened the app after a Cancel.
+  const close = () => { if (!busy) onClose(); };
 
   const shownTitle = preview?.manifest.title ?? title ?? t("apps.title");
   const blocked = preview && (preview.run.status === "revoked" || preview.run.status === "removed" || preview.install === "rollback" || preview.install === "equivocation" || preview.install === "same");
   const why = preview && (runLine(preview.run, t) ?? (preview.install === "rollback" ? t("apps.install.rollback")
-    : preview.install === "equivocation" ? t("apps.install.equivocation", { sequence: String(preview.manifest.sequence) })
+    : preview.install === "equivocation" ? t("apps.install.equivocation")
       : preview.install === "same" ? t("apps.install.same") : null));
   return (
-    <Shell titleId={titleId} onClose={onClose} testId="app-install">
+    <Shell titleId={titleId} onClose={close} testId="app-install">
       <Head titleId={titleId} title={shownTitle} version={preview?.manifest.version} tagline={preview?.manifest.tagline} icon={preview?.icon} />
       {!preview && !error && <p className="text-sm text-text-muted" data-testid="app-install-checking">{t("apps.install.fetching")}</p>}
       {preview && (
@@ -263,7 +271,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
       {/* Too wide for one line (a phone at a large text size), the buttons wrap: unwrapped, "Install and open" pushed
           Cancel off the screen's start, where nothing scrolls to it. */}
       <div className="flex flex-wrap justify-end gap-2">
-        <Button onClick={onClose}>{t("common.cancel")}</Button>
+        <Button disabled={busy} onClick={onClose}>{t("common.cancel")}</Button>
         {preview && !blocked && (
           <Button variant="primary" data-testid="app-install-confirm" loading={busy} onClick={() => void install()}>
             {preview.install === "update" ? t("apps.install.update")
@@ -351,11 +359,13 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
       <Publisher fingerprint={app.fingerprint} unknown={app.unknownPublisher} listedBy={app.listedBy} builtIn={app.builtIn && "installed"} />
       {app.description && <p dir="auto" className="text-sm text-text-secondary whitespace-pre-line [overflow-wrap:anywhere]">{app.description}</p>}
       {why && <Line tone={app.run.status === "needs-files" ? "warning" : "danger"} testId="app-run-line">{why}</Line>}
-      {app.equivocation && <Line tone="warning" testId="app-equivocation">{t("apps.install.equivocation", { sequence: String(app.equivocation.sequence) })}</Line>}
+      {/* The version's internal `sequence` is never shown: the person knows it by the version in the header. */}
+      {app.equivocation && <Line tone="warning" testId="app-equivocation">{t("apps.install.equivocation")}</Line>}
       {app.pending && (
         <div className="bg-surface rounded-xl px-4 py-3 space-y-3" data-testid="app-update">
           <p className="text-sm text-text-primary">{t("apps.app.updateWaits", { version: app.pending.version })}</p>
-          <Permissions asks={app.pending.added} update />
+          {/* An update that no longer adds a permission to the version installed meanwhile has nothing to list. */}
+          {app.pending.added.length > 0 && <Permissions asks={app.pending.added} update />}
           <div className="flex justify-end">
             <Button variant="primary" data-testid="app-update-accept" disabled={busy} loading={pending === "update"} onClick={() => void act(() => engine.call("appUpdateAccept", { ref: app.ref }), false, "update")}>{t("apps.install.update")}</Button>
           </div>
@@ -365,7 +375,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
       <Privacy internet={(app.permissions as readonly string[]).includes("internet")} />
       {error && <ErrorLine error={error} testId="app-details-error" />}
       <div className="flex flex-wrap justify-end gap-2">
-        <Button ref={uninstall} variant="danger" data-testid="app-uninstall-open" onClick={() => setRemoving(true)}>{app.run.status === "ok" ? t("apps.app.uninstall") : t("apps.app.remove")}</Button>
+        <Button ref={uninstall} variant="danger" data-testid="app-uninstall-open" onClick={() => setRemoving(true)}>{t("apps.app.uninstall")}</Button>
         {app.run.status === "needs-files" && <Button data-testid="app-fetch-files" disabled={busy} loading={pending === "files"} onClick={() => void act(() => engine.call("appFetchFiles", { ref: app.ref }), false, "files")}>{t("apps.app.fetchFiles")}</Button>}
         {app.run.status === "removed" && <Button data-testid="app-run-anyway" onClick={() => { onOpen(app, { runAnyway: true }); onClose(); }}>{t("apps.app.runAnyway")}</Button>}
         {!canRun && app.run.status !== "needs-files" && <Button data-testid="app-keep-stopped" onClick={onClose}>{t("apps.app.keepStopped")}</Button>}

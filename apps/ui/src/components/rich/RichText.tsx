@@ -6,6 +6,7 @@ import { markMentions, type MentionView } from "../../lib/parse/mentions";
 import { Highlight, Marked } from "../chat/ChatSearch";
 import { matchRanges } from "../../lib/chatSearch";
 import { CodeBlock } from "./CodeBlock";
+import { holdsInvisible, showInvisible } from "./invisible";
 import { ISOLATES_ITSELF, VIEWS, type AtomViewProps } from "./views";
 import "./rich-text.css";
 
@@ -102,7 +103,12 @@ function segments(list: Segment[], sentAt: number | undefined, budget: Budget, k
         out.push(marked(segment.text, marks, k));
         break;
       case "code":
-        out.push(<code key={k} dir="ltr" className="rich-code">{marked(segment.text, marks)}</code>);
+        // A direction control or an invisible character in it draws as a marker (showInvisible), as in a code block.
+        if (holdsInvisible(segment.text)) {
+          const start = marks?.at ?? 0;
+          if (marks) marks.at += segment.text.length;
+          out.push(<code key={k} dir="ltr" className="rich-code">{showInvisible(segment.text, start, marks?.ranges)}</code>);
+        } else out.push(<code key={k} dir="ltr" className="rich-code">{marked(segment.text, marks)}</code>);
         break;
       case "span": {
         const inner = segments(segment.children, sentAt, budget, `${k}.`, marks);

@@ -69,8 +69,10 @@ Other settings:
 - `GHOSTLY_RELAY_PROXIES` is the number of reverse proxies in front of it (`1` for one nginx): each client then
   counts by the `X-Forwarded-For` entry that many from the end, the ones before it being the client's to write.
   Without either, the headers are ignored, and the first request that carries one logs which setting is missing
-  (`requests carry CF-Connecting-IP but GHOSTLY_RELAY_CLOUDFLARE is not set`). A client that reaches the port past the proxy could write them itself,
-  so publish it only where the proxy is (`HYPERDHT_RELAY_BIND`, loopback by default).
+  (`requests carry CF-Connecting-IP but GHOSTLY_RELAY_CLOUDFLARE is not set`). With either set, the
+  relay listens on 127.0.0.1 unless `HOST` says otherwise: only the proxy should reach it, since anyone else could
+  write that header. The container sets `HOST=0.0.0.0` inside it and publishes the port where the proxy is
+  (`HYPERDHT_RELAY_BIND`, loopback by default).
 
 A setting that is there but empty or not of its kind (`PORT=`, `GHOSTLY_RELAY_PROXIES=one`, a limit of `0`) stops the
 start with one line that names it; leave a setting out for its default. The start line says how clients are counted,

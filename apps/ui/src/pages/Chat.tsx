@@ -4,6 +4,7 @@ import { PeerAvatar } from "../components/Avatar";
 import { AvatarOpener } from "../components/AvatarViewer";
 import { useBackdropDismiss, useDialogFocus } from "../hooks/useDismiss";
 import { useComposition } from "../hooks/useComposition";
+import { draftDirection } from "../lib/documentLanguage";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { setChatOnCall } from "../lib/chatsOnCall";
 import { setCallNoPath, useCallNoPath } from "../lib/callNoPath";
@@ -532,8 +533,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (!request) return;
     void openAppInChat(request.app, appHere, request.options).catch((e: unknown) => { setAppsError(appErrorText(e, t)); setShowApps(true); });
   }, [visible, appHere, openRequested, t]);
-  /** The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. */
-  const [editing, setEditing] = useState<ChatMessage | null>(null);
+  /**
+   * The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. Only while the chat has it: deleted
+   * meanwhile (from its own ⋮, or for everyone), the edit ends, its words with it, and the draft set aside comes back.
+   */
+  const [chosenEdit, setEditing] = useState<ChatMessage | null>(null);
+  const editing = chosenEdit && heldOriginal(chosenEdit, quoteIndex) ? chosenEdit : null;
+  useEffect(() => { if (chosenEdit && !editing) setEditing(null); }, [chosenEdit, editing]);
   // Opened from the Tasks board: on the card's message, once it is here.
   useJumpTo(visible, id => messages.some(m => m.id === id));
   // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
@@ -818,11 +824,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           <span className="block text-text-secondary">{t(webrtc.mediaProblem === "denied" && mediaDeniedText() === "settings.media.deniedIos" ? "settings.media.deniedIos" : MEDIA_PROBLEM_TEXT[webrtc.mediaProblem][1])}</span>
         </div>
       )}
-      {/* Our call found no path to the contact (a VPN or firewall that blocks UDP, on either side): where a TURN server
-          is set, and the guide. */}
-      {(webrtc.noPath || noPathShown) && !webrtc.mediaProblem && (
-        <CallNoPathNotice iceServers={engine.state?.settings.iceServers} onClose={() => { webrtc.dismissNoPath(); setCallNoPath(sessionId, false); }} />
-      )}
       {/* The system paused our microphone in a call (an iPhone's Home Screen app while the screen is locked): the
           contact hears nothing until Ghostly is back on screen, and the call is still on. */}
       {webrtc.micPaused && !webrtc.mediaProblem && (
@@ -871,6 +872,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 ref={labelInputRef}
                 type="text"
                 value={labelDraft}
+                dir={draftDirection(labelDraft)}
                 onChange={(e) => setLabelDraft(e.target.value)}
                 {...labelComposition.inputProps}
                 onKeyDown={(e) => {
@@ -895,12 +897,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 type="button"
                 ref={nameRef}
                 onClick={startEditLabel}
-                className={`group/name min-w-0 text-start text-[15px] font-normal m-0 leading-tight truncate cursor-pointer rounded hover:text-accent transition-colors ${focus} ${isAnonymous ? "text-text-muted italic" : "text-text-primary"}`}
+                className={`group/name flex items-center min-w-0 text-start text-[15px] font-normal m-0 leading-tight cursor-pointer rounded hover:text-accent transition-colors ${focus} ${isAnonymous ? "text-text-muted italic" : "text-text-primary"}`}
                 title={t("chat.setNameHint")}
               >
                 {/* With no name, the word alone: the start of their key ("Contact · 1kwb54" elsewhere) is on the line
-                    right under it, and the whole of it was cut to "Contac…" on a 320px phone. */}
-                <bdi data-testid="chat-name">{isAnonymous ? t("common.unnamedContactShort") : shownName}</bdi>
+                    right under it, and the whole of it was cut to "Contac…" on a 320px phone. Cut in its own direction,
+                    as the group header's name is: in Arabic a Latin name cut by the page's direction lost its start. */}
+                <span data-testid="chat-name" dir="auto" className="min-w-0 truncate">{isAnonymous ? t("common.unnamedContactShort") : shownName}</span>
                 {!chatLabel && (
                   <svg
                     width="12"
@@ -912,7 +915,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     aria-hidden="true"
-                    className="inline ms-1.5 text-text-muted opacity-0 group-hover/name:opacity-100 group-focus-visible/name:opacity-100 max-md:hidden"
+                    className="shrink-0 ms-1.5 text-text-muted opacity-0 group-hover/name:opacity-100 group-focus-visible/name:opacity-100 max-md:hidden"
                   >
                     <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                     <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
@@ -1060,6 +1063,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
       {/* On a phone the chat list's offline notice is on another screen: what is written here waits too. */}
       <OfflineBanner inChat />
+      {/* Our call found no path to the contact (a VPN or firewall that blocks UDP, on either side): where a TURN server
+          is set, and the guide. It stays until closed, so it is a line under the header, never over its controls. */}
+      {(webrtc.noPath || noPathShown) && !webrtc.mediaProblem && (
+        <CallNoPathNotice iceServers={engine.state?.settings.iceServers} onClose={() => { webrtc.dismissNoPath(); setCallNoPath(sessionId, false); }} />
+      )}
       <ChatSearchBar search={search} />
       {appHere && <ChatAppResume linkId={appHere} />}
       <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} returnFocus={optionsRef} />

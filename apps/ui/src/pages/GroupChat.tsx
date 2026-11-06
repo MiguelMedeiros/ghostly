@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CueChat } from "../lib/cues";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
@@ -19,6 +19,7 @@ import { TasksButton } from "../components/chat/TasksButton";
 import { useJumpTo } from "../hooks/useJumpTo";
 import { RoutineStack } from "../components/chat/RoutineCard";
 import type { MemberFaceOf } from "../components/chat/SenderAvatar";
+import { AdminMark } from "../components/chat/AdminMark";
 import { panelCard, routineStacksReader } from "../lib/statusCards";
 import { rowPicker } from "../lib/chatRows";
 import { useComposerTranslation } from "../hooks/useComposerTranslation";
@@ -36,7 +37,7 @@ import { forgetSentOriginal } from "../lib/sentOriginals";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { GroupInvitationCard, focusPastRow, rowAfter } from "../components/GroupInvitation";
 import { GroupOthers } from "../components/GroupOthers";
-import { authorName, forgetGroupLocal, groupPath, groupReadAt, groupStatusText, groupUnreadAt, markGroupRead, memberName, memberPhoto } from "../lib/groups";
+import { authorName, forgetGroupLocal, groupPath, groupReadAt, groupStatusText, groupUnreadAt, markGroupRead, formerName, memberName, memberPhoto, sameNamed } from "../lib/groups";
 import { NowPlayingChat, stopPlayingFrom } from "../lib/nowPlaying";
 import { clearChatNotification } from "../lib/notifications";
 import { useWindowAway, windowAway } from "../lib/windowAway";
@@ -59,7 +60,7 @@ import { servicesPlatform } from "../lib/platform";
 import { useEngineValue } from "../lib/engineState";
 import { formatFileSize } from "../lib/format";
 import { videoMetaOf } from "../lib/videoPoster";
-import { messageSnippet, quoteFor, replyIndexer, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
+import { heldOriginal, messageSnippet, quoteFor, replyIndexer, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
 import { buttonsViews, compactPresses } from "../lib/buttons";
 import { useForwarding } from "../hooks/useForwarding";
 import { useChatSearch } from "../hooks/useChatSearch";
@@ -89,20 +90,21 @@ interface RosterNames {
 }
 
 /** `myName`: how a mention of me reads (my own name, as a member sees it); the others go by the roster's names. */
-function rosterNames(group: Pick<GroupView, "members" | "formerNames">, t: Translate, myName = ""): RosterNames {
+function rosterNames(group: Pick<GroupView, "profile" | "members" | "formerNames">, t: Translate, myName = ""): RosterNames {
   const byKey = new Map<string, string>();
+  const same = sameNamed(group.members, myName);
   const members = group.members.map(m => {
-    const name = memberName(m, t);
+    const name = memberName(m, t, same);
     if (!byKey.has(m.key)) byKey.set(m.key, name);
     return { key: m.key, me: m.me, name: m.me ? myName : name };
   });
-  const gone = { members: [], formerNames: group.formerNames };
-  return { members, author: key => byKey.get(key) ?? authorName(gone, key, t) };
+  // A former member's name is told apart from the roster's in a community (`authorName`).
+  return { members, author: key => byKey.get(key) ?? authorName(group, key, t) };
 }
 
 /** What the names are made of: the same text while no member's key or name (nor a former name) changed. */
-const rosterNamesKey = (group: Pick<GroupView, "members" | "formerNames"> | undefined) =>
-  group ? JSON.stringify([group.members.map(m => [m.key, m.me, m.nick]), group.formerNames]) : "";
+const rosterNamesKey = (group: Pick<GroupView, "profile" | "members" | "formerNames"> | undefined) =>
+  group ? JSON.stringify([group.profile, group.members.map(m => [m.key, m.me, m.nick]), group.formerNames]) : "";
 
 function toChatMessage(message: StoredMessage, names: RosterNames): ChatMessage {
   const mentions = mentionViews(message.text, message.mentions, names.members, message.sender === "me");
@@ -179,9 +181,12 @@ function writtenName(name: string, t: Translate): string {
   return key ? t("group.member.unnamed", { key }) : name;
 }
 
-/** A line the engine wrote as "<name> <what happened>", said in the interface's language with the name it was written with. */
-function writtenEvent(event: StoredMessage["event"], text: string, t: Translate): string | undefined {
-  const named = (ending: string) => text.endsWith(ending) && text.length > ending.length ? writtenName(text.slice(0, -ending.length), t) : undefined;
+/**
+ * A line the engine wrote as "<name> <what happened>", said in the interface's language with the name it was written
+ * with (`nameOf`: that name as the line says it).
+ */
+function writtenEvent(event: StoredMessage["event"], text: string, t: Translate, nameOf: (name: string) => string): string | undefined {
+  const named = (ending: string) => text.endsWith(ending) && text.length > ending.length ? nameOf(text.slice(0, -ending.length)) : undefined;
   if (event === "joined") { const name = named(" joined"); return name && t("group.event.joined", { name }); }
   if (event === "admin") { const name = named(" is now the admin"); return name && t("group.event.admin", { name }); }
   if (event === "picture") {
@@ -189,7 +194,7 @@ function writtenEvent(event: StoredMessage["event"], text: string, t: Translate)
     return changed ? t("group.event.pictureChanged", { name: changed }) : removed ? t("group.event.pictureRemoved", { name: removed }) : undefined;
   }
   const marker = " renamed the group to “", at = event === "renamed" ? text.indexOf(marker) : -1;
-  return at > 0 && text.endsWith("”") ? t("group.event.renamed", { name: writtenName(text.slice(0, at), t), group: text.slice(at + marker.length, -1) }) : undefined;
+  return at > 0 && text.endsWith("”") ? t("group.event.renamed", { name: nameOf(text.slice(0, at)), group: text.slice(at + marker.length, -1) }) : undefined;
 }
 
 /** A name or picture change the engine wrote crediting nobody (a new admin signed again what the last one set), said in the interface's language. */
@@ -206,7 +211,7 @@ function namelessEvent(event: StoredMessage["event"], text: string, t: Translate
  * stores it in English: the line is said again in the interface's language from its kind, where the stored text has
  * the shape the engine writes. Any other text (a reason the core gave) is shown as it is.
  */
-function eventText(message: StoredMessage, group: GroupView, t: Translate): string {
+function eventText(message: StoredMessage, group: GroupView, t: Translate, nameSlot?: string): string {
   const member = message.member ? group.members.find(m => m.key === message.member) : undefined;
   const text = message.text;
   // My own key is me whatever the roster says: once removed, it no longer lists me, and my lines still read "You …".
@@ -225,14 +230,16 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate): stri
     if (message.event === "created" && text.startsWith("Group created. ")) return t("group.event.withNote", { event: t("group.event.created"), note: readNote(group, t) });
     if (message.event === "joined" && !message.member && text.startsWith("You joined. ")) return t("group.event.withNote", { event: t("group.event.youJoined"), note: readNote(group, t) });
     if (message.event === "joined" && !message.member && text === "You joined again") return t("group.event.youJoinedAgain");
+    // The name stored, in a community told apart from a member's of the same name by the end of its key (`formerName`).
+    const nameOf = (stored: string) => message.member && !me ? formerName(group, message.member, writtenName(stored, t)) : writtenName(stored, t);
     const gone = " is no longer a member";
-    if (message.event === "gone" && text.endsWith(gone)) return t("group.event.gone", { name: writtenName(text.slice(0, -gone.length), t) });
+    if (message.event === "gone" && text.endsWith(gone)) return t("group.event.gone", { name: nameOf(text.slice(0, -gone.length)) });
     const left = " left";
-    if (message.event === "left" && text.endsWith(left)) return t("group.event.left", { name: writtenName(text.slice(0, -left.length), t) });
+    if (message.event === "left" && text.endsWith(left)) return t("group.event.left", { name: nameOf(text.slice(0, -left.length)) });
     // A community's line about a member who has left since: no roster or former name says who it was, but the stored
     // line does, in the shape the engine writes. Said again in the interface's language with that name; a change that
     // credits nobody, without one.
-    const written = message.member ? writtenEvent(message.event, text, t) : namelessEvent(message.event, text, t);
+    const written = message.member ? writtenEvent(message.event, text, t, nameOf) : namelessEvent(message.event, text, t);
     if (written) return written;
     // My own removal or fork: the core's reason ("Member … holds a different membership history for epoch 4. …") is
     // English, and its detail is the notice's (behind its ⓘ). The line says what happened, from its kind.
@@ -241,7 +248,7 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate): stri
     const fixed = (FIXED_EVENTS as Map<string, string>).get(text);
     return fixed === "rotated" ? t("group.event.rotated") : fixed === "removed" ? t("group.event.removed") : fixed === "forked" ? t("group.event.forked") : text;
   }
-  const name = member ? memberName(member, t) : authorName(group, message.member!, t);
+  const name = nameSlot ?? (member ? memberName(member, t, sameNamed(group.members)) : authorName(group, message.member!, t));
   if (message.event === "joined") return t("group.event.joined", { name });
   // A member back in the group (invited again): the line of their earlier removal or leave is theirs too. Mine says
   // what happened to me in its own words.
@@ -260,6 +267,18 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate): stri
     return me ? t("group.event.renamedYou", { group }) : t("group.event.renamed", { name, group });
   }
   return text;
+}
+
+/** What `eventLine` writes in place of the admin's name (a private-use character), to put the name and its mark there. */
+const NAME_SLOT = "";
+
+/** A membership line (`eventText`), the admin's name in it with the admin's mark, which no name a member picks can be. */
+function eventLine(message: StoredMessage, group: GroupView, t: Translate): ReactNode {
+  const member = message.member ? group.members.find(m => m.key === message.member) : undefined;
+  if (!member || member.me || member.role !== "admin") return eventText(message, group, t);
+  const [before, after, ...more] = eventText(message, group, t, NAME_SLOT).split(NAME_SLOT);
+  if (after === undefined || more.length) return eventText(message, group, t);
+  return <>{before}<bdi>{memberName(member, t, sameNamed(group.members))}</bdi> <AdminMark testId="group-event-admin" />{after}</>;
 }
 
 /**
@@ -352,19 +371,33 @@ export function GroupChat() {
   // A group with a history whose rows have not come yet (shown at start, the engine still starting): it says it is
   // loading, not an empty group.
   const reading = loaded.groupId !== groupId && !engine.messages.has(`group:${groupId}`) && (group?.lastMessageAt ?? 0) > 0;
-  /** The message the composer answers (WISP 902 § Replies). */
-  const [replyingTo, setReplyingTo] = useState<StoredMessage | null>(null);
+  const [readReplies] = useState(() => replyIndexer(true));
+  const quoteIndex = useMemo(() => readReplies(messages), [messages, readReplies]);
+  /**
+   * The message the composer answers (WISP 902 § Replies), read as the group has it now (as a 1:1 chat's, Chat.tsx): an
+   * edit shows in the bar, and a message deleted (for everyone, by its author or an admin) lets the bar go.
+   */
+  const [chosenReply, setReplyingTo] = useState<StoredMessage | null>(null);
+  const replyingTo = useMemo(() => (chosenReply && heldOriginal(chosenReply, quoteIndex, true)) ?? null, [chosenReply, quoteIndex]);
+  useEffect(() => { if (chosenReply && !replyingTo) setReplyingTo(null); }, [chosenReply, replyingTo]);
   /**
    * The reply as it is when a message goes, not as a render's closure saw it: the composer sends what was queued one
    * after the other, and only the first of them after Reply carries it.
    */
   const replyingRef = useRef(replyingTo);
   replyingRef.current = replyingTo;
-  /** The message of mine the composer edits (WISP 902 § Edits). */
-  const [editing, setEditing] = useState<StoredMessage | null>(null);
+  /**
+   * The message of mine the composer edits (WISP 902 § Edits). Only while the group has it: deleted meanwhile, the edit
+   * ends, its words with it, and the draft set aside comes back.
+   */
+  const [chosenEdit, setEditing] = useState<StoredMessage | null>(null);
+  const editing = chosenEdit && heldOriginal(chosenEdit, quoteIndex, true) ? chosenEdit : null;
+  useEffect(() => { if (chosenEdit && !editing) setEditing(null); }, [chosenEdit, editing]);
   useEffect(() => { setReplyingTo(null); setEditing(null); }, [groupId]);
-  const [readReplies] = useState(() => replyIndexer(true));
-  const quoteIndex = useMemo(() => readReplies(messages), [messages, readReplies]);
+  // The group no longer takes my messages (removed, left on another device): the composer under the bars is off, and
+  // they go. Not while it is off for a moment in a group still active (a join or removal past 16 members).
+  const closed = !!rosterGroup && !rosterGroup.canSend && rosterGroup.status !== "active";
+  useEffect(() => { if (closed) { setReplyingTo(null); setEditing(null); } }, [closed]);
   // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
   const [pickButtonRow] = useState(() => rowPicker<StoredMessage, StoredMessage>(m => m.card?.kind === "buttons" || m.replyTo ? m : undefined));
   const buttonRows = useMemo(() => pickButtonRow(messages), [pickButtonRow, messages]);
@@ -386,6 +419,10 @@ export function GroupChat() {
   // A new group opens on its link (the sidebar says so in the navigation's state); the header's Share link opens it again.
   const location = useLocation();
   const [sharing, setSharing] = useState<"" | "created" | "share">("");
+  /** The unanswered joiners' New link while it works: a reset seals a fresh key to every member, and a second press made another. */
+  const [resetting, setResetting] = useState(false);
+  /** Its "Make a new link?" question, asked as every other New link's is: the link shared so far stops letting anyone in. */
+  const [askingReset, setAskingReset] = useState(false);
   // Its dialog waits for the link (a new group's, or one just turned on, comes with the state that follows), then stays
   // until it is closed: turned off in it, the link says so there, and one turned on again later opens nothing by itself.
   const [shareShown, setShareShown] = useState(false);
@@ -528,8 +565,8 @@ export function GroupChat() {
       const { error, messageId } = await engine.call("sendGroupMessage", { groupId, text, ...(mentions?.length && { mentions }), ...(answering && { replyTo: answering.id }) });
       if (!error && messageId && extra?.translated) keepSentOriginal(`group:${groupId}`, messageId, extra.translated);
       if (!error && answering) {
-        if (replyingRef.current === answering) replyingRef.current = null;
-        setReplyingTo(current => current === answering ? null : current);
+        if (replyingRef.current?.id === answering.id) replyingRef.current = null;
+        setReplyingTo(current => current?.id === answering.id ? null : current);
       }
       // The engine says why in English: said here in the app's language (lib/errorText.ts).
       return error && problemLine(error, t);
@@ -550,8 +587,8 @@ export function GroupChat() {
       const video = !voice && isPlayableVideoType(source.type) ? await videoMetaOf(source).catch(() => undefined) : undefined;
       await platform.sendGroupFile(groupId, source, { ...(voice && { voice }), ...(video && { video }), ...(answering && { replyTo: answering.id }) });
       if (answering) {
-        if (replyingRef.current === answering) replyingRef.current = null;
-        setReplyingTo(current => current === answering ? null : current);
+        if (replyingRef.current?.id === answering.id) replyingRef.current = null;
+        setReplyingTo(current => current?.id === answering.id ? null : current);
       }
       return null;
     } catch (e) { return problemLine(e, t); }
@@ -561,7 +598,7 @@ export function GroupChat() {
   const onTyping = useGroupTypingSender(rosterGroup?.profile === "mesh" && rosterGroup.status === "active" ? groupId : undefined);
   const typers = useMemo(() => (group?.typing ?? []).map(({ key, kind, status }): GroupTyper => {
     const member = group!.members.find(m => m.key === key);
-    return { key, name: member ? memberName(member, t) : t("group.member.unnamed", { key: key.slice(0, 8) }), ...(kind ? { kind } : {}), ...(status ? { status } : {}) };
+    return { key, name: member ? memberName(member, t, sameNamed(group!.members)) : t("group.member.unnamed", { key: key.slice(0, 8) }), ...(kind ? { kind } : {}), ...(status ? { status } : {}) };
   }), [group, t]);
 
   // "@everyone": a private group's admin only; a community has no everyone (WISP 902 § Mentions).
@@ -638,7 +675,7 @@ export function GroupChat() {
   const peerOf = (paymentId: string) => paymentPeers[paymentId] ?? "";
   // A row of the timeline: an event, a payment's note, or a message.
   const row = (m: StoredMessage, inStack?: MessageAuthor) => m.event
-    ? <div key={m.id} data-testid="group-event" className="flex justify-center mb-3.5 px-6"><span className="rounded-lg bg-surface-alt/90 px-3 py-1.5 text-center text-[11px] text-text-muted">{eventText(m, group, t)}</span></div>
+    ? <div key={m.id} data-testid="group-event" className="flex justify-center mb-3.5 px-6"><span className="rounded-lg bg-surface-alt/90 px-3 py-1.5 text-center text-[11px] text-text-muted">{eventLine(m, group, t)}</span></div>
     // A note about a payment this device is part of is shown under its own bubble instead.
     : m.groupPay ? (ownNotes.has(m.groupPay.id) ? null : <GroupPaymentNote key={m.id} note={m.groupPay} group={group} />)
     : m.paymentId ? <div key={m.id} data-testid="group-payment">
@@ -647,7 +684,7 @@ export function GroupChat() {
     </div>
     // No `peerAck`: a group has no receipts (WISP 902), so a message of mine is sent, one tick, never "Delivered".
     : <MessageBubble key={m.id} message={shownOf(m)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} highlight={search.highlight(m.id)} {...authorProps(m, inStack)} payee={payeeOf(m)}
-      onReply={replyTarget(m, true) ? () => { setEditing(null); setReplyingTo(m); } : undefined} quote={quoteOf(m)}
+      onReply={replyTarget(m, true) && group.canSend ? () => { setEditing(null); setReplyingTo(m); } : undefined} quote={quoteOf(m)}
       buttons={group.canSend ? buttonsOf.get(m.id) : undefined} compactPress={presses.has(m.id)}
       onEdit={canEditInGroup(m) && !m.card && group.canSend ? () => { setReplyingTo(null); setEditing(m); } : undefined}
       // Mine, as the group carried it (a text, a card, a file): taken off every member's device (WISP 400 § Delete for everyone).
@@ -791,12 +828,18 @@ export function GroupChat() {
       </div>}
       {group.adminOff && group.status === "active" && (group.isAdmin || group.profile === "community") && <ManageHere groupId={group.id} />}
       {group.entryJammed && group.isAdmin && group.status === "active" && <LinkJammed groupId={group.id} onReplaced={() => setSharing("share")} />}
-      {/* Joiners the door let in whose side never came up, many lately: real ones may not get in. One tap replaces the
-          link, and its share sheet opens on the new one. */}
+      {/* Joiners the door let in whose side never came up, many lately: real ones may not get in. A new link, asked as
+          every other New link is, and its share sheet opens on the new one. */}
       {group.isAdmin && group.status === "active" && !!community?.unansweredKnocks && <div role="status" data-testid="group-knocks-unanswered" className="flex flex-wrap items-center gap-2 px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
         <span className="min-w-0 flex-1">{t("group.link.unanswered")}</span>
-        <button type="button" data-testid="group-knocks-reset" onClick={() => void act(async () => { await engine.call("enableGroupLink", { groupId, reset: true }); setSharing("share"); })}
-          className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer max-md:min-h-11 max-md:px-3">{t("group.link.reset")}</button>
+        <button type="button" data-testid="group-knocks-reset" {...working(resetting)} onClick={() => { if (!resetting) setAskingReset(true); }}
+          className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer data-[loading]:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.link.reset")}</button>
+        {askingReset && <GroupLinkAskDialog kind="reset" onClose={() => setAskingReset(false)} onConfirm={() => {
+          setAskingReset(false);
+          if (resetting) return;
+          setResetting(true);
+          void act(async () => { await engine.call("enableGroupLink", { groupId, reset: true }); setSharing("share"); }).finally(() => setResetting(false));
+        }} />}
       </div>}
       {(error || (group.status && group.status !== "active")) && <div ref={noticeRef} tabIndex={-1} role="status" data-testid="group-notice" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
         {error && <Notice problem={error} className="text-xs" />}

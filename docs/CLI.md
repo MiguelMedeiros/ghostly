@@ -163,7 +163,7 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
   meanwhile (past 10,000 events or 16 MiB, an `events.gap` says what was dropped).
 
 Main types: `message.received`, `message.sent`, `message.delivery`, `message.edited`, `chat.pairing`, `chat.connection`, `chat.joined`,
-`typing.started` (with `kind` and `status`) and `typing.stopped` (`group.typing.started` and `group.typing.stopped` in a private group, with `member`), `message.reaction` and `group.reaction`, `group.message.edited`,
+`typing.started` (with `kind` and `status`) and `typing.stopped` (`group.typing.started` and `group.typing.stopped` in a private group, with `member`; all live only, never replayed), `message.reaction` and `group.reaction`, `group.message.edited`,
 `group.message` and `group.sent` (with `messageId`, `member`, `nick` from the roster, and `mentioned`), `group.mentioned`
 (a mention of this profile learned after its `group.message`, once), `group.members`,
 `file.offered`, `file.done` and `file.failed` (with the file's `messageId`), `payment.created`, `payment.updated`,
@@ -180,7 +180,7 @@ ghostly listen --from alice --from bob --group team --exec ./bot.sh
   chat made after `listen` started, and only ever the chat of that key (a contact's own name never stands for a key).
   A prefix of a chat's id or the name its contact gave itself is refused, with the chat it found: another contact
   could call itself that. Name the chat first (`ghostly chat rename <chat> <name>`). `--group` takes a group (id,
-  prefix or name; one that fits more than one group is refused, with their ids). Names are turned into ids once, at the
+  prefix or name, or `group:<id>`; one that fits more than one group is refused, with their ids). Names are turned into ids once, at the
   start, so a contact who renames themselves later changes nothing. A name that matches nothing is an error (exit 3).
 - With either flag, an event of any other chat or group never reaches `--exec`, `--webhook` or stdout. The message
   itself is kept in the chat as always, and the cursor moves past it. Events of the profile itself
@@ -237,7 +237,8 @@ reactions, typing).
 
 A chat is named by its id, its contact's key, the label you gave it, or (only when no label matches) a unique prefix
 of its id or the name the contact gave itself; a group by its id, its name, or a unique
-prefix of its id; a member by its key, a unique prefix or its name. **Names are a convenience for people**: a contact chooses its own name, a group's admin the
+prefix of its id, each also written `group:<ref>` (every command that takes a group, `listen --group` included, and
+every one that takes a chat or a group); a member by its key, a unique prefix or its name. **Names are a convenience for people**: a contact chooses its own name, a group's admin the
 group's and a member its own, so a bot or a script addresses by id (`<chat id>`, `group:<group id>`, a member's whole
 key), which every answer and event carries. What the CLI does when names meet:
 

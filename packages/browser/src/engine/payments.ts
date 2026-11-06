@@ -187,6 +187,9 @@ class NoEcashError extends Error {
 const arkSats=(network:string)=>network==="bitcoin"?"sats":"test sats";
 /** The English line kept with a payment message (the CLI and older apps show it): test sats say so. */
 const satsOn=(network:WalletNetwork)=>network==="testnet"?"test sats":"sats";
+/** The sender's chat line of ecash sent in a chat, from its record: one id, whether written as it goes or on a later start. */
+const ecashLine=(payment:StoredPayment):StoredMessage=>({linkId:payment.linkId,id:`me_${payment.createdAt}`,text:`⚡ ${payment.amount.toLocaleString()} ${satsOn(paymentNetwork(payment))}`,
+  sender:"me",timestamp:payment.createdAt,via:"datalink",paymentId:payment.id});
 type AskMethod = "arkade" | "usdt" | "bark" | "bitcoin" | "spark" | "fedimint";
 const ENDPOINT_OF: Record<Exclude<AskMethod, "usdt" | "fedimint">, string> = { arkade: ENDPOINT.arkade, bark: ENDPOINT.bark, bitcoin: ENDPOINT.bitcoin, spark: ENDPOINT.spark };
 /**
@@ -1829,28 +1832,18 @@ export class PaymentDesk {
       requestId: params.requestId,
       network: mintNetwork(mint),
     });
-    let token: string;
-    let paidFrom: string;
+    let sent: StoredPayment;
     try {
       // Written down in the same transaction that takes the ecash out of the wallet: from here on the
       // token is the only copy of that money.
       const created = await this.wallet.createToken(params.amount, params.mints, memo, record, params.network);
-      token = created.token;
-      paidFrom = created.mint;
-      this.payments.set(id, record(created.token, created.mint));
+      sent = record(created.token, created.mint);
+      this.payments.set(id, sent);
     } catch (error) {
       throw new NoEcashError(error);
     }
     this.host.onChange();
-    await this.host.storeMessage({
-      linkId: params.linkId,
-      id: `me_${params.timestamp}`,
-      text: `⚡ ${params.amount.toLocaleString()} ${satsOn(mintNetwork(paidFrom))}`,
-      sender: "me",
-      timestamp: params.timestamp,
-      via: "datalink",
-      paymentId: id,
-    });
+    await this.host.storeMessage(ecashLine(sent));
 
     try {
       await this.sendTo(link, {
@@ -1859,7 +1852,7 @@ export class PaymentDesk {
         requestId: params.requestId,
         amount: { value: String(params.amount), asset: UNIT },
         memo,
-        endpoint: [ENDPOINT.cashu, token],
+        endpoint: [ENDPOINT.cashu, sent.token!],
       });
     } catch (error) {
       await this.reclaim(id).catch(() => {});
@@ -1910,15 +1903,21 @@ export class PaymentDesk {
     if (!link?.supportsPayments) return;
     // "I paid your invoice" that did not get through goes now (`InvoiceClaim`).
     for (const claim of this.claims) if (claim.linkId === linkId && !claim.pending && claim.expiresAt > Date.now()) await this.tellClaim(claim);
-    // Our open requests to this edge's group reach the member now; one already paid is closed on their side.
+    // Our open requests to this edge's group reach the member now; one already paid is closed on their side while
+    // fresh, as a 1:1 request is below: not the group's whole history at every edge opening.
     const group = this.host.groupOf?.(linkId);
     if (group) for (const request of this.payments.values()) {
       if (request.group !== group || request.kind !== "request" || request.direction !== "out") continue;
       if (request.state === "pending") await this.sendGroupRequest(linkId, request);
-      else if (request.state === "settled") link.sendPaymentResult({ id: request.id, ok: true });
+      else if (request.state === "settled" && Date.now() - request.createdAt < RECEIPT_FRESH_MS) link.sendPaymentResult({ id: request.id, ok: true });
     }
     for (const payment of this.payments.values()) {
       if (payment.linkId !== linkId || payment.direction !== "out" || this.reclaims.has(payment.id)) continue;
+      // A request of ours our wallet saw paid is said so again while fresh (as a receipt is, `receiptOwed`), whatever
+      // its rail: the answer `settleRequest` sent is dropped with the chat down, and a request paid from another wallet
+      // (a Fedimint request's invoice, an address paid from outside) has no token or receipt the payer says again, so
+      // its copy would stay open with a Pay button that pays it twice.
+      if (payment.kind === "request" && payment.state === "settled" && !payment.group && Date.now() - payment.createdAt < RECEIPT_FRESH_MS) { link.sendPaymentResult({ id: payment.id, ok: true }); continue; }
       if(payment.target?.method==='usdt') {
         if(!link.supportsUsdtPayments)continue;
         if(payment.kind==='request'&&payment.state==='pending'&&payment.target.expiresAt>Date.now())await link.sendPaymentRequest({id:payment.id,timestamp:payment.createdAt,amount:{value:String(payment.amount),asset:payment.unit},memo:payment.memo,endpoints:[[ENDPOINT.usdt,JSON.stringify(payment.target)]],ask:payment.ask});
@@ -1956,15 +1955,16 @@ export class PaymentDesk {
         else if(payment.kind==="payment" && payment.txid && payment.state==="settled" && this.receiptOwed(payment))await this.sendTo(link, {id:payment.id,timestamp:payment.createdAt,requestId:payment.requestId,amount:{value:String(payment.amount),asset:UNIT},endpoint:[ENDPOINT.arkade,JSON.stringify({txid:payment.txid})]});
         continue;
       }
-      // A request of ours our wallet saw paid is said so again while fresh (as a receipt is, `receiptOwed`): the answer
-      // `settleRequest` sent is dropped with the chat down, and a request paid over Lightning has no token or receipt the
-      // payer says again, so its copy would stay open with a Pay button that pays it twice.
-      if (payment.kind === "request" && payment.state === "settled" && payment.invoice && !payment.group && Date.now() - payment.createdAt < RECEIPT_FRESH_MS) { link.sendPaymentResult({ id: payment.id, ok: true }); continue; }
       if(payment.state !== "pending")continue;
-      if (payment.kind === "payment" && payment.token) await this.sendTo(link, {
-        id: payment.id, timestamp: payment.createdAt, requestId: payment.requestId,
-        amount: { value: String(payment.amount), asset: UNIT }, memo: payment.memo, endpoint: [ENDPOINT.cashu, payment.token],
-      });
+      if (payment.kind === "payment" && payment.token) {
+        // Its line, when the app ended after the token was written down and before the line was: a line already
+        // there (or deleted here) stays as it is.
+        await this.host.storeMessage(ecashLine(payment));
+        await this.sendTo(link, {
+          id: payment.id, timestamp: payment.createdAt, requestId: payment.requestId,
+          amount: { value: String(payment.amount), asset: UNIT }, memo: payment.memo, endpoint: [ENDPOINT.cashu, payment.token],
+        });
+      }
       else if (payment.kind === "request" && (payment.invoice || payment.mints?.length)) await link.sendPaymentRequest({
         id: payment.id, timestamp: payment.createdAt, amount: { value: String(payment.amount), asset: UNIT }, memo: payment.memo, network: paymentNetwork(payment),
         endpoints: [...(payment.invoice ? [[ENDPOINT.bolt11, payment.invoice] as [string, string]] : []), ...(payment.mints?.length ? [[ENDPOINT.cashu, cashuRequestPayload(payment.mints)] as [string, string]] : [])],

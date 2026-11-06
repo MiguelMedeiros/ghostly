@@ -28,6 +28,28 @@ describe("the relays' settings", () => {
     expect(Object.keys(DEFAULT_LIMITS)).toContain("clientsPerAddress");
   });
 
+  // Behind a proxy or Cloudflare, a client that reaches the port past it could write the header it is counted by.
+  it.each([
+    [{}, "0.0.0.0"],
+    [{ GHOSTLY_RELAY_PROXIES: "0" }, "0.0.0.0"],
+    [{ GHOSTLY_RELAY_PROXIES: "1" }, "127.0.0.1"],
+    [{ GHOSTLY_RELAY_PROXIES: "2" }, "127.0.0.1"],
+    [{ GHOSTLY_RELAY_PROXIES: "1", HOST: "0.0.0.0" }, "0.0.0.0"],
+    [{ HOST: "192.0.2.1" }, "192.0.2.1"],
+  ])("both listen where %j says: %s", (env, host) => {
+    expect(pushSettings(env).host).toBe(host);
+    expect(hyperdhtSettings(env).host).toBe(host);
+  });
+
+  it.each([
+    [{ GHOSTLY_RELAY_CLOUDFLARE: "0" }, "0.0.0.0"],
+    [{ GHOSTLY_RELAY_CLOUDFLARE: "1" }, "127.0.0.1"],
+    [{ GHOSTLY_RELAY_CLOUDFLARE: "1", GHOSTLY_RELAY_PROXIES: "1" }, "127.0.0.1"],
+    [{ GHOSTLY_RELAY_CLOUDFLARE: "1", HOST: "0.0.0.0" }, "0.0.0.0"],
+  ])("the HyperDHT relay listens where %j says: %s", (env, host) => {
+    expect(hyperdhtSettings(env).host).toBe(host);
+  });
+
   it.each([
     ["PORT", "", "a port from 1 to 65535"],
     ["PORT", "abc", "a port from 1 to 65535"],
@@ -154,3 +176,14 @@ function startLine(service: string, env: Record<string, string | undefined>): Pr
     child.once("exit", (code) => { clearTimeout(timer); fail(new Error(`exited ${code}: ${err}`)); });
   }).finally(() => { child.kill("SIGTERM"); });
 }
+
+describe("the HyperDHT relay's container", () => {
+  it("listens on every interface of the container, so the published port and a Cloudflare tunnel still reach it", async () => {
+    const { readFileSync } = await import("node:fs");
+    const dockerfile = readFileSync(resolve(__dirname, "../../../infra/services/hyperdht-relay/Dockerfile"), "utf8");
+    const env = dockerfile.split("\n").filter((line) => /^ENV\s/.test(line)).join(" ");
+    expect(env).toMatch(/\bHOST=0\.0\.0\.0\b/);
+    // The compose file turns the Cloudflare setting on by default; the Dockerfile's HOST must still win over it.
+    expect(hyperdhtSettings({ HOST: "0.0.0.0", GHOSTLY_RELAY_CLOUDFLARE: "1" }).host).toBe("0.0.0.0");
+  });
+});

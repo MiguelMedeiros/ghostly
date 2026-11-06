@@ -11,6 +11,7 @@ import {
 } from "./records";
 import type { ServiceAd } from "./services";
 import type { SignalSight } from "./signal";
+import { RelaysFailedError } from "./relay";
 import { budgetRetryMs, isDiscoveryBudgetError, type PkarrTransport } from "./transport";
 import { traceLink } from "./linkTrace";
 
@@ -77,6 +78,14 @@ export const OFFER_LOOK_MS = 90_000;
  * matrix's chat stayed "On DHT · retrying live" for 45 s (E2E full, 2026-10-30).
  */
 export const SIGNAL_OUT_READS = 3;
+/**
+ * The first fast reads once the contact's offer is due now (`expectPeer(…, true)`: the chat just left DHT only, on
+ * both sides) are signaling too, as many as after an answer, until one finds a new signal of the contact's. As plain
+ * reads, an extension whose relay minute was spent read its contact once as it came back from DHT only, and the next
+ * read waited 41 s: the offer out since then was never read, and the matrix's chat stayed "On DHT · retrying live" for
+ * 45 s (E2E full, 2026-11-05).
+ */
+export const SIGNAL_DUE_READS = SIGNAL_OUT_READS;
 /**
  * How long a link looks fast when its peer, or the peer's offer, is due any moment. The peer that
  * dials does so as soon as it sees the other one here, and its offer lands in its packet a moment
@@ -226,6 +235,8 @@ export interface LinkSessionEvents {
   onPeerTransports?(value: string): void;
   /** The peer's packet has said no `_tr` for `TRANSPORTS_GONE_MS`: the peer publishes none (any more). Once per such stretch. */
   onPeerTransportsGone?(): void;
+  /** The peer's packet that advertises carries no `_tr` (`true`) where the last read did, or carries one again (`false`). */
+  onPeerTransportsUnsaid?(unsaid: boolean): void;
   onStatus?(status: LinkStatus): void;
   /** A poll started, or finished with the next one due in `nextInMs`. */
   onPoll?(poll: { polling: boolean; nextInMs: number }): void;
@@ -299,6 +310,10 @@ export class LinkSession {
   private lastCallSignalIn: string | null = null;
   /** The `_rtc` signal the last packet that went out carried. */
   private rtcSignalOut: string | null = null;
+  /** Counts the signals taken back (`setRtcSignal(null)`): each ends an attempt. */
+  private rtcAttempt = 0;
+  /** A publish that went out carried a signal of this attempt (since the last take-back). */
+  private rtcAttemptOut = false;
   private lastRtcSignalIn: string | null = null;
   /** The `_rtc` signal the peer's packet carried as last read (null: none), whether or not it was new. */
   private peerRtcSignal: string | null = null;
@@ -308,6 +323,8 @@ export class LinkSession {
   /** When a read first found the peer's packet advertising with no `_tr` (0: the last packet that said carried one). */
   private transportsAbsentSince = 0;
   private transportsGone = false;
+  /** The peer's packet carried a `_tr` and the last read found none (`onPeerTransportsUnsaid`). */
+  private transportsUnsaid = false;
 
   private running = false;
   /** Stopped without a last packet (`stop(false)`): nothing more goes out. */
@@ -337,6 +354,8 @@ export class LinkSession {
   private fastStepsAfter = 0;
   /** Fast reads still signaling since this side's last new offer or answer went out (`SIGNAL_OUT_READS`). */
   private signalReadsLeft = 0;
+  /** Fast reads still signaling while the contact's offer is due (`SIGNAL_DUE_READS`). */
+  private dueSignalReadsLeft = 0;
   /** When the last `expectPeer` window ends (or ended): the pace slows down from there step by step. */
   private expectUntil = 0;
   /**
@@ -404,6 +423,12 @@ export class LinkSession {
   get peerPresence(): PeerPresence {
     return this.presence;
   }
+
+  /**
+   * The relays took a WebRTC signal of this attempt: its answer, or an earlier one of it. Not an earlier attempt's still
+   * in the packet out: its take-back, a background write, is the first the relays' budget holds back.
+   */
+  get rtcSignalPublished(): boolean { return this.rtcAttemptOut; }
 
   /** The `_rtc` signal the peer's packet carries, as last read: null when it carries none. */
   get peerSignal(): string | null {
@@ -498,23 +523,27 @@ export class LinkSession {
   setFastPoll(fast: boolean, offer = false): void {
     this.fastPollUntil = fast ? Date.now() + (offer ? OFFER_LOOK_MS : FAST_POLL_MAX_MS) : 0;
     this.fastStepsAfter = fast && offer ? Date.now() + OFFER_FAST_MS : 0;
-    // The signal this window is for goes out next (`SIGNAL_OUT_READS`): the reads left for the last one end.
-    this.signalReadsLeft = 0;
+    // The signal this window is for goes out next (`SIGNAL_OUT_READS`): the reads left for the last one end, and so do
+    // those for the contact's (`SIGNAL_DUE_READS`).
+    this.signalReadsLeft = this.dueSignalReadsLeft = 0;
     if (fast) this.pollNow();
   }
 
   /**
    * The peer, or its offer, is due any moment: poll fast for `EXPECT_PEER_MS` (never cutting a longer fast window short),
-   * then slow down step by step (`nextInterval`) rather than at once.
+   * then slow down step by step (`nextInterval`) rather than at once. `signal`: its offer is due now (it may be out
+   * already): a read goes at once, even inside a window already looking fast, and the first reads that look for it are
+   * signaling (`SIGNAL_DUE_READS`).
    */
-  expectPeer(awaited = false): void {
+  expectPeer(awaited = false, signal = false): void {
     const until = Date.now() + EXPECT_PEER_MS;
     this.expectUntil = Math.max(this.expectUntil, until);
     if (awaited) this.awaitedUntil = Math.max(this.awaitedUntil, until);
+    if (signal) this.dueSignalReadsLeft = SIGNAL_DUE_READS;
     // Due now: an offer of mine that was looking less often looks fast again, as long as this window.
     const stepping = this.fastStepsAfter > 0 && Date.now() >= this.fastStepsAfter;
     if (this.fastStepsAfter) this.fastStepsAfter = Math.max(this.fastStepsAfter, until);
-    if (until <= this.fastPollUntil) { if (stepping) this.pollNow(); return; }
+    if (until <= this.fastPollUntil) { if (stepping || signal) this.pollNow(); return; }
     this.fastPollUntil = until;
     this.pollNow();
   }
@@ -539,7 +568,7 @@ export class LinkSession {
    */
   calm(): void {
     if (this.rtcSignal !== null) return;
-    this.fastPollUntil = this.fastStepsAfter = this.expectUntil = this.watchUntil = this.lingerUntil = 0;
+    this.fastPollUntil = this.fastStepsAfter = this.expectUntil = this.watchUntil = this.lingerUntil = this.dueSignalReadsLeft = 0;
   }
 
   /** The data link carries chat and services while it is up. */
@@ -595,6 +624,7 @@ export class LinkSession {
   async setRtcSignal(signal: string | null, reportFailure = false): Promise<void> {
     if (this.rtcSignal === signal) return;
     this.rtcSignal = signal;
+    if (signal === null) { this.rtcAttempt++; this.rtcAttemptOut = false; }
     // A signal taken back (the session opened, or the attempt ended) is nothing the contact waits for: upkeep.
     if (reportFailure) await this.publish(signal === null);
     else await this.publish(signal === null).catch(() => {});
@@ -767,6 +797,7 @@ export class LinkSession {
 
   private async publishOnce(advertise: boolean, upkeep = false): Promise<number> {
     const rtcSignal = advertise ? this.rtcSignal : null;
+    const attempt = this.rtcAttempt;
     const started = Date.now();
     let keptMessages: number;
     try {
@@ -828,6 +859,7 @@ export class LinkSession {
       if (lapsed) this.pollNow();
     }
     this.rtcSignalOut = rtcSignal;
+    if (rtcSignal && attempt === this.rtcAttempt) this.rtcAttemptOut = true;
     traceLink(this.identity.pubKeyZ32, "publish", { ms, rtc: !!rtcSignal, advertise });
     this.events.onPublish?.({ ms, rtc: !!rtcSignal, ...(signalOut && { signalOut }) });
     this.discoveryResult("publish");
@@ -856,14 +888,18 @@ export class LinkSession {
     const started = Date.now();
     // A read the relays' budget held back: the next one goes when the budget frees a request.
     let heldBackMs: number | undefined;
+    /** This read is one of `SIGNAL_DUE_READS`: one the budget held back asked nothing of the relays, and is not counted. */
+    let dueRead = false;
     try {
       // A look that can wait (nobody watching, nothing expected) says so: a transport with a request
       // budget spends only part of it on those, and keeps the rest for links that are signaling.
       const pace = this.pace();
       // This side's offer is out, and this read looks for its answer, or its offer or answer just went out
-      // (`SIGNAL_OUT_READS`): signaling (`PkarrRequestOptions.signal`).
-      const signal = pace === "fast" && this.rtcSignalOut !== null && (this.fastStepsAfter > 0 || this.signalReadsLeft > 0);
-      if (signal && !this.fastStepsAfter) this.signalReadsLeft--;
+      // (`SIGNAL_OUT_READS`), or the contact's offer is due now (`SIGNAL_DUE_READS`): signaling (`PkarrRequestOptions.signal`).
+      const signalOut = pace === "fast" && this.rtcSignalOut !== null && (this.fastStepsAfter > 0 || this.signalReadsLeft > 0);
+      const signal = signalOut || (pace === "fast" && this.dueSignalReadsLeft > 0);
+      if (signalOut) { if (!this.fastStepsAfter) this.signalReadsLeft--; }
+      else if (signal) { this.dueSignalReadsLeft--; dueRead = true; }
       const watch = !signal && this.watching();
       // In its first seconds, when an app that restarts has its offer out (`PkarrRequestOptions.departed`). Not `watch`
       // alone: a packet the contact put just before its goodbye, read only after it, advertises, and looks like it is back.
@@ -872,9 +908,14 @@ export class LinkSession {
       const background = pace === "background" || pace === "connected" || (pace === "idle" && !this.active);
       // Back after a restart: the offer waits on this read (`PkarrRequestOptions.resume`).
       const resume = !signal && !watch && (this.resumeReads || Date.now() < this.awaitedUntil);
-      const packet = await this.transport.resolve(this.peerPubKeyZ32, { background, urgent: pace === "fast", ...(signal && { signal }), ...(watch && { watch }), ...(departed && { departed }), ...(resume && { resume }) });
+      // Every relay out of reach: what they gave last still stands for the contact, but the read says it failed. Taken as
+      // the answer, the link never said it could not read its contact, and the engine let a gone contact's HyperDHT
+      // listener go for the whole outage (`contactUnread`), where only that listener could bring the contact back.
+      let unread: RelaysFailedError | undefined;
+      const packet = await this.transport.resolve(this.peerPubKeyZ32, { background, urgent: pace === "fast", ...(signal && { signal }), ...(watch && { watch }), ...(departed && { departed }), ...(resume && { resume }) }, false)
+        .catch((error: unknown) => { if (!(error instanceof RelaysFailedError)) throw error; unread = error; return error.kept; });
       if (!this.running) return;
-      this.discoveryResult("read");
+      this.discoveryResult("read", unread);
       const ms = Date.now() - started;
       const wasOnline = this.presence.online, wasSeen = this.presence.lastPacketAt;
       // What this read finds that the read before did not have came in between, by this device's clock.
@@ -926,9 +967,11 @@ export class LinkSession {
             this.lastTransportsIn = batch.transports;
             this.events.onPeerTransports?.(batch.transports);
           }
+          if (this.transportsUnsaid) { this.transportsUnsaid = false; this.events.onPeerTransportsUnsaid?.(false); }
         } else if (batch.services !== null && !this.transportsGone) {
           // It advertises, and `_tr` is left out for size only after `_svc` is (`buildLinkRecords`): it set none.
           this.transportsAbsentSince ||= Date.now();
+          if (!this.transportsUnsaid && this.lastTransportsIn !== null) { this.transportsUnsaid = true; this.events.onPeerTransportsUnsaid?.(true); }
           if (Date.now() - this.transportsAbsentSince >= TRANSPORTS_GONE_MS) {
             this.transportsGone = true;
             // The value it said before, said again later, is news again.
@@ -950,6 +993,8 @@ export class LinkSession {
         if (ms > 1_500 || (online && !wasOnline) || batch.packetTimestamp !== wasSeen || newSignal || (globalThis as { __ghostlyLinkTrace?: boolean }).__ghostlyLinkTrace)
           traceLink(this.identity.pubKeyZ32, "poll", { ms, pace, online, age: Date.now() - batch.packetTimestamp, seen: Date.now() - seenAt, rtc: newSignal, first: wasSeen === 0 });
         if (newSignal) {
+          // The offer that was due is here: what follows it reads as its answer's (`SIGNAL_OUT_READS`).
+          this.dueSignalReadsLeft = 0;
           this.lastRtcSignalIn = batch.rtcSignal!;
           this.events.onRtcSignal?.(batch.rtcSignal!, readBefore ? { since: readBefore, after: peerPacketBefore || null } : undefined);
         }
@@ -971,6 +1016,7 @@ export class LinkSession {
       }
     } finally {
       this.polling = false;
+      if (dueRead && heldBackMs !== undefined) this.dueSignalReadsLeft++;
       if (this.running && this.pollAgain) {
         this.pollAgain = false;
         if (this.pollTimer) clearTimeout(this.pollTimer);

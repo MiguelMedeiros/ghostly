@@ -96,6 +96,26 @@ describe("the stores' records read and written", () => {
     expect((await rows(STORES.appStores) as { problem?: string }[])[0]!.problem).toBeUndefined();
   });
 
+  it("a host that answers with an error keeps its status with the problem, a new one written and cleared with it", async () => {
+    await installed();
+    const store = apps(net);
+    const files = new Map(net.files);
+    const answer = (status: number) => net.fetch.mockImplementation(async () => new Response("down", { status }));
+    answer(503);
+    expect(await store.refreshStores(), "the host's own trouble: try later").toMatchObject([{ problem: "status", problemStatus: 503 }]);
+    answer(404);
+    expect(await store.refreshStores(), "nothing at the link any more").toMatchObject([{ problem: "status", problemStatus: 404 }]);
+    expect(await rows(STORES.appStores)).toMatchObject([{ problem: "status", problemStatus: 404 }]);
+    net.fetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const body = files.get(String(input));
+      return body ? new Response(body.slice(), { status: 200 }) : new Response("not found", { status: 404 });
+    });
+    const [back] = await store.refreshStores();
+    expect(back!.problem).toBeUndefined();
+    expect(back!.problemStatus).toBeUndefined();
+    expect((await rows(STORES.appStores) as { problemStatus?: number }[])[0]!.problemStatus).toBeUndefined();
+  });
+
   it("a store that signed two indexes under one number is written once, and keeps when that was first seen", async () => {
     await installed();
     let now = NOW_MS + 3600_000;

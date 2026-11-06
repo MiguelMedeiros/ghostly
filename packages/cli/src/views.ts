@@ -249,6 +249,9 @@ export function groupJson(group: GroupView, showSecret = false) {
       ...(m.hub ? { hub: true } : {}), ...(m.viaHub ? { viaHub: true } : {}), ...(m.hubRole ? { hubRole: m.hubRole } : {}) })),
     ...(group.hubs ? { hubs: group.hubs } : {}),
     invitation: group.invitation ? { chat: group.invitation.linkId, accepted: group.invitation.accepted, viaLink: !!group.invitation.viaLink, stage: group.invitation.stage ?? null } : null,
+    // Other groups that came under this id (a contact's invitation, with the chat it came over, or a link opened): kept
+    // beside it until the person picks (`engine keepGroup {groupId}`, or `engine switchGroup {groupId, to: <chat or link>}`).
+    ...(group.others?.length ? { others: group.others.map((o) => ("link" in o ? { link: showSecret ? o.link : "<hidden>" } : { chat: o.linkId, name: o.name, members: o.members })) } : {}),
     community: group.community ?? null,
     picture: !!group.picture,
     pin: pinJson(group.pin),

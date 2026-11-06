@@ -344,6 +344,14 @@ export function pairedMessageFits(ts: number, m: string, reply?: WireReply, forw
 }
 
 /**
+ * The `paired-edit` frame of this edit fits a session, as `pairedMessageFits` says of a text's: an edit within 16 KiB
+ * can pass it the same way, and the contact's session ends on it each time it is said again.
+ */
+export function pairedEditFits(edit: WireEdit): boolean {
+  return editFrame(edit).length <= SESSION_FRAME_MAX;
+}
+
+/**
  * A native descriptor from the contact's capability record against the one known (a session's, or an older record's).
  * The record carries only how to dial, never an address: the Iroh endpoint id and the relay it is homed on, the
  * HyperDHT key and the relay a browser's goes through. For the same endpoint, a known Iroh descriptor keeps its
@@ -451,6 +459,11 @@ export interface GhostLinkEvents {
    * forgotten here, and the owner forgets what it kept of it.
    */
   onPacketTransportsGone?(): void;
+  /**
+   * With `packetTransports`: the member's packet carries no `_tr` where the last one read did (`true`), or one again
+   * (`false`). News only: what it said before is kept, and on a device link only a signed value counts.
+   */
+  onPacketTransportsUnsaid?(unsaid: boolean): void;
   onPairingState?(state: PairingState): void;
   /** How far a first pairing got (`pairingProgress` option): every change, up to `live`. */
   onPairingProgress?(progress: PairingProgress): void;
@@ -549,7 +562,8 @@ export interface GhostLinkEvents {
   onAnswersRefused?(): void;
   /**
    * A group link's WebRTC offer of this side's was answered and nothing connected `RACE_ANSWERED_MS` later: there is no
-   * direct path, as a chat's race takes it (`scheduleRace`). Said once per offer; the attempt itself goes on.
+   * direct path, as a chat's race takes it (`scheduleRace`). Said once per offer; the attempt itself goes on. Not for an
+   * answer read late (`LATE_ANSWER_MS`): the link gives that attempt up and offers again.
    */
   onRtcStalled?(): void;
   /** The contact's packet came between two reads of its record: its clock against this one (`LinkSessionEvents.onPeerClock`). */
@@ -1065,11 +1079,15 @@ export class GhostLink {
     // During migration the authenticated channel already reaches the peer.
     // Carry signed ICE signaling there instead of waiting for DHT polling.
     if (this.switcher?.pending?.choices.includes("webrtc/1") && this.channel && this.paired?.state.status === "ready") {
-      if (signed) this.channel.send(JSON.stringify({ t: "paired-rtc", signal: signed }));
+      if (signed) { this.channel.send(JSON.stringify({ t: "paired-rtc", signal: signed })); this.rtcViaChannel = true; }
       return;
     }
+    if (!signed) this.rtcViaChannel = false;
     void this.session.setRtcSignal(signed, !!this.options.params.profile).catch(report);
   }
+
+  /** A WebRTC signal of this attempt went over the authenticated channel (a migration), not the relays. */
+  private rtcViaChannel = false;
 
   /** This app is going away (`depart`): no more dials. */
   private leaving = false;
@@ -1259,6 +1277,7 @@ export class GhostLink {
         onPeerClock: (packetAt, readBefore, readAt) => events.onPeerClock?.(packetAt, readBefore, readAt),
         onPeerTransports: value => this.peerPacketTransports(value),
         onPeerTransportsGone: () => this.peerPacketTransportsGone(),
+        onPeerTransportsUnsaid: (unsaid) => { if (options.packetTransports && !this.stopped) events.onPacketTransportsUnsaid?.(unsaid); },
         onDiscoveryError: error => events.onDiscoveryError?.(error),
         onStatus: (status) => events.onStatus?.(status),
         onPoll: (poll) => events.onPoll?.(poll),
@@ -1314,6 +1333,8 @@ export class GhostLink {
       offerStanding: ts => !this.leaving && !this.stopped && !this.streamBlocked && this.peerOfferTs() === ts,
       onAnswerReplaced: () => this.redial(),
       onDirect: evidence => events.onDirectEvidence?.(evidence),
+      // An answer the relays' budget held back for the whole attempt never reached the offerer (agents#1637).
+      signalOut: () => this.rtcViaChannel || this.session.rtcSignalPublished,
       onAnswersRefused: () => this.answersRefused(),
       onOpen: channel => {
         if (this.streamBlocked || this.keyStopped) { channel.close(); return; }
@@ -1355,6 +1376,16 @@ export class GhostLink {
           // up (15 s in Chromium, the attempt's 90 s where the connection never says `failed`), then for the `_tr` both ways.
           if (options.packetTransports) setTimeout(() => {
             if (this.answeredAt !== answeredAt || this.channel || this.stopped || this.dataLink.state !== "connecting") return;
+            // An answer read late (`LATE_ANSWER_MS`): the member's ICE may have given up on it meanwhile, which says
+            // nothing about the network. The attempt is given up and the edge offers again, WebRTC left on: taken for
+            // a network that blocks, the edge went native on both sides after a restart, and past the native slots the
+            // member stayed unreachable for the whole of a 12-minute lab (agents#971).
+            if (this.dataLink.answerLate) {
+              traceLink(this.myPubKeyZ32, "rtc-stalled", { late: true });
+              this.dataLink.abandon();
+              this.redial();
+              return;
+            }
             traceLink(this.myPubKeyZ32, "rtc-stalled", {});
             events.onRtcStalled?.();
           }, RACE_ANSWERED_MS);
@@ -1461,7 +1492,8 @@ export class GhostLink {
     const tracker = this.tracker;
     if (!tracker || tracker.done) return;
     if (state === "answering") tracker.offerReceived();
-    else if (state === "connecting" && was === "offering") tracker.answerReceived();
+    // On a busy page the channel opens before the answer is applied (`DataLink.handleSignal`): the answer came all the same.
+    else if ((state === "connecting" || state === "open") && was === "offering") tracker.answerReceived();
     else if (state === "idle") {
       if (was === "offering") tracker.failed("timeout", true);
       else if (was === "answering" || was === "connecting") tracker.failed("transport", true);
@@ -1545,7 +1577,8 @@ export class GhostLink {
     traceLink(this.myPubKeyZ32, "unblocked", { held: !!this.heldSignal });
     this.autoConnectFailures = 0;
     this.lastAutoConnectAt = 0;
-    this.session.expectPeer();
+    // The contact's offer is due now, out already if it left first: its first reads are signaling (`SIGNAL_DUE_READS`).
+    this.session.expectPeer(false, true);
     const held = this.heldSignal;
     this.heldSignal = null;
     if (held) this.handleRtcSignal(held.signal, held.sight);
@@ -3578,6 +3611,8 @@ export class GhostLink {
       // Past a text's edits only an app that shows cards takes one (WISP 405 · Status Cards); an older one would drop it.
       // A removal goes whatever its number: an app that knows removals takes it, an older one shows or drops its fallback.
       if (!edit.rm && !validEditNumber(edit.e) && !(edit.sc && this.supportsStatusCards)) return "Your contact's app takes no more edits of this message";
+      // One past what a session takes would end the contact's session, again on every new one.
+      if (!pairedEditFits(edit)) return PAIRED_FRAME_TOO_LARGE;
       try { this.channel.send(editFrame(edit)); return null; } catch { return "The connection closed before sending"; }
     }
     // A card's edit waits for the live session: on the floor the card would read as its text until the next one.
@@ -4993,8 +5028,9 @@ export class GhostLink {
     this.applicationOpen = false;
     this.dht?.setLive(false);
     // A replacement still authenticating may yet carry the chat. Without one, the session a plan meant to move is
-    // gone, and so is the plan: its dial must not go on and open a session of its own, or settle the next one.
-    if (!this.candidate) { this.cancelCandidate(); this.switcher.stop(); }
+    // gone, and so is the plan: its dial must not go on and open a session of its own, or settle the next one. Its
+    // target goes too, or the chat's native listeners are held (`canReleaseEndpoint`) until the contact is back.
+    if (!this.candidate) { this.cancelCandidate(); this.switcher.stop(); this.transitionTarget = this.transitionError = undefined; }
     this.activeBinding = undefined;
     this.paired?.stop();
     this.paired = null;

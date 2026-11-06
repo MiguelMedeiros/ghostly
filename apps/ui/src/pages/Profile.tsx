@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { InputGroup, LinkRow, Page } from "../components/layout";
 import { useSettings } from "../contexts/SettingsContext";
@@ -83,6 +83,8 @@ export function Profile() {
   const wantsBackup = !!asked?.backupProfile;
   const [creating, setCreating] = useState(wantsNew), [newName, setNewName] = useState("");
   const newNameField = useFittedNameField(newName, setNewName, fitsProfileName);
+  // The new profile opens after a moment (`switchProfile`): another submit until the reload made a second one.
+  const opening = useRef(false), [opened, setOpened] = useState(false);
   useEffect(() => { if (wantsNew) { setCreating(true); document.querySelector("[data-testid='profile-list']")?.scrollIntoView({ block: "nearest" }); } }, [wantsNew]);
   const [deleting, setDeleting] = useState<ProfileEntry | null>(null);
   // A backup restored to replace the profile it was made from lands here, the copy running: the original's removal
@@ -120,7 +122,7 @@ export function Profile() {
         {/* Left empty, it shows the saved name again, which an empty name does not replace (as the nickname field does). */}
         <input data-testid="profile-name" aria-label={t("profile.nameLabel")} value={name} {...nameField} onBlur={() => { if (name.trim()) saveName(); else setName(plain); }}
           onCompositionEnd={(e) => { nameComposition.inputProps.onCompositionEnd(e); nameField.onCompositionEnd(e); }} onKeyDown={(e) => { if (!nameComposition.composing(e) && e.key === "Enter") saveName(); }}
-          className="min-w-0 flex-[1_1_8rem] bg-transparent text-xl font-semibold text-text-primary rounded-lg px-2 -mx-2 py-1 border border-transparent hover:border-border focus:border-accent focus:outline-none" />
+          className="min-w-0 flex-[1_1_8rem] bg-transparent text-xl font-semibold text-text-primary rounded-lg px-2 -mx-2 py-1 border border-field-border focus:border-accent focus:outline-none" />
         {current.restored && (
           <span data-testid="profile-restored-tag" title={t("profile.restoredTagHint")} className="inline-flex items-center gap-0.5 shrink-0 whitespace-nowrap rounded-full border border-border bg-surface-alt ps-2.5 pe-0.5 text-xs text-text-muted">
             {t("profile.restoredTag")}
@@ -182,9 +184,9 @@ export function Profile() {
         ))}
         {!canSwitch ? <Block><Notice>{t("profile.oneOnly")}</Notice></Block> : creating ? (
           <Block>
-            <InputGroup as="form" onSubmit={(e) => { e.preventDefault(); attempt(() => { const entry = createProfile(newName); askNameIn(entry.id); switchProfile(entry.id, { route: "/profile" }); }); }}>
+            <InputGroup as="form" onSubmit={(e) => { e.preventDefault(); if (!opening.current) attempt(() => { const entry = createProfile(newName); askNameIn(entry.id); switchProfile(entry.id, { route: "/profile" }); opening.current = true; setOpened(true); }); }}>
               <input data-testid="profile-new-name" autoFocus className={input} placeholder={t("profile.name")} value={newName} {...newNameField} />
-              <Button type="submit" variant="primary" data-testid="profile-create" disabled={!newName.trim()}>{t("profile.create")}</Button>
+              <Button type="submit" variant="primary" data-testid="profile-create" disabled={!newName.trim() || opened}>{t("profile.create")}</Button>
               <Button onClick={() => { setCreating(false); setNewName(""); }}>{t("common.cancel")}</Button>
             </InputGroup>
           </Block>

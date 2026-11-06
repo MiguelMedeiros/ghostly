@@ -1,11 +1,11 @@
-import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, ownInviteRefusal, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { findSecret, guardText, secretWords } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
 import {
-  bool, chatOf, chatOrGroup, dhtOnly, findChat, findGroup, groupOf, inviteTaken, list, messageOf, node, num, oneOf, state, str, transportOffered, waitForState,
+  bool, chatOf, chatOrGroup, cleanName, dhtOnly, findChat, findGroup, groupOf, groupPrefixed, inviteTaken, list, messageOf, node, num, oneOf, state, str, transportOffered, waitForState,
   type ApiContext, type Method, type Params,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -87,20 +87,22 @@ function relayRefused(error: unknown, patch: Record<string, unknown>): unknown {
 
 // ---------- chat names ----------
 
-/** The engine keeps a chat's name to 48 UTF-16 units (renameLink). */
-const CHAT_NAME_UNITS = 48;
+/** The engine keeps a chat's name to 48 characters (code points: `renameLink`). */
+const CHAT_NAME_LENGTH = 48;
 
 /**
- * A chat's name on this side (`chat rename`, an invite's `--label`): what the engine keeps whole, on one line, refused
- * with the rule as a profile's or a group's name is. Taken as given, the engine cut it at 48 UTF-16 units without a
- * word (half an emoji left as a lone surrogate) and kept line breaks. Counted as the engine counts: an emoji is two.
+ * A chat's name on this side (`chat rename`, an invite's `--label`), as the engine stores it (`cleanName`): a tab or a
+ * line break is a space, invisible characters go, and what is left is counted. Longer than the engine keeps whole is
+ * refused, not cut. An empty name (or spaces) is the documented one of `chat rename` (the contact's own name) and no
+ * label for an invite; a name with nothing that shows is refused: given as is, the engine cleared the chat's name.
  */
 function chatName(params: Params, name: string): string | undefined {
   const value = str(params, name);
-  if (value !== undefined && (value.trim().length > CHAT_NAME_UNITS || /\p{Cc}/u.test(value.trim()))) {
-    throw new CliError("bad_request", `A chat's name is up to ${CHAT_NAME_UNITS} characters on one line (an emoji counts as two)`);
-  }
-  return value;
+  if (value === undefined || !value.trim()) return value === undefined ? undefined : "";
+  const clean = cleanName(value, CHAT_NAME_LENGTH);
+  if (clean === undefined) throw new CliError("bad_request", `A chat's name is up to ${CHAT_NAME_LENGTH} characters on one line`);
+  if (!clean) throw new CliError("bad_request", `A chat's name needs a character that shows (an empty name gives back the contact's own)`);
+  return clean;
 }
 
 // ---------- mentions ----------
@@ -236,6 +238,11 @@ const METHODS: Record<string, Method> = {
       if (kind === "strings" && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) throw new CliError("bad_request", `${key} must be a list of strings`);
       if (kind === "string" && typeof value !== "string") throw new CliError("bad_request", `${key} must be a string`);
       if (kind === "boolean" && typeof value !== "boolean") throw new CliError("bad_request", `${key} must be true or false`);
+      // The engine says "Enter at least one relay address" for any list it can't use (node.ts `updateSettings`): the
+      // address given is named here, in the app's Settings words; an empty list stays the engine's to refuse.
+      if (key === "relays" && (value as string[]).length && !(value as string[]).some(normalizeRelayUrl)) {
+        throw relayRefused(new Error(relayUrlProblem((value as string[])[0]) ?? ""), { relays: value });
+      }
       // The name contacts see: `profile set --name`'s rule.
       if (key === "nick") { patch.nick = checkShownName(value, key); guardText(patch.nick, bool(params, "force"), "nick", "set it"); continue; }
       if (kind === "ice") {
@@ -493,9 +500,11 @@ const METHODS: Record<string, Method> = {
     // For everyone (WISP 400 § Delete for everyone): a message of mine, in a chat or a group, gone from every device.
     if (bool(params, "everyone")) {
       const target = chatOrGroup(ctx, str(params, "chat", true));
-      // A one-shot leaves once its command is done, and the removal with it: by default it stays until the contact has it.
-      const wait = oneOf(params, "wait", ["none", "confirmed"] as const, !target.group && ctx.mode === "one-shot" ? "confirmed" : "none");
-      if (target.group && wait !== "none") throw new CliError("bad_request", "A group has no receipts: --wait confirmed is for a chat");
+      // A one-shot leaves once its command is done, and the removal with it: by default it stays until the contact has it,
+      // or in a group (no receipts) until a member's edge took it.
+      const wait = oneOf(params, "wait", ["none", "confirmed", "sent"] as const, ctx.mode !== "one-shot" ? "none" : target.group ? "sent" : "confirmed");
+      if (target.group && wait === "confirmed") throw new CliError("bad_request", "A group has no receipts: --wait confirmed is for a chat (--wait sent waits until a member's edge took it)");
+      if (!target.group && wait === "sent") throw new CliError("bad_request", "--wait sent is for a group: a chat's removal waits with --wait confirmed");
       const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
       const ref = str(params, "message", true);
       const message = await messageOf(ctx, target.linkId, ref, (m) => m.sender === "me");
@@ -504,7 +513,11 @@ const METHODS: Record<string, Method> = {
       if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
       // `messageId`, as every command that makes or changes a message names it; `deleted` kept for callers that read
       // it (agents#1582).
-      if (target.group) return { group: target.id, messageId: message.id, deleted: message.id, everyone: true };
+      if (target.group) {
+        const e = result.e;
+        const edges = !e ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, target.id, message.id, e, ms) : node(ctx).groupTaken({ groupId: target.id, messageId: message.id, edit: e });
+        return { group: target.id, messageId: message.id, deleted: message.id, everyone: true, sent: edges > 0, edges };
+      }
       if (wait === "confirmed") await waitForRemoval(ctx, target.linkId, message.id, ms);
       return { chat: target.id, messageId: message.id, deleted: message.id, everyone: true, confirmed: !node(ctx).removalPending({ linkId: target.linkId, messageId: message.id }) };
     }
@@ -601,7 +614,8 @@ const METHODS: Record<string, Method> = {
 
   async "group.create"(ctx, params) {
     // As `group rename` checks it: a name a group cannot have is said here, before anything is made.
-    const name = groupName(str(params, "name", true));
+    const clean = cleanName(str(params, "name", true), MAX_GROUP_NAME_LENGTH);
+    const name = clean && groupName(clean);
     if (!name) throw new CliError("bad_request", `A group's name is 1 to ${MAX_GROUP_NAME_LENGTH} characters on one line`);
     // Every member reads it, and a community's anyone who opens its link.
     guardText(name, bool(params, "force"), "group's name", "create it");
@@ -910,7 +924,7 @@ function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, hint: (sho
   try { return chat(); } catch (error) {
     if (!(error instanceof CliError) || error.code !== "not_found") throw error;
     const ref = str(params, "chat", true);
-    const named = ref.startsWith("group:") ? ref.slice("group:".length) : ref;
+    const named = groupPrefixed(ref) ?? ref;
     let group: GroupView;
     try { group = findGroup(state(ctx).groups, named); } catch { throw error; }
     const shown = /^[\w.:-]+$/.test(named) ? named : JSON.stringify(named);

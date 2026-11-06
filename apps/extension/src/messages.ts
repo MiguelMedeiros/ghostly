@@ -19,6 +19,8 @@ export type RuntimeMessage =
   | { target: "engine"; type: "ping" }
   /** The worker is about to close the peer's document, to start it again as another profile. */
   | { target: "engine"; type: "stop" }
+  /** Chrome took back these host patterns (`permissions.onRemoved`): the apps at those hosts stop being shared. */
+  | { target: "engine"; type: "local-access-removed"; origins: string[] }
   | {
       target: "engine";
       type: "http-request";
@@ -28,6 +30,8 @@ export type RuntimeMessage =
       path: string;
       headers: [string, string][];
       bodyB64: string | null;
+      /** The app's name when its tab opened (`ViewerPage.app`), for when the peer's state no longer lists it. */
+      app?: string;
     };
 
 /**
@@ -42,6 +46,11 @@ export interface ViewerPage {
   unreachable: string;
   /** Any other failure (`services.window.failed`); the engine's own words go to the console. */
   failed: string;
+  /**
+   * The app's name as the chat listed it when the tab opened: the peer's state no longer has it once the contact took
+   * the app back, which is when the tab says so by name (`services.window.unshared`).
+   */
+  app?: string;
 }
 
 export type HttpRequestReply =
@@ -66,4 +75,9 @@ export interface EngineStatus {
    * Absent from a document an older build started.
    */
   activeId?: string;
+  /**
+   * The peer stopped for good (its document is closing for a switch, or "Clear all data" ran) and its document stays
+   * on with no peer: the page that would ask for a new one went away, or the worker did. Absent from an older build.
+   */
+  stopped?: boolean;
 }

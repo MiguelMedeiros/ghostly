@@ -213,8 +213,9 @@ export interface EngineApi {
   /**
    * Deletes a message of mine for everyone (WISP 400 § Delete for everyone): gone here at once, and from every member's
    * device as its last edit. A chat's or a group's (`group:<id>`); refused for someone else's, a payment or a notice.
+   * In a group, `e` is the removal's edit number, for `groupTaken`.
    */
-  removeMessage(params: { linkId: string; messageId: string }): { error: string | null; refused?: boolean };
+  removeMessage(params: { linkId: string; messageId: string }): { error: string | null; refused?: boolean; e?: number };
   /** Link secrets, for a UI that keeps its own session list in the same profile. */
   exportLinks(): { deliveryMode?: DeliveryMode; profile?: "paired-chat/1"; seedB64: string; peerPubKeyZ32: string; encKeyB64: string; createdAt: number; inviteCode?: string; label?: string }[];
   /** Sends a file whose bytes the caller already put in the `files` store. Progress shows up in `transfers`. */
@@ -571,8 +572,11 @@ export interface EngineApi {
   appStoreRefresh(params?: { key?: string }): import("../engine/apps").AppStoreSummary[];
   /** Fetches and checks an app for its install screen: a pasted URL, a store's listing or a chat card's pointer. Nothing is stored. */
   appPreview(params: import("../engine/apps").AppSource): import("../engine/apps").AppPreview;
-  /** Installs (or updates to) the app `appPreview` fetched, by its digest; `grant` holds every permission it asks for. */
-  appInstall(params: { digest: string; grant: string[] }): import("../engine/apps").InstalledAppView;
+  /**
+   * Installs (or updates to) the app `appPreview` fetched, by its digest; `grant` holds every permission it asks for,
+   * `asks` what the screen listed (`AppPreview.asks`): an install that adds more now is refused with `permissions-changed`.
+   */
+  appInstall(params: { digest: string; grant: string[]; asks?: string[] }): import("../engine/apps").InstalledAppView;
   /** Installs the waiting update whose new permissions the person accepted. */
   appUpdateAccept(params: { ref: string }): import("../engine/apps").InstalledAppView;
   /** The update check, now (the Apps page opened). Nothing is asked for with no app installed. */

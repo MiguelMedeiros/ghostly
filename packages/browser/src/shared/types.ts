@@ -275,9 +275,10 @@ export interface StoredGroup {
   community?: CommunityState;
   /**
    * Joining a community group through its link (`group2/…`), or again after my admission lost a
-   * race: my member seed, the entry session, and what arrived of the welcome.
+   * race: my member seed, the entry session, and what arrived of the welcome. `opened`: the entry key of the link a
+   * member checking it still is opened, when that is not the door it asks (where it knocks once it learns it is out).
    */
-  joining?: { g: string; host: string; seedB64: string; linkId: string; name: string; inviter: string; invitedAt?: number; pieces: unknown[]; since: number; check?: boolean; replaced?: boolean };
+  joining?: { g: string; host: string; seedB64: string; linkId: string; name: string; inviter: string; invitedAt?: number; pieces: unknown[]; since: number; check?: boolean; opened?: string; replaced?: boolean };
 }
 
 export interface GroupMemberView {
@@ -578,6 +579,8 @@ export interface PendingMelt {
   /** Set when the invoice pays a contact's payment request. */
   paymentId?: string;
   createdAt: number;
+  /** Came with a restored copy of the profile: its change is as old as the copy, and is checked like the copy's ecash. */
+  restored?: boolean;
 }
 
 /**
@@ -648,6 +651,8 @@ export interface StoredQuote {
    * is asked: the ecash it issues is for these, and its signatures for them can be asked for again (NUT-09).
    */
   outputs?: unknown[];
+  /** Came with a restored copy of the profile: its ecash is as old as the copy, and is checked like the copy's ecash. */
+  restored?: boolean;
 }
 
 export type PaymentState =

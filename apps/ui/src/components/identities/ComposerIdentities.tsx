@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
+import { identityRefusal } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { IdentityProofView, LinkView } from "@ghostly/browser/shared/types";
 import { useOutsideDismiss } from "../../hooks/useDismiss";
@@ -326,8 +327,10 @@ function IdentityBack({ t, entry, contact, now, busy, turning, stopping, done, e
   const retry = on && status?.status === "rejected";
   /** The main action stops the share. */
   const stops = on && !retry;
+  // Why the contact's app refused it, only in words this app writes itself (identityRefusal).
+  const why = status?.status === "rejected" ? identityRefusal(status.error) : undefined;
   const state = status && status.status !== "withdrawn"
-    ? (status.status === "rejected" && status.error ? t("identities.picker.rejectedWhy", { status: sharedStatus(status.status, t), error: problemLine(status.error, t) }) : sharedStatus(status.status, t))
+    ? (why ? t("identities.picker.rejectedWhy", { status: sharedStatus(status.status, t), error: problemLine(why, t) }) : sharedStatus(status.status, t))
     : t("identities.shared.notShared");
   const days = daysLeft(p.expiresAt, now);
   const warn = p.expiresAt > now && expiringSoon(p, now) ? (days === 1 ? t("identities.card.expiresInOne") : t("identities.card.expiresIn", { count: days })) : "";

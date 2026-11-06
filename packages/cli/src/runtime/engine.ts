@@ -123,8 +123,8 @@ export function mainlineNetwork(env = process.env): { off: true } | { off: false
 
 /**
  * WebRTC for the engine (WISP 101): libdatachannel through node-datachannel's W3C polyfill. Chats go live over it with
- * browsers directly, and groups need it (their links use WebRTC alone). A native module: without it, or with
- * `GHOSTLY_WEBRTC=0`, the CLI runs without WebRTC and says so.
+ * browsers directly, and calls need it. A native module: without it, or with `GHOSTLY_WEBRTC=0`, the CLI runs without
+ * WebRTC and says so; its groups' links go over Iroh or HyperDHT (WISP 902 § Transports).
  */
 async function installWebRtc(): Promise<boolean> {
   if (!envSwitch("GHOSTLY_WEBRTC", true)) return false;

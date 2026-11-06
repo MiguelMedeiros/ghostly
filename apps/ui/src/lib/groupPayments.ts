@@ -1,7 +1,7 @@
 import type { GroupPayNote, GroupView } from "@ghostly/browser/shared/types";
 import type { Translate } from "../contexts/I18nContext";
 import { english } from "./english";
-import { memberName } from "./groups";
+import { memberName, sameNamed } from "./groups";
 
 export const RAIL = { cashu: "Cashu", lightning: "Lightning", arkade: "Ark", bark: "Bark", spark: "Spark", bitcoin: "Bitcoin on-chain", usdt: "USDT", fedimint: "Fedimint" } as const;
 /** A rail's name in the app's language: brand names as they are, "Bitcoin on-chain" in words. */
@@ -11,7 +11,7 @@ export const railName = (rail: keyof typeof RAIL, t: Translate = english): strin
 function who(group: GroupView, key: string, t: Translate, capital = true): string {
   const member = group.members.find(m => m.key === key);
   if (!member) return t(capital ? "payments.group.formerMember" : "payments.group.formerMemberObject");
-  return member.me ? t(capital ? "payments.group.you" : "payments.group.youObject") : memberName(member, t);
+  return member.me ? t(capital ? "payments.group.you" : "payments.group.youObject") : memberName(member, t, sameNamed(group.members));
 }
 
 /** Who pays whom, in the group's words. */

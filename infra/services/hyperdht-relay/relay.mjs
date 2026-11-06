@@ -60,6 +60,15 @@ export const DEFAULT_LIMITS = Object.freeze({
 })
 
 /**
+ * The congestion window of the relay's one HyperDHT node: requests it may have out per 750 ms tick before the rest wait
+ * in its queue, for every client together. dht-rpc's default (80) is sized for one app, and each listen's announcer pings
+ * its 3 nodes every 3 s, about one request a second per listen: measured on loopback, 80 keeps up with about 1,000
+ * listens and 320 with 4,096, so a window of listens / 12 sends them all. At the defaults 512 × 16 / 12 = 683. Never
+ * below dht-rpc's 80; at most 2048 (24,576 listens), past which a relay is better split in two.
+ */
+export const relayWindow = ({ clients, listens }) => Math.min(2048, Math.max(80, Math.ceil(clients * listens / 12)))
+
+/**
  * dht-relay 0.4.3 (its latest release) hands a browser the announce record where the browser expects the
  * record's relay addresses, so signing an announcement throws and nobody can reach a browser that listens.
  * The browser signs `{ publicKey, relayAddresses }` itself; this gives it the list it signs.
@@ -441,7 +450,7 @@ export async function startRelay(options = {}) {
   // A new node counts itself firewalled until its first network check, about 20 minutes in (dht-rpc's STABLE_TICKS).
   // Until then two browsers on this relay reach each other only by holepunching the relay's own socket, which on
   // loopback often fails. On loopback nothing stands between the nodes, so the relay says so from the start.
-  const dht = options.dht ?? new DHT(bootstrap.length ? { bootstrap, ...(loopback ? { host: '127.0.0.1', firewalled: false } : {}) } : {})
+  const dht = options.dht ?? new DHT({ maxWindow: relayWindow(limits), ...(bootstrap.length ? { bootstrap, ...(loopback ? { host: '127.0.0.1', firewalled: false } : {}) } : {}) })
   // When another node last answered this one. With no outgoing UDP (a firewall, a tunnel, a container network) none
   // ever does: the node is up, its routing table stays empty, and a browser's listen through it still resolves.
   let answeredAt = null
@@ -716,7 +725,8 @@ export const networkOf = ({ testnet, bootstrap }) =>
   testnet ? `(own testnet of ${nodeCount(testnet)})` : bootstrap.length ? `(bootstrap ${nodeCount(bootstrap.length)})` : '(public HyperDHT)'
 
 /**
- * The relay's settings from its environment (server.mjs): PORT (49443), HOST (0.0.0.0), GHOSTLY_HYPERDHT_BOOTSTRAP,
+ * The relay's settings from its environment (server.mjs): PORT (49443), HOST (0.0.0.0; 127.0.0.1 behind proxies
+ * or Cloudflare), GHOSTLY_HYPERDHT_BOOTSTRAP,
  * GHOSTLY_HYPERDHT_TESTNET, GHOSTLY_RELAY_ORIGINS, GHOSTLY_RELAY_CLOUDFLARE (1 or 0), GHOSTLY_RELAY_PROXIES (0) and
  * GHOSTLY_RELAY_<LIMIT>. Throws on one present but not of its kind, and on a testnet with bootstrap nodes.
  */
@@ -730,14 +740,17 @@ export function readSettings (env) {
   const testnet = setting(env, 'GHOSTLY_HYPERDHT_TESTNET', 0, 'count') || undefined
   // startRelay drops the bootstrap nodes for the testnet: both set is one of them meant for another start.
   if (testnet && bootstrap.length) throw new Error(`GHOSTLY_HYPERDHT_TESTNET=${JSON.stringify(env.GHOSTLY_HYPERDHT_TESTNET)}: expected no GHOSTLY_HYPERDHT_BOOTSTRAP with it (the testnet is a network of its own)`)
+  const proxies = setting(env, 'GHOSTLY_RELAY_PROXIES', 0, 'count')
+  const cloudflare = setting(env, 'GHOSTLY_RELAY_CLOUDFLARE', false, 'flag')
   return {
     port: setting(env, 'PORT', 49443, 'port'),
-    host: setting(env, 'HOST', '0.0.0.0', 'text'),
+    // Behind a proxy only the proxy should reach it: anyone else could write the header a client is counted by.
+    host: setting(env, 'HOST', proxies || cloudflare ? '127.0.0.1' : '0.0.0.0', 'text'),
     bootstrap,
     testnet,
     origins: setting(env, 'GHOSTLY_RELAY_ORIGINS', [], 'origins'),
-    proxies: setting(env, 'GHOSTLY_RELAY_PROXIES', 0, 'count'),
-    cloudflare: setting(env, 'GHOSTLY_RELAY_CLOUDFLARE', false, 'flag'),
+    proxies,
+    cloudflare,
     limits,
   }
 }

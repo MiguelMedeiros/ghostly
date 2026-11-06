@@ -60,6 +60,7 @@ import { RAIL_WIDTH, RailAction, RailChat, RailGroup, RailToggle } from "./ChatR
 import { useRailShortcut } from "../hooks/useRailShortcut";
 import { useOpenRowInView } from "../hooks/useOpenRowInView";
 import { useComposition } from "../hooks/useComposition";
+import { draftDirection } from "../lib/documentLanguage";
 import { useEngineValue } from "../lib/engineState";
 
 const NO_GROUPS: NonNullable<typeof engine.state>["groups"] = [];
@@ -128,9 +129,12 @@ export function Sidebar() {
   const isMobile = useIsMobile();
   const { settings: { chatListDensity: density, chatListCollapsed }, updateChatListCollapsed } = useSettings();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [search, setSearch] = useState("");
+  const [typed, setSearch] = useState("");
   // Folded to a rail of pictures, where there is a side list; a phone's list is the whole screen and never folds.
   const collapsed = !isMobile && chatListCollapsed;
+  // The rail has no search: it shows every chat. A phone turned on its side into a folded list keeps what was typed in
+  // its search for the way back.
+  const search = collapsed ? "" : typed;
   const sidebarRef = useRef<HTMLDivElement>(null), toggleRef = useRef<HTMLButtonElement>(null);
   // The button that folded or unfolded the list goes with it: the focus goes to the one that takes its place (in the
   // header, or at the top of the rail). A shortcut pressed elsewhere (the message field) leaves the focus where it is.
@@ -485,7 +489,7 @@ export function Sidebar() {
 
       {/* Search */}
       <div className="px-3 py-2 bg-sidebar-bg">
-        <div className="flex items-center gap-3 bg-search-bg rounded-lg px-3 py-1.5 has-[input:focus-visible]:outline-2 has-[input:focus-visible]:-outline-offset-2 has-[input:focus-visible]:outline-focus-ring">
+        <div className="flex items-center gap-3 bg-search-bg rounded-lg px-3 py-1.5 ring-1 ring-inset ring-field-border has-[input:focus-visible]:outline-2 has-[input:focus-visible]:-outline-offset-2 has-[input:focus-visible]:outline-focus-ring">
           <svg
             width="16"
             height="16"
@@ -505,6 +509,7 @@ export function Sidebar() {
           <input
             type="search"
             value={search}
+            dir={draftDirection(search)}
             onChange={(e) => setSearch(e.target.value)}
             {...composition.inputProps}
             onKeyDown={(e) => {

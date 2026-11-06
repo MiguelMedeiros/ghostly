@@ -5,6 +5,7 @@ import { audiences, isConfigured, oidcProviders, providerForIssuer, type OidcPro
 import { signInForProof } from "../oidc/flow";
 import { MAX_ID_TOKEN_LENGTH, verifyIdToken } from "../oidc/verify";
 import { JwksCache, sharedJwksCache } from "../oidc/jwks";
+import { oidcDisplaySource } from "../displaySource";
 
 /**
  * Identity proofs through OpenID Connect: the person signs in with a provider (Google, Microsoft,
@@ -126,7 +127,7 @@ export function createOidcIdentityProvider(options: OidcIdentityOptions = {}): I
         // With an email, always: a recheck then replaces a display stored before (which kept the email as the name).
         ...(name || url || id.email ? { display: {
           ...(name ? { name } : {}), ...(url ? { url } : {}), fetchedAt: id.issuedAt,
-          source: `Signed by ${provider.name}${id.email ? id.emailVerified ? `; email verified by ${provider.name}` : `; email not verified by ${provider.name}` : ""}`,
+          source: oidcDisplaySource(provider.name, id.email ? id.emailVerified ? "verified" : "unverified" : undefined),
         } } : {}),
       };
     },

@@ -897,14 +897,45 @@ describe("GroupChat: the options menu", () => {
     expect(within(screen.getByRole("dialog")).getByTestId("group-leave-successor")).toHaveTextContent("You are the admin: Alice becomes the admin when you leave.");
   });
 
-  it("tells a community's admin when joiners through the link never answer, and replaces the link in one tap", async () => {
+  it("tells a community's admin when joiners through the link never answer, and asks before replacing the link", async () => {
+    // Every other New link asks first: the link shared so far, wherever it was posted, stops letting people in.
     const entryLink = "ghostly://c/group-1";
     const { user, engine } = openGroup(active({ profile: "community", isAdmin: true, entryLink, community: { hub: true, hubs: 1, connected: 0, unansweredKnocks: 16 } }));
     engine.on("enableGroupLink", () => ({ link: entryLink }));
     expect(screen.getByTestId("group-knocks-unanswered")).toHaveTextContent("People opening the link may not be getting in");
     await user.click(screen.getByTestId("group-knocks-reset"));
+    expect(screen.getByTestId("group-link-ask-dialog")).toHaveAttribute("data-kind", "reset");
+    expect(engine.callsTo("enableGroupLink")).toEqual([]);
+    await user.click(screen.getByTestId("group-link-ask-confirm"));
     expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: "group-1", reset: true }]);
     // The new link is to share again: its sheet opens.
+    expect(await screen.findByTestId("group-share-dialog")).toBeInTheDocument();
+  });
+
+  it("keeps the link when the unanswered joiners' New link question is cancelled", async () => {
+    const { user, engine } = openGroup(active({ profile: "community", isAdmin: true, entryLink: "ghostly://c/group-1", community: { hub: true, hubs: 1, connected: 0, unansweredKnocks: 16 } }));
+    engine.on("enableGroupLink", () => ({ link: "ghostly://c/group-1" }));
+    await user.click(screen.getByTestId("group-knocks-reset"));
+    await user.click(within(screen.getByTestId("group-link-ask-dialog")).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByTestId("group-link-ask-dialog")).toBeNull();
+    expect(engine.callsTo("enableGroupLink")).toEqual([]);
+    expect(screen.queryByTestId("group-share-dialog")).toBeNull();
+  });
+
+  it("replaces the link once when the unanswered joiners' New link is pressed again while it works", async () => {
+    // A reset seals a fresh key to every member, a slice at a time: the button is pressed again before it ends.
+    const entryLink = "ghostly://c/group-1";
+    const { user, engine } = openGroup(active({ profile: "community", isAdmin: true, entryLink, community: { hub: true, hubs: 1, connected: 0, unansweredKnocks: 16 } }));
+    let done = () => {};
+    engine.on("enableGroupLink", () => new Promise(resolve => { done = () => resolve({ link: entryLink }); }));
+    await user.click(screen.getByTestId("group-knocks-reset"));
+    await user.click(screen.getByTestId("group-link-ask-confirm"));
+    await user.click(screen.getByTestId("group-knocks-reset"));
+    // Pressed while it works, it asks nothing again.
+    expect(screen.queryByTestId("group-link-ask-dialog")).toBeNull();
+    expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: "group-1", reset: true }]);
+    expect(screen.getByTestId("group-knocks-reset")).toHaveAttribute("aria-busy", "true");
+    await act(async () => { done(); });
     expect(await screen.findByTestId("group-share-dialog")).toBeInTheDocument();
   });
 
@@ -1124,7 +1155,8 @@ describe("GroupChat: history and sending", () => {
       stored({ id: "m2", member: "gone".padEnd(52, "y"), text: "bye" }),
       stored({ id: "m3", sender: "me", member: ME, text: "hello" }),
     ]);
-    expect(await screen.findByText("Alice joined")).toBeInTheDocument();
+    // Alice is the admin: her name in the line carries the admin's mark.
+    expect((await screen.findAllByTestId("group-event"))[0]).toHaveTextContent(/^Alice admin joined$/);
     expect(screen.getByText("You are now the admin")).toBeInTheDocument();
     expect(screen.getByText("~Alice")).toBeInTheDocument();
     // Someone no longer in the roster: named by their key.

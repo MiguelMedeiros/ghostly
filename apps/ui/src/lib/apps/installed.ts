@@ -14,6 +14,8 @@ let apps: readonly InstalledAppView[] | null = null;
 /** The built-in apps this profile is offered (`appBuiltIns`): read with the installed ones, each time. */
 let offers: readonly BuiltInAppOffer[] = [];
 let loading: Promise<void> | null = null;
+/** Why the last read failed (storage: a private window, a full disk), or null: the list is then no proof of none. */
+let failed: unknown = null;
 const listeners = new Set<() => void>();
 const tell = () => { for (const listener of [...listeners]) listener(); };
 const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
@@ -36,8 +38,8 @@ export function refreshInstalledApps(): Promise<void> {
   const read: Promise<void> = engine.call("appList").then(async (list) => {
     const offered = await builtIns;
     if (mine !== asked) return loading ?? undefined;
-    offers = offered; apps = list; tell(); stopTakenDown(list);
-  }, () => { if (mine !== asked) return loading ?? undefined; apps ??= []; tell(); }).finally(() => { if (loading === read) loading = null; });
+    offers = offered; apps = list; failed = null; tell(); stopTakenDown(list);
+  }, (e: unknown) => { if (mine !== asked) return loading ?? undefined; apps ??= []; failed = e; tell(); }).finally(() => { if (loading === read) loading = null; });
   loading = read;
   return read;
 }
@@ -47,7 +49,14 @@ export function forgetInstalledApps(): void {
   apps = null;
   offers = [];
   loading = null;
+  failed = null;
   asked++;
+}
+
+/** Why the last read of the installed apps failed, or null when it did not: the Apps page says it, not "No apps yet." */
+export function useInstalledAppsFailure(enabled: boolean): unknown {
+  const snapshot = () => (enabled ? failed : null);
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
 /**

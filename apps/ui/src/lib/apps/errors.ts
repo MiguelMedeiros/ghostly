@@ -1,4 +1,6 @@
+import type { AppStoreSummary } from "@ghostly/browser/engine/apps";
 import type { Translate, TranslationKey } from "../../contexts/I18nContext";
+import { date } from "../identities";
 import { problemLine } from "../problemText";
 
 /*
@@ -10,6 +12,7 @@ const KEYS: Record<string, TranslationKey> = {
   "github-link": "apps.errors.githubLink",
   "private-link": "apps.errors.privateLink",
   offline: "apps.errors.offline",
+  runner: "apps.errors.runner",
   status: "apps.errors.status",
   network: "apps.errors.network",
   slow: "apps.errors.slow",
@@ -61,6 +64,17 @@ export function appStoreErrorView(error: unknown, t: Translate): AppErrorView {
   const code = appErrorCode(error);
   if (!code || (KEYS[code] && KEYS[code] !== "apps.errors.notSigned")) return appErrorView(error, t);
   return { text: t("apps.errors.notStore"), info: error instanceof Error ? error.message : String(error) };
+}
+
+/**
+ * Why a store's last read failed, as its block on the Apps page says it: the store signed two lists under one number
+ * (kept marked until a newer list comes), else the read's code in the words of an error of reading it.
+ */
+export function appStoreProblemText(store: Pick<AppStoreSummary, "problem" | "problemStatus" | "equivocation">, t: Translate): string | null {
+  if (store.equivocation) return t("apps.store.equivocation", { date: date(Math.floor(store.equivocation.at / 1000), t.language) });
+  if (!store.problem) return null;
+  // As the engine's fetch error says it: `status: The host answered 503`.
+  return appStoreErrorView(new Error(`${store.problem}: ${store.problemStatus !== undefined ? `The host answered ${store.problemStatus}` : ""}`), t).text;
 }
 
 export function appErrorText(error: unknown, t: Translate): string {

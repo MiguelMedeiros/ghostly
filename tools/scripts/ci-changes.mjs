@@ -92,12 +92,28 @@ export const WEBSITE_INPUTS = [
   "packages/core/src/bytes.ts",
   "packages/core/src/image.ts",
   "packages/core/src/text.ts",
-  // privacy-hosts.test.mjs checks the privacy page's resolver list against the app's DoH resolvers.
+  // privacy-hosts.test.mjs checks the privacy page's resolver list against the app's DoH resolvers, and the agents
+  // FAQ's relay hosts against the default Pkarr and Iroh relays.
   "packages/browser/src/proofs/domain.ts",
+  "packages/core/src/relay.ts",
+  "packages/browser/src/platform/irohWeb.ts",
+  // privacy-settings.test.mjs checks the privacy page's Settings paths against the app's section names.
+  "apps/ui/src/lib/settingsSections.ts",
+  "apps/ui/src/locales/en/settings.json",
+  "apps/ui/src/locales/en/network.json",
   // The launch checklist (e2e/launch-checklist.spec.ts) checks the repository's social preview's size.
   "docs/assets/social-preview.png",
   // shots-version.test.mjs checks lib/release.ts's version against the app's.
   "package.json",
+  // agents-webrtc.test.mjs checks the site's text against it.
+  "packages/cli/src/runtime/engine.ts",
+  "packages/browser/src/engine/node.ts",
+  // first-pairing.test.mjs checks the site's text against it.
+  "packages/core/src/ghostlink.ts",
+  "packages/core/src/capsRecord.ts",
+  // pkarr-ttl.test.mjs checks the site's text against it.
+  "packages/core/src/didDht.ts",
+  "packages/core/src/pkarr.ts",
   // The jobs themselves.
   ".github/workflows/ci.yml",
 ];

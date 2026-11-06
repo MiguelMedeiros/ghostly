@@ -558,4 +558,17 @@ describe("errors", () => {
     const community = "Share the group's link with them: anyone who opens it joins";
     expect(asCliError(new Error(community)).toJSON()).toEqual({ code: "bad_request", message: community });
   });
+
+  // `group invite`'s other refusals were `engine` too: a bot that retries on `unavailable` never retried a contact
+  // that was merely offline, and one that alerts on `engine` alerted on a repeated invite.
+  it("say an invite to an offline contact as unavailable, and one the group cannot take as refused", () => {
+    const away = "This contact is not connected right now. Invite them when they are online.";
+    expect(asCliError(new Error(away)).toJSON()).toEqual({ code: "unavailable", message: away });
+    for (const message of [
+      "This contact is already a member", "A group holds 32 members at most", "Their app does not take part in groups: they need an updated Ghostly first.",
+      "Their app takes groups of 8 at most: they need an updated Ghostly first.",
+      "This group runs through hubs, which their app does not take part in: they need an updated Ghostly first.",
+      "A group grows past 8 only when everyone is on an updated Ghostly. Not seen updated yet: Bob.",
+    ])expect(asCliError(new Error(message)).toJSON(), message).toEqual({ code: "refused", message });
+  });
 });

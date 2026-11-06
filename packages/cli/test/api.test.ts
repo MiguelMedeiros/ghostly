@@ -64,19 +64,71 @@ describe("chats", () => {
 
   // A chat's name was taken whatever it held and cut by the engine at 48 UTF-16 units: half an emoji stayed as a lone
   // surrogate, a newline was kept, and the invite was made before its name was cut.
-  it("a chat's name is what the engine keeps whole on one line, refused before anything is made", async () => {
+  it("a chat's name is what the engine keeps whole, refused before anything is made", async () => {
     const { ctx, node } = fake();
     const calls = Object.assign(node, { renameLink: vi.fn(), createLink: vi.fn(), joinLink: vi.fn() });
-    const rule = { code: "bad_request", message: "A chat's name is up to 48 characters on one line (an emoji counts as two)" };
-    for (const name of ["y".repeat(49), `${"x".repeat(47)}👻`, "a\nb", "tab\there"]) {
+    const long = { code: "bad_request", message: "A chat's name is up to 48 characters on one line" };
+    const unseen = { code: "bad_request", message: "A chat's name needs a character that shows (an empty name gives back the contact's own)" };
+    for (const [name, rule] of [["y".repeat(49), long], [`${"x".repeat(48)}👻`, long], ["\u200b", unseen], ["\u0301\u0301", unseen], ["\u200e \u2066", unseen]] as const) {
       await expect(callApi(ctx, "chat.rename", { chat: "chat-one", name }), JSON.stringify(name)).rejects.toMatchObject(rule);
       await expect(callApi(ctx, "invite.create", { label: name }), JSON.stringify(name)).rejects.toMatchObject(rule);
       await expect(callApi(ctx, "invite.join", { invite: "ghostly1abc", label: name }), JSON.stringify(name)).rejects.toMatchObject(rule);
     }
     for (const made of [calls.renameLink, calls.createLink, calls.joinLink]) expect(made).not.toHaveBeenCalled();
-    // What the engine keeps whole is taken: 46 characters and an emoji, spaces around trimmed by the engine.
-    await callApi(ctx, "chat.rename", { chat: "chat-one", name: ` ${"x".repeat(46)}👻 ` });
-    expect(calls.renameLink).toHaveBeenCalledWith({ linkId: "chat-one", label: ` ${"x".repeat(46)}👻 ` });
+    // What the engine keeps whole is taken, cleaned as it stores it: an emoji is one character, as the engine counts.
+    await callApi(ctx, "chat.rename", { chat: "chat-one", name: ` ${"x".repeat(47)}👻 ` });
+    expect(calls.renameLink).toHaveBeenLastCalledWith({ linkId: "chat-one", label: `${"x".repeat(47)}👻` });
+  });
+
+  // One rule for every name this side writes (a chat's, the profile's, a group's): cleaned as the engine stores it, then
+  // counted. A tab was refused as a second line for a chat or the profile and taken as a space for a group, a name 48
+  // long once stored was refused at its raw length, and an invisible-only name cleared a chat's name with exit 0 (the
+  // profile kept it as its name).
+  it("a chat's, the profile's and a group's name are cleaned first, then counted; nothing that shows is refused", async () => {
+    const { ctx, node } = fake();
+    const calls = Object.assign(node, { renameLink: vi.fn(), createGroup: vi.fn(async () => ({ groupId: "g2" })), renameGroup: vi.fn(async () => undefined) });
+    const label = async (name: string) => { await callApi(ctx, "chat.rename", { chat: "chat-one", name }); return calls.renameLink.mock.lastCall?.[0].label; };
+    expect(await label("tab\tbot")).toBe("tab bot");
+    expect(await label("two\nlines")).toBe("two lines");
+    expect(await label(`${"x".repeat(48)}   `)).toBe("x".repeat(48));
+    expect(await label(`${"a".repeat(47)}\u200b\u200b\u200bb`)).toBe(`${"a".repeat(47)}b`);
+    // NFC, as a ref is compared (`nameKey`): a decomposed é is one character.
+    expect(await label(`${"e\u0301".repeat(48)}`)).toBe("é".repeat(48));
+    // The documented empty name: back to the contact's own.
+    expect(await label("")).toBe("");
+    expect(await label("  ")).toBe("");
+    // The answer is the chat's, as before.
+    expect(Object.keys(await callApi(ctx, "chat.rename", { chat: "chat-one", name: "tab\tbot" }) as object)).toEqual(Object.keys(await callApi(ctx, "chat.rename", { chat: "chat-one", name: "bot" }) as object));
+
+    const nick = async (method: string, params: Record<string, unknown>) => { await callApi(ctx, method, params); return (calls.updateSettings.mock.lastCall as unknown as [{ settings: Settings }])[0].settings.nick; };
+    expect(await nick("profile.set", { name: "tab\tname" })).toBe("tab name");
+    expect(await nick("settings.set", { nick: "tab\tnick" })).toBe("tab nick");
+    expect(await nick("profile.set", { name: `${"p".repeat(63)}\u200b\u200b\u200bq` })).toBe(`${"p".repeat(63)}q`);
+    expect(await nick("profile.set", { name: `${"p".repeat(64)}  ` })).toBe("p".repeat(64));
+    expect(await nick("profile.set", { name: "" })).toBe("");
+    expect(Object.keys(await callApi(ctx, "profile.set", { name: "tab\tname" }) as object)).toEqual(["profile", "name", "shareProfile", "picture", "online"]);
+    calls.updateSettings.mockClear();
+    for (const name of ["\u200b", "\u0301\u0301", "\u2800"]) {
+      await expect(callApi(ctx, "profile.set", { name }), JSON.stringify(name)).rejects.toMatchObject({ code: "bad_request", message: "name needs a character that shows (an empty one is no name)" });
+      await expect(callApi(ctx, "settings.set", { nick: name }), JSON.stringify(name)).rejects.toMatchObject({ code: "bad_request", message: "nick needs a character that shows (an empty one is no name)" });
+    }
+    await expect(callApi(ctx, "profile.set", { name: "p".repeat(65) })).rejects.toMatchObject({ code: "bad_request", message: "name must be up to 64 characters on one line" });
+    expect(calls.updateSettings).not.toHaveBeenCalled();
+
+    // A group's name keeps its rule.
+    const groupRule = { code: "bad_request", message: "A group's name is 1 to 64 characters on one line" };
+    expect(await callApi(ctx, "group.create", { name: "tab\tcrew", profile: "mesh" })).toEqual({ group: "g2", link: null });
+    expect(calls.createGroup).toHaveBeenLastCalledWith({ name: "tab crew", profile: "mesh" });
+    await callApi(ctx, "group.create", { name: `${"g".repeat(63)}\u200b\u200b\u200bh`, profile: "mesh" });
+    expect(calls.createGroup).toHaveBeenLastCalledWith({ name: `${"g".repeat(63)}h`, profile: "mesh" });
+    await callApi(ctx, "group.rename", { group: "Crew", name: "tab\tcrew" });
+    expect(calls.renameGroup).toHaveBeenLastCalledWith({ groupId: "g1", name: "tab crew" });
+    for (const name of ["\u200b", "\u0301\u0301", "g".repeat(65)]) {
+      await expect(callApi(ctx, "group.create", { name, profile: "mesh" }), JSON.stringify(name)).rejects.toMatchObject(groupRule);
+      await expect(callApi(ctx, "group.rename", { group: "Crew", name }), JSON.stringify(name)).rejects.toMatchObject(groupRule);
+    }
+    expect(calls.createGroup).toHaveBeenCalledTimes(2);
+    expect(calls.renameGroup).toHaveBeenCalledTimes(1);
   });
 
   // `invite join <your own invite>` said the engine's tag for its RPC clients: "own-invite <chat id>: This is your own…".
@@ -98,6 +150,40 @@ describe("chats", () => {
     expect(() => findChat([mallory], KEY)).toThrow(/No chat/);
     expect(findChat([impostor, alice], "Alice").id).toBe("chatAlice");
     expect(findChat([impostor], "alice").id).toBe("chatImpostor");
+  });
+
+  it("a name is found by the string that set it: cleaned as the engine cleans a name it stores (agents#2907)", () => {
+    // `chat rename X "bot "` stores "bot", `group create "Team  "` stores "Team": the same string given back finds it.
+    // Trailing and doubled spaces, a zero-width space, a bidi mark, and a decomposed "é" (e + U+0301) against the
+    // precomposed one (and back), for a label, a contact's own name and a group's name.
+    const refs: [stored: string, typed: string][] = [
+      ["bot", "bot "], ["bot", " bot "], ["my bot", "my  bot"], ["my bot", "my\tbot"], ["bot", "b\u200bot"],
+      ["rtl", "rtl\u202e"], ["rtl", "\u200frtl"], ["Jos\u00e9", "Jose\u0301"], ["Jose\u0301", "jos\u00e9"],
+    ];
+    for (const [stored, typed] of refs) {
+      expect(findChat([link("chatOther", { label: "other" }), link("chatLabel", { label: stored })], typed).id).toBe("chatLabel");
+      expect(findChat([link("chatOther", { label: "other" }), link("chatNick", { peerNick: stored })], typed).id).toBe("chatNick");
+      const named = { ...group, id: "n".repeat(22), name: stored, status: "active" } as unknown as GroupView;
+      const other = { ...group, id: "o".repeat(22), name: "other", status: "active" } as unknown as GroupView;
+      expect(findGroup([other, named], typed).id).toBe(named.id);
+      expect(findChatOrGroup([link("chatOther", { label: "other" })], [other, named], typed)).toEqual({ group: named });
+      // A contact's own name still never takes a group's name, however it was typed.
+      expect(() => findChatOrGroup([link("chatNick", { peerNick: stored })], [named], typed)).toThrow(/and a group/);
+    }
+    // Two chats whose names clean to one stay ambiguous; a ref with nothing visible left names nothing.
+    expect(() => findChat([link("chatA", { label: "my bot" }), link("chatB", { label: "My  Bot" })], "my bot ")).toThrow(expect.objectContaining({ code: "bad_request", details: { matches: ["chatA", "chatB"] } }));
+    expect(() => findChat([link("chatA", { label: "bot" })], "\u200b")).toThrow(/No chat/);
+    expect(() => findGroup([{ ...group, id: "n".repeat(22), name: "bot" } as unknown as GroupView], "\u202e")).toThrow(/No group/);
+    // Ids, keys and prefixes stay exact: nothing is cleaned off them.
+    const chat = link("chatExact", { label: "bot" });
+    expect(findChat([chat], "chatExact").id).toBe("chatExact");
+    expect(findChat([chat], "chatEx").id).toBe("chatExact");
+    expect(() => findChat([chat], "chatExact ")).toThrow(/No chat/);
+    expect(() => findChat([chat], "chat\u200bExact")).toThrow(/No chat/);
+    const room = { ...group, id: "r".repeat(22), name: "Team" } as unknown as GroupView;
+    expect(findGroup([room], room.id).id).toBe(room.id);
+    expect(() => findGroup([room], `${room.id} `)).toThrow(/No group/);
+    expect(() => findGroup([room], "rrr\u200b")).toThrow(/No group/);
   });
 
   it("a contact's own name never takes what names a group: the group's id is the group, its name or a prefix is refused", () => {
@@ -243,6 +329,40 @@ describe("chats", () => {
     for (const to of [[""], ["group:"]]) await expect(callApi(ctx, "chat.forward", { chat: bob.id, messages: ["m1"], to })).rejects.toMatchObject({ code: "bad_request" });
     expect(node.sendMessage).not.toHaveBeenCalled();
     expect(node.sendGroupMessage).not.toHaveBeenCalled();
+  });
+
+  it("group:<ref> names a group on every group command and in listen --group, as on the commands that take a chat or a group", async () => {
+    const team = { ...group, id: "k3x9q2abcdefghijklmnop", name: "Team", status: "active" } as unknown as GroupView;
+    const other = { ...group, id: "z".repeat(22), name: "k3x9q2", status: "active" } as unknown as GroupView;
+    const chat = link("chatTeamChat", { label: "Desk" });
+    const node = { getState: () => ({ links: [chat], groups: [team, other] }), sendGroupMessage: vi.fn(async () => ({ error: null, messageId: "gm1" })), groupTaken: () => 0, setGroupTyping: vi.fn() };
+    const ctx = { runtime: { server: { node } }, mode: "daemon" } as unknown as ApiContext;
+    const call = (method: string, params: Record<string, unknown>) => callApi(ctx, method, params);
+    // Its id, a prefix only it fits and its name (any case), each as is and after group:, as findChatOrGroup reads them.
+    for (const ref of [team.id, "k3x9q2a", "team"]) {
+      for (const given of [ref, `group:${ref}`]) {
+        expect(findGroup([team, other], given)).toBe(team);
+        expect(findChatOrGroup([chat], [team, other], `group:${ref}`)).toEqual({ group: team });
+        await expect(call("group.get", { group: given })).resolves.toMatchObject({ id: team.id, name: "Team" });
+      }
+    }
+    // A write: group send goes to that group.
+    await expect(call("group.send", { group: `group:${team.id}`, text: "hi" })).resolves.toMatchObject({ group: team.id, messageId: "gm1" });
+    expect(node.sendGroupMessage).toHaveBeenCalledWith(expect.objectContaining({ groupId: team.id, text: "hi" }));
+    // listen --group: the allowlist lets that group's events through, and only those.
+    const event = (id: string) => ({ seq: 1, id: "g", type: "group.message", at: 1, group: id } as GhostlyEvent);
+    const list = await allowlist([], [`group:${team.id}`], call, async () => null);
+    expect(await list.allows(event(team.id))).toBe(true);
+    expect(await list.allows(event(other.id))).toBe(false);
+    // What names more than one group, or none, or a chat, is refused as without the prefix (the message names the ref after group:).
+    const both = { code: "bad_request", message: '"k3x9q2" names more than one group: use its id', details: { matches: [team.id, other.id] } };
+    await expect(call("group.get", { group: "group:k3x9q2" })).rejects.toMatchObject(both);
+    await expect(allowlist([], ["group:k3x9q2"], call, async () => null)).rejects.toMatchObject(both);
+    await expect(call("group.get", { group: "group:zed" })).rejects.toMatchObject({ code: "not_found", message: 'No group "zed" (ghostly group list)' });
+    // group:<a chat> is no group: never that chat (without the prefix, the chat's name says it is a chat).
+    for (const ref of [chat.id, "desk"]) await expect(call("group.get", { group: `group:${ref}` })).rejects.toMatchObject({ code: "not_found", message: `No group ${JSON.stringify(ref)} (ghostly group list)` });
+    await expect(call("group.get", { group: "desk" })).rejects.toMatchObject({ code: "not_found", details: { chat: chat.id } });
+    await expect(call("group.get", { group: "group:" })).rejects.toMatchObject({ code: "bad_request", message: '"" names no group' });
   });
 
   it("a command that takes a chat or a group names both when neither has the name", async () => {
@@ -1051,7 +1171,7 @@ describe("settings", () => {
     // Each was `engine` (exit 1), in the app's words ("Enter at least one relay address").
     const { ctx, node } = fake();
     const refusals: [Record<string, unknown>, string, string][] = [
-      [{ relays: ["notaurl"] }, "Enter at least one relay address (https://…)", "relays: give at least one relay address (https://…)"],
+      [{ relays: [] }, "Enter at least one relay address (https://…)", "relays: give at least one relay address (https://…)"],
       [{ irohRelays: ["x"] }, "Not a relay address: x", "irohRelays: not a relay address: x"],
       [{ hyperdhtRelay: "nope" }, "Enter a relay address (wss://…)", "hyperdhtRelay: give a relay address (wss://…)"],
       // A relay address with the wrong scheme (irohWeb.ts irohRelayProblem, hyperdhtRelay.ts hyperdhtRelayProblem).
@@ -1062,6 +1182,23 @@ describe("settings", () => {
       node.updateSettings.mockRejectedValueOnce(new Error(engine));
       await expect(callApi(ctx, "settings.set", patch)).rejects.toMatchObject({ code: "bad_request", message: said });
     }
+  });
+
+  it("name the Pkarr relay it can't use, as the app's Settings does, and ask for one only for an empty list", async () => {
+    // The engine says "Enter at least one relay address" for any list it can't use: the one given went unnamed.
+    const { ctx, node } = fake();
+    const refusals: [string[], string][] = [
+      [["ftp://x"], "relays: not a relay address: ftp://x"],
+      [["ftp://relay.example.org"], "relays: use an https:// relay address: ftp://relay.example.org"],
+      [["wss://relay.example.org", "notaurl"], "relays: use an https:// relay address: wss://relay.example.org"],
+    ];
+    for (const [relays, said] of refusals) {
+      await expect(callApi(ctx, "settings.set", { relays })).rejects.toMatchObject({ code: "bad_request", message: said });
+    }
+    expect(node.updateSettings).not.toHaveBeenCalled();
+    // A usable one next to them is the engine's to keep (it drops the rest), as before.
+    await callApi(ctx, "settings.set", { relays: ["https://relay.example.org", "ftp://x"] });
+    expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { relays: ["https://relay.example.org", "ftp://x"] } });
   });
 
   it("take TCP and TLS TURN servers for the apps, and say the CLI does not use them", async () => {

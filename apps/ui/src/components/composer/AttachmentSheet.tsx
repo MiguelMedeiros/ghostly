@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
 import { decodablePicture } from "../../lib/decodablePicture";
+import { draftDirection } from "../../lib/documentLanguage";
 import { formatFileSize } from "../../lib/format";
 import { DocumentGlyph } from "./icons";
 import { useComposition } from "../../hooks/useComposition";
@@ -126,7 +127,7 @@ export function AttachmentSheet({ files, alert, status, returnFocus, onPaste, on
           {alert && <div role="alert" className="animate-fade-in">{alert}</div>}
           <input ref={captionRef} type="text" value={caption} onChange={(e) => setCaption(e.target.value)} data-testid="attachment-caption"
             {...composition.inputProps} onKeyDown={(e) => { if (composition.composing(e)) return; if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-            placeholder={t("composer.caption")} aria-label={t("composer.caption")} maxLength={4000}
+            placeholder={t("composer.caption")} aria-label={t("composer.caption")} maxLength={4000} dir={draftDirection(caption)}
             className="w-full min-h-10 px-3 rounded-lg bg-surface-alt border border-border text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent" />
           <div className="flex items-center justify-end gap-2">
             <button type="button" data-testid="attachment-cancel" onClick={onCancel} className={`${button} bg-surface-alt text-text-primary border border-border`}>{t("common.cancel")}</button>

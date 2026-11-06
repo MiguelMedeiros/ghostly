@@ -330,25 +330,26 @@ export function newestMarked(history: StoredMessage[]): { last?: StoredMessage; 
  * chat): the marks it moved go back to the newest line still kept, as `load` reads them, and the record's `came` it
  * raised goes too. A mark a newer line moved stays, and the history is read only when the message moved one
  * (`markedBy`): removals go at the pace of edits. `history`: the group's rows, with it gone. True when `came` changed
- * (the record is to be saved).
+ * (the record is to be saved). `mentionOnly`: an edit took my mention out of it: the message is still there, so only
+ * the "@" goes back.
  */
-export async function unmark(marks: GroupMarks, group: Pick<StoredGroup, "came"> | undefined, groupId: string, history: () => Promise<StoredMessage[]>, removed: StoredMessage): Promise<boolean> {
+export async function unmark(marks: GroupMarks, group: Pick<StoredGroup, "came"> | undefined, groupId: string, history: () => Promise<StoredMessage[]>, removed: StoredMessage, mentionOnly = false): Promise<boolean> {
   const by = marks.by.get(groupId);
-  if (!by || ![by.last, by.peer, by.mention].includes(removed.id)) return false;
+  const last = !mentionOnly && by?.last === removed.id, peer = !mentionOnly && by?.peer === removed.id, mention = by?.mention === removed.id;
+  if (!by || !(last || peer || mention)) return false;
   const newest = newestMarked((await history()).filter(m => m.id !== removed.id));
   const back = (map: Map<string, number>, row: StoredMessage | undefined) => { if (row) map.set(groupId, row.timestamp); else map.delete(groupId); };
   let came = false;
-  if (by.last === removed.id) back(marks.lastMessageAt, newest.last);
-  if (by.peer === removed.id) {
+  if (last) back(marks.lastMessageAt, newest.last);
+  if (peer) {
     back(marks.lastPeerMessageAt, newest.peer);
     if (group?.came?.peer !== undefined) { group.came = { ...group.came, peer: undefined }; came = true; }
   }
-  if (by.mention === removed.id) {
+  if (mention) {
     back(marks.lastMentionAt, newest.mention);
     if (group?.came?.mention !== undefined) { group.came = { ...group.came, mention: undefined }; came = true; }
   }
-  marks.by.set(groupId, { last: by.last === removed.id ? newest.last?.id : by.last, peer: by.peer === removed.id ? newest.peer?.id : by.peer,
-    mention: by.mention === removed.id ? newest.mention?.id : by.mention });
+  marks.by.set(groupId, { last: last ? newest.last?.id : by.last, peer: peer ? newest.peer?.id : by.peer, mention: mention ? newest.mention?.id : by.mention });
   return came;
 }
 
@@ -469,6 +470,8 @@ const LEFT_KEPT_MS = 7 * 24 * 60 * 60_000;
 const LEFT_HAND_ON_MS = 1_000;
 /** The commits of my chain since my leave said to the admin my leave follows, before the leave (it may lack them). */
 const LEFT_COMMITS = 16;
+/** How long a tombstone the role went on from stays after the commit removing it, for the leaves that followed the role to it. */
+const LEFT_PASSED_ON_MS = 2 * 60_000;
 /** Admin side: how long a contact invited over its chat is waited for. After, it holds no place and may be invited again. */
 const INVITED_KEPT_MS = LEFT_KEPT_MS;
 /** How long the admin keeps the edge to a member it removed while that member was away, to tell it (`StoredGroup.farewells`). */
@@ -740,6 +743,7 @@ export class Groups {
         edges: groupId => host.edges(groupId),
         ready: linkId => host.linkReady(linkId, GROUP_VERSION_FILES),
         membership: groupId => this.fileMembership(groupId),
+        out: groupId => this.fileOut(groupId),
         sendApp: (groupId, frame) => this.communities.sendApp(groupId, frame),
         changed: () => host.emit(),
         now: () => this.now(),
@@ -893,6 +897,15 @@ export class Groups {
   messages(groupId: string): Promise<StoredMessage[]> { return this.store.getMessages(MESSAGE_LINK(groupId)); }
 
   private isCommunity(groupId: string): boolean { return this.communities.has(groupId); }
+  /**
+   * A private group's roster in admission order, its admin and my key: what the edge each member keeps while the group
+   * is not on screen is computed from (`keptMeshPeer`, WISP 902 § Transports). Undefined for a community or no session.
+   */
+  meshOrder(groupId: string): { order: string[]; admin?: string; me: string } | undefined {
+    const session = this.sessions.get(groupId);
+    if (!session || this.isCommunity(groupId)) return undefined;
+    return { order: session.admissionOrder, admin: session.admin, me: session.myKey };
+  }
   /**
    * What paces a private group's edges (`meshEdgeIntervals`), as a roster of that many members would: the roster in a
    * full mesh, the edges this member keeps (and one) with hubs. 0 for no group.
@@ -1225,6 +1238,13 @@ export class Groups {
     return { me: session.myKey, community: false, onHubs: this.hubs.active(groupId, session, this.now()), inRoster: key => rosterHas(session.roster, key), couldRead: (key, messageId, ts) => session.couldRead(key, messageId, ts) };
   }
 
+  /** Why this device is out of the group for good, as `fileCheck` says it; undefined while it is in it, or not loaded. */
+  private fileOut(groupId: string): string | undefined {
+    const session = this.isCommunity(groupId) ? this.communities.session(groupId) : this.sessions.get(groupId);
+    if (!session || session.status === "active") return undefined;
+    return session.state.statusReason ?? "You are no longer in this group";
+  }
+
   /**
    * This side is typing in a private group (with what it is doing), or stopped (WISP 902 · Group Mesh § Typing).
    * Nothing for a community: it does not carry typing yet.
@@ -1345,11 +1365,18 @@ export class Groups {
     return undefined;
   }
 
-  /** The admin heard me: the tombstone of a group I left can go. */
+  /**
+   * The admin heard me: the tombstone of a group I left can go. One the role went on from stays `LEFT_PASSED_ON_MS`
+   * more (`holdsRole`): a member whose leave followed the role to me may not have reached me yet, and only I can tell
+   * it where the role went.
+   */
   private async leaveConfirmed(groupId: string): Promise<void> {
     if (!this.stored.get(groupId)?.left) return;
+    if (this.holdsRole(groupId, this.sessions.get(groupId))) { if (!this.passedOnUntil.has(groupId)) this.passedOnUntil.set(groupId, this.now() + LEFT_PASSED_ON_MS); return; }
     await this.forget(groupId);
   }
+  /** Tombstones the role went on from, removed already, and when they go (`leaveConfirmed`). */
+  private readonly passedOnUntil = new Map<string, number>();
 
   async remove(groupId: string, key: string): Promise<void> {
     if (this.isCommunity(groupId)) return this.communities.remove(groupId, key);
@@ -1460,10 +1487,11 @@ export class Groups {
     return by.last === messageId || by.peer === messageId || by.mention === messageId;
   }
 
-  async unmark(groupId: string, removed: StoredMessage): Promise<void> {
-    if (this.isCommunity(groupId)) return this.communities.unmark(groupId, removed);
+  /** `mentionOnly`: an edit took my mention out of the message, which stays: its "@" alone goes back. */
+  async unmark(groupId: string, removed: StoredMessage, mentionOnly = false): Promise<void> {
+    if (this.isCommunity(groupId)) return this.communities.unmark(groupId, removed, mentionOnly);
     const group = this.stored.get(groupId);
-    if (await unmark(this.marks, group, groupId, () => this.store.getMessages(MESSAGE_LINK(groupId)), removed) && group) await this.store.putGroup(group);
+    if (await unmark(this.marks, group, groupId, () => this.store.getMessages(MESSAGE_LINK(groupId)), removed, mentionOnly) && group) await this.store.putGroup(group);
   }
 
   /** The connection of an edge opened. One kept to tell a removed member closes a while after, whatever its app says or does not say. */
@@ -1552,6 +1580,7 @@ export class Groups {
     this.stored.delete(groupId);
     this.leavesHeard.delete(groupId);
     this.handOnAt.delete(groupId);
+    this.passedOnUntil.delete(groupId);
     this.takeBack(groupId);
     this.acceptSaid.delete(groupId);
     this.entryHosts.delete(groupId);
@@ -1705,7 +1734,7 @@ export class Groups {
       const quiet: string[] = [];
       for (const group of [...this.stored.values()]) {
         if (group.left) {
-          if (now - group.left.at > LEFT_KEPT_MS) { await this.forget(group.id); continue; }
+          if (now - group.left.at > LEFT_KEPT_MS || now >= (this.passedOnUntil.get(group.id) ?? Infinity)) { await this.forget(group.id); continue; }
           // The role reached my tombstone (a hand-over that crossed my leave): it goes on, after a restart too.
           const session = this.sessions.get(group.id);
           if (session?.status === "left" && session.admin === session.myKey && now >= (this.handOnAt.get(group.id) ?? 0)) await this.handOn(group.id);
@@ -2354,6 +2383,8 @@ export class Groups {
       return;
     }
     const taken = await session.handle(peerKey, frame);
+    // A signed leave a hub passed on: that member leaves for me too, so it stands in for nobody (WISP 902 § Stand-ins).
+    for (const f of taken) if (f.t === "group-bye" && f.k !== peerKey && this.hubs.departs(groupId, f.k)) this.host.emit();
     // A message over this edge written before this member was asked: its answer is still coming (`holdSync`).
     const askedAt = this.askedAt(groupId, peerKey);
     if (taken.some(f => f.t === "group-msg" && f.ts < askedAt)) {
@@ -2408,20 +2439,42 @@ export class Groups {
    */
   private async afterLeave(groupId: string, from: string, raw: unknown): Promise<void> {
     const group = this.stored.get(groupId), left = group?.left, session = this.sessions.get(groupId);
-    if (!group || !left || !session || (from !== left.admin && !left.hubs?.includes(from)) || !raw || typeof raw !== "object") return;
+    if (!group || !left || !session || !raw || typeof raw !== "object") return;
     const t = (raw as { t?: unknown }).t;
+    // While the role is or was mine, any member's leave reaches me, as it reaches an admin: a member whose leave follows
+    // the role says it to me, and the role does not go on to it.
+    const holding = t === "group-leave" && this.holdsRole(groupId, session) && rosterHas(session.roster, from);
+    if (from !== left.admin && !left.hubs?.includes(from) && !holding) return;
     if (t === "group-leave" && from !== session.myKey) {
       let heard = this.leavesHeard.get(groupId);
       if (!heard) this.leavesHeard.set(groupId, (heard = new Set()));
       heard.add(from);
+      // The role went on from me already: that leave follows it, to the admin my commits name.
+      if (holding && session.admin !== session.myKey) {
+        const edge = this.host.edges(groupId).get(from);
+        if (edge) { try { this.sayCommitsSinceLeave(groupId, session, group, edge); } catch { /* it says it again */ } }
+      }
       return;
     }
     if (t !== "group-commit") return;
     // My leave may still be under way, its turn in the session's queue before or after this commit's.
     if (session.status === "active") await session.handle(from, raw);
     if (session.status !== "left" || !(await session.followAfterLeave(raw))) return;
-    if (session.admin === session.myKey) { this.handOnAt.set(groupId, this.now() + LEFT_HAND_ON_MS); return; }
+    if (session.admin === session.myKey) { this.handOnAt.set(groupId, this.now() + LEFT_HAND_ON_MS); this.reconcileEdges(groupId); return; }
     await this.leaveFollows(groupId);
+  }
+
+  /**
+   * A tombstone the role reached, until it goes: it keeps edges to every member, as an admin does (past the size where
+   * hubs start, the ones to its hubs: they carry leaves and commits), so the leaves that follow the role reach it, and
+   * its `role` commit handing it on reaches them (a member whose leave the role passed by has no other way to hear where
+   * it went). Also when the role reached my leave while it was under way, and went on in the same step: a `role` commit
+   * of mine past the epoch my leave was signed in.
+   */
+  private holdsRole(groupId: string, session: GroupSession | undefined): boolean {
+    if (session?.status !== "left") return false;
+    const since = this.stored.get(groupId)?.left?.bye?.e ?? session.epoch - 1;
+    return session.admin === session.myKey || session.state.chain.some(c => c.k === "role" && c.by === session.myKey && c.e > since);
   }
 
   /** My tombstone's chain moved: my leave goes to the admin it names now, over our edge when it is up (and when it opens). */
@@ -2445,9 +2498,14 @@ export class Groups {
    * role came to it from a leaver, whose edge with it is the only one up), then the leave.
    */
   private sayLeave(groupId: string, session: GroupSession, group: StoredGroup, linkId: string): void {
+    this.sayCommitsSinceLeave(groupId, session, group, linkId);
+    this.host.sendOnLink(linkId, { t: "group-leave", g: groupId });
+  }
+
+  /** The commits of my chain since I left (at most `LEFT_COMMITS`), without a secret. */
+  private sayCommitsSinceLeave(groupId: string, session: GroupSession, group: StoredGroup, linkId: string): void {
     const since = group.left?.bye?.e ?? session.epoch;
     for (let e = Math.max(since + 1, session.epoch - LEFT_COMMITS + 1); e <= session.epoch; e++) this.host.sendOnLink(linkId, farewellCommit(groupId, session, e));
-    this.host.sendOnLink(linkId, { t: "group-leave", g: groupId });
   }
 
   /** A tombstone the role reached: it goes on (`nextAdmin`), and my leave with it. */
@@ -3150,7 +3208,7 @@ export class Groups {
       const left = group?.left;
       const removed = this.removedAt.get(groupId);
       const wanted = session?.status === "active" && group ? this.edgesWanted(groupId, session, group, this.now())
-        : left ? new Set([left.admin, ...left.hubs ?? []])
+        : left ? new Set([left.admin, ...left.hubs ?? [], ...this.holdsRole(groupId, session) && !this.hubs.large(session!) ? session!.others : []])
         : removed !== undefined && this.now() - removed < REMOVED_LINGER_MS ? new Set(existing.keys()) : new Set<string>();
       for (const [key, linkId] of existing) if (!wanted.has(key)) await this.host.closeEdge(linkId);
       const met = this.justMet.get(groupId);

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { EDIT_RECEIVE_LIMIT, EDIT_SEND_LIMIT, REMOVED_TEXT, createIdentity, parseCommunityEdit, type GroupEdit } from "@ghostly/core";
 import { GROUP_EDITS_HELD, GROUP_EDIT_CATCH_UP, GROUP_EDIT_RESEND, GROUP_EDIT_RESEND_WINDOW_MS, GroupEdits, type GroupEditsHost } from "../src/engine/groupEdits";
 import { patchRemoval, removalRow, withRemoval } from "../src/engine/removals";
+import { MESH_GOSSIP_MS } from "../src/engine/groups";
 import type { StoredMessage } from "../src/shared/types";
 import { CommunityWorld, type Peer } from "./communityWorld";
 // covers: groups.edit, groups.protocol.edits
@@ -95,7 +96,8 @@ describe("GroupEdits on its own", () => {
     const card = { kind: "task" as const, id: "t", title: "T", status: "running" as const };
     const removed: string[] = [];
     const { edits, sent, messages, tick } = setup([{ ...mine(0, "🔄 T"), card, edit: { seq: 7, at: 5, history: [] } }, bobs(0)], [me, bob, carol], removed);
-    expect(await edits.removeMine("g1", mine(0).id)).toEqual({ error: null, messageId: mine(0).id });
+    // `e`: the number the removal is said under, past the message's last edit.
+    expect(await edits.removeMine("g1", mine(0).id)).toEqual({ error: null, messageId: mine(0).id, e: 8 });
     expect(removed).toEqual([mine(0).id]);
     expect(sent).toEqual([{ edit: { id: mine(0).id, e: 8, ts: 1_000_000, m: REMOVED_TEXT, rm: true } }]);
     expect(messages[0]).toMatchObject({ removed: true, edit: { seq: 8 } });
@@ -461,8 +463,11 @@ describe("GroupEdits on its own", () => {
     await world.until(() => [alice, carol].every(m => !!textOf(m.peer, messageId!)), 60_000);
     carol.peer.online = false;
     await world.run(5_000);
-    expect(await bob.edits.removeMine(id, messageId!)).toMatchObject({ error: null });
+    const removed = await bob.edits.removeMine(id, messageId!);
+    // Its edit number, by which an edge that took it is counted (what the CLI's one-shot delete waits for).
+    expect(removed).toMatchObject({ error: null, e: 1 });
     await world.until(() => !textOf(alice.peer, messageId!), 60_000);
+    expect(bob.peer.groups.taken(id, messageId!, removed.e)).toBeGreaterThan(0);
     expect(textOf(carol.peer, messageId!)).toBe("🔄 Task 1");
     carol.peer.online = true;
     // Nobody asks: Bob's side of the edge coming up says it again.
@@ -590,6 +595,8 @@ function member(world: CommunityWorld, name: string, old = false): { peer: Peer;
       const at = peer.messages.findIndex(m => m.linkId === chat && m.id === message.id);
       if (at >= 0) peer.messages.splice(at, 1);
     },
+    // As the engine does (node.ts): an edit that names me no more takes the group's "@" back.
+    unmentioned: (chat, row) => peer.groups.unmark(chat.slice("group:".length), row, true),
     changed: () => {},
     membership: groupId => {
       const view = world.view(peer, groupId);
@@ -748,6 +755,55 @@ describe("edits on headless peers", { timeout: 120_000 }, () => {
       }
       expect(carol.peer.messages.filter(m => !m.event)).toHaveLength(40);
     } finally { vi.useRealTimers(); }
+    for (const m of [alice, bob, carol]) m.edits.stop();
+  });
+});
+
+/**
+ * An edit that takes my mention out of a member's message: the group's "@" in the list goes at once, as a restart reads
+ * it from the history and as a delete for everyone takes it (`unmark`). Its unread and place in the list stay: it is
+ * still there. It stayed until the group was opened or the app started again.
+ */
+describe("an edit that names me no more", { timeout: 120_000 }, () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it.each(["mesh", "community"] as const)("in a %s group: the \"@\" goes at once, as after a restart; one that keeps it keeps it", async (kind) => {
+    const world = new CommunityWorld();
+    vi.spyOn(Date, "now").mockImplementation(() => world.now);
+    const alice = member(world, "alice"), bob = member(world, "bob"), carol = member(world, "carol");
+    const id = kind === "mesh" ? await alice.peer.groups.create("Pings", "mesh") : await alice.peer.groups.create("Pings");
+    const link = await alice.peer.groups.enableLink(id);
+    for (const m of [bob, carol]) await m.peer.groups.joinByLink(link);
+    await world.until(() => [bob, carol].every(m => world.member(m.peer, id) && world.view(m.peer, id)!.members.length === 3), 10 * 60_000);
+    await world.run(20_000);
+    const carolKey = world.view(carol.peer, id)!.myKey!;
+    const ping = (o: number) => [{ k: carolKey, o, l: 6 }];
+    const marks = () => { const v = world.view(carol.peer, id)!; return { lastMessageAt: v.lastMessageAt, lastPeerMessageAt: v.lastPeerMessageAt, lastMentionAt: v.lastMentionAt }; };
+    await bob.peer.groups.send(id, "@carol first ping", ping(0));
+    await world.until(() => world.texts(carol.peer, id).includes("@carol first ping"), MESH_GOSSIP_MS + 60_000);
+    const first = world.view(carol.peer, id)!.lastMentionAt!;
+    await world.run(5_000);
+    const { messageId } = await bob.peer.groups.send(id, "@carol second ping", ping(0));
+    await world.until(() => world.texts(carol.peer, id).includes("@carol second ping"), MESH_GOSSIP_MS + 60_000);
+    const pinged = marks();
+    expect(pinged.lastMentionAt).toBeGreaterThan(first);
+
+    // An edit that keeps the mention keeps the "@".
+    expect(await bob.edits.edit(id, messageId!, "@carol second ping, edited")).toMatchObject({ error: null });
+    await world.until(() => textOf(carol.peer, messageId!) === "@carol second ping, edited", 60_000);
+    expect(marks()).toEqual(pinged);
+
+    expect(await bob.edits.edit(id, messageId!, "no ping after all")).toMatchObject({ error: null });
+    await world.until(() => textOf(carol.peer, messageId!) === "no ping after all", 60_000);
+    expect(carol.peer.messages.find(m => m.id === messageId)!.mentioned).toBeUndefined();
+    // Back to the mention before it; the message is still the newest, unread.
+    const edited = marks();
+    expect(edited.lastMentionAt).toBeLessThanOrEqual(first);
+    expect(edited.lastMentionAt).toBeGreaterThan(0);
+    expect(edited).toEqual({ ...pinged, lastMentionAt: edited.lastMentionAt });
+    await new Promise(r => setTimeout(r, 1_100));
+    await world.restart(carol.peer);
+    expect(marks().lastMentionAt).toBe(edited.lastMentionAt);
     for (const m of [alice, bob, carol]) m.edits.stop();
   });
 });

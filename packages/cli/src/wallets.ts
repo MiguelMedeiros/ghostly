@@ -316,7 +316,7 @@ const WALLETS: Record<string, Method> = {
     // mint says every invoice is paid, so one from `wallet receive` is credited only on its payer's word.
     if (params.chat !== undefined && !isInvoice(text)) throw new CliError("usage", "--chat names the chat an invoice came from: an address's or LNURL's invoice is its server's");
     // Its contact is told it was paid: a contact's own name or a prefix of its id never names the chat.
-    const chat = params.chat === undefined ? undefined : findOwnNamedChat(state(ctx).links, str(params, "chat", true));
+    const chat = params.chat === undefined ? undefined : findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
     if (chat) inviteTaken(chat);
     if (isInvoice(text)) {
       // Which wallet pays is named, never guessed from the invoice: test mints issue `lnbc` invoices too, and a
@@ -346,7 +346,7 @@ const WALLETS: Record<string, Method> = {
   async "chat.pay"(ctx, params) {
     const memo = memoOf(params, "pay");
     // Money moves: a contact's own name or a prefix of its id never names the chat.
-    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true));
+    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
     inviteTaken(link);
     const amount = num(params, "amount", 0, { min: 1 });
     if (!amount) throw new CliError("bad_request", "amount is required");
@@ -378,7 +378,7 @@ const WALLETS: Record<string, Method> = {
   /** Pays a request the contact made in a chat. */
   async "chat.payRequest"(ctx, params) {
     // Money moves: a contact's own name or a prefix of its id never names the chat.
-    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true));
+    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
     const paymentId = str(params, "payment", true);
     const request = state(ctx).payments[paymentId];
     if (!request || request.linkId !== link.id || request.kind !== "request") throw new CliError("not_found", `No request ${paymentId} in this chat`);

@@ -163,11 +163,19 @@ function settlesWithin(promise: Promise<unknown>, ms: number): Promise<boolean> 
  * waited for the next minute (60 s and more instead of 3 to 5).
  */
 export function chatOnly(method: string, params: Record<string, unknown>): boolean {
-  // A status card's `chat` may name a group as well (WISP 405 · Status Cards): its sessions must start.
-  if (method.startsWith("task.") || method.startsWith("routine.") || method.startsWith("button.")) return false;
-  // A usage report to every 1:1 chat (`--all`) needs no group; one to a named chat may name a group.
+  // A usage report to every 1:1 chat (`--all`) needs no group.
   if (method === "usage.send") return params.all === true;
+  if (chatOrGroup(method, params)) return false;
   return method.startsWith("chat.") || (params.chat !== undefined && params.group === undefined && !method.startsWith("group."));
+}
+
+/** A command whose `chat` may name a group as well: a one-shot for it starts the groups' sessions. */
+function chatOrGroup(method: string, params: Record<string, unknown>): boolean {
+  // A status card's or a button's (WISP 405 · Status Cards), and a usage report's to a named chat.
+  if (method.startsWith("task.") || method.startsWith("routine.") || method.startsWith("button.") || method === "usage.send") return true;
+  // So may `message delete --everyone`'s: a group's removal goes over its members' edges, which a one-shot that left
+  // the groups unstarted never opened (it waited its whole timeout, and the members kept the message).
+  return method === "chat.delete" && params.everyone === true;
 }
 
 /**
@@ -184,10 +192,11 @@ export function newChatOnly(method: string): boolean {
  * A command about the 1:1 chat it names, or one that makes or joins a new chat (`newChatOnly`): a one-shot for it leaves
  * the other saved chats unstarted too, and starts only the chat a call names (`startNamedChats`). Started, each saved
  * chat put its records and its leave packet on the relays: with 12 invites saved one `send` took the relays' 30
- * requests a minute, and a text to a contact who is away, or the next one-shot, waited behind them.
+ * requests a minute, and a text to a contact who is away, or the next one-shot, waited behind them. So does a command
+ * whose chat may name a group (`chatOrGroup`: a bot's `task send`): the groups start for it, the other 1:1 chats do not.
  */
 export function oneChatOnly(method: string, params: Record<string, unknown>): boolean {
-  return newChatOnly(method) || (chatOnly(method, params) && typeof params.chat === "string");
+  return newChatOnly(method) || ((chatOnly(method, params) || chatOrGroup(method, params)) && typeof params.chat === "string");
 }
 
 /**
@@ -413,12 +422,12 @@ async function readStdin(onData?: () => void): Promise<string> {
 const o = (type: OptionSpec["type"], description: string): OptionSpec => ({ type, description });
 
 /** Commands with their own flow (main.ts), as help shows them. */
-const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionSpec>][] = [
-  ["profile create <name> [--use] [--name <shown name>]", "Make a profile (its own keys, chats and wallets)", { use: o("boolean", "Make it the current profile"), name: o("string", "The name contacts see"), force: o("boolean", "Use --name even if it looks like a seed, a key or ecash") }],
+export const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionSpec>][] = [
+  ["profile create <name> [--use] [--name <shown name>] [--force]", "Make a profile (its own keys, chats and wallets)", { use: o("boolean", "Make it the current profile"), name: o("string", "The name contacts see"), force: o("boolean", "Use --name even if it looks like a seed, a key or ecash") }],
   ["profile list", "Profiles, and which one is current"],
   ["profile use <name>", "Make a profile the current one"],
   ["profile show", "The name contacts see, and whether it is shared"],
-  ["profile set [--name <name>] [--share-profile | --no-share-profile]", "Change the name contacts see", { name: o("string", "The name contacts see"), "share-profile": o("boolean", "Share the name and picture with contacts (--no-share-profile: do not)"), force: o("boolean", "Use --name even if it looks like a seed, a key or ecash") }],
+  ["profile set [--name <name>] [--share-profile | --no-share-profile] [--force]", "Change the name contacts see", { name: o("string", "The name contacts see"), "share-profile": o("boolean", "Share the name and picture with contacts (--no-share-profile: do not)"), force: o("boolean", "Use --name even if it looks like a seed, a key or ecash") }],
   ["profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]", "A backup of the profile, encrypted with a passphrase (from a file or GHOSTLY_BACKUP_PASSPHRASE); --no-passphrase makes one anyone can read", { out: o("string", "The backup file to write"), "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), passphrase: { ...o("boolean", "Do not encrypt. The file then holds the profile's keys and wallet secrets in the clear"), negatedOnly: true }, light: o("boolean", "Leave out files over 1 MB (voice messages over 4 MB); their messages stay") }],
   ["profile restore <file> <new profile> [--passphrase-file f] [--use]", "A backup into a new profile (a backup made with --no-passphrase needs none)", { "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), use: o("boolean", "Make it the current profile") }],
   ["daemon [--detach] [--timeout s]", "Keep the profile online (foreground; --detach runs it in the background)", { detach: o("boolean", "Run in the background (log in the profile folder)"), timeout: o("number", "Seconds it waits for a command that holds the profile, and --detach for it to start (default 60)") }],
@@ -436,7 +445,7 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
     translate,
   }],
   ["settings get [--show-secret]", "The profile's settings", { "show-secret": o("boolean", "Show credentials too") }],
-  ["settings set <key> <json-value>", "Change one: relays, irohRelays, hyperdhtRelay, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, nick. <json-value> - (or none, piped) reads it from stdin: a TURN password stays out of ps", { force: o("boolean", "Set a nick even if it looks like a seed, a key or ecash") }],
+  ["settings set <key> <json-value> [--force]", "Change one: relays, irohRelays, hyperdhtRelay, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, nick. <json-value> - (or none, piped) reads it from stdin: a TURN password stays out of ps", { force: o("boolean", "Set a nick even if it looks like a seed, a key or ecash") }],
   ["engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes] [--force]", "Any call of the app's engine, with its own parameters (engine --list --verbose names them)", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets"), yes: o("boolean", "Confirm a call that deletes chats or groups"), force: o("boolean", "Send a text that looks like a secret") }],
   ["engine --list [--verbose]", "The engine's calls", { verbose: o("boolean", "With what each call takes: { linkId, label }, ? for an optional one") }],
   ["call pipe [<chat|call>]", "A call's audio on stdin/stdout: raw s16le mono PCM at the call's rate (e.g. with sox or ffmpeg)"],
@@ -648,8 +657,8 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
   switch (sub) {
     case "create": {
       const [name] = parsed.positionals;
-      if (!name) throw new CliError("usage", "Missing <name>: ghostly profile create <name> [--use] [--name <shown name>]");
-      noMoreThan(1, parsed.positionals, "profile create <name> [--use] [--name <shown name>]");
+      if (!name) throw new CliError("usage", "Missing <name>: ghostly profile create <name> [--use] [--name <shown name>] [--force]");
+      noMoreThan(1, parsed.positionals, "profile create <name> [--use] [--name <shown name>] [--force]");
       // A command that fails changes nothing: the name is checked before the folder is made, and the profile is made
       // current only once it holds it. Before, the retry with a good name was refused "Profile <name> exists".
       const shownName = parsed.options.name === undefined ? undefined : checkShownName(parsed.options.name);
@@ -688,11 +697,11 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       print(await withSession(g, (s) => s.call("profile.get"), { offline: true }));
       return;
     case "set": {
-      noMoreThan(0, parsed.positionals, "profile set [--name <name>] [--share-profile | --no-share-profile]");
+      noMoreThan(0, parsed.positionals, "profile set [--name <name>] [--share-profile | --no-share-profile] [--force]");
       const params: Record<string, unknown> = {};
       if (parsed.options.name !== undefined) params.name = parsed.options.name;
       if (parsed.options["share-profile"] !== undefined) params.shareProfile = parsed.options["share-profile"];
-      if (!Object.keys(params).length) throw new CliError("usage", "Nothing to change: ghostly profile set [--name <name>] [--share-profile | --no-share-profile]");
+      if (!Object.keys(params).length) throw new CliError("usage", "Nothing to change: ghostly profile set [--name <name>] [--share-profile | --no-share-profile] [--force]");
       if (parsed.options.force === true) params.force = true;
       print(await withSession(g, (s) => s.call("profile.set", params)));
       return;
@@ -1221,8 +1230,8 @@ async function settingsCommand(sub: string | undefined, argv: string[]): Promise
   if (sub === "get") { noMoreThan(0, parsed.positionals, "settings get [--show-secret]"); print(await withSession(g, (s) => s.call("settings.get", { showSecret: parsed.options["show-secret"] === true }), { offline: true })); return; }
   if (sub === "set") {
     const [key, given] = parsed.positionals;
-    if (!key) throw new CliError("usage", "Missing <key>: ghostly settings set <key> <json-value>");
-    noMoreThan(2, parsed.positionals, "settings set <key> <json-value>");
+    if (!key) throw new CliError("usage", "Missing <key>: ghostly settings set <key> <json-value> [--force]");
+    noMoreThan(2, parsed.positionals, "settings set <key> <json-value> [--force]");
     // `-`, or no value on a pipe: the value from stdin, out of ps and the shell's history (a TURN password).
     const { value, warning } = await settingValue(key, given, readStdin, process.stdin.isTTY === true, (note) => process.stderr.write(`ghostly: ${note}\n`));
     if (warning) process.stderr.write(`ghostly: ${warning}\n`);
@@ -1384,7 +1393,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
       return joined.answer;
     }
     return result;
-  }, { deferGroups: chatOnly(command.method, params) || oneChatOnly(command.method, params), deferChats: oneChatOnly(command.method, params), offline: offlineCall(command.method, params) });
+  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: oneChatOnly(command.method, params), offline: offlineCall(command.method, params) });
   if (translator) {
     try { printAnswer(await (await import("./translate")).translateAnswer(result, translator)); } finally { translator.close(); }
     return;
@@ -1414,6 +1423,12 @@ async function callPipeCommand(argv: string[]): Promise<void> {
   // A clip that ends (`ffmpeg -t 3 … | ghostly call pipe`) is queued and played, and the contact's audio goes on
   // coming: the end of stdin never closes the socket, whose daemon side would close the call's audio with it.
   process.stdin.pipe(socket, { end: false });
+  // Nobody reads the contact's audio any more (`call pipe | head -c …`, a player closed): the pipe leaves, exit 0, and
+  // the call goes on (another program may take its audio). It died on an EPIPE nobody handled, with a stack trace.
+  onReaderGone(() => {
+    process.stderr.write(`ghostly: call ${call.call}: nothing reads its audio any more; the call goes on\n`);
+    socket.destroy();
+  });
   socket.pipe(process.stdout);
   socket.on("close", () => exit(0));
   socket.on("error", () => exit(1));

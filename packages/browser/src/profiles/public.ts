@@ -1,5 +1,5 @@
 import { verifyEvent, type Event } from 'nostr-tools/pure';
-import { isZ32Key, type ProofAdapter, type ProofRecord } from '@ghostly/core';
+import { hasVisible, isZ32Key, stripHidden, type ProofAdapter, type ProofRecord } from '@ghostly/core';
 
 export interface PublicProfile {
   adapter: ProofAdapter; key: string; name?: string; avatar?: string;
@@ -19,9 +19,9 @@ export function selectedProfile(profiles: PublicProfile[] = [], proofs: ProofRec
 }
 export function profileName(value: unknown): string | undefined {
   if (typeof value !== 'string' || value.length > 256) return;
-  // Treat as plain text; remove controls and bidi overrides, never render HTML.
-  const name = value.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, '').trim().slice(0, 64); // eslint-disable-line no-control-regex
-  return name || undefined;
+  // One line of plain text, as core's display text: no control, invisible, bidi or line-separator character; never HTML.
+  const name = stripHidden(value).trim().slice(0, 64);
+  return name && hasVisible(name) ? name : undefined;
 }
 export function nostrMetadata(value: unknown, key: string, now = Date.now()): { name?: string; picture?: string; eventAt: number; eventId: string } | undefined {
   try {

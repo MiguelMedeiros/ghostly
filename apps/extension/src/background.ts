@@ -30,10 +30,12 @@ function ensureEngine(): Promise<void> {
 async function startEngine(): Promise<void> {
   if (!(await chrome.offscreen.hasDocument())) await createEngineDocument();
   const status = await waitForEngine();
-  if (status.profile === status.active) return;
+  if (status.profile === status.active && !status.stopped) return;
   // A page made another profile the one in use. The running peer stops and its document closes before
   // the next one opens: never two peers, and never one peer over two profiles' data.
-  await replaceEngine(status.activeId);
+  // Or the peer stopped for good and nobody asked for the next one: the page that ran "Clear all data" went away
+  // before it could (`restart-engine`), or a worker went away mid-restart. That document goes too, as after a switch.
+  await replaceEngine(status.profile === status.active ? undefined : status.activeId);
 }
 
 /** Peers started one after another for switches made while each one started, before the pages are told to retry. */
@@ -136,9 +138,9 @@ chrome.runtime.onUpdateAvailable.addListener((details) => {
   void rememberPendingUpdate(details.version);
 });
 
-chrome.action.onClicked.addListener(async () => {
-  await ensureEngine();
-  await showApp();
+// The app opens even when the peer does not start, as on a first install: the page says why.
+chrome.action.onClicked.addListener(() => {
+  void ensureEngine().catch(() => {}).then(() => showApp()).catch(() => {});
 });
 
 /** Brings the app's tab forward, or opens one; on `route` (`/chat/…`) when given. */
@@ -203,6 +205,18 @@ function listenToNotifications(): void {
 const onNotificationClicked = (id: string) => void openNotification(id).catch(() => {});
 listenToNotifications();
 chrome.permissions.onAdded.addListener(listenToNotifications);
+
+/**
+ * The person turned off the extension's site access to a host of this machine (`chrome://extensions`, or the puzzle
+ * menu): the peer stops sharing the apps there, as "Share" turned off does, until they are turned on again. Ghostly's own
+ * `permissions.remove` fires this too, once no app is left at that host: then there is nothing to turn off.
+ */
+chrome.permissions.onRemoved.addListener(({ origins }) => {
+  if (!origins?.length) return;
+  void ensureEngine()
+    .then(() => chrome.runtime.sendMessage({ target: "engine", type: "local-access-removed", origins } satisfies RuntimeMessage))
+    .catch(() => {});
+});
 
 /**
  * A tab that shows the app already, on any of its pages (`app.html#/chat/…`). Asked of the extension's own contexts:
@@ -308,13 +322,13 @@ interface ViewerBinding {
 /** The English page, for a request that came without one. */
 const ENGLISH_PAGE: ViewerPage = { lang: "en", dir: "ltr", unreachable: servicesEn.window.unreachable, failed: servicesEn.window.failed };
 
-/** What the page sent, if it is a page: short texts, a language tag and a direction; else English. */
+/** What the page sent, if it is a page: short texts, a language tag and a direction; else English. An app name only if short text. */
 function viewerPageOf(page: unknown): ViewerPage {
   const text = (value: unknown) => typeof value === "string" && value.length > 0 && value.length <= 500;
   if (typeof page !== "object" || page === null) return ENGLISH_PAGE;
-  const { lang, dir, unreachable, failed } = page as Record<string, unknown>;
+  const { lang, dir, unreachable, failed, app } = page as Record<string, unknown>;
   if (typeof lang !== "string" || !/^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(lang) || (dir !== "ltr" && dir !== "rtl") || !text(unreachable) || !text(failed)) return ENGLISH_PAGE;
-  return { lang, dir, unreachable: unreachable as string, failed: failed as string };
+  return { lang, dir, unreachable: unreachable as string, failed: failed as string, ...(text(app) ? { app: app as string } : {}) };
 }
 
 // Session storage outlives the service worker, which the browser stops whenever it is idle.
@@ -414,6 +428,7 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
     path: parsed.path,
     headers: Object.entries(paused.request.headers),
     bodyB64,
+    ...(binding.page.app ? { app: binding.page.app } : {}),
   };
 
   let reply: HttpRequestReply;
