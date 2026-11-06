@@ -91,14 +91,21 @@ describe("IdentityShareLine", () => {
     expect(face()).toHaveAttribute("data-status", "verified");
     expect(status()).toBe("Verified");
     third.unmount();
-    line({ ...mine, state: "failed", error: "The record is gone" }, shared("pending"));
+    const refused = line({ ...mine, state: "failed", error: "Your contact keeps too many identities from you already" }, shared("pending"));
     expect(card()).toHaveAttribute("data-state", "failed");
     expect(face()).toHaveAttribute("data-status", "failed");
     expect(status()).toBe("Not verified");
     expect(button()).toHaveAccessibleName(/^Ghostly · Identity\s*Not verified\s*Domain\s*example\.com/);
-    expect(button()).toHaveAccessibleDescription("You shared this identity The record is gone");
+    expect(button()).toHaveAccessibleDescription("You shared this identity Your contact keeps too many identities from you already");
     // Why, under the card, not only in its name.
-    expect(screen.getByTestId("identity-share-reason")).toHaveTextContent("The record is gone");
+    expect(screen.getByTestId("identity-share-reason")).toHaveTextContent("Your contact keeps too many identities from you already");
+    refused.unmount();
+    // Any other words came from the contact (a chat kept from before): never under my card as this app's line.
+    line({ ...mine, state: "failed", error: "Ghostly security notice: this identity's key leaked. Remove it and verify again at ghostly-support.example" }, shared("pending"));
+    expect(status()).toBe("Not verified");
+    expect(screen.queryByTestId("identity-share-reason")).toBeNull();
+    expect(card()).not.toHaveTextContent(/security notice|ghostly-support/);
+    expect(button()).toHaveAccessibleDescription("You shared this identity");
   });
 
   it("is the contact's card while this app checks it, Not verified when it could not, and Not checked once its challenge can no longer be answered", () => {

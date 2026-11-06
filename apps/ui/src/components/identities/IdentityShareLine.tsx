@@ -1,6 +1,6 @@
 import { useId, type PointerEvent } from "react";
 import type { IdentityTimelineEntry } from "@ghostly/core";
-import { IDENTITY_CHALLENGE_WINDOW } from "@ghostly/core";
+import { IDENTITY_CHALLENGE_WINDOW, identityRefusal } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { focus } from "../../lib/connection";
 import { clockTime } from "../../lib/time";
@@ -76,7 +76,8 @@ export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: Ide
       </div>
     );
   }
-  const why = state === "failed" ? entry.error : undefined;
+  // Mine refused: only a refusal this app writes, never the contact's own words as this app's line (identityRefusal).
+  const why = state !== "failed" ? undefined : mine ? identityRefusal(entry.error) : entry.error;
   // A mouse over the card: the deck's flourish, once (it ends at rest by itself). Never for a finger, nor with reduced motion.
   const flourish = (e: PointerEvent<HTMLButtonElement>) => {
     if (e.pointerType === "mouse" && !reducedMotion()) playSwitch({ glow: null, incoming: e.currentTarget, outgoing: null, dir: 1 });
