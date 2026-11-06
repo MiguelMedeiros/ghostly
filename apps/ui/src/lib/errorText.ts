@@ -176,7 +176,9 @@ const RULES: readonly Rule[] = [
   exact("It did not come within a week", "errors.files.floor.notInAWeek", "errors.files.askAgain"),
   // A group's file every holder served damaged (packages/browser groupFiles.ts DAMAGED): the group is asked, not a contact.
   exact("Every copy of this file arrived damaged and was deleted. Ask for it again later.", "errors.files.refused.damaged", "errors.files.askGroupAgain"),
-  { match: /^Could not store the file: (?:This device has no space left for the file|QuotaExceededError[\s\S]*|[\s\S]*No space left on device[\s\S]*)$/, key: "errors.files.noRoomHere", next: "errors.files.noRoomHereNext", detail: true },
+  // A received file this device had no room for (packages/core chatFiles.ts `storeFailure`): named QuotaExceededError
+  // by the engine, whatever the storage said; the older lines as each storage worded it (OPFS, IndexedDB, Desktop).
+  { match: /^Could not store the file: (?:This device has no space left for the file|This device has no room left to save this|QuotaExceededError[\s\S]*|[\s\S]*No space left on device[\s\S]*)$/, key: "errors.files.noRoomHere", next: "errors.files.noRoomHereNext", detail: true },
   { match: /^Could not store the file: [\s\S]+$/, key: "errors.files.storeFailed", next: "errors.files.askAgain", detail: true },
   exact("Not delivered in time", "errors.files.notDelivered", "errors.files.sendWhenBack"),
   exact("Your contact asked for the same part of this file too many times", "errors.files.askedTooOften", "errors.files.refused.sendAgain"),
