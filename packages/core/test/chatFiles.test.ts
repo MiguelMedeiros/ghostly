@@ -810,8 +810,9 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     lose = false;
     const asked = w.b.sent.length;
     expect(w.b.files.request("ask-0001")).toBe(true);
-    await until(() => state(w.b, "in", "ask-0001") === "done");
-    expect(state(w.a, "out", "ask-0001")).toBe("done");
+    // The sender is done once the receiver's pf-done reaches it, a turn after the receiver is.
+    await until(() => state(w.a, "out", "ask-0001") === "done");
+    expect(state(w.b, "in", "ask-0001")).toBe("done");
     expect(w.b.sent.slice(asked).find((f) => f.t === "pf-accept")).toEqual({ t: "pf-accept", id: "ask-0001", offset: had });
     // Nothing to ask for once it is here, or while the person still decides.
     expect(w.b.files.request("ask-0001")).toBe(false);
