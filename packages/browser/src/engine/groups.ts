@@ -5,7 +5,7 @@ import {
   GROUP_HAVE_FRAME, GROUP_VERSION_FILES, GROUP_WANT_FRAME, GROUP_WANT_NO_FRAME, type GroupFileMeta,
   type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
-import type { GroupEvent, GroupJoinStage, GroupLive, GroupView, OtherGroup, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
+import type { GroupEvent, GroupJoinStage, GroupLight, GroupLive, GroupView, OtherGroup, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
 import type { Removal } from "./removals";
 import { groupReply } from "../shared/replies";
 import { droppedPin, pinOfFormerMember, pinView } from "./pins";
@@ -225,6 +225,12 @@ export interface GroupStore {
    */
   getGroupLive?(): Promise<Map<string, GroupLive>>;
   putGroupLive?(groupId: string, live: GroupLive): Promise<void>;
+  /**
+   * A private group's pin and deletions for everyone, while its record is behind on them (`GroupLight`); `putGroup` with
+   * a small row deletes it. A store without them writes the whole record for each, as before.
+   */
+  getGroupLight?(): Promise<Map<string, GroupLight>>;
+  putGroupLight?(groupId: string, light: GroupLight): Promise<void>;
 }
 
 const MESSAGE_LINK = (groupId: string) => `group:${groupId}`;
