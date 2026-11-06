@@ -150,8 +150,10 @@ export function listProfiles(home: string): string[] {
   return readdirSync(root).filter((name) => NAME.test(name) && statSync(join(root, name)).isDirectory()).sort();
 }
 
+/** Makes `name` current; `default` is made on first use, as every command makes it, any other must exist. */
 export function selectProfile(home: string, name: string): void {
-  if (!profileExists(home, name)) throw new CliError("not_found", `No profile ${name}`);
+  if (name === DEFAULT_PROFILE) createProfile(home, name, { existing: true });
+  else if (!profileExists(home, name)) throw new CliError("not_found", `No profile ${name}`);
   ensureFolder(home);
   writeFileSync(join(home, "current"), name + "\n", { mode: 0o600 });
 }
