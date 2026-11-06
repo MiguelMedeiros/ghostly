@@ -331,16 +331,20 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
     setBusy(true); setPending(which); setError(null);
     try { await work(); await refreshInstalledApps(); if (close) onClose(); } catch (e) { setError(appErrorView(e, t)); void refreshInstalledApps(); } finally { setBusy(false); setPending(null); }
   };
+  // While Uninstall (or an Update) runs, the screen stays, as the install screen's: a Cancel then showed the app as
+  // still here, and it was deleted a moment later. Escape on the question is its Cancel, as on the other Remove questions.
+  const close = () => { if (!busy) onClose(); };
+  const keepIt = () => { if (!busy) setRemoving(false); };
   const why = runLine(app.run, t);
   const canRun = app.run.status === "ok";
   if (removing) {
     return (
-      <Shell titleId={titleId} onClose={onClose} testId="app-uninstall">
+      <Shell titleId={titleId} onClose={keepIt} testId="app-uninstall">
         <h2 id={titleId} className="text-lg font-medium text-text-primary [overflow-wrap:anywhere]">{t("apps.app.uninstallTitle", { title: app.title })}</h2>
         <p className="text-sm text-text-secondary">{t("apps.app.uninstallText")}</p>
         {error && <ErrorLine error={error} />}
         <div className="flex flex-wrap justify-end gap-2">
-          <Button ref={keep} onClick={() => setRemoving(false)}>{t("common.cancel")}</Button>
+          <Button ref={keep} disabled={busy} onClick={keepIt}>{t("common.cancel")}</Button>
           <Button data-testid="app-export" disabled={busy} loading={pending === "export"} onClick={() => void act(async () => saveAppData(app.ref, await engine.call("appDataExportText", { ref: app.ref })), false, "export")}>{t("apps.app.export")}</Button>
           <Button variant="danger" data-testid="app-uninstall-confirm" disabled={busy} loading={pending === "uninstall"} onClick={() => void act(async () => { await engine.call("appUninstall", { ref: app.ref }); await forgetLinkedFiles(app.ref); onUninstalled?.(); }, true, "uninstall")}>{t("apps.app.uninstall")}</Button>
         </div>
@@ -348,7 +352,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
     );
   }
   return (
-    <Shell titleId={titleId} onClose={onClose} testId="app-details" box={box}>
+    <Shell titleId={titleId} onClose={close} testId="app-details" box={box}>
       <Head titleId={titleId} title={app.title} version={app.version} tagline={app.tagline} installed={app} />
       <Publisher fingerprint={app.fingerprint} unknown={app.unknownPublisher} listedBy={app.listedBy} builtIn={app.builtIn && "installed"} />
       {app.description && <p dir="auto" className="text-sm text-text-secondary whitespace-pre-line [overflow-wrap:anywhere]">{app.description}</p>}
