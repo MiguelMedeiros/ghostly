@@ -633,6 +633,11 @@ export class Apps {
   /** Reads of a bundle's URL under way: an install screen opened again waits on the read the closed one began, not on a second. */
   private readonly bundleReads = new Map<string, Promise<{ bundle: AppBundle; bytes: Uint8Array }>>();
   /**
+   * The last write of a bundle under way, by digest: a second write of the same files (Open while the update check
+   * fetches them, two Installs) waits for it and finds them stored, never removing the file the first one is filling.
+   */
+  private readonly bundleWrites = new Map<string, Promise<FileBytesKind>>();
+  /**
    * The `icon.png` of each checked bundle, by digest (at most 256 KiB and 1024 × 1024 pixels, or null for none): every icon shown on the Apps
    * page, in a chat's cards and in the composer's Apps is read without the whole bundle again.
    */
@@ -975,19 +980,24 @@ export class Apps {
   /**
    * Stores a bundle's bytes. A browser that keeps no files fails here: Safari's Private Browsing (and WebKit's in-memory
    * contexts) refuses a Blob in IndexedDB with "Error preparing Blob/File data to be stored in object store". Any such
-   * failure is `storage`, with the browser's own words after it for the logs, and leaves no piece behind.
+   * failure is `storage`, with the browser's own words after it for the logs, and leaves no piece behind. Writes of one
+   * digest run one after the other (`bundleWrites`): a file store takes a file's pieces only in order.
    */
-  private async writeBundle(digest: string, bytes: Uint8Array): Promise<FileBytesKind> {
+  private writeBundle(digest: string, bytes: Uint8Array): Promise<FileBytesKind> {
     this.written.add(digest);
     const writes = this.writes.get(digest) ?? { started: 0, running: 0 };
     this.writes.set(digest, writes);
     writes.started++;
     writes.running++;
-    try {
-      return await this.writeBundleBytes(digest, bytes);
-    } finally {
-      if (--writes.running === 0 && this.writes.get(digest) === writes) this.writes.delete(digest);
-    }
+    const before = this.bundleWrites.get(digest);
+    const write = (before ? before.catch(() => {}).then(() => this.writeBundleBytes(digest, bytes)) : this.writeBundleBytes(digest, bytes))
+      .finally(() => {
+        if (--writes.running === 0 && this.writes.get(digest) === writes) this.writes.delete(digest);
+      });
+    this.bundleWrites.set(digest, write);
+    const done = () => { if (this.bundleWrites.get(digest) === write) this.bundleWrites.delete(digest); };
+    write.then(done, done);
+    return write;
   }
 
   private async writeBundleBytes(digest: string, bytes: Uint8Array): Promise<FileBytesKind> {
