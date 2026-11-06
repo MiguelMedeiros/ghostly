@@ -320,6 +320,21 @@ const TOO_MANY_RECEIVED = "Your contact keeps too many identities from you alrea
 
 const peerError = (e: unknown) => e instanceof IdentityCheckUnavailable ? IDENTITY_CHECK_UNAVAILABLE : shortError(e);
 
+const UNSUPPORTED_KIND = "Your contact's app cannot verify this kind of identity yet";
+const NOT_IN_PROFILE = "That identity is no longer in your profile";
+const CONTACT_REFUSED = "Your contact could not verify it";
+const EXPIRED = "The proof has expired";
+/** The refusals a contact's app writes itself (onRequest, onPresent): the only words of its `idp-result` kept as they came. */
+const CONTACT_REFUSALS = new Set([UNSUPPORTED_KIND, IDENTITY_CHECK_UNAVAILABLE, TOO_MANY_RECEIVED, REVOKED, EXPIRED]);
+
+/**
+ * Why a share of mine was not accepted, as this app may say it under my identity: one of the refusals above or my own
+ * app's line; else nothing past "not verified". Any other words came from the contact (a ledger kept before this check)
+ * and would read as this app's own notice.
+ */
+export const identityRefusal = (error: unknown): string | undefined =>
+  typeof error === "string" && (CONTACT_REFUSALS.has(error) || error === NOT_IN_PROFILE) ? error : undefined;
+
 /**
  * The `idp-*` exchange of one conversation. Frames (all JSON, additive, over the paired channel,
  * only when both offers carry `identity-proof/1`):
@@ -467,7 +482,8 @@ export class IdentityExchange {
           const s = id ? this.shared(id) : undefined;
           if (!s || s.status !== "pending") return;
           const ok = frame.ok === true;
-          const error = ok ? undefined : clean(frame.error, ERROR_MAX) ?? "Your contact could not verify it";
+          // Only a refusal its app writes: any other text is the contact's own, never shown as this app's line.
+          const error = ok ? undefined : typeof frame.error === "string" && CONTACT_REFUSALS.has(frame.error) ? frame.error : CONTACT_REFUSED;
           const entry: SharedIdentity = { ...s, status: ok ? "accepted" : "rejected", at: this.now(), error };
           // The contact keeps one proof per identity (onPresent): the one it accepted replaced any other of the same
           // provider and subject it held from here, so that one is no longer shared in this chat.
@@ -513,7 +529,7 @@ export class IdentityExchange {
       // A kind this app does not verify: told so at once (`idp-result`), no durable write. The provider is the
       // contact's to choose, so a write here would let it fill the timeline (one entry per fresh id, the real
       // verified line pushed out) and ring the identity cue, with no limit.
-      const error = "Your contact's app cannot verify this kind of identity yet";
+      const error = UNSUPPORTED_KIND;
       this.send({ t: "idp-result", id, ok: false, error });
       return;
     }
@@ -536,7 +552,7 @@ export class IdentityExchange {
     this.requested.delete(id);
     const local = await this.options.localProof(id);
     if (!local) {
-      const error = "That identity is no longer in your profile";
+      const error = NOT_IN_PROFILE;
       await this.setShared({ ...s, status: "rejected", at: this.now(), error }, { type: "result", side: "mine", proof: id, ok: false, error });
       return;
     }
@@ -580,7 +596,7 @@ export class IdentityExchange {
       if (!verifyIdentityPresentation(binding.key, sig as string, id, scope, nonce, issuedAt)) throw new Error("The proof key did not sign this conversation's challenge");
       if (binding.issuedAt > now + IDENTITY_CLOCK_SKEW) throw new Error("The proof is dated in the future");
       const result = boundVerifiedIdentity(await this.options.verify(statement, evidence));
-      if (Math.min(binding.expiresAt, result.expiresAt ?? Infinity) <= now) throw new Error("The proof has expired");
+      if (Math.min(binding.expiresAt, result.expiresAt ?? Infinity) <= now) throw new Error(EXPIRED);
       // A presentation needs the proof key, so this only matters when its seed leaked: a lookup that
       // fails is not a refusal, a revocation found is.
       if (await this.options.revoked?.(statement).catch(() => false)) throw new Error(REVOKED);

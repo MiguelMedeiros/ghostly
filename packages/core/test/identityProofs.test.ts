@@ -286,10 +286,11 @@ describe("identity exchange", () => {
     expect(w.ledger(alice, bob).shared[0].error).toBe(IDENTITY_CHECK_UNAVAILABLE);
     // The detail itself, not a bare "503": the frames carry random keys and signatures, where those digits turn up.
     expect(JSON.stringify(w.frames)).not.toMatch(/jenkins|answered 503/);
-    // Any other refusal still says why: it is about the proof, not about the verifier's network.
+    // Any other refusal is sent as it is, and the sharer keeps the default line: words its app cannot tell from the contact's own.
     failure = new Error("The file on the homeserver is not this proof");
     await ab.share(id, true);
-    await vi.waitFor(() => expect(w.ledger(alice, bob).shared[0].error).toBe("The file on the homeserver is not this proof"));
+    await vi.waitFor(() => expect(w.ledger(alice, bob).shared[0].error).toBe("Your contact could not verify it"));
+    expect(w.frames.filter(f => f.t === "idp-result").at(-1)).toMatchObject({ ok: false, error: "The file on the homeserver is not this proof" });
     // The verifier's own re-check keeps the detail.
     failure = undefined;
     await ab.share(id, true);
@@ -353,13 +354,13 @@ describe("identity timeline, from the exchange", () => {
     expect(tl(w, alice, bob)).toEqual([expect.objectContaining({ state: "verified" })]);
   });
 
-  it("a refused share turns failed on both sides, with the reason", async () => {
+  it("a refused share turns failed on both sides, with the reason: the verifier's own, the sharer's in its app's words", async () => {
     const w = world(), { alice, bob } = w.ids;
     const ab = w.peer(alice, bob, "a".repeat(64));
     w.peer(bob, alice, "a".repeat(64), { verify: async () => { throw new Error("The file on the homeserver is not this proof"); } });
     await ab.share(w.addProof(), true);
     await vi.waitFor(() => expect(tl(w, alice, bob)[0]?.state).toBe("failed"));
-    expect(tl(w, alice, bob)[0].error).toBe("The file on the homeserver is not this proof");
+    expect(tl(w, alice, bob)[0].error).toBe("Your contact could not verify it");
     expect(tl(w, bob, alice)).toEqual([expect.objectContaining({ side: "theirs", state: "failed", error: "The file on the homeserver is not this proof", subject: externalKey })]);
   });
 
