@@ -1769,6 +1769,15 @@ export class CommunitySession {
     });
   }
 
+  /**
+   * After I left, a chain that names me the admin whose tip's secret has not come (the fresh one of a commit below went
+   * missing): the engine asks my edges for it (`catchUp`) while I follow, so the role can go on. Only what I still read
+   * comes back (`readsAt`): epochs before the commit that takes me out, never that one's nor any later.
+   */
+  get leftWaitsForSecret(): boolean {
+    return this.following && this.state.status === "left" && this.admin === this.myKey && !this.state.secrets[this.topHash];
+  }
+
   /** Commits the leave requests I hold whose members are still in: the engine calls this on hubs. */
   commitPendingLeaves(now = Date.now()): Promise<number> {
     return this.serialize(async () => {
