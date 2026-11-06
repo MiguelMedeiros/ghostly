@@ -340,7 +340,8 @@ export const servicesPlatform: ServicesPlatform | null = {
   async openService(peerPubKeyZ32, serviceId) {
     const link = engine.linkByPeer(peerPubKeyZ32);
     if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
-    await getBrowserHost().openService(peerPubKeyZ32, serviceId, viewerTag(link.myPubKeyZ32));
+    // Hide my IP from contacts as it is now: while it is on, the app loads nothing but its own origin.
+    await getBrowserHost().openService(peerPubKeyZ32, serviceId, viewerTag(link.myPubKeyZ32), engine.state?.settings.relayOnly === true);
   },
   openPaymentLink(uri) {
     const open = getBrowserHost().openPaymentLink;

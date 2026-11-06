@@ -420,8 +420,9 @@ pub fn open_service_window<R: tauri::Runtime>(
     tag: String,
     title: String,
     unreachable: Option<String>,
+    relay_only: Option<bool>,
 ) -> Result<(), String> {
-    viewer::open(&app, peer, service, tag, title, unreachable)
+    viewer::open(&app, peer, service, tag, title, unreachable, relay_only)
 }
 
 /// The profile locked: every contact's app window closes (`viewer::close_all`).

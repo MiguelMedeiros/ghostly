@@ -75,7 +75,7 @@ export const extensionHost: BrowserHost = {
     if (!reply?.ok) throw new Error(reply?.error ?? "Could not open a wallet");
   },
 
-  async openService(peerPubKeyZ32, serviceId, tag) {
+  async openService(peerPubKeyZ32, serviceId, tag, relayOnly) {
     // A page of the profile before a switch: the peer runs the other one now, which must not serve this one's app.
     if (!pageProfileIsCurrent()) {
       startAsProfileInUse();
@@ -88,6 +88,7 @@ export const extensionHost: BrowserHost = {
       serviceId,
       tag,
       page: viewerPage(engine.linkByPeer(peerPubKeyZ32)?.peerServices?.find((s) => s.id === serviceId)?.name),
+      relayOnly,
     } satisfies RuntimeMessage);
     if (!reply?.ok) throw new Error(reply?.error ?? "Could not open the service");
   },

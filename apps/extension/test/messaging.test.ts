@@ -251,7 +251,7 @@ describe("viewer tabs", () => {
   it("opens one tab bound to one contact's service, intercepting only the virtual origin", async () => {
     const tabId = await openViewer(world);
     expect(world.callsTo("tabs.create")).toEqual([["about:blank"]]);
-    expect(world.session.get(`viewer:${tabId}`)).toEqual({ peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, page: expect.objectContaining({ lang: "en", dir: "ltr" }) });
+    expect(world.session.get(`viewer:${tabId}`)).toEqual({ peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, page: expect.objectContaining({ lang: "en", dir: "ltr" }), relayOnly: false });
     expect(world.callsTo("debugger.attach")).toEqual([[{ tabId }, "1.3"]]);
     expect(world.callsTo("debugger.sendCommand").map(([, method, params]) => [method, params])).toEqual([
       ["Fetch.enable", { patterns: [{ urlPattern: "https://*.invalid/*", requestStage: "Request" }] }],
@@ -342,6 +342,29 @@ describe("viewer tabs", () => {
       throw offline;
     };
     expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([policy]);
+  });
+
+  it("keeps a tab opened while Hide my IP from contacts is on to its own origin, the error page's policy too", async () => {
+    // covers: settings.network.relay-only
+    const strict = "default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
+    const loose = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
+    const policies = (params: Record<string, unknown>) =>
+      (params.responseHeaders as { name: string; value: string }[]).filter(({ name }) => name.toLowerCase() === "content-security-policy").map(({ value }) => value);
+    const hidden = await openViewer(world, PEER, SERVICE, TAG, undefined, true);
+    // Another profile's chat, opened with it off; and a page that says anything but true counts as off.
+    const shown = await openViewer(world, PEER, SERVICE, OTHER_TAG, undefined, "yes");
+    expect(world.session.get(`viewer:${hidden}`)).toMatchObject({ relayOnly: true });
+    expect(world.session.get(`viewer:${shown}`)).toMatchObject({ relayOnly: false });
+
+    engineControl().respond = async () => okResponse("<img src=\"https://contact.example/p.png\">", 200, [["content-type", "text/html"], ["content-security-policy", "img-src *"]]);
+    expect(policies((await pauseRequest(world, hidden, { url: `https://${SERVICE}.${PEER}.${TAG}.invalid/` })).params)).toEqual([`img-src *, ${strict}`]);
+    expect(policies((await pauseRequest(world, shown, { url: `https://${SERVICE}.${PEER}.${OTHER_TAG}.invalid/` })).params)).toEqual([`img-src *, ${loose}`]);
+
+    const offline = await httpError("offline", "offline");
+    engineControl().respond = async () => {
+      throw offline;
+    };
+    expect(policies((await pauseRequest(world, hidden, { url: `https://${SERVICE}.${PEER}.${TAG}.invalid/` })).params)).toEqual([strict]);
   });
 
   it("joins a body DevTools hands over in several pieces", async () => {
