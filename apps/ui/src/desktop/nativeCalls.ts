@@ -492,10 +492,11 @@ export class NativePeerConnection extends EventTarget {
     if (this.closed) return;
     const now = this.devices();
     const track = this.audio.sender.track;
-    // Each as its own command would have done it: one that fails leaves the call as Rust started it.
+    // Each as its own command would have done it: one that fails leaves the call as Rust started it. A device picked
+    // again during these awaits went to Rust on its own (`described`): the older pick does not follow it there.
     if (now.camera !== sent.camera) await invoke("native_call_camera", { id: this.id, camera: now.camera }).catch(() => {});
-    if (now.speaker !== sent.speaker) await invoke("native_call_speaker", { id: this.id, device: now.speaker }).catch(() => {});
-    if (now.microphone !== sent.microphone) {
+    if (now.speaker !== sent.speaker && this.devices().speaker === now.speaker) await invoke("native_call_speaker", { id: this.id, device: now.speaker }).catch(() => {});
+    if (now.microphone !== sent.microphone && this.audio.sender.track === track) {
       await invoke<string | null>("native_call_microphone", { id: this.id, device: now.microphone }).then((used) => this.using(track, used), () => {});
     }
   }
