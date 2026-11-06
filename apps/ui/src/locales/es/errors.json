@@ -174,6 +174,7 @@
       "tooManyNext": "Responde a los archivos que te esperan y pide a tu contacto que lo envíe de nuevo."
     },
     "gone": "Este archivo ya no está aquí",
+    "incomplete": "Este archivo está incompleto: le falta una parte",
     "noRoom": "No hay espacio en el dispositivo de tu contacto",
     "noRoomHere": "No hay espacio en este dispositivo",
     "noRoomHereNext": "Libera espacio y pídelo de nuevo.",
