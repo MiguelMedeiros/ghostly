@@ -1,3 +1,4 @@
+import { generatePrimeSync, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import * as openpgp from 'openpgp';
@@ -149,6 +150,64 @@ describe('OpenPGP proof: what a contact receives', () => {
     const later = await pasted('expired-clearsign', 'expired');
     await expect(verifyPgpEvidence(later.evidence, statement, { now: Date.UTC(2026, 6, 1) / 1000 })).rejects.toThrow(/expired/);
   });
+});
+
+describe('OpenPGP proof: RSA keys sized before any signature is verified', () => {
+  const big = (bytes: Uint8Array) => BigInt(`0x${Buffer.from(bytes).toString('hex') || '0'}`);
+  const bytesOf = (x: bigint) => { const hex = x.toString(16); return Uint8Array.from(Buffer.from(hex.length % 2 ? `0${hex}` : hex, 'hex')); };
+  const inverse = (a: bigint, m: bigint) => {
+    let [r0, r1, s0, s1] = [a % m, m, 1n, 0n];
+    while (r1) { const q = r0 / r1; [r0, r1, s0, s1] = [r1, r0 - q * r1, s1, s0 - q * s1]; }
+    return r0 === 1n ? ((s0 % m) + m) % m : 0n;
+  };
+  /** A valid, self-certified RSA key with an exponent of `exponentBits` bits, and its proof of the statement. */
+  async function rsaProof(exponentBits: number, modulusBits = 2048) {
+    for (;;) {
+      let p = generatePrimeSync(modulusBits / 2, { bigint: true }), q = generatePrimeSync(modulusBits / 2, { bigint: true });
+      if (p > q) [p, q] = [q, p];
+      const phi = (p - 1n) * (q - 1n);
+      const e = exponentBits === 17 ? 65537n : big(randomBytes(exponentBits / 8)) | (1n << BigInt(exponentBits - 1)) | 1n;
+      const d = inverse(e, phi);
+      if (!d) continue;
+      const packet = new openpgp.SecretKeyPacket(new Date(Date.now() - day * 1000));
+      Object.assign(packet, { algorithm: openpgp.enums.publicKey.rsaEncryptSign, isEncrypted: false,
+        publicParams: { n: bytesOf(p * q), e: bytesOf(e) }, privateParams: { d: bytesOf(d), p: bytesOf(p), q: bytesOf(q), u: bytesOf(inverse(p, q)) } });
+      await packet.computeFingerprintAndKeyID();
+      const packets = new openpgp.PacketList<openpgp.AnyPacket>(); packets.push(packet);
+      const { privateKey, publicKey } = await openpgp.reformatKey({ privateKey: new openpgp.PrivateKey(packets as openpgp.PacketList<openpgp.AnyKeyPacket>), userIDs: [{ name: 'Erin Test', email: 'erin@example.org' }], format: 'object' });
+      const signature = await openpgp.sign({ message: await openpgp.createMessage({ text: statement }), signingKeys: privateKey, detached: true, format: 'binary' }) as Uint8Array;
+      const evidence: PgpEvidence = { scheme: 'openpgp/1', key: toBase64Url(publicKey.write()), signature: toBase64Url(signature) };
+      return { evidence, publicKey };
+    }
+  }
+  /** As Chromium (BoringSSL refuses an RSA exponent over 33 bits): OpenPGP.js then verifies in JavaScript. */
+  function chromiumWebCrypto() {
+    const importKey = crypto.subtle.importKey.bind(crypto.subtle);
+    return vi.spyOn(crypto.subtle, 'importKey').mockImplementation(((format: string, data: JsonWebKey, ...rest: unknown[]) => {
+      if (format === 'jwk' && data.kty === 'RSA' && fromBase64Url(data.e!).length > 5) return Promise.reject(new DOMException('exponent too large', 'DataError'));
+      return (importKey as (...args: unknown[]) => Promise<CryptoKey>)(format, data, ...rest);
+    }) as typeof crypto.subtle.importKey);
+  }
+
+  it.each([16384, 60000])('a %i-bit public exponent is refused, before any signature is verified', async exponentBits => {
+    const { evidence, publicKey } = await rsaProof(exponentBits);
+    expect(fromBase64Url(evidence.key).length).toBeLessThanOrEqual(PGP_LIMITS.sharedKey);
+    const webcrypto = chromiumWebCrypto();
+    try {
+      await expect(verifyPgpEvidence(evidence, statement)).rejects.toThrow(new RegExp(`${exponentBits}-bit public exponent.*does not accept`));
+      await expect(readPgpPublicKey(publicKey.armor())).rejects.toThrow(/public exponent/);
+      expect(webcrypto).not.toHaveBeenCalled();
+    } finally { webcrypto.mockRestore(); }
+  }, 60_000);
+  it('an RSA key with the usual exponent still proves, and one over 8192 bits is refused', async () => {
+    const { evidence } = await rsaProof(17, 4096);
+    const webcrypto = chromiumWebCrypto();
+    try { await expect(verifyPgpEvidence(evidence, statement)).resolves.toMatchObject({ algorithm: 'RSA 4096', userIds: ['Erin Test <erin@example.org>'] }); }
+    finally { webcrypto.mockRestore(); }
+    const key = await openpgp.readKey({ binaryKey: fromBase64Url(evidence.key) });
+    (key.keyPacket as unknown as { publicParams: { n: Uint8Array } }).publicParams.n = Uint8Array.from({ length: 1040 }, () => 0xff);
+    await expect(verifyPgpEvidence({ ...evidence, key: toBase64Url(key.write()) }, statement)).rejects.toThrow(/RSA 8320.*does not accept/);
+  }, 60_000);
 });
 
 describe('OpenPGP proof: the person\'s key and the statement', () => {
