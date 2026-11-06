@@ -281,8 +281,9 @@ export class MeshHubs {
   }
 
   /**
-   * A member said on its own edge that it leaves: if it was a hub, it is none from now on, rather than until the beacon
-   * forgets it and its grace runs out (the commit that takes it out may have no other way here). True when a hub went.
+   * A member said that it leaves, on its own edge or in a signed bye a hub passed on: if it was a hub, it is none from now
+   * on, rather than until the beacon forgets it and its grace runs out (the commit that takes it out may have no other way
+   * here), and it stands in for nobody. True when a hub went.
    */
   departs(groupId: string, key: string): boolean {
     const live = this.live.get(groupId);

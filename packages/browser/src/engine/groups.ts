@@ -2467,6 +2467,8 @@ export class Groups {
       return;
     }
     const taken = await session.handle(peerKey, frame);
+    // A signed leave a hub passed on: that member leaves for me too, so it stands in for nobody (WISP 902 § Stand-ins).
+    for (const f of taken) if (f.t === "group-bye" && f.k !== peerKey && this.hubs.departs(groupId, f.k)) this.host.emit();
     // A message over this edge written before this member was asked: its answer is still coming (`holdSync`).
     const askedAt = this.askedAt(groupId, peerKey);
     if (taken.some(f => f.t === "group-msg" && f.ts < askedAt)) {
