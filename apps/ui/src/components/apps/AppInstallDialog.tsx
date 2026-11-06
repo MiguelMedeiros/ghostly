@@ -178,15 +178,21 @@ function Shell({ titleId, onClose, children, testId, box }: { titleId: string; o
   );
 }
 
+/** What "Version {{version}}" gets in place of the version (a private-use character), to put the version there in its own direction. */
+const VERSION_SLOT = "";
+
 function Head({ titleId, title, version, tagline, icon, installed }: { titleId: string; title: string; version?: string; tagline?: string; icon?: Uint8Array | null; installed?: InstalledAppView }) {
   const { t } = useI18n();
+  const [before = "", after = ""] = version ? t("apps.app.version", { version: VERSION_SLOT }).split(VERSION_SLOT) : [];
   return (
     <div className="flex items-center gap-3">
       <AppIcon size={48} icon={icon} installed={installed} />
       <div className="min-w-0">
         <h2 id={titleId} dir="auto" className="text-match-parent text-lg font-medium text-text-primary break-words">{title}</h2>
-        {version && <p className="text-xs text-text-muted">{t("apps.app.version", { version })}</p>}
-        {/* A link or a long word breaks anywhere: unbroken, it pushed the screen sideways on a phone, and cut it off in Arabic. */}
+        {/* A link, a long word or a version (64 characters, no space) breaks anywhere: unbroken, it pushed the screen
+            sideways on a phone, and cut it off in Arabic. The version keeps its own direction: in Arabic, broken
+            after "1.0.0-", its "-" was drawn at the left ("-1.0.0"). */}
+        {version && <p className="text-xs text-text-muted [overflow-wrap:anywhere]">{before}<bdi dir="ltr">{version}</bdi>{after}</p>}
         {tagline && <p dir="auto" className="text-match-parent text-sm text-text-secondary [overflow-wrap:anywhere]">{tagline}</p>}
       </div>
     </div>
