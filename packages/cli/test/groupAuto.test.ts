@@ -2,7 +2,9 @@ import { mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import type { EngineState, GroupView, LinkView } from "@ghostly/browser/shared/types";
+import { createIdentity } from "@ghostly/core";
+import { Groups, type GroupStore, type GroupsHost } from "@ghostly/browser/engine/groups";
+import type { EngineState, GroupView, LinkView, StoredGroup } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
 import { parseArgs } from "../src/args";
 import { idSlot, positionals, COMMANDS } from "../src/commands";
@@ -116,6 +118,46 @@ describe("group auto", () => {
       "group auto: the invitation to group g1 from chat chat-owner waits: The contact who invited you is not connected. Try again when they are.",
       "group auto: accepted the invitation to group g1 from chat chat-owner",
     ]);
+  });
+
+  it("an invitation over a granted chat finds room when 32 others wait, and is accepted; off, it is dropped as before", async () => {
+    // The engine's invitations with the wiring `openHost` makes: the engine asks `autoJoins`, the daemon's check accepts.
+    const admin = createIdentity().pubKeyZ32;
+    const id = (i: number) => `${String(i).padStart(2, "0")}${"D".repeat(20)}`;
+    const engineWith = async (autoJoins?: (chat: string) => boolean) => {
+      const stored = new Map<string, StoredGroup>();
+      const store: GroupStore = { getGroups: async () => [], putGroup: async (g) => { stored.set(g.id, structuredClone(g)); }, deleteGroup: async (gid) => { stored.delete(gid); }, getMessages: async () => [] };
+      const host = { sendOnLink: () => { throw new Error("offline"); }, linkReady: () => false, contactName: () => undefined, edges: () => new Map(), entries: () => new Map(), openEdge: async () => "", closeEdge: async () => {},
+        openEntry: async () => "", publish: async () => {}, resolve: async () => null, edgeNick: () => undefined, storeMessage: async () => {}, emit: () => {}, ...(autoJoins ? { autoJoins } : {}) } as unknown as GroupsHost;
+      const groups = new Groups(host, store);
+      for (let i = 0; i < 32; i++) await groups.handleContactFrame(`chat-${i >> 2}`, { t: "group-invite", g: id(i), name: `g${i}`, admin, e: 0, n: 1 });
+      return groups;
+    };
+    const w = world();
+    w.auto.set({ on: true, from: ["Miguel"] });
+    const groups = await engineWith((chat) => w.auto.autoJoins(chat));
+    await groups.handleContactFrame("chat-owner", { t: "group-invite", g: id(40), name: "Owner's", admin, e: 0, n: 1 });
+    w.s.groups = groups.views();
+    expect(w.s.groups.map((g) => g.id)).toContain(id(40));
+    expect(w.s.groups.map((g) => g.id)).not.toContain(id(0));
+    expect(w.s.groups).toHaveLength(32);
+    expect(w.auto.autoJoins("chat-owner")).toBe(true);
+    expect(w.auto.autoJoins("chat-other")).toBe(false);
+    w.auto.check(w.state());
+    await vi.waitFor(() => expect(w.engine.acceptGroupInvitation).toHaveBeenCalledWith({ groupId: id(40) }));
+    expect(w.engine.acceptGroupInvitation).toHaveBeenCalledTimes(1);
+
+    // Auto-join off (or no `group auto` at all): the 33rd is dropped and the 32 stay, as before.
+    w.auto.set({ on: false });
+    expect(w.auto.autoJoins("chat-owner")).toBe(false);
+    for (const before of [await engineWith((chat) => w.auto.autoJoins(chat)), await engineWith()]) {
+      await before.handleContactFrame("chat-owner", { t: "group-invite", g: id(40), name: "Owner's", admin, e: 0, n: 1 });
+      expect(before.views().map((g) => g.id).sort()).toEqual(Array.from({ length: 32 }, (_, i) => id(i)));
+    }
+    // A chat whose contact's key changed is not granted, even before the daemon's check drops it.
+    w.auto.set({ on: true, from: ["chat-owner"] });
+    w.s.links = w.s.links.map((l) => (l.id === "chat-owner" ? { ...l, peerPubKeyZ32: "new-key" } : l));
+    expect(w.auto.autoJoins("chat-owner")).toBe(false);
   });
 
   it("a one-shot only keeps the setting: it accepts nothing itself", async () => {
