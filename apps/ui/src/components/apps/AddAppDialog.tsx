@@ -56,7 +56,7 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
 
   const check = async () => {
     const typed = url.trim();
-    if (!typed) return;
+    if (!typed || adding) return;
     // The engine takes nothing but `https:` (`appPasteUrl`): any other text goes to it as typed, and it refuses it in the dialog's words.
     const link = typed.replace(LOOSE_SCHEME, "https://");
     const mine = ++asked.current;
@@ -117,8 +117,10 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
         {/* noValidate: a link the field's type refuses is answered below in the app's words, not by the browser's own bubble. */}
         <form className="space-y-2" noValidate onSubmit={(e) => { e.preventDefault(); void check(); }}>
           <label htmlFor={fieldId} className="text-sm text-text-primary">{t("apps.add.label")}</label>
+          {/* Fixed while Add store runs: an edit (or Enter, which checks again) dropped the store's question and its busy
+              state, and Cancel then closed Add while the store was added all the same. */}
           <input id={fieldId} data-testid="apps-add-url" autoFocus className={input} type="url" inputMode="url" autoComplete="off" spellCheck={false} dir="ltr"
-            placeholder="https://github.com/owner/repo" value={url} onChange={(e) => edit(e.target.value)} />
+            readOnly={adding} placeholder="https://github.com/owner/repo" value={url} onChange={(e) => edit(e.target.value)} />
           <Notice>{t("apps.add.hint")}</Notice>
           {error && <Notice tone="error" testId="apps-add-error" details={error.info}>{error.text}</Notice>}
           {!store && (
