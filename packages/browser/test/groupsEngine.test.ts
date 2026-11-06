@@ -962,11 +962,18 @@ describe("invitations: what the admission exchange ignores", () => {
 
     const carol = world.add("carol");
     const id = (i: number) => `${String(i).padStart(2, "0")}${"B".repeat(20)}`;
-    // More than 32 waiting, all chats together, are not kept.
+    const sent = vi.spyOn((carol as unknown as { host: GroupsHost }).host, "sendOnLink").mockImplementation(() => {});
+    // More than 32 waiting, all chats together, are not kept: the inviter is told no, as past one chat's four.
     for (let i = 0; i < 33; i++) await carol.handleContactFrame(`chat-${i >> 2}`, { t: "group-invite", g: id(i), name: `g${i}`, admin: intruder, e: 0, n: 1 });
     expect(carol.views()).toHaveLength(32);
     expect(carol.views().map(v => v.id)).not.toContain(id(32));
     expect(carol.views()[0].invitation).toMatchObject({ admin: intruder, members: 1 });
+    expect(sent.mock.calls).toEqual([["chat-8", { t: "group-decline", g: id(32) }]]);
+    // One of the 32 sent again by its own chat takes no new room: it replaces itself, unanswered.
+    await carol.handleContactFrame("chat-0", { t: "group-invite", g: id(0), name: "renamed", admin: intruder, e: 0, n: 1 });
+    expect(view(carol, id(0)).name).toBe("renamed");
+    expect(sent).toHaveBeenCalledTimes(1);
+    sent.mockRestore();
   });
 
   it("an invitation over a chat this app accepts by itself finds room among 32 waiting: the oldest of the chat holding the most goes", async () => {
@@ -986,7 +993,7 @@ describe("invitations: what the admission exchange ignores", () => {
       for (let i = 0; i < 32; i++) await carol.handleContactFrame(`chat-${i >> 2}`, { t: "group-invite", g: id(i), name: `g${i}`, admin, e: 0, n: 1 });
       expect(carol.views()).toHaveLength(32);
 
-      // The owner's is kept: all chats hold four, so the oldest of all goes (chat-0's first), without a word.
+      // The owner's is kept: all chats hold four, so the oldest of all goes (chat-0's first), its inviter told no.
       await carol.handleContactFrame("chat-owner", { t: "group-invite", g: id(40), name: "owner's", admin, e: 0, n: 1 });
       expect(ids()).toContain(id(40));
       expect(ids()).not.toContain(id(0));
@@ -999,11 +1006,11 @@ describe("invitations: what the admission exchange ignores", () => {
       expect(ids()).not.toContain(id(8));
       expect(carol.views()).toHaveLength(32);
 
-      // Any other chat's still finds no room, and takes none.
+      // Any other chat's still finds no room, takes none, and is told no.
       await carol.handleContactFrame("chat-9", { t: "group-invite", g: id(42), name: "late", admin, e: 0, n: 1 });
       expect(ids()).not.toContain(id(42));
       expect(carol.views()).toHaveLength(32);
-      expect(sent).not.toHaveBeenCalled();
+      expect(sent.mock.calls).toEqual([["chat-0", { t: "group-decline", g: id(0) }], ["chat-2", { t: "group-decline", g: id(8) }], ["chat-9", { t: "group-decline", g: id(42) }]]);
     } finally {
       clock.mockRestore();
       sent.mockRestore();
