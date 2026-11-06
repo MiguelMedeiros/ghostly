@@ -1347,10 +1347,16 @@ export class GhostLink {
       },
       onClose: () => {
         if (this.activeBinding) return;
-        // A live WebRTC session the contact closed: dialled again at once, and watched for it to come back.
+        // A live WebRTC session that closed: dialled again at once, and the contact watched for it to come back.
         const wasLive = !!this.channel && this.paired?.state.status === "ready";
         this.detach();
-        if (wasLive) this.peerLost("closed");
+        if (!wasLive) return;
+        // Ended here, not by an offer of the contact's (the data link is idle): its network changed, say, and the
+        // contact's connection may hold on for half a minute (node-datachannel never says `disconnected`). The side
+        // whose key does not dial resumes as after an absence: it dials once, and the contact's offer, should one cross
+        // it, is settled by key. It waited for the contact's connection to give up: 31-34 s offline with a CLI contact.
+        if (this.dataLink.state === "idle" && this.awaitsContactDial()) this.resumeAfterAbsence();
+        this.peerLost("closed");
       },
       onState: (state) => {
         const was = this.lastDataLinkState;
