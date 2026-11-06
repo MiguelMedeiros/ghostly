@@ -15,7 +15,10 @@ const require = createRequire(import.meta.url)
  * is someone else's traffic.
  */
 export const DEFAULT_LIMITS = Object.freeze({
-  /** WebSockets at once, over all clients. */
+  /**
+   * WebSockets at once, over all clients. A full relay still lets in an address holding fewer than another one would
+   * after it: the oldest client of the address holding the most is dropped for it (see makeRoom).
+   */
   clients: 512,
   /** WebSockets at once from one address (an IPv6 /64 counts as one, see addressKey). */
   clientsPerAddress: 16,
@@ -445,6 +448,9 @@ export function refusalLines (log, { most = 5 } = {}) {
   }
 }
 
+/** How often one address may have a client dropped to make room for its own on a full relay (see makeRoom). */
+const ROOM_MS = 10_000
+
 /**
  * Starts a relay: an HTTP server whose WebSocket upgrades each carry one browser's HyperDHT (dht-relay,
  * non-custodial: the browser keeps its keys and runs the Noise handshake and the encrypted stream itself;
@@ -485,6 +491,7 @@ export async function startRelay(options = {}) {
   const clients = new Set()
   // Each client's dht-relay session, for what it holds (`stats().held`).
   const nodes = new Set()
+  // Address → its clients, oldest first, each with what drops it to make room.
   const perAddress = new Map()
   const stats = { accepted: 0, refused: 0, dropped: 0 }
   // What each client had waiting unread when the relay last wrote to it, and their sum. A count grows only on a write
@@ -526,6 +533,29 @@ export async function startRelay(options = {}) {
     log(`requests carry ${header} but ${setting} is not set: every client counts as the proxy`)
   }
 
+  /**
+   * On a full relay, what makes room for a client from `address` (null: none is made). A client holding one listen and
+   * answering pings is never idle, so the first `clients / clientsPerAddress` addresses would hold the relay for as long
+   * as they stay. An address that would then hold fewer than the one holding the most gets in, in place of that one's
+   * oldest client: every address that comes gets a share, down to an even split, and a household behind one address
+   * still gets in. An address makes room once per `ROOM_MS`, so one that closes each client it opens bounces nobody
+   * faster than that.
+   */
+  const madeRoom = new Map()
+  const makeRoom = address => {
+    if (Date.now() - (madeRoom.get(address) ?? -Infinity) < ROOM_MS) return null
+    const own = perAddress.get(address)?.size ?? 0
+    let most = null
+    for (const held of perAddress.values()) if (!most || held.size > most.size) most = held
+    if (!most || most.size <= own + 1) return null
+    const [[, evict]] = most
+    return () => { madeRoom.set(address, Date.now()); evict() }
+  }
+  const forgetRoom = setInterval(() => {
+    for (const [address, at] of madeRoom) if (Date.now() - at >= ROOM_MS) madeRoom.delete(address)
+  }, 60_000)
+  forgetRoom.unref?.()
+
   // Node's defaults (60 s for the headers, 300 s for the request) let a connection that never upgrades sit for minutes.
   const server = http.createServer({ requestTimeout: limits.requestMs, headersTimeout: limits.requestMs, connectionsCheckingInterval: Math.min(1000, limits.requestMs) }, (request, response) => {
     if (request.url === '/healthz') {
@@ -559,15 +589,16 @@ export async function startRelay(options = {}) {
       socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`)
     }
     if (origins.size && !origins.has(origin)) { refusedOrigin(origin); return refuse('403 Forbidden') }
-    if (clients.size >= limits.clients) return refuse('503 Service Unavailable', 'full')
-    if ((perAddress.get(address) ?? 0) >= limits.clientsPerAddress) return refuse('429 Too Many Requests', 'address')
-    wss.handleUpgrade(request, socket, head, ws => accept(ws, address))
+    const room = clients.size >= limits.clients ? makeRoom(address) : undefined
+    if (room === null) return refuse('503 Service Unavailable', 'full')
+    if ((perAddress.get(address)?.size ?? 0) >= limits.clientsPerAddress) return refuse('429 Too Many Requests', 'address')
+    // Room is made once the upgrade is through (ws calls back at once then, or never): one it refuses drops nobody.
+    wss.handleUpgrade(request, socket, head, ws => { room?.(); accept(ws, address) })
   })
 
   function accept(ws, address) {
     stats.accepted++
     clients.add(ws)
-    perAddress.set(address, (perAddress.get(address) ?? 0) + 1)
     let dropped = false
     const drop = why => {
       if (dropped) return
@@ -575,6 +606,15 @@ export async function startRelay(options = {}) {
       unqueue(ws)
       ws.terminate()
     }
+    // Its slot is free as it is dropped to make room, not once its socket has closed: the next upgrade counts it gone.
+    const release = () => {
+      if (!clients.delete(ws)) return
+      const held = perAddress.get(address)
+      held.delete(ws)
+      if (!held.size) perAddress.delete(address)
+    }
+    if (!perAddress.has(address)) perAddress.set(address, new Map())
+    perAddress.get(address).set(ws, () => { drop('room'); release() })
     queued.set(ws, { bytes: 0, drop })
     // A token bucket on what the client sends, its pings and pongs too: past it, the relay stops reading its socket for a while.
     let tokens = limits.burstBytes
@@ -632,10 +672,7 @@ export async function startRelay(options = {}) {
       unqueue(ws)
       clearInterval(ping)
       leave()
-      clients.delete(ws)
-      const left = (perAddress.get(address) ?? 1) - 1
-      if (left > 0) perAddress.set(address, left)
-      else perAddress.delete(address)
+      release()
     })
     ws.on('error', () => drop('socket error'))
     const stream = new WsStream(false, ws)
@@ -699,6 +736,7 @@ export async function startRelay(options = {}) {
       for (const ws of clients) ws.terminate()
       // What the last minute left out is said before the relay stops.
       clearInterval(flushing)
+      clearInterval(forgetRoom)
       refusals.flush()
       await new Promise(resolve => { wss.close(); server.close(() => resolve()); server.closeAllConnections() })
       if (!options.dht) await dht.destroy()

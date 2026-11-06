@@ -38,7 +38,7 @@ are in WISP 103, "Browser profile".
 
 | | default | env |
 |---|---|---|
-| WebSockets at once | 512 | `GHOSTLY_RELAY_CLIENTS` |
+| WebSockets at once (when full, an address that would hold fewer than the one holding the most gets in, in place of that one's oldest client; once per 10 s per address) | 512 | `GHOSTLY_RELAY_CLIENTS` |
 | from one address | 16 | `GHOSTLY_RELAY_CLIENTS_PER_ADDRESS` |
 | largest message | 256 KiB | `GHOSTLY_RELAY_PAYLOAD_BYTES` |
 | bytes a client sends per second, burst | 512 KiB/s, 4 MiB | `GHOSTLY_RELAY_BYTES_PER_SECOND`, `GHOSTLY_RELAY_BURST_BYTES` |
