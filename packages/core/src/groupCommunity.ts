@@ -1741,13 +1741,15 @@ export class CommunitySession {
 
   /**
    * After I left, a chain that names me the admin (a hand-over that crossed my leave): the role goes on to
-   * `pick(<the signer of my tip>)` with a `role` commit of mine, as an admin's leave hands it. True when it went; false
-   * while the secret of my tip has not come (it is tried again).
+   * `pick(<the member who handed it to me>)` with a `role` commit of mine, as an admin's leave hands it. Who handed it is
+   * the signer of the newest `role` on my branch, whatever members committed on top since: an admission there would
+   * otherwise steer the role to whoever let someone in. True when it went; false while the secret of my tip has not
+   * come (it is tried again).
    */
   handOnAfterLeave(pick: (by: string) => string | undefined, now = Date.now()): Promise<boolean> {
     return this.serialize(async () => {
       if (!this.following || this.state.status !== "left" || this.admin !== this.myKey || !this.state.secrets[this.topHash]) return false;
-      const next = pick(this.top.by);
+      const next = pick([...this.state.chain].reverse().find(c => c.k === "role" || c.k === "create")!.by);
       if (!next || next === this.myKey || !rosterHas(this.roster, next)) return false;
       await this.commit("role", { s: next }, now);
       return true;
