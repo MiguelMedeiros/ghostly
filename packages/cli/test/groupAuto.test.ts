@@ -49,6 +49,18 @@ describe("group auto", () => {
     expect(w.auto.set({ on: true, from: ["Miguel", "chat-owner"] })).toEqual({ on: true, from: ["chat-owner"] });
   });
 
+  it("--from a group says it is a group, not a chat, with its id, as call auto on --from does", () => {
+    const w = world();
+    w.s.groups = [{ id: "g1crew", name: "Crew", profile: "mesh", members: [], isAdmin: false, status: "active" } as unknown as GroupView];
+    const refused = (ref: string) => { try { w.auto.set({ on: true, from: ["chat-owner", ref] }); } catch (error) { expect(error).toBeInstanceOf(CliError); return (error as CliError).toJSON(); } return expect.fail("not refused"); };
+    for (const ref of ["Crew", "g1crew", "g1c", "group:g1crew"]) {
+      expect(refused(ref)).toEqual({ code: "not_found", message: `${JSON.stringify(ref)} is a group, not a chat (ghostly chat list)`, details: { group: "g1crew" } });
+    }
+    expect(refused("Nobody")).toEqual({ code: "not_found", message: "No chat \"Nobody\" (ghostly chat list)" });
+    expect(w.auto.get()).toEqual({ on: false, from: [] });
+    expect(w.auto.set({ on: true, from: ["Miguel"] })).toEqual({ on: true, from: ["chat-owner"] });
+  });
+
   it("accepts an invitation over a granted chat at once and logs the group and the chat; another chat's stays pending", async () => {
     const w = world();
     w.auto.set({ on: true, from: ["Miguel"] });
