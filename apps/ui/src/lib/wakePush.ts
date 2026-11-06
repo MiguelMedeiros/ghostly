@@ -43,6 +43,8 @@ export interface WakeWords {
   /** "{name} is online", with `{name}` left for the worker to fill, and the words without a name. */
   online?: string;
   onlineUnnamed?: string;
+  /** "Notify me when a contact comes online" is off: the worker shows no online notice of its own. */
+  onlineOff?: true;
   standby?: string;
   standbyCall?: string;
   standbyUnnamed?: string;
@@ -267,16 +269,19 @@ export function useWakeTableSync(text: WakeWords): void {
   // `groups` anew in every state (up to one every 50 ms while someone types or a file moves), so the arrays themselves
   // say nothing about a change: written on them, the table was a database transaction per state, and read whole, they
   // drew the app's shell (and every chat it holds) on each.
-  const { wake, owner, rotateAsked, held } = useEngineValue((state) => ({
+  const { wake, owner, rotateAsked, onlineOff, held } = useEngineValue((state) => ({
     wake: state?.settings.wake,
     owner: state?.wakeOwner,
     rotateAsked: !!state?.settings.wakeRotate,
+    onlineOff: state?.settings.wakeOnline === false,
     held: state?.links && JSON.stringify([
       state.links.map((link) => [link.id, link.peerPubKeyZ32, link.wakeToken, !!link.wakeMuted]),
       (state.groups ?? []).filter((group) => group.profile === "mesh").map((group) => [group.id, group.wakeTokens, !!group.wakeMuted]),
     ]),
   }));
-  const words = JSON.stringify({ ...text, db: databaseName() });
+  // "Notify me when a contact comes online" turned off is kept by this device's worker itself, not only by the contacts'
+  // apps (each hears of it on its next session with this app open): the table says so, and is written again when it changes.
+  const words = JSON.stringify({ ...text, ...(onlineOff && { onlineOff: true }), db: databaseName() });
   const on = !!wake;
   useEffect(() => {
     const push = pushPlatform();

@@ -24,6 +24,11 @@ export interface WakeText {
   online?: string;
   onlineUnnamed?: string;
   /**
+   * The person turned "Notify me when a contact comes online" off: an online push shows no notice of its own (the quiet
+   * one), whatever a contact that has not heard of it yet sends. Absent: online notices show.
+   */
+  onlineOff?: true;
+  /**
    * In a profile on several devices (WISP 06 § Push and the phone), the words of a device that is not the active one,
    * with `{device}` where a device's name goes: a message ("New message. Active on {device}."), a call, the same without
    * a name, and a wake-up from another of the person's devices ("{device} wants to take over. Open Ghostly.", or, on a
