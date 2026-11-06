@@ -326,6 +326,36 @@ it("sends a file to a contact with files/3, and cancels one on both sides", asyn
   await vi.waitFor(() => expect(t.records.get("in:send-0002")).toMatchObject({ state: "cancelled", error: "Cancelled by the sender" }));
 }, 60_000);
 
+it("deleting the chat while files move ends them on the contact's side too, before its session stops", async () => {
+  const t = await setup();
+  // Both transfers stop midway and stay under way: the contact's bytes and its acknowledgements go no further.
+  let hold = false;
+  const send = t.contact.sendFilesFrame.bind(t.contact);
+  t.contact.sendFilesFrame = (frame) => (hold && (frame.t === "pf-data" || frame.t === "pf-got") ? true : send(frame));
+  t.offer("gone-in-01", 10 * 1024 * 1024);
+  const sent = await put(t, "gone-out-1", 12 * 1024 * 1024);
+  await vi.waitFor(async () => {
+    expect((await t.incoming("gone-in-01"))?.transfer?.transferred ?? 0).toBeGreaterThan(1024 * 1024);
+    expect(t.received.get("gone-out-1")?.length ?? 0).toBeGreaterThan(1024 * 1024);
+  }, { timeout: 20_000 });
+  hold = true;
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  expect(t.records.get("in:gone-out-1")?.state).toBe("active");
+  expect(t.records.get("out:gone-in-01")?.state).toBe("active");
+
+  t.node().removeLink({ linkId: t.id });
+  await vi.waitFor(() => {
+    expect(t.records.get("in:gone-out-1")).toMatchObject({ state: "cancelled", error: "Cancelled by the sender" });
+    expect(t.records.get("out:gone-in-01")).toMatchObject({ state: "cancelled", error: "Cancelled by your contact" });
+  }, { timeout: 5_000 });
+  // What the contact had of the file it was receiving goes.
+  await vi.waitFor(() => expect(t.received.has("gone-out-1")).toBe(false));
+  // The session still ends, and nothing of the chat is left here.
+  await vi.waitFor(() => expect(t.files.live).toBe(false));
+  expect(t.node()["fileDesk"]["chats"].has(t.id)).toBe(false);
+  await vi.waitFor(async () => expect(await fileStore.get(sent.id)).toBeUndefined());
+}, 60_000);
+
 it("a sent file whose every byte arrived is too late to cancel: it ends done on both sides, kept there", async () => {
   const t = await setup();
   let release!: () => void;

@@ -367,13 +367,22 @@ export class FileDesk {
     }
   }
 
-  /** The chat went away: its transfers stop here. */
-  drop(linkId: string): void {
+  /**
+   * The chat went away: its transfers stop here. An unfinished one ends on the contact's side too, as deleting its
+   * message does, on the session while it is still up: one never told stayed under way there for good, its part kept.
+   * Called before the chat's link goes, so what is said still finds it. True when an end was said on the session.
+   */
+  drop(linkId: string): boolean {
     const chat = this.chats.get(linkId);
+    // The waiting ones first: a received one cancelled would otherwise start the next waiting one, accepting it.
+    const records = chat?.files.records().sort((a, b) => Number(b.state === "queued") - Number(a.state === "queued")) ?? [];
+    const said = !!chat?.files.live && records.some((record) => !transferEnded(record));
+    for (const record of records) chat!.files.forget(record.direction, record.id);
     chat?.files.detach();
     for (const { timer } of chat?.unsaved.values() ?? []) clearTimeout(timer);
     this.chats.delete(linkId);
     for (const id of [...this.moved.keys(), ...this.restored, ...this.stallChecks.keys()]) if (id.startsWith(`${linkId}-`)) this.unwatch(id);
+    return said;
   }
 
   /** Stops tracking whether a transfer is stuck. */
