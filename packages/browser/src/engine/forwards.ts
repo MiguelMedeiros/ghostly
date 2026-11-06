@@ -107,13 +107,33 @@ async function withoutMetadata(source: StoredFile, size: number, file: MessageFi
   return new Blob(stripPictureMetadata(whole, file.mime) as BlobPart[], { type: source.blob?.type ?? file.mime });
 }
 
+/** What a forward of a message deleted meanwhile says, whether it went before the forward or while its file was copied. */
+export const FORWARD_MESSAGE_GONE = "That message is not in this chat";
+
+type ForwardTarget = { linkId: string; wireId: string; timestamp: number; file: MessageFile };
+
 /**
  * A copy of a file on this device, for sending in another chat under `file.id`: a small one whole, a larger one a
  * step at a time, never whole in memory; a picture without its metadata, read whole, and a video without its. Refused
  * while it is still arriving, or when its bytes are gone. Resolves to `file` as it goes: a stripped file's size is its
  * copy's.
+ *
+ * A copy cut off because its source went meanwhile says why, as one started after would: its message deleted (here, or
+ * for everyone by its sender, which takes its file: `messageGone`, asked only once the copy failed) is
+ * `FORWARD_MESSAGE_GONE`, its record gone with the message still here is "not on this device any more". Only bytes
+ * missing from a source still kept whole on record stay "shorter than it says".
  */
-export async function copyForForward(sourceId: string, target: { linkId: string; wireId: string; timestamp: number; file: MessageFile }): Promise<MessageFile> {
+export async function copyForForward(sourceId: string, target: ForwardTarget, messageGone?: () => Promise<boolean>): Promise<MessageFile> {
+  try {
+    return await copyFile(sourceId, target);
+  } catch (error) {
+    if (await messageGone?.().catch(() => false)) throw Object.assign(new Error(FORWARD_MESSAGE_GONE), { cause: error });
+    if (!(await fileStore.get(sourceId).catch(() => ({ metadata: true })))?.metadata) throw Object.assign(new Error("The file is not on this device any more"), { cause: error });
+    throw error;
+  }
+}
+
+async function copyFile(sourceId: string, target: ForwardTarget): Promise<MessageFile> {
   const source = await fileStore.get(sourceId);
   if (!source?.metadata) throw new Error("The file is not on this device any more");
   const stored = storedSize(source);

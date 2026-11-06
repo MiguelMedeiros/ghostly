@@ -199,6 +199,9 @@ const RULES: readonly Rule[] = [
   // A file forwarded that is still arriving here, or whose bytes are gone (engine/forwards.ts `copyForForward`).
   exact("The file has not arrived yet", "errors.files.notArrived", "errors.files.notArrivedNext"),
   exact("The file is not on this device any more", "errors.files.notHere", "errors.files.notHereNext"),
+  // A stored file with fewer bytes here than its size says: a forward's copy of one cut short (engine/forwards.ts), a
+  // file read for a backup or a move to another device (lib/backupFile.ts, lib/handoffProfile.ts, shared/storedFiles.ts).
+  exact("The file is shorter than it says", "errors.files.incomplete"),
   exact("This device cannot decode the recording", "errors.files.cannotDecodeRecording"),
   exact("The video took too long", "errors.files.videoTooSlow"),
   { match: HOLD_FULL_ITEMS, key: "errors.hold.fullItems", next: "errors.hold.fullNext" },
