@@ -152,6 +152,8 @@ export interface AddedAppStore {
   equivocation?: { sequence: number; digest: string; at: number };
   /** What went wrong at the last read: a refusal code, or the fetch error's. */
   problem?: string;
+  /** The HTTP status the host answered when `problem` is `status`: its own trouble (5xx, 429) passes, a 404 does not. */
+  problemStatus?: number;
 }
 
 /** Where a bundle's file lies in the client's own file storage (`Apps.fileAt`): bytes `offset` to `offset + length` of `id`. */
@@ -250,6 +252,7 @@ export interface AppStoreSummary {
   removed: AppRemoval[];
   equivocation?: { sequence: number; at: number };
   problem?: string;
+  problemStatus?: number;
 }
 
 /**
@@ -1196,6 +1199,7 @@ export class Apps {
       removed: index?.removed ?? [],
       ...(s.equivocation && { equivocation: { sequence: s.equivocation.sequence, at: s.equivocation.at } }),
       ...(s.problem && { problem: s.problem }),
+      ...(s.problemStatus !== undefined && { problemStatus: s.problemStatus }),
     };
   }
 
@@ -1283,7 +1287,7 @@ export class Apps {
   private withIndex(record: AddedAppStore, index: AppStoreIndex, digest: string): AddedAppStore {
     const held = record.index ? { key: record.key, sequence: record.index.sequence, digest: record.digest ?? "" } : null;
     const decision = appStoreDecision(held, { key: index.key, sequence: index.sequence, digest });
-    const { problem: _problem, ...rest } = record;
+    const { problem: _problem, problemStatus: _status, ...rest } = record;
     switch (decision) {
       case "new": case "update": { const { equivocation: _e, ...clean } = rest; return { ...clean, index, digest, fetchedAt: this.now() }; }
       case "same": return { ...rest, fetchedAt: this.now() };
@@ -1341,7 +1345,9 @@ export class Apps {
       const now = await this.storeRecord(s.key);
       if (!now || now.removed) continue;
       // Judged against the record held now: an index taken meanwhile (Add, at another URL) is not replaced by an older one.
-      let next: AddedAppStore = read.ok ? this.withIndex(now, read.store.index, read.store.digest) : { ...now, problem: read.reason };
+      const { problemStatus: _status, ...unread } = now;
+      let next: AddedAppStore = read.ok ? this.withIndex(now, read.store.index, read.store.digest)
+        : { ...unread, problem: read.reason, ...("status" in read && read.status !== undefined && { problemStatus: read.status }) };
       const fromCopy = copy?.ok ? this.withIndex(now, copy.store.index, copy.store.digest) : null;
       if (next.copyUrl !== undefined && !next.problem) {
         // Its own URL holds the index held, or a newer one: the copy is not read any more.
@@ -1350,7 +1356,7 @@ export class Apps {
       } else if (fromCopy && fromCopy.problem !== "rollback" && next.problem !== "equivocation") next = fromCopy;
       // Nothing to keep but when it was read: held here, not written (the whole index would be written with it).
       const unchanged = now === s && next.index === s.index && next.digest === s.digest && next.problem === s.problem && next.equivocation === s.equivocation
-        && next.copyUrl === s.copyUrl;
+        && next.problemStatus === s.problemStatus && next.copyUrl === s.copyUrl;
       if (unchanged) (await this.records()).set(s.key, next);
       else await this.putStore(next);
       out.push(this.summary(next));
@@ -1364,17 +1370,17 @@ export class Apps {
    * its last read (`behindReads`: one at a commit stays so), and stopped when it turns out not to be; otherwise only
    * once the own URL showed it.
    */
-  private async readStore(s: AddedAppStore): Promise<{ read: AppStoreRead | { ok: false; reason: string }; copy: AppStoreRead | null }> {
+  private async readStore(s: AddedAppStore): Promise<{ read: AppStoreRead | { ok: false; reason: string; status?: number }; copy: AppStoreRead | null }> {
     const last = this.behindReads.get(s.key);
     const lastBehind = last?.url === s.url ? last : undefined;
     const unneeded = new AbortController();
     const readCopy = (at: string) => this.readStoreAt(at, s.key, s, undefined, unneeded.signal).catch((): null => null);
     const early = s.copyUrl !== undefined && lastBehind ? readCopy(s.copyUrl) : null;
-    let read: AppStoreRead | { ok: false; reason: string };
+    let read: AppStoreRead | { ok: false; reason: string; status?: number };
     try {
       read = await this.readStoreAt(s.url, s.key, s, lastBehind);
     } catch (error) {
-      read = { ok: false, reason: error instanceof AppFetchError ? error.code : "network" };
+      read = error instanceof AppFetchError ? { ok: false, reason: error.code, ...(error.status !== undefined && { status: error.status }) } : { ok: false, reason: "network" };
     }
     // Its own URL behind the copy of its index the person took (or not answering): that copy's read is used.
     const behind = !read.ok || !!this.withIndex(s, read.store.index, read.store.digest).problem;
