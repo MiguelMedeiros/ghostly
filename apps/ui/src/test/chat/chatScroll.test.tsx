@@ -573,6 +573,20 @@ describe("the chat timeline's scrolling", () => {
     expect(list().scrollTop).toBe(1200);
   });
 
+  it("End or Ctrl/Cmd+↓ leaves the chat where it is behind a dialog (Members, Forward, Delete chat), and the key to the dialog", () => {
+    const { rerender } = renderApp(<><Timeline rows={theirs(0, 30)} /><dialog open data-testid="dialog"><button type="button">Close</button></dialog></>);
+    scrollTo(0);
+    rerender(<><Timeline rows={theirs(0, 31)} /><dialog open data-testid="dialog"><button type="button">Close</button></dialog></>);
+    expect(pill()).toHaveAttribute("data-count", "1");
+    const button = screen.getByRole("button", { name: "Close" });
+    for (const [target, init] of [[button, { key: "End" }], [button, { key: "ArrowDown", ctrlKey: true }], [document.body, { key: "End" }]] as const) {
+      // Not taken: in the dialog, End scrolls what holds the focus.
+      expect(fireEvent.keyDown(target, init)).toBe(true);
+      expect(list().scrollTop).toBe(0);
+    }
+    expect(pill()).toHaveAttribute("data-count", "1");
+  });
+
   it("a jump to a message (a quote's, a search's) from the bottom lands on it, not back at the bottom", () => {
     const { rerender } = renderApp(<Timeline rows={theirs(0, 40)} />);
     expect(list().scrollTop).toBe(1700);
