@@ -49,7 +49,7 @@ import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, engineText, groupName, parseCommunityEdit, parseEngineError, sanitizeDisplayText, traceLink } from "@ghostly/core";
 import { ClockWatch, DirectPathWatch, firstDeviceSetSecret } from "@ghostly/core";
-import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WAKE_ONLINE_DELAY_MS, WAKE_ONLINE_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
+import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WAKE_ONLINE_BATCH, WAKE_ONLINE_BATCH_MS, WAKE_ONLINE_DELAY_MS, WAKE_ONLINE_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
 import { COMMUNITY_PIN_FRAME, PIN_LIMITS, mayPin, pinIsNewer, pinNumberHolds, readPin, type GroupPinFrame, type WirePin } from "@ghostly/core";
 import { CapsExchange, DHT_FILE_CAPABILITY, DHT_FILE_TOO_LARGE, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, dhtFileId, type DhtFileAnnouncement, type DhtPacketFacts, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
@@ -3534,14 +3534,22 @@ export class GhostlyNode implements EngineImplementation {
    * An online wake-up (WISP 401 § Wake-up push, revision 2026-10-27) to each paired contact that asked for one, whose
    * chat is not live: at most one per contact per `WAKE_ONLINE_INTERVAL_MS`, counted across restarts, since a restart is
    * what says it. Apart from the message wake-ups' limit, so it never holds one back. A muted chat's contact shared no
-   * target; a group's edge is never told.
+   * target; a group's edge is never told. `WAKE_ONLINE_BATCH` at a time, the rest a `WAKE_ONLINE_BATCH_MS` later (those
+   * still away then), so a push relay's minute keeps room for the message and call wake-ups.
    */
   private sayOnline(now = Date.now()): void {
     if (!this.networkOn || this.shuttingDown) return;
+    let sent = 0;
     for (const live of this.links.values()) {
       const { id, peerWake: target, profile, group, onlineWokeAt } = live.stored;
       if (!target?.online || !profile || group || live.link?.isDataLinkOpen) continue;
       if (onlineWokeAt !== undefined && onlineWokeAt <= now && now - onlineWokeAt < WAKE_ONLINE_INTERVAL_MS) continue;
+      if (sent === WAKE_ONLINE_BATCH) {
+        clearTimeout(this.onlineTimer);
+        this.onlineTimer = setTimeout(() => { this.onlineTimer = undefined; this.sayOnline(); }, WAKE_ONLINE_BATCH_MS);
+        return;
+      }
+      sent += 1;
       live.stored = { ...live.stored, onlineWokeAt: now };
       void db.patchLink(id, { onlineWokeAt: now });
       this.postWake(id, target, "online");
