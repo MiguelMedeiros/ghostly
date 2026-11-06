@@ -104,7 +104,8 @@ export function translateWith(dict: unknown, language?: Language): Translate {
     let value = pluralForm(dict, key, language, params) ?? getNestedValue(dict, key);
     if (params) {
       const unit = unitForm(dict, value, language, params);
-      for (const [k, v] of Object.entries(params)) value = value.replace(new RegExp(`{{${k}}}`, "g"), String(k === "unit" && unit !== undefined ? unit : v));
+      // Put in by a function: a string would read `$$`, `$&` and `` $` `` in a contact's name or text as patterns.
+      for (const [k, v] of Object.entries(params)) value = value.replace(new RegExp(`{{${k}}}`, "g"), () => String(k === "unit" && unit !== undefined ? unit : v));
     }
     return value;
   };
