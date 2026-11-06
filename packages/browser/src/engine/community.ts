@@ -398,7 +398,7 @@ export class Communities {
    * Communities I left, gone from here but for their session and edges, which follow the chain a while
    * (`LEFT_FOLLOW_MS`): the leave I said, whose leaves I heard since, and when a role that reached me goes on.
    */
-  private readonly leftBehind = new Map<string, { session: CommunitySession; frame: CommunityLeaveFrame; since: number; heard: Set<string>; handOnAt?: number }>();
+  private readonly leftBehind = new Map<string, { session: CommunitySession; frame: CommunityLeaveFrame; since: number; heard: Set<string>; handOnAt?: number; askedAt?: number }>();
   /** Joiners: the knock record a knock read whose write the relays refused, and when it was read (`knock`). */
   private readonly knockRead = new Map<string, { n: number; knocks: Knock[]; at: number }>();
   /** My frames an edge took, and which of them carry an edit (`frame id → editKey`). */
@@ -807,8 +807,17 @@ export class Communities {
     else if (now - left.since > LEFT_FOLLOW_MS) await this.dropLeftBehind(groupId);
     else if (!rosterHas(s.roster, s.myKey)) left.handOnAt = undefined;
     else if (s.admin !== s.myKey) left.handOnAt = undefined;
-    else if (left.handOnAt === undefined) left.handOnAt = now + LEFT_HAND_ON_MS;
-    else if (now >= left.handOnAt) await this.handOn(groupId, now);
+    else {
+      // The secret of my tip went missing (a fresh one sealed to me was lost): asked of whoever I am connected to, as a
+      // member catches up, now and then until it comes. It is of an epoch before the commit that takes me out.
+      if (s.leftWaitsForSecret && now - (left.askedAt ?? 0) >= 5_000) {
+        left.askedAt = now;
+        const ready = [...this.host.edges(groupId)].filter(([key, id]) => key !== s.myKey && this.host.linkReady(id, 2) && rosterHas(s.roster, key)).map(([key]) => key);
+        for (const key of ready.slice(0, 3)) s.catchUp(key);
+      }
+      if (left.handOnAt === undefined) left.handOnAt = now + LEFT_HAND_ON_MS;
+      else if (now >= left.handOnAt) await this.handOn(groupId, now);
+    }
   }
 
   /**

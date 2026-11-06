@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { createIdentity } from "@ghostly/core";
+import { communityCommitHash, createIdentity } from "@ghostly/core";
 import { CommunityWorld, sameRun, seededRandom, type Peer } from "./communityWorld";
 // covers: groups.leave, groups.admin-change
 
@@ -114,6 +114,41 @@ describe("a community's admin role handed to a member whose leave is on its way"
       await world.run(120_000);
       for (const p of peers.filter(p => p !== bob)) expect(peerOf(world.view(p, id)!.members.find(m => m.role === "admin")!.key)?.name, p.name).toBe("carol");
     });
+
+    // The fresh secret of a hub's commit (a member's leave) did not reach the member the admin then made the admin while
+    // it left: its app took the `role` on top of that commit, could not derive the role's secret, never asked for it, and
+    // the group kept the leaver as its admin for good.
+    for (const lose of [true, false]) {
+      it(`seed ${seed}: the member made the admin as it leaves ${lose ? "missed" : "had (control)"} the fresh secret of the commit below`, async () => {
+        const { world, id, peers, carol, key } = await group(seed, ["carol", "bob", "dave", "erin", "fay"]);
+        const [, bob, , erin] = peers;
+        const lost: string[] = [], sealed: string[] = [];
+        world.drop = (from, to, frame) => {
+          if (to === bob && frame.t === "group-secret") sealed.push(frame.h as string);
+          if (to === bob && frame.t === "group-secrets") sealed.push(...(frame.secrets as { h: string }[]).map(s => s.h));
+          if (!lose || lost.length || to !== bob || frame.t !== "group-secret" || frame.to !== key(bob)) return false;
+          lost.push(from.name);
+          return true;
+        };
+        await erin.groups.leave(id);
+        await world.until(() => world.view(carol, id)?.members.length === 4, 2 * 60_000);
+        await world.run(2_000);
+        if (lose) expect(lost.length).toBe(1);
+        // The epoch it leaves in is the one below the commit whose secret it lacks: what the role needs is a later one.
+        expect(world.view(bob, id)!.epoch).toBe(world.view(carol, id)!.epoch - (lose ? 1 : 0));
+        const left = bob.groups.communities.session(id)!;
+        await Promise.allSettled([carol.groups.makeAdmin(id, key(bob)), bob.groups.leave(id)]);
+        await converged(world, id, peers.filter(p => p !== bob && p !== erin), key);
+        // What it asked for while it followed is of epochs before the commit that took it out: nothing of that one's on,
+        // sealed to it by anyone or held by its app.
+        const chain = carol.groups.communities.session(id)!.state.chain;
+        const out = chain.find(c => (c.k === "leave" || c.k === "remove") && c.s === key(bob))?.e;
+        expect(out, "the commit that takes bob out").toBeDefined();
+        expect(sealed.length).toBeGreaterThan(0);
+        const epochOf = new Map(chain.map(c => [communityCommitHash(c), c.e] as const));
+        for (const h of [...sealed, ...Object.keys(left.state.secrets)]) if (epochOf.has(h)) expect(epochOf.get(h)!, h).toBeLessThan(out!);
+      });
+    }
 
     it(`seed ${seed}: control, the member leaves a second after the role reached it`, async () => {
       const { world, id, peers, carol, key } = await group(seed);

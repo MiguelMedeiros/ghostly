@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
+import { fromBase64Url } from "../src/bytes";
+import { sealSecret } from "../src/groupCrypto";
 import { CommunitySession, communityCommitHash, type CommunityFrame, type CommunitySessionHooks, type CommunityState } from "../src/groupCommunity";
 // covers: groups.community.leave
 
@@ -19,11 +21,14 @@ interface Member { name: string; session: CommunitySession; online: boolean; hea
 class Net {
   readonly members = new Map<string, Member>();
   private pending: Promise<unknown>[] = [];
+  /** A frame this returns true for is lost on its way. */
+  drop?: (to: Member, frame: CommunityFrame) => boolean;
+  now = Date.now();
 
   private hooks(name: string): CommunitySessionHooks {
     const deliver = (to: Member | undefined, frame: CommunityFrame) => {
       const me = this.members.get(name)!;
-      if (!to || !to.online || !me.online || to === me) return;
+      if (!to || !to.online || !me.online || to === me || this.drop?.(to, frame)) return;
       to.heard.push(clone(frame));
       this.pending.push(to.session.handle(me.session.myKey, clone(frame)));
     };
@@ -34,6 +39,7 @@ class Net {
       addressed: (to, frame) => deliver(this.byKey(to), frame),
       message: () => {},
       changed: () => {},
+      clock: () => this.now,
     };
   }
   byKey(key: string): Member | undefined { for (const m of this.members.values()) if (m.session.myKey === key) return m; return undefined; }
@@ -134,6 +140,79 @@ describe("a member's app that left takes no secret from the commit that took it 
     bob.session.catchUp(carol.session.myKey); await net.settle();
     expect(secretFrames(bob, side)).toEqual([]);
     expect(bob.session.state.secrets[side]).toBeUndefined();
+  });
+
+  // agents#3226: the role reached a leaver whose fresh secret of the commit below went missing. Its app asks for it
+  // (`leftWaitsForSecret`), and gets it: an epoch before the commit that takes it out. Nothing of that one's on, asked
+  // for or sealed to it.
+  it("a leaver made the admin asks for the secret it missed below its removal, and nothing from the removal on", async () => {
+    const net = new Net();
+    const alice = net.create("Alice");
+    const bob = await net.admit(alice, "Bob");
+    const carol = await net.admit(alice, "Carol");
+    const dave = await net.admit(alice, "Dave");
+    const erin = await net.admit(alice, "Erin");
+    await net.settle();
+    // Dave leaves; the fresh secret of Carol's commit of it does not reach Bob.
+    await dave.session.leave(); await net.settle();
+    net.drop = (to, f) => to === bob && (f.t === "group-secret" || f.t === "group-secrets");
+    expect(await carol.session.commitPendingLeaves()).toBe(1);
+    await net.settle();
+    // Alice makes Bob the admin while Bob leaves: neither heard the other first.
+    net.only(alice, carol, erin);
+    await alice.session.transferAdmin(bob.session.myKey); await net.settle();
+    net.only(bob);
+    const leave = (await bob.session.leave(true))!;
+    await bob.session.followAfterLeave();
+    net.only(alice, bob, carol, erin);
+    for (const m of [alice, carol, erin]) await m.session.handle(bob.session.myKey, clone(leave));
+    // The role reaches Bob, the secrets still not: the role cannot go on until he asks.
+    bob.session.catchUp(alice.session.myKey); await net.settle();
+    net.drop = undefined;
+    expect(bob.session.admin).toBe(bob.session.myKey);
+    expect(bob.session.leftWaitsForSecret).toBe(true);
+    expect(await bob.session.handOnAfterLeave(() => alice.session.myKey)).toBe(false);
+    net.now += 6_000;
+    bob.session.catchUp(alice.session.myKey); await net.settle();
+    expect(bob.session.leftWaitsForSecret).toBe(false);
+    expect(await bob.session.handOnAfterLeave(() => alice.session.myKey)).toBe(true);
+    await net.settle();
+    expect(alice.session.admin).toBe(alice.session.myKey);
+    // With Erin away, Carol commits Bob's leave (epoch `out`) and Alice a fresh epoch on top.
+    net.only(alice, bob, carol);
+    expect(await carol.session.commitPendingLeaves()).toBe(1);
+    await net.settle();
+    const out = alice.session.epoch, removal = alice.session.topHash;
+    expect(bob.session.topHash).toBe(removal);
+    await alice.session.rotate(); await net.settle();
+    const later = alice.session.topHash;
+    // Erin, on her view from before, lets someone in: a side branch at `out` that still lists Bob.
+    net.only(bob, erin);
+    await erin.session.admit(createIdentity().pubKeyZ32); await net.settle();
+    const side = erin.session.topHash;
+    expect(erin.session.epoch).toBe(out);
+    expect(bob.session.state.side.map(c => communityCommitHash(c))).toContain(side);
+    const epochOf = (h: string) => [...alice.session.state.chain, ...erin.session.state.chain].find(c => communityCommitHash(c) === h)!.e;
+    // Erin's answer may seal him her side's secret (Bob is in by her view): not taken.
+    net.now += 6_000;
+    bob.session.catchUp(erin.session.myKey); await net.settle();
+    // Asked from far back: what comes is of the epochs before the removal, none of it or later.
+    net.only(alice, bob);
+    bob.heard.length = 0;
+    const sync = { ...(bob.session as unknown as { syncFrame(to: string): Record<string, unknown> }).syncFrame(alice.session.myKey) };
+    sync.h = communityCommitHash(alice.session.state.chain[0]); sync.secrets = [];
+    await alice.session.handle(bob.session.myKey, sync); await net.settle();
+    const sealed = bob.heard.flatMap(f => f.t === "group-secret" ? [f.h] : f.t === "group-secrets" ? f.secrets.map(s => s.h) : []);
+    expect(sealed.length).toBeGreaterThan(0);
+    for (const h of sealed) expect(epochOf(h)).toBeLessThan(out);
+    // Sealed to it anyway (an app that does not bound it, or a stale view): not taken.
+    for (const [by, h] of [[alice, removal], [alice, later], [erin, side]] as const) {
+      const secret = fromBase64Url(by.session.state.secrets[h]);
+      const s = sealSecret(bob.session.myKey, secret, JSON.stringify(["ghostly-group/2 secret", by.session.id, h, bob.session.myKey]));
+      await bob.session.handle(by.session.myKey, { t: "group-secret", v: 2, g: by.session.id, to: bob.session.myKey, h, s });
+      expect(bob.session.state.secrets[h], `epoch ${epochOf(h)}`).toBeUndefined();
+    }
+    for (const h of Object.keys(bob.session.state.secrets)) expect(epochOf(h)).toBeLessThan(out);
   });
 
   it("the main branch's secrets from before the removal still reach it, and none from it on", async () => {
