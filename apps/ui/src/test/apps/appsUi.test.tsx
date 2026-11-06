@@ -547,6 +547,77 @@ describe("with the apps flag on", () => {
     expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: all, asks: [] }, { digest: DIGEST, grant: all, asks: all }]);
   });
 
+  it("an update refused for what it asks, whose read again fails, says why and takes no Update until Try again reads it", async () => {
+    const all = ["chat", "name"] as AppPreview["asks"];
+    const manifest = { ...preview().manifest, permissions: all };
+    let read: () => AppPreview = () => preview({ install: "update", asks: [], manifest });
+    fakeEngine.on("appPreview", () => read()).on("appInstall", (params) => {
+      const { asks } = params as { asks: string[] };
+      if (asks.length < 1) throw new Error("permissions-changed: This install now asks for name; look at it again");
+      return installed({ permissions: all });
+    });
+    const onInstalled = vi.fn();
+    const { user } = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} onInstalled={onInstalled} />);
+    const confirm = await screen.findByTestId("app-install-confirm");
+    expect(confirm).toHaveTextContent("Update");
+    read = () => { throw new Error("offline: no network"); };
+    await user.click(confirm);
+    expect(await screen.findByTestId("app-install-error")).toHaveTextContent("You are offline.");
+    expect(screen.getByTestId("app-install-error")).not.toHaveTextContent("Look at them again");
+    // The screen still shows what it asked before: another press would be refused the same way.
+    expect(screen.getByTestId("app-install-confirm")).toBeDisabled();
+    const retry = screen.getByTestId("app-install-retry");
+    expect(retry).toHaveTextContent("Try again");
+    expect(retry).toHaveFocus();
+    await user.click(screen.getByTestId("app-install-confirm"));
+    expect(fakeEngine.callsTo("appInstall")).toHaveLength(1);
+    // Still offline: said again, Update still off.
+    await user.click(retry);
+    await waitFor(() => expect(fakeEngine.callsTo("appPreview")).toHaveLength(3));
+    expect(await screen.findByTestId("app-install-error")).toHaveTextContent("You are offline.");
+    expect(screen.getByTestId("app-install-confirm")).toBeDisabled();
+    // Back online: what it asks now, and Update grants that.
+    read = () => preview({ install: "update", asks: ["name"], manifest });
+    await user.click(screen.getByTestId("app-install-retry"));
+    expect(await screen.findByTestId("app-permissions")).toHaveTextContent("See your name in this chat");
+    expect(screen.getByTestId("app-install-error")).toHaveTextContent("This update now adds other permissions. Look at them again before you update.");
+    expect(screen.queryByTestId("app-install-retry")).not.toBeInTheDocument();
+    expect(screen.getByTestId("app-install-confirm")).toBeEnabled();
+    expect(screen.getByTestId("app-install-confirm")).toHaveFocus();
+    await user.click(screen.getByTestId("app-install-confirm"));
+    await waitFor(() => expect(onInstalled).toHaveBeenCalled());
+    expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: all, asks: [] }, { digest: DIGEST, grant: all, asks: ["name"] }]);
+  });
+
+  it("a new install refused for what it asks, whose read again fails, says the read's error, and Try again shows the install's words", async () => {
+    const all = ["chat", "name"] as AppPreview["asks"];
+    const manifest = { ...preview().manifest, permissions: all };
+    let read: () => AppPreview = () => preview({ install: "new", asks: ["chat"], manifest });
+    fakeEngine.on("appPreview", () => read()).on("appInstall", (params) => {
+      const { asks } = params as { asks: string[] };
+      if (asks.length < all.length) throw new Error("permissions-changed: This install now asks for chat, name; look at it again");
+      return installed({ permissions: all });
+    });
+    const onInstalled = vi.fn();
+    const { user } = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} onInstalled={onInstalled} />);
+    const confirm = await screen.findByTestId("app-install-confirm");
+    expect(confirm).toHaveTextContent("Install");
+    read = () => { throw new Error("network: fetch failed"); };
+    await user.click(confirm);
+    expect(await screen.findByTestId("app-install-error")).toHaveTextContent("Could not reach the host.");
+    expect(screen.getByTestId("app-install-error")).not.toHaveTextContent("update");
+    expect(screen.getByTestId("app-install-confirm")).toBeDisabled();
+    read = () => preview({ install: "new", asks: all, manifest });
+    await user.click(screen.getByTestId("app-install-retry"));
+    expect(await screen.findByTestId("app-install-error")).toHaveTextContent("What this app asks for changed. Look at it again before you install it.");
+    expect(screen.getByTestId("app-permissions")).toHaveTextContent("See your name in this chat");
+    expect(screen.getByTestId("app-install-confirm")).toHaveTextContent("Install");
+    expect(screen.getByTestId("app-install-confirm")).toBeEnabled();
+    await user.click(screen.getByTestId("app-install-confirm"));
+    await waitFor(() => expect(onInstalled).toHaveBeenCalled());
+    expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: all, asks: ["chat"] }, { digest: DIGEST, grant: all, asks: all }]);
+  });
+
   it("shows the internet permission with what it means behind ⓘ, and an update that adds it asks again", async () => {
     const internet: AppPreview["asks"] = ["chat", "internet"];
     fakeEngine.on("appPreview", () => preview({ asks: internet, manifest: { ...preview().manifest, permissions: internet } }));
