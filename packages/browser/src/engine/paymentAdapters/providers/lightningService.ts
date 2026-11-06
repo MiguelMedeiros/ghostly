@@ -212,6 +212,9 @@ export class LightningService {
   async createInvoice(amount: number, context: { memo?: string; paymentId?: string } = {}): Promise<LightningInvoice & { source: string }> {
     const { provider, descriptor } = await this.sources.use();
     if (!provider.capabilities.receive) throw new Error(`${descriptor.label} cannot create invoices`);
+    // Receiving needs looking up, as paying does: an invoice the source cannot be asked about would never be seen
+    // paid nor expire, and its chat request would wait for good. A source that reports its own (the mints) is told.
+    if (!provider.capabilities.lookup && !provider.settlesItself) throw new Error(`${descriptor.label} cannot look up its invoices, so a payment to it would never be seen: receive with another Lightning card, or connect it with invoice lookup allowed`);
     const created = await provider.createInvoice(amount, context.memo ?? "Ghostly");
     const decoded = decodeBolt11(created.invoice);
     // What goes to a contact must be the invoice we asked for: this amount, this hash, the right chain.
