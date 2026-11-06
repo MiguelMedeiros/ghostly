@@ -136,9 +136,9 @@ chrome.runtime.onUpdateAvailable.addListener((details) => {
   void rememberPendingUpdate(details.version);
 });
 
-chrome.action.onClicked.addListener(async () => {
-  await ensureEngine();
-  await showApp();
+// The app opens even when the peer does not start, as on a first install: the page says why.
+chrome.action.onClicked.addListener(() => {
+  void ensureEngine().catch(() => {}).then(() => showApp()).catch(() => {});
 });
 
 /** Brings the app's tab forward, or opens one; on `route` (`/chat/…`) when given. */
