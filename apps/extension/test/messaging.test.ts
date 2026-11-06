@@ -679,7 +679,8 @@ describe("the toolbar button", () => {
       world.endOffscreen();
       world.onCreateDocument = async () => {};
       fire(world.chrome.action.onClicked);
-      await vi.advanceTimersByTimeAsync(100 * 50 + 1000);
+      // The silent document is waited on, replaced once, and the new one waited on too, before the start gives up.
+      await vi.advanceTimersByTimeAsync(2 * 100 * 50 + 1000);
       expect(world.callsTo("tabs.create")).toEqual([[world.chrome.runtime.getURL("app.html")]]);
     } finally {
       vi.useRealTimers();
