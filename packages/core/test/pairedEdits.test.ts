@@ -257,6 +257,23 @@ describe("edits on a paired session (edit/1)", () => {
     answer = true;
   });
 
+  it("refuses an edit whose frame passes the contact's frame limit once JSON escapes it, and the session stays open", async () => {
+    const { a, b } = pair();
+    await live(a, b);
+    await vi.waitFor(() => expect(a.link.supportsEdits && b.link.supportsEdits).toBe(true));
+    // 12,002 UTF-8 bytes: each U+0001 is six characters in the frame's JSON, ~72 K against the 60 K a session takes.
+    const controls = `x${"\u0001".repeat(12_000)}x`;
+    expect(validEditMessage(controls)).toBe(true);
+    expect(await a.link.sendEdit(edit({ m: controls }))).toBe("Message too long once encoded. Shorten it or send it as a file.");
+    expect(editsSent(a)).toEqual([]);
+    // Quotes are two characters each, and go.
+    const quotes = "\"".repeat(12_002);
+    expect(await a.link.sendEdit(edit({ e: 2, m: quotes }))).toBeNull();
+    await vi.waitFor(() => expect(a.receipts).toEqual([[ID, 2]]));
+    expect(b.edits.map(x => x.m)).toEqual([quotes]);
+    expect(a.link.isDataLinkOpen && b.link.isDataLinkOpen).toBe(true);
+  });
+
   it("an app that does not offer edit/1 gets nothing, and what it sends is not read", async () => {
     const { a, b } = pair({ b: { editSupport: false } });
     await live(a, b);
