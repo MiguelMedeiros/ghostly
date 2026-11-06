@@ -204,6 +204,11 @@ export function NetworkSettings() {
         <input id={FIELDS.push} value={pushRelay} onChange={(e) => { setPushRelay(e.target.value); edited("push"); }} placeholder="https://push-relay.example.org"
           {...exactText} dir="ltr" data-testid="network-push-relay" {...invalid("push")} className={`${field} font-mono text-sm`} />
         {problemUnder("push")}
+        {/* The saved relay answered the last wake-up, but not as a push relay (a web page, its own refusal): said until it forwards one. */}
+        {network.pushRelayRefused && pushRelay.trim() === network.pushRelay && <div data-testid="network-push-relay-refused" className="mt-1 text-xs text-warn-ink">
+          <p>{t("network.pushRelayRefused", { http: String(network.pushRelayRefused.http) })}</p>
+          {network.pushRelayRefused.text && <p data-testid="network-push-relay-said">{fillNames(t("network.pushRelayRefusedSaid"), { text: network.pushRelayRefused.text })}</p>}
+        </div>}
       </Field>
 
       <Field testId="network-turn-field" label={t("network.turn")} htmlFor="network-turn-url" hint={t(credentialGone ? "network.turnCredentialAgain" : "network.turnHint")} info={t("network.turnInfo")}>

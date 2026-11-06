@@ -1914,6 +1914,18 @@ export interface ServiceView extends StoredService {
   requests: number;
 }
 
+/** A push relay's answer that was not a push service's status (`EngineState.pushRelayRefused`). */
+export interface PushRelayRefused {
+  /** The relay address it came from. */
+  url: string;
+  /** When, in ms. */
+  at: number;
+  /** The relay's HTTP status. */
+  http: number;
+  /** The relay's own error text, when it gave one. */
+  text?: string;
+}
+
 export interface EngineState {
   settings: Settings;
   /**
@@ -1938,6 +1950,12 @@ export interface EngineState {
    * neither replaces nor turns off what is not its own). Absent in a profile on one device, or when nobody said.
    */
   wakeOwner?: "here" | "away";
+  /**
+   * The push relay set in `settings.pushRelay` answered the last wake-up it was handed, but not as a push relay: a web
+   * page, JSON without the push service's status, or its own refusal (`text`, its `{ error }` on one line, cut). Kept
+   * in memory until it forwards one; absent otherwise, and where the host posts wake-ups itself (Desktop, CLI).
+   */
+  pushRelayRefused?: PushRelayRefused;
   transport: {
     protocol: string; relays: string[];
     /** Present where Iroh runs in the browser (web app, extension): the relays it uses and the defaults. */

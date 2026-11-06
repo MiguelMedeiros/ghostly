@@ -16,6 +16,8 @@
   "pushRelay": "推送中继(可选)",
   "pushRelayHint": "用于从浏览器唤醒联系人。留空：不使用。",
   "pushRelayInfo": "浏览器无法向推送服务发送，由此中继代发。它能看到你的 IP 地址以及你何时唤醒了某人，但看不到消息。",
+  "pushRelayRefused": "通过此中继的上一次唤醒失败：它没有以推送中继的方式应答 (HTTP {{http}})。应用已关闭的联系人无法通过它被唤醒。",
+  "pushRelayRefusedSaid": "中继返回：“{{text}}”",
   "readRelays": "同时使用 Pkarr 中继",
   "readRelaysHint": "更快找到首个联系人。中继能看到查询了哪些密钥。",
   "readRelaysInfo": "本应用直接读取 Mainline DHT。开启：还会通过下方的 Pkarr 中继读取。如果 DHT 被拦截，即使关闭也会通过这些中继读取。",

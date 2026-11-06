@@ -584,6 +584,7 @@ export const servicesPlatform: ServicesPlatform | null = {
       ...(state.transport.iroh ? { iroh: { relays: state.settings.irohRelays ?? [], defaultRelays: state.transport.iroh.defaults } } : {}),
       hyperdhtRelay: state.settings.hyperdhtRelay ?? DEFAULT_HYPERDHT_RELAY,
       pushRelay: state.settings.pushRelay ?? "",
+      ...(state.pushRelayRefused ? { pushRelayRefused: { http: state.pushRelayRefused.http, ...(state.pushRelayRefused.text !== undefined ? { text: state.pushRelayRefused.text } : {}) } } : {}),
       relayOnly: state.settings.relayOnly === true,
       ...(state.transport.direct ? { readRelays: state.settings.readRelays === true } : {}),
       ...(state.transport.directBlocked ? { directBlocked: true } : {}),

@@ -139,7 +139,7 @@ import { RESTORE_UNCHECKED_KEY, isRestoreUnchecked, peekTurn, restoreCheckOf, re
 import { createDeviceSigningKey } from "../devices/signingKey";
 import { afterStop, money, planHandoffWallets, type HandoffTakerFacts, type HandoffWalletPlan, type WalletHome } from "../devices/handoffWallets";
 import { clearWalletHomes, readWalletHomes, writeWalletHomes } from "../devices/walletHomes";
-import { postPush, profileWakeAfter, profileWakeOnRemoval, wakeOwnerOf } from "../devices/push";
+import { PushRelayRefusal, postPush, profileWakeAfter, profileWakeOnRemoval, wakeOwnerOf } from "../devices/push";
 import { MAX_ALLOWED_TOKENS, forkTimes } from "../devices/state";
 import { awayFrom, setAwayWallets, setSingleWriterGate, refuseAway } from "./paymentAdapters/away";
 import { breezDatabaseInUse } from "./paymentAdapters/providers/breezDatabases";
@@ -192,7 +192,7 @@ import type {
   PublicPostsView,
 } from "../shared/types";
 import { WALLET_TYPES } from "../shared/types";
-import type { WakeSubscription } from "../shared/types";
+import type { PushRelayRefused, WakeSubscription } from "../shared/types";
 import { forgetWallet, mainnetBalances, markBackedUp, observeBalances, putOff, type BackupReminders } from "../shared/backupReminder";
 import { withoutFrame, type MessageChanges } from "../shared/messageChanges";
 import { pairedWireReply, receivedPairedReply, replyRef, replyTo as replyToOriginal } from "../shared/replies";
@@ -1068,6 +1068,8 @@ export class GhostlyNode implements EngineImplementation {
   private readonly cardPresses = new Map<string, Map<string, { id: string; button: string }[]>>();
   /** At most one wake-up per contact per `WAKE_INTERVAL_MS` (WISP 401 § Wake-up push). */
   private readonly wakeLimiter = new WakeLimiter();
+  /** The push relay's last answer that was not a push service's status, until it forwards one (`EngineState.pushRelayRefused`). */
+  private pushRelayRefusal?: PushRelayRefused;
   /** Call wake-ups have their own, shorter limit: a call is rarer than a message and cannot wait five minutes. */
   private readonly callWakeLimiter = new WakeLimiter(WAKE_CALL_INTERVAL_MS);
   /** Mentions in private groups: one per member per 5 minutes, four per group per minute (WISP 902 · Group Mesh § Wake-up push). */
@@ -2889,6 +2891,7 @@ export class GhostlyNode implements EngineImplementation {
       ...(this.limitedMode && this.restoreCheck && { restoreCheck: this.restoreCheck }),
       ...(this.limitedMode && this.startChecking && { startCheck: true as const }),
       ...(wakeOwnerOf(this.settings.wake, this.ownDeviceKey) && { wakeOwner: wakeOwnerOf(this.settings.wake, this.ownDeviceKey) }),
+      ...(this.pushRelayRefusal && this.pushRelayRefusal.url === this.settings.pushRelay && { pushRelayRefused: this.pushRelayRefusal }),
       transport: {
         ...this.transport.describe(), ...(this.options.irohWeb || this.ownIrohRelays ? { iroh: { relays: this.irohRelays, defaults: [...DEFAULT_IROH_RELAYS] } } : {}),
         ...(this.transport.configure && { direct: true }), ...(this.transport.discovery && { discovery: this.transport.discovery() }),
@@ -3723,9 +3726,25 @@ export class GhostlyNode implements EngineImplementation {
     return true;
   }
 
-  /** Posts a wake-up: the host's way, or `fetch`, then the push relay when a page may not post it itself. */
-  private postPush(request: PushRequest): Promise<number> {
-    return postPush(request, { pushSend: this.options.pushSend, relay: this.settings.pushRelay });
+  /**
+   * Posts a wake-up: the host's way, or `fetch`, then the push relay when a page may not post it itself. A relay that
+   * answers but not as a push relay is kept for the pages (`EngineState.pushRelayRefused`) until it forwards one; a
+   * relay that cannot be reached at all (offline, timed out) is not, as a page cannot tell that from being offline.
+   */
+  private async postPush(request: PushRequest): Promise<number> {
+    const relay = this.settings.pushRelay;
+    try {
+      return await postPush(request, {
+        pushSend: this.options.pushSend, relay,
+        relayed: () => { if (this.pushRelayRefusal?.url === relay) { this.pushRelayRefusal = undefined; this.emitState(); } },
+      });
+    } catch (error) {
+      if (error instanceof PushRelayRefusal && relay) {
+        this.pushRelayRefusal = { url: relay, at: Date.now(), http: error.http, ...(error.text !== undefined && { text: error.text }) };
+        this.emitState();
+      }
+      throw error;
+    }
   }
 
   removeLink({ linkId }: { linkId: string }): void {
