@@ -6,7 +6,7 @@ import { fileMoment, fileMomentLine, fileOfferLine, type FileMoment } from "../.
 import { isGroupFile } from "../../lib/fileStatus";
 import { servicesPlatform } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
-import { paymentLine } from "../paymentWords";
+import { paymentLine, storedPaymentLine } from "../paymentWords";
 import { appCardLine, cardLine, showsCard } from "../../lib/statusCards";
 
 /** What the announcer reads of a message: a 1:1 chat's and a group's both have it. */
@@ -40,7 +40,10 @@ function spoken(message: Announceable, t: Translate): string {
   if (showsCard(message.card)) return cardLine(message.card);
   const wallet = message.paymentId ? servicesPlatform?.wallet : undefined;
   const payment = wallet?.getPayment(message.paymentId!);
-  return payment ? paymentLine(t, payment, wallet!.getState()) : appCardLine(message.card, t) ?? filePreview(message.file, t) ?? previewText(message.text, t);
+  if (payment) return paymentLine(t, payment, wallet!.getState());
+  // A payment the wallet does not know (yet): its stored English line, said as the bubble says it.
+  if (message.paymentId) return storedPaymentLine(t, message.text, message.sender === "me");
+  return appCardLine(message.card, t) ?? filePreview(message.file, t) ?? previewText(message.text, t);
 }
 
 const short = (text: string) => {

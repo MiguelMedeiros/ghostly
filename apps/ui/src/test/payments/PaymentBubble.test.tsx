@@ -31,6 +31,25 @@ it("shows the message's own text for a payment the wallet does not know", () => 
   expect(screen.queryByTestId("payment-bubble")).not.toBeInTheDocument();
 });
 
+// The line the app keeps with the message is English (for the CLI and older apps): before the wallet is there, or once
+// its payment record is gone, the bubble says it in the app's language, as the chat list does.
+it.each([
+  ["⚡ Requested 1,000 test sats", true, "pt", "⚡ Você pediu 1.000 sats de teste"],
+  ["⚡ 1.000 sats", false, "pt", "⚡ Enviou para você 1.000 sats"],
+  // Written by a device whose own language uses other digits.
+  ["⚡ ١٬٠٠٠ sats", false, "pt", "⚡ Enviou para você 1.000 sats"],
+  ["Requested 2100 test sats on Ark", false, "pt", "⚡ Pediu a você 2.100 sats de teste"],
+  ["⚡ Requested 5,000 sats from the group", true, "es", "⚡ Pediste 5000 sats"],
+  ["1 test sats on Fedimint", true, "pt", "⚡ Você enviou 1 sat de teste"],
+  ["Requested 1.5 TEST-USDT", true, "pt", "⚡ Você pediu 1.5 TEST-USDT"],
+  ["Token payment request", false, "pt", "⚡ Pediu a você"],
+  ["[a payment]", true, "pt", "[a payment]"],
+] as const)("says the stored line “%s” in the app's language when the wallet does not know the payment", (stored, mine, language, said) => {
+  fakeEngine.setState({ links: [linkView()] });
+  renderApp(<PaymentBubble paymentId="missing" peerPubKey="peer" fallbackText={stored} mine={mine} />, { language });
+  expect(screen.getByText(said)).toBeInTheDocument();
+});
+
 describe("what the bubble says", () => {
   it.each([
     ["request", "out", "You requested"],

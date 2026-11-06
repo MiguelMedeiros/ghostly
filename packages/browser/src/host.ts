@@ -76,6 +76,13 @@ export interface BrowserHost {
    */
   requestLocalAccess(originPattern: string, origin: string): Promise<boolean>;
   /**
+   * Runs `task` (the share's `addService`, right after `requestLocalAccess` said yes) while no `forgetLocalAccess` or
+   * `releaseUnusedLocalAccess`, from this page or another, can give `originPattern` back. Resolves false without running
+   * it when the access went back between the two: ask again. Left out where nothing gives access back under a share
+   * (Desktop keeps one list per profile, in Rust).
+   */
+  withLocalAccess?(originPattern: string, task: () => Promise<void>): Promise<boolean>;
+  /**
    * The profile no longer shares any app at `origin` (desktop: off Rust's list of addresses it may reach; the extension
    * gives Chrome back `localAccessPattern(origin)` once no profile shares an app at that host, on any port).
    */

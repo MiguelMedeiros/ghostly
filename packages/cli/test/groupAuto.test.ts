@@ -192,6 +192,16 @@ describe("group auto", () => {
     expect(w.auto.set({ on: false })).toEqual({ on: false, from: [] });
   });
 
+  it("each on names every chat: a new on replaces the list, as call auto on --from does (docs/CLI.md says so)", () => {
+    const w = world();
+    expect(w.auto.set({ on: true, from: ["chat-owner"] })).toEqual({ on: true, from: ["chat-owner"] });
+    expect(w.auto.set({ on: true, from: ["chat-other"] })).toEqual({ on: true, from: ["chat-other"] });
+    expect(w.auto.set({ on: true, from: ["chat-owner", "chat-other"] })).toEqual({ on: true, from: ["chat-owner", "chat-other"] });
+    const docs = readFileSync(join(import.meta.dirname, "../../../docs/CLI.md"), "utf8").replace(/\s+/g, " ");
+    expect(docs).not.toContain("--from <chat>` (again for more chats)");
+    expect(docs).toContain("a new `group auto on` replaces the list");
+  });
+
   it("over the API: group.auto reads and sets it, group.list shows it, chat.remove forgets the chat", async () => {
     const w = world();
     Object.assign(w.engine, { removeLink: vi.fn(async () => undefined) });

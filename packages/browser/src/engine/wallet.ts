@@ -12,7 +12,8 @@ import type {
   Wallet,
 } from "@cashu/cashu-ts";
 import { STORES, newestWalletTx, openDb, store, transact, wrap, committed } from "../shared/idb";
-import { openRow, openRows, RowSeals, sealRow, sealedStore } from "./sealedRows";
+import { openRow, openRows, proofKey, RowSeals, sealRow, sealedStore } from "./sealedRows";
+import { hasDataKey } from "./dataKey";
 import { LIMITS, PaymentPreflightError, decodeBolt11, engineError, engineText, type PaymentReview, type WalletNetwork } from "@ghostly/core";
 import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS, keysetRefused, mintRefused } from "./paymentAdapters/cashu";
 import { AskBackoff } from "./askBackoff";
@@ -337,6 +338,8 @@ export class CashuWallet {
   private readonly quoteAsked = new Map<string, number>();
   /** Per quote the screen shows: until when (`watch`). */
   private readonly quoteWatched = new Map<string, number>();
+  /** Per open quote whose mint did not answer, or answered with an error: as `meltAsk`, on top of its own pace. */
+  private readonly quoteAsk = new AskBackoff(INVOICE_PACE.missedMs, INVOICE_PACE.missedCapMs);
   private meltTimer: ReturnType<typeof setTimeout> | null = null;
   /** Per pending melt: when it is asked about next and the wait before that, in this run (a restart asks at once). */
   private readonly meltAsk = new AskBackoff(MELT_POLL_MS, MELT_SLOW_POLL_MS);
@@ -569,6 +572,8 @@ export class CashuWallet {
     const quote = (await this.quotes()).find((q) => q.invoice.toLowerCase() === wanted);
     if (!quote) return false;
     this.quoteWatched.set(quote.quote, Date.now() + INVOICE_PACE.watchMs);
+    // Its mint may be back: the screen asks whatever wait its silence earned.
+    this.quoteAsk.forget(quote.quote);
     await this.pollQuotes();
     return true;
   }
@@ -675,6 +680,7 @@ export class CashuWallet {
     // What this run knows of quotes that are no longer stored goes with them.
     const stored = new Set(quotes.map((q) => q.quote));
     for (const pace of [this.quoteAsked, this.quoteWatched]) for (const id of pace.keys()) if (!stored.has(id)) pace.delete(id);
+    this.quoteAsk.keepOnly(stored);
 
     const open = quotes.filter((q) => !q.issuedUnclaimed && !q.held);
     const at = Date.now();
@@ -684,15 +690,15 @@ export class CashuWallet {
     if (next.length) this.scheduleQuotes(Math.min(...next));
   }
 
-  /** When the mint is next asked about this quote. */
+  /** When the mint is next asked about this quote: at its pace, and not before the wait its mint's silence earned. */
   private nextAsk(quote: StoredQuote, now: number): number {
-    return nextInvoiceAsk({
+    return Math.max(this.quoteAsk.at(quote.quote, 0), nextInvoiceAsk({
       createdAt: quote.createdAt,
       expiresAt: quote.expiresAt,
       watchedUntil: this.quoteWatched.get(quote.quote),
       closed: !!quote.paymentId && !!this.events.requestClosed?.(quote.paymentId),
       paid: !!quote.paid,
-    }, this.quoteAsked.get(quote.quote), now);
+    }, this.quoteAsked.get(quote.quote), now));
   }
 
   /** The next round at `at`, unless one is due sooner. */
@@ -704,13 +710,23 @@ export class CashuWallet {
     this.quoteTimer = setTimeout(() => { this.quoteTimer = null; void this.pollQuotes(); }, Math.max(0, at - Date.now()));
   }
 
-  /** Asks the mints about these quotes. Returns the ones minted. */
+  /**
+   * Asks the mints about these quotes. Returns the ones minted. A quote whose mint does not answer, or answers with an
+   * error, waits longer each time (`quoteAsk`); a mint that could not be loaded is not loaded again in this call for its
+   * other quotes, which wait as that one does. The load runs outside the mint's lock, so a failed one does not hold it.
+   */
   private async settleQuotes(quotes: readonly StoredQuote[]): Promise<string[]> {
     const minted: string[] = [];
+    const down = new Set<string>();
     for (const { quote, mint } of quotes.filter((q) => !q.issuedUnclaimed && !q.held)) {
       this.quoteAsked.set(quote, Date.now());
+      // Its mint could not be loaded for another quote just now: this one waits as that one does.
+      if (down.has(mint)) { this.quoteAsk.missed(quote, Date.now()); continue; }
       try {
+        try { await this.wallet(mint); }
+        catch (error) { down.add(mint); throw error; }
         const paid = await this.locked(mint, () => this.settleQuote(quote));
+        this.quoteAsk.forget(quote);
         if (paid) {
           minted.push(quote);
           // Test coins are no invoice anyone else knows of.
@@ -718,7 +734,8 @@ export class CashuWallet {
           this.events.onChange();
         }
       } catch {
-        // mint unreachable: try again on the next round
+        // The mint did not answer, or answered with an error: asked again later, and later each time.
+        this.quoteAsk.missed(quote, Date.now());
       }
     }
     return minted;
@@ -1332,8 +1349,8 @@ export class CashuWallet {
    * payment then stays, marked `finished`, until the chat has been told (`tellSwap`). Returns whether it stored.
    */
   private async finishSwap(swap: PendingSwap, keep: Proof[], send: Proof[], late: boolean): Promise<boolean> {
-    const secrets = new Set(swap.kind === "send" ? swapOf(swap).inputs.map((p) => p.secret) : []);
-    const inputs = (await this.allProofs()).filter((p) => p.mint === swap.mint && secrets.has(p.secret));
+    // A redeem's inputs were never the wallet's: only a split looks its own up.
+    const inputs = (await this.proofsOf(swap.kind === "send" ? swapOf(swap).inputs.map((p) => p.secret) : [])).filter((p) => p.mint === swap.mint);
     const lost = swap.kind === "send" ? swapOf(swap).inputs.reduce((sum, p) => sum + Number(p.amount), 0) - sats(keep) - sats(send) : 0;
     let stored = false;
     await this.sealedTransact([STORES.proofs, STORES.swaps, STORES.walletTx, ...(swap.payment ? [STORES.payments] : [])], { [STORES.proofs]: [...keep, ...send], [STORES.payments]: swap.payment ? [swap.payment] : [] }, (stores) => {
@@ -1391,8 +1408,7 @@ export class CashuWallet {
 
   /** The proofs a split reserved, as they are stored now. */
   private async storedInputs(swap: PendingSwap): Promise<StoredProof[]> {
-    const secrets = new Set(swapOf(swap).inputs.map((p) => p.secret));
-    return (await this.allProofs()).filter((p) => p.mint === swap.mint && p.reserved && secrets.has(p.secret));
+    return (await this.proofsOf(swapOf(swap).inputs.map((p) => p.secret))).filter((p) => p.mint === swap.mint && p.reserved);
   }
 
   private async swapsAt(mint: string): Promise<PendingSwap[]> {
@@ -1876,8 +1892,7 @@ export class CashuWallet {
   }
 
   private async reservedProofs(melt: PendingMelt): Promise<StoredProof[]> {
-    const secrets = new Set(melt.secrets);
-    return (await this.allProofs()).filter((p) => secrets.has(p.secret));
+    return this.proofsOf(melt.secrets);
   }
 
   /** Everything held, as one token per mint; `mints`: only these mints' (one network's wallet). */
@@ -1938,6 +1953,22 @@ export class CashuWallet {
 
   private async allProofs(): Promise<StoredProof[]> {
     return openRows(STORES.proofs, await wrap<StoredProof[]>((await store(STORES.proofs, "readonly")).getAll()));
+  }
+
+  /**
+   * The stored proofs of these secrets, each read by its key: a swap's inputs cost what the swap holds, not the wallet.
+   * With the data key, a proof is under the hash of its secret, or under the secret itself until the migration reseals it.
+   */
+  private async proofsOf(secrets: Iterable<string>): Promise<StoredProof[]> {
+    const wanted = [...new Set(secrets)];
+    if (wanted.length === 0) return [];
+    const proofs = await store(STORES.proofs, "readonly");
+    const sealed = hasDataKey();
+    const found = await Promise.all(wanted.map(async (secret) => {
+      const [hashed, plain] = await Promise.all([sealed ? wrap<StoredProof | undefined>(proofs.get(proofKey(secret))) : undefined, wrap<StoredProof | undefined>(proofs.get(secret))]);
+      return hashed ?? plain;
+    }));
+    return openRows(STORES.proofs, found.filter((p): p is StoredProof => p !== undefined));
   }
 
   private async readSwaps(): Promise<PendingSwap[]> {

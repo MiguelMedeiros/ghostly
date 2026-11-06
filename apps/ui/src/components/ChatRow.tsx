@@ -23,7 +23,7 @@ import { sameValue } from "../lib/sameValue";
 import type { ChatListDensity } from "../lib/settings";
 import type { ChatMessage } from "../lib/types";
 import { servicesPlatform } from "../lib/platform";
-import { paymentLine } from "./paymentWords";
+import { paymentLine, storedPaymentLine } from "./paymentWords";
 import { callEventText } from "../lib/callLines";
 import { refusedRowText } from "../lib/refusedLine";
 import { callLineCount } from "../lib/storage";
@@ -250,7 +250,8 @@ function joinPreview(p: ChatRowProps, joiner: string | undefined, t: Translate):
 
 /**
  * A payment or a request as the list's line (paymentLine: what its bubble says, in the app's language, test sats as
- * test sats), or undefined while the wallet does not know it. Only a change of that line draws the row again.
+ * test sats), or undefined while the wallet does not know it (the row then says the stored line as the bubble does,
+ * `storedPaymentLine`). Only a change of that line draws the row again.
  */
 function usePaymentLine(paymentId: string | undefined, t: Translate): string | undefined {
   const subscribe = useCallback((listener: () => void) => (paymentId && servicesPlatform?.subscribe(listener)) || (() => {}), [paymentId]);
@@ -365,7 +366,8 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
                 : refused !== undefined ? refused
                 : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo, callLineCount(p.lastMessage.callEvent)) ?? p.lastMessage.text
                 : showsCard(p.lastMessage.card) ? cardLine(p.lastMessage.card)
-                : payment ?? appCardLine(p.lastMessage.card, t, installed) ?? filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t)}
+                : payment ?? (p.lastMessage.paymentId ? storedPaymentLine(t, p.lastMessage.text, p.lastMessage.sender === "me")
+                  : appCardLine(p.lastMessage.card, t, installed) ?? filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t))}
             </span>
           : <span className="italic text-text-muted">{t("chat.noMessages")}</span>}
         status={(muted || p.pinned) && <>

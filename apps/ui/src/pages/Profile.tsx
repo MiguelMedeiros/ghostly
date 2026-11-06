@@ -26,6 +26,7 @@ import { formatAmount } from "../lib/amount";
 import { useComposition } from "../hooks/useComposition";
 import { useOwnNameField } from "../hooks/useOwnNameField";
 import { useFittedNameField } from "../hooks/useGroupNameField";
+import { useFocusLanding } from "../hooks/useFocusLanding";
 import { openJoinAnother } from "../lib/devices";
 import { problemText, type Problem } from "../lib/problemText";
 
@@ -86,6 +87,9 @@ export function Profile() {
   const newNameField = useFittedNameField(newName, setNewName, fitsProfileName);
   // The new profile opens after a moment (`switchProfile`): another submit until the reload made a second one.
   const opening = useRef(false), [opened, setOpened] = useState(false);
+  // Cancel goes with the form: the focus goes back to New profile, which takes its place, not to the page.
+  const [cancelled, setCancelled] = useState(false);
+  useFocusLanding(cancelled ? "[data-testid='profile-new']" : null, () => setCancelled(false));
   useEffect(() => { if (wantsNew) { setCreating(true); document.querySelector("[data-testid='profile-list']")?.scrollIntoView({ block: "nearest" }); } }, [wantsNew]);
   const [deleting, setDeleting] = useState<ProfileEntry | null>(null);
   // A backup restored to replace the profile it was made from lands here, the copy running: the original's removal
@@ -188,7 +192,7 @@ export function Profile() {
             <InputGroup as="form" onSubmit={(e) => { e.preventDefault(); if (!opening.current) attempt(() => { const entry = createProfile(newName); askNameIn(entry.id); switchProfile(entry.id, { route: "/profile" }); opening.current = true; setOpened(true); }); }}>
               <input data-testid="profile-new-name" autoFocus className={input} placeholder={t("profile.name")} value={newName} {...newNameField} />
               <Button type="submit" variant="primary" data-testid="profile-create" disabled={!hasVisible(newName) || opened}>{t("profile.create")}</Button>
-              <Button onClick={() => { setCreating(false); setNewName(""); }}>{t("common.cancel")}</Button>
+              <Button onClick={() => { setCreating(false); setNewName(""); setCancelled(true); }}>{t("common.cancel")}</Button>
             </InputGroup>
           </Block>
         ) : (

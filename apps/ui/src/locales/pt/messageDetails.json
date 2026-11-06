@@ -162,6 +162,12 @@
     "voice": "Voz",
     "wire": "Rede"
   },
+  "send": {
+    "failed": "falhou",
+    "failedBecause": "falhou: {{error}}",
+    "sending": "enviando",
+    "sent": "enviado"
+  },
   "storage": {
     "blob": "o arquivo inteiro no IndexedDB",
     "idb": "pedaços no IndexedDB",

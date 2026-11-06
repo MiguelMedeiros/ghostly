@@ -456,15 +456,17 @@ export function seenChatWakeTags(profile: string, path: string): string[] {
  * any text of the message.
  * An online notice (revision 2026-10-27) names the contact only by the name the table already holds for that chat,
  * else "A contact is online"; only for a 1:1 chat, under a tag of its own so it never replaces a "New message".
+ * With "Notify me when a contact comes online" turned off here (`onlineOff`, written by the page), an online push has no
+ * notice of its own (the worker shows `quietWakeNotice`): a contact that has not heard of the switch yet still sends one.
  */
-export function wakeNotice(found: { entry: { path: string; name?: string; mutedUntil?: number | "forever" }; text: { title: string; body: string; call?: string; online?: string; onlineUnnamed?: string } } | undefined, options: { now: number; appVisible: boolean; profile: string; kind?: "message" | "call" | "online" }):
+export function wakeNotice(found: { entry: { path: string; name?: string; mutedUntil?: number | "forever" }; text: { title: string; body: string; call?: string; online?: string; onlineUnnamed?: string; onlineOff?: boolean } } | undefined, options: { now: number; appVisible: boolean; profile: string; kind?: "message" | "call" | "online" }):
   { title: string; body: string; tag: string; call: boolean; data: { path: string; profile: string } } | null {
   if (!found || options.appVisible) return null;
   const { entry, text } = found;
   if (entry.mutedUntil === "forever" || (typeof entry.mutedUntil === "number" && entry.mutedUntil > options.now)) return null;
   if (!/^\/(chat|group)\/[^/?#]+$/.test(entry.path)) return null;
   if (options.kind === "online") {
-    if (!entry.path.startsWith("/chat/")) return null;
+    if (!entry.path.startsWith("/chat/") || text.onlineOff) return null;
     const name = typeof entry.name === "string" ? entry.name.trim() : "";
     const body = name ? (text.online || "{name} is online").split("{name}").join(name) : text.onlineUnnamed || "A contact is online";
     return { title: text.title, body, tag: wakeTag("wake-online", options.profile, entry.path), call: false, data: { path: entry.path, profile: options.profile } };

@@ -23,6 +23,7 @@ const BEA = "tok-bea-aaaaaaaaaaaaaa";
 const CAI = "tok-cai-aaaaaaaaaaaaaa";
 const DAN = "tok-dan-aaaaaaaaaaaaaa";
 const EVE = "tok-eve-aaaaaaaaaaaaaa";
+const FAY = "tok-fay-aaaaaaaaaaaaaa";
 const TEXT = { title: "Ghostly", body: "New message", call: "Incoming call", online: "{name} is online", onlineUnnamed: "A contact is online" };
 
 interface Shown { title: string; options: { tag?: string; silent?: boolean; body?: string; renotify?: boolean; vibrate?: number[] }; closed: boolean }
@@ -184,6 +185,15 @@ describe("every push the worker takes shows a notification", () => {
       expect(await push(body), body).toBe(1);
       expect(shown[before]).toMatchObject({ options: { tag: "quiet:", body: "", silent: true } });
     }
+  });
+
+  it("with online notices turned off on this device, an online push shows the quiet notice, never \"<name> is online\"; a message still shows", async () => {
+    await writeWakeEntries("", [{ token: FAY, path: "/chat/fay", name: "Fay" }], { ...TEXT, onlineOff: true });
+    const { push, shown } = await startPushWorker();
+    expect(await push(wake(FAY, { o: 1 }))).toBe(1);
+    expect(shown[0]).toMatchObject({ options: { tag: "quiet:", body: "", silent: true } });
+    expect(await push(wake(FAY))).toBe(1);
+    expect(shown[1]).toMatchObject({ options: { body: "New message", tag: "wake::/chat/fay" } });
   });
 
   it("an online notice inside its 30-minute gap: the one on screen again, silently, or the quiet notice once it was dismissed", async () => {
