@@ -56,6 +56,23 @@ describe("the chat header's call buttons", () => {
     expect(onCall).not.toHaveBeenCalled();
   });
 
+  it("when the chat cannot call, show why on screen as a press finds them off, where a phone has no title to show", async () => {
+    const onCall = vi.fn();
+    const { user, rerender } = renderApp(<CallButtons phone blocked="Calls need a live connection" busy={false} onCall={onCall} />);
+    expect(screen.queryByTestId("call-blocked")).toBeNull();
+    await user.click(screen.getByTestId("call-audio"));
+    expect(screen.getByTestId("call-blocked-text")).toHaveTextContent("Calls need a live connection");
+    expect(screen.getByTestId("call-blocked-region")).toHaveAttribute("role", "status");
+    expect(onCall).not.toHaveBeenCalled();
+
+    // During a call the buttons are off with no reason to give: nothing new is said.
+    await user.click(screen.getByTestId("call-blocked-close"));
+    rerender(<CallButtons phone blocked={null} busy onCall={onCall} />);
+    await user.click(screen.getByTestId("call-audio"));
+    expect(screen.queryByTestId("call-blocked")).toBeNull();
+    expect(onCall).not.toHaveBeenCalled();
+  });
+
   it("keep the keyboard focus during a call, and start no second one", async () => {
     const onCall = vi.fn();
     const { user, rerender } = renderApp(<CallButtons blocked={null} busy={false} onCall={onCall} />);
