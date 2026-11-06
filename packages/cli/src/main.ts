@@ -5,7 +5,7 @@ import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, type OptionSpec, type Parsed } from "./args";
 import { connectDaemon, DaemonClient, endedUnanswered, isNotTheDaemon } from "./client";
 import { childEnv, dropSecretEnv } from "./childEnv";
-import { COMMANDS, idSlot, noMoreThan, positionals, takesText, TEXT_COMMANDS } from "./commands";
+import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_COMMANDS } from "./commands";
 import { here, inRange, INPUT_BYTES, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS } from "./engineMethods";
 import { asCliError, CliError, type ErrorCode, EXIT, localFileError } from "./errors";
@@ -1402,7 +1402,7 @@ async function identityAddCommand(argv: string[]): Promise<void> {
 
 async function tableCommand(name: string, argv: string[]): Promise<void> {
   const command = COMMANDS[name];
-  const parsed = parseArgs(argv, command.options ?? {}, idSlot(command), { command: name, text: takesText(command) });
+  const parsed = parseArgs(argv, command.options ?? {}, idSlot(command), { command: name, text: takesText(command), number: numberSlot(command) });
   const g = globals(parsed);
   pretty = g.pretty;
   const args = positionals(command, parsed.positionals);
