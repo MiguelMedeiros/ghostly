@@ -6,7 +6,7 @@ import { activeProfileId } from "./profiles";
 import { MUTE_EVENT, chatOfLink, groupChat, mutedUntil } from "./chatMute";
 import { groupPath } from "./groups";
 import { contactName } from "./identities";
-import { chatNamesForPeer } from "./storage";
+import { chatNamesForPeer, ownsKey } from "./storage";
 import { chatPath } from "./url";
 import { useEngineValue } from "./engineState";
 import { useWindowAway } from "./windowAway";
@@ -316,14 +316,17 @@ export function useWakeTableSync(text: WakeWords): void {
       // A mute that ends by itself: the contact is told to wake this chat again when it does, with no state to wait for.
       if (soonest !== Infinity) muteEnds = setTimeout(write, Math.min(Math.max(soonest - Date.now(), 0) + 50, 2 ** 31 - 1));
     };
+    // Another tab's write of this profile's keys (a mute, a chat), or the storage cleared. Not another profile's: a tab
+    // running one stores its chats a few times per text it gets, and each would rewrite this profile's table.
+    const stored = (event: StorageEvent) => { if (event.key === null || ownsKey(event.key)) write(); };
     write();
     window.addEventListener(MUTE_EVENT, write);
-    window.addEventListener("storage", write);
+    window.addEventListener("storage", stored);
     window.addEventListener("session-updated", write);
     return () => {
       clearTimeout(muteEnds);
       window.removeEventListener(MUTE_EVENT, write);
-      window.removeEventListener("storage", write);
+      window.removeEventListener("storage", stored);
       window.removeEventListener("session-updated", write);
     };
   }, [on, held, words]);
