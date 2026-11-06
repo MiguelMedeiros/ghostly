@@ -59,6 +59,7 @@ import {
   DEFAULT_RELAYS,
   currentRelays,
   GhostLink,
+  type GhostLinkEvents,
   utf8Encode,
   type IncomingMessage,
   emptyLinkRecords,
@@ -381,6 +382,19 @@ const RTT_SAVE_MS = 5 * 60_000;
 const REACTION_RESEND_MS = 30_000;
 /** How long a deleted chat's session stays up once the ends of its moving files are said, so they get there (as a yield's goodbye). */
 const FILES_END_MS = 300;
+/** A link event that only asks something and acts on nothing: a deleted chat's link may still ask it (`whileChat`). */
+const ASKS_ONLY: ReadonlySet<string> = new Set(["onFileRoom"]);
+
+/**
+ * A chat's link events, acted on only while `current` says the link is still the chat's. A deleted chat's link stays
+ * up a moment to say the ends of its files (`removeLink`): what it hears meanwhile (a text, a reaction, a pin, a
+ * payment, a call signal) is not taken. Each handler the chat has stays there, so the link offers what it offered.
+ */
+function whileChat(events: GhostLinkEvents, current: () => boolean): GhostLinkEvents {
+  return Object.fromEntries(Object.entries(events).map(([name, handler]) => [name,
+    typeof handler !== "function" || ASKS_ONLY.has(name) ? handler
+      : (...args: unknown[]) => current() ? (handler as (...args: unknown[]) => unknown)(...args) : undefined])) as GhostLinkEvents;
+}
 /** A chat's reactions shown on the chat list before the one shown now, kept to show again when that one is taken back. */
 const REACTION_NOTES_KEPT = 8;
 /**
@@ -978,6 +992,8 @@ export class GhostlyNode implements EngineImplementation {
   }
   /** The newest time written in each chat while this engine runs: a message written well before it is a catch-up. */
   private readonly newestAt = new Map<string, number>();
+  /** The chats deleted while this engine runs (`removeLink`): a row that comes for one later is not stored. */
+  private readonly removedChats = new Set<string>();
   /** The chats whose contact's joined line came while this engine runs (`firstContactRow`), whatever `stored` says. */
   private readonly contactSpoke = new WeakSet<LiveLink>();
   /** Per group: when the last message written well before it came, came. What comes after it, as old, is its catch-up. */
@@ -3727,8 +3743,10 @@ export class GhostlyNode implements EngineImplementation {
     // Its files still moving end on the contact's side too, said on the session before it stops. Closed at once, the
     // channel lost those frames on their way, and the contact's transfers stayed under way for good.
     const filesEnded = this.fileDesk.drop(linkId);
-    // Gone before its link stops: the link's closing events find no chat to make an outbox or files for again.
+    // Gone before its link stops: the link's closing events find no chat to make an outbox or files for again, and
+    // nothing the link hears until it stops is taken (`whileChat`). Nor is a row stored for the chat later on.
     this.links.delete(linkId);
+    this.removedChats.add(linkId);
     if (filesEnded) setTimeout(() => void live.link?.stop(true), FILES_END_MS);
     else void live.link?.stop(true);
     void live.caps?.stop();
@@ -8579,7 +8597,8 @@ export class GhostlyNode implements EngineImplementation {
       getHostedHttpService: (id) => this.hostedService(id, stored.peerPubKeyZ32),
       // Private groups are announced on paired chats; their admission frames arrive here.
       groupsSupport: !!stored.profile,
-      events: {
+      // Heard only while this is the chat's link: once the chat is deleted, nothing it hears is acted on.
+      events: whileChat({
         onPairingProgress: progress => {
           if (knockCue(live.pairingProgress, progress)) this.cueFeedback({ cue: "knock", key: `${linkId}:${progress.startedAt}` }, linkId);
           live.pairingProgress = progress;
@@ -8847,7 +8866,7 @@ export class GhostlyNode implements EngineImplementation {
         onFileAnnounced: stored.profile && !stored.group ? (file, packet) => this.fileAnnounced(linkId, file, packet) : undefined,
         onFileFailed: (id, reason, direction) =>
           this.fileSettled(this.localFileId(linkId, id, direction, { failed: true }), reason, linkId),
-      },
+      }, () => this.links.get(linkId) === live),
     });
     const link = live.link;
     // The chat may be on screen already: a new chat's page opens it while the engine is still saving it, before this
@@ -9848,6 +9867,8 @@ export class GhostlyNode implements EngineImplementation {
     // Its place, in the order rows come (before anything is awaited).
     message = this.placed(message, place);
     const live = this.links.get(message.linkId);
+    // A chat deleted in this run takes no row again: none would ever be shown, nor deleted with it.
+    if (!live && this.removedChats.has(message.linkId)) return false;
     // The peer republishes what it sent for a few minutes: what was deleted here stays deleted.
     if (live?.stored.deletedIds?.includes(message.id)) return false;
     // A member's message its author deleted for everyone, coming again with a catch-up or handed on: it stays gone.
