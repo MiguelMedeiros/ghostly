@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { MAX_NICK_LENGTH } from "@ghostly/core";
-import { cleanName } from "./apiKit";
+import { shownName } from "./apiKit";
 import { childEnv } from "./childEnv";
 import { CliError } from "./errors";
 import { runtimePath } from "./privateFolder";
@@ -48,18 +48,15 @@ export function checkProfileName(name: string): string {
 
 /**
  * The name a profile shows its contacts, whichever command sets it (`--name`, `profile.set`, `settings set nick`):
- * cleaned as a group's name is (`cleanName`: a tab or a line break is a space, invisible characters go), then up to 64
- * characters; empty (or spaces) is no name. `settings set nick` took any length and every one took a line break,
- * printed whole by `status`; a name with nothing that shows was kept as given, and contacts saw no name. `field` names
- * it in the refusal.
+ * cleaned as a group's name is (`shownName`: a tab or a line break is a space, invisible characters go), then up to 64
+ * characters as stored; empty (or spaces) is no name. `settings set nick` took any length and every one took a line
+ * break, printed whole by `status`; a name with nothing that shows was kept as given, and contacts saw no name. `field`
+ * names it in the refusal.
  */
 export function checkShownName(name: unknown, field = "name"): string {
   if (typeof name !== "string") throw new CliError("bad_request", `${field} must be up to ${MAX_NICK_LENGTH} characters on one line`);
   if (!name.trim()) return "";
-  const shown = cleanName(name, MAX_NICK_LENGTH);
-  if (shown === undefined) throw new CliError("bad_request", `${field} must be up to ${MAX_NICK_LENGTH} characters on one line`);
-  if (!shown) throw new CliError("bad_request", `${field} needs a character that shows (an empty one is no name)`);
-  return shown;
+  return shownName(name, MAX_NICK_LENGTH, field, " (an empty one is no name)");
 }
 
 export function currentProfile(home: string, option?: string): string {

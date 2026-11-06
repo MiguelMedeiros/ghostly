@@ -1,4 +1,4 @@
-import { INVITE_TAKEN, isZ32Key, sanitizeDisplayText, type PairedTransport } from "@ghostly/core";
+import { groupName, INVITE_TAKEN, isZ32Key, MAX_GROUP_NAME_BYTES, MAX_GROUP_NAME_LENGTH, sanitizeDisplayText, type PairedTransport } from "@ghostly/core";
 import type { GhostlyNode } from "@ghostly/browser/engine/node";
 import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { CliError } from "./errors";
@@ -127,6 +127,37 @@ export function nameKey(name: string | null | undefined): string {
 export function cleanName(name: string, max: number): string | undefined {
   const clean = (sanitizeDisplayText(name.replace(/\s+/gu, " "), Infinity)?.replace(/ {2,}/g, " ") ?? "").normalize("NFC");
   return [...clean].length > max ? undefined : clean;
+}
+
+/**
+ * `name` as `cleanName` stores it, or the one refusal every name kind gives (`bad_request`), so a chat's, the profile's
+ * and a group's name read alike. `subject` starts the sentence ("A chat's name", "nick"); `empty` follows "needs a
+ * character that shows" (what an empty name does instead, when it does something). Too long says the count as stored,
+ * in code points as the engine counts, and the largest character of several code points in it (a joined emoji or a
+ * flag counts as several): the person sees what to cut, and a bot reads `details.length` and `details.max`.
+ */
+export function shownName(name: string, max: number, subject: string, empty = ""): string {
+  const clean = cleanName(name, Infinity) ?? "";
+  const length = [...clean].length;
+  if (length > max) {
+    const widest = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(clean)]
+      .map(({ segment }) => segment).reduce((a, b) => ([...b].length > [...a].length ? b : a), "");
+    const several = [...widest].length > 1 ? `: ${widest} counts as ${[...widest].length}` : "";
+    throw new CliError("bad_request", `${subject} is up to ${max} characters as stored (this one is ${length}${several})`, { length, max });
+  }
+  if (!clean) throw new CliError("bad_request", `${subject} needs a character that shows${empty}`);
+  return clean;
+}
+
+/**
+ * The `name` param of `group create` and `group rename`, refused as a chat's or the profile's name is (`shownName`),
+ * then as the engine takes it (`groupName`: the same cleaning, 64 code points, 256 bytes; 64 code points never pass
+ * 256 bytes, so its refusal is only a guard). Said here, before anything is made.
+ */
+export function groupNameOf(params: Params): string {
+  const name = groupName(shownName(str(params, "name", true), MAX_GROUP_NAME_LENGTH, "A group's name"));
+  if (!name) throw new CliError("bad_request", `A group's name is up to ${MAX_GROUP_NAME_BYTES} bytes as stored`);
+  return name;
 }
 
 /** Whether `name` is the one `key` (a ref's `nameKey`) names. */

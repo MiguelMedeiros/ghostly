@@ -9,7 +9,7 @@ describe("profile create --name", { timeout: 60_000 }, () => {
     const dir = home("create-bad-name");
     ok(await ghostly(["--home", dir, "profile", "create", "first", "--use"]));
     expect(error(await ghostly(["--home", dir, "profile", "create", "bot", "--use", "--name", "x".repeat(65)]), "bad_request", 1).message)
-      .toBe("name must be up to 64 characters on one line");
+      .toBe("name is up to 64 characters as stored (this one is 65)");
     // Nothing that shows: no profile either (it was made, and kept the invisible name).
     expect(error(await ghostly(["--home", dir, "profile", "create", "bot", "--use", "--name", "\u200b\u200b"]), "bad_request", 1).message)
       .toBe("name needs a character that shows (an empty one is no name)");
