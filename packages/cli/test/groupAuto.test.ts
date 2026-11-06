@@ -10,6 +10,7 @@ import { parseArgs } from "../src/args";
 import { idSlot, positionals, COMMANDS } from "../src/commands";
 import { CliError } from "../src/errors";
 import { GroupAutoJoin } from "../src/groupAuto";
+import { groupJson } from "../src/views";
 // covers: headless.group-auto
 
 /**
@@ -28,6 +29,7 @@ function world(dir = mkdtempSync(join(tmpdir(), "ghostly-group-auto-")), joins =
     acceptGroupInvitation: vi.fn(async ({ groupId }: { groupId: string }) => {
       s.groups = s.groups.map((g) => (g.id === groupId ? { ...g, invitation: { ...g.invitation!, accepted: true } } : g));
     }),
+    switchGroup: vi.fn(async (_: { groupId: string; to: string }) => undefined),
   };
   const lines: string[] = [];
   const auto = new GroupAutoJoin({ engine, profileDir: dir, joins, log: (line) => lines.push(line) });
@@ -170,6 +172,57 @@ describe("group auto", () => {
     w.auto.set({ on: true, from: ["chat-owner"] });
     w.s.links = w.s.links.map((l) => (l.id === "chat-owner" ? { ...l, peerPubKeyZ32: "new-key" } : l));
     expect(w.auto.autoJoins("chat-owner")).toBe(false);
+  });
+
+  it("an invitation over a granted chat kept beside another contact's under the same id is the one taken; the CLI shows both", async () => {
+    // The engine's invitations with the wiring `openHost` makes: another contact who knows the group's id invites first.
+    const admin = createIdentity().pubKeyZ32, g = "G".repeat(22);
+    const frames: [string, Record<string, unknown>][] = [];
+    const stored = new Map<string, StoredGroup>();
+    const store: GroupStore = { getGroups: async () => [], putGroup: async (x) => { stored.set(x.id, structuredClone(x)); }, deleteGroup: async (gid) => { stored.delete(gid); }, getMessages: async () => [] };
+    const host = { sendOnLink: (linkId: string, frame: Record<string, unknown>) => { frames.push([linkId, frame]); }, linkReady: () => true, contactName: () => undefined, edges: () => new Map(), entries: () => new Map(), openEdge: async () => "", closeEdge: async () => {},
+      openEntry: async () => "", publish: async () => {}, resolve: async () => null, edgeNick: () => undefined, storeMessage: async () => {}, emit: () => {} } as unknown as GroupsHost;
+    const groups = new Groups(host, store);
+    const links = [link("chat-owner", OWNER, { label: "Miguel" }), link("chat-other", OTHER)];
+    const state = () => ({ links, groups: groups.views() }) as unknown as EngineState;
+    const engine = { getState: state, acceptGroupInvitation: vi.fn(({ groupId }: { groupId: string }) => groups.accept(groupId)),
+      switchGroup: vi.fn(({ groupId, to }: { groupId: string; to: string }) => groups.switchGroup(groupId, to)) };
+    const lines: string[] = [];
+    const auto = new GroupAutoJoin({ engine, profileDir: mkdtempSync(join(tmpdir(), "ghostly-group-auto-")), joins: true, log: (line) => lines.push(line) });
+    auto.set({ on: true, from: ["Miguel"] });
+    await groups.handleContactFrame("chat-other", { t: "group-invite", g, name: "Team", admin, e: 0, n: 3 });
+    await groups.handleContactFrame("chat-owner", { t: "group-invite", g, name: "Team", admin, e: 0, n: 3 });
+    expect(groups.views()[0]).toMatchObject({ invitation: { linkId: "chat-other" }, others: [{ linkId: "chat-owner" }] });
+    // What `group show` prints: the one held, and the one beside it with the chat it came over.
+    expect(groupJson(groups.views()[0])).toMatchObject({ invitation: { chat: "chat-other" }, others: [{ chat: "chat-owner", name: "Team", members: 3 }] });
+
+    auto.check(state());
+    await vi.waitFor(() => expect(engine.acceptGroupInvitation).toHaveBeenCalledWith({ groupId: g }));
+    expect(engine.switchGroup).toHaveBeenCalledWith({ groupId: g, to: "chat-owner" });
+    expect(groups.views()[0]).toMatchObject({ invitation: { linkId: "chat-owner", accepted: true } });
+    expect(groups.views()[0].others).toBeUndefined();
+    // The other contact is told no; the owner hears the accept.
+    expect(frames.map(([linkId, frame]) => [linkId, frame.t])).toEqual([["chat-other", "group-decline"], ["chat-owner", "group-accept"]]);
+    expect(lines).toEqual([`group auto: accepted the invitation to group ${g} from chat chat-owner (another contact's under the same id declined)`]);
+  });
+
+  it("an invitation over a granted chat beside a group already joined or accepted is not taken: it waits for the person, said once", async () => {
+    const w = world();
+    w.auto.set({ on: true, from: ["Miguel"] });
+    const other = { linkId: "chat-owner", contact: "Miguel", name: "Team", members: 3 };
+    w.s.groups = [{ ...invited("g-in", "chat-other"), status: "active", others: [other] } as GroupView, { ...invited("g-accepted", "chat-other", { accepted: true }), others: [other] } as GroupView,
+      { ...invited("g-not-granted", "chat-owner"), others: [{ ...other, linkId: "chat-other" }] } as GroupView];
+    w.auto.check(w.state());
+    w.auto.check(w.state());
+    await Promise.resolve();
+    expect(w.engine.switchGroup).not.toHaveBeenCalled();
+    // The one held over the granted chat is accepted as before; another contact's beside it is left alone.
+    expect(w.engine.acceptGroupInvitation).toHaveBeenCalledTimes(1);
+    expect(w.engine.acceptGroupInvitation).toHaveBeenCalledWith({ groupId: "g-not-granted" });
+    expect(w.lines.filter((line) => line.includes("waits for you"))).toEqual([
+      "group auto: an invitation to group g-in from chat chat-owner is kept beside another group under the same id: it waits for you (ghostly group show g-in)",
+      "group auto: an invitation to group g-accepted from chat chat-owner is kept beside another group under the same id: it waits for you (ghostly group show g-accepted)",
+    ]);
   });
 
   it("a one-shot only keeps the setting: it accepts nothing itself", async () => {
