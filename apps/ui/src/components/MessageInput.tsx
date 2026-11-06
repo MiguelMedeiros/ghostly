@@ -841,12 +841,13 @@ export function MessageInput({
   }, [draftId, canAttach, fileUnavailable, maxLength, maxBytes, textBytes, t]);
 
   // A paste where no field has the focus (the chat's messages clicked last) still brings its files here: to the chat
-  // on screen only. Every loaded chat's composer is mounted, and the document has one paste for all of them.
+  // on screen only. Every loaded chat's composer is mounted, and the document has one paste for all of them. A dialog
+  // over the chat keeps its paste: a panel that says so (`role`) or a native `<dialog>`, which has no role.
   useEffect(() => {
     if (!hearsFiles || !onScreen) return;
     const paste = (e: globalThis.ClipboardEvent) => {
       const target = e.target instanceof Element ? e.target : null;
-      if (e.defaultPrevented || target?.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='dialog']")) return;
+      if (e.defaultPrevented || target?.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='dialog'], dialog")) return;
       if (takeRef.current(e.clipboardData)) e.preventDefault();
     };
     document.addEventListener("paste", paste);
