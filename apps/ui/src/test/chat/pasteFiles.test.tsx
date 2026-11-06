@@ -202,6 +202,14 @@ describe("a pasted picture or file", () => {
     expect(paste(screen.getByTestId("messages"), { files: [png()] })).toBe(false);
     expect(await screen.findByTestId("attachment-sheet")).toBeInTheDocument();
   });
+
+  it("a paste with the focus on a modal over the chat (a native <dialog>, no role) is left to the dialog", () => {
+    renderApp(<>{column()}<dialog open data-testid="modal"><button>Delete</button></dialog></>);
+    const button = within(screen.getByTestId("modal")).getByRole("button", { name: "Delete" });
+    act(() => button.focus());
+    expect(paste(button, { files: [png()] })).toBe(true);
+    expect(sheet()).toBeNull();
+  });
 });
 
 /** What the desktop host holds for a paste, read back a few bytes at a time as Rust hands them. */
