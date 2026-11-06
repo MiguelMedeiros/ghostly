@@ -16,6 +16,7 @@ import { CliError } from "./errors";
 import { guardText } from "./secretGuard";
 import { endTyping } from "./typing";
 import { measureVoice } from "./voicePeaks";
+import { goesOn } from "./waitNotice";
 
 /**
  * Files and voice notes in a chat (WISP 1100, phase 3), as the app's composer sends them (packages/browser
@@ -321,8 +322,14 @@ export const FILE_METHODS: Record<string, Method> = {
     }
     // The message's id, as a group's file and `send` answer it: what `message delete`, `react`, `pin` and `--reply` take.
     // The engine names a sent file's row after its time (node.ts `sendFile`), the one given here.
-    if (wait === "sent") await FILE_METHODS["file.wait"](ctx, { chat: link.id, file: file.id, timeout: seconds });
-    return { chat: link.id, messageId: `me_${timestamp}`, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}) };
+    const messageId = `me_${timestamp}`;
+    // A wait that runs out leaves the file in the chat, going on as a text does (waits.ts): said so, with its ids. It
+    // answered only "Timed out … waiting for file <id> to arrive", so a bot could not name it and a person sent it again.
+    if (wait === "sent") await FILE_METHODS["file.wait"](ctx, { chat: link.id, file: file.id, timeout: seconds }).catch((error: unknown) => {
+      if (!(error instanceof CliError) || error.code !== "timeout") throw error;
+      throw new CliError("timeout", `${error.message}. It is kept here and ${goesOn(ctx.mode)}`, { ...error.details, chat: link.id, messageId, file: file.id });
+    });
+    return { chat: link.id, messageId, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}) };
   },
 
   async "file.list"(ctx, params) {
