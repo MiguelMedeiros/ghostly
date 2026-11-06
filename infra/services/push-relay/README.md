@@ -53,9 +53,10 @@ A setting that is there but empty or not of its kind (`PORT=`, `GHOSTLY_RELAY_PR
 line that names it; leave a setting out for its default. The start line says how many proxies it counts, where it
 listens and which origins it serves (`any origin` when none is set).
 
-The log holds counts and reasons only, never an endpoint or an address: `forwarded <status>`, `failed`, and each
-refusal by kind (`refused origin`, `refused method`, `refused rate`, `refused size`, or what was wrong with the
-request, such as `refused Not a push service` or `refused Bad TTL value`). The first refusal of a kind is logged at
-once and the rest as one count a minute (`refused rate 41 more`), so a flood stays a line a minute. A refused origin's first line names it, quoted
+The log holds counts and reasons only, never an endpoint or an address: `forwarded <status>`, `failed <cause>`, and
+each refusal by kind (`refused origin`, `refused method`, `refused rate`, `refused size`, or what was wrong with the
+request, such as `refused Not a push service` or `refused Bad TTL value`). The first of each (a status, a cause, a
+kind of refusal) is logged at once and the rest as one count a minute (`forwarded 201 4120 more`, `refused rate 41
+more`), so busy traffic or a flood stays a line a minute each; `/healthz` keeps the totals. A refused origin's first line names it, quoted
 (`refused origin "https://app.ghostly.tools.example"`, `refused origin (none)` without one), so a misspelt
 `GHOSTLY_RELAY_ORIGINS` shows; the count after it covers every origin refused that minute.
