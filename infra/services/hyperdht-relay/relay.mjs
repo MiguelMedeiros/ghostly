@@ -537,7 +537,9 @@ export async function startRelay(options = {}) {
     }
     response.writeHead(426, { 'content-type': 'text/plain' }); response.end('Ghostly HyperDHT relay: connect with a WebSocket\n')
   })
-  const wss = new WebSocketServer({ noServer: true, maxPayload: limits.payloadBytes, perMessageDeflate: false })
+  // A client's pings are answered by accept(), within its budget: ws's own answer (autoPong) read them past the budget
+  // and queued a pong for each, unbounded until the relay next wrote to that client.
+  const wss = new WebSocketServer({ noServer: true, maxPayload: limits.payloadBytes, perMessageDeflate: false, autoPong: false })
 
   server.on('upgrade', (request, socket, head) => {
     const address = addressKey(addressOf(request, { proxies: options.proxies, cloudflare: options.cloudflare }))
@@ -574,25 +576,49 @@ export async function startRelay(options = {}) {
       ws.terminate()
     }
     queued.set(ws, { bytes: 0, drop })
-    // A token bucket on what the client sends: past it, the relay stops reading its socket for a while.
+    // A token bucket on what the client sends, its pings and pongs too: past it, the relay stops reading its socket for a while.
     let tokens = limits.burstBytes
     let last = Date.now()
     let paused = false
-    ws.on('message', data => {
+    const spend = bytes => {
       const now = Date.now()
       tokens = Math.min(limits.burstBytes, tokens + (now - last) * limits.bytesPerSecond / 1000)
       last = now
-      tokens -= data.length ?? data.byteLength ?? 0
+      tokens -= bytes
       if (tokens < 0 && !paused && ws._socket) {
         paused = true
         ws._socket.pause()
         setTimeout(() => { paused = false; ws._socket?.resume() }, Math.ceil(-tokens / limits.bytesPerSecond * 1000))
       }
+    }
+    ws.on('message', data => spend(data.length ?? data.byteLength ?? 0))
+    // A control frame from a client is its payload and 6 bytes (header and mask), so an empty one still costs.
+    const CONTROL_FRAME_BYTES = 6
+    // At most one pong waits to be written: a ping that comes meanwhile is kept, the last one only, and answered once
+    // it is (RFC 6455 5.5.3 lets a pong answer only the most recent ping). Each pong waiting cost the process about
+    // 700 bytes, and one client sent a million pings a second. The payload is copied: it is a view into the chunk the
+    // socket read, which a kept ping would hold whole.
+    let ponging = false
+    let nextPing = null
+    const pong = data => {
+      ponging = true
+      ws.pong(data, false, () => {
+        ponging = false
+        const next = nextPing
+        nextPing = null
+        if (next && ws.readyState === ws.OPEN) pong(next)
+      })
+    }
+    ws.on('ping', data => {
+      spend(data.length + CONTROL_FRAME_BYTES)
+      if (dropped) return
+      if (ponging) nextPing = Buffer.from(data)
+      else pong(Buffer.from(data))
     })
     // A peer that has gone without closing (a sleeping laptop, a dead route) still holds its slot: one that has not
     // answered the last ping by the next is dropped.
     let answered = true
-    ws.on('pong', () => { answered = true })
+    ws.on('pong', data => { spend(data.length + CONTROL_FRAME_BYTES); answered = true })
     const ping = setInterval(() => {
       if (!answered) return drop('no pong')
       answered = false
