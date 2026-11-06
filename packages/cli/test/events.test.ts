@@ -690,6 +690,76 @@ describe("the event stream", () => {
       expect(whole.mock.calls).toEqual([["c1"]]);
     });
 
+    /**
+     * A transfer that ends while its daemon stops, or as the next start runs before the hub reads the engine: the next
+     * start reports its end, once. It said nothing: a bot that restarted while a big file came never handled the file.
+     */
+    describe("a transfer that ends while no hub watches", () => {
+      const sent = message("c1", "me_8", { sender: "me", delivery: "sent", file: { id: "c1-out-w", name: "a", size: 9, mime: "text/plain" } });
+      const history = () => new Map([["c1", [message("c1", "peer_v", { file: voice }), sent]]]);
+      async function underWay(journal: string) {
+        const first = await hub(journal);
+        first.h.baseline(state([link("c1")]), history());
+        first.h.sink.post({ kind: "state", state: transfers({
+          "c1-in-v": { state: "transferring", transferred: 400, size: 900, direction: "in", stage: "verifying" },
+          "c1-out-w": { state: "transferring", transferred: 0, size: 9, direction: "out", stage: "asking" },
+        }) });
+        expect(first.events.map((e) => [e.type, e.file])).toEqual([["file.stage", "c1-in-v"], ["file.stage", "c1-out-w"]]);
+        // The seen set is written behind: the next start reads it once it is in.
+        await new Promise((r) => setTimeout(r, 50));
+      }
+
+      it("ended while it stopped: the next start reads its end in the file's record", async () => {
+        await underWay("ended-stop.jsonl");
+        const { h, events } = await hub("ended-stop.jsonl");
+        // A finished file has no transfer in the engine's state at start: only its record says it is done.
+        h.baseline(state([link("c1")]), history());
+        const records: Record<string, unknown> = {
+          "c1-in-v": { direction: "in", transfer: { state: "done", transferred: 900, size: 900 } },
+          "c1-out-w": { direction: "out", transfer: { state: "failed", transferred: 0, size: 9, error: "Declined" } },
+        };
+        await h.ended(async (id) => records[id] as never);
+        expect(events.map((e) => [e.type, e.file, e.chat, e.messageId, e.direction])).toEqual([
+          ["file.done", "c1-in-v", "c1", "peer_v", "in"],
+          ["file.failed", "c1-out-w", "c1", "me_8", "out"],
+        ]);
+        expect(events[0]).toMatchObject({ id: "file.done:c1-in-v", size: 900, transferred: 900 });
+        expect(events[1]).toMatchObject({ error: "Declined" });
+        // Told once: a start after it says nothing again.
+        await new Promise((r) => setTimeout(r, 50));
+        const again = await hub("ended-stop.jsonl");
+        again.h.baseline(state([link("c1")]), history());
+        await again.h.ended(async (id) => records[id] as never);
+        expect(again.events).toEqual([]);
+      });
+
+      it("ended as the next start ran: the start's state has it done", async () => {
+        await underWay("ended-start.jsonl");
+        const { h, events } = await hub("ended-start.jsonl");
+        h.baseline(transfers({ "c1-in-v": { state: "done", transferred: 900, size: 900, direction: "in" }, "c1-out-w": { state: "transferring", transferred: 0, size: 9, direction: "out", stage: "asking" } }), history());
+        expect(events.map((e) => [e.type, e.file, e.messageId])).toEqual([["file.done", "c1-in-v", "peer_v"]]);
+        await h.ended(async () => undefined);
+        expect(events).toHaveLength(1);
+        // Still under way, the other one is reported when it ends.
+        h.sink.post({ kind: "state", state: transfers({ "c1-in-v": { state: "done", transferred: 900, size: 900, direction: "in" }, "c1-out-w": { state: "done", transferred: 9, size: 9, direction: "out" } }) });
+        expect(events.map((e) => [e.type, e.file])).toEqual([["file.done", "c1-in-v"], ["file.done", "c1-out-w"]]);
+      });
+
+      it("one never seen under way, or whose record is gone, says nothing", async () => {
+        await underWay("ended-none.jsonl");
+        const { h, events } = await hub("ended-none.jsonl");
+        h.baseline(transfers({ "c1-in-x": { state: "done", transferred: 9, size: 9, direction: "in" } }), history());
+        await h.ended(async () => undefined);
+        expect(events).toEqual([]);
+        await new Promise((r) => setTimeout(r, 50));
+        // The notes of files whose records went are dropped: a record that comes back later is no news either.
+        const again = await hub("ended-none.jsonl");
+        again.h.baseline(state([link("c1")]), history());
+        await again.h.ended(async () => ({ direction: "in", transfer: { state: "done", transferred: 900, size: 900 } }) as never);
+        expect(again.events).toEqual([]);
+      });
+    });
+
     it("a file event whose message never comes goes after a moment, with messageId null", async () => {
       const { h, events } = await hub("f3.jsonl");
       h.baseline(state([link("c1")]), new Map([["c1", []]]));

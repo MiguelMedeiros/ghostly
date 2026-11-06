@@ -2,7 +2,7 @@ import { appendFileSync, closeSync, existsSync, fstatSync, ftruncateSync, openSy
 import type { AppFrameEvent } from "@ghostly/core";
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { EngineEvent, RpcResponse } from "@ghostly/browser/shared/rpc";
-import type { EngineState, GroupView, LinkView, PinView, StoredMessage } from "@ghostly/browser/shared/types";
+import type { EngineState, FileTransferView, GroupView, LinkView, PinView, StoredMessage } from "@ghostly/browser/shared/types";
 import { chatJson, chatMessageJson, groupJson, groupMessageJson, type MessageJson } from "./views";
 import { paymentJson } from "./wallets";
 
@@ -219,7 +219,7 @@ export class EventHub {
     const cutoff = this.now() - SEEN_KEEP_MS;
     let dropped = 0;
     for (const [chat, known] of this.seen) {
-      if (chat === FORMAT || chat.startsWith("said:")) continue;
+      if (chat === FORMAT || chat === UNDERWAY || chat.startsWith("said:")) continue;
       const reactions = chat.startsWith("reactions:");
       const gone: [string, null][] = [];
       for (const [id, note] of known) {
@@ -580,27 +580,67 @@ export class EventHub {
         });
       }
     }
-    for (const [id, transfer] of Object.entries(state.transfers ?? {})) {
-      const shape = `${transfer.state}|${transfer.stage ?? ""}`, before = this.transfers.get(id);
-      this.transfers.set(id, shape);
-      if (quiet || before === shape) continue;
-      const chat = state.links.find((l) => id.startsWith(`${l.id}-`))?.id ?? null;
-      // A group's file (WISP 503) names its group.
-      const group = chat ? undefined : state.groups.find((g) => id.startsWith(`group-${g.id}-`))?.id;
-      const fields = { chat, ...(group ? { group } : {}), file: id, direction: transfer.direction ?? (id.includes("-in-") ? "in" : "out"), size: transfer.size, transferred: transfer.transferred, ...(transfer.error ? { error: transfer.error } : {}) };
-      let emit: ((messageId: string | null) => void) | null = null;
-      if (transfer.state === "done") { const key = `file.done:${id}`; emit = (messageId) => this.emit("file.done", key, { ...fields, messageId }); }
-      else if (transfer.state === "failed") { const key = `file.failed:${id}:${this.now()}`; emit = (messageId) => this.emit("file.failed", key, { ...fields, messageId, retry: !!transfer.retry }); }
-      else if (transfer.stage === "asking" && fields.direction === "in") { const key = `file.offered:${id}:${this.now()}`; emit = (messageId) => this.emit("file.offered", key, { ...fields, messageId, room: transfer.room ?? null }); }
-      else if (transfer.stage) {
-        const key = `file.stage:${id}:${transfer.stage}:${this.now()}`, stage = { stage: transfer.stage, ...(transfer.pausedBy ? { pausedBy: transfer.pausedBy } : {}) };
-        emit = (messageId) => this.emit("file.stage", key, { ...fields, messageId, ...stage });
-      }
-      if (emit) this.fileEvent(id, emit, chat ?? (group ? `group:${group}` : null));
-    }
+    for (const [id, transfer] of Object.entries(state.transfers ?? {})) this.transferChanged(id, transfer, state, quiet);
     this.state = state;
     for (const listener of this.stateListeners) {
       try { listener(state); } catch { /* its own */ }
+    }
+  }
+
+  /**
+   * A transfer's `file.*` event, when its shape changed. One under way is noted in the seen set until its end is told:
+   * one that ends while no hub watches (a stop, a start before the baseline) is told by the next start, at its baseline
+   * or from its record (`ended`), once. `quiet`: the baseline, which tells only those ends.
+   */
+  private transferChanged(id: string, transfer: FileTransferView, state: EngineState, quiet: boolean): void {
+    const shape = `${transfer.state}|${transfer.stage ?? ""}`, before = this.transfers.get(id);
+    this.transfers.set(id, shape);
+    const end = transfer.state === "done" || transfer.state === "failed", underway = this.seen.get(UNDERWAY)?.has(id) ?? false;
+    if (!end && !underway) {
+      this.seenOf(UNDERWAY).set(id, "yes");
+      this.persist(UNDERWAY, [[id, "yes"]]);
+    }
+    if ((quiet && !(end && underway)) || before === shape) return;
+    const chat = state.links.find((l) => id.startsWith(`${l.id}-`))?.id ?? null;
+    // A group's file (WISP 503) names its group.
+    const group = chat ? undefined : state.groups.find((g) => id.startsWith(`group-${g.id}-`))?.id;
+    const fields = { chat, ...(group ? { group } : {}), file: id, direction: transfer.direction ?? (id.includes("-in-") ? "in" : "out"), size: transfer.size, transferred: transfer.transferred, ...(transfer.error ? { error: transfer.error } : {}) };
+    // An end told is no longer under way: its note goes as it is told (one still waiting for its message at a stop stays).
+    const told = () => {
+      if (!this.seen.get(UNDERWAY)?.delete(id)) return;
+      this.persist(UNDERWAY, [[id, null]]);
+    };
+    let emit: ((messageId: string | null) => void) | null = null;
+    if (transfer.state === "done") { const key = `file.done:${id}`; emit = (messageId) => { told(); this.emit("file.done", key, { ...fields, messageId }); }; }
+    else if (transfer.state === "failed") { const key = `file.failed:${id}:${this.now()}`; emit = (messageId) => { told(); this.emit("file.failed", key, { ...fields, messageId, retry: !!transfer.retry }); }; }
+    else if (transfer.stage === "asking" && fields.direction === "in") { const key = `file.offered:${id}:${this.now()}`; emit = (messageId) => this.emit("file.offered", key, { ...fields, messageId, room: transfer.room ?? null }); }
+    else if (transfer.stage) {
+      const key = `file.stage:${id}:${transfer.stage}:${this.now()}`, stage = { stage: transfer.stage, ...(transfer.pausedBy ? { pausedBy: transfer.pausedBy } : {}) };
+      emit = (messageId) => this.emit("file.stage", key, { ...fields, messageId, ...stage });
+    }
+    if (emit) this.fileEvent(id, emit, chat ?? (group ? `group:${group}` : null));
+  }
+
+  /**
+   * After the baseline, before the sink is attached: the transfers noted under way that the engine's state no longer
+   * shows. A finished file has no transfer there after a restart, only its record (`stored`): one that ended while the
+   * daemon stopped is told now. A record gone (the file deleted) drops its note.
+   */
+  async ended(stored: (fileId: string) => Promise<{ direction?: "in" | "out"; transfer?: FileTransferView } | undefined>): Promise<void> {
+    const state = this.state;
+    if (!state) return;
+    for (const id of [...this.seen.get(UNDERWAY)?.keys() ?? []]) {
+      if (state.transfers?.[id]) continue;
+      let record;
+      try { record = await stored(id); } catch { continue; /* asked again at the next start */ }
+      if (!record) {
+        this.seen.get(UNDERWAY)?.delete(id);
+        this.persist(UNDERWAY, [[id, null]]);
+        continue;
+      }
+      const transfer = record.transfer;
+      if (transfer?.state !== "done" && transfer?.state !== "failed") continue;
+      this.transferChanged(id, { ...transfer, ...(record.direction ? { direction: record.direction } : {}) }, state, true);
     }
   }
 
@@ -844,6 +884,8 @@ const FORMAT = "format:";
 const MENTIONS_NOTED = "mentions";
 /** The seen set's mark that its notes carry their time. */
 const AGES_NOTED = "ages";
+/** The seen set's notes of the transfers seen under way whose end was not told yet, by file id. */
+const UNDERWAY = "files:";
 
 /**
  * A note: what the seen set keeps of a message (or a reaction's number), then `@` and the time of its last activity in
