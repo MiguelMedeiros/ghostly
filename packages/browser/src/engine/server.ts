@@ -1,7 +1,8 @@
 import { parseCallSignal } from "@ghostly/core";
 import type { MessageChanges } from "../shared/messageChanges";
 import type { EngineEvent, RpcRequest, RpcResponse } from "../shared/rpc";
-import type { StoredMessage } from "../shared/types";
+import type { MessagePage, StoredMessage } from "../shared/types";
+import { db } from "./db";
 import { errorLine, profileOpenFailure } from "../shared/idb";
 import type { PeerServer, PeerStopOptions } from "../devices/linkOnly";
 import { GhostlyNode, LIMITED_MODE_ERROR, LIMITED_MODE_METHODS, type NodeOptions } from "./node";
@@ -45,7 +46,12 @@ export class EngineServer implements PeerServer {
   private changes = 0;
   private readonly changedAt = new Map<string, number>();
 
-  constructor(options: NodeOptions = {}) {
+  /**
+   * `keepNewest`: the start keeps each chat's and group's newest rows that many, from the whole histories it reads anyway,
+   * for `takeStartNewest` (the CLI's event check at start, which read them again).
+   */
+  constructor(options: NodeOptions & { keepNewest?: number } = {}) {
+    if (options.keepNewest) db.keepNewest(options.keepNewest);
     this.node = new GhostlyNode(
       {
         onAttention: (event) => this.broadcast({kind:"attention", event}),
@@ -70,7 +76,17 @@ export class EngineServer implements PeerServer {
     );
     this.ready = this.node.start();
     // A start that fails is told to each client as it attaches; nothing else may be left to report it as unhandled.
-    this.ready.catch(() => {});
+    // Nobody takes what it kept then.
+    this.ready.catch(() => { if (options.keepNewest) db.keepNewest(0); });
+  }
+
+  /**
+   * Once the engine has started: per chat or group, its newest rows (`keepNewest`) as `messagePage` reads them, from the
+   * whole history the start read. A history written since that read is not in it; one changed since the engine was made
+   * may be (`historyChanged` says). Keeping stops: a second call gets none.
+   */
+  takeStartNewest(): Map<string, MessagePage> {
+    return db.takeNewest();
   }
 
   /** A point in the engine's history changes: a history read after it can be handed to `attach` as read. */
