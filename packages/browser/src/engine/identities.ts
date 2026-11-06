@@ -635,7 +635,10 @@ export class IdentityProofs {
     const id = frame.t === "idp-withdraw" && typeof frame.id === "string" ? frame.id
       : frame.t === "idp-present" && isIdentityBinding(frame.binding) ? identityStatement(frame.binding).id : undefined;
     const withdrawn = () => !!id && !!this.host.ledger(linkId)?.received.some(r => r.id === id && r.status === "withdrawn");
-    const before = withdrawn();
+    // A withdraw that marks a presentation still in its check withdrawn (`challenge.withdrawn`) counts too: the
+    // record kept from an earlier withdraw already reads withdrawn, and that check's own frame read it so on arrival.
+    const checking = () => frame.t === "idp-withdraw" && !!this.host.ledger(linkId)?.challenges.some(c => c.id === id && !c.withdrawn);
+    const before = withdrawn() && !checking();
     const handled = x.receive(frame).then(() => { if (id && !before && withdrawn()) this.afterWithdrawal(linkId, id); });
     // A presentation's check waits on a host the contact chose (up to 30 s): it is not waited for here, so the
     // contact's texts, pings and other frames go on meanwhile. Its outcome is written and sent when it ends.
