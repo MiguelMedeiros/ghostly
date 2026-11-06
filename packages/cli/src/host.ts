@@ -85,6 +85,7 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     reportAppFrames(hub, node, paths.dir);
     runtime.server.attach(hub.sink, { mark, ids: [...histories.keys(), ...newest.keys()] });
   } catch (error) {
+    hub.release();
     await runtime.close().catch(() => {});
     release();
     throw error;
@@ -98,6 +99,8 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
       // Every call is hung up, and every card update still waiting for its time sent, while the engine can still tell the contact.
       await Promise.all([calls.stopAll(), flushCardUpdates(ctx)]).catch(() => {});
       runtime.server.detach(hub.sink);
+      // The seqs reserved past the last event go back, so the next start numbers on from it (`EventHub.release`).
+      hub.release();
       await runtime.close().catch(() => {});
       release();
     })()),

@@ -321,7 +321,9 @@ chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print 
   said, which orders nothing (a clock can be wrong).
 - A message's `from` is `me`, `peer`, or `system` for a group's own line in `group history` (`event`: created, joined,
   renamed, …; the stream says it as `group.event`): nobody wrote it, whatever `member` key it carries.
-- `seq` grows by one per event in the profile, across restarts; `id` is the same whenever the same fact is reported.
+- `seq` grows by one per event in the profile, across restarts, and is never given to two events; after a crash, or a
+  full disk that kept events out of the journal, it can skip numbers, and a replay across them starts with
+  `events.gap`. `id` is the same whenever the same fact is reported.
   Dedupe by `id`; resume with `--since <seq>`, or let `--cursor <file>` remember the last event handled. A cursor
   file that holds no event number (empty, edited by hand) is refused at start (`bad_request`, naming the file): fix or
   remove it, or give `--since`.
