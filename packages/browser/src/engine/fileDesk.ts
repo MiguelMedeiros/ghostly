@@ -470,7 +470,7 @@ export class FileDesk {
           metadata: { name: file.name, size: file.size, mime: file.mime, timestamp: file.timestamp, voice: file.voice, video: file.video, image: file.image }, wire3: record });
         await this.deps.patchMessage?.(linkId, `peer_${record.id}`, (current) => current.sender !== "peer" || current.file?.id !== id ? null
           : { file: message, text: fileMessageText(message), via: "datalink", details: { ...current.details, wire: fileWire("files/3", file.size) } });
-      }).catch(() => {});
+      }).catch((error) => this.unkept(linkId, chat, record.id, id, error, said));
     }
     if (record.direction === "in" && !chat.local.has(record.id)) {
       // A new offer: its file and its message, then its record.
@@ -489,7 +489,7 @@ export class FileDesk {
           ...(place !== undefined && sentAt !== undefined ? { timestamp: place, sentAt } : { timestamp: file.timestamp }),
           ...(file.reply && { replyTo: receivedPairedReply(file.reply) }), ...(file.forwarded && { forwarded: file.forwarded }),
           details: { wire: fileWire("files/3", file.size) } });
-      }).catch(() => {});
+      }).catch((error) => this.unkept(linkId, chat, record.id, id, error));
     }
     const offered = record.direction === "in" && !this.deps.transfers.has(chat.local.get(record.id)!);
     this.show(linkId, chat, record, transferred, progress);
@@ -513,6 +513,30 @@ export class FileDesk {
     }
     if (record.state === "done" && record.direction === "in") this.deps.wireIds(linkId)?.add(record.id);
     this.deps.changed(progress ? 250 : 50);
+  }
+
+  /**
+   * A new offer whose record or message could not be stored: refused (no room, or `invalid` for any other cause), not
+   * taken and said done with no message for it here. What was written of it goes, so the sender's Retry is a new offer.
+   * One said on the floor gets its bubble back, saying it was refused, and waits for the offer again.
+   */
+  private unkept(linkId: string, chat: Chat, wireId: string, id: string, error: unknown, said?: { local: string; at: number }): void {
+    if (said) chat.announced.set(wireId, said);
+    else {
+      chat.local.delete(wireId);
+      this.deps.wireIds(linkId)?.delete(wireId);
+      this.deps.transfers.delete(id);
+      clearTimeout(chat.unsaved.get(id)?.timer);
+      chat.unsaved.delete(id);
+      chat.lastSaved.delete(id);
+      this.speeds.delete(id);
+      this.underway.delete(id);
+      this.unwatch(id);
+      chat.saving = chat.saving.then(() => fileStore.delete(id)).catch(() => {});
+    }
+    // Refused, a file said on the floor ends its bubble (`refusedHere`).
+    chat.files.refuse(wireId, (error as { name?: unknown } | null)?.name === "QuotaExceededError" ? "no-room" : "invalid");
+    this.deps.changed();
   }
 
   /** Writes a transfer's record and the view of it, after the chat's writes before it; what was held back goes with it. */

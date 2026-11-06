@@ -1336,6 +1336,25 @@ export class ChatFiles {
     this.startNext();
   }
 
+  /**
+   * An offer taken here whose record or message the host could not store: refused, so its sender does not count it
+   * delivered and keeps its Retry, and forgotten, so that retry is a new offer here. Nothing of it is reported changed
+   * (there is nothing to write it to); what was stored of it is removed.
+   */
+  refuse(id: string, why: RefuseReason): void {
+    const entry = this.entries.get(key("in", id));
+    if (!entry || transferEnded(entry.record)) return;
+    this.entries.delete(key("in", id));
+    const incoming = entry.in!;
+    entry.record.state = "failed";
+    clearTimeout(incoming.timer);
+    clearTimeout(incoming.ackTimer);
+    incoming.dropped = true;
+    void incoming.writing.then(() => incoming.target?.then((t) => t.discard())).catch(() => {});
+    this.send({ t: "pf-refuse", id, why });
+    this.startNext();
+  }
+
   pause(direction: "in" | "out", id: string): void {
     const entry = this.entry(direction, id), { record } = entry;
     if (transferEnded(record) || record.state === "verifying" || (record.state === "paused" && record.pausedBy === "me")) return;
