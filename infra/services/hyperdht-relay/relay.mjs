@@ -505,17 +505,21 @@ Object.defineProperty(FirewallProxy.prototype, '_deny', {
  * over the client's. Behind `proxies` reverse proxies (a tunnel, nginx), the entry that many from the end of
  * `X-Forwarded-For` (the ones before it are the client's to write). Otherwise, or without the header, the socket's.
  */
-export function addressOf(request, { proxies = 0, cloudflare = false } = {}) {
-  const socket = request.socket.remoteAddress ?? 'unknown'
+export function addressOf(request, options = {}) {
+  return forwardedAddress(request, options) ?? request.socket.remoteAddress ?? 'unknown'
+}
+
+/** The client's address from the header `proxies` or `cloudflare` says to read (see addressOf), or null without it. */
+export function forwardedAddress(request, { proxies = 0, cloudflare = false } = {}) {
   if (cloudflare) {
     const header = request.headers['cf-connecting-ip']
     const connecting = String(Array.isArray(header) ? header[0] : header ?? '').trim()
     if (connecting) return connecting
   }
-  if (!proxies) return socket
+  if (!proxies) return null
   const header = request.headers['x-forwarded-for']
   const hops = (Array.isArray(header) ? header.join(',') : header ?? '').split(',').map(item => item.trim()).filter(Boolean)
-  return hops.length >= proxies ? hops[hops.length - proxies] : socket
+  return hops.length >= proxies ? hops[hops.length - proxies] : null
 }
 
 /**
@@ -646,13 +650,16 @@ export async function startRelay(options = {}) {
   const refusals = refusalLines(log)
   const flushing = setInterval(refusals.flush, 60_000)
   flushing.unref?.()
-  // Once per start each: a proxy in front the relay was not told about makes every client count as that proxy.
+  // Once per start each: a proxy in front the relay was not told about, or one it was told about that does not write
+  // the header, makes every client count as that proxy.
   const hinted = new Set()
-  const hint = (header, setting) => {
+  const hint = (header, line) => {
     if (hinted.has(header)) return
     hinted.add(header)
-    log(`requests carry ${header} but ${setting} is not set: every client counts as the proxy`)
+    log(line)
   }
+  const unset = (header, setting) => hint(header, `requests carry ${header} but ${setting} is not set: every client counts as the proxy`)
+  const missing = (header, setting) => hint(header, `requests arrive without ${header} though ${setting} is set: each counts as the proxy, so have the proxy write it or leave the setting out`)
 
   /**
    * On a full relay, what makes room for a client from `address` (null: none is made). A client holding one listen and
@@ -705,11 +712,15 @@ export async function startRelay(options = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: limits.payloadBytes, perMessageDeflate: false, autoPong: false })
 
   server.on('upgrade', (request, socket, head) => {
-    const address = addressKey(addressOf(request, { proxies: options.proxies, cloudflare: options.cloudflare }))
+    const forwarded = forwardedAddress(request, { proxies: options.proxies, cloudflare: options.cloudflare })
+    const address = addressKey(forwarded ?? request.socket.remoteAddress ?? 'unknown')
     // Cloudflare writes both headers: its own setting is the one to name.
     if (!options.cloudflare && !options.proxies) {
-      if (request.headers['cf-connecting-ip'] !== undefined) hint('CF-Connecting-IP', 'GHOSTLY_RELAY_CLOUDFLARE')
-      else if (request.headers['x-forwarded-for'] !== undefined) hint('X-Forwarded-For', 'GHOSTLY_RELAY_PROXIES')
+      if (request.headers['cf-connecting-ip'] !== undefined) unset('CF-Connecting-IP', 'GHOSTLY_RELAY_CLOUDFLARE')
+      else if (request.headers['x-forwarded-for'] !== undefined) unset('X-Forwarded-For', 'GHOSTLY_RELAY_PROXIES')
+    } else if (forwarded === null) {
+      if (options.cloudflare) missing('CF-Connecting-IP', 'GHOSTLY_RELAY_CLOUDFLARE')
+      else missing('X-Forwarded-For', 'GHOSTLY_RELAY_PROXIES')
     }
     const origin = request.headers.origin
     // A refusal goes straight to the raw socket, which nothing else listens on: a client that has already reset it
