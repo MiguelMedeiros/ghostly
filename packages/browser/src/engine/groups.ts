@@ -1194,7 +1194,7 @@ export class Groups {
   /**
    * Invitee side: 32 invitations wait, and a new one comes over a chat whose invitations this app accepts by itself
    * (`GroupsHost.autoJoins`). It takes the place of the oldest waiting from the chat that holds the most (of chats tied,
-   * the one whose oldest is oldest), dropped without a word as one past the 32 is, so that contacts whose invitations
+   * the one whose oldest is oldest), its inviter told no as one past the 32 is, so that contacts whose invitations
    * nobody here answers cannot keep it out. Never one over such a chat, one being accepted, or a link's join. Nothing
    * is made room for when the new one replaces one waiting under its id (it takes no new room) or its chat holds its
    * four already. True when room was made.
@@ -1211,6 +1211,7 @@ export class Groups {
     const most = Math.max(0, ...held.values());
     const oldest = others.filter(x => held.get(x.invitation!.linkId) === most).sort((a, b) => a.createdAt - b.createdAt)[0];
     if (!oldest) return false;
+    try { this.host.sendOnLink(oldest.invitation!.linkId, { t: "group-decline", g: oldest.id }); } catch { /* they may invite again */ }
     await this.dropInvitation(oldest);
     return true;
   }
@@ -2247,12 +2248,14 @@ export class Groups {
         // the place taken by anyone's. Another contact's would take the admin's place: it is kept beside it, for the person
         // to pick. One taken back waits for nothing: any invitation takes its place.
         if (existing?.invitation && !existing.state && existing.invitation.linkId !== linkId && !(existing.invitation.genesis && linkId === keptAdminChat(existing.previous)) && !existing.invitation.takenBack) return other();
-        if ([...this.stored.values()].filter(x => x.invitation && !x.invitation.takenBack).length >= MAX_WAITING_INVITATIONS && !await this.roomForAutoJoin(linkId, existing)) return;
-        // One chat holds a few unanswered at a time, so a contact cannot use up the room the others' invitations need.
-        // Past that the inviter is told no, as it would be by a Decline, and may invite again later. Only one of its own
-        // waiting, sent again, takes no new room: one taken back, or another chat's under the same id, counts as new.
+        // One chat holds a few unanswered at a time, so a contact cannot use up the room the others' invitations need, and
+        // all chats together 32 (one over a chat this app accepts by itself makes room, `roomForAutoJoin`). Past either
+        // the inviter is told no, as it would be by a Decline, and may invite again later. Only one of its own waiting,
+        // sent again, takes no new room: one taken back, or another chat's under the same id, counts as new.
         const ownWaiting = existing?.invitation && !existing.invitation.takenBack && existing.invitation.linkId === linkId;
-        if (!ownWaiting && [...this.stored.values()].filter(x => x.invitation?.linkId === linkId && !x.invitation.takenBack).length >= MAX_INVITATIONS_PER_CHAT) {
+        const waiting = [...this.stored.values()].filter(x => x.invitation && !x.invitation.takenBack);
+        if (!ownWaiting && (waiting.filter(x => x.invitation!.linkId === linkId).length >= MAX_INVITATIONS_PER_CHAT
+          || (waiting.length >= MAX_WAITING_INVITATIONS && !await this.roomForAutoJoin(linkId, existing)))) {
           try { this.host.sendOnLink(linkId, { t: "group-decline", g }); } catch { /* they may invite again */ }
           return;
         }

@@ -340,7 +340,7 @@ ghostly listen --type message.received --cursor "${GHOSTLY_HOME:-$HOME/.ghostly}
   profile's `groups.json` (0600) with each chat's contact key: removing the chat takes it off the list, and a chat
   whose contact's key is no longer that one loses it. Each accept is a line in the daemon's log (the group's id and
   the chat). A profile keeps at most 32 invitations waiting (4 per chat): when 32 wait, one over a chat on the list
-  takes the place of the oldest waiting from the chat that holds the most, dropped without a word, so the invitations
+  takes the place of the oldest waiting from the chat that holds the most, whose inviter is told no, so the invitations
   nobody answers on a bot cannot keep its owner's out.
 
 ## Voice calls
