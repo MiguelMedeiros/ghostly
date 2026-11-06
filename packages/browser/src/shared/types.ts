@@ -301,6 +301,13 @@ export interface GroupLive {
   came?: StoredGroup["came"];
 }
 
+/**
+ * What a pin or a deletion for everyone changes of a private group's record, in a row of its own (settings store,
+ * `groupLightKey`), apart from `GroupLive` so that a message does not write them too: there while the record is behind
+ * on them, deleted each time the record is written whole (`engine/groupRows.ts`).
+ */
+export interface GroupLight { pin?: StoredPin; removedIds: string[]; removals: Removal[] }
+
 export interface GroupMemberView {
   key: string;
   role: GroupRole;
