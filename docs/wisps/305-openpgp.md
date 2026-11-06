@@ -41,7 +41,7 @@ No other fields are allowed. Limits, enforced before parsing: 1.5 KiB for the si
 A verifier (the contact's app, locally, fetching nothing) MUST refuse the proof unless all of the following hold:
 
 1. The key parses as exactly one public key, of version 4 or 6. v3 keys and the LibrePGP v5 format are refused. A private key is refused without being echoed.
-2. The primary key and the key that signed use an allowed algorithm: Ed25519 (both the RFC 9580 algorithm 27 and the legacy EdDSA form), Ed448, ECDSA on P-256, P-384, P-521 or brainpoolP256r1/P384r1/P512r1, or RSA with a modulus of at least 2048 bits. DSA, ElGamal and secp256k1 are refused.
+2. The primary key and the key that signed use an allowed algorithm: Ed25519 (both the RFC 9580 algorithm 27 and the legacy EdDSA form), Ed448, ECDSA on P-256, P-384, P-521 or brainpoolP256r1/P384r1/P512r1, or RSA with a modulus of 2048 to 8192 bits. DSA, ElGamal and secp256k1 are refused. Every RSA key in the key, primary and subkeys, has a modulus of at most 8192 bits and a public exponent of at most 64 bits, checked before any signature on it is verified.
 3. The signature's hash is SHA-256, SHA-384, SHA-512, SHA-224, SHA3-256 or SHA3-512. SHA-1, MD5 and RIPEMD-160 are refused. Self-signatures on the key may still use SHA-1, because older keys carry them; MD5 and RIPEMD-160 are refused there too.
 4. The key's primary fingerprint is the one the statement names (the statement's external identity); a valid signature by any other key is refused.
 5. The signature's issuer (key ID, and the issuer fingerprint subpacket when present) is the primary key or one of its subkeys.
