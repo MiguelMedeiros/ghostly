@@ -1225,8 +1225,8 @@ describe("a browser that keeps no app files (Safari's Private Browsing)", () => 
 });
 
 describe("a restored profile (installed list, no bundle)", () => {
-  async function restored() {
-    const v1 = await bundle();
+  async function restored(data?: Uint8Array) {
+    const v1 = await bundle({ data });
     net.put(BUNDLE_URL, v1.bytes);
     const store = apps(net);
     await store.preview({ url: BUNDLE_URL });
@@ -1293,6 +1293,45 @@ describe("a restored profile (installed list, no bundle)", () => {
     await (await fileBytes()).remove(`app-${v1.digest}`);
     await store.preview({ url: PINNED_URL });
     expect(await store.install({ digest: v1.digest, grant: ["chat"] })).toMatchObject({ run: { status: "ok" } });
+  });
+
+  // Each case three times, with files of many pieces: a collision of the two writes depends on how their pieces interleave.
+  describe.each([1, 2, 3])("two fetches of its files at once share one write (run %i)", () => {
+    const large = () => restored(new Uint8Array(2_500_000));
+
+    it("Open while the update check fetches them: both get the files", async () => {
+      const { v1, store } = await large();
+      const [entry, check] = await Promise.all([store.entry({ ref: v1.ref }), store.checkUpdates()]);
+      expect(entry.digest).toBe(v1.digest);
+      expect(check[0]!.run).toEqual({ status: "ok" });
+      expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
+    });
+
+    it("Open twice", async () => {
+      const { v1, store } = await large();
+      const entries = await Promise.all([store.entry({ ref: v1.ref }), store.entry({ ref: v1.ref })]);
+      expect(entries.map((e) => e.digest)).toEqual([v1.digest, v1.digest]);
+      expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
+    });
+
+    it("Get its files twice", async () => {
+      const { v1, store } = await large();
+      expect(await Promise.all([store.fetchFiles({ ref: v1.ref }), store.fetchFiles({ ref: v1.ref })])).toEqual([{ status: "ok" }, { status: "ok" }]);
+      expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
+    });
+  });
+});
+
+describe.each([1, 2, 3])("two Installs of one app at once install it (run %i)", () => {
+  it.each([["small", 0], ["2.5 MB", 2_500_000]])("a %s bundle", async (_, size) => {
+    const v1 = await bundle({ data: new Uint8Array(size) });
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    const views = await Promise.all([store.install({ digest: v1.digest, grant: ["chat"] }), store.install({ digest: v1.digest, grant: ["chat"] })]);
+    expect(views.map((v) => v.run)).toEqual([{ status: "ok" }, { status: "ok" }]);
+    expect(await appRows()).toHaveLength(1);
+    expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
   });
 });
 
