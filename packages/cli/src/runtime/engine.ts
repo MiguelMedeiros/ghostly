@@ -209,6 +209,8 @@ export interface RuntimeOptions {
   deferGroups?: boolean; deferChats?: boolean; offline?: boolean; logJoins?: boolean;
   /** The chats whose group invitations this profile accepts by itself (`group auto`, `NodeOptions.autoJoins`). */
   autoJoins?: (linkId: string) => boolean;
+  /** The start keeps each history's newest rows that many, for the host's event check (`EngineServer.takeStartNewest`). */
+  keepNewest?: number;
 }
 
 /**
@@ -324,6 +326,7 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     ...(options.deferGroups ? { deferGroups: true } : {}),
     ...(options.deferChats ? { deferChats: true } : {}),
     ...(options.offline ? { offline: true } : {}),
+    ...(options.keepNewest ? { keepNewest: options.keepNewest } : {}),
     // Tests only: group links as an app from before native ones (test/groupCompat.test.ts).
     ...(process.env.GHOSTLY_TEST_WEBRTC_GROUP_LINKS === "1" ? { webrtcGroupLinks: true } : {}),
   });

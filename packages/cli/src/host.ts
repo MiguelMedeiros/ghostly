@@ -57,7 +57,7 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
   let groupAuto: GroupAutoJoin | undefined;
   const autoJoins = (chat: string): boolean => !!groupAuto?.autoJoins(chat);
   try {
-    runtime = await startRuntime(paths, { ...options, ...(mode === "daemon" ? { logJoins: true } : {}), autoJoins });
+    runtime = await startRuntime(paths, { ...options, ...(mode === "daemon" ? { logJoins: true } : {}), autoJoins, keepNewest: BASELINE_NEWEST });
   } catch (error) {
     release();
     throw error;
@@ -74,9 +74,11 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     const whole = (id: string) => (id.startsWith("group:") ? node.groupMessages({ groupId: id.slice(6) }) : node.getMessages(id));
     // A store that was closed holds every note the hub made, and a history the engine has not touched since is as it
     // was closed: its newest messages say whether the hub is in step with it. Otherwise the whole history is read.
+    // Those newest messages come from the whole histories the engine's start read, where it kept them unwritten since.
     const closed = !runtime.store.recovered;
+    const kept = runtime.server.takeStartNewest();
     for (const id of [...now.links.map((link) => link.id), ...now.groups.map((group) => `group:${group.id}`)]) {
-      const page = closed && !runtime.server.historyChanged(id) ? await node.messagePage({ linkId: id, limit: BASELINE_NEWEST }) : null;
+      const page = closed && !runtime.server.historyChanged(id) ? kept.get(id) ?? await node.messagePage({ linkId: id, limit: BASELINE_NEWEST }) : null;
       if (page && !page.more) histories.set(id, page.messages);
       else if (page && hub.inStep(id, page.messages)) newest.set(id, page.messages);
       else histories.set(id, await whole(id));
