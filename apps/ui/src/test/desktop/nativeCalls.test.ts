@@ -276,6 +276,32 @@ describe("the RTCPeerConnection stand-in", () => {
     }
   });
 
+  it("tells Rust when the window goes out of sight and back: meanwhile it makes no picture past the first for it", async () => {
+    // The page draws none out of sight, and Rust's JPEGs of two pictures were 6% of a core and 1 MB a second through Tauri's channel.
+    const hidden = { on: false };
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockImplementation(() => (hidden.on ? "hidden" : "visible"));
+    const hiddenSpy = vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden.on);
+    const show = (on: boolean) => { hidden.on = !on; document.dispatchEvent(new Event("visibilitychange")); };
+    const told = () => tauri.invoke.mock.calls.filter(([command]) => command === "native_pictures_shown").map(([, args]) => args);
+    try {
+      const pc = new NativePeerConnection({});
+      show(false);
+      await vi.waitFor(() => expect(told()).toEqual([{ shown: false }]));
+      show(true);
+      await vi.waitFor(() => expect(told()).toEqual([{ shown: false }, { shown: true }]));
+      // One window, one word for it: a second call (or a camera) does not say it twice.
+      const second = new NativePeerConnection({});
+      show(false);
+      await vi.waitFor(() => expect(told()).toEqual([{ shown: false }, { shown: true }, { shown: false }]));
+      pc.close();
+      second.close();
+    } finally {
+      show(true);
+      visibility.mockRestore();
+      hiddenSpy.mockRestore();
+    }
+  });
+
   it("answers an offer through Rust, the lanes known as soon as the offer is", async () => {
     const pc = new NativePeerConnection({});
     await pc.setRemoteDescription({ type: "offer", sdp: "their offer" });
