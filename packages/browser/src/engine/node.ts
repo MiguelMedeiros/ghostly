@@ -931,7 +931,8 @@ export class GhostlyNode implements EngineImplementation {
   private readonly edgeRtcOff = new Map<string, { away: boolean; held: boolean }>();
   /** Edges put back on WebRTC by a return (`edgeRtcPresence`) since the network last changed: failing again holds them native. */
   private readonly edgeRtcRetried = new Set<string>();
-  private readonly pollIntervals: PollIntervals;
+  /** The pace the app gave (`NodeOptions.pollIntervals`): the Desktop's is the DHT's. */
+  private readonly ownPollIntervals: PollIntervals;
   private readonly localFetch: LocalFetch;
   private readonly links = new Map<string, LiveLink>();
   private services: StoredService[] = [];
@@ -2027,7 +2028,7 @@ export class GhostlyNode implements EngineImplementation {
       // A CLI profile is always `single` (WISP 06 § Goals and non-goals): no device state database is made for it.
       ...(options.singleDevice ? { runsHere: async () => true } : {}),
       readPath: () => readPathOf(this.relays ? { relays: this.relays.describe().relays } : this.settings, !!this.transport.configure) });
-    this.pollIntervals = options.pollIntervals ?? RELAY_POLL_INTERVALS;
+    this.ownPollIntervals = options.pollIntervals ?? RELAY_POLL_INTERVALS;
     this.localFetch = options.localFetch ?? webLocalFetch;
     (this.hold as unknown as { host: { transport: PkarrTransport } }).host.transport = this.transport;
     // A relay that trips or recovers shows in the connection panel's Details.
@@ -2041,6 +2042,15 @@ export class GhostlyNode implements EngineImplementation {
    */
   private configureDirect(): void {
     this.transport.configure?.({ relays: this.settings.relays, readRelays: this.settings.readRelays === true, dhtDirect: this.settings.relayOnly !== true });
+  }
+
+  /**
+   * How often links read Pkarr. The Desktop that keeps to the relays (Hide my IP from contacts) reads every packet from
+   * them, background reads too, so it goes at the relays' pace, not the DHT's: at the DHT's, one waiting invite was 45
+   * relay reads a minute, against a browser's 30. Links take it as they start; turning the switch restarts them.
+   */
+  private get pollIntervals(): PollIntervals {
+    return this.transport.configure && this.settings.relayOnly === true ? RELAY_POLL_INTERVALS : this.ownPollIntervals;
   }
 
   /**
