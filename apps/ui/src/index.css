@@ -1512,7 +1512,7 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
    (the accent on classic's green, the yellow on every light one). The mix keeps the hue and reads at 4:1 or more. */
 .money-ink-mainnet,[data-message-bubble] .network-tag[data-network="mainnet"]{color:color-mix(in oklab,var(--color-accent) 50%,var(--color-text-primary))}
 [data-message-bubble] .network-tag[data-network="testnet"]{color:color-mix(in oklab,var(--color-test-money) 50%,var(--color-text-primary))}
-.payment-back-network{margin-left:8px;font-size:9px}
+.payment-back-network{margin-inline-start:8px;font-size:9px}
 
 /* An app opened alone covers the whole screen: its bar keeps clear of a phone's status bar and notch (webOpener.ts). */
 .alone-bar {
