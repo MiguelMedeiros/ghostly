@@ -318,6 +318,9 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     pushSend: (request) => nodePushSend(request),
     // Held items are read from the contact's storage on public addresses only (./holdFetch.ts).
     holdFetch: nodeHoldFetch(),
+    // libdatachannel keeps only its own candidates out of the offer under `iceTransportPolicy: "relay"`: its ICE still
+    // checks from this machine's sockets. With Hide my IP from contacts on, chats and group edges go over the relays.
+    webrtcIgnoresRelayOnly: true,
     callsSupport: callsUnavailable === null,
     ...(callsUnavailable ? { callsUnavailable } : {}),
     ...(options.autoJoins ? { autoJoins: options.autoJoins } : {}),
