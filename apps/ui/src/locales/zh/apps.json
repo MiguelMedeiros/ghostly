@@ -62,6 +62,7 @@
     "title": "与 {{name}} 一起用的应用"
   },
   "errors": {
+    "damaged": "它在此设备上的文件已损坏。请重新获取文件。",
     "equivocation": "这个链接里是你已有版本的另一个副本。Ghostly 保留了你的版本。",
     "expired": "耗时太久。请重新检查应用。",
     "githubLink": "这个 GitHub 页面不是应用。请粘贴仓库链接，或应用文件的链接。",

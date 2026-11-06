@@ -31,6 +31,8 @@ const KEYS: Record<string, TranslationKey> = {
   "signature-key": "apps.errors.notSigned",
   "bad-signature-statement": "apps.errors.notSigned",
   "needs-files": "apps.errors.needsFiles",
+  // Its stored files are not what was installed: the engine dropped them, and Get its files fetches them again.
+  damaged: "apps.errors.damaged",
   storage: "apps.errors.storage",
 };
 

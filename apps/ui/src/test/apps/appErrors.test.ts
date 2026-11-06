@@ -54,4 +54,15 @@ describe("app errors", () => {
   it("other errors have no ⓘ", () => {
     expect(appErrorView(new Error("offline: no network"), translateWith(locales.en))).toEqual({ text: "You are offline." });
   });
+
+  it("files found damaged on this device say to get them again, in every language, never that Ghostly won't install it", () => {
+    const damaged = new Error("damaged: This app's stored files do not match what was installed");
+    expect(appErrorView(damaged, translateWith(locales.en))).toEqual({ text: "Its files on this device are damaged. Get its files again." });
+    expect(appErrorView(damaged, translateWith(locales.pt)).text).toBe("Os arquivos dele neste dispositivo estão danificados. Baixe os arquivos de novo.");
+    for (const [name, locale] of Object.entries(locales)) {
+      const t = translateWith(locale);
+      expect(appErrorView(damaged, t).text, name).not.toBe(t("apps.errors.refused"));
+      expect(appErrorView(damaged, t).text, name).not.toMatch(/apps\.errors|stored files/);
+    }
+  });
 });

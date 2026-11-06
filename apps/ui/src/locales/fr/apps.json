@@ -62,6 +62,7 @@
     "title": "Apps avec {{name}}"
   },
   "errors": {
+    "damaged": "Ses fichiers sur cet appareil sont endommagés. Récupérez ses fichiers à nouveau.",
     "equivocation": "Ce lien contient une autre copie d'une version que vous avez. Ghostly a gardé la vôtre.",
     "expired": "C'était trop long. Vérifiez l'app à nouveau.",
     "githubLink": "Cette page GitHub n'est pas une app. Collez le lien du dépôt ou celui du fichier de l'app.",
