@@ -3,23 +3,30 @@ import { error, ghostly, home, ok } from "./support/cli";
 // covers: headless.cli
 
 /**
- * The name contacts see has one rule, whichever command sets it: up to 64 characters on one line, as a group's name.
- * `settings set nick` stored 300 characters that `profile set --name` refused, and both took a name with a line break;
- * `status` and `profile show` printed them whole (contacts saw the first 64 only).
+ * The name contacts see has one rule, whichever command sets it, as a group's name: cleaned first (a tab or a line
+ * break is a space, invisible characters go), then up to 64 characters. `settings set nick` stored 300 characters that
+ * `profile set --name` refused, and both took a name with a line break; `status` and `profile show` printed them whole
+ * (contacts saw the first 64 only). A tab was refused as a second line, and a name with nothing that shows was kept.
  */
 describe("the profile's name", { timeout: 120_000 }, () => {
   const dir = home("profile-name");
   const name = async () => ok(await ghostly(["--home", dir, "profile", "show"])).name;
 
-  it("is refused past 64 characters or with a line break, by either command, and the name before stays", async () => {
+  it("is refused past 64 characters or with nothing that shows, by either command, and the name before stays", async () => {
     ok(await ghostly(["--home", dir, "profile", "set", "--name", "Bot"]));
-    for (const bad of ["x".repeat(300), "a\nb", "a\rb", "tab\there"]) {
-      expect(error(await ghostly(["--home", dir, "profile", "set", "--name", bad]), "bad_request", 1).message, JSON.stringify(bad))
-        .toBe("name must be up to 64 characters on one line");
-      expect(error(await ghostly(["--home", dir, "settings", "set", "nick", bad]), "bad_request", 1).message, JSON.stringify(bad))
-        .toBe("nick must be up to 64 characters on one line");
+    for (const [bad, rule] of [["x".repeat(300), "must be up to 64 characters on one line"], ["\u200b", "needs a character that shows (an empty one is no name)"]]) {
+      expect(error(await ghostly(["--home", dir, "profile", "set", "--name", bad]), "bad_request", 1).message, JSON.stringify(bad)).toBe(`name ${rule}`);
+      expect(error(await ghostly(["--home", dir, "settings", "set", "nick", JSON.stringify(bad)]), "bad_request", 1).message, JSON.stringify(bad)).toBe(`nick ${rule}`);
     }
     expect(await name()).toBe("Bot");
+  });
+
+  it("takes a tab or a line break as a space, by either command", async () => {
+    for (const given of ["a\nb", "a\rb", "a\tb"]) {
+      expect(ok(await ghostly(["--home", dir, "profile", "set", "--name", given])).name, JSON.stringify(given)).toBe("a b");
+      expect(ok(await ghostly(["--home", dir, "settings", "set", "nick", JSON.stringify(`${given}!`)])).nick, JSON.stringify(given)).toBe("a b!");
+    }
+    expect(await name()).toBe("a b!");
   });
 
   it("is taken at 64 characters, emoji counted as one, and trimmed, by either command", async () => {

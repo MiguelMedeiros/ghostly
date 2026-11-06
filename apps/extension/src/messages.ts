@@ -73,4 +73,9 @@ export interface EngineStatus {
    * Absent from a document an older build started.
    */
   activeId?: string;
+  /**
+   * The peer stopped for good (its document is closing for a switch, or "Clear all data" ran) and its document stays
+   * on with no peer: the page that would ask for a new one went away, or the worker did. Absent from an older build.
+   */
+  stopped?: boolean;
 }

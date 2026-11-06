@@ -83,7 +83,12 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener((request: ClientMessage) => withPeer((s) => {
     // A chat's whole history the page asked for; a device that is not the active one has none.
     if (request?.kind === "history") void engineOf(s)?.history(client, request.linkId);
-    else void s.handle(client, request);
+    else {
+      const handled = s.handle(client, request);
+      // "Clear all data" stops the peer for good (`clearProfileData`): once it is over, the worker replaces this document
+      // at the next start it is asked for, should the page go away before it asks for a new peer (`restart-engine`).
+      if (request?.kind === "request" && request.method === "clearProfileData") void handled.finally(() => { cleared = true; });
+    }
   }));
 });
 
@@ -138,8 +143,13 @@ function serviceName(peer: EngineServer, peerPubKeyZ32: string, serviceId: strin
 }
 
 let stopping: Promise<void> | null = null;
-/** Stops the peer, once: before the worker closes this document for a switch, or as the page goes away. */
-const stopPeer = () => (stopping ??= (running ? running.stop() : server.then((s) => s.stop())).catch(() => {}));
+/** A page's "Clear all data" stopped the peer: it does not run again in this document. */
+let cleared = false;
+/**
+ * Stops the peer, once: before the worker closes this document for a switch, or as the page goes away. One "Clear all
+ * data" stopped is not stopped again: nothing it held is written over the emptied database.
+ */
+const stopPeer = () => (stopping ??= cleared ? Promise.resolve() : (running ? running.stop() : server.then((s) => s.stop())).catch(() => {}));
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {
   if (message?.target !== "engine" || !fromOwnPage(sender)) return false;
@@ -147,7 +157,8 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     // Which profile runs, and which one the registry names now: they differ once a page switched.
     // Answered too when the peer did not start (its database did not open): the pages connect and are told why
     // (`start-failed`). Before, no answer came and the page got "The Ghostly peer did not start" after five seconds.
-    void server.then((s) => s.ready.catch(() => {}), () => {}).then(() => sendResponse({ profile, active: activeNamespace(), activeId: activeProfileId() } satisfies EngineStatus));
+    // A peer that stopped for good says so, and the worker starts another in its place.
+    void server.then((s) => s.ready.catch(() => {}), () => {}).then(() => sendResponse({ profile, active: activeNamespace(), activeId: activeProfileId(), stopped: cleared || stopping !== null } satisfies EngineStatus));
     return true;
   }
   if (message.type === "stop") {

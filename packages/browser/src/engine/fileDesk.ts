@@ -77,9 +77,14 @@ interface Chat {
   lastSaved: Map<string, number>;
   /** By local id: the newest progress the 2 s held back, and the write waiting for them to be up. */
   unsaved: Map<string, { record: FileTransferRecord; timer: ReturnType<typeof setTimeout> }>;
+  /** By local id: the newest state of a transfer the database refused to write (a full disk), and the look again for it. */
+  refused: Map<string, FileStateFields>;
+  rewrite?: ReturnType<typeof setTimeout>;
 }
 
 interface Speed { bytes: number; at: number; rate: number }
+
+type FileStateFields = Parameters<typeof fileStore.patch>[1];
 
 /** Local id of a file sent: the same shape files/2 uses. */
 export const outgoingFileId = (linkId: string, wireId: string) => `${linkId}-out-${wireId}`;
@@ -96,6 +101,9 @@ const floorRefusal = (why: unknown): string =>
 
 /** Progress is written to the database at most this often; every change of state is written at once. */
 const SAVE_EVERY_MS = 2_000;
+
+/** A transfer's state the database refused is written again this often, until it goes (`FileDesk.save`). */
+const REWRITE_AFTER_MS = 5_000;
 
 /** The views of finished transfers the states carry, the newest (`FileDesk.finished`). */
 const DONE_VIEWS_KEPT = 16;
@@ -123,7 +131,7 @@ export class FileDesk {
   private chat(linkId: string): Chat {
     let chat = this.chats.get(linkId);
     if (chat) return chat;
-    const made: Chat = { local: new Map(), places: new Map(), announced: new Map(), withdrawn: new Map(), saving: Promise.resolve(), lastSaved: new Map(), unsaved: new Map(), files: undefined as unknown as ChatFiles };
+    const made: Chat = { local: new Map(), places: new Map(), announced: new Map(), withdrawn: new Map(), saving: Promise.resolve(), lastSaved: new Map(), unsaved: new Map(), refused: new Map(), files: undefined as unknown as ChatFiles };
     made.files = new ChatFiles({
       send: (frame) => { this.refusedHere(made, frame); return this.deps.send(linkId, frame); },
       decide: (file, again) => this.decide(linkId, file, again),
@@ -352,6 +360,7 @@ export class FileDesk {
     chat.files.forget(out ? "out" : "in", wireId);
     clearTimeout(chat.unsaved.get(fileId)?.timer);
     chat.unsaved.delete(fileId);
+    chat.refused.delete(fileId);
     if (!out) { chat.local.delete(wireId); chat.announced.delete(wireId); chat.withdrawn.delete(wireId); }
     this.speeds.delete(fileId);
     this.unwatch(fileId);
@@ -367,13 +376,23 @@ export class FileDesk {
     }
   }
 
-  /** The chat went away: its transfers stop here. */
-  drop(linkId: string): void {
+  /**
+   * The chat went away: its transfers stop here. An unfinished one ends on the contact's side too, as deleting its
+   * message does, on the session while it is still up: one never told stayed under way there for good, its part kept.
+   * Called before the chat's link goes, so what is said still finds it. True when an end was said on the session.
+   */
+  drop(linkId: string): boolean {
     const chat = this.chats.get(linkId);
+    // The waiting ones first: a received one cancelled would otherwise start the next waiting one, accepting it.
+    const records = chat?.files.records().sort((a, b) => Number(b.state === "queued") - Number(a.state === "queued")) ?? [];
+    const said = !!chat?.files.live && records.some((record) => !transferEnded(record));
+    for (const record of records) chat!.files.forget(record.direction, record.id);
     chat?.files.detach();
     for (const { timer } of chat?.unsaved.values() ?? []) clearTimeout(timer);
+    clearTimeout(chat?.rewrite);
     this.chats.delete(linkId);
     for (const id of [...this.moved.keys(), ...this.restored, ...this.stallChecks.keys()]) if (id.startsWith(`${linkId}-`)) this.unwatch(id);
+    return said;
   }
 
   /** Stops tracking whether a transfer is stuck. */
@@ -528,6 +547,7 @@ export class FileDesk {
       this.deps.transfers.delete(id);
       clearTimeout(chat.unsaved.get(id)?.timer);
       chat.unsaved.delete(id);
+      chat.refused.delete(id);
       chat.lastSaved.delete(id);
       this.speeds.delete(id);
       this.underway.delete(id);
@@ -539,14 +559,43 @@ export class FileDesk {
     this.deps.changed();
   }
 
-  /** Writes a transfer's record and the view of it, after the chat's writes before it; what was held back goes with it. */
+  /**
+   * Writes a transfer's record and the view of it, after the chat's writes before it; what was held back goes with it.
+   * One the database refuses (a full disk) is kept and written again, with the chat's next write and every few seconds,
+   * until it goes: dropped, a received file that failed for want of room read "under way" after a restart, then
+   * "Cancelled by the sender".
+   */
   private save(chat: Chat, id: string, record: FileTransferRecord): void {
     const held = chat.unsaved.get(id);
     if (held) { clearTimeout(held.timer); chat.unsaved.delete(id); }
     // Ended: no more progress to space out.
     if (transferEnded(record)) chat.lastSaved.delete(id); else chat.lastSaved.set(id, Date.now());
     const transfer = this.deps.transfers.get(id);
-    chat.saving = chat.saving.then(() => fileStore.patch(id, { wire3: record, ...(transfer && { transfer: { state: transfer.state, transferred: transfer.transferred, size: transfer.size, error: transfer.error } }) })).catch(() => {});
+    const change: FileStateFields = { wire3: record, ...(transfer && { transfer: { state: transfer.state, transferred: transfer.transferred, size: transfer.size, error: transfer.error } }) };
+    chat.saving = chat.saving.then(() => {
+      // Newer than one refused before: it goes last, in its place.
+      chat.refused.delete(id);
+      chat.refused.set(id, change);
+      return this.writeRefused(chat);
+    }).catch(() => this.rewriteLater(chat));
+  }
+
+  /** Writes what is waiting in `refused`, oldest first; it stops at the first the database refuses. */
+  private async writeRefused(chat: Chat): Promise<void> {
+    for (const [id, change] of [...chat.refused]) {
+      await fileStore.patch(id, change);
+      chat.refused.delete(id);
+    }
+  }
+
+  private rewriteLater(chat: Chat): void {
+    if (chat.rewrite || !chat.refused.size) return;
+    chat.rewrite = setTimeout(() => {
+      chat.rewrite = undefined;
+      chat.saving = chat.saving.then(() => this.writeRefused(chat)).catch(() => this.rewriteLater(chat));
+    }, REWRITE_AFTER_MS);
+    // A headless app (the CLI) is not kept running for it.
+    (chat.rewrite as { unref?: () => void }).unref?.();
   }
 
   private show(linkId: string, chat: Chat, record: FileTransferRecord, transferred: number, progress = false): void {
