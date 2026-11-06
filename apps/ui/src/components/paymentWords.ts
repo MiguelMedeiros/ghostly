@@ -1,7 +1,7 @@
 import { decodeBolt11 } from "@ghostly/core";
 import { isWorthlessMint } from "@ghostly/browser/shared/mints";
 import type { Translate } from "../contexts/I18nContext";
-import { formatAmount, formatTokenAmount } from "../lib/amount";
+import { formatAmount, formatDecimal, formatTokenAmount } from "../lib/amount";
 import type { ChatPayment, WalletState } from "../lib/platform";
 import { satsIn } from "./NetworkTag";
 
@@ -95,6 +95,8 @@ const DIGITS = "0-9٠-٩۰-۹";
  */
 const STORED_LINE = new RegExp(`^(?:⚡ )?(Requested )?([${DIGITS}][${DIGITS}.,'٫٬\\s]*?) (test sats|sats|[A-Z][A-Z0-9-]*)(?: on (?:Ark|Bark|Fedimint|Spark)| on-chain| from the group)?$`);
 const DIGIT = new RegExp(`[${DIGITS}]`);
+/** A token amount as the engine writes it (`formatPaymentAmount`): Latin digits, a point, no grouping. */
+const PLAIN_DECIMAL = /^\d+(?:\.\d+)?$/;
 /** A whole number of sats as written there, whatever its digits and grouping marks. */
 const satsWritten = (number: string) => Number([...number].filter((c) => DIGIT.test(c)).map((c) => {
   const code = c.charCodeAt(0);
@@ -114,6 +116,6 @@ export function storedPaymentLine(t: Translate, text: string, mine: boolean): st
   const what = paymentTitle(t, { kind: requested ? "request" : "payment", direction });
   const amount = unit === "sats" || unit === "test sats"
     ? t("wallet.cards.amount", { amount: formatAmount(satsWritten(number), t.language), unit: satsIn(t, unit === "sats" ? "mainnet" : "testnet") })
-    : `${number} ${unit}`;
+    : `${PLAIN_DECIMAL.test(number) ? formatDecimal(number, t.language) : number} ${unit}`;
   return t("chat.preview.payment", { what, amount });
 }
