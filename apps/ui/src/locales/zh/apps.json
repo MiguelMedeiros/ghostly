@@ -10,6 +10,7 @@
     "storeNewer": "你已经有这个商店了。这个链接里是它的较新副本。",
     "storeOlder": "这是你已有商店的较旧副本。你的那份更新，保持不变。",
     "storeReads": "Ghostly 从 {{host}} 读取它，该主机会知道你的 IP 地址。",
+    "storeRemovedOlder": "你移除这个商店时，它的列表比这份副本更新。要重新添加，请使用指向其最新列表的链接。",
     "title": "添加应用或商店",
     "updateStore": "更新商店"
   },

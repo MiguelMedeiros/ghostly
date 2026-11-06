@@ -10,6 +10,7 @@
     "storeNewer": "Vous avez déjà cette boutique. Ce lien en contient une copie plus récente.",
     "storeOlder": "C'est une copie plus ancienne d'une boutique que vous avez déjà. La vôtre est plus récente et reste telle quelle.",
     "storeReads": "Ghostly la lit depuis {{host}}, qui apprend votre adresse IP.",
+    "storeRemovedOlder": "Vous avez retiré cette boutique quand sa liste était plus récente que cette copie. Pour l'ajouter à nouveau, utilisez un lien vers sa liste la plus récente.",
     "title": "Ajouter une app ou une boutique",
     "updateStore": "Mettre à jour la boutique"
   },
