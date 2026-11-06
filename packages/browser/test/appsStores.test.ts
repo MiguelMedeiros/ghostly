@@ -509,6 +509,26 @@ describe("stores", () => {
     }
   });
 
+  it("the preview of a store removed says what Add would refuse: an index older than the last one taken, or another under its sequence", async () => {
+    const OLD_URL = `https://cdn.jsdelivr.net/gh/ghostly/store@${"0".repeat(40)}/ghostly-store.json`;
+    await net.putStore(await storeFiles({ sequence: 5 }), OLD_URL);
+    await net.putStore(await storeFiles({ sequence: 6 }));
+    const store = apps(net);
+    await store.addStore({ url: STORE_URL });
+    await store.removeStore({ key: keyOf(STORE_KEY) });
+    const older = await store.previewStore({ url: OLD_URL });
+    expect(older).toMatchObject({ sequence: 5, refused: "rollback" });
+    expect(older.held, "a store removed is not one the person has").toBeUndefined();
+    await expect(store.addStore({ url: OLD_URL })).rejects.toThrow(/^rollback/);
+    await net.putStore(await storeFiles({ sequence: 6, apps: [listing(await bundle())] }), OLD_URL);
+    expect(await store.previewStore({ url: OLD_URL })).toMatchObject({ sequence: 6, refused: "equivocation" });
+    // The one last taken, or a newer one, is offered as the first time.
+    expect(await store.previewStore({ url: STORE_URL })).not.toHaveProperty("refused");
+    await net.putStore(await storeFiles({ sequence: 7 }), OLD_URL);
+    expect(await store.previewStore({ url: OLD_URL })).not.toHaveProperty("refused");
+    expect(await store.addStore({ url: OLD_URL })).toMatchObject({ sequence: 7 });
+  });
+
   it("an index whose bytes have not changed is not checked again, only its expiry; a changed one is read whole", async () => {
     const v1 = await bundle();
     await net.putStore(await storeFiles({ apps: [listing(v1)], revoked: [await revocation(v1.ref, [v1.digest])], expires: NOW_S + 3600 }));

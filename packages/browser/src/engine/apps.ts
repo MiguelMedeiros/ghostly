@@ -260,7 +260,9 @@ export interface AppStoreSummary {
  * removed), with the `sequence` of the index held (absent when none was read yet), and `equivocation` when this index
  * is another one signed under that sequence (the preview marks the held store with it). Add then takes only a newer index.
  */
-export interface AppStorePreview { url: string; key: string; fingerprint: string; name: string; description?: string; kind: AppStoreKind; sequence: number; expires: number; expired: boolean; apps: number; held?: { sequence?: number; equivocation?: true } }
+export interface AppStorePreview { url: string; key: string; fingerprint: string; name: string; description?: string; kind: AppStoreKind; sequence: number; expires: number; expired: boolean; apps: number; held?: { sequence?: number; equivocation?: true };
+  /** A store the person removed, whose index here is older than the last one taken from it, or another under its sequence: `addStore` refuses it so. */
+  refused?: "rollback" | "equivocation" }
 
 /** Where to fetch an app from: a pasted URL, a store's listing, or a chat card's pointer. */
 export type AppSource =
@@ -1294,10 +1296,13 @@ export class Apps {
     const other = !!held && !held.removed && !!held.index
       && appStoreDecision({ key: held.key, sequence: held.index.sequence, digest: held.digest ?? "" }, { key: index.key, sequence: index.sequence, digest }) === "equivocation";
     if (other && held.equivocation?.digest !== digest) await this.putStore(this.withIndex(held, index, digest));
+    // A store removed takes back no index older than the last one taken from it (`addStore`): Add is not offered for it.
+    const seen = held?.removed && held.seen && appStoreDecision({ key: held.key, ...held.seen }, { key: index.key, sequence: index.sequence, digest });
     return {
       url: at, key: index.key, fingerprint: appFingerprint(index.key), name: index.name, kind: index.kind, sequence: index.sequence,
       expires: index.expires, expired: read.store.expired, apps: index.apps.length, ...(index.description !== undefined && { description: index.description }),
       ...(held && !held.removed && { held: held.index ? { sequence: held.index.sequence, ...(other && { equivocation: true as const }) } : {} }),
+      ...((seen === "rollback" || seen === "equivocation") && { refused: seen }),
     };
   }
 
