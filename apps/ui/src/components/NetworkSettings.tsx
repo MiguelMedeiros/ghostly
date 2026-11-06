@@ -24,6 +24,8 @@ const FIELDS = {
   turnUrl: "network-turn-url", turnUsername: "network-turn-username", turnCredential: "network-turn-credential",
 } as const;
 type FieldName = keyof typeof FIELDS;
+/** The TURN server's block, which a link to Settings can name to open Network at it (the call note's). */
+export const TURN_FIELD = "network-turn";
 /** What is wrong with each field, said in the page's language. */
 type Problems = Partial<Record<FieldName, string>>;
 
@@ -213,7 +215,7 @@ export function NetworkSettings() {
         </div>}
       </Field>
 
-      <Field testId="network-turn-field" label={t("network.turn")} htmlFor="network-turn-url" hint={t(credentialGone ? "network.turnCredentialAgain" : "network.turnHint")} info={t("network.turnInfo")}>
+      <Field id={TURN_FIELD} testId="network-turn-field" label={t("network.turn")} htmlFor="network-turn-url" hint={t(credentialGone ? "network.turnCredentialAgain" : "network.turnHint")} info={t("network.turnInfo")}>
         <input id={FIELDS.turnUrl} aria-label={t("network.turnUrl")} value={turn.urls} onChange={(e) => { setTurn({ ...turn, urls: e.target.value }); edited("turnUrl"); }}
           placeholder="turn:turn.example.org:3478" {...exactText} dir="ltr" {...invalid("turnUrl")} className={`${field} font-mono text-sm`} />
         {problemUnder("turnUrl")}

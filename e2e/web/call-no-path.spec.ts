@@ -1,5 +1,5 @@
 import type { BrowserContext } from "@playwright/test";
-import { chat, expect, test } from "../support/fixtures";
+import { chat, connect, expect, link, test } from "../support/fixtures";
 import { pair } from "../support/paired";
 
 // covers: calls.no-path
@@ -55,6 +55,33 @@ test("a call that finds no path says the network may block calls, with Network s
   await bob.page.getByTestId("call-no-path-close").click();
   await expect(bob.page.getByTestId("call-no-path")).toHaveCount(0);
 });
+
+// A phone's Network screen has the relay lists above the TURN server: opened at its top, the field was below the fold.
+for (const language of ["en", "ar"] as const) {
+  test(`on a phone (${language}) Network settings opens Network with the TURN server field on screen`, { tag: ["@feature:calls.no-path", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+    test.setTimeout(4 * 60_000);
+    const alice = await peer("no-path-desk", { beforeOpen: callsFindNoPath });
+    const bob = await peer("no-path-phone", { beforeOpen: callsFindNoPath, mobile: true, viewport: { width: 375, height: 667 } });
+    await link(alice, bob);
+    await connect(alice, bob);
+    if (language === "ar") {
+      await bob.page.evaluate(() => {
+        const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+        localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language: "ar" }));
+      });
+      await bob.page.reload();
+      await expect(bob.page.locator("html")).toHaveAttribute("dir", "rtl");
+    }
+    await expect(bob.page.getByTestId("call-audio")).toBeEnabled({ timeout: 30_000 });
+    await bob.page.getByTestId("call-audio").click();
+    await alice.page.getByTitle("Accept audio call").click();
+    await expect(bob.page.getByTestId("call-no-path")).toBeVisible({ timeout: 90_000 });
+
+    await bob.page.getByTestId("call-no-path-settings").click();
+    // The whole field, its address, username and credential, not just its top edge.
+    await expect(bob.page.getByTestId("network-turn-field")).toBeInViewport({ ratio: 1 });
+  });
+}
 
 test("a caller who left the chat while it rang finds the note there when back", { tag: ["@feature:calls.no-path"] }, async ({ peer }) => {
   test.setTimeout(4 * 60_000);
