@@ -46,7 +46,10 @@ const MAX_ATTEMPTS = 8;
 const SEQUENCE_BLOCK = 64;
 /** The wait before publication attempt `attempts + 1` of a text, or of a receipt the contact still asks for. */
 const backoff = (attempts: number) => Math.min(60_000, 4_000 * 2 ** attempts);
-/** The contact's mailbox is read this often while either side is DHT-only, and otherwise… */
+/**
+ * The contact's mailbox is read this often while this side is DHT-only (a contact that chose it is read at the chat's
+ * pace: `ACTIVE_DHT_POLL_MS` open, or on a daemon, `peerDhtPollMs`), and otherwise…
+ */
 const DHT_POLL_MS = 4_000;
 const STREAM_POLL_MS = 30_000;
 /**
@@ -299,6 +302,11 @@ export class DhtDelivery {
     /** The contact took this side's reactions up to number `n`. */
     reactionsTaken?(n: number): Promise<void>;
     pollMs?: number;
+    /**
+     * How often a contact that chose DHT only is read with the chat in the background, where every chat counts as open
+     * (a CLI daemon: `ACTIVE_DHT_POLL_MS`). Absent: at the background pace (WISP 403, poll pace).
+     */
+    peerDhtPollMs?: number;
     /**
      * A chat already paired, started again: its first control envelope goes this long after the start, not in the
      * burst of an app coming back (bug hunt r7a). A text, a receipt, a new mode or a new capability revision still go at once.
@@ -1096,7 +1104,9 @@ export class DhtDelivery {
     if (this.live) return LIVE_POLL_MS;
     // Our text awaits its receipt: the receipt is what the person is looking at.
     if (this.state.pending && this.state.pending.expires > now) return DHT_POLL_MS;
-    return this.active ? ACTIVE_DHT_POLL_MS : STREAM_POLL_MS;
+    if (this.active) return ACTIVE_DHT_POLL_MS;
+    // A contact that chose DHT only, read where every chat is open (a daemon): its texts come in seconds, not at 30 s.
+    return this.state.peerMode === "dht" && this.options.peerDhtPollMs ? Math.min(this.options.peerDhtPollMs, STREAM_POLL_MS) : STREAM_POLL_MS;
   }
   /**
    * How long ago this side's invite was made (or joined), while nobody used it (or its inviter never answered,
