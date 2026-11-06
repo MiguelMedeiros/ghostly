@@ -28,6 +28,11 @@ export type FromWorker =
   | { type: "share-none" }
   /** The shares this page asked to forward (`share-forward`) are handed to the app's page of its profile. */
   | { type: "share-forwarded" }
+  /**
+   * A share is to be forwarded and no page of its profile said `share-here` in this worker's life (it restarted since):
+   * a page that takes shares says it again now, without coming to the front.
+   */
+  | { type: "share-where" }
   /** A wake-up notification was tapped: open this chat, in this profile (switching to it when another is open). */
   | { type: "open-chat"; path: string; profile: string }
   /** A wake-up notification was tapped: which profile does this window run, and does it hold its peer? Answered on the port sent with it (`WindowSays`). */
