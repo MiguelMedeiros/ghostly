@@ -88,10 +88,16 @@ export function refs(values: unknown, flag: string, what: string): void {
   }
 }
 
-/** A whole number of sats from the command line. */
+/**
+ * A whole number of sats from the command line (`<sats>`), refused in a number flag's words: `<sats> takes a whole
+ * number from 1 up, not -5`, a number as typed, other words quoted. Before: "Not an amount in sats: \"-5\"".
+ */
 export function sats(value: string | undefined): number {
   const n = Number(value);
-  if (!value || !Number.isSafeInteger(n) || n <= 0) throw new CliError("usage", `Not an amount in sats: ${JSON.stringify(value)}`);
+  if (!value || !Number.isSafeInteger(n) || n <= 0) {
+    const shown = /^-?\d+(\.\d+)?$/.test(value ?? "") ? value : JSON.stringify(value);
+    throw new CliError("usage", `<sats> takes a whole number from 1 up, not ${shown}`);
+  }
   return n;
 }
 
