@@ -62,6 +62,14 @@ describe("parsing kinds 0, 3, 1 and 10000", () => {
     expect(followHints([B, C], [A, C], [B], A)).toEqual({ followsYou: true, youFollow: true, mutual: [C] });
     expect(followHints([], [], [B], A)).toEqual({ followsYou: false, youFollow: false, mutual: [] });
   });
+  it("a profile's name is one line of plain text: no separator, invisible or direction-changing character", () => {
+    const name = "Alice Verified by GitHub ​⁠﻿؜‎‏\u{e0041}";
+    const p = parseProfile(signed({ kind: 0, content: JSON.stringify({ name, display_name: name }) }), A)!;
+    expect(p.name).toBe("AliceVerified by GitHub");
+    expect(p.handle).toBeUndefined();
+    expect(parseProfile(signed({ kind: 0, content: JSON.stringify({ display_name: "​⁠\u{e0041}", name: "alice" }) }), A)!.name).toBe("alice");
+    for (const ok of ["مريم", "שלום עליכם", "👩🏽‍💻 Ana", "नमस्ते", "Zoë 🇧🇷", "山田 太郎"]) expect(plainText(ok, 64)).toBe(ok);
+  });
   it("plain text never keeps controls or bidi overrides", () => {
     expect(plainText("a\u0000b‮c⁦d", 10)).toBe("abcd");
     expect(plainText("x".repeat(1000), 10)).toBe("x".repeat(10));
