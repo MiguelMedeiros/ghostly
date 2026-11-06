@@ -706,6 +706,24 @@ describe("answering a call", () => {
     expect(lines(call)).toEqual(["call_received", "call_missed", "call_received"]);
   });
 
+  it("a chat let go between a burst's calls (off screen, loaded only for its call) still holds the next one back", () => {
+    const first = renderCall(undefined, undefined, {}, "chat-burst");
+    first.receive(remote.offer(Date.now()));
+    first.receive(remote.hangUp(Date.now() + 1));
+    first.unmount();
+
+    act(() => { vi.advanceTimersByTime(500); });
+    const again = renderCall(undefined, undefined, {}, "chat-burst");
+    again.receive(remote.offer(Date.now()));
+    expect(again.result.current.callState).toBe("idle");
+    expect(lines(again)).toEqual(["call_missed"]);
+
+    // Another contact's chat knows nothing of it.
+    const other = renderCall(undefined, undefined, {}, "chat-other");
+    other.receive(remote.offer(Date.now()));
+    expect(other.result.current.callState).toBe("incoming");
+  });
+
   it("a call declined here does not hold the next ring back, nor does one that rang out", () => {
     const call = renderCall();
     call.receive(remote.offer(Date.now()));
