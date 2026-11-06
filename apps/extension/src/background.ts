@@ -207,6 +207,18 @@ listenToNotifications();
 chrome.permissions.onAdded.addListener(listenToNotifications);
 
 /**
+ * The person turned off the extension's site access to a host of this machine (`chrome://extensions`, or the puzzle
+ * menu): the peer stops sharing the apps there, as "Share" turned off does, until they are turned on again. Ghostly's own
+ * `permissions.remove` fires this too, once no app is left at that host: then there is nothing to turn off.
+ */
+chrome.permissions.onRemoved.addListener(({ origins }) => {
+  if (!origins?.length) return;
+  void ensureEngine()
+    .then(() => chrome.runtime.sendMessage({ target: "engine", type: "local-access-removed", origins } satisfies RuntimeMessage))
+    .catch(() => {});
+});
+
+/**
  * A tab that shows the app already, on any of its pages (`app.html#/chat/…`). Asked of the extension's own contexts:
  * `chrome.tabs.query({ url })` needs the `tabs` permission, which Ghostly does not have, and finds nothing without it.
  */

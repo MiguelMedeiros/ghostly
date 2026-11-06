@@ -1,4 +1,5 @@
-import { GhostlyHttpError, fromBase64, toBase64 } from "@ghostly/core";
+import { GhostlyHttpError, fromBase64, parseLocalTarget, toBase64 } from "@ghostly/core";
+import { localAccessPattern } from "@ghostly/browser/host";
 import type { EngineServer, EngineClientSink } from "@ghostly/browser/engine/server";
 import { copyingSink } from "@ghostly/browser/engine/copyingSink";
 import { createPeerServer } from "@ghostly/browser/devices/peer";
@@ -142,6 +143,24 @@ function serviceName(peer: EngineServer, peerPubKeyZ32: string, serviceId: strin
   }
 }
 
+/**
+ * Chrome no longer lets the extension reach `patterns` (`http://127.0.0.1/*`): every app this profile shares at one of
+ * those hosts, on any port, is turned off ("Share" off, `setServiceEnabled`), so contacts no longer see it and are
+ * answered as for any app not shared. Turning it on again is the person's to do.
+ */
+async function turnOffAppsAt(patterns: string[]): Promise<void> {
+  const peer = engineOf(await server);
+  if (!peer) return;
+  await peer.ready;
+  const gone = new Set(patterns);
+  for (const service of peer.node.getState().services) {
+    if (!service.enabled) continue;
+    let pattern: string;
+    try { pattern = localAccessPattern(parseLocalTarget(service.target).origin); } catch { continue; }
+    if (gone.has(pattern)) peer.node.setServiceEnabled({ serviceId: service.id, enabled: false });
+  }
+}
+
 let stopping: Promise<void> | null = null;
 /** A page's "Clear all data" stopped the peer: it does not run again in this document. */
 let cleared = false;
@@ -168,6 +187,11 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
   }
   if (message.type === "http-request") {
     void handleHttpRequest(message).then(sendResponse);
+    return true;
+  }
+  if (message.type === "local-access-removed") {
+    const origins = Array.isArray(message.origins) ? message.origins.filter((o): o is string => typeof o === "string") : [];
+    void turnOffAppsAt(origins).then(() => sendResponse(true), () => sendResponse(false));
     return true;
   }
   return false;
