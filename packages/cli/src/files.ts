@@ -269,6 +269,36 @@ async function markDownloaded(path: string): Promise<void> {
 
 const ACTIONS = ["accept", "decline", "pause", "resume", "cancel", "resend", "request"] as const;
 
+/**
+ * `file wait`: until a transfer ends: done answers, failed is an `engine` error with the transfer's words (and whether
+ * `file resend` can go on). A file whose transfer this run has not seen answers from the file store. `stopping`: the
+ * daemon's stop ends it as well (`waitForState`), for `file send --wait`, which answers with what it knows then.
+ */
+async function waitForFile(ctx: ApiContext, params: Params, stopping?: AbortSignal) {
+  const fileId = str(params, "file", true);
+  const { where } = fileChat(ctx, params, fileId);
+  const stored = await fileStore.get(fileId);
+  if (!stored && !state(ctx).transfers[fileId]) throw new CliError("not_found", `No file ${fileId}`);
+  const ms = num(params, "timeout", 300, { min: 1, max: 86_400 }) * 1000;
+  // A received file that waits for this person's `file accept` (over 25 MiB, or a group's file that did not come by
+  // itself) does not move however long this waits: said at once, naming the command. Before, it waited out its
+  // timeout and answered "0 of 40000000 bytes, asking", as if the contact were slow.
+  const transfer = await waitForState(ctx, (s) => {
+    const now = s.transfers[fileId] ?? stored?.transfer;
+    return now && (now.state === "done" || now.state === "failed" || (now.stage === "asking" && now.direction === "in")) ? now : undefined;
+  }, ms, `file ${fileId} to arrive`, stopping).catch((error: unknown) => {
+    const now = state(ctx).transfers[fileId];
+    if (error instanceof CliError && error.code === "timeout" && now) throw new CliError("timeout", `${error.message} (${now.transferred} of ${now.size} bytes${now.stage ? `, ${stageWords(now)}` : ""})`, { file: fileId, transferred: now.transferred, size: now.size, stage: now.stage ?? null, ...(error.details?.reason ? { reason: error.details.reason } : {}) });
+    throw error;
+  });
+  if (transfer.state === "failed") throw new CliError("engine", transfer.error ?? "The transfer failed", { file: fileId, ...where, retry: !!transfer.retry });
+  if (transfer.state !== "done") {
+    const name = (stored ?? await fileStore.get(fileId).catch(() => undefined))?.metadata?.name ?? "The file";
+    throw new CliError("confirm", `${name} (${megabytes(transfer.size)}) waits for you to take it: ghostly file accept ${fileId} (or file decline)`, { file: fileId, ...where, size: transfer.size, stage: "asking" });
+  }
+  return { ...where, file: fileId, state: "done", size: transfer.size };
+}
+
 export const FILE_METHODS: Record<string, Method> = {
   async "file.send"(ctx, params) {
     // The contact (or every member) reads its name as a message's text (docs/CLI.md § Safety).
@@ -321,8 +351,15 @@ export const FILE_METHODS: Record<string, Method> = {
     }
     // The message's id, as a group's file and `send` answer it: what `message delete`, `react`, `pin` and `--reply` take.
     // The engine names a sent file's row after its time (node.ts `sendFile`), the one given here.
-    if (wait === "sent") await FILE_METHODS["file.wait"](ctx, { chat: link.id, file: file.id, timeout: seconds });
-    return { chat: link.id, messageId: `me_${timestamp}`, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}) };
+    const messageId = `me_${timestamp}`;
+    // A wait that ends short (its time, or the daemon's stop: a restart) names the message as `send --wait` does: the
+    // file is in the chat, and a bot that sent it again sent it twice. A stop ended the connection under it before, with
+    // exit 4 "may be done: check `ghostly chat history` for a message", and no id to look for.
+    if (wait === "sent") await waitForFile(ctx, { chat: link.id, file: file.id, timeout: seconds }, ctx.stopping).catch((error: unknown) => {
+      if (error instanceof CliError && error.code === "timeout") throw new CliError("timeout", `${error.message}. It is in the chat as ${messageId}: \`ghostly file wait ${file.id}\` follows it`, { chat: link.id, messageId, file: file.id, ...error.details });
+      throw error;
+    });
+    return { chat: link.id, messageId, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}) };
   },
 
   async "file.list"(ctx, params) {
@@ -387,33 +424,8 @@ export const FILE_METHODS: Record<string, Method> = {
     return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };
   },
 
-  /**
-   * Until a transfer ends: done answers, failed is an `engine` error with the transfer's words (and whether `file
-   * resend` can go on). A file whose transfer this run has not seen answers from the file store.
-   */
   async "file.wait"(ctx, params) {
-    const fileId = str(params, "file", true);
-    const { where } = fileChat(ctx, params, fileId);
-    const stored = await fileStore.get(fileId);
-    if (!stored && !state(ctx).transfers[fileId]) throw new CliError("not_found", `No file ${fileId}`);
-    const ms = num(params, "timeout", 300, { min: 1, max: 86_400 }) * 1000;
-    // A received file that waits for this person's `file accept` (over 25 MiB, or a group's file that did not come by
-    // itself) does not move however long this waits: said at once, naming the command. Before, it waited out its
-    // timeout and answered "0 of 40000000 bytes, asking", as if the contact were slow.
-    const transfer = await waitForState(ctx, (s) => {
-      const now = s.transfers[fileId] ?? stored?.transfer;
-      return now && (now.state === "done" || now.state === "failed" || (now.stage === "asking" && now.direction === "in")) ? now : undefined;
-    }, ms, `file ${fileId} to arrive`).catch((error: unknown) => {
-      const now = state(ctx).transfers[fileId];
-      if (error instanceof CliError && error.code === "timeout" && now) throw new CliError("timeout", `${error.message} (${now.transferred} of ${now.size} bytes${now.stage ? `, ${stageWords(now)}` : ""})`, { file: fileId, transferred: now.transferred, size: now.size, stage: now.stage ?? null });
-      throw error;
-    });
-    if (transfer.state === "failed") throw new CliError("engine", transfer.error ?? "The transfer failed", { file: fileId, ...where, retry: !!transfer.retry });
-    if (transfer.state !== "done") {
-      const name = (stored ?? await fileStore.get(fileId).catch(() => undefined))?.metadata?.name ?? "The file";
-      throw new CliError("confirm", `${name} (${megabytes(transfer.size)}) waits for you to take it: ghostly file accept ${fileId} (or file decline)`, { file: fileId, ...where, size: transfer.size, stage: "asking" });
-    }
-    return { ...where, file: fileId, state: "done", size: transfer.size };
+    return waitForFile(ctx, params);
   },
 
   /**

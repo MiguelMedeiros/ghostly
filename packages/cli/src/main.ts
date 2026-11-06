@@ -272,11 +272,24 @@ async function session(g: Globals, options: RuntimeOptions, again = true): Promi
 }
 
 /**
- * `again`: a session of its own, for a read (`readOnly`) whose connection ended unanswered (`endedUnanswered`): the
- * daemon stopped or restarted under it. The read is asked once more there, through the daemon that answers now or on
- * the profile itself, and so is every call after it. It failed as a timeout told to check `ghostly chat history` for
- * a message that was never sent (exit 4), as "The daemon went away" (exit 1), or refused as a daemon of an older
- * release (exit 1), while a command started a moment later answered.
+ * Waits that change nothing (`chat wait`, `file wait`): one a daemon that stopped left unanswered is asked once more,
+ * as a read is (`throughDaemon`), for the time it had left. They failed as a timeout told to check `ghostly chat
+ * history` for a message (exit 4) when a restart came while they waited.
+ */
+const READ_WAITS: ReadonlySet<string> = new Set(["chat.wait", "file.wait"]);
+
+/** `params` with the `timeout` (its own, or the daemon's default for `method`) less the `spentMs` already waited. */
+function waitLeft(method: string, params: Record<string, unknown>, spentMs: number): Record<string, unknown> {
+  const seconds = typeof params.timeout === "number" ? params.timeout : waitsFor(method, params);
+  return seconds === undefined ? params : { ...params, timeout: Math.max(1, Math.ceil(seconds - spentMs / 1000)) };
+}
+
+/**
+ * `again`: a session of its own, for a read (`readOnly`, or one of `READ_WAITS`) whose connection ended unanswered
+ * (`endedUnanswered`): the daemon stopped or restarted under it. The read is asked once more there, through the daemon
+ * that answers now or on the profile itself, and so is every call after it. It failed as a timeout told to check
+ * `ghostly chat history` for a message that was never sent (exit 4), as "The daemon went away" (exit 1), or refused as
+ * a daemon of an older release (exit 1), while a command started a moment later answered.
  */
 function throughDaemon(client: DaemonClient, again?: () => Promise<Session>): Session {
   // The version check goes on the same connection as the command, ahead of it, not before it, and with no deadline
@@ -298,11 +311,13 @@ function throughDaemon(client: DaemonClient, again?: () => Promise<Session>): Se
   };
   const call = async (m: string, p?: unknown): Promise<unknown> => {
     if (next) return (await next).call(m, p);
+    const from = performance.now();
     try { return await first(m, p); }
     catch (error) {
-      if (!again || aborted || !endedUnanswered(error) || !readOnly(m, (p ?? {}) as Record<string, unknown>)) throw error;
+      const params = (p ?? {}) as Record<string, unknown>;
+      if (!again || aborted || !endedUnanswered(error) || !(readOnly(m, params) || READ_WAITS.has(m))) throw error;
       next ??= again();
-      try { return await (await next).call(m, p); }
+      try { return await (await next).call(m, READ_WAITS.has(m) ? waitLeft(m, params, performance.now() - from) : p); }
       catch (failure) {
         // The daemon asked once more went away as well: a read changed nothing, so it says so, and not to check a chat.
         // A listener refused again is one that does not prove itself, and is named so.
