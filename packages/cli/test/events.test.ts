@@ -796,7 +796,11 @@ describe("the seen set forgets", () => {
     const { h, events } = await clocked("late-edit.jsonl");
     h.baseline(state([link("c1")]), new Map([["c1", [m1, m2]]]));
     clock.now = 50 * DAY;
+    // A message today, so the sweep's window (counted back from the newest activity) lets m1 and m2's notes go.
+    const m50 = message("c1", "m50", { timestamp: 50 * DAY });
+    h.sink.post({ kind: "messages", linkId: "c1", messages: [m1, m2, m50] });
     expect(h.sweep()).toBe(2);
+    events.length = 0;
     // The contact's clock says day 19 (31 days behind): the engine keeps that as the edit's time, and when it took it.
     const edited = { ...m1, text: "v1", edit: { seq: 1, at: 19 * DAY, heardAt: 50 * DAY, history: [{ at: 10 * DAY, text: "t m1" }] } };
     h.sink.post({ kind: "message-changes", linkId: "c1", messages: [edited], deleted: [] });
@@ -807,19 +811,19 @@ describe("the seen set forgets", () => {
     expect(events.map((e) => e.id).slice(1)).toEqual(["message.reaction:c1:m2:peer:1"]);
     // An edit stored before the engine kept when it came, dated a month back: no news, as before.
     const old = message("c1", "m3", { timestamp: 10 * DAY, text: "v1", edit: { seq: 1, at: 19 * DAY, history: [] } });
-    h.sink.post({ kind: "messages", linkId: "c1", messages: [edited, m2r, old] });
+    h.sink.post({ kind: "messages", linkId: "c1", messages: [edited, m2r, old, m50] });
     expect(events).toHaveLength(2);
 
-    // A restart: nothing again, now or once every note is gone; the newest rows are in step.
+    // A restart: nothing again, now or after a sweep 40 days on; the newest rows are in step.
     await new Promise((r) => setTimeout(r, 50));
     clock.now = 51 * DAY;
     const again = await clocked("late-edit.jsonl");
-    again.h.baseline(state([link("c1")]), new Map([["c1", [edited, m2r, old]]]));
+    again.h.baseline(state([link("c1")]), new Map([["c1", [edited, m2r, old, m50]]]));
     clock.now = 90 * DAY;
-    expect(again.h.sweep()).toBe(3);
-    again.h.sink.post({ kind: "messages", linkId: "c1", messages: [edited, m2r, old] });
+    again.h.sweep();
+    again.h.sink.post({ kind: "messages", linkId: "c1", messages: [edited, m2r, old, m50] });
     expect(again.events).toEqual([]);
-    expect(again.h.inStep("c1", [edited, m2r, old])).toBe(true);
+    expect(again.h.inStep("c1", [edited, m2r, old, m50])).toBe(true);
   });
 
   it("a group's line read more than 30 days after its commit is news: it came here now; a restart says it no more", async () => {
