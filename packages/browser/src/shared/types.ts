@@ -275,9 +275,10 @@ export interface StoredGroup {
   community?: CommunityState;
   /**
    * Joining a community group through its link (`group2/…`), or again after my admission lost a
-   * race: my member seed, the entry session, and what arrived of the welcome.
+   * race: my member seed, the entry session, and what arrived of the welcome. `opened`: the entry key of the link a
+   * member checking it still is opened, when that is not the door it asks (where it knocks once it learns it is out).
    */
-  joining?: { g: string; host: string; seedB64: string; linkId: string; name: string; inviter: string; invitedAt?: number; pieces: unknown[]; since: number; check?: boolean; replaced?: boolean };
+  joining?: { g: string; host: string; seedB64: string; linkId: string; name: string; inviter: string; invitedAt?: number; pieces: unknown[]; since: number; check?: boolean; opened?: string; replaced?: boolean };
 }
 
 export interface GroupMemberView {

@@ -555,13 +555,14 @@ export class Communities {
       // member knocks and dial it. A member asks its own door instead (none while the link is off).
       const door = s.entryKey === link.host;
       if (s.status === "active" && s.roster.length === 1) return link.g;
+      // The link opened is kept: told meanwhile that it is out, it knocks there (`tick`).
       if (s.status === "active") {
-        if (s.entryKey) await this.startJoining(door ? link : { g: link.g, host: s.entryKey }, s.state.seedB64, this.now(), true);
+        if (s.entryKey) await this.startJoining(door ? link : { g: link.g, host: s.entryKey }, s.state.seedB64, this.now(), true, door ? undefined : link.host);
         return link.g;
       }
       // Removed (or its admission lost): let in again by whoever is at the door, with the same key at the door it
       // knows, else with a fresh one, as any joiner; the history here stays.
-      if (s.status === "removed" || s.status === "lost") { await this.startJoining(link, door ? s.state.seedB64 : dialedKey(link), this.now()); return link.g; }
+      if (s.status === "removed" || s.status === "lost") { await this.startJoining(link, this.rejoinSeed(s, link), this.now()); return link.g; }
       // Anything else (forked): opening a link never deletes what is kept. Refused as a private group refuses it.
       throw new Error("You are out of this group and its history is still here. Delete it from this device to join with a link.");
     }
@@ -583,15 +584,41 @@ export class Communities {
     return live?.session.status === "removed";
   }
 
-  /** `check`: a member, as far as this device knows, asking the door whether it still is (`joinByLink`). */
-  private async startJoining(link: GroupEntryLink, seedB64: string, since: number, check = false): Promise<void> {
+  /** Someone out of the group knocks with the member key it had at the door it knows, else with a fresh one, as any joiner. */
+  private rejoinSeed(s: CommunitySession, link: GroupEntryLink): string {
+    return s.entryKey === link.host ? s.state.seedB64 : dialedKey(link);
+  }
+
+  /** The newest link this device knows of a group it knocks at: the one opened, over the door a member's check asks. */
+  private knockLink(joining: NonNullable<StoredGroup["joining"]>): GroupEntryLink {
+    return { g: joining.g, host: joining.opened ?? joining.host };
+  }
+
+  /**
+   * A member asking the door it knows whether it still is, told meanwhile that it is out (removed while its app was
+   * closed, the link replaced): no check any more but a knock, at the link that was opened, as any joiner's. Left a
+   * check, it knocked for an hour at a door nobody reads, and Try again knocked there too.
+   */
+  private async checkTurnedKnock(group: StoredGroup, s: CommunitySession, now: number): Promise<boolean> {
+    const joining = group.joining!, link = this.knockLink(joining);
+    if (link.host !== joining.host) { await this.startJoining(link, this.rejoinSeed(s, link), now); return true; }
+    delete joining.check;
+    await this.store.putGroup(group);
+    return false;
+  }
+
+  /**
+   * `check`: a member, as far as this device knows, asking the door whether it still is (`joinByLink`); `opened`, the
+   * entry key of the link it opened when that is not the door.
+   */
+  private async startJoining(link: GroupEntryLink, seedB64: string, since: number, check = false, opened?: string): Promise<void> {
     this.lastKnock.delete(link.g); this.knocked.delete(link.g); this.knockAt.delete(link.g); this.knockingWith.delete(link.g); this.knockRead.delete(link.g);
     this.knockingSince.delete(link.g); this.gaveUp.delete(link.g); this.toldFull.delete(link.g);
     const before = this.stored.get(link.g)?.joining;
     const linkId = await this.host.openEntry(link, "guest", seedB64, link.host);
     if (before && before.linkId !== linkId) await this.host.closeEdge(before.linkId);
     const group: StoredGroup = this.stored.get(link.g) ?? { id: link.g, createdAt: since };
-    group.joining = { g: link.g, host: link.host, seedB64, linkId, name: group.community?.name ?? "", inviter: "", pieces: [], since, ...(check && { check: true }) };
+    group.joining = { g: link.g, host: link.host, seedB64, linkId, name: group.community?.name ?? "", inviter: "", pieces: [], since, ...(check && { check: true }), ...(check && opened && { opened }) };
     this.stored.set(link.g, group);
     await this.store.putGroup(group);
     this.host.emit();
@@ -808,6 +835,7 @@ export class Communities {
     this.sharing = { groups: Math.max(1, active.length), hubs: Math.max(1, active.filter(l => l.hub).length) };
     for (const group of [...this.stored.values()]) {
       const live = this.live.get(group.id);
+      if (group.joining?.check && live && live.session.status !== "active" && await this.checkTurnedKnock(group, live.session, now)) continue;
       if (group.joining && (this.knocking(group, live) || group.joining.check) && !this.gaveUp.has(group.id) && !group.joining.replaced) {
         const knocking = this.knocking(group, live), waited = now - group.joining.since;
         // Knocking stops as soon as a member's side of the entry session is seen, before it is up: that one is answering.

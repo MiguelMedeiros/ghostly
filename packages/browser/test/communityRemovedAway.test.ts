@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { communityCommitHash, createIdentity, decodeCommunityLink, encodeCommunityLink, identityFromSeedB64, knockIdentity } from "@ghostly/core";
-import { CommunityWorld, RELAY_NETWORK, type Peer } from "./communityWorld";
+import { CommunityWorld, RELAY_NETWORK, sameRun, seededRandom, type Peer } from "./communityWorld";
 // covers: groups.community.remove, groups.community.join, groups.community.send, groups.protocol.community-topology
 
 /**
@@ -180,6 +180,58 @@ describe("a community member removed while its app was closed", { timeout: 120_0
     // His history says what happened, in order: removed, then in again.
     const lines = dave.messages.filter(m => m.event === "removed" || (m.event === "joined" && !m.member)).sort((a, b) => a.timestamp - b.timestamp).map(m => m.text);
     expect(lines.slice(-2)).toEqual(["You were removed from this group", "You joined again"]);
+  });
+
+  // The admin removed her and replaced the link meanwhile, the usual way to let someone back in; she opens the new link
+  // as her app starts, before it heard of the removal. Her app asks the door it knows (the old entry key) whether she is
+  // still in; told she is out, the knock goes to the link she opened, with a fresh key, and Try again knocks there too.
+  for (const seed of [11, 22, 33]) it(`opening the replaced link before it was told knocks at that link once it is (seed ${seed})`, async () => {
+    const world = new CommunityWorld(undefined, null, seededRandom(seed));
+    const restore = sameRun(world, seed);
+    try {
+      const admin = world.add("admin"), bob = world.add("bob"), carol = world.add("carol");
+      const id = await admin.groups.create("Open door");
+      const link = await admin.groups.enableLink(id);
+      for (const p of [bob, carol]) await p.groups.joinByLink(link);
+      await world.until(() => [bob, carol].every(p => world.member(p, id)), 10 * 60_000);
+      await world.run(20_000);
+      const carolKey = world.view(carol, id)!.myKey!, oldEntry = session(carol, id).entryKey;
+      carol.online = false;
+      await world.run(5_000);
+      await admin.groups.remove(id, carolKey);
+      const newest = await admin.groups.enableLink(id, true);
+      const newEntry = decodeCommunityLink(newest)!.host;
+      expect(newEntry).not.toBe(oldEntry);
+      await world.run(10_000);
+
+      await world.restart(carol);
+      expect(world.view(carol, id)?.status).toBe("active");
+      await carol.groups.joinByLink(newest);
+      await world.until(() => world.view(carol, id)?.status === "removed", 90_000);
+      // Out, it knocks at the link it opened, with a fresh key: let in again within a couple of minutes.
+      const took = await world.until(() => world.member(carol, id) && world.view(admin, id)!.members.length === 3, 5 * 60_000);
+      expect(took).toBeLessThanOrEqual(2 * 60_000);
+      expect(world.view(carol, id)?.myKey).not.toBe(carolKey);
+      expect(session(carol, id).entryKey).toBe(newEntry);
+
+      // Out again, and nobody reads the knocks at the newest link for over an hour: Try again knocks there.
+      carol.online = false;
+      await world.run(5_000);
+      await admin.groups.remove(id, world.view(carol, id)!.myKey!);
+      const third = await admin.groups.enableLink(id, true), thirdEntry = decodeCommunityLink(third)!;
+      const knocks = new Set([0, 1, 2, 3].map(n => knockIdentity({ g: `${thirdEntry.g}.${n}`, host: thirdEntry.host }).pubKeyZ32));
+      world.failRead = (peer, k) => peer !== carol && knocks.has(k);
+      await world.run(10_000);
+      await world.restart(carol);
+      await carol.groups.joinByLink(third);
+      await world.until(() => world.view(carol, id)?.status === "removed", 90_000);
+      await world.until(() => world.view(carol, id)?.invitation?.unanswered === true, 2 * 60 * 60_000, 60_000);
+      expect((await carol.store.getGroups())[0].joining?.host).toBe(thirdEntry.host);
+      world.failRead = null;
+      await carol.groups.accept(id);
+      const back = await world.until(() => world.member(carol, id) && world.view(admin, id)!.members.length === 3, 5 * 60_000);
+      expect(back).toBeLessThanOrEqual(3 * 60_000);
+    } finally { restore(); }
   });
 
   it("is told although its clock runs minutes behind the admin's", async () => {
