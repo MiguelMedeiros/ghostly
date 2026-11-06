@@ -212,16 +212,17 @@ const invitedOnly = (group: GroupView) => group.status === undefined && !!group.
  */
 export function findGroup(groups: readonly GroupView[], given: string): GroupView {
   const ref = groupPrefixed(given) ?? given;
-  if (!ref.trim()) throw new CliError("bad_request", `${JSON.stringify(ref)} names no group`);
+  // Each refusal echoes the ref as given (`"group:k86q"`), not the part after `group:`: what the person typed.
+  if (!ref.trim()) throw new CliError("bad_request", `${JSON.stringify(given)} names no group`);
   const exact = groups.find((group) => group.id === ref);
   if (exact) return exact;
   const key = nameKey(ref);
   for (const among of [groups.filter((group) => !invitedOnly(group)), groups.filter(invitedOnly)]) {
     const found = among.filter((group) => namedAs(key, group.name) || group.id.startsWith(ref));
     if (found.length === 1) return found[0];
-    if (found.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one group: use its id`, { matches: found.map((group) => group.id) });
+    if (found.length > 1) throw new CliError("bad_request", `${JSON.stringify(given)} names more than one group: use its id`, { matches: found.map((group) => group.id) });
   }
-  throw new CliError("not_found", `No group ${JSON.stringify(ref)} (ghostly group list)`);
+  throw new CliError("not_found", `No group ${JSON.stringify(given)} (ghostly group list)`);
 }
 
 /**
