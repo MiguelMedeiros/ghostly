@@ -272,9 +272,9 @@ async function lockHeld(ns: string): Promise<boolean> {
 
 /**
  * Deletes a profile of this space for good: its local keys, its peer database and its wallets' own storage
- * (Ark, Bark and Breez databases, Fedimint client files), the forks a handoff left of it on this device, then its place
- * on the list (WISP 04). Never the active one,
- * never the first, never one running in another tab, and never a wallet's storage another profile still uses.
+ * (Ark, Bark and Breez databases, Fedimint client files), the forks a handoff left of it on this device and what a move
+ * of it to this device staged and never installed, then its place on the list (WISP 04). Never the active one, never the
+ * first, never one running in another tab, and never a wallet's storage another profile still uses.
  */
 export async function deleteProfile(id: string, password?: string): Promise<void> {
   if (!id) throw new Error("The first profile cannot be deleted");
@@ -289,8 +289,12 @@ export async function deleteProfile(id: string, password?: string): Promise<void
   const others = await Promise.all(listProfiles().filter((p) => p.id !== id).map((p) => walletStorage(databaseOf(p.id))));
   const usedElsewhere = new Set(others.flatMap((o) => [...o.databases, ...o.files]));
   const own = await walletStorage(dbName);
-  // The forks its device record lists (WISP 06 § Installing the staged state): read before the record goes.
-  const forks = (await readDeviceRecord(dbName).catch(() => null))?.forks ?? [];
+  // The forks its device record lists (WISP 06 § Installing the staged state), and the staging namespace a move of it
+  // to this device wrote and never installed (a pull that stopped keeps its files, their notes and, past pass 2, the
+  // staged database for a later try): read before the record goes, the only thing that names them.
+  const record = await readDeviceRecord(dbName).catch(() => null);
+  const forks = record?.forks ?? [];
+  const staged = record?.handoff?.role === "taking" ? record.handoff.staging : undefined;
   if (await databaseExists(dbName)) await dropUnheld(dbName);
   // The folders and files its apps were given (linked files: handles, never copies).
   if (await databaseExists(linkedFilesDatabase(dbName))) await drop(linkedFilesDatabase(dbName)).catch(() => {});
@@ -315,6 +319,7 @@ export async function deleteProfile(id: string, password?: string): Promise<void
     await handoffProfileHost()?.staging.drop(fork).catch(() => {});
     if (await databaseExists(linkedFilesDatabase(fork))) await drop(linkedFilesDatabase(fork)).catch(() => {});
   }
+  if (staged && staged !== dbName && !listed.has(staged)) await handoffProfileHost()?.staging.drop(staged).catch(() => {});
   // Its device state goes with it (WISP 06): a profile made later under the same name must not inherit it.
   await forgetDevice(dbName).catch(() => {});
   // What another profile's peek saw of it (its contacts' keys, link and message ids), and its notice.
