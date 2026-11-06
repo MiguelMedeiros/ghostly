@@ -25,6 +25,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { JoinDialog } from "./JoinDialog";
 import { useBackgroundPoller } from "../hooks/useBackgroundPoller";
 import { useI18n } from "../contexts/I18nContext";
+import { useIsLocked } from "../contexts/LockScreenContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { AccountBar } from "./AccountBar";
 import { AppBrand } from "./AppBrand";
@@ -247,11 +248,13 @@ export function Sidebar() {
     };
   }, [refreshSessions]);
 
-  // The open chat is read while the page shows; in a hidden window what comes stays unread (usePageShown).
+  // The open chat is read while the page shows; in a hidden window what comes stays unread (usePageShown), and under
+  // the lock screen too (the app stays mounted there).
   const pageShown = usePageShown();
+  const locked = useIsLocked();
   useEffect(() => {
-    if (activeSessionId && pageShown) markSessionAsRead(activeSessionId);
-  }, [activeSessionId, pageShown, sessions]);
+    if (activeSessionId && pageShown && !locked) markSessionAsRead(activeSessionId);
+  }, [activeSessionId, pageShown, locked, sessions]);
 
   // The installed app's shortcuts (manifest.json): `#/new` opens the New menu, `#/scan` opens Join with Scan focused.
   // Any site can send the browser to either address, so neither does anything without a press: a chat made at `#/new`
