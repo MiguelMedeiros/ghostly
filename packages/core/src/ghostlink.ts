@@ -219,6 +219,16 @@ export const LIVENESS_PING_MS = 15_000;
  * side a round trip later, and seeing its current channel close first would make it drop the whole session.
  */
 export const SWITCH_RETIRE_MS = 3_000;
+/**
+ * A receiver takes at most this many `paired-rtc` frames from a contact per `RTC_SIGNAL_RATE_WINDOW_MS`, counted before
+ * their signature is checked; the rest are dropped. Each offer taken builds a new peer connection (and gathers for it).
+ * A person's busiest minute is under half of it, 30 frames: five moves to WebRTC (one every 12 s, back and forth), each
+ * with every offer again that refused answers bring (`ANSWER_REFUSED_REDIALS`) and both sides offering at once. One
+ * move without a refusal takes one or two. A signal dropped here is a move that does not connect: the chat stays where
+ * it is, as with any failed move.
+ */
+export const RTC_SIGNAL_RECEIVE_LIMIT = 60;
+export const RTC_SIGNAL_RATE_WINDOW_MS = 60_000;
 export const LIVENESS_MISSED_PINGS = 3;
 /**
  * Frames that keep a session going rather than say something of the two people's: what the contact sent last outside
@@ -917,6 +927,8 @@ export class GhostLink {
   private readonly editsReceived = new RateWindow(EDIT_RECEIVE_LIMIT, EDIT_RATE_WINDOW_MS);
   /** Call signals the contact may send per window; the rest are dropped. */
   private readonly callsReceived = new RateWindow(CALL_RECEIVE_LIMIT, CALL_RATE_WINDOW_MS);
+  /** WebRTC signals the contact may send on the session (`paired-rtc`) per window; the rest are dropped. */
+  private readonly rtcSignalsReceived = new RateWindow(RTC_SIGNAL_RECEIVE_LIMIT, RTC_SIGNAL_RATE_WINDOW_MS);
   private readonly wakeReceived = new RateWindow(6, 60_000);
   /** Said once a session by the requester's app: a few a minute at most. */
   private readonly askerReceived = new RateWindow(4, 60_000);
@@ -4426,6 +4438,8 @@ export class GhostLink {
           if (!frame || typeof frame !== "object") return;
           if (paired.peerTransportSwitchSupport && this.switcher.handle(frame)) return;
           if (frame.t === "paired-rtc") {
+            // Counted before its signature is checked, as call signals are: each offer taken builds a peer connection.
+            if (!this.rtcSignalsReceived.take()) return;
             if (this.switcher.pending?.choices.includes("webrtc/1") && typeof frame.signal === "string") {
               const credentials = this.options.pairing!.credentials;
               const signal = verifyPairedSignal(frame.signal, this.options.params.peerPubKeyZ32,
