@@ -57,7 +57,7 @@ import { PINNED_FRAME, PIN_FRAME, PIN_LIMITS, parsePinFrame, parsePinnedFrame, p
 import { TYPING_FRAME, TypingReceiver, TypingSender, type TypingActivity } from "./pairedTyping";
 import { EDIT_FRAME, EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDITED_FRAME, RateWindow, dhtEditId, editFrame, editedFrame, parseEditFrame, parseEditedFrame, validEditMessage, validEditNumber, type WireEdit } from "./pairedEdits";
 import { FILE_FRAMES, FILE_LIMITS, decodeFileData, encodeFileData } from "./chatFiles";
-import { PAIRED_CALL_FRAME, PairedCalls, parsePairedCallFrame } from "./pairedCalls";
+import { CALL_RATE_WINDOW_MS, CALL_RECEIVE_LIMIT, PAIRED_CALL_FRAME, PairedCalls, parsePairedCallFrame } from "./pairedCalls";
 import { heardCallSignal } from "./callSignal";
 import { traceLink } from "./linkTrace";
 import { isDiscoveryBudgetError, type PkarrTransport } from "./transport";
@@ -915,6 +915,8 @@ export class GhostLink {
   private readonly pinsReceived = new ReactionWindow(PIN_LIMITS.receive, PIN_LIMITS.windowMs);
   /** Edit frames the contact may send per window; the rest go unconfirmed and come again. */
   private readonly editsReceived = new RateWindow(EDIT_RECEIVE_LIMIT, EDIT_RATE_WINDOW_MS);
+  /** Call signals the contact may send per window; the rest are dropped. */
+  private readonly callsReceived = new RateWindow(CALL_RECEIVE_LIMIT, CALL_RATE_WINDOW_MS);
   private readonly wakeReceived = new RateWindow(6, 60_000);
   /** Said once a session by the requester's app: a few a minute at most. */
   private readonly askerReceived = new RateWindow(4, 60_000);
@@ -4545,7 +4547,9 @@ export class GhostLink {
             return;
           }
           if (frame?.t === PAIRED_CALL_FRAME) {
-            const signal = this.supportsCalls ? parsePairedCallFrame(frame) : null;
+            // Counted before it is read, as edits are: a contact's app that loops its signals runs the call only so often.
+            if (!this.supportsCalls || !this.callsReceived.take()) return;
+            const signal = parsePairedCallFrame(frame);
             // One already heard on an earlier session is not handed on again (`PairedCalls.heard`).
             if (signal && this.pairedCalls.heard(signal)) this.options.events?.onCallSignal?.(signal);
             return;
