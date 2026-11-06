@@ -264,6 +264,8 @@ describe("messages that arrive late keep their order and land where they arrive"
     expect(texts(rows)).toEqual(["Bo joined", "Cy is no longer a member", "hi all"]);
     expect(rows[0].timestamp).toBe(yesterday);
     expect(rows[1].timestamp).toBe(yesterday + MINUTE);
+    // And when they came here: the event stream judges them by it (a line read a month late is still news).
+    expect([rows[0].heardAt, rows[1].heardAt]).toEqual([now, now]);
   });
 
   it("the list of groups and unread follow when a message came, never a member's clock", () => {
