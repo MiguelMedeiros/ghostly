@@ -64,19 +64,71 @@ describe("chats", () => {
 
   // A chat's name was taken whatever it held and cut by the engine at 48 UTF-16 units: half an emoji stayed as a lone
   // surrogate, a newline was kept, and the invite was made before its name was cut.
-  it("a chat's name is what the engine keeps whole on one line, refused before anything is made", async () => {
+  it("a chat's name is what the engine keeps whole, refused before anything is made", async () => {
     const { ctx, node } = fake();
     const calls = Object.assign(node, { renameLink: vi.fn(), createLink: vi.fn(), joinLink: vi.fn() });
-    const rule = { code: "bad_request", message: "A chat's name is up to 48 characters on one line (an emoji counts as two)" };
-    for (const name of ["y".repeat(49), `${"x".repeat(47)}👻`, "a\nb", "tab\there"]) {
+    const long = { code: "bad_request", message: "A chat's name is up to 48 characters on one line" };
+    const unseen = { code: "bad_request", message: "A chat's name needs a character that shows (an empty name gives back the contact's own)" };
+    for (const [name, rule] of [["y".repeat(49), long], [`${"x".repeat(48)}👻`, long], ["\u200b", unseen], ["\u0301\u0301", unseen], ["\u200e \u2066", unseen]] as const) {
       await expect(callApi(ctx, "chat.rename", { chat: "chat-one", name }), JSON.stringify(name)).rejects.toMatchObject(rule);
       await expect(callApi(ctx, "invite.create", { label: name }), JSON.stringify(name)).rejects.toMatchObject(rule);
       await expect(callApi(ctx, "invite.join", { invite: "ghostly1abc", label: name }), JSON.stringify(name)).rejects.toMatchObject(rule);
     }
     for (const made of [calls.renameLink, calls.createLink, calls.joinLink]) expect(made).not.toHaveBeenCalled();
-    // What the engine keeps whole is taken: 46 characters and an emoji, spaces around trimmed by the engine.
-    await callApi(ctx, "chat.rename", { chat: "chat-one", name: ` ${"x".repeat(46)}👻 ` });
-    expect(calls.renameLink).toHaveBeenCalledWith({ linkId: "chat-one", label: ` ${"x".repeat(46)}👻 ` });
+    // What the engine keeps whole is taken, cleaned as it stores it: an emoji is one character, as the engine counts.
+    await callApi(ctx, "chat.rename", { chat: "chat-one", name: ` ${"x".repeat(47)}👻 ` });
+    expect(calls.renameLink).toHaveBeenLastCalledWith({ linkId: "chat-one", label: `${"x".repeat(47)}👻` });
+  });
+
+  // One rule for every name this side writes (a chat's, the profile's, a group's): cleaned as the engine stores it, then
+  // counted. A tab was refused as a second line for a chat or the profile and taken as a space for a group, a name 48
+  // long once stored was refused at its raw length, and an invisible-only name cleared a chat's name with exit 0 (the
+  // profile kept it as its name).
+  it("a chat's, the profile's and a group's name are cleaned first, then counted; nothing that shows is refused", async () => {
+    const { ctx, node } = fake();
+    const calls = Object.assign(node, { renameLink: vi.fn(), createGroup: vi.fn(async () => ({ groupId: "g2" })), renameGroup: vi.fn(async () => undefined) });
+    const label = async (name: string) => { await callApi(ctx, "chat.rename", { chat: "chat-one", name }); return calls.renameLink.mock.lastCall?.[0].label; };
+    expect(await label("tab\tbot")).toBe("tab bot");
+    expect(await label("two\nlines")).toBe("two lines");
+    expect(await label(`${"x".repeat(48)}   `)).toBe("x".repeat(48));
+    expect(await label(`${"a".repeat(47)}\u200b\u200b\u200bb`)).toBe(`${"a".repeat(47)}b`);
+    // NFC, as a ref is compared (`nameKey`): a decomposed é is one character.
+    expect(await label(`${"e\u0301".repeat(48)}`)).toBe("é".repeat(48));
+    // The documented empty name: back to the contact's own.
+    expect(await label("")).toBe("");
+    expect(await label("  ")).toBe("");
+    // The answer is the chat's, as before.
+    expect(Object.keys(await callApi(ctx, "chat.rename", { chat: "chat-one", name: "tab\tbot" }) as object)).toEqual(Object.keys(await callApi(ctx, "chat.rename", { chat: "chat-one", name: "bot" }) as object));
+
+    const nick = async (method: string, params: Record<string, unknown>) => { await callApi(ctx, method, params); return (calls.updateSettings.mock.lastCall as unknown as [{ settings: Settings }])[0].settings.nick; };
+    expect(await nick("profile.set", { name: "tab\tname" })).toBe("tab name");
+    expect(await nick("settings.set", { nick: "tab\tnick" })).toBe("tab nick");
+    expect(await nick("profile.set", { name: `${"p".repeat(63)}\u200b\u200b\u200bq` })).toBe(`${"p".repeat(63)}q`);
+    expect(await nick("profile.set", { name: `${"p".repeat(64)}  ` })).toBe("p".repeat(64));
+    expect(await nick("profile.set", { name: "" })).toBe("");
+    expect(Object.keys(await callApi(ctx, "profile.set", { name: "tab\tname" }) as object)).toEqual(["profile", "name", "shareProfile", "picture", "online"]);
+    calls.updateSettings.mockClear();
+    for (const name of ["\u200b", "\u0301\u0301", "\u2800"]) {
+      await expect(callApi(ctx, "profile.set", { name }), JSON.stringify(name)).rejects.toMatchObject({ code: "bad_request", message: "name needs a character that shows (an empty one is no name)" });
+      await expect(callApi(ctx, "settings.set", { nick: name }), JSON.stringify(name)).rejects.toMatchObject({ code: "bad_request", message: "nick needs a character that shows (an empty one is no name)" });
+    }
+    await expect(callApi(ctx, "profile.set", { name: "p".repeat(65) })).rejects.toMatchObject({ code: "bad_request", message: "name must be up to 64 characters on one line" });
+    expect(calls.updateSettings).not.toHaveBeenCalled();
+
+    // A group's name keeps its rule.
+    const groupRule = { code: "bad_request", message: "A group's name is 1 to 64 characters on one line" };
+    expect(await callApi(ctx, "group.create", { name: "tab\tcrew", profile: "mesh" })).toEqual({ group: "g2", link: null });
+    expect(calls.createGroup).toHaveBeenLastCalledWith({ name: "tab crew", profile: "mesh" });
+    await callApi(ctx, "group.create", { name: `${"g".repeat(63)}\u200b\u200b\u200bh`, profile: "mesh" });
+    expect(calls.createGroup).toHaveBeenLastCalledWith({ name: `${"g".repeat(63)}h`, profile: "mesh" });
+    await callApi(ctx, "group.rename", { group: "Crew", name: "tab\tcrew" });
+    expect(calls.renameGroup).toHaveBeenLastCalledWith({ groupId: "g1", name: "tab crew" });
+    for (const name of ["\u200b", "\u0301\u0301", "g".repeat(65)]) {
+      await expect(callApi(ctx, "group.create", { name, profile: "mesh" }), JSON.stringify(name)).rejects.toMatchObject(groupRule);
+      await expect(callApi(ctx, "group.rename", { group: "Crew", name }), JSON.stringify(name)).rejects.toMatchObject(groupRule);
+    }
+    expect(calls.createGroup).toHaveBeenCalledTimes(2);
+    expect(calls.renameGroup).toHaveBeenCalledTimes(1);
   });
 
   // `invite join <your own invite>` said the engine's tag for its RPC clients: "own-invite <chat id>: This is your own…".

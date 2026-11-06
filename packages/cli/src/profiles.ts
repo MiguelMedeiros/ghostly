@@ -3,6 +3,8 @@ import { closeSync, existsSync, linkSync, lstatSync, mkdirSync, openSync, readdi
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { MAX_NICK_LENGTH } from "@ghostly/core";
+import { cleanName } from "./apiKit";
 import { childEnv } from "./childEnv";
 import { CliError } from "./errors";
 import { runtimePath } from "./privateFolder";
@@ -46,15 +48,17 @@ export function checkProfileName(name: string): string {
 
 /**
  * The name a profile shows its contacts, whichever command sets it (`--name`, `profile.set`, `settings set nick`):
- * trimmed, up to 64 characters on one line, as a group's name; empty is no name. `settings set nick` took any length
- * and every one took a line break, printed whole by `status`. `field` names it in the refusal.
+ * cleaned as a group's name is (`cleanName`: a tab or a line break is a space, invisible characters go), then up to 64
+ * characters; empty (or spaces) is no name. `settings set nick` took any length and every one took a line break,
+ * printed whole by `status`; a name with nothing that shows was kept as given, and contacts saw no name. `field` names
+ * it in the refusal.
  */
 export function checkShownName(name: unknown, field = "name"): string {
-  const shown = typeof name === "string" ? name.trim() : undefined;
-  // Core's MAX_NICK_LENGTH: this file loads before any command, without the engine.
-  if (shown === undefined || [...shown].length > 64 || /\p{Cc}/u.test(shown)) {
-    throw new CliError("bad_request", `${field} must be up to 64 characters on one line`);
-  }
+  if (typeof name !== "string") throw new CliError("bad_request", `${field} must be up to ${MAX_NICK_LENGTH} characters on one line`);
+  if (!name.trim()) return "";
+  const shown = cleanName(name, MAX_NICK_LENGTH);
+  if (shown === undefined) throw new CliError("bad_request", `${field} must be up to ${MAX_NICK_LENGTH} characters on one line`);
+  if (!shown) throw new CliError("bad_request", `${field} needs a character that shows (an empty one is no name)`);
   return shown;
 }
 
