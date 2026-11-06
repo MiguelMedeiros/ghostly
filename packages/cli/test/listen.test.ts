@@ -144,6 +144,21 @@ describe("agent turns", () => {
     expect(toTurn(other("message.edited", { chat: "c1", messageId: "m1", message: { id: "m1", text: "new", timestamp: 1, nick: null } }))).toBeNull();
     expect(toTurn(other("typing.started", { chat: "c1" }))).toBeNull();
   });
+
+  it("a member's press on a button of my question is a turn, with who pressed; a press on someone else's question is not", () => {
+    // `press` is there only when the question is this profile's (the engine's `buttonPress`).
+    const press = { messageId: "q1", button: "go", label: "Deploy" };
+    expect(toTurn(groupMessage("g1", "p1", "Deploy", { replyTo: { id: "q1", snippet: "Deploy to staging?", button: "go" }, press }))).toMatchObject({
+      source: "group.message", group: "g1", member: KEY, messageId: turnRef("g1", "p1"), press: { ...press, by: KEY }, untrusted: { text: "Deploy", name: "Carol", messageId: "p1" },
+    });
+    expect(toTurn(groupMessage("g1", "p2", "Deploy", { replyTo: { id: "q2", snippet: "Deploy to staging?", button: "go" } }))).toBeNull();
+    // A late mention's event is still the mention's turn; a press with no member key says so.
+    expect(toTurn({ ...groupMessage("g1", "p3", "Deploy", { press }), type: "group.mentioned" })).toBeNull();
+    expect(toTurn(groupMessage("g1", "p4", "Deploy", { press, member: undefined }))!.press).toEqual({ ...press, by: null });
+    // In a 1:1 chat every message is a turn; its press names the chat as `by`, as `button.pressed` does.
+    expect(toTurn(received("c1", "p5", "Deploy", { press }))).toMatchObject({ source: "message.received", chat: "c1", press: { ...press, by: "c1" } });
+    expect(toTurn(received("c1", "p6", "hi"))).not.toHaveProperty("press");
+  });
 });
 
 describe("hooks", () => {
