@@ -385,10 +385,19 @@ export class IdentityExchange {
 
   /** Stop sharing here. The contact is told (now or on reconnect); a copy it kept cannot be erased. */
   async withdraw(id: string, connected: boolean): Promise<void> {
-    const s = this.shared(id);
+    let s = this.shared(id);
     if (!s || s.status === "withdrawn") return;
     this.requested.delete(id);
-    if (s.status === "queued") { await this.options.storage.update(l => this.log({ ...l, shared: l.shared.filter(x => x.id !== id) }, { type: "unsent", side: "mine", proof: id })); return; }
+    if (s.status === "queued") {
+      // Unless its challenge was answered meanwhile: that presentation is out, so it is withdrawn as a pending one.
+      let answered: SharedIdentity | undefined;
+      await this.options.storage.update(l => {
+        answered = l.shared.find(x => x.id === id && x.status === "pending");
+        return answered ? l : this.log({ ...l, shared: l.shared.filter(x => x.id !== id) }, { type: "unsent", side: "mine", proof: id });
+      });
+      if (!answered) return;
+      s = answered;
+    }
     // One the contact refused, it never held: its app writes no stop, and neither does this side.
     await this.setShared({ ...s, status: "withdrawal-pending", at: this.now(), error: undefined },
       s.status === "rejected" ? undefined : { type: "stopped", side: "mine", proof: id, provider: s.provider, subject: s.subject, reason: "withdrawn" });
@@ -530,7 +539,14 @@ export class IdentityExchange {
     }
     const scope = this.options.scope();
     const sig = signIdentityPresentation(local.seed, id, scope, nonce, issuedAt);
-    await this.setShared({ ...s, status: "pending", at: this.now(), error: undefined });
+    // Read again in the write: a Remove or Unshare while the proof key was opened holds, and nothing is presented.
+    let stopped = false;
+    await this.options.storage.update(l => {
+      const x = l.shared.find(y => y.id === id);
+      if (!x || (x.status !== "queued" && x.status !== "pending")) { stopped = true; return l; }
+      return { ...l, shared: [...l.shared.filter(y => y.id !== id), { ...x, status: "pending", at: this.now(), error: undefined }] };
+    });
+    if (stopped) return;
     this.send({ t: "idp-present", nonce, issuedAt, binding: local.statement.binding, evidence: local.evidence, sig });
   }
 

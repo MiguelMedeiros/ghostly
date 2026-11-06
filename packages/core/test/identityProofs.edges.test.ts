@@ -264,6 +264,55 @@ describe("withdrawing", () => {
     await w.peers.alice.receive({ t: "idp-withdrawn" });
     expect(w.ledgers.alice.shared[0].status).toBe("accepted");
   });
+
+  it("stopped while its challenge is answered: nothing is presented, and no entry is written back", async () => {
+    const w = world();
+    const id = w.addProof();
+    w.state.online = false;
+    await w.peers.alice.share(id, true);
+    const proof = w.proofs.get(id)!;
+    let open!: () => void;
+    // The proof key's seed is still being opened when the share is withdrawn.
+    w.proofs.get = () => new Promise<LocalIdentityProof>(resolve => { open = () => resolve(proof); }) as never;
+    const answering = w.peers.alice.receive({ t: "idp-challenge", id, nonce: "N".repeat(43), issuedAt: NOW });
+    await w.peers.alice.withdraw(id, true);
+    expect(w.ledgers.alice.shared).toEqual([]);
+    open();
+    await answering;
+    expect(w.sent("idp-present")).toEqual([]);
+    expect(w.ledgers.alice.shared).toEqual([]);
+    expect(w.ledgers.alice.timeline).toEqual([]);
+  });
+
+  it("a challenge answer written between a withdraw's read and its write: the withdraw is sent, as for any share that went out", async () => {
+    const id = "e".repeat(64);
+    const { binding, seed } = newIdentityBinding({ provider: "test", subject: SUBJECT, validitySeconds: 86_400, now: NOW });
+    let ledger: IdentityLedger = { ...emptyIdentityLedger(), shared: [{ id, provider: "test", subject: SUBJECT, status: "queued", at: NOW }] };
+    // A database's writes: in order, each on the ledger as the one before left it, and seen by a read once done.
+    const writes: (() => void)[] = [];
+    const frames: Frame[] = [];
+    const alice = new IdentityExchange({
+      scope: () => ({ subject: "s", audience: "a", context: "a".repeat(64), session: "s".repeat(64) }),
+      send: frame => { frames.push(frame as Frame); },
+      storage: { read: () => ledger, update: change => new Promise(resolve => { writes.push(() => { ledger = change(structuredClone(ledger)); resolve(); }); }) },
+      providers: () => ["test"],
+      localProof: () => ({ statement: identityStatement(binding), evidence: {}, seed }),
+      verify: async () => ({ subject: SUBJECT, source: "Test" }), now: () => NOW,
+    });
+    alice.ready();
+    const answering = alice.receive({ t: "idp-challenge", id, nonce: "N".repeat(43), issuedAt: NOW });
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    const stopping = alice.withdraw(id, true);
+    expect(writes).toHaveLength(2);
+    writes.shift()!();
+    await answering;
+    writes.shift()!();
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    writes.shift()!();
+    await stopping;
+    expect(frames.map(f => f.t)).toEqual(["idp-hello", "idp-request", "idp-present", "idp-withdraw"]);
+    expect(ledger.shared).toEqual([expect.objectContaining({ id, status: "withdrawal-pending" })]);
+  });
 });
 
 describe("verifying a presentation", () => {
