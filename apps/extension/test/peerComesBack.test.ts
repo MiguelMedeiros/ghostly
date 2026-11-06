@@ -16,6 +16,7 @@ vi.mock("@ghostly/browser/engine/server", async () => (await import("./fakeEngin
 
 let world: FakeWorld;
 const documents = () => world.callsTo("offscreen.createDocument").length;
+const PEER_CHECK = "peer-check";
 
 beforeEach(() => {
   resetEngine();
@@ -58,6 +59,51 @@ describe("the peer starts again by itself", () => {
     expect(documents()).toBe(2);
   });
 });
+describe("a document that never answers is not kept", () => {
+  /**
+   * A page connected through the extension's host; the peer's document goes away, and the next one is created but its
+   * script never listens (it threw as it loaded, a chunk did not load). The page tries again for 3 minutes, the worker
+   * starts again, the minute check runs 3 times, and then a new document's script would load: the page must get a peer.
+   */
+  it.each([1, 2, 3])("is closed, and a new one runs once one can (run %i)", async () => {
+    world = await bootExtension();
+    await vi.waitFor(() => expect(engineControl().servers).toHaveLength(1));
+    const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
+    const { engine: client } = await world.load("page", async () => {
+      (await import("@ghostly/browser/host")).setBrowserHost(extensionHost);
+      return import("@ghostly/browser/platform/engine");
+    });
+    await client.connect();
+    expect(engineControl().servers[0].attached).toHaveLength(1);
+
+    const loads = world.onCreateDocument;
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      world.onCreateDocument = async () => {};
+      world.endOffscreen();
+      await vi.advanceTimersByTimeAsync(3 * 60_000);
+      expect(client.reconnecting).toBe(true);
+
+      const restarted = restartServiceWorker(world);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await restarted;
+      for (let i = 0; i < 3; i++) {
+        world.fireAlarm(PEER_CHECK);
+        await vi.advanceTimersByTimeAsync(60_000);
+      }
+
+      world.onCreateDocument = loads;
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(client.reconnecting).toBe(false);
+      expect(engineControl().servers).toHaveLength(2);
+      expect(engineControl().servers[1].attached).toHaveLength(1);
+      expect(world.callsTo("offscreen.closeDocument").length).toBeGreaterThan(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 30_000);
+});
+
 
 describe("a peer that stopped for good is not taken for a running one", () => {
   const app = () => ({ id: world.chrome.runtime.id, url: world.chrome.runtime.getURL("app.html") });
