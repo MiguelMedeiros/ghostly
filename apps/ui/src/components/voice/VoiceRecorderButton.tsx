@@ -4,6 +4,7 @@ import { mediaDeniedText, toChosenSpeaker } from "../../lib/mediaDevices";
 import { MICROPHONE_MESSAGES, MicrophoneError, VoiceRecorder, canRecordVoice, type MicrophoneProblem } from "../../lib/voiceRecorder";
 import { useT, type Translate } from "../../contexts/I18nContext";
 import { useIsLocked } from "../../contexts/LockScreenContext";
+import { androidApp } from "../../lib/touchOnly";
 
 /** The microphone's own problems, in the person's language; a browser's words about it stay as they are. */
 function microphoneText(t: Translate, problem: MicrophoneProblem): string {
@@ -296,6 +297,21 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   useEffect(() => {
     if (isLocked && recorderRef.current && !sendingRef.current) cancel();
   }, [isLocked, cancel]);
+
+  // Android silences the microphone of an app out of sight (Home, the screen off) a few seconds after it goes, and the
+  // page is never told: the track stays live, the clock runs, and the rest of the recording is silence. Hands-free, it
+  // pauses as the page goes out of sight and comes back paused, with its preview, to resume, listen to or send.
+  useEffect(() => {
+    if (mode !== "locked" || phase !== "recording" || !androidApp()) return;
+    const onHidden = () => { if (document.visibilityState === "hidden") pauseRecording(); };
+    onHidden();
+    document.addEventListener("visibilitychange", onHidden);
+    window.addEventListener("pagehide", pauseRecording);
+    return () => {
+      document.removeEventListener("visibilitychange", onHidden);
+      window.removeEventListener("pagehide", pauseRecording);
+    };
+  }, [mode, phase, pauseRecording]);
 
   // Esc discards, Enter sends: wherever focus is while recording. Asking "discard?", Esc keeps. Not the keys of the
   // lock screen, nor of another dialog over the page (the lock screen is one): those keys are theirs. Most of the app's
