@@ -12,7 +12,8 @@ import type {
   Wallet,
 } from "@cashu/cashu-ts";
 import { STORES, newestWalletTx, openDb, store, transact, wrap, committed } from "../shared/idb";
-import { openRow, openRows, RowSeals, sealRow, sealedStore } from "./sealedRows";
+import { openRow, openRows, proofKey, RowSeals, sealRow, sealedStore } from "./sealedRows";
+import { hasDataKey } from "./dataKey";
 import { LIMITS, PaymentPreflightError, decodeBolt11, engineError, engineText, type PaymentReview, type WalletNetwork } from "@ghostly/core";
 import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS, keysetRefused, mintRefused } from "./paymentAdapters/cashu";
 import { AskBackoff } from "./askBackoff";
@@ -1332,8 +1333,8 @@ export class CashuWallet {
    * payment then stays, marked `finished`, until the chat has been told (`tellSwap`). Returns whether it stored.
    */
   private async finishSwap(swap: PendingSwap, keep: Proof[], send: Proof[], late: boolean): Promise<boolean> {
-    const secrets = new Set(swap.kind === "send" ? swapOf(swap).inputs.map((p) => p.secret) : []);
-    const inputs = (await this.allProofs()).filter((p) => p.mint === swap.mint && secrets.has(p.secret));
+    // A redeem's inputs were never the wallet's: only a split looks its own up.
+    const inputs = (await this.proofsOf(swap.kind === "send" ? swapOf(swap).inputs.map((p) => p.secret) : [])).filter((p) => p.mint === swap.mint);
     const lost = swap.kind === "send" ? swapOf(swap).inputs.reduce((sum, p) => sum + Number(p.amount), 0) - sats(keep) - sats(send) : 0;
     let stored = false;
     await this.sealedTransact([STORES.proofs, STORES.swaps, STORES.walletTx, ...(swap.payment ? [STORES.payments] : [])], { [STORES.proofs]: [...keep, ...send], [STORES.payments]: swap.payment ? [swap.payment] : [] }, (stores) => {
@@ -1391,8 +1392,7 @@ export class CashuWallet {
 
   /** The proofs a split reserved, as they are stored now. */
   private async storedInputs(swap: PendingSwap): Promise<StoredProof[]> {
-    const secrets = new Set(swapOf(swap).inputs.map((p) => p.secret));
-    return (await this.allProofs()).filter((p) => p.mint === swap.mint && p.reserved && secrets.has(p.secret));
+    return (await this.proofsOf(swapOf(swap).inputs.map((p) => p.secret))).filter((p) => p.mint === swap.mint && p.reserved);
   }
 
   private async swapsAt(mint: string): Promise<PendingSwap[]> {
@@ -1876,8 +1876,7 @@ export class CashuWallet {
   }
 
   private async reservedProofs(melt: PendingMelt): Promise<StoredProof[]> {
-    const secrets = new Set(melt.secrets);
-    return (await this.allProofs()).filter((p) => secrets.has(p.secret));
+    return this.proofsOf(melt.secrets);
   }
 
   /** Everything held, as one token per mint; `mints`: only these mints' (one network's wallet). */
@@ -1938,6 +1937,22 @@ export class CashuWallet {
 
   private async allProofs(): Promise<StoredProof[]> {
     return openRows(STORES.proofs, await wrap<StoredProof[]>((await store(STORES.proofs, "readonly")).getAll()));
+  }
+
+  /**
+   * The stored proofs of these secrets, each read by its key: a swap's inputs cost what the swap holds, not the wallet.
+   * With the data key, a proof is under the hash of its secret, or under the secret itself until the migration reseals it.
+   */
+  private async proofsOf(secrets: Iterable<string>): Promise<StoredProof[]> {
+    const wanted = [...new Set(secrets)];
+    if (wanted.length === 0) return [];
+    const proofs = await store(STORES.proofs, "readonly");
+    const sealed = hasDataKey();
+    const found = await Promise.all(wanted.map(async (secret) => {
+      const [hashed, plain] = await Promise.all([sealed ? wrap<StoredProof | undefined>(proofs.get(proofKey(secret))) : undefined, wrap<StoredProof | undefined>(proofs.get(secret))]);
+      return hashed ?? plain;
+    }));
+    return openRows(STORES.proofs, found.filter((p): p is StoredProof => p !== undefined));
   }
 
   private async readSwaps(): Promise<PendingSwap[]> {
