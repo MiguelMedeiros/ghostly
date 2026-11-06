@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { p256 } from "@noble/curves/nist.js";
-import { createIdentity, decryptPushPayload, fromBase64Url, generateVapidKeys, newWakeToken, toBase64Url, utf8Decode, type WakeTarget } from "@ghostly/core";
+import { createIdentity, decryptPushPayload, fromBase64Url, generateVapidKeys, newWakeToken, toBase64Url, utf8Decode, WAKE_RETRY_MS, type WakeTarget } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, transact } from "../src/shared/idb";
@@ -255,6 +255,70 @@ describe("waking a contact whose app is closed", () => {
     node["wakeLimiter"].reset(chat.id);
     await node.sendMessage({ linkId: chat.id, text: "hi" });
     await vi.waitFor(async () => expect((await saved(chat.id))?.peerWake).toBeUndefined());
+  });
+
+  it("a wake-up that did not reach the push service does not hold the next message's back past a short pause", async () => {
+    const failures: [string, () => Response][] = [
+      ["relay 429 (its own minute full)", () => new Response("Too Many Requests", { status: 429 })],
+      ["relay 502 (push service did not answer)", () => new Response(JSON.stringify({ error: "The push service did not answer" }), { status: 502 })],
+      ["push service 503 via relay", () => new Response(JSON.stringify({ status: 503 }), { status: 200 })],
+      ["push service 429 via relay", () => new Response(JSON.stringify({ status: 429 }), { status: 200 })],
+      ["relay unreachable", () => { throw new TypeError("Failed to fetch"); }],
+    ];
+    for (const [name, failure] of failures) {
+      const posts: string[] = [];
+      let relay = failure;
+      vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+        if (url.startsWith("https://web.push.apple.com")) throw new TypeError("Failed to fetch");
+        try { const answer = relay(); posts.push(answer.ok && (await answer.clone().json() as { status: number }).status === 201 ? "ok" : "fail"); return answer; }
+        catch (error) { posts.push("fail"); throw error; }
+      }));
+      const t = Date.now();
+      const now = vi.spyOn(Date, "now").mockReturnValue(t);
+      const node = engine();
+      await node.updateSettings({ settings: { pushRelay: "https://push-relay.example/" } });
+      const chat = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: contactTarget().target });
+      await node.sendMessage({ linkId: chat.id, text: "hi" });
+      await vi.waitFor(() => expect(posts, name).toEqual(["fail"]));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      relay = () => new Response(JSON.stringify({ status: 201 }), { status: 200 });
+      // At once: the relay is not asked again yet.
+      now.mockReturnValue(t + 50);
+      await node.sendMessage({ linkId: chat.id, text: "are you there?" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(posts, name).toEqual(["fail"]);
+      // A little later, the next message's own wake-up goes.
+      now.mockReturnValue(t + WAKE_RETRY_MS);
+      await node.sendMessage({ linkId: chat.id, text: "hello?" });
+      await vi.waitFor(() => expect(posts, name).toEqual(["fail", "ok"]));
+      // That one went out: the 5-minute limit holds from it.
+      now.mockReturnValue(t + 4 * 60_000);
+      await node.sendMessage({ linkId: chat.id, text: "still there?" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(posts, name).toEqual(["fail", "ok"]);
+      expect((await saved(chat.id))?.peerWake, name).toBeDefined();
+      now.mockRestore();
+    }
+  });
+
+  it("a wake-up the push service took holds the next for five minutes, as does a subscription refused for good", async () => {
+    let status = 201;
+    const pushSend = vi.fn(async () => status);
+    const t = Date.now();
+    const now = vi.spyOn(Date, "now").mockReturnValue(t);
+    const node = engine({ pushSend });
+    for (const answer of [201, 400]) {
+      status = answer;
+      const chat = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: contactTarget().target });
+      const before = pushSend.mock.calls.length;
+      await node.sendMessage({ linkId: chat.id, text: "hi" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      now.mockReturnValue(t + WAKE_RETRY_MS);
+      await node.sendMessage({ linkId: chat.id, text: "hi again" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(pushSend.mock.calls.length - before).toBe(1);
+      now.mockReturnValue(t);
+    }
   });
 
   it("a push relay that answers but not as a push relay is kept in the state, with its own error text, until it forwards one", async () => {
