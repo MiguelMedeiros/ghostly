@@ -9,6 +9,7 @@ import { contactName } from "./identities";
 import { chatNamesForPeer } from "./storage";
 import { chatPath } from "./url";
 import { useEngineValue } from "./engineState";
+import { useWindowAway } from "./windowAway";
 
 /*
  * Wake-up push, the receiving side (WISP 401 § Wake-up push): this profile's browser push subscription, which the
@@ -59,6 +60,11 @@ export interface PushPlatform {
   syncTable(profile: string, entries: readonly WakeTableEntry[], text: WakeWords): Promise<void>;
   /** The words and the database name alone, the tokens left as they are: a standby's page writes these. */
   syncText?(profile: string, text: WakeWords): Promise<void>;
+  /**
+   * Closes this profile's wake-up notices the app in front made stale: the quiet one, and with `path` that chat's
+   * message and online notices (never a call's).
+   */
+  closeNotices?(profile: string, path?: string): Promise<void>;
 }
 
 /** The device words of the push worker, with `{device}` left in for the worker to fill (`t` interpolates `{{device}}`). */
@@ -212,6 +218,17 @@ async function notificationsRefused(): Promise<boolean> {
   return refused();
 }
 
+/**
+ * The person has this profile's app in front: the wake-up notices it made stale go from the system's list (WISP 401 §
+ * Wake-up push). Always the profile's quiet notice; with `path` (the chat on screen), that chat's "New message" and
+ * online notice. A ringing call's notice stays. Only the installed web app has them; elsewhere this does nothing.
+ */
+export function closeWakeNotices(path?: string): void {
+  const push = pushPlatform();
+  if (!push?.closeNotices) return;
+  void push.closeNotices(activeProfileId(), path).catch(() => {});
+}
+
 let rotating: Promise<void> | null = null;
 
 /**
@@ -318,6 +335,12 @@ export function useWakeTableSync(text: WakeWords): void {
   useEffect(() => {
     if (rotate) void rotateWake();
   }, [rotate]);
+
+  // The app in front says it all: the quiet notice a push with nothing to say left goes when it starts or comes back.
+  const away = useWindowAway();
+  useEffect(() => {
+    if (!away) closeWakeNotices();
+  }, [away]);
 
   const endpoint = wake?.endpoint;
   useEffect(() => {

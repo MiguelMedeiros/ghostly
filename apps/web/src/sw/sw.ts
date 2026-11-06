@@ -13,7 +13,7 @@
  *   page and caches nothing, and only shows wake-ups (WISP 401 § Wake-up push). A scope per profile gives each
  *   profile a push subscription of its own, so contacts of two profiles cannot tell they share a browser.
  */
-import { CACHE_PREFIX, SHARED_ROUTE, assetAnswer, classify, installList, precacheMode, pushNotice, pushScopeProfile, quietWakeNotice, readShare, readShareBody, TOO_LARGE_SHARE, type SharedItem } from "./policy";
+import { CACHE_PREFIX, SHARED_ROUTE, assetAnswer, classify, installList, precacheMode, pushNotice, pushScopeProfile, quietWakeNotice, quietWakeTag, readShare, readShareBody, TOO_LARGE_SHARE, type SharedItem } from "./policy";
 import { readWakeEntry, readWakeText, type WakeText } from "./wakeStore";
 import { readPushDeviceView } from "./deviceState";
 import { deviceNoticeWords } from "./deviceWords";
@@ -362,6 +362,16 @@ function showQuiet(notice: { title: string; body: string; tag: string; data: unk
 }
 
 /**
+ * A notice of the profile that says something is up: the quiet one a push with nothing to say left there goes, so the
+ * system's list holds the notice that tells, not an empty "Ghostly" beside it. Never throws: the push already showed
+ * its notice, and a failure here must not make it show the quiet one again.
+ */
+async function closeQuietNotice(profile: string): Promise<void> {
+  const shown = await worker.registration.getNotifications({ tag: quietWakeTag(profile) }).catch(() => []);
+  for (const notice of shown) { try { notice.close(); } catch { /* gone already */ } }
+}
+
+/**
  * What one push shows: true once a notice is up, false when this push has nothing of its own to show (not a wake-up, a
  * token this profile does not know, a muted chat, this profile's app on screen, one inside the gap after its notice was
  * dismissed).
@@ -391,12 +401,14 @@ async function showWake(profile: string, body: string | undefined, appVisible: b
     const [shown] = await worker.registration.getNotifications({ tag: notice.tag });
     if (!shown) return false;
     await worker.registration.showNotification(notice.title, { ...options, renotify: false, silent: true });
+    await closeQuietNotice(profile);
     return true;
   }
   // A call stays until it is answered or dismissed, and buzzes again: a web app cannot ring like a phone call.
   await worker.registration.showNotification(notice.title, {
     ...options, renotify: notice.call, ...(notice.call && { vibrate: [300, 200, 300, 200, 300] }),
   });
+  await closeQuietNotice(profile);
   return true;
 }
 

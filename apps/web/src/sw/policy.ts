@@ -428,7 +428,25 @@ export function pushNotice(
  * profile, replaced in place. Browsers end a subscription whose pushes show nothing, so the worker never shows nothing.
  */
 export function quietWakeNotice(profile: string, title?: string): Omit<PushNotice, "quiet"> {
-  return { title: title || "Ghostly", body: "", tag: `quiet:${profile}`, call: false, data: { path: "/", profile } };
+  return { title: title || "Ghostly", body: "", tag: quietWakeTag(profile), call: false, data: { path: "/", profile } };
+}
+
+/** The tag of a profile's quiet notice (`quietWakeNotice`): a notice of the profile that says something closes it. */
+export function quietWakeTag(profile: string): string {
+  return `quiet:${profile}`;
+}
+
+/** The tag of a chat's wake-up notice, one per kind: an online notice never replaces a "New message", nor either a call. */
+export function wakeTag(kind: "wake" | "wake-call" | "wake-online", profile: string, path: string): string {
+  return `${kind}:${profile}:${path}`;
+}
+
+/**
+ * The wake-up notices of a chat that are stale once the person has it on screen: its "New message" and its online
+ * notice. A call's is not among them: it says the caller is waiting, and it stays while the call rings.
+ */
+export function seenChatWakeTags(profile: string, path: string): string[] {
+  return [wakeTag("wake", profile, path), wakeTag("wake-online", profile, path)];
 }
 
 /**
@@ -449,13 +467,13 @@ export function wakeNotice(found: { entry: { path: string; name?: string; mutedU
     if (!entry.path.startsWith("/chat/")) return null;
     const name = typeof entry.name === "string" ? entry.name.trim() : "";
     const body = name ? (text.online || "{name} is online").split("{name}").join(name) : text.onlineUnnamed || "A contact is online";
-    return { title: text.title, body, tag: `wake-online:${options.profile}:${entry.path}`, call: false, data: { path: entry.path, profile: options.profile } };
+    return { title: text.title, body, tag: wakeTag("wake-online", options.profile, entry.path), call: false, data: { path: entry.path, profile: options.profile } };
   }
   // A call says so ("Incoming call", the app's own words): the caller is waiting for the chat to go live.
   // Groups have no calls: a group's token woken as a call is a message wake-up (WISP 902 · Group Mesh § Wake-up push).
   const call = options.kind === "call" && entry.path.startsWith("/chat/");
   return {
-    title: text.title, body: call ? text.call || "Incoming call" : text.body, tag: `${call ? "wake-call" : "wake"}:${options.profile}:${entry.path}`, call,
+    title: text.title, body: call ? text.call || "Incoming call" : text.body, tag: wakeTag(call ? "wake-call" : "wake", options.profile, entry.path), call,
     data: { path: entry.path, profile: options.profile },
   };
 }

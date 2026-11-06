@@ -127,6 +127,7 @@ import { scrollIntoViewGently } from "../lib/motion";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { usePageShown } from "../hooks/usePageShown";
 import { clearChatNotification } from "../lib/notifications";
+import { closeWakeNotices } from "../lib/wakePush";
 import { useWindowAway, windowAway } from "../lib/windowAway";
 import { showChatOnScreen } from "../lib/appBadge";
 import { setSaved, useSavedIn } from "../hooks/useSavedMessages";
@@ -659,7 +660,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // asked as it is now (`useWindowAway` runs this again when it comes back): its watch may start after this mounts.
   const away = useWindowAway();
   useEffect(() => {
-    if (visible && !windowAway()) clearChatNotification(sessionId);
+    if (!visible || windowAway()) return;
+    clearChatNotification(sessionId);
+    // The installed web app: this chat's wake-up notices too (a ringing call's stays).
+    closeWakeNotices(chatPath(sessionId));
   }, [visible, away, sessionId, messages.length]);
   // Nor does the icon count it meanwhile: a message landing here would show on it until the line above ran (appBadge).
   useEffect(() => (visible && pageShown ? showChatOnScreen(sessionId) : undefined), [visible, pageShown, sessionId]);
