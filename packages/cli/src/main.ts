@@ -8,7 +8,7 @@ import { childEnv, dropSecretEnv } from "./childEnv";
 import { COMMANDS, idSlot, noMoreThan, positionals, takesText, TEXT_COMMANDS } from "./commands";
 import { here, inRange, INPUT_BYTES, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS } from "./engineMethods";
-import { asCliError, CliError, EXIT, localFileError } from "./errors";
+import { asCliError, CliError, type ErrorCode, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import { jsonOut } from "./jsonOut";
@@ -815,7 +815,7 @@ async function runDaemon(g: Globals, seconds: number): Promise<void> {
     }
   }
   let served: Awaited<ReturnType<typeof serve>>;
-  try { served = await serve(host); } catch (error) { await host.close(); throw error; }
+  try { served = await serve(host); } catch (error) { await host.close(); throw childAnswer(detached, error); }
   keepServing();
   const stop = stopper(async () => { await served.close(); await host.close(); });
   host.ctx.stop = stop;
@@ -825,13 +825,13 @@ async function runDaemon(g: Globals, seconds: number): Promise<void> {
 }
 
 /**
- * A detached child's busy answer carries its own pid (`child`): its parent reads it in `daemon.log`, where every
- * daemon of the profile writes, and another detach's child that lost the profile writes busy too.
+ * A detached child's answer carries its own pid (`child`): its parent reads it in `daemon.log`, where every daemon of
+ * the profile writes, and another detach's child that lost the profile, or refused to start, writes there too.
  */
 function childAnswer(detached: boolean, error: unknown): unknown {
   if (!detached) return error;
   const failure = asCliError(error);
-  return failure.code === "busy" ? new CliError("busy", failure.message, { ...failure.details, child: process.pid }) : error;
+  return new CliError(failure.code, failure.message, { ...failure.details, child: process.pid });
 }
 
 async function daemonCommand(argv: string[]): Promise<void> {
@@ -1038,13 +1038,20 @@ async function spawnDaemon(g: Globals, until: number) {
     // Another process took the profile between the look and the child's start: it holds it still, or the child's
     // answer in the log says so (a one-shot that already ended). Tried again while there is time. Only a child that
     // ended busy lost it: one that exited 0 or by a signal had it and was stopped (`daemon stop`), and stays stopped.
+    const answer = !spawned.error && child.exitCode !== null && child.pid !== undefined ? childAnswerIn(g.paths.log, logFrom, child.pid) : null;
     const lost = !spawned.error && child.exitCode === EXIT.busy && child.pid !== undefined
-      && (![null, child.pid].includes(lockOwner(g.paths)) || lostTheProfile(g.paths.log, logFrom, child.pid));
+      && (![null, child.pid].includes(lockOwner(g.paths)) || answer?.code === "busy");
     if (lost && performance.now() < until) return null;
     heldBy(g, child.pid);
     // Alive still: it is starting (a large profile takes seconds), not failed, and the profile is its own now.
     if (child.exitCode === null && child.signalCode === null && child.pid !== undefined && processAlive(child.pid)) {
       throw new CliError("timeout", `The daemon (process ${child.pid}) is still starting; ghostly daemon status shows when it is up`, { pid: child.pid, log: g.paths.log });
+    }
+    // It refused to start (a mistyped GHOSTLY_* value is `usage`, exit 2, as in the foreground): its own answer.
+    if (answer) {
+      const details: Record<string, unknown> = { ...answer.details, log: g.paths.log };
+      delete details.child;
+      throw new CliError(answer.code, answer.message, details);
     }
     throw new CliError("engine", spawned.error ? `The daemon could not be spawned: ${spawned.error.message}` : `The daemon did not start; see ${g.paths.log}`);
   }
@@ -1053,21 +1060,24 @@ async function spawnDaemon(g: Globals, until: number) {
 }
 
 /**
- * Whether the answer the detached child `pid` wrote to the log from byte `from` on is `busy`: it found the profile
- * taken. Another child's busy line (a detach started at the same time) is not its own.
+ * The error the detached child `pid` answered with, as it wrote it to the log from byte `from` on: `busy` when it found
+ * the profile taken, its refusal when it did not start. Another child's line (a detach started at the same time) is
+ * not its own. Null when it wrote none (a crash, a signal).
  */
-function lostTheProfile(log: string, from: number, pid: number): boolean {
+function childAnswerIn(log: string, from: number, pid: number): CliError | null {
   let fd: number;
-  try { fd = openSync(log, "r"); } catch { return false; }
+  try { fd = openSync(log, "r"); } catch { return null; }
   try {
     const buffer = Buffer.alloc(64 * 1024);
     const text = buffer.subarray(0, readSync(fd, buffer, 0, buffer.length, from)).toString("utf8");
-    return text.split("\n").some((line) => {
+    for (const line of text.split("\n")) {
       try {
-        const { error } = JSON.parse(line) as { error?: { code?: string; details?: { child?: number } } };
-        return error?.code === "busy" && error.details?.child === pid;
-      } catch { return false; }
-    });
+        const { error } = JSON.parse(line) as { error?: { code?: unknown; message?: unknown; details?: Record<string, unknown> } };
+        if (error?.details?.child !== pid || typeof error.code !== "string" || !Object.hasOwn(EXIT, error.code) || typeof error.message !== "string") continue;
+        return new CliError(error.code as ErrorCode, error.message, error.details);
+      } catch { /* not JSON: the engine's notes */ }
+    }
+    return null;
   } finally { closeSync(fd); }
 }
 
