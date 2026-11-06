@@ -573,12 +573,21 @@ export class HandoffGiver {
     });
   }
 
-  /** "Let <device> try again": the count of wrong passwords of that device starts again. */
-  async allowAgain(key: string): Promise<void> {
-    const record = await this.ports.records.read();
-    if (!record?.handoffAttempts?.[key]) return;
-    const { [key]: _, ...rest } = record.handoffAttempts;
-    await this.ports.records.amend({ handoffAttempts: rest });
+  /**
+   * "Let <device> try again": the count of wrong passwords of that device starts again. The wrong password it was
+   * offered for is answered: the screen shows it no more (it stayed, and the press looked like it did nothing).
+   */
+  allowAgain(key: string): Promise<void> {
+    return this.exclusive(async () => {
+      const record = await this.ports.records.read();
+      if (record?.handoffAttempts?.[key]) {
+        const { [key]: _, ...rest } = record.handoffAttempts;
+        await this.ports.records.amend({ handoffAttempts: rest });
+      }
+      if (this.phase !== "idle" || this.peer !== key || this.failure !== "password") return;
+      this.failure = undefined;
+      this.changed();
+    });
   }
 
   /** The link to `key` opened (a new session) or closed. */
