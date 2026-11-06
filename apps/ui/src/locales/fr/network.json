@@ -16,6 +16,8 @@
   "pushRelay": "Relais push (facultatif)",
   "pushRelayHint": "Pour réveiller des contacts depuis un navigateur. Vide : aucun.",
   "pushRelayInfo": "Un navigateur ne peut pas envoyer à un service push ; ce relais le fait. Il voit votre adresse IP et quand vous réveillez quelqu'un, jamais le message.",
+  "pushRelayRefused": "Le dernier réveil par ce relais a échoué : il n'a pas répondu comme un relais push (HTTP {{http}}). Les contacts dont l'app est fermée ne sont pas réveillés par lui.",
+  "pushRelayRefusedSaid": "Le relais a dit : « {{text}} »",
   "readRelays": "Utiliser aussi les relais Pkarr",
   "readRelaysHint": "Trouve plus vite un premier contact. Les relais voient quelles clés sont cherchées.",
   "readRelaysInfo": "Cette app lit directement la DHT Mainline. Activé : elle lit aussi via les relais Pkarr ci-dessous. Si la DHT est bloquée, elle lit quand même via ces relais.",

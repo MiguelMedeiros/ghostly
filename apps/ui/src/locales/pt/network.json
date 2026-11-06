@@ -16,6 +16,8 @@
   "pushRelay": "Relay de push (opcional)",
   "pushRelayHint": "Para acordar contatos a partir de um navegador. Vazio: nenhum.",
   "pushRelayInfo": "Um navegador não pode enviar a um serviço de push; este relay envia. Ele vê seu endereço IP e quando você acorda alguém, nunca a mensagem.",
+  "pushRelayRefused": "O último despertar por este relay falhou: ele não respondeu como um relay de push (HTTP {{http}}). Contatos com o app fechado não são acordados por ele.",
+  "pushRelayRefusedSaid": "O relay disse: “{{text}}”",
   "readRelays": "Usar também relays Pkarr",
   "readRelaysHint": "Encontra o primeiro contato mais rápido. Os relays veem quais chaves são buscadas.",
   "readRelaysInfo": "Este app lê a DHT Mainline diretamente. Ligado: também lê pelos relays Pkarr abaixo. Se a DHT estiver bloqueada, lê por eles mesmo assim.",

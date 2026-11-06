@@ -172,6 +172,40 @@ describe("Settings, Network: push relay", () => {
     expect(screen.getByTestId("network-error").textContent).toBe("Use https:// no endereço do relay: http://push.example.org/");
     expect(engine.callsTo("updateSettings")).toEqual([]);
   });
+
+  const RELAY = "https://push-relay.example/";
+  const refused = { url: RELAY, at: 1, http: 403, text: "Origin not allowed" };
+
+  it("says under it when the saved relay answered the last wake-up but not as a push relay, with what the relay said; nothing once it forwards one", async () => {
+    // The field shows the relay as saved when the page opens.
+    fakeEngine.update({ transport, settings: { relays: RELAYS, pushRelay: RELAY } });
+    const { engine, user } = renderApp(<NetworkSettings />);
+    expect(screen.getByTestId("network-push-relay")).toHaveValue(RELAY);
+    expect(screen.queryByTestId("network-push-relay-refused")).toBeNull();
+    act(() => engine.update({ pushRelayRefused: refused }));
+    expect(screen.getByTestId("network-push-relay-refused").textContent).toBe(
+      "The last wake-up through this relay failed: it did not answer as a push relay (HTTP 403). Contacts whose app is closed are not woken through it.The relay said: “Origin not allowed”");
+    // The relay's words are its own: kept apart from the sentence's direction.
+    expect(screen.getByTestId("network-push-relay-said").querySelector("bdi")?.textContent).toBe("Origin not allowed");
+    // A web page at that address says nothing of its own.
+    act(() => engine.update({ pushRelayRefused: { url: RELAY, at: 2, http: 200 } }));
+    expect(screen.getByTestId("network-push-relay-refused")).toHaveTextContent("(HTTP 200)");
+    expect(screen.queryByTestId("network-push-relay-said")).toBeNull();
+    // Another address typed in: what the saved one did is not about it.
+    await user.type(screen.getByTestId("network-push-relay"), "x");
+    expect(screen.queryByTestId("network-push-relay-refused")).toBeNull();
+    await user.type(screen.getByTestId("network-push-relay"), "{Backspace}");
+    expect(screen.getByTestId("network-push-relay-refused")).toBeInTheDocument();
+    act(() => engine.update({ pushRelayRefused: undefined }));
+    expect(screen.queryByTestId("network-push-relay-refused")).toBeNull();
+  });
+
+  it("pt: says it in the app's language, the relay's words as it gave them", () => {
+    fakeEngine.update({ transport, settings: { relays: RELAYS, pushRelay: RELAY }, pushRelayRefused: refused });
+    renderApp(<NetworkSettings />, { language: "pt" });
+    expect(screen.getByTestId("network-push-relay-refused").textContent).toBe(
+      "O último despertar por este relay falhou: ele não respondeu como um relay de push (HTTP 403). Contatos com o app fechado não são acordados por ele.O relay disse: “Origin not allowed”");
+  });
 });
 
 describe("Settings, Network: Iroh relays on the Desktop", () => {

@@ -257,6 +257,84 @@ describe("waking a contact whose app is closed", () => {
     await vi.waitFor(async () => expect((await saved(chat.id))?.peerWake).toBeUndefined());
   });
 
+  it("a push relay that answers but not as a push relay is kept in the state, with its own error text, until it forwards one", async () => {
+    let relay: () => Response | Promise<Response> = () => new Response("<!doctype html><title>My site</title>", { status: 200, headers: { "Content-Type": "text/html" } });
+    const relayed = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.startsWith("https://web.push.apple.com")) throw new TypeError("Failed to fetch");
+      relayed();
+      return relay();
+    }));
+    const node = engine();
+    await node.updateSettings({ settings: { pushRelay: "https://push-relay.example/" } });
+    const chat = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: contactTarget().target });
+    const wake = async () => {
+      const before = relayed.mock.calls.length;
+      node["wakeLimiter"].reset(chat.id);
+      await node.sendMessage({ linkId: chat.id, text: "hi" });
+      await vi.waitFor(() => expect(relayed.mock.calls.length).toBe(before + 1));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    };
+    expect(node.getState().pushRelayRefused).toBeUndefined();
+    // A web page at that address: refused, no text of its own.
+    await wake();
+    expect(node.getState().pushRelayRefused).toMatchObject({ url: "https://push-relay.example/", http: 200 });
+    expect(node.getState().pushRelayRefused?.text).toBeUndefined();
+    // JSON, but without the push service's status.
+    relay = () => new Response(JSON.stringify({ ok: true }), { status: 200 });
+    await wake();
+    expect(node.getState().pushRelayRefused).toMatchObject({ http: 200 });
+    // The relay's own refusal: its error text, on one line and cut.
+    relay = () => new Response(JSON.stringify({ error: "Origin not allowed" }), { status: 403 });
+    await wake();
+    expect(node.getState().pushRelayRefused).toMatchObject({ url: "https://push-relay.example/", http: 403, text: "Origin not allowed" });
+    relay = () => new Response(JSON.stringify({ error: `Bad\nTTL\u202e value ${"x".repeat(300)}` }), { status: 400 });
+    await wake();
+    const { text } = node.getState().pushRelayRefused!;
+    expect(text).toMatch(/^Bad TTL value x+…$/);
+    expect([...text!]).toHaveLength(120);
+    // A status the relay forwards (here the push service's own 429) is the relay working: nothing is said any more.
+    relay = () => new Response(JSON.stringify({ status: 429 }), { status: 200 });
+    await wake();
+    expect(node.getState().pushRelayRefused).toBeUndefined();
+    // The push service's 410 through the relay is not the relay's problem either; it forgets the subscription as before.
+    relay = () => new Response(JSON.stringify({ status: 410 }), { status: 200 });
+    await wake();
+    expect(node.getState().pushRelayRefused).toBeUndefined();
+    await vi.waitFor(async () => expect((await saved(chat.id))?.peerWake).toBeUndefined());
+  });
+
+  it("a push relay that cannot be reached (offline, timed out) is not said to refuse; another relay address drops what the old one said", async () => {
+    let relay: () => Response | Promise<Response> = () => { throw new TypeError("Failed to fetch"); };
+    const relayed = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.startsWith("https://web.push.apple.com")) throw new TypeError("Failed to fetch");
+      relayed();
+      return relay();
+    }));
+    const node = engine();
+    await node.updateSettings({ settings: { pushRelay: "https://push-relay.example/" } });
+    const chat = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: contactTarget().target });
+    const wake = async () => {
+      const before = relayed.mock.calls.length;
+      node["wakeLimiter"].reset(chat.id);
+      await node.sendMessage({ linkId: chat.id, text: "hi" });
+      await vi.waitFor(() => expect(relayed.mock.calls.length).toBe(before + 1));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    };
+    await wake();
+    expect(node.getState().pushRelayRefused).toBeUndefined();
+    relay = () => new Response(JSON.stringify({ error: "Too many" }), { status: 429 });
+    await wake();
+    expect(node.getState().pushRelayRefused).toMatchObject({ http: 429, text: "Too many" });
+    // Unreachable afterwards: what it said last is kept, not taken for a fix.
+    relay = () => { throw new TypeError("Failed to fetch"); };
+    await wake();
+    expect(node.getState().pushRelayRefused).toMatchObject({ http: 429 });
+    await node.updateSettings({ settings: { pushRelay: "https://other-relay.example/" } });
+    expect(node.getState().pushRelayRefused).toBeUndefined();
+  });
+
   it("a call to a closed app: one call wake-up, limited apart from messages; none while live or without a target", async () => {
     const pushSend = vi.fn(async () => 201);
     const node = engine({ pushSend });
