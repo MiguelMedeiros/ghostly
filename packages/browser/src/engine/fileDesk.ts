@@ -394,9 +394,12 @@ export class FileDesk {
     const used = this.deps.wireIds(linkId);
     // Said on the DHT floor first: its message is there, waiting for this offer.
     const said = this.chats.get(linkId)?.announced.has(file.id) ?? false;
-    // Offered again, the file is this chat's already (its id is in use by it); new, its id must be new.
-    if (!used || (!again && !said && used.has(file.id))) return { refuse: "invalid" };
+    if (!used) return { refuse: "invalid" };
+    // Before its id is judged: a deleted file's id stays in use for the rest of the run, and "invalid" read as a failure
+    // with a Retry that never works on the sender's side (after a restart, the same offer was declined).
     if (this.deps.deleted(linkId, `peer_${file.id}`)) return { refuse: "declined" };
+    // Offered again, the file is this chat's already (its id is in use by it); new, its id must be new.
+    if (!again && !said && used.has(file.id)) return { refuse: "invalid" };
     if (!again && !said && await this.deps.messageExists?.(linkId, `peer_${file.id}`)) return { refuse: "invalid" };
     const room = await (await fileBytes()).room().catch(() => null);
     if (room !== null && file.size > room) return { refuse: "no-room", room };

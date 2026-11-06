@@ -150,7 +150,7 @@ export function findChat(links: readonly LinkView[], ref: string, groups: readon
  */
 function noChat(ref: string, groups: readonly GroupView[]): CliError {
   let group: GroupView | undefined;
-  try { group = findGroup(groups, ref.startsWith("group:") ? ref.slice("group:".length) : ref); } catch { /* no group, or more than one */ }
+  try { group = findGroup(groups, ref); } catch { /* no group, or more than one */ }
   if (group) return new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat (ghostly chat list)`, { group: group.id });
   return new CliError("not_found", `No chat ${JSON.stringify(ref)} (ghostly chat list)`);
 }
@@ -192,6 +192,13 @@ export function namedByThem(ref: string, chat: { chat: string; name: string | nu
   return new CliError("bad_request", `${JSON.stringify(ref)} names a chat only by what its contact chose (a prefix of its id, its own name): use the chat's id, its contact's key or a label given here (ghostly chat rename <chat> <name>)`, chat);
 }
 
+/**
+ * `group:<ref>`, the form that names a group wherever a group is taken (docs/CLI.md § What it does): `<ref>`, read as any
+ * other ref (`findGroup`: an id, a prefix of it or a name). Null for a ref without it. `findGroup` and `findChatOrGroup`
+ * both read the prefix here, so a group command and a command that takes a chat or a group never read it apart.
+ */
+export const groupPrefixed = (ref: string): string | null => (ref.startsWith("group:") ? ref.slice("group:".length) : null);
+
 /** Only an invitation so far: this profile is not in the group (yet), and whoever invited chose its name. */
 const invitedOnly = (group: GroupView) => group.status === undefined && !!group.invitation;
 
@@ -200,9 +207,11 @@ const invitedOnly = (group: GroupView) => group.status === undefined && !!group.
  * chooses its name, so neither wins over the other: a ref that is one group's name and another's prefix is refused,
  * with both ids, as `chatBy` does for chats. A group this profile is in wins over an invitation with the same name or
  * prefix (the one who invites chooses those); an invitation is still found by its id, and by name or prefix where no
- * group of this profile has it.
+ * group of this profile has it. `group:<ref>` is `<ref>` (`groupPrefixed`); before, only the commands that take a chat
+ * or a group read it, and every group command and `listen --group` answered it `No group`.
  */
-export function findGroup(groups: readonly GroupView[], ref: string): GroupView {
+export function findGroup(groups: readonly GroupView[], given: string): GroupView {
+  const ref = groupPrefixed(given) ?? given;
   if (!ref.trim()) throw new CliError("bad_request", `${JSON.stringify(ref)} names no group`);
   const exact = groups.find((group) => group.id === ref);
   if (exact) return exact;
@@ -224,7 +233,7 @@ export function findGroup(groups: readonly GroupView[], ref: string): GroupView 
  * chat or group stays that error.
  */
 export function findChatOrGroup(links: readonly LinkView[], groups: readonly GroupView[], ref: string): { link: LinkView } | { group: GroupView } {
-  if (ref.startsWith("group:")) return { group: findGroup(groups, ref.slice("group:".length)) };
+  if (groupPrefixed(ref) !== null) return { group: findGroup(groups, ref) };
   let chat: ReturnType<typeof chatBy>;
   try {
     chat = chatBy(links, ref);
@@ -311,7 +320,8 @@ export function chatOrGroup(ctx: ApiContext, ref: string): { id: string; linkId:
 export function groupOf(ctx: ApiContext, params: Params, twin?: string): GroupView {
   const ref = str(params, "group", true);
   try { return findGroup(state(ctx).groups, ref); } catch (error) {
-    if (!(error instanceof CliError) || error.code !== "not_found") throw error;
+    // `group:<ref>` names a group only: never a chat, as in `findChatOrGroup`.
+    if (!(error instanceof CliError) || error.code !== "not_found" || groupPrefixed(ref) !== null) throw error;
     let chat: LinkView;
     try { chat = findChat(state(ctx).links, ref); } catch { throw error; }
     const shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
