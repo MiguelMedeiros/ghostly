@@ -268,13 +268,54 @@ describe("removing a proof and its revocation", () => {
     await vi.advanceTimersByTimeAsync(5_000);
     await vi.waitFor(() => expect(pkarr.get(binding.key)?.[0]).toMatchObject({ label: "_ghostly-revoked", value: expect.stringContaining(id) }));
 
-    // Thirty-one days on (the proof lived thirty), the next republish drops it.
+    // Thirty-one days on (the proof lived thirty), it is no longer published, but kept: this clock may be the one that is wrong.
     pkarr.clear();
     vi.setSystemTime(Date.now() + 31 * 86_400_000);
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(pkarr.size).toBe(0);
+    expect(await stored<{ id: string }[]>("identityRevocations")).toEqual([expect.objectContaining({ id })]);
+    // Past its expiry by more than the longest a proof may last, the next republish drops it.
+    vi.setSystemTime(Date.now() + 401 * 86_400_000);
     await vi.advanceTimersByTimeAsync(60 * 60_000);
     await vi.waitFor(async () => expect(await stored("identityRevocations")).toEqual([]));
     expect(pkarr.size).toBe(0);
     again.stop();
+  });
+
+  /**
+   * The revocation was dropped by this device's clock: one run with the clock 40 days ahead deleted it for good, and a
+   * removal made then kept none, so once the clock was put right nothing republished it and the contact, told by no
+   * withdraw (the chat deleted first), kept the proof verified until its real expiry.
+   */
+  for (const when of ["after the removal", "during the removal"] as const) it(`a clock once set ahead ${when} does not end the revocation: put right, it is republished and the contact sees it revoked`, async () => {
+    const { engines, state, pkarr, make, id, binding } = await shared();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const right = Date.now();
+    const ahead = () => vi.setSystemTime(right + 40 * 86_400_000);
+    state.deleted.a = true;
+    engines.a.forget("chat");
+    const run = async (ms: number) => { const a = make("a"); await a.load(); a.start(); await vi.advanceTimersByTimeAsync(ms); a.stop(); return a; };
+
+    if (when === "during the removal") ahead();
+    const removing = make("a");
+    await removing.load();
+    await removing.remove({ id });
+    if (when === "after the removal") { ahead(); await run(10_000); }
+    expect(await stored<{ id: string }[]>("identityRevocations")).toEqual([expect.objectContaining({ id })]);
+
+    // The clock put right, the relays forgot the record; the app runs again for two hours.
+    vi.setSystemTime(right + 60_000);
+    pkarr.clear();
+    const a = await run(2 * 60 * 60_000);
+    expect(pkarr.get(binding.key)?.[0]).toMatchObject({ label: "_ghostly-revoked", value: expect.stringContaining(id) });
+    await engines.b.checkRevocations();
+    expect(engines.b.linkView("chat", true)!.received[0].status).toBe("revoked");
+
+    // Clear all data with the clock ahead again still publishes it, once more.
+    ahead();
+    pkarr.clear();
+    await a.revokeAll();
+    expect([...pkarr.keys()]).toEqual([binding.key]);
   });
 
   it("revocations are looked up only online, for proofs standing or withdrawn, never for one revoked or expired", async () => {

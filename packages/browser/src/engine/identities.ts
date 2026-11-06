@@ -1,5 +1,5 @@
 import {
-  budgetRetryMs, emptyIdentityLedger, fromBase64Url, isDiscoveryBudgetError, identityRevocationValue, identityStatement, IdentityCheckUnavailable, IdentityExchange, IDENTITY_REVOCATION_LABEL, isIdentityBinding, newIdentityBinding,
+  budgetRetryMs, emptyIdentityLedger, fromBase64Url, isDiscoveryBudgetError, identityRevocationValue, identityStatement, IdentityCheckUnavailable, IdentityExchange, IDENTITY_MAX_VALIDITY, IDENTITY_REVOCATION_LABEL, isIdentityBinding, newIdentityBinding,
   receivedIdentityStatus, revokesIdentity, toBase64Url,
   type IdentityBinding, type IdentityLedger, type IdentityScope, type ReceivedIdentity, type IdentityStatement, type LocalIdentityProof, type VerifiedIdentity,
 } from "@ghostly/core";
@@ -59,6 +59,12 @@ const REVOCATIONS_ROUND = "identityRevocationsRound";
 interface LookupRound { startedAt: number; done: string[] }
 /** Relays and the DHT forget a record within hours: republish revocations this often while the app runs. */
 const REPUBLISH_MS = 60 * 60_000;
+/**
+ * A revocation is kept (with its sealed seed) this long past its expiry by this device's clock, which may be the one that
+ * is wrong: the contacts decide expiry by theirs. Only a clock ahead by more than the longest a proof may last (400 days)
+ * drops one still standing for them. Republished only until its expiry, as before; a few hundred bytes each.
+ */
+const REVOCATION_KEPT_PAST_EXPIRY = IDENTITY_MAX_VALIDITY;
 /** How often the contacts' proofs are looked up for a revocation (and once shortly after start). */
 const REVOCATION_CHECK_MS = 12 * 60 * 60_000;
 /** A lookup that could not run (offline, no relay answered) is tried again after this, doubled each time, up to the 12 h. */
@@ -353,10 +359,10 @@ export class IdentityProofs {
       if (shared && shared.status !== "withdrawn") await this.exchange(linkId)?.withdraw(id, !!this.host.channel(linkId));
     }
     const revocation: Revocation = { id, key: proof.binding.key, seed: proof.seed, revokedAt: now(), expiresAt: Math.min(proof.binding.expiresAt, proof.verified.expiresAt ?? Infinity) };
+    // Kept whatever this clock says: the contacts decide expiry by theirs.
     const wasShared = this.everShared(proof);
-    const revoke = wasShared && revocation.expiresAt > now();
     await this.save((proofs, revocations) => proofs.some(p => identityStatement(p.binding).id === id)
-      ? [proofs.filter(p => identityStatement(p.binding).id !== id), revoke ? [...revocations, revocation] : revocations]
+      ? [proofs.filter(p => identityStatement(p.binding).id !== id), wasShared ? [...revocations, revocation] : revocations]
       : [proofs, revocations]);
     if (wasShared) void this.publishRevocation(revocation).catch(() => {});
     else { this.seeds.get(id)?.fill(0); this.seeds.delete(id); }
@@ -372,7 +378,7 @@ export class IdentityProofs {
     this.stop();
     const at = now();
     const last: Revocation[] = [
-      ...this.revocations.filter(r => r.expiresAt > at),
+      ...this.revocations,
       ...this.proofs.filter(p => this.everShared(p)).map(p => ({
         id: identityStatement(p.binding).id, key: p.binding.key, seed: p.seed, revokedAt: at, expiresAt: Math.min(p.binding.expiresAt, p.verified.expiresAt ?? Infinity),
       })),
@@ -393,12 +399,12 @@ export class IdentityProofs {
     await this.host.publish(await this.seedOf(r.id, r.seed), [{ label: IDENTITY_REVOCATION_LABEL, value: identityRevocationValue(r.id, r.revokedAt) }]);
   }
   private async republish(): Promise<void> {
-    const live = this.revocations.filter(r => r.expiresAt > now());
-    if (live.length !== this.revocations.length) {
-      for (const r of this.revocations) if (!live.includes(r)) { this.seeds.get(r.id)?.fill(0); this.seeds.delete(r.id); }
-      await this.save((proofs, revocations) => [proofs, revocations.filter(r => r.expiresAt > now())]);
+    const kept = (r: Revocation) => r.expiresAt + REVOCATION_KEPT_PAST_EXPIRY > now();
+    if (!this.revocations.every(kept)) {
+      for (const r of this.revocations) if (!kept(r)) { this.seeds.get(r.id)?.fill(0); this.seeds.delete(r.id); }
+      await this.save((proofs, revocations) => [proofs, revocations.filter(kept)]);
     }
-    for (const r of live) {
+    for (const r of this.revocations.filter(r => r.expiresAt > now())) {
       if (!this.running) return;
       await this.publishRevocation(r).catch(() => {});
     }
