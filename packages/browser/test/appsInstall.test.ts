@@ -2,11 +2,11 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { APP_BUNDLE_MAGIC, canonicalJsonBytes, toBase64Url, utf8Encode, type SignedAppRevocation } from "@ghostly/core";
-import { fileBytes } from "../src/shared/fileBytes";
+import { fileBytes, resetFileBytes } from "../src/shared/fileBytes";
 import { STORES, openDb, wrap } from "../src/shared/idb";
 import {
   BUNDLE_URL, FakeNet, NOW_MS, PINNED_URL, PUBLISHER, REPO, STORE_KEY, STORE_URL, appRows, apps, bundle, bundleIds, emptyProfile, keyOf,
-  listing, revocation, signer, storeFiles,
+  listing, revocation, signer, storageRows, storeFiles,
 } from "./appsSupport";
 // covers: apps.engine.installed
 
@@ -1242,6 +1242,119 @@ describe("a restored profile (installed list, no bundle)", () => {
     await (await fileBytes()).remove(`app-${v1.digest}`);
     await store.preview({ url: PINNED_URL });
     expect(await store.install({ digest: v1.digest, grant: ["chat"] })).toMatchObject({ run: { status: "ok" } });
+  });
+});
+
+describe("files only partly written back (the page went away while they were written)", () => {
+  const MiB = 1024 * 1024;
+  const big = (n: number) => { const b = new Uint8Array(n); for (let i = 0; i < n; i++) b[i] = (i * 31 + 7) & 255; return b; };
+  /**
+   * An installed 2.5 MB app with a storage row, its file then cut to `kept` bytes as `writeBundle` leaves it when the
+   * page goes away after a few of its MiB appends (the IndexedDB backend loses what was not flushed), and a new engine:
+   * the next start.
+   */
+  async function cut(kept: number) {
+    const v1 = await bundle({ data: big(2_500_000) });
+    net.put(BUNDLE_URL, v1.bytes);
+    const first = apps(net);
+    await first.preview({ url: BUNDLE_URL });
+    await first.install({ digest: v1.digest, grant: ["chat"] });
+    await first.storageSet({ ref: v1.ref, scope: "alone", key: "save", value: { game: 42 } });
+    const data = await storageRows();
+    const id = `app-${v1.digest}`;
+    const files = await fileBytes();
+    await files.remove(id);
+    for (let at = 0; at < kept; at += MiB) await files.append(id, at, v1.bytes.subarray(at, Math.min(at + MiB, kept)));
+    await files.flush(id);
+    await files.close(id);
+    resetFileBytes(["idb"]);
+    net.requests.length = 0;
+    return { v1, id, data, store: apps(net) };
+  }
+  const stored = async (id: string) => (await fileBytes()).size(id);
+
+  for (const kept of [MiB, 2 * MiB, 2 * MiB + 1000]) {
+    it(`${kept} bytes of it count as missing: Open says so, Get its files writes it whole, and the app's data stays (${kept})`, async () => {
+      const { v1, id, data, store } = await cut(kept);
+      net.files.delete(BUNDLE_URL);
+      expect(await store.runCheck({ ref: v1.ref })).toEqual({ status: "needs-files" });
+      expect((await store.list())[0]!.run).toEqual({ status: "needs-files" });
+      await expect(store.entry({ ref: v1.ref })).rejects.toThrow(/^needs-files: /);
+      net.put(BUNDLE_URL, v1.bytes);
+      expect(await store.fetchFiles({ ref: v1.ref })).toEqual({ status: "ok" });
+      expect(net.requests, "peeked, then read whole").toEqual([BUNDLE_URL, BUNDLE_URL, BUNDLE_URL]);
+      expect(await stored(id)).toBe(v1.bytes.length);
+      expect((await store.entry({ ref: v1.ref })).digest).toBe(v1.digest);
+      expect(await apps(net).entry({ ref: v1.ref }), "and after the next start").toMatchObject({ digest: v1.digest });
+      expect(data.length).toBeGreaterThan(0);
+      expect(await storageRows()).toEqual(data);
+    });
+  }
+
+  it("installing the same version from its link writes a partial file again, and so does the update check", async () => {
+    const { v1, id, data, store } = await cut(2 * MiB);
+    await store.preview({ url: BUNDLE_URL });
+    expect(await store.install({ digest: v1.digest, grant: ["chat"] })).toMatchObject({ run: { status: "ok" } });
+    expect(await stored(id)).toBe(v1.bytes.length);
+    expect((await store.entry({ ref: v1.ref })).digest).toBe(v1.digest);
+    expect(await storageRows()).toEqual(data);
+
+    await emptyProfile();
+    net = new FakeNet();
+    const again = await cut(MiB);
+    expect((await again.store.checkUpdates())[0]).toMatchObject({ run: { status: "ok" } });
+    expect(await stored(again.id)).toBe(again.v1.bytes.length);
+    expect(await storageRows()).toEqual(again.data);
+  });
+
+  it("a whole-sized file that does not hold the bundle is damaged: Open says so and drops it, Get its files fetches it again", async () => {
+    const v1 = await bundle({ data: big(2_500_000) });
+    net.put(BUNDLE_URL, v1.bytes);
+    const first = apps(net);
+    await first.preview({ url: BUNDLE_URL });
+    await first.install({ digest: v1.digest, grant: ["chat"] });
+    await first.storageSet({ ref: v1.ref, scope: "alone", key: "save", value: { game: 42 } });
+    const data = await storageRows();
+    const id = `app-${v1.digest}`;
+    const wrong = v1.bytes.slice();
+    wrong[wrong.length - 1] ^= 1;
+    const files = await fileBytes();
+    await files.remove(id);
+    await files.append(id, 0, wrong);
+    await files.flush(id);
+    await files.close(id);
+    net.files.delete(BUNDLE_URL);
+    const store = apps(net);
+    const checked = vi.fn();
+    const told = apps(net, { checked });
+    expect(await store.runCheck({ ref: v1.ref }), "its size is right: a list reads no more than that").toEqual({ status: "ok" });
+    await expect(told.entry({ ref: v1.ref })).rejects.toThrow(/^damaged: /);
+    expect(checked, "the pages read the list again: it needs its files now").toHaveBeenCalled();
+    expect(await stored(id)).toBeNull();
+    expect(await store.runCheck({ ref: v1.ref })).toEqual({ status: "needs-files" });
+    net.put(BUNDLE_URL, v1.bytes);
+    expect(await store.fetchFiles({ ref: v1.ref })).toEqual({ status: "ok" });
+    expect((await store.entry({ ref: v1.ref })).digest).toBe(v1.digest);
+    expect(await storageRows()).toEqual(data);
+  });
+
+  it("a whole file costs the list and the check before a run its size, no read and no hash", async () => {
+    const v1 = await bundle({ data: big(2_500_000) });
+    net.put(BUNDLE_URL, v1.bytes);
+    const first = apps(net);
+    await first.preview({ url: BUNDLE_URL });
+    await first.install({ digest: v1.digest, grant: ["chat"] });
+    const files = await fileBytes();
+    const read = vi.spyOn(files, "read"), digest = vi.spyOn(files, "digest"), size = vi.spyOn(files, "size");
+    net.requests.length = 0;
+    const store = apps(net);
+    expect(await store.runCheck({ ref: v1.ref })).toEqual({ status: "ok" });
+    expect((await store.list())[0]!.run).toEqual({ status: "ok" });
+    expect(await store.fetchFiles({ ref: v1.ref })).toEqual({ status: "ok" });
+    expect(read).not.toHaveBeenCalled();
+    expect(digest).not.toHaveBeenCalled();
+    expect(size).toHaveBeenCalled();
+    expect(net.requests).toEqual([]);
   });
 });
 

@@ -62,6 +62,7 @@
     "title": "Apps con {{name}}"
   },
   "errors": {
+    "damaged": "Sus archivos en este dispositivo están dañados. Descarga sus archivos de nuevo.",
     "equivocation": "Este enlace tiene otra copia de una versión que ya tienes. Ghostly conservó la tuya.",
     "expired": "Tardó demasiado. Vuelve a comprobar la app.",
     "githubLink": "Esa página de GitHub no es una app. Pega el enlace del repositorio o el del archivo de la app.",

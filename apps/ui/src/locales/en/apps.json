@@ -62,6 +62,7 @@
     "title": "Apps with {{name}}"
   },
   "errors": {
+    "damaged": "Its files on this device are damaged. Get its files again.",
     "equivocation": "This link holds a different copy of a version you have. Ghostly kept yours.",
     "expired": "That took too long. Check the app again.",
     "githubLink": "That GitHub page is not an app. Paste the repository's link, or the link to its app file.",

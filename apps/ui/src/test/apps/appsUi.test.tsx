@@ -801,6 +801,28 @@ describe("with the apps flag on", () => {
     expect(screen.queryByTestId("installed-app-open")).not.toBeInTheDocument();
   });
 
+  it("Open on an app whose files here are damaged says so, and the page then offers Get its files", async () => {
+    let run: InstalledAppView["run"] = { status: "ok" };
+    fakeEngine.on("appList", () => [installed({ view: "full", run })]).on("appStoreList", () => []).on("appCheckUpdates", () => [])
+      .on("appFetchFiles", () => ({ status: "ok" as const }));
+    // The engine dropped the files it found damaged and told every page to read the list again.
+    setAppOpener(vi.fn(async () => {
+      run = { status: "needs-files" };
+      fakeEngine.emit({ kind: "apps-checked" });
+      throw new Error("damaged: This app's stored files do not match what was installed");
+    }));
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    await user.click(await screen.findByTestId("installed-app-open"));
+    expect(await screen.findByText("Its files on this device are damaged. Get its files again.")).toBeInTheDocument();
+    expect(screen.queryByText("Ghostly won't install it")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("installed-app-hint")).toHaveTextContent("Needs its files");
+    await user.click(screen.getByRole("button", { name: detailsOf("Chess") }));
+    run = { status: "ok" };
+    await user.click(await screen.findByTestId("app-fetch-files"));
+    expect(fakeEngine.callsTo("appFetchFiles")).toHaveLength(1);
+    expect(await screen.findByTestId("app-open")).toBeInTheDocument();
+  });
+
   it("lists installed apps and stores; uninstall offers an export first", async () => {
     fakeEngine.on("appList", () => [installed({ unknownPublisher: false, listedBy: [{ key: "s", name: "Ghostly", kind: "curated" }] })])
       .on("appStoreList", () => [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
