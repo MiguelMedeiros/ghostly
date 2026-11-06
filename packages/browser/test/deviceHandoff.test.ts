@@ -416,6 +416,16 @@ describe("the password proof and its limits", () => {
     await until(() => w.giver.view()?.failure === "password");
   });
 
+  it("Let <device> try again answers the wrong password it was offered for: the count starts again and the giver shows it no more", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(5_000));
+    await w.taker.pull("not the password");
+    await until(() => w.giver.view()?.failure === "password");
+    await w.giver.allowAgain(B);
+    expect(w.giverRecords.record.handoffAttempts?.[B]).toBeUndefined();
+    expect(w.giver.view()).toBeNull();
+  });
+
   it("five wrong in an hour lock the device out with a retry time; a right one after the hour starts the count again", { timeout: 30_000 }, async () => {
     const w = world();
     for (let i = 0; i < HANDOFF_ATTEMPTS.perHour; i++) {
