@@ -110,6 +110,24 @@ function find(m: Mark): Element | null {
   return m.id ? document.getElementById(m.id) : null;
 }
 
+/**
+ * Keeps the middle of the screen in the reader's chapter. When what was at the middle is gone from the chapter's new
+ * shape (a tablet turned, the figure drawn anew before the resize event), its step is held by its title where the
+ * title was: above the screen, for a reader further down the step. In the shorter shape (the cards) that lands past
+ * the chapter's end, on the statement after it: the reader was in the chapter, and stays in it.
+ */
+function inChapter(home: string | null) {
+  const section = home ? document.getElementById(home) : null;
+  if (!section) return;
+  const r = section.getBoundingClientRect();
+  const middle = window.innerHeight / 2;
+  if (r.top <= middle && r.bottom > middle) return;
+  // The nearest point of the chapter, a little way in from its edge, goes to the middle.
+  const margin = Math.min(r.height, window.innerHeight) / 4;
+  const point = Math.min(Math.max(middle, r.top + margin), r.bottom - margin);
+  window.scrollBy({ top: point - middle, behavior: "instant" });
+}
+
 function hold(marks: Mark[]) {
   for (const m of marks) {
     const el = find(m);
@@ -121,6 +139,7 @@ function hold(marks: Mark[]) {
     const at = m.h > 0 ? (m.at * window.innerHeight) / m.h : m.at;
     const by = r.top + m.f * r.height - at;
     if (Math.abs(by) >= 1) window.scrollBy({ top: by, behavior: "instant" });
+    inChapter(m.home);
     return;
   }
 }
