@@ -174,6 +174,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Not delivered in time", `${CORE}/chatFiles.ts`],
   ["Your contact asked for the same part of this file too many times", `${CORE}/chatFiles.ts`],
   ["Could not store the file: This device has no space left for the file", `${CORE}/chatFiles.ts`, "Could not store the file: "],
+  // The same where file bytes live in IndexedDB (shared/idb.ts `committed`): a line received files kept before it was named.
+  ["Could not store the file: This device has no room left to save this", `${BROWSER}/shared/idb.ts`, "This device has no room left to save this"],
   ["Could not store the file: The stored copy is gone", `${CORE}/chatFiles.ts`, "Could not store the file: "],
   ["Your contact could not take this file", `${CORE}/chatFiles.ts`],
   ["Cancelled by the sender", `${CORE}/chatFiles.ts`],
@@ -641,6 +643,18 @@ describe("errors in the app's language", () => {
     expect(problemText(new Error(forward), pt)).toEqual({ tone: "error", title: pt("errors.app.noRoom"), next: pt("errors.app.noRoomNext"), detail: forward });
     const received = `Could not store the file: ${windows}`;
     expect(knownErrorParts(received, pt)).toMatchObject({ title: pt("errors.files.noRoomHere"), next: pt("errors.files.noRoomHereNext") });
+  });
+
+  it.each(LANGUAGES)("a received file IndexedDB had no room for reads as no room here in %s, however the line was kept", (language) => {
+    const t = translators[language];
+    const noRoom = { title: t("errors.files.noRoomHere"), next: t("errors.files.noRoomHereNext") };
+    // As the engine says it now (named by the error, packages/core chatFiles.ts), with and without the storage's own words.
+    for (const raw of [
+      "Could not store the file: QuotaExceededError: This device has no room left to save this",
+      "Could not store the file: QuotaExceededError",
+      // As a received file's record kept it before (the IndexedDB storage's words alone).
+      "Could not store the file: This device has no room left to save this",
+    ]) expect(knownErrorParts(raw, t), raw).toEqual({ ...noRoom, detail: raw });
   });
 
   it("a storage that is full says the same with the browser's own message, and reads in English as a sentence and its next step", () => {

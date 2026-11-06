@@ -4,7 +4,8 @@ import { afterEach, expect, it, vi } from "vitest";
 import { ChatFiles, FILE_LIMITS, GhostLink, createIdentity, createLink, identityFromSeedB64, randomBytes, toBase64Url, type FileTransferRecord, type IncomingTarget, type OfferDecision } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
-import { fileStore } from "../src/shared/idb";
+import { STORES, fileStore } from "../src/shared/idb";
+import { knownErrorParts } from "../../../apps/ui/src/lib/errorText";
 import { fileBytes, registerFileBytes } from "../src/shared/fileBytes";
 import { IdbFileBytes } from "../src/shared/fileBytesIdb";
 import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
@@ -711,4 +712,33 @@ it("a contact without files/3 cannot send over files/2 a file larger than files/
   // Up to that size, files/2 carries a file as before.
   await sendOld(t, "old-00005", 256 * 1024);
   await vi.waitFor(async () => expect((await storedIn(t)).map((f) => f.metadata?.size)).toEqual([256 * 1024]));
+}, 60_000);
+
+it("a received file IndexedDB has no room for says there is no room here, not to ask for it again", async () => {
+  // Pieces past the second: the write succeeds as a request, then Chromium aborts its transaction with a
+  // QuotaExceededError of no message, as a browser out of storage does (idbWriteKept.test.ts).
+  const real = IDBObjectStore.prototype.put;
+  let pieces = 0;
+  const put = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore["put"]>) {
+    const request = real.apply(this, args);
+    if (this.name !== STORES.fileChunks || ++pieces <= 2) return request;
+    const tx = this.transaction;
+    request.addEventListener("success", () => {
+      const quota = new DOMException("", "QuotaExceededError");
+      Object.defineProperty(tx, "error", { get: () => quota, set: () => {}, configurable: true });
+      tx.abort();
+    });
+    return request;
+  });
+  cleanup.push(async () => put.mockRestore());
+  const t = await setup();
+  t.offer("full-00001", 6 * 1024 * 1024 + 123);
+  await vi.waitFor(() => expect(t.records.get("out:full-00001")).toMatchObject({ state: "failed", error: "Not enough space on your contact's device" }), { timeout: 30_000 });
+  const { fileId } = (await t.incoming("full-00001"))!;
+  await vi.waitFor(async () => expect((await fileStore.get(fileId))?.wire3?.state).toBe("failed"));
+  const error = (await fileStore.get(fileId))!.wire3!.error!;
+  // Named by the error, not by its words: each storage words its no-room its own way (and Chromium's has none).
+  expect(error).toBe("Could not store the file: QuotaExceededError: This device has no room left to save this");
+  // What the app shows for it: no room here and its next step, the storage's words behind the ⓘ.
+  expect(knownErrorParts(error)).toMatchObject({ title: "No room on this device", next: "Free some space, then ask for it again." });
 }, 60_000);
