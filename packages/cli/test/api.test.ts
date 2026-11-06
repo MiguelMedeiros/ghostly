@@ -68,7 +68,7 @@ describe("chats", () => {
   it("a chat's name is what the engine keeps whole, refused before anything is made", async () => {
     const { ctx, node } = fake();
     const calls = Object.assign(node, { renameLink: vi.fn(), createLink: vi.fn(), joinLink: vi.fn() });
-    const long = { code: "bad_request", message: "A chat's name is up to 48 characters on one line" };
+    const long = { code: "bad_request", message: "A chat's name is up to 48 characters as stored (this one is 49)", details: { length: 49, max: 48 } };
     const unseen = { code: "bad_request", message: "A chat's name needs a character that shows (an empty name gives back the contact's own)" };
     for (const [name, rule] of [["y".repeat(49), long], [`${"x".repeat(48)}👻`, long], ["\u200b", unseen], ["\u0301\u0301", unseen], ["\u200e \u2066", unseen]] as const) {
       await expect(callApi(ctx, "chat.rename", { chat: "chat-one", name }), JSON.stringify(name)).rejects.toMatchObject(rule);
@@ -85,9 +85,9 @@ describe("chats", () => {
   // counted. A tab was refused as a second line for a chat or the profile and taken as a space for a group, a name 48
   // long once stored was refused at its raw length, and an invisible-only name cleared a chat's name with exit 0 (the
   // profile kept it as its name).
-  it("a chat's, the profile's and a group's name are cleaned first, then counted; nothing that shows is refused", async () => {
+  it("a chat's and the profile's name are cleaned first, then counted; nothing that shows is refused", async () => {
     const { ctx, node } = fake();
-    const calls = Object.assign(node, { renameLink: vi.fn(), createGroup: vi.fn(async () => ({ groupId: "g2" })), renameGroup: vi.fn(async () => undefined) });
+    const calls = Object.assign(node, { renameLink: vi.fn() });
     const label = async (name: string) => { await callApi(ctx, "chat.rename", { chat: "chat-one", name }); return calls.renameLink.mock.lastCall?.[0].label; };
     expect(await label("tab\tbot")).toBe("tab bot");
     expect(await label("two\nlines")).toBe("two lines");
@@ -113,23 +113,68 @@ describe("chats", () => {
       await expect(callApi(ctx, "profile.set", { name }), JSON.stringify(name)).rejects.toMatchObject({ code: "bad_request", message: "name needs a character that shows (an empty one is no name)" });
       await expect(callApi(ctx, "settings.set", { nick: name }), JSON.stringify(name)).rejects.toMatchObject({ code: "bad_request", message: "nick needs a character that shows (an empty one is no name)" });
     }
-    await expect(callApi(ctx, "profile.set", { name: "p".repeat(65) })).rejects.toMatchObject({ code: "bad_request", message: "name must be up to 64 characters on one line" });
+    await expect(callApi(ctx, "profile.set", { name: "p".repeat(65) })).rejects.toMatchObject({ code: "bad_request", message: "name is up to 64 characters as stored (this one is 65)", details: { length: 65, max: 64 } });
     expect(calls.updateSettings).not.toHaveBeenCalled();
+  });
 
-    // A group's name keeps its rule.
-    const groupRule = { code: "bad_request", message: "A group's name is 1 to 64 characters on one line" };
+  // A group's name has the same refusals: it said "1 to 64 characters on one line" to a name of two invisible ones.
+  it("a group's name is cleaned first, then counted, and nothing that shows is refused as a chat's name is", async () => {
+    const { ctx, node } = fake();
+    const calls = Object.assign(node, { createGroup: vi.fn(async () => ({ groupId: "g2" })), renameGroup: vi.fn(async () => undefined) });
+    const groupUnseen = { code: "bad_request", message: "A group's name needs a character that shows" };
+    const groupLong = { code: "bad_request", message: "A group's name is up to 64 characters as stored (this one is 65)", details: { length: 65, max: 64 } };
     expect(await callApi(ctx, "group.create", { name: "tab\tcrew", profile: "mesh" })).toEqual({ group: "g2", link: null });
     expect(calls.createGroup).toHaveBeenLastCalledWith({ name: "tab crew", profile: "mesh" });
     await callApi(ctx, "group.create", { name: `${"g".repeat(63)}\u200b\u200b\u200bh`, profile: "mesh" });
     expect(calls.createGroup).toHaveBeenLastCalledWith({ name: `${"g".repeat(63)}h`, profile: "mesh" });
     await callApi(ctx, "group.rename", { group: "Crew", name: "tab\tcrew" });
     expect(calls.renameGroup).toHaveBeenLastCalledWith({ groupId: "g1", name: "tab crew" });
-    for (const name of ["\u200b", "\u0301\u0301", "g".repeat(65)]) {
-      await expect(callApi(ctx, "group.create", { name, profile: "mesh" }), JSON.stringify(name)).rejects.toMatchObject(groupRule);
-      await expect(callApi(ctx, "group.rename", { group: "Crew", name }), JSON.stringify(name)).rejects.toMatchObject(groupRule);
+    for (const [name, rule] of [["\u200b\u200b", groupUnseen], ["\u0301\u0301", groupUnseen], ["g".repeat(65), groupLong]] as const) {
+      await expect(callApi(ctx, "group.create", { name, profile: "mesh" }), JSON.stringify(name)).rejects.toMatchObject(rule);
+      await expect(callApi(ctx, "group.rename", { group: "Crew", name }), JSON.stringify(name)).rejects.toMatchObject(rule);
     }
     expect(calls.createGroup).toHaveBeenCalledTimes(2);
     expect(calls.renameGroup).toHaveBeenCalledTimes(1);
+  });
+
+  // A name is counted in code points, as the engine keeps it, so a joined emoji counts as several (a family of four is
+  // 7, a flag or a skin tone 2). The refusal said "up to 48 characters on one line" to 7 emoji on one line, with no
+  // count: it now says the count as stored and what counts as several, and gives both numbers as details.
+  it("a name too long says its count as stored and the emoji that counts as several, for a chat, the profile and a group", async () => {
+    const { ctx, node } = fake();
+    const calls = Object.assign(node, { renameLink: vi.fn(), createLink: vi.fn(), createGroup: vi.fn(async () => ({ groupId: "g2" })), renameGroup: vi.fn(async () => undefined) });
+    const family = "\u{1F468}\u200d\u{1F469}\u200d\u{1F467}\u200d\u{1F466}";
+    const flag = "\u{1F1E7}\u{1F1F7}";
+    const chatRules = [
+      [family.repeat(7), `A chat's name is up to 48 characters as stored (this one is 49: ${family} counts as 7)`, 49],
+      [flag.repeat(25), `A chat's name is up to 48 characters as stored (this one is 50: ${flag} counts as 2)`, 50],
+      [`${"x".repeat(46)}\u{1F44D}${flag}`, `A chat's name is up to 48 characters as stored (this one is 49: ${flag} counts as 2)`, 49],
+    ] as const;
+    for (const [name, message, length] of chatRules) {
+      await expect(callApi(ctx, "chat.rename", { chat: "chat-one", name }), message).rejects.toMatchObject({ code: "bad_request", message, details: { length, max: 48 } });
+      await expect(callApi(ctx, "invite.create", { label: name }), message).rejects.toMatchObject({ code: "bad_request", message, details: { length, max: 48 } });
+    }
+    expect(calls.renameLink).not.toHaveBeenCalled();
+    expect(calls.createLink).not.toHaveBeenCalled();
+    // At the limit as stored: taken, single emoji or a skin tone included.
+    for (const name of ["\u{1F44D}".repeat(48), `${"x".repeat(46)}\u{1F44D}\u{1F3FD}`, family.repeat(6) + "x".repeat(6)]) {
+      await callApi(ctx, "chat.rename", { chat: "chat-one", name });
+      expect(calls.renameLink).toHaveBeenLastCalledWith({ linkId: "chat-one", label: name });
+    }
+
+    const tenFamilies = family.repeat(10);
+    const profileRule = (field: string) => ({ code: "bad_request", message: `${field} is up to 64 characters as stored (this one is 70: ${family} counts as 7)`, details: { length: 70, max: 64 } });
+    await expect(callApi(ctx, "profile.set", { name: tenFamilies })).rejects.toMatchObject(profileRule("name"));
+    await expect(callApi(ctx, "settings.set", { nick: tenFamilies })).rejects.toMatchObject(profileRule("nick"));
+    expect(calls.updateSettings).not.toHaveBeenCalled();
+
+    const groupRule = { code: "bad_request", message: `A group's name is up to 64 characters as stored (this one is 70: ${family} counts as 7)`, details: { length: 70, max: 64 } };
+    await expect(callApi(ctx, "group.create", { name: tenFamilies, profile: "mesh" })).rejects.toMatchObject(groupRule);
+    await expect(callApi(ctx, "group.rename", { group: "Crew", name: tenFamilies })).rejects.toMatchObject(groupRule);
+    expect(calls.createGroup).not.toHaveBeenCalled();
+    expect(calls.renameGroup).not.toHaveBeenCalled();
+    await callApi(ctx, "group.create", { name: "\u{1F44D}".repeat(64), profile: "mesh" });
+    expect(calls.createGroup).toHaveBeenLastCalledWith({ name: "\u{1F44D}".repeat(64), profile: "mesh" });
   });
 
   // `invite join <your own invite>` said the engine's tag for its RPC clients: "own-invite <chat id>: This is your own…".
