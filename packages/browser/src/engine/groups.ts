@@ -5,7 +5,7 @@ import {
   GROUP_HAVE_FRAME, GROUP_VERSION_FILES, GROUP_WANT_FRAME, GROUP_WANT_NO_FRAME, type GroupFileMeta,
   type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
-import type { GroupEvent, GroupJoinStage, GroupLive, GroupView, OtherGroup, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
+import type { GroupEvent, GroupJoinStage, GroupLight, GroupLive, GroupView, OtherGroup, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
 import type { Removal } from "./removals";
 import { groupReply } from "../shared/replies";
 import { droppedPin, pinOfFormerMember, pinView } from "./pins";
@@ -225,6 +225,12 @@ export interface GroupStore {
    */
   getGroupLive?(): Promise<Map<string, GroupLive>>;
   putGroupLive?(groupId: string, live: GroupLive): Promise<void>;
+  /**
+   * A private group's pin and deletions for everyone, while its record is behind on them (`GroupLight`); `putGroup` with
+   * a small row deletes it. A store without them writes the whole record for each, as before.
+   */
+  getGroupLight?(): Promise<Map<string, GroupLight>>;
+  putGroupLight?(groupId: string, light: GroupLight): Promise<void>;
 }
 
 const MESSAGE_LINK = (groupId: string) => `group:${groupId}`;
@@ -2467,6 +2473,8 @@ export class Groups {
       return;
     }
     const taken = await session.handle(peerKey, frame);
+    // A signed leave a hub passed on: that member leaves for me too, so it stands in for nobody (WISP 902 § Stand-ins).
+    for (const f of taken) if (f.t === "group-bye" && f.k !== peerKey && this.hubs.departs(groupId, f.k)) this.host.emit();
     // A message over this edge written before this member was asked: its answer is still coming (`holdSync`).
     const askedAt = this.askedAt(groupId, peerKey);
     if (taken.some(f => f.t === "group-msg" && f.ts < askedAt)) {

@@ -322,6 +322,20 @@ async function appWindows(): Promise<WindowClient[]> {
   return all.filter((client) => { try { return ["/", "/index.html"].includes(new URL(client.url).pathname); } catch { return false; } });
 }
 
+/**
+ * Whether `profile`'s app is on screen: a window in front (focused or visible) that runs this profile and holds its
+ * peer, where a wake-up's message arrives by itself. A window of another profile does not count: a window runs one
+ * profile, so this one runs nowhere there and its notice must show. Only the windows in front are asked what they run
+ * (`open-ask`, all at once, so the push waits at most `OPEN_ASK_MS` before its notice); one that does not answer in
+ * time (a page of an older build, or busy) counts as on screen, as every window in front did before.
+ */
+async function profileOnScreen(profile: string): Promise<boolean> {
+  const inFront = (await appWindows()).filter((client) => client.focused || client.visibilityState === "visible");
+  if (!inFront.length) return false;
+  const said = await Promise.all(inFront.map(askWindow));
+  return said.some((says) => says === null || (says.peer && says.profile === profile));
+}
+
 /** Quiet: no sound, no vibration, nothing that stays up, and one notice per tag, replaced in place. */
 function showQuiet(notice: { title: string; body: string; tag: string; data: unknown }): Promise<void> {
   return worker.registration.showNotification(notice.title, { body: notice.body, tag: notice.tag, data: notice.data, icon: "/icon-192.png", badge: "/icon-192.png", silent: true, renotify: false, requireInteraction: false });
@@ -339,7 +353,8 @@ async function closeQuietNotice(profile: string): Promise<void> {
 
 /**
  * What one push shows: true once a notice is up, false when this push has nothing of its own to show (not a wake-up, a
- * token this profile does not know, a muted chat, the app on screen, one inside the gap after its notice was dismissed).
+ * token this profile does not know, a muted chat, this profile's app on screen, one inside the gap after its notice was
+ * dismissed).
  */
 async function showWake(profile: string, body: string | undefined, appVisible: boolean, text: WakeText | undefined): Promise<boolean> {
   const wake = readWake(body);
@@ -381,7 +396,7 @@ worker.addEventListener("push", (event) => {
   if (PUSH_PROFILE === null) return;
   const profile = PUSH_PROFILE;
   event.waitUntil((async () => {
-    const appVisible = await appWindows().then((all) => all.some((client) => client.focused || client.visibilityState === "visible"), () => false);
+    const appVisible = await profileOnScreen(profile).catch(() => false);
     const text = await readWakeText(profile).catch(() => undefined);
     if (await showWake(profile, event.data?.text(), appVisible, text).catch(() => false)) return;
     // Every push shows something: one that shows nothing counts against the subscription (Safari ends it after a few,
