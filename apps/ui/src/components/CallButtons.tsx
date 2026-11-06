@@ -1,4 +1,6 @@
 import { useI18n } from "../contexts/I18nContext";
+import { useToast } from "../hooks/useToast";
+import { Toast } from "./ui/Toast";
 
 interface CallButtonsProps {
   /** Why calls cannot start in this chat right now (the title and description of both buttons), or null when they can. */
@@ -20,12 +22,18 @@ export function CallButtons({ blocked, busy, onCall, phone }: CallButtonsProps) 
   // to give it back; nor is it reached at all, so the reason in its title (its description, the label being its name)
   // is never heard, and a phone has no hover to show it.
   const off = !!blocked || busy;
+  // A press on a button that is off says why on screen: a title shows only on hover, which a phone does not have.
+  const why = useToast();
+  const press = (withVideo: boolean) => {
+    if (blocked) why.show(blocked);
+    else if (!busy) onCall(withVideo);
+  };
   const offLook = "aria-disabled:opacity-30 aria-disabled:cursor-not-allowed aria-disabled:hover:text-text-secondary aria-disabled:hover:bg-transparent";
   return (
     <>
       {/* Audio call button */}
       <button
-        onClick={() => { if (!off) onCall(false); }}
+        onClick={() => press(false)}
         aria-disabled={off || undefined}
         className={`${phone ? "w-11 h-11 flex items-center justify-center" : "p-2 max-md:px-2 max-md:py-2.5"} text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer ${offLook}`}
         title={blocked ?? t("calls.audio")}
@@ -47,7 +55,7 @@ export function CallButtons({ blocked, busy, onCall, phone }: CallButtonsProps) 
       </button>
       {/* Video call button */}
       {!phone && <button
-        onClick={() => { if (!off) onCall(true); }}
+        onClick={() => press(true)}
         aria-disabled={off || undefined}
         className={`p-2 max-md:px-2 max-md:py-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer ${offLook}`}
         title={blocked ?? t("calls.video")}
@@ -68,6 +76,7 @@ export function CallButtons({ blocked, busy, onCall, phone }: CallButtonsProps) 
           <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
         </svg>
       </button>}
+      <Toast toast={why.toast} onDismiss={why.dismiss} testId="call-blocked" />
     </>
   );
 }
