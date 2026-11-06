@@ -90,7 +90,7 @@ interface RosterNames {
 }
 
 /** `myName`: how a mention of me reads (my own name, as a member sees it); the others go by the roster's names. */
-function rosterNames(group: Pick<GroupView, "members" | "formerNames">, t: Translate, myName = ""): RosterNames {
+function rosterNames(group: Pick<GroupView, "profile" | "members" | "formerNames">, t: Translate, myName = ""): RosterNames {
   const byKey = new Map<string, string>();
   const same = sameNamed(group.members, myName);
   const members = group.members.map(m => {
@@ -98,13 +98,13 @@ function rosterNames(group: Pick<GroupView, "members" | "formerNames">, t: Trans
     if (!byKey.has(m.key)) byKey.set(m.key, name);
     return { key: m.key, me: m.me, name: m.me ? myName : name };
   });
-  // A former member's name is told apart from the roster's (`authorName`).
+  // A former member's name is told apart from the roster's in a community (`authorName`).
   return { members, author: key => byKey.get(key) ?? authorName(group, key, t) };
 }
 
 /** What the names are made of: the same text while no member's key or name (nor a former name) changed. */
-const rosterNamesKey = (group: Pick<GroupView, "members" | "formerNames"> | undefined) =>
-  group ? JSON.stringify([group.members.map(m => [m.key, m.me, m.nick]), group.formerNames]) : "";
+const rosterNamesKey = (group: Pick<GroupView, "profile" | "members" | "formerNames"> | undefined) =>
+  group ? JSON.stringify([group.profile, group.members.map(m => [m.key, m.me, m.nick]), group.formerNames]) : "";
 
 function toChatMessage(message: StoredMessage, names: RosterNames): ChatMessage {
   const mentions = mentionViews(message.text, message.mentions, names.members, message.sender === "me");
@@ -230,8 +230,8 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate, nameS
     if (message.event === "created" && text.startsWith("Group created. ")) return t("group.event.withNote", { event: t("group.event.created"), note: readNote(group, t) });
     if (message.event === "joined" && !message.member && text.startsWith("You joined. ")) return t("group.event.withNote", { event: t("group.event.youJoined"), note: readNote(group, t) });
     if (message.event === "joined" && !message.member && text === "You joined again") return t("group.event.youJoinedAgain");
-    // The name stored, told apart from a member's of the same name by the end of its key (`formerName`).
-    const nameOf = (stored: string) => message.member && !me ? formerName(group.members, message.member, writtenName(stored, t)) : writtenName(stored, t);
+    // The name stored, in a community told apart from a member's of the same name by the end of its key (`formerName`).
+    const nameOf = (stored: string) => message.member && !me ? formerName(group, message.member, writtenName(stored, t)) : writtenName(stored, t);
     const gone = " is no longer a member";
     if (message.event === "gone" && text.endsWith(gone)) return t("group.event.gone", { name: nameOf(text.slice(0, -gone.length)) });
     const left = " left";

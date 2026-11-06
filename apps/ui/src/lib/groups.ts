@@ -66,22 +66,32 @@ export const memberName = (m: { key: string; me: boolean; nick?: string }, t: Tr
   m.me ? t("group.member.you") : !m.nick ? t("group.member.unnamed", { key: publicKeyLabel(m.key) })
     : sameNamed?.has(m.key) ? withKeyEnd(m.nick, m.key) : m.nick;
 
+/** What `formerName` reads of a group. */
+type FormerNamesOf = { profile?: GroupView["profile"]; members: readonly Pick<GroupMemberView, "key" | "me" | "nick">[] };
+
 /**
  * Who wrote (or reacted to) a group's message: a member by the roster's name; an author no longer in the roster
  * (removed, or back with a new member key) by the name the group knew them by, else by their key. A name another
- * member shows too is told apart by the end of its key, a former member's as well as a member's.
+ * member shows too is told apart by the end of its key, a member's always and a former member's in a community
+ * (`formerName`).
  */
-export const authorName = (group: { members: readonly Pick<GroupMemberView, "key" | "me" | "nick">[]; formerNames?: GroupView["formerNames"] }, key: string, t: Translate = english) => {
+export const authorName = (group: FormerNamesOf & { formerNames?: GroupView["formerNames"] }, key: string, t: Translate = english) => {
   const member = group.members.find(m => m.key === key);
   if (member) return memberName(member, t, sameNamed(group.members));
   const former = group.formerNames?.[key];
-  return former ? formerName(group.members, key, former) : t("group.member.unnamed", { key: key.slice(0, 8) });
+  return former ? formerName(group, key, former) : t("group.member.unnamed", { key: key.slice(0, 8) });
 };
 
-/** The name `key` went by when it was no longer in the roster, told apart by the end of its key where a member there shows it too. */
-export function formerName(members: readonly Pick<GroupMemberView, "key" | "me" | "nick">[], key: string, name: string): string {
+/**
+ * The name `key` went by when it was no longer in the roster. In a community, where anyone with the link comes in, it
+ * is told apart by the end of its key where a member there shows it too. A private group's members come in only by
+ * the admin's invitation, and one removed and invited again comes back with a new key under the same name: what she
+ * wrote before keeps that name as it is.
+ */
+export function formerName(group: FormerNamesOf, key: string, name: string): string {
+  if (group.profile !== "community") return name;
   const form = sameNameForm(name);
-  return members.some(m => !m.me && m.key !== key && m.nick && sameNameForm(m.nick) === form) ? withKeyEnd(name, key) : name;
+  return group.members.some(m => !m.me && m.key !== key && m.nick && sameNameForm(m.nick) === form) ? withKeyEnd(name, key) : name;
 }
 
 /**
