@@ -923,6 +923,10 @@ impl Pkarr {
             let mut state = self.inner.state.lock().unwrap();
             state.read_relays = state.read_relays_chosen || !on;
             state.dht_silent = 0;
+            // Reads no longer go to the DHT: the panel says nothing until a relay answers.
+            if !on {
+                state.path = None;
+            }
         }
         drop(closed);
         if let Some(file) = self.inner.remembered.lock().unwrap().as_ref() {
@@ -3435,6 +3439,33 @@ mod direct {
         assert!(pkarr.resolve(&keypair.public_key()).await.is_some());
         assert_eq!(requests(&relay, "GET"), gets, "tripped: not asked");
         assert_eq!(pkarr.status().path, Some(Path::Dht));
+    }
+
+    /// Hide my IP from contacts: the DHT is closed, so the panel no longer says reads go to it. Nothing is said until
+    /// a relay answers, however long every relay fails.
+    #[tokio::test]
+    async fn turning_the_dht_off_forgets_that_reads_went_to_it() {
+        let (relay, dht) = (pkarr_relay().await, pkarr_relay().await);
+        let relays: Vec<Url> = vec![relay.url.parse().unwrap()];
+        let pkarr = Pkarr::new(Some(pkarr_client(&dht)), &relays).unwrap();
+        pkarr.configure(relays.clone(), false, None);
+        pkarr.resolve(&Keypair::random().public_key()).await;
+        assert_eq!(pkarr.status().path, Some(Path::Dht));
+
+        pkarr.configure(relays.clone(), false, Some(false));
+        assert_eq!(pkarr.status().path, None);
+        *relay.broken.lock().unwrap() = true;
+        pkarr.resolve(&Keypair::random().public_key()).await;
+        assert_eq!(pkarr.status().path, None, "the relay failed");
+
+        *relay.broken.lock().unwrap() = false;
+        pkarr.resolve(&Keypair::random().public_key()).await;
+        assert_eq!(
+            pkarr.status().path,
+            Some(Path::Relay {
+                relay: plain(&relay.url.parse().unwrap())
+            })
+        );
     }
 
     #[test]
