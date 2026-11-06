@@ -133,7 +133,8 @@ ghostly listen --turns --from alice --group team --cursor ~/.ghostly/agent.curso
 ```
 
 - `--turns` gives one `agent.turn` event per message to answer: each message a contact sends in a 1:1 chat, and each
-  group message that mentions the agent. Nothing else wakes it (its own messages, edits, reactions, typing).
+  group message that mentions the agent. Nothing else wakes it (its own messages, edits, reactions, typing). An
+  `events.gap` (`{from, to}`: events lost across a crash or the journal's trim) also reaches the hook: check `type`.
 - `--from <chat|key>` and `--group <group>` (each again for more) are the allowlist, checked before the agent wakes.
   Anyone else's message stays in the chat and never reaches the hook. `--group` alone lets no 1:1 chat through, and
   `--from` alone no group. Names are turned into ids once, when `listen` starts. Everyone on it can try to steer the
