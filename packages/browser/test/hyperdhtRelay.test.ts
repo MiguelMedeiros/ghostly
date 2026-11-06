@@ -1,4 +1,6 @@
 import "fake-indexeddb/auto";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { GhostLink, createIdentity, createLink, encodeFileData, fromBase64Url, type BoundChannel, type NativeEndpoint, type PairingState } from "@ghostly/core";
 import { createRelayedHyperEndpoint, hyperKeyPair, relayUrlProblem } from "../src/platform/hyperdhtRelay";
@@ -267,6 +269,30 @@ it("says it is unavailable when the relay goes away", async () => {
   await own.close();
   await vi.waitFor(() => expect(gone).toHaveBeenCalledTimes(1));
   await endpoint.close();
+}, 60_000);
+
+it("lets a chat's endpoint go once it is closed or refused, while the relay connection stays open", async () => {
+  const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
+  const own = await startRelay({ testnet: 2 });
+  // Another chat keeps the app's one relay connection open, as it does for as long as the app runs.
+  const keeperSeed = seed();
+  const keeper = await createRelayedHyperEndpoint(keeperSeed, own.url);
+  // In a function of its own: this test's own frame would keep the last one.
+  const openAndClose = async () => {
+    const endpoint = await createRelayedHyperEndpoint(seed(), own.url);
+    await endpoint.close();
+    return new WeakRef(endpoint);
+  };
+  const endpoints: WeakRef<NativeEndpoint>[] = [];
+  for (let i = 0; i < 20; i++) endpoints.push(await openAndClose());
+  // Refused listens on the same connection between (the relay refuses a key it already listens on) keep none of them.
+  for (let i = 0; i < 20; i++) await expect(createRelayedHyperEndpoint(keeperSeed, own.url)).rejects.toThrow("did not let this chat listen");
+  setFlagsFromString("--expose-gc");
+  const gc = runInNewContext("gc") as () => void;
+  // Each was kept, with its listener and its key pair, until the connection closed (about 6 KiB each).
+  await vi.waitFor(() => { gc(); expect(endpoints.flatMap((ref, i) => ref.deref() ? [i] : [])).toEqual([]); }, { timeout: 2000, interval: 50 });
+  await keeper.close();
+  await own.close();
 }, 60_000);
 
 it("drops a client past its listen budget and refuses topic queries, and keeps serving the others", async () => {
