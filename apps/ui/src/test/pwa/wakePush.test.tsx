@@ -174,6 +174,34 @@ describe("the push worker's table", () => {
     expect(platform.syncTable).toHaveBeenCalledTimes(3);
   });
 
+  it("is not written again for what another profile's tab stores, only for this profile's keys", async () => {
+    const platform = fakePlatform();
+    setPushPlatform(platform);
+    session("chata", "peer-a");
+    fakeEngine.setState(engineState({
+      settings: { online: true, nick: "Ghost", relays: [], iceServers: [], mints: [], mintsInitialized: true, wake: { ...keys, vapid: generateVapidKeys() } },
+      links: [linkView({ id: "l-a", peerPubKeyZ32: "peer-a", wakeToken: "tokenaaaaaaaaaaaaaaaaa" })],
+    }));
+    renderHook(() => useWakeTableSync({ title: "Ghostly", body: "New message" }));
+    await waitFor(() => expect(platform.syncTable).toHaveBeenCalledTimes(1));
+
+    // Another profile running in another tab stores its chats as its texts come (a few keys per text), and the browser
+    // tells this tab of each: none is this profile's table.
+    const other = (key: string) => window.dispatchEvent(new StorageEvent("storage", { key, newValue: "x" }));
+    for (let i = 0; i < 30; i++) {
+      other("ghostly_k3v9q2m7xa_chatw");
+      other("ghostly_k3v9q2m7xa_read_chatw");
+      other("ghostly-profiles");
+    }
+    expect(platform.syncTable).toHaveBeenCalledTimes(1);
+
+    // This profile's own keys (a mute), and the whole storage cleared, still write it.
+    other("ghostly_mute_chata");
+    expect(platform.syncTable).toHaveBeenCalledTimes(2);
+    window.dispatchEvent(new StorageEvent("storage", { key: null }));
+    expect(platform.syncTable).toHaveBeenCalledTimes(3);
+  });
+
   it("a mute that ends by itself: the contact is told to wake the chat again, with no new state to wait for", async () => {
     const platform = fakePlatform();
     setPushPlatform(platform);
