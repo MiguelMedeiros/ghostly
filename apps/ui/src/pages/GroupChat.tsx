@@ -39,6 +39,7 @@ import { GroupOthers } from "../components/GroupOthers";
 import { authorName, forgetGroupLocal, groupPath, groupReadAt, groupStatusText, groupUnreadAt, markGroupRead, memberName, memberPhoto } from "../lib/groups";
 import { NowPlayingChat, stopPlayingFrom } from "../lib/nowPlaying";
 import { clearChatNotification } from "../lib/notifications";
+import { closeWakeNotices } from "../lib/wakePush";
 import { useWindowAway, windowAway } from "../lib/windowAway";
 import { authorsMemo, type MessageAuthor } from "../lib/senderRuns";
 import { rowDaysReader } from "../lib/chatDays";
@@ -538,7 +539,9 @@ export function GroupChat() {
   // Its notification goes once the window has the focus too, as a chat's does (Chat.tsx).
   const away = useWindowAway();
   useEffect(() => {
-    if (group && !windowAway()) clearChatNotification(`group:${group.id}`);
+    if (!group || windowAway()) return;
+    clearChatNotification(`group:${group.id}`);
+    closeWakeNotices(groupPath(group.id));
   }, [group?.id, group?.lastMessageAt, group, away]);
 
   /** `extra.translated`: a translation from the composer's preview, whose original is kept beside it on this device. */
