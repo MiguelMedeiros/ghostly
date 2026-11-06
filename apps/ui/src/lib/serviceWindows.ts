@@ -13,10 +13,27 @@ export function setServiceWindowsCloser(next: (() => void) | null): void {
   closer = next;
 }
 
+/** How many times they were closed for the lock: an open still on its way then never shows its app. */
+let closes = 0;
+
 /** Closes every one of them, where the app has them. */
 export function closeServiceWindows(): void {
+  closes += 1;
   closer?.();
 }
+
+/**
+ * Read by an opener before its first wait: the returned function says whether they were closed since (the profile
+ * locked, here or in another tab). There is nothing to close until the app is on screen, so the opener asks after every
+ * wait, and one that finds them closed shows nothing (`lockedSince` for an app, `apps/open.ts`).
+ */
+export function serviceWindowsClosedSince(): () => boolean {
+  const at = closes;
+  return () => closes !== at;
+}
+
+/** Why an open that the profile's lock overtook showed nothing. */
+export const SERVICE_LOCKED = "The profile locked before the contact's app opened";
 
 /*
  * On the web a contact's app is drawn over the whole app (apps/web/src/svc/opener.ts), a call's windows with it: it
