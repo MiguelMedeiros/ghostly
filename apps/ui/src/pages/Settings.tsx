@@ -514,7 +514,7 @@ export function Settings() {
 
   // What this device has: the options it lacks are not offered, nor found by the search.
   const has = (needs: SettingNeeds) => needs === "profiles" ? canSwitch : needs === "updates" ? update.supported
-    : needs === "wake" ? canWake : needs === "translate" ? translateOffered() : hasMediaDevices();
+    : needs === "wake" ? canWake : needs === "wakeOn" ? canWake && wakeOnline.shared : needs === "translate" ? translateOffered() : hasMediaDevices();
   const shown = (id: SettingsSection) => id !== "media" || hasMediaDevices();
   // "Password" found by the search opens the lock's password form: to set one when there is none (no row of its own then).
   const found = (entry: SettingEntry) => { if (entry.opens === "passwordForm" && !showPasswordForm) openPasswordForm(); };
