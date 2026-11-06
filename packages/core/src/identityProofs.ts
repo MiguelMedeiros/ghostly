@@ -334,6 +334,8 @@ const peerError = (e: unknown) => e instanceof IdentityCheckUnavailable ? IDENTI
 export class IdentityExchange {
   private peerProviders: readonly string[] | undefined;
   private requested = new Set<string>();
+  /** The nonces of the presentations in their provider's check now. */
+  private checking = new Set<string>();
   constructor(private options: IdentityExchangeOptions) {}
   private now() { return (this.options.now ?? nowSeconds)(); }
   /** The ledger with one more step on the chat's timeline, in milliseconds (a test's clock, in seconds, when given). */
@@ -444,7 +446,14 @@ export class IdentityExchange {
           return;
         case "idp-request": return await this.onRequest(id, frame.provider);
         case "idp-challenge": return await this.onChallenge(id, frame.nonce, frame.issuedAt);
-        case "idp-present": return await this.onPresent(frame);
+        case "idp-present": {
+          // The engine checks a presentation beside the chat's other frames, not before them: a copy of one still in
+          // its check is refused here, so it never reaches the provider twice.
+          const nonce = typeof frame.nonce === "string" ? frame.nonce : "";
+          if (this.checking.has(nonce)) throw new Error("Unknown or reused identity challenge");
+          this.checking.add(nonce);
+          try { return await this.onPresent(frame); } finally { this.checking.delete(nonce); }
+        }
         case "idp-result": {
           const s = id ? this.shared(id) : undefined;
           if (!s || s.status !== "pending") return;

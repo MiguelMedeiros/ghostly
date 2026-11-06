@@ -414,7 +414,10 @@ describe("verifying a presentation", () => {
   it("records one outcome when the same present arrives twice at once", async () => {
     const w = world();
     const frame = await present(w, w.addProof());
+    w.verify.mockClear();
     await Promise.all([w.peers.bob.receive(frame), w.peers.bob.receive(frame)]);
+    // Presentations are checked off the chat's frame queue: the copy is refused before it reaches the provider.
+    expect(w.verify).toHaveBeenCalledTimes(1);
     expect(w.ledgers.bob.received).toHaveLength(1);
     expect(w.sent("idp-result")).toHaveLength(1);
     expect(w.errors).toEqual(["Unknown or reused identity challenge"]);
