@@ -41,6 +41,8 @@ class Disk {
   /** A copy of the bytes, for small files only. */
   bytes: number[] | null;
   failAt = Infinity;
+  /** What a write past `failAt` throws: "disk full" when unset. */
+  failWith?: unknown;
   discarded = false;
   /** The check of the digest waits for this, as one over a large file takes a while. */
   checking?: Promise<void>;
@@ -60,7 +62,7 @@ class Disk {
       offset: this.length,
       append: async (chunk) => {
         if (this.writeMs) await new Promise((resolve) => setTimeout(resolve, this.writeMs));
-        if (this.length + chunk.length > this.failAt) throw new Error("disk full");
+        if (this.length + chunk.length > this.failAt) throw this.failWith ?? new Error("disk full");
         this.hash.update(chunk);
         this.length += chunk.length;
         if (this.bytes) for (const b of chunk) this.bytes.push(b);
@@ -1009,6 +1011,34 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     w.b.disks.get("full-001")!.failAt = 500_000;
     await until(() => state(w.a, "out", "full-001") === "failed");
     expect(w.b.records.get("in:full-001")?.error).toContain("disk full");
+  });
+
+  it.each(["ENOSPC", "EDQUOT"])("a write the disk had no room for (Node's %s, as the CLI's file bytes pass it up) is stored as no room", async (code) => {
+    const id = `${code.toLowerCase()}-01`;
+    const w = wire();
+    w.attach();
+    send(w, file(id, 2 * 1024 * 1024));
+    await until(() => w.b.disks.has(id));
+    const disk = w.b.disks.get(id)!;
+    disk.failWith = Object.assign(new Error(`${code}: no space left on device, write`), { code, errno: -28, syscall: "write" });
+    disk.failAt = 500_000;
+    await until(() => state(w.b, "in", id) === "failed");
+    // Told by the error's code, never its words: named QuotaExceededError, as the app's matcher and the CLI read it.
+    expect(w.b.records.get(`in:${id}`)?.error).toBe(`Could not store the file: QuotaExceededError: ${code}: no space left on device, write`);
+    expect(w.b.sent).toContainEqual({ t: "pf-refuse", id, why: "no-room" });
+    expect(disk.discarded).toBe(true);
+  });
+
+  it("a write that failed for another reason (EIO, or words that only mention ENOSPC) keeps its words", async () => {
+    const w = wire();
+    w.attach();
+    send(w, file("eio-0001", 2 * 1024 * 1024));
+    await until(() => w.b.disks.has("eio-0001"));
+    const disk = w.b.disks.get("eio-0001")!;
+    disk.failWith = Object.assign(new Error("EIO: i/o error, write (not ENOSPC)"), { code: "EIO", syscall: "write" });
+    disk.failAt = 500_000;
+    await until(() => state(w.b, "in", "eio-0001") === "failed");
+    expect(w.b.records.get("in:eio-0001")?.error).toBe("Could not store the file: EIO: i/o error, write (not ENOSPC)");
   });
 
   it("at most three files arrive at once from one contact; the others wait their turn", async () => {

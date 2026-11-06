@@ -170,7 +170,7 @@ Main types: `message.received`, `message.sent`, `message.delivery`, `message.edi
 `typing.started` (with `kind` and `status`) and `typing.stopped` (`group.typing.started` and `group.typing.stopped` in a private group, with `member`; all live only, never replayed), `message.reaction` and `group.reaction`, `group.message.edited`,
 `group.message` and `group.sent` (with `messageId`, `member`, `nick` from the roster, and `mentioned`), `group.mentioned`
 (a mention of this profile learned after its `group.message`, once), `group.members`,
-`file.offered`, `file.done` and `file.failed` (with the file's `messageId`), `payment.created`, `payment.updated`,
+`file.offered`, `file.done` and `file.failed` (with the file's `messageId`; `reason: "no_space"` when this device had no room for it), `payment.created`, `payment.updated`,
 `identity.received`, `call.incoming`, `call.outgoing`, `call.connected`, `call.stalled`, `call.resumed`, `call.ended`. The full list is in the
 [package README](../packages/cli/README.md#events).
 

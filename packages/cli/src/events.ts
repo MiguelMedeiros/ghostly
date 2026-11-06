@@ -3,6 +3,7 @@ import type { AppFrameEvent } from "@ghostly/core";
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { EngineEvent, RpcResponse } from "@ghostly/browser/shared/rpc";
 import type { EngineState, GroupView, LinkView, PinView, StoredMessage } from "@ghostly/browser/shared/types";
+import { transferFailure } from "./errors";
 import { chatJson, chatMessageJson, groupJson, groupMessageJson, type MessageJson } from "./views";
 import { paymentJson } from "./wallets";
 
@@ -596,7 +597,9 @@ export class EventHub {
       const chat = state.links.find((l) => id.startsWith(`${l.id}-`))?.id ?? null;
       // A group's file (WISP 503) names its group.
       const group = chat ? undefined : state.groups.find((g) => id.startsWith(`group-${g.id}-`))?.id;
-      const fields = { chat, ...(group ? { group } : {}), file: id, direction: transfer.direction ?? (id.includes("-in-") ? "in" : "out"), size: transfer.size, transferred: transfer.transferred, ...(transfer.error ? { error: transfer.error } : {}) };
+      // A received file this device had no room for: the CLI's words and `reason: "no_space"` (`transferFailure`).
+      const said = transfer.state === "failed" ? transferFailure(transfer.error) : { error: transfer.error, reason: undefined };
+      const fields = { chat, ...(group ? { group } : {}), file: id, direction: transfer.direction ?? (id.includes("-in-") ? "in" : "out"), size: transfer.size, transferred: transfer.transferred, ...(said.error ? { error: said.error } : {}), ...(said.reason ? { reason: said.reason } : {}) };
       let emit: ((messageId: string | null) => void) | null = null;
       if (transfer.state === "done") { const key = `file.done:${id}`; emit = (messageId) => this.emit("file.done", key, { ...fields, messageId }); }
       else if (transfer.state === "failed") { const key = `file.failed:${id}:${this.now()}`; emit = (messageId) => this.emit("file.failed", key, { ...fields, messageId, retry: !!transfer.retry }); }

@@ -673,6 +673,15 @@ describe("the event stream", () => {
       expect(events[3]).toMatchObject({ chat: "c1", file: "c1-out-w", error: "Cancelled", retry: true });
     });
 
+    it("file.failed of a received file this device had no room for says so in the CLI's words, with reason no_space", async () => {
+      const { h, events } = await hub("f5.jsonl");
+      h.baseline(state([link("c1")]), new Map([["c1", [message("c1", "peer_v", { file: voice })]]]));
+      h.sink.post({ kind: "state", state: transfers({
+        "c1-in-v": { state: "failed", transferred: 5, size: 900, direction: "in", error: "Could not store the file: QuotaExceededError: ENOSPC: no space left on device, write" },
+      }) });
+      expect(events.filter((e) => e.type === "file.failed")).toMatchObject([{ chat: "c1", file: "c1-in-v", messageId: "peer_v", error: "No room left on the disk for this file: free some space, then ask for it again", reason: "no_space", retry: false }]);
+    });
+
     it("a file of a message older than the baseline read names its message: the history is read then, once", async () => {
       const older = message("c1", "peer_v", { file: voice }), other = message("c1", "peer_w", { file: { ...voice, id: "c1-in-w" } }), last = message("c1", "m9");
       const first = await hub("f4.jsonl");

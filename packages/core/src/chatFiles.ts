@@ -574,10 +574,13 @@ export function decodeFileData(message: Uint8Array): { id: string; offset: numbe
  * Why a received file could not be stored, as its record says it. A storage with no room left is told by the error's
  * name, `QuotaExceededError` (IndexedDB's, the OPFS worker's, the CLI's), never by its words: each storage words it
  * its own way, and Chromium's own has no message at all. The app reads that name as "no room here" (errorText.ts).
+ * A Node write the disk had no room for (the CLI's file bytes pass Node's error up as it is) is told by its `code`,
+ * `ENOSPC` or `EDQUOT`, and named so too: before, it was stored as Node's bare "ENOSPC: no space left on device, write".
  */
 function storeFailure(error: unknown): string {
   const message = (error instanceof Error ? error.message : String(error)).trim();
-  const quota = (error as { name?: unknown } | null)?.name === "QuotaExceededError" && !message.startsWith("QuotaExceededError");
+  const { name, code } = (error ?? {}) as { name?: unknown; code?: unknown };
+  const quota = (name === "QuotaExceededError" || code === "ENOSPC" || code === "EDQUOT") && !message.startsWith("QuotaExceededError");
   return `Could not store the file: ${quota ? `QuotaExceededError${message ? `: ${message}` : ""}` : message}`;
 }
 
