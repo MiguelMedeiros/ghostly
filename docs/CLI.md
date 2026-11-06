@@ -248,6 +248,9 @@ key), which every answer and event carries. What the CLI does when names meet:
   chat found only by a prefix of its id or the name its contact gave itself never takes what also names a group. The group's id is the
   group; a prefix of it or the name of a group you are in is refused (exit 1, `bad_request`, `details.chat` and `details.groups`):
   use the chat's id or `group:<id>`. A label you gave the chat still wins.
+- `group:<ref>` is a group in every command, never a chat: a chat-only command answers it as a group (exit 3,
+  `not_found`). `chat rename` and `invite create --label` refuse a name starting with `group:` (exit 1, `bad_request`);
+  a chat named so before is named by its id (or its contact's key) and renamed with `ghostly chat rename <id> <name>`.
 - A label you gave a chat wins over an id prefix: a contact can choose how a chat's id begins (yours is made from
   their invite code). A prefix that fits one chat and the name a contact gave another is refused.
 - Where a command moves money or gives something lasting to a chat (`chat pay`, `chat pay-request`, `pay --chat`,
