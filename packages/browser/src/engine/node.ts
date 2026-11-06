@@ -3693,15 +3693,21 @@ export class GhostlyNode implements EngineImplementation {
   private wakePeer(live: LiveLink, kind: WakeKind = "message"): void {
     const target = live.stored.peerWake, linkId = live.stored.id;
     if (!target || !live.stored.profile || live.stored.group || !this.networkOn) return;
-    if (!(kind === "call" ? this.callWakeLimiter : this.wakeLimiter).take(linkId)) return;
-    this.postWake(linkId, target, kind);
+    const limiter = kind === "call" ? this.callWakeLimiter : this.wakeLimiter, takenAt = Date.now();
+    if (!limiter.take(linkId, takenAt)) return;
+    // One that did not reach the push service is not the contact's wake-up: the next message's may go a little later.
+    this.postWake(linkId, target, kind, () => limiter.missed(linkId, takenAt));
   }
 
-  /** Posts one wake-up to the target a link holds; a subscription gone (404, 410) is forgotten. */
-  private postWake(linkId: string, target: WakeTarget, kind: WakeKind): void {
+  /**
+   * Posts one wake-up to the target a link holds; a subscription gone (404, 410) is forgotten. `missed`: it did not
+   * reach the push service (no network, the relay did not forward it, or the service answered 429 or 5xx).
+   */
+  private postWake(linkId: string, target: WakeTarget, kind: WakeKind, missed?: () => void): void {
     let request: PushRequest;
     try { request = wakeRequest(target, Date.now(), kind); } catch { return; }
     void this.postPush(request).then((status) => {
+      if (status === 429 || status >= 500) missed?.();
       // The subscription is gone (the contact turned it off, or its browser dropped it): forget it until it shares a new one.
       if ((status === 404 || status === 410) && this.links.get(linkId)?.stored.peerWake?.endpoint === target.endpoint) {
         const current = this.links.get(linkId)!;
@@ -3709,7 +3715,7 @@ export class GhostlyNode implements EngineImplementation {
         void db.patchLink(linkId, { peerWake: undefined });
         this.emitState();
       }
-    }).catch(() => { /* no network, or refused and no relay: the message still waits for the contact */ });
+    }).catch(() => { missed?.(); /* no network, or refused and no relay: the message still waits for the contact */ });
   }
 
   /**
