@@ -191,6 +191,10 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   // A file forwarded that is still arriving here, or whose bytes are gone (a copy of mine that failed, "Not sent").
   ["The file has not arrived yet", `${BROWSER}/engine/forwards.ts`],
   ["The file is not on this device any more", `${BROWSER}/engine/forwards.ts`],
+  ["The file is shorter than it says", `${BROWSER}/engine/forwards.ts`],
+  ["The file is shorter than it says", "apps/ui/src/lib/backupFile.ts"],
+  // A forward whose message was deleted while its file was copied (engine/forwards.ts), as one deleted before it.
+  ["That message is not in this chat", `${BROWSER}/engine/forwards.ts`],
   ["That is not a valid mint URL", CODES],
   ["Mints must use https", CODES],
   ["Enter an amount in sats", `${BROWSER}/engine/wallet.ts`],
