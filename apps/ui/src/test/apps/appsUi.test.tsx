@@ -1296,23 +1296,26 @@ describe("with the apps flag on", () => {
   const LONG = "Schachweltmeisterschaftsvorbereitungsapp";
   const BETA = "1.2.0-beta.12";
 
-  it("a card with a long title cuts the title alone and keeps the version whole after it", async () => {
+  it("a card with a long title cuts the title alone and keeps the version whole after it, up to half the line", async () => {
     fakeEngine.on("appList", () => []);
     const card: AppCard = { ...CARD, title: LONG, version: BETA };
     renderApp(<MessageBubble message={cardMessage({ card, text: statusCardText(card) })} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
     const title = await screen.findByTestId("app-card-title");
     expect(title).toHaveTextContent(`${LONG} ${BETA}`);
     expect(within(title).getByText(LONG)).toHaveClass("truncate", "min-w-0");
-    expect(within(title).getByText(BETA)).toHaveClass("shrink-0", "whitespace-nowrap");
+    // A longer version is cut at its end, past half the line, not the title (e2e/web/apps-long-version.spec.ts lays it out).
+    expect(within(title).getByText(BETA)).toHaveClass("shrink-0", "max-w-[50%]", "truncate");
+    expect(within(title).getByText(BETA)).toHaveAttribute("dir", "ltr");
     expect(within(title).getByText(LONG)).not.toContainElement(within(title).getByText(BETA));
   });
 
-  it("an installed app with a long title cuts the title alone in its row and keeps the version whole after it", async () => {
+  it("an installed app with a long title cuts the title alone in its row and keeps the version whole after it, up to half the line", async () => {
     fakeEngine.on("appList", () => [installed({ title: LONG, version: BETA })]).on("appStoreList", () => []).on("appCheckUpdates", () => []);
     renderApp(<Apps />, { route: "/apps" });
     const row = await screen.findByTestId("installed-app");
     expect(within(row).getByText(LONG)).toHaveClass("truncate", "min-w-0");
-    expect(within(row).getByText(BETA)).toHaveClass("shrink-0", "whitespace-nowrap");
+    expect(within(row).getByText(BETA)).toHaveClass("shrink-0", "max-w-[50%]", "truncate");
+    expect(within(row).getByText(BETA)).toHaveAttribute("dir", "ltr");
     expect(within(row).getByText(LONG)).not.toContainElement(within(row).getByText(BETA));
     // The version stays in the details button's name, right after the title, as the row shows it.
     expect(within(row).getByRole("button", { name: detailsOf(`${LONG} ${BETA}`) })).toBeInTheDocument();
