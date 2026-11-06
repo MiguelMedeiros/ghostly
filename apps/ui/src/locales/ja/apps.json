@@ -175,8 +175,10 @@
     "removeNamed": "{{name}} を削除",
     "removeNone": "もう一度追加するには、そのリンクが必要です。",
     "removeTitle": "{{name}} を削除しますか?",
+    "rollback": "このストアのリンクには、お使いのものより古いリストがあります。Ghostlyはお使いのものを残しました。",
     "showMore": "さらに表示 ({{count}})",
-    "stale": "{{date}} から更新されていません"
+    "stale": "{{date}} から更新されていません",
+    "tooLarge": "このストアのリストは大きすぎて、Ghostlyでは読めません。"
   },
   "title": "アプリ",
   "view": {

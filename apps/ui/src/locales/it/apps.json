@@ -175,8 +175,10 @@
     "removeNamed": "Rimuovi {{name}}",
     "removeNone": "Per aggiungerlo di nuovo ti servirà il suo link.",
     "removeTitle": "Rimuovere {{name}}?",
+    "rollback": "Il link di questo store ora contiene un elenco più vecchio del tuo. Ghostly ha tenuto il tuo.",
     "showMore": "Mostra altre ({{count}})",
-    "stale": "Non aggiornato dal {{date}}"
+    "stale": "Non aggiornato dal {{date}}",
+    "tooLarge": "L'elenco di questo store è troppo grande perché Ghostly lo legga."
   },
   "title": "App",
   "view": {
