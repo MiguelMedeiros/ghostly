@@ -280,7 +280,11 @@ seconds (`daemon status --timeout s` sets its own), or a command that waits (`ch
 within its `--timeout` (or the default, 60, 300 and 30 s) plus 10 seconds, is a timeout too (exit 4,
 `details.method`). Any other command (`send`, `react`, `invite create`, `settings set` and the like) is sent only
 once the daemon has answered `status`: one that has not in 15 seconds is a timeout as well, and the command was not
-sent, so the daemon does not act on it when it wakes. `ghostly daemon restart` starts a fresh one: a daemon that does not answer `daemon stop` within
+sent, so the daemon does not act on it when it wakes. A read (`chat list`, `status` and the like) that a daemon
+stopping or restarting leaves unanswered is asked once more, through the daemon that runs then or on the profile
+itself; when that one goes away too it fails with `unavailable` (exit 1, `details.method`): a read changes nothing, so
+running it again is safe. Any other command it leaves unanswered may be done: it is a timeout (exit 4) with
+`details.reason: daemon-stopped`, and `ghostly chat history` shows whether a message went. `ghostly daemon restart` starts a fresh one: a daemon that does not answer `daemon stop` within
 its `--timeout` (default 20 s) is ended with SIGTERM, and SIGKILL after as long again (on Windows the first ends it:
 there is no second). A daemon kept by a service manager (systemd, launchd) is restarted with the manager instead: it
 starts its own again, and the one `restart` started would race it for the profile.

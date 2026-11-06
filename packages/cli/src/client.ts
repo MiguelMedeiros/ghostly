@@ -28,13 +28,39 @@ function notTheDaemon(socket: string): CliError {
   return new CliError("refused", `What answers on ${socket} did not prove it is this profile's daemon, so nothing was sent to it. A daemon of an older release cannot: \`ghostly daemon restart\` starts this one's`, { reason: "not-the-daemon" });
 }
 
+/** The failures of calls whose connection ended unanswered (`endedUnanswered`), not answers the daemon gave. */
+const unanswered = new WeakSet<CliError>();
+
 /**
  * A call the daemon read and never answered, because it stopped (a restart, a crash): what was asked may be done, so
  * it is no plain failure a bot tries again (a send went twice). A daemon that stops answers its waits first (`serve`);
  * this is for the calls it could not.
  */
 function stoppedUnanswered(method: string): CliError {
-  return new CliError("timeout", `The daemon stopped before it answered ${method}, which may be done: check (\`ghostly chat history\` for a message) before you try again`, { method, reason: "daemon-stopped" });
+  const error = new CliError("timeout", `The daemon stopped before it answered ${method}, which may be done: check (\`ghostly chat history\` for a message) before you try again`, { method, reason: "daemon-stopped" });
+  unanswered.add(error);
+  return error;
+}
+
+/**
+ * A call whose connection ended before the daemon read it, or before it proved itself: nothing was done. `leaving`: this
+ * client ended it (a deadline, Ctrl-C), so it is no daemon that stopped under the call.
+ */
+function wentAway(leaving: boolean): CliError {
+  const error = new CliError("unavailable", "The daemon went away");
+  if (!leaving) unanswered.add(error);
+  return error;
+}
+
+/**
+ * Whether a call failed because its connection ended unanswered (the daemon stopped, restarted or crashed under it),
+ * not because the daemon answered it with an error. A read that did can be asked again: it changed nothing. So may one
+ * refused because the daemon's secret was gone when its greeting or its hello's answer came: a daemon that stops removes
+ * it first, and the greeting it wrote just before is read after. Nothing but the hello was written to it, and a listener
+ * that never proves itself is refused again on the new connection.
+ */
+export function endedUnanswered(error: unknown): boolean {
+  return error instanceof CliError && unanswered.has(error);
 }
 
 export function isNotTheDaemon(error: unknown): boolean {
@@ -88,7 +114,7 @@ export class DaemonClient {
         clearTimeout(waitedTooLong);
         // The secret is read once a listener spoke: the daemon wrote it before it listened.
         const secret = readDaemonSecret(this.address.dir);
-        if (!secret || !provesGreeting(secret, this.address.dir, message)) { this.refuse(); return; }
+        if (!secret || !provesGreeting(secret, this.address.dir, message)) { this.refuse(!secret); return; }
         this.greeted = true;
         // A client closed before the greeting came (a start's readiness probe) has nothing to say.
         if (socket.writableEnded || socket.destroyed) return;
@@ -100,7 +126,7 @@ export class DaemonClient {
         // The secret is read once a listener answered: the daemon wrote it before it listened.
         const secret = readDaemonSecret(this.address.dir);
         if (!message.error && secret && provesDaemon(secret, nonce, message.result)) { this.verified = true; this.settle.resolve(); return; }
-        this.refuse();
+        this.refuse(!secret);
         return;
       }
       if (message.event) { if (this.held) this.held.push(message.event); else this.eventListener?.(message.event); return; }
@@ -112,7 +138,7 @@ export class DaemonClient {
     });
     socket.on("close", () => {
       clearTimeout(waitedTooLong);
-      const why = this.refusal ?? new CliError("unavailable", "The daemon went away");
+      const why = this.refusal ?? wentAway(this.leaving);
       if (!this.verified) this.settle.reject(why);
       for (const waiting of this.pending.values()) waiting.reject(waiting.written && !this.refusal && !this.leaving ? stoppedUnanswered(waiting.method) : why);
       this.pending.clear();
@@ -121,8 +147,10 @@ export class DaemonClient {
     socket.on("error", () => {});
   }
 
-  private refuse(): void {
+  /** `secretGone`: the daemon's secret was not there to check against, as when it stops (`endedUnanswered`). */
+  private refuse(secretGone = false): void {
     this.refusal = notTheDaemon(this.address.socket);
+    if (secretGone) unanswered.add(this.refusal);
     this.settle.reject(this.refusal);
     this.socket.destroy();
   }
@@ -136,7 +164,7 @@ export class DaemonClient {
    * and the command answered "The daemon went away" (`unavailable`, read as try later) while the daemon ran on.
    */
   call(method: string, params: unknown = {}, { timeoutMs }: { timeoutMs?: number } = {}): Promise<unknown> {
-    if (this.socket.destroyed) return Promise.reject(this.refusal ?? new CliError("unavailable", "The daemon went away"));
+    if (this.socket.destroyed) return Promise.reject(this.refusal ?? wentAway(this.leaving));
     const id = this.nextId++;
     const line = JSON.stringify({ id, method, params }) + "\n";
     const bytes = Buffer.byteLength(line);
