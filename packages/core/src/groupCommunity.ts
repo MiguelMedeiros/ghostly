@@ -1524,7 +1524,8 @@ export class CommunitySession {
   get adminWork(): boolean { return this.hooks.adminWork?.() !== false; }
   private requireAdmin(): void { this.requireMember(); if (!this.isAdmin) throw new Error("Only the admin can do that"); }
 
-  private async commit(kind: CommunityKind, fields: { s?: string; x?: string; ls?: string; ls3?: string }, now: number): Promise<{ commit: CommunityCommit; hash: string; secret: Uint8Array }> {
+  /** `alongside`: what else the commit changes in the state, saved in the same write (only once the commit is signed). */
+  private async commit(kind: CommunityKind, fields: { s?: string; x?: string; ls?: string; ls3?: string }, now: number, alongside?: () => void): Promise<{ commit: CommunityCommit; hash: string; secret: Uint8Array }> {
     if (!this.adminWork) throw new Error(GROUP_ADMIN_OFF_ERROR);
     if (this.hooks.adminTurn && !(await this.hooks.adminTurn())) throw engineError("groupTurnUnconfirmed");
     if (this.state.chain.length >= COMMUNITY_LIMITS.chain) throw new Error("This group has reached its membership history limit. Create a new group.");
@@ -1551,6 +1552,7 @@ export class CommunitySession {
     this.state.secrets[hash] = toBase64Url(secret);
     this.state.seq = 0; this.state.seqH = hash;
     this.pruneSide();
+    alongside?.();
     await this.persist();
     this.hooks.broadcast({ t: "group-commit", v: 2, g: this.id, commit });
     // A key respelled in its last character could be pinned and added by a build before `MEMBER_KEY` was canonical, and
@@ -1674,9 +1676,8 @@ export class CommunitySession {
     return this.serialize(async () => {
       this.requireAdmin();
       const entry = off ? null : identityFromSeedB64(toBase64Url(randomBytes(32)));
-      await this.commit("link", { x: entry?.pubKeyZ32 ?? "" }, now);
-      this.state.entry = { key: entry?.pubKeyZ32 ?? "", seedB64: entry?.seedB64 ?? "" };
-      await this.persist();
+      // The new key is saved with the commit naming it: one write of the state (the chain, the secrets), not two.
+      await this.commit("link", { x: entry?.pubKeyZ32 ?? "" }, now, () => { this.state.entry = { key: entry?.pubKeyZ32 ?? "", seedB64: entry?.seedB64 ?? "" }; });
       // Every member can answer the new link: its seed, sealed to each. One agreement a member, ~1 ms in JavaScript: sealed
       // a slice at a time, so a page sharing the thread draws meanwhile (250 members held it 230 ms).
       if (entry) {
