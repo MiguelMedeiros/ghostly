@@ -214,10 +214,18 @@ export class EventHub {
 
   /**
    * Drops the notes of settled messages, and of reactions, whose last activity is older than `SEEN_KEEP_MS`: from memory
-   * and from the store. A message of mine still on its way (or failed, which a retry sends again) keeps its note.
+   * and from the store. A message of mine still on its way (or failed, which a retry sends again) keeps its note. The
+   * 30 days count back from the newest activity the set knows when the clock reads later than it: a clock run ahead (a
+   * wrong RTC, a VM restored with a skewed clock) would otherwise drop the notes of the recent history, which the next
+   * start with the clock right reports again.
    */
   sweep(): number {
-    const cutoff = this.now() - SEEN_KEEP_MS;
+    let newest = 0;
+    for (const [chat, known] of this.seen) {
+      if (chat === FORMAT || chat.startsWith("said:")) continue;
+      for (const note of known.values()) newest = Math.max(newest, timeIn(note) ?? 0);
+    }
+    const cutoff = Math.min(this.now(), newest) - SEEN_KEEP_MS;
     let dropped = 0;
     for (const [chat, known] of this.seen) {
       if (chat === FORMAT || chat.startsWith("said:")) continue;

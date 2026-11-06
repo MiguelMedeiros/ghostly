@@ -731,10 +731,13 @@ describe("the seen set forgets", () => {
     const m3 = message("c1", "m3", { timestamp: 20 * DAY });
     clock.now = 25 * DAY;
     const { h, events } = await clocked("forget.jsonl");
-    h.baseline(state([link("c1")]), new Map([["c1", [m1, me1, me2, m3]]]));
+    h.baseline(state([link("c1"), link("c2")]), new Map([["c1", [m1, me1, me2, m3]], ["c2", []]]));
     h.markSaid("c1", "joined");
 
     clock.now = 41 * DAY;
+    // Another contact wrote yesterday: the 30 days count back from the clock, which is no later than the newest activity.
+    h.sink.post({ kind: "messages", linkId: "c2", messages: [message("c2", "n40", { timestamp: 40 * DAY })] });
+    events.length = 0;
     // m1, its reaction and me_1: settled, last active more than 30 days ago. me_2 failed (a retry sends it again), m3 is recent.
     expect(h.sweep()).toBe(3);
     expect([...notes(h).get("c1")!.keys()].sort()).toEqual(["m3", "me_2"]);
@@ -847,5 +850,41 @@ describe("the seen set forgets", () => {
     again.h.sweep();
     again.h.sink.post({ kind: "messages", linkId: "group:g1", messages: [said, older, joined, hello] });
     expect(again.events).toEqual([]);
+  });
+
+  it("with no activity in the last 30 days, a sweep keeps the newest 30 days of notes: the clock is no proof that they passed", async () => {
+    clock.now = 10 * DAY;
+    const { h } = await clocked("idle.jsonl");
+    h.baseline(state([link("c1")]), new Map([["c1", [message("c1", "m1", { timestamp: 1 * DAY }), message("c1", "m9", { timestamp: 9 * DAY })]]]));
+    clock.now = 100 * DAY;
+    expect(h.sweep()).toBe(0);
+    // A message today: the window counts back from it, and m1 (and m9, 91 days before it) go.
+    h.sink.post({ kind: "messages", linkId: "c1", messages: [message("c1", "m1", { timestamp: 1 * DAY }), message("c1", "m9", { timestamp: 9 * DAY }), message("c1", "m100", { timestamp: 100 * DAY })] });
+    expect(h.sweep()).toBe(2);
+    expect([...notes(h).get("c1")!.keys()]).toEqual(["m100"]);
+  });
+
+  it("a start with the clock more than 30 days ahead drops no recent note: the next start, the clock right again, reports nothing again", async () => {
+    clock.now = 80 * DAY;
+    const first = await clocked("skew.jsonl");
+    first.h.baseline(state([link("c1")]), new Map([["c1", []]]));
+    const m80 = message("c1", "m80", { timestamp: 80 * DAY });
+    const m90 = message("c1", "m90", { timestamp: 90 * DAY, reactions: { peer: { e: "👍", n: 1, at: 95 * DAY } } });
+    const me99 = message("c1", "me99", { sender: "me", delivery: "delivered", timestamp: 99 * DAY });
+    first.h.sink.post({ kind: "messages", linkId: "c1", messages: [m80, m90, me99] });
+    expect(first.events.map((e) => e.id).sort()).toEqual(["message.reaction:c1:m90:peer:1", "message.received:c1:m80", "message.received:c1:m90", "message.sent:c1:me99"]);
+    await new Promise((r) => setTimeout(r, 50));
+
+    // A wrong clock at one start: 60 days ahead.
+    clock.now = 160 * DAY;
+    const skewed = await clocked("skew.jsonl");
+    skewed.h.baseline(state([link("c1")]), new Map([["c1", [m80, m90, me99]]]));
+    expect(skewed.events).toEqual([]);
+    await new Promise((r) => setTimeout(r, 50));
+
+    clock.now = 100 * DAY;
+    const right = await clocked("skew.jsonl");
+    right.h.baseline(state([link("c1")]), new Map([["c1", [m80, m90, me99]]]));
+    expect(right.events).toEqual([]);
   });
 });

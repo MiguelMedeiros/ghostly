@@ -135,4 +135,54 @@ describe("a state over the extension's port", () => {
     expect(engine.state!.links[2].peerAvatar).toBe(contacts[2]);
     expect(engine.state!.groups[0].picture).toBe(group);
   });
+
+  it("carries an identity's or a Nostr profile's picture only when it changed, and the page keeps the ones it has", async () => {
+    posted.length = 0;
+    // The profile's own verified identities and Nostr key, a contact's verified identities and Nostr key: each public
+    // profile's picture a re-encoded JPEG (up to 32 KB), the same strings until one changes.
+    const picture = (seed: string) => `data:image/jpeg;base64,/9j/${seed.repeat(8_000 / seed.length)}`;
+    const mine = ["p", "q"].map(picture), theirs = ["r", "s", "t"].map(picture), myNostr = picture("n"), theirNostr = picture("o");
+    const profile = (avatar: string | undefined) => ({ found: true, name: "x", hosts: ["nexus.pubky.app"], fetchedAt: 1, ...(avatar ? { avatar } : {}) });
+    const nostr = (subject: string, avatar: string | undefined) => ({
+      subject, npub: `npub-${subject}`, profile: { fetchedAt: 1, relays: [], stale: false, found: true, profile: { name: "x", hasPicture: true, eventAt: 1, eventId: "e", ...(avatar ? { avatar } : {}) } },
+    });
+    const pictured = (typing: boolean, more: { theirs?: (string | undefined)[]; myNostr?: string } = {}) => state(typing, {
+      identityProofs: mine.map((avatar, i) => ({ id: `mine${i}`, provider: "pubky", subject: `s${i}`, publicProfile: profile(avatar) })) as unknown as EngineState["identityProofs"],
+      nostr: { own: [nostr("me", more.myNostr ?? myNostr)], settings: { relays: [], autoLoadProfiles: true, publish: false } },
+      links: [{
+        ...link(typing),
+        identities: { support: true, shared: [], received: (more.theirs ?? theirs).map((avatar, i) => ({ id: `theirs${i}`, provider: "bluesky", subject: `t${i}`, publicProfile: profile(avatar) })) },
+        nostr: [nostr("them", theirNostr)],
+      }] as unknown as EngineState["links"],
+    });
+    await engine.connect();
+    await flush();
+    const node = fake.nodes[0];
+    node.events.onState(pictured(false));
+    expect(posted.at(-1)).toBeGreaterThan(7 * 8_000);
+
+    // A contact typing, 20 times: no picture changed, none goes again.
+    const from = posted.length;
+    for (let i = 0; i < 20; i++) node.events.onState(pictured(i % 2 === 0));
+    for (const bytes of posted.slice(from)) expect(bytes).toBeLessThan(3_000);
+    const shown = engine.state!;
+    expect(shown.identityProofs.map((p) => p.publicProfile?.avatar)).toEqual(mine);
+    expect(shown.nostr.own[0].profile?.profile?.avatar).toBe(myNostr);
+    expect(shown.links[0].identities!.received.map((p) => p.publicProfile?.avatar)).toEqual(theirs);
+    expect(shown.links[0].nostr![0].profile?.profile?.avatar).toBe(theirNostr);
+    expect(shown.links[0].identities!.received[0].publicProfile?.name).toBe("x");
+
+    // One of their identities changed its picture, another lost it, and this profile's Nostr picture changed: those go.
+    const changed = picture("x"), mineChanged = picture("y");
+    node.events.onState(pictured(false, { theirs: [theirs[0], changed, undefined], myNostr: mineChanged }));
+    expect(posted.at(-1)).toBeGreaterThan(2 * 8_000);
+    expect(posted.at(-1)).toBeLessThan(3 * 8_000);
+    expect(engine.state!.links[0].identities!.received.map((p) => p.publicProfile?.avatar)).toEqual([theirs[0], changed, undefined]);
+    expect(engine.state!.nostr.own[0].profile?.profile?.avatar).toBe(mineChanged);
+    expect(engine.state!.identityProofs.map((p) => p.publicProfile?.avatar)).toEqual(mine);
+    // Its picture back: sent again, as one the page no longer has.
+    node.events.onState(pictured(false, { theirs: [theirs[0], changed, theirs[2]], myNostr: mineChanged }));
+    expect(engine.state!.links[0].identities!.received[2].publicProfile?.avatar).toBe(theirs[2]);
+    expect(engine.state!.links[0].nostr![0].profile?.profile?.avatar).toBe(theirNostr);
+  });
 });

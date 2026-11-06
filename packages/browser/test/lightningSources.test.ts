@@ -100,6 +100,17 @@ describe("the invoice a contact is handed", () => {
     await expect(lightning.createInvoice(10)).rejects.toThrow("cannot create invoices");
   });
 
+  it("comes only from a source that can also look it up: one it could never see paid is not made", async () => {
+    // An NWC connection with make_invoice but not lookup_invoice, a WebLN wallet with makeInvoice but no lookupInvoice.
+    const fake = new FakeLightningProvider();
+    Object.assign(fake, { capabilities: { ...fake.capabilities, lookup: false } });
+    const created = vi.spyOn(fake, "createInvoice");
+    const { lightning } = await ready(fake);
+    await expect(lightning.createInvoice(100, { paymentId: "req-1" })).rejects.toThrow("cannot look up its invoices");
+    expect(created, "the source is not asked for one").not.toHaveBeenCalled();
+    expect((await keys()).filter((k) => k.startsWith("lightningOp-")), "nothing journaled").toEqual([]);
+  });
+
   it("is refused when the source returns another amount or another payment hash than it says", async () => {
     const fake = new FakeLightningProvider({ settleMs: 600_000 });
     const make = fake.createInvoice.bind(fake);
