@@ -1740,7 +1740,7 @@ export class GroupSession {
     // signed word for the members who can, kept and passed on as is while the author is in the roster. Hubs change, and
     // most members of that epoch reach the author only through whoever is a hub now.
     if (!rosterHas(commit.m, this.myKey)) {
-      if (member && this.keepEdit(raw)) { await this.persist(); this.took(cleanEdit(raw)); }
+      if (member && this.keepEdit(raw)) { this.persistSoon(); this.took(cleanEdit(raw)); }
       return;
     }
     const secret = this.secret(raw.e);
@@ -1763,7 +1763,10 @@ export class GroupSession {
     const copy = this.kept().find(f => f.s === raw.s && f.e === raw.e && f.n === raw.n);
     const first = copy && readFirstPlace(copy.o, copy.e);
     await this.hooks.edit?.({ id: first ? groupMessageId(raw.s, first.e, first.n) : groupMessageId(raw.s, raw.e, raw.n), sender: raw.s, e: raw.v, ts: raw.ts, m: body.text, ...(k.length ? { k } : {}), ...(sc ? { sc } : {}), ...(rm ? { rm: true as const } : {}) });
-    if (this.keepEdit(raw)) { await this.persist(); this.took(cleanEdit(raw)); }
+    // Saved within the window, as a message is: a member's burst of edits (of messages that are not there, as many as it
+    // signs) was a whole record written for each. The app stored the edit above; lost with a save, the frame comes back
+    // in the next catch-up's answer from whoever kept it.
+    if (this.keepEdit(raw)) { this.persistSoon(); this.took(cleanEdit(raw)); }
   }
 
   private parkEdit(from: string, frame: GroupEditFrame): void {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { GroupSession, groupMessageId, type GroupEdgeFrame, type GroupEditFrame, type GroupState } from "../src/groupSession";
 import { CommunitySession, COMMUNITY_LIMITS, type CommunityFrame } from "../src/groupCommunity";
@@ -13,6 +13,8 @@ class Mesh {
   readonly sessions = new Map<string, GroupSession>();
   readonly edits = new Map<string, GroupIncomingEdit[]>();
   readonly sent: { from: string; to: string; frame: GroupEdgeFrame }[] = [];
+  /** What each member's session saved, in order (the whole record each time). */
+  readonly saves = new Map<string, GroupState[]>();
   /** Members that pass on what their session took, as a hub does (WISP 902 § Hubs), and whom each member counts on. */
   readonly hubs = new Set<string>();
   readonly carriers = new Map<string, string[]>();
@@ -21,7 +23,7 @@ class Mesh {
   /** An app from before edits: its session has no `edit` hook. */
   add(state: GroupState, old = false): GroupSession {
     const session: GroupSession = new GroupSession(state, {
-      save: async () => {},
+      save: async state => { this.saves.get(session.myKey)!.push(clone(state)); },
       send: (to, frame) => this.deliver(session, to, frame),
       message: () => {},
       ...(old ? {} : { edit: (e: GroupIncomingEdit) => { this.edits.get(session.myKey)!.push(e); } }),
@@ -30,6 +32,7 @@ class Mesh {
     });
     this.sessions.set(session.myKey, session);
     this.edits.set(session.myKey, []);
+    this.saves.set(session.myKey, []);
     return session;
   }
   private deliver(from: GroupSession, to: string, frame: GroupEdgeFrame): void {
@@ -220,6 +223,45 @@ describe("group-edit frames (a private group)", () => {
       expect(mesh.of(dave).filter(e => e.id === gone && e.rm)).toHaveLength(1);
     });
   }
+
+  it("a burst of edits taken is saved once a window, not once each, and what one save lost comes back at catch-up", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { mesh, alice, bob, carol } = await trio();
+      const id = ((await bob.sendText("Deploy: 0 of 2")) as { id: string }).id;
+      await mesh.settle();
+      for (const s of [alice, carol]) await s.flush();
+      const before = clone(carol.state);
+      for (const s of [alice, carol]) mesh.saves.get(s.myKey)!.length = 0;
+      // Bob edits 200 messages of his that are not there, each signed and sealed: neither member saves its whole record
+      // for each.
+      const epoch = bob.epoch;
+      for (let n = 1_000; n < 1_200; n++) {
+        expect(await bob.sendEdit(groupMessageId(bob.myKey, epoch, n), { v: 1, ts: 2, text: "x" })).toHaveProperty("sent");
+      }
+      // And one honest edit of a line that is there.
+      await bob.sendEdit(id, { v: 1, ts: 3, text: "Deploy: done" });
+      await mesh.settle();
+      for (const s of [alice, carol]) expect(mesh.saves.get(s.myKey)).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(1_000);
+      for (const s of [alice, carol]) { await s.flush(); expect(mesh.saves.get(s.myKey)).toHaveLength(1); }
+      // The honest edit is in what was saved: a restart keeps it to hand on.
+      const saved = mesh.saves.get(carol.myKey)!.at(-1)!;
+      const ref = meshMessageRef(id)!;
+      expect(new GroupSession(clone(saved), { save: async () => {}, send: () => {}, message: () => {}, changed: () => {} }).state.relayEdits)
+        .toContainEqual(expect.objectContaining({ s: bob.myKey, n: ref.n, v: 1 }));
+      // Carol killed before that save (her app has the edit): her session back from the record before takes the frame
+      // again when she asks for Bob, and keeps it to hand on.
+      const back = mesh.add(clone(before));
+      mesh.setEdge(back, bob, false);
+      await alice.handle(back.myKey, clone(back.syncFrame([bob.myKey])));
+      await mesh.settle();
+      expect(mesh.of(back)).toContainEqual({ id, sender: bob.myKey, e: 1, ts: 3, m: "Deploy: done" });
+      expect(back.state.relayEdits).toContainEqual(expect.objectContaining({ s: bob.myKey, n: ref.n, v: 1 }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("an author's own burst of edits is kept as before: the latest of each, as many as the log holds", async () => {
     const { mesh, alice, bob } = await trio();
