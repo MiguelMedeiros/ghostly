@@ -1750,6 +1750,9 @@ export class Apps {
       // not read whole at every check to be refused again. One under a number held is still read: it marks the app.
       const twin = holds && (holds.sequence === app.sequence || holds.sequence === app.pending?.sequence);
       if (holds && !twin && this.runStatus(holds, this.storeViews(stores), app.revocations).status !== "ok") continue;
+      // Unless the app is marked for that very one already (a mark is only taken from a bundle read whole and checked,
+      // and the peek's digest is the SHA-256 of the manifest it read): nothing new is learned, and the mark keeps its `at`.
+      if (holds && twin && app.equivocation?.sequence === holds.sequence && app.equivocation.digest === holds.digest) { outcome = "equivocation"; continue; }
       let fetched: { bundle: AppBundle; bytes: Uint8Array };
       try { fetched = await this.fetchBundle(url); } catch { continue; }
       const { bundle, bytes } = fetched;

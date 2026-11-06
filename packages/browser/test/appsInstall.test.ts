@@ -423,6 +423,41 @@ describe("updates", () => {
     expect((await store.list())[0]).toMatchObject({ sequence: 3, digest: v3.digest });
   });
 
+  it("another bundle under the installed number at the app's source is read whole once: once marked, each check costs a peek and writes nothing", async () => {
+    let now = NOW_MS;
+    const v1 = await bundle({ sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net, { now: () => now });
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    // Its publisher rebuilt version 1 without raising the number: 5 MiB of files.
+    const twin = await bundle({ sources: [BUNDLE_URL], data: new Uint8Array(5 * 1024 * 1024).fill(7) });
+    net.put(BUNDLE_URL, twin.bytes);
+    const put = IDBObjectStore.prototype.put;
+    const appPuts = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, value: unknown, key?: IDBValidKey) { return put.call(this, value, key); });
+    const check = async () => {
+      net.fetch.mockClear();
+      appPuts.mockClear();
+      expect(await store.checkUpdates()).toEqual([{ ref: v1.ref, outcome: "equivocation", run: { status: "ok" } }]);
+      const reads = net.fetch.mock.calls.filter(([url]) => String(url) === BUNDLE_URL).map(([, init]) => ((init?.headers ?? {}) as Record<string, string>).range ? "peek" : "whole");
+      return { reads, puts: appPuts.mock.contexts.filter((s) => (s as IDBObjectStore).name === STORES.apps).length };
+    };
+    expect(await check(), "found: read whole and checked, then marked").toEqual({ reads: ["peek", "whole"], puts: 1 });
+    const first = now;
+    for (let visit = 1; visit <= 2; visit++) {
+      now += 60_000;
+      expect(await check(), `visit ${visit}: the peek names the digest marked`).toEqual({ reads: ["peek"], puts: 0 });
+    }
+    expect((await store.list())[0]).toMatchObject({ digest: v1.digest, equivocation: { sequence: 1, at: first } });
+    // Yet another bundle under that number: read whole again, and marked.
+    const third = await bundle({ sources: [BUNDLE_URL], entry: "<p>a third version 1" });
+    net.put(BUNDLE_URL, third.bytes);
+    now += 60_000;
+    expect(await check()).toEqual({ reads: ["peek", "whole"], puts: 1 });
+    expect((await store.list())[0]).toMatchObject({ digest: v1.digest, equivocation: { sequence: 1, at: now } });
+    expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
+  });
+
   it("a waiting update its publisher revoked, or a store of the person's removed, goes with its files; the next version is looked for", async () => {
     const v1 = await bundle({ sources: [BUNDLE_URL] });
     net.put(BUNDLE_URL, v1.bytes);
