@@ -252,6 +252,17 @@ class EngineClient {
     return this.connecting;
   }
 
+  /**
+   * The page's first connection. One that fails (an extension tab opened while the peer does not start) is tried again
+   * as after a lost one, and the page says so meanwhile: before, it looked alive and stayed apart from the peer for good.
+   */
+  start(): void {
+    void this.connect().catch(() => {
+      this.setReconnecting(true);
+      this.reconnect(500);
+    });
+  }
+
   /** Connects again after `delay`, and again after twice as long while the tries fail. */
   private reconnect(delay: number): void {
     setTimeout(() => void this.connect().catch(() => {
