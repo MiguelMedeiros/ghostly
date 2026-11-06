@@ -1,7 +1,20 @@
 import { identityPicture, nostrPicture, type PictureAt } from "../shared/keptPictures";
+import { isRefusalId } from "../shared/refusals";
 import type { KeptPictures, PostedEvent } from "../shared/rpc";
-import type { EngineState, LinkView } from "../shared/types";
+import type { EngineState, LinkView, StoredMessage } from "../shared/types";
 import type { EngineClientSink } from "./server";
+
+/**
+ * A row as the extension's pages get it: without its details record (how it travelled, WISP 400 § Message details),
+ * which the details view asks the engine for (`messageDetails`). It was 40% of an attach's bytes, and went again with
+ * each history ask and each change. A row under a refusal's id keeps the frame it came in (`details.wire`): that is how
+ * the page tells a contact's text from the engine's refusal line (`paymentRefusal`).
+ */
+function withoutDetails(message: StoredMessage): StoredMessage {
+  if (message.details === undefined) return message;
+  const { details, ...row } = message;
+  return details.wire && isRefusalId(message.id) ? { ...row, details: { wire: details.wire } } : row;
+}
 
 /**
  * A client whose messages are copied on their way (the extension's port): every state used to carry every payment
@@ -13,12 +26,15 @@ import type { EngineClientSink } from "./server";
  * of a state's bytes, and went again with each one. One this client was sent last under the same name is left out
  * (`keptPictures`); a new one, or one back after a state without it, goes. The same for each public profile's picture
  * (up to 32 KB): this profile's verified identities' and Nostr keys', and each contact's.
+ *
+ * A history's and a change's rows go without their details record (`withoutDetails`).
  */
 export function copyingSink(post: (message: PostedEvent) => void): EngineClientSink {
   let sent: Pick<EngineState, "payments" | "wallet"> | null = null;
   let pictures = new Map<string, string>();
   return {
     post: (message) => {
+      if (message.kind === "messages" || message.kind === "message-changes") return post({ ...message, messages: message.messages.map(withoutDetails) });
       if (message.kind !== "state") return post(message);
       const { payments, wallet, settings, links, edges, groups, identityProofs, nostr, ...rest } = message.state;
       const now = new Map<string, string>();
