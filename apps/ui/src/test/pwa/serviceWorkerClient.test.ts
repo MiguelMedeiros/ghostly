@@ -240,6 +240,14 @@ describe("a share, on the page's side", () => {
     expect(registration.active!.posted[1]).toEqual({ type: "share-here", profile: activeProfileId() });
   });
 
+  it("asked by a worker that restarted with a share to forward, it says it takes shares again, without coming to the front", async () => {
+    listenForShares();
+    await vi.waitFor(() => expect(registration.active!.posted).toHaveLength(1));
+    container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "share-where" } }));
+    await vi.waitFor(() => expect(registration.active!.posted).toHaveLength(2));
+    expect(registration.active!.posted[1]).toEqual({ type: "share-here", profile: activeProfileId() });
+  });
+
   it("says how Web Locks names it as its peer lock's holder, which the worker checks before it forwards a share here", async () => {
     const query = vi.fn(async () => ({ held: [{ name: "ghostly-peer-work", clientId: "other-tab", mode: "exclusive" }, { name: "ghostly-peer", clientId: "this-tab", mode: "exclusive" }] }));
     Object.defineProperty(navigator, "locks", { configurable: true, value: { query } });

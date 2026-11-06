@@ -167,6 +167,8 @@ export function listenForShares(peerLock?: string): void {
   workers.addEventListener("message", (event: MessageEvent<FromWorker>) => {
     const message = event.data;
     if (message?.type === "build-gone") { noteBuildGone(); return; }
+    // The worker restarted since this page last said it takes shares, and has one to forward: said again, unfocused.
+    if (message?.type === "share-where") { here(); return; }
     if (message?.type !== "share" || !message.item) return;
     const { item } = message;
     // The page restarts with it still in the picker (a profile switch): the worker holds it again for the next page.
