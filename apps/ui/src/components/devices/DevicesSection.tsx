@@ -179,7 +179,7 @@ export function DevicesSection() {
       {/* A pull this device's wallets or a call on it kept from happening: what keeps the profile here (WISP 06 § Wallets). */}
       {handoff?.role === "giver" && handoff.step === "failed" && handoff.failure && WALLET_REFUSALS.has(handoff.failure) && (
         <Row testId="handoff-wallet-refusal" label={t(FAILURES[handoff.failure], { device: handoffDevice, wallet: walletNameOf(handoff.wallet) })}
-          hint={handoff.expiresAt !== undefined ? t("devices.handoff.staysExpires", { wallet: walletNameOf(handoff.wallet), date: dayText(handoff.expiresAt, language) }) : undefined} />
+          hint={handoff.expiresAt !== undefined ? t("devices.handoff.staysExpires", { wallet: walletNameOf(handoff.wallet), date: dayText(handoff.expiresAt, language) }) : nextOf(FAILURES[handoff.failure], t)} />
       )}
       {adding && <AddDeviceDialog onClose={() => setAdding(false)} />}
       {moving && <MoveDialog device={moving.name} deviceKey={moving.key} onClose={() => { setMoving(null); setMoveClosed(true); }} />}
