@@ -27,7 +27,7 @@ import { webOpener } from "../../ui/src/lib/apps/webOpener";
 import { profileDatabase } from "../../ui/src/lib/profileData";
 import { activeProfileId } from "../../ui/src/lib/profiles";
 import { nameInChat } from "../../ui/src/lib/apps/nameInChat";
-import { currentPush, pushSupported, subscribePush, syncWakeTable, syncWakeText, unsubscribePush } from "./pwa/push";
+import { closeWakeNotices, currentPush, pushSupported, subscribePush, syncWakeTable, syncWakeText, unsubscribePush } from "./pwa/push";
 import { SHARE_FORWARD_AFTER_MS, askForShare, followNewVersion, handShareOver, listenForShares, listenForTaps, openedForShare, registerServiceWorker } from "./pwa/serviceWorker";
 
 // A build for the e2e suite runs mini-apps through the real runner and broker before the app has a screen for them.
@@ -47,7 +47,7 @@ listenForTaps(() => isPeer);
 // Another tab took a new version: this one reloads into it rather than run the build whose files its worker deleted.
 const mayStart = followNewVersion();
 // Wake-up push (WISP 401 § Wake-up push): this app can be woken while closed; Settings shows the switch.
-setPushPlatform({ supported: pushSupported, subscribe: subscribePush, current: currentPush, unsubscribe: unsubscribePush, syncTable: syncWakeTable, syncText: syncWakeText });
+setPushPlatform({ supported: pushSupported, subscribe: subscribePush, current: currentPush, unsubscribe: unsubscribePush, syncTable: syncWakeTable, syncText: syncWakeText, closeNotices: closeWakeNotices });
 // GNOME Web and other WebKitGTK browsers before 2.52 keep the sounds' output running: waking it froze the page.
 gateSounds();
 

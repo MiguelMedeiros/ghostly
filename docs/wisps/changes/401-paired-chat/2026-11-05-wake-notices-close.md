@@ -1,0 +1,1 @@
+a notice of the profile that says something closes its quiet notice, and the app closes the wake-up notices it made stale: the profile's quiet notice while it is in front, and a chat's message and online notices once that chat is on screen in the window with the focus (a call's notice stays).
