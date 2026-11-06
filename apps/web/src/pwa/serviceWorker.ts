@@ -1,6 +1,6 @@
 import { carryIncomingShare, incomingShare, receiveShare, type IncomingShare } from "../../../ui/src/lib/incomingShare";
 import { activeProfileId, listProfiles, switchProfile } from "../../../ui/src/lib/profiles";
-import type { FromWorker, ToWorker, WindowSays } from "../sw/messages";
+import type { ChatTaken, FromWorker, ToWorker, WindowSays } from "../sw/messages";
 
 /*
  * The page's side of the service worker (`src/sw/sw.ts`): registering it, putting a new version in place when
@@ -221,6 +221,9 @@ function tellReady(message: ToWorker): void {
  * profile's peer to open the chat (`open-chat`). One that waits gets it only when no window answered for that profile
  * (a new window it opened, or pages of an older build): of its own profile, the chat is where it starts once it takes
  * over; of another, it runs nothing, so it switches. `peer`: whether this page holds its profile's peer yet.
+ *
+ * One that said nothing in time (frozen or busy) is told only on a guess (`silent`): holding another profile's peer, it
+ * stays that profile (WISP 04) and hands the chat back, and the worker opens a new window on it.
  */
 export function listenForTaps(peer: () => boolean): void {
   const workers = container();
@@ -228,7 +231,11 @@ export function listenForTaps(peer: () => boolean): void {
   workers.addEventListener("message", (event: MessageEvent<FromWorker>) => {
     const message = event.data;
     if (message?.type === "open-ask") { event.ports[0]?.postMessage({ profile: activeProfileId(), peer: peer() } satisfies WindowSays); return; }
-    if (message?.type === "open-chat") openChat(message.path, message.profile);
+    if (message?.type !== "open-chat") return;
+    if (!message.silent) { openChat(message.path, message.profile); return; }
+    const taken = message.profile === activeProfileId() || !peer();
+    if (taken) openChat(message.path, message.profile);
+    event.ports[0]?.postMessage({ taken } satisfies ChatTaken);
   });
   workers.startMessages();
 }
