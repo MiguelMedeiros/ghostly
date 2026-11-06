@@ -30,10 +30,12 @@ function ensureEngine(): Promise<void> {
 async function startEngine(): Promise<void> {
   if (!(await chrome.offscreen.hasDocument())) await createEngineDocument();
   const status = await waitForEngine();
-  if (status.profile === status.active) return;
+  if (status.profile === status.active && !status.stopped) return;
   // A page made another profile the one in use. The running peer stops and its document closes before
   // the next one opens: never two peers, and never one peer over two profiles' data.
-  await replaceEngine(status.activeId);
+  // Or the peer stopped for good and nobody asked for the next one: the page that ran "Clear all data" went away
+  // before it could (`restart-engine`), or a worker went away mid-restart. That document goes too, as after a switch.
+  await replaceEngine(status.profile === status.active ? undefined : status.activeId);
 }
 
 /** Peers started one after another for switches made while each one started, before the pages are told to retry. */
