@@ -11,7 +11,8 @@ describe("the push relay's log of forwards (infra/services/push-relay)", () => {
 
   it("logs forwards and failures as counts, a line per status or cause a minute, however many clients push", async () => {
     const lines: string[] = [];
-    const relay = await startRelay({ hosts: [/^127\.0\.0\.1$/], proxies: 1, log: (...words: unknown[]) => lines.push(words.join(" ")) });
+    // Room for 60 to one endpoint: the limit per subscription is pushRelayEndpointLimit's.
+    const relay = await startRelay({ hosts: [/^127\.0\.0\.1$/], proxies: 1, limits: { perEndpoint: 100 }, log: (...words: unknown[]) => lines.push(words.join(" ")) });
     close = relay.close;
     const real = globalThis.fetch;
     // The push service: 201 for /ok, 404 for a made-up endpoint, nobody home for /down.
