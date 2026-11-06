@@ -53,9 +53,10 @@ export class GroupAutoJoin {
       this.grants = [];
     } else {
       if (!next.from?.length) throw new CliError("bad_request", "Auto-join needs the chats whose invitations it accepts: group auto on --from <chat>");
-      // Never a chat found only by a name its contact chose (`findOwnNamedChat`), as `call auto on --from`.
-      const links = this.host.engine.getState().links;
-      const grants = next.from.map((ref) => findOwnNamedChat(links, ref)).map((link) => ({ chat: link.id, contact: link.peerPubKeyZ32 }));
+      // Never a chat found only by a name its contact chose (`findOwnNamedChat`), as `call auto on --from`; a group's
+      // name or id is refused as one ("is a group, not a chat", with its id), as there.
+      const { links, groups } = this.host.engine.getState();
+      const grants = next.from.map((ref) => findOwnNamedChat(links, ref, groups)).map((link) => ({ chat: link.id, contact: link.peerPubKeyZ32 }));
       this.grants = grants.filter((g, i) => grants.findIndex((x) => x.chat === g.chat) === i);
     }
     this.save();
