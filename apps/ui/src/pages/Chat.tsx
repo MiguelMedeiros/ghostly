@@ -316,6 +316,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     maxCandidates: session?.profile === "paired-chat/1" ? PAIRED_CALL_CANDIDATES : undefined,
     // The microphone and camera this profile chose in Settings → Audio & video.
     devices: callDevicePreferences,
+    // A burst of the contact's calls rings once though this chat, off screen, is let go between them (App's loaded chats).
+    chatId: sessionId,
   });
   const callDevices = useCallDevices(webrtc);
 

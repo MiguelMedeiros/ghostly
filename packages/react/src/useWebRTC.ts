@@ -66,7 +66,19 @@ interface UseWebRTCParams {
    * `ideal` falls back to the default when the device is gone). Not for a `media` that does not choose devices.
    */
   devices?: () => { audio?: ConstrainDOMString; video?: ConstrainDOMString };
+  /**
+   * The chat's own id: what this chat knows of its contact's last missed call (QUICK_REDIAL_MS) is kept under it past
+   * this hook's mount (`missedAtByChat`). Left out, it lasts as long as the hook.
+   */
+  chatId?: string;
 }
+
+/**
+ * When each chat's contact's last call was missed (`lastMissedAtRef`), by chat id. A chat off screen is loaded only for
+ * its call and let go as it ends: the next call of a burst loads it anew, and its hook would know nothing of the one
+ * just missed and ring again, at every call of a ring-and-hang-up loop while the person is anywhere but that chat.
+ */
+const missedAtByChat = new Map<string, number>();
 
 /** The browser's own WebRTC and capture. */
 const browserMedia: CallMedia = {
@@ -266,6 +278,7 @@ export function useWebRTC({
   relayOnly,
   maxCandidates,
   devices,
+  chatId,
 }: UseWebRTCParams) {
   const iceServersRef = useRef(iceServers);
   iceServersRef.current = iceServers;
@@ -348,8 +361,15 @@ export function useWebRTC({
   const lastProcessedSignalRef = useRef<number>(0);
   const callStateRef = useRef<CallState>("idle");
   const pendingOfferRef = useRef<CallSignal | null>(null);
-  /** When the contact's last call was missed here, on this clock, if it barely rang (QUICK_REDIAL_MS); 0 otherwise. */
-  const lastMissedAtRef = useRef(0);
+  /**
+   * When the contact's last call was missed here, on this clock, if it barely rang (QUICK_REDIAL_MS); 0 otherwise. Set
+   * with `setMissedAt`, which keeps it for the chat's next mount (`missedAtByChat`).
+   */
+  const lastMissedAtRef = useRef(chatId ? (missedAtByChat.get(chatId) ?? 0) : 0);
+  const setMissedAt = useCallback((at: number) => {
+    lastMissedAtRef.current = at;
+    if (chatId) missedAtByChat.set(chatId, at);
+  }, [chatId]);
   /** When the contact's call began to ring here, on this clock (BURST_RING_MS). */
   const ringingSinceRef = useRef(0);
   /** The contact's last call held back here (QUICK_REDIAL_MS) until its hang-up: its offer, when it was heard, its missed line. */
@@ -1380,7 +1400,7 @@ export function useWebRTC({
     if (signal.t === "o" && callStateRef.current === "idle" && Date.now() - lastMissedAtRef.current < QUICK_REDIAL_MS) {
       // Placed faster than a person redials (QUICK_REDIAL_MS): kept as missed, with no card, ring or notification.
       lastProcessedSignalRef.current = signal.ts;
-      lastMissedAtRef.current = Date.now();
+      setMissedAt(Date.now());
       heldOfferRef.current = { signal, at: Date.now(), line: addCallEventMessage?.("call_missed", signalHasVideo(signal), undefined, signal.ts) || null };
     } else if (signal.t === "o" && (callStateRef.current === "idle" || yielded)) {
       lastProcessedSignalRef.current = signal.ts;
@@ -1401,7 +1421,7 @@ export function useWebRTC({
       if (callStateRef.current !== "idle") traceCallEnd("contact-hang-up", { state: callStateRef.current, ...(signal.r && { r: signal.r }) });
       // The caller gave up (or its ring ran out) before we answered: a missed call, as when our own ring runs out.
       if (callStateRef.current === "incoming") {
-        lastMissedAtRef.current = Date.now() - ringingSinceRef.current < BURST_RING_MS ? Date.now() : 0;
+        setMissedAt(Date.now() - ringingSinceRef.current < BURST_RING_MS ? Date.now() : 0);
         addCallEventMessage?.("call_missed", callHadVideoRef.current, undefined, pendingOfferRef.current?.ts);
       } else if (callStateRef.current === "offering" && signal.r !== "u" && myOfferTimestampRef.current && callSignalHeardAt(signal) > myOfferTimestampRef.current) {
         // Our call still rang there: the contact declined it (a side that rings sends nothing else).
@@ -1421,7 +1441,7 @@ export function useWebRTC({
         hangUp(false);
       }
     }
-  }, [incomingCallSignal, handleAnswer, hangUp, updateCallState, setFastPoll, addCallEventMessage, applyRemotePicture, restartAnswer, restartable, cleanupConnection, removeCallEventMessage, answerIceRestart, applyIceRestartAnswer, ringOffer]);
+  }, [incomingCallSignal, handleAnswer, hangUp, updateCallState, setFastPoll, addCallEventMessage, applyRemotePicture, restartAnswer, restartable, cleanupConnection, removeCallEventMessage, answerIceRestart, applyIceRestartAnswer, ringOffer, setMissedAt]);
 
   // An unanswered call does not ring forever (RING_MS). Ours hangs up and says "No answer". Theirs stops ringing here
   // with a missed call and sends nothing: the caller's own ring runs out too, and a hang-up would read as declined.
@@ -1450,13 +1470,13 @@ export function useWebRTC({
         setNoAnswer(true);
       } else {
         // It rang its whole minute: a person's call, which holds the next one back no more than a declined one does.
-        lastMissedAtRef.current = 0;
+        setMissedAt(0);
         addCallEventMessageRef.current?.("call_missed", callHadVideoRef.current, undefined, pendingOfferRef.current?.ts);
         hangUpRef.current(false, false);
       }
     }, RING_MS);
     return () => clearTimeout(timer);
-  }, [callState]);
+  }, [callState, setMissedAt]);
 
   // Another page answered or declined the call ringing here (`callHandledElsewhere`): it stops ringing here as though it
   // never had. That page wrote the call's lines into the history both show, and sent its answer; this one sends
