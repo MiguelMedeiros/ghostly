@@ -1,0 +1,1 @@
+"the app is on screen", which keeps a wake-up's own notice from showing, means a window in front that runs the woken profile and holds its peer: a window of another profile on screen no longer hides it; a window that does not say what it runs within half a second still counts.
