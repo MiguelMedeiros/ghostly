@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { decodeBolt11 } from "@ghostly/core";
 import type { LinkView, PaymentView, WalletView } from "@ghostly/browser/shared/types";
 import { PaymentBubble } from "../../components/PaymentBubble";
+import { paymentLine, storedPaymentLine } from "../../components/paymentWords";
+import { loadLocale, translatorFor } from "../../locales";
 import { fakeEngine, linkView, paymentView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { lightningSource, liveMainnetInvoice, MAINNET_INVOICE, mint, REAL_MINT, REGTEST_INVOICE, reviewOf, SIGNET_INVOICE, target, TEST_MINT, TESTNET_INVOICE } from "./fixtures";
@@ -41,13 +43,40 @@ it.each([
   ["Requested 2100 test sats on Ark", false, "pt", "⚡ Pediu a você 2.100 sats de teste"],
   ["⚡ Requested 5,000 sats from the group", true, "es", "⚡ Pediste 5000 sats"],
   ["1 test sats on Fedimint", true, "pt", "⚡ Você enviou 1 sat de teste"],
-  ["Requested 1.5 TEST-USDT", true, "pt", "⚡ Você pediu 1.5 TEST-USDT"],
+  ["Requested 1.5 TEST-USDT", true, "pt", "⚡ Você pediu 1,5 TEST-USDT"],
   ["Token payment request", false, "pt", "⚡ Pediu a você"],
   ["[a payment]", true, "pt", "[a payment]"],
 ] as const)("says the stored line “%s” in the app's language when the wallet does not know the payment", (stored, mine, language, said) => {
   fakeEngine.setState({ links: [linkView()] });
   renderApp(<PaymentBubble paymentId="missing" peerPubKey="peer" fallbackText={stored} mine={mine} />, { language });
   expect(screen.getByText(said)).toBeInTheDocument();
+});
+
+// A token amount in the stored line is the engine's plain decimal ("1234.5"): said as the language writes numbers, the
+// same as `paymentLine` once the wallet knows the payment, so the line does not change when the wallets load.
+describe("a stored token amount", () => {
+  const said = async (language: "en" | "pt" | "fr" | "ja" | "ar", stored: string, mine = true) => {
+    await loadLocale(language);
+    return storedPaymentLine(translatorFor(language), stored, mine);
+  };
+
+  it.each(["pt", "fr", "ja", "ar"] as const)("reads in %s as paymentLine says the same request", async (language) => {
+    await loadLocale(language);
+    const t = translatorFor(language);
+    const known = paymentLine(t, paymentView({ kind: "request", direction: "out", amount: 1_234_500_000, target: target({ method: "usdt", network: "sepolia", asset: "TEST-USDT", unit: "token-base", decimals: 6 }) }), null);
+    expect(storedPaymentLine(t, "Requested 1234.5 TEST-USDT", true)).toBe(known);
+  });
+
+  it("keeps every digit written, trailing zeros included", async () => {
+    expect(await said("pt", "Requested 1.50 TEST-USDT")).toBe("⚡ Você pediu 1,50 TEST-USDT");
+    expect(await said("en", "123456789012.123456789012345678 WETH", false)).toBe("⚡ Sent you 123,456,789,012.123456789012345678 WETH");
+    expect(await said("pt", "123456789012.123456789012345678 WETH", false)).toBe("⚡ Enviou para você 123.456.789.012,123456789012345678 WETH");
+  });
+
+  it("leaves an amount the engine did not write this way as it is", async () => {
+    expect(await said("pt", "Requested 1,500.5 TEST-USDT")).toBe("⚡ Você pediu 1,500.5 TEST-USDT");
+    expect(await said("pt", "Requested 1.5.2 TEST-USDT")).toBe("⚡ Você pediu 1.5.2 TEST-USDT");
+  });
 });
 
 describe("what the bubble says", () => {
