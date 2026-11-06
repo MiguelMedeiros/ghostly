@@ -348,8 +348,9 @@ async function showWake(profile: string, body: string | undefined, appVisible: b
     return true;
   }
   const options = { body: notice.body, tag: notice.tag, data: notice.data, icon: "/icon-192.png", badge: "/icon-192.png", requireInteraction: notice.call };
-  // A device asking for a handoff may ask again soon (its own limit is one per 30 s): it is counted like a call.
-  if (!(await takeWakeSlot(profile, wake.token, notice.call || wake.kind === "device", now))) {
+  // A device asking for a handoff may ask again soon (its own limit is one per 30 s): it is counted like a call. An
+  // online notice has its own count (one per 30 minutes), apart from messages and calls.
+  if (!(await takeWakeSlot(profile, wake.token, wake.kind === "online" ? "online" : notice.call || wake.kind === "device", now))) {
     // Too soon after this token's last one (`WAKE_NOTICE_GAP_MS`): no new notice and no sound. The one still on
     // screen is shown again, silently; a dismissed one stays gone.
     const [shown] = await worker.registration.getNotifications({ tag: notice.tag });

@@ -5,6 +5,8 @@ import { databaseName } from "@ghostly/browser/shared/idb";
 import { activeProfileId } from "./profiles";
 import { MUTE_EVENT, chatOfLink, groupChat, mutedUntil } from "./chatMute";
 import { groupPath } from "./groups";
+import { contactName } from "./identities";
+import { chatNamesForPeer } from "./storage";
 import { chatPath } from "./url";
 import { useEngineValue } from "./engineState";
 
@@ -21,11 +23,12 @@ export interface PushKeys {
   auth: string;
 }
 
-/** A row of the push worker's table: which chat a token names, and its mute. */
+/** A row of the push worker's table: which chat a token names, its mute, and a 1:1 chat's name (for an online notice). */
 export interface WakeTableEntry {
   token: string;
   path: string;
   mutedUntil?: number | "forever";
+  name?: string;
 }
 
 /**
@@ -36,6 +39,9 @@ export interface WakeWords {
   title: string;
   body: string;
   call?: string;
+  /** "{name} is online", with `{name}` left for the worker to fill, and the words without a name. */
+  online?: string;
+  onlineUnnamed?: string;
   standby?: string;
   standbyCall?: string;
   standbyUnnamed?: string;
@@ -134,6 +140,20 @@ export function useWakeOn(): boolean {
 /** Whether this device is woken now, as the engine has it (`useWakeOn`, read once). */
 export function wakeIsOn(): boolean {
   return !!engine.state?.settings.wake && engine.state.wakeOwner !== "away";
+}
+
+/**
+ * "Notify me when a contact comes online" (revision 2026-10-27): whether this profile shares a subscription at all
+ * (`shared`, this device's or another's), and whether contacts are asked for an online notice (`on`, the default).
+ * Drawn again only when one of the two changes.
+ */
+export function useWakeOnline(): { shared: boolean; on: boolean } {
+  return useEngineValue((state) => ({ shared: !!state?.settings.wake, on: state?.settings.wakeOnline !== false }));
+}
+
+/** Asks contacts for online notices, or stops asking: each live one is told now, the others on their next session. */
+export async function setWakeOnline(on: boolean): Promise<void> {
+  await engine.call("setWakeOnline", { on });
 }
 
 /**
@@ -262,7 +282,9 @@ export function useWakeTableSync(text: WakeWords): void {
           // A muted chat is not woken at all: its contact is told to forget the subscription (the worker checks too).
           if (!!link.wakeMuted !== (until !== undefined)) void engine.call("setWakeMuted", { linkId: link.id, muted: until !== undefined }).catch(() => {});
           if (!link.wakeToken) continue;
-          entries.push({ token: link.wakeToken, path: chatPath(chat), ...(until !== undefined && { mutedUntil: until }) });
+          // The name this app shows for the chat: an online notice says it, since the push names nobody.
+          const name = contactName(chatNamesForPeer(link.peerPubKeyZ32))?.trim();
+          entries.push({ token: link.wakeToken, path: chatPath(chat), ...(until !== undefined && { mutedUntil: until }), ...(name && { name }) });
         }
         // Private groups (WISP 902 · Group Mesh § Wake-up push): a token per member, all opening the group; muted, none.
         for (const group of groups ?? []) {

@@ -4,10 +4,10 @@ import { generateVapidKeys } from "@ghostly/core";
 import { groupChat, setChatMute } from "../../lib/chatMute";
 import { saveSession } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
-import { pushPlatform, rotateWake, setPushPlatform, setWake, useStandbyPush, useWakeOn, useWakeTableSync, type PushPlatform } from "../../lib/wakePush";
+import { pushPlatform, rotateWake, setPushPlatform, setWake, setWakeOnline, useStandbyPush, useWakeOn, useWakeOnline, useWakeTableSync, type PushPlatform } from "../../lib/wakePush";
 import { engineState, fakeEngine, linkView } from "../fakeEngine";
 
-// covers: push.wake.notify, push.wake.mute, push.wake.group, devices.push, devices.push.renew
+// covers: push.wake.notify, push.wake.mute, push.wake.group, push.wake.online, devices.push, devices.push.renew
 
 const keys = { endpoint: "https://fcm.googleapis.com/fcm/send/x", p256dh: "p", auth: "a" };
 type Fake = PushPlatform & { [K in keyof PushPlatform]: PushPlatform[K] & ReturnType<typeof vi.fn> };
@@ -106,6 +106,44 @@ describe("the push worker's table", () => {
     await waitFor(() => expect(platform.syncTable.mock.lastCall![1]).toEqual([
       { token: "tokenaaaaaaaaaaaaaaaaa", path: "/chat/chata" }, { token: "tokenbbbbbbbbbbbbbbbbb", path: "/chat/chatb" },
     ]));
+  });
+
+  it("holds the name this app shows for each 1:1 chat, for the online notice; none it does not know", async () => {
+    const platform = fakePlatform();
+    setPushPlatform(platform);
+    const named = (id: string, peer: string, names: { label?: string; nick?: string }) =>
+      saveSession({ id, mySeedB64: "s", peerPubKeyB64: peer, encKeyB64: "e", createdAt: 1, messages: [], ...names } as unknown as ChatSession);
+    named("chatl", "peer-l", { label: " Ana ", nick: "ana_bot" });
+    named("chatn", "peer-n", { nick: "Bo" });
+    session("chatu", "peer-u");
+    fakeEngine.setState(engineState({
+      settings: { online: true, nick: "Ghost", relays: [], iceServers: [], mints: [], mintsInitialized: true, wake: { ...keys, vapid: generateVapidKeys() } },
+      links: [
+        linkView({ id: "l-l", peerPubKeyZ32: "peer-l", wakeToken: "tokenlllllllllllllllll" }),
+        linkView({ id: "l-n", peerPubKeyZ32: "peer-n", wakeToken: "tokennnnnnnnnnnnnnnnnn" }),
+        linkView({ id: "l-u", peerPubKeyZ32: "peer-u", wakeToken: "tokenuuuuuuuuuuuuuuuuu" }),
+      ],
+    }));
+    const words = { title: "Ghostly", body: "New message", online: "{name} is online", onlineUnnamed: "A contact is online" };
+    renderHook(() => useWakeTableSync(words));
+    await waitFor(() => expect(platform.syncTable).toHaveBeenCalled());
+    expect(platform.syncTable).toHaveBeenLastCalledWith("", [
+      { token: "tokenlllllllllllllllll", path: "/chat/chatl", name: "Ana" },
+      { token: "tokennnnnnnnnnnnnnnnnn", path: "/chat/chatn", name: "Bo" },
+      { token: "tokenuuuuuuuuuuuuuuuuu", path: "/chat/chatu" },
+    ], { ...words, db: "ghostly" });
+  });
+
+  it("the online switch asks the engine, and reads its setting: on unless turned off", async () => {
+    fakeEngine.on("setWakeOnline", () => undefined);
+    await setWakeOnline(false);
+    expect(fakeEngine.callsTo("setWakeOnline")).toEqual([{ on: false }]);
+    const settings = { online: true, nick: "Ghost", relays: [], iceServers: [], mints: [], mintsInitialized: true };
+    fakeEngine.setState(engineState({ settings }));
+    const { result } = renderHook(() => useWakeOnline());
+    expect(result.current).toEqual({ shared: false, on: true });
+    await act(async () => { fakeEngine.setState(engineState({ settings: { ...settings, wake: { ...keys, vapid: generateVapidKeys() }, wakeOnline: false } })); });
+    expect(result.current).toEqual({ shared: true, on: false });
   });
 
   it("is written when what it holds changes, not at every state the engine builds", async () => {

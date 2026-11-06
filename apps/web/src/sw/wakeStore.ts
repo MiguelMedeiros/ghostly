@@ -1,7 +1,8 @@
 /*
  * What the push worker needs to know to show a wake-up (WISP 401 § Wake-up push), written by the app's page:
  * which chat each per-contact token names, whether that chat is muted, and the words to show. IndexedDB, since
- * a worker cannot read the page's localStorage. It holds no key and no message: a token, a route and a time.
+ * a worker cannot read the page's localStorage. It holds no key and no message: a token, a route, a time, and a 1:1
+ * chat's name for its online notice (a name the profile's own database holds already).
  */
 
 export interface WakeEntry {
@@ -10,6 +11,8 @@ export interface WakeEntry {
   path: string;
   /** Muted until then (ms since the epoch), or for good; absent when it is not muted. */
   mutedUntil?: number | "forever";
+  /** A 1:1 chat's name as this app shows it: what an online notice says ("Ana is online"). The push never names anyone. */
+  name?: string;
 }
 
 export interface WakeText {
@@ -17,6 +20,9 @@ export interface WakeText {
   body: string;
   /** What a call wake-up says ("Incoming call"), in the app's language. */
   call?: string;
+  /** What an online notice says, with `{name}` where the chat's name goes ("{name} is online"), and without a name. */
+  online?: string;
+  onlineUnnamed?: string;
   /**
    * In a profile on several devices (WISP 06 § Push and the phone), the words of a device that is not the active one,
    * with `{device}` where a device's name goes: a message ("New message. Active on {device}."), a call, the same without

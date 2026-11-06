@@ -165,6 +165,7 @@ export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
   setWakeSubscription: "{ subscription }",
   wakeConfirm: "{ endpoint }",
   setWakeMuted: "{ linkId, muted }",
+  setWakeOnline: "{ on }",
   wakeForCall: "{ linkId }",
   setCallOn: "{ on }",
   setFastPoll: "{ linkId, fast }",
