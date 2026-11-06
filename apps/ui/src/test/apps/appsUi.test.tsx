@@ -392,6 +392,30 @@ describe("with the apps flag on", () => {
     expect(onStoreAdded).toHaveBeenCalledTimes(1);
   });
 
+  it("while Add store runs, the link can be neither edited nor checked again: the question and its Cancel stay as they were", async () => {
+    const LINK = "https://raw.githubusercontent.com/ana/store/HEAD/ghostly-store.json";
+    let finish: () => void = () => {};
+    fakeEngine.on("appStorePreview", ({ url }) => ({ url, key: "k", name: "Ana's store", kind: "curated", sequence: 1, apps: 1, fingerprint: "abcd efgh", expires: 9e9, expired: false }))
+      .on("appStoreAdd", () => new Promise<AppStoreSummary>((resolve) => { finish = () => resolve({} as AppStoreSummary); }));
+    const onClose = vi.fn(), onStoreAdded = vi.fn();
+    const { user } = renderApp(<AddAppDialog onClose={onClose} onStoreAdded={onStoreAdded} />);
+    const field = screen.getByTestId("apps-add-url");
+    await user.type(field, LINK);
+    await user.click(screen.getByTestId("apps-add-check"));
+    await user.click(within(await screen.findByTestId("apps-add-store")).getByTestId("apps-add-store-confirm"));
+    // An edit dropped the question and the busy state with it: Cancel and Escape then closed Add while the store was added.
+    await user.type(field, "x");
+    await user.type(field, "{Enter}");
+    expect(field).toHaveValue(LINK);
+    expect(fakeEngine.callsTo("appStorePreview")).toHaveLength(1);
+    expect(within(screen.getByTestId("apps-add-store")).getByRole("button", { name: "Cancel" })).toBeDisabled();
+    await user.keyboard("{Escape}");
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => finish());
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(onStoreAdded).toHaveBeenCalledTimes(1);
+  });
+
   it("names a contact with no name as the chat does, not Anonymous, on the card and its install screen", async () => {
     fakeEngine.on("appList", () => []).on("appPreview", () => preview());
     // The chat of a contact with no name passes none (Chat.tsx), and calls them "Contact · <the start of their key>".
