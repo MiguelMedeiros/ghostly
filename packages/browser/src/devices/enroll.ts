@@ -154,8 +154,11 @@ interface Shared {
   /** Seconds and milliseconds since 1970: the code's expiry is in seconds. */
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
-  /** Runs after this device's record was written with the device set: the network settings go in, and the links start. */
-  afterWrite?: () => Promise<void>;
+  /**
+   * Runs after this device's record was written with the device set: the network settings go in, and the links start.
+   * `added`: on the inviter, the signing key (base64url) of the device it just added.
+   */
+  afterWrite?: (added?: string) => Promise<void>;
   /** A view changed. */
   onChange?: (view: EnrollView) => void;
   /** A stored seed in place of a non-extractable key (tests). */
@@ -463,7 +466,7 @@ export class EnrollInviter extends Enrollment {
     }
     this.crash("inviter:after-put");
     const published = await confirmPublished(keeper, this.sleep);
-    await this.options.afterWrite?.().catch(() => {});
+    await this.options.afterWrite?.(toBase64Url(joiner.key)).catch(() => {});
     await this.end({ role: "inviter", step: "done", device: joiner.name, published });
   }
 }

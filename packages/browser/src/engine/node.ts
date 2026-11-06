@@ -7283,9 +7283,10 @@ export class GhostlyNode implements EngineImplementation {
    * The active device's links to the other devices, and its stored turn record put again (WISP 06 § Publishing and
    * reading: "The active device puts its stored bytes at start"). This is also what completes an enrollment that a
    * crash stopped after the record with the new device was stored and before it was put. `justRead`: it starts on a good
-   * turn read made a moment before (the read at start, or limited mode's), which counts while it is fresh.
+   * turn read made a moment before (the read at start, or limited mode's), which counts while it is fresh. `added`: the
+   * signing key of a device an enrollment just added, whose link awaits it (`DeviceLinks.expectDevice`).
    */
-  private async startDeviceSet({ justRead = false }: { justRead?: boolean } = {}): Promise<void> {
+  private async startDeviceSet({ justRead = false, added }: { justRead?: boolean; added?: string } = {}): Promise<void> {
     // An enrollment that finished with the network off (past its point of no return): the links wait for it to come back.
     if (this.shuttingDown || !this.networkOn) return;
     // This device's signing key, as its record names it: whose the profile's push subscription is (WISP 06 § Push and the phone).
@@ -7301,9 +7302,13 @@ export class GhostlyNode implements EngineImplementation {
         pushSend: (request) => this.postPush(request),
         onActiveHint: () => void this.readActiveTurn().catch(() => {}),
       });
+      if (added) this.deviceLinks.expectDevice(added);
       await this.deviceLinks.start();
       await this.startHandoff().catch(() => {});
-    } else await this.deviceLinks.refresh();
+    } else {
+      if (added) this.deviceLinks.expectDevice(added);
+      await this.deviceLinks.refresh();
+    }
     // The profile's subscription is this device's own: the record holds it too, so a standby here can still share it.
     if (this.settings.wake?.device && this.settings.wake.device === this.ownDeviceKey) await this.deviceLinks.setOwnPush(this.settings.wake).catch(() => {});
     // This device has a subscription of its own and the profile gives contacts another device's (it came back active
@@ -7597,7 +7602,7 @@ export class GhostlyNode implements EngineImplementation {
       // The new standby reaches the other devices through the person's relays and servers (`devices/network.ts`).
       networkSettings: () => deviceNetworkOf(this.settings),
       // The record now lists the new device: the network settings go into it, and the links start.
-      afterWrite: async () => { await this.syncDeviceNetwork(); await this.startDeviceSet(); },
+      afterWrite: async (added) => { await this.syncDeviceNetwork(); await this.startDeviceSet({ added }); },
       // An enrollment that ended after its grant went out and before the new device said it stored it: that device
       // may hold the secret, so the set moves to a new one (once this enrollment is over). Any end tries it: one that
       // a second Add cancelled was refused while that one ran, and is due once it is over, done included.
