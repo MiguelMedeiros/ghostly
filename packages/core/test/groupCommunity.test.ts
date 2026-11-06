@@ -1172,8 +1172,8 @@ describe("a leave ends one admission", { timeout: 60_000 }, () => {
     const { net, alice, bob, carol, first } = await rejoined();
     const key = carol.session.myKey;
     expect(first.ls3).toBeDefined();
-    // Alice still holds the request Bob committed: it is not one for this admission, and she commits nothing.
-    expect(alice.session.state.pendingLeaves.map(r => r.s)).toEqual([key]);
+    // Alice dropped the request Bob committed once his commit took Carol out, and commits nothing.
+    expect(alice.session.state.pendingLeaves).toEqual([]);
     expect(await alice.session.commitPendingLeaves()).toBe(0);
     expect(alice.session.state.pendingLeaves).toEqual([]);
     // As a request, with and without the statement of the admission it ended: no member keeps it.

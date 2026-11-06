@@ -1353,6 +1353,10 @@ export class CommunitySession {
     if (this.state.status === "lost" && rosterHas(this.roster, this.myKey)) { this.state.status = "active"; delete this.state.statusReason; }
     this.followEntry();
     this.pruneSide();
+    // A held request goes once the branch I follow takes its member out (its leave or a removal), as committing it drops
+    // it on a hub: a member who never commits kept up to 64 for members long gone, and handed them on in every sync answer.
+    // One a lost fork drops is held again from the dropped commit (`holdDroppedLeaves`).
+    this.state.pendingLeaves = this.state.pendingLeaves.filter(r => rosterHas(this.roster, r.s));
     // Saved at once only when my place in the group changed (removed, left, lost, back in); otherwise within a second, as
     // messages are. Each commit of a catch-up saved the whole state: 1,000 commits were 1,051 whole-record writes, 241 MB
     // of journal on the CLI store (agents#1767). A save lost to a crash is asked again at the next sync: the commits are on
@@ -2620,8 +2624,8 @@ export class CommunitySession {
     if (unheard.size !== (this.state.unheard?.length ?? 0)) { this.state.unheard = [...unheard]; this.persistSoon(); }
     // The link's seed, so they can answer it too.
     if (rosterHas(this.roster, from)) { const entry = this.entryFrame(from); if (entry) answer.push(entry); }
-    // Pending leaves travel too, so whoever commits next can.
-    for (const request of this.state.pendingLeaves) answer.push({ t: "group-leave", v: 2, g: this.id, ...request });
+    // Pending leaves travel too, so whoever commits next can: those of members still in (a receiver drops the others).
+    for (const request of this.state.pendingLeaves) if (rosterHas(this.roster, request.s)) answer.push({ t: "group-leave", v: 2, g: this.id, ...request });
     // Or here, those after every message.
     answer.push(...metas.map(m => m.frame));
     // And where I am, so they can hand me what I lack (asked once in a while, not in a loop).
