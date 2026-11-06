@@ -243,6 +243,22 @@ function guardProtocol(protocol, drop) {
   }
 }
 
+/**
+ * protomux hands every error a client's messages raise (one it cannot decode, a throw in dht-relay's handler for it) to
+ * safety-catch, which throws a TypeError or a RangeError again where nothing catches it: one client's message would end
+ * the process and every client with it. The client's own mux now drops that client only.
+ */
+function guardMux(mux, drop) {
+  const fail = error => {
+    drop('protocol error')
+    mux._destroying = true
+    mux.stream.destroy(error)
+  }
+  mux._safeDestroy = fail
+  mux._safeDestroyBound = fail
+  mux._warn = error => mux.stream.emit('warning', error)
+}
+
 // Not in the package's exports: loaded by path, the same module dht-relay itself uses (0.4.3 is pinned).
 const { HandshakeProxy } = require(join(dirname(require.resolve('@hyperswarm/dht-relay')), 'lib', 'handshake-proxy.js'))
 
@@ -289,15 +305,22 @@ const roundTrip = original => function (payload) {
     return Promise.reject(new Error('Too many handshakes'))
   }
   handshakes.set(this._id, this)
+  // Out of the map as the answer comes (or the wait ends), not once the race settles a few microtasks later: dht-relay
+  // hands every answer with this id to a handshake in the map, and the same answer twice in one batch from the client
+  // reached a handshake whose answer slot the first had emptied.
+  const forget = () => { if (handshakes.get(this._id) === this) handshakes.delete(this._id) }
+  const answer = original.call(this, payload)
+  const onAnswer = this._onNoiseReply
+  this._onNoiseReply = message => { forget(); onAnswer(message) }
   let timer
   return Promise.race([
-    original.call(this, payload),
+    answer,
     new Promise((_, reject) => {
-      timer = setTimeout(() => { this._onNoiseReply = null; reject(new Error('No handshake answer')) }, limits.handshakeMs)
+      timer = setTimeout(() => { forget(); this._onNoiseReply = null; reject(new Error('No handshake answer')) }, limits.handshakeMs)
     }),
   ]).finally(() => {
     clearTimeout(timer)
-    if (handshakes.get(this._id) === this) handshakes.delete(this._id)
+    forget()
   })
 }
 HandshakeProxy.prototype.send = roundTrip(HandshakeProxy.prototype.send)
@@ -601,7 +624,12 @@ export async function startRelay(options = {}) {
       else holdQueued(ws)
       cb(null)
     }
-    void relay(clientDht(dht, limits, drop, gone, refusals.line), stream).then(node => {
+    // protomux keeps itself on a stream whose userData is null (a WsStream has none), and relay() makes the client's
+    // mux at once: guardMux gets it there.
+    stream.userData = null
+    const session = relay(clientDht(dht, limits, drop, gone, refusals.line), stream)
+    guardMux(stream.userData, drop)
+    void session.then(node => {
       guardProtocol(node._protocol, drop)
       bound(node, limits, gone, refusals.line)
       nodes.add(node)
