@@ -1490,10 +1490,12 @@ export class CashuWallet {
             await this.putSwap(swap);
           }
           let outcome = await this.swapOutcome(swap);
-          this.swapAsk.forget(id);
           // A redeem whose token the mint reads unspent, with nothing signed, never happened however long the app was
           // closed, and still can: sent again below, never let go while the token is good (only the mint's word ends it).
           if (outcome.state === "never" && !outcome.final && swap.kind === "receive" && !swap.released) outcome = { state: "open", idle: true };
+          // The mint answered. A redeem sent again below keeps its pace until the mint takes it: a mint that reads the
+          // token but never takes the swap is not sent it every 30 s for as long as the token is good.
+          if (!(outcome.state === "open" && outcome.idle && swap.kind === "receive" && !swap.released)) this.swapAsk.forget(id);
           if (outcome.state === "open") {
             // Its inputs went back, and an hour on the mint still cannot say more: nothing of it is held here.
             if (swap.released && Date.now() >= swap.createdAt + SWAP_WATCH_MS) { await this.dropSwap(swap, new Set()); return; }
@@ -1510,6 +1512,7 @@ export class CashuWallet {
               const { deserializeSwapPreview } = await loadCashu();
               try {
                 const { keep } = await (await this.wallet(mint)).completeSwap(deserializeSwapPreview(swapOf(swap)));
+                this.swapAsk.forget(id);
                 if (await this.finishSwap(swap, keep, [], true)) {
                   const told = await this.tellSwap(swap, true);
                   if (swap.payment && told) await committed((await store(STORES.swaps, "readwrite")).delete(swap.id));
@@ -1534,7 +1537,10 @@ export class CashuWallet {
                   await this.dropSwap(swap, refusal.gone);
                   await this.tellSwap(swap, false);
                   this.events.onChange();
-                } else later(SWAP_POLL_MS);
+                }
+                // Not taken, and the mint did not refuse it: from 30 s, twice as late each time (each send moves when
+                // it is overdue, so that cannot pace it).
+                else later(this.swapAsk.missed(id, Date.now()));
               }
             } else if (outcome.pending && swap.kind === "receive" && !swap.released && Date.now() >= swapOverdueAt(swap)) {
               // No request of it can reach the mint any more, and its sender's ecash is still held by a payment of

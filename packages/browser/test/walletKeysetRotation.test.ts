@@ -371,6 +371,36 @@ describe("ecash received around a keyset rotation", () => {
     expect(await all<PendingSwap>(STORES.swaps)).toEqual([]);
   });
 
+  it("a waiting redeem whose mint reads the token but never takes the swap is kept, and sent less and less often", async () => {
+    const { token } = await wallet.createToken(13);
+    mint.held.add("/v1/swap");
+    await chat(wallet).pay(token);
+    await wallet.stop();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      const next = reopened();
+      wallet = next.wallet;
+      const before = mint.calls.length;
+      wallet.start();
+      // Two hours of a mint that answers what it signed and what is spent, and drops every swap.
+      for (let second = 0; second < 7_200; second++) await vi.advanceTimersByTimeAsync(1_000);
+      const sent = mint.calls.slice(before).filter((path) => path === "/v1/swap").length;
+      expect(await all<PendingSwap>(STORES.swaps), "the token is still good: never let go").toHaveLength(1);
+      expect(next.results).toEqual([]);
+      // Every 30 s for the first minutes, then twice as late each time, up to every 10 min: about 17. Before, every 30 s: 240.
+      expect(sent).toBeLessThanOrEqual(20);
+      expect(mint.unspent(token)).toBe(true);
+      // The mint takes swaps again: the redeem goes through within its 10 min pace, and the contact is told.
+      mint.held.clear();
+      for (let second = 0; second < 600 && next.results.length === 0; second++) await vi.advanceTimersByTimeAsync(1_000);
+      expect(next.results).toEqual([{ id: "pay1", ok: true, credited: "13" }]);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(await balance()).toBe(100);
+    expect(await all<PendingSwap>(STORES.swaps)).toEqual([]);
+  });
+
   it("ecash its sender spent before it arrived is refused as spent, never in cashu-ts' words", async () => {
     const { token } = await wallet.createToken(13);
     mint.rotate();
