@@ -81,7 +81,7 @@ tools, run Ghostly as an OS user of its own ([threat model](https://ghostly.tool
 | `--profile <name>` or `GHOSTLY_PROFILE` | Run one command on another profile |
 | `--home <dir>` or `GHOSTLY_HOME` | Move the whole `~/.ghostly` folder |
 | `profile set --name <name>`, `profile picture <jpeg>` | What contacts see |
-| `profile backup --out <file>`, `profile restore <file> <name>` | A backup of the headless profile, encrypted with a passphrase (`--no-passphrase`: not encrypted, by explicit choice) |
+| `profile backup --out <file>`, `profile restore <file> <name>` | A backup of the headless profile, encrypted with a passphrase (`--no-passphrase`: not encrypted, by explicit choice); the `group auto` and `call auto` settings travel with it |
 
 Only one process opens a profile at a time.
 
@@ -342,8 +342,8 @@ ghostly listen --type message.received --cursor "${GHOSTLY_HOME:-$HOME/.ghostly}
   that came while it was down; any other invitation waits for `group accept` as before. `group auto` alone prints the
   setting, `group list` shows it as `autoJoin`, `group auto off` turns it off. There is no "from anyone": `on` needs a
   chat, named as for `call auto on --from` (its id, its contact's key or a label given here). It is kept in the
-  profile's `groups.json` (0600) with each chat's contact key: removing the chat takes it off the list, and a chat
-  whose contact's key is no longer that one loses it. Each accept is a line in the daemon's log (the group's id and
+  profile's `groups.json` (0600) with each chat's contact key, and a `profile backup` carries it to the restored copy:
+  removing the chat takes it off the list, and a chat whose contact's key is no longer that one loses it. Each accept is a line in the daemon's log (the group's id and
   the chat). A profile keeps at most 32 invitations waiting (4 per chat): when 32 wait, one over a chat on the list
   takes the place of the oldest waiting from the chat that holds the most, whose inviter is told no, so the invitations
   nobody answers on a bot cannot keep its owner's out.
