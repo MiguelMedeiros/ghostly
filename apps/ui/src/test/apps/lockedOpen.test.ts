@@ -11,7 +11,7 @@ import type { AppEntry } from "../../lib/platform";
 // needs-files app's bundle downloading), Rust's `app_open`, the web runner's check. Nothing is registered yet, so the
 // lock stops nothing: the opener must not start the app once its waits end.
 let runnerHeld: Promise<void> = Promise.resolve();
-vi.mock("../../lib/apps/runnerCheck", () => ({ runnerAvailable: vi.fn(async () => { await runnerHeld; return true; }), runnerPolicy: vi.fn(async () => true), forgetRunnerCheck: () => {}, isRunnerPolicy: () => true }));
+vi.mock("../../lib/apps/runnerCheck", () => ({ runnerAvailable: vi.fn(async () => true), runnerPolicy: vi.fn(async () => { await runnerHeld; return true; }), forgetRunnerCheck: () => {}, isRunnerPolicy: () => true }));
 const started: string[] = [];
 vi.mock("../../lib/apps/broker", async (actual) => ({
   ...(await actual<typeof import("../../lib/apps/broker")>()),
@@ -117,10 +117,10 @@ describe("an app opened just before the profile locks (web)", () => {
   it("locked while the runner is checked: it never starts", async () => {
     const runner = held();
     runnerHeld = runner.promise;
-    const { runnerAvailable } = await import("../../lib/apps/runnerCheck");
-    vi.mocked(runnerAvailable).mockClear();
+    const { runnerPolicy } = await import("../../lib/apps/runnerCheck");
+    vi.mocked(runnerPolicy).mockClear();
     const opening = web()(REF, null);
-    await vi.waitFor(() => expect(runnerAvailable).toHaveBeenCalled());
+    await vi.waitFor(() => expect(runnerPolicy).toHaveBeenCalled());
     stopRunningApps();
     runner.release();
     await expect(opening).rejects.toThrow();
