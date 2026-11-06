@@ -1,6 +1,6 @@
 import {
   DEVICES_CAPABILITY, HANDOFF_CAPABILITY, GhostLink, RTC_CONFIG, SET_ACK, SET_UPDATE, checkPushEndpoint, vapidKeysMatch, createIdentity, deviceEchoFrame, deviceEchoNonce, deviceLinkPairing, devicePingFrame,
-  fromBase64Url, setAckFrame, type DeviceFrame, type NativeEndpoint, type NativeTransport, type PairedTransport, type PkarrTransport, type PollIntervals, type PushRequest, type TurnNetwork,
+  fromBase64Url, readSetUpdate, setAckFrame, toBase64Url, type DeviceFrame, type NativeEndpoint, type NativeTransport, type PairedTransport, type PkarrTransport, type PollIntervals, type PushRequest, type TurnNetwork,
   type WakeTarget,
 } from "@ghostly/core";
 import { DEVICE_RENEW_FRAME, DEVICE_TOKENS_FRAME, DEVICE_WAKE_FRAME, DeviceWaker, deviceWakeFrame, otherTarget, ownTargetFor, postPush, pushForSet, readDeviceTokens, readDeviceWake, withAllowed, withOtherPush, withOwnPush, withRenew } from "./push";
@@ -49,7 +49,8 @@ export interface DeviceHandoffHandler {
  * Which links a device holds follows from its record alone, and is brought in line by `refresh()`:
  * - under the current `D`, one to every other device the set lists;
  * - under the `D` of an earlier set, one to each staying device that has not acknowledged the move yet (the list
- *   kept for it), so the new secret can reach it over the old link;
+ *   kept for it), so the new secret can reach it over the old link: the link under the secret it holds, never one
+ *   per set it missed;
  * - none for a `removed` device, and none for a `single` profile: no record, no key read, nothing asked of a relay.
  * A link whose `D` or device is no longer in the record is closed. So a device that no longer holds the current `D`
  * derives none of the links the others hold, and loses the ones it had as soon as they move.
@@ -458,15 +459,23 @@ export class DeviceLinks implements DeviceLinkEngine {
     record.deviceSet.forEach((slot, index) => {
       if (slot && index !== identity.ownSlot && slot.key !== own) wanted.push({ id: `${record.d}|${slot.key}`, d: identity.d, key: slot.key, name: slot.name, slot: index, earlier: false });
     });
-    // An earlier set's secret reaches the devices that stay over the links of that set, until each acknowledged it.
-    for (const earlier of record.earlierSets) {
-      for (const key of earlier.pending) {
-        if (key === own || earlier.d === record.d) continue;
-        // Only a device that stays: a key the current set no longer lists gets no link, whatever the list says.
-        const staying = record.deviceSet.find((slot) => slot?.key === key);
-        if (!staying) continue;
-        // One link per old secret and device: two sets that both wait for it share none.
-        if (!wanted.some((w) => w.id === `${earlier.d}|${key}`)) wanted.push({ id: `${earlier.d}|${key}`, d: fromBase64Url(earlier.d), key, name: staying.name, earlier: true });
+    // An earlier set's secret reaches the devices that stay over the links of that set, until each acknowledged it. Only
+    // a device that stays: a key the current set no longer lists gets no link, whatever the list says. A device off
+    // across several moves holds one secret, the oldest set still waiting for it: that set's link is the one it opens.
+    // The set's frame names the secret it takes from there, and only that set's link follows: the newest one (a frame
+    // this device signed again, `remove.ts`), which the current link covers, or the next set (one another device
+    // signed). A link under any other set is under a secret that device never got, and could never open.
+    const pendingFor = (key: string, d?: string) => record.earlierSets.find((set) => set.d !== record.d && (d === undefined || set.d === d) && set.pending.includes(key));
+    for (const staying of record.deviceSet) {
+      if (!staying || staying.key === own) continue;
+      const key = staying.key;
+      for (let set = pendingFor(key); set;) {
+        const id = `${set.d}|${key}`;
+        if (wanted.some((w) => w.id === id)) break;
+        wanted.push({ id, d: fromBase64Url(set.d), key, name: staying.name, earlier: true });
+        let next: string | undefined;
+        try { const update = readSetUpdate(JSON.parse(set.setUpdate) as DeviceFrame); if (update) next = toBase64Url(update.d); } catch { /* none */ }
+        set = next === undefined ? undefined : pendingFor(key, next);
       }
     }
     return wanted;
