@@ -6,10 +6,10 @@ import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
 import { usePlatformValue } from "../hooks/useServicesPlatform";
 import { servicesPlatform } from "../lib/platform";
-import { knownChatKeys } from "../lib/storage";
+import { knownChatKeys, ownsKey } from "../lib/storage";
 import { type ColorScheme } from "../lib/settings";
 import { ColorSwatches } from "../components/ColorSwatches";
-import { baseProfileName, clearRestoredMark, createProfile, currentProfile, fitsProfileName, listProfiles, renameProfile, switchProfile, type ProfileEntry } from "../lib/profiles";
+import { baseProfileName, clearRestoredMark, createProfile, currentProfile, fitsProfileName, listProfiles, registryKey, renameProfile, settingsKeyFor, switchProfile, type ProfileEntry } from "../lib/profiles";
 import { askNameIn } from "../lib/nameStep";
 import { Block, Button, Notice, Row, Section, Segmented, Switch, input } from "../components/wallet/ui";
 import { ProfileBackups } from "../components/ProfileBackups";
@@ -30,13 +30,25 @@ import { useFocusLanding } from "../hooks/useFocusLanding";
 import { openJoinAnother } from "../lib/devices";
 import { problemText, type Problem } from "../lib/problemText";
 
+/**
+ * Another tab's write the page shows: the registry, a profile's settings (its colour in the list), this profile's own
+ * keys, or the storage cleared. Not another profile's chats: its tab stores them a few times per text it gets.
+ */
+const showsKey = (key: string | null) =>
+  key === null || key === registryKey() || ownsKey(key) || listProfiles().some((entry) => key === settingsKeyFor(entry.id));
+
 /** Profiles change outside React (another component, another tab); re-read them when they do. */
 function useProfiles() {
   const [, bump] = useState(0);
   useEffect(() => {
     const changed = () => bump((n) => n + 1);
-    for (const name of ["profiles-updated", "settings-updated", "storage"]) window.addEventListener(name, changed);
-    return () => { for (const name of ["profiles-updated", "settings-updated", "storage"]) window.removeEventListener(name, changed); };
+    const stored = (event: StorageEvent) => { if (showsKey(event.key)) changed(); };
+    for (const name of ["profiles-updated", "settings-updated"]) window.addEventListener(name, changed);
+    window.addEventListener("storage", stored);
+    return () => {
+      for (const name of ["profiles-updated", "settings-updated"]) window.removeEventListener(name, changed);
+      window.removeEventListener("storage", stored);
+    };
   }, []);
   return { current: currentProfile(), all: listProfiles() };
 }
