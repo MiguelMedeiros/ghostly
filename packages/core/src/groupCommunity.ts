@@ -1032,7 +1032,9 @@ export class CommunitySession {
    * and is never kept (WISP 903), so a member who was away counted it missing until the commit changed.
    */
   missing(sender: string): number {
-    this.settleGaps();
+    // Only the answers now over: the members view asks once per member, and `settleGaps`'s prune walks every author
+    // (the engine's tick runs it).
+    this.settleAnswers();
     const key = seenKey(this.epoch, shortHash(this.topHash));
     const entry = this.state.seen[sender]?.[key];
     if (!entry) return 0;
@@ -1046,6 +1048,18 @@ export class CommunitySession {
    * held by nobody. Returns whether some became gone (the members view changes). A sync nobody answered settles nothing.
    */
   settleGaps(): boolean {
+    const changed = this.settleAnswers();
+    // Only for authors and commits still seen: the rest is pruned with them.
+    for (const [sender, byKey] of Object.entries(this.gapsGone)) {
+      for (const key of Object.keys(byKey)) if (!this.state.seen[sender]?.[key]) delete byKey[key];
+      if (!Object.keys(byKey).length) delete this.gapsGone[sender];
+    }
+    return changed;
+  }
+
+  /** The gaps of the answers now over (`settleGaps`), without the prune. */
+  private settleAnswers(): boolean {
+    if (!this.answerOf.size) return false;
     const now = this.hooks.clock?.() ?? Date.now();
     let changed = false;
     for (const [from, answer] of this.answerOf) {
@@ -1057,11 +1071,6 @@ export class CommunitySession {
         (this.gapsGone[sender] ??= {})[key] = upTo;
         changed = true;
       }
-    }
-    // Only for authors and commits still seen: the rest is pruned with them.
-    for (const [sender, byKey] of Object.entries(this.gapsGone)) {
-      for (const key of Object.keys(byKey)) if (!this.state.seen[sender]?.[key]) delete byKey[key];
-      if (!Object.keys(byKey).length) delete this.gapsGone[sender];
     }
     return changed;
   }

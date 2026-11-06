@@ -131,6 +131,29 @@ describe("community gaps nobody holds", () => {
     expect(counts).toEqual([1, 1, 1, 0, 0, 0]);
   });
 
+  it("the members view asks missing() of each member without walking every author's gaps each time", async () => {
+    const net = new Net();
+    const alice = net.create(), dave = await net.admit(alice), others: Member[] = [];
+    for (let i = 0; i < 12; i++) others.push(await net.admit(alice));
+    await net.settle();
+    for (const [i, m] of others.entries()) await m.session.sendText(`hi ${i}`, `M${i}`, 1_000 + i);
+    await net.settle();
+    // One finished catch-up: every author in my sync's `have` has its gaps settled.
+    dave.session.catchUp(alice.session.myKey);
+    await net.settle();
+    net.now += 6_000;
+    dave.session.settleGaps();
+    const roster = dave.session.roster.map(([key]) => key);
+    let reads = 0;
+    const seen = dave.session.state.seen;
+    dave.session.state.seen = new Proxy(seen, { get: (target, p, r) => { reads++; return Reflect.get(target, p, r) as unknown; } });
+    const missing = roster.map(key => dave.session.missing(key));
+    dave.session.state.seen = seen;
+    expect(missing.every(n => n === 0)).toBe(true);
+    // One read per member; it was one per author more for each (14 members: 182 reads; 256: about 65,000 for one view).
+    expect(reads).toBeLessThanOrEqual(roster.length);
+  });
+
   it("a sync nobody answered settles nothing", async () => {
     const net = new Net();
     const alice = net.create(), bob = await net.admit(alice), dave = await net.admit(alice);
