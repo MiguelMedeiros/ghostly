@@ -864,6 +864,8 @@ function setting (env, name, fallback, kind) {
   if (kind === 'port') return /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 65535 ? Number(value) : fail('a port from 1 to 65535')
   if (kind === 'count') return /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) ? Number(value) : fail('a whole number of 0 or more')
   if (kind === 'positive') return /^\d+$/.test(value) && Number(value) > 0 && Number.isSafeInteger(Number(value)) ? Number(value) : fail('a whole number above 0')
+  // Node runs a timer past 2^31-1 ms after 1 ms: "about 35 days" would drop every client as it connects.
+  if (kind === 'ms') return /^\d+$/.test(value) && Number(value) > 0 && Number(value) <= TIMER_MAX_MS ? Number(value) : fail(`a whole number above 0, at most ${TIMER_MAX_MS} (about 24 days)`)
   if (kind === 'flag') return value === '1' ? true : value === '0' ? false : fail('1 or 0')
   if (kind === 'text') return value || fail('a value (leave it out for the default)')
   if (kind === 'origins') {
@@ -874,6 +876,8 @@ function setting (env, name, fallback, kind) {
   }
   return value
 }
+
+const TIMER_MAX_MS = 2 ** 31 - 1
 
 const list = value => (value ?? '').split(',').map(item => item.trim()).filter(Boolean)
 
@@ -895,7 +899,7 @@ export const networkOf = ({ testnet, bootstrap }) =>
 export function readSettings (env) {
   const limits = {}
   for (const name of Object.keys(DEFAULT_LIMITS)) {
-    const value = setting(env, limitVariable(name), undefined, 'positive')
+    const value = setting(env, limitVariable(name), undefined, name.endsWith('Ms') ? 'ms' : 'positive')
     if (value !== undefined) limits[name] = value
   }
   const bootstrap = bootstrapSetting(env)

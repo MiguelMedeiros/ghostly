@@ -58,6 +58,9 @@ Past a limit the client is dropped, or its socket is paused (the byte rate), or 
 `streams` is closed, or a handshake past `handshakes` is refused (`refused handshake <why>` in the log). Topic lookups and announcements
 are refused: Ghostly never makes them, and they would make the relay an open crawler.
 
+A time limit (`*_MS`) is at most 2147483647 (about 24 days), the longest a Node timer waits; a longer one stops the
+start, as any other value not of its kind does.
+
 Other settings:
 
 - `GHOSTLY_RELAY_ORIGINS` lists the allowed origins, comma-separated, each as a browser sends it: scheme, host and a
