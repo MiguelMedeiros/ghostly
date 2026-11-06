@@ -3122,6 +3122,8 @@ export class Groups {
         this.files?.arrivedAgain(state.id, id, frame.e);
       },
       edit: e => this.host.groupEdit?.(state.id, e),
+      // My edit of a message older than my hubs goes to them too: they carry it to the members of its epoch (WISP 902 § Hubs).
+      carriers: () => this.hubs.active(state.id, session, this.now()) ? this.hubs.hubs(state.id, session, this.now()) : [],
       changed: () => {
         // Taken out as a hub: my edges stay a moment, for my last act, passing on the commit that says so (WISP 902 § Hubs).
         if (session.status === "removed" && this.hubs.isHub(state.id) && !this.removedAt.has(state.id)) this.removedAt.set(state.id, this.now());
