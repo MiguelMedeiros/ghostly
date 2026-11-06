@@ -653,6 +653,22 @@ export class Communities {
     void this.knock(group, now).catch(() => {});
   }
 
+  /** The link a joiner knocks at was replaced (or turned off): it is told so and stops, until it opens the current link. */
+  private async linkReplaced(group: StoredGroup): Promise<void> {
+    const joining = group.joining!, g = group.id;
+    joining.replaced = true;
+    joining.inviter = "";
+    joining.pieces = [];
+    if (this.knocked.has(g)) void this.unknock({ g, host: joining.host }, this.knockAt.get(g) ?? KNOCK_BELL, joining.seedB64).catch(() => {});
+    this.knocked.delete(g);
+    this.knockAt.delete(g);
+    countWaitingJoin(this.host, g, this.now(), false);
+    traceJoin(g, "join.replaced");
+    await this.store.putGroup(group);
+    await this.host.closeEdge(joining.linkId);
+    this.host.emit();
+  }
+
   /** The joiner's side of the link's entry session, opened again where it is gone (the same key, so the same session). */
   private async reopenEntry(joining: NonNullable<StoredGroup["joining"]>): Promise<void> {
     if ([...this.host.entries(joining.g).values()].includes(joining.linkId)) return;
@@ -954,10 +970,14 @@ export class Communities {
       if (!live) continue;
       if (live.session.status === "lost" && !group.joining) {
         // My admission lost a race: I am nobody's hub and nobody's door any more; I knock again with
-        // the same key, at the link I was let in by, and whoever is there lets me in.
+        // the same key, at the link I was let in by, and whoever is there lets me in. What it lost to replaced that link (or
+        // turned it off): nobody reads knocks there any more, so I am told, as a joiner holding that link is, and ask for
+        // the current one. Not let in through it on my own: the admin replaced the link to keep out whoever holds the old.
         if (live.hub) { live.hub = false; live.leaving = 0; await this.publishBeacon(group.id, live, now, false).catch(() => {}); }
         await this.closeEntries(group.id);
-        await this.startJoining({ g: group.id, host: live.session.lostEntryKey }, live.session.state.seedB64, now);
+        const lostAt = live.session.lostEntryKey;
+        await this.startJoining({ g: group.id, host: lostAt }, live.session.state.seedB64, now);
+        if (lostAt !== live.session.entryKey) await this.linkReplaced(group);
         continue;
       }
       if (live.session.status !== "active") {
@@ -2042,20 +2062,7 @@ export class Communities {
         if (this.stored.get(g) !== group || group.joining !== joining || joining.linkId !== linkId || joining.inviter !== inviter) return;
         // The link was replaced (or turned off) while this entry was open: knocking at it again lets nobody in, so the
         // joiner is told and stops, until it opens the current link. A member checking it still is waits as before.
-        if ("error" in joined && joined.error === LINK_REPLACED && !joining.check) {
-          joining.replaced = true;
-          joining.inviter = "";
-          joining.pieces = [];
-          if (this.knocked.has(g)) void this.unknock({ g, host: joining.host }, this.knockAt.get(g) ?? KNOCK_BELL, joining.seedB64).catch(() => {});
-          this.knocked.delete(g);
-          this.knockAt.delete(g);
-          countWaitingJoin(this.host, g, this.now(), false);
-          traceJoin(g, "join.replaced");
-          await this.store.putGroup(group);
-          await this.host.closeEdge(linkId);
-          this.host.emit();
-          return;
-        }
+        if ("error" in joined && joined.error === LINK_REPLACED && !joining.check) { await this.linkReplaced(group); return; }
         if ("error" in joined) { joining.pieces = []; return; }
         traceJoin(g, "welcome.received");
         const before = this.live.get(g)?.session, again = !!before;

@@ -671,6 +671,81 @@ describe("removing a proof and its revocation", () => {
     engines.b.stop();
   });
 
+  /**
+   * B's checks of A's presentations, held by hand in the order they start: `release(n, ok)` ends the n-th (from 0),
+   * verified as usual or failed. Checks past those named pass through at once.
+   */
+  function heldChecks(state: ReturnType<typeof pair>["state"], held: number) {
+    const gates = Array.from({ length: held }, () => { let open!: (ok: boolean) => void; const gate = new Promise<boolean>(resolve => { open = resolve; }); return { gate, open }; });
+    const started: (() => void)[] = [];
+    const entered = gates.map((_, n) => new Promise<void>(resolve => { started[n] = resolve; }));
+    let calls = 0;
+    state.providers.b = [{ ...fakeKey, verify: async (statement, evidence, ctx) => {
+      const n = calls++;
+      if (n < held) { started[n](); if (!(await gates[n].gate)) throw new Error("Evidence is for another statement"); }
+      return fakeKey.verify(statement, evidence as Parameters<typeof fakeKey.verify>[1], ctx);
+    } }];
+    return { entered, release: (n: number, ok: boolean) => gates[n].open(ok) };
+  }
+
+  it("unshared and shared again while the contact still checks the older presentation: both sides end shared and verified, and an unshare after it reaches both (3 runs)", async () => {
+    for (let run = 1; run <= 3; run++) {
+      const { engines, ledgers, state } = pair();
+      await clearStorage();
+      await engines.a.load(); await engines.b.load();
+      const checks = heldChecks(state, 1);
+      const { id } = await prove(engines.a);
+      await engines.a.share({ linkId: "chat", id });
+      await checks.entered[0];
+      // The older presentation's check is still out (as on a session before a reconnect) when A unshares and shares again.
+      await engines.a.withdraw({ linkId: "chat", id });
+      await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === id)?.status).toBe("withdrawn"));
+      await engines.a.share({ linkId: "chat", id });
+      await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === id)?.status).toBe("accepted"));
+      await vi.waitFor(() => expect(ledgers.b.received.find(r => r.id === id)?.status).toBe("verified"));
+      // Then the older check ends.
+      checks.release(0, true);
+      await vi.waitFor(() => expect(ledgers.b.challenges, `run ${run}: the older challenge is used up`).toEqual([]));
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(ledgers.b.received.map(r => `${r.id}:${r.status}`), `run ${run}: B`).toEqual([`${id}:verified`]);
+      expect(engines.b.linkView("chat", true)!.received.map(r => r.status), `run ${run}: B's view`).toEqual(["verified"]);
+      expect(ledgers.a.shared.map(s => `${s.id}:${s.status}`), `run ${run}: A`).toEqual([`${id}:accepted`]);
+      expect(engines.a.views()[0].sharedWith, `run ${run}: A's page`).toBe(1);
+      // B's chat ends on the share it verified, not on a stop.
+      expect(ledgers.b.timeline?.at(-1), `run ${run}: B's timeline`).toMatchObject({ proof: id, kind: "shared", state: "verified" });
+      // Unshared after that: no longer shared on both sides.
+      await engines.a.withdraw({ linkId: "chat", id });
+      await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === id)?.status).toBe("withdrawn"));
+      expect(ledgers.b.received.map(r => `${r.id}:${r.status}`), `run ${run}: B after the unshare`).toEqual([`${id}:withdrawn`]);
+      expect(engines.a.views()[0].sharedWith).toBe(0);
+      engines.a.stop(); engines.b.stop();
+    }
+  });
+
+  it("the older presentation's check failing after the share again does not settle the newer share: both sides end shared and verified", async () => {
+    const { engines, ledgers, state } = pair();
+    await clearStorage();
+    await engines.a.load(); await engines.b.load();
+    const checks = heldChecks(state, 2);
+    const { id } = await prove(engines.a);
+    await engines.a.share({ linkId: "chat", id });
+    await checks.entered[0];
+    await engines.a.withdraw({ linkId: "chat", id });
+    await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === id)?.status).toBe("withdrawn"));
+    await engines.a.share({ linkId: "chat", id });
+    await checks.entered[1];
+    // The older check fails while the newer one is still out.
+    checks.release(0, false);
+    await vi.waitFor(() => expect(ledgers.b.challenges).toHaveLength(1));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(ledgers.a.shared.find(s => s.id === id)?.status, "A still waits for the newer check").toBe("pending");
+    checks.release(1, true);
+    await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === id)?.status).toBe("accepted"));
+    await vi.waitFor(() => expect(ledgers.b.received.map(r => `${r.id}:${r.status}`)).toEqual([`${id}:verified`]));
+    expect(engines.a.views()[0].sharedWith).toBe(1);
+    engines.a.stop(); engines.b.stop();
+  });
+
   it("a proof only withdrawn from this chat (still in the owner's profile) stays withdrawn, after a few lookups that back off", async () => {
     const { engines, resolved, id } = await shared();
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });

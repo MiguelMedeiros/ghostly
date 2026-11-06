@@ -331,6 +331,9 @@ export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityR
 /** A private group's small row in the settings store (`GroupLive`, `engine/groupRows.ts`): the profile's too. */
 export const groupLiveKey = (groupId: string): string => `groupLive:${groupId}`;
 export const GROUP_LIVE_RANGE = (): IDBKeyRange => IDBKeyRange.bound(groupLiveKey(""), `${groupLiveKey("")}￿`);
+/** A private group's pin and deletions for everyone, while its record is behind on them (`GroupLight`): the profile's too. */
+export const groupLightKey = (groupId: string): string => `groupLight:${groupId}`;
+export const GROUP_LIGHT_RANGE = (): IDBKeyRange => IDBKeyRange.bound(groupLightKey(""), `${groupLightKey("")}￿`);
 
 /**
  * The fields of the peer's `settings` record that are a wallet's, kept by "Clear all data": the mint list, the first-run
@@ -355,6 +358,7 @@ export async function clearProfileStores(): Promise<void> {
     const settings = tx.objectStore(STORES.settings);
     for (const key of PROFILE_SETTINGS_KEYS) settings.delete(key);
     settings.delete(GROUP_LIVE_RANGE());
+    settings.delete(GROUP_LIGHT_RANGE());
     const read = settings.get("settings");
     read.onsuccess = () => {
       const record = read.result as Record<string, unknown> | undefined;

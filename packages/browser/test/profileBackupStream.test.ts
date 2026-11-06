@@ -8,10 +8,10 @@ import { memorySink } from "../src/backup/stream";
 import { DB_VERSION, STORES, openDb, transact, wrap } from "../src/shared/idb";
 import { SMALL_FILE_BYTES, fileBytes, registerFileBytes, resetFileBytes, type FileBytes } from "../src/shared/fileBytes";
 import { setStorageProfile } from "../../../apps/ui/src/lib/storage";
-import { createProfile, listProfiles } from "../../../apps/ui/src/lib/profiles";
+import { createProfile, listProfiles, namespaceOf, registryKey } from "../../../apps/ui/src/lib/profiles";
 import { backUpToFile, stageBackup } from "../../../apps/ui/src/lib/backupFile";
 import { backupProtectionOf, createProfileBackup, isCancelled, openProfileBackup, restoreProfileBackup, writeProfileBackup, type BackupProgress } from "../../../apps/ui/src/lib/profileBackup";
-import { sweepInterruptedRestores } from "../../../apps/ui/src/lib/restoreJournal";
+import { holdRestore, noteRestore, sweepInterruptedRestores } from "../../../apps/ui/src/lib/restoreJournal";
 // covers: backup.profile.file, backup.stream, backup.unprotected, backup.progress, backup.envelope
 
 class FakeStorage {
@@ -289,6 +289,53 @@ it("a restore whose tab was closed half way leaves nothing for good: the next st
   const second = await restoreProfileBackup(bundle, PASS);
   await sweepInterruptedRestores();
   expect((await readAll(`ghostly_${second.id}`, STORES.messages)).length).toBe(5);
+});
+
+it("a restore that finishes while another tab's sweep is taking back an older one is never taken back with it", async () => {
+  fakeLocks();
+  await seed({ small: 40 });
+  const bundle = await createProfileBackup(PASS);
+  // A restore in a tab still open when the next one starts, so that one's own sweep leaves it alone.
+  noteRestore("closedtab", ["ghostly_closedtab"]);
+  const closeTab = await holdRestore("closedtab");
+  let midway!: () => void, finish!: () => void;
+  const reachedMidway = new Promise<void>((resolve) => { midway = resolve; });
+  const finishing = new Promise<void>((resolve) => { finish = resolve; });
+  const source = { size: bundle.length, read: async (offset: number, length: number) => {
+    if (offset > bundle.length / 2) { midway(); await finishing; }
+    return bundle.subarray(offset, offset + Math.min(length, 16 * 1024));
+  } };
+  const restoring = restoreProfileBackup(source, PASS);
+  await reachedMidway;
+  // That tab is closed (its lock is let go a moment later). Another tab starts and sweeps; taking back what the closed
+  // tab wrote takes a moment.
+  closeTab();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  let deleting!: () => void, deleted!: () => void;
+  const reachedDelete = new Promise<void>((resolve) => { deleting = resolve; });
+  const gate = new Promise<void>((resolve) => { deleted = resolve; });
+  const deleteDatabase = indexedDB.deleteDatabase.bind(indexedDB);
+  vi.spyOn(indexedDB, "deleteDatabase").mockImplementation((name: string) => {
+    if (name !== "ghostly_closedtab") return deleteDatabase(name);
+    const request = {} as IDBOpenDBRequest;
+    deleting();
+    void gate.then(() => request.onsuccess?.call(request, new Event("success")));
+    return request;
+  });
+  const sweeping = sweepInterruptedRestores();
+  await reachedDelete;
+  // Meanwhile the restore finishes: its profile is listed, its note dropped, its lock let go.
+  finish();
+  const restored = await restoring;
+  const ns = namespaceOf(restored.id);
+  expect(listProfiles().map((p) => p.id)).toContain(restored.id);
+  deleted();
+  await sweeping;
+  expect(listProfiles().map((p) => p.id)).toContain(restored.id);
+  expect(await databases()).toContain(`ghostly_${ns}`);
+  expect((await readAll(`ghostly_${ns}`, STORES.messages)).length).toBe(5);
+  expect(storage.getItem(`ghostly_${ns}_app_settings`)).toContain("Nick Kept Secret");
+  expect(storage.getItem("ghostly-restoring:" + registryKey()), "the closed tab's note is gone too").toBeNull();
 });
 
 /**
