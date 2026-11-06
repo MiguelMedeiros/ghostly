@@ -102,6 +102,7 @@
     "note": "Nothing is copied: {{app}} reads what you pick, on this device."
   },
   "install": {
+    "asksChanged": "What this app asks for changed. Look at it again before you install it.",
     "equivocation": "Two different copies of this version exist. Ghostly kept the one you have.",
     "fetching": "Checking the app…",
     "foundBy": "Found by {{name}}",
