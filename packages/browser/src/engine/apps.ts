@@ -585,6 +585,18 @@ export function peekAppManifest(bytes: Uint8Array): { ref: string; sequence: num
   } catch { return null; }
 }
 
+/** `length` bytes of a stored file from `at`, or null where it ends before them. */
+async function readStored(files: FileBytes, id: string, at: number, length: number): Promise<Uint8Array | null> {
+  const out = new Uint8Array(length);
+  for (let done = 0; done < length;) {
+    const part = await files.read(id, at + done, Math.min(FILE_BYTES_STEP, length - done));
+    if (!part.length) return null;
+    out.set(part, done);
+    done += part.length;
+  }
+  return out;
+}
+
 /** Where a bundle's manifest ends, from its first bytes, or null when they are not a bundle's or name a manifest too long. */
 function peekManifestEnd(bytes: Uint8Array): number | null {
   const magic = utf8Encode(APP_BUNDLE_MAGIC);
@@ -608,6 +620,8 @@ export class Apps {
    * page, in a chat's cards and in the composer's Apps is read without the whole bundle again.
    */
   private readonly icons = new Map<string, Uint8Array | null>();
+  /** Reads of an icon from its stored bundle under way, by digest: cards of one app drawn at once share one read. */
+  private readonly iconReads = new Map<string, Promise<Uint8Array | null>>();
   /** What each `ref\0scope` holds, read once from its counter row and kept in step by the writes here. */
   private readonly usage = new Map<string, AppScopeCount>();
   private readonly queues = new Map<string, Promise<unknown>>();
@@ -1058,6 +1072,49 @@ export class Apps {
       return read.bundle;
     })().finally(() => { this.verifying.delete(app.digest); });
     this.verifying.set(app.digest, reading);
+    return reading;
+  }
+
+  /**
+   * The installed bundle's `icon.png`, or null for none, read alone from where it lies in the stored bundle: an icon drawn
+   * after a start reads and hashes its own bytes, not the whole bundle (up to 16 MiB, for every row of the Apps page at
+   * once). What makes its bytes safe: the stored manifest's bytes must hash to the digest the record holds (where the
+   * whole bundle, its signature and its icon were checked at install), and the icon's bytes to the SHA-256 that manifest
+   * lists for it. The statement between them is not checked: a wrong length only moves where the icon is read from, and
+   * those bytes fail the hash.
+   */
+  private storedIcon(app: InstalledApp): Promise<Uint8Array | null> {
+    const under = this.iconReads.get(app.digest);
+    if (under) return under;
+    const reading = (async () => {
+      const files = await fileBytesOf(app.bytes);
+      const id = bundleId(app.digest);
+      const size = files ? await files.size(id) : null;
+      if (!files || size === null) fail("needs-files", "This app's files are not on this device yet");
+      const damaged: () => never = () => fail("damaged", "This app's stored files do not match what was installed");
+      const first = await files.read(id, 0, Math.min(size, PEEK_FIRST_BYTES));
+      const end = peekManifestEnd(first);
+      if (end === null || end + 4 > size) damaged();
+      const head = end + 4 <= first.length ? first : await readStored(files, id, 0, end + 4) ?? damaged();
+      const manifestBytes = head.subarray(APP_BUNDLE_MAGIC.length + 4, end);
+      if (appDigest(manifestBytes) !== app.digest) damaged();
+      const manifest = JSON.parse(utf8Decode(manifestBytes)) as AppManifest;
+      let at = end + 4 + new DataView(head.buffer, head.byteOffset, head.byteLength).getUint32(end);
+      // The files follow the statement in the manifest's order.
+      let listed: AppManifest["files"][number] | undefined;
+      for (const f of manifest.files) {
+        if (f.path === APP_ICON_PATH) { listed = f; break; }
+        at += f.size;
+      }
+      let icon: Uint8Array | null = null;
+      if (listed) {
+        icon = at + listed.size <= size ? await readStored(files, id, at, listed.size) : null;
+        if (!icon || toBase64Url(await sha256Paced(icon)) !== listed.sha256) damaged();
+      }
+      this.icons.set(app.digest, icon);
+      return icon;
+    })().finally(() => { this.iconReads.delete(app.digest); });
+    this.iconReads.set(app.digest, reading);
     return reading;
   }
 
@@ -1922,10 +1979,12 @@ export class Apps {
     const app = path === APP_ICON_PATH ? await this.installedOrFail(ref) : await this.runningOrFail(ref, digest);
     // A version that runs on after its update: its bundle went with the update, and the installed one's files are not its own.
     if (path !== APP_ICON_PATH && digest !== undefined && digest !== app.digest) fail("no-file", "No such file in this app");
-    const icon = path === APP_ICON_PATH ? this.icons.get(app.digest) : undefined;
-    if (icon) return icon.slice();
-    if (icon === null) fail("no-file", "No such file in this app");
-    const bundle = await this.verifiedBundle(app, path !== APP_ICON_PATH);
+    if (path === APP_ICON_PATH) {
+      const icon = this.icons.has(app.digest) ? this.icons.get(app.digest) : await this.storedIcon(app);
+      if (!icon) fail("no-file", "No such file in this app");
+      return icon.slice();
+    }
+    const bundle = await this.verifiedBundle(app, true);
     if (typeof path !== "string" || !bundle.files.has(path)) fail("no-file", "No such file in this app");
     return bundle.files.get(path)!.slice();
   }
