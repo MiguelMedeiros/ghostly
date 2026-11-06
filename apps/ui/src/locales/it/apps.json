@@ -10,6 +10,7 @@
     "storeNewer": "Hai già questo store. Questo link ne contiene una copia più recente.",
     "storeOlder": "È una copia più vecchia di uno store che hai già. Il tuo è più recente e resta com'è.",
     "storeReads": "Ghostly lo legge da {{host}}, che vede il tuo indirizzo IP.",
+    "storeRemovedOlder": "Hai rimosso questo store quando il suo elenco era più recente di questa copia. Per aggiungerlo di nuovo, usa un link al suo elenco più recente.",
     "title": "Aggiungi un'app o uno store",
     "updateStore": "Aggiorna store"
   },

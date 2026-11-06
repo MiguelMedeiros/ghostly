@@ -98,12 +98,15 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
 
   // A store the person has already (by its key): Add takes only a newer index of it, so only that is offered. Another
   // index under the held sequence is not the one held: the store signed two lists (the engine marked it on the store).
+  // A store the person removed takes back no list older than the last one taken from it: Add would refuse this one.
   const held = store?.held;
-  const heldLine = !store || !held ? null
+  const heldLine = !store ? null
+    : store.refused ? t("apps.add.storeRemovedOlder")
+    : !held ? null
     : held.sequence === undefined || store.sequence > held.sequence ? t("apps.add.storeNewer")
     : store.sequence < held.sequence ? t("apps.add.storeOlder")
     : held.equivocation ? t("apps.add.storeEquivocation") : t("apps.add.storeHeld");
-  const offered = !!store && (!held || held.sequence === undefined || store.sequence > held.sequence);
+  const offered = !!store && !store.refused && (!held || held.sequence === undefined || store.sequence > held.sequence);
 
   if (app) return <AppInstallDialog source={{ url: app.url }} fetched={app.preview} onClose={onClose} onInstalled={onInstalled} />;
   return (
@@ -139,7 +142,7 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
             </div>
             {heldLine && <Notice testId="apps-add-store-held" tone={held?.equivocation ? "warning" : undefined}>{heldLine}</Notice>}
             {/* A store held is still read from its own link: this one is not where it is read from. */}
-            {!held && <Notice>{t("apps.add.storeReads", { host: hostOf(store.url) })}</Notice>}
+            {offered && !held && <Notice>{t("apps.add.storeReads", { host: hostOf(store.url) })}</Notice>}
             {/* Wraps rather than push Cancel off the screen (a phone at a large text size), as the install screen's. */}
             <div className="flex flex-wrap justify-end gap-2">
               <Button ref={storeCancel} disabled={adding} onClick={onClose}>{offered ? t("common.cancel") : t("common.close")}</Button>
