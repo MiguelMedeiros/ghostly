@@ -17,13 +17,19 @@ import { problemLine } from "../../lib/problemText";
 /**
  * Where a share stands now. A share that stopped later (the next entry of that identity on that side is a stop) is
  * withdrawn or revoked, whatever its check had said. Else its entry's state, told apart where the entry alone cannot
- * say it: mine not sent yet is waiting, theirs never presented is unanswered.
+ * say it: mine not sent yet is waiting, theirs never presented is unanswered. A verified share no longer held (theirs
+ * gone from what this app keeps, a newer proof of it took its place; mine no longer shared) is no longer shared, even
+ * with no stop on the timeline: it never says Verified on the entry's word alone.
  */
 function shareState(entry: IdentityTimelineEntry, link: Pick<LinkView, "identities" | "identityTimeline"> | undefined, now = Date.now()): ShareState {
   const timeline = link?.identityTimeline ?? [];
   const i = timeline.findIndex(e => e.id === entry.id);
   const next = i < 0 ? undefined : timeline.slice(i + 1).find(e => e.side === entry.side && e.proof === entry.proof);
   if (next?.kind === "stopped") return next.reason === "revoked" ? "revoked" : "withdrawn";
+  const held = link?.identities && (entry.side === "theirs"
+    ? link.identities.received.some(r => r.id === entry.proof)
+    : !["withdrawn", "withdrawal-pending"].includes(link.identities.shared.find(s => s.id === entry.proof)?.status ?? ""));
+  if (entry.state === "verified" && held === false) return "withdrawn";
   if (entry.state === "verified" || entry.state === "failed") return entry.state;
   if (entry.side === "mine") return link?.identities?.shared.find(s => s.id === entry.proof)?.status === "queued" ? "waiting" : "verifying";
   // The contact asked for a challenge and never answered it: it can no longer be answered.

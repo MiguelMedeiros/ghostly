@@ -160,6 +160,23 @@ describe("IdentityShareLine", () => {
     expect(face()).toHaveAttribute("data-status", "verified");
   });
 
+  it("never says Verified for a share no longer held: the contact's proof gone from this app, or mine no longer shared", () => {
+    // Theirs: a newer proof of the same identity took its place (or it was let go for room), with no stop written.
+    const older = entry({ proof: "n1", provider: "nostr", subject: NOSTR_KEY });
+    const newer = entry({ id: "theirs:n2:0", proof: "n2", provider: "nostr", subject: NOSTR_KEY, at: older.at + 500 });
+    const received = receivedView({ id: "n2", provider: "nostr", subject: NOSTR_KEY, verified: { subject: NOSTR_KEY, source: "Nostr signature" } });
+    const theirs = line(older, { links: [paired({ identities: identitiesView({ received: [received] }), identityTimeline: [older, newer] })] });
+    expect(card()).toHaveAttribute("data-state", "withdrawn");
+    expect(face()).toHaveAttribute("data-status", "withdrawn");
+    expect(status()).toBe("No longer shared");
+    theirs.unmount();
+    // Mine: my app marked the share withdrawn (replaced at the contact's), and my proof still stands.
+    const mine = entry({ id: "mine:proof-1:0", proof: "proof-1", side: "mine", subject: "example.com" });
+    line(mine, { identityProofs: [proofView()], links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "proof-1", status: "withdrawn" })] }), identityTimeline: [mine] })] });
+    expect(card()).toHaveAttribute("data-state", "withdrawn");
+    expect(status()).toBe("No longer shared");
+  });
+
   it("plays the deck's flourish once under a mouse, and nothing for a finger or with reduced motion", () => {
     const animate = vi.fn(() => ({ cancel() {} }) as unknown as Animation);
     const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
