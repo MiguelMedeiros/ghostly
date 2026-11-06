@@ -1,11 +1,12 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createIdentity, type GroupSession } from "@ghostly/core";
+import { REMOVED_TEXT, createIdentity, type GroupSession } from "@ghostly/core";
 import { db } from "../src/engine/db";
 import { Groups, type GroupStore, type GroupsHost } from "../src/engine/groups";
 import { SEQ_BLOCK } from "../src/engine/groupRows";
 import { STORES, clearProfileStores, groupLiveKey, store, wrap } from "../src/shared/idb";
 import type { StoredGroup } from "../src/shared/types";
+import { CommunityWorld } from "./communityWorld";
 // covers: groups.send
 
 /*
@@ -141,6 +142,39 @@ describe("a private group's saves", () => {
     expect(third.groups.pinOf(id)).toMatchObject({ id: sent.messageId, n: now });
     expect(third.groups.isRemoved(id, "member:0:199")).toBe(true);
   }, 30_000);
+
+  it("a member's edit or deletion for everyone that comes in writes the edits it keeps to hand on, not the whole record, and they are there when the app starts again", async () => {
+    const world = new CommunityWorld();
+    vi.spyOn(Date, "now").mockImplementation(() => world.now);
+    const [alice, bob] = ["alice", "bob"].map(name => world.add(name));
+    const id = await alice.groups.create("Ghosts", "mesh");
+    await bob.groups.joinByLink(await alice.groups.enableLink(id));
+    await world.until(() => world.member(bob, id), 5 * 60_000);
+    for (let i = 0; i < 40; i++) {
+      const key = createIdentity().pubKeyZ32;
+      await sessionOf(alice.groups, id).admit(key);
+      await sessionOf(alice.groups, id).remove(key);
+    }
+    await world.run(60_000);
+    const { messageId } = await bob.groups.send(id, "hello");
+    await world.until(() => alice.messages.some(m => m.id === messageId), 60_000);
+    await alice.groups.flush();
+    const raw = alice.store as Required<GroupStore>;
+    expect(JSON.stringify((await raw.getGroups()).find(g => g.id === id)).length, "the record holds the chain").toBeGreaterThan(40_000);
+    const edits: Array<[string, { e: number; m: string; rm?: true }]> = [["an edit", { e: 1, m: "hello again" }], ["another", { e: 2, m: "hello, all" }], ["a deletion for everyone", { e: 3, m: REMOVED_TEXT, rm: true }]];
+    for (const [action, edit] of edits) {
+      const record = vi.spyOn(raw, "putGroup");
+      expect(await bob.groups.sendEdit(id, { id: messageId!, ts: world.now, ...edit })).toBeNull();
+      await world.run(5_000);
+      await alice.groups.flush();
+      expect(record.mock.calls.filter(([g]) => g.id === id).length, `${action}: the record is not written`).toBe(0);
+      record.mockRestore();
+    }
+    const kept = sessionOf(alice.groups, id).state.relayEdits!.map(f => f.v);
+    expect(kept).toEqual([3]);
+    await world.restart(alice);
+    expect(sessionOf(alice.groups, id).state.relayEdits!.map(f => f.v), "kept to hand on after a restart").toEqual(kept);
+  }, 60_000);
 
   it("started again, the group goes on from its last number, without a gap or a number used twice", async () => {
     const first = engine();
