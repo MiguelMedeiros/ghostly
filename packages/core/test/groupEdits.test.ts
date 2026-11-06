@@ -18,6 +18,10 @@ class Mesh {
   /** Members that pass on what their session took, as a hub does (WISP 902 § Hubs), and whom each member counts on. */
   readonly hubs = new Set<string>();
   readonly carriers = new Map<string, string[]>();
+  /** The sessions' clock (`hooks.clock`) when set; the wall clock otherwise. */
+  clock: number | null = null;
+  /** Moves the sessions' clock on by `ms`, from the wall clock the first time: an author's frames taken at its pace. */
+  tick(ms: number): void { this.clock = (this.clock ?? Date.now()) + ms; }
   private closed = new Set<string>();
   private pending: Promise<unknown>[] = [];
   /** An app from before edits: its session has no `edit` hook. */
@@ -26,6 +30,7 @@ class Mesh {
       save: async state => { this.saves.get(session.myKey)!.push(clone(state)); },
       send: (to, frame) => this.deliver(session, to, frame),
       message: () => {},
+      clock: () => this.clock ?? Date.now(),
       ...(old ? {} : { edit: (e: GroupIncomingEdit) => { this.edits.get(session.myKey)!.push(e); } }),
       changed: () => {},
       carriers: () => this.carriers.get(session.myKey) ?? [],
@@ -234,12 +239,14 @@ describe("group-edit frames (a private group)", () => {
       const before = clone(carol.state);
       for (const s of [alice, carol]) mesh.saves.get(s.myKey)!.length = 0;
       // Bob edits 200 messages of his that are not there, each signed and sealed: neither member saves its whole record
-      // for each.
+      // for each. At his pace, so each is taken (the clock the sessions read, not the save's timer).
       const epoch = bob.epoch;
       for (let n = 1_000; n < 1_200; n++) {
+        mesh.tick(400);
         expect(await bob.sendEdit(groupMessageId(bob.myKey, epoch, n), { v: 1, ts: 2, text: "x" })).toHaveProperty("sent");
       }
       // And one honest edit of a line that is there.
+      mesh.tick(400);
       await bob.sendEdit(id, { v: 1, ts: 3, text: "Deploy: done" });
       await mesh.settle();
       for (const s of [alice, carol]) expect(mesh.saves.get(s.myKey)).toHaveLength(0);
@@ -266,8 +273,10 @@ describe("group-edit frames (a private group)", () => {
   it("an author's own burst of edits is kept as before: the latest of each, as many as the log holds", async () => {
     const { mesh, alice, bob } = await trio();
     const ids: string[] = [];
-    for (let i = 0; i < 70; i++) ids.push(((await bob.sendText(`line ${i}`)) as { id: string }).id);
-    for (const id of ids) await bob.sendEdit(id, { v: 1, ts: 1, text: "edited" });
+    // At his pace, so each is taken.
+    for (let i = 0; i < 70; i++) { mesh.tick(400); ids.push(((await bob.sendText(`line ${i}`)) as { id: string }).id); }
+    for (const id of ids) { mesh.tick(400); await bob.sendEdit(id, { v: 1, ts: 1, text: "edited" }); }
+    mesh.tick(400);
     await bob.sendEdit(ids[69], { v: 2, ts: 2, text: "edited again" });
     await mesh.settle();
     expect((alice.state.relayEdits ?? []).map(f => [f.n, f.v])).toEqual(ids.slice(-64).map((id, i) => [meshMessageRef(id)!.n, i === 63 ? 2 : 1]));
