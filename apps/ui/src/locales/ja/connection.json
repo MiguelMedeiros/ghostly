@@ -139,6 +139,8 @@
     "inUse": "使用中",
     "needsDesktop": "{{transport}} には Ghostly Desktop が必要です",
     "noWebrtc": "このアプリには WebRTC がありません",
+    "relayOnlyHyperdht": "IPを隠す設定がオンの間、HyperDHT には HyperDHT リレーが必要です · 設定、ネットワーク",
+    "relayOnlyOff": "IPを隠す設定がオンの間はオフです · 設定、ネットワーク",
     "relayUnreached": "{{transport}} がリレーに届きません · 設定、ネットワーク",
     "throughRelay": "リレー経由 · 直接接続できないときに使用",
     "waiting": "待機中"

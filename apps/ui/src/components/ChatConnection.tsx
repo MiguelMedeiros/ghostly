@@ -92,9 +92,10 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   callOn?: boolean;
 }) {
   // What it shows of the engine's state, compared by content: the whole state drew the chat's header on every change.
-  const { link, ghostlyOnline, directBlocked, clockOffMs, discovery } = useEngineValue((state) => ({
+  const { link, ghostlyOnline, relayOnly, directBlocked, clockOffMs, discovery } = useEngineValue((state) => ({
     link: paired ? state?.links.find(l => l.peerPubKeyZ32 === peerKey) : undefined,
     ghostlyOnline: state?.settings.online ?? true,
+    relayOnly: state?.settings.relayOnly === true,
     directBlocked: state?.transport?.directBlocked,
     clockOffMs: state?.transport?.clockOffMs,
     discovery: state?.transport?.discovery,
@@ -280,7 +281,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
       {online && clockOffMs !== undefined && <ClockOffHint ms={clockOffMs} />}
       {paired && <fieldset disabled={busy || !ghostlyOnline || !link} className="mt-2">
         <legend className="sr-only">{t("connection.panel.legend")}</legend>
-        {link && <TransportOptions link={link} disabled={busy || !ghostlyOnline} dhtBlocked={callOn ? t("connection.option.dhtCallOn") : undefined}
+        {link && <TransportOptions link={link} disabled={busy || !ghostlyOnline} dhtBlocked={callOn ? t("connection.option.dhtCallOn") : undefined} relayOnly={relayOnly}
           onChoose={choice => void run(() => engine.call("setChatTransport", { linkId: link.id, transport: choice }))} />}
         <label className="connection-switch-row mt-1 flex min-h-11 items-center justify-between gap-2 rounded-lg px-2.5"><span className="text-text-primary">{t("connection.panel.fallback")}</span>
           <span className="connection-switch"><input type="checkbox" role="switch" aria-label={t("connection.panel.fallback")} aria-checked={link?.transportFallback??true} checked={link?.transportFallback??true} disabled={!link || dht}

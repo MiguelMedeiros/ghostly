@@ -20,13 +20,15 @@ export type ConnectionChoice = PairedTransport | "auto" | "dht";
  *
  * `dhtBlocked`: why DHT only cannot be chosen now (a call on in the chat: its hang-up crosses the live link DHT only
  * closes). The option is off and says so on screen, at every width.
+ *
+ * `relayOnly`: "Hide my IP from contacts" is on, which is why the Desktop's own Iroh and HyperDHT are off.
  */
-export function TransportOptions({ link, disabled = false, dhtBlocked, onChoose }: {
-  link: LinkView; disabled?: boolean; dhtBlocked?: string; onChoose(choice: ConnectionChoice): void;
+export function TransportOptions({ link, disabled = false, dhtBlocked, relayOnly = false, onChoose }: {
+  link: LinkView; disabled?: boolean; dhtBlocked?: string; relayOnly?: boolean; onChoose(choice: ConnectionChoice): void;
 }) {
   const { t } = useI18n();
   const dhtRow = useRef<HTMLButtonElement>(null), dhtFocused = useRef(false);
-  const options = transportOptions(link, t);
+  const options = transportOptions(link, t, relayOnly);
   const own = ownTransports(link), local = options.filter(o => own.includes(o.transport));
   // One transport in this app (web, the extension): nothing to choose between, only to know why.
   const single = local.length <= 1;
