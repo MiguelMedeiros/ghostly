@@ -124,8 +124,10 @@ export const CONNECT_MS = 600;
  * `lateAnswerMs`: an answer that goes in this long or more after its offer was made finds the answering side's ICE given
  * up on it: that connection goes `failed` at once, and the offer's connects nothing (the CLI lab of agents#971, where the
  * answerer's connection failed 0.1 s after the offerer took an answer it read 68 s late).
+ * `answerAppliedAfterMs`: the offer's `setRemoteDescription` of its answer resolves this long after it was called; past
+ * `CONNECT_MS`, the channel is open before it does (a busy page: the offerer's data link goes from offering to open).
  */
-export const rtc: { blocked: boolean; answerFailsAfterMs?: number; blockedFailsAfterMs?: number; noCandidates: Set<string>; srflxAfterMs?: number; answerSrflxAfterMs?: number; needsSrflx?: boolean; lateAnswerMs?: number } = { blocked: false, noCandidates: new Set() };
+export const rtc: { blocked: boolean; answerFailsAfterMs?: number; blockedFailsAfterMs?: number; noCandidates: Set<string>; srflxAfterMs?: number; answerSrflxAfterMs?: number; needsSrflx?: boolean; lateAnswerMs?: number; answerAppliedAfterMs?: number } = { blocked: false, noCandidates: new Set() };
 
 class FakePeerConnection extends EventTarget {
   /** The app this connection belongs to, for `killRtc`. */
@@ -201,6 +203,7 @@ class FakePeerConnection extends EventTarget {
       if (this.closed || answerer.closed) return;
       for (const pc of [this, answerer]) { pc.connectionState = "connected"; pc.channel.open(); }
     }, CONNECT_MS);
+    if (rtc.answerAppliedAfterMs !== undefined) await new Promise(resolve => setTimeout(resolve, rtc.answerAppliedAfterMs));
   }
   close() { this.closed = true; this.connectionState = "closed"; this.channel?.close(); }
 }
@@ -355,5 +358,6 @@ export async function closeWorld(): Promise<void> {
   rtc.answerSrflxAfterMs = undefined;
   rtc.needsSrflx = undefined;
   rtc.lateAnswerMs = undefined;
+  rtc.answerAppliedAfterMs = undefined;
   vi.useRealTimers();
 }
