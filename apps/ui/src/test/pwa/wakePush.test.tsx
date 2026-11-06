@@ -222,6 +222,41 @@ describe("the push worker's table", () => {
     expect(platform.syncTable).toHaveBeenCalledTimes(3);
   });
 
+  it("a message that came looks through the stored chats once, not once or twice per chat", async () => {
+    const platform = fakePlatform();
+    setPushPlatform(platform);
+    const links = [];
+    for (let i = 0; i < 40; i++) {
+      saveSession({ id: `chat${i}`, mySeedB64: "s", peerPubKeyB64: `peer-${i}`, encKeyB64: "e", createdAt: 1, messages: [], label: `Contact ${i}` } as unknown as ChatSession);
+      links.push(linkView({ id: `l-${i}`, peerPubKeyZ32: `peer-${i}`, wakeToken: `token${String(i).padStart(17, "a")}` }));
+    }
+    fakeEngine.setState(engineState({
+      settings: { online: true, nick: "Ghost", relays: [], iceServers: [], mints: [], mintsInitialized: true, wake: { ...keys, vapid: generateVapidKeys() } },
+      links,
+    }));
+    renderHook(() => useWakeTableSync({ title: "Ghostly", body: "New message" }));
+    await waitFor(() => expect(platform.syncTable).toHaveBeenCalledTimes(1));
+
+    // Each message that came, each tick and each reaction says `session-updated`: the table is built again, and each
+    // look through the stored chats walks every key of the page's storage (its chats, mutes, drafts, settings...).
+    const real = localStorage;
+    let walked = 0;
+    vi.stubGlobal("localStorage", {
+      get length() { return real.length; },
+      key: (i: number) => { walked++; return real.key(i); },
+      getItem: (key: string) => real.getItem(key),
+      setItem: (key: string, value: string) => real.setItem(key, value),
+      removeItem: (key: string) => real.removeItem(key),
+      clear: () => real.clear(),
+    });
+    window.dispatchEvent(new Event("session-updated"));
+    vi.unstubAllGlobals();
+    expect(platform.syncTable).toHaveBeenCalledTimes(2);
+    expect(walked).toBeLessThanOrEqual(2 * real.length);
+    expect(platform.syncTable.mock.lastCall![1]).toHaveLength(40);
+    expect(platform.syncTable.mock.lastCall![1][39]).toEqual({ token: `token${"39".padStart(17, "a")}`, path: "/chat/chat39", name: "Contact 39" });
+  });
+
   it("a mute that ends by itself: the contact is told to wake the chat again, with no new state to wait for", async () => {
     const platform = fakePlatform();
     setPushPlatform(platform);

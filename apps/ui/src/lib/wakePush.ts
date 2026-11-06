@@ -3,10 +3,10 @@ import { generateVapidKeys, type VapidKeys } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import { databaseName } from "@ghostly/browser/shared/idb";
 import { activeProfileId } from "./profiles";
-import { MUTE_EVENT, chatOfLink, groupChat, mutedUntil } from "./chatMute";
+import { MUTE_EVENT, groupChat, mutedUntil } from "./chatMute";
 import { groupPath } from "./groups";
 import { contactName } from "./identities";
-import { chatNamesForPeer, ownsKey } from "./storage";
+import { chatsByPeer, ownsKey } from "./storage";
 import { chatPath } from "./url";
 import { useEngineValue } from "./engineState";
 import { useWindowAway } from "./windowAway";
@@ -296,16 +296,19 @@ export function useWakeTableSync(text: WakeWords): void {
       const entries: WakeTableEntry[] = [];
       let soonest = Infinity;
       if (on) {
+        // Every chat in one look through the stored chats, not one or two per link: this runs at each message that comes.
+        const chats = chatsByPeer();
         for (const link of links) {
-          const chat = chatOfLink(link.id, links);
-          if (!chat) continue;
+          const found = chats.get(link.peerPubKeyZ32);
+          if (!found) continue;
+          const chat = found.id;
           const until = mutedUntil(chat);
           if (typeof until === "number") soonest = Math.min(soonest, until);
           // A muted chat is not woken at all: its contact is told to forget the subscription (the worker checks too).
           if (!!link.wakeMuted !== (until !== undefined)) void engine.call("setWakeMuted", { linkId: link.id, muted: until !== undefined }).catch(() => {});
           if (!link.wakeToken) continue;
           // The name this app shows for the chat: an online notice says it, since the push names nobody.
-          const name = contactName(chatNamesForPeer(link.peerPubKeyZ32))?.trim();
+          const name = contactName(found)?.trim();
           entries.push({ token: link.wakeToken, path: chatPath(chat), ...(until !== undefined && { mutedUntil: until }), ...(name && { name }) });
         }
         // Private groups (WISP 902 · Group Mesh § Wake-up push): a token per member, all opening the group; muted, none.
