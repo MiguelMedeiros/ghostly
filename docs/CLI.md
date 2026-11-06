@@ -140,6 +140,8 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 - `--type message.received` keeps one type; `--type message` (or `message.`) a family. A family deeper down ends in
   "." (`group.typing.`): `group.message` is that type alone. A first word that is no family (`--type bogus`) is a usage
   error naming the families; a type no event has (`message.recieved`) is said on stderr, and the listener runs on.
+  `events.gap` passes every `--type` (and `--turns`): a bot on `message.received` is told when messages were lost
+  across a crash or a trim.
 - `--from <chat|key>` and `--group <group>` (each again for more) are an allowlist: only those chats' and groups'
   events get through. See [Allowlist](#allowlist).
 - `--turns` gives one `agent.turn` event per message to answer. See [Agent turns](#agent-turns).
@@ -198,7 +200,7 @@ ghostly listen --from alice --from bob --group team --exec ./bot.sh
 `--turns` is the event shape for an agent (Claude Code, a bot on a model): each `message.received`, and each
 `group.message` that mentions this profile, becomes one `agent.turn`. A mention learned later (the message first
 came through another member without it) is a `group.mentioned`, and its turn then, with `source: "group.mentioned"`. Nothing else is one (my own messages, edits,
-reactions, typing).
+reactions, typing). An `events.gap` still comes through as it is: turns may have been lost there.
 
 ```json
 {"seq":41,"id":"agent.turn:message.received:f3gg…:t_5d0c…","type":"agent.turn","at":1790450767762,

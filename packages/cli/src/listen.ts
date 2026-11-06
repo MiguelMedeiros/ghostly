@@ -353,15 +353,17 @@ export function eventHandler(options: ListenOptions): EventHandler {
     // counted toward MAX_BEHIND, not kept. An app's frames at 48 a second, each 32 KiB, filled the bound in 21 s behind
     // a bridge that was down, ~32 MiB held to be dropped, and the feed paused with the one wanted event pending
     // (agents#1597). The cursor passes it once the events before it are handled.
-    if (!matches(event, options.types)) { dropped = Math.max(dropped, seq); keepDropped(); return; }
+    // `events.gap` passes every `--type` and `--turns`, as it passes the allowlist: a bot on `message.received` is told
+    // that messages were lost across a crash or a trim. Before, it was dropped and the cursor moved past it.
+    const gap = type === "events.gap";
+    if (!gap && !matches(event, options.types)) { dropped = Math.max(dropped, seq); keepDropped(); return; }
     behind++;
     chain = chain.then(async () => {
       if (stopped) return;
       const skip = () => keep(event.seq);
-      if (!matches(event, options.types)) return skip();
       if (options.allow && !(await options.allow.allows(event))) return skip();
       if (options.translate) event = await options.translate(event);
-      if (options.turns) {
+      if (options.turns && !gap) {
         const next = toTurn(event);
         if (!next) return skip();
         event = next;
