@@ -952,11 +952,14 @@ export class CommunitySession {
    * it was in. What one who left wrote while in the group is taken and handed on, its goodbye included, up to what the
    * member who committed the leave had heard of it then (its `group-left` mark), never past it: the leaver still holds
    * those epochs' secrets, and anything it signs later is not heard (WISP 903 § Leaving and removal). No mark here
-   * (one not come yet, or a committer's app before it) and nothing of it is heard.
+   * (one not come yet, or a committer's app before it) and nothing of it is heard. A key let in only on a branch that
+   * lost is heard no more either, as one removed, once this member knows it lost.
    */
   private heardAfterOut(f: { s: string; e: number; h: string; n: number }): boolean {
     const i = this.outIndex(f.s);
-    if (i < 0) return true;
+    // Let in only on a branch that lost: in no roster anyone sees (`isRecentMember`), and heard no more, as one removed,
+    // whatever epoch of its branch it signs for (WISP 903 § A key no commit names).
+    if (i < 0) return rosterHas(this.roster, f.s) || this.isRecentMember(f.s) || !this.lostAt(f.s);
     const commit = this.state.chain[i];
     if (commit.k !== "leave") return false;
     const high = this.state.left?.[communityCommitHash(commit)]?.hi[seenKey(f.e, f.h)];
