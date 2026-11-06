@@ -118,6 +118,9 @@ const RUNNER: &str = r#"<!doctype html>
 
   const invoke = internals.invoke.bind(internals);
   const clockNow = Date.now;
+  const reflectApply = Reflect.apply;
+  const listen = EventTarget.prototype.addEventListener;
+  const stopImmediately = Event.prototype.stopImmediatePropagation;
   // Every answer and event comes as its JSON text, parsed here (`json_response`, `event_script`): evaluated as a
   // JavaScript literal, a `__proto__` member would set the object's prototype instead of staying a key, as the web
   // broker keeps it (jsonValueOf).
@@ -226,6 +229,26 @@ const RUNNER: &str = r#"<!doctype html>
     };
     addEventListener("pointerdown", heard, true);
     addEventListener("keydown", heard, true);
+    // The person's copy or cut in the app puts on the clipboard what they selected, never what the app says in its
+    // place: an app has no clipboard permission (WISP 1200), so none of its listeners hears one (a listener could set
+    // the event's clipboardData and cancel it). This capture listener on the window runs before any of the app's and
+    // stops the event there, so nothing cancels it and the browser copies the selection. One the app makes writes nothing.
+    // A document opened again (`document.open`, or a write once the page is parsed) erases the window's listeners: this
+    // one goes back on as it opens, before any the app adds after.
+    const selectionOnly = (event) => { if (event.isTrusted === true) reflectApply(stopImmediately, event, []); };
+    const keepSelection = () => {
+      reflectApply(listen, window, ["copy", selectionOnly, true]);
+      reflectApply(listen, window, ["cut", selectionOnly, true]);
+    };
+    keepSelection();
+    for (const name of ["open", "write", "writeln"]) {
+      const opens = Document.prototype[name];
+      Object.defineProperty(Document.prototype, name, { configurable: true, writable: true, value: function () {
+        const result = reflectApply(opens, this, arguments);
+        keepSelection();
+        return result;
+      } });
+    }
     document.write(entry);
     document.close();
   }, () => stop("broker")), (error) => {
@@ -2471,6 +2494,51 @@ mod tests {
             "document.write(entry)",
         ] {
             assert!(check < RUNNER.find(later).unwrap(), "{later}");
+        }
+    }
+
+    /// The person's copy or cut in an app puts what they selected on the clipboard: both runners stop it before any of
+    /// the app's listeners with the very same text, added after `document.open` (which drops a window's listeners) and
+    /// before the entry is written, through what each took before the app's code runs, and put back whenever the
+    /// document is opened again.
+    #[test]
+    fn the_runners_keep_the_persons_copy_alike() {
+        let web = include_str!("../../web/public/app-frame.html");
+        let begin = "    // The person's copy or cut in the app";
+        let finish = "        keepSelection();\n        return result;\n      } });\n    }\n";
+        let guard = |runner: &'static str| {
+            let start = runner.find(begin).unwrap();
+            let end = start + runner[start..].find(finish).unwrap() + finish.len();
+            (start, &runner[start..end])
+        };
+        let (at, desktop) = guard(RUNNER);
+        let (web_at, web_guard) = guard(web);
+        assert_eq!(desktop, web_guard);
+        for line in [
+            r#"if (event.isTrusted === true) reflectApply(stopImmediately, event, []);"#,
+            r#"reflectApply(listen, window, ["copy", selectionOnly, true]);"#,
+            r#"reflectApply(listen, window, ["cut", selectionOnly, true]);"#,
+            r#"for (const name of ["open", "write", "writeln"]) {"#,
+        ] {
+            assert!(desktop.contains(line), "{line}");
+        }
+        assert!(RUNNER.find("document.open()").unwrap() < at);
+        assert!(at < RUNNER.find("document.write(entry)").unwrap());
+        assert!(web.find("    document.open();").unwrap() < web_at);
+        assert!(
+            web_at
+                < web
+                    .find("reflectApply(documentWrite, document, [html]);")
+                    .unwrap()
+        );
+        for (runner, written) in [(RUNNER, at), (web, web_at)] {
+            for taken in [
+                "const reflectApply = Reflect.apply;",
+                "const listen = EventTarget.prototype.addEventListener;",
+                "const stopImmediately = Event.prototype.stopImmediatePropagation;",
+            ] {
+                assert!(runner.find(taken).unwrap() < written, "{taken}");
+            }
         }
     }
 

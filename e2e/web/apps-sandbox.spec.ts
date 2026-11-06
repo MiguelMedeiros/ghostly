@@ -504,6 +504,76 @@ test("an app writes nothing to the clipboard: not on load, not in a tap, not fro
   expect(seen.edit).toBe("true typed");
 });
 
+test("the person's copy and cut in an app put what they selected on the clipboard, never what the app's listeners say", {
+  tag: ["@feature:apps.web-sandbox"],
+}, async ({ page }) => {
+  await appPage(page);
+  const ref = "evilpublisherkey/swap";
+  // Every place an app can listen for the person's copy or cut, each one swapping what goes on the clipboard.
+  const entry = `<!doctype html><title>swap</title><body><p><span id=shown>bc1qREALADDRESS</span></p><textarea id=t>bc1qCUTADDRESS</textarea><script>
+    const g = window.ghostly;
+    const swap = (where) => (e) => {
+      g.storage.set("heard", where);
+      try { e.clipboardData.setData("text/plain", "bc1qSWAPPEDBYAPP"); } catch (error) { /* refused */ }
+      e.preventDefault();
+    };
+    for (const type of ["copy", "cut"]) {
+      addEventListener(type, swap("window capture"), true);
+      addEventListener(type, swap("window"));
+      document.addEventListener(type, swap("document"), true);
+      document.addEventListener(type, swap("document"));
+      document.getElementById("shown").addEventListener(type, swap("element"));
+      document.getElementById("t").addEventListener(type, swap("element"));
+    }
+    window.oncopy = swap("oncopy");
+    document.body.oncut = swap("oncut");
+    g.storage.set("ready", true);
+  </script>`;
+  await open(page, ref, entry);
+  await expect.poll(() => stored(page, ref)).toMatchObject({ ready: true });
+  const frame = page.frameLocator(`iframe[data-app="${ref}"]`);
+  // What the clipboard holds, pasted by the person into a field of the page itself.
+  const pasted = async () => {
+    await page.evaluate(() => { const field = document.createElement("textarea"); field.id = "pasted"; document.body.append(field); });
+    await page.locator("#pasted").focus();
+    await page.keyboard.press("ControlOrMeta+V");
+    const value = await page.locator("#pasted").inputValue();
+    await page.evaluate(() => document.getElementById("pasted")!.remove());
+    return value;
+  };
+
+  await frame.locator("#shown").dblclick();
+  await page.keyboard.press("ControlOrMeta+C");
+  expect(await pasted()).toBe("bc1qREALADDRESS");
+
+  await frame.locator("#t").focus();
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.press("ControlOrMeta+X");
+  expect(await pasted()).toBe("bc1qCUTADDRESS");
+  // The cut took the text out, as a cut does.
+  await expect(frame.locator("#t")).toHaveValue("");
+  // None of the app's listeners heard either.
+  expect((await stored(page, ref)).heard).toBeUndefined();
+
+  // An app that opens its document again (which erases the window's listeners) and listens in the new one.
+  const reopened = "evilpublisherkey/reopen";
+  await open(page, reopened, `<!doctype html><title>reopen</title><body><script>
+    const g = window.ghostly;
+    setTimeout(() => {
+      document.open();
+      const body = document.appendChild(document.createElement("html")).appendChild(document.createElement("body"));
+      body.innerHTML = "<span id=shown>bc1qREALADDRESS</span>";
+      document.addEventListener("copy", (e) => { g.storage.set("heard", true); e.clipboardData.setData("text/plain", "bc1qSWAPPEDBYAPP"); e.preventDefault(); });
+      g.storage.set("ready", true);
+    }, 100);
+  </script>`);
+  await expect.poll(() => stored(page, reopened)).toMatchObject({ ready: true });
+  await page.frameLocator(`iframe[data-app="${reopened}"]`).locator("#shown").dblclick();
+  await page.keyboard.press("ControlOrMeta+C");
+  expect(await pasted()).toBe("bc1qREALADDRESS");
+  expect((await stored(page, reopened)).heard).toBeUndefined();
+});
+
 test("Chess, as it is built, runs under the runner's lock", {
   tag: ["@feature:apps.web-sandbox", "@feature:apps.chess"],
 }, async ({ page }) => {
