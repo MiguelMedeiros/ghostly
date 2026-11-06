@@ -48,7 +48,7 @@ export function Home() {
           {t("home.description")}
         </p>
         </div>
-          <ul className="mx-auto flex w-fit max-w-full flex-col gap-2 text-left text-text-muted text-xs leading-relaxed">
+          <ul className="mx-auto flex w-fit max-w-full flex-col gap-2 text-start text-text-muted text-xs leading-relaxed">
             <li className="flex items-center gap-2.5">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0 text-accent">
                 <rect x="5" y="10" width="14" height="11" rx="2" />

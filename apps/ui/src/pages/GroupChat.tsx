@@ -869,7 +869,7 @@ export function GroupChat() {
           </div>
           <h2 className="mt-4 text-base font-semibold text-text-primary">{joining.title}</h2>
           <p className="mt-2 text-sm leading-relaxed text-text-muted">{joining.body}</p>
-          {!linkReplaced && <ol data-testid="group-joining-steps" data-stage={stage} className="mx-auto mt-4 w-fit space-y-1.5 text-left text-xs">
+          {!linkReplaced && <ol data-testid="group-joining-steps" data-stage={stage} className="mx-auto mt-4 w-fit space-y-1.5 text-start text-xs">
             {joinSteps(group.profile === "community", t).map(step => {
               const state = joinStepState(stage, step.stage);
               const done = state === "done", current = state === "current";
