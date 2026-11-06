@@ -373,7 +373,8 @@ chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print 
   or unpins: `{messageId, ref, by, removed}`, with `messageId` the message's id here (null when it is not here, or
   unpinned), `ref` the id both sides know it by, and `by` `peer` or a member key.
 - `--type message.received` keeps one type; `--type message` (or `message.`, `message.*`) a family. A family deeper
-  down ends in "." (`group.typing.`): `group.message` is that type alone.
+  down ends in "." (`group.typing.`): `group.message` is that type alone. `events.gap` passes every `--type` (and
+  `--turns`), so a bot on one type still learns that events were lost.
 - `--from <chat|key>` and `--group <group>` (again for more): an allowlist. Only the chats (id, a label given here,
   or the contact's `peer` key, which also matches a chat made later) and groups (id, prefix or name, or `group:<id>`; one that fits more than one group is refused) named get through;
   a prefix of a chat's id or the name its contact gave itself is refused (another contact could call itself that:
