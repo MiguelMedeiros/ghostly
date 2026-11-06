@@ -95,4 +95,26 @@ describe("daemon --detach reads only its own child's answer", { timeout: 120_000
     expect(started).toMatchObject({ daemon: "started", pid: pids()[1] });
     expect(ok(await ghostly(["--home", dir, "daemon", "status"], { env }))).toMatchObject({ running: true, pid: pids()[1] });
   });
+
+  it("a child that refused to start answers with its own error, code and exit status", async () => {
+    const dir = home("detach-refused");
+    dirs.push(dir);
+    ok(await ghostly(["--home", dir, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));
+    const log = profilePaths(dir, "default").log;
+    // Another child's refusal in the log, written as the detach starts: not this child's answer.
+    writeFileSync(log, `${JSON.stringify({ error: { code: "busy", message: "Profile default is in use by process 1", details: { child: 1 } } })}\n`);
+    const failed = await ghostly(["--home", dir, "daemon", "--detach", "--timeout", "20"], { env: { ...env, GHOSTLY_PKARR_RELAYS: "notaurl" } });
+    expect(error(failed, "usage", 2).message).toBe('GHOSTLY_PKARR_RELAYS takes http:// or https:// URLs, comma-separated, not "notaurl"');
+    expect((failed.json.error as { details?: unknown }).details).toEqual({ log });
+  });
+
+  it("a restart whose new daemon refused to start answers with its error and says the old one was stopped", async () => {
+    const dir = home("restart-refused");
+    dirs.push(dir);
+    ok(await ghostly(["--home", dir, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));
+    const { pid } = ok(await ghostly(["--home", dir, "daemon", "--detach", "--timeout", "30"], { env })) as { pid: number };
+    const failed = await ghostly(["--home", dir, "daemon", "restart", "--timeout", "20"], { env: { ...env, GHOSTLY_HYPERDHT_BOOTSTRAP: "127.0.0.1:99999" } });
+    expect(error(failed, "usage", 2).message).toBe(`GHOSTLY_HYPERDHT_BOOTSTRAP takes host:port nodes, comma-separated, not "127.0.0.1:99999". The daemon (process ${pid}) was stopped: start it again with ghostly daemon --detach`);
+    expect((failed.json.error as { details?: unknown }).details).toEqual({ log: profilePaths(dir, "default").log, stopped: pid });
+  });
 });
