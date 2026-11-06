@@ -12,7 +12,7 @@ import { DeviceSetError, deviceIdentity, openTurnKeeper } from "./setup";
 import { loadDeviceSigningKey, type DeviceSigningKey } from "./signingKey";
 import { forkTimes, type DevicePatch, type DeviceRecord, type DeviceSlot, type DeviceState, type SecretOffer } from "./state";
 import { amendDevice, forgetDevice, moveDevice, readDeviceRecord } from "./store";
-import { acknowledged, pendingFrames } from "./remove";
+import { acknowledged, delivered, pendingFrames } from "./remove";
 import { checkSetUpdate } from "./setUpdate";
 import type { TurnKeeper, TurnOutcome } from "./turn";
 import { TakeoverRefusal, canTakeOver, forceTakeover, takeoverTarget } from "./takeover";
@@ -464,12 +464,15 @@ export class DeviceLinks implements DeviceLinkEngine {
     // across several moves holds one secret, the oldest set still waiting for it: that set's link is the one it opens.
     // The set's frame names the secret it takes from there, and only that set's link follows: the newest one (a frame
     // this device signed again, `remove.ts`), which the current link covers, or the next set (one another device
-    // signed). A link under any other set is under a secret that device never got, and could never open.
+    // signed). A link under any other set is under a secret that device never got, and could never open. Except where a
+    // frame went to the device over a live link (`delivered`): it may hold the secret that frame named then, its
+    // `set-ack` lost, and the chain from that set's link follows too.
     const pendingFor = (key: string, d?: string) => record.earlierSets.find((set) => set.d !== record.d && (d === undefined || set.d === d) && set.pending.includes(key));
     for (const staying of record.deviceSet) {
       if (!staying || staying.key === own) continue;
       const key = staying.key;
-      for (let set = pendingFor(key); set;) {
+      const took = record.earlierSets.flatMap((set) => (set.pending.includes(key) ? (set.delivered ?? []).filter((e) => e.key === key).map((e) => pendingFor(key, e.d)) : []));
+      for (const start of [pendingFor(key), ...took]) for (let set = start; set;) {
         const id = `${set.d}|${key}`;
         if (wanted.some((w) => w.id === id)) break;
         wanted.push({ id, d: fromBase64Url(set.d), key, name: staying.name, earlier: true });
@@ -804,7 +807,9 @@ export class DeviceLinks implements DeviceLinkEngine {
     if (running.earlier) {
       for (const pending of pendingFrames(record)) {
         if (pending.d !== running.d || pending.key !== running.key) continue;
-        try { running.link.sendDeviceFrame(pending.frame); } catch { /* the link closed under it: the next session sends it */ }
+        try { running.link.sendDeviceFrame(pending.frame); } catch { continue; /* the link closed under it: the next session sends it */ }
+        // The device may take it and its `set-ack` be lost: the link of the secret it names is kept after the next move.
+        if (record.state === "active" && delivered(record, pending.key, pending.d)) await amendDevice(this.options.profile, (current) => delivered(current, pending.key, pending.d));
       }
       return;
     }
