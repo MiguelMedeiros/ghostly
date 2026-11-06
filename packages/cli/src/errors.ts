@@ -44,6 +44,10 @@ export function asCliError(error: unknown): CliError {
   // A member asking for a group's admin-only change, one removed from the group (or gone) asking for any, an invitation
   // already answered: not allowed, not the engine failing.
   if (/^Only the admin |^You are no longer in this group$|^No invitation to (accept|decline)$/.test(message)) return new CliError("refused", message);
+  // `group invite` to a contact whose app is closed: try again once they are online.
+  if (message === "This contact is not connected right now. Invite them when they are online.") return new CliError("unavailable", message);
+  // `group invite` the group or the contact's app cannot take: one already in, a full group, an app too old for it.
+  if (/^This contact is already a member$|^A group holds \d+ members at most$|^A group grows past \d+ only when |^Their app (does not take part in groups|takes groups of \d+ at most)|^This group runs through hubs, which their app /.test(message)) return new CliError("refused", message);
   // `group invite` into a community: it has no invitations, its link is how people join.
   if (message === "Share the group's link with them: anyone who opens it joins") return new CliError("bad_request", message);
   return new CliError("engine", message);
