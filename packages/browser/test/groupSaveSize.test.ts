@@ -182,6 +182,53 @@ describe("a private group's saves", () => {
     expect(new Set([...now.said, ...old.said, ...back.said]).size).toBe(now.said.length + old.said.length + back.said.length);
   });
 
+  it("a pin, an unpin or a member's deletion for everyone taken by an app from before is not undone back here by the row of their own", async () => {
+    await clearProfileStores();
+    const now = engine();
+    await now.groups.load();
+    const [one, two] = [await grown(now.groups, 3, 0), await grown(now.groups, 3, 0)];
+    const m1 = (await now.groups.send(one, "m1")).messageId!, m2 = (await now.groups.send(one, "m2")).messageId!;
+    const at = Date.now();
+    // Group two: its record holds a pin (a commit wrote it whole), then a newer one goes to their row.
+    await now.groups.setPin(two, { id: "first", n: at, by: "me", at });
+    await sessionOf(now.groups, two).rotate();
+    await now.groups.setPin(two, { id: "second", n: at + 1, by: "me", at });
+    // Group one: a pin and a member's deletion in their row alone.
+    await now.groups.setPin(one, { id: m1, n: at, by: "me", at });
+    await now.groups.removed(one, "member:0:1");
+    await now.groups.flush();
+
+    // As the apps from before do: the groups' records, no small rows, no row for the pin and the deletions.
+    const before: GroupStore = { getGroups: () => db.getGroups(), putGroup: group => db.putGroup(group), deleteGroup: groupId => db.deleteGroup(groupId), getMessages: linkId => db.getMessages(linkId) };
+    const old = engine(before);
+    await old.groups.load();
+    expect(old.groups.pinOf(one)).toBeUndefined();
+    expect(old.groups.pinOf(two)).toMatchObject({ id: "first" });
+    // It pins, unpins and hears a deletion; it sends nothing and takes no commit.
+    await old.groups.setPin(one, { id: m2, n: at + 2, by: "me", at });
+    await old.groups.setPin(two, { id: "", n: at + 2, by: "me", at });
+    await old.groups.removed(one, "member:0:2");
+    await old.groups.flush();
+
+    const back = engine();
+    await back.groups.load();
+    expect(back.groups.pinOf(one)).toMatchObject({ id: m2 });
+    expect(back.groups.pinOf(two)).toMatchObject({ id: "" });
+    expect(back.groups.isRemoved(one, "member:0:2")).toBe(true);
+    // What the app from before never saw is lost with its row, as when it sends.
+    expect(back.groups.isRemoved(one, "member:0:1")).toBe(false);
+
+    // What this app takes from here on goes to their row again, and counts at the next start.
+    await back.groups.removed(one, "member:0:3");
+    await back.groups.setPin(one, { id: m1, n: at + 3, by: "me", at });
+    await back.groups.flush();
+    const third = engine();
+    await third.groups.load();
+    expect(third.groups.pinOf(one)).toMatchObject({ id: m1, n: at + 3 });
+    expect(third.groups.isRemoved(one, "member:0:2")).toBe(true);
+    expect(third.groups.isRemoved(one, "member:0:3")).toBe(true);
+  });
+
   it("killed right after a send saved its counter and frame: that save went to the small row, and opened again the text is stored and said", async () => {
     // The other tests' groups would be opened again too.
     await clearProfileStores();
