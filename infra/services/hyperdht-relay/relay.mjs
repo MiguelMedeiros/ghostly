@@ -486,8 +486,8 @@ const ROOM_MS = 10_000
 /**
  * Starts a relay: an HTTP server whose WebSocket upgrades each carry one browser's HyperDHT (dht-relay,
  * non-custodial: the browser keeps its keys and runs the Noise handshake and the encrypted stream itself;
- * the relay moves handshake messages and ciphertext). `GET /healthz` answers with the counts and the node's state,
- * 503 while its routing table is empty.
+ * the relay moves handshake messages and ciphertext). `GET /healthz` answers with the node's state, never a count,
+ * 503 while its routing table is empty; `stats()` has the counts.
  *
  * options: port, host, bootstrap (host:port list), testnet (size of an in-process HyperDHT network, for tests
  * and e2e), limits, origins (allowed `Origin` values, see originOf; empty allows any), proxies, cloudflare (see addressOf), log.
@@ -594,9 +594,11 @@ export async function startRelay(options = {}) {
   const server = http.createServer({ requestTimeout: limits.requestMs, headersTimeout: limits.requestMs, connectionsCheckingInterval: Math.min(1000, limits.requestMs) }, (request, response) => {
     if (request.url === '/healthz') {
       // Healthy while the node's routing table holds another node: with none, nobody reaches what it announces.
+      // Anyone may read it (behind a proxy every caller is on loopback), so only the node's state: the client counts
+      // and the time of the last answer move with each browser, and on a small relay would tell when one opens the app.
       const reached = dht.toArray().length
       response.writeHead(reached > 0 ? 200 : 503, { 'content-type': 'application/json', 'cache-control': 'no-store' })
-      response.end(JSON.stringify({ ok: reached > 0, clients: clients.size, ...stats, firewalled: dht.firewalled, nodes: reached, sinceAnswerMs: answeredAt === null ? null : Date.now() - answeredAt }))
+      response.end(JSON.stringify({ ok: reached > 0, firewalled: dht.firewalled, nodes: reached }))
       return
     }
     response.writeHead(426, { 'content-type': 'text/plain' }); response.end('Ghostly HyperDHT relay: connect with a WebSocket\n')
@@ -786,6 +788,7 @@ export async function startRelay(options = {}) {
     stats: () => ({
       clients: clients.size,
       ...stats,
+      sinceAnswerMs: answeredAt === null ? null : Date.now() - answeredAt,
       held: [...nodes].reduce((held, node) => ({ handshakes: held.handshakes + node._handshakes.size, signatures: held.signatures + node._signatures.size }), { handshakes: 0, signatures: 0 }),
     }),
     // Each client is told the relay is going away (1001), so it reconnects as it would after a restart, not a crash;

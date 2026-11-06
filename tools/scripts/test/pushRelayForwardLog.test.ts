@@ -30,7 +30,7 @@ describe("the push relay's log of forwards (infra/services/push-relay)", () => {
     for (let n = 0; n < 60; n++) expect((await post(n, n % 3 === 0 ? "made-up" : "ok")).status).toBe(200);
     for (let n = 60; n < 65; n++) expect((await post(n, "down")).status).toBe(502);
     expect(lines).toEqual(["forwarded 404", "forwarded 201", "failed ECONNREFUSED"]);
-    expect(await (await fetch(`${url}healthz`)).json()).toMatchObject({ forwarded: 60, failed: 5, refused: 0 });
+    expect(relay.stats()).toMatchObject({ forwarded: 60, failed: 5, refused: 0 });
     await relay.close();
     close = undefined;
     expect(lines).toEqual(["forwarded 404", "forwarded 201", "failed ECONNREFUSED", "forwarded 404 19 more", "forwarded 201 39 more", "failed ECONNREFUSED 4 more"]);

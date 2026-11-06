@@ -105,9 +105,9 @@ an `.env` file next to it):
   `GHOSTLY_RELAY_PROXIES=1`;
 - `GHOSTLY_RELAY_ORIGINS` with the origins of the web app you serve, or every browser on it is refused (403).
 
-`GET /healthz` answers with the counts (clients, accepted, refused, dropped) and the HyperDHT node's state: `nodes`
-in its routing table, `firewalled`, and `sinceAnswerMs` since another node last answered it (`null`: never). It is
-`ok: false` with HTTP 503 while `nodes` is 0: the node reaches no other one (no outgoing UDP, as behind a tunnel, a
+`GET /healthz` answers with the HyperDHT node's state: `nodes` in its routing table and `firewalled`
+(`{"ok":true,"firewalled":false,"nodes":20}`). Anyone who reaches the relay may read it, so it carries no count of
+clients; refusals and drops are in the log. It is `ok: false` with HTTP 503 while `nodes` is 0: the node reaches no other one (no outgoing UDP, as behind a tunnel, a
 firewall or a container network without it), so nobody reaches the browsers listening through it. The start log
 says `bootstrap reached no node` then. The log has counts and reasons only: never a key, an address or anyone's
 traffic.

@@ -175,10 +175,12 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     const cors = origin === undefined ? {} : { 'Access-Control-Allow-Origin': allowed.size ? origin : '*', 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'Content-Type', Vary: 'Origin' }
     const answer = (status, value) => { res.writeHead(status, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)) }
     const refuse = (why, status, value, detail) => { refusals.refuse(why, detail); answer(status, value) }
-    // An operator's check (curl, a monitor): up, with counts since the start, and nothing about any client.
+    // A monitor's check: up, and nothing else. Anyone may read it (behind a proxy every caller is on loopback), so it
+    // has no counts: those move with each push, and on a relay one person runs they would tell when that person wakes
+    // someone. The operator has them in the log.
     if (req.method === 'GET' && req.url.split('?')[0] === '/healthz') {
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
-      res.end(JSON.stringify({ ok: true, forwarded: forwards.total(), failed: failures.total(), refused: refusals.total(), tracked: recent.size }))
+      res.end(JSON.stringify({ ok: true }))
       return
     }
     // The preflight is answered, not refused: the POST after it is the one refusal of that page's attempt.
@@ -235,6 +237,8 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     server.listen(port, host, () => resolve({
       port: server.address().port,
       tracked: () => recent.size,
+      /** Counts since the start, for the process that runs it (never served). */
+      stats: () => ({ forwarded: forwards.total(), failed: failures.total(), refused: refusals.total(), tracked: recent.size }),
       /** Open connections, a request in them or not. */
       clients: () => new Promise(done => server.getConnections((_, count) => done(count ?? 0))),
       // `server.close` stops the check that ends a slow request, so a client holding half a request would hold the
