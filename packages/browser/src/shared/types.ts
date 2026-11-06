@@ -606,6 +606,8 @@ export interface PendingMelt {
   /** Set when the invoice pays a contact's payment request. */
   paymentId?: string;
   createdAt: number;
+  /** Came with a restored copy of the profile: its change is as old as the copy, and is checked like the copy's ecash. */
+  restored?: boolean;
 }
 
 /**
@@ -676,6 +678,8 @@ export interface StoredQuote {
    * is asked: the ecash it issues is for these, and its signatures for them can be asked for again (NUT-09).
    */
   outputs?: unknown[];
+  /** Came with a restored copy of the profile: its ecash is as old as the copy, and is checked like the copy's ecash. */
+  restored?: boolean;
 }
 
 export type PaymentState =

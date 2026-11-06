@@ -776,10 +776,12 @@ export class CashuWallet {
     const minted = sats(proofs);
     const tx: WalletTx = { ...walletTx(quote.mint, "lightning-in", minted, quote.amount - minted, quote.paymentId ? "Request paid over Lightning" : quote.testCoins ? TEST_COINS_NOTE : undefined), quote: quote.quote };
     await this.sealedTransact([STORES.proofs, STORES.walletTx, STORES.quotes], { [STORES.proofs]: proofs }, (stores) => {
-      for (const p of proofs) stores[STORES.proofs].put(toStored(quote.mint, p));
+      // From a restored copy, the profile it came from may have minted this invoice and spent its ecash since.
+      for (const p of proofs) stores[STORES.proofs].put({ ...toStored(quote.mint, p), ...(quote.restored ? { unchecked: true } : {}) } satisfies StoredProof);
       stores[STORES.walletTx].put(tx);
       stores[STORES.quotes].delete(quote.quote);
     });
+    if (quote.restored) void this.checkRestored();
     return quote;
   }
 
@@ -1766,10 +1768,12 @@ export class CashuWallet {
     const tx = walletTx(melt.mint, "lightning-out", melt.amount, melt.outlay - sats(change) - melt.amount, melt.note);
     await this.sealedTransact([STORES.proofs, STORES.melts, STORES.walletTx], { [STORES.proofs]: change }, (stores) => {
       for (const secret of melt.secrets) stores[STORES.proofs].delete(secret);
-      for (const p of change) stores[STORES.proofs].put(toStored(melt.mint, p));
+      // From a restored copy, the profile it came from may have settled this payment and spent its change since.
+      for (const p of change) stores[STORES.proofs].put({ ...toStored(melt.mint, p), ...(melt.restored ? { unchecked: true } : {}) } satisfies StoredProof);
       stores[STORES.melts].delete(melt.quote);
       stores[STORES.walletTx].put(tx);
     });
+    if (melt.restored && change.length > 0) void this.checkRestored();
   }
 
   /**
