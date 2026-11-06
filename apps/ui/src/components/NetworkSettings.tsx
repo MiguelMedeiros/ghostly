@@ -100,6 +100,8 @@ export function NetworkSettings() {
   const direct = network.readRelays !== undefined;
   // Hide my IP from contacts: this app reads and writes through the relays alone, whatever the switch below says.
   const relayOnly = direct && network.relayOnly === true;
+  // How this app reaches the DHT now: with Hide my IP on, the Desktop's DHT node is closed and it goes through the relays.
+  const reaches = relayOnly ? "relays" : network.kind;
 
   const refuse = (refused: Problems) => { focusFirst.current = true; setProblems(refused); };
   // An edit of a refused field takes its error away; the others stay until the next Save.
@@ -240,7 +242,7 @@ export function NetworkSettings() {
           </button>
           {saved && <span role="status" data-testid="network-saved" className="text-accent text-sm">{t("network.saved")}</span>}
           {error && <span role="alert" data-testid="network-error" className="text-danger text-sm min-w-0 break-words">{error}</span>}
-          <span data-testid="network-protocol" data-kind={network.kind} className="text-text-muted text-xs ms-auto min-w-0">{fillNames(t(network.kind === "direct" ? "network.protocolDirect" : "network.protocolRelays"), PROTOCOL_NAMES)}</span>
+          <span data-testid="network-protocol" data-kind={reaches} className="text-text-muted text-xs ms-auto min-w-0">{fillNames(t(reaches === "direct" ? "network.protocolDirect" : "network.protocolRelays"), PROTOCOL_NAMES)}</span>
         </div>
       </Block>
     </Section>
