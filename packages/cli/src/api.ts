@@ -641,10 +641,11 @@ const METHODS: Record<string, Method> = {
     const view = await waitForState(ctx, (s) => {
       const now = s.links.find((l) => l.id === link.id);
       if (!now) throw new CliError("not_found", `Chat ${link.id} was removed`);
-      // Live: a session that exists now, never one remembered from the last run (`isLive`).
+      // Live: a session that exists now, never one remembered from the last run (`isLive`). Paired: the contact's key
+      // kept (`peerParticipationKey`) is a fact of the chat, whether the contact is online now or not.
       const ok = until === "live" ? isLive(now)
         : until === "text" ? now.textDelivery === "stream" || now.textDelivery === "dht" || now.textDelivery === "hold"
-        : !!now.pairingProgress?.peerSeen || now.pairing?.status === "ready" || isLive(now);
+        : !!now.peerParticipationKey || !!now.pairingProgress?.peerSeen || now.pairing?.status === "ready" || isLive(now);
       return ok ? now : undefined;
     }, ms, `chat ${link.id} to be ${until}`);
     return chatJson(view);
