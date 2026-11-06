@@ -101,13 +101,13 @@ describe("a device this one just added", () => {
     // The enrollment's record is written: the active device's links start while the new device shows its last screen.
     desktop.links.expectDevice(phone.slot.key);
     await settled(desktop.links.start());
-    // The person taps Continue there a little later, and the new device starts into its standby screen.
-    await run(15_000);
+    // The person taps Continue there a moment later, and the new device starts into its standby screen.
+    await run(3_000);
     await settled(phone.links.start());
     const started = Date.now();
     while (Date.now() - started < 3 * RELAY_POLL_INTERVALS.background && !(desktop.links.live(phone.slot.key) && phone.links.live(desktop.slot.key))) await run(250);
-    // Read every 4 s until it is seen. At the background pace it took 31 s (web↔web, the e2e's relay).
-    expect(Date.now() - started).toBeLessThanOrEqual(15_000);
+    // Read every 4 s until it is seen. At the background pace it took about 30 s, here and web↔web on the e2e's relay.
+    expect(Date.now() - started).toBeLessThanOrEqual(12_000);
   }, 120_000);
 
   it("is awaited ten minutes at most: a new device that never starts is then read at the background pace", async () => {
