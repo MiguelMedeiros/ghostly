@@ -30,6 +30,10 @@ it('binds Pubky indexed metadata to the requested key and never fabricates a Kee
  expect(pubkyMetadata({id:'key',name:'Alice',image:'pubky://file'},'key')).toEqual({name:'Alice',picture:'https://nexus.pubky.app/static/avatar/key'});
  expect((await lookupPublicProfile('keet-import','f'.repeat(64))).source).toBe('unavailable');
  expect(profileName('x'.repeat(300))).toBeUndefined();expect(profileName('A\u202eB\n')).toBe('AB');
+ // Pubky's and Bluesky's names: one line, nothing invisible or direction-changing; scripts and emoji as written.
+ expect(profileName('Alice\u2028Verified by GitHub\u2029\u200b\u2060\ufeff\u061c\u200e\u200f\u{e0041}')).toBe('AliceVerified by GitHub');
+ expect(profileName('\u200b\u2060\ufeff\u{e0041}')).toBeUndefined();
+ for (const ok of ['\u0645\u0631\u064a\u0645','\u05e9\u05dc\u05d5\u05dd \u05e2\u05dc\u05d9\u05db\u05dd','\ud83d\udc69\ud83c\udffd\u200d\ud83d\udcbb Ana','\u0928\u092e\u0938\u094d\u0924\u0947','Zo\u00eb \ud83c\udde7\ud83c\uddf7']) expect(profileName(ok)).toBe(ok);
 });
 it('selects only a current conversation proof, supports choice, and falls back on withdrawal/expiry',()=>{
  const profiles:PublicProfile[]=[{adapter:'nostr',key:'n',name:'Nostr name',fetchedAt:now,source:'nostr-signed'},{adapter:'pubky-import',key:'p',name:'Pubky name',fetchedAt:now,source:'pubky-index'}];

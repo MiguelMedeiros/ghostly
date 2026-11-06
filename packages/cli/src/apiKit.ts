@@ -136,8 +136,8 @@ const namedAs = (key: string, name: string | null | undefined) => key !== "" && 
  * A chat by its id; by its contact's key (only by the key: a name is never taken for one); by the label this side gave
  * it; and only when no label matches, by a unique prefix of its id or the name the contact gave itself. The contact
  * controls both of those (a joiner's chat id is made from the inviter's code), so neither wins over a label, and a ref
- * that fits one chat's prefix and another's name is refused. A ref that names no chat but one of `groups` says it is a
- * group (see `noChat`).
+ * that fits one chat's prefix and another's name is refused. `group:<ref>` is taken for a chat only by a label. A ref
+ * that names no chat but one of `groups` says it is a group (see `noChat`).
  */
 export function findChat(links: readonly LinkView[], ref: string, groups: readonly GroupView[] = []): LinkView {
   return chatBy(links, ref, groups).link;
@@ -170,6 +170,9 @@ function chatBy(links: readonly LinkView[], ref: string, groups: readonly GroupV
   const key = nameKey(ref);
   const named = (name: string | null | undefined) => namedAs(key, name);
   const byLabel = links.filter((link) => named(link.label));
+  // `group:<ref>` names a group (`groupPrefixed`): only a label given here takes it for a chat, never a name its contact
+  // chose (a contact calling itself `group:Crew` took `send group:Crew` and every chat-only command meant for the group).
+  if (!byLabel.length && groupPrefixed(ref) !== null) throw noChat(ref, groups);
   const found = byLabel.length ? byLabel : [...new Set([...links.filter((link) => link.id.startsWith(ref)), ...links.filter((link) => named(link.peerNick))])];
   if (found.length === 1) return { link: found[0], theirName: !byLabel.length };
   if (found.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: found.map((link) => link.id) });

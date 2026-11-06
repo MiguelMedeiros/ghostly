@@ -54,6 +54,7 @@ import { languageName } from "../lib/documentLanguage";
 import { translateEnabled } from "../lib/translateFlag";
 import { pictureLinkRead, pictureLinkUrl, type PictureRead } from "../lib/pictureLink";
 import { SenderAvatar, type MessageAuthor } from "./chat/SenderAvatar";
+import { AdminMark } from "./chat/AdminMark";
 import { useMemberText } from "../contexts/MemberColorsContext";
 import { AppCardView } from "./apps/AppCardView";
 import { useAppsAvailable } from "../lib/apps/flag";
@@ -1163,7 +1164,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const nick = own && !isMe && (!author || author.first) ? `${contactName === undefined ? "~" : ""}${own}` : "";
   // Isolated, as on a routine row (RoutineCard.tsx): in a right-to-left chat a Latin name read "Carol~".
   const nickRun = <bdi>{nick}</bdi>;
-  const nickEl = nick ? (
+  const nameEl = nick ? (
     // A group member's name takes their colour (lib/memberColors.ts), and a tap on it opens who they are.
     <div data-testid="message-nick" data-key={author?.key} className={`${author ? memberText(author.key) : "text-accent-hover"} text-[12.8px] font-medium mb-[2px] leading-[22px]`}>
       {author && onOpenAuthor && !choosing
@@ -1171,6 +1172,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         : nickRun}
     </div>
   ) : null;
+  // The admin's mark beside their name, out of it: a member can take the admin's name, never this.
+  const nickEl = nameEl && author?.admin ? <div className="flex items-center gap-1.5">{nameEl}<AdminMark testId="message-nick-admin" /></div> : nameEl;
   const menu = !choosing && (
     <MessageMenu onDelete={onDelete} onDeleteForEveryone={isMe ? deleteForEveryone : undefined} group={inGroup} onDetails={openDetails} onReply={onReply} onEdit={isMe ? onEdit : undefined} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved}
       onForward={onForward} onSelect={onSelect} align={isMe ? "left" : "right"} download={download} sender={isMe ? "me" : "peer"} {...(isMe ? sending : {})} />

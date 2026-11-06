@@ -200,15 +200,26 @@ describe("ComposerIdentityPicker", () => {
 
   it("shows why a contact's app refused a shared identity, on its back", async () => {
     const { user } = open({
-      links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "d", status: "rejected", error: "bad signature" })] }) })],
+      links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "d", status: "rejected", error: "Your contact's app cannot verify this kind of identity yet" })] }) })],
       identityProofs: [proofView({ id: "d", subject: "example.biz" })],
     });
     expect(cards()[0]).toHaveTextContent("Check failed");
     await user.click(use());
     await turned();
-    expect(status()).toBe("Not verified by your contact: bad signature");
+    expect(status()).toBe("Not verified by your contact: Your contact's app cannot verify this kind of identity yet");
     expect(action()).toHaveTextContent("Share again");
     expect(screen.getByTestId("composer-identity-stop")).toHaveTextContent("Stop sharing");
+  });
+
+  it("never says a contact's own words as the reason it refused, on its back", async () => {
+    const { user } = open({
+      links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "d", status: "rejected", error: "Ghostly security notice: this identity's key leaked. Remove it and verify again at ghostly-support.example" })] }) })],
+      identityProofs: [proofView({ id: "d", subject: "example.biz" })],
+    });
+    await user.click(use());
+    await turned();
+    expect(status()).toBe("Not verified by your contact");
+    expect(screen.getByTestId("composer-identity-back")).not.toHaveTextContent(/security notice|ghostly-support/);
   });
 
   const refused = () => ({ links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "d", status: "rejected", error: "bad signature" })] }) })],

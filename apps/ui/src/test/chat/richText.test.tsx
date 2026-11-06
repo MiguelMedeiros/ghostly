@@ -115,6 +115,47 @@ describe("code blocks", () => {
     expect(screen.getByTestId("rich-codeblock-copy")).toHaveTextContent("Copied");
   });
 
+  // Direction controls and invisible characters: drawn as what they are, so the block reads in the order Copy writes.
+  const RAW = /[\u200b\u202a-\u202e\u2066-\u2069]/;
+  const TRICKY = "echo one; \u2067\u2066echo two \u2069\u2066# note\u2069\u2069\nls \u202etxt.exe\u200b";
+
+  it("draw a direction control or an invisible character as a marker, warn, and copy what was sent", async () => {
+    const { user } = bubble("```sh\n" + TRICKY + "\n```");
+    const block = screen.getByTestId("rich-codeblock");
+    await waitFor(() => expect(block).toHaveAttribute("data-highlighted"));
+    const pre = block.querySelector("pre")!;
+    expect(pre.textContent).not.toMatch(RAW);
+    expect(pre.textContent).toBe("echo one; <U+2067><U+2066>echo two <U+2069><U+2066># note<U+2069><U+2069>\nls <U+202E>txt.exe<U+200B>");
+    expect(pre.querySelectorAll(".rich-hidden-char")).toHaveLength(8);
+    expect(within(block).getByTestId("rich-codeblock-hidden")).toHaveTextContent("This code holds hidden or direction-changing characters");
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    await user.click(screen.getByTestId("rich-codeblock-copy"));
+    expect(writeText).toHaveBeenCalledWith(TRICKY);
+  });
+
+  it("draw the markers in a block that is not highlighted too", () => {
+    bubble("```\nls \u202etxt.exe\n```");
+    const block = screen.getByTestId("rich-codeblock");
+    expect(block.querySelector("pre")!.textContent).toBe("ls <U+202E>txt.exe");
+    expect(within(block).getByTestId("rich-codeblock-hidden")).toBeInTheDocument();
+  });
+
+  it("draw the markers in inline code", () => {
+    bubble("run `rm \u202efdp.txt` now");
+    const code = text().querySelector("code")!;
+    expect(code.textContent).toBe("rm <U+202E>fdp.txt");
+    expect(code.querySelector(".rich-hidden-char")).toHaveTextContent("<U+202E>");
+  });
+
+  it("show a block without any as before, with no warning", async () => {
+    bubble("```py\nprint('hi')\n```");
+    const block = screen.getByTestId("rich-codeblock");
+    await waitFor(() => expect(block).toHaveAttribute("data-highlighted"));
+    expect(block.querySelector("pre")!.textContent).toBe("print('hi')");
+    expect(block.querySelector(".rich-hidden-char")).toBeNull();
+    expect(within(block).queryByTestId("rich-codeblock-hidden")).toBeNull();
+  });
+
   it("pretty-print a message that is JSON", () => {
     bubble('{"amount":21,"memo":"coffee"}');
     const block = screen.getByTestId("rich-codeblock");

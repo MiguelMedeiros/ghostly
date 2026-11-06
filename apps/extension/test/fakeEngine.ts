@@ -1,6 +1,8 @@
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { RpcRequest } from "@ghostly/browser/shared/rpc";
 import { databaseName } from "@ghostly/browser/shared/idb";
+import type { StoredService } from "@ghostly/browser/shared/types";
+import { mayReach } from "@ghostly/browser/engine/serviceAccess";
 
 /**
  * Stands in for `@ghostly/browser/engine/server` in the offscreen document: the
@@ -31,6 +33,8 @@ export interface FakeEngineControl {
   respond: (peer: string, service: string, init: EngineRequestInit) => Promise<EngineResponse>;
   /** The chats the peer's state lists (`getState().links`): what a contact shares, by name. */
   links?: { peerPubKeyZ32: string; peerServices: { id: string; name: string }[] | null }[];
+  /** The apps this peer shares (`getState().services`), which `setServiceEnabled` turns on and off as the engine's does. */
+  services?: StoredService[];
 }
 
 export function engineControl(): FakeEngineControl {
@@ -68,7 +72,16 @@ export class FakeEngineServer {
       this.requests.push({ peer, service, init });
       return engineControl().respond(peer, service, init);
     },
-    getState: () => ({ links: engineControl().links ?? [] }),
+    getState: () => ({ links: engineControl().links ?? [], services: (engineControl().services ?? []).map((s) => ({ ...s, requests: 0 })) }),
+    setServiceEnabled: ({ serviceId, enabled }: { serviceId: string; enabled: boolean }) => {
+      const service = engineControl().services?.find((s) => s.id === serviceId);
+      if (service) service.enabled = enabled;
+    },
+    /** Whether a contact's request for one of this peer's apps is served: the engine's own check (`hostedService`). */
+    serves: (serviceId: string, peerPubKeyZ32: string) => {
+      const service = engineControl().services?.find((s) => s.id === serviceId);
+      return !!service && mayReach(service, peerPubKeyZ32);
+    },
     shutdown: async () => {
       this.shutdowns++;
       engineControl().log.push(`stop ${this.database}`);

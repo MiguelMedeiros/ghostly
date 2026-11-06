@@ -208,7 +208,8 @@ describe("renaming a group in the app", () => {
     renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
     expect(screen.getByTestId("group-name")).toHaveTextContent("Book club");
     const lines = await screen.findAllByTestId("group-event");
-    expect(lines.map(l => l.textContent)).toEqual(["Alice renamed the group to “Book club”"]);
+    // Alice is the admin: her name carries the admin's mark.
+    expect(lines.map(l => l.textContent)).toEqual(["Alice admin renamed the group to “Book club”"]);
   });
 
   it("a change the engine credits nobody with (a new admin signed again what the last one set) names nobody, in the app's language", async () => {

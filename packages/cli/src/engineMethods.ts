@@ -236,7 +236,7 @@ export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
   appStoreRemove: "{ key }",
   appStoreRefresh: "{ key? }?",
   appPreview: "AppSource",
-  appInstall: "{ digest, grant }",
+  appInstall: "{ digest, grant, asks? }",
   appUpdateAccept: "{ ref }",
   appCheckUpdates: "",
   appUninstall: "{ ref }",

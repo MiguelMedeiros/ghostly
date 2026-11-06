@@ -6,6 +6,7 @@
 import { GhostlyHttpError, viewerResponseHeaders, type ClientRequest, type ClientResponse } from "@ghostly/core";
 import { BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServicesHost } from "./protocol";
 import { callWindowOn } from "../../../ui/src/lib/serviceWindows";
+import { appInput } from "../../../ui/src/lib/apps/open";
 
 /** How a request reaches the contact: the engine's `request` for that contact and service. */
 export type ServiceSend = (request: ClientRequest) => Promise<ClientResponse>;
@@ -147,6 +148,12 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     port.close();
   }
 }
+
+/**
+ * How often an open view looks whether the person is using the app (`navigator.userActivation`): well within the time
+ * a tap or a key keeps the page active (5 s in Chromium, Firefox and WebKit), so none goes unseen.
+ */
+const INPUT_LOOK_MS = 1_000;
 
 /** What `openServiceView` puts over the app, so a test (or a second open, or the lock) can find and close it. */
 export const VIEW_ID = SERVICE_VIEW_ID;
@@ -299,7 +306,12 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const shut = [...document.body.children].filter((el) => !el.hasAttribute("inert"));
   let unwatch = () => {};
+  // The person's taps and keys in the app go to its frame, never to this page, whose lock screen would lock them out
+  // mid-use and close the app with what they typed. The browser's user activation does reach it: real input in a frame
+  // activates every frame above it, and no script can, so the contact's page cannot keep the lock away by itself.
+  const using = setInterval(() => { if (navigator.userActivation?.isActive) appInput(); }, INPUT_LOOK_MS);
   const end = () => {
+    clearInterval(using);
     unwatch();
     removeEventListener("message", onMessage);
     removeEventListener("keydown", onKey);

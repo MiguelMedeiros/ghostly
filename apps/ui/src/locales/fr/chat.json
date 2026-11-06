@@ -373,6 +373,7 @@
     "copied": "Copié",
     "copy": "Copier",
     "copyCode": "Copier le code",
+    "hiddenChars": "Ce code contient des caractères cachés ou qui changent le sens du texte, affichés comme <U+…>. Copier le code les copie aussi.",
     "localTime": "{{time}} chez vous",
     "showAll": "Tout afficher",
     "showLess": "Afficher moins",

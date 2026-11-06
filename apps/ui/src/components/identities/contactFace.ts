@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
+import { hasVisible, stripHidden } from "@ghostly/core";
 import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import { engine } from "@ghostly/browser/platform/engine";
 import { hasPublicProfile } from "@ghostly/browser/profiles/readers";
@@ -84,9 +85,9 @@ export function useFaceChoice(peerKey: string | undefined): FaceChoice | undefin
  */
 export function cleanFaceName(value: string | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
-  // eslint-disable-next-line no-control-regex
-  const text = value.replace(/\s+/g, " ").replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, "").replace(/\s+/g, " ").trim();
-  return Array.from(text).slice(0, 64).join("").trim() || undefined;
+  const text = stripHidden(value.replace(/\s+/g, " ")).replace(/\s+/g, " ").trim();
+  const name = Array.from(text).slice(0, 64).join("").trim();
+  return name && hasVisible(name) ? name : undefined;
 }
 
 /** How a contact can be shown: one of their verified identities with a public profile that has a name or a photo. */
