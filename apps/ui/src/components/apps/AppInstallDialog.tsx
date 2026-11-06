@@ -361,6 +361,8 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
       {why && <Line tone={app.run.status === "needs-files" ? "warning" : "danger"} testId="app-run-line">{why}</Line>}
       {/* The version's internal `sequence` is never shown: the person knows it by the version in the header. */}
       {app.equivocation && <Line tone="warning" testId="app-equivocation">{t("apps.install.equivocation")}</Line>}
+      {/* What it may do now stays while an update waits: that update's "also asks to" adds to this list. */}
+      <Permissions asks={app.permissions} update={false} />
       {app.pending && (
         <div className="bg-surface rounded-xl px-4 py-3 space-y-3" data-testid="app-update">
           <p className="text-sm text-text-primary">{t("apps.app.updateWaits", { version: app.pending.version })}</p>
@@ -371,7 +373,6 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
           </div>
         </div>
       )}
-      {!app.pending && <Permissions asks={app.permissions} update={false} />}
       <Privacy internet={(app.permissions as readonly string[]).includes("internet")} />
       {error && <ErrorLine error={error} testId="app-details-error" />}
       <div className="flex flex-wrap justify-end gap-2">

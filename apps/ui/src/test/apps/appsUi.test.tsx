@@ -403,6 +403,19 @@ describe("with the apps flag on", () => {
     expect(fakeEngine.callsTo("appUpdateAccept")).toEqual([{ ref: REF }]);
   });
 
+  it("keeps what an installed app may do now on its screen while an update that asks for more waits", async () => {
+    fakeEngine.on("appList", () => []);
+    renderApp(<InstalledAppDialog onClose={() => {}} onOpen={() => {}}
+      app={installed({ permissions: ["chat", "name"], pending: { sequence: 8, version: "1.3.0", added: ["internet"] } })} />);
+    const update = await screen.findByTestId("app-update");
+    const lists = screen.getAllByTestId("app-permissions");
+    expect(lists).toHaveLength(2);
+    const now = lists.find((list) => !update.contains(list))!;
+    expect(now).toHaveTextContent("It can");
+    expect([...now.querySelectorAll("[data-permission]")].map((li) => li.getAttribute("data-permission"))).toEqual(["storage", "chat", "name"]);
+    expect([...within(update).getByTestId("app-permissions").querySelectorAll("[data-permission]")].map((li) => li.getAttribute("data-permission"))).toEqual(["internet"]);
+  });
+
   it("the install screen of an update lists only the added permission", async () => {
     fakeEngine.on("appPreview", () => preview({ install: "update", asks: ["name"] }));
     renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
