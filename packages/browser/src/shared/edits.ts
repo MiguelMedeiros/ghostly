@@ -58,10 +58,10 @@ export function canRemove(message: Pick<StoredMessage, "paymentId" | "event" | "
  * (WISP 406 · Message Buttons) are the exception: their text is the question people answer, so a new one keeps the
  * version it replaces, and only a change of the buttons alone (the answer marked, closed) adds none.
  */
-export function withEdit(message: StoredMessage, edit: { seq: number; at: number; text: string; preview?: LinkPreview; card?: StatusCard; pending?: boolean }): StoredMessage {
+export function withEdit(message: StoredMessage, edit: { seq: number; at: number; heardAt?: number; text: string; preview?: LinkPreview; card?: StatusCard; pending?: boolean }): StoredMessage {
   const before = message.edit?.history ?? [];
   const history = edit.text === message.text || (edit.card && edit.card.kind !== "buttons") ? before : trimHistory([...before, { at: message.edit?.at ?? shownTime(message), text: message.text }]);
-  const next: MessageEdit = { seq: edit.seq, at: edit.at, history, ...(edit.pending && { pending: true as const }) };
+  const next: MessageEdit = { seq: edit.seq, at: edit.at, ...(edit.heardAt !== undefined && { heardAt: edit.heardAt }), history, ...(edit.pending && { pending: true as const }) };
   const { preview: _old, card: _card, ...rest } = message;
   return { ...rest, text: edit.text, edit: next, ...(edit.preview && { preview: edit.preview }), ...(edit.card && { card: edit.card }) };
 }

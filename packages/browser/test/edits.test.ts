@@ -329,6 +329,19 @@ describe("the contact's edits", () => {
     expect((await t.row(original.id)).edit?.history.map(v => v.text)).toEqual(["v0", "v3"]);
   });
 
+  it("keep when the edit came here beside the time the contact's clock gives it, a month behind", async () => {
+    const t = await setup();
+    expect(await t.contact.sendMessage("v0", Date.now(), WIRE("H"))).toBeNull();
+    const original = await t.peerRow("v0");
+    const behind = Date.now() - 31 * 86_400_000, before = Date.now();
+    expect(await t.contact.sendEdit({ id: WIRE("H"), e: 1, ts: behind, m: "v1" })).toBeNull();
+    await vi.waitFor(async () => expect((await t.row(original.id)).text).toBe("v1"));
+    const { edit } = await t.row(original.id);
+    expect(edit?.at).toBe(behind);
+    expect(edit?.heardAt).toBeGreaterThanOrEqual(before);
+    expect(edit?.heardAt).toBeLessThanOrEqual(Date.now());
+  });
+
   it("never change one of my messages: an edit naming my wire id waits for a message of the contact's that never comes", async () => {
     const t = await setup();
     const sent = await t.node.sendMessage({ linkId: t.id, text: "mine" });
