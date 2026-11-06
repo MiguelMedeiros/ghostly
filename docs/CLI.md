@@ -109,7 +109,8 @@ One JSON object per line each way:
 ```
 
 A connection takes one `events.subscribe`: a second on it is refused (`bad_request`), and a new stream is a new
-connection.
+connection. Its `since`, as `events.replay`'s, is a whole number from 0 (a number, not text: anything else is
+`bad_request`); left out or `null`, the stream starts from now.
 
 The daemon speaks first on the socket: a greeting that proves, with the secret it writes in the profile's folder
 (`daemon.secret`, 0600, new at every start), its pid and the time. A command writes nothing until that checks out,

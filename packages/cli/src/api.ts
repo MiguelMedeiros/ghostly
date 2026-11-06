@@ -5,7 +5,7 @@ import { findSecret, guardText, secretWords } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
 import {
-  bool, chatOf, chatOrGroup, cleanName, dhtOnly, findChat, findGroup, groupOf, groupPrefixed, inviteTaken, list, messageOf, node, num, oneOf, state, str, transportOffered, waitForState,
+  bool, chatOf, chatOrGroup, cleanName, dhtOnly, findChat, findGroup, groupOf, groupPrefixed, inviteTaken, list, messageOf, node, num, oneOf, sinceSeq, state, str, transportOffered, waitForState,
   type ApiContext, type Method, type Params,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -812,7 +812,7 @@ const METHODS: Record<string, Method> = {
   },
 
   async "events.replay"(ctx, params) {
-    return { events: ctx.hub.replay(num(params, "since", 0)), lastSeq: ctx.hub.lastSeq };
+    return { events: ctx.hub.replay(sinceSeq(params, 0)), lastSeq: ctx.hub.lastSeq };
   },
 
   async "daemon.stop"(ctx) {
