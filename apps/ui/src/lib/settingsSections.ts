@@ -102,6 +102,7 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   { section: "network", label: "network.hyperdht" },
   { section: "network", label: "network.pushRelay" },
   { section: "network", label: "network.turn", words: "settings.searchWords.turn" },
+  { section: "network", label: "network.relayOnly" },
   { section: "network", label: "network.domainLookups", words: "settings.searchWords.domains" },
   { section: "storage", label: "settings.storageUsed", words: "settings.searchWords.storage" },
   { section: "storage", label: "settings.groupDownloads.title", words: "settings.searchWords.groupDownloads" },
