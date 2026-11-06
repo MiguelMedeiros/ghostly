@@ -722,6 +722,37 @@ describe("removing a proof and its revocation", () => {
     }
   });
 
+  it("withdrawn, shared again, then removed while the contact still checks the new presentation: the contact finds it revoked after the withdraw (3 runs)", async () => {
+    for (let run = 1; run <= 3; run++) {
+      const { engines, ledgers, state, resolved, pkarr, id } = await shared();
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      await engines.a.withdraw({ linkId: "chat", id });
+      await vi.waitFor(() => expect(ledgers.b.received.map(r => r.status)).toEqual(["withdrawn"]));
+      // The first withdraw's lookups run and end.
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      const checks = heldChecks(state, 1);
+      await engines.a.share({ linkId: "chat", id });
+      await checks.entered[0];
+      await engines.a.remove({ id });
+      await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === id)?.status).toBe("withdrawn"));
+      // The relays do not return the owner's revocation yet when the check looks it up.
+      const published = [...pkarr];
+      pkarr.clear();
+      checks.release(0, true);
+      await vi.waitFor(() => expect(ledgers.b.challenges).toEqual([]));
+      expect(engines.b.linkView("chat", true)!.received.map(r => r.status), `run ${run}: right after the check`).toEqual(["withdrawn"]);
+      for (const [key, records] of published) pkarr.set(key, records);
+      resolved.length = 0;
+      await vi.advanceTimersByTimeAsync(20_000);
+      await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received.map(r => r.status), `run ${run}: 20 s after the removal`).toEqual(["revoked"]));
+      // Once: found on the first try, and no second round of lookups follows.
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(resolved, `run ${run}: its revocation looked up after the withdraw`).toHaveLength(1);
+      engines.a.stop(); engines.b.stop();
+      vi.useRealTimers();
+    }
+  });
+
   it("the older presentation's check failing after the share again does not settle the newer share: both sides end shared and verified", async () => {
     const { engines, ledgers, state } = pair();
     await clearStorage();
