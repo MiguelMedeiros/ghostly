@@ -1,4 +1,4 @@
-import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { DEFAULT_HYPERDHT_RELAY } from "@ghostly/browser/shared/hyperdhtRelay";
@@ -7,7 +7,7 @@ import { findSecret, guardText, secretWords } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
 import {
-  bool, chatOf, chatOrGroup, cleanName, dhtOnly, findChat, findGroup, groupOf, groupPrefixed, inviteTaken, list, messageOf, noMessage, nobodyJoined, node, num, oneOf, somebodyJoined, state, str, transportOffered, waitForState,
+  bool, chatOf, chatOrGroup, dhtOnly, findChat, findGroup, groupNameOf, groupOf, groupPrefixed, inviteTaken, list, messageOf, noMessage, nobodyJoined, node, num, oneOf, shownName, somebodyJoined, state, str, transportOffered, waitForState,
   type ApiContext, type Method, type Params, type RefPlace,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -118,7 +118,7 @@ function relayRefused(error: unknown, patch: Record<string, unknown>): unknown {
 const CHAT_NAME_LENGTH = 48;
 
 /**
- * A chat's name on this side (`chat rename`, an invite's `--label`), as the engine stores it (`cleanName`): a tab or a
+ * A chat's name on this side (`chat rename`, an invite's `--label`), as the engine stores it (`shownName`): a tab or a
  * line break is a space, invisible characters go, and what is left is counted. Longer than the engine keeps whole is
  * refused, not cut. An empty name (or spaces) is the documented one of `chat rename` (the contact's own name) and no
  * label for an invite; a name with nothing that shows is refused: given as is, the engine cleared the chat's name. A
@@ -127,9 +127,7 @@ const CHAT_NAME_LENGTH = 48;
 function chatName(params: Params, name: string): string | undefined {
   const value = str(params, name);
   if (value === undefined || !value.trim()) return value === undefined ? undefined : "";
-  const clean = cleanName(value, CHAT_NAME_LENGTH);
-  if (clean === undefined) throw new CliError("bad_request", `A chat's name is up to ${CHAT_NAME_LENGTH} characters on one line`);
-  if (!clean) throw new CliError("bad_request", `A chat's name needs a character that shows (an empty name gives back the contact's own)`);
+  const clean = shownName(value, CHAT_NAME_LENGTH, "A chat's name", " (an empty name gives back the contact's own)");
   if (groupPrefixed(clean) !== null) throw new CliError("bad_request", `A chat's name can't start with "group:": that names a group`);
   return clean;
 }
@@ -699,9 +697,7 @@ const METHODS: Record<string, Method> = {
 
   async "group.create"(ctx, params) {
     // As `group rename` checks it: a name a group cannot have is said here, before anything is made.
-    const clean = cleanName(str(params, "name", true), MAX_GROUP_NAME_LENGTH);
-    const name = clean && groupName(clean);
-    if (!name) throw new CliError("bad_request", `A group's name is 1 to ${MAX_GROUP_NAME_LENGTH} characters on one line`);
+    const name = groupNameOf(params);
     // Every member reads it, and a community's anyone who opens its link.
     guardText(name, bool(params, "force"), "group's name", "create it");
     const profile = oneOf(params, "profile", ["community", "mesh"] as const, "community");
