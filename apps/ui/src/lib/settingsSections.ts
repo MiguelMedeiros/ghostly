@@ -53,10 +53,11 @@ export function sectionInView(boxes: readonly SectionBox[], line: number, viewBo
 }
 
 /**
- * What a setting needs to be there at all: several profiles, an updater, wake-up push, calls' devices, translation (a
- * `VITE_TRANSLATE` Desktop build, lib/translateSettings.ts).
+ * What a setting needs to be there at all: several profiles, an updater, wake-up push, wake-ups turned on (the online
+ * notice rides on the subscription), calls' devices, translation (a `VITE_TRANSLATE` Desktop build,
+ * lib/translateSettings.ts).
  */
-export type SettingNeeds = "profiles" | "updates" | "wake" | "media" | "translate";
+export type SettingNeeds = "profiles" | "updates" | "wake" | "wakeOn" | "media" | "translate";
 
 /** One option the menu's search finds, by its row's label or by other words people look for it by. */
 export interface SettingEntry {
@@ -88,7 +89,7 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   { section: "notifications", label: "settings.cues.interface", words: "settings.cues.interfaceHint" },
   { section: "notifications", label: "settings.systemNotifications", words: "settings.searchWords.systemNotices" },
   { section: "notifications", label: "pwa.wake", words: "settings.searchWords.wake", needs: "wake" },
-  { section: "notifications", label: "pwa.wakeOnline", needs: "wake" },
+  { section: "notifications", label: "pwa.wakeOnline", needs: "wakeOn" },
   { section: "media", label: "settings.media.microphone", words: "settings.searchWords.microphone", needs: "media" },
   { section: "media", label: "settings.media.camera", words: "settings.searchWords.camera", needs: "media" },
   { section: "media", label: "settings.media.speaker", words: "settings.searchWords.speaker", needs: "media" },
