@@ -20,7 +20,7 @@ import { format } from "node:util";
 import { completeWithPipedEvidence, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, settingValue, textFromStdin } from "./secretInput";
 import type { Translator } from "./translate";
 import {
-  checkProfileName, checkShownName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
+  checkProfileName, checkShownName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, noProfile, profileExists, profilePaths, selectProfile,
   startingDaemon,
   type ProfilePaths,
 } from "./profiles";
@@ -72,16 +72,12 @@ function globals(parsed: Parsed): Globals {
 function requireProfile(g: Globals): void {
   if (profileExists(g.home, g.profile)) return;
   if (g.profile === DEFAULT_PROFILE) { createProfile(g.home, g.profile); return; }
-  throw noProfile(g);
-}
-
-function noProfile(g: Globals): CliError {
-  return new CliError("not_found", `No profile ${g.profile}: make it with \`ghostly profile create ${g.profile}\``);
+  throw noProfile(g.profile);
 }
 
 /** For a command that only reads: a mistyped profile is named as one, and `default` is not made by asking about it. */
 function knownProfile(g: Globals): void {
-  if (g.profile !== DEFAULT_PROFILE && !profileExists(g.home, g.profile)) throw noProfile(g);
+  if (g.profile !== DEFAULT_PROFILE && !profileExists(g.home, g.profile)) throw noProfile(g.profile);
 }
 
 /**
