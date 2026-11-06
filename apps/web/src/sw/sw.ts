@@ -396,8 +396,8 @@ function askWindow(client: WindowClient): Promise<WindowSays | null> {
 /**
  * A tap on a wake-up: the window that runs the notice's profile and holds its peer comes forward on that chat, the one
  * in front first. Never a tab waiting behind another (it opens nothing), and never another profile's window (it would
- * switch away from the profile it runs). No such window: a new one opens there. Windows that do not say what they run
- * (pages of the build before this one) get it as they did, the first one.
+ * switch away from the profile it runs). No such window: the first window that does not say what it runs (a page of the
+ * build before this one, or a frozen or busy one) gets it; none of those either: a new one opens there.
  */
 async function openFrom(notification: Shown): Promise<void> {
   notification.close();
@@ -407,9 +407,9 @@ async function openFrom(notification: Shown): Promise<void> {
   const windows = await appWindows();
   const said = await Promise.all(windows.map(askWindow));
   const ours = windows.filter((_, i) => said[i]?.peer && said[i].profile === data.profile);
-  const open = said.some(Boolean)
-    ? ours.find((client) => client.focused || client.visibilityState === "visible") ?? ours[0]
-    : windows[0];
+  // None says it runs the profile, but one said nothing: it may be the profile's own, frozen or busy (focusing
+  // unfreezes it, and the message waits for it), so it gets the chat rather than a new window stuck behind its lock.
+  const open = ours.find((client) => client.focused || client.visibilityState === "visible") ?? ours[0] ?? windows.find((_, i) => !said[i]);
   if (open) {
     await open.focus?.().catch(() => undefined);
     open.postMessage(message);
