@@ -130,7 +130,9 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 {"seq":6,"id":"message.received:f3gg…:peer_jY7N…","type":"message.received","at":1790450767762,"chat":"f3gg…","message":{"id":"peer_jY7N…","from":"peer","text":"hello","timestamp":1790450767735}}
 ```
 
-- `seq` grows by one per event in the profile, across restarts. `id` is stable for the fact it reports: dedupe on it.
+- `seq` grows by one per event in the profile, across restarts, and a seq is never given to two events. After a crash,
+  or a full disk that kept events out of the journal, it can skip numbers: a replay across them starts with
+  `events.gap`. `id` is stable for the fact it reports: dedupe on it.
 - A message's `timestamp` is its place in the history: when this profile sent it, or when it arrived here. A
   received message also has `sentAt`, the time its sender's clock said. Histories are ordered by `timestamp`.
 - `--since <seq>` replays from the journal (the last 10,000 events, and no more than their last 16 MiB); `--cursor <file>` remembers the last event
