@@ -107,10 +107,18 @@ describe("opening a contact's app", () => {
   it("opens it in an origin of this profile's chat with the contact, never one every profile shares", async () => {
     withLinks(chat({ myPubKeyZ32: ME }));
     await services.openService("peer-1", "atlas");
-    expect(host.openService).toHaveBeenCalledWith("peer-1", "atlas", viewerTag(ME));
+    expect(host.openService).toHaveBeenCalledWith("peer-1", "atlas", viewerTag(ME), false);
     expect(isViewerTag(viewerTag(ME))).toBe(true);
     // Another profile's chat with the same contact, or this one after "Clear all data", has another key of its own.
     expect(viewerTag(ME_ELSEWHERE)).not.toBe(viewerTag(ME));
+  });
+
+  it("tells the host Hide my IP from contacts is on, so the app keeps to its own origin", async () => {
+    // covers: settings.network.relay-only
+    withLinks(chat({ myPubKeyZ32: ME }));
+    (engine.state as EngineState).settings.relayOnly = true;
+    await services.openService("peer-1", "atlas");
+    expect(host.openService).toHaveBeenCalledWith("peer-1", "atlas", viewerTag(ME), true);
   });
 
   it("opens nothing for a contact the peer does not know yet", async () => {

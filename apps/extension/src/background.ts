@@ -1,4 +1,4 @@
-import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders, VIEWER_SERVICE_CSP, withViewerPolicy } from "@ghostly/core";
+import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders, viewerServicePolicy, withViewerPolicy } from "@ghostly/core";
 import type { EngineStatus, HttpRequestReply, RuntimeMessage, ViewerPage } from "./messages";
 import { fromOwnPage } from "./shared/sender";
 import { parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
@@ -274,7 +274,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     return true;
   }
   if (message.type === "open-service") {
-    void openViewer(message.peerPubKeyZ32, message.serviceId, message.tag, viewerPageOf(message.page)).then(
+    void openViewer(message.peerPubKeyZ32, message.serviceId, message.tag, viewerPageOf(message.page), message.relayOnly === true).then(
       () => sendResponse({ ok: true }),
       (error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
     );
@@ -335,6 +335,8 @@ interface ViewerBinding {
   tag: string;
   /** Its error page, in the language of the page that opened it. */
   page: ViewerPage;
+  /** Hide my IP from contacts was on when it opened: every answer keeps the app to its own origin. */
+  relayOnly: boolean;
 }
 
 /** The English page, for a request that came without one. */
@@ -384,7 +386,7 @@ export async function devtools(tabId: number, method: string, params?: Record<st
   await chrome.debugger.sendCommand({ tabId }, method, params);
 }
 
-async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string, page: ViewerPage): Promise<void> {
+async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string, page: ViewerPage, relayOnly: boolean): Promise<void> {
   const url = viewerUrl(peerPubKeyZ32, serviceId, tag);
   const parsed = parseViewerUrl(url);
   if (!parsed || parsed.serviceId !== serviceId || parsed.peerPubKeyZ32 !== peerPubKeyZ32 || parsed.tag !== tag) throw new Error("Invalid service");
@@ -393,7 +395,7 @@ async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string,
   // The one tab DevTools ever attaches to: the one created right here, for this service.
   const tab = await chrome.tabs.create({ url: "about:blank" });
   if (tab.id === undefined) throw new Error("Could not open a tab");
-  await chrome.storage.session.set({ [bindingKey(tab.id)]: { peerPubKeyZ32, serviceId, tag, page } satisfies ViewerBinding });
+  await chrome.storage.session.set({ [bindingKey(tab.id)]: { peerPubKeyZ32, serviceId, tag, page, relayOnly } satisfies ViewerBinding });
   try {
     await chrome.debugger.attach({ tabId: tab.id }, PROTOCOL_VERSION);
     await devtools(tab.id, "Fetch.enable", {
@@ -464,7 +466,7 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
     await devtools(tabId, "Fetch.fulfillRequest", {
       requestId: paused.requestId,
       responseCode: reply.status,
-      responseHeaders: withViewerPolicy(viewerResponseHeaders(reply.headers)).map(([name, value]) => ({ name, value })),
+      responseHeaders: withViewerPolicy(viewerResponseHeaders(reply.headers), binding.relayOnly === true).map(([name, value]) => ({ name, value })),
       body: reply.bodyB64,
     });
     return;
@@ -483,7 +485,7 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
       { name: "content-type", value: "text/html; charset=utf-8" },
       { name: "cache-control", value: "no-store" },
       { name: "x-ghostly-error", value: reply.code },
-      { name: "content-security-policy", value: VIEWER_SERVICE_CSP },
+      { name: "content-security-policy", value: viewerServicePolicy(binding.relayOnly === true) },
     ],
     body: toBase64(utf8Encode(html)),
   });

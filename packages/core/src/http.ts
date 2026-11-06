@@ -240,17 +240,30 @@ export function viewerResponseHeaders(headers: HeaderList): HeaderList {
 export const VIEWER_SERVICE_CSP = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
 
 /**
+ * The policy while Hide my IP from contacts is on (`relayOnly`, WISP 100 § Relay only): `VIEWER_SERVICE_CSP` without
+ * `https:`, so the app loads nothing but its own origin (and inline, data: and blob: content). A picture, script or
+ * frame from a server the contact names would show that server this device's address. The same value as Desktop's
+ * `SERVICE_CSP_RELAY_ONLY` and `OPENED_SERVICE_CSP_RELAY_ONLY`.
+ */
+export const VIEWER_SERVICE_CSP_RELAY_ONLY = "default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
+
+/** Ghostly's policy for a contact's app, by whether Hide my IP from contacts is on. */
+export function viewerServicePolicy(relayOnly: boolean): string {
+  return relayOnly ? VIEWER_SERVICE_CSP_RELAY_ONLY : VIEWER_SERVICE_CSP;
+}
+
+/**
  * `headers` with Ghostly's policy after the contact's own, all in one `content-security-policy` joined by commas: a
  * browser enforces every policy of the list, so the contact's can narrow Ghostly's but never widen it.
  */
-export function withViewerPolicy(headers: HeaderList): HeaderList {
+export function withViewerPolicy(headers: HeaderList, relayOnly = false): HeaderList {
   const policies: string[] = [];
   const out: HeaderList = [];
   for (const [name, value] of headers) {
     if (name.toLowerCase() === "content-security-policy") policies.push(value);
     else out.push([name, value]);
   }
-  out.push(["content-security-policy", [...policies, VIEWER_SERVICE_CSP].join(", ")]);
+  out.push(["content-security-policy", [...policies, viewerServicePolicy(relayOnly)].join(", ")]);
   return out;
 }
 

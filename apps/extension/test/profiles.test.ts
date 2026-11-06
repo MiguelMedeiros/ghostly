@@ -473,7 +473,7 @@ describe("a contact's app open as the profile before", () => {
       const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
       openPageProfile();
       useProfile(world, WORK);
-      await expect(extensionHost.openService!(PEER, SERVICE, TAG)).rejects.toThrow("Switching profiles");
+      await expect(extensionHost.openService!(PEER, SERVICE, TAG, false)).rejects.toThrow("Switching profiles");
       expect(reload).toHaveBeenCalledTimes(1);
       expect(world.callsTo("tabs.create")).toEqual([]);
     } finally {

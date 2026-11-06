@@ -1157,6 +1157,7 @@ mod tests {
             "ybndrfg8ejkmcpqx".into(),
             "Atlas".into(),
             None,
+            None,
         )
         .unwrap();
         let url = format!("{}://atlas.{peer}.ybndrfg8ejkmcpqx/", viewer::SCHEME);
