@@ -636,8 +636,11 @@ export class IdentityProofs {
       : frame.t === "idp-present" && isIdentityBinding(frame.binding) ? identityStatement(frame.binding).id : undefined;
     const withdrawn = () => !!id && !!this.host.ledger(linkId)?.received.some(r => r.id === id && r.status === "withdrawn");
     const before = withdrawn();
-    await x.receive(frame);
-    if (id && !before && withdrawn()) this.afterWithdrawal(linkId, id);
+    const handled = x.receive(frame).then(() => { if (id && !before && withdrawn()) this.afterWithdrawal(linkId, id); });
+    // A presentation's check waits on a host the contact chose (up to 30 s): it is not waited for here, so the
+    // contact's texts, pings and other frames go on meanwhile. Its outcome is written and sent when it ends.
+    if (frame.t === "idp-present") void handled.catch(() => {});
+    else await handled;
   }
   ready(linkId: string): void {
     if (this.greeted.has(linkId) || !this.host.channel(linkId)) return;
