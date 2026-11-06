@@ -148,6 +148,26 @@ describe("domain provider", () => {
     expect(missing).not.toBeInstanceOf(IdentityCheckUnavailable);
   });
 
+  it("tells the contact a domain that no longer exists, or has no address, by every method: the resolver answered", async () => {
+    const s = statement(), signer = schnorr.utils.randomSecretKey();
+    const evidence: Record<string, DomainEvidence> = { dns: { method: "dns" }, https: { method: "https" }, nip05: { method: "nip05", event: signNostr(s, signer) } };
+    // Gone (NXDOMAIN for every type), or a name left with no A or AAAA record.
+    for (const zone of [{ a: {}, txt: {} }, { a: {}, txt: { [SUBJECT]: ["v=spf1 -all"] } }]) {
+      for (const method of ["dns", "https", "nip05"] as const) {
+        clearDomainCache();
+        const net = testNetwork();
+        Object.assign(net.zone, zone);
+        net.files.set("/.well-known/ghostly.json", domainWellKnownFile([recordFor(s)]));
+        net.files.set("/.well-known/nostr.json?name=_", JSON.stringify({ names: { _: hex(schnorr.getPublicKey(signer)) } }));
+        const failure = await verifyIdentity([domain], s, evidence[method], ctx(net.fetch)).catch((e: unknown) => e);
+        expect(failure, method).toBeInstanceOf(Error);
+        expect(failure, method).not.toBeInstanceOf(IdentityCheckUnavailable);
+        if (method !== "dns") expect(String(failure), method).toMatch(`${SUBJECT} has no address`);
+        expect(net.asked.some(u => u.startsWith(`https://${SUBJECT}/`)), method).toBe(false);
+      }
+    }
+  });
+
   it("refuses a statement whose domain is not canonical, before any lookup", async () => {
     const net = testNetwork();
     const s = identityStatement({ ...newIdentityBinding({ provider: "domain", subject: SUBJECT, validitySeconds: 86_400 }).binding, subject: "Proofs.Example.com" });
