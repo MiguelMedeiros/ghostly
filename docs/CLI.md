@@ -397,7 +397,9 @@ Voice only: a video call is answered as a voice call. The details are in the
 
 The CLI publishes every Pkarr packet to the relays in its settings and to the Mainline DHT (BEP 44, over UDP, as the
 Desktop does), and reads the relays first, the DHT when every relay fails. So a bot keeps finding its contacts, and its
-group's edges come up, while the relays answer errors. `GHOSTLY_DHT=0` leaves the DHT out (relays only, as the web app);
+group's edges come up, while the relays answer errors. Its background reads (the periodic looks at contacts away) keep
+to the share the relays would give them there, 20 lookups a minute per relay in all, each contact in its turn; a read
+someone waits on (a chat open, a signal due, a text awaiting its receipt) goes at once. `GHOSTLY_DHT=0` leaves the DHT out (relays only, as the web app);
 `GHOSTLY_DHT_BOOTSTRAP=host:port,…` replaces the public bootstrap routers (a private testnet). The daemon is then a DHT node like any
 other: it answers other nodes' queries and keeps the small values they store for a while, as the Desktop's Pkarr client
 does.
