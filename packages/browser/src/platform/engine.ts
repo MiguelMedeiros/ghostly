@@ -3,6 +3,7 @@ import type { AppFrameEvent } from "@ghostly/core";
 import type { AppRangeAsk, AttentionEvent, EngineApi, EngineMethod, KeptPictures, PostedEvent, PostedState } from "../shared/rpc";
 import type { EngineState, LinkView, StoredMessage } from "../shared/types";
 import { applyMessageChanges, type MessageChanges } from "../shared/messageChanges";
+import { identityPicture, nostrPicture, picturesBack } from "../shared/keptPictures";
 import type { ProfileOpenFailure } from "../shared/idb";
 import type { DeviceGateView } from "../devices/gate";
 
@@ -378,17 +379,30 @@ function keptState(posted: PostedState, before: EngineState | null): EngineState
 }
 
 /** The pictures a state left out (`KeptPictures`), from the state before: each the one it was sent last. */
-function keptPictures(state: Omit<PostedState, "keptPictures">, before: EngineState | null, kept: KeptPictures): Pick<EngineState, "settings" | "links" | "groups" | "edges"> {
+function keptPictures(state: Omit<PostedState, "keptPictures">, before: EngineState | null, kept: KeptPictures): Pick<EngineState, "settings" | "links" | "groups" | "edges"> & Partial<Pick<EngineState, "identityProofs" | "nostr">> {
   const back = <T extends { id: string }>(list: T[], ids: string[] | undefined, had: T[] | undefined, field: keyof T & ("peerAvatar" | "picture")): T[] => {
     if (!ids?.length) return list;
     const names = new Set(ids), pictures = new Map((had ?? []).map((item) => [item.id, item[field]]));
     return list.map((item) => (names.has(item.id) ? { ...item, [field]: pictures.get(item.id) } : item));
   };
+  const linksBefore = new Map(before?.links.map((link) => [link.id, link]));
+  // A contact's public profile pictures: their identities' and Nostr keys', from the same chat before.
+  const contactProfiles = (link: LinkView): LinkView => {
+    const received = kept.received?.[link.id], nostr = kept.nostr?.[link.id], had = linksBefore.get(link.id);
+    if (!received && !nostr) return link;
+    return {
+      ...link,
+      ...(received && link.identities && { identities: { ...link.identities, received: picturesBack(link.identities.received, received, had?.identities?.received, identityPicture) } }),
+      ...(nostr && link.nostr && { nostr: picturesBack(link.nostr, nostr, had?.nostr, nostrPicture) }),
+    };
+  };
   return {
     settings: kept.avatar ? { ...state.settings, avatar: before?.settings.avatar } : state.settings,
-    links: back(state.links, kept.links, before?.links, "peerAvatar"),
+    links: back(state.links, kept.links, before?.links, "peerAvatar").map(contactProfiles),
     groups: back(state.groups, kept.groups, before?.groups, "picture"),
     ...(state.edges && { edges: back(state.edges, kept.edges, before?.edges, "peerAvatar") }),
+    ...(kept.identityProofs && { identityProofs: picturesBack(state.identityProofs, kept.identityProofs, before?.identityProofs, identityPicture) }),
+    ...(kept.nostrOwn && { nostr: { ...state.nostr, own: picturesBack(state.nostr.own, kept.nostrOwn, before?.nostr.own, nostrPicture) } }),
   };
 }
 
