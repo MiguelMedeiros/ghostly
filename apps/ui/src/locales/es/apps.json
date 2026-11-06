@@ -175,8 +175,10 @@
     "removeNamed": "Quitar {{name}}",
     "removeNone": "Para añadirla de nuevo, necesitarás su enlace.",
     "removeTitle": "¿Quitar {{name}}?",
+    "rollback": "El enlace de esta tienda ahora tiene una lista más antigua que la tuya. Ghostly conservó la tuya.",
     "showMore": "Mostrar más ({{count}})",
-    "stale": "Desactualizada desde el {{date}}"
+    "stale": "Desactualizada desde el {{date}}",
+    "tooLarge": "La lista de esta tienda es demasiado grande para que Ghostly la lea."
   },
   "title": "Apps",
   "view": {

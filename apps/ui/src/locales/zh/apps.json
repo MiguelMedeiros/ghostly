@@ -175,8 +175,10 @@
     "removeNamed": "移除 {{name}}",
     "removeNone": "要再次添加，你需要它的链接。",
     "removeTitle": "移除 {{name}}？",
+    "rollback": "该商店的链接现在提供的列表比你的更旧。Ghostly 保留了你的那份。",
     "showMore": "显示更多 ({{count}})",
-    "stale": "自 {{date}} 起已过期"
+    "stale": "自 {{date}} 起已过期",
+    "tooLarge": "该商店的列表太大，Ghostly 无法读取。"
   },
   "title": "应用",
   "view": {
