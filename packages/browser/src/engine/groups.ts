@@ -470,6 +470,8 @@ const LEFT_KEPT_MS = 7 * 24 * 60 * 60_000;
 const LEFT_HAND_ON_MS = 1_000;
 /** The commits of my chain since my leave said to the admin my leave follows, before the leave (it may lack them). */
 const LEFT_COMMITS = 16;
+/** How long a tombstone the role went on from stays after the commit removing it, for the leaves that followed the role to it. */
+const LEFT_PASSED_ON_MS = 2 * 60_000;
 /** Admin side: how long a contact invited over its chat is waited for. After, it holds no place and may be invited again. */
 const INVITED_KEPT_MS = LEFT_KEPT_MS;
 /** How long the admin keeps the edge to a member it removed while that member was away, to tell it (`StoredGroup.farewells`). */
@@ -1363,11 +1365,18 @@ export class Groups {
     return undefined;
   }
 
-  /** The admin heard me: the tombstone of a group I left can go. */
+  /**
+   * The admin heard me: the tombstone of a group I left can go. One the role went on from stays `LEFT_PASSED_ON_MS`
+   * more (`holdsRole`): a member whose leave followed the role to me may not have reached me yet, and only I can tell
+   * it where the role went.
+   */
   private async leaveConfirmed(groupId: string): Promise<void> {
     if (!this.stored.get(groupId)?.left) return;
+    if (this.holdsRole(groupId, this.sessions.get(groupId))) { if (!this.passedOnUntil.has(groupId)) this.passedOnUntil.set(groupId, this.now() + LEFT_PASSED_ON_MS); return; }
     await this.forget(groupId);
   }
+  /** Tombstones the role went on from, removed already, and when they go (`leaveConfirmed`). */
+  private readonly passedOnUntil = new Map<string, number>();
 
   async remove(groupId: string, key: string): Promise<void> {
     if (this.isCommunity(groupId)) return this.communities.remove(groupId, key);
@@ -1571,6 +1580,7 @@ export class Groups {
     this.stored.delete(groupId);
     this.leavesHeard.delete(groupId);
     this.handOnAt.delete(groupId);
+    this.passedOnUntil.delete(groupId);
     this.takeBack(groupId);
     this.acceptSaid.delete(groupId);
     this.entryHosts.delete(groupId);
@@ -1724,7 +1734,7 @@ export class Groups {
       const quiet: string[] = [];
       for (const group of [...this.stored.values()]) {
         if (group.left) {
-          if (now - group.left.at > LEFT_KEPT_MS) { await this.forget(group.id); continue; }
+          if (now - group.left.at > LEFT_KEPT_MS || now >= (this.passedOnUntil.get(group.id) ?? Infinity)) { await this.forget(group.id); continue; }
           // The role reached my tombstone (a hand-over that crossed my leave): it goes on, after a restart too.
           const session = this.sessions.get(group.id);
           if (session?.status === "left" && session.admin === session.myKey && now >= (this.handOnAt.get(group.id) ?? 0)) await this.handOn(group.id);
@@ -2429,20 +2439,42 @@ export class Groups {
    */
   private async afterLeave(groupId: string, from: string, raw: unknown): Promise<void> {
     const group = this.stored.get(groupId), left = group?.left, session = this.sessions.get(groupId);
-    if (!group || !left || !session || (from !== left.admin && !left.hubs?.includes(from)) || !raw || typeof raw !== "object") return;
+    if (!group || !left || !session || !raw || typeof raw !== "object") return;
     const t = (raw as { t?: unknown }).t;
+    // While the role is or was mine, any member's leave reaches me, as it reaches an admin: a member whose leave follows
+    // the role says it to me, and the role does not go on to it.
+    const holding = t === "group-leave" && this.holdsRole(groupId, session) && rosterHas(session.roster, from);
+    if (from !== left.admin && !left.hubs?.includes(from) && !holding) return;
     if (t === "group-leave" && from !== session.myKey) {
       let heard = this.leavesHeard.get(groupId);
       if (!heard) this.leavesHeard.set(groupId, (heard = new Set()));
       heard.add(from);
+      // The role went on from me already: that leave follows it, to the admin my commits name.
+      if (holding && session.admin !== session.myKey) {
+        const edge = this.host.edges(groupId).get(from);
+        if (edge) { try { this.sayCommitsSinceLeave(groupId, session, group, edge); } catch { /* it says it again */ } }
+      }
       return;
     }
     if (t !== "group-commit") return;
     // My leave may still be under way, its turn in the session's queue before or after this commit's.
     if (session.status === "active") await session.handle(from, raw);
     if (session.status !== "left" || !(await session.followAfterLeave(raw))) return;
-    if (session.admin === session.myKey) { this.handOnAt.set(groupId, this.now() + LEFT_HAND_ON_MS); return; }
+    if (session.admin === session.myKey) { this.handOnAt.set(groupId, this.now() + LEFT_HAND_ON_MS); this.reconcileEdges(groupId); return; }
     await this.leaveFollows(groupId);
+  }
+
+  /**
+   * A tombstone the role reached, until it goes: it keeps edges to every member, as an admin does (past the size where
+   * hubs start, the ones to its hubs: they carry leaves and commits), so the leaves that follow the role reach it, and
+   * its `role` commit handing it on reaches them (a member whose leave the role passed by has no other way to hear where
+   * it went). Also when the role reached my leave while it was under way, and went on in the same step: a `role` commit
+   * of mine past the epoch my leave was signed in.
+   */
+  private holdsRole(groupId: string, session: GroupSession | undefined): boolean {
+    if (session?.status !== "left") return false;
+    const since = this.stored.get(groupId)?.left?.bye?.e ?? session.epoch - 1;
+    return session.admin === session.myKey || session.state.chain.some(c => c.k === "role" && c.by === session.myKey && c.e > since);
   }
 
   /** My tombstone's chain moved: my leave goes to the admin it names now, over our edge when it is up (and when it opens). */
@@ -2466,9 +2498,14 @@ export class Groups {
    * role came to it from a leaver, whose edge with it is the only one up), then the leave.
    */
   private sayLeave(groupId: string, session: GroupSession, group: StoredGroup, linkId: string): void {
+    this.sayCommitsSinceLeave(groupId, session, group, linkId);
+    this.host.sendOnLink(linkId, { t: "group-leave", g: groupId });
+  }
+
+  /** The commits of my chain since I left (at most `LEFT_COMMITS`), without a secret. */
+  private sayCommitsSinceLeave(groupId: string, session: GroupSession, group: StoredGroup, linkId: string): void {
     const since = group.left?.bye?.e ?? session.epoch;
     for (let e = Math.max(since + 1, session.epoch - LEFT_COMMITS + 1); e <= session.epoch; e++) this.host.sendOnLink(linkId, farewellCommit(groupId, session, e));
-    this.host.sendOnLink(linkId, { t: "group-leave", g: groupId });
   }
 
   /** A tombstone the role reached: it goes on (`nextAdmin`), and my leave with it. */
@@ -3171,7 +3208,7 @@ export class Groups {
       const left = group?.left;
       const removed = this.removedAt.get(groupId);
       const wanted = session?.status === "active" && group ? this.edgesWanted(groupId, session, group, this.now())
-        : left ? new Set([left.admin, ...left.hubs ?? []])
+        : left ? new Set([left.admin, ...left.hubs ?? [], ...this.holdsRole(groupId, session) && !this.hubs.large(session!) ? session!.others : []])
         : removed !== undefined && this.now() - removed < REMOVED_LINGER_MS ? new Set(existing.keys()) : new Set<string>();
       for (const [key, linkId] of existing) if (!wanted.has(key)) await this.host.closeEdge(linkId);
       const met = this.justMet.get(groupId);
