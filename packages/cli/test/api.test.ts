@@ -279,6 +279,40 @@ describe("chats", () => {
     expect(node.sendGroupMessage).not.toHaveBeenCalled();
   });
 
+  it("group:<ref> names a group on every group command and in listen --group, as on the commands that take a chat or a group", async () => {
+    const team = { ...group, id: "k3x9q2abcdefghijklmnop", name: "Team", status: "active" } as unknown as GroupView;
+    const other = { ...group, id: "z".repeat(22), name: "k3x9q2", status: "active" } as unknown as GroupView;
+    const chat = link("chatTeamChat", { label: "Desk" });
+    const node = { getState: () => ({ links: [chat], groups: [team, other] }), sendGroupMessage: vi.fn(async () => ({ error: null, messageId: "gm1" })), groupTaken: () => 0, setGroupTyping: vi.fn() };
+    const ctx = { runtime: { server: { node } }, mode: "daemon" } as unknown as ApiContext;
+    const call = (method: string, params: Record<string, unknown>) => callApi(ctx, method, params);
+    // Its id, a prefix only it fits and its name (any case), each as is and after group:, as findChatOrGroup reads them.
+    for (const ref of [team.id, "k3x9q2a", "team"]) {
+      for (const given of [ref, `group:${ref}`]) {
+        expect(findGroup([team, other], given)).toBe(team);
+        expect(findChatOrGroup([chat], [team, other], `group:${ref}`)).toEqual({ group: team });
+        await expect(call("group.get", { group: given })).resolves.toMatchObject({ id: team.id, name: "Team" });
+      }
+    }
+    // A write: group send goes to that group.
+    await expect(call("group.send", { group: `group:${team.id}`, text: "hi" })).resolves.toMatchObject({ group: team.id, messageId: "gm1" });
+    expect(node.sendGroupMessage).toHaveBeenCalledWith(expect.objectContaining({ groupId: team.id, text: "hi" }));
+    // listen --group: the allowlist lets that group's events through, and only those.
+    const event = (id: string) => ({ seq: 1, id: "g", type: "group.message", at: 1, group: id } as GhostlyEvent);
+    const list = await allowlist([], [`group:${team.id}`], call, async () => null);
+    expect(await list.allows(event(team.id))).toBe(true);
+    expect(await list.allows(event(other.id))).toBe(false);
+    // What names more than one group, or none, or a chat, is refused as without the prefix (the message names the ref after group:).
+    const both = { code: "bad_request", message: '"k3x9q2" names more than one group: use its id', details: { matches: [team.id, other.id] } };
+    await expect(call("group.get", { group: "group:k3x9q2" })).rejects.toMatchObject(both);
+    await expect(allowlist([], ["group:k3x9q2"], call, async () => null)).rejects.toMatchObject(both);
+    await expect(call("group.get", { group: "group:zed" })).rejects.toMatchObject({ code: "not_found", message: 'No group "zed" (ghostly group list)' });
+    // group:<a chat> is no group: never that chat (without the prefix, the chat's name says it is a chat).
+    for (const ref of [chat.id, "desk"]) await expect(call("group.get", { group: `group:${ref}` })).rejects.toMatchObject({ code: "not_found", message: `No group ${JSON.stringify(ref)} (ghostly group list)` });
+    await expect(call("group.get", { group: "desk" })).rejects.toMatchObject({ code: "not_found", details: { chat: chat.id } });
+    await expect(call("group.get", { group: "group:" })).rejects.toMatchObject({ code: "bad_request", message: '"" names no group' });
+  });
+
   it("a command that takes a chat or a group names both when neither has the name", async () => {
     const { ctx } = fake();
     const neither = { code: "not_found", message: 'No chat or group "alcie" (ghostly chat list, ghostly group list)' };
