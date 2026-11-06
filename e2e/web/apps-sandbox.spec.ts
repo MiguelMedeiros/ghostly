@@ -31,6 +31,7 @@ test.afterAll(async () => { await listeners?.close(); });
 interface Hook {
   open(launch: { ref: string; version: string; title: string; permissions: string[]; entry: string; chat?: { linkId: string } | null; files?: Record<string, string>; unguarded?: boolean }): number;
   status(handle: number): { phase: string; stopped: string | null };
+  inputs(): number;
   stored(ref: string, scope: string): Record<string, unknown>;
   calls(): { op: string; ref: string; scope?: string; key?: string }[];
   sent(): { linkId: string; ref: string; data: unknown }[];
@@ -59,6 +60,7 @@ async function open(page: Page, ref: string, entry: string, extra: { permissions
 }
 
 const stored = (page: Page, ref: string, scope = "alone") => page.evaluate(({ ref, scope }) => (window as unknown as { __ghostlyApps: Hook }).__ghostlyApps.stored(ref, scope), { ref, scope });
+const inputs = (page: Page) => page.evaluate(() => (window as unknown as { __ghostlyApps: Hook }).__ghostlyApps.inputs());
 const status = (page: Page, handle: number) => page.evaluate((handle) => (window as unknown as { __ghostlyApps: Hook }).__ghostlyApps.status(handle), handle);
 
 /** Hits per tag, for the report. */
@@ -572,6 +574,35 @@ test("the person's copy and cut in an app put what they selected on the clipboar
   await page.keyboard.press("ControlOrMeta+C");
   expect(await pasted()).toBe("bc1qREALADDRESS");
   expect((await stored(page, reopened)).heard).toBeUndefined();
+});
+
+test("an app that opens its document again keeps the runner's listeners: no other frame's message, a # link ends it, the person's taps count", {
+  tag: ["@feature:apps.web-sandbox"],
+}, async ({ page }) => {
+  await appPage(page);
+  const ref = "evilpublisherkey/reopen-listeners";
+  // `document.open()` with no close erases the window's listeners and the app runs on, in a document of its own making.
+  const handle = await open(page, ref, `<!doctype html><title>reopen</title><body><script>
+    const g = window.ghostly;
+    setTimeout(() => {
+      document.open();
+      const body = document.appendChild(document.createElement("html")).appendChild(document.createElement("body"));
+      body.innerHTML = "<div id=pad style='width:100vw;height:100vh'></div>";
+      addEventListener("message", (e) => g.storage.set("heard", String(e.data)));
+      document.getElementById("pad").addEventListener("click", () => setTimeout(() => { location.hash = "#gone"; }, 1000));
+      g.storage.set("ready", true);
+    }, 100);
+  </script>`);
+  await expect.poll(() => stored(page, ref)).toMatchObject({ ready: true });
+  // What another frame of the page posts to it, as one more app frame would (parent.frames[i]).
+  await page.evaluate((ref) => document.querySelector<HTMLIFrameElement>(`iframe[data-app="${ref}"]`)!.contentWindow!.postMessage("from another frame", "*"), ref);
+  const before = await inputs(page);
+  // The person's tap in the app, after which the app follows a link to "#gone".
+  await page.frameLocator(`iframe[data-app="${ref}"]`).locator("#pad").click();
+  await page.waitForTimeout(3_000);
+  expect.soft((await stored(page, ref)).heard).toBeUndefined();
+  expect.soft(await inputs(page)).toBeGreaterThan(before);
+  expect.soft(await status(page, handle)).toEqual({ phase: "stopped", stopped: "navigated" });
 });
 
 test("Chess, as it is built, runs under the runner's lock", {

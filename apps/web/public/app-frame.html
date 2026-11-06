@@ -311,34 +311,13 @@
     // nor a policy governs that, so this end is closed: the app talks to the broker over its port only, and nothing
     // posted to the window reaches the app. A capture listener on the window runs before any of the app's, `onmessage`
     // included (a capture listener the app adds runs after this first one); it is added after document.open, which
-    // erases the window's listeners, and out of the app's reach, so no removeEventListener names it.
+    // erases the window's listeners (and again whenever the app opens the document again), and out of the app's reach,
+    // so no removeEventListener names it.
     const deaf = (event) => { reflectApply(stopImmediately, event, []); };
-    reflectApply(listen, window, ["message", deaf, true]);
-    reflectApply(listen, window, ["messageerror", deaf, true]);
     // A fragment navigation (`location.hash`, a link to "#…") is an entry in the page's history too, and no load. No
     // policy stops it, so the runner makes it one: a reload, which tears the app down (any load but the one after
     // `writing`).
-    reflectApply(listen, window, ["hashchange", () => { reflectApply(reload, here, []); }, true]);
-    // The person's copy or cut in the app puts on the clipboard what they selected, never what the app says in its
-    // place: an app has no clipboard permission (WISP 1200), so none of its listeners hears one (a listener could set
-    // the event's clipboardData and cancel it). This capture listener on the window runs before any of the app's and
-    // stops the event there, so nothing cancels it and the browser copies the selection. One the app makes writes nothing.
-    // A document opened again (`document.open`, or a write once the page is parsed) erases the window's listeners: this
-    // one goes back on as it opens, before any the app adds after.
-    const selectionOnly = (event) => { if (event.isTrusted === true) reflectApply(stopImmediately, event, []); };
-    const keepSelection = () => {
-      reflectApply(listen, window, ["copy", selectionOnly, true]);
-      reflectApply(listen, window, ["cut", selectionOnly, true]);
-    };
-    keepSelection();
-    for (const name of ["open", "write", "writeln"]) {
-      const opens = Document.prototype[name];
-      Object.defineProperty(Document.prototype, name, { configurable: true, writable: true, value: function () {
-        const result = reflectApply(opens, this, arguments);
-        keepSelection();
-        return result;
-      } });
-    }
+    const fragment = () => { reflectApply(reload, here, []); };
     // The person's taps and keys in the app never reach the client's page, whose lock screen would lock them out of a
     // game longer than its time: the runner says `activity` for a trusted one, at most every 5 seconds (WISP 1200).
     let said = -Infinity;
@@ -349,8 +328,36 @@
       said = at;
       try { activity(); } catch (e) { /* the app broke its own calls */ }
     };
-    reflectApply(listen, window, ["pointerdown", heard, true]);
-    reflectApply(listen, window, ["keydown", heard, true]);
+    // The runner's own listeners on the window, put on now and again whenever the document is opened again.
+    const keepRunnerListeners = () => {
+      reflectApply(listen, window, ["message", deaf, true]);
+      reflectApply(listen, window, ["messageerror", deaf, true]);
+      reflectApply(listen, window, ["hashchange", fragment, true]);
+      reflectApply(listen, window, ["pointerdown", heard, true]);
+      reflectApply(listen, window, ["keydown", heard, true]);
+    };
+    // The person's copy or cut in the app puts on the clipboard what they selected, never what the app says in its
+    // place: an app has no clipboard permission (WISP 1200), so none of its listeners hears one (a listener could set
+    // the event's clipboardData and cancel it). This capture listener on the window runs before any of the app's and
+    // stops the event there, so nothing cancels it and the browser copies the selection. One the app makes writes nothing.
+    const selectionOnly = (event) => { if (event.isTrusted === true) reflectApply(stopImmediately, event, []); };
+    // A document opened again (`document.open` with no close, or a write once the page is parsed) erases the window's
+    // listeners, and the app runs on: every one of the runner's goes back on as it opens, before any the app adds after,
+    // through what the runner took before the app's code ran.
+    const keepListeners = () => {
+      keepRunnerListeners();
+      reflectApply(listen, window, ["copy", selectionOnly, true]);
+      reflectApply(listen, window, ["cut", selectionOnly, true]);
+    };
+    keepListeners();
+    for (const name of ["open", "write", "writeln"]) {
+      const opens = Document.prototype[name];
+      Object.defineProperty(Document.prototype, name, { configurable: true, writable: true, value: function () {
+        const result = reflectApply(opens, this, arguments);
+        keepListeners();
+        return result;
+      } });
+    }
     if (hintGuard) hintGuard.install();
     reflectApply(documentWrite, document, [html]);
     // The app writes no markup into the page while it is parsed: it would go in past the guard and the broker's

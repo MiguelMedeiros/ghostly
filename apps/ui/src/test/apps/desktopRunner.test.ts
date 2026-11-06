@@ -121,6 +121,31 @@ it("says `activity` for the person's taps and keys, at most every 5 seconds, and
   expect(said()).toBe(2);
 });
 
+// A document opened again (`document.open` with no close, or a write once the page is parsed) erases the window's
+// listeners, and the app runs on: the runner's taps-and-keys listener goes back on as it opens, through what the runner
+// took before the app's code ran, so the lock screen still counts the person's input in the app.
+it("listens for the person's taps and keys again whenever the app opens its document again", async () => {
+  const clock = { t: 1_000 };
+  const asked: string[] = [];
+  const { window, listeners, capture } = open((request) => {
+    asked.push(request.type);
+    return request.type === "start" ? `"<p>chess</p>"` : `{"id":${request.id},"ok":true}`;
+  }, clock);
+  await settle();
+  const said = () => asked.filter((type) => type === "activity").length;
+  runInNewContext("addEventListener = function () {}; Reflect.apply = function () {};", window);
+  for (const name of ["open", "write", "writeln"]) {
+    delete listeners.pointerdown;
+    delete listeners.keydown;
+    runInNewContext(`Document.prototype.${name}.call(document)`, window);
+    expect([name, capture.pointerdown, capture.keydown, typeof listeners.pointerdown, typeof listeners.keydown]).toEqual([name, true, true, "function", "function"]);
+    const before = said();
+    clock.t += 5_000;
+    listeners.pointerdown!({ isTrusted: true });
+    expect(said(), name).toBe(before + 1);
+  }
+});
+
 // The person's copy or cut in the app window puts on the clipboard what they selected: the app's own listeners, which
 // could set other text in its place, never hear it. The runner's capture listener on the window runs before any of the
 // app's and stops the event there, through what it took before the app's code ran.

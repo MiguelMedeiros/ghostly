@@ -227,25 +227,30 @@ const RUNNER: &str = r#"<!doctype html>
       said = at;
       try { send("activity", []).catch(() => {}); } catch (error) {}
     };
-    addEventListener("pointerdown", heard, true);
-    addEventListener("keydown", heard, true);
+    // The runner's own listeners on the window, put on now and again whenever the document is opened again.
+    const keepRunnerListeners = () => {
+      reflectApply(listen, window, ["pointerdown", heard, true]);
+      reflectApply(listen, window, ["keydown", heard, true]);
+    };
     // The person's copy or cut in the app puts on the clipboard what they selected, never what the app says in its
     // place: an app has no clipboard permission (WISP 1200), so none of its listeners hears one (a listener could set
     // the event's clipboardData and cancel it). This capture listener on the window runs before any of the app's and
     // stops the event there, so nothing cancels it and the browser copies the selection. One the app makes writes nothing.
-    // A document opened again (`document.open`, or a write once the page is parsed) erases the window's listeners: this
-    // one goes back on as it opens, before any the app adds after.
     const selectionOnly = (event) => { if (event.isTrusted === true) reflectApply(stopImmediately, event, []); };
-    const keepSelection = () => {
+    // A document opened again (`document.open` with no close, or a write once the page is parsed) erases the window's
+    // listeners, and the app runs on: every one of the runner's goes back on as it opens, before any the app adds after,
+    // through what the runner took before the app's code ran.
+    const keepListeners = () => {
+      keepRunnerListeners();
       reflectApply(listen, window, ["copy", selectionOnly, true]);
       reflectApply(listen, window, ["cut", selectionOnly, true]);
     };
-    keepSelection();
+    keepListeners();
     for (const name of ["open", "write", "writeln"]) {
       const opens = Document.prototype[name];
       Object.defineProperty(Document.prototype, name, { configurable: true, writable: true, value: function () {
         const result = reflectApply(opens, this, arguments);
-        keepSelection();
+        keepListeners();
         return result;
       } });
     }
@@ -2505,7 +2510,7 @@ mod tests {
     fn the_runners_keep_the_persons_copy_alike() {
         let web = include_str!("../../web/public/app-frame.html");
         let begin = "    // The person's copy or cut in the app";
-        let finish = "        keepSelection();\n        return result;\n      } });\n    }\n";
+        let finish = "        keepListeners();\n        return result;\n      } });\n    }\n";
         let guard = |runner: &'static str| {
             let start = runner.find(begin).unwrap();
             let end = start + runner[start..].find(finish).unwrap() + finish.len();
@@ -2539,6 +2544,65 @@ mod tests {
             ] {
                 assert!(runner.find(taken).unwrap() < written, "{taken}");
             }
+        }
+    }
+
+    /// An app that opens its document again (`document.open` with no close, or a write once the page is parsed) erases
+    /// the window's listeners and runs on: each runner puts every listener it adds after its own `document.open` back on
+    /// as the document opens, not only the copy guard. On the web: the one that keeps other frames' messages out and the
+    /// one that makes a "#" link a reload; on both: the one that says `activity` for the person's taps and keys.
+    #[test]
+    fn the_runners_put_every_listener_back_when_the_document_opens_again() {
+        let web = include_str!("../../web/public/app-frame.html");
+        let wrapper = "        const result = reflectApply(opens, this, arguments);\n        keepListeners();\n";
+        let keep = "    const keepListeners = () => {\n      keepRunnerListeners();\n";
+        for (name, runner, opened, written, listeners) in [
+            (
+                "desktop",
+                RUNNER,
+                "document.open();",
+                "document.write(entry);",
+                &[
+                    r#"["pointerdown", heard, true]"#,
+                    r#"["keydown", heard, true]"#,
+                ][..],
+            ),
+            (
+                "web",
+                web,
+                "    document.open();",
+                "reflectApply(documentWrite, document, [html]);",
+                &[
+                    r#"["message", deaf, true]"#,
+                    r#"["messageerror", deaf, true]"#,
+                    r#"["hashchange", fragment, true]"#,
+                    r#"["pointerdown", heard, true]"#,
+                    r#"["keydown", heard, true]"#,
+                ][..],
+            ),
+        ] {
+            let start = runner.find(opened).unwrap();
+            let end = runner.find(written).unwrap();
+            let section = &runner[start..end];
+            assert!(section.contains(wrapper), "{name}");
+            assert!(section.contains(keep), "{name}");
+            let begin = "    const keepRunnerListeners = () => {\n";
+            let own = section.find(begin).unwrap_or_else(|| panic!("{name}"));
+            let own = &section[own + begin.len()..];
+            let own = &own[..own.find("    };\n").unwrap()];
+            let added: Vec<&str> = own.lines().map(str::trim).collect();
+            let expected: Vec<String> = listeners
+                .iter()
+                .map(|args| format!("reflectApply(listen, window, {args});"))
+                .collect();
+            assert_eq!(added, expected, "{name}");
+            // Every listener the runner adds on the window from its `document.open` on is one of those it puts back.
+            assert_eq!(
+                section.matches("reflectApply(listen, window, [").count(),
+                listeners.len() + 2,
+                "{name}"
+            );
+            assert!(!section.contains("addEventListener("), "{name}");
         }
     }
 
