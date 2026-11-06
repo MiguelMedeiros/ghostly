@@ -52,15 +52,18 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
   const unmark = mode === "daemon" ? markStarting(paths) : () => {};
   const release = () => { unmark(); locked(); };
   let runtime;
+  // Made once the engine runs (it needs the engine), and asked by the engine from then on: an invitation over a chat it
+  // names finds room when 32 others wait (`GroupAutoJoin.autoJoins`).
+  let groupAuto: GroupAutoJoin | undefined;
+  const autoJoins = (chat: string): boolean => !!groupAuto?.autoJoins(chat);
   try {
-    runtime = await startRuntime(paths, mode === "daemon" ? { ...options, logJoins: true } : options);
+    runtime = await startRuntime(paths, { ...options, ...(mode === "daemon" ? { logJoins: true } : {}), autoJoins });
   } catch (error) {
     release();
     throw error;
   }
   const hub = new EventHub(paths.events);
   let calls!: CallManager;
-  let groupAuto!: GroupAutoJoin;
   try {
     await hub.open();
     const node = runtime.server.node;
@@ -86,8 +89,8 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     hub.onCallSignal((chat, signal) => manager.onSignal(chat, signal));
     reportAppFrames(hub, node, paths.dir);
     // Group invitations over the chats `group auto on --from` names: only a daemon accepts them, those that came while it was down too.
-    groupAuto = new GroupAutoJoin({ engine: node, profileDir: paths.dir, joins: mode === "daemon" });
-    const joiner = groupAuto;
+    const joiner = new GroupAutoJoin({ engine: node, profileDir: paths.dir, joins: mode === "daemon" });
+    groupAuto = joiner;
     hub.onState((s) => joiner.check(s));
     runtime.server.attach(hub.sink, { mark, ids: [...histories.keys(), ...newest.keys()] });
     joiner.check(node.getState());
