@@ -273,10 +273,13 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate, nameS
 /** What `eventLine` writes in place of the admin's name (a private-use character), to put the name and its mark there. */
 const NAME_SLOT = "";
 
-/** A membership line (`eventText`), the admin's name in it with the admin's mark, which no name a member picks can be. */
+/**
+ * A membership line (`eventText`), the admin's name in it with the admin's mark, which no name a member picks can be.
+ * Not the line that makes them the admin: it says so in its own words, and the mark would only repeat "admin".
+ */
 function eventLine(message: StoredMessage, group: GroupView, t: Translate): ReactNode {
   const member = message.member ? group.members.find(m => m.key === message.member) : undefined;
-  if (!member || member.me || member.role !== "admin") return eventText(message, group, t);
+  if (!member || member.me || member.role !== "admin" || message.event === "admin") return eventText(message, group, t);
   const [before, after, ...more] = eventText(message, group, t, NAME_SLOT).split(NAME_SLOT);
   if (after === undefined || more.length) return eventText(message, group, t);
   return <>{before}<bdi>{memberName(member, t, sameNamed(group.members))}</bdi> <AdminMark testId="group-event-admin" />{after}</>;

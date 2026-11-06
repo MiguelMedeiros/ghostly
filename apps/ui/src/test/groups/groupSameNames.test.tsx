@@ -76,7 +76,7 @@ describe("a group's members with one name", () => {
     expect(within(other).queryByTestId("message-nick-admin")).toBeNull();
   });
 
-  it("in a private group, the lines that name the admin carry the mark, and a former member's name stays as it was", async () => {
+  it("in a private group, the lines that name the admin carry the mark (but the one that says they are the admin), and a former member's name stays as it was", async () => {
     openChat({ profile: "mesh", formerNames: { [GONE]: "Alice" }, members: [member(ME, undefined, "member", true), member(ADMIN, "Alice", "admin"), member(OTHER, "Bob")] }, [
       line("e1", ADMIN, "admin", "Alice is now the admin", 0),
       line("e2", ADMIN, "renamed", "Alice renamed the group to “Book club”", 1),
@@ -86,13 +86,27 @@ describe("a group's members with one name", () => {
     ]);
     const lines = await screen.findAllByTestId("group-event");
     expect(lines.map(l => l.textContent)).toEqual([
-      "Alice admin is now the admin", "Alice admin renamed the group to “Book club”", "Alice left", "Bob renamed the group to “Book club”",
+      "Alice is now the admin", "Alice admin renamed the group to “Book club”", "Alice left", "Bob renamed the group to “Book club”",
     ]);
-    expect(lines.map(l => !!within(l).queryByTestId("group-event-admin"))).toEqual([true, true, false, false]);
+    // The line that hands her the role says it already: a mark there would only say "admin" twice.
+    expect(lines.map(l => !!within(l).queryByTestId("group-event-admin"))).toEqual([false, true, false, false]);
     // A roster with no two of one name: the names stay as they are, the admin's still marked.
     expect(within(await rowOf("from the admin")).getByTestId("message-nick")).toHaveTextContent(/^~Alice$/);
     expect(within(await rowOf("from the admin")).getByTestId("message-nick-admin")).toBeInTheDocument();
     expect(within(await rowOf("from Bob")).queryByTestId("message-nick-admin")).toBeNull();
+  });
+
+  it("in a community, the line that hands the admin the role names them once, told apart from a member of the same name, and their other lines keep the mark", async () => {
+    openChat({ profile: "community", members: [member(ME, undefined, "member", true), member(ADMIN, "Alice", "admin"), member(OTHER, "Alice")] }, [
+      line("e1", OTHER, "joined", "Alice joined", 0),
+      line("e2", ADMIN, "admin", "Alice is now the admin", 1),
+      line("e3", ADMIN, "renamed", "Alice renamed the group to “Book club”", 2),
+    ]);
+    const lines = await screen.findAllByTestId("group-event");
+    expect(lines.map(l => l.textContent)).toEqual([
+      "Alice (…0th3r9) joined", "Alice (…adm1n0) is now the admin", "Alice (…adm1n0) admin renamed the group to “Book club”",
+    ]);
+    expect(lines.map(l => !!within(l).queryByTestId("group-event-admin"))).toEqual([false, false, true]);
   });
 
   it("in a community, a member who took a former member's name reads apart from what the former member wrote", async () => {
