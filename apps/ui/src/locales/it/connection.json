@@ -139,6 +139,8 @@
     "inUse": "In uso",
     "needsDesktop": "{{transport}} richiede Ghostly Desktop",
     "noWebrtc": "Questa app non ha WebRTC",
+    "relayOnlyHyperdht": "Con Nascondi il mio IP, HyperDHT richiede un relay HyperDHT · Opzioni, Rete",
+    "relayOnlyOff": "Disattivato con Nascondi il mio IP · Opzioni, Rete",
     "relayUnreached": "{{transport}} non ha raggiunto il relay · Opzioni, Rete",
     "throughRelay": "Tramite relay · usato quando niente di diretto si connette",
     "waiting": "In attesa"
