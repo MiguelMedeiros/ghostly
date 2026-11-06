@@ -13,7 +13,7 @@ export const commands: Record<string, Command> = {
   },
   "group auto": {
     method: "group.auto", usage: "group auto [on|off] [--from <chat>]...", summary: "Accept group invitations by themselves, only from the chats named (kept in the profile; the daemon accepts)",
-    args: ["mode...?"], options: { from: { type: "list", description: "Invitations from this chat: its id, its contact's key or a label given here with chat rename (again for more)" } },
+    args: ["mode...?"], options: { from: { type: "list", description: "Invitations from this chat: its id, its contact's key or a label given here with chat rename (again for more: a new on replaces the list)" } },
     params: ({ options }, a) => {
       if (a.mode !== undefined && a.mode !== "on" && a.mode !== "off") throw new CliError("usage", `group auto takes on or off, not ${JSON.stringify(a.mode)}: ghostly group auto [on|off] [--from <chat>]...`);
       // Never from anyone: on names its chats. Without on, the chats would be dropped without a word.

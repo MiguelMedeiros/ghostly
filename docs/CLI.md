@@ -337,7 +337,8 @@ ghostly listen --type message.received --cursor "${GHOSTLY_HOME:-$HOME/.ghostly}
   Not in a release yet ([WISP 1100 · Apps as a bot](wisps/1100-headless.md#apps-as-a-bot)).
 - A voice bot: [examples/call-echo.mjs](../packages/cli/examples/call-echo.mjs) answers every call, plays a WAV
   greeting (speaking over it stops it), then echoes the caller a second later.
-- A bot that joins its owner's groups: `ghostly group auto on --from <chat>` (again for more chats). The daemon then
+- A bot that joins its owner's groups: `ghostly group auto on --from <chat>`, every chat in one command
+  (`--from alice --from bob`): a new `group auto on` replaces the list, as `call auto on` does. The daemon then
   accepts an invitation that comes over one of those chats at once, as `group accept` would, and on start the ones
   that came while it was down; any other invitation waits for `group accept` as before. `group auto` alone prints the
   setting, `group list` shows it as `autoJoin`, `group auto off` turns it off. There is no "from anyone": `on` needs a
@@ -359,7 +360,7 @@ ghostly call auto on --from alice        # or: ghostly call answer alice, on eac
 ghostly listen --type call.              # call.connected carries {"audio":{"socket":…,"rate":48000,…}}
 ```
 
-`call auto on --from` names chats: removing one (`chat remove`) takes it off the list, and removing the last one turns
+`call auto on --from` names chats, every one in the same command: a new `call auto on` replaces the list. Removing one (`chat remove`) takes it off the list, and removing the last one turns
 auto-answer off rather than leaving an empty list, which would answer everyone.
 
 A ready one: [ghostly-voice-agent](https://github.com/MiguelMedeiros/ghostly-voice-agent) answers calls by voice (speech to text, Claude,
