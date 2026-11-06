@@ -1462,12 +1462,25 @@ export class CommunitySession {
     for (const h of Object.keys(this.state.secrets)) if (!keep.has(h)) delete this.state.secrets[h];
   }
 
+  /** The epoch of the commit on the main branch that took `key` out (`outIndex`), while it is out. */
+  private outEpoch(key: string): number | undefined { const i = this.outIndex(key); return i < 0 ? undefined : this.state.chain[i].e; }
+
+  /**
+   * Whether `key` reads commit `h`, so its secret may be sealed to it or taken by it: in its roster, and not out by then.
+   * A member stops being one at the commit that takes it out: a side branch from before it may list it still, at that
+   * epoch or later, and that epoch's secret and every later one never reach it.
+   */
+  private readsAt(h: string, key: string, out = this.outEpoch(key)): boolean {
+    const c = this.known.get(h);
+    return !!c && rosterHas(this.rosterAt(h) ?? [], key) && (out === undefined || c.e < out);
+  }
+
   /** A derived epoch's secret, from its parent's, when that is held. */
   private takeDerived(h: string): void {
     const c = this.known.get(h);
     if (!c || this.state.secrets[h] || FRESH.has(c.k)) return;
     const parent = this.state.secrets[c.p];
-    if (!parent || !rosterHas(this.rosterAt(h) ?? [], this.myKey)) return;
+    if (!parent || !this.readsAt(h, this.myKey)) return;
     const secret = derivedSecret(fromBase64Url(parent), communityUntaggedHash(c));
     if (confirmationMatches(epochKeys(secret, this.id, c.e).confirm, communityUntaggedHash(c), c.c)) {
       this.state.secrets[h] = toBase64Url(secret);
@@ -1476,7 +1489,7 @@ export class CommunitySession {
     }
   }
 
-  /** A sealed secret for a known commit I am in the roster of: kept only when it confirms. */
+  /** A sealed secret for a known commit I read (`readsAt`): kept only when it confirms. */
   private takeSecret(h: string, sealed: unknown): boolean {
     const c = this.known.get(h);
     if (!c) {
@@ -1489,7 +1502,7 @@ export class CommunitySession {
       this.pendingSecrets.set(h, { sealed, at: now });
       return false;
     }
-    if (this.state.secrets[h] || !isSealed(sealed) || !rosterHas(this.rosterAt(h) ?? [], this.myKey)) return false;
+    if (this.state.secrets[h] || !isSealed(sealed) || !this.readsAt(h, this.myKey)) return false;
     const secret = openSecret(this.identity.seed, this.myKey, sealed, secretAad(this.id, h, this.myKey));
     if (!secret || !confirmationMatches(epochKeys(secret, this.id, c.e).confirm, communityUntaggedHash(c), c.c)) return false;
     this.state.secrets[h] = toBase64Url(secret);
@@ -2569,17 +2582,19 @@ export class CommunitySession {
       start = common !== undefined ? this.mainIndex.get(common)! + 1 : Math.max(0, this.state.chain.length - COMMUNITY_LIMITS.side);
       ask();
     }
+    // Nothing of the epoch that took them out or later, on any branch (`readsAt`).
+    const out = this.outEpoch(from);
     for (let i = start; i < this.state.chain.length; i++) {
       const commit = this.state.chain[i], h = communityCommitHash(commit);
       answer.push({ t: "group-commit", v: 2, g: this.id, commit });
       const secret = this.state.secrets[h];
-      if (secret && rosterHas(this.rosterAt(h) ?? [], from) && FRESH.has(commit.k))
+      if (secret && this.readsAt(h, from, out) && FRESH.has(commit.k))
         answer.push({ t: "group-secret", v: 2, g: this.id, to: from, h, s: sealSecret(from, fromBase64Url(secret), secretAad(this.id, h, from)) });
     }
     // Secrets of the window they were in and lack (derived ones included: they may lack the parent).
     const held = new Set(Array.isArray(frame.secrets) ? frame.secrets.filter(x => typeof x === "string") : []);
     const secrets = this.state.chain.slice(-COMMUNITY_LIMITS.window - 1).map(c => communityCommitHash(c))
-      .filter(h => this.state.secrets[h] && !held.has(shortHash(h)) && rosterHas(this.rosterAt(h) ?? [], from))
+      .filter(h => this.state.secrets[h] && !held.has(shortHash(h)) && this.readsAt(h, from, out))
       .map(h => ({ h, s: sealSecret(from, fromBase64Url(this.state.secrets[h]), secretAad(this.id, h, from)) }));
     if (secrets.length) answer.push({ t: "group-secrets", v: 2, g: this.id, secrets: secrets.slice(-COMMUNITY_LIMITS.secrets) });
     // What was said while they were away, by anyone, for epochs they were in.
@@ -2612,9 +2627,9 @@ export class CommunitySession {
       if (!this.heardAfterOut(stored)) continue;
       const found = this.commitByShort(stored.e, stored.h);
       if (!found) continue;
-      const reads = rosterHas(this.rosterAt(found.hash) ?? [], from), mine = stored.s === this.myKey && unheard.has(frameKey(stored));
+      const reads = this.readsAt(found.hash, from, out), mine = stored.s === this.myKey && unheard.has(frameKey(stored));
       if (!reads && !(mine && rosterHas(this.roster, from))) continue;
-      if (!this.mainIndex.has(found.hash)) this.handSide(from, found.hash, handed, answer);
+      if (!this.mainIndex.has(found.hash)) this.handSide(from, found.hash, handed, answer, out);
       // A leaver's frame goes after its leave's mark, without which it is not taken.
       if (!rosterHas(this.roster, stored.s) && !marked.has(stored.s)) { marked.add(stored.s); const left = this.leftFrame(stored.s); if (left) answer.push(left); }
       while (metas.length && metas[0].ts < stored.ts) answer.push(metas.shift()!.frame);
@@ -2635,13 +2650,13 @@ export class CommunitySession {
   }
 
   /** The commits of a branch I do not follow, from where it leaves mine, and the secrets I hold of those `to` was in, onto `answer`. */
-  private handSide(to: string, tip: string, handed: Set<string>, answer: CommunityFrame[]): void {
+  private handSide(to: string, tip: string, handed: Set<string>, answer: CommunityFrame[], out = this.outEpoch(to)): void {
     for (const h of this.pathToMain(tip) ?? []) {
       if (handed.has(h)) continue;
       handed.add(h);
       answer.push({ t: "group-commit", v: 2, g: this.id, commit: this.known.get(h)! });
       const secret = this.state.secrets[h];
-      if (secret && rosterHas(this.rosterAt(h) ?? [], to)) answer.push({ t: "group-secret", v: 2, g: this.id, to, h, s: sealSecret(to, fromBase64Url(secret), secretAad(this.id, h, to)) });
+      if (secret && this.readsAt(h, to, out)) answer.push({ t: "group-secret", v: 2, g: this.id, to, h, s: sealSecret(to, fromBase64Url(secret), secretAad(this.id, h, to)) });
     }
   }
 
