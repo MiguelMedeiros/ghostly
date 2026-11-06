@@ -108,6 +108,14 @@ describe("a new message, read out to a screen reader", () => {
     expect(region()).not.toHaveTextContent("Requested");
   });
 
+  it("a payment the wallet does not know yet reads in the app's language too, not the engine's English line", () => {
+    fakeEngine.setState({ payments: {} });
+    const view = renderApp(<MessageAnnouncer chat="c" messages={HISTORY} nameOf={nameOf} />, { language: "pt" });
+    view.rerender(<MessageAnnouncer chat="c" messages={[...HISTORY, peer("⚡ Requested 1,234 test sats", { paymentId: "pay-1" })]} nameOf={nameOf} />);
+    wait(ANNOUNCE_WINDOW_MS);
+    expect(region()).toHaveTextContent(/^Alice: ⚡ Pediu a você 1\.234 sats de teste$/);
+  });
+
   it("an app card reads as the card names it, in the app's language, not its English fallback with the bundle's link", () => {
     const card = { kind: "app", id: "a".repeat(22), ref: "r".repeat(52), digest: "d".repeat(43), sequence: 1, title: "Chess", version: "1.2.0", url: "https://raw.githubusercontent.com/ana/chess/HEAD/chess.ghostlyapp", opened: true } as const;
     const view = renderApp(<MessageAnnouncer chat="c" messages={HISTORY} nameOf={nameOf} />, { language: "zh" });
