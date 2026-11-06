@@ -54,7 +54,7 @@ by IP), so about 3 invites a minute go out at once. Past that, `invite create` s
 `"published":false` and `retryInMs`: the invite goes out by itself when the relays' minute frees a request, and the
 link works from then on. A one-shot (no daemon) waits up to 20 s for it before it leaves.
 
-With no relay answering at all, `invite create` answers `"published":false` with a `reason` (what the relays said) and a
+With no relay answering at all, `invite create` answers `"published":false` with a `reason` naming the relays (`No relay answered (127.0.0.1:9): it goes out once one does`) and a
 `note`. The invite is good, so don't make another: it goes out by itself once a relay answers, while a daemon runs for
 the profile.
 
