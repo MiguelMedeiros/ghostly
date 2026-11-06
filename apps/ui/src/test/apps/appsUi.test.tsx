@@ -320,6 +320,78 @@ describe("with the apps flag on", () => {
     await waitFor(() => expect(screen.queryByTestId("app-install")).not.toBeInTheDocument());
   });
 
+  it("while Uninstall runs, its question's Cancel, Escape and backdrop do not take it back to an app that is about to go", async () => {
+    let finish: () => void = () => {};
+    fakeEngine.on("appList", () => []).on("appUninstall", () => new Promise<void>((resolve) => { finish = resolve; }));
+    const onClose = vi.fn(), onUninstalled = vi.fn();
+    const { user } = renderApp(<InstalledAppDialog app={installed()} onClose={onClose} onOpen={() => {}} onUninstalled={onUninstalled} />);
+    await user.click(await screen.findByTestId("app-uninstall-open"));
+    const question = screen.getByTestId("app-uninstall");
+    await user.click(within(question).getByTestId("app-uninstall-confirm"));
+    expect(within(question).getByTestId("app-uninstall-confirm")).toHaveAttribute("aria-busy", "true");
+    const cancel = within(question).getByRole("button", { name: "Cancel" });
+    expect(cancel).toBeDisabled();
+    await user.click(cancel);
+    await user.keyboard("{Escape}");
+    await user.pointer({ keys: "[MouseLeft]", target: question.parentElement! });
+    expect(screen.getByTestId("app-uninstall")).toBeInTheDocument();
+    expect(screen.queryByTestId("app-details")).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => finish());
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(onUninstalled).toHaveBeenCalledTimes(1);
+  });
+
+  it("Escape on the Uninstall question does what its Cancel does: back to the app's screen, on Uninstall", async () => {
+    const onClose = vi.fn();
+    const { user } = renderApp(<InstalledAppDialog app={installed()} onClose={onClose} onOpen={() => {}} />);
+    await user.click(await screen.findByTestId("app-uninstall-open"));
+    expect(screen.getByTestId("app-uninstall")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("app-uninstall")).not.toBeInTheDocument();
+    expect(screen.getByTestId("app-uninstall-open")).toHaveFocus();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(fakeEngine.callsTo("appUninstall")).toEqual([]);
+  });
+
+  it("while a waiting Update runs, Escape and the backdrop do not close the app's screen", async () => {
+    let finish: () => void = () => {};
+    fakeEngine.on("appList", () => []).on("appUpdateAccept", () => new Promise<InstalledAppView>((resolve) => { finish = () => resolve(installed()); }));
+    const onClose = vi.fn();
+    const { user } = renderApp(<InstalledAppDialog onClose={onClose} onOpen={() => {}}
+      app={installed({ pending: { sequence: 8, version: "1.3.0", added: ["name"] } })} />);
+    await user.click(await screen.findByTestId("app-update-accept"));
+    const details = screen.getByTestId("app-details");
+    await user.keyboard("{Escape}");
+    await user.pointer({ keys: "[MouseLeft]", target: details.parentElement! });
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => finish());
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("while Add store runs, the store's Cancel, Escape and the backdrop do not close Add: no Cancel the store is added after all", async () => {
+    const LINK = "https://raw.githubusercontent.com/ana/store/HEAD/ghostly-store.json";
+    let finish: () => void = () => {};
+    fakeEngine.on("appStorePreview", ({ url }) => ({ url, key: "k", name: "Ana's store", kind: "curated", sequence: 1, apps: 1, fingerprint: "abcd efgh", expires: 9e9, expired: false }))
+      .on("appStoreAdd", () => new Promise<AppStoreSummary>((resolve) => { finish = () => resolve({} as AppStoreSummary); }));
+    const onClose = vi.fn(), onStoreAdded = vi.fn();
+    const { user } = renderApp(<AddAppDialog onClose={onClose} onStoreAdded={onStoreAdded} />);
+    await user.type(screen.getByTestId("apps-add-url"), LINK);
+    await user.click(screen.getByTestId("apps-add-check"));
+    const store = await screen.findByTestId("apps-add-store");
+    await user.click(within(store).getByTestId("apps-add-store-confirm"));
+    const cancel = within(store).getByRole("button", { name: "Cancel" });
+    expect(cancel).toBeDisabled();
+    await user.click(cancel);
+    await user.keyboard("{Escape}");
+    await user.pointer({ keys: "[MouseLeft]", target: screen.getByTestId("apps-add-dialog").parentElement! });
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => finish());
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(onStoreAdded).toHaveBeenCalledTimes(1);
+  });
+
   it("names a contact with no name as the chat does, not Anonymous, on the card and its install screen", async () => {
     fakeEngine.on("appList", () => []).on("appPreview", () => preview());
     // The chat of a contact with no name passes none (Chat.tsx), and calls them "Contact · <the start of their key>".
