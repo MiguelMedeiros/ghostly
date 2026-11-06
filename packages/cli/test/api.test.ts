@@ -810,6 +810,13 @@ describe("chat wait", () => {
     await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "live", timeout: 1 })).rejects.toMatchObject({ code: "timeout" });
   });
 
+  it("a timeout names the state in words that read: text is carried, not been", async () => {
+    // It read "waiting for chat chat-one to be text".
+    const { ctx } = moving(remembered({ textDelivery: "unavailable" }));
+    await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "text", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat chat-one to carry text" });
+    await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "live", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat chat-one to be live" });
+  });
+
   it("a chat removed while it is waited for answers not_found at once, not a timeout at the end", async () => {
     // The check's not_found was thrown inside the hub's state listener, which swallows it: the wait went on to its
     // --timeout (up to a day) and answered "Timed out … to be live", exit 4.
