@@ -229,8 +229,23 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
     return () => { live = false; };
   }, [key, have]);
 
+  // The app asks for more than this screen lists, and reading it again failed (offline, the host down): what the screen
+  // shows is not what Install would be asked to grant, so Install waits until Try again reads it.
+  const [stale, setStale] = useState(false);
+  const [rechecking, setRechecking] = useState(false);
+  const retryButton = useRef<HTMLButtonElement>(null), confirmButton = useRef<HTMLButtonElement>(null);
+  const recheck = async () => {
+    try {
+      const again = await engine.call("appPreview", source);
+      setPreview(again); setStale(false);
+      setError({ text: t(again.install === "update" ? "apps.errors.permissionsChanged" : "apps.install.asksChanged") });
+    } catch (read) {
+      // The read's own failure, said as it is: "look at them again" over the old list had nothing new to look at.
+      setStale(true); setError(appErrorView(read, t));
+    }
+  };
   const install = async () => {
-    if (!preview) return;
+    if (!preview || stale) return;
     focusBack();
     setBusy(true); setError(null);
     try {
@@ -241,11 +256,23 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
     } catch (e) {
       // It asks for more than this screen listed (the app uninstalled since it opened, a version that dropped a permission
       // installed by the check): the screen shows what it asks now, and Install grants only that.
-      const again = appErrorCode(e) === "permissions-changed" ? await engine.call("appPreview", source).catch(() => null) : null;
-      if (again) setPreview(again);
-      setError(again ? { text: t(again.install === "update" ? "apps.errors.permissionsChanged" : "apps.install.asksChanged") } : appErrorView(e, t));
+      if (appErrorCode(e) === "permissions-changed") await recheck();
+      else setError(appErrorView(e, t));
     } finally { setBusy(false); }
   };
+  const retry = async () => {
+    setRechecking(true); setError(null);
+    try { await recheck(); } finally { setRechecking(false); }
+  };
+  // Install turned off with the focus on it hands the focus to Try again; Try again gone (read) hands it back to Install.
+  const wasStale = useRef(false);
+  useEffect(() => {
+    const was = wasStale.current;
+    wasStale.current = stale;
+    if (was === stale) return;
+    const active = document.activeElement;
+    if (!active || active === document.body || active === confirmButton.current) (stale ? retryButton : confirmButton).current?.focus({ preventScroll: true });
+  }, [stale]);
   // While Install runs, the screen stays: closed, the install went on all the same, and opened the app after a Cancel.
   const close = () => { if (!busy) onClose(); };
 
@@ -272,8 +299,11 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
           Cancel off the screen's start, where nothing scrolls to it. */}
       <div className="flex flex-wrap justify-end gap-2">
         <Button disabled={busy} onClick={onClose}>{t("common.cancel")}</Button>
+        {preview && !blocked && stale && (
+          <Button ref={retryButton} data-testid="app-install-retry" loading={rechecking} onClick={() => void retry()}>{t("apps.page.tryAgain")}</Button>
+        )}
         {preview && !blocked && (
-          <Button variant="primary" data-testid="app-install-confirm" loading={busy} onClick={() => void install()}>
+          <Button ref={confirmButton} variant="primary" data-testid="app-install-confirm" loading={busy} disabled={stale} onClick={() => void install()}>
             {preview.install === "update" ? t("apps.install.update")
               // A built-in app is already here: the button allows what it asks, it downloads nothing.
               : preview.carried ? t(openAfter ? "apps.builtIn.allowOpen" : "apps.builtIn.allow")
