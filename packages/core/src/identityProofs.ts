@@ -540,6 +540,7 @@ export class IdentityExchange {
     let error: string | undefined;
     /** The same, as this side's own timeline says it. */
     let reason: string | undefined;
+    /** Its owner withdrew the proof while this check ran: no result goes out (see below). */
     let withdrawn = false;
     try {
       // Before anything is checked or looked up: a contact past the bound costs this side nothing more.
@@ -562,6 +563,11 @@ export class IdentityExchange {
       const challenge = challengeOf(l);
       if (!challenge) throw new Error("Unknown or reused identity challenge");
       const challenges = l.challenges.filter(c => c.nonce !== nonce);
+      withdrawn = !!challenge.withdrawn;
+      // Withdrawn while it was checked, then shared again: the newer share decides, so this outcome is dropped. A withdraw
+      // marks every challenge and record of that proof, so one of them still unmarked came with the newer share.
+      if (withdrawn && (challenges.some(c => c.id === challenge.id && !c.withdrawn) ||
+        l.received.some(r => r.id === challenge.id && r.status !== "withdrawn" && r.status !== "revoked"))) return { ...l, challenges };
       // A newer proof of the same identity replaces the older one; the bound holds for presentations checked at once.
       const subject = verified?.subject;
       // A re-check may have found it revoked while it was being checked.
@@ -572,14 +578,13 @@ export class IdentityExchange {
         subject: verified?.subject ?? binding.subject, ok: !!verified, ...(reason ? { error: reason } : {}) });
       if (!verified || !received) return { ...logged, challenges };
       // Its owner withdrew it while it was being checked: kept as if the withdraw had come just after.
-      withdrawn = !!challenge.withdrawn;
       const record: ReceivedIdentity = { id, binding, evidence, verified, presenter: scope.subject, audience: scope.audience, context: scope.context,
         verifiedAt: now, checkedAt: now, status: withdrawn ? "withdrawn" : "verified" };
       const kept = { ...logged, challenges, received: [...received, record] };
       return withdrawn ? this.log(kept, { type: "stopped", side: "theirs", proof: id, provider: binding.provider, subject: verified.subject, reason: "withdrawn" }) : kept;
     });
-    // A withdrawn one gets no result: the owner has it withdrawn (`idp-withdrawn` went out), and a late one would
-    // settle a new share of the same proof made since.
+    // A withdrawn one gets no result, verified or not: the owner has it withdrawn (`idp-withdrawn` went out), and a late
+    // one would settle a new share of the same proof made since.
     if (!withdrawn) this.send(verified ? { t: "idp-result", id, ok: true } : { t: "idp-result", id, ok: false, error });
   }
 }
