@@ -312,9 +312,21 @@ export class DeviceLinks implements DeviceLinkEngine {
   /** A hint came inside `TURN_HINT_EVERY_MS` of the last read, and a read is due at its end. */
   private hintDeferred = false;
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
+  /** When this device added each device it enrolled in this run, by signing key (`expectDevice`). */
+  private readonly added = new Map<string, number>();
 
   constructor(private readonly options: DeviceLinksOptions) {
     this.createPeerConnection = "createPeerConnection" in options ? options.createPeerConnection : defaultPeerConnection();
+  }
+
+  /**
+   * This device just added the device of signing key `key` (an enrollment's record was written): its link, opened by the
+   * next `refresh`, awaits it as a chat awaits the contact of an invite just sent (`AWAITING_PEER_MS`). The new device
+   * starts into its standby screen only once the person taps Continue there, after the link's first read: read at the
+   * background pace from then, it went live about 30 s after it started (bug hunt, 2026-11-06).
+   */
+  expectDevice(key: string): void {
+    this.added.set(key, Date.now());
   }
 
   /** `host` is the device-link-only server's: it is told when what the standby screen shows changes. */
@@ -496,8 +508,9 @@ export class DeviceLinks implements DeviceLinkEngine {
       transport: this.options.transport,
       pollIntervals: this.options.pollIntervals,
       // Never an invite just sent: the other device is there (its packet is read at once) or away. As one, a link to a
-      // device away read it every 4 s for the first ten minutes of every start, half a relay's minute each.
-      madeAt: 0,
+      // device away read it every 4 s for the first ten minutes of every start, half a relay's minute each. Only a device
+      // this one added just now is awaited (`expectDevice`), from when it was added.
+      madeAt: want.earlier ? 0 : this.added.get(want.key) ?? 0,
       autoConnect: true,
       createPeerConnection: () => {
         if (!this.createPeerConnection) throw new ReferenceError("RTCPeerConnection is not defined");
