@@ -121,7 +121,8 @@ chat; a `<chat>` is its id, a unique prefix of it, or its name.
 
 Names are for people at a terminal. A contact chooses its own name, a group's admin its group's name and a member its
 name in a group, so in a script or an agent keep the **id** (`chat` and `group` in every answer and event, a member's
-key) and address by it: `<chat id>`, `group:<group id>`, `<member key>`. Where a command takes a chat or a group, a
+key) and address by it: `<chat id>`, `group:<group id>` (every command that takes a group, `listen --group` too),
+`<member key>`. Where a command takes a chat or a group, a
 name that a contact gave itself and that also names one of your groups is refused (exit 1, `bad_request`) and both ids are shown.
 So is a `<group>` that is one group's name and a prefix of another's id.
 
