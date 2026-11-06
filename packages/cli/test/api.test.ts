@@ -766,17 +766,29 @@ describe("chat wait", () => {
     expect(await callApi(ctx, "status", {})).toMatchObject({ chats: 1, live: 0 });
   });
 
-  it("--until text takes the DHT floor or a hold, and --until paired the contact seen or a session, not the last run's", async () => {
+  it("--until text takes the DHT floor or a hold, and --until paired the contact seen or a session", async () => {
     const { ctx, set } = moving(remembered({ textDelivery: "unavailable" }));
     await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "text", timeout: 1 })).rejects.toMatchObject({ code: "timeout" });
     set(remembered({ textDelivery: "dht" }));
     expect(await callApi(ctx, "chat.wait", { chat: "Alice", until: "text", timeout: 1 })).toMatchObject({ live: false, text: "dht" });
-    set(remembered({ textDelivery: "stream" }));
+    // An invite nobody took yet: no contact's key, nothing to answer.
+    const invite = { inviteCode: "ghostly1-code", peerParticipationKey: undefined, transportHistory: undefined } as Partial<LinkView>;
+    set(remembered({ ...invite, textDelivery: "unavailable" }));
     await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "paired", timeout: 1 })).rejects.toMatchObject({ code: "timeout" });
-    set(remembered({ pairingProgress: { stage: "waiting", peerSeen: true } } as Partial<LinkView>));
+    set(remembered({ ...invite, pairingProgress: { stage: "waiting", peerSeen: true } } as Partial<LinkView>));
     expect(await callApi(ctx, "chat.wait", { chat: "Alice", until: "paired", timeout: 1 })).toMatchObject({ live: false });
     set(remembered(session));
     expect(await callApi(ctx, "chat.wait", { chat: "Alice", until: "paired", timeout: 1 })).toMatchObject({ live: true });
+  });
+
+  it("--until paired answers at once for a chat paired before, while its contact is away; --until live still waits", async () => {
+    // Paired long ago (the contact's key kept), the contact's daemon stopped: the pairing reads `connecting` again,
+    // with no pairing in progress, and texts go on the DHT. Paired is a fact of the chat, not of the contact being online.
+    const { ctx } = moving(remembered({ textDelivery: "dht" }));
+    const from = Date.now();
+    expect(await callApi(ctx, "chat.wait", { chat: "Alice", until: "paired", timeout: 5 })).toMatchObject({ id: "chat-one", live: false, text: "dht" });
+    expect(Date.now() - from).toBeLessThan(1000);
+    await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "live", timeout: 1 })).rejects.toMatchObject({ code: "timeout" });
   });
 
   it("a chat removed while it is waited for answers not_found at once, not a timeout at the end", async () => {
