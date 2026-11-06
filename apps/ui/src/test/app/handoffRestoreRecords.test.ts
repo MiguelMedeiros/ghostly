@@ -101,7 +101,8 @@ describe("a taker points each restored file record at its staged bytes", () => {
 
     await staging.restore(new Uint8Array(), files.map(({ id, size, sha256 }) => ({ id, size, sha256 })));
 
-    expect(restored.transactions).toEqual(Array.from({ length: 3 }, () => `${staging.database} readwrite`));
+    // And one read of the staging's notes, for all of them.
+    expect(restored.transactions.filter((tx) => !tx.endsWith(" versionchange"))).toEqual(["ghostly-staging readonly", ...Array.from({ length: 3 }, () => `${staging.database} readwrite`)]);
     const rows = new Map((await rowsOf(staging.database)).map((value) => [value.id as string, value]));
     for (const file of files) {
       const stored = rows.get(file.id)!;
@@ -126,7 +127,7 @@ describe("a taker points each restored file record at its staged bytes", () => {
     await staging.restore(new Uint8Array(), files);
 
     // Three files of 12 MiB reach the 32 MiB a transaction takes: 3 + 3 + 1.
-    expect(restored.transactions).toHaveLength(3);
+    expect(restored.transactions.filter((tx) => tx.startsWith(staging.database))).toHaveLength(3);
     for (const stored of await rowsOf(staging.database)) expect((stored.blob as Blob).size).toBe(bytes.length);
   });
 

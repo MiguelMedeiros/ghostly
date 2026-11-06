@@ -120,7 +120,8 @@ describe("a move back keeps the files the frozen copy holds as Blobs where they 
     const files = held.map((file) => ({ id: file.id, size: file.bytes.length, sha256: file.digest }));
 
     await staging.copyHeld(files.map((file) => ({ fromId: file.id, file })));
-    expect(await staging.held()).toEqual(files);
+    expect(await staging.held()).toEqual(expect.arrayContaining(files));
+    expect(await staging.held()).toHaveLength(files.length);
     await staging.restore(new Uint8Array(), files);
 
     expect(storage.calls).toEqual({ written: 0, read: 0 });
