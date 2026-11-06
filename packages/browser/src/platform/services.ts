@@ -291,10 +291,18 @@ export const servicesPlatform: ServicesPlatform | null = {
 
   async shareService(name, target) {
     const { origin } = parseLocalTarget(target);
-    // Where the platform asks the user, it only does so from a user gesture: this has to come first.
-    const granted = await getBrowserHost().requestLocalAccess(localAccessPattern(origin), origin);
-    if (!granted) throw new Error("Ghostly needs your permission to reach that local address");
-    await engine.call("addService", { name, target });
+    const pattern = localAccessPattern(origin);
+    const host = getBrowserHost();
+    const add = async () => { await engine.call("addService", { name, target }); };
+    // A second round only when another tab gave the access back between the yes and the app's row (the extension).
+    for (let round = 0; round < 2; round++) {
+      // Where the platform asks the user, it only does so from a user gesture: this has to come first.
+      const granted = await host.requestLocalAccess(pattern, origin);
+      if (!granted) break;
+      if (!host.withLocalAccess) return add();
+      if (await host.withLocalAccess(pattern, add)) return;
+    }
+    throw new Error("Ghostly needs your permission to reach that local address");
   },
   async removeService(serviceId) {
     // Read before the call: the state after it may not have caught up yet.
