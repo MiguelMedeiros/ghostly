@@ -147,7 +147,11 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
   says so once on stderr and prints messages as they are. See the CLI README's Translation section.
 - `--exec '<command>'` runs a shell command once per event, in order, with the event on **stdin** (never in its
   arguments, so a contact's text cannot reach the shell). A command that exits non-zero is said on stderr and the
-  cursor moves past its event: it is not run again.
+  cursor moves past its event: it is not run again. A command ended by a signal is said with it (`--exec ended by
+  SIGKILL on event N`), and one still running after a minute is said once on stderr (the events after it wait). The
+  command runs in a process group of its own: a stop (SIGTERM, SIGINT, Ctrl-C) gives a running command 5 s to end,
+  then sends its group SIGTERM, and SIGKILL 5 s later. A command the stop ended leaves the cursor before its event, so
+  the next start runs it again, never alongside the old one.
 - `--webhook <url>` POSTs each event to a local bridge (`127.0.0.1`, `localhost` or `[::1]` only; a redirect is not
   followed; no `user:password@` in the URL, so put a token in its path or query). A bridge that is not answering (connection refused, a timeout, a 5xx, 408 or 429) holds the stream: the
   event is tried again, up to a minute apart, until the bridge takes it, and the cursor never moves past it, so a
