@@ -489,7 +489,8 @@ export class IdentityProofs {
       for (const r of this.host.ledger(linkId)?.received ?? []) {
         const after = this.providers().find(p => p.id === r.binding.provider)?.recheck?.afterSeconds;
         if (after === undefined || (r.status !== "verified" && r.status !== "unconfirmed") || !this.revocable(r)) continue;
-        if (t - r.checkedAt < Math.max(after, AUTO_RECHECK_AFTER_S) || (this.recheckBackoff.get(`${linkId}|${r.id}`)?.until ?? 0) > at) continue;
+        // A check made while the clock ran ahead is due now, not at that future date.
+        if ((r.checkedAt <= t && t - r.checkedAt < Math.max(after, AUTO_RECHECK_AFTER_S)) || (this.recheckBackoff.get(`${linkId}|${r.id}`)?.until ?? 0) > at) continue;
         due.push({ linkId, r });
       }
     }
@@ -676,7 +677,7 @@ export class IdentityProofs {
         return { id: r.id, provider: r.binding.provider, subject: r.verified.subject, verified: r.verified, display: r.display,
           status, verifiedAt: r.verifiedAt, checkedAt: r.checkedAt,
           expiresAt: Math.min(r.binding.expiresAt, r.verified.expiresAt ?? Infinity), error: r.error,
-          recheckDue: !!provider?.recheck && t - r.checkedAt >= provider.recheck.afterSeconds,
+          recheckDue: !!provider?.recheck && (r.checkedAt > t || t - r.checkedAt >= provider.recheck.afterSeconds),
           ...(publicProfile ? { publicProfile } : {}) };
       }),
       error: this.errors.get(linkId),

@@ -959,6 +959,29 @@ describe("per chat", () => {
     engines.b.stop();
   });
 
+  it("a contact's proof checked while this device's clock ran ahead is due again once the clock is put right, not at that future date", async () => {
+    const { engines, ledgers, state } = pair();
+    await clearStorage();
+    await engines.a.load(); await engines.b.load();
+    const proof = await prove(engines.a, 365);
+    const realNow = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(realNow + 60 * 86_400_000);
+    await engines.a.share({ linkId: "chat", id: proof.id });
+    await vi.waitFor(() => expect(ledgers.b.received[0]?.status).toBe("verified"));
+    // The clock is put right.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], now: realNow });
+    const verify = vi.fn(async () => { throw new Error("The record is not published"); });
+    state.providers.b = [{ ...fakeKey, recheck: { afterSeconds: 86_400 }, verify } as unknown as IdentityProofProvider];
+    expect(engines.b.linkView("chat", true)!.received[0].recheckDue).toBe(true);
+    engines.b.start();
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(engines.b.linkView("chat", true)!.received[0]).toMatchObject({ status: "unconfirmed", error: "The record is not published", recheckDue: false });
+    expect(ledgers.b.received[0].checkedAt).toBeLessThanOrEqual(Math.floor(Date.now() / 1000));
+    engines.b.stop();
+  });
+
   it("a check that could not reach the server changes nothing and backs off; offline nothing is checked; a check that holds is due a day later", async () => {
     const { engines, ledgers, state } = await shared();
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
