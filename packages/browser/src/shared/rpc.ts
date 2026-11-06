@@ -707,9 +707,16 @@ export type EngineEvent =
   | { kind: "device-gate"; gate: import("../devices/gate").DeviceGateView };
 
 /**
- * A state as a client across a copying boundary gets it (`copyingSink`, the extension's port): `payments` and `wallet`
- * are left out when they are the ones that client was sent last, and the page keeps those.
+ * The pictures a posted state left out, as the ones that client was sent last: the profile's own (`settings.avatar`), and
+ * by id each chat's and group edge's contact's (`peerAvatar`) and each group's (`picture`).
  */
-export type PostedState = Omit<EngineState, "payments" | "wallet"> & Partial<Pick<EngineState, "payments" | "wallet">>;
+export interface KeptPictures { avatar?: true; links?: string[]; edges?: string[]; groups?: string[] }
+
+/**
+ * A state as a client across a copying boundary gets it (`copyingSink`, the extension's port): `payments` and `wallet`
+ * are left out when they are the ones that client was sent last, and so is each picture (`keptPictures`); the page keeps
+ * those.
+ */
+export type PostedState = Omit<EngineState, "payments" | "wallet"> & Partial<Pick<EngineState, "payments" | "wallet">> & { keptPictures?: KeptPictures };
 /** What a page hears from the peer: an event, a state that may leave out what it already has, or an answer. */
 export type PostedEvent = Exclude<EngineEvent, { kind: "state" }> | { kind: "state"; state: PostedState } | RpcResponse;
