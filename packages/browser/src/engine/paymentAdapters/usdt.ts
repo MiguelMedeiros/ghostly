@@ -133,8 +133,11 @@ export class UsdtAdapter implements PaymentAdapter<UsdtPrepared> {
   }); }
   private current(): WalletAccountEvm { if (!this.account) throw new Error('Unlock the USDT wallet first'); return this.account; }
   address() { return this.current().getAddress(); }
+  /**
+   * The token and gas balances. The chain and the contract are not asked again here: `connect` checked them, and every
+   * payment does before it signs. The wallet reads this every 8 s, and the contract's whole code was most of each read.
+   */
   async balances() {
-    await this.assertToken();
     const address = await this.address();
     const [token, gas] = await Promise.all([this.rpc<string>('eth_call',[{to:this.config.token,data:erc20.encodeFunctionData('balanceOf',[address])},'latest']),this.rpc<string>('eth_getBalance',[address,'pending'])]);
     return {balance:erc20.decodeFunctionResult('balanceOf',token)[0].toString(),gasBalance:BigInt(gas).toString()};
