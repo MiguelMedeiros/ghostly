@@ -67,8 +67,10 @@ export class Adb {
     this.tryRun("reverse", "--remove", `tcp:${port}`);
   }
 
+  /** The app's process id; "" when it has none (`pidof` fails then, and its failure is no id). */
   pid(): string {
-    return this.tryRun("shell", "pidof", PKG).out.trim();
+    const found = this.tryRun("shell", "pidof", PKG);
+    return found.ok ? found.out.trim() : "";
   }
 }
 
@@ -211,7 +213,7 @@ function install(adb: Adb, apk: string): void {
 }
 
 /** The WebView of the app's process `pid`, not one of a process that is gone (`pm clear` kills it; the list lags). */
-async function webViewPage(device: AndroidDevice, pid: number): Promise<Page> {
+export async function webViewPage(device: AndroidDevice, pid: number): Promise<Page> {
   const end = Date.now() + 120_000;
   while (Date.now() < end) {
     const view = device.webViews().find((v) => v.pkg() === PKG && v.pid() === pid);

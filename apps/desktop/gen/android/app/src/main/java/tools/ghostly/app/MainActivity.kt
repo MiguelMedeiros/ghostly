@@ -144,6 +144,16 @@ class MainActivity : TauriActivity() {
     controller.isAppearanceLightNavigationBars = !night
   }
 
+  /**
+   * A share, a notification's tap or a sign-in's link that comes to the task (singleTask). Kept as the activity's
+   * intent before the plugins hear it: when Android ended the process but kept the task in Recents, the activity made
+   * again gets it before GhostlyHostPlugin is loaded (no plugin hears it), and the plugin's `load` takes it from here.
+   */
+  override fun onNewIntent(intent: Intent) {
+    setIntent(intent)
+    super.onNewIntent(intent)
+  }
+
   override fun onResume() {
     super.onResume()
     resumed = true
