@@ -8,7 +8,7 @@ import { useI18n, type Translate, type TranslationKey } from "../../contexts/I18
 import { Button } from "../wallet/ui";
 import { InfoButton } from "../layout";
 import { AppIcon, Fingerprint } from "./AppIcon";
-import { appErrorText, appErrorView, type AppErrorView } from "../../lib/apps/errors";
+import { appErrorCode, appErrorText, appErrorView, type AppErrorView } from "../../lib/apps/errors";
 import { refreshInstalledApps } from "../../lib/apps/installed";
 import { saveAppData } from "../../lib/apps/exportData";
 import { webKitAppLeak } from "../../lib/apps/flag";
@@ -234,11 +234,17 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
     focusBack();
     setBusy(true); setError(null);
     try {
-      const app = await engine.call("appInstall", { digest: preview.digest, grant: [...preview.manifest.permissions] });
+      const app = await engine.call("appInstall", { digest: preview.digest, grant: [...preview.manifest.permissions], asks: [...preview.asks] });
       await refreshInstalledApps();
       onInstalled?.(app);
       onClose();
-    } catch (e) { setError(appErrorView(e, t)); } finally { setBusy(false); }
+    } catch (e) {
+      // It asks for more than this screen listed (the app uninstalled since it opened, a version that dropped a permission
+      // installed by the check): the screen shows what it asks now, and Install grants only that.
+      const again = appErrorCode(e) === "permissions-changed" ? await engine.call("appPreview", source).catch(() => null) : null;
+      if (again) setPreview(again);
+      setError(again ? { text: t(again.install === "update" ? "apps.errors.permissionsChanged" : "apps.install.asksChanged") } : appErrorView(e, t));
+    } finally { setBusy(false); }
   };
   // While Install runs, the screen stays: closed, the install went on all the same, and opened the app after a Cancel.
   const close = () => { if (!busy) onClose(); };

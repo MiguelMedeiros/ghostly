@@ -100,6 +100,7 @@
     "note": "不会复制任何内容：{{app}} 在此设备上读取你选择的内容。"
   },
   "install": {
+    "asksChanged": "此应用请求的权限已变更。安装前请再查看一遍。",
     "equivocation": "此版本存在两个不同的副本。Ghostly 保留了你已有的那个。",
     "fetching": "正在检查应用…",
     "foundBy": "由 {{name}} 找到",

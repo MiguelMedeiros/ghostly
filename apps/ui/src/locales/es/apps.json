@@ -100,6 +100,7 @@
     "note": "No se copia nada: {{app}} lee lo que elijas, en este dispositivo."
   },
   "install": {
+    "asksChanged": "Lo que pide esta app cambió. Revísalo de nuevo antes de instalarla.",
     "equivocation": "Existen dos copias distintas de esta versión. Ghostly conservó la que tienes.",
     "fetching": "Comprobando la app…",
     "foundBy": "Encontrada por {{name}}",

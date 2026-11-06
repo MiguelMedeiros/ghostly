@@ -290,7 +290,7 @@ describe("with the apps flag on", () => {
       "Ghostly downloads the app from raw.githubusercontent.com, which learns your IP address and when. The app has no internet access, but its publisher may still learn your IP address and when you open it.");
     expect(within(screenEl).queryByTestId("app-webkit-line")).not.toBeInTheDocument();
     await user.click(within(screenEl).getByRole("button", { name: "Install and open" }));
-    expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: ["chat"] }]);
+    expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: ["chat"], asks: ["chat"] }]);
     // Installing from a card opens it in that chat.
     await waitFor(() => expect(opener).toHaveBeenCalledWith(REF, "link-1", { runAnyway: false }));
     expect(fetches).toEqual([]);
@@ -411,6 +411,31 @@ describe("with the apps flag on", () => {
     expect(permissions).toHaveTextContent("See your name in this chat");
     expect(permissions).not.toHaveTextContent("Keep its own data");
     expect(screen.getByTestId("app-install-confirm")).toHaveTextContent("Update");
+  });
+
+  it("Install of a screen whose app asks for more since it opened shows what it asks now, and grants only that", async () => {
+    const all = ["chat", "name"] as AppPreview["asks"];
+    const manifest = { ...preview().manifest, permissions: all };
+    let shown = preview({ install: "update", asks: [], manifest });
+    fakeEngine.on("appPreview", () => shown).on("appInstall", (params) => {
+      const { asks } = params as { asks: string[] };
+      if (asks.length < all.length) throw new Error("permissions-changed: This install now asks for chat, name; look at it again");
+      return installed({ permissions: all });
+    });
+    const onInstalled = vi.fn();
+    const { user } = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} onInstalled={onInstalled} />);
+    expect(await screen.findByTestId("app-install-confirm")).toHaveTextContent("Update");
+    expect(screen.queryByTestId("app-permissions")).not.toBeInTheDocument();
+    // Uninstalled meanwhile: the screen read again is a new install's, every permission listed.
+    shown = preview({ install: "new", asks: all, manifest });
+    await user.click(screen.getByTestId("app-install-confirm"));
+    expect(await screen.findByTestId("app-install-error")).toHaveTextContent("What this app asks for changed. Look at it again before you install it.");
+    expect(onInstalled).not.toHaveBeenCalled();
+    expect(screen.getByTestId("app-permissions")).toHaveTextContent("See your name in this chat");
+    expect(screen.getByTestId("app-install-confirm")).toHaveTextContent("Install");
+    await user.click(screen.getByTestId("app-install-confirm"));
+    await waitFor(() => expect(onInstalled).toHaveBeenCalled());
+    expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: all, asks: [] }, { digest: DIGEST, grant: all, asks: all }]);
   });
 
   it("shows the internet permission with what it means behind ⓘ, and an update that adds it asks again", async () => {
@@ -1129,7 +1154,7 @@ describe("an app that comes with Ghostly (WISP 1200 § Built-in apps)", () => {
     expect(fakeEngine.callsTo("appInstall")).toEqual([]);
 
     await user.click(within(screenOf).getByTestId("app-install-confirm"));
-    await waitFor(() => expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: ["chat", "name"] }]));
+    await waitFor(() => expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: ["chat", "name"], asks: ["chat", "name"] }]));
     // Installed: its own row now, and (an app that runs in a chat) the question of which chat.
     expect(await screen.findByTestId("installed-app")).toHaveTextContent("Chess");
     expect(screen.queryByTestId("built-in-app")).not.toBeInTheDocument();
