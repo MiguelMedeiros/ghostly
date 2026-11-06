@@ -150,8 +150,12 @@ export function listProfiles(home: string): string[] {
   return readdirSync(root).filter((name) => NAME.test(name) && statSync(join(root, name)).isDirectory()).sort();
 }
 
+/** A profile this home lacks, as `profile use` and `--profile` both say it: quoted, with how to list or make one. */
+export const noProfile = (name: string): CliError =>
+  new CliError("not_found", `No profile ${JSON.stringify(name)} (ghostly profile list, or ghostly profile create ${name})`);
+
 export function selectProfile(home: string, name: string): void {
-  if (!profileExists(home, name)) throw new CliError("not_found", `No profile ${name}`);
+  if (!profileExists(home, name)) throw noProfile(name);
   ensureFolder(home);
   writeFileSync(join(home, "current"), name + "\n", { mode: 0o600 });
 }

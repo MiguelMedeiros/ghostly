@@ -212,7 +212,7 @@ describe("chats", () => {
     // An ambiguous name stays what it is, from either side; group:<id> is a group only.
     expect(refused([link("chatA", { label: "Twin" }), link("chatB", { label: "Twin" })], "twin")).toMatchObject({ code: "bad_request", message: expect.stringMatching(/more than one chat/) });
     expect(() => findChatOrGroup([], [room, { ...room, id: "h".repeat(22) } as unknown as GroupView], "team room")).toThrow(/more than one group/);
-    expect(refused([asName], "group:zed")).toEqual({ code: "not_found", message: 'No group "zed" (ghostly group list)' });
+    expect(refused([asName], "group:zed")).toEqual({ code: "not_found", message: 'No group "group:zed" (ghostly group list)' });
     const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o";
     expect(refused([asName], KEY)).toMatchObject({ code: "not_found", message: `No chat with "${KEY}" (ghostly chat list)` });
     // The same bytes with the last character respelled: no key, and never a name (a contact calling itself that is not found by it).
@@ -294,7 +294,7 @@ describe("chats", () => {
     const refused = expect.objectContaining(refusal);
     expect(() => findGroup(groups, "k3x9q2")).toThrow(refused);
     expect(() => findChatOrGroup([], groups, "k3x9q2")).toThrow(refused);
-    expect(() => findChatOrGroup([], groups, "group:k3x9q2")).toThrow(refused);
+    expect(() => findChatOrGroup([], groups, "group:k3x9q2")).toThrow(expect.objectContaining({ ...refusal, message: '"group:k3x9q2" names more than one group: use its id' }));
     // Its id (as is, or group:<id>), a prefix only it fits, and a name only one group has still name it.
     expect(findGroup(groups, mine.id).id).toBe(mine.id);
     expect(findChatOrGroup([], groups, `group:${mine.id}`)).toEqual({ group: mine });
@@ -322,7 +322,7 @@ describe("chats", () => {
       expect(() => findGroup([crew], ref)).toThrow(expect.objectContaining({ code: "bad_request", message: `${JSON.stringify(ref)} names no group` }));
       expect(() => findChatOrGroup([bob], [crew], ref)).toThrow(expect.objectContaining({ code: "bad_request" }));
     }
-    expect(() => findChatOrGroup([bob], [crew], "group:")).toThrow(expect.objectContaining({ code: "bad_request", message: "\"\" names no group" }));
+    expect(() => findChatOrGroup([bob], [crew], "group:")).toThrow(expect.objectContaining({ code: "bad_request", message: "\"group:\" names no group" }));
     // What a daemon's caller (the API, not the command line) gets: forward never reaches the only chat or group.
     const node = { getState: () => ({ links: [bob], groups: [crew] }), getMessage: vi.fn(async () => msg("m1", 1)), sendMessage: vi.fn(), sendGroupMessage: vi.fn() };
     const ctx = { runtime: { server: { node } }, mode: "daemon" } as unknown as ApiContext;
@@ -354,15 +354,15 @@ describe("chats", () => {
     const list = await allowlist([], [`group:${team.id}`], call, async () => null);
     expect(await list.allows(event(team.id))).toBe(true);
     expect(await list.allows(event(other.id))).toBe(false);
-    // What names more than one group, or none, or a chat, is refused as without the prefix (the message names the ref after group:).
-    const both = { code: "bad_request", message: '"k3x9q2" names more than one group: use its id', details: { matches: [team.id, other.id] } };
+    // What names more than one group, or none, or a chat, is refused as without the prefix (the message echoes the ref as given).
+    const both = { code: "bad_request", message: '"group:k3x9q2" names more than one group: use its id', details: { matches: [team.id, other.id] } };
     await expect(call("group.get", { group: "group:k3x9q2" })).rejects.toMatchObject(both);
     await expect(allowlist([], ["group:k3x9q2"], call, async () => null)).rejects.toMatchObject(both);
-    await expect(call("group.get", { group: "group:zed" })).rejects.toMatchObject({ code: "not_found", message: 'No group "zed" (ghostly group list)' });
+    await expect(call("group.get", { group: "group:zed" })).rejects.toMatchObject({ code: "not_found", message: 'No group "group:zed" (ghostly group list)' });
     // group:<a chat> is no group: never that chat (without the prefix, the chat's name says it is a chat).
-    for (const ref of [chat.id, "desk"]) await expect(call("group.get", { group: `group:${ref}` })).rejects.toMatchObject({ code: "not_found", message: `No group ${JSON.stringify(ref)} (ghostly group list)` });
+    for (const ref of [chat.id, "desk"]) await expect(call("group.get", { group: `group:${ref}` })).rejects.toMatchObject({ code: "not_found", message: `No group ${JSON.stringify(`group:${ref}`)} (ghostly group list)` });
     await expect(call("group.get", { group: "desk" })).rejects.toMatchObject({ code: "not_found", details: { chat: chat.id } });
-    await expect(call("group.get", { group: "group:" })).rejects.toMatchObject({ code: "bad_request", message: '"" names no group' });
+    await expect(call("group.get", { group: "group:" })).rejects.toMatchObject({ code: "bad_request", message: '"group:" names no group' });
   });
 
   it("a command that takes a chat or a group names both when neither has the name", async () => {

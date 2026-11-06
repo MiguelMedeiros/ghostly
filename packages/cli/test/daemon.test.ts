@@ -109,7 +109,7 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
   it("daemon status and daemon stop on a profile that does not exist say so; `default` is not made by asking", async () => {
     const typo = home("no-such-profile");
     createProfile(typo, "bot");
-    const message = "No profile nobody: make it with `ghostly profile create nobody`";
+    const message = 'No profile "nobody" (ghostly profile list, or ghostly profile create nobody)';
     expect(error(await ghostly(["--home", typo, "-p", "nobody", "daemon", "status"], { env }), "not_found", 3).message).toBe(message);
     expect(error(await ghostly(["--home", typo, "-p", "nobody", "daemon", "stop"], { env }), "not_found", 3).message).toBe(message);
     expect(existsSync(profilePaths(typo, "nobody").dir)).toBe(false);
