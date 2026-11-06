@@ -282,6 +282,11 @@ export interface GroupSessionHooks {
    */
   adminWork?(): boolean;
   /**
+   * The hubs I count on (WISP 902 · Group Mesh § Hubs), when the group runs on them: they carry my edits on even of a
+   * message from before they were let in, which they cannot read. Absent or empty: a full mesh.
+   */
+  carriers?(): readonly string[];
+  /**
    * Whether a fresh turn read says this device is the active one (WISP 06 § When a device checks), asked before every
    * commit: two devices that both think they are active would each commit after one parent, and the group halts. No:
    * a commit the person asked for is refused (`groupTurnUnconfirmed`); an automatic one (a member's leave) is not made
@@ -1292,7 +1297,8 @@ export class GroupSession {
   /**
    * Says an edit of one of my messages (WISP 902 § Edits): edit `v`, the whole new text and its mentions, sealed under
    * the key of the message's epoch and signed, to every member of that epoch still in the group, or to `to` alone (an
-   * edge that just opened). Someone admitted after the message cannot open it and is not sent it. The message's
+   * edge that just opened). Someone admitted after the message cannot open it and is not sent it, but a hub I count on
+   * (`hooks.carriers`), which carries it on to the members who can. The message's
    * epoch key must still be here: past `GROUP_LIMITS.secrets` epochs a message cannot be edited.
    */
   sendEdit(messageId: string, edit: { v: number; ts: number; text: string; mentions?: readonly GroupMention[]; card?: StatusCard; remove?: boolean }, to?: string): Promise<{ sent: number } | { error: string }> {
@@ -1314,6 +1320,9 @@ export class GroupSession {
       // open only the copy, so it gets the edit of the copy, which it files under the same message.
       const copies = [ref, ...this.state.sent.filter(f => f.o && f.o.e === ref.e && f.o.n === ref.n)];
       const told = new Set<string>();
+      // On hubs, the hubs I count on carry it too when they came after the message: unread by them, but most members of
+      // its epoch have no edge with me, and those hubs are the only way it reaches them (WISP 902 § Hubs).
+      const carriers = this.hooks.carriers?.() ?? [];
       for (const copy of copies) {
         const readers = this.state.chain[copy.e]?.m, key = this.secret(copy.e);
         if (!readers || !key) continue;
@@ -1321,8 +1330,9 @@ export class GroupSession {
         const { n: nn, c } = encryptText(epochKeys(key, this.id, copy.e).message, editAad(header), plain);
         const unsigned = { ...header, nn, c };
         const frame: GroupEditFrame = { t: GROUP_EDIT_FRAME, ...unsigned, sig: toBase64Url(sign(editSigned(unsigned), this.identity.seed)) };
-        const members = (to === undefined ? this.others : [to]).filter(k => k !== this.myKey && !told.has(k) && rosterHas(this.roster, k) && rosterHas(readers, k));
-        for (const k of members) { this.hooks.send(k, frame); told.add(k); }
+        const targets = (to === undefined ? this.others : [to]).filter(k => k !== this.myKey && rosterHas(this.roster, k));
+        for (const k of targets.filter(k => !told.has(k) && rosterHas(readers, k))) { this.hooks.send(k, frame); told.add(k); }
+        for (const k of targets.filter(k => carriers.includes(k) && !rosterHas(readers, k))) this.hooks.send(k, frame);
       }
       return { sent: told.size };
     });
@@ -1712,7 +1722,14 @@ export class GroupSession {
     if (!verify(fromBase64Url(raw.sig), editSigned(raw), publicKeyFromZ32(raw.s))) return;
     if (raw.e > this.epoch) { this.parkEdit(from, raw); return; }
     const commit = this.state.chain[raw.e];
-    if (!commit || !rosterHas(commit.m, raw.s) || !rosterHas(commit.m, this.myKey)) return;
+    if (!commit || !rosterHas(commit.m, raw.s)) return;
+    // Of an epoch from before I was let in (a hub let in after the message): nothing for me to read, but the author's
+    // signed word for the members who can, kept and passed on as is while the author is in the roster. Hubs change, and
+    // most members of that epoch reach the author only through whoever is a hub now.
+    if (!rosterHas(commit.m, this.myKey)) {
+      if (member && this.keepEdit(raw)) { await this.persist(); this.took(cleanEdit(raw)); }
+      return;
+    }
     const secret = this.secret(raw.e);
     if (!secret) { if (raw.e >= this.epoch - GROUP_LIMITS.secrets) this.parkEdit(from, raw); return; }
     const plain = decryptText(epochKeys(secret, this.id, raw.e).message, editAad(raw), raw.nn, raw.c);
