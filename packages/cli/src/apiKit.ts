@@ -272,13 +272,21 @@ export function startNamedChats(ctx: ApiContext, params: Params): void {
 export const chatOf = (ctx: ApiContext, params: Params) => findChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
 
 /**
+ * A chat whose invite nobody took yet has no session to close either: `chat disconnect` answered done with the chat at
+ * `connecting`, and `--hold` put the waiting invite on DHT only (a one-shot answered `pairing: error`).
+ */
+export function somebodyJoined(link: LinkView): void {
+  if (link.profile && link.inviteCode && !link.peerParticipationKey) throw new CliError("unavailable", "Nobody joined this chat yet: its invite is still waiting to be taken");
+}
+
+/**
  * A chat whose invite nobody took yet: nobody is there to pay or to dial, and its stage says so. Before, `chat pay`
  * waited 15 s and `chat connect` 25 s for the contact, then answered `engine`. A chat whose invite someone else used
  * first is refused too, with the sentence `send` gives: its contact seals everything to them (`connect` waited 120 s,
  * then answered `timeout`, a code a bot retries).
  */
 export function inviteTaken(link: LinkView): void {
-  if (link.profile && link.inviteCode && !link.peerParticipationKey) throw new CliError("unavailable", "Nobody joined this chat yet: its invite is still waiting to be taken");
+  somebodyJoined(link);
   if (link.dhtDelivery?.inviteTaken && link.textDelivery !== "stream") throw new CliError("refused", INVITE_TAKEN);
 }
 
