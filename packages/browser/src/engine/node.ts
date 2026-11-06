@@ -379,6 +379,8 @@ const CARD_RESTORE_EVERY_MS = 30_000;
 const RTT_SAVE_MS = 5 * 60_000;
 /** A reaction said on the live session and not confirmed is said again after this long. */
 const REACTION_RESEND_MS = 30_000;
+/** How long a deleted chat's session stays up once the ends of its moving files are said, so they get there (as a yield's goodbye). */
+const FILES_END_MS = 300;
 /** A chat's reactions shown on the chat list before the one shown now, kept to show again when that one is taken back. */
 const REACTION_NOTES_KEPT = 8;
 /**
@@ -3645,13 +3647,17 @@ export class GhostlyNode implements EngineImplementation {
     this.quoteSweeps.forget(linkId);
     this.editBuffer.forget(linkId);
     live.carried?.stop();
+    // Its files still moving end on the contact's side too, said on the session before it stops. Closed at once, the
+    // channel lost those frames on their way, and the contact's transfers stayed under way for good.
+    const filesEnded = this.fileDesk.drop(linkId);
     // Gone before its link stops: the link's closing events find no chat to make an outbox or files for again.
     this.links.delete(linkId);
-    void live.link?.stop(true); void live.caps?.stop();
+    if (filesEnded) setTimeout(() => void live.link?.stop(true), FILES_END_MS);
+    else void live.link?.stop(true);
+    void live.caps?.stop();
     this.identities.forget(linkId);
     this.nostrSocial.forgetLink(linkId);
     this.hold.forgetLink(linkId);
-    this.fileDesk.drop(linkId);
     // A chat made for a contact link request: deleting it takes the request back.
     void this.contactAsks.forgetChat(linkId).catch(() => {});
     // Its wake-up target and token go with the row: this chat can no longer wake the contact, nor be woken. The
@@ -8720,7 +8726,8 @@ export class GhostlyNode implements EngineImplementation {
           this.fileProgress(this.localFileId(linkId, id, direction), transferred),
         onFileComplete: (id, direction) =>
           this.fileSettled(this.localFileId(linkId, id, direction, { failed: false }), undefined, linkId),
-        onFilesFrame: (frame) => this.fileDesk.handle(linkId, frame),
+        // A deleted chat's link, still up while the ends of its files get out (`removeLink`), makes it no files again.
+        onFilesFrame: (frame) => this.links.get(linkId) !== live ? Promise.resolve() : this.fileDesk.handle(linkId, frame),
         onFilesSession: (open) => { if (this.links.get(linkId) !== live) return; this.fileDesk.session(linkId, open); if (open) this.sayWithdrawnFiles(linkId); },
         onFileAnnounced: stored.profile && !stored.group ? (file, packet) => this.fileAnnounced(linkId, file, packet) : undefined,
         onFileFailed: (id, reason, direction) =>
