@@ -298,13 +298,16 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   }, [isLocked, cancel]);
 
   // Esc discards, Enter sends: wherever focus is while recording. Asking "discard?", Esc keeps. Not the keys of the
-  // lock screen, nor of another dialog over the page (the lock screen is one): those keys are theirs.
+  // lock screen, nor of another dialog over the page (the lock screen is one): those keys are theirs. Most of the app's
+  // panels (Message details, the connection panel) are a `role="dialog"` box, not a `<dialog>`, and a menu (a message's
+  // ⋮) is a group of buttons: Enter there presses its row. The bar's own "discard?" is an alertdialog in the bar, and its
+  // keys stay the bar's.
   useEffect(() => {
     if (mode === "idle") return;
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (sendingRef.current || lockedRef.current) return;
-      const dialog = event.target instanceof Element ? event.target.closest("dialog") : null;
-      if (dialog && !dialog.contains(buttonRef.current)) return;
+      const dialog = event.target instanceof Element ? event.target.closest("dialog, [role=dialog], [role=alertdialog], [data-menu]") : null;
+      if (dialog && !dialog.contains(buttonRef.current) && !barRef.current?.contains(dialog)) return;
       if (confirmingRef.current) {
         if (event.key === "Escape") { event.preventDefault(); keep(); }
         return;
