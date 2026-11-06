@@ -2199,12 +2199,13 @@ export class Groups {
         // the place taken by anyone's. Another contact's would take the admin's place: it is kept beside it, for the person
         // to pick. One taken back waits for nothing: any invitation takes its place.
         if (existing?.invitation && !existing.state && existing.invitation.linkId !== linkId && !(existing.invitation.genesis && linkId === keptAdminChat(existing.previous)) && !existing.invitation.takenBack) return other();
-        if ([...this.stored.values()].filter(x => x.invitation && !x.invitation.takenBack).length >= 32) return;
-        // One chat holds a few unanswered at a time, so a contact cannot use up the room the others' invitations need.
-        // Past that the inviter is told no, as it would be by a Decline, and may invite again later. Only one of its own
-        // waiting, sent again, takes no new room: one taken back, or another chat's under the same id, counts as new.
+        // One chat holds a few unanswered at a time, so a contact cannot use up the room the others' invitations need, and
+        // all chats together 32. Past either the inviter is told no, as it would be by a Decline, and may invite again
+        // later. Only one of its own waiting, sent again, takes no new room: one taken back, or another chat's under the
+        // same id, counts as new.
         const ownWaiting = existing?.invitation && !existing.invitation.takenBack && existing.invitation.linkId === linkId;
-        if (!ownWaiting && [...this.stored.values()].filter(x => x.invitation?.linkId === linkId && !x.invitation.takenBack).length >= MAX_INVITATIONS_PER_CHAT) {
+        const waiting = [...this.stored.values()].filter(x => x.invitation && !x.invitation.takenBack);
+        if (!ownWaiting && (waiting.length >= 32 || waiting.filter(x => x.invitation!.linkId === linkId).length >= MAX_INVITATIONS_PER_CHAT)) {
           try { this.host.sendOnLink(linkId, { t: "group-decline", g }); } catch { /* they may invite again */ }
           return;
         }

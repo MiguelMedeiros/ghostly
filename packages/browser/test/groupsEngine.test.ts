@@ -962,11 +962,18 @@ describe("invitations: what the admission exchange ignores", () => {
 
     const carol = world.add("carol");
     const id = (i: number) => `${String(i).padStart(2, "0")}${"B".repeat(20)}`;
-    // More than 32 waiting, all chats together, are not kept.
+    const sent = vi.spyOn((carol as unknown as { host: GroupsHost }).host, "sendOnLink").mockImplementation(() => {});
+    // More than 32 waiting, all chats together, are not kept: the inviter is told no, as past one chat's four.
     for (let i = 0; i < 33; i++) await carol.handleContactFrame(`chat-${i >> 2}`, { t: "group-invite", g: id(i), name: `g${i}`, admin: intruder, e: 0, n: 1 });
     expect(carol.views()).toHaveLength(32);
     expect(carol.views().map(v => v.id)).not.toContain(id(32));
     expect(carol.views()[0].invitation).toMatchObject({ admin: intruder, members: 1 });
+    expect(sent.mock.calls).toEqual([["chat-8", { t: "group-decline", g: id(32) }]]);
+    // One of the 32 sent again by its own chat takes no new room: it replaces itself, unanswered.
+    await carol.handleContactFrame("chat-0", { t: "group-invite", g: id(0), name: "renamed", admin: intruder, e: 0, n: 1 });
+    expect(view(carol, id(0)).name).toBe("renamed");
+    expect(sent).toHaveBeenCalledTimes(1);
+    sent.mockRestore();
   });
 
   it("one chat holds four invitations at a time: its next is answered as declined, and another contact's still arrives", async () => {
