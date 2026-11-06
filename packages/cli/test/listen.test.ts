@@ -248,6 +248,83 @@ describe("hooks", () => {
     }
   }, 10_000);
 
+  it("with --print, a hook's stdout goes to stderr as it comes: listen's stdout carries the events only, in order", async () => {
+    const said: string[] = [], out: string[] = [];
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => { said.push(String(chunk)); return true; });
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => { out.push(String(chunk)); return true; });
+    const lines: string[] = [];
+    try {
+      // A hook that echoes for debugging, and one line of 300,000 bytes: before, both went into the JSON stream.
+      const handle = eventHandler({ types: [], print: true, write: (line) => { lines.push(line); },
+        exec: `printf 'hook saw %s\\n' "$GHOSTLY_EVENT_SEQ"; head -c 300000 /dev/zero | tr '\\0' H; echo` });
+      const events = [received("c1", "a", "one"), received("c1", "b", "two")];
+      for (const event of events) handle(event);
+      await handle.idle();
+      expect(lines.map((line) => (JSON.parse(line) as GhostlyEvent).seq)).toEqual(events.map((event) => event.seq));
+      expect(out.join("")).toBe("");
+      const text = said.join("");
+      expect(text.indexOf(`hook saw ${events[0].seq}\n`)).toBeGreaterThanOrEqual(0);
+      expect(text.indexOf(`hook saw ${events[1].seq}\n`)).toBeGreaterThan(text.indexOf(`hook saw ${events[0].seq}\n`));
+      expect(text.match(/H{300000}\n/g)).toHaveLength(2);
+      expect(text).not.toMatch("--exec");
+    } finally {
+      stderr.mockRestore();
+      stdout.mockRestore();
+    }
+  }, 10_000);
+
+  it("a hook killed by a signal is said as killed, not as an exit 1; an exit code as before; the cursor moves past both", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-hook-"));
+    for (const print of [false, true]) {
+      const cursor = join(dir, `${print}.cursor`), ran = join(dir, `${print}.ran`);
+      const events = [received("c1", "a", "one"), other("chat.created", { chat: "c2" }), received("c1", "c", "three")];
+      const said: string[] = [];
+      const stderr = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => { said.push(String(chunk)); return true; });
+      try {
+        const handle = eventHandler({ types: [], print, write: () => {}, cursor,
+          exec: `printf '%s\\n' "$GHOSTLY_EVENT_SEQ" >> '${ran}'; case "$GHOSTLY_EVENT_SEQ" in ${events[0].seq}) exit 7;; ${events[1].seq}) kill -9 $$;; esac` });
+        for (const event of events) handle(event);
+        await handle.idle();
+      } finally {
+        stderr.mockRestore();
+      }
+      expect(said.join(""), `print: ${print}`).toBe(
+        `ghostly: --exec exited 7 on event ${events[0].seq} (message.received)\n` +
+        `ghostly: --exec was killed by SIGKILL on event ${events[1].seq} (chat.created)\n`);
+      expect(readFileSync(ran, "utf8")).toBe(events.map((event) => `${event.seq}\n`).join(""));
+      expect(readFileSync(cursor, "utf8").trim()).toBe(String(events[2].seq));
+    }
+  }, 10_000);
+
+  it("with --print, a process the hook leaves running with its stdout does not hold the next event", async () => {
+    const said: string[] = [];
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => { said.push(String(chunk)); return true; });
+    try {
+      const handle = eventHandler({ types: [], print: true, write: () => {}, exec: `echo started "$GHOSTLY_EVENT_SEQ"; (sleep 4; echo late) &` });
+      const started = Date.now();
+      handle(received("c1", "a", "one"));
+      handle(received("c1", "b", "two"));
+      await handle.idle();
+      expect(Date.now() - started).toBeLessThan(3500);
+      expect(said.join("")).toMatch(/started \d+\nstarted \d+\n/);
+    } finally {
+      stderr.mockRestore();
+    }
+  }, 10_000);
+
+  it("without --print, a hook's stdout stays listen's stdout: nothing of it on stderr", async () => {
+    const said: string[] = [];
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => { said.push(String(chunk)); return true; });
+    try {
+      const handle = eventHandler({ types: [], print: false, write: () => { throw new Error("nothing is printed without --print"); }, exec: `echo ': hook output on stdout, as before'` });
+      handle(received("c1", "a", "one"));
+      await handle.idle();
+      expect(said).toEqual([]);
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
   it("a webhook with a user or password in its URL is a usage error that does not repeat them: fetch never posts to one", async () => {
     // What `post` would meet: every event held as "not answering", for good, the password on stderr each time.
     await expect(fetch("http://bridge:s3cret@127.0.0.1:1/hook", { method: "POST" })).rejects.toThrow(TypeError);
