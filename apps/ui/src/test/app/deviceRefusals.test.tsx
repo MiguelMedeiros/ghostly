@@ -113,4 +113,13 @@ describe("Profile, Devices on the active device", () => {
     await waitFor(() => expect(engine.callsTo("deviceHandoffAllow")).toEqual([{ key: PHONE }]));
     expect(await screen.findByTestId("handoff-allow-error")).toHaveTextContent("That device is not one of this profile's");
   });
+
+  it("a Use here that Mainnet money kept from happening says what to do here, as the Move dialog does", async () => {
+    const { engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => set());
+    engine.on("deviceHandoffView", () => ({ role: "giver", device: "iPhone", key: PHONE, step: "failed", bytes: 0, total: 0, failure: "mainnet", wallet: "ark" }) satisfies HandoffView);
+    const row = await screen.findByTestId("handoff-wallet-refusal", {}, { timeout: 3_000 });
+    expect(row).toHaveTextContent("Mainnet money can't move yet");
+    expect(row).toHaveTextContent("Empty your Mainnet wallets first.");
+  });
 });
