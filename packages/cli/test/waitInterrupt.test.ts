@@ -105,6 +105,16 @@ describe("what a wait says", () => {
     expect(waitNotice("file.save", { file: "f1", wait: true, timeout: 9 }, "one-shot")?.waiting).toContain("up to 9 s");
   });
 
+  it("names a chat's state in words that read: --until text is a chat that can carry text", () => {
+    // It read "waiting for chat bob to be text", and Ctrl-C "chat bob was not text yet".
+    expect(waitNotice("chat.wait", { chat: "bob", until: "text" }, "daemon")).toEqual({
+      waiting: "waiting for chat bob to carry text (up to 60 s; Ctrl-C stops waiting)",
+      stopped: "chat bob could not carry text yet",
+    });
+    expect(waitNotice("chat.wait", { chat: "bob" }, "daemon")).toEqual({ waiting: "waiting for chat bob to be live (up to 60 s; Ctrl-C stops waiting)", stopped: "chat bob was not live yet" });
+    expect(waitNotice("chat.wait", { chat: "bob", until: "paired" }, "daemon")?.stopped).toBe("chat bob was not paired yet");
+  });
+
   it("knows the waits a one-shot does by default, with no --wait, and that a daemon answers those at once", () => {
     expect(waitNotice("file.send", { chat: "bob", path: "/f" }, "one-shot")?.waiting).toBe("waiting for it to go out to bob (up to 300 s; Ctrl-C stops waiting, it still goes)");
     expect(waitNotice("chat.react", { chat: "bob", message: "m", emoji: "👍" }, "one-shot")?.waiting).toBe("waiting for bob's app to confirm it (up to 30 s; Ctrl-C stops waiting, it still goes)");

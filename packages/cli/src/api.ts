@@ -26,6 +26,7 @@ import { APP_SERVE_METHODS } from "./appServe";
 import { APP_CHAT_METHODS } from "./appChat";
 import { WALLET_METHODS } from "./wallets";
 import { TRANSPORT_NAMES } from "./words";
+import { chatState } from "./waitNotice";
 import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, isLive, messageJson, type MessageJson } from "./views";
 
 /**
@@ -622,7 +623,7 @@ const METHODS: Record<string, Method> = {
         : until === "text" ? now.textDelivery === "stream" || now.textDelivery === "dht" || now.textDelivery === "hold"
         : !!now.peerParticipationKey || !!now.pairingProgress?.peerSeen || now.pairing?.status === "ready" || isLive(now);
       return ok ? now : undefined;
-    }, ms, `chat ${link.id} to be ${until}`);
+    }, ms, `chat ${link.id} ${chatState(until).to}`);
     return chatJson(view);
   },
 
