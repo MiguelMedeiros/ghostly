@@ -101,6 +101,18 @@ describe("a tap on a wake-up notification", () => {
     expect(work.focusedByTap).toBe(false);
   });
 
+  it.each([1, 2, 3])("the profile's own window says nothing in time (frozen or busy) while another profile's answers: the silent one gets the chat, no new window (run %i)", async () => {
+    const work = appWindow("work", { profile: "work1", peer: true }, { focused: true, visibilityState: "visible" });
+    const frozen = appWindow("frozen");
+    const { tap, opened } = await startPushWorker([work, frozen]);
+    await tap("/chat/abc", "");
+    expect(frozen.told).toEqual([openChat("/chat/abc", "")]);
+    expect(frozen.focusedByTap).toBe(true);
+    expect(work.told).toEqual([]);
+    expect(work.focusedByTap).toBe(false);
+    expect(opened).toEqual([]);
+  });
+
   it("no window of the app at all: a new one opens on the chat", async () => {
     const { tap, opened } = await startPushWorker([]);
     await tap("/chat/abc", "");
