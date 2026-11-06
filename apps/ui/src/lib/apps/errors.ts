@@ -12,6 +12,7 @@ const KEYS: Record<string, TranslationKey> = {
   "github-link": "apps.errors.githubLink",
   "private-link": "apps.errors.privateLink",
   offline: "apps.errors.offline",
+  runner: "apps.errors.runner",
   status: "apps.errors.status",
   network: "apps.errors.network",
   slow: "apps.errors.slow",
