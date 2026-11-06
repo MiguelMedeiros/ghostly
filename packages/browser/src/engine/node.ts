@@ -4187,7 +4187,8 @@ export class GhostlyNode implements EngineImplementation {
   private async applyPeerEditNow(linkId: string, message: StoredMessage, edit: WireEdit): Promise<void> {
     const updated = await db.patchMessage(linkId, message.id, current => {
       if (!takesPeerEdit(current, edit.m) || (current.edit?.seq ?? 0) >= edit.e) return null;
-      const next = withEdit(current, { seq: edit.e, at: heardTime(edit.ts), text: edit.m, preview: edit.pv, card: edit.sc });
+      const now = Date.now();
+      const next = withEdit(current, { seq: edit.e, at: heardTime(edit.ts, now), heardAt: now, text: edit.m, preview: edit.pv, card: edit.sc });
       return { text: next.text, edit: next.edit, preview: next.preview, card: next.card };
     });
     if (updated) await this.messagesChanged(linkId, [message.id]);
@@ -9737,7 +9738,8 @@ export class GhostlyNode implements EngineImplementation {
    * of a group's history (a membership change, a rename) is not a message: it stays at its commit's time, but never
    * ahead of this clock nor above a row placed here since the app started. The admin's clock picks that time: two
    * minutes ahead, "X joined" sat under everything said in the next two minutes; behind, it went above what the
-   * members had just read. Read late with nothing newer here (a member back after a while), it keeps its moment.
+   * members had just read. Read late with nothing newer here (a member back after a while), it keeps its moment, and
+   * `heardAt` says when it came here.
    * `place`: a received row's place given already (`placeAbove`): it takes it, and the next row still goes past the last.
    */
   private placed(message: StoredMessage, place?: number): StoredMessage {
@@ -9746,7 +9748,7 @@ export class GhostlyNode implements EngineImplementation {
       if (message.sender !== "peer") return message;
       const timestamp = Math.max(Math.min(receivedTimestamp(message.timestamp, now), now), last + 1);
       this.placedAt.set(message.linkId, timestamp);
-      return { ...message, timestamp };
+      return { ...message, timestamp, heardAt: now };
     }
     if (message.sender === "peer" && message.sentAt === undefined) {
       const sentAt = claimedTime(message.timestamp);

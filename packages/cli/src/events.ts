@@ -32,8 +32,9 @@ const SEEN_DB = "ghostly-cli";
 const SEEN = "seen";
 
 /**
- * How long the seen set keeps the note of a settled message after its last activity (its arrival, its edit, a reaction):
- * older notes are dropped, and a message that came here longer ago with no note is no news. A daemon kept a note per
+ * How long the seen set keeps the note of a settled message after its last activity (its arrival, its edit, a reaction),
+ * each as this device's clock has it: older notes are dropped, and a message that came here longer ago with no note is
+ * no news. A daemon kept a note per
  * message of its whole history in memory, for as long as it ran.
  */
 export const SEEN_KEEP_MS = 30 * 86_400_000;
@@ -246,7 +247,7 @@ export class EventHub {
     return messages.every((message) => {
       const note = known?.get(message.id), before = note === undefined ? undefined : stateIn(note);
       // Its note dropped, and nothing about it since (`SEEN_KEEP_MS`): nothing to report of it.
-      if (note === undefined && message.timestamp < cutoff && activityOf(message) < cutoff) return true;
+      if (note === undefined && cameAt(message) < cutoff && activityOf(message) < cutoff) return true;
       let state = stateOf(message);
       // As `messages` reads it: a mention reported stays reported.
       if (before !== undefined && mentionedIn(before) && !mentionedIn(state)) state = withFlag(state, MENTIONED);
@@ -682,15 +683,17 @@ export class EventHub {
       const note = known.get(message.id), before = note === undefined ? undefined : stateIn(note);
       const at = activityOf(message);
       const json = () => group ? groupMessageJson(message, this.state?.groups.find((g) => g.id === group)) : chatMessageJson(message, this.state?.links.find((l) => l.id === chat));
-      if (before === undefined && message.timestamp < cutoff) {
+      if (before === undefined && cameAt(message) < cutoff) {
         // Came here longer ago than `SEEN_KEEP_MS`, with no note: its note was dropped (or it came, that long ago, while
         // nothing ran). No news, and no note again, unless it was active since: then an edit since is reported, once.
+        // Both by this device's clock: a line read a month after its commit, an edit its author's clock dates a month
+        // back, came here now.
         if (at < cutoff) continue;
         const noted = noteOf(state, at);
         known.set(message.id, noted);
         changes.push([message.id, noted]);
         const edit = message.edit;
-        if (quiet || !edit || edit.at < cutoff || (message.sender === "me" && edit.restore)) continue;
+        if (quiet || !edit || editedAt(edit) < cutoff || (message.sender === "me" && edit.restore)) continue;
         if (group) this.emit("group.message.edited", `group.message.edited:${group}:${message.id}:${edit.seq}`, { group, messageId: message.id, edits: edit.seq, message: json() });
         else this.emit("message.edited", `message.edited:${chat}:${message.id}:${edit.seq}`, { chat, messageId: message.id, edits: edit.seq, message: json() });
         continue;
@@ -858,9 +861,20 @@ function timeIn(note: string): number | undefined {
   const at = note.lastIndexOf("@");
   return at === -1 ? undefined : parseInt(note.slice(at + 1), 36);
 }
+/**
+ * When a message came here: its place (a received row's is when it was stored here), or for a group's line, whose place
+ * is its commit's moment, when this device stored it (`heardAt`; absent on lines stored before it).
+ */
+function cameAt(message: StoredMessage): number {
+  return Math.max(message.timestamp, message.heardAt ?? 0);
+}
+/** When an edit came here: a contact's or member's is dated by their clock (`at`), and taken here at `heardAt`. */
+function editedAt(edit: NonNullable<StoredMessage["edit"]>): number {
+  return Math.max(edit.at, edit.heardAt ?? 0);
+}
 /** The last time a message changed here: it came, it was edited, someone reacted. */
 function activityOf(message: StoredMessage): number {
-  let at = Math.max(message.timestamp, message.edit?.at ?? 0);
+  let at = Math.max(cameAt(message), message.edit ? editedAt(message.edit) : 0);
   for (const r of Object.values(message.reactions ?? {})) at = Math.max(at, r.at ?? 0);
   return at;
 }

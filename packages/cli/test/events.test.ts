@@ -787,4 +787,65 @@ describe("the seen set forgets", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect((await clocked("aged.jsonl")).h.inStep("c1", [m1, m2])).toBe(true);
   });
+  it("an edit dated a month back by its author's clock, of a message whose note was dropped, is news: it came here now", async () => {
+    const m1 = message("c1", "m1", { timestamp: 10 * DAY }), m2 = message("c1", "m2", { timestamp: 10 * DAY });
+    clock.now = 10 * DAY;
+    const { h, events } = await clocked("late-edit.jsonl");
+    h.baseline(state([link("c1")]), new Map([["c1", [m1, m2]]]));
+    clock.now = 50 * DAY;
+    expect(h.sweep()).toBe(2);
+    // The contact's clock says day 19 (31 days behind): the engine keeps that as the edit's time, and when it took it.
+    const edited = { ...m1, text: "v1", edit: { seq: 1, at: 19 * DAY, heardAt: 50 * DAY, history: [{ at: 10 * DAY, text: "t m1" }] } };
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [edited], deleted: [] });
+    expect(events.map((e) => e.id)).toEqual(["message.edited:c1:m1:1"]);
+    // A reaction (this side's clock) on the other one is reported as ever, with no edit.
+    const m2r = { ...m2, reactions: { peer: { e: "👍", n: 1, at: 50 * DAY } } };
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [m2r], deleted: [] });
+    expect(events.map((e) => e.id).slice(1)).toEqual(["message.reaction:c1:m2:peer:1"]);
+    // An edit stored before the engine kept when it came, dated a month back: no news, as before.
+    const old = message("c1", "m3", { timestamp: 10 * DAY, text: "v1", edit: { seq: 1, at: 19 * DAY, history: [] } });
+    h.sink.post({ kind: "messages", linkId: "c1", messages: [edited, m2r, old] });
+    expect(events).toHaveLength(2);
+
+    // A restart: nothing again, now or once every note is gone; the newest rows are in step.
+    await new Promise((r) => setTimeout(r, 50));
+    clock.now = 51 * DAY;
+    const again = await clocked("late-edit.jsonl");
+    again.h.baseline(state([link("c1")]), new Map([["c1", [edited, m2r, old]]]));
+    clock.now = 90 * DAY;
+    expect(again.h.sweep()).toBe(3);
+    again.h.sink.post({ kind: "messages", linkId: "c1", messages: [edited, m2r, old] });
+    expect(again.events).toEqual([]);
+    expect(again.h.inStep("c1", [edited, m2r, old])).toBe(true);
+  });
+
+  it("a group's line read more than 30 days after its commit is news: it came here now; a restart says it no more", async () => {
+    const g1 = { id: "g1", name: "G", members: [], isAdmin: false, canSend: true, lastMessageAt: 0, profile: "mesh", invited: [], memberLinks: {}, createdAt: 1 };
+    const said = message("group:g1", "bo:1:0", { member: "bo", timestamp: 5 * DAY });
+    clock.now = 10 * DAY;
+    const { h, events } = await clocked("late-line.jsonl");
+    h.baseline(state([], [g1]), new Map([["group:g1", [said]]]));
+    // Back on day 50: the line "Ana joined" committed on day 15 keeps that moment as its place, and a new message.
+    clock.now = 50 * DAY;
+    h.sweep();
+    const joined = message("group:g1", `event:2:joined:${15 * DAY}`, { event: "joined", text: "Ana joined", member: "anakey", timestamp: 15 * DAY, heardAt: 50 * DAY });
+    const hello = message("group:g1", "anakey:2:0", { member: "anakey", timestamp: 50 * DAY });
+    h.sink.post({ kind: "message-changes", linkId: "group:g1", messages: [joined, hello], deleted: [] });
+    expect(events.map((e) => e.id)).toEqual([`group.event:g1:${joined.id}`, "group.message:g1:anakey:2:0"]);
+    // A line stored before the engine kept when it came, a month old: no news, as before.
+    const older = message("group:g1", `event:1:joined:${12 * DAY}`, { event: "joined", text: "Bo joined", member: "bo", timestamp: 12 * DAY });
+    h.sink.post({ kind: "messages", linkId: "group:g1", messages: [said, older, joined, hello] });
+    expect(events).toHaveLength(2);
+
+    // A restart, the next day and once its notes are gone: nothing again.
+    await new Promise((r) => setTimeout(r, 50));
+    clock.now = 51 * DAY;
+    const again = await clocked("late-line.jsonl");
+    expect(again.h.inStep("group:g1", [joined, hello])).toBe(true);
+    again.h.baseline(state([], [g1]), new Map([["group:g1", [said, older, joined, hello]]]));
+    clock.now = 90 * DAY;
+    again.h.sweep();
+    again.h.sink.post({ kind: "messages", linkId: "group:g1", messages: [said, older, joined, hello] });
+    expect(again.events).toEqual([]);
+  });
 });
