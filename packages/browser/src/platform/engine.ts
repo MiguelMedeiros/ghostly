@@ -1,6 +1,6 @@
 import { getBrowserHost, type EngineConnection } from "../host";
 import type { AppFrameEvent } from "@ghostly/core";
-import type { AppRangeAsk, AttentionEvent, EngineApi, EngineMethod, PostedEvent, PostedState } from "../shared/rpc";
+import type { AppRangeAsk, AttentionEvent, EngineApi, EngineMethod, KeptPictures, PostedEvent, PostedState } from "../shared/rpc";
 import type { EngineState, LinkView, StoredMessage } from "../shared/types";
 import { applyMessageChanges, type MessageChanges } from "../shared/messageChanges";
 import type { ProfileOpenFailure } from "../shared/idb";
@@ -366,10 +366,30 @@ class EngineClient {
 }
 
 /** A state the peer sent, whole: what it left out (`PostedState`) is what this page has from the state before. */
-function keptState(state: PostedState, before: EngineState | null): EngineState {
-  const payments = "payments" in state ? undefined : before?.payments, wallet = "wallet" in state ? undefined : before?.wallet;
-  if (!payments && !wallet) return state as EngineState;
-  return { ...state, ...(payments ? { payments } : {}), ...(wallet ? { wallet } : {}) } as EngineState;
+function keptState(posted: PostedState, before: EngineState | null): EngineState {
+  const kept = posted.keptPictures;
+  const payments = "payments" in posted ? undefined : before?.payments, wallet = "wallet" in posted ? undefined : before?.wallet;
+  if (!payments && !wallet && !kept) return posted as EngineState;
+  const { keptPictures: _, ...state } = posted;
+  return {
+    ...state, ...(payments ? { payments } : {}), ...(wallet ? { wallet } : {}),
+    ...(kept && keptPictures(state, before, kept)),
+  } as EngineState;
+}
+
+/** The pictures a state left out (`KeptPictures`), from the state before: each the one it was sent last. */
+function keptPictures(state: Omit<PostedState, "keptPictures">, before: EngineState | null, kept: KeptPictures): Pick<EngineState, "settings" | "links" | "groups" | "edges"> {
+  const back = <T extends { id: string }>(list: T[], ids: string[] | undefined, had: T[] | undefined, field: keyof T & ("peerAvatar" | "picture")): T[] => {
+    if (!ids?.length) return list;
+    const names = new Set(ids), pictures = new Map((had ?? []).map((item) => [item.id, item[field]]));
+    return list.map((item) => (names.has(item.id) ? { ...item, [field]: pictures.get(item.id) } : item));
+  };
+  return {
+    settings: kept.avatar ? { ...state.settings, avatar: before?.settings.avatar } : state.settings,
+    links: back(state.links, kept.links, before?.links, "peerAvatar"),
+    groups: back(state.groups, kept.groups, before?.groups, "picture"),
+    ...(state.edges && { edges: back(state.edges, kept.edges, before?.edges, "peerAvatar") }),
+  };
 }
 
 export const engine = new EngineClient();

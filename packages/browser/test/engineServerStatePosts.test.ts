@@ -94,4 +94,45 @@ describe("a state over the extension's port", () => {
     expect(engine.state!.wallet.balance).toBe(9);
     expect(engine.state!.payments.p0.state).toBe("closed");
   });
+
+  it("carries a picture only when it changed, and the page keeps the ones it has", async () => {
+    posted.length = 0;
+    // The profile's own picture, each contact's (a chat's and a group edge's) and each group's: the same strings until one changes.
+    const picture = (seed: string) => `data:image/jpeg;base64,/9j/${seed.repeat(8_000 / seed.length)}`;
+    const own = picture("me"), contacts = ["a", "b", "c"].map(picture), edge = picture("e"), group = picture("g");
+    const pictured = (typing: boolean, more: { contacts?: (string | undefined)[]; own?: string } = {}) => state(typing, {
+      settings: { nick: "me", avatar: more.own ?? own } as EngineState["settings"],
+      links: ["c1", "c2", "c3"].map((id, i) => ({ ...link(typing && i === 0), id, ...(((more.contacts ?? contacts)[i]) ? { peerAvatar: (more.contacts ?? contacts)[i] } : {}) })) as EngineState["links"],
+      edges: [{ id: "e1", peerPubKeyZ32: "member", peerAvatar: edge }] as EngineState["edges"],
+      groups: [{ id: "g1", name: "Group", members: [], picture: group }] as unknown as EngineState["groups"],
+    });
+    await engine.connect();
+    await flush();
+    const node = fake.nodes[0];
+    node.events.onState(pictured(false));
+    expect(posted.at(-1)).toBeGreaterThan(48_000);
+
+    // A contact typing, 20 times: no picture changed, none goes again.
+    const from = posted.length;
+    for (let i = 0; i < 20; i++) node.events.onState(pictured(i % 2 === 0));
+    for (const bytes of posted.slice(from)) expect(bytes).toBeLessThan(2_000);
+    const shown = engine.state!;
+    expect(shown.settings.avatar).toBe(own);
+    expect(shown.links.map((l) => l.peerAvatar)).toEqual(contacts);
+    expect(shown.edges![0].peerAvatar).toBe(edge);
+    expect(shown.groups[0].picture).toBe(group);
+    expect("keptPictures" in shown).toBe(false);
+
+    // One contact changed theirs and another took it away: the new one goes, the gone one is gone, the rest stay.
+    const changed = picture("x");
+    node.events.onState(pictured(false, { contacts: [contacts[0], changed, undefined] }));
+    expect(posted.at(-1)).toBeGreaterThan(8_000);
+    expect(posted.at(-1)).toBeLessThan(10_000);
+    expect(engine.state!.links.map((l) => l.peerAvatar)).toEqual([contacts[0], changed, undefined]);
+    expect(engine.state!.settings.avatar).toBe(own);
+    // Its picture back: sent again, as one the page no longer has.
+    node.events.onState(pictured(false, { contacts: [contacts[0], changed, contacts[2]] }));
+    expect(engine.state!.links[2].peerAvatar).toBe(contacts[2]);
+    expect(engine.state!.groups[0].picture).toBe(group);
+  });
 });
