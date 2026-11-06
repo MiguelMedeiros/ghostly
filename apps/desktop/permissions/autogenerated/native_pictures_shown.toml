@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-native-pictures-shown"
+description = "Enables the native_pictures_shown command without any pre-configured scope."
+commands.allow = ["native_pictures_shown"]
+
+[[permission]]
+identifier = "deny-native-pictures-shown"
+description = "Denies the native_pictures_shown command without any pre-configured scope."
+commands.deny = ["native_pictures_shown"]

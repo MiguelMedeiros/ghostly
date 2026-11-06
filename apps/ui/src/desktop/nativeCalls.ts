@@ -133,6 +133,21 @@ class CallChannel {
 /** How long a picture's decode may take before the next picture is drawn without it. */
 const DECODE_MS = 1000;
 
+let followingSight = false;
+
+/**
+ * Tells Rust each time the window goes out of sight and back (`native_pictures_shown`), from the first picture on:
+ * out of sight it makes no JPEG past each picture's first, rather than make 15 a second of each for a page that
+ * draws none of them (`Picture.show`). Rust takes a new page as in sight.
+ */
+function followSight(): void {
+  if (followingSight) return;
+  followingSight = true;
+  const tell = () => void invoke("native_pictures_shown", { shown: !document.hidden }).catch(() => {});
+  document.addEventListener("visibilitychange", tell);
+  if (document.hidden) tell();
+}
+
 /** A canvas showing the last JPEG that came, and the video track that films it. */
 class Picture {
   private readonly canvas = document.createElement("canvas");
@@ -148,6 +163,7 @@ class Picture {
     this.canvas.width = 640;
     this.canvas.height = 480;
     this.track = this.canvas.captureStream(15).getVideoTracks()[0];
+    followSight();
   }
 
   /**

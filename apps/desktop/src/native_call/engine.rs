@@ -62,6 +62,12 @@ const STUN_LOOKUP: Duration = Duration::from_secs(5);
 /// How often to ask for a keyframe while no picture has been decoded yet.
 const KEYFRAME_UNTIL_PICTURE: Duration = Duration::from_secs(1);
 
+/// The Ghostly window's page is out of sight (`native_pictures_shown`). The page draws no picture then
+/// (`Picture.show`), so each picture goes to it until one has gone, and the ones after are left out before they
+/// are scaled or made a JPEG: a video call's two took 6% of a core here, and 1 MB a second through Tauri's channel,
+/// for nobody. Back in sight, the next one goes.
+pub static PAGE_HIDDEN: AtomicBool = AtomicBool::new(false);
+
 /// A JPEG frame for the page, or an event: whatever the page is told.
 pub type Sink = Arc<dyn Fn(Vec<u8>) + Send + Sync>;
 
@@ -348,13 +354,24 @@ pub struct Camera {
 
 impl Camera {
     /// The camera named `wanted`, or the default one. `fake`: a test picture instead of the default
-    /// ([`fake_media`]), and the test cameras by name. `preview` gets each frame as a JPEG.
+    /// ([`fake_media`]), and the test cameras by name. `preview` gets each frame as a JPEG, past the first only
+    /// while the page is in sight ([`PAGE_HIDDEN`]).
     pub fn open(fake: bool, wanted: Option<&str>, preview: Sink) -> Result<Camera, String> {
+        Camera::open_while(fake, wanted, preview, &PAGE_HIDDEN)
+    }
+
+    /// [`Camera::open`], its preview left out while `hidden` is set, past the first.
+    fn open_while(
+        fake: bool,
+        wanted: Option<&str>,
+        preview: Sink,
+        hidden: &'static AtomicBool,
+    ) -> Result<Camera, String> {
         let description = format!(
             "{{device}} ! videoconvert ! videoscale ! videorate \
              ! video/x-raw,format=I420,width={WIDTH},pixel-aspect-ratio=1/1,framerate={FPS}/1 ! tee name=t \
              t. ! queue leaky=downstream max-size-buffers=2 ! appsink name=out sync=false async=false max-buffers=2 drop=true \
-             t. ! queue leaky=downstream max-size-buffers=2 ! jpegenc quality=70 \
+             t. ! queue leaky=downstream max-size-buffers=2 ! jpegenc name=shot quality=70 \
              ! appsink name=preview sync=false async=false max-buffers=2 drop=true"
         );
         let test = |pattern: &str| format!("videotestsrc is-live=true pattern={pattern}");
@@ -364,7 +381,8 @@ impl Camera {
         let target: Arc<Mutex<Option<gst_app::AppSrc>>> = Arc::default();
         // Set once the camera has started: a failure before is the start's.
         let started = Arc::new(AtomicBool::new(false));
-        let ready = |pipeline: &gst::Pipeline| Camera::wire(pipeline, &target, &preview, &started);
+        let ready =
+            |pipeline: &gst::Pipeline| Camera::wire(pipeline, &target, &preview, &started, hidden);
         let (pipeline, device) = match pretend {
             Some((name, pattern)) => {
                 let (pipeline, _) = start_with(
@@ -409,13 +427,14 @@ impl Camera {
         })
     }
 
-    /// The camera's frames to `target`'s call, and to `preview`; once `started`, its failure to `preview` too, as
-    /// `{"ended":"camera"}`.
+    /// The camera's frames to `target`'s call, and to `preview` (past the first, not while `hidden`); once
+    /// `started`, its failure to `preview` too, as `{"ended":"camera"}`.
     fn wire(
         pipeline: &gst::Pipeline,
         target: &Arc<Mutex<Option<gst_app::AppSrc>>>,
         preview: &Sink,
         started: &Arc<AtomicBool>,
+        hidden: &'static AtomicBool,
     ) -> Result<(), String> {
         let (page, started) = (preview.clone(), started.clone());
         let failed: Failed = Arc::new(move || {
@@ -455,8 +474,10 @@ impl Camera {
                 .build(),
         );
         let preview = preview.clone();
+        let sent = out_of_sight(&element(pipeline, "shot")?, "sink", hidden)?;
         each_buffer(&element(pipeline, "preview")?, move |buffer| {
             if let Some(jpeg) = bytes_of(buffer) {
+                sent.store(true, Ordering::Relaxed);
                 preview(jpeg);
             }
         });
@@ -904,7 +925,17 @@ fn due(next: &mut Option<Instant>, now: Instant) -> bool {
 /// here). The others are left out as they leave the decoder, before any is scaled or made a JPEG: a browser
 /// sends 30 a second.
 fn show(pipeline: &gst::Pipeline, page: Sink) -> Result<(), String> {
+    show_while(pipeline, page, &PAGE_HIDDEN)
+}
+
+/// [`show`], past the first picture none while `hidden` is set.
+fn show_while(
+    pipeline: &gst::Pipeline,
+    page: Sink,
+    hidden: &'static AtomicBool,
+) -> Result<(), String> {
     let next = Mutex::new(None::<Instant>);
+    let sent = out_of_sight(&element(pipeline, "decoder")?, "src", hidden)?;
     element::<gst::Element>(pipeline, "decoder")?
         .static_pad("src")
         .ok_or("No decoder output")?
@@ -917,10 +948,33 @@ fn show(pipeline: &gst::Pipeline, page: Sink) -> Result<(), String> {
         });
     each_buffer(&element(pipeline, "picture")?, move |buffer| {
         if let Some(jpeg) = bytes_of(buffer) {
+            sent.store(true, Ordering::Relaxed);
             page(jpeg);
         }
     });
     Ok(())
+}
+
+/// Leaves out what passes `element`'s `pad` while the page is out of sight (`hidden`), once a picture has gone to
+/// it: the flag returned, which whoever hands the page its pictures sets.
+fn out_of_sight(
+    element: &gst::Element,
+    pad: &str,
+    hidden: &'static AtomicBool,
+) -> Result<Arc<AtomicBool>, String> {
+    let sent = Arc::new(AtomicBool::new(false));
+    let gone = sent.clone();
+    element
+        .static_pad(pad)
+        .ok_or("No pad to leave pictures out at")?
+        .add_probe(gst::PadProbeType::BUFFER, move |_, _| {
+            if hidden.load(Ordering::Relaxed) && gone.load(Ordering::Relaxed) {
+                gst::PadProbeReturn::Drop
+            } else {
+                gst::PadProbeReturn::Ok
+            }
+        });
+    Ok(sent)
 }
 
 /// Counts what a receiving pipeline decodes and, for pictures, sends them to the page and asks for keyframes.
@@ -2030,6 +2084,118 @@ mod tests {
             encoded, pictures,
             "{encoded} JPEGs made for {pictures} shown"
         );
+    }
+
+    /// The page out of sight: a peer's pictures are made JPEGs until one has gone to the page, then none, until
+    /// it is back in sight. 2 s of a live peer at 30 a second, out of sight for the first half and more.
+    #[test]
+    fn out_of_sight_the_peers_pictures_stop_after_the_first() {
+        if let Some(missing) = missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        static HIDDEN: AtomicBool = AtomicBool::new(true);
+        let pipeline = launch(&format!(
+            "videotestsrc is-live=true num-buffers=60 ! video/x-raw,format=I420,width=640,height=480,framerate=30/1 \
+             ! identity name=decoder ! {}",
+            shown()
+        ))
+        .unwrap();
+        let (encoded, pictures) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+        let into = encoded.clone();
+        element::<gst::Element>(&pipeline, "jpeg")
+            .unwrap()
+            .static_pad("sink")
+            .unwrap()
+            .add_probe(gst::PadProbeType::BUFFER, move |_, _| {
+                into.fetch_add(1, Ordering::Relaxed);
+                gst::PadProbeReturn::Ok
+            });
+        let seen = pictures.clone();
+        show_while(
+            &pipeline,
+            Arc::new(move |_| {
+                seen.fetch_add(1, Ordering::Relaxed);
+            }),
+            &HIDDEN,
+        )
+        .unwrap();
+        start(&pipeline, "The picture").unwrap();
+        let end = Instant::now() + Duration::from_secs(10);
+        while pictures.load(Ordering::Relaxed) == 0 {
+            assert!(Instant::now() < end, "no picture");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // Long enough for 10 more at 15 a second.
+        std::thread::sleep(Duration::from_millis(700));
+        let (made_hidden, shown_hidden) = (
+            encoded.load(Ordering::Relaxed),
+            pictures.load(Ordering::Relaxed),
+        );
+        HIDDEN.store(false, Ordering::Relaxed);
+        let ended = pipeline.bus().unwrap().timed_pop_filtered(
+            gst::ClockTime::from_seconds(60),
+            &[gst::MessageType::Eos, gst::MessageType::Error],
+        );
+        stop(pipeline);
+        assert!(
+            matches!(
+                ended.as_ref().map(|m| m.view()),
+                Some(gst::MessageView::Eos(_))
+            ),
+            "{ended:?}"
+        );
+        assert_eq!(
+            (made_hidden, shown_hidden),
+            (1, 1),
+            "JPEGs made and shown out of sight"
+        );
+        let shown = pictures.load(Ordering::Relaxed);
+        assert!(shown > 1, "{shown} pictures shown once back in sight");
+        assert_eq!(encoded.load(Ordering::Relaxed), shown);
+    }
+
+    /// The page out of sight: a camera's preview is made a JPEG until one has gone to the page, then none, until it
+    /// is back in sight; the call's own frames (`out`) are not the page's and go on.
+    #[test]
+    fn out_of_sight_the_camera_preview_stops_after_the_first() {
+        if let Some(missing) = missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        static HIDDEN: AtomicBool = AtomicBool::new(true);
+        let previews = Arc::new(AtomicU64::new(0));
+        let seen = previews.clone();
+        let camera = Camera::open_while(
+            true,
+            None,
+            Arc::new(move |bytes: Vec<u8>| {
+                if bytes.starts_with(&[0xff, 0xd8]) {
+                    seen.fetch_add(1, Ordering::Relaxed);
+                }
+            }),
+            &HIDDEN,
+        )
+        .unwrap();
+        let until = |count: u64| {
+            let end = Instant::now() + Duration::from_secs(10);
+            while previews.load(Ordering::Relaxed) < count {
+                assert!(
+                    Instant::now() < end,
+                    "{} previews",
+                    previews.load(Ordering::Relaxed)
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        };
+        until(1);
+        // Long enough for 10 more at 15 a second.
+        std::thread::sleep(Duration::from_millis(700));
+        let hidden = previews.load(Ordering::Relaxed);
+        HIDDEN.store(false, Ordering::Relaxed);
+        until(3);
+        drop(camera);
+        assert_eq!(hidden, 1, "previews out of sight");
     }
 
     /// How many of 4 s of pictures `gap_us` apart the page is shown, each coming up to `jitter_us` early or late,
