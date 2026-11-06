@@ -73,6 +73,10 @@ export class FakeEngineServer {
       this.shutdowns++;
       engineControl().log.push(`stop ${this.database}`);
     },
+    /** "Clear all data", the peer's part: as the engine's, it ends with the peer stopped (node.ts `clearProfileData`). */
+    clearProfileData: async () => {
+      await this.node.shutdown();
+    },
   };
 
   stop(): Promise<void> {
@@ -100,6 +104,8 @@ export class FakeEngineServer {
 
   async handle(client: EngineClientSink, request: RpcRequest): Promise<void> {
     this.handled.push({ client, request });
+    // Answered once the call is over, as `EngineServer.handle` does; only the call the extension cares about runs.
+    if (request?.kind === "request" && request.method === "clearProfileData") await this.node.clearProfileData();
   }
 }
 
