@@ -708,9 +708,14 @@ export type EngineEvent =
 
 /**
  * The pictures a posted state left out, as the ones that client was sent last: the profile's own (`settings.avatar`), and
- * by id each chat's and group edge's contact's (`peerAvatar`) and each group's (`picture`).
+ * by id each chat's and group edge's contact's (`peerAvatar`) and each group's (`picture`). The public profile pictures:
+ * this profile's identities' by proof id (`identityProofs`) and its Nostr keys' by key (`nostrOwn`), and by chat id a
+ * contact's identities' (`received`) and Nostr keys' (`nostr`), the same way (`shared/keptPictures`).
  */
-export interface KeptPictures { avatar?: true; links?: string[]; edges?: string[]; groups?: string[] }
+export interface KeptPictures {
+  avatar?: true; links?: string[]; edges?: string[]; groups?: string[];
+  identityProofs?: string[]; nostrOwn?: string[]; received?: Record<string, string[]>; nostr?: Record<string, string[]>;
+}
 
 /**
  * A state as a client across a copying boundary gets it (`copyingSink`, the extension's port): `payments` and `wallet`
