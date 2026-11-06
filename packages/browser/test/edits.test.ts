@@ -787,6 +787,34 @@ describe("EditQueue", () => {
       expect([next.sent.map(e => e.m), next.reads.n]).toEqual([["t3", "t4"], 1]);
     });
 
+    it("given the history as read elsewhere, reads none of it again: what it found and what it is told since go", async () => {
+      for (const n of [1, 2]) rows.set(`me_${n}`, row(n));
+      rows.set("me_9", row(9, { edit: { seq: 1, at: 1_009, history: [] } }));
+      const asked: string[][] = [];
+      const { q, sent, reads } = byId(undefined, asked);
+      q.learn([...rows.values()]);
+      // Settled since that read (by another look): it is let go, not sent.
+      rows.set("me_2", row(2, { edit: { seq: 1, at: 1_002, history: [] } }));
+      // Edited since that read: it is told, and goes too.
+      rows.set("me_3", row(3));
+      q.edited("me_3");
+      await q.flush();
+      expect([reads.n, sent.map(e => e.m), asked]).toEqual([0, ["t1", "t3"], [["me_1", "me_2", "me_3"]]]);
+      // A confirmation finds its row from the wire ids that read gave.
+      asked.length = 0;
+      await q.received(row(1).wireId!, 1);
+      expect([reads.n, asked, rows.get("me_1")!.edit!.pending]).toEqual([0, [["me_1"]], undefined]);
+    });
+
+    it("given nothing (a chat the start never read), reads the history once at its first look", async () => {
+      rows.set("me_1", row(1));
+      const { q, sent, reads } = byId();
+      await q.flush();
+      q.reopened();
+      await q.flush();
+      expect([reads.n, sent.map(e => e.m)]).toEqual([1, ["t1", "t1"]]);
+    });
+
     it("a new session sends again what the last one sent without a confirmation, reading those rows alone", async () => {
       rows.set("me_1", row(1));
       const asked: string[][] = [];

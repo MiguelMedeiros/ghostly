@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { LIMITS, createIdentity, dhtFileId, type FileSink, type GhostLinkOptions } from "@ghostly/core";
+import { LIMITS, createIdentity, createLink, dhtFileId, type FileSink, type GhostLinkOptions } from "@ghostly/core";
 import { GROUP_ANCHOR_ANSWER_MS, GROUP_IROH_WEB_SLOTS, GROUP_NATIVE_SLOTS, GhostlyNode, NATIVE_HOLD_MS, RESUME_SPENT_MS, type NodeOptions } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { setJoinTraceSink } from "../src/engine/joinTrace";
@@ -1727,14 +1727,93 @@ describe("a 1:1 session that opens (agents#2468)", () => {
     const again = await hosted();
     const back = again.linkOf(chat.id);
     const sendEdit = wire(back, false);
-    // The new run reads the chat's history once for the edit queue (it starts with nothing known); the outbox has what
-    // the start read.
-    expect.soft(await historyReads(chat.id, () => opens(back)), "whole-history reads at the first open after a restart").toBeLessThanOrEqual(1);
+    // The edit queue and the outbox both have what the start read: the first open reads no history.
+    expect.soft(await historyReads(chat.id, () => opens(back)), "whole-history reads at the first open after a restart").toBe(0);
     await vi.waitFor(() => expect(wires(back)).toEqual([unconfirmedWire, awayWire]));
     await vi.waitFor(() => expect(sendEdit).toHaveBeenCalledWith(expect.objectContaining({ id: WIRE_OLD, m: "old, edited" }), expect.anything()));
     closes(back);
     await settle();
     expect.soft(await historyReads(chat.id, () => opens(back)), "whole-history reads at the next open").toBe(0);
+  });
+
+  it("from the start to its first session open, the chat's history is read whole once: by the start", async () => {
+    const chat = await chatWithHistory();
+    const whole = vi.spyOn(db, "getMessages");
+    try {
+      const { linkOf } = await hosted(chat);
+      opens(linkOf(chat.id));
+      await settle();
+      // The start's read seeds what a session open needs: what waits to go, cards due, and my edits on their way.
+      expect(whole.mock.calls.filter(([id]) => id === chat.id)).toHaveLength(1);
+    } finally { whole.mockRestore(); }
+  });
+
+  it("after a restart, my edit and my removal on their way go when the session opens, found from the start's read", async () => {
+    const chat = await chatWithHistory();
+    const WIRE_GONE = "g".repeat(22);
+    await db.putMessage({ linkId: chat.id, id: `me_${WIRE_GONE}`, wireId: WIRE_GONE, text: "to delete", sender: "me", timestamp: 950, via: "datalink", delivery: "delivered" });
+    const first = await hosted(chat);
+    closes(first.linkOf(chat.id));
+    expect(await first.node.editMessage({ linkId: chat.id, messageId: `me_${WIRE_OLD}`, text: "old, edited" })).toMatchObject({ error: null });
+    expect(await first.node.removeMessage({ linkId: chat.id, messageId: `me_${WIRE_GONE}` })).toMatchObject({ error: null });
+    await settle();
+    await first.node.shutdown();
+    nodes.splice(nodes.indexOf(first.node), 1);
+    links.length = 0;
+
+    const whole = vi.spyOn(db, "getMessages");
+    try {
+      const again = await hosted();
+      const back = again.linkOf(chat.id);
+      const sendEdit = wire(back, false);
+      opens(back);
+      await vi.waitFor(() => expect(sendEdit).toHaveBeenCalledWith(expect.objectContaining({ id: WIRE_OLD, m: "old, edited" }), expect.anything()));
+      await vi.waitFor(() => expect(sendEdit).toHaveBeenCalledWith(expect.objectContaining({ id: WIRE_GONE, rm: true }), expect.anything()));
+      await settle();
+      expect(whole.mock.calls.filter(([id]) => id === chat.id), "whole-history reads from the start to the session open").toHaveLength(1);
+    } finally { whole.mockRestore(); }
+  });
+
+  it("an edit made after the start, before the session opens, goes when it opens", async () => {
+    const chat = await chatWithHistory();
+    const whole = vi.spyOn(db, "getMessages");
+    try {
+      const { node, linkOf } = await hosted(chat);
+      const link = linkOf(chat.id);
+      const sendEdit = wire(link, false);
+      expect(await node.editMessage({ linkId: chat.id, messageId: `me_${WIRE_OLD}`, text: "edited before the session" })).toMatchObject({ error: null });
+      await settle();
+      expect(sendEdit).not.toHaveBeenCalled();
+      opens(link);
+      await vi.waitFor(() => expect(sendEdit).toHaveBeenCalledWith(expect.objectContaining({ id: WIRE_OLD, m: "edited before the session" }), expect.anything()));
+      await settle();
+      expect(whole.mock.calls.filter(([id]) => id === chat.id)).toHaveLength(1);
+    } finally { whole.mockRestore(); }
+  });
+
+  it("a chat added during the run, which the start never read, learns its edits on their way from one read of its history", async () => {
+    const { node, linkOf } = await hosted();
+    const { linkId } = await node.ensureLink({ ...createLink().mine, profile: "paired-chat/1" });
+    const link = linkOf(linkId);
+    const sendEdit = wire(link, false);
+    // An edit on its way the queue was never told of (written by another run of the profile): the history has it.
+    await db.putMessage({ linkId, id: `me_${WIRE_OLD}`, wireId: WIRE_OLD, text: "edited elsewhere", sender: "me", timestamp: 900, via: "datalink", delivery: "delivered",
+      edit: { seq: 1, at: Date.now(), history: [], pending: true } });
+    // Its other lookups read it lazily too (what waits to go, cards due); the edit queue's is one read.
+    const read = db.getMessages.bind(db), byQueue: string[] = [];
+    const whole = vi.spyOn(db, "getMessages").mockImplementation((...args) => {
+      if (args[0] === linkId && /EditQueue/.test(new Error().stack ?? "")) byQueue.push(args[0]);
+      return read(...args);
+    });
+    try {
+      opens(link);
+      await vi.waitFor(() => expect(sendEdit).toHaveBeenCalledWith(expect.objectContaining({ id: WIRE_OLD, m: "edited elsewhere" }), expect.anything()));
+      closes(link);
+      await settle();
+      opens(link);
+      await settle();
+      expect(byQueue, "the edit queue's whole-history reads in the run").toHaveLength(1);
+    } finally { whole.mockRestore(); }
   });
 });
 
