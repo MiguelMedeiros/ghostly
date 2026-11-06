@@ -1032,7 +1032,9 @@ export class CommunitySession {
    * and is never kept (WISP 903), so a member who was away counted it missing until the commit changed.
    */
   missing(sender: string): number {
-    this.settleGaps();
+    // Only the answers now over: the members view asks once per member, and `settleGaps`'s prune walks every author
+    // (the engine's tick runs it).
+    this.settleAnswers();
     const key = seenKey(this.epoch, shortHash(this.topHash));
     const entry = this.state.seen[sender]?.[key];
     if (!entry) return 0;
@@ -1046,6 +1048,18 @@ export class CommunitySession {
    * held by nobody. Returns whether some became gone (the members view changes). A sync nobody answered settles nothing.
    */
   settleGaps(): boolean {
+    const changed = this.settleAnswers();
+    // Only for authors and commits still seen: the rest is pruned with them.
+    for (const [sender, byKey] of Object.entries(this.gapsGone)) {
+      for (const key of Object.keys(byKey)) if (!this.state.seen[sender]?.[key]) delete byKey[key];
+      if (!Object.keys(byKey).length) delete this.gapsGone[sender];
+    }
+    return changed;
+  }
+
+  /** The gaps of the answers now over (`settleGaps`), without the prune. */
+  private settleAnswers(): boolean {
+    if (!this.answerOf.size) return false;
     const now = this.hooks.clock?.() ?? Date.now();
     let changed = false;
     for (const [from, answer] of this.answerOf) {
@@ -1057,11 +1071,6 @@ export class CommunitySession {
         (this.gapsGone[sender] ??= {})[key] = upTo;
         changed = true;
       }
-    }
-    // Only for authors and commits still seen: the rest is pruned with them.
-    for (const [sender, byKey] of Object.entries(this.gapsGone)) {
-      for (const key of Object.keys(byKey)) if (!this.state.seen[sender]?.[key]) delete byKey[key];
-      if (!Object.keys(byKey).length) delete this.gapsGone[sender];
     }
     return changed;
   }
@@ -1344,6 +1353,10 @@ export class CommunitySession {
     if (this.state.status === "lost" && rosterHas(this.roster, this.myKey)) { this.state.status = "active"; delete this.state.statusReason; }
     this.followEntry();
     this.pruneSide();
+    // A held request goes once the branch I follow takes its member out (its leave or a removal), as committing it drops
+    // it on a hub: a member who never commits kept up to 64 for members long gone, and handed them on in every sync answer.
+    // One a lost fork drops is held again from the dropped commit (`holdDroppedLeaves`).
+    this.state.pendingLeaves = this.state.pendingLeaves.filter(r => rosterHas(this.roster, r.s));
     // Saved at once only when my place in the group changed (removed, left, lost, back in); otherwise within a second, as
     // messages are. Each commit of a catch-up saved the whole state: 1,000 commits were 1,051 whole-record writes, 241 MB
     // of journal on the CLI store (agents#1767). A save lost to a crash is asked again at the next sync: the commits are on
@@ -1449,12 +1462,25 @@ export class CommunitySession {
     for (const h of Object.keys(this.state.secrets)) if (!keep.has(h)) delete this.state.secrets[h];
   }
 
+  /** The epoch of the commit on the main branch that took `key` out (`outIndex`), while it is out. */
+  private outEpoch(key: string): number | undefined { const i = this.outIndex(key); return i < 0 ? undefined : this.state.chain[i].e; }
+
+  /**
+   * Whether `key` reads commit `h`, so its secret may be sealed to it or taken by it: in its roster, and not out by then.
+   * A member stops being one at the commit that takes it out: a side branch from before it may list it still, at that
+   * epoch or later, and that epoch's secret and every later one never reach it.
+   */
+  private readsAt(h: string, key: string, out = this.outEpoch(key)): boolean {
+    const c = this.known.get(h);
+    return !!c && rosterHas(this.rosterAt(h) ?? [], key) && (out === undefined || c.e < out);
+  }
+
   /** A derived epoch's secret, from its parent's, when that is held. */
   private takeDerived(h: string): void {
     const c = this.known.get(h);
     if (!c || this.state.secrets[h] || FRESH.has(c.k)) return;
     const parent = this.state.secrets[c.p];
-    if (!parent || !rosterHas(this.rosterAt(h) ?? [], this.myKey)) return;
+    if (!parent || !this.readsAt(h, this.myKey)) return;
     const secret = derivedSecret(fromBase64Url(parent), communityUntaggedHash(c));
     if (confirmationMatches(epochKeys(secret, this.id, c.e).confirm, communityUntaggedHash(c), c.c)) {
       this.state.secrets[h] = toBase64Url(secret);
@@ -1463,7 +1489,7 @@ export class CommunitySession {
     }
   }
 
-  /** A sealed secret for a known commit I am in the roster of: kept only when it confirms. */
+  /** A sealed secret for a known commit I read (`readsAt`): kept only when it confirms. */
   private takeSecret(h: string, sealed: unknown): boolean {
     const c = this.known.get(h);
     if (!c) {
@@ -1476,7 +1502,7 @@ export class CommunitySession {
       this.pendingSecrets.set(h, { sealed, at: now });
       return false;
     }
-    if (this.state.secrets[h] || !isSealed(sealed) || !rosterHas(this.rosterAt(h) ?? [], this.myKey)) return false;
+    if (this.state.secrets[h] || !isSealed(sealed) || !this.readsAt(h, this.myKey)) return false;
     const secret = openSecret(this.identity.seed, this.myKey, sealed, secretAad(this.id, h, this.myKey));
     if (!secret || !confirmationMatches(epochKeys(secret, this.id, c.e).confirm, communityUntaggedHash(c), c.c)) return false;
     this.state.secrets[h] = toBase64Url(secret);
@@ -1515,7 +1541,8 @@ export class CommunitySession {
   get adminWork(): boolean { return this.hooks.adminWork?.() !== false; }
   private requireAdmin(): void { this.requireMember(); if (!this.isAdmin) throw new Error("Only the admin can do that"); }
 
-  private async commit(kind: CommunityKind, fields: { s?: string; x?: string; ls?: string; ls3?: string }, now: number): Promise<{ commit: CommunityCommit; hash: string; secret: Uint8Array }> {
+  /** `alongside`: what else the commit changes in the state, saved in the same write (only once the commit is signed). */
+  private async commit(kind: CommunityKind, fields: { s?: string; x?: string; ls?: string; ls3?: string }, now: number, alongside?: () => void): Promise<{ commit: CommunityCommit; hash: string; secret: Uint8Array }> {
     if (!this.adminWork) throw new Error(GROUP_ADMIN_OFF_ERROR);
     if (this.hooks.adminTurn && !(await this.hooks.adminTurn())) throw engineError("groupTurnUnconfirmed");
     if (this.state.chain.length >= COMMUNITY_LIMITS.chain) throw new Error("This group has reached its membership history limit. Create a new group.");
@@ -1542,6 +1569,7 @@ export class CommunitySession {
     this.state.secrets[hash] = toBase64Url(secret);
     this.state.seq = 0; this.state.seqH = hash;
     this.pruneSide();
+    alongside?.();
     await this.persist();
     this.hooks.broadcast({ t: "group-commit", v: 2, g: this.id, commit });
     // A key respelled in its last character could be pinned and added by a build before `MEMBER_KEY` was canonical, and
@@ -1665,9 +1693,8 @@ export class CommunitySession {
     return this.serialize(async () => {
       this.requireAdmin();
       const entry = off ? null : identityFromSeedB64(toBase64Url(randomBytes(32)));
-      await this.commit("link", { x: entry?.pubKeyZ32 ?? "" }, now);
-      this.state.entry = { key: entry?.pubKeyZ32 ?? "", seedB64: entry?.seedB64 ?? "" };
-      await this.persist();
+      // The new key is saved with the commit naming it: one write of the state (the chain, the secrets), not two.
+      await this.commit("link", { x: entry?.pubKeyZ32 ?? "" }, now, () => { this.state.entry = { key: entry?.pubKeyZ32 ?? "", seedB64: entry?.seedB64 ?? "" }; });
       // Every member can answer the new link: its seed, sealed to each. One agreement a member, ~1 ms in JavaScript: sealed
       // a slice at a time, so a page sharing the thread draws meanwhile (250 members held it 230 ms).
       if (entry) {
@@ -1727,17 +1754,28 @@ export class CommunitySession {
 
   /**
    * After I left, a chain that names me the admin (a hand-over that crossed my leave): the role goes on to
-   * `pick(<the signer of my tip>)` with a `role` commit of mine, as an admin's leave hands it. True when it went; false
-   * while the secret of my tip has not come (it is tried again).
+   * `pick(<the member who handed it to me>)` with a `role` commit of mine, as an admin's leave hands it. Who handed it is
+   * the signer of the newest `role` on my branch, whatever members committed on top since: an admission there would
+   * otherwise steer the role to whoever let someone in. True when it went; false while the secret of my tip has not
+   * come (it is tried again).
    */
   handOnAfterLeave(pick: (by: string) => string | undefined, now = Date.now()): Promise<boolean> {
     return this.serialize(async () => {
       if (!this.following || this.state.status !== "left" || this.admin !== this.myKey || !this.state.secrets[this.topHash]) return false;
-      const next = pick(this.top.by);
+      const next = pick([...this.state.chain].reverse().find(c => c.k === "role" || c.k === "create")!.by);
       if (!next || next === this.myKey || !rosterHas(this.roster, next)) return false;
       await this.commit("role", { s: next }, now);
       return true;
     });
+  }
+
+  /**
+   * After I left, a chain that names me the admin whose tip's secret has not come (the fresh one of a commit below went
+   * missing): the engine asks my edges for it (`catchUp`) while I follow, so the role can go on. Only what I still read
+   * comes back (`readsAt`): epochs before the commit that takes me out, never that one's nor any later.
+   */
+  get leftWaitsForSecret(): boolean {
+    return this.following && this.state.status === "left" && this.admin === this.myKey && !this.state.secrets[this.topHash];
   }
 
   /** Commits the leave requests I hold whose members are still in: the engine calls this on hubs. */
@@ -2555,17 +2593,19 @@ export class CommunitySession {
       start = common !== undefined ? this.mainIndex.get(common)! + 1 : Math.max(0, this.state.chain.length - COMMUNITY_LIMITS.side);
       ask();
     }
+    // Nothing of the epoch that took them out or later, on any branch (`readsAt`).
+    const out = this.outEpoch(from);
     for (let i = start; i < this.state.chain.length; i++) {
       const commit = this.state.chain[i], h = communityCommitHash(commit);
       answer.push({ t: "group-commit", v: 2, g: this.id, commit });
       const secret = this.state.secrets[h];
-      if (secret && rosterHas(this.rosterAt(h) ?? [], from) && FRESH.has(commit.k))
+      if (secret && this.readsAt(h, from, out) && FRESH.has(commit.k))
         answer.push({ t: "group-secret", v: 2, g: this.id, to: from, h, s: sealSecret(from, fromBase64Url(secret), secretAad(this.id, h, from)) });
     }
     // Secrets of the window they were in and lack (derived ones included: they may lack the parent).
     const held = new Set(Array.isArray(frame.secrets) ? frame.secrets.filter(x => typeof x === "string") : []);
     const secrets = this.state.chain.slice(-COMMUNITY_LIMITS.window - 1).map(c => communityCommitHash(c))
-      .filter(h => this.state.secrets[h] && !held.has(shortHash(h)) && rosterHas(this.rosterAt(h) ?? [], from))
+      .filter(h => this.state.secrets[h] && !held.has(shortHash(h)) && this.readsAt(h, from, out))
       .map(h => ({ h, s: sealSecret(from, fromBase64Url(this.state.secrets[h]), secretAad(this.id, h, from)) }));
     if (secrets.length) answer.push({ t: "group-secrets", v: 2, g: this.id, secrets: secrets.slice(-COMMUNITY_LIMITS.secrets) });
     // What was said while they were away, by anyone, for epochs they were in.
@@ -2598,9 +2638,9 @@ export class CommunitySession {
       if (!this.heardAfterOut(stored)) continue;
       const found = this.commitByShort(stored.e, stored.h);
       if (!found) continue;
-      const reads = rosterHas(this.rosterAt(found.hash) ?? [], from), mine = stored.s === this.myKey && unheard.has(frameKey(stored));
+      const reads = this.readsAt(found.hash, from, out), mine = stored.s === this.myKey && unheard.has(frameKey(stored));
       if (!reads && !(mine && rosterHas(this.roster, from))) continue;
-      if (!this.mainIndex.has(found.hash)) this.handSide(from, found.hash, handed, answer);
+      if (!this.mainIndex.has(found.hash)) this.handSide(from, found.hash, handed, answer, out);
       // A leaver's frame goes after its leave's mark, without which it is not taken.
       if (!rosterHas(this.roster, stored.s) && !marked.has(stored.s)) { marked.add(stored.s); const left = this.leftFrame(stored.s); if (left) answer.push(left); }
       while (metas.length && metas[0].ts < stored.ts) answer.push(metas.shift()!.frame);
@@ -2611,8 +2651,8 @@ export class CommunitySession {
     if (unheard.size !== (this.state.unheard?.length ?? 0)) { this.state.unheard = [...unheard]; this.persistSoon(); }
     // The link's seed, so they can answer it too.
     if (rosterHas(this.roster, from)) { const entry = this.entryFrame(from); if (entry) answer.push(entry); }
-    // Pending leaves travel too, so whoever commits next can.
-    for (const request of this.state.pendingLeaves) answer.push({ t: "group-leave", v: 2, g: this.id, ...request });
+    // Pending leaves travel too, so whoever commits next can: those of members still in (a receiver drops the others).
+    for (const request of this.state.pendingLeaves) if (rosterHas(this.roster, request.s)) answer.push({ t: "group-leave", v: 2, g: this.id, ...request });
     // Or here, those after every message.
     answer.push(...metas.map(m => m.frame));
     // And where I am, so they can hand me what I lack (asked once in a while, not in a loop).
@@ -2621,13 +2661,13 @@ export class CommunitySession {
   }
 
   /** The commits of a branch I do not follow, from where it leaves mine, and the secrets I hold of those `to` was in, onto `answer`. */
-  private handSide(to: string, tip: string, handed: Set<string>, answer: CommunityFrame[]): void {
+  private handSide(to: string, tip: string, handed: Set<string>, answer: CommunityFrame[], out = this.outEpoch(to)): void {
     for (const h of this.pathToMain(tip) ?? []) {
       if (handed.has(h)) continue;
       handed.add(h);
       answer.push({ t: "group-commit", v: 2, g: this.id, commit: this.known.get(h)! });
       const secret = this.state.secrets[h];
-      if (secret && rosterHas(this.rosterAt(h) ?? [], to)) answer.push({ t: "group-secret", v: 2, g: this.id, to, h, s: sealSecret(to, fromBase64Url(secret), secretAad(this.id, h, to)) });
+      if (secret && this.readsAt(h, to, out)) answer.push({ t: "group-secret", v: 2, g: this.id, to, h, s: sealSecret(to, fromBase64Url(secret), secretAad(this.id, h, to)) });
     }
   }
 

@@ -30,10 +30,12 @@ function ensureEngine(): Promise<void> {
 async function startEngine(): Promise<void> {
   if (!(await chrome.offscreen.hasDocument())) await createEngineDocument();
   const status = await waitForEngine();
-  if (status.profile === status.active) return;
+  if (status.profile === status.active && !status.stopped) return;
   // A page made another profile the one in use. The running peer stops and its document closes before
   // the next one opens: never two peers, and never one peer over two profiles' data.
-  await replaceEngine(status.activeId);
+  // Or the peer stopped for good and nobody asked for the next one: the page that ran "Clear all data" went away
+  // before it could (`restart-engine`), or a worker went away mid-restart. That document goes too, as after a switch.
+  await replaceEngine(status.profile === status.active ? undefined : status.activeId);
 }
 
 /** Peers started one after another for switches made while each one started, before the pages are told to retry. */
@@ -51,7 +53,8 @@ async function replaceEngine(next?: string): Promise<void> {
     await chrome.runtime.sendMessage({ target: "engine", type: "stop" } satisfies RuntimeMessage).catch(() => {});
     await chrome.offscreen.closeDocument().catch(() => {});
     await createEngineDocument();
-    const status = await waitForEngine();
+    // Just made: one that does not answer is replaced at the next start (`waitForEngine`).
+    const status = (await answerOf()) ?? notStarted();
     if (status.profile === status.active) return;
     next = status.activeId;
   }
@@ -82,8 +85,25 @@ async function createEngineDocument(): Promise<void> {
     });
 }
 
-/** The document exists before its script listens; wait until the peer answers. */
+/**
+ * The peer's answer. A document that never gives one (its script threw as it loaded, a chunk did not load) is no peer,
+ * and nothing else closes it: every later try (a page's, a new tab's, the minute check) would wait on it again. It goes,
+ * and a new one is waited on before the start fails; one that does not answer either goes at the next try.
+ */
 async function waitForEngine(): Promise<EngineStatus> {
+  const status = await answerOf();
+  if (status) return status;
+  await chrome.offscreen.closeDocument().catch(() => {});
+  await createEngineDocument();
+  return (await answerOf()) ?? notStarted();
+}
+
+function notStarted(): never {
+  throw new Error("The Ghostly peer did not start. Reopen the extension to retry.");
+}
+
+/** The document exists before its script listens; wait until the peer answers, or 5 seconds. */
+async function answerOf(): Promise<EngineStatus | undefined> {
   for (let attempt = 0; attempt < 100; attempt++) {
     try {
       const status = (await chrome.runtime.sendMessage({ target: "engine", type: "ping" } satisfies RuntimeMessage)) as EngineStatus | undefined;
@@ -93,7 +113,7 @@ async function waitForEngine(): Promise<EngineStatus> {
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error("The Ghostly peer did not start. Reopen the extension to retry.");
+  return undefined;
 }
 
 chrome.runtime.onStartup.addListener(() => void ensureEngine());
@@ -136,9 +156,9 @@ chrome.runtime.onUpdateAvailable.addListener((details) => {
   void rememberPendingUpdate(details.version);
 });
 
-chrome.action.onClicked.addListener(async () => {
-  await ensureEngine();
-  await showApp();
+// The app opens even when the peer does not start, as on a first install: the page says why.
+chrome.action.onClicked.addListener(() => {
+  void ensureEngine().catch(() => {}).then(() => showApp()).catch(() => {});
 });
 
 /** Brings the app's tab forward, or opens one; on `route` (`/chat/…`) when given. */
@@ -203,6 +223,18 @@ function listenToNotifications(): void {
 const onNotificationClicked = (id: string) => void openNotification(id).catch(() => {});
 listenToNotifications();
 chrome.permissions.onAdded.addListener(listenToNotifications);
+
+/**
+ * The person turned off the extension's site access to a host of this machine (`chrome://extensions`, or the puzzle
+ * menu): the peer stops sharing the apps there, as "Share" turned off does, until they are turned on again. Ghostly's own
+ * `permissions.remove` fires this too, once no app is left at that host: then there is nothing to turn off.
+ */
+chrome.permissions.onRemoved.addListener(({ origins }) => {
+  if (!origins?.length) return;
+  void ensureEngine()
+    .then(() => chrome.runtime.sendMessage({ target: "engine", type: "local-access-removed", origins } satisfies RuntimeMessage))
+    .catch(() => {});
+});
 
 /**
  * A tab that shows the app already, on any of its pages (`app.html#/chat/…`). Asked of the extension's own contexts:

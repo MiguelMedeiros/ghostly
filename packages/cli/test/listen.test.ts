@@ -89,6 +89,22 @@ describe("--type", () => {
     ]);
   });
 
+  it("events.gap passes every --type and --turns: printed, handed to the hook, and the cursor stops at it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-gap-"));
+    for (const [types, turns] of [[["message.received"], false], [["daemon", "group", "chat"], false], [[], true]] as Array<[string[], boolean]>) {
+      const lines: string[] = [], cursor = join(dir, `${turns}-${types.length}.cursor`), got = join(dir, `${turns}-${types.length}.got`);
+      const handle = eventHandler({ types, turns, cursor, print: true, write: (line) => { lines.push(line); }, exec: `cat >> '${got}'` });
+      const gap = other("events.gap", { from: 3, to: 9 });
+      handle(gap);
+      await handle.idle();
+      // Before, every one of these dropped it and moved the cursor past it: a bot on message.received never learned that
+      // messages were lost across a crash or a trim.
+      expect(lines.map((line) => (JSON.parse(line) as GhostlyEvent).type), JSON.stringify({ types, turns })).toEqual(["events.gap"]);
+      expect(JSON.parse(readFileSync(got, "utf8"))).toMatchObject({ seq: gap.seq, type: "events.gap", from: 3, to: 9 });
+      expect(readFileSync(cursor, "utf8")).toBe(`${gap.seq}\n`);
+    }
+  });
+
   it("listen --type bogus stops at once with a usage error, and opens no profile", async () => {
     const home = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
     const result = await ghostly(["--home", home, "listen", "--type", "message", "--type", "bogus"]);

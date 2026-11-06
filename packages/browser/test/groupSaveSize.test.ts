@@ -96,6 +96,52 @@ describe("a private group's saves", () => {
     // past the default 5 s on a busy CI runner.
   }, 30_000);
 
+  it("a pin and a deletion for everyone, mine or a member's, write the small row, and are there when the app starts again", async () => {
+    await clearProfileStores();
+    const first = engine();
+    await first.groups.load();
+    const id = await grown(first.groups, 31, 20);
+    const sent = await first.groups.send(id, "pin me");
+    await first.groups.flush();
+    const now = Date.now();
+    const actions: Array<[string, () => Promise<unknown>]> = [
+      ["a pin", () => first.groups.setPin(id, { id: sent.messageId!, n: now, by: "me", at: now })],
+      ["a member's deletion", async () => { await first.groups.removed(id, "member:0:1"); await first.groups.flush(); }],
+      ["my deletion", () => first.groups.setRemovals(id, [{ id: sent.messageId!, e: 1, at: now, pending: true }])],
+      ["my deletion said", async () => { await first.groups.setRemovals(id, [{ id: sent.messageId!, e: 1, at: now }]); await first.groups.flush(); }],
+    ];
+    for (const [action, act] of actions) {
+      const written = writes();
+      await act();
+      const total = Object.values(written).reduce((sum, n) => sum + n, 0);
+      expect(total, `${action}: ${JSON.stringify(written)}`).toBeLessThan(8_000);
+      expect(written[STORES.groups] ?? 0, `${action}: the record is not written`).toBe(0);
+      vi.restoreAllMocks();
+    }
+
+    // Many deletions kept: a message does not write them again.
+    for (let i = 2; i < 200; i++) await first.groups.removed(id, `member:0:${i}`);
+    await first.groups.flush();
+    const written = writes();
+    await first.groups.send(id, "still small");
+    expect(Object.values(written).reduce((sum, n) => sum + n, 0)).toBeLessThan(2_000);
+    vi.restoreAllMocks();
+
+    const again = engine();
+    await again.groups.load();
+    expect(again.groups.pinOf(id)).toMatchObject({ id: sent.messageId, n: now });
+    expect(again.groups.isRemoved(id, "member:0:1")).toBe(true);
+    expect(again.groups.isRemoved(id, "member:0:199")).toBe(true);
+    expect(again.groups.removals(id)).toEqual([{ id: sent.messageId, e: 1, at: now }]);
+    // A commit writes the record whole, with them in it: they are still there after the next start.
+    await sessionOf(again.groups, id).rotate();
+    await again.groups.flush();
+    const third = engine();
+    await third.groups.load();
+    expect(third.groups.pinOf(id)).toMatchObject({ id: sent.messageId, n: now });
+    expect(third.groups.isRemoved(id, "member:0:199")).toBe(true);
+  }, 30_000);
+
   it("started again, the group goes on from its last number, without a gap or a number used twice", async () => {
     const first = engine();
     await first.groups.load();

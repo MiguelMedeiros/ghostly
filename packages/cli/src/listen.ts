@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { CONTACT_KEY, namedByThem } from "./apiKit";
+import { CONTACT_KEY, nameKey, namedByThem } from "./apiKit";
 import { childEnv } from "./childEnv";
 import { connectDaemon, type DaemonAddress, type DaemonClient } from "./client";
 import { CliError, localFileError } from "./errors";
@@ -82,7 +82,8 @@ export async function allowlist(from: readonly string[], groups: readonly string
   for (const ref of from) {
     if (CONTACT_KEY.test(ref)) { keys.add(ref); continue; }
     const chat = (await otherFlag(call("chat.get", { chat: ref }), ref, "--from")) as { id: string; label?: string | null; peerName?: string | null; peer?: string };
-    if (chat.id !== ref && chat.label?.toLowerCase() !== ref.toLowerCase()) throw namedByThem(ref, { chat: chat.id, name: chat.peerName ?? null, contact: chat.peer });
+    // A label compared as the lookup compares it (`nameKey`): the string given to `chat rename` names its chat.
+    if (chat.id !== ref && (!nameKey(ref) || nameKey(chat.label) !== nameKey(ref))) throw namedByThem(ref, { chat: chat.id, name: chat.peerName ?? null, contact: chat.peer });
     chats.add(chat.id);
   }
   for (const ref of groups) groupIds.add(((await otherFlag(call("group.get", { group: ref }), ref, "--group")) as { id: string }).id);
@@ -352,15 +353,17 @@ export function eventHandler(options: ListenOptions): EventHandler {
     // counted toward MAX_BEHIND, not kept. An app's frames at 48 a second, each 32 KiB, filled the bound in 21 s behind
     // a bridge that was down, ~32 MiB held to be dropped, and the feed paused with the one wanted event pending
     // (agents#1597). The cursor passes it once the events before it are handled.
-    if (!matches(event, options.types)) { dropped = Math.max(dropped, seq); keepDropped(); return; }
+    // `events.gap` passes every `--type` and `--turns`, as it passes the allowlist: a bot on `message.received` is told
+    // that messages were lost across a crash or a trim. Before, it was dropped and the cursor moved past it.
+    const gap = type === "events.gap";
+    if (!gap && !matches(event, options.types)) { dropped = Math.max(dropped, seq); keepDropped(); return; }
     behind++;
     chain = chain.then(async () => {
       if (stopped) return;
       const skip = () => keep(event.seq);
-      if (!matches(event, options.types)) return skip();
       if (options.allow && !(await options.allow.allows(event))) return skip();
       if (options.translate) event = await options.translate(event);
-      if (options.turns) {
+      if (options.turns && !gap) {
         const next = toTurn(event);
         if (!next) return skip();
         event = next;

@@ -4,7 +4,8 @@ import { afterEach, expect, it, vi } from "vitest";
 import { ChatFiles, FILE_LIMITS, GhostLink, createIdentity, createLink, identityFromSeedB64, randomBytes, toBase64Url, type FileTransferRecord, type IncomingTarget, type OfferDecision } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
-import { fileStore } from "../src/shared/idb";
+import { STORES, fileStore } from "../src/shared/idb";
+import { knownErrorParts } from "../../../apps/ui/src/lib/errorText";
 import { fileBytes, registerFileBytes } from "../src/shared/fileBytes";
 import { IdbFileBytes } from "../src/shared/fileBytesIdb";
 import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
@@ -36,8 +37,8 @@ Object.defineProperty(globalThis.navigator, "storage", { value: { estimate: asyn
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { left = 40 * 1024 ** 3; checking = undefined; for (const step of cleanup.splice(0).reverse()) await step(); });
 
-/** `files2`: the contact also takes files/2; `largeFiles: false`, an app from before files/3. */
-async function setup({ files2 = false, largeFiles = true } = {}) {
+/** `files2`: the contact also takes files/2; `largeFiles: false`, an app from before files/3; `reactions`: it reacts and pins. */
+async function setup({ files2 = false, largeFiles = true, reactions = false } = {}) {
   const net = new FakeNativeNet();
   // As the real Iroh and HyperDHT channels: past 120 KiB queued, a frame is refused.
   net.sendBudget = 120 * 1024;
@@ -60,6 +61,8 @@ async function setup({ files2 = false, largeFiles = true } = {}) {
   let decide: (size: number) => OfferDecision = () => "accept";
   /** What reached the contact, in the order it came: each text, and each file's first offer. */
   const arrivals: string[] = [];
+  /** Told of each change to one of the contact's transfers, as it is made (`watch`). */
+  const watchers: ((record: FileTransferRecord) => void)[] = [];
   const peer: { link?: GhostLink } = {};
   const files = new ChatFiles({
     send: (frame) => peer.link?.sendFilesFrame(frame) ?? false,
@@ -74,12 +77,13 @@ async function setup({ files2 = false, largeFiles = true } = {}) {
       const { size, digest } = sources.get(record.id)!;
       return { read: async (offset, length) => pattern(offset, Math.min(length, size - offset)), digest: async () => digest ?? digestOf(size) };
     },
-    changed: (record) => { records.set(`${record.direction}:${record.id}`, record); },
+    changed: (record) => { records.set(`${record.direction}:${record.id}`, record); for (const watch of watchers) watch(record); },
     room: async () => 50 * 1024 ** 3,
     writable: () => peer.link?.filesWritable(),
   });
   const contact = new GhostLink({
     params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false, largeFilesSupport: largeFiles,
+    ...(reactions && { reactionsSupport: true, pinSupport: true }),
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
     native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1", "hyperdht/1"], peerFallback: true,
       peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "app"), "hyperdht/1": fakeDescriptor("hyperdht/1", "app") } },
@@ -117,6 +121,7 @@ async function setup({ files2 = false, largeFiles = true } = {}) {
   };
   return {
     net, id, files, records, received, contact, offer, incoming, arrivals,
+    watch: (fn: (record: FileTransferRecord) => void) => { watchers.push(fn); },
     node: () => node,
     set decide(fn: (size: number) => OfferDecision) { decide = fn; },
     /** The app quits and starts again, the contact dialling it once it is back. */
@@ -324,6 +329,99 @@ it("sends a file to a contact with files/3, and cancels one on both sides", asyn
   await vi.waitFor(() => expect(t.node().getState().transfers[cancelled.id]).toMatchObject({ stage: "asking" }));
   t.node().fileAction({ linkId: t.id, fileId: cancelled.id, action: "cancel" });
   await vi.waitFor(() => expect(t.records.get("in:send-0002")).toMatchObject({ state: "cancelled", error: "Cancelled by the sender" }));
+}, 60_000);
+
+it("deleting the chat while files move ends them on the contact's side too, before its session stops", async () => {
+  const t = await setup();
+  // Both transfers stop midway and stay under way: the contact's bytes and its acknowledgements go no further.
+  let hold = false;
+  const send = t.contact.sendFilesFrame.bind(t.contact);
+  t.contact.sendFilesFrame = (frame) => (hold && (frame.t === "pf-data" || frame.t === "pf-got") ? true : send(frame));
+  t.offer("gone-in-01", 10 * 1024 * 1024);
+  const sent = await put(t, "gone-out-1", 12 * 1024 * 1024);
+  await vi.waitFor(async () => {
+    expect((await t.incoming("gone-in-01"))?.transfer?.transferred ?? 0).toBeGreaterThan(1024 * 1024);
+    expect(t.received.get("gone-out-1")?.length ?? 0).toBeGreaterThan(1024 * 1024);
+  }, { timeout: 20_000 });
+  hold = true;
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  expect(t.records.get("in:gone-out-1")?.state).toBe("active");
+  expect(t.records.get("out:gone-in-01")?.state).toBe("active");
+
+  t.node().removeLink({ linkId: t.id });
+  await vi.waitFor(() => {
+    expect(t.records.get("in:gone-out-1")).toMatchObject({ state: "cancelled", error: "Cancelled by the sender" });
+    expect(t.records.get("out:gone-in-01")).toMatchObject({ state: "cancelled", error: "Cancelled by your contact" });
+  }, { timeout: 5_000 });
+  // What the contact had of the file it was receiving goes.
+  await vi.waitFor(() => expect(t.received.has("gone-out-1")).toBe(false));
+  // The session still ends, and nothing of the chat is left here.
+  await vi.waitFor(() => expect(t.files.live).toBe(false));
+  expect(t.node()["fileDesk"]["chats"].has(t.id)).toBe(false);
+  await vi.waitFor(async () => expect(await fileStore.get(sent.id)).toBeUndefined());
+}, 60_000);
+
+/** What reaches the app for a chat once it is deleted: the rows stored under it, and what the pages and the attention heard. */
+function afterDelete(t: Awaited<ReturnType<typeof setup>>) {
+  const events = t.node()["events"] as { onMessages: ReturnType<typeof vi.fn>; onAttention?: (fact: { linkId?: string }) => void };
+  const attention: { linkId?: string }[] = [];
+  events.onAttention = (fact) => { attention.push(fact); };
+  const told = events.onMessages.mock.calls.length;
+  return async () => ({
+    rows: (await db.getMessages(t.id)).map((m) => m.id),
+    told: events.onMessages.mock.calls.slice(told).filter((call) => JSON.stringify(call).includes(t.id)).length,
+    attention: attention.filter((fact) => fact.linkId === t.id).length,
+    reactionNote: t.node()["reactionNotes"].has(t.id),
+  });
+}
+
+it("a deleted chat's link, up a moment to say its files' ends, acts on nothing it hears: no text, reaction or pin is taken", async () => {
+  const t = await setup({ reactions: true });
+  let hold = false;
+  const send = t.contact.sendFilesFrame.bind(t.contact);
+  t.contact.sendFilesFrame = (frame) => (hold && (frame.t === "pf-data" || frame.t === "pf-got") ? true : send(frame));
+  t.offer("gone-in-02", 10 * 1024 * 1024);
+  await vi.waitFor(async () => expect((await t.incoming("gone-in-02"))?.transfer?.transferred ?? 0).toBeGreaterThan(1024 * 1024), { timeout: 20_000 });
+  hold = true;
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  expect(t.records.get("out:gone-in-02")?.state).toBe("active");
+
+  // The moment the contact hears its transfer ended, it writes, reacts to what it wrote and pins it.
+  const said: (string | null)[] = [];
+  t.watch((record) => {
+    if (record.id !== "gone-in-02" || record.state !== "cancelled" || said.length) return;
+    const wire = "afterdeletetext0000001";
+    said.push("text");
+    void t.contact.sendMessage("Written as the chat went", Date.now(), wire).then((error) => { said.push(`text:${error}`); });
+    said.push(t.contact.sendReaction({ id: wire, e: "👍", n: Date.now() }), t.contact.sendPin({ id: wire, n: Date.now() }));
+  });
+  const heard = afterDelete(t);
+  t.node().removeLink({ linkId: t.id });
+  // The file's end still reaches the contact, which is why the link stayed up.
+  await vi.waitFor(() => expect(t.records.get("out:gone-in-02")).toMatchObject({ state: "cancelled", error: "Cancelled by your contact" }), { timeout: 5_000 });
+  await vi.waitFor(() => expect(said).toHaveLength(4));
+  expect(said, JSON.stringify(said)).toEqual(["text", null, null, "text:null"]);
+  await vi.waitFor(() => expect(t.files.live).toBe(false));
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  expect(await heard()).toEqual({ rows: [], told: 0, attention: 0, reactionNote: false });
+}, 60_000);
+
+it("a chat deleted with no file moving stops its link at once: what the contact writes then is not taken either", async () => {
+  const t = await setup({ reactions: true });
+  const heard = afterDelete(t);
+  t.node().removeLink({ linkId: t.id });
+  await vi.waitFor(() => expect(t.files.live).toBe(false));
+  await t.contact.sendMessage("Written after the chat went", Date.now(), "afterdeletetext0000002");
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  expect(await heard()).toEqual({ rows: [], told: 0, attention: 0, reactionNote: false });
+}, 60_000);
+
+it("a deleted chat takes no row the engine stores for it later by another way (a held text, a payment's line)", async () => {
+  const t = await setup();
+  const heard = afterDelete(t);
+  t.node().removeLink({ linkId: t.id });
+  await t.node()["storeMessage"]({ linkId: t.id, id: "peer_afterdeletehold00001", text: "Held for the chat", sender: "peer", timestamp: Date.now(), via: "hold" });
+  expect(await heard()).toEqual({ rows: [], told: 0, attention: 0, reactionNote: false });
 }, 60_000);
 
 it("a sent file whose every byte arrived is too late to cancel: it ends done on both sides, kept there", async () => {
@@ -681,4 +779,33 @@ it("a contact without files/3 cannot send over files/2 a file larger than files/
   // Up to that size, files/2 carries a file as before.
   await sendOld(t, "old-00005", 256 * 1024);
   await vi.waitFor(async () => expect((await storedIn(t)).map((f) => f.metadata?.size)).toEqual([256 * 1024]));
+}, 60_000);
+
+it("a received file IndexedDB has no room for says there is no room here, not to ask for it again", async () => {
+  // Pieces past the second: the write succeeds as a request, then Chromium aborts its transaction with a
+  // QuotaExceededError of no message, as a browser out of storage does (idbWriteKept.test.ts).
+  const real = IDBObjectStore.prototype.put;
+  let pieces = 0;
+  const put = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore["put"]>) {
+    const request = real.apply(this, args);
+    if (this.name !== STORES.fileChunks || ++pieces <= 2) return request;
+    const tx = this.transaction;
+    request.addEventListener("success", () => {
+      const quota = new DOMException("", "QuotaExceededError");
+      Object.defineProperty(tx, "error", { get: () => quota, set: () => {}, configurable: true });
+      tx.abort();
+    });
+    return request;
+  });
+  cleanup.push(async () => put.mockRestore());
+  const t = await setup();
+  t.offer("full-00001", 6 * 1024 * 1024 + 123);
+  await vi.waitFor(() => expect(t.records.get("out:full-00001")).toMatchObject({ state: "failed", error: "Not enough space on your contact's device" }), { timeout: 30_000 });
+  const { fileId } = (await t.incoming("full-00001"))!;
+  await vi.waitFor(async () => expect((await fileStore.get(fileId))?.wire3?.state).toBe("failed"));
+  const error = (await fileStore.get(fileId))!.wire3!.error!;
+  // Named by the error, not by its words: each storage words its no-room its own way (and Chromium's has none).
+  expect(error).toBe("Could not store the file: QuotaExceededError: This device has no room left to save this");
+  // What the app shows for it: no room here and its next step, the storage's words behind the ⓘ.
+  expect(knownErrorParts(error)).toMatchObject({ title: "No room on this device", next: "Free some space, then ask for it again." });
 }, 60_000);

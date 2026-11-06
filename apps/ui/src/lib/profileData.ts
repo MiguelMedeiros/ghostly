@@ -9,7 +9,7 @@ import { dropBreezDatabasesOf } from "@ghostly/browser/engine/paymentAdapters/pr
 import { activeProfileId, chosenProfileId, listProfiles, namespaceOf, prefixOf, registryKey, settingsKeyFor, unregisterProfile } from "./profiles";
 import { retryUnsaved, unreadUnder } from "./storage";
 import { clearPeek, peekFresh, storeKey as peekStoreKey } from "./profilePeek";
-import { verifyPassword } from "./settings";
+import { lockRetryAt, tryLockPassword, waitMessage } from "./lockAttempts";
 import { pushPlatform } from "./wakePush";
 import { linkedFilesDatabase } from "./apps/webFiles";
 
@@ -70,6 +70,33 @@ function drop(name: string): Promise<void> {
     r.onsuccess = () => resolve();
     r.onerror = () => reject(r.error);
     r.onblocked = () => reject(new Error("This profile is open in another window. Close it, then try again."));
+  });
+}
+
+/**
+ * `drop`, only if no other connection holds the database. A blocked delete is not withdrawn by giving up on it: it stays
+ * queued and deletes the database once the holder closes. So the delete is asked from inside a version change, which
+ * runs only when every other connection has closed; one that was blocked is refused when it finally runs.
+ */
+async function dropUnheld(name: string): Promise<void> {
+  const current = await request(indexedDB.open(name));
+  const version = current.version;
+  current.close();
+  return new Promise((resolve, reject) => {
+    let blocked = false, deleted: Promise<void> | null = null;
+    const r = indexedDB.open(name, version + 1);
+    r.onblocked = () => { blocked = true; reject(new Error("This profile is open in another window. Close it, then try again.")); };
+    r.onupgradeneeded = () => {
+      // Queued behind this version change, the delete runs as soon as it is refused, before any other connection opens.
+      if (!blocked) deleted = drop(name);
+      r.transaction!.abort();
+    };
+    r.onerror = (event) => {
+      event.preventDefault();
+      if (deleted) deleted.then(resolve, reject);
+      else if (!blocked) reject(r.error);
+    };
+    r.onsuccess = () => { r.result.close(); reject(new Error("Could not delete this profile's data")); };
   });
 }
 
@@ -217,12 +244,18 @@ async function storedAvatar(dbName: string): Promise<string | undefined> {
 
 /**
  * Another profile's data is only read or removed from here with its lock password, when it has a lock:
- * being able to open one profile must not open the others.
+ * being able to open one profile must not open the others. Wrong passwords are paced as on that profile's lock screen.
  */
 export async function assertUnlocked(id: string, password?: string): Promise<void> {
   if (id === activeProfileId()) return;
   const hash = profileLock(id);
-  if (hash && !(password && (await verifyPassword(password, hash)))) throw new Error("Wrong lock password for that profile");
+  if (!hash) return;
+  const waiting = lockRetryAt(id);
+  if (waiting) throw new Error(waitMessage(waiting));
+  if (!password) throw new Error("Wrong lock password for that profile");
+  const tried = await tryLockPassword(id, password, hash);
+  if (tried.waited) throw new Error(waitMessage(tried.retryAt!));
+  if (!tried.ok) throw new Error("Wrong lock password for that profile");
 }
 
 /** Another window runs that profile: it is online itself. */
@@ -258,7 +291,7 @@ export async function deleteProfile(id: string, password?: string): Promise<void
   const own = await walletStorage(dbName);
   // The forks its device record lists (WISP 06 § Installing the staged state): read before the record goes.
   const forks = (await readDeviceRecord(dbName).catch(() => null))?.forks ?? [];
-  if (await databaseExists(dbName)) await drop(dbName);
+  if (await databaseExists(dbName)) await dropUnheld(dbName);
   // The folders and files its apps were given (linked files: handles, never copies).
   if (await databaseExists(linkedFilesDatabase(dbName))) await drop(linkedFilesDatabase(dbName)).catch(() => {});
   await dropFileSpace(dbName).catch(() => {});

@@ -290,10 +290,130 @@ describe("with the apps flag on", () => {
       "Ghostly downloads the app from raw.githubusercontent.com, which learns your IP address and when. The app has no internet access, but its publisher may still learn your IP address and when you open it.");
     expect(within(screenEl).queryByTestId("app-webkit-line")).not.toBeInTheDocument();
     await user.click(within(screenEl).getByRole("button", { name: "Install and open" }));
-    expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: ["chat"] }]);
+    expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: ["chat"], asks: ["chat"] }]);
     // Installing from a card opens it in that chat.
     await waitFor(() => expect(opener).toHaveBeenCalledWith(REF, "link-1", { runAnyway: false }));
     expect(fetches).toEqual([]);
+  });
+
+  it("while Install and open runs, the screen's Cancel, Escape and its backdrop do not close it: no Cancel the app opens after all", async () => {
+    let finish: () => void = () => {};
+    fakeEngine.on("appList", () => []).on("appPreview", () => preview())
+      .on("appInstall", () => new Promise<InstalledAppView>((resolve) => { finish = () => resolve(installed()); }));
+    const opener = vi.fn(async () => {});
+    setAppOpener(opener);
+    const { user } = renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
+    act(() => fakeEngine.update({ links: [ana(true)] }));
+    await user.click(await screen.findByTestId("app-card-install"));
+    const screenEl = await screen.findByTestId("app-install");
+    await user.click(await within(screenEl).findByRole("button", { name: "Install and open" }));
+    expect(within(screenEl).getByTestId("app-install-confirm")).toHaveAttribute("aria-busy", "true");
+    const cancel = within(screenEl).getByRole("button", { name: "Cancel" });
+    expect(cancel).toBeDisabled();
+    await user.click(cancel);
+    await user.keyboard("{Escape}");
+    await user.pointer({ keys: "[MouseLeft]", target: screenEl.parentElement! });
+    expect(screen.getByTestId("app-install")).toBeInTheDocument();
+    await act(async () => finish());
+    // It installs and opens as it said it would, and the screen closes.
+    await waitFor(() => expect(opener).toHaveBeenCalledWith(REF, "link-1", { runAnyway: false }));
+    await waitFor(() => expect(screen.queryByTestId("app-install")).not.toBeInTheDocument());
+  });
+
+  it("while Uninstall runs, its question's Cancel, Escape and backdrop do not take it back to an app that is about to go", async () => {
+    let finish: () => void = () => {};
+    fakeEngine.on("appList", () => []).on("appUninstall", () => new Promise<void>((resolve) => { finish = resolve; }));
+    const onClose = vi.fn(), onUninstalled = vi.fn();
+    const { user } = renderApp(<InstalledAppDialog app={installed()} onClose={onClose} onOpen={() => {}} onUninstalled={onUninstalled} />);
+    await user.click(await screen.findByTestId("app-uninstall-open"));
+    const question = screen.getByTestId("app-uninstall");
+    await user.click(within(question).getByTestId("app-uninstall-confirm"));
+    expect(within(question).getByTestId("app-uninstall-confirm")).toHaveAttribute("aria-busy", "true");
+    const cancel = within(question).getByRole("button", { name: "Cancel" });
+    expect(cancel).toBeDisabled();
+    await user.click(cancel);
+    await user.keyboard("{Escape}");
+    await user.pointer({ keys: "[MouseLeft]", target: question.parentElement! });
+    expect(screen.getByTestId("app-uninstall")).toBeInTheDocument();
+    expect(screen.queryByTestId("app-details")).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => finish());
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(onUninstalled).toHaveBeenCalledTimes(1);
+  });
+
+  it("Escape on the Uninstall question does what its Cancel does: back to the app's screen, on Uninstall", async () => {
+    const onClose = vi.fn();
+    const { user } = renderApp(<InstalledAppDialog app={installed()} onClose={onClose} onOpen={() => {}} />);
+    await user.click(await screen.findByTestId("app-uninstall-open"));
+    expect(screen.getByTestId("app-uninstall")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("app-uninstall")).not.toBeInTheDocument();
+    expect(screen.getByTestId("app-uninstall-open")).toHaveFocus();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(fakeEngine.callsTo("appUninstall")).toEqual([]);
+  });
+
+  it("while a waiting Update runs, Escape and the backdrop do not close the app's screen", async () => {
+    let finish: () => void = () => {};
+    fakeEngine.on("appList", () => []).on("appUpdateAccept", () => new Promise<InstalledAppView>((resolve) => { finish = () => resolve(installed()); }));
+    const onClose = vi.fn();
+    const { user } = renderApp(<InstalledAppDialog onClose={onClose} onOpen={() => {}}
+      app={installed({ pending: { sequence: 8, version: "1.3.0", added: ["name"] } })} />);
+    await user.click(await screen.findByTestId("app-update-accept"));
+    const details = screen.getByTestId("app-details");
+    await user.keyboard("{Escape}");
+    await user.pointer({ keys: "[MouseLeft]", target: details.parentElement! });
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => finish());
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("while Add store runs, the store's Cancel, Escape and the backdrop do not close Add: no Cancel the store is added after all", async () => {
+    const LINK = "https://raw.githubusercontent.com/ana/store/HEAD/ghostly-store.json";
+    let finish: () => void = () => {};
+    fakeEngine.on("appStorePreview", ({ url }) => ({ url, key: "k", name: "Ana's store", kind: "curated", sequence: 1, apps: 1, fingerprint: "abcd efgh", expires: 9e9, expired: false }))
+      .on("appStoreAdd", () => new Promise<AppStoreSummary>((resolve) => { finish = () => resolve({} as AppStoreSummary); }));
+    const onClose = vi.fn(), onStoreAdded = vi.fn();
+    const { user } = renderApp(<AddAppDialog onClose={onClose} onStoreAdded={onStoreAdded} />);
+    await user.type(screen.getByTestId("apps-add-url"), LINK);
+    await user.click(screen.getByTestId("apps-add-check"));
+    const store = await screen.findByTestId("apps-add-store");
+    await user.click(within(store).getByTestId("apps-add-store-confirm"));
+    const cancel = within(store).getByRole("button", { name: "Cancel" });
+    expect(cancel).toBeDisabled();
+    await user.click(cancel);
+    await user.keyboard("{Escape}");
+    await user.pointer({ keys: "[MouseLeft]", target: screen.getByTestId("apps-add-dialog").parentElement! });
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => finish());
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(onStoreAdded).toHaveBeenCalledTimes(1);
+  });
+
+  it("while Add store runs, the link can be neither edited nor checked again: the question and its Cancel stay as they were", async () => {
+    const LINK = "https://raw.githubusercontent.com/ana/store/HEAD/ghostly-store.json";
+    let finish: () => void = () => {};
+    fakeEngine.on("appStorePreview", ({ url }) => ({ url, key: "k", name: "Ana's store", kind: "curated", sequence: 1, apps: 1, fingerprint: "abcd efgh", expires: 9e9, expired: false }))
+      .on("appStoreAdd", () => new Promise<AppStoreSummary>((resolve) => { finish = () => resolve({} as AppStoreSummary); }));
+    const onClose = vi.fn(), onStoreAdded = vi.fn();
+    const { user } = renderApp(<AddAppDialog onClose={onClose} onStoreAdded={onStoreAdded} />);
+    const field = screen.getByTestId("apps-add-url");
+    await user.type(field, LINK);
+    await user.click(screen.getByTestId("apps-add-check"));
+    await user.click(within(await screen.findByTestId("apps-add-store")).getByTestId("apps-add-store-confirm"));
+    // An edit dropped the question and the busy state with it: Cancel and Escape then closed Add while the store was added.
+    await user.type(field, "x");
+    await user.type(field, "{Enter}");
+    expect(field).toHaveValue(LINK);
+    expect(fakeEngine.callsTo("appStorePreview")).toHaveLength(1);
+    expect(within(screen.getByTestId("apps-add-store")).getByRole("button", { name: "Cancel" })).toBeDisabled();
+    await user.keyboard("{Escape}");
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => finish());
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(onStoreAdded).toHaveBeenCalledTimes(1);
   });
 
   it("names a contact with no name as the chat does, not Anonymous, on the card and its install screen", async () => {
@@ -379,6 +499,19 @@ describe("with the apps flag on", () => {
     expect(fakeEngine.callsTo("appUpdateAccept")).toEqual([{ ref: REF }]);
   });
 
+  it("keeps what an installed app may do now on its screen while an update that asks for more waits", async () => {
+    fakeEngine.on("appList", () => []);
+    renderApp(<InstalledAppDialog onClose={() => {}} onOpen={() => {}}
+      app={installed({ permissions: ["chat", "name"], pending: { sequence: 8, version: "1.3.0", added: ["internet"] } })} />);
+    const update = await screen.findByTestId("app-update");
+    const lists = screen.getAllByTestId("app-permissions");
+    expect(lists).toHaveLength(2);
+    const now = lists.find((list) => !update.contains(list))!;
+    expect(now).toHaveTextContent("It can");
+    expect([...now.querySelectorAll("[data-permission]")].map((li) => li.getAttribute("data-permission"))).toEqual(["storage", "chat", "name"]);
+    expect([...within(update).getByTestId("app-permissions").querySelectorAll("[data-permission]")].map((li) => li.getAttribute("data-permission"))).toEqual(["internet"]);
+  });
+
   it("the install screen of an update lists only the added permission", async () => {
     fakeEngine.on("appPreview", () => preview({ install: "update", asks: ["name"] }));
     renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
@@ -387,6 +520,102 @@ describe("with the apps flag on", () => {
     expect(permissions).toHaveTextContent("See your name in this chat");
     expect(permissions).not.toHaveTextContent("Keep its own data");
     expect(screen.getByTestId("app-install-confirm")).toHaveTextContent("Update");
+  });
+
+  it("Install of a screen whose app asks for more since it opened shows what it asks now, and grants only that", async () => {
+    const all = ["chat", "name"] as AppPreview["asks"];
+    const manifest = { ...preview().manifest, permissions: all };
+    let shown = preview({ install: "update", asks: [], manifest });
+    fakeEngine.on("appPreview", () => shown).on("appInstall", (params) => {
+      const { asks } = params as { asks: string[] };
+      if (asks.length < all.length) throw new Error("permissions-changed: This install now asks for chat, name; look at it again");
+      return installed({ permissions: all });
+    });
+    const onInstalled = vi.fn();
+    const { user } = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} onInstalled={onInstalled} />);
+    expect(await screen.findByTestId("app-install-confirm")).toHaveTextContent("Update");
+    expect(screen.queryByTestId("app-permissions")).not.toBeInTheDocument();
+    // Uninstalled meanwhile: the screen read again is a new install's, every permission listed.
+    shown = preview({ install: "new", asks: all, manifest });
+    await user.click(screen.getByTestId("app-install-confirm"));
+    expect(await screen.findByTestId("app-install-error")).toHaveTextContent("What this app asks for changed. Look at it again before you install it.");
+    expect(onInstalled).not.toHaveBeenCalled();
+    expect(screen.getByTestId("app-permissions")).toHaveTextContent("See your name in this chat");
+    expect(screen.getByTestId("app-install-confirm")).toHaveTextContent("Install");
+    await user.click(screen.getByTestId("app-install-confirm"));
+    await waitFor(() => expect(onInstalled).toHaveBeenCalled());
+    expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: all, asks: [] }, { digest: DIGEST, grant: all, asks: all }]);
+  });
+
+  it("an update refused for what it asks, whose read again fails, says why and takes no Update until Try again reads it", async () => {
+    const all = ["chat", "name"] as AppPreview["asks"];
+    const manifest = { ...preview().manifest, permissions: all };
+    let read: () => AppPreview = () => preview({ install: "update", asks: [], manifest });
+    fakeEngine.on("appPreview", () => read()).on("appInstall", (params) => {
+      const { asks } = params as { asks: string[] };
+      if (asks.length < 1) throw new Error("permissions-changed: This install now asks for name; look at it again");
+      return installed({ permissions: all });
+    });
+    const onInstalled = vi.fn();
+    const { user } = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} onInstalled={onInstalled} />);
+    const confirm = await screen.findByTestId("app-install-confirm");
+    expect(confirm).toHaveTextContent("Update");
+    read = () => { throw new Error("offline: no network"); };
+    await user.click(confirm);
+    expect(await screen.findByTestId("app-install-error")).toHaveTextContent("You are offline.");
+    expect(screen.getByTestId("app-install-error")).not.toHaveTextContent("Look at them again");
+    // The screen still shows what it asked before: another press would be refused the same way.
+    expect(screen.getByTestId("app-install-confirm")).toBeDisabled();
+    const retry = screen.getByTestId("app-install-retry");
+    expect(retry).toHaveTextContent("Try again");
+    expect(retry).toHaveFocus();
+    await user.click(screen.getByTestId("app-install-confirm"));
+    expect(fakeEngine.callsTo("appInstall")).toHaveLength(1);
+    // Still offline: said again, Update still off.
+    await user.click(retry);
+    await waitFor(() => expect(fakeEngine.callsTo("appPreview")).toHaveLength(3));
+    expect(await screen.findByTestId("app-install-error")).toHaveTextContent("You are offline.");
+    expect(screen.getByTestId("app-install-confirm")).toBeDisabled();
+    // Back online: what it asks now, and Update grants that.
+    read = () => preview({ install: "update", asks: ["name"], manifest });
+    await user.click(screen.getByTestId("app-install-retry"));
+    expect(await screen.findByTestId("app-permissions")).toHaveTextContent("See your name in this chat");
+    expect(screen.getByTestId("app-install-error")).toHaveTextContent("This update now adds other permissions. Look at them again before you update.");
+    expect(screen.queryByTestId("app-install-retry")).not.toBeInTheDocument();
+    expect(screen.getByTestId("app-install-confirm")).toBeEnabled();
+    expect(screen.getByTestId("app-install-confirm")).toHaveFocus();
+    await user.click(screen.getByTestId("app-install-confirm"));
+    await waitFor(() => expect(onInstalled).toHaveBeenCalled());
+    expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: all, asks: [] }, { digest: DIGEST, grant: all, asks: ["name"] }]);
+  });
+
+  it("a new install refused for what it asks, whose read again fails, says the read's error, and Try again shows the install's words", async () => {
+    const all = ["chat", "name"] as AppPreview["asks"];
+    const manifest = { ...preview().manifest, permissions: all };
+    let read: () => AppPreview = () => preview({ install: "new", asks: ["chat"], manifest });
+    fakeEngine.on("appPreview", () => read()).on("appInstall", (params) => {
+      const { asks } = params as { asks: string[] };
+      if (asks.length < all.length) throw new Error("permissions-changed: This install now asks for chat, name; look at it again");
+      return installed({ permissions: all });
+    });
+    const onInstalled = vi.fn();
+    const { user } = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} onInstalled={onInstalled} />);
+    const confirm = await screen.findByTestId("app-install-confirm");
+    expect(confirm).toHaveTextContent("Install");
+    read = () => { throw new Error("network: fetch failed"); };
+    await user.click(confirm);
+    expect(await screen.findByTestId("app-install-error")).toHaveTextContent("Could not reach the host.");
+    expect(screen.getByTestId("app-install-error")).not.toHaveTextContent("update");
+    expect(screen.getByTestId("app-install-confirm")).toBeDisabled();
+    read = () => preview({ install: "new", asks: all, manifest });
+    await user.click(screen.getByTestId("app-install-retry"));
+    expect(await screen.findByTestId("app-install-error")).toHaveTextContent("What this app asks for changed. Look at it again before you install it.");
+    expect(screen.getByTestId("app-permissions")).toHaveTextContent("See your name in this chat");
+    expect(screen.getByTestId("app-install-confirm")).toHaveTextContent("Install");
+    expect(screen.getByTestId("app-install-confirm")).toBeEnabled();
+    await user.click(screen.getByTestId("app-install-confirm"));
+    await waitFor(() => expect(onInstalled).toHaveBeenCalled());
+    expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: all, asks: ["chat"] }, { digest: DIGEST, grant: all, asks: all }]);
   });
 
   it("shows the internet permission with what it means behind ⓘ, and an update that adds it asks again", async () => {
@@ -692,6 +921,28 @@ describe("with the apps flag on", () => {
     expect(screen.queryByTestId("installed-app-open")).not.toBeInTheDocument();
   });
 
+  it("Open on an app whose files here are damaged says so, and the page then offers Get its files", async () => {
+    let run: InstalledAppView["run"] = { status: "ok" };
+    fakeEngine.on("appList", () => [installed({ view: "full", run })]).on("appStoreList", () => []).on("appCheckUpdates", () => [])
+      .on("appFetchFiles", () => ({ status: "ok" as const }));
+    // The engine dropped the files it found damaged and told every page to read the list again.
+    setAppOpener(vi.fn(async () => {
+      run = { status: "needs-files" };
+      fakeEngine.emit({ kind: "apps-checked" });
+      throw new Error("damaged: This app's stored files do not match what was installed");
+    }));
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    await user.click(await screen.findByTestId("installed-app-open"));
+    expect(await screen.findByText("Its files on this device are damaged. Get its files again.")).toBeInTheDocument();
+    expect(screen.queryByText("Ghostly won't install it")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("installed-app-hint")).toHaveTextContent("Needs its files");
+    await user.click(screen.getByRole("button", { name: detailsOf("Chess") }));
+    run = { status: "ok" };
+    await user.click(await screen.findByTestId("app-fetch-files"));
+    expect(fakeEngine.callsTo("appFetchFiles")).toHaveLength(1);
+    expect(await screen.findByTestId("app-open")).toBeInTheDocument();
+  });
+
   it("lists installed apps and stores; uninstall offers an export first", async () => {
     fakeEngine.on("appList", () => [installed({ unknownPublisher: false, listedBy: [{ key: "s", name: "Ghostly", kind: "curated" }] })])
       .on("appStoreList", () => [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
@@ -861,6 +1112,30 @@ describe("with the apps flag on", () => {
     expect(within(details).getByText("Chess for two.")).toHaveAttribute("dir", "auto");
   });
 
+  // Aligned to their own start, an English title and tagline sat at the far left of their lines in Arabic, away from
+  // the icon on the right; the row with the version went left to right after its title.
+  it("lines up an app's title and tagline with the page, beside its icon, whatever their own direction", async () => {
+    // Built in: its row's line is the tagline alone, not after "Unknown publisher ·".
+    fakeEngine.on("appList", () => [installed({ builtIn: true })])
+      .on("appStoreList", () => [
+        { key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
+          name: "Ghostly", kind: "curated", sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1,
+          apps: [{ ref: `${KEY}/other`, sequence: 1, digest: DIGEST, urls: [URL_], title: "Snake", tagline: "Eat, grow." }], removed: [] },
+      ]).on("appCheckUpdates", () => []);
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    const row = await screen.findByTestId("installed-app");
+    const title = within(row).getByText("Chess");
+    expect(title).toHaveAttribute("dir", "auto");
+    expect(title.parentElement).not.toHaveAttribute("dir");
+    expect(within(row).getByText("Play chess with a contact")).toHaveClass("text-match-parent");
+    expect(screen.getByText("Snake")).toHaveClass("text-match-parent");
+    expect(screen.getByText("Eat, grow.")).toHaveClass("text-match-parent");
+    await user.click(within(row).getByRole("button", { name: detailsOf("Chess") }));
+    const details = screen.getByTestId("app-details");
+    expect(within(details).getByRole("heading", { name: "Chess" })).toHaveClass("text-match-parent");
+    expect(within(details).getByText("Play chess with a contact")).toHaveClass("text-match-parent");
+  });
+
   it("breaks a publisher's or a store's word with no space anywhere, so on a phone it pushes no screen sideways (nor cuts it off in Arabic)", async () => {
     // 80 characters, a tagline's limit, with nowhere to break: a link, a German compound, a name in Latin letters.
     const long = `https://example.com/${"a".repeat(60)}`;
@@ -1007,10 +1282,14 @@ describe("with the apps flag on", () => {
     expect(rows()).toHaveLength(50);
   });
 
-  it("gives the card's title its own direction", async () => {
+  // The row with the version goes the page's way, from the icon: in its title's direction, an English title sat at the
+  // far left of an Arabic card.
+  it("gives the card's title its own direction, and its row the page's", async () => {
     fakeEngine.on("appList", () => []);
     renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
-    expect(await screen.findByTestId("app-card-title")).toHaveAttribute("dir", "auto");
+    const row = await screen.findByTestId("app-card-title");
+    expect(row).not.toHaveAttribute("dir");
+    expect(within(row).getByText(CARD.title)).toHaveAttribute("dir", "auto");
   });
 
   // A title may have 40 characters: cut as one text with the version, a phone showed no version at all.
@@ -1077,7 +1356,7 @@ describe("an app that comes with Ghostly (WISP 1200 § Built-in apps)", () => {
     expect(fakeEngine.callsTo("appInstall")).toEqual([]);
 
     await user.click(within(screenOf).getByTestId("app-install-confirm"));
-    await waitFor(() => expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: ["chat", "name"] }]));
+    await waitFor(() => expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: ["chat", "name"], asks: ["chat", "name"] }]));
     // Installed: its own row now, and (an app that runs in a chat) the question of which chat.
     expect(await screen.findByTestId("installed-app")).toHaveTextContent("Chess");
     expect(screen.queryByTestId("built-in-app")).not.toBeInTheDocument();

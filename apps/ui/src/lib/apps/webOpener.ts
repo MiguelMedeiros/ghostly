@@ -11,8 +11,8 @@
  */
 import { runnerFor, startApp, type AppStopReason, type AppView, type RunningApp } from "./broker";
 import { appSlot, chatApp, setChatApp, updateChatApp } from "./running";
-import { runnerAvailable } from "./runnerCheck";
-import { registerRunningApp, type AppOpener, type AppTakedown } from "./open";
+import { runnerPolicy } from "./runnerCheck";
+import { LOCKED, lockedSince, registerRunningApp, type AppOpener, type AppTakedown } from "./open";
 import type { AppsPlatform, LinkedFilesHost } from "../platform";
 
 export interface WebOpenerOptions {
@@ -32,11 +32,13 @@ export interface WebOpenerOptions {
 
 /**
  * An app the person did not close (its frame navigated, broke the protocol, or never started) says why in the console,
- * and its place says it stopped (WISP 1200 § the runner, step 7): it is not told apart from Close otherwise.
+ * and its place says it stopped (WISP 1200 § the runner, step 7): it is not told apart from Close otherwise. One that
+ * never started while the person is offline did not fail: its runner page never loaded.
  */
 function warnStop(title: string, reason: AppStopReason): AppTakedown | null {
   if (reason === "closed" || reason === "stopped") return null;
   console.warn(`[apps] ${title} stopped: ${reason}`);
+  if (reason === "timeout" && navigator.onLine === false) return { why: "offline" };
   return reason === "unresponsive" ? { why: "unresponsive" } : { why: "failed" };
 }
 
@@ -47,11 +49,18 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     const engine = apps();
     if (!engine) throw new Error("Apps cannot run in this app");
     const host: AppsPlatform = linkedFiles ? { ...engine, linkedFiles } : engine;
+    // The profile locking while it opens (its files downloading, the runner checked) stops nothing yet: it never starts.
+    const locked = lockedSince();
     // A version a store removed runs only with "Run anyway"; a revoked one never (the engine checks both again).
     const entry = await host.entry(ref, options?.runAnyway === true);
-    // The runner from what the person granted; its server must send that runner's policy.
+    if (locked()) throw new Error(LOCKED);
+    // The runner from what the person granted; its server must send that runner's policy. The runner pages are never
+    // cached (sw/policy.ts): offline, or when it could not be asked, it would not load, and the person is told so.
     const internet = entry.permissions.includes("internet");
-    if (!(await runnerAvailable(runnerFor(host, entry), fetch, internet))) throw new Error("This server does not send the policy apps run under");
+    const policy = navigator.onLine === false ? null : await runnerPolicy(runnerFor(host, entry), fetch, internet);
+    if (policy === null) throw new Error("offline: the runner page could not be reached");
+    if (!policy) throw new Error("runner: This server does not send the policy apps run under");
+    if (locked()) throw new Error(LOCKED);
 
     const launch = { ...entry, chat: linkId ? { linkId, name: nameIn(linkId) } : null };
     const view: AppView = {
@@ -107,7 +116,7 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     // and the notch (index.css), or Close sits under them and cannot be pressed (the installed web app on an iPhone).
     bar.className = "alone-bar flex items-center gap-2 border-b border-border px-3 py-2 text-sm";
     const title = document.createElement("span");
-    title.className = "flex-1 truncate font-medium";
+    title.className = "text-match-parent flex-1 truncate font-medium";
     title.setAttribute("data-testid", "mini-app-title");
     title.dir = "auto";
     title.textContent = entry.title;

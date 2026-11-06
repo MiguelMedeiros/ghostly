@@ -834,8 +834,15 @@ const names = new Map<string, { raw: string; label?: string; nick?: string }>();
  */
 export function chatNamesForPeer(peerPubKeyB64: string): { label?: string; nick?: string } | undefined {
   const chat = firstOf(chatKeys().filter((c) => c.peer === peerPubKeyB64));
-  const raw = chat && readKey(chat.key);
-  if (!chat || !raw) return undefined;
+  const found = chat && namesOf(chat);
+  forgetGoneNames();
+  return found;
+}
+
+/** A chat's names, its stored copy parsed again only when it changed. Undefined when it is not stored or unreadable. */
+function namesOf(chat: ChatKeys): { label?: string; nick?: string } | undefined {
+  const raw = readKey(chat.key);
+  if (!raw) return undefined;
   let known = names.get(chat.key);
   if (known?.raw !== raw) {
     try {
@@ -845,8 +852,32 @@ export function chatNamesForPeer(peerPubKeyB64: string): { label?: string; nick?
       return undefined;
     }
   }
-  for (const key of names.keys()) if (!contacts.has(key)) names.delete(key);
   return { label: known.label, nick: known.nick };
+}
+
+function forgetGoneNames(): void {
+  for (const key of names.keys()) if (!contacts.has(key)) names.delete(key);
+}
+
+/**
+ * Per contact's key: the chat `sessionIdForPeer` finds, with the names `chatNamesForPeer` gives, from one look through
+ * the stored chats. Each look walks every key of the page's storage, so a list of every contact (the push worker's
+ * table, built again at each message that comes) asking one contact at a time walked it once or twice per chat.
+ */
+export function chatsByPeer(): Map<string, { id: string; label?: string; nick?: string }> {
+  const byPeer = new Map<string, ChatKeys[]>();
+  for (const chat of chatKeys()) {
+    const same = byPeer.get(chat.peer);
+    if (same) same.push(chat);
+    else byPeer.set(chat.peer, [chat]);
+  }
+  const found = new Map<string, { id: string; label?: string; nick?: string }>();
+  for (const [peer, matches] of byPeer) {
+    const chat = firstOf(matches);
+    if (chat) found.set(peer, { id: chat.id, ...namesOf(chat) });
+  }
+  forgetGoneNames();
+  return found;
 }
 
 /** Per storage prefix, per chat's key: the stored text and what it counts, `after[i]` the unread from message `i` on. */

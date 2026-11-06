@@ -200,7 +200,8 @@ describe("GroupEdits on its own", () => {
     expect(await edits.receive("g1", bob, { id: bobs(0).id, e: 3, ts: 30, m: "v3" })).toBe("applied");
     expect(await edits.receive("g1", bob, { id: bobs(0).id, e: 2, ts: 20, m: "v2" })).toBe("stale");
     expect(messages).toHaveLength(1);
-    expect(messages[0]).toMatchObject({ text: "v3", edit: { seq: 3, history: [{ text: "v0" }] } });
+    // Dated by bob's clock, and kept with when it came here.
+    expect(messages[0]).toMatchObject({ text: "v3", edit: { seq: 3, at: 30, heardAt: 1_000_000, history: [{ text: "v0" }] } });
   });
 
   it("drops an edit of someone else's message, from someone no longer in the group, or of my own", async () => {

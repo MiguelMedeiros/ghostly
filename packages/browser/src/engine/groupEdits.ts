@@ -350,7 +350,7 @@ export class GroupEdits {
     const updated = await this.host.patch(chat, message.id, current => {
       if (!takes(current) || (current.edit?.seq ?? 0) >= edit.e) return null;
       wasMentioned = !!current.mentioned;
-      const next = withEdit(current, { seq: edit.e, at: heardTime(edit.ts), text: edit.m, card: edit.sc });
+      const next = withEdit(current, { seq: edit.e, at: heardTime(edit.ts), heardAt: this.now(), text: edit.m, card: edit.sc });
       // Who it names now shows as such; an edit that names me is never a new mention (no sound, no @ in the list).
       return { text: next.text, edit: next.edit, card: next.card, mentions: edit.k?.length ? edit.k : undefined, mentioned: mentionsMember(edit.k, me) ? true : undefined };
     });

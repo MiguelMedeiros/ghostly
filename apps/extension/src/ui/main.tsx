@@ -10,7 +10,8 @@ import { extensionHost } from "../host";
 import { loadSettings } from "../../../ui/src/lib/settings";
 import { applyDocumentLanguage } from "../../../ui/src/lib/documentLanguage";
 import { loadLocale } from "../../../ui/src/locales";
-import { databaseFor, followEngineRestart, followProfileSwitch, openPageProfile, startAsProfileInUse } from "../profile";
+import { clearInProgress } from "../../../ui/src/lib/clearData";
+import { databaseFor, finishBeforeSwitching, followEngineRestart, followProfileSwitch, openPageProfile, startAsProfileInUse } from "../profile";
 
 // Ghostly Browser renders the Desktop UI as is. What differs is below it: the
 // platform modules come from @ghostly/browser, on top of the extension host.
@@ -21,7 +22,9 @@ const profile = openPageProfile();
 setStorageProfile(profile);
 setDatabaseName(databaseFor(profile));
 // Another tab switched: the peer follows it, and this page starts again as that profile, where it was left.
+// A "Clear all data" this page runs goes on to its end first: its profile's data would be left half cleared.
 followProfileSwitch(profile, startAsProfileInUse);
+finishBeforeSwitching(clearInProgress);
 // Another tab started the peer again (Clear all data, the device gate): this page starts again on the new one.
 followEngineRestart(() => location.reload());
 

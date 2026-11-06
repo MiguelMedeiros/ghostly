@@ -139,11 +139,12 @@ test("a device that is not the active one never rings: quiet Active on <device> 
   await worker.clear();
   await worker.deliver(JSON.stringify({ wake: 1, k: DEVICE_TOKEN, d: 1 }));
   await expect.poll(async () => (await worker.shown()).map((n) => n.body)).toEqual(["MacBook wants to move this profile here. Open Ghostly."]);
-  // The device flag on a token no device of this one holds proves nothing: nothing new shows.
+  // The device flag on a token no device of this one holds proves nothing: the app's name alone, quietly (a push that
+  // shows nothing counts against the subscription).
   await worker.clear();
   await worker.deliver(JSON.stringify({ wake: 1, k: UNKNOWN_TOKEN, d: 1 }));
-  await worker.page.waitForTimeout(1_500);
-  expect(await worker.shown()).toEqual([]);
+  await expect.poll(() => worker.shown()).toEqual([{ title: "Ghostly", body: "", tag: "quiet:", silent: true, requireInteraction: false, path: "/" }]);
+  await worker.clear();
 
   // Active again: a wake-up from the MacBook says it wants to take over. The same token again within 30 seconds would
   // only show the notice on screen again, silently (the worker's own limit, as for a call).

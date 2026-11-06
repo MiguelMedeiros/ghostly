@@ -1,12 +1,12 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { APP_BUNDLE_MAGIC, canonicalJsonBytes, toBase64Url, utf8Encode, type SignedAppRevocation } from "@ghostly/core";
-import { fileBytes } from "../src/shared/fileBytes";
+import { APP_BUNDLE_MAGIC, canonicalJsonBytes, toBase64Url, utf8Encode, type AppPermission, type SignedAppRevocation } from "@ghostly/core";
+import { fileBytes, resetFileBytes } from "../src/shared/fileBytes";
 import { STORES, openDb, wrap } from "../src/shared/idb";
 import {
   BUNDLE_URL, FakeNet, NOW_MS, PINNED_URL, PUBLISHER, REPO, STORE_KEY, STORE_URL, appRows, apps, bundle, bundleIds, emptyProfile, keyOf,
-  listing, revocation, signer, storeFiles,
+  listing, revocation, signer, storageRows, storeFiles,
 } from "./appsSupport";
 // covers: apps.engine.installed
 
@@ -236,6 +236,57 @@ describe("updates", () => {
     expect(await store.acceptUpdate({ ref: v1.ref })).toMatchObject({ sequence: 2, permissions: ["internet", "chat"] });
   });
 
+  it("Install of a screen opened before the app was uninstalled grants nothing it did not show, and the screen read again asks for all", async () => {
+    const all: AppPermission[] = ["chat", "internet", "files", "name"];
+    const { store, v1 } = await installed({ permissions: all });
+    const v2 = await bundle({ sequence: 2, permissions: all });
+    net.put(PINNED_URL, v2.bytes);
+    // A card's screen: an update that asks nothing.
+    const screen = await store.preview({ url: PINNED_URL });
+    expect(screen).toMatchObject({ install: "update", asks: [] });
+    // Uninstalled (another tab, the Apps page) before Install is pressed: the permissions went with it.
+    await store.uninstall({ ref: v1.ref });
+    await expect(store.install({ digest: v2.digest, grant: all, asks: screen.asks })).rejects.toThrow(/^permissions-changed/);
+    await expect(store.install({ digest: v2.digest, grant: all }), "the screen the engine showed last asked nothing either").rejects.toThrow(/^permissions-changed/);
+    expect(await store.list()).toEqual([]);
+    expect(await bundleIds()).toEqual([]);
+    const again = await store.preview({ url: PINNED_URL });
+    expect(again).toMatchObject({ install: "new", asks: all });
+    expect(await store.install({ digest: v2.digest, grant: all, asks: again.asks })).toMatchObject({ sequence: 2, permissions: all });
+  });
+
+  it("Install of a screen opened before the check dropped a permission does not grant it back unshown", async () => {
+    const { store, v1 } = await installed({ permissions: ["chat", "internet"] });
+    const v3 = await bundle({ sequence: 3, permissions: ["chat", "internet"] });
+    const pinned3 = `https://cdn.jsdelivr.net/gh/ana/chess@${"c".repeat(40)}/app.ghostlyapp`;
+    net.put(pinned3, v3.bytes);
+    const screen = await store.preview({ url: pinned3 });
+    expect(screen).toMatchObject({ install: "update", asks: [] });
+    // Meanwhile the check installs 2, which drops internet, by itself.
+    const v2 = await bundle({ sequence: 2, permissions: ["chat"] });
+    net.put(PINNED_URL, v2.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v2, [PINNED_URL])] }));
+    await store.addStore({ url: STORE_URL });
+    expect((await store.checkUpdates())[0]!.outcome).toBe("updated");
+    expect((await store.list())[0]).toMatchObject({ sequence: 2, permissions: ["chat"] });
+    // A second screen of 3 shows internet; the first one's Install still grants only what that one showed.
+    const again = await store.preview({ url: pinned3 });
+    expect(again).toMatchObject({ install: "update", asks: ["internet"] });
+    await expect(store.install({ digest: v3.digest, grant: ["chat", "internet"], asks: screen.asks })).rejects.toThrow(/^permissions-changed/);
+    expect((await store.list())[0]).toMatchObject({ ref: v1.ref, sequence: 2, permissions: ["chat"] });
+    expect(await bundleIds()).toEqual([`app-${v2.digest}`]);
+    expect(await store.install({ digest: v3.digest, grant: ["chat", "internet"], asks: again.asks })).toMatchObject({ sequence: 3, permissions: ["chat", "internet"] });
+  });
+
+  it("Install of an update that asks nothing new is not refused, and the shown list may be more than it adds now", async () => {
+    const { store, v1 } = await installed({ permissions: ["chat"] });
+    const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"] });
+    net.put(PINNED_URL, v2.bytes);
+    const screen = await store.preview({ url: PINNED_URL });
+    expect(screen).toMatchObject({ install: "update", asks: ["name"] });
+    expect(await store.install({ digest: v2.digest, grant: ["chat", "name"], asks: screen.asks })).toMatchObject({ ref: v1.ref, sequence: 2, permissions: ["chat", "name"] });
+  });
+
   it("the install screen says equivocation for a bundle that clashes with the update waiting, as Install answers", async () => {
     const { store, v1 } = await installed();
     const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"] });
@@ -421,6 +472,41 @@ describe("updates", () => {
     net.put(BUNDLE_URL, v3.bytes);
     expect((await store.checkUpdates())[0]!.outcome).toBe("updated");
     expect((await store.list())[0]).toMatchObject({ sequence: 3, digest: v3.digest });
+  });
+
+  it("another bundle under the installed number at the app's source is read whole once: once marked, each check costs a peek and writes nothing", async () => {
+    let now = NOW_MS;
+    const v1 = await bundle({ sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net, { now: () => now });
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    // Its publisher rebuilt version 1 without raising the number: 5 MiB of files.
+    const twin = await bundle({ sources: [BUNDLE_URL], data: new Uint8Array(5 * 1024 * 1024).fill(7) });
+    net.put(BUNDLE_URL, twin.bytes);
+    const put = IDBObjectStore.prototype.put;
+    const appPuts = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, value: unknown, key?: IDBValidKey) { return put.call(this, value, key); });
+    const check = async () => {
+      net.fetch.mockClear();
+      appPuts.mockClear();
+      expect(await store.checkUpdates()).toEqual([{ ref: v1.ref, outcome: "equivocation", run: { status: "ok" } }]);
+      const reads = net.fetch.mock.calls.filter(([url]) => String(url) === BUNDLE_URL).map(([, init]) => ((init?.headers ?? {}) as Record<string, string>).range ? "peek" : "whole");
+      return { reads, puts: appPuts.mock.contexts.filter((s) => (s as IDBObjectStore).name === STORES.apps).length };
+    };
+    expect(await check(), "found: read whole and checked, then marked").toEqual({ reads: ["peek", "whole"], puts: 1 });
+    const first = now;
+    for (let visit = 1; visit <= 2; visit++) {
+      now += 60_000;
+      expect(await check(), `visit ${visit}: the peek names the digest marked`).toEqual({ reads: ["peek"], puts: 0 });
+    }
+    expect((await store.list())[0]).toMatchObject({ digest: v1.digest, equivocation: { sequence: 1, at: first } });
+    // Yet another bundle under that number: read whole again, and marked.
+    const third = await bundle({ sources: [BUNDLE_URL], entry: "<p>a third version 1" });
+    net.put(BUNDLE_URL, third.bytes);
+    now += 60_000;
+    expect(await check()).toEqual({ reads: ["peek", "whole"], puts: 1 });
+    expect((await store.list())[0]).toMatchObject({ digest: v1.digest, equivocation: { sequence: 1, at: now } });
+    expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
   });
 
   it("a waiting update its publisher revoked, or a store of the person's removed, goes with its files; the next version is looked for", async () => {
@@ -1139,8 +1225,8 @@ describe("a browser that keeps no app files (Safari's Private Browsing)", () => 
 });
 
 describe("a restored profile (installed list, no bundle)", () => {
-  async function restored() {
-    const v1 = await bundle();
+  async function restored(data?: Uint8Array) {
+    const v1 = await bundle({ data });
     net.put(BUNDLE_URL, v1.bytes);
     const store = apps(net);
     await store.preview({ url: BUNDLE_URL });
@@ -1207,6 +1293,158 @@ describe("a restored profile (installed list, no bundle)", () => {
     await (await fileBytes()).remove(`app-${v1.digest}`);
     await store.preview({ url: PINNED_URL });
     expect(await store.install({ digest: v1.digest, grant: ["chat"] })).toMatchObject({ run: { status: "ok" } });
+  });
+
+  // Each case three times, with files of many pieces: a collision of the two writes depends on how their pieces interleave.
+  describe.each([1, 2, 3])("two fetches of its files at once share one write (run %i)", () => {
+    const large = () => restored(new Uint8Array(2_500_000));
+
+    it("Open while the update check fetches them: both get the files", async () => {
+      const { v1, store } = await large();
+      const [entry, check] = await Promise.all([store.entry({ ref: v1.ref }), store.checkUpdates()]);
+      expect(entry.digest).toBe(v1.digest);
+      expect(check[0]!.run).toEqual({ status: "ok" });
+      expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
+    });
+
+    it("Open twice", async () => {
+      const { v1, store } = await large();
+      const entries = await Promise.all([store.entry({ ref: v1.ref }), store.entry({ ref: v1.ref })]);
+      expect(entries.map((e) => e.digest)).toEqual([v1.digest, v1.digest]);
+      expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
+    });
+
+    it("Get its files twice", async () => {
+      const { v1, store } = await large();
+      expect(await Promise.all([store.fetchFiles({ ref: v1.ref }), store.fetchFiles({ ref: v1.ref })])).toEqual([{ status: "ok" }, { status: "ok" }]);
+      expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
+    });
+  });
+});
+
+describe.each([1, 2, 3])("two Installs of one app at once install it (run %i)", () => {
+  it.each([["small", 0], ["2.5 MB", 2_500_000]])("a %s bundle", async (_, size) => {
+    const v1 = await bundle({ data: new Uint8Array(size) });
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    const views = await Promise.all([store.install({ digest: v1.digest, grant: ["chat"] }), store.install({ digest: v1.digest, grant: ["chat"] })]);
+    expect(views.map((v) => v.run)).toEqual([{ status: "ok" }, { status: "ok" }]);
+    expect(await appRows()).toHaveLength(1);
+    expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
+  });
+});
+
+describe("files only partly written back (the page went away while they were written)", () => {
+  const MiB = 1024 * 1024;
+  const big = (n: number) => { const b = new Uint8Array(n); for (let i = 0; i < n; i++) b[i] = (i * 31 + 7) & 255; return b; };
+  /**
+   * An installed 2.5 MB app with a storage row, its file then cut to `kept` bytes as `writeBundle` leaves it when the
+   * page goes away after a few of its MiB appends (the IndexedDB backend loses what was not flushed), and a new engine:
+   * the next start.
+   */
+  async function cut(kept: number) {
+    const v1 = await bundle({ data: big(2_500_000) });
+    net.put(BUNDLE_URL, v1.bytes);
+    const first = apps(net);
+    await first.preview({ url: BUNDLE_URL });
+    await first.install({ digest: v1.digest, grant: ["chat"] });
+    await first.storageSet({ ref: v1.ref, scope: "alone", key: "save", value: { game: 42 } });
+    const data = await storageRows();
+    const id = `app-${v1.digest}`;
+    const files = await fileBytes();
+    await files.remove(id);
+    for (let at = 0; at < kept; at += MiB) await files.append(id, at, v1.bytes.subarray(at, Math.min(at + MiB, kept)));
+    await files.flush(id);
+    await files.close(id);
+    resetFileBytes(["idb"]);
+    net.requests.length = 0;
+    return { v1, id, data, store: apps(net) };
+  }
+  const stored = async (id: string) => (await fileBytes()).size(id);
+
+  for (const kept of [MiB, 2 * MiB, 2 * MiB + 1000]) {
+    it(`${kept} bytes of it count as missing: Open says so, Get its files writes it whole, and the app's data stays (${kept})`, async () => {
+      const { v1, id, data, store } = await cut(kept);
+      net.files.delete(BUNDLE_URL);
+      expect(await store.runCheck({ ref: v1.ref })).toEqual({ status: "needs-files" });
+      expect((await store.list())[0]!.run).toEqual({ status: "needs-files" });
+      await expect(store.entry({ ref: v1.ref })).rejects.toThrow(/^needs-files: /);
+      net.put(BUNDLE_URL, v1.bytes);
+      expect(await store.fetchFiles({ ref: v1.ref })).toEqual({ status: "ok" });
+      expect(net.requests, "peeked, then read whole").toEqual([BUNDLE_URL, BUNDLE_URL, BUNDLE_URL]);
+      expect(await stored(id)).toBe(v1.bytes.length);
+      expect((await store.entry({ ref: v1.ref })).digest).toBe(v1.digest);
+      expect(await apps(net).entry({ ref: v1.ref }), "and after the next start").toMatchObject({ digest: v1.digest });
+      expect(data.length).toBeGreaterThan(0);
+      expect(await storageRows()).toEqual(data);
+    });
+  }
+
+  it("installing the same version from its link writes a partial file again, and so does the update check", async () => {
+    const { v1, id, data, store } = await cut(2 * MiB);
+    await store.preview({ url: BUNDLE_URL });
+    expect(await store.install({ digest: v1.digest, grant: ["chat"] })).toMatchObject({ run: { status: "ok" } });
+    expect(await stored(id)).toBe(v1.bytes.length);
+    expect((await store.entry({ ref: v1.ref })).digest).toBe(v1.digest);
+    expect(await storageRows()).toEqual(data);
+
+    await emptyProfile();
+    net = new FakeNet();
+    const again = await cut(MiB);
+    expect((await again.store.checkUpdates())[0]).toMatchObject({ run: { status: "ok" } });
+    expect(await stored(again.id)).toBe(again.v1.bytes.length);
+    expect(await storageRows()).toEqual(again.data);
+  });
+
+  it("a whole-sized file that does not hold the bundle is damaged: Open says so and drops it, Get its files fetches it again", async () => {
+    const v1 = await bundle({ data: big(2_500_000) });
+    net.put(BUNDLE_URL, v1.bytes);
+    const first = apps(net);
+    await first.preview({ url: BUNDLE_URL });
+    await first.install({ digest: v1.digest, grant: ["chat"] });
+    await first.storageSet({ ref: v1.ref, scope: "alone", key: "save", value: { game: 42 } });
+    const data = await storageRows();
+    const id = `app-${v1.digest}`;
+    const wrong = v1.bytes.slice();
+    wrong[wrong.length - 1] ^= 1;
+    const files = await fileBytes();
+    await files.remove(id);
+    await files.append(id, 0, wrong);
+    await files.flush(id);
+    await files.close(id);
+    net.files.delete(BUNDLE_URL);
+    const store = apps(net);
+    const checked = vi.fn();
+    const told = apps(net, { checked });
+    expect(await store.runCheck({ ref: v1.ref }), "its size is right: a list reads no more than that").toEqual({ status: "ok" });
+    await expect(told.entry({ ref: v1.ref })).rejects.toThrow(/^damaged: /);
+    expect(checked, "the pages read the list again: it needs its files now").toHaveBeenCalled();
+    expect(await stored(id)).toBeNull();
+    expect(await store.runCheck({ ref: v1.ref })).toEqual({ status: "needs-files" });
+    net.put(BUNDLE_URL, v1.bytes);
+    expect(await store.fetchFiles({ ref: v1.ref })).toEqual({ status: "ok" });
+    expect((await store.entry({ ref: v1.ref })).digest).toBe(v1.digest);
+    expect(await storageRows()).toEqual(data);
+  });
+
+  it("a whole file costs the list and the check before a run its size, no read and no hash", async () => {
+    const v1 = await bundle({ data: big(2_500_000) });
+    net.put(BUNDLE_URL, v1.bytes);
+    const first = apps(net);
+    await first.preview({ url: BUNDLE_URL });
+    await first.install({ digest: v1.digest, grant: ["chat"] });
+    const files = await fileBytes();
+    const read = vi.spyOn(files, "read"), digest = vi.spyOn(files, "digest"), size = vi.spyOn(files, "size");
+    net.requests.length = 0;
+    const store = apps(net);
+    expect(await store.runCheck({ ref: v1.ref })).toEqual({ status: "ok" });
+    expect((await store.list())[0]!.run).toEqual({ status: "ok" });
+    expect(await store.fetchFiles({ ref: v1.ref })).toEqual({ status: "ok" });
+    expect(read).not.toHaveBeenCalled();
+    expect(digest).not.toHaveBeenCalled();
+    expect(size).toHaveBeenCalled();
+    expect(net.requests).toEqual([]);
   });
 });
 

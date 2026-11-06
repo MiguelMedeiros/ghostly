@@ -41,7 +41,7 @@ import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResu
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
 import { APPS_CAPABILITY, BUTTON_ID, BUTTONS_CAPABILITY, EDIT_CAPABILITY, STATUS_CARD_CAPABILITY, UPGRADE_CAPABILITY, MAX_EDITS_PER_MESSAGE, STATUS_CARD_LIMITS, checkStatusCard, forwardedAgain, readForwarded, statusCardText, withRequestOptions, type StatusCard, type WireEdit } from "@ghostly/core";
-import { FORWARD_MESSAGES, FORWARD_TARGETS, copyForForward, forwardError, forwardKind, type ForwardResult } from "./forwards";
+import { FORWARD_MESSAGES, FORWARD_MESSAGE_GONE, FORWARD_TARGETS, copyForForward, forwardError, forwardKind, type ForwardResult } from "./forwards";
 import { TEST_USDT_FAUCET_AMOUNT, arrivalKey, claimedTime, heardTime, receivedTimestamp, shownTime, typingActivity, type TypingActivity, type TypingKind, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/modeGate";
 import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
@@ -49,16 +49,17 @@ import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, engineText, groupName, parseCommunityEdit, parseEngineError, sanitizeDisplayText, traceLink } from "@ghostly/core";
 import { ClockWatch, DirectPathWatch, firstDeviceSetSecret } from "@ghostly/core";
-import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
+import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WAKE_ONLINE_BATCH, WAKE_ONLINE_BATCH_MS, WAKE_ONLINE_DELAY_MS, WAKE_ONLINE_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
 import { COMMUNITY_PIN_FRAME, PIN_LIMITS, mayPin, pinIsNewer, pinNumberHolds, readPin, type GroupPinFrame, type WirePin } from "@ghostly/core";
 import { CapsExchange, DHT_FILE_CAPABILITY, DHT_FILE_TOO_LARGE, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, dhtFileId, type DhtFileAnnouncement, type DhtPacketFacts, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
-import { fileMessageText, parseLinkPreview, pairedMessageFrame, pairedMessageFits, PAIRED_FRAME_TOO_LARGE, type WireReply, type LinkPreview, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, lastSharedWithMe, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
+import { fileMessageText, parseLinkPreview, pairedMessageFrame, pairedMessageFits, pairedEditFits, PAIRED_FRAME_TOO_LARGE, type WireReply, type LinkPreview, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, lastSharedWithMe, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
 import {
   presenceSeenAt,
   DEFAULT_RELAYS,
   currentRelays,
   GhostLink,
+  type GhostLinkEvents,
   utf8Encode,
   type IncomingMessage,
   emptyLinkRecords,
@@ -138,7 +139,7 @@ import { RESTORE_UNCHECKED_KEY, isRestoreUnchecked, peekTurn, restoreCheckOf, re
 import { createDeviceSigningKey } from "../devices/signingKey";
 import { afterStop, money, planHandoffWallets, type HandoffTakerFacts, type HandoffWalletPlan, type WalletHome } from "../devices/handoffWallets";
 import { clearWalletHomes, readWalletHomes, writeWalletHomes } from "../devices/walletHomes";
-import { postPush, profileWakeAfter, profileWakeOnRemoval, wakeOwnerOf } from "../devices/push";
+import { PushRelayRefusal, postPush, profileWakeAfter, profileWakeOnRemoval, wakeOwnerOf } from "../devices/push";
 import { MAX_ALLOWED_TOKENS, forkTimes } from "../devices/state";
 import { awayFrom, setAwayWallets, setSingleWriterGate, refuseAway } from "./paymentAdapters/away";
 import { breezDatabaseInUse } from "./paymentAdapters/providers/breezDatabases";
@@ -191,7 +192,7 @@ import type {
   PublicPostsView,
 } from "../shared/types";
 import { WALLET_TYPES } from "../shared/types";
-import type { WakeSubscription } from "../shared/types";
+import type { PushRelayRefused, WakeSubscription } from "../shared/types";
 import { forgetWallet, mainnetBalances, markBackedUp, observeBalances, putOff, type BackupReminders } from "../shared/backupReminder";
 import { withoutFrame, type MessageChanges } from "../shared/messageChanges";
 import { pairedWireReply, receivedPairedReply, replyRef, replyTo as replyToOriginal } from "../shared/replies";
@@ -379,6 +380,21 @@ const CARD_RESTORE_EVERY_MS = 30_000;
 const RTT_SAVE_MS = 5 * 60_000;
 /** A reaction said on the live session and not confirmed is said again after this long. */
 const REACTION_RESEND_MS = 30_000;
+/** How long a deleted chat's session stays up once the ends of its moving files are said, so they get there (as a yield's goodbye). */
+const FILES_END_MS = 300;
+/** A link event that only asks something and acts on nothing: a deleted chat's link may still ask it (`whileChat`). */
+const ASKS_ONLY: ReadonlySet<string> = new Set(["onFileRoom"]);
+
+/**
+ * A chat's link events, acted on only while `current` says the link is still the chat's. A deleted chat's link stays
+ * up a moment to say the ends of its files (`removeLink`): what it hears meanwhile (a text, a reaction, a pin, a
+ * payment, a call signal) is not taken. Each handler the chat has stays there, so the link offers what it offered.
+ */
+function whileChat(events: GhostLinkEvents, current: () => boolean): GhostLinkEvents {
+  return Object.fromEntries(Object.entries(events).map(([name, handler]) => [name,
+    typeof handler !== "function" || ASKS_ONLY.has(name) ? handler
+      : (...args: unknown[]) => current() ? (handler as (...args: unknown[]) => unknown)(...args) : undefined])) as GhostLinkEvents;
+}
 /** A chat's reactions shown on the chat list before the one shown now, kept to show again when that one is taken back. */
 const REACTION_NOTES_KEPT = 8;
 /**
@@ -724,6 +740,11 @@ export interface NodeOptions {
    * Mesh § Hubs). Default: the Desktop app; the CLI says so itself; a browser tab only when the admin pins it.
    */
   staysOnline?: boolean;
+  /**
+   * Whether this app accepts the group invitations that come over this contact chat by itself (the CLI's `group auto on
+   * --from`, `GroupsHost.autoJoins`): one that comes while 32 wait takes the place of another chat's. Default: none.
+   */
+  autoJoins?: (linkId: string) => boolean;
   /** How long a chat reads a contact that left a live session no slower than the idle pace (GhostLink `watchPeerIdleMs`): the CLI's daemon, `DAEMON_WATCH_PEER_IDLE_MS`. */
   watchPeerIdleMs?: number;
   /**
@@ -924,7 +945,8 @@ export class GhostlyNode implements EngineImplementation {
   private readonly edgeRtcOff = new Map<string, { away: boolean; held: boolean }>();
   /** Edges put back on WebRTC by a return (`edgeRtcPresence`) since the network last changed: failing again holds them native. */
   private readonly edgeRtcRetried = new Set<string>();
-  private readonly pollIntervals: PollIntervals;
+  /** The pace the app gave (`NodeOptions.pollIntervals`): the Desktop's is the DHT's. */
+  private readonly ownPollIntervals: PollIntervals;
   private readonly localFetch: LocalFetch;
   private readonly links = new Map<string, LiveLink>();
   private services: StoredService[] = [];
@@ -970,6 +992,12 @@ export class GhostlyNode implements EngineImplementation {
   }
   /** The newest time written in each chat while this engine runs: a message written well before it is a catch-up. */
   private readonly newestAt = new Map<string, number>();
+  /**
+   * The chats deleted while this engine runs (`removeLink`), with how many times each was: a row that comes for one
+   * later is not stored, nor one whose store was under way as it was deleted (`storeNewMessage`), the same invite
+   * joined again meanwhile or not.
+   */
+  private readonly removedChats = new Map<string, number>();
   /** The chats whose contact's joined line came while this engine runs (`firstContactRow`), whatever `stored` says. */
   private readonly contactSpoke = new WeakSet<LiveLink>();
   /** Per group: when the last message written well before it came, came. What comes after it, as old, is its catch-up. */
@@ -1044,6 +1072,8 @@ export class GhostlyNode implements EngineImplementation {
   private readonly cardPresses = new Map<string, Map<string, { id: string; button: string }[]>>();
   /** At most one wake-up per contact per `WAKE_INTERVAL_MS` (WISP 401 § Wake-up push). */
   private readonly wakeLimiter = new WakeLimiter();
+  /** The push relay's last answer that was not a push service's status, until it forwards one (`EngineState.pushRelayRefused`). */
+  private pushRelayRefusal?: PushRelayRefused;
   /** Call wake-ups have their own, shorter limit: a call is rarer than a message and cannot wait five minutes. */
   private readonly callWakeLimiter = new WakeLimiter(WAKE_CALL_INTERVAL_MS);
   /** Mentions in private groups: one per member per 5 minutes, four per group per minute (WISP 902 · Group Mesh § Wake-up push). */
@@ -1752,6 +1782,7 @@ export class GhostlyNode implements EngineImplementation {
     adminTurn: (_groupId, options) => this.confirmTurn({ within: options?.wait === false ? 0 : GhostlyNode.TURN_CONFIRM_WAIT_MS }),
     // An app with no WebRTC (the Linux Desktop) reaches members over native listeners, a few of them
     // (`groupNativeSlots`): it does not offer to be a private group's hub, which keeps an edge with everyone.
+    autoJoins: linkId => !!this.options.autoJoins?.(linkId),
     staysOnline: () => this.options.staysOnline ?? (this.options.platform === "desktop" && typeof RTCPeerConnection !== "undefined"),
     peerRoom: groupId => {
       // With no WebRTC, a group's links are native ones, and all the groups together hold what the transport with
@@ -2019,7 +2050,7 @@ export class GhostlyNode implements EngineImplementation {
       // A CLI profile is always `single` (WISP 06 § Goals and non-goals): no device state database is made for it.
       ...(options.singleDevice ? { runsHere: async () => true } : {}),
       readPath: () => readPathOf(this.relays ? { relays: this.relays.describe().relays } : this.settings, !!this.transport.configure) });
-    this.pollIntervals = options.pollIntervals ?? RELAY_POLL_INTERVALS;
+    this.ownPollIntervals = options.pollIntervals ?? RELAY_POLL_INTERVALS;
     this.localFetch = options.localFetch ?? webLocalFetch;
     (this.hold as unknown as { host: { transport: PkarrTransport } }).host.transport = this.transport;
     // A relay that trips or recovers shows in the connection panel's Details.
@@ -2027,9 +2058,21 @@ export class GhostlyNode implements EngineImplementation {
     this.clockOff = this.transport.onServerTime?.(time => this.clock.server(time.source, time.date, time.sent, time.received));
   }
 
-  /** The Desktop reaches the DHT itself: the relays in Settings are written to, and read from only when the person chose so. */
+  /**
+   * The Desktop reaches the DHT itself: the relays in Settings are written to, and read from only when the person chose
+   * so. With Hide my IP from contacts on, it does not reach the DHT at all: reads and writes go through the relays.
+   */
   private configureDirect(): void {
-    this.transport.configure?.({ relays: this.settings.relays, readRelays: this.settings.readRelays === true });
+    this.transport.configure?.({ relays: this.settings.relays, readRelays: this.settings.readRelays === true, dhtDirect: this.settings.relayOnly !== true });
+  }
+
+  /**
+   * How often links read Pkarr. The Desktop that keeps to the relays (Hide my IP from contacts) reads every packet from
+   * them, background reads too, so it goes at the relays' pace, not the DHT's: at the DHT's, one waiting invite was 45
+   * relay reads a minute, against a browser's 30. Links take it as they start; turning the switch restarts them.
+   */
+  private get pollIntervals(): PollIntervals {
+    return this.transport.configure && this.settings.relayOnly === true ? RELAY_POLL_INTERVALS : this.ownPollIntervals;
   }
 
   /**
@@ -2277,6 +2320,8 @@ export class GhostlyNode implements EngineImplementation {
       this.links.get(stored.id)!.waitingSends = Promise.resolve(new Set(messages.filter(waitsForLive).map(m => m.id)));
       // So are the cards due to go again: a session that opens reads no history for them when there are none.
       this.links.get(stored.id)!.cardsDue = Promise.resolve(new Set(messages.filter(cardDue).map(m => m.id)));
+      // And my edits and removals on their way: the session that opens first reads those rows alone, not the history again.
+      this.editsFor(stored.id).learn([...messages, ...(stored.removals ?? []).map(r => removalRow(stored.id, r))]);
       this.links.get(stored.id)!.pkarrSeenAt = pkarrSeenAt(messages);
       // What the contact's clock was when the chat was last live: its first message of this run is read by it.
       for (const message of messages.slice(-4 * CLOCK_SAMPLES)) this.clockSample(message);
@@ -2295,7 +2340,7 @@ export class GhostlyNode implements EngineImplementation {
     });
     if (this.shuttingDown) return;
     this.emitState();
-    if (this.networkOn) { this.hold.start(); this.startGroupEntries(); this.prepareSpare(STARTUP_QUIET_MS); }
+    if (this.networkOn) { this.hold.start(); this.startGroupEntries(); this.prepareSpare(STARTUP_QUIET_MS); this.announceOnline(); }
     if (!this.limitedMode) this.openStartedWallets(fresh);
     // Mini-apps (WISP 1200): the default stores preloaded, and the update check, which asks nothing with no app installed.
     if (this.appsOn && !this.appsWireOnly) void this.appStore.start().catch(() => {});
@@ -2536,6 +2581,7 @@ export class GhostlyNode implements EngineImplementation {
       this.hold.start();
       this.startGroupEntries();
       this.prepareSpare(STARTUP_QUIET_MS);
+      this.announceOnline();
       void this.did.publishNow().catch(() => {});
       this.identities.networkBack();
     }
@@ -2714,6 +2760,7 @@ export class GhostlyNode implements EngineImplementation {
     this.shuttingDown = true;
     this.stopBegan();
     if (this.limitedTimer) { clearTimeout(this.limitedTimer); this.limitedTimer = null; }
+    clearTimeout(this.onlineTimer);
     this.appShelf?.stop();
     // First, before anything that waits: every live contact hears this app is going, and watches for it to come back.
     if (!quiet) this.depart({ quitting: options.quitting === true });
@@ -2818,7 +2865,7 @@ export class GhostlyNode implements EngineImplementation {
   appStoreRemove(params: { key: string }): Promise<void> { return this.appStore.removeStore(params); }
   appStoreRefresh(params: { key?: string } = {}): Promise<AppStoreSummary[]> { return this.appStore.refreshStores(params); }
   appPreview(params: AppSource): Promise<AppPreview> { return this.appStore.preview(params); }
-  appInstall(params: { digest: string; grant: string[] }): Promise<InstalledAppView> { return this.appStore.install(params); }
+  appInstall(params: { digest: string; grant: string[]; asks?: string[] }): Promise<InstalledAppView> { return this.appStore.install(params); }
   appUpdateAccept(params: { ref: string }): Promise<InstalledAppView> { return this.appStore.acceptUpdate(params); }
   appCheckUpdates(): Promise<AppCheckResult[]> { return this.appStore.checkUpdates(); }
   /** Uninstalls an app. One running then is closed in every chat (the contact hears `close`), and the pages are told, to stop its frames. */
@@ -2848,6 +2895,7 @@ export class GhostlyNode implements EngineImplementation {
       ...(this.limitedMode && this.restoreCheck && { restoreCheck: this.restoreCheck }),
       ...(this.limitedMode && this.startChecking && { startCheck: true as const }),
       ...(wakeOwnerOf(this.settings.wake, this.ownDeviceKey) && { wakeOwner: wakeOwnerOf(this.settings.wake, this.ownDeviceKey) }),
+      ...(this.pushRelayRefusal && this.pushRelayRefusal.url === this.settings.pushRelay && { pushRelayRefused: this.pushRelayRefusal }),
       transport: {
         ...this.transport.describe(), ...(this.options.irohWeb || this.ownIrohRelays ? { iroh: { relays: this.irohRelays, defaults: [...DEFAULT_IROH_RELAYS] } } : {}),
         ...(this.transport.configure && { direct: true }), ...(this.transport.discovery && { discovery: this.transport.discovery() }),
@@ -3474,7 +3522,61 @@ export class GhostlyNode implements EngineImplementation {
       await db.patchLink(linkId, { wakeToken: token });
       this.emitState();
     }
-    live.link.sendWake({ ...own, token });
+    // Unless turned off, the contact is asked to say when it comes online while this app is closed (`o`). Not while
+    // the subscription is another device's of this profile (WISP 06 § Push and the phone): that device is on standby
+    // and shows no online notice, and a push that shows nothing may cost it the subscription in Safari.
+    const online = this.settings.wakeOnline !== false && wakeOwnerOf(own, this.ownDeviceKey) !== "away";
+    live.link.sendWake({ ...own, token, ...(online && { online: true as const }) });
+  }
+
+  /**
+   * Whether paired contacts are asked for an online notice (Settings → Notifications, on by default). Each live one is
+   * told again now; one away hears it on its next session, and until then may still send one, which shows.
+   */
+  async setWakeOnline({ on }: { on: boolean }): Promise<void> {
+    if ((this.settings.wakeOnline !== false) === on) return;
+    this.settings = { ...this.settings, wakeOnline: false };
+    if (on) delete this.settings.wakeOnline;
+    await db.putSettings(this.settings);
+    for (const live of this.links.values()) if (live.stored.profile && !live.stored.group) await this.shareWake(live.stored.id);
+    this.emitState();
+  }
+
+  private onlineTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /**
+   * This app came online (it started, or its network came back): once the chats had `WAKE_ONLINE_DELAY_MS` to go live,
+   * the contacts still away that asked are told (`sayOnline`). A contact whose app is open goes live and is not pushed.
+   */
+  private announceOnline(): void {
+    clearTimeout(this.onlineTimer);
+    this.onlineTimer = setTimeout(() => { this.onlineTimer = undefined; this.sayOnline(); }, WAKE_ONLINE_DELAY_MS);
+  }
+
+  /**
+   * An online wake-up (WISP 401 § Wake-up push, revision 2026-10-27) to each paired contact that asked for one, whose
+   * chat is not live: at most one per contact per `WAKE_ONLINE_INTERVAL_MS`, counted across restarts, since a restart is
+   * what says it. Apart from the message wake-ups' limit, so it never holds one back. A muted chat's contact shared no
+   * target; a group's edge is never told. `WAKE_ONLINE_BATCH` at a time, the rest a `WAKE_ONLINE_BATCH_MS` later (those
+   * still away then), so a push relay's minute keeps room for the message and call wake-ups.
+   */
+  private sayOnline(now = Date.now()): void {
+    if (!this.networkOn || this.shuttingDown) return;
+    let sent = 0;
+    for (const live of this.links.values()) {
+      const { id, peerWake: target, profile, group, onlineWokeAt } = live.stored;
+      if (!target?.online || !profile || group || live.link?.isDataLinkOpen) continue;
+      if (onlineWokeAt !== undefined && onlineWokeAt <= now && now - onlineWokeAt < WAKE_ONLINE_INTERVAL_MS) continue;
+      if (sent === WAKE_ONLINE_BATCH) {
+        clearTimeout(this.onlineTimer);
+        this.onlineTimer = setTimeout(() => { this.onlineTimer = undefined; this.sayOnline(); }, WAKE_ONLINE_BATCH_MS);
+        return;
+      }
+      sent += 1;
+      live.stored = { ...live.stored, onlineWokeAt: now };
+      void db.patchLink(id, { onlineWokeAt: now });
+      this.postWake(id, target, "online");
+    }
   }
 
   // ---------- wake-up push in private groups (WISP 902 · Group Mesh § Wake-up push) ----------
@@ -3595,15 +3697,21 @@ export class GhostlyNode implements EngineImplementation {
   private wakePeer(live: LiveLink, kind: WakeKind = "message"): void {
     const target = live.stored.peerWake, linkId = live.stored.id;
     if (!target || !live.stored.profile || live.stored.group || !this.networkOn) return;
-    if (!(kind === "call" ? this.callWakeLimiter : this.wakeLimiter).take(linkId)) return;
-    this.postWake(linkId, target, kind);
+    const limiter = kind === "call" ? this.callWakeLimiter : this.wakeLimiter, takenAt = Date.now();
+    if (!limiter.take(linkId, takenAt)) return;
+    // One that did not reach the push service is not the contact's wake-up: the next message's may go a little later.
+    this.postWake(linkId, target, kind, () => limiter.missed(linkId, takenAt));
   }
 
-  /** Posts one wake-up to the target a link holds; a subscription gone (404, 410) is forgotten. */
-  private postWake(linkId: string, target: WakeTarget, kind: WakeKind): void {
+  /**
+   * Posts one wake-up to the target a link holds; a subscription gone (404, 410) is forgotten. `missed`: it did not
+   * reach the push service (no network, the relay did not forward it, or the service answered 429 or 5xx).
+   */
+  private postWake(linkId: string, target: WakeTarget, kind: WakeKind, missed?: () => void): void {
     let request: PushRequest;
     try { request = wakeRequest(target, Date.now(), kind); } catch { return; }
     void this.postPush(request).then((status) => {
+      if (status === 429 || status >= 500) missed?.();
       // The subscription is gone (the contact turned it off, or its browser dropped it): forget it until it shares a new one.
       if ((status === 404 || status === 410) && this.links.get(linkId)?.stored.peerWake?.endpoint === target.endpoint) {
         const current = this.links.get(linkId)!;
@@ -3611,7 +3719,7 @@ export class GhostlyNode implements EngineImplementation {
         void db.patchLink(linkId, { peerWake: undefined });
         this.emitState();
       }
-    }).catch(() => { /* no network, or refused and no relay: the message still waits for the contact */ });
+    }).catch(() => { missed?.(); /* no network, or refused and no relay: the message still waits for the contact */ });
   }
 
   /**
@@ -3628,9 +3736,25 @@ export class GhostlyNode implements EngineImplementation {
     return true;
   }
 
-  /** Posts a wake-up: the host's way, or `fetch`, then the push relay when a page may not post it itself. */
-  private postPush(request: PushRequest): Promise<number> {
-    return postPush(request, { pushSend: this.options.pushSend, relay: this.settings.pushRelay });
+  /**
+   * Posts a wake-up: the host's way, or `fetch`, then the push relay when a page may not post it itself. A relay that
+   * answers but not as a push relay is kept for the pages (`EngineState.pushRelayRefused`) until it forwards one; a
+   * relay that cannot be reached at all (offline, timed out) is not, as a page cannot tell that from being offline.
+   */
+  private async postPush(request: PushRequest): Promise<number> {
+    const relay = this.settings.pushRelay;
+    try {
+      return await postPush(request, {
+        pushSend: this.options.pushSend, relay,
+        relayed: () => { if (this.pushRelayRefusal?.url === relay) { this.pushRelayRefusal = undefined; this.emitState(); } },
+      });
+    } catch (error) {
+      if (error instanceof PushRelayRefusal && relay) {
+        this.pushRelayRefusal = { url: relay, at: Date.now(), http: error.http, ...(error.text !== undefined && { text: error.text }) };
+        this.emitState();
+      }
+      throw error;
+    }
   }
 
   removeLink({ linkId }: { linkId: string }): void {
@@ -3645,13 +3769,19 @@ export class GhostlyNode implements EngineImplementation {
     this.quoteSweeps.forget(linkId);
     this.editBuffer.forget(linkId);
     live.carried?.stop();
-    // Gone before its link stops: the link's closing events find no chat to make an outbox or files for again.
+    // Its files still moving end on the contact's side too, said on the session before it stops. Closed at once, the
+    // channel lost those frames on their way, and the contact's transfers stayed under way for good.
+    const filesEnded = this.fileDesk.drop(linkId);
+    // Gone before its link stops: the link's closing events find no chat to make an outbox or files for again, and
+    // nothing the link hears until it stops is taken (`whileChat`). Nor is a row stored for the chat later on.
     this.links.delete(linkId);
-    void live.link?.stop(true); void live.caps?.stop();
+    this.removedChats.set(linkId, (this.removedChats.get(linkId) ?? 0) + 1);
+    if (filesEnded) setTimeout(() => void live.link?.stop(true), FILES_END_MS);
+    else void live.link?.stop(true);
+    void live.caps?.stop();
     this.identities.forget(linkId);
     this.nostrSocial.forgetLink(linkId);
     this.hold.forgetLink(linkId);
-    this.fileDesk.drop(linkId);
     // A chat made for a contact link request: deleting it takes the request back.
     void this.contactAsks.forgetChat(linkId).catch(() => {});
     // Its wake-up target and token go with the row: this chat can no longer wake the contact, nor be woken. The
@@ -3883,8 +4013,12 @@ export class GhostlyNode implements EngineImplementation {
     const reply = message.replyTo;
     if (!reply || reply.messageId) return message;
     const group = message.linkId.startsWith("group:");
+    // A chat deleted in this run has no history left to look in, and its row is not stored (`storeNewMessage`).
+    const gone = () => !group && !this.links.has(message.linkId) && this.removedChats.has(message.linkId);
+    if (gone()) return message;
     let original: StoredMessage | undefined, history: StoredMessage[] | undefined;
     for (const rowId of group ? [reply.id] : [`peer_${reply.id}`, `me_${reply.id}`, ...await this.rowsNamed(message.linkId, reply.id)]) {
+      if (gone()) return message;
       const row = rowId === message.id ? undefined : await db.getMessage(message.linkId, rowId);
       if (row && replyRef(row, group) === reply.id) { original = row; break; }
     }
@@ -3903,7 +4037,7 @@ export class GhostlyNode implements EngineImplementation {
       const id = (await this.unkeyedRowsOf(this.links.get(message.linkId)!)).get(reply.id);
       const row = id === undefined || id === message.id ? undefined : await db.getMessage(message.linkId, id);
       if (row && replyRef(row) === reply.id) original = row;
-    } else if (!original && !group) {
+    } else if (!original && !group && !gone()) {
       history = await db.getMessages(message.linkId);
       original = history.find(m => m.id !== message.id && replyRef(m) === reply.id);
     }
@@ -4033,6 +4167,8 @@ export class GhostlyNode implements EngineImplementation {
     // A message with a card takes more edits: a bot updates a long task often (WISP 405 · Status Cards).
     const seq = (message.edit?.seq ?? 0) + 1, most = card ? STATUS_CARD_LIMITS.edits : MAX_EDITS_PER_MESSAGE;
     if (seq > most) return refuse(`This message was edited ${most} times, the most one takes.`);
+    // As a send is (`pairedMessageFits`): within 16 KiB, an edit's frame can still pass what the contact's session takes.
+    if (!pairedEditFits({ id: "A".repeat(22), e: seq, ts: Date.now(), m: text, ...(card && { sc: card }) })) return refuse(PAIRED_FRAME_TOO_LARGE);
     const edited = withEdit(message, { seq, at: Date.now(), text, preview, card, pending: true });
     await db.patchMessage(linkId, message.id, () => ({ text: edited.text, edit: edited.edit, preview: edited.preview, card: edited.card }));
     await this.messagesChanged(linkId, [message.id]);
@@ -4102,7 +4238,8 @@ export class GhostlyNode implements EngineImplementation {
   private async applyPeerEditNow(linkId: string, message: StoredMessage, edit: WireEdit): Promise<void> {
     const updated = await db.patchMessage(linkId, message.id, current => {
       if (!takesPeerEdit(current, edit.m) || (current.edit?.seq ?? 0) >= edit.e) return null;
-      const next = withEdit(current, { seq: edit.e, at: heardTime(edit.ts), text: edit.m, preview: edit.pv, card: edit.sc });
+      const now = Date.now();
+      const next = withEdit(current, { seq: edit.e, at: heardTime(edit.ts, now), heardAt: now, text: edit.m, preview: edit.pv, card: edit.sc });
       return { text: next.text, edit: next.edit, preview: next.preview, card: next.card };
     });
     if (updated) await this.messagesChanged(linkId, [message.id]);
@@ -5468,7 +5605,7 @@ export class GhostlyNode implements EngineImplementation {
       throw new Error("Chat not found");
     // Each one by its id: a long chat or group is not read whole for the few forwarded.
     const chosen = await Promise.all(ids.map(id => db.getMessage(linkId, id)));
-    if (chosen.some(m => !m)) throw new Error("That message is not in this chat");
+    if (chosen.some(m => !m)) throw new Error(FORWARD_MESSAGE_GONE);
     const messages = (chosen as StoredMessage[]).sort((a, b) => a.timestamp - b.timestamp);
     for (const message of messages) {
       const kind = forwardKind(message);
@@ -5487,6 +5624,7 @@ export class GhostlyNode implements EngineImplementation {
       if (groupId ? !this.membership(groupId) : !live || live.stored.group !== undefined) { note(groupId ? "You are not in this group" : "Chat not found"); continue; }
       for (const message of messages) {
         const hops = forwardedAgain(message.forwarded);
+        const gone = () => this.forwardSourceGone(linkId, message.id);
         try {
           if (forwardKind(message) === "text") {
             const sent = groupId ? await this.groups.send(groupId, message.text, [], undefined, hops)
@@ -5508,7 +5646,7 @@ export class GhostlyNode implements EngineImplementation {
             const original = message.file!, picked: MessageFile = { id: groupFileId(groupId, "out"), name: original.name, size: original.size, mime: original.mime,
               ...(original.voice && { voice: original.voice }), ...(original.video && { video: original.video }), ...(original.image && { image: original.image }) };
             // As it goes: a picture without its metadata, its size the copy's.
-            const file = await copyForForward(original.id, { linkId: to, wireId: picked.id.slice(`group-${groupId}-out-`.length), timestamp: now(), file: picked });
+            const file = await copyForForward(original.id, { linkId: to, wireId: picked.id.slice(`group-${groupId}-out-`.length), timestamp: now(), file: picked }, gone);
             const sent = await this.sendGroupFile({ groupId, file, forwarded: hops });
             if (sent.error) { await removeStored(file.id).catch(() => {}); note(sent.error); continue; }
             if (sent.messageId) result.messageIds.push(sent.messageId);
@@ -5519,7 +5657,7 @@ export class GhostlyNode implements EngineImplementation {
           const original = message.file!, wireId = toBase64Url(randomBytes(12)), timestamp = now();
           const picked: MessageFile = { id: GhostlyNode.outgoingFileId(to, wireId), name: original.name, size: original.size, mime: original.mime,
             ...(original.voice && { voice: original.voice }), ...(original.video && { video: original.video }), ...(original.image && { image: original.image }) };
-          const file = await copyForForward(original.id, { linkId: to, wireId, timestamp, file: picked });
+          const file = await copyForForward(original.id, { linkId: to, wireId, timestamp, file: picked }, gone);
           try {
             await this.sendFile({ linkId: to, file, timestamp, forwarded: hops });
           } catch (error) {
@@ -5537,6 +5675,15 @@ export class GhostlyNode implements EngineImplementation {
       }
     }
     return { results };
+  }
+  /**
+   * A message being forwarded was deleted meanwhile: here, or for everyone by its author. Its deletion is written down
+   * (a chat's `deletedIds`, a group's removals) before its file goes, and its row after: either says so.
+   */
+  private async forwardSourceGone(linkId: string, messageId: string): Promise<boolean> {
+    const noted = linkId.startsWith("group:") ? this.groups.isRemoved(linkId.slice("group:".length), messageId)
+      : !!this.links.get(linkId)?.stored.deletedIds?.includes(messageId);
+    return noted || !await db.getMessage(linkId, messageId);
   }
   /**
    * How many edges took my message (or its edit number `edit`, or my reaction numbered `reaction`, as `react` gave it,
@@ -5696,7 +5843,8 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * Pins a message of a chat or a group, or unpins (WISP 400 § Pinned message): one per chat, the last pin winning. A
    * 1:1 chat keeps it until the contact confirms it on a live session; a group sends it to its members, where the rule
-   * (`mayPin`) allows it. In a group, `n` is the pin's number, for `groupTaken`.
+   * (`mayPin`) allows it. In a group, `n` is the pin's number, for `groupTaken`. The message pinned already is not
+   * pinned again: nothing goes, and the pin stays its pinner's (`n` only when that is me).
    */
   async pinMessage({ linkId, messageId, remove }: { linkId: string; messageId?: string; remove?: boolean }): Promise<{ error: string | null; refused?: boolean; n?: number }> {
     if (typeof linkId !== "string" || !linkId) return { error: "No chat to pin in" };
@@ -5706,8 +5854,10 @@ export class GhostlyNode implements EngineImplementation {
       // Not a member (removed, say): refused with the reason the group shows, as a reaction is.
       if (!view || view.status !== "active") return { error: view?.statusReason ?? "You are not in this group", refused: true };
       if (!mayPinIn(view)) return { error: "Only the admin pins in a community" };
-      const pin = await myPin(host, linkId, messageId, !!remove, this.groups.pinOf(groupId));
+      const current = this.groups.pinOf(groupId), pin = await myPin(host, linkId, messageId, !!remove, current);
       if ("error" in pin) return pin;
+      // Pinned already: nothing goes. My own pin's number is still the one its edges take (`groupTaken`).
+      if ("already" in pin) return { error: null, ...(current?.by === "me" && { n: current.n }) };
       if (this.groups.isCommunityGroup(groupId)) {
         try { await this.groups.sendCommunityApp(groupId, { t: COMMUNITY_PIN_FRAME, id: pin.id, n: pin.n }, pinKey(pin.n)); } catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
         await this.groups.setPin(groupId, pin);
@@ -5725,6 +5875,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!live.stored.profile) return { error: "Pins need a current chat; this compatibility chat sends text only." };
     const pin = await myPin(host, linkId, messageId, !!remove, live.stored.pin);
     if ("error" in pin) return pin;
+    if ("already" in pin) return { error: null };
     await this.keepLinkPin(linkId, pin, { id: pin.id, n: pin.n });
     this.flushPin(linkId);
     return { error: null };
@@ -6887,6 +7038,7 @@ export class GhostlyNode implements EngineImplementation {
     // Only through setWakeSubscription, which checks it and gives every chat a new token.
     delete (settings as Partial<Settings>).wake;
     delete (settings as Partial<Settings>).wakeRotate;
+    delete (settings as Partial<Settings>).wakeOnline;
     delete (settings as Partial<Settings>).wakeMutedGroups;
     delete (settings as Partial<Settings>).wakeHeldBy;
     delete (settings as Partial<Settings>).wakeRenew;
@@ -6912,7 +7064,7 @@ export class GhostlyNode implements EngineImplementation {
       // The Desktop writes to them: kept as the browsers keep theirs. Elsewhere (a transport of one's own) as given.
       else if (this.transport.configure) this.settings.relays = [...new Set(settings.relays.map(normalizeRelayUrl).filter((relay): relay is string => relay !== null))];
     }
-    if (settings.relays || settings.readRelays !== undefined) {
+    if (settings.relays || settings.readRelays !== undefined || relayOnlyChanged) {
       if (this.settings.readRelays !== true) delete this.settings.readRelays;
       this.configureDirect();
     }
@@ -6992,6 +7144,7 @@ export class GhostlyNode implements EngineImplementation {
       this.hold.start();
       this.startGroupEntries();
       this.prepareSpare(STARTUP_QUIET_MS);
+      this.announceOnline();
       void this.did.publishNow().catch(() => {});
       this.identities.networkBack();
       // As at a start online: the links to the other devices, on the good read just made.
@@ -8481,7 +8634,8 @@ export class GhostlyNode implements EngineImplementation {
       getHostedHttpService: (id) => this.hostedService(id, stored.peerPubKeyZ32),
       // Private groups are announced on paired chats; their admission frames arrive here.
       groupsSupport: !!stored.profile,
-      events: {
+      // Heard only while this is the chat's link: once the chat is deleted, nothing it hears is acted on.
+      events: whileChat({
         onPairingProgress: progress => {
           if (knockCue(live.pairingProgress, progress)) this.cueFeedback({ cue: "knock", key: `${linkId}:${progress.startedAt}` }, linkId);
           live.pairingProgress = progress;
@@ -8743,12 +8897,13 @@ export class GhostlyNode implements EngineImplementation {
           this.fileProgress(this.localFileId(linkId, id, direction), transferred),
         onFileComplete: (id, direction) =>
           this.fileSettled(this.localFileId(linkId, id, direction, { failed: false }), undefined, linkId),
-        onFilesFrame: (frame) => this.fileDesk.handle(linkId, frame),
+        // A deleted chat's link, still up while the ends of its files get out (`removeLink`), makes it no files again.
+        onFilesFrame: (frame) => this.links.get(linkId) !== live ? Promise.resolve() : this.fileDesk.handle(linkId, frame),
         onFilesSession: (open) => { if (this.links.get(linkId) !== live) return; this.fileDesk.session(linkId, open); if (open) this.sayWithdrawnFiles(linkId); },
         onFileAnnounced: stored.profile && !stored.group ? (file, packet) => this.fileAnnounced(linkId, file, packet) : undefined,
         onFileFailed: (id, reason, direction) =>
           this.fileSettled(this.localFileId(linkId, id, direction, { failed: true }), reason, linkId),
-      },
+      }, () => this.links.get(linkId) === live),
     });
     const link = live.link;
     // The chat may be on screen already: a new chat's page opens it while the engine is still saving it, before this
@@ -9639,7 +9794,8 @@ export class GhostlyNode implements EngineImplementation {
    * of a group's history (a membership change, a rename) is not a message: it stays at its commit's time, but never
    * ahead of this clock nor above a row placed here since the app started. The admin's clock picks that time: two
    * minutes ahead, "X joined" sat under everything said in the next two minutes; behind, it went above what the
-   * members had just read. Read late with nothing newer here (a member back after a while), it keeps its moment.
+   * members had just read. Read late with nothing newer here (a member back after a while), it keeps its moment, and
+   * `heardAt` says when it came here.
    * `place`: a received row's place given already (`placeAbove`): it takes it, and the next row still goes past the last.
    */
   private placed(message: StoredMessage, place?: number): StoredMessage {
@@ -9648,7 +9804,7 @@ export class GhostlyNode implements EngineImplementation {
       if (message.sender !== "peer") return message;
       const timestamp = Math.max(Math.min(receivedTimestamp(message.timestamp, now), now), last + 1);
       this.placedAt.set(message.linkId, timestamp);
-      return { ...message, timestamp };
+      return { ...message, timestamp, heardAt: now };
     }
     if (message.sender === "peer" && message.sentAt === undefined) {
       const sentAt = claimedTime(message.timestamp);
@@ -9748,6 +9904,13 @@ export class GhostlyNode implements EngineImplementation {
     // Its place, in the order rows come (before anything is awaited).
     message = this.placed(message, place);
     const live = this.links.get(message.linkId);
+    // A chat deleted in this run takes no row again: none would ever be shown, nor deleted with it. Nor does one deleted
+    // while this store is under way (its reply looked for, its row written), even when the same invite was joined again
+    // meanwhile under the same id: checked after every wait below (`kept`).
+    const deletes = this.removedChats.get(message.linkId);
+    if (!live && deletes !== undefined) return false;
+    const chat = message.linkId;
+    const kept = () => this.removedChats.get(chat) === deletes;
     // The peer republishes what it sent for a few minutes: what was deleted here stays deleted.
     if (live?.stored.deletedIds?.includes(message.id)) return false;
     // A member's message its author deleted for everyone, coming again with a catch-up or handed on: it stays gone.
@@ -9763,7 +9926,7 @@ export class GhostlyNode implements EngineImplementation {
       const at = Date.now();
       message = { ...message, details: { ...withSend(message.details, { at, ...pathSnapshot(live, message.via), result: "sent" }), sentAt: at } };
     }
-    if (!(await db.addMessage(message))) return false;
+    if (!(await this.addRowWhile(message, kept))) return false;
     // It waits for the live link: `sendWaiting` finds it by its id (a list not read yet reads it from the history).
     if (live && waitsForLive(message)) void live.waitingSends?.then(known => known.add(message.id), () => {});
     // A row a reply names by another id than its own: `resolveReply` finds it by that id.
@@ -9781,14 +9944,29 @@ export class GhostlyNode implements EngineImplementation {
     const early = message.sender === "peer" && message.id.startsWith("peer_") ? this.editBuffer.take(message.linkId, message.id.slice(5)) : undefined;
     if (early) {
       await this.applyPeerEdit(message.linkId, message, early);
+      if (!kept()) return false;
       live?.link?.confirmEdit(early.id, early.e);
     }
     await this.messagesChanged(message.linkId, [message.id]);
+    if (!kept()) return false;
     this.emitState();
     // Reactions that came before it are shown now, and a member's edit.
     await this.reactions.stored(message);
     await this.groupEdits.stored(message);
     return true;
+  }
+
+  /**
+   * Writes a new message's row while `kept` says its chat is still the one its store began for, checked right before
+   * the write and again once it is done: a chat deleted while the row was being written loses it again, as the
+   * chat's other rows went (`db.deleteLink`). False when it was there already, or its chat went.
+   */
+  private async addRowWhile(message: StoredMessage, kept: () => boolean): Promise<boolean> {
+    if (!kept()) return false;
+    if (!(await db.addMessage(message))) return false;
+    if (kept()) return true;
+    await db.deleteMessage(message.linkId, message.id).catch(() => {});
+    return false;
   }
 
   private servicesChanged(): void {

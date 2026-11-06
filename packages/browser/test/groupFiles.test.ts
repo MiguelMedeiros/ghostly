@@ -2039,4 +2039,39 @@ describe("a file in a community", { timeout: 120_000 }, () => {
     await t.world.restart(reader);
     expect([...store.records.keys()]).toEqual([]);
   });
+
+  // A member whose join lost a race ("Asking to be let in again…") is out only for a moment: its files stopped for good,
+  // what came of them went, and they read failed with no Ask again, still so once it was back in, until the app restarted.
+  it("still coming while its member is let in again after a lost race keep coming, and arrive once it is back in", async () => {
+    const t = new FilesWorld();
+    const admin = t.add("admin");
+    const id = await admin.groups.create("Open door");
+    const link = await admin.groups.enableLink(id);
+    const others = Array.from({ length: 3 }, (_, i) => t.add(`p${i}`));
+    for (const p of others) await p.groups.joinByLink(`https://app.ghostly.tools/#/join/${link}`);
+    await t.world.until(() => others.every(p => t.world.member(p, id)), 10 * 60_000);
+    await t.world.run(30_000);
+    const [author, reader] = others;
+    t.files.get(reader)!.settings.autoDownloads = false;
+    // The reader's offers wait on the way: its Download stays asked of a holder.
+    t.hold = (_from, to, frame) => to === reader && frame.t === "pf-offer";
+    const { messageId, meta } = await t.send(author, id, pattern(60_000, 13), { name: "asked.bin" });
+    await t.world.until(() => !!t.got(reader, id, messageId).message?.file, 60_000);
+    await reader.groups.downloadFile(t.got(reader, id, messageId).message!.file!.id);
+
+    // Lost, as `adopt` leaves it when the branch it follows drops its join (held so here: the reader is still in this
+    // roster, so the next branch choice would take it back at once); then back in.
+    // Its session is made again as it is saved, so the reader's sessions are held lost on their class.
+    const proto = Object.getPrototypeOf(reader.groups.communities.session(id)!), status = Object.getOwnPropertyDescriptor(proto, "status")!;
+    const me = t.key(reader, id);
+    Object.defineProperty(proto, "status", { configurable: true, get() { return this.myKey === me ? "lost" : status.get!.call(this); } });
+    try {
+      await t.world.run(2 * GROUP_FILE_LIMITS.wantWaitMs);
+      expect(t.got(reader, id, messageId).transfer).not.toMatchObject({ state: "failed" });
+    } finally { Object.defineProperty(proto, "status", status); }
+    expect(t.world.view(reader, id)!.status).toBe("active");
+    t.release(id);
+    await t.world.until(() => t.done(reader, id, messageId), 5 * 60_000);
+    expect(sha(t.got(reader, id, messageId).bytes!)).toBe(meta.d);
+  });
 });

@@ -128,8 +128,11 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     const val NOTIFICATIONS = "notifications"
     /** The extra a notification's tap carries: the page's id for it, which names the chat only in the page. */
     const val EXTRA_NOTIFICATION = "tools.ghostly.app.notification"
-    /** Marks an intent handled, so the one that started the app is not taken again when the activity comes back. */
-    private const val EXTRA_HANDLED = "tools.ghostly.app.handled"
+    /**
+     * Marks an intent handled, so the one that started the app is not taken again when the activity comes back. Only
+     * on this process's copy: MainActivity marks the intent of an activity made again in a new process (LaunchIntent).
+     */
+    const val EXTRA_HANDLED = "tools.ghostly.app.handled"
     private const val CHANNEL = "messages"
     /** At most this many files from one share, as a paste (clipboard.rs `MAX_PASTED_FILES`). */
     private const val MAX_SHARED_FILES = 32
@@ -157,6 +160,8 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       val since = shareTurns.last()
       thread(name = "ghostly-share-clean") { SharedCopies.stale(sharedRoot(), since).forEach { it.deleteRecursively() } }
     }
+    // The latest intent the activity got (MainActivity keeps a new one as its intent): one that came while the plugin
+    // was not loaded yet reaches the page too. One already taken is marked handled.
     take(activity.intent)
     watchNetwork()
     // The call notification's Hang up (CallService.kt): the page ends the call.

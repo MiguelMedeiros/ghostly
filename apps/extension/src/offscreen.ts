@@ -1,4 +1,5 @@
-import { GhostlyHttpError, fromBase64, toBase64 } from "@ghostly/core";
+import { GhostlyHttpError, fromBase64, parseLocalTarget, toBase64 } from "@ghostly/core";
+import { localAccessPattern } from "@ghostly/browser/host";
 import type { EngineServer, EngineClientSink } from "@ghostly/browser/engine/server";
 import { copyingSink } from "@ghostly/browser/engine/copyingSink";
 import { createPeerServer } from "@ghostly/browser/devices/peer";
@@ -20,6 +21,11 @@ import { setStorageProfile } from "../../ui/src/lib/storage";
 const VIEWER_MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 /** How long a peer being replaced gets to say goodbye to its contacts before its document closes. */
 const STOP_GRACE_MS = 3_000;
+/**
+ * How long a peer being replaced in the middle of "Clear all data" gets to end it (take back what it can, stop, empty
+ * its database: `CLEAR_WITHDRAW_MS` and a little more), as long as the page gives it (clearData.ts `CLEAR_ENGINE_MS`).
+ */
+const CLEAR_GRACE_MS = 15_000;
 /**
  * Each chat's newest rows a page gets when it connects (`EngineServer.attach`'s `newest`), not its whole history: this
  * port carries JSON, and every chat's whole history went across to each tab opened or reloaded (about 20 MiB for 50
@@ -83,7 +89,15 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener((request: ClientMessage) => withPeer((s) => {
     // A chat's whole history the page asked for; a device that is not the active one has none.
     if (request?.kind === "history") void engineOf(s)?.history(client, request.linkId);
-    else void s.handle(client, request);
+    else {
+      const handled = s.handle(client, request);
+      // "Clear all data" stops the peer for good (`clearProfileData`): once it is over, the worker replaces this document
+      // at the next start it is asked for, should the page go away before it asks for a new peer (`restart-engine`).
+      if (request?.kind === "request" && request.method === "clearProfileData") {
+        void handled.finally(() => { cleared = true; });
+        clearing = handled.catch(() => {});
+      }
+    }
   }));
 });
 
@@ -137,9 +151,35 @@ function serviceName(peer: EngineServer, peerPubKeyZ32: string, serviceId: strin
   }
 }
 
+/**
+ * Chrome no longer lets the extension reach `patterns` (`http://127.0.0.1/*`): every app this profile shares at one of
+ * those hosts, on any port, is turned off ("Share" off, `setServiceEnabled`), so contacts no longer see it and are
+ * answered as for any app not shared. Turning it on again is the person's to do.
+ */
+async function turnOffAppsAt(patterns: string[]): Promise<void> {
+  const peer = engineOf(await server);
+  if (!peer) return;
+  await peer.ready;
+  const gone = new Set(patterns);
+  for (const service of peer.node.getState().services) {
+    if (!service.enabled) continue;
+    let pattern: string;
+    try { pattern = localAccessPattern(parseLocalTarget(service.target).origin); } catch { continue; }
+    if (gone.has(pattern)) peer.node.setServiceEnabled({ serviceId: service.id, enabled: false });
+  }
+}
+
 let stopping: Promise<void> | null = null;
-/** Stops the peer, once: before the worker closes this document for a switch, or as the page goes away. */
-const stopPeer = () => (stopping ??= (running ? running.stop() : server.then((s) => s.stop())).catch(() => {}));
+/** A page's "Clear all data" stopped the peer: it does not run again in this document. */
+let cleared = false;
+/** A page's "Clear all data" in progress in the peer: it ends with the peer stopped. */
+let clearing: Promise<void> | null = null;
+/**
+ * Stops the peer, once: before the worker closes this document for a switch, or as the page goes away. One "Clear all
+ * data" stopped is not stopped again: nothing it held is written over the emptied database. One clearing stops once
+ * its clear is over: a switch in another tab no longer leaves its database half emptied.
+ */
+const stopPeer = () => (stopping ??= cleared ? Promise.resolve() : clearing ?? (running ? running.stop() : server.then((s) => s.stop())).catch(() => {}));
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {
   if (message?.target !== "engine" || !fromOwnPage(sender)) return false;
@@ -147,16 +187,23 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     // Which profile runs, and which one the registry names now: they differ once a page switched.
     // Answered too when the peer did not start (its database did not open): the pages connect and are told why
     // (`start-failed`). Before, no answer came and the page got "The Ghostly peer did not start" after five seconds.
-    void server.then((s) => s.ready.catch(() => {}), () => {}).then(() => sendResponse({ profile, active: activeNamespace(), activeId: activeProfileId() } satisfies EngineStatus));
+    // A peer that stopped for good says so, and the worker starts another in its place.
+    void server.then((s) => s.ready.catch(() => {}), () => {}).then(() => sendResponse({ profile, active: activeNamespace(), activeId: activeProfileId(), stopped: cleared || stopping !== null } satisfies EngineStatus));
     return true;
   }
   if (message.type === "stop") {
     // Its contacts see it leave, if that takes a moment; a peer that hangs does not hold up the switch.
-    void Promise.race([stopPeer(), new Promise((resolve) => setTimeout(resolve, STOP_GRACE_MS))]).then(() => sendResponse(true));
+    const grace = clearing && !cleared ? CLEAR_GRACE_MS : STOP_GRACE_MS;
+    void Promise.race([stopPeer(), new Promise((resolve) => setTimeout(resolve, grace))]).then(() => sendResponse(true));
     return true;
   }
   if (message.type === "http-request") {
     void handleHttpRequest(message).then(sendResponse);
+    return true;
+  }
+  if (message.type === "local-access-removed") {
+    const origins = Array.isArray(message.origins) ? message.origins.filter((o): o is string => typeof o === "string") : [];
+    void turnOffAppsAt(origins).then(() => sendResponse(true), () => sendResponse(false));
     return true;
   }
   return false;

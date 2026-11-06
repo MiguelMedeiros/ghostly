@@ -13,24 +13,35 @@ class Mesh {
   readonly sessions = new Map<string, GroupSession>();
   readonly edits = new Map<string, GroupIncomingEdit[]>();
   readonly sent: { from: string; to: string; frame: GroupEdgeFrame }[] = [];
+  /** Members that pass on what their session took, as a hub does (WISP 902 § Hubs), and whom each member counts on. */
+  readonly hubs = new Set<string>();
+  readonly carriers = new Map<string, string[]>();
   private closed = new Set<string>();
   private pending: Promise<unknown>[] = [];
   /** An app from before edits: its session has no `edit` hook. */
   add(state: GroupState, old = false): GroupSession {
     const session: GroupSession = new GroupSession(state, {
       save: async () => {},
-      send: (to, frame) => {
-        this.sent.push({ from: session.myKey, to, frame: clone(frame) });
-        const target = this.sessions.get(to);
-        if (target && !this.closed.has([session.myKey, to].sort().join("|"))) this.pending.push(target.handle(session.myKey, clone(frame)));
-      },
+      send: (to, frame) => this.deliver(session, to, frame),
       message: () => {},
       ...(old ? {} : { edit: (e: GroupIncomingEdit) => { this.edits.get(session.myKey)!.push(e); } }),
       changed: () => {},
+      carriers: () => this.carriers.get(session.myKey) ?? [],
     });
     this.sessions.set(session.myKey, session);
     this.edits.set(session.myKey, []);
     return session;
+  }
+  private deliver(from: GroupSession, to: string, frame: GroupEdgeFrame): void {
+    this.sent.push({ from: from.myKey, to, frame: clone(frame) });
+    const target = this.sessions.get(to);
+    if (!target || this.closed.has([from.myKey, to].sort().join("|"))) return;
+    this.pending.push(target.handle(from.myKey, clone(frame)).then(took => {
+      if (!this.hubs.has(to)) return;
+      for (const f of took) for (const key of this.sessions.keys()) {
+        if (key !== from.myKey && key !== to && key !== (f as { s?: string }).s) this.deliver(target, key, target.handOnTo(key, f));
+      }
+    }));
   }
   setEdge(a: GroupSession, b: GroupSession, open: boolean): void {
     const key = [a.myKey, b.myKey].sort().join("|");
@@ -250,6 +261,94 @@ describe("group-edit frames (a private group)", () => {
     expect(carol.epoch).toBe(bob.epoch);
     expect(mesh.of(carol)).toEqual([{ id, sender: bob.myKey, e: 1, ts: 1, m: "new epoch, edited" }]);
     expect(id).toBe(groupMessageId(bob.myKey, bob.epoch, 0));
+  });
+
+  it("on hubs, an edit and a removal of a message older than the hub reach the members through it, live and at catch-up", async () => {
+    const { mesh, alice, bob, carol } = await trio();
+    const kept = ((await bob.sendText("keep A")) as { id: string }).id;
+    const gone = ((await bob.sendText("del B")) as { id: string }).id;
+    await mesh.settle();
+    // A hub let in after both messages: Bob's only edge is to it, and Carol is away.
+    const hub = await admit(mesh, alice);
+    mesh.hubs.add(hub.myKey);
+    mesh.carriers.set(bob.myKey, [hub.myKey]);
+    mesh.setEdge(bob, alice, false); mesh.setEdge(bob, carol, false);
+    mesh.setEdge(carol, alice, false); mesh.setEdge(carol, hub, false);
+    expect(await bob.sendEdit(kept, { v: 1, ts: 1, text: "A edited" })).toEqual({ sent: 2 });
+    expect(await bob.sendEdit(gone, { v: 5_001, ts: 2, text: REMOVED_TEXT, remove: true })).toEqual({ sent: 2 });
+    await mesh.settle();
+    // The hub cannot read them (it was not in their epoch), but carries them on.
+    expect(mesh.of(hub)).toEqual([]);
+    expect(mesh.of(alice)).toEqual([
+      { id: kept, sender: bob.myKey, e: 1, ts: 1, m: "A edited" },
+      { id: gone, sender: bob.myKey, e: 5_001, ts: 2, m: REMOVED_TEXT, rm: true },
+    ]);
+    // Carol is back on the hub alone: her catch-up asks it for Bob.
+    mesh.setEdge(carol, hub, true);
+    await hub.handle(carol.myKey, clone(carol.syncFrame([bob.myKey])));
+    await mesh.settle();
+    expect(mesh.of(carol).map(e => [e.id, e.e])).toEqual([[kept, 1], [gone, 5_001]]);
+    // Carried blind only as the author signed it, and only while the author is in the roster.
+    mesh.setEdge(bob, hub, false);
+    await bob.sendEdit(kept, { v: 2, ts: 3, text: "A again" });
+    const late = mesh.sent.filter(f => f.frame.t === GROUP_EDIT_FRAME && f.to === hub.myKey).pop()!.frame as GroupEditFrame;
+    expect(late.v).toBe(2);
+    expect(await hub.handle(alice.myKey, { ...clone(late), v: 3 })).toEqual([]);
+    await alice.remove(bob.myKey);
+    await mesh.settle();
+    expect(await hub.handle(alice.myKey, clone(late))).toEqual([]);
+  });
+
+  it("on hubs, a hub let in after an edit is handed it unread, once, by those that hold it, and carries it to a member back", async () => {
+    const { mesh, alice, bob, carol } = await trio();
+    const kept = ((await bob.sendText("keep A")) as { id: string }).id;
+    const gone = ((await bob.sendText("del B")) as { id: string }).id;
+    await mesh.settle();
+    // Carol is away. Hub A, let in after both messages, is Bob's only edge when he edits them, then his app closes.
+    mesh.setEdge(carol, alice, false); mesh.setEdge(carol, bob, false);
+    const hubA = await admit(mesh, alice);
+    mesh.setEdge(carol, hubA, false);
+    mesh.hubs.add(hubA.myKey);
+    mesh.carriers.set(bob.myKey, [hubA.myKey]);
+    mesh.setEdge(bob, alice, false);
+    expect(await bob.sendEdit(kept, { v: 1, ts: 1, text: "A edited" })).toEqual({ sent: 2 });
+    expect(await bob.sendEdit(gone, { v: 5_001, ts: 2, text: REMOVED_TEXT, remove: true })).toEqual({ sent: 2 });
+    await mesh.settle();
+    expect(mesh.of(alice).map(e => e.id)).toEqual([kept, gone]);
+    mesh.setEdge(bob, hubA, false);
+    // Hub B is let in after the edits: neither Bob nor anyone's catch-up handed it them.
+    const hubB = await admit(mesh, alice);
+    mesh.setEdge(carol, hubB, false); mesh.setEdge(bob, hubB, false);
+    mesh.hubs.add(hubB.myKey);
+    const toHubB = (from: GroupSession) => mesh.sent.filter(f => f.frame.t === GROUP_EDIT_FRAME && f.from === from.myKey && f.to === hubB.myKey).length;
+    // A member that does not count on it as a hub hands it only what it can read: none of these.
+    await alice.handle(hubB.myKey, clone(hubB.syncFrame([bob.myKey])));
+    await mesh.settle();
+    expect(toHubB(alice)).toBe(0);
+    // Hub A counts on it: its sync asking for Bob gets the edits Hub A carries, unread, and only once.
+    mesh.carriers.set(hubA.myKey, [hubB.myKey]);
+    await hubA.handle(hubB.myKey, clone(hubB.syncFrame([bob.myKey])));
+    await mesh.settle();
+    expect(toHubB(hubA)).toBe(2);
+    await hubA.handle(hubB.myKey, clone(hubB.syncFrame([bob.myKey])));
+    await mesh.settle();
+    expect(toHubB(hubA)).toBe(2);
+    // As does a member of the edits' epoch that counts on it: its two, once.
+    mesh.carriers.set(alice.myKey, [hubB.myKey]);
+    for (let i = 0; i < 2; i++) { await alice.handle(hubB.myKey, clone(hubB.syncFrame([bob.myKey]))); await mesh.settle(); }
+    expect(toHubB(alice)).toBe(2);
+    expect(mesh.of(hubB)).toEqual([]);
+    // Hub A leaves; Carol is back with Hub B alone, and her catch-up asks it for Bob.
+    mesh.setEdge(hubA, hubB, false);
+    mesh.setEdge(carol, hubB, true);
+    await hubB.handle(carol.myKey, clone(carol.syncFrame([bob.myKey])));
+    await mesh.settle();
+    expect(mesh.of(carol).map(e => [e.id, e.e])).toEqual([[kept, 1], [gone, 5_001]]);
+    // A member let in after the messages, not a hub, is handed none of them, from a hub or a reader.
+    const dave = await admit(mesh, alice);
+    for (const via of [hubB, alice]) await via.handle(dave.myKey, clone(dave.syncFrame([bob.myKey])));
+    await mesh.settle();
+    expect(mesh.sent.filter(f => f.frame.t === GROUP_EDIT_FRAME && f.to === dave.myKey)).toEqual([]);
   });
 });
 

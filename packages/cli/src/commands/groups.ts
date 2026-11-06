@@ -1,5 +1,5 @@
 import { CliError } from "../errors";
-import { type Command, groupWait, here, showSecret, secret, cursor, pageLimit, timeout, typingFor, typingKind } from "./shared";
+import { type Command, groupWait, here, refs, showSecret, secret, cursor, pageLimit, timeout, typingFor, typingKind } from "./shared";
 
 const nameForce = { type: "boolean", description: "Use the name even if it looks like a seed, a key or ecash" } as const;
 const forced = (options: Record<string, unknown>) => (options.force === true ? { force: true } : {});
@@ -10,6 +10,19 @@ export const commands: Record<string, Command> = {
   "group admin": {
     method: "group.admin", usage: "group admin <group> <member> [--show-secret]", summary: "Make a member the admin (admin)", args: ["group", "member"],
     options: showSecret, params: ({ options }, a) => ({ group: a.group, member: a.member, ...secret(options) }),
+  },
+  "group auto": {
+    method: "group.auto", usage: "group auto [on|off] [--from <chat>]...", summary: "Accept group invitations by themselves, only from the chats named (kept in the profile; the daemon accepts)",
+    args: ["mode...?"], options: { from: { type: "list", description: "Invitations from this chat: its id, its contact's key or a label given here with chat rename (again for more: a new on replaces the list)" } },
+    params: ({ options }, a) => {
+      if (a.mode !== undefined && a.mode !== "on" && a.mode !== "off") throw new CliError("usage", `group auto takes on or off, not ${JSON.stringify(a.mode)}: ghostly group auto [on|off] [--from <chat>]...`);
+      // Never from anyone: on names its chats. Without on, the chats would be dropped without a word.
+      if (a.mode === "on" && options.from === undefined) throw new CliError("usage", "group auto on needs the chats whose invitations it accepts: ghostly group auto on --from <chat>");
+      if (a.mode !== "on" && options.from !== undefined) throw new CliError("usage", "--from goes with on: ghostly group auto on --from <chat>");
+      refs(options.from, "from", "chat");
+      if (a.mode === undefined) return {};
+      return a.mode === "on" ? { on: true, from: options.from } : { on: false };
+    },
   },
   "group create": {
     method: "group.create", usage: "group create <name...> [--mesh] [--force]", summary: "A community (a link anyone can open) or, with --mesh, a private group of up to 32",
@@ -53,7 +66,7 @@ export const commands: Record<string, Command> = {
       return { group: a.group, on: options.off !== true, reset: options.reset === true };
     },
   },
-  "group list": { method: "group.list", usage: "group list [--show-secret]", summary: "Groups and invitations", options: showSecret, params: ({ options }) => secret(options) },
+  "group list": { method: "group.list", usage: "group list [--show-secret]", summary: "Groups, invitations and auto-join", options: showSecret, params: ({ options }) => secret(options) },
   "group picture": {
     method: "group.picture", usage: "group picture <group> <jpeg> | --clear", summary: "Set or clear the group's picture (admin; a square JPEG)", args: ["group", "path...?"],
     options: { clear: { type: "boolean", description: "Remove the picture" } },

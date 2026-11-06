@@ -1,14 +1,20 @@
 import { screen, within } from "@testing-library/react";
-import { useLocation } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { Route, Routes, useLocation } from "react-router-dom";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CALLS_BLOCKED_GUIDE, CallNoPathNotice } from "../../components/CallNoPathNotice";
+import { LockScreenProvider } from "../../contexts/LockScreenContext";
+import { UpdateProvider } from "../../contexts/UpdateContext";
+import { Settings } from "../../pages/Settings";
 import { renderApp } from "../render";
+import { windowIs } from "../viewport";
 
 // covers: calls.no-path
 
 function Where() {
   return <p data-testid="where">{useLocation().pathname}</p>;
 }
+
+afterEach(() => vi.restoreAllMocks());
 
 describe("the note when a call found no path to the contact", () => {
   it("says why in one plain sentence, points to Settings, Network and to the guide, and closes", async () => {
@@ -65,6 +71,23 @@ describe("the note when a call found no path to the contact", () => {
     const note = screen.getByRole("alert");
     expect(note).toHaveTextContent("A chamada não conectou");
     expect(within(note).getByRole("link", { name: "Ajustes de rede" })).toBeInTheDocument();
+  });
+
+  // A phone's Network screen has its relay lists above the TURN server: at 375×667 the field started below the fold.
+  it.each([[true, "en"], [true, "ar"], [false, "en"], [false, "ar"]] as const)("Network settings opens Network at the TURN server field (phone: %s, %s)", async (phone, language) => {
+    windowIs(phone);
+    const scrolled: Element[] = [];
+    vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (this: Element) { scrolled.push(this); });
+    const { user } = renderApp(
+      <LockScreenProvider><UpdateProvider>
+        <Routes>
+          <Route path="/chat/:id" element={<CallNoPathNotice onClose={() => {}} />} />
+          <Route path="/settings/:section?" element={<Settings />} />
+        </Routes>
+      </UpdateProvider></LockScreenProvider>, { route: "/chat/abc", language });
+    await user.click(screen.getByTestId("call-no-path-settings"));
+    const field = await screen.findByTestId("network-turn-field");
+    await vi.waitFor(() => expect(scrolled[scrolled.length - 1]).toBe(field));
   });
 
   it("says the TURN server case in every language", () => {

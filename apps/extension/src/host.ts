@@ -9,7 +9,7 @@ import { languageTag, textDirection } from "../../ui/src/lib/documentLanguage";
 import { translatorFor } from "../../ui/src/locales";
 import { markEngineRestart, pageProfileIsCurrent, startAsProfileInUse } from "./profile";
 import { setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
-import { forgetLocalAccess, releaseUnusedLocalAccess } from "./localAccess";
+import { forgetLocalAccess, releaseUnusedLocalAccess, withLocalAccess } from "./localAccess";
 
 // A contact's app tabs close when the profile locks, as Desktop's windows do: the worker serves them, page or not.
 setServiceWindowsCloser(() => void chrome.runtime.sendMessage({ target: "background", type: "close-services" } satisfies RuntimeMessage).catch(() => {}));
@@ -53,6 +53,9 @@ export const extensionHost: BrowserHost = {
   },
 
   async restartEngine() {
+    // Another tab switched while this page cleared its profile: the peer that runs now is the other profile's, just
+    // started, and this page starts again as that profile once its clear is over (`finishBeforeSwitching`).
+    if (!pageProfileIsCurrent()) return;
     const reply = await chrome.runtime.sendMessage({ target: "background", type: "restart-engine" } satisfies RuntimeMessage);
     if (!reply?.ok) throw new Error(reply?.error ?? "The Ghostly peer did not start again. Reopen the extension to retry.");
     // Every other tab of the extension is on the new peer now, still showing what the old one told it.
@@ -61,6 +64,8 @@ export const extensionHost: BrowserHost = {
 
   // Chrome's own prompt, and only from a user gesture.
   requestLocalAccess: (originPattern) => chrome.permissions.request({ origins: [originPattern] }),
+  // The share's app is added under the lock the give-back holds, so neither runs in the middle of the other.
+  withLocalAccess,
   // Given back once no app of any profile is at that host, on any port (localAccess.ts).
   forgetLocalAccess,
   releaseUnusedLocalAccess,

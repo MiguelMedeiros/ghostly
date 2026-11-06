@@ -26,6 +26,8 @@ class Net {
   delivered = 0;
   /** Every frame that reached someone: who sent it, to whom, its type. */
   readonly log: { from: string; to: string; t: string }[] = [];
+  /** How many times each member saved its state. */
+  readonly saves = new Map<string, number>();
   /** The members' clock. */
   now = () => Date.now();
 
@@ -39,7 +41,7 @@ class Net {
       return true;
     };
     return {
-      save: async (state: CommunityState) => { this.members.get(name)!.saved = state; },
+      save: async (state: CommunityState) => { this.members.get(name)!.saved = state; this.saves.set(name, (this.saves.get(name) ?? 0) + 1); },
       broadcast: (frame: CommunityFrame) => [...this.members.values()].filter(m => deliver(m, frame)).length,
       direct: (to: string, frame: CommunityFrame) => { deliver(this.byKey(to), frame); },
       addressed: (to: string, frame: CommunityFrame) => { deliver(this.byKey(to), frame); },
@@ -717,6 +719,27 @@ describe("community sessions", { timeout: 60_000 }, () => {
     expect(dave.session.roster).toHaveLength(4);
   });
 
+  it("a replaced link is saved once, the new entry key in the same write as the link commit, and a restart keeps both", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    await net.meet(alice, bob);
+    const before = net.saves.get("alice") ?? 0;
+    const fresh = await alice.session.replaceLink();
+    const seed = alice.session.state.entry.seedB64;
+    // The admin's state is the whole chain and the secrets: one write for the reset, not one for the commit and one for the key.
+    expect((net.saves.get("alice") ?? 0) - before).toBe(1);
+    expect(alice.saved.entry).toEqual({ key: fresh, seedB64: seed });
+    expect(alice.saved.chain.at(-1)).toMatchObject({ k: "link", x: fresh });
+    await net.settle();
+    await net.restart(alice);
+    expect(alice.session.entryKey).toBe(fresh);
+    expect(alice.session.state.entry.seedB64).toBe(seed);
+    // The restarted admin still answers the new link.
+    const carol = await net.admit(alice, "carol");
+    expect(carol.session.roster).toHaveLength(3);
+  });
+
   it("messages go to everyone, and a restart keeps the branch, the secrets and the store", async () => {
     const net = new Net();
     const alice = net.create("alice");
@@ -1172,8 +1195,8 @@ describe("a leave ends one admission", { timeout: 60_000 }, () => {
     const { net, alice, bob, carol, first } = await rejoined();
     const key = carol.session.myKey;
     expect(first.ls3).toBeDefined();
-    // Alice still holds the request Bob committed: it is not one for this admission, and she commits nothing.
-    expect(alice.session.state.pendingLeaves.map(r => r.s)).toEqual([key]);
+    // Alice dropped the request Bob committed once his commit took Carol out, and commits nothing.
+    expect(alice.session.state.pendingLeaves).toEqual([]);
     expect(await alice.session.commitPendingLeaves()).toBe(0);
     expect(alice.session.state.pendingLeaves).toEqual([]);
     // As a request, with and without the statement of the admission it ended: no member keeps it.

@@ -1,5 +1,6 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { chat, say } from "../support/fixtures";
-import { type Adb, PKG, activityStarts, expect, newChat, pairWithWeb, pending, skipUntilA1, test } from "./support/android";
+import { type Adb, PKG, activityStarts, expect, newChat, pairWithWeb, pending, skipUntilA1, test, webViewPage } from "./support/android";
 
 /**
  * The Android host (A1): what the system does for the app, read from the system's side over adb. Until the APK under
@@ -88,6 +89,71 @@ test("text shared from another app opens the Share to… picker", { tag: ["@feat
   app.adb.run("shell", "am", "start", "-a", "android.intent.action.SEND", "-t", "text/plain", "--es", "android.intent.extra.TEXT", text, "-p", PKG);
   await expect(app.page.getByTestId("share-picker")).toBeVisible();
   await expect(app.page.getByTestId("share-text")).toHaveText(text);
+});
+
+test("text shared while the app's process is gone but its task is in Recents opens the Share to… picker", { tag: ["@feature:android.host.share-target", "@gated"] }, async ({ app }) => {
+  const { adb, device } = app;
+  const takes = adb.shell("cmd package query-activities -a android.intent.action.SEND -t text/plain").includes(PKG);
+  skipUntilA1("Sharing into the app", !takes && "the app has no ACTION_SEND filter for text");
+  app.background();
+  await expect.poll(() => app.page.evaluate(() => document.visibilityState), { timeout: 10_000, message: "the page sees the app in the background" }).toBe("hidden");
+  // Android ends the process for memory and keeps the task: `am kill` ends only a process that is safe to end, so it
+  // is asked until the app's process is in the background enough for it.
+  await expect.poll(() => {
+    adb.tryRun("shell", "am", "kill", PKG);
+    return adb.pid();
+  }, { timeout: 30_000, message: "the app's process ended by am kill" }).toBe("");
+  expect(adb.shell("dumpsys activity recents"), "the app's task still in Recents").toContain(PKG);
+  const text = `shared-after-kill-${Date.now()}`;
+  // The task's activity (singleTask) is made again in a new process and gets the share as a new intent.
+  adb.run("shell", "am", "start", "-W", "-a", "android.intent.action.SEND", "-t", "text/plain", "--es", "android.intent.extra.TEXT", text, "-p", PKG);
+  let pid = "";
+  await expect.poll(() => (pid = adb.pid()), { timeout: 30_000, message: "the app's new process" }).not.toBe("");
+  const page = await webViewPage(device, Number(pid));
+  await expect(page.getByTestId("share-picker")).toBeVisible({ timeout: 120_000 });
+  await expect(page.getByTestId("share-text")).toHaveText(text);
+});
+
+/** A task of the app whose root intent is a share (`dumpsys activity recents`). */
+const shareRooted = /baseIntent=Intent \{ act=android\.intent\.action\.SEND [^\n]*pkg=tools\.ghostly\.app/;
+
+test("a share that started the app is not offered again when Android brings the app back after ending its process", { tag: ["@feature:android.host.share-target", "@gated"] }, async ({ app, relayUrl }) => {
+  const { adb, device } = app;
+  const takes = adb.shell("cmd package query-activities -a android.intent.action.SEND -t text/plain").includes(PKG);
+  skipUntilA1("Sharing into the app", !takes && "the app has no ACTION_SEND filter for text");
+  // The app not running and no task of it: the share starts it, and is its task's root intent (the profile and its
+  // Network settings stay). A debug e2e start, as the fixture's.
+  adb.run("shell", "am", "force-stop", PKG);
+  const text = `shared-at-start-${Date.now()}`;
+  adb.run("shell", "am", "start", "-W", "-f", "0x10008000", "-a", "android.intent.action.SEND", "-t", "text/plain", "--es", "android.intent.extra.TEXT", text, "-p", PKG, "--ez", "ghostly_e2e", "true", "--es", "GHOSTLY_PKARR_RELAYS", relayUrl);
+  expect(adb.shell("dumpsys activity recents"), "the share is the root intent of the app's task").toMatch(shareRooted);
+  let pid = "";
+  await expect.poll(() => (pid = adb.pid()), { timeout: 30_000, message: "the app's process" }).not.toBe("");
+  let page = await webViewPage(device, Number(pid));
+  await expect(page.getByTestId("share-text")).toHaveText(text, { timeout: 120_000 });
+  await page.getByTestId("share-cancel").click();
+  await expect(page.getByTestId("share-picker")).toBeHidden();
+
+  adb.shell("input keyevent KEYCODE_HOME");
+  await expect.poll(() => page.evaluate(() => document.visibilityState), { timeout: 10_000, message: "the page sees the app in the background" }).toBe("hidden");
+  await expect.poll(() => {
+    adb.tryRun("shell", "am", "kill", PKG);
+    return adb.pid();
+  }, { timeout: 30_000, message: "the app's process ended by am kill" }).toBe("");
+  expect(adb.shell("dumpsys activity recents"), "the app's task, the share's, still in Recents").toMatch(shareRooted);
+
+  // Back from Recents, as a person would: the overview, then its front card (the app's task, the latest one).
+  adb.shell("input keyevent KEYCODE_APP_SWITCH");
+  await sleep(2_000);
+  const [width, height] = (/(\d+)x(\d+)/.exec(adb.shell("wm size")) ?? []).slice(1).map(Number);
+  adb.shell(`input tap ${Math.round(width / 2)} ${Math.round(height / 2)}`);
+  await expect.poll(() => (pid = adb.pid()), { timeout: 30_000, message: "the app's new process" }).not.toBe("");
+  page = await webViewPage(device, Number(pid));
+  // The chat list, or the picker over it: the share Rust would hand over comes at the page's start, a few seconds more
+  // for it to show, then none.
+  await expect(newChat(page).or(page.getByTestId("share-picker")), "the UI rendered").toBeAttached({ timeout: 120_000 });
+  await sleep(5_000);
+  await expect(page.getByTestId("share-picker")).toHaveCount(0);
 });
 
 /** The app's view of `id` in its activity's view hierarchy (`dumpsys activity`), as shown (V), or null when there is none. */

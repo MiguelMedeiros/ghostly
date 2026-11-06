@@ -282,6 +282,11 @@ export interface GroupSessionHooks {
    */
   adminWork?(): boolean;
   /**
+   * The hubs I count on (WISP 902 · Group Mesh § Hubs), when the group runs on them: they carry my edits on even of a
+   * message from before they were let in, which they cannot read. Absent or empty: a full mesh.
+   */
+  carriers?(): readonly string[];
+  /**
    * Whether a fresh turn read says this device is the active one (WISP 06 § When a device checks), asked before every
    * commit: two devices that both think they are active would each commit after one parent, and the group halts. No:
    * a commit the person asked for is refused (`groupTurnUnconfirmed`); an automatic one (a member's leave) is not made
@@ -501,6 +506,12 @@ export class GroupSession {
    * them is not handed them again at every sync. In memory only.
    */
   private leaversHanded = new Map<string, Set<string>>();
+  /**
+   * The kept edits each hub I count on was handed that it cannot read (`editKey`): of epochs from before it was let in,
+   * for it to carry to the members of those epochs. Each goes to a hub once while my app runs, not at every sync of its
+   * own. In memory only.
+   */
+  private carriedHanded = new Map<string, Set<string>>();
   /** Syncs answered per member, a few a minute (`GROUP_LIMITS.syncAnswers`). In memory only. */
   private syncsAnswered = new Map<string, RateWindow>();
   /**
@@ -551,7 +562,13 @@ export class GroupSession {
           const handed = this.leaversHanded.get(to) ?? new Set<string>();
           this.leaversHanded.set(to, handed.add(editKey(frame)));
         }
-        return hooks.send(to, frame);
+        const took = hooks.send(to, frame);
+        // So does an edit a hub carries unread (`receiveSync`), once its edge took it.
+        if (took !== false && frame.t === GROUP_EDIT_FRAME && !rosterHas(this.state.chain[frame.e]?.m ?? [], to)) {
+          const carried = this.carriedHanded.get(to) ?? new Set<string>();
+          this.carriedHanded.set(to, carried.add(editKey(frame)));
+        }
+        return took;
       },
       ...(hooks.handled && { handled: (to: string) => hooks.handled!(to) }),
       active: () => this.state.status === "active",
@@ -1292,7 +1309,8 @@ export class GroupSession {
   /**
    * Says an edit of one of my messages (WISP 902 § Edits): edit `v`, the whole new text and its mentions, sealed under
    * the key of the message's epoch and signed, to every member of that epoch still in the group, or to `to` alone (an
-   * edge that just opened). Someone admitted after the message cannot open it and is not sent it. The message's
+   * edge that just opened). Someone admitted after the message cannot open it and is not sent it, but a hub I count on
+   * (`hooks.carriers`), which carries it on to the members who can. The message's
    * epoch key must still be here: past `GROUP_LIMITS.secrets` epochs a message cannot be edited.
    */
   sendEdit(messageId: string, edit: { v: number; ts: number; text: string; mentions?: readonly GroupMention[]; card?: StatusCard; remove?: boolean }, to?: string): Promise<{ sent: number } | { error: string }> {
@@ -1314,6 +1332,9 @@ export class GroupSession {
       // open only the copy, so it gets the edit of the copy, which it files under the same message.
       const copies = [ref, ...this.state.sent.filter(f => f.o && f.o.e === ref.e && f.o.n === ref.n)];
       const told = new Set<string>();
+      // On hubs, the hubs I count on carry it too when they came after the message: unread by them, but most members of
+      // its epoch have no edge with me, and those hubs are the only way it reaches them (WISP 902 § Hubs).
+      const carriers = this.hooks.carriers?.() ?? [];
       for (const copy of copies) {
         const readers = this.state.chain[copy.e]?.m, key = this.secret(copy.e);
         if (!readers || !key) continue;
@@ -1321,8 +1342,9 @@ export class GroupSession {
         const { n: nn, c } = encryptText(epochKeys(key, this.id, copy.e).message, editAad(header), plain);
         const unsigned = { ...header, nn, c };
         const frame: GroupEditFrame = { t: GROUP_EDIT_FRAME, ...unsigned, sig: toBase64Url(sign(editSigned(unsigned), this.identity.seed)) };
-        const members = (to === undefined ? this.others : [to]).filter(k => k !== this.myKey && !told.has(k) && rosterHas(this.roster, k) && rosterHas(readers, k));
-        for (const k of members) { this.hooks.send(k, frame); told.add(k); }
+        const targets = (to === undefined ? this.others : [to]).filter(k => k !== this.myKey && rosterHas(this.roster, k));
+        for (const k of targets.filter(k => !told.has(k) && rosterHas(readers, k))) { this.hooks.send(k, frame); told.add(k); }
+        for (const k of targets.filter(k => carriers.includes(k) && !rosterHas(readers, k))) this.hooks.send(k, frame);
       }
       return { sent: told.size };
     });
@@ -1712,7 +1734,14 @@ export class GroupSession {
     if (!verify(fromBase64Url(raw.sig), editSigned(raw), publicKeyFromZ32(raw.s))) return;
     if (raw.e > this.epoch) { this.parkEdit(from, raw); return; }
     const commit = this.state.chain[raw.e];
-    if (!commit || !rosterHas(commit.m, raw.s) || !rosterHas(commit.m, this.myKey)) return;
+    if (!commit || !rosterHas(commit.m, raw.s)) return;
+    // Of an epoch from before I was let in (a hub let in after the message): nothing for me to read, but the author's
+    // signed word for the members who can, kept and passed on as is while the author is in the roster. Hubs change, and
+    // most members of that epoch reach the author only through whoever is a hub now.
+    if (!rosterHas(commit.m, this.myKey)) {
+      if (member && this.keepEdit(raw)) { await this.persist(); this.took(cleanEdit(raw)); }
+      return;
+    }
     const secret = this.secret(raw.e);
     if (!secret) { if (raw.e >= this.epoch - GROUP_LIMITS.secrets) this.parkEdit(from, raw); return; }
     const plain = decryptText(epochKeys(secret, this.id, raw.e).message, editAad(raw), raw.nn, raw.c);
@@ -2035,8 +2064,14 @@ export class GroupSession {
     }
     // Their latest edits too, after the messages they change (a sync says nothing of edits: one they have changes nothing).
     const readable = (f: GroupEditFrame) => !!this.state.chain[f.e] && rosterHas(this.state.chain[f.e].m, from);
+    // A hub I count on gets those of epochs from before it was let in too, unread, each once (`carriedHanded`): it
+    // carries them to the members of those epochs, whose only edge may be that hub. Hubs change, and one let in after an
+    // edit was said is handed none by its author or by a catch-up otherwise (WISP 902 § Edits, "Carried unread").
+    const carrier = !!this.hooks.carriers?.().includes(from), carried = this.carriedHanded.get(from);
+    if (carried) { const held = new Set((this.state.relayEdits ?? []).map(editKey)); for (const key of carried) if (!held.has(key)) carried.delete(key); }
+    const owed = (f: GroupEditFrame) => readable(f) || (carrier && !!this.state.chain[f.e] && !carried?.has(editKey(f)));
     for (const author of asked) {
-      const edits = (this.state.relayEdits ?? []).filter(f => f.s === author && readable(f));
+      const edits = (this.state.relayEdits ?? []).filter(f => f.s === author && owed(f));
       answer.push(...edits.slice(-GROUP_LIMITS.handOnEdits));
     }
     // And the removals of authors out of the roster (all `pruneRelay` keeps of theirs), whom nobody names in `ask`: each

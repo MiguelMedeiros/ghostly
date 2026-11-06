@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 import { pasteInvite } from "../support/clipboard";
 import { expect, test } from "../support/fixtures";
 import { HeadlessBot } from "../support/headless";
+import { choose } from "../support/select";
 
 /**
  * A contact's shared web app, opened on the web (WISP 701; apps/web/src/svc/): a bot on the headless Ghostly shares a
@@ -185,5 +186,80 @@ test("a person on the web opens the web app a bot shares, on an origin of its ow
   } finally {
     await bot.stop();
     app.server.close();
+  }
+});
+
+/**
+ * Taps and keys in a contact's app go to its frame, never to the Ghostly page: with the lock after 1 minute, a person
+ * writing in it was locked out mid-use, and the lock closed the app with what they wrote. Real time, not the page's
+ * clock: the peer that carries the app's requests runs in the same page. While the person writes, the test only types
+ * and clicks (page.keyboard, page.mouse): Playwright's evaluations and checks act as user gestures in Chromium, and a
+ * check in the frame would count as input of its own.
+ */
+test("taps and keys in a contact's app keep the lock away while the person uses it; left alone, it locks and closes the app", {
+  tag: ["@feature:services.web-open", "@feature:settings.lock.idle"],
+}, async ({ peer, relay }, info) => {
+  test.setTimeout(6 * 60_000);
+  const url = await relay.listen();
+  const notes = createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    response.end(`<!doctype html><title>Notes</title><textarea id="notes" style="position:fixed;inset:0;width:100%;height:100%"></textarea>`);
+  });
+  await new Promise<void>((done) => notes.listen(0, "127.0.0.1", done));
+  const bot = new HeadlessBot();
+  try {
+    await bot.start(url, "Notes bot");
+    const person = await peer("person", { serviceWorkers: "allow", beforeOpen: async (context) => { await context.addInitScript(() => {
+      try { if (location.hostname === "localhost") localStorage.setItem("ghostly-test-services", "on"); } catch { /* opaque origin */ }
+    }); } });
+    const invite = await bot.run("invite", "create", "--label", "person");
+    await person.page.getByRole("button", { name: "Join chat", exact: true }).first().click();
+    await pasteInvite(person.page, invite.invite as string);
+    await expect(person.page.getByPlaceholder("Message…")).toBeEnabled();
+    await bot.run("chat", "wait", invite.chat as string, "--until", "live", "--timeout", "120");
+    await bot.run("service", "add", "Notes", `http://127.0.0.1:${(notes.address() as AddressInfo).port}`);
+    await bot.run("service", "share", "notes", invite.chat as string);
+    const open = person.page.getByTestId("open-service").filter({ hasText: "Notes" });
+    await expect(open).toBeVisible({ timeout: 120_000 });
+
+    // Lock after 1 minute, then back to the chat.
+    const chat = person.page.url();
+    await person.page.getByTestId("account-settings").click();
+    await person.page.getByRole("switch", { name: "Lock Screen" }).click();
+    const passwords = person.page.getByTestId("settings-password-form").locator("input[type=password]");
+    await passwords.nth(0).fill("spooky");
+    await passwords.nth(1).fill("spooky");
+    await person.page.getByRole("button", { name: "Set password" }).click();
+    await expect(person.page.getByText("Password set successfully")).toBeVisible();
+    await choose(person.page.getByTestId("settings-timeout"), "1");
+    await person.page.goto(chat);
+    await open.click();
+    const frame = person.page.getByTestId("service-view-frame");
+    const field = person.page.frameLocator("[data-testid=service-view-frame]").frameLocator("iframe").locator("#notes");
+    await expect(field).toBeVisible({ timeout: 60_000 });
+    const box = (await frame.boundingBox())!;
+
+    // Ninety seconds of writing in the app, past the lock time.
+    const started = Date.now();
+    let typed = "";
+    while (Date.now() - started < 90_000) {
+      await person.page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await person.page.keyboard.type("note ");
+      typed += "note ";
+      await person.page.waitForTimeout(4_000);
+    }
+    await expect(person.page.getByText("Ghostly is locked")).toHaveCount(0);
+    await expect(field).toHaveValue(typed);
+
+    // Left alone, the lock comes, and the app closes with it (the checks above count as a gesture of up to 5 s).
+    await person.page.waitForTimeout(80_000);
+    await expect(person.page.getByText("Ghostly is locked")).toBeVisible();
+    await expect(person.page.locator("#ghostly-service-view")).toHaveCount(0);
+  } catch (error) {
+    await bot.attachLogs(info);
+    throw error;
+  } finally {
+    await bot.stop();
+    notes.close();
   }
 });

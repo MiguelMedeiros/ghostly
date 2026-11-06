@@ -57,7 +57,7 @@ import { PINNED_FRAME, PIN_FRAME, PIN_LIMITS, parsePinFrame, parsePinnedFrame, p
 import { TYPING_FRAME, TypingReceiver, TypingSender, type TypingActivity } from "./pairedTyping";
 import { EDIT_FRAME, EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDITED_FRAME, RateWindow, dhtEditId, editFrame, editedFrame, parseEditFrame, parseEditedFrame, validEditMessage, validEditNumber, type WireEdit } from "./pairedEdits";
 import { FILE_FRAMES, FILE_LIMITS, decodeFileData, encodeFileData } from "./chatFiles";
-import { PAIRED_CALL_FRAME, PairedCalls, parsePairedCallFrame } from "./pairedCalls";
+import { CALL_RATE_WINDOW_MS, CALL_RECEIVE_LIMIT, PAIRED_CALL_FRAME, PairedCalls, parsePairedCallFrame } from "./pairedCalls";
 import { heardCallSignal } from "./callSignal";
 import { traceLink } from "./linkTrace";
 import { isDiscoveryBudgetError, type PkarrTransport } from "./transport";
@@ -219,6 +219,16 @@ export const LIVENESS_PING_MS = 15_000;
  * side a round trip later, and seeing its current channel close first would make it drop the whole session.
  */
 export const SWITCH_RETIRE_MS = 3_000;
+/**
+ * A receiver takes at most this many `paired-rtc` frames from a contact per `RTC_SIGNAL_RATE_WINDOW_MS`, counted before
+ * their signature is checked; the rest are dropped. Each offer taken builds a new peer connection (and gathers for it).
+ * A person's busiest minute is under half of it, 30 frames: five moves to WebRTC (one every 12 s, back and forth), each
+ * with every offer again that refused answers bring (`ANSWER_REFUSED_REDIALS`) and both sides offering at once. One
+ * move without a refusal takes one or two. A signal dropped here is a move that does not connect: the chat stays where
+ * it is, as with any failed move.
+ */
+export const RTC_SIGNAL_RECEIVE_LIMIT = 60;
+export const RTC_SIGNAL_RATE_WINDOW_MS = 60_000;
 export const LIVENESS_MISSED_PINGS = 3;
 /**
  * Frames that keep a session going rather than say something of the two people's: what the contact sent last outside
@@ -341,6 +351,14 @@ export const PAIRED_FRAME_TOO_LARGE = "Message too long once encoded. Shorten it
  */
 export function pairedMessageFits(ts: number, m: string, reply?: WireReply, forwarded?: number, card?: StatusCard): boolean {
   return pairedMessageFrame("A".repeat(22), ts, m, undefined, reply, forwarded, card).length <= SESSION_FRAME_MAX;
+}
+
+/**
+ * The `paired-edit` frame of this edit fits a session, as `pairedMessageFits` says of a text's: an edit within 16 KiB
+ * can pass it the same way, and the contact's session ends on it each time it is said again.
+ */
+export function pairedEditFits(edit: WireEdit): boolean {
+  return editFrame(edit).length <= SESSION_FRAME_MAX;
 }
 
 /**
@@ -907,6 +925,10 @@ export class GhostLink {
   private readonly pinsReceived = new ReactionWindow(PIN_LIMITS.receive, PIN_LIMITS.windowMs);
   /** Edit frames the contact may send per window; the rest go unconfirmed and come again. */
   private readonly editsReceived = new RateWindow(EDIT_RECEIVE_LIMIT, EDIT_RATE_WINDOW_MS);
+  /** Call signals the contact may send per window; the rest are dropped. */
+  private readonly callsReceived = new RateWindow(CALL_RECEIVE_LIMIT, CALL_RATE_WINDOW_MS);
+  /** WebRTC signals the contact may send on the session (`paired-rtc`) per window; the rest are dropped. */
+  private readonly rtcSignalsReceived = new RateWindow(RTC_SIGNAL_RECEIVE_LIMIT, RTC_SIGNAL_RATE_WINDOW_MS);
   private readonly wakeReceived = new RateWindow(6, 60_000);
   /** Said once a session by the requester's app: a few a minute at most. */
   private readonly askerReceived = new RateWindow(4, 60_000);
@@ -1071,11 +1093,15 @@ export class GhostLink {
     // During migration the authenticated channel already reaches the peer.
     // Carry signed ICE signaling there instead of waiting for DHT polling.
     if (this.switcher?.pending?.choices.includes("webrtc/1") && this.channel && this.paired?.state.status === "ready") {
-      if (signed) this.channel.send(JSON.stringify({ t: "paired-rtc", signal: signed }));
+      if (signed) { this.channel.send(JSON.stringify({ t: "paired-rtc", signal: signed })); this.rtcViaChannel = true; }
       return;
     }
+    if (!signed) this.rtcViaChannel = false;
     void this.session.setRtcSignal(signed, !!this.options.params.profile).catch(report);
   }
+
+  /** A WebRTC signal of this attempt went over the authenticated channel (a migration), not the relays. */
+  private rtcViaChannel = false;
 
   /** This app is going away (`depart`): no more dials. */
   private leaving = false;
@@ -1321,6 +1347,8 @@ export class GhostLink {
       offerStanding: ts => !this.leaving && !this.stopped && !this.streamBlocked && this.peerOfferTs() === ts,
       onAnswerReplaced: () => this.redial(),
       onDirect: evidence => events.onDirectEvidence?.(evidence),
+      // An answer the relays' budget held back for the whole attempt never reached the offerer (agents#1637).
+      signalOut: () => this.rtcViaChannel || this.session.rtcSignalPublished,
       onAnswersRefused: () => this.answersRefused(),
       onOpen: channel => {
         if (this.streamBlocked || this.keyStopped) { channel.close(); return; }
@@ -1333,10 +1361,16 @@ export class GhostLink {
       },
       onClose: () => {
         if (this.activeBinding) return;
-        // A live WebRTC session the contact closed: dialled again at once, and watched for it to come back.
+        // A live WebRTC session that closed: dialled again at once, and the contact watched for it to come back.
         const wasLive = !!this.channel && this.paired?.state.status === "ready";
         this.detach();
-        if (wasLive) this.peerLost("closed");
+        if (!wasLive) return;
+        // Ended here, not by an offer of the contact's (the data link is idle): its network changed, say, and the
+        // contact's connection may hold on for half a minute (node-datachannel never says `disconnected`). The side
+        // whose key does not dial resumes as after an absence: it dials once, and the contact's offer, should one cross
+        // it, is settled by key. It waited for the contact's connection to give up: 31-34 s offline with a CLI contact.
+        if (this.dataLink.state === "idle" && this.awaitsContactDial()) this.resumeAfterAbsence();
+        this.peerLost("closed");
       },
       onState: (state) => {
         const was = this.lastDataLinkState;
@@ -1478,7 +1512,8 @@ export class GhostLink {
     const tracker = this.tracker;
     if (!tracker || tracker.done) return;
     if (state === "answering") tracker.offerReceived();
-    else if (state === "connecting" && was === "offering") tracker.answerReceived();
+    // On a busy page the channel opens before the answer is applied (`DataLink.handleSignal`): the answer came all the same.
+    else if ((state === "connecting" || state === "open") && was === "offering") tracker.answerReceived();
     else if (state === "idle") {
       if (was === "offering") tracker.failed("timeout", true);
       else if (was === "answering" || was === "connecting") tracker.failed("transport", true);
@@ -3596,6 +3631,8 @@ export class GhostLink {
       // Past a text's edits only an app that shows cards takes one (WISP 405 · Status Cards); an older one would drop it.
       // A removal goes whatever its number: an app that knows removals takes it, an older one shows or drops its fallback.
       if (!edit.rm && !validEditNumber(edit.e) && !(edit.sc && this.supportsStatusCards)) return "Your contact's app takes no more edits of this message";
+      // One past what a session takes would end the contact's session, again on every new one.
+      if (!pairedEditFits(edit)) return PAIRED_FRAME_TOO_LARGE;
       try { this.channel.send(editFrame(edit)); return null; } catch { return "The connection closed before sending"; }
     }
     // A card's edit waits for the live session: on the floor the card would read as its text until the next one.
@@ -4408,6 +4445,8 @@ export class GhostLink {
           if (!frame || typeof frame !== "object") return;
           if (paired.peerTransportSwitchSupport && this.switcher.handle(frame)) return;
           if (frame.t === "paired-rtc") {
+            // Counted before its signature is checked, as call signals are: each offer taken builds a peer connection.
+            if (!this.rtcSignalsReceived.take()) return;
             if (this.switcher.pending?.choices.includes("webrtc/1") && typeof frame.signal === "string") {
               const credentials = this.options.pairing!.credentials;
               const signal = verifyPairedSignal(frame.signal, this.options.params.peerPubKeyZ32,
@@ -4529,7 +4568,9 @@ export class GhostLink {
             return;
           }
           if (frame?.t === PAIRED_CALL_FRAME) {
-            const signal = this.supportsCalls ? parsePairedCallFrame(frame) : null;
+            // Counted before it is read, as edits are: a contact's app that loops its signals runs the call only so often.
+            if (!this.supportsCalls || !this.callsReceived.take()) return;
+            const signal = parsePairedCallFrame(frame);
             // One already heard on an earlier session is not handed on again (`PairedCalls.heard`).
             if (signal && this.pairedCalls.heard(signal)) this.options.events?.onCallSignal?.(signal);
             return;
@@ -5014,8 +5055,9 @@ export class GhostLink {
     this.applicationOpen = false;
     this.dht?.setLive(false);
     // A replacement still authenticating may yet carry the chat. Without one, the session a plan meant to move is
-    // gone, and so is the plan: its dial must not go on and open a session of its own, or settle the next one.
-    if (!this.candidate) { this.cancelCandidate(); this.switcher.stop(); }
+    // gone, and so is the plan: its dial must not go on and open a session of its own, or settle the next one. Its
+    // target goes too, or the chat's native listeners are held (`canReleaseEndpoint`) until the contact is back.
+    if (!this.candidate) { this.cancelCandidate(); this.switcher.stop(); this.transitionTarget = this.transitionError = undefined; }
     this.activeBinding = undefined;
     this.paired?.stop();
     this.paired = null;

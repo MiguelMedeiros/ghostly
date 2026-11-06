@@ -8,7 +8,7 @@ import { useI18n, type Translate, type TranslationKey } from "../../contexts/I18
 import { Button } from "../wallet/ui";
 import { InfoButton } from "../layout";
 import { AppIcon, Fingerprint } from "./AppIcon";
-import { appErrorText, appErrorView, type AppErrorView } from "../../lib/apps/errors";
+import { appErrorCode, appErrorText, appErrorView, type AppErrorView } from "../../lib/apps/errors";
 import { refreshInstalledApps } from "../../lib/apps/installed";
 import { saveAppData } from "../../lib/apps/exportData";
 import { webKitAppLeak } from "../../lib/apps/flag";
@@ -184,10 +184,10 @@ function Head({ titleId, title, version, tagline, icon, installed }: { titleId: 
     <div className="flex items-center gap-3">
       <AppIcon size={48} icon={icon} installed={installed} />
       <div className="min-w-0">
-        <h2 id={titleId} dir="auto" className="text-lg font-medium text-text-primary break-words">{title}</h2>
+        <h2 id={titleId} dir="auto" className="text-match-parent text-lg font-medium text-text-primary break-words">{title}</h2>
         {version && <p className="text-xs text-text-muted">{t("apps.app.version", { version })}</p>}
         {/* A link or a long word breaks anywhere: unbroken, it pushed the screen sideways on a phone, and cut it off in Arabic. */}
-        {tagline && <p dir="auto" className="text-sm text-text-secondary [overflow-wrap:anywhere]">{tagline}</p>}
+        {tagline && <p dir="auto" className="text-match-parent text-sm text-text-secondary [overflow-wrap:anywhere]">{tagline}</p>}
       </div>
     </div>
   );
@@ -229,25 +229,60 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
     return () => { live = false; };
   }, [key, have]);
 
+  // The app asks for more than this screen lists, and reading it again failed (offline, the host down): what the screen
+  // shows is not what Install would be asked to grant, so Install waits until Try again reads it.
+  const [stale, setStale] = useState(false);
+  const [rechecking, setRechecking] = useState(false);
+  const retryButton = useRef<HTMLButtonElement>(null), confirmButton = useRef<HTMLButtonElement>(null);
+  const recheck = async () => {
+    try {
+      const again = await engine.call("appPreview", source);
+      setPreview(again); setStale(false);
+      setError({ text: t(again.install === "update" ? "apps.errors.permissionsChanged" : "apps.install.asksChanged") });
+    } catch (read) {
+      // The read's own failure, said as it is: "look at them again" over the old list had nothing new to look at.
+      setStale(true); setError(appErrorView(read, t));
+    }
+  };
   const install = async () => {
-    if (!preview) return;
+    if (!preview || stale) return;
     focusBack();
     setBusy(true); setError(null);
     try {
-      const app = await engine.call("appInstall", { digest: preview.digest, grant: [...preview.manifest.permissions] });
+      const app = await engine.call("appInstall", { digest: preview.digest, grant: [...preview.manifest.permissions], asks: [...preview.asks] });
       await refreshInstalledApps();
       onInstalled?.(app);
       onClose();
-    } catch (e) { setError(appErrorView(e, t)); } finally { setBusy(false); }
+    } catch (e) {
+      // It asks for more than this screen listed (the app uninstalled since it opened, a version that dropped a permission
+      // installed by the check): the screen shows what it asks now, and Install grants only that.
+      if (appErrorCode(e) === "permissions-changed") await recheck();
+      else setError(appErrorView(e, t));
+    } finally { setBusy(false); }
   };
+  const retry = async () => {
+    setRechecking(true); setError(null);
+    try { await recheck(); } finally { setRechecking(false); }
+  };
+  // Install turned off with the focus on it hands the focus to Try again; Try again gone (read) hands it back to Install.
+  const wasStale = useRef(false);
+  useEffect(() => {
+    const was = wasStale.current;
+    wasStale.current = stale;
+    if (was === stale) return;
+    const active = document.activeElement;
+    if (!active || active === document.body || active === confirmButton.current) (stale ? retryButton : confirmButton).current?.focus({ preventScroll: true });
+  }, [stale]);
+  // While Install runs, the screen stays: closed, the install went on all the same, and opened the app after a Cancel.
+  const close = () => { if (!busy) onClose(); };
 
   const shownTitle = preview?.manifest.title ?? title ?? t("apps.title");
   const blocked = preview && (preview.run.status === "revoked" || preview.run.status === "removed" || preview.install === "rollback" || preview.install === "equivocation" || preview.install === "same");
   const why = preview && (runLine(preview.run, t) ?? (preview.install === "rollback" ? t("apps.install.rollback")
-    : preview.install === "equivocation" ? t("apps.install.equivocation", { sequence: String(preview.manifest.sequence) })
+    : preview.install === "equivocation" ? t("apps.install.equivocation")
       : preview.install === "same" ? t("apps.install.same") : null));
   return (
-    <Shell titleId={titleId} onClose={onClose} testId="app-install">
+    <Shell titleId={titleId} onClose={close} testId="app-install">
       <Head titleId={titleId} title={shownTitle} version={preview?.manifest.version} tagline={preview?.manifest.tagline} icon={preview?.icon} />
       {!preview && !error && <p className="text-sm text-text-muted" data-testid="app-install-checking">{t("apps.install.fetching")}</p>}
       {preview && (
@@ -263,9 +298,12 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
       {/* Too wide for one line (a phone at a large text size), the buttons wrap: unwrapped, "Install and open" pushed
           Cancel off the screen's start, where nothing scrolls to it. */}
       <div className="flex flex-wrap justify-end gap-2">
-        <Button onClick={onClose}>{t("common.cancel")}</Button>
+        <Button disabled={busy} onClick={onClose}>{t("common.cancel")}</Button>
+        {preview && !blocked && stale && (
+          <Button ref={retryButton} data-testid="app-install-retry" loading={rechecking} onClick={() => void retry()}>{t("apps.page.tryAgain")}</Button>
+        )}
         {preview && !blocked && (
-          <Button variant="primary" data-testid="app-install-confirm" loading={busy} onClick={() => void install()}>
+          <Button ref={confirmButton} variant="primary" data-testid="app-install-confirm" loading={busy} disabled={stale} onClick={() => void install()}>
             {preview.install === "update" ? t("apps.install.update")
               // A built-in app is already here: the button allows what it asks, it downloads nothing.
               : preview.carried ? t(openAfter ? "apps.builtIn.allowOpen" : "apps.builtIn.allow")
@@ -329,16 +367,20 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
     setBusy(true); setPending(which); setError(null);
     try { await work(); await refreshInstalledApps(); if (close) onClose(); } catch (e) { setError(appErrorView(e, t)); void refreshInstalledApps(); } finally { setBusy(false); setPending(null); }
   };
+  // While Uninstall (or an Update) runs, the screen stays, as the install screen's: a Cancel then showed the app as
+  // still here, and it was deleted a moment later. Escape on the question is its Cancel, as on the other Remove questions.
+  const close = () => { if (!busy) onClose(); };
+  const keepIt = () => { if (!busy) setRemoving(false); };
   const why = runLine(app.run, t);
   const canRun = app.run.status === "ok";
   if (removing) {
     return (
-      <Shell titleId={titleId} onClose={onClose} testId="app-uninstall">
+      <Shell titleId={titleId} onClose={keepIt} testId="app-uninstall">
         <h2 id={titleId} className="text-lg font-medium text-text-primary [overflow-wrap:anywhere]">{t("apps.app.uninstallTitle", { title: app.title })}</h2>
         <p className="text-sm text-text-secondary">{t("apps.app.uninstallText")}</p>
         {error && <ErrorLine error={error} />}
         <div className="flex flex-wrap justify-end gap-2">
-          <Button ref={keep} onClick={() => setRemoving(false)}>{t("common.cancel")}</Button>
+          <Button ref={keep} disabled={busy} onClick={keepIt}>{t("common.cancel")}</Button>
           <Button data-testid="app-export" disabled={busy} loading={pending === "export"} onClick={() => void act(async () => saveAppData(app.ref, await engine.call("appDataExportText", { ref: app.ref })), false, "export")}>{t("apps.app.export")}</Button>
           <Button variant="danger" data-testid="app-uninstall-confirm" disabled={busy} loading={pending === "uninstall"} onClick={() => void act(async () => { await engine.call("appUninstall", { ref: app.ref }); await forgetLinkedFiles(app.ref); onUninstalled?.(); }, true, "uninstall")}>{t("apps.app.uninstall")}</Button>
         </div>
@@ -346,26 +388,29 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
     );
   }
   return (
-    <Shell titleId={titleId} onClose={onClose} testId="app-details" box={box}>
+    <Shell titleId={titleId} onClose={close} testId="app-details" box={box}>
       <Head titleId={titleId} title={app.title} version={app.version} tagline={app.tagline} installed={app} />
       <Publisher fingerprint={app.fingerprint} unknown={app.unknownPublisher} listedBy={app.listedBy} builtIn={app.builtIn && "installed"} />
       {app.description && <p dir="auto" className="text-sm text-text-secondary whitespace-pre-line [overflow-wrap:anywhere]">{app.description}</p>}
       {why && <Line tone={app.run.status === "needs-files" ? "warning" : "danger"} testId="app-run-line">{why}</Line>}
-      {app.equivocation && <Line tone="warning" testId="app-equivocation">{t("apps.install.equivocation", { sequence: String(app.equivocation.sequence) })}</Line>}
+      {/* The version's internal `sequence` is never shown: the person knows it by the version in the header. */}
+      {app.equivocation && <Line tone="warning" testId="app-equivocation">{t("apps.install.equivocation")}</Line>}
+      {/* What it may do now stays while an update waits: that update's "also asks to" adds to this list. */}
+      <Permissions asks={app.permissions} update={false} />
       {app.pending && (
         <div className="bg-surface rounded-xl px-4 py-3 space-y-3" data-testid="app-update">
           <p className="text-sm text-text-primary">{t("apps.app.updateWaits", { version: app.pending.version })}</p>
-          <Permissions asks={app.pending.added} update />
+          {/* An update that no longer adds a permission to the version installed meanwhile has nothing to list. */}
+          {app.pending.added.length > 0 && <Permissions asks={app.pending.added} update />}
           <div className="flex justify-end">
             <Button variant="primary" data-testid="app-update-accept" disabled={busy} loading={pending === "update"} onClick={() => void act(() => engine.call("appUpdateAccept", { ref: app.ref }), false, "update")}>{t("apps.install.update")}</Button>
           </div>
         </div>
       )}
-      {!app.pending && <Permissions asks={app.permissions} update={false} />}
       <Privacy internet={(app.permissions as readonly string[]).includes("internet")} />
       {error && <ErrorLine error={error} testId="app-details-error" />}
       <div className="flex flex-wrap justify-end gap-2">
-        <Button ref={uninstall} variant="danger" data-testid="app-uninstall-open" onClick={() => setRemoving(true)}>{app.run.status === "ok" ? t("apps.app.uninstall") : t("apps.app.remove")}</Button>
+        <Button ref={uninstall} variant="danger" data-testid="app-uninstall-open" onClick={() => setRemoving(true)}>{t("apps.app.uninstall")}</Button>
         {app.run.status === "needs-files" && <Button data-testid="app-fetch-files" disabled={busy} loading={pending === "files"} onClick={() => void act(() => engine.call("appFetchFiles", { ref: app.ref }), false, "files")}>{t("apps.app.fetchFiles")}</Button>}
         {app.run.status === "removed" && <Button data-testid="app-run-anyway" onClick={() => { onOpen(app, { runAnyway: true }); onClose(); }}>{t("apps.app.runAnyway")}</Button>}
         {!canRun && app.run.status !== "needs-files" && <Button data-testid="app-keep-stopped" onClick={onClose}>{t("apps.app.keepStopped")}</Button>}

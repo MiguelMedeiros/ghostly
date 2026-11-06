@@ -57,9 +57,18 @@ async function startWorker(scope = "https://app.ghostly.tools/", windows: { id: 
 
 const item = (text: string) => ({ title: "", text, url: "", files: [] });
 
-const page = (id: string) => {
+/** A window: what it hears, but for the worker asking it where it is (`share-where`), which `asked` counts. */
+const page = (id: string, onAsked?: () => void) => {
   const heard: unknown[] = [];
-  return { id, heard, postMessage: (message: unknown) => { heard.push(message); } };
+  const self = {
+    id, heard, asked: 0,
+    postMessage: (message: unknown) => {
+      if ((message as { type?: string }).type !== "share-where") { heard.push(message); return; }
+      self.asked += 1;
+      onAsked?.();
+    },
+  };
+  return self;
 };
 
 it("holds a share the page gave back until the next page asks for it, and stays up meanwhile", async () => {
@@ -277,6 +286,27 @@ it("an app tab that keeps its lock gets the share forwarded", async () => {
   await worker.looked();
   expect(home.heard).toEqual([{ type: "share", item: item("for Ana") }]);
   expect(opened.heard).toEqual([{ type: "share-forwarded" }]);
+});
+
+it("the worker restarted since the app's page last came to the front: it asks the windows, and the share goes to that page unfocused", async () => {
+  const opened = page("opened");
+  const other = page("other");
+  // The app's tab: it takes shares, so asked where it is it says so, as it would on focus.
+  const home = page("home", () => worker.say({ type: "share-here", profile: "home", lock: "lock-home" }, home));
+  const locks = new Map([["lock-home", "ghostly-peer"]]);
+  const worker = await startWorker(undefined, [other, home, opened], locks);
+  // A fresh worker: the share's POST started it, and no page said `share-here` in its life.
+  await worker.post("two");
+  worker.say({ type: "share-forward", profile: "home" }, opened);
+  await worker.looked();
+  expect(home.asked).toBe(1);
+  expect(home.heard).toEqual([{ type: "share", item: expect.objectContaining(item("two")) }]);
+  expect(opened.heard).toEqual([{ type: "share-forwarded" }]);
+  // Never the tab that asked for the forward. A window that does not take shares (one waiting behind the app's tab)
+  // says nothing, and gets nothing.
+  expect(opened.asked).toBe(0);
+  expect(other.asked).toBe(1);
+  expect(other.heard).toEqual([]);
 });
 
 it("a share forwarded never goes to the app's page on its way out (a share into the same window replaced it)", async () => {

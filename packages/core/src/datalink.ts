@@ -28,6 +28,12 @@ export interface DataLinkOptions {
   createPeerConnection: () => RTCPeerConnection;
   /** Publishes (or clears, with null) my `_rtc` record. */
   publishSignal: (signal: string | null) => void;
+  /**
+   * Whether a signal of this side went out in this attempt: a relay (or the authenticated channel) took it. An answer
+   * the relays' budget held back the whole attempt never reached the offerer, so its failing says nothing of the
+   * network (agents#1637). Left out: every signal counts as out.
+   */
+  signalOut?: () => boolean;
   /** Signaling in progress (or over): look fast for the peer's signal. `offer`: for the answer to this side's offer. */
   setFastPoll: (fast: boolean, offer?: boolean) => void;
   onOpen: (channel: FrameChannel) => void;
@@ -315,6 +321,19 @@ export class DataLink {
    */
   get answerLate(): boolean { return this.state === "connecting" && !!this.myOfferTs && this.answerCameLate; }
 
+  /**
+   * This side answered, and no answer of its went out in this attempt (`signalOut`: the relays' budget held every one
+   * back): the offerer never had one to try (agents#1637). The answering side's twin of `answerLate`.
+   */
+  private get answerNotOut(): boolean { return this.state === "connecting" && !this.myOfferTs && this.options.signalOut?.() === false; }
+
+  /**
+   * This attempt, if it ends now without opening, says nothing about direct connections: the answer to this side's offer
+   * was read late (`answerLate`), or this side's answer never went out (`answerNotOut`). An answer made again and still
+   * unread `LATE_ANSWER_MS` on (`failed`) is the same case, seen from the offer that still stands.
+   */
+  private get saysNothing(): boolean { return this.answerLate || this.answerNotOut; }
+
   /** The peer connection this link holds now (null when idle): a later one is another attempt. */
   get connection(): RTCPeerConnection | null { return this.pc; }
 
@@ -342,7 +361,7 @@ export class DataLink {
    * nothing: the next offer or answer gathers for as long as it takes.
    */
   private noteNoPublic(ended: boolean): void {
-    if (ended && !this.answerLate && (this.myOfferTs || this.answered) && this.sentLacksPublic && this.state === "connecting") this.fullGather = true;
+    if (ended && !this.saysNothing && (this.myOfferTs || this.answered) && this.sentLacksPublic && this.state === "connecting") this.fullGather = true;
   }
 
   /**
@@ -351,7 +370,7 @@ export class DataLink {
    * candidate, a public port per STUN server, or (for the side that offered) candidates that read as reachable.
    */
   private directEvidence(): DirectEvidence | null {
-    if (this.state !== "connecting" || !this.pc || this.answerLate) return null;
+    if (this.state !== "connecting" || !this.pc || this.saysNothing) return null;
     const local = this.pc.localDescription?.sdp ?? "";
     return !PUBLIC_CANDIDATE.test(local) ? "no-public" : symmetricNat(local) ? "symmetric" : this.myOfferTs ? "no-path" : null;
   }

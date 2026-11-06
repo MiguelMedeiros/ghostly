@@ -71,6 +71,13 @@ const BUDGET_TRIES = 5;
  */
 const REVOCATION_READ_GAP_MS = 3_000;
 /**
+ * The lookup under way (`REVOCATIONS_ROUND`) is written at most this often, or once this many proofs were read since
+ * (the reads of that time), and when it ends cut short or the engine stops: a restart after a crash reads again at most
+ * those. Written after every read, it cost n writes of 1 to n entries: 45 MB a lookup for 900 proofs.
+ */
+const ROUND_SAVE_MS = 60_000;
+const ROUND_SAVE_READS = ROUND_SAVE_MS / REVOCATION_READ_GAP_MS;
+/**
  * After a contact withdraws a proof, how long to wait before each lookup for its revocation (WISP 300: removing a proof withdraws it from
  * every chat and revokes it). The notice goes out before the revocation is published, so not at once; each try backs
  * off, and the first that finds it stops the rest. The 12 h check covers it after that.
@@ -107,6 +114,9 @@ export class IdentityProofs {
   private lookupsMissed = 0;
   /** The lookup under way, if one was cut short (`REVOCATIONS_ROUND`). */
   private round: LookupRound | undefined;
+  /** When `round` was last written (ms), and how many proofs it gained since: `noteRound`. */
+  private roundSavedAt = 0;
+  private roundUnsaved = 0;
   /**
    * How the last Pkarr read of each contact's proof went (`revoked`), by proof id: answered, could not run (offline, no
    * relay answered), or held back by the relays' budget, which takes reads again in this many ms.
@@ -158,8 +168,10 @@ export class IdentityProofs {
   /** Background work: republish revocations, look up the contacts' proofs for revocations. */
   start(): void {
     this.running = true;
+    // A round under way at `stop` plans no next one: `stop` cleared the timers before it ended.
+    const stops = this.stops;
     const every = (ms: number, first: number, work: () => Promise<void>) => {
-      const tick = () => { void work().catch(() => {}).finally(() => { this.timers.push(setTimeout(tick, ms)); }); };
+      const tick = () => { void work().catch(() => {}).finally(() => { if (this.stops === stops) this.timers.push(setTimeout(tick, ms)); }); };
       this.timers.push(setTimeout(tick, first));
     };
     every(REPUBLISH_MS, 5_000, () => this.republish());
@@ -202,6 +214,8 @@ export class IdentityProofs {
     for (const t of this.timers) clearTimeout(t);
     this.timers = [];
     this.lookupTimer = undefined;
+    // The lookup under way ends here: what it read since its last write is kept for the next start.
+    this.saveRound();
     this.wakeLookup?.();
     this.unlisten?.();
     this.unlisten = undefined;
@@ -384,7 +398,10 @@ export class IdentityProofs {
       for (const r of this.revocations) if (!live.includes(r)) { this.seeds.get(r.id)?.fill(0); this.seeds.delete(r.id); }
       await this.save((proofs, revocations) => [proofs, revocations.filter(r => r.expiresAt > now())]);
     }
-    for (const r of live) await this.publishRevocation(r).catch(() => {});
+    for (const r of live) {
+      if (!this.running) return;
+      await this.publishRevocation(r).catch(() => {});
+    }
   }
   /**
    * Looks up the contacts' proofs for a revocation (the Pkarr record only, not the provider): the ones standing, and the
@@ -394,6 +411,7 @@ export class IdentityProofs {
    * Each proof answered is noted in the lookup under way (`round`, kept across a restart): one cut short (a read that
    * failed, the relays' budget still held after its tries, the network gone, the app stopped) goes on later from the
    * proofs still to look up. Started again from the first, a few keys no relay answered cost every proof's read again.
+   * It is written about once a minute (`ROUND_SAVE_MS`) and whenever the lookup ends without completing.
    *
    * One read every `REVOCATION_READ_GAP_MS`, the longest unread first: read back to back, the lookup took the relays'
    * whole background share for a minute, and every read past it was held back.
@@ -404,10 +422,12 @@ export class IdentityProofs {
     const at = Date.now();
     if (!this.round || at - this.round.startedAt >= REVOCATION_CHECK_MS || this.round.startedAt > at) this.round = { startedAt: at, done: [] };
     const round = this.round, done = new Set(round.done);
+    this.roundSavedAt = at;
+    this.roundUnsaved = 0;
     const todo = this.host.linkIds().flatMap(linkId => (this.host.ledger(linkId)?.received ?? [])
       .filter(r => this.revocable(r) && !done.has(`${linkId}|${r.id}`)).map(r => ({ linkId, id: r.id })))
       .sort((a, b) => (this.lastRead.get(a.id) ?? 0) - (this.lastRead.get(b.id) ?? 0));
-    let missed = false, wait = 0;
+    let missed = false, wait = 0, complete = false;
     const stops = this.stops;
     try {
       for (const { linkId, id } of todo) {
@@ -423,12 +443,15 @@ export class IdentityProofs {
           const read = this.reads.get(id);
           wait = typeof read === "number" ? read : REVOCATION_READ_GAP_MS;
           if (read === "failed") { missed = true; break; }
-          if (typeof read !== "number") { round.done.push(`${linkId}|${id}`); this.saveRound(round); break; }
+          if (typeof read !== "number") { round.done.push(`${linkId}|${id}`); this.noteRound(round); break; }
           if (tries >= BUDGET_TRIES) return false;
         }
       }
+      complete = !missed;
     } finally {
       this.reads.clear();
+      // Cut short (stopped, offline, a read failed or held back, an error): what was read since the last write is kept.
+      if (!complete) this.saveRound(round);
     }
     // "Clear all data" came meanwhile: the profile it was for is gone, and its time must not land in the cleared one.
     if (this.ended || missed) return false;
@@ -440,9 +463,17 @@ export class IdentityProofs {
     });
     return true;
   }
-  /** Not waited on: the writes keep their order, so the lookup's end (which deletes it) lands after. */
-  private saveRound(round: LookupRound): void {
-    if (this.ended || this.round !== round) return;
+  /** A proof read in the lookup under way: written a minute after the last write, or once `ROUND_SAVE_READS` wait (a clock set back writes too). */
+  private noteRound(round: LookupRound): void {
+    this.roundUnsaved++;
+    const since = Date.now() - this.roundSavedAt;
+    if (this.roundUnsaved >= ROUND_SAVE_READS || since >= ROUND_SAVE_MS || since < 0) this.saveRound(round);
+  }
+  /** Not waited on: the writes keep their order, so the lookup's end (which deletes it) lands after. Nothing new since the last write: nothing written. */
+  private saveRound(round: LookupRound | undefined = this.round): void {
+    if (!round || this.roundUnsaved === 0 || this.ended || this.round !== round) return;
+    this.roundUnsaved = 0;
+    this.roundSavedAt = Date.now();
     void transact([STORES.settings], stores => { stores[STORES.settings].put({ ...round, done: [...round.done] }, REVOCATIONS_ROUND); }).catch(() => {});
   }
   /**
@@ -463,7 +494,7 @@ export class IdentityProofs {
       }
     }
     for (const { linkId, r } of due.sort((a, b) => a.r.checkedAt - b.r.checkedAt).slice(0, AUTO_RECHECK_BATCH)) {
-      if (this.ended || !this.host.online()) return;
+      if (this.ended || !this.running || !this.host.online()) return;
       const key = `${linkId}|${r.id}`;
       try {
         await this.exchange(linkId)?.recheck(r.id, { keepUnavailable: true });
@@ -604,9 +635,15 @@ export class IdentityProofs {
     const id = frame.t === "idp-withdraw" && typeof frame.id === "string" ? frame.id
       : frame.t === "idp-present" && isIdentityBinding(frame.binding) ? identityStatement(frame.binding).id : undefined;
     const withdrawn = () => !!id && !!this.host.ledger(linkId)?.received.some(r => r.id === id && r.status === "withdrawn");
-    const before = withdrawn();
-    await x.receive(frame);
-    if (id && !before && withdrawn()) this.afterWithdrawal(linkId, id);
+    // A withdraw that marks a presentation still in its check withdrawn (`challenge.withdrawn`) counts too: the
+    // record kept from an earlier withdraw already reads withdrawn, and that check's own frame read it so on arrival.
+    const checking = () => frame.t === "idp-withdraw" && !!this.host.ledger(linkId)?.challenges.some(c => c.id === id && !c.withdrawn);
+    const before = withdrawn() && !checking();
+    const handled = x.receive(frame).then(() => { if (id && !before && withdrawn()) this.afterWithdrawal(linkId, id); });
+    // A presentation's check waits on a host the contact chose (up to 30 s): it is not waited for here, so the
+    // contact's texts, pings and other frames go on meanwhile. Its outcome is written and sent when it ends.
+    if (frame.t === "idp-present") void handled.catch(() => {});
+    else await handled;
   }
   ready(linkId: string): void {
     if (this.greeted.has(linkId) || !this.host.channel(linkId)) return;

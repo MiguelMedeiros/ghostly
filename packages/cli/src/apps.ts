@@ -1,5 +1,5 @@
 import { createHash, createPrivateKey, generateKeyPairSync } from "node:crypto";
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import {
   APP_BUNDLE_LIMITS, APP_PREFIXES, appFingerprint, appRef, appRevocationFor, appStoreDecision, assembleAppBundle, canonicalJson, canonicalJsonBytes,
@@ -338,10 +338,14 @@ function readSource(path: string): Record<string, unknown> {
   return draft;
 }
 
-/** Writes a file whole or not at all: a reader never sees half a bundle (and a dot file left by a crash is never bundled). */
-function writeWhole(path: string, bytes: Uint8Array): void {
+/**
+ * Writes a file whole or not at all: a reader never sees half a bundle (and a dot file left by a crash is never bundled).
+ * The temporary file is always a new one ("wx"): a file or link already at its name is removed, never written through.
+ */
+export function writeWhole(path: string, bytes: Uint8Array): void {
   const tmp = join(dirname(path), `.${basename(path)}.${process.pid}.tmp`);
-  writeFileSync(tmp, bytes);
+  rmSync(tmp, { force: true });
+  writeFileSync(tmp, bytes, { mode: 0o644, flag: "wx" });
   renameSync(tmp, path);
 }
 

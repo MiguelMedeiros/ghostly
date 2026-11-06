@@ -10,6 +10,7 @@
     "storeNewer": "You have this store already. This link holds a newer copy of it.",
     "storeOlder": "This is an older copy of a store you have. Yours is newer and stays as it is.",
     "storeReads": "Ghostly reads it from {{host}}, which learns your IP address.",
+    "storeRemovedOlder": "You removed this store when its list was newer than this copy. To add it again, use a link to its newest list.",
     "title": "Add an app or a store",
     "updateStore": "Update store"
   },
@@ -18,7 +19,6 @@
     "fetchFiles": "Get its files",
     "keepStopped": "Keep it stopped",
     "needsFiles": "Needs its files",
-    "remove": "Remove",
     "runAnyway": "Run anyway",
     "stopped": "Stopped",
     "uninstall": "Uninstall",
@@ -62,6 +62,7 @@
     "title": "Apps with {{name}}"
   },
   "errors": {
+    "damaged": "Its files on this device are damaged. Get its files again.",
     "equivocation": "This link holds a different copy of a version you have. Ghostly kept yours.",
     "expired": "That took too long. Check the app again.",
     "githubLink": "That GitHub page is not an app. Paste the repository's link, or the link to its app file.",
@@ -80,6 +81,7 @@
     "removed": "A store you added removed this app.",
     "revoked": "Its publisher revoked this version.",
     "rollback": "The link holds an older version.",
+    "runner": "This server isn't set up to run apps safely, so Ghostly won't open them here.",
     "slow": "That took too long on this connection. Try again on a faster one.",
     "status": "Nothing found at that link.",
     "storage": "This browser can't keep apps here (private browsing?). Try a normal window.",
@@ -100,7 +102,8 @@
     "note": "Nothing is copied: {{app}} reads what you pick, on this device."
   },
   "install": {
-    "equivocation": "Two different versions {{sequence}} exist. Ghostly kept the one you have.",
+    "asksChanged": "What this app asks for changed. Look at it again before you install it.",
+    "equivocation": "Two different copies of this version exist. Ghostly kept the one you have.",
     "fetching": "Checking the app…",
     "foundBy": "Found by {{name}}",
     "inStore": "In {{name}}",
@@ -130,7 +133,7 @@
     "same": "Already installed.",
     "sentBy": "Sent by {{name}}",
     "unknownPublisher": "Unknown publisher",
-    "unknownPublisherInfo": "Anyone can sign an app with a new key. Only a store you added vouches for its maker. Compare this key with the maker's own.",
+    "unknownPublisherInfo": "Anyone can sign an app with a new key. Only a store you added vouches for its publisher. Compare this key with the publisher's own.",
     "update": "Update",
     "webkit": "In this browser, an app can still contact other servers.",
     "webkitInfo": "Safari and every iPhone or iPad browser let apps open connections Ghostly cannot block. Those servers learn your IP address. The desktop app blocks them."
@@ -140,12 +143,13 @@
     "addHint": "Add an app or a store by its link",
     "details": "{{title}}: details",
     "installed": "Installed",
-    "intro": "Games and small apps, signed by their makers and run in a sandbox.",
+    "intro": "Games and small apps, signed by their publishers and run in a sandbox.",
     "loading": "Loading…",
     "noStores": "No stores yet. Add one by its link.",
     "none": "No apps yet.",
     "open": "Open",
-    "stores": "Stores"
+    "stores": "Stores",
+    "tryAgain": "Try again"
   },
   "pick": {
     "hint": "It runs in a chat, with your contact.",
@@ -158,12 +162,12 @@
     "count_other": "{{count}} apps",
     "curated": "Curated",
     "empty": "This store lists no apps.",
+    "equivocation": "This store signed two different lists under the same number (seen {{date}}). Ghostly kept yours.",
     "filter": "Search this store",
     "indexed": "Indexed",
     "installed": "Installed",
     "noMatch": "No app in this store matches.",
     "notRead": "Not read yet",
-    "problem": "The last read failed.",
     "read": "Read",
     "readNamed": "Read {{name}}",
     "refresh": "Refresh",
@@ -174,8 +178,10 @@
     "removeNamed": "Remove {{name}}",
     "removeNone": "To add it again, you will need its link.",
     "removeTitle": "Remove {{name}}?",
+    "rollback": "This store's link now holds an older list than yours. Ghostly kept yours.",
     "showMore": "Show more ({{count}})",
-    "stale": "Out of date since {{date}}"
+    "stale": "Out of date since {{date}}",
+    "tooLarge": "This store's list is too large for Ghostly to read."
   },
   "title": "Apps",
   "view": {
@@ -186,10 +192,11 @@
     "resume": "Back to {{title}}",
     "resumeSharing": "sharing a file",
     "sharingWith": "sharing a file with {{name}}",
-    "stoppedFailed": "{{title}} stopped working and was closed. If it keeps happening, tell its maker.",
+    "stoppedFailed": "{{title}} stopped working and was closed. If it keeps happening, tell its publisher.",
+    "stoppedOffline": "{{title}} couldn't start: you are offline. Open it again once you're connected.",
     "stoppedRemoved": "{{title}} was stopped: {{store}} removed this version",
-    "stoppedRevoked": "{{title}} was stopped: its maker revoked this version",
-    "stoppedUnresponsive": "{{title}} stopped responding and was closed, so your chats keep working. Open it again, or tell its maker if it keeps happening.",
+    "stoppedRevoked": "{{title}} was stopped: its publisher revoked this version",
+    "stoppedUnresponsive": "{{title}} stopped responding and was closed, so your chats keep working. Open it again, or tell its publisher if it keeps happening.",
     "with": "{{title}} with {{name}}",
     "withName": "with {{name}}",
     "withSharing": "{{title}} · sharing a file with {{name}}"

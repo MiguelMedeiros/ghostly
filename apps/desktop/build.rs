@@ -74,6 +74,7 @@ const COMMANDS: &[&str] = &[
     "native_microphone_meter_close",
     "native_notification_permission",
     "native_notification_tap",
+    "native_pictures_shown",
     "native_private_notification",
     "native_speaker_test",
     "native_unread_count",

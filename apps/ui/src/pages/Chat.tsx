@@ -64,7 +64,7 @@ import { IncomingCallNotification } from "../components/IncomingCallNotification
 import { useIsLocked, useRingOnLockScreen } from "../contexts/LockScreenContext";
 import { handOverCall, takeHandedCall } from "../lib/lockedRing";
 import { contactStatus } from "../lib/contactStatus";
-import { callLineId, callsBlockedText } from "../lib/callLines";
+import { callEventText, callLineId, callsBlockedText } from "../lib/callLines";
 import { PeerServices } from "../components/PeerServices";
 import { formatFileSize } from "../lib/format";
 import { playSound, startRinging } from "../lib/sounds";
@@ -127,6 +127,7 @@ import { scrollIntoViewGently } from "../lib/motion";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { usePageShown } from "../hooks/usePageShown";
 import { clearChatNotification } from "../lib/notifications";
+import { closeWakeNotices } from "../lib/wakePush";
 import { useWindowAway, windowAway } from "../lib/windowAway";
 import { showChatOnScreen } from "../lib/appBadge";
 import { setSaved, useSavedIn } from "../hooks/useSavedMessages";
@@ -143,6 +144,11 @@ const MEDIA_PROBLEM_TEXT = {
   relayOnly: ["calls.relayOnlyOff", "calls.relayOnlyOffNext"],
   relayOnlyNow: ["calls.relayOnlyNow", "calls.relayOnlyNowNext"],
 } as const;
+
+/** The lines a call ends with that are said as it ends (`callEndSaid`); "no answer" has its own notice. */
+const CALL_END_LINES: ReadonlySet<CallEventType> = new Set(["call_ended", "call_missed", "call_cancelled", "call_rejected", "call_failed"]);
+/** How long a call's end stays in its region, so the same words after the next call are a change again. */
+const CALL_END_SAID_MS = 5000;
 
 /** Tech Info's Status (the engine's word for the link) in the reader's language. A word not here stays as it is. */
 const STATUS_TEXT = {
@@ -238,8 +244,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const countedOnRef = useRef(new Map<string, string>());
   // The chat is on screen: a missed line the person already read may still count the next call (they see it change).
   const seenRef = useRef(false);
+  /** The chat's last call line, said as its call ends (`callEndSaid`). */
+  const lastCallLineRef = useRef<{ type: CallEventType; hasVideo: boolean } | null>(null);
   const addCallEventMessage = useCallback(
     (type: CallEventType, hasVideo: boolean, duration?: number, call?: number) => {
+      lastCallLineRef.current = { type, hasVideo };
       // Kept in English in the history: the call line is worded in the person's language where it is drawn (MessageBubble).
       const textMap: Record<CallEventType, string> = {
         call_started: hasVideo ? "Video call started" : "Audio call started",
@@ -314,9 +323,25 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
   const callState = webrtc.callState;
   const previousCallState = useRef(callState);
+  // A call's window and its ring say "Calling..." and "Connected" to a screen reader, and go as the call ends: the
+  // line the call left ("Audio call declined", "Missed audio call") is said then, once, since the chat's call lines
+  // are not read out (MessageAnnouncer). Not what a notice of its own says: No answer, the no-path note, a media problem.
+  const [callEndSaid, setCallEndSaid] = useState("");
+  const callEnd = useRef({ t, notice: false });
+  callEnd.current = { t, notice: webrtc.noAnswer || webrtc.noPath || !!webrtc.mediaProblem };
+  useEffect(() => {
+    if (!callEndSaid) return;
+    const timer = setTimeout(() => setCallEndSaid(""), CALL_END_SAID_MS);
+    return () => clearTimeout(timer);
+  }, [callEndSaid]);
   useEffect(() => {
     const before = previousCallState.current;
     previousCallState.current = callState;
+    if (callState !== "idle") setCallEndSaid("");
+    else if (before !== "idle" && lastCallLineRef.current && !callEnd.current.notice) {
+      const { type, hasVideo } = lastCallLineRef.current;
+      if (CALL_END_LINES.has(type)) setCallEndSaid(callEventText(callEnd.current.t, type, hasVideo) ?? "");
+    }
     // A call starting (placed, or answered) pauses a voice message or audio file that plays, here or held by the app.
     const quiet = (state: string) => state === "idle" || state === "incoming" || state === "ended";
     if (!quiet(callState) && quiet(before)) pauseForCall();
@@ -659,7 +684,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // asked as it is now (`useWindowAway` runs this again when it comes back): its watch may start after this mounts.
   const away = useWindowAway();
   useEffect(() => {
-    if (visible && !windowAway()) clearChatNotification(sessionId);
+    if (!visible || windowAway()) return;
+    clearChatNotification(sessionId);
+    // The installed web app: this chat's wake-up notices too (a ringing call's stays).
+    closeWakeNotices(chatPath(sessionId));
   }, [visible, away, sessionId, messages.length]);
   // Nor does the icon count it meanwhile: a message landing here would show on it until the line above ran (appBadge).
   useEffect(() => (visible && pageShown ? showChatOnScreen(sessionId) : undefined), [visible, pageShown, sessionId]);
@@ -903,12 +931,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 type="button"
                 ref={nameRef}
                 onClick={startEditLabel}
-                className={`group/name min-w-0 text-start text-[15px] font-normal m-0 leading-tight truncate cursor-pointer rounded hover:text-accent transition-colors ${focus} ${isAnonymous ? "text-text-muted italic" : "text-text-primary"}`}
+                className={`group/name flex items-center min-w-0 text-start text-[15px] font-normal m-0 leading-tight cursor-pointer rounded hover:text-accent transition-colors ${focus} ${isAnonymous ? "text-text-muted italic" : "text-text-primary"}`}
                 title={t("chat.setNameHint")}
               >
                 {/* With no name, the word alone: the start of their key ("Contact · 1kwb54" elsewhere) is on the line
-                    right under it, and the whole of it was cut to "Contac…" on a 320px phone. */}
-                <bdi data-testid="chat-name">{isAnonymous ? t("common.unnamedContactShort") : shownName}</bdi>
+                    right under it, and the whole of it was cut to "Contac…" on a 320px phone. Cut in its own direction,
+                    as the group header's name is: in Arabic a Latin name cut by the page's direction lost its start. */}
+                <span data-testid="chat-name" dir="auto" className="min-w-0 truncate">{isAnonymous ? t("common.unnamedContactShort") : shownName}</span>
                 {!chatLabel && (
                   <svg
                     width="12"
@@ -920,7 +949,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     aria-hidden="true"
-                    className="inline ms-1.5 text-text-muted opacity-0 group-hover/name:opacity-100 group-focus-visible/name:opacity-100 max-md:hidden"
+                    className="shrink-0 ms-1.5 text-text-muted opacity-0 group-hover/name:opacity-100 group-focus-visible/name:opacity-100 max-md:hidden"
                   >
                     <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                     <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
@@ -1255,6 +1284,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       )}
 
       {!visible && wakeNotice && !locked && createPortal(wakeNotice, callLayer ?? document.body)}
+
+      {/* How the call ended, said once (`callEndSaid`): where the call's window hangs, since this chat may be off screen. */}
+      {!locked && createPortal(<p role="status" className="sr-only" data-testid="call-end-spoken">{callEndSaid}</p>, callLayer ?? document.body)}
 
       {/* Active call overlay */}
       {(webrtc.callState === "offering" ||

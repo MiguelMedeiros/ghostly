@@ -15,6 +15,17 @@ export const PAIRED_CALL_FRAME = "paired-call";
 /** A compact offer with the eight candidates `parseCallSignal` accepts stays well under this. */
 export const MAX_PAIRED_CALL_SIGNAL = 8192;
 
+/**
+ * A receiver takes at most this many `paired-call` frames from a contact per `CALL_RATE_WINDOW_MS`, counted before they
+ * are read; the rest are dropped. A person's busiest minute is under half of it, 68 frames: three calls placed, each
+ * started over 4 times on a newer offer (`MAX_RESTARTS`) and hung up; two calls whose path was lost twice, restarted
+ * every 8 s for 30 s each time (`ICE_RESTART_RETRY_MS`, `RECONNECT_TIMEOUT_MS`); the camera and the screen turned on
+ * and off five times each; and the latest signal said again on ten new sessions. Only an app that loops its signals
+ * reaches it.
+ */
+export const CALL_RECEIVE_LIMIT = 150;
+export const CALL_RATE_WINDOW_MS = 60_000;
+
 export interface PairedCallFrame { t: typeof PAIRED_CALL_FRAME; s: string }
 
 /**

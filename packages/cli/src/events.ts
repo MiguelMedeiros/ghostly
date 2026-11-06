@@ -14,6 +14,11 @@ export interface GhostlyEvent { seq: number; id: string; type: string; at: numbe
 
 /** Events the journal keeps for `listen --since`. */
 export const JOURNAL_KEEP = 10_000;
+/**
+ * Seqs reserved ahead in `<journal>.reserved` (`EventHub.reserve`): a new reservation is written when fewer than half
+ * of them are left, so the mark is rewritten once per 128 events, and a full disk that refuses it still leaves 128.
+ */
+export const SEQS_RESERVED = 256;
 /** Bytes the journal keeps at most: a contact's long texts never make it too large to read. */
 export const JOURNAL_KEEP_BYTES = 16 * 1024 * 1024;
 /** A journal past this is trimmed, and only this much of its end is ever read. */
@@ -27,8 +32,9 @@ const SEEN_DB = "ghostly-cli";
 const SEEN = "seen";
 
 /**
- * How long the seen set keeps the note of a settled message after its last activity (its arrival, its edit, a reaction):
- * older notes are dropped, and a message that came here longer ago with no note is no news. A daemon kept a note per
+ * How long the seen set keeps the note of a settled message after its last activity (its arrival, its edit, a reaction),
+ * each as this device's clock has it: older notes are dropped, and a message that came here longer ago with no note is
+ * no news. A daemon kept a note per
  * message of its whole history in memory, for as long as it ran.
  */
 export const SEEN_KEEP_MS = 30 * 86_400_000;
@@ -66,6 +72,12 @@ export class EventHub {
   private marked = false;
   /** Whether `dropped` is ahead of `<journal>.dropped` (a full disk refused it): the next event's write tries it again. */
   private markOwed = false;
+  /**
+   * The highest seq `<journal>.reserved` holds: no event is told a seq past it before the mark says so, and a start
+   * numbers on from it. A full disk can take an event and its `.dropped` mark both, after it was told; the next start
+   * then never gives its seq again, and a replay across it says `events.gap`. A stop gives back what it did not use.
+   */
+  private reserved = 0;
   /** Typing changes told this run: a change's id carries it, as it takes no seq of its own (`emitLive`). */
   private typingChanges = 0;
   private journalLines = 0;
@@ -105,6 +117,7 @@ export class EventHub {
   /** Loads the journal's last seq and the seen set; call before `sink` is attached. */
   async open(): Promise<void> {
     // A journal that cannot be read never keeps the profile from opening: it is set aside and a new one begins.
+    const reserved = readDropped(this.journalPath + ".reserved") ?? 0;
     try {
       const dropped = readDropped(this.journalPath + ".dropped");
       if (existsSync(this.journalPath)) {
@@ -136,6 +149,13 @@ export class EventHub {
       this.journalLines = 0;
       this.journalBytes = 0;
       this.markDropped(this.seq);
+    }
+    // Seqs the last run reserved and did not give back (a crash, or a stop that could not write): some may have been told
+    // with no line here. None is given again, and a replay across them says `events.gap`.
+    this.reserved = reserved;
+    if (reserved > this.seq) {
+      this.seq = reserved;
+      this.markDropped(Math.max(this.dropped, reserved));
     }
     this.db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(this.seenDb, 1);
@@ -194,10 +214,18 @@ export class EventHub {
 
   /**
    * Drops the notes of settled messages, and of reactions, whose last activity is older than `SEEN_KEEP_MS`: from memory
-   * and from the store. A message of mine still on its way (or failed, which a retry sends again) keeps its note.
+   * and from the store. A message of mine still on its way (or failed, which a retry sends again) keeps its note. The
+   * 30 days count back from the newest activity the set knows when the clock reads later than it: a clock run ahead (a
+   * wrong RTC, a VM restored with a skewed clock) would otherwise drop the notes of the recent history, which the next
+   * start with the clock right reports again.
    */
   sweep(): number {
-    const cutoff = this.now() - SEEN_KEEP_MS;
+    let newest = 0;
+    for (const [chat, known] of this.seen) {
+      if (chat === FORMAT || chat.startsWith("said:")) continue;
+      for (const note of known.values()) newest = Math.max(newest, timeIn(note) ?? 0);
+    }
+    const cutoff = Math.min(this.now(), newest) - SEEN_KEEP_MS;
     let dropped = 0;
     for (const [chat, known] of this.seen) {
       if (chat === FORMAT || chat.startsWith("said:")) continue;
@@ -227,7 +255,7 @@ export class EventHub {
     return messages.every((message) => {
       const note = known?.get(message.id), before = note === undefined ? undefined : stateIn(note);
       // Its note dropped, and nothing about it since (`SEEN_KEEP_MS`): nothing to report of it.
-      if (note === undefined && message.timestamp < cutoff && activityOf(message) < cutoff) return true;
+      if (note === undefined && cameAt(message) < cutoff && activityOf(message) < cutoff) return true;
       let state = stateOf(message);
       // As `messages` reads it: a mention reported stays reported.
       if (before !== undefined && mentionedIn(before) && !mentionedIn(state)) state = withFlag(state, MENTIONED);
@@ -285,7 +313,43 @@ export class EventHub {
       this.marked = true;
       this.markOwed = false;
     } catch (error) {
-      this.markOwed = true;
+      // A full disk refuses the copy (a new file), not a rewrite of the mark there: that takes no new block.
+      try {
+        writeMark(this.journalPath + ".dropped", seq, false);
+        this.marked = true;
+        this.markOwed = false;
+      } catch {
+        this.markOwed = true;
+        process.stderr.write(`ghostly: event journal error: ${error instanceof Error ? error.message : String(error)}\n`);
+      }
+    }
+  }
+
+  /**
+   * Reserves seqs ahead of the one about to be told, in `<journal>.reserved`, rewritten where it is (no new block, so a
+   * full disk takes it): written before the event goes anywhere, as `markDropped` is. Refused, the event still goes
+   * (the reservation made before covers the next ones), and the next event tries again.
+   */
+  private reserve(): void {
+    if (this.reserved - this.seq >= SEQS_RESERVED / 2) return;
+    try {
+      writeMark(this.journalPath + ".reserved", this.seq + SEQS_RESERVED, true);
+      this.reserved = this.seq + SEQS_RESERVED;
+    } catch (error) {
+      process.stderr.write(`ghostly: event journal error: ${error instanceof Error ? error.message : String(error)}\n`);
+    }
+  }
+
+  /**
+   * At a stop: the seqs reserved past the last one told are given back, so the next start numbers on from it, with no
+   * jump. Not written (a disk that takes no rewrite either), the next start numbers past the reservation instead.
+   */
+  release(): void {
+    if (this.reserved <= this.seq) return;
+    try {
+      writeMark(this.journalPath + ".reserved", this.seq, true);
+      this.reserved = this.seq;
+    } catch (error) {
       process.stderr.write(`ghostly: event journal error: ${error instanceof Error ? error.message : String(error)}\n`);
     }
   }
@@ -295,6 +359,7 @@ export class EventHub {
   /** Emits an event the host makes itself (`daemon.started`). */
   emit(type: string, id: string, fields: Record<string, unknown> = {}): GhostlyEvent {
     const event: GhostlyEvent = { seq: ++this.seq, id, type, at: this.now(), ...fields };
+    this.reserve();
     // The journal failing never keeps an event from the listeners.
     let written = false;
     try {
@@ -626,15 +691,17 @@ export class EventHub {
       const note = known.get(message.id), before = note === undefined ? undefined : stateIn(note);
       const at = activityOf(message);
       const json = () => group ? groupMessageJson(message, this.state?.groups.find((g) => g.id === group)) : chatMessageJson(message, this.state?.links.find((l) => l.id === chat));
-      if (before === undefined && message.timestamp < cutoff) {
+      if (before === undefined && cameAt(message) < cutoff) {
         // Came here longer ago than `SEEN_KEEP_MS`, with no note: its note was dropped (or it came, that long ago, while
         // nothing ran). No news, and no note again, unless it was active since: then an edit since is reported, once.
+        // Both by this device's clock: a line read a month after its commit, an edit its author's clock dates a month
+        // back, came here now.
         if (at < cutoff) continue;
         const noted = noteOf(state, at);
         known.set(message.id, noted);
         changes.push([message.id, noted]);
         const edit = message.edit;
-        if (quiet || !edit || edit.at < cutoff || (message.sender === "me" && edit.restore)) continue;
+        if (quiet || !edit || editedAt(edit) < cutoff || (message.sender === "me" && edit.restore)) continue;
         if (group) this.emit("group.message.edited", `group.message.edited:${group}:${message.id}:${edit.seq}`, { group, messageId: message.id, edits: edit.seq, message: json() });
         else this.emit("message.edited", `message.edited:${chat}:${message.id}:${edit.seq}`, { chat, messageId: message.id, edits: edit.seq, message: json() });
         continue;
@@ -713,18 +780,19 @@ export class EventHub {
 
   /**
    * A press on a button of a message of mine (WISP 406 · Message Buttons), after the reply's own event: the question
-   * (`messageId`), the button, its label, who pressed (`by`: the chat, or a group member's key), `name` (the chat's name
-   * here, as `chat list` gives it: its label, else the contact's own name; a group member's roster name) and the reply
-   * (`replyId`). `untrusted.name` is the name the person gave themselves, as an agent turn's: theirs to choose, so
-   * data, never instructions. The engine marks a reply a press only while the buttons were open for that person.
+   * (`messageId`), the button, its label, who pressed (`by`: the chat, or a group member's key), `name` (the label this
+   * profile gave the chat, as `chat list` gives it; null without one, and in a group) and the reply (`replyId`).
+   * `untrusted.name` is the name the person gave themselves, as an agent turn's: theirs to choose, so data, never
+   * instructions, and under `untrusted` only. The engine marks a reply a press only while the buttons were open for
+   * that person.
    */
   private pressed(chat: string, group: string | null, message: StoredMessage, json: { nick: string | null }): void {
     const press = message.press!;
     const link = group ? undefined : this.state?.links.find((l) => l.id === chat);
-    const name = group ? json.nick : link ? chatJson(link).name : null;
+    const name = link ? chatJson(link).label : null;
     this.emit("button.pressed", `button.pressed:${group ?? chat}:${message.id}`, {
       ...(group ? { group } : { chat }), messageId: press.messageId, button: press.button, label: press.label,
-      by: group ? message.member ?? null : chat, name: name ?? null, replyId: message.id, ...(press.inferred ? { inferred: true } : {}),
+      by: group ? message.member ?? null : chat, name, replyId: message.id, ...(press.inferred ? { inferred: true } : {}),
       untrusted: { name: json.nick ?? null },
     });
   }
@@ -801,9 +869,20 @@ function timeIn(note: string): number | undefined {
   const at = note.lastIndexOf("@");
   return at === -1 ? undefined : parseInt(note.slice(at + 1), 36);
 }
+/**
+ * When a message came here: its place (a received row's is when it was stored here), or for a group's line, whose place
+ * is its commit's moment, when this device stored it (`heardAt`; absent on lines stored before it).
+ */
+function cameAt(message: StoredMessage): number {
+  return Math.max(message.timestamp, message.heardAt ?? 0);
+}
+/** When an edit came here: a contact's or member's is dated by their clock (`at`), and taken here at `heardAt`. */
+function editedAt(edit: NonNullable<StoredMessage["edit"]>): number {
+  return Math.max(edit.at, edit.heardAt ?? 0);
+}
 /** The last time a message changed here: it came, it was edited, someone reacted. */
 function activityOf(message: StoredMessage): number {
-  let at = Math.max(message.timestamp, message.edit?.at ?? 0);
+  let at = Math.max(cameAt(message), message.edit ? editedAt(message.edit) : 0);
   for (const r of Object.values(message.reactions ?? {})) at = Math.max(at, r.at ?? 0);
   return at;
 }
@@ -912,12 +991,35 @@ function firstSeq(lines: readonly string[]): number | undefined {
   return undefined;
 }
 
-/** The journal's dropped mark (`EventHub.dropped`), or undefined when there is none (a journal from before it). */
+/**
+ * The journal's dropped mark (`EventHub.dropped`) or its reserved one (`EventHub.reserved`), or undefined when there is
+ * none (a journal from before it).
+ */
 function readDropped(path: string): number | undefined {
   try {
     const seq = Number(readFileSync(path, "utf8").trim());
     return Number.isSafeInteger(seq) && seq >= 0 ? seq : undefined;
   } catch { return undefined; }
+}
+
+/**
+ * Writes a mark over the one there, as a line of fixed width (`000…0042`, which `readDropped` reads, v1.10's too): a
+ * rewrite never grows the file past its first block, so a full disk takes it, and one cut short leaves the new mark's
+ * first digits before the old one's last, never a number below the old one when the mark grows. `create`: a file that
+ * is not there is made (a first start).
+ */
+function writeMark(path: string, seq: number, create: boolean): void {
+  const line = Buffer.from(String(seq).padStart(19, "0") + "\n");
+  let fd: number;
+  try { fd = openSync(path, "r+"); } catch (error) {
+    if (!create || (error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    fd = openSync(path, "wx", 0o600);
+  }
+  try {
+    for (let at = 0; at < line.length;) at += writeSync(fd, line, at, line.length - at, at);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /**

@@ -8,7 +8,7 @@ import { updateFailure } from "../lib/updateFailure";
 import { canInstall, isAppleMobile, isMacSafari, startInstall, useInstallState } from "../lib/installPrompt";
 import { browserPrompts, reconsiderPersist, requestPersist, useStorageProtection } from "../lib/storagePersistence";
 import { storageBreakdown, useDesktopStorage } from "../lib/desktopStorage";
-import { isNoPushService, noPushService, pushPlatform, pushUnavailable, setWake, useNoPushService, useWakeOn, wakeIsOn } from "../lib/wakePush";
+import { isNoPushService, noPushService, pushPlatform, pushUnavailable, setWake, setWakeOnline, useNoPushService, useWakeOn, useWakeOnline, wakeIsOn } from "../lib/wakePush";
 import { noticePlace, noticeSettings, notificationPermission, openNoticeSettings, requestNotifications, type NoticePermission } from "../lib/notifications";
 import { getVersion } from "@tauri-apps/api/app";
 import { NetworkSettings } from "../components/NetworkSettings";
@@ -105,6 +105,11 @@ function SettingsGroup({ id, view, children }: { id: SettingsSection; view: Sect
   );
 }
 
+/** Scrolls the page to a section's top, or to the block inside it a link named (`field`) once that is drawn. */
+function scrollToSection(section: SettingsSection, field: string | null, behavior: ScrollBehavior) {
+  ((field && document.getElementById(field)) || document.getElementById(`settings-section-${section}`))?.scrollIntoView({ block: "start", behavior });
+}
+
 export function Settings() {
   const nav = useAppNavigation();
   const { settings, updateColorScheme, updateLanguage, updateLockScreen, updateNotifications,
@@ -132,6 +137,13 @@ export function Settings() {
       // of this page's when the browser's storage refused to keep it, or a refused New token left them on).
       if (on && isNoPushService(e)) { if (!noPushService() || wakeIsOn()) setWakeError(t("pwa.wakeNoPushService")); } else setWakeError(problemLine(e, t));
     } finally { setWakeBusy(false); }
+  };
+  // Online notices ride on the same subscription: the switch shows while one is shared, on by default.
+  const wakeOnline = useWakeOnline();
+  const [wakeOnlineError, setWakeOnlineError] = useState("");
+  const changeWakeOnline = async (on: boolean) => {
+    setWakeOnlineError("");
+    try { await setWakeOnline(on); } catch (e) { setWakeOnlineError(problemLine(e, t)); }
   };
   const isMobile = useIsMobile();
   const profile = currentProfile();
@@ -171,14 +183,21 @@ export function Settings() {
   const wanted = useRef<SettingsSection | null>(section);
   // How the page went to it: smoothly from the index, at once from an address.
   const glide = useRef<ScrollBehavior>("auto");
+  // A block inside the section the link named (`{ field }` in its state: the call note's TURN server, below Network's
+  // relay lists): the page goes to it rather than to the section's top, on a phone too, until scrolled by hand.
+  const asked = (location.state as { field?: unknown } | null)?.field;
+  const linkedField = typeof asked === "string" ? asked : null;
+  const wantedField = useRef(linkedField);
   useEffect(() => {
-    if (isMobile || !section) return;
+    if (!section) return;
+    wantedField.current = linkedField;
+    if (isMobile) { if (linkedField) document.getElementById(linkedField)?.scrollIntoView({ block: "start" }); return; }
     wanted.current = section;
     if (picked.current === section) { picked.current = null; return; } // picked in the index: already on its way there
     glide.current = "auto";
-    document.getElementById(`settings-section-${section}`)?.scrollIntoView({ block: "start" });
+    scrollToSection(section, linkedField, "auto");
     setInView(section);
-  }, [section, isMobile]);
+  }, [section, isMobile, linkedField]);
   useEffect(() => {
     const body = content.current?.closest<HTMLElement>("[data-page-body]");
     if (isMobile || !body) return;
@@ -192,14 +211,14 @@ export function Settings() {
       setInView(sectionInView(boxes, view.top + 48, view.bottom, atEnd, wanted.current));
     };
     // Scrolled by hand (wheel, touch, keys, the scroll bar): the section at the top is marked again.
-    const byHand = (event: Event) => { if (event.type !== "pointerdown" || event.target === body) wanted.current = null; };
+    const byHand = (event: Event) => { if (event.type !== "pointerdown" || event.target === body) { wanted.current = null; wantedField.current = null; } };
     const hands = ["wheel", "touchmove", "keydown", "pointerdown"] as const;
     body.addEventListener("scroll", onScroll, { passive: true });
     for (const type of hands) body.addEventListener(type, byHand, { passive: true });
     // A section above the wanted one drawn late (Network once its settings load) moves it down while a smooth scroll
     // still heads for its old place, which ends short of it: the page goes on to where it is now.
     const moved = new ResizeObserver(() => {
-      if (wanted.current) document.getElementById(`settings-section-${wanted.current}`)?.scrollIntoView({ block: "start", behavior: glide.current });
+      if (wanted.current) scrollToSection(wanted.current, wantedField.current, glide.current);
     });
     if (content.current) moved.observe(content.current);
     return () => {
@@ -210,6 +229,7 @@ export function Settings() {
   }, [isMobile]);
   const pick = (to: SettingsSection) => {
     wanted.current = to;
+    wantedField.current = null;
     glide.current = settings.reduceMotion ? "auto" : "smooth";
     document.getElementById(`settings-section-${to}`)?.scrollIntoView({ block: "start", behavior: glide.current });
     setInView(to);
@@ -507,7 +527,7 @@ export function Settings() {
 
   // What this device has: the options it lacks are not offered, nor found by the search.
   const has = (needs: SettingNeeds) => needs === "profiles" ? canSwitch : needs === "updates" ? update.supported
-    : needs === "wake" ? canWake : needs === "translate" ? translateOffered() : hasMediaDevices();
+    : needs === "wake" ? canWake : needs === "wakeOn" ? canWake && wakeOnline.shared : needs === "translate" ? translateOffered() : hasMediaDevices();
   const shown = (id: SettingsSection) => id !== "media" || hasMediaDevices();
   // "Password" found by the search opens the lock's password form: to set one when there is none (no row of its own then).
   const found = (entry: SettingEntry) => { if (entry.opens === "passwordForm" && !showPasswordForm) openPasswordForm(); };
@@ -671,6 +691,12 @@ export function Settings() {
             {wakeOn && <Button data-testid="settings-wake-rotate" disabled={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeRotate")}</Button>}
             {wakeNoPush && <Button data-testid="settings-wake-retry" disabled={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeTryAgain")}</Button>}
             <Switch testId="settings-wake" label={t("pwa.wake")} checked={wakeOn} disabled={wakeBusy} unavailable={wakeNoPush} describedBy={wakeNoPush ? wakeHintId : undefined} onChange={(on) => void changeWake(on)} />
+          </Row>
+        )}
+        {canWake && wakeOnline.shared && (
+          <Row label={t("pwa.wakeOnline")} testId="settings-wake-online-row" info={t("pwa.wakeOnlineInfo")}
+            hint={<span role="status">{wakeOnlineError || t("pwa.wakeOnlineHint")}</span>}>
+            <Switch testId="settings-wake-online" label={t("pwa.wakeOnline")} checked={wakeOnline.on} onChange={(on) => void changeWakeOnline(on)} />
           </Row>
         )}
         {!canWake && pushUnavailable() && (

@@ -1,14 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { hasVisible } from "@ghostly/core";
 import { InputGroup, LinkRow, Page } from "../components/layout";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
 import { usePlatformValue } from "../hooks/useServicesPlatform";
 import { servicesPlatform } from "../lib/platform";
-import { knownChatKeys } from "../lib/storage";
+import { knownChatKeys, ownsKey } from "../lib/storage";
 import { type ColorScheme } from "../lib/settings";
 import { ColorSwatches } from "../components/ColorSwatches";
-import { baseProfileName, clearRestoredMark, createProfile, currentProfile, fitsProfileName, listProfiles, renameProfile, switchProfile, type ProfileEntry } from "../lib/profiles";
+import { baseProfileName, clearRestoredMark, createProfile, currentProfile, fitsProfileName, listProfiles, registryKey, renameProfile, settingsKeyFor, switchProfile, type ProfileEntry } from "../lib/profiles";
 import { askNameIn } from "../lib/nameStep";
 import { Block, Button, Notice, Row, Section, Segmented, Switch, input } from "../components/wallet/ui";
 import { ProfileBackups } from "../components/ProfileBackups";
@@ -25,16 +26,29 @@ import { formatAmount } from "../lib/amount";
 import { useComposition } from "../hooks/useComposition";
 import { useOwnNameField } from "../hooks/useOwnNameField";
 import { useFittedNameField } from "../hooks/useGroupNameField";
+import { useFocusLanding } from "../hooks/useFocusLanding";
 import { openJoinAnother } from "../lib/devices";
 import { problemText, type Problem } from "../lib/problemText";
+
+/**
+ * Another tab's write the page shows: the registry, a profile's settings (its colour in the list), this profile's own
+ * keys, or the storage cleared. Not another profile's chats: its tab stores them a few times per text it gets.
+ */
+const showsKey = (key: string | null) =>
+  key === null || key === registryKey() || ownsKey(key) || listProfiles().some((entry) => key === settingsKeyFor(entry.id));
 
 /** Profiles change outside React (another component, another tab); re-read them when they do. */
 function useProfiles() {
   const [, bump] = useState(0);
   useEffect(() => {
     const changed = () => bump((n) => n + 1);
-    for (const name of ["profiles-updated", "settings-updated", "storage"]) window.addEventListener(name, changed);
-    return () => { for (const name of ["profiles-updated", "settings-updated", "storage"]) window.removeEventListener(name, changed); };
+    const stored = (event: StorageEvent) => { if (showsKey(event.key)) changed(); };
+    for (const name of ["profiles-updated", "settings-updated"]) window.addEventListener(name, changed);
+    window.addEventListener("storage", stored);
+    return () => {
+      for (const name of ["profiles-updated", "settings-updated"]) window.removeEventListener(name, changed);
+      window.removeEventListener("storage", stored);
+    };
   }, []);
   return { current: currentProfile(), all: listProfiles() };
 }
@@ -83,6 +97,11 @@ export function Profile() {
   const wantsBackup = !!asked?.backupProfile;
   const [creating, setCreating] = useState(wantsNew), [newName, setNewName] = useState("");
   const newNameField = useFittedNameField(newName, setNewName, fitsProfileName);
+  // The new profile opens after a moment (`switchProfile`): another submit until the reload made a second one.
+  const opening = useRef(false), [opened, setOpened] = useState(false);
+  // Cancel goes with the form: the focus goes back to New profile, which takes its place, not to the page.
+  const [cancelled, setCancelled] = useState(false);
+  useFocusLanding(cancelled ? "[data-testid='profile-new']" : null, () => setCancelled(false));
   useEffect(() => { if (wantsNew) { setCreating(true); document.querySelector("[data-testid='profile-list']")?.scrollIntoView({ block: "nearest" }); } }, [wantsNew]);
   const [deleting, setDeleting] = useState<ProfileEntry | null>(null);
   // A backup restored to replace the profile it was made from lands here, the copy running: the original's removal
@@ -182,10 +201,10 @@ export function Profile() {
         ))}
         {!canSwitch ? <Block><Notice>{t("profile.oneOnly")}</Notice></Block> : creating ? (
           <Block>
-            <InputGroup as="form" onSubmit={(e) => { e.preventDefault(); attempt(() => { const entry = createProfile(newName); askNameIn(entry.id); switchProfile(entry.id, { route: "/profile" }); }); }}>
+            <InputGroup as="form" onSubmit={(e) => { e.preventDefault(); if (!opening.current) attempt(() => { const entry = createProfile(newName); askNameIn(entry.id); switchProfile(entry.id, { route: "/profile" }); opening.current = true; setOpened(true); }); }}>
               <input data-testid="profile-new-name" autoFocus className={input} placeholder={t("profile.name")} value={newName} {...newNameField} />
-              <Button type="submit" variant="primary" data-testid="profile-create" disabled={!newName.trim()}>{t("profile.create")}</Button>
-              <Button onClick={() => { setCreating(false); setNewName(""); }}>{t("common.cancel")}</Button>
+              <Button type="submit" variant="primary" data-testid="profile-create" disabled={!hasVisible(newName) || opened}>{t("profile.create")}</Button>
+              <Button onClick={() => { setCreating(false); setNewName(""); setCancelled(true); }}>{t("common.cancel")}</Button>
             </InputGroup>
           </Block>
         ) : (

@@ -289,19 +289,24 @@ const AT_BACK = "again at the back once it is reviewed and queued";
 export function waiting(pr) {
   if (onHold(pr)) return `it is on hold (\`${HOLD}\`): it boards once the label comes off`;
   if (pr.draft) return "it is a draft";
+  // First of the rest: GitHub runs no pull_request workflow on a pull request that conflicts with its base, so no CI
+  // remedy below can work until the conflict is resolved. `tick` reads it only for one that waits anyway.
+  if (pr.conflict) return `it conflicts with \`${pr.base}\`, and GitHub runs no CI on a pull request until its conflict with the base is resolved; merge \`origin/${pr.base}\` into it. It keeps its place until then; after that push it leaves the line and joins it ${AT_BACK}`;
   if (pr.fork) return "it comes from a fork";
   if (pr.unread === "comments") return `it has more comments than the train reads (${PAGES_READ * 100}), so it cannot find its own record of the reviewed head; it moves on once a maintainer deletes some of them`;
   if (pr.unread) return `it has more events than the train reads (${PAGES_READ * 100}), so it cannot tell when it was queued or whether its base changed; close it and open a new pull request from the same branch, which joins the line ${AT_BACK}`;
   if (pr.ci === "failure") return `CI Success is red on its last commit. A re-run of a failed job keeps its place; after a pushed fix it leaves the line and joins it ${AT_BACK}`;
   // The fast tier is enough to board: the batch's full CI is the gate.
   if (pr.ci === "success" || pr.fast === "success") return null;
-  if (pr.fast === "failure") return "CI Success (draft) is red on its last commit and CI Success has not passed on it yet";
+  // A green full run that does not count says how to get one that does: that run, not the fast tier, is what a ready
+  // pull request needs, so these come before a red fast tier.
   if (pr.shared?.length) return `another pull request from its branch (${pr.shared.map((o) => `#${o.number} into \`${o.base}\`${o.moved ? ", its base changed" : ""}`).join(", ")}) ran CI on the same commit with that base's ci.yml; close it and, ten minutes later, push a new commit; after the push it leaves the line and joins it ${AT_BACK}`;
   if (pr.crowded) return `its branch has more pull requests than the train reads (${PAGES_READ * 100}), so one into another base may have run CI on the same commit; open a new pull request from a new branch, which joins the line ${AT_BACK}`;
   if (pr.retargeted) return `its green CI run on its last commit ran before its base was changed; close and reopen it for a run against this base, which keeps its place (after a pushed commit instead, it leaves the line and joins it ${AT_BACK})`;
   // A re-run plans from the run's own merge commit again (GitHub keeps its sha), so it skips the same jobs: a run
   // planned by an older ci-changes.mjs than the base's stays short. Closing and reopening makes a new merge commit.
   if (pr.misplanned) return "the green CI run on its last commit skipped jobs that its changes need (a run planned for another base, or by an older copy of ci-changes.mjs); close and reopen it for a new run (re-running that run plans it the same way again)";
+  if (pr.fast === "failure") return "CI Success (draft) is red on its last commit and CI Success has not passed on it yet";
   return "CI Success has not passed on its last commit yet";
 }
 
@@ -826,6 +831,18 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     }
   }
 
+  // Whether a queued pull request that cannot board conflicts with its base (`waiting` says so first). Asked only of one
+  // that waits for a reason the conflict comes before, so a green one costs no request; GitHub answers `unknown` while
+  // it still works the mergeability out, so that is asked once more, a moment later.
+  for (const p of queued.filter((p) => !gone.has(p.number) && !onHold(p) && !p.draft && waiting(p))) {
+    let state = (await gh.pull(p.number)).mergeState;
+    if (state === "unknown") {
+      await pause(2000);
+      state = (await gh.pull(p.number)).mergeState;
+    }
+    p.conflict = state === "dirty";
+  }
+
   let inFlight = null;
   /** CI Success on the base itself while a red batch or lone pull request waits for it: every position comment says so. */
   let held = null;
@@ -1341,6 +1358,8 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
     open: p.state === "open",
     base: p.base.ref,
     author: p.user?.login,
+    // Only `GET /pulls/<n>` has it (lists leave it out): `dirty` when it conflicts with its base, `unknown` while GitHub works it out.
+    mergeState: p.mergeable_state,
   });
   return {
     pulls: async (base) => (await all(`/pulls?state=open${base ? `&base=${encodeURIComponent(base)}` : ""}`)).map(pull),

@@ -1,10 +1,10 @@
 import { createHash, generateKeyPairSync } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { appRevocationFor, readAppBundle, readAppRevocations, type AppManifest } from "@ghostly/core";
-import { verifyApp } from "../src/apps";
+import { verifyApp, writeWhole } from "../src/apps";
 import { CliError } from "../src/errors";
 import { error, ghostly, home, ok } from "./support/cli";
 // covers: apps.bundle, apps.store
@@ -334,6 +334,24 @@ describe("app revoke", () => {
     expect(ok(await ghostly(["app", "publish", dir, "--key", key]))).toMatchObject({ sequence: 2 });
     expect(ok(await ghostly(["app", "verify", bundle]))).toMatchObject({ valid: true, sequence: 2 });
   }, 60_000);
+});
+
+describe("writing a bundle, a revocation list or a store index", () => {
+  it("writes a new file by its temporary name, never into one that is there or where a link there points", () => {
+    if (process.platform === "win32") return;
+    const dir = tmp();
+    const other = join(tmp(), "someone-else.txt");
+    writeFileSync(other, "untouched");
+    const out = join(dir, "app.ghostlyapp");
+    const temporary = join(dir, `.app.ghostlyapp.${process.pid}.tmp`);
+    symlinkSync(other, temporary);
+    writeWhole(out, new TextEncoder().encode("bundle"));
+    expect(readFileSync(other, "utf8")).toBe("untouched");
+    expect(readFileSync(out, "utf8")).toBe("bundle");
+    expect(lstatSync(out).isSymbolicLink()).toBe(false);
+    expect(existsSync(temporary)).toBe(false);
+    expect(statSync(out).mode & 0o777).toBe(0o644 & ~process.umask());
+  });
 });
 
 describe("app verify", () => {

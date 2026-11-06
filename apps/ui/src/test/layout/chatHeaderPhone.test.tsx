@@ -87,6 +87,25 @@ describe("a chat's header on a phone", () => {
   });
 });
 
+describe("a chat's name in the header, in Arabic", () => {
+  // agents#3088: the button cut the name in the page's direction with the name in a <bdi> inside it, so a Latin name
+  // too long for a phone lost its start ("…a Maria Fernanda d"). The box that cuts it reads it in its own direction,
+  // as the group header's name does, and the rename pencil stays beside it.
+  it("is cut by a box in the name's own direction, so a Latin name keeps its start", async () => {
+    viewport(375, 667);
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Ana Maria Fernanda de Souza", messages: [], createdAt: 1_700_000_000_000 });
+    const { engine } = renderApp(<Chat sessionId="chat-1" visible onCallChange={() => {}} callLayer={null} />, { language: "ar" });
+    engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("sendMessage", () => ({ error: null }));
+    engine.update({ links: [linkView({ peerPubKeyZ32: PEER, profile: "paired-chat/1", pairing: { status: "ready" } } as never)] });
+    const name = await screen.findByTestId("chat-name");
+    expect(name).toHaveTextContent("Ana Maria Fernanda de Souza");
+    expect(name).toHaveAttribute("dir", "auto");
+    expect(name).toHaveClass("min-w-0", "truncate");
+    // The button around it lays the name out and does not cut it in the page's direction itself.
+    expect(name.closest("button")).not.toHaveClass("truncate");
+  });
+});
+
 /** The menu's rows and separators top to bottom: a row by its test id (or its text), a separator as "—". */
 const layout = (menu: HTMLElement) => [...menu.querySelectorAll<HTMLElement>("[data-menu-item], [role=separator]")]
   .map(el => el.getAttribute("role") === "separator" ? "—" : el.dataset.testid ?? el.textContent);

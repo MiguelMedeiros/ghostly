@@ -11,6 +11,7 @@ import { MAX_LINE } from "./client";
 import { greeting, HELLO, newDaemonSecret, proof, removeDaemonSecret } from "./daemonProof";
 import { asCliError, CliError } from "./errors";
 import { EventHub, type GhostlyEvent } from "./events";
+import { GroupAutoJoin } from "./groupAuto";
 import { resumeHolds } from "./holds";
 import { ownFolder, ownProfile, privateFolder } from "./privateFolder";
 import { acquireLock, startingPath, type ProfilePaths } from "./profiles";
@@ -51,8 +52,12 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
   const unmark = mode === "daemon" ? markStarting(paths) : () => {};
   const release = () => { unmark(); locked(); };
   let runtime;
+  // Made once the engine runs (it needs the engine), and asked by the engine from then on: an invitation over a chat it
+  // names finds room when 32 others wait (`GroupAutoJoin.autoJoins`).
+  let groupAuto: GroupAutoJoin | undefined;
+  const autoJoins = (chat: string): boolean => !!groupAuto?.autoJoins(chat);
   try {
-    runtime = await startRuntime(paths, mode === "daemon" ? { ...options, logJoins: true } : options);
+    runtime = await startRuntime(paths, { ...options, ...(mode === "daemon" ? { logJoins: true } : {}), autoJoins, keepNewest: BASELINE_NEWEST });
   } catch (error) {
     release();
     throw error;
@@ -69,9 +74,11 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     const whole = (id: string) => (id.startsWith("group:") ? node.groupMessages({ groupId: id.slice(6) }) : node.getMessages(id));
     // A store that was closed holds every note the hub made, and a history the engine has not touched since is as it
     // was closed: its newest messages say whether the hub is in step with it. Otherwise the whole history is read.
+    // Those newest messages come from the whole histories the engine's start read, where it kept them unwritten since.
     const closed = !runtime.store.recovered;
+    const kept = runtime.server.takeStartNewest();
     for (const id of [...now.links.map((link) => link.id), ...now.groups.map((group) => `group:${group.id}`)]) {
-      const page = closed && !runtime.server.historyChanged(id) ? await node.messagePage({ linkId: id, limit: BASELINE_NEWEST }) : null;
+      const page = closed && !runtime.server.historyChanged(id) ? kept.get(id) ?? await node.messagePage({ linkId: id, limit: BASELINE_NEWEST }) : null;
       if (page && !page.more) histories.set(id, page.messages);
       else if (page && hub.inStep(id, page.messages)) newest.set(id, page.messages);
       else histories.set(id, await whole(id));
@@ -83,13 +90,19 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     const manager = calls;
     hub.onCallSignal((chat, signal) => manager.onSignal(chat, signal));
     reportAppFrames(hub, node, paths.dir);
+    // Group invitations over the chats `group auto on --from` names: only a daemon accepts them, those that came while it was down too.
+    const joiner = new GroupAutoJoin({ engine: node, profileDir: paths.dir, joins: mode === "daemon" });
+    groupAuto = joiner;
+    hub.onState((s) => joiner.check(s));
     runtime.server.attach(hub.sink, { mark, ids: [...histories.keys(), ...newest.keys()] });
+    joiner.check(node.getState());
   } catch (error) {
+    hub.release();
     await runtime.close().catch(() => {});
     release();
     throw error;
   }
-  const ctx: ApiContext = { runtime, hub, mode, version, calls };
+  const ctx: ApiContext = { runtime, hub, mode, version, calls, groupAuto };
   resumeHolds(ctx);
   let closing: Promise<void> | null = null;
   return {
@@ -98,6 +111,8 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
       // Every call is hung up, and every card update still waiting for its time sent, while the engine can still tell the contact.
       await Promise.all([calls.stopAll(), flushCardUpdates(ctx)]).catch(() => {});
       runtime.server.detach(hub.sink);
+      // The seqs reserved past the last event go back, so the next start numbers on from it (`EventHub.release`).
+      hub.release();
       await runtime.close().catch(() => {});
       release();
     })()),

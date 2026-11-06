@@ -139,7 +139,7 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
           </span>
         </span>
         <div className="min-w-0 flex-1 ms-1">
-          <h2 data-testid="mini-app-title" dir="auto" className="m-0 text-[15px] font-semibold leading-tight text-text-primary truncate">{title}</h2>
+          <h2 data-testid="mini-app-title" dir="auto" className="text-match-parent m-0 text-[15px] font-semibold leading-tight text-text-primary truncate">{title}</h2>
           {/* While the app serves a file to the contact, the line says so (WISP 1200 § A read lane to the contact). */}
           <p data-testid="mini-app-with" data-serving={app?.serving || undefined} className={`m-0 flex min-w-0 overflow-hidden text-[12px] leading-tight whitespace-nowrap ${named ? "text-text-secondary" : "text-text-muted italic"}`}>
             {aroundName(t(app?.serving ? "apps.view.sharingWith" : "apps.view.withName", { name: NAME }), name)}
@@ -198,7 +198,9 @@ export function ChatAppResume({ linkId }: { linkId: string }) {
       className="flex w-full items-center gap-2 px-4 py-2 bg-panel-header border-b border-border text-[13px] font-medium text-accent hover:bg-surface-hover cursor-pointer shrink-0 text-start">
       <AppGlyph size={16} />
       <span className="min-w-0 flex-1">
-        <span className="block truncate">{t("apps.view.resume", { title: app.title })}</span>
+        {/* Only the title is cut, in its own direction: a Latin title in Arabic kept its end and lost its first letters,
+            and "<title> に戻る" lost the words after a long one. */}
+        <span className="flex min-w-0 overflow-hidden whitespace-nowrap">{aroundName(t("apps.view.resume", { title: NAME }), app.title, "mini-app-resume-title")}</span>
         {/* A line of its own: beside the title, a narrow phone cut the app's name in some languages. */}
         {app.serving && <span data-testid="mini-app-resume-sharing" className="block truncate text-[12px] font-normal text-text-secondary">
           <span className="sr-only">, </span>{t("apps.view.resumeSharing")}

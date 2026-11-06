@@ -1,4 +1,6 @@
+import type { AppStoreSummary } from "@ghostly/browser/engine/apps";
 import type { Translate, TranslationKey } from "../../contexts/I18nContext";
+import { date } from "../identities";
 import { problemLine } from "../problemText";
 
 /*
@@ -10,6 +12,7 @@ const KEYS: Record<string, TranslationKey> = {
   "github-link": "apps.errors.githubLink",
   "private-link": "apps.errors.privateLink",
   offline: "apps.errors.offline",
+  runner: "apps.errors.runner",
   status: "apps.errors.status",
   network: "apps.errors.network",
   slow: "apps.errors.slow",
@@ -28,7 +31,15 @@ const KEYS: Record<string, TranslationKey> = {
   "signature-key": "apps.errors.notSigned",
   "bad-signature-statement": "apps.errors.notSigned",
   "needs-files": "apps.errors.needsFiles",
+  // Its stored files are not what was installed: the engine dropped them, and Get its files fetches them again.
+  damaged: "apps.errors.damaged",
   storage: "apps.errors.storage",
+};
+
+/** A store's list held older or too large: said of the store's list, not of an app's version. */
+const STORE_KEYS: Record<string, TranslationKey> = {
+  rollback: "apps.store.rollback",
+  "too-large": "apps.store.tooLarge",
 };
 
 /** The longer story behind an ⓘ beside an error's line, for the errors that have one. */
@@ -55,12 +66,25 @@ export function appErrorView(error: unknown, t: Translate): AppErrorView {
 
 /**
  * An error of reading or adding a store (Add): a store refused (not JSON, a bad field, a bad signature) says the link holds
- * no valid store, its refusal as it came behind the ⓘ, rather than an app Ghostly won't install.
+ * no valid store, its refusal as it came behind the ⓘ, rather than an app Ghostly won't install. An older or too large
+ * list is said of the store.
  */
 export function appStoreErrorView(error: unknown, t: Translate): AppErrorView {
   const code = appErrorCode(error);
+  if (code && STORE_KEYS[code]) return { text: t(STORE_KEYS[code]) };
   if (!code || (KEYS[code] && KEYS[code] !== "apps.errors.notSigned")) return appErrorView(error, t);
   return { text: t("apps.errors.notStore"), info: error instanceof Error ? error.message : String(error) };
+}
+
+/**
+ * Why a store's last read failed, as its block on the Apps page says it: the store signed two lists under one number
+ * (kept marked until a newer list comes), else the read's code in the words of an error of reading it.
+ */
+export function appStoreProblemText(store: Pick<AppStoreSummary, "problem" | "problemStatus" | "equivocation">, t: Translate): string | null {
+  if (store.equivocation) return t("apps.store.equivocation", { date: date(Math.floor(store.equivocation.at / 1000), t.language) });
+  if (!store.problem) return null;
+  // As the engine's fetch error says it: `status: The host answered 503`.
+  return appStoreErrorView(new Error(`${store.problem}: ${store.problemStatus !== undefined ? `The host answered ${store.problemStatus}` : ""}`), t).text;
 }
 
 export function appErrorText(error: unknown, t: Translate): string {

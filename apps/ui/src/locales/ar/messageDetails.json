@@ -162,6 +162,12 @@
     "voice": "الصوت",
     "wire": "الشبكة"
   },
+  "send": {
+    "failed": "فشل",
+    "failedBecause": "فشل: {{error}}",
+    "sending": "جارٍ الإرسال",
+    "sent": "أُرسل"
+  },
   "storage": {
     "blob": "الملف كاملًا في IndexedDB",
     "idb": "أجزاء في IndexedDB",

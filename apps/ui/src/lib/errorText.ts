@@ -176,7 +176,9 @@ const RULES: readonly Rule[] = [
   exact("It did not come within a week", "errors.files.floor.notInAWeek", "errors.files.askAgain"),
   // A group's file every holder served damaged (packages/browser groupFiles.ts DAMAGED): the group is asked, not a contact.
   exact("Every copy of this file arrived damaged and was deleted. Ask for it again later.", "errors.files.refused.damaged", "errors.files.askGroupAgain"),
-  { match: /^Could not store the file: (?:This device has no space left for the file|QuotaExceededError[\s\S]*|[\s\S]*No space left on device[\s\S]*)$/, key: "errors.files.noRoomHere", next: "errors.files.noRoomHereNext", detail: true },
+  // A received file this device had no room for (packages/core chatFiles.ts `storeFailure`): named QuotaExceededError
+  // by the engine, whatever the storage said; the older lines as each storage worded it (OPFS, IndexedDB, Desktop).
+  { match: /^Could not store the file: (?:This device has no space left for the file|This device has no room left to save this|QuotaExceededError[\s\S]*|[\s\S]*No space left on device[\s\S]*)$/, key: "errors.files.noRoomHere", next: "errors.files.noRoomHereNext", detail: true },
   { match: /^Could not store the file: [\s\S]+$/, key: "errors.files.storeFailed", next: "errors.files.askAgain", detail: true },
   exact("Not delivered in time", "errors.files.notDelivered", "errors.files.sendWhenBack"),
   exact("Your contact asked for the same part of this file too many times", "errors.files.askedTooOften", "errors.files.refused.sendAgain"),
@@ -199,6 +201,9 @@ const RULES: readonly Rule[] = [
   // A file forwarded that is still arriving here, or whose bytes are gone (engine/forwards.ts `copyForForward`).
   exact("The file has not arrived yet", "errors.files.notArrived", "errors.files.notArrivedNext"),
   exact("The file is not on this device any more", "errors.files.notHere", "errors.files.notHereNext"),
+  // A stored file with fewer bytes here than its size says: a forward's copy of one cut short (engine/forwards.ts), a
+  // file read for a backup or a move to another device (lib/backupFile.ts, lib/handoffProfile.ts, shared/storedFiles.ts).
+  exact("The file is shorter than it says", "errors.files.incomplete"),
   exact("This device cannot decode the recording", "errors.files.cannotDecodeRecording"),
   exact("The video took too long", "errors.files.videoTooSlow"),
   { match: HOLD_FULL_ITEMS, key: "errors.hold.fullItems", next: "errors.hold.fullNext" },
@@ -579,7 +584,9 @@ const RULES: readonly Rule[] = [
   exact("Switch to another profile first", "errors.profile.switchFirst"),
   exact("Unknown profile", "errors.profile.unknown"),
   exact("This profile is open in another window. Close it, then try again.", "errors.profile.openElsewhere"),
+  exact("Could not delete this profile's data", "errors.profile.notDeleted", "errors.profile.notDeletedNext"),
   exact("Wrong lock password for that profile", "errors.profile.wrongPassword"),
+  { match: /^Too many attempts\. Try again in (?<seconds>\d+) s$/, key: "lockScreen.tooManyAttempts" },
   exact("This backup does not hold a profile", "errors.profile.notABackup"),
   exact("Wrong passphrase, or the backup was changed", "errors.profile.wrongPassphrase", "errors.profile.wrongPassphraseNext"),
   exact("This is not a Ghostly backup", "errors.profile.notGhostlyBackup"),

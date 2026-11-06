@@ -1,14 +1,14 @@
 import "fake-indexeddb/auto";
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatFiles, GhostLink, NO_PICTURE_METADATA, NO_VIDEO_METADATA, createIdentity, createLink, forwardedAgain, forwardedMany, identityFromSeedB64, readForwarded, withoutVideoMetadata, type FileTransferRecord, type IncomingMessage, type IncomingTarget } from "@ghostly/core";
+import { ChatFiles, GhostLink, NO_PICTURE_METADATA, NO_VIDEO_METADATA, REMOVED_TEXT, createIdentity, createLink, forwardedAgain, forwardedMany, identityFromSeedB64, readForwarded, withoutVideoMetadata, type FileTransferRecord, type IncomingMessage, type IncomingTarget } from "@ghostly/core";
 import { H264_MP4, PLACE, hasPlace, withMovie, xyzUdta } from "../../core/test/support/videoFixtures";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { copyForForward, forwardError, forwardKind } from "../src/engine/forwards";
 import { fileBytes } from "../src/shared/fileBytes";
 import { fileStore } from "../src/shared/idb";
-import { FileAppender } from "../src/shared/storedFiles";
+import { FileAppender, removeStored } from "../src/shared/storedFiles";
 import type { StoredMessage } from "../src/shared/types";
 import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
 // covers: chat.forward.wire, chat.forward.files, files.paired.send
@@ -48,7 +48,7 @@ afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await st
 type Contact = Awaited<ReturnType<typeof contactOf>>;
 
 /** A contact of the app, on its own chat: the texts it got, the files it got (hashed), every files/3 frame it heard. */
-async function contactOf(net: FakeNativeNet, name: string, transport: ConstructorParameters<typeof GhostlyNode>[1]["transport"], { files = true } = {}) {
+async function contactOf(net: FakeNativeNet, name: string, transport: ConstructorParameters<typeof GhostlyNode>[1]["transport"], { files = true, edits = false } = {}) {
   const invitation = createLink();
   const [mine, theirs] = [createIdentity().seedB64, createIdentity().seedB64];
   const id = `forward-${name}-${crypto.randomUUID()}`;
@@ -86,7 +86,7 @@ async function contactOf(net: FakeNativeNet, name: string, transport: Constructo
   });
   const link = new GhostLink({
     // Without files: an app that takes none, neither files/2 (no handler) nor files/3.
-    params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false, largeFilesSupport: files,
+    params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false, largeFilesSupport: files, editSupport: edits,
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
     native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", `app-${name}`) } },
     transport, createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
@@ -113,11 +113,12 @@ async function contactOf(net: FakeNativeNet, name: string, transport: Constructo
   };
 }
 
-async function setup({ withCarol = false } = {}) {
+/** `edits`: Alice's app takes edits, so she can delete her messages for everyone. */
+async function setup({ withCarol = false, edits = false } = {}) {
   const net = new FakeNativeNet();
   const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
   await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
-  const a = await contactOf(net, "alice", transport), b = await contactOf(net, "bob", transport);
+  const a = await contactOf(net, "alice", transport, { edits }), b = await contactOf(net, "bob", transport);
   // Carol's app takes no files.
   const c = withCarol ? await contactOf(net, "carol", transport, { files: false }) : undefined;
   const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false,
@@ -132,6 +133,8 @@ async function setup({ withCarol = false } = {}) {
     await vi.waitFor(() => expect(node.getState().links.find(l => l.id === contact.id)?.capabilities?.largeFiles).toBe(true), { timeout: 20_000 });
     await vi.waitFor(() => expect(contact.files.live).toBe(true), { timeout: 10_000 });
   }
+  // Ready comes before the two capability announcements cross: until each side has the other's, an edit is refused.
+  if (edits) await vi.waitFor(() => expect(a.link.supportsEdits).toBe(true), { timeout: 10_000 });
   const row = async (contact: Contact, find: (m: StoredMessage) => boolean) => {
     await vi.waitFor(async () => expect((await db.getMessages(contact.id)).find(find)).toBeDefined(), { timeout: 10_000 });
     return (await db.getMessages(contact.id)).find(find)!;
@@ -175,6 +178,54 @@ describe("a group file", () => {
     const done = target(3);
     await copyForForward(id, done);
     expect(await fileStore.get(done.file.id)).toMatchObject({ direction: "out", digest: digestOf(size) });
+  });
+});
+
+describe("a copy whose source goes while it is copied", () => {
+  /** A received file kept in file storage, and a copy of it for chat `link-b` whose first step runs `meanwhile`. */
+  async function copying(meanwhile: (id: string) => Promise<void>) {
+    const id = `link-a-in-${crypto.randomUUID()}`, size = 2.5 * 1024 * 1024;
+    const storage = await fileBytes(), appender = new FileAppender(storage, id);
+    await appender.append(pattern(0, size));
+    await appender.close();
+    await fileStore.put({ id, linkId: "link-a", direction: "in", createdAt: 1, metadata: { name: "a.bin", size, mime: "application/octet-stream", timestamp: 1 },
+      transfer: { state: "done", transferred: size, size }, bytes: storage.kind, digest: await storage.digest(id) });
+    const target = { linkId: "link-b", wireId: "w1", timestamp: 2, file: { id: `link-b-out-${crypto.randomUUID()}`, name: "a.bin", size, mime: "application/octet-stream" } };
+    const append = FileAppender.prototype.append;
+    let done = false;
+    const spy = vi.spyOn(FileAppender.prototype, "append").mockImplementation(async function (this: FileAppender, chunk: Uint8Array) {
+      await append.call(this, chunk);
+      if (!done && this.id === target.file.id) { done = true; await meanwhile(id); }
+    });
+    cleanup.push(async () => { spy.mockRestore(); });
+    return { id, target, storage };
+  }
+
+  it("its message deleted meanwhile: the message is gone, asked only once the copy failed, and no copy is kept", async () => {
+    const { id, target, storage } = await copying(async id => { await fileStore.delete(id); await storage.remove(id); });
+    const gone = vi.fn(async () => true);
+    await expect(copyForForward(id, target, gone)).rejects.toThrow("That message is not in this chat");
+    expect(gone).toHaveBeenCalledTimes(1);
+    expect(await fileStore.get(target.file.id)).toBeUndefined();
+    expect(await storage.size(target.file.id) ?? 0).toBe(0);
+  });
+
+  it("its record gone with its message still here: not on this device any more, as before the copy", async () => {
+    const { id, target } = await copying(async id => { await removeStored(id); });
+    await expect(copyForForward(id, target, async () => false)).rejects.toThrow("The file is not on this device any more");
+  });
+
+  it("only its bytes gone, its record and message kept: shorter than it says", async () => {
+    const { id, target, storage } = await copying(async id => { await storage.remove(id); });
+    await expect(copyForForward(id, target, async () => false)).rejects.toThrow("The file is shorter than it says");
+  });
+
+  it("copied whole, its message is never asked about", async () => {
+    const { id, target } = await copying(async () => {});
+    const gone = vi.fn(async () => true);
+    await copyForForward(id, target, gone);
+    expect(gone).not.toHaveBeenCalled();
+    expect(await fileStore.get(target.file.id)).toMatchObject({ direction: "out" });
   });
 });
 
@@ -278,6 +329,76 @@ describe("forwarding between chats", { timeout: 60_000 }, () => {
     await vi.waitFor(() => expect(t.a.got).toHaveLength(2));
     expect(t.a.got.map(m => [m.text, m.forwarded])).toEqual([["first", 1], ["seen before", 5]]);
     expect(forwardedMany(t.a.got[1]!.forwarded)).toBe(true);
+  });
+
+  /** A file Alice sent, received here whole and kept in file storage (not in a Blob), so it is copied a step at a time. */
+  async function receivedLarge(t: Awaited<ReturnType<typeof setup>>, wireId: string, size = 2.5 * 1024 * 1024 + 11) {
+    t.a.offer(wireId, size);
+    const received = await t.row(t.a, m => m.id === `peer_${wireId}`);
+    await vi.waitFor(() => expect(t.node.getState().transfers[received.file!.id]).toMatchObject({ state: "done" }), { timeout: 15_000 });
+    expect((await fileStore.get(received.file!.id))?.bytes).toBeDefined();
+    return received;
+  }
+
+  /** Runs `meanwhile` once, when the forward's copy for Bob's chat has written its first step, before it reads the next. */
+  function duringCopy(t: Awaited<ReturnType<typeof setup>>, meanwhile: () => Promise<void>) {
+    const append = FileAppender.prototype.append;
+    let done = false;
+    const spy = vi.spyOn(FileAppender.prototype, "append").mockImplementation(async function (this: FileAppender, chunk: Uint8Array) {
+      await append.call(this, chunk);
+      if (!done && this.id.startsWith(`${t.b.id}-out-`)) { done = true; await meanwhile(); }
+    });
+    cleanup.push(async () => { spy.mockRestore(); });
+    return () => done;
+  }
+
+  /** Nothing of a forward reached Bob's chat: no row of mine, no file record, no file frame heard but the session's room. */
+  async function nothingSentToBob(t: Awaited<ReturnType<typeof setup>>) {
+    expect((await db.getMessages(t.b.id)).filter(m => m.sender === "me")).toEqual([]);
+    expect(await fileStore.listForLink(t.b.id)).toEqual([]);
+    expect(t.b.frames.filter(f => f.t !== "pf-room")).toEqual([]);
+  }
+
+  // A forward racing its sender's delete for everyone ends as one started after the delete: the message is gone. The
+  // copy's next read finds no bytes (they went with the message), which is not a truncated file.
+  for (const run of [1, 2, 3])
+    it(`a file its sender deletes for everyone while it is copied: the message is gone, and nothing goes on (run ${run})`, async () => {
+      const t = await setup({ edits: true });
+      const received = await receivedLarge(t, `race-00000${run}`);
+      const storage = await fileBytes();
+      const copied = duringCopy(t, async () => {
+        expect(await t.a.link.sendEdit({ id: `race-00000${run}`, e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+        // Its bytes are gone here: the copy's next read comes back empty. Its row may still be there a moment longer.
+        await vi.waitFor(async () => expect(await storage.size(received.file!.id) ?? 0).toBe(0), { timeout: 10_000 });
+      });
+      const { results } = await t.node.forwardMessages({ linkId: t.a.id, messageIds: [received.id], to: [t.b.id] });
+      expect(copied()).toBe(true);
+      expect(results).toEqual([{ to: t.b.id, messageIds: [], sent: [], error: "That message is not in this chat" }]);
+      await vi.waitFor(async () => expect(await db.getMessage(t.a.id, received.id)).toBeUndefined());
+      await nothingSentToBob(t);
+    });
+
+  it("a file its sender deleted for everyone before the forward: the message is gone, as before", async () => {
+    const t = await setup({ edits: true });
+    const received = await receivedLarge(t, "gone-000001");
+    expect(await t.a.link.sendEdit({ id: "gone-000001", e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+    await vi.waitFor(async () => expect(await db.getMessage(t.a.id, received.id)).toBeUndefined());
+    await expect(t.node.forwardMessages({ linkId: t.a.id, messageIds: [received.id], to: [t.b.id] })).rejects.toThrow("That message is not in this chat");
+    await nothingSentToBob(t);
+  });
+
+  it("a file whose bytes here are cut short while it is copied, its message still here: still said to be shorter than it says", async () => {
+    const t = await setup();
+    const received = await receivedLarge(t, "cut-0000001");
+    const storage = await fileBytes();
+    const copied = duringCopy(t, async () => { await storage.remove(received.file!.id); });
+    const { results } = await t.node.forwardMessages({ linkId: t.a.id, messageIds: [received.id], to: [t.b.id] });
+    expect(copied()).toBe(true);
+    expect(results).toEqual([{ to: t.b.id, messageIds: [], sent: [], error: "The file is shorter than it says" }]);
+    // Its message and record are as they were: only the bytes went.
+    expect(await db.getMessage(t.a.id, received.id)).toBeDefined();
+    expect(await fileStore.get(received.file!.id)).toBeDefined();
+    await nothingSentToBob(t);
   });
 
   it("sends a received file on from the bytes here: the contact gets it whole, and the one who sent it is never asked again", async () => {

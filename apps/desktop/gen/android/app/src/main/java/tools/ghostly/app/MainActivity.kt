@@ -73,6 +73,11 @@ class MainActivity : TauriActivity() {
         .toMap()
       for ((name, value) in E2eEnvironment.of(strings)) Os.setenv(name, value, true)
     }
+    // A share, a notification's tap or a sign-in's link the task started with, already taken by the run Android ended
+    // (LaunchIntent): the plugin's `load` leaves it, so a share sent or cancelled is never offered (nor copied) again.
+    if (LaunchIntent.takenBefore(savedInstanceState != null, intent?.flags ?: 0)) {
+      intent?.putExtra(GhostlyHostPlugin.EXTRA_HANDLED, true)
+    }
     // The camera's photos a previous page held (CameraCapture.kt): this start's page holds none of them.
     CameraFiles.sweep(cacheDir)
     enableEdgeToEdge()
@@ -142,6 +147,16 @@ class MainActivity : TauriActivity() {
     val controller = WindowCompat.getInsetsController(window, window.decorView)
     controller.isAppearanceLightStatusBars = !night
     controller.isAppearanceLightNavigationBars = !night
+  }
+
+  /**
+   * A share, a notification's tap or a sign-in's link that comes to the task (singleTask). Kept as the activity's
+   * intent before the plugins hear it: when Android ended the process but kept the task in Recents, the activity made
+   * again gets it before GhostlyHostPlugin is loaded (no plugin hears it), and the plugin's `load` takes it from here.
+   */
+  override fun onNewIntent(intent: Intent) {
+    setIntent(intent)
+    super.onNewIntent(intent)
   }
 
   override fun onResume() {

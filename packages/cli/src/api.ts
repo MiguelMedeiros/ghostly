@@ -5,7 +5,7 @@ import { findSecret, guardText, secretWords } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
 import {
-  bool, chatOf, chatOrGroup, dhtOnly, findChat, findGroup, groupOf, inviteTaken, list, messageOf, node, num, oneOf, state, str, transportOffered, waitForState,
+  bool, chatOf, chatOrGroup, cleanName, dhtOnly, findChat, findGroup, groupOf, groupPrefixed, inviteTaken, list, messageOf, node, num, oneOf, state, str, transportOffered, waitForState,
   type ApiContext, type Method, type Params,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -26,6 +26,7 @@ import { APP_SERVE_METHODS } from "./appServe";
 import { APP_CHAT_METHODS } from "./appChat";
 import { WALLET_METHODS } from "./wallets";
 import { TRANSPORT_NAMES } from "./words";
+import { chatState } from "./waitNotice";
 import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, isLive, messageJson, type MessageJson } from "./views";
 
 /**
@@ -87,20 +88,22 @@ function relayRefused(error: unknown, patch: Record<string, unknown>): unknown {
 
 // ---------- chat names ----------
 
-/** The engine keeps a chat's name to 48 UTF-16 units (renameLink). */
-const CHAT_NAME_UNITS = 48;
+/** The engine keeps a chat's name to 48 characters (code points: `renameLink`). */
+const CHAT_NAME_LENGTH = 48;
 
 /**
- * A chat's name on this side (`chat rename`, an invite's `--label`): what the engine keeps whole, on one line, refused
- * with the rule as a profile's or a group's name is. Taken as given, the engine cut it at 48 UTF-16 units without a
- * word (half an emoji left as a lone surrogate) and kept line breaks. Counted as the engine counts: an emoji is two.
+ * A chat's name on this side (`chat rename`, an invite's `--label`), as the engine stores it (`cleanName`): a tab or a
+ * line break is a space, invisible characters go, and what is left is counted. Longer than the engine keeps whole is
+ * refused, not cut. An empty name (or spaces) is the documented one of `chat rename` (the contact's own name) and no
+ * label for an invite; a name with nothing that shows is refused: given as is, the engine cleared the chat's name.
  */
 function chatName(params: Params, name: string): string | undefined {
   const value = str(params, name);
-  if (value !== undefined && (value.trim().length > CHAT_NAME_UNITS || /\p{Cc}/u.test(value.trim()))) {
-    throw new CliError("bad_request", `A chat's name is up to ${CHAT_NAME_UNITS} characters on one line (an emoji counts as two)`);
-  }
-  return value;
+  if (value === undefined || !value.trim()) return value === undefined ? undefined : "";
+  const clean = cleanName(value, CHAT_NAME_LENGTH);
+  if (clean === undefined) throw new CliError("bad_request", `A chat's name is up to ${CHAT_NAME_LENGTH} characters on one line`);
+  if (!clean) throw new CliError("bad_request", `A chat's name needs a character that shows (an empty name gives back the contact's own)`);
+  return clean;
 }
 
 // ---------- mentions ----------
@@ -171,6 +174,19 @@ function showUntilPaired(ctx: ApiContext, linkId: string): void {
   timer.unref?.();
   const off = ctx.hub.onState((s) => { if (done(s)) hide(); });
   inviteShown.set(ctx, stop);
+}
+
+/**
+ * `invite create`'s `reason` when no relay took the invite. The engine's words ("Publish failed on every relay: Error:
+ * http://… did not answer a moment ago; retry shortly; Error: …") read as the CLI failing, a class name per relay, beside
+ * a `note` that says the invite is good: the relays are named, and nothing is asked of whoever reads it.
+ */
+function inviteNotOut(detail: string): string {
+  if (!detail.startsWith("Publish failed on every relay:")) return detail;
+  const hosts = [...new Set([...detail.matchAll(/\bhttps?:\/\/[^\s;,]+/g)].map(([url]) => URL.canParse(url) ? new URL(url).host : url))];
+  const named = hosts.length ? ` (${hosts.join(", ")})` : "";
+  // A relay that answered with an error status took the request: "did not answer" would not be true of it.
+  return `${/ responded \d{3}\b/.test(detail) ? "No relay took the invite" : "No relay answered"}${named}: it goes out once one does`;
 }
 
 /** V8's words for reading what a value does not have: an `engine.call` given a parameter of the wrong kind. */
@@ -279,7 +295,7 @@ const METHODS: Record<string, Method> = {
     return {
       ...answer,
       ...(waitUntil !== undefined && { retryInMs: Math.max(0, waitUntil - Date.now()) }),
-      ...(progress?.detail && { reason: progress.detail }),
+      ...(progress?.detail && { reason: inviteNotOut(progress.detail) }),
       note: "The invite is good: it goes out by itself once a relay answers, while a daemon runs for this profile",
     };
   },
@@ -570,6 +586,7 @@ const METHODS: Record<string, Method> = {
     noCallOn(ctx, link.id, "remove the chat");
     await node(ctx).removeLink({ linkId: link.id });
     ctx.calls.forgetChat(link.id);
+    ctx.groupAuto.forgetChat(link.id);
     return { removed: link.id };
   },
   async "chat.transport"(ctx, params) {
@@ -625,18 +642,20 @@ const METHODS: Record<string, Method> = {
     const view = await waitForState(ctx, (s) => {
       const now = s.links.find((l) => l.id === link.id);
       if (!now) throw new CliError("not_found", `Chat ${link.id} was removed`);
-      // Live: a session that exists now, never one remembered from the last run (`isLive`).
+      // Live: a session that exists now, never one remembered from the last run (`isLive`). Paired: the contact's key
+      // kept (`peerParticipationKey`) is a fact of the chat, whether the contact is online now or not.
       const ok = until === "live" ? isLive(now)
         : until === "text" ? now.textDelivery === "stream" || now.textDelivery === "dht" || now.textDelivery === "hold"
-        : !!now.pairingProgress?.peerSeen || now.pairing?.status === "ready" || isLive(now);
+        : !!now.peerParticipationKey || !!now.pairingProgress?.peerSeen || now.pairing?.status === "ready" || isLive(now);
       return ok ? now : undefined;
-    }, ms, `chat ${link.id} to be ${until}`);
+    }, ms, `chat ${link.id} ${chatState(until).to}`);
     return chatJson(view);
   },
 
   async "group.create"(ctx, params) {
     // As `group rename` checks it: a name a group cannot have is said here, before anything is made.
-    const name = groupName(str(params, "name", true));
+    const clean = cleanName(str(params, "name", true), MAX_GROUP_NAME_LENGTH);
+    const name = clean && groupName(clean);
     if (!name) throw new CliError("bad_request", `A group's name is 1 to ${MAX_GROUP_NAME_LENGTH} characters on one line`);
     // Every member reads it, and a community's anyone who opens its link.
     guardText(name, bool(params, "force"), "group's name", "create it");
@@ -659,7 +678,12 @@ const METHODS: Record<string, Method> = {
   },
   async "group.list"(ctx, params) {
     const showSecret = bool(params, "showSecret");
-    return { groups: state(ctx).groups.map((g) => groupJson(g, showSecret)).sort((a, b) => b.lastMessageAt - a.lastMessageAt) };
+    return { groups: state(ctx).groups.map((g) => groupJson(g, showSecret)).sort((a, b) => b.lastMessageAt - a.lastMessageAt), autoJoin: ctx.groupAuto.get() };
+  },
+  /** Invitations over the chats named accepted by the daemon itself (`group auto on --from`); no argument: the setting. */
+  async "group.auto"(ctx, params) {
+    if (params.on === undefined) return { autoJoin: ctx.groupAuto.get() };
+    return { autoJoin: ctx.groupAuto.set({ on: bool(params, "on"), from: list(params, "from") }) };
   },
   async "group.get"(ctx, params) {
     return groupJson(groupOf(ctx, params, "chat show <chat>"), bool(params, "showSecret"));
@@ -803,9 +827,10 @@ const METHODS: Record<string, Method> = {
     const raw = params.params;
     if (raw !== undefined && (raw === null || typeof raw !== "object" || Array.isArray(raw))) throw new CliError("bad_request", "params must be an object");
     const args = raw as Params | undefined;
-    // "Hide my IP from contacts" (`relayOnly`, WISP 100 § Relay only) is not in 1.5: no app shows it, and the Desktop's
-    // own transports do not follow it yet. Nobody turns it on through here either, until the release that shows it;
-    // turning it off stays possible, for a profile an older CLI (whose engine took any key) turned it on in.
+    // "Hide my IP from contacts" (`relayOnly`, WISP 100 § Relay only) is the apps' switch in Settings, Network, not the
+    // CLI's yet: its WebRTC chat links (node-datachannel) still check from this machine's own sockets under the relay
+    // policy, as its calls did (they are refused while it is on). Nobody turns it on through here until they keep to
+    // the relay; turning it off stays possible, for a profile an older CLI (whose engine took any key) turned it on in.
     if (method === "updateSettings" && args?.settings && typeof args.settings === "object" && "relayOnly" in args.settings && (args.settings as Params).relayOnly !== false) {
       throw new CliError("bad_request", "relayOnly is not a setting yet: Hide my IP from contacts comes in a later release");
     }
@@ -835,8 +860,11 @@ const METHODS: Record<string, Method> = {
     if (typeof target !== "function") throw new CliError("not_found", `The engine has no call ${method}`);
     try {
       const result = (await target.call(node(ctx), args)) ?? null;
-      // The chat is gone, as with `chat remove`: auto-answer no longer names it.
-      if (method === "removeLink") ctx.calls.forgetChat(str(args ?? {}, "linkId", true));
+      // The chat is gone, as with `chat remove`: auto-answer and auto-join no longer name it.
+      if (method === "removeLink") {
+        ctx.calls.forgetChat(str(args ?? {}, "linkId", true));
+        ctx.groupAuto.forgetChat(str(args ?? {}, "linkId", true));
+      }
       return result;
     } catch (error) {
       // A value of the wrong kind (a number for a text, a missing key of a typed object) ends as JavaScript reading what is
@@ -957,7 +985,7 @@ function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, hint: (sho
   try { return chat(); } catch (error) {
     if (!(error instanceof CliError) || error.code !== "not_found") throw error;
     const ref = str(params, "chat", true);
-    const named = ref.startsWith("group:") ? ref.slice("group:".length) : ref;
+    const named = groupPrefixed(ref) ?? ref;
     let group: GroupView;
     try { group = findGroup(state(ctx).groups, named); } catch { throw error; }
     const shown = /^[\w.:-]+$/.test(named) ? named : JSON.stringify(named);
@@ -1007,9 +1035,13 @@ async function connectWithin(ctx: ApiContext, link: LinkView, ms: number): Promi
 async function saveMark(ctx: ApiContext, params: Params, remove: boolean) {
   const target = chatOrGroup(ctx, str(params, "chat", true)), messageId = str(params, "message", true);
   const result = await node(ctx).saveMessage({ linkId: target.linkId, messageId, remove });
-  // An unsave whose id names neither a saved message nor one of the chat's (a typo): said, with where the ids are.
-  if (result.error && remove && /not in this chat/.test(result.error)) throw new CliError("not_found", `No saved message ${JSON.stringify(messageId)} in this chat (ghostly saved list shows the saved ones)`);
-  if (result.error) throw new CliError(/not in this chat/.test(result.error) ? "not_found" : "bad_request", result.error);
+  // An id that names no message of the chat or group (a typo): said as pin and message details say it, in a group too
+  // (the engine's line says "chat"); an unsave's with where the saved ids are.
+  const where = target.group ? "group" : "chat";
+  if (result.error && /not in this chat/.test(result.error)) {
+    throw new CliError("not_found", remove ? `No saved message ${JSON.stringify(messageId)} in this ${where} (ghostly saved list shows the saved ones)` : `No message ${JSON.stringify(messageId)} in this ${where}`);
+  }
+  if (result.error) throw new CliError("bad_request", result.error);
   return { [target.group ? "group" : "chat"]: target.id, messageId, saved: !remove };
 }
 

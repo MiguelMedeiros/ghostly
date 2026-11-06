@@ -48,6 +48,8 @@ struct Socket {
 }
 struct Peer {
     endpoint: Endpoint,
+    /// The relays it was started on (none: n0's public ones), the only non-public ones a contact is dialled through.
+    relays: Vec<String>,
     events: Channel<Event>,
     listener: tokio::task::JoinHandle<()>,
     watcher: tokio::task::JoinHandle<()>,
@@ -287,6 +289,7 @@ impl TransportState {
             }
             inner.page
         };
+        let relays_given = relays.to_vec();
         let endpoint = if relays.is_empty() || local_only {
             wire::endpoint(seed, local_only).await?
         } else {
@@ -351,6 +354,7 @@ impl TransportState {
             id,
             Peer {
                 endpoint,
+                relays: relays_given,
                 events,
                 listener,
                 watcher,
@@ -388,6 +392,58 @@ fn iroh_relays(given: Option<Vec<String>>, env: Option<&str>) -> Vec<String> {
         .filter(|relay| !relay.is_empty())
         .map(String::from)
         .collect()
+}
+
+/// Whether a contact is dialled through the relay its descriptor names (none: its direct addresses alone). The contact
+/// chose it and this device opens it on its own, again on each redial: https at a public name or a public address, as
+/// a held item's address is (`isHoldUrl`, packages/core/src/storeForward.ts), or one of the endpoint's own relays
+/// (`own`: the person's, a private network's or a test's) in either spelling. The page checks the same
+/// (`dialableIrohRelay`, packages/core/src/pairedTransports.ts); this is what Rust holds to whoever asks.
+fn dialable_relay(relay: Option<&str>, own: &[String]) -> bool {
+    let Some(relay) = relay else { return true };
+    let spelled = |value: &str| {
+        let mut url = url::Url::parse(value).ok()?;
+        if let Some(url::Host::Domain(name)) = url.host() {
+            let name = name.trim_end_matches('.').to_ascii_lowercase();
+            url.set_host(Some(&name)).ok()?;
+        }
+        Some(url)
+    };
+    let Some(url) = spelled(relay) else {
+        return false;
+    };
+    if own.iter().any(|mine| spelled(mine).as_ref() == Some(&url)) {
+        return true;
+    }
+    if url.scheme() != "https"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return false;
+    }
+    match url.host() {
+        Some(url::Host::Domain(name)) => {
+            name.contains('.')
+                && ![
+                    "localhost",
+                    "local",
+                    "internal",
+                    "lan",
+                    "home",
+                    "home.arpa",
+                    "localdomain",
+                    "intranet",
+                    "corp",
+                ]
+                .iter()
+                .any(|suffix| name == *suffix || name.ends_with(&format!(".{suffix}")))
+        }
+        Some(url::Host::Ipv4(ip)) => crate::link_preview::is_public(ip.into()),
+        Some(url::Host::Ipv6(ip)) => crate::link_preview::is_public(ip.into()),
+        None => false,
+    }
 }
 
 #[tauri::command]
@@ -429,6 +485,9 @@ pub async fn paired_iroh_connect(
     let (endpoint, events) = {
         let inner = state.inner.lock().unwrap();
         let peer = inner.peers.get(&endpoint_id).ok_or("Endpoint closed")?;
+        if !dialable_relay(descriptor.relay.as_deref(), &peer.relays) {
+            return Err("The contact's Iroh relay is not one this device dials".into());
+        }
         (peer.endpoint.clone(), peer.events.clone())
     };
     let connection = wire::connect(&endpoint, &descriptor).await?;
@@ -561,6 +620,56 @@ mod tests {
             .await
             .unwrap();
         (started.id, started.descriptor, seen)
+    }
+
+    /// A contact names the relay it is dialled through: never this machine or its network, unless it is one of the
+    /// endpoint's own relays.
+    #[test]
+    fn a_contact_is_dialled_through_a_public_relay_or_one_of_the_endpoints_own() {
+        let none: [String; 0] = [];
+        for relay in [
+            "http://127.0.0.1:4601",
+            "http://localhost:4601/",
+            "http://[::1]:4601/",
+            "https://10.0.0.1/",
+            "https://[::1]/",
+            "https://192.168.1.2/",
+            "https://169.254.169.254/",
+            "https://100.64.0.1/",
+            "https://[fd00::1]/",
+            "https://0x7f.1/",
+            "https://localhost/",
+            "https://router/",
+            "https://nas.local./",
+            "https://user@relay.test/",
+            "https://relay.test/?x=1",
+            "not a relay",
+        ] {
+            assert!(!dialable_relay(Some(relay), &none), "{relay}");
+        }
+        for relay in [
+            None,
+            Some("https://relay.test/"),
+            Some("https://use1-1.relay.n0.iroh.link./"),
+            Some("https://8.8.8.8/"),
+        ] {
+            assert!(dialable_relay(relay, &none), "{relay:?}");
+        }
+        let own = [
+            "http://127.0.0.1:4600".to_string(),
+            "https://10.0.0.1/".to_string(),
+            "https://relay.lan.example./".to_string(),
+        ];
+        for relay in [
+            "http://127.0.0.1:4600/",
+            "https://10.0.0.1",
+            "https://relay.lan.example/",
+        ] {
+            assert!(dialable_relay(Some(relay), &own), "{relay}");
+        }
+        for relay in ["http://127.0.0.1:4601/", "https://10.0.0.2/"] {
+            assert!(!dialable_relay(Some(relay), &own), "{relay}");
+        }
     }
 
     #[test]

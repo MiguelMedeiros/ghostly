@@ -13,8 +13,8 @@
  *   page and caches nothing, and only shows wake-ups (WISP 401 § Wake-up push). A scope per profile gives each
  *   profile a push subscription of its own, so contacts of two profiles cannot tell they share a browser.
  */
-import { CACHE_PREFIX, SHARED_ROUTE, assetAnswer, classify, installList, precacheMode, pushNotice, pushScopeProfile, readShare, readShareBody, TOO_LARGE_SHARE, type SharedItem } from "./policy";
-import { readWakeEntry, readWakeText } from "./wakeStore";
+import { CACHE_PREFIX, SHARED_ROUTE, assetAnswer, classify, installList, precacheMode, pushNotice, pushScopeProfile, quietWakeNotice, quietWakeTag, readShare, readShareBody, TOO_LARGE_SHARE, type SharedItem } from "./policy";
+import { readWakeEntry, readWakeText, type WakeText } from "./wakeStore";
 import { readPushDeviceView } from "./deviceState";
 import { deviceNoticeWords } from "./deviceWords";
 import { takeWakeSlot } from "./wakeLimit";
@@ -208,18 +208,38 @@ async function forwardTarget(source: WindowClient, profile: string | null): Prom
 }
 
 /**
+ * The windows no page said `share-here` from in this worker's life are asked where they are: one that takes shares
+ * says it again. The browser stops an idle worker and starts it afresh, with `sharePages` empty, while the app's page
+ * stays open and says it otherwise only when it comes to the front.
+ */
+async function askSharePages(source: WindowClient): Promise<void> {
+  const all = await worker.clients.matchAll({ type: "window" });
+  for (const client of all) if (client.id !== source.id && !sharePages.has(client.id)) client.postMessage({ type: "share-where" } satisfies FromWorker);
+}
+
+/**
  * Hands the shares held to the app's page `source` asks for, once that page held its lock on two looks
  * `SHARE_LOCK_LOOK_MS` apart: a share into the same window replaced a page that holds it a moment longer as it goes.
- * No such page: the shares stay held, for whichever page asks next (`source`, once it is the app, or one of the
- * profile that says it is there).
+ * None on the first look: the windows are asked where they are (`askSharePages`), and looked at again. Still none:
+ * the shares stay held, for whichever page asks next (`source`, once it is the app, or one of the profile that says it
+ * is there).
  */
 async function forward(source: WindowClient, profile: string | null): Promise<void> {
   let before: string | undefined;
-  for (let look = 0; look < 3; look++) {
+  let asked = false;
+  let looks = 3;
+  for (let look = 0; look < looks; look++) {
     if (look) await new Promise((resolve) => setTimeout(resolve, SHARE_LOCK_LOOK_MS));
     if (!held.length) return;
     const to = await forwardTarget(source, profile);
     if (!held.length) return;
+    if (!to && !asked) {
+      // The page that answers holds its lock on two looks after this one, as any other.
+      asked = true;
+      looks += 1;
+      await askSharePages(source);
+      continue;
+    }
     if (!to) break;
     if (to.id === before) { handOver(to); return; }
     before = to.id;
@@ -322,40 +342,90 @@ async function appWindows(): Promise<WindowClient[]> {
   return all.filter((client) => { try { return ["/", "/index.html"].includes(new URL(client.url).pathname); } catch { return false; } });
 }
 
+/**
+ * Whether `profile`'s app is on screen: a window in front (focused or visible) that runs this profile and holds its
+ * peer, where a wake-up's message arrives by itself. A window of another profile does not count: a window runs one
+ * profile, so this one runs nowhere there and its notice must show. Only the windows in front are asked what they run
+ * (`open-ask`, all at once, so the push waits at most `OPEN_ASK_MS` before its notice); one that does not answer in
+ * time (a page of an older build, or busy) counts as on screen, as every window in front did before.
+ */
+async function profileOnScreen(profile: string): Promise<boolean> {
+  const inFront = (await appWindows()).filter((client) => client.focused || client.visibilityState === "visible");
+  if (!inFront.length) return false;
+  const said = await Promise.all(inFront.map(askWindow));
+  return said.some((says) => says === null || (says.peer && says.profile === profile));
+}
+
+/** Quiet: no sound, no vibration, nothing that stays up, and one notice per tag, replaced in place. */
+function showQuiet(notice: { title: string; body: string; tag: string; data: unknown }): Promise<void> {
+  return worker.registration.showNotification(notice.title, { body: notice.body, tag: notice.tag, data: notice.data, icon: "/icon-192.png", badge: "/icon-192.png", silent: true, renotify: false, requireInteraction: false });
+}
+
+/**
+ * A notice of the profile that says something is up: the quiet one a push with nothing to say left there goes, so the
+ * system's list holds the notice that tells, not an empty "Ghostly" beside it. Never throws: the push already showed
+ * its notice, and a failure here must not make it show the quiet one again.
+ */
+async function closeQuietNotice(profile: string): Promise<void> {
+  const shown = await worker.registration.getNotifications({ tag: quietWakeTag(profile) }).catch(() => []);
+  for (const notice of shown) { try { notice.close(); } catch { /* gone already */ } }
+}
+
+/**
+ * What one push shows: true once a notice is up, false when this push has nothing of its own to show (not a wake-up, a
+ * token this profile does not know, a muted chat, this profile's app on screen, one inside the gap after its notice was
+ * dismissed).
+ */
+async function showWake(profile: string, body: string | undefined, appVisible: boolean, text: WakeText | undefined): Promise<boolean> {
+  const wake = readWake(body);
+  if (!wake) return false;
+  const found = await readWakeEntry(profile, wake.token).catch(() => undefined);
+  const now = Date.now();
+  // In a profile on several devices the worker reads the device state itself (WISP 06 § Push and the phone): a device
+  // that is not the active one shows the quiet notices, and a wake-up from another of the person's devices says so.
+  const device = await readPushDeviceView(text?.db).catch(() => null);
+  // A device that was never active may have no words of a page yet: the browser's language, not English, until one writes them.
+  const words = { ...deviceNoticeWords(navigator.languages?.length ? navigator.languages : [navigator.language]), ...text };
+  const notice = pushNotice(wake, found, device, { now, appVisible, profile, text: words });
+  if (!notice) return false;
+  if (notice.quiet) {
+    await showQuiet(notice);
+    return true;
+  }
+  const options = { body: notice.body, tag: notice.tag, data: notice.data, icon: "/icon-192.png", badge: "/icon-192.png", requireInteraction: notice.call };
+  // A device asking for a handoff may ask again soon (its own limit is one per 30 s): it is counted like a call. An
+  // online notice has its own count (one per 30 minutes), apart from messages and calls.
+  if (!(await takeWakeSlot(profile, wake.token, wake.kind === "online" ? "online" : notice.call || wake.kind === "device", now))) {
+    // Too soon after this token's last one (`WAKE_NOTICE_GAP_MS`): no new notice and no sound. The one still on
+    // screen is shown again, silently; a dismissed one stays gone.
+    const [shown] = await worker.registration.getNotifications({ tag: notice.tag });
+    if (!shown) return false;
+    await worker.registration.showNotification(notice.title, { ...options, renotify: false, silent: true });
+    await closeQuietNotice(profile);
+    return true;
+  }
+  // A call stays until it is answered or dismissed, and buzzes again: a web app cannot ring like a phone call.
+  await worker.registration.showNotification(notice.title, {
+    ...options, renotify: notice.call, ...(notice.call && { vibrate: [300, 200, 300, 200, 300] }),
+  });
+  await closeQuietNotice(profile);
+  return true;
+}
+
 worker.addEventListener("push", (event) => {
   if (PUSH_PROFILE === null) return;
   const profile = PUSH_PROFILE;
   event.waitUntil((async () => {
-    const wake = readWake(event.data?.text());
-    const found = wake ? await readWakeEntry(profile, wake.token).catch(() => undefined) : undefined;
-    const appVisible = (await appWindows()).some((client) => client.focused || client.visibilityState === "visible");
-    const now = Date.now();
-    // In a profile on several devices the worker reads the device state itself (WISP 06 § Push and the phone): a device
-    // that is not the active one shows the quiet notices, and a wake-up from another of the person's devices says so.
-    const text = wake ? await readWakeText(profile).catch(() => undefined) : undefined;
-    const device = wake ? await readPushDeviceView(text?.db).catch(() => null) : null;
-    // A device that was never active may have no words of a page yet: the browser's language, not English, until one writes them.
-    const words = { ...deviceNoticeWords(navigator.languages?.length ? navigator.languages : [navigator.language]), ...text };
-    const notice = pushNotice(wake, found, device, { now, appVisible, profile, text: words });
-    if (!notice || !wake) return;
-    if (notice.quiet) {
-      // Quiet: no sound, no vibration, nothing that stays up, and one notice per profile, replaced in place.
-      await worker.registration.showNotification(notice.title, { body: notice.body, tag: notice.tag, data: notice.data, icon: "/icon-192.png", badge: "/icon-192.png", silent: true, renotify: false, requireInteraction: false });
-      return;
-    }
-    const options = { body: notice.body, tag: notice.tag, data: notice.data, icon: "/icon-192.png", badge: "/icon-192.png", requireInteraction: notice.call };
-    // A device asking for a handoff may ask again soon (its own limit is one per 30 s): it is counted like a call.
-    if (!(await takeWakeSlot(profile, wake.token, notice.call || wake.kind === "device", now))) {
-      // Too soon after this token's last one (`WAKE_NOTICE_GAP_MS`): no new notice and no sound. The one still on
-      // screen is shown again, silently, since browsers expect every push to show something; a dismissed one stays gone.
-      const [shown] = await worker.registration.getNotifications({ tag: notice.tag });
-      if (shown) await worker.registration.showNotification(notice.title, { ...options, renotify: false, silent: true });
-      return;
-    }
-    // A call stays until it is answered or dismissed, and buzzes again: a web app cannot ring like a phone call.
-    await worker.registration.showNotification(notice.title, {
-      ...options, renotify: notice.call, ...(notice.call && { vibrate: [300, 200, 300, 200, 300] }),
-    });
+    const appVisible = await profileOnScreen(profile).catch(() => false);
+    const text = await readWakeText(profile).catch(() => undefined);
+    if (await showWake(profile, event.data?.text(), appVisible, text).catch(() => false)) return;
+    // Every push shows something: one that shows nothing counts against the subscription (Safari ends it after a few,
+    // Firefox once its quota is spent), and then no contact can wake this profile until the app is opened. Anyone who
+    // holds it could send such pushes on purpose. So one quiet notice of the profile, replaced in place: any number of
+    // them leave one on screen. With the app on screen it goes away at once (it is live: nothing to tell).
+    const notice = quietWakeNotice(profile, text?.title);
+    await showQuiet(notice);
+    if (appVisible) for (const shown of await worker.registration.getNotifications({ tag: notice.tag })) shown.close();
   })());
 });
 
@@ -374,8 +444,8 @@ function askWindow(client: WindowClient): Promise<WindowSays | null> {
 /**
  * A tap on a wake-up: the window that runs the notice's profile and holds its peer comes forward on that chat, the one
  * in front first. Never a tab waiting behind another (it opens nothing), and never another profile's window (it would
- * switch away from the profile it runs). No such window: a new one opens there. Windows that do not say what they run
- * (pages of the build before this one) get it as they did, the first one.
+ * switch away from the profile it runs). No such window: the first window that does not say what it runs (a page of the
+ * build before this one, or a frozen or busy one) gets it; none of those either: a new one opens there.
  */
 async function openFrom(notification: Shown): Promise<void> {
   notification.close();
@@ -385,9 +455,9 @@ async function openFrom(notification: Shown): Promise<void> {
   const windows = await appWindows();
   const said = await Promise.all(windows.map(askWindow));
   const ours = windows.filter((_, i) => said[i]?.peer && said[i].profile === data.profile);
-  const open = said.some(Boolean)
-    ? ours.find((client) => client.focused || client.visibilityState === "visible") ?? ours[0]
-    : windows[0];
+  // None says it runs the profile, but one said nothing: it may be the profile's own, frozen or busy (focusing
+  // unfreezes it, and the message waits for it), so it gets the chat rather than a new window stuck behind its lock.
+  const open = ours.find((client) => client.focused || client.visibilityState === "visible") ?? ours[0] ?? windows.find((_, i) => !said[i]);
   if (open) {
     await open.focus?.().catch(() => undefined);
     open.postMessage(message);

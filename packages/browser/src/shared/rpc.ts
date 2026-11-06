@@ -367,6 +367,8 @@ export interface EngineApi {
    * A private group's `group:<id>` does the same for every member of it (WISP 902 · Group Mesh § Wake-up push).
    */
   setWakeMuted(params: { linkId: string; muted: boolean }): Promise<void>;
+  /** Whether paired contacts are asked to say when they come online while this app is closed (on by default): each live one is told again. */
+  setWakeOnline(params: { on: boolean }): Promise<void>;
   /** A call to a contact whose app is closed: a "call" wake-up; true when it can be woken this way (the caller then waits). */
   wakeForCall(params: { linkId: string }): Promise<boolean>;
   /**
@@ -575,8 +577,11 @@ export interface EngineApi {
   appStoreRefresh(params?: { key?: string }): import("../engine/apps").AppStoreSummary[];
   /** Fetches and checks an app for its install screen: a pasted URL, a store's listing or a chat card's pointer. Nothing is stored. */
   appPreview(params: import("../engine/apps").AppSource): import("../engine/apps").AppPreview;
-  /** Installs (or updates to) the app `appPreview` fetched, by its digest; `grant` holds every permission it asks for. */
-  appInstall(params: { digest: string; grant: string[] }): import("../engine/apps").InstalledAppView;
+  /**
+   * Installs (or updates to) the app `appPreview` fetched, by its digest; `grant` holds every permission it asks for,
+   * `asks` what the screen listed (`AppPreview.asks`): an install that adds more now is refused with `permissions-changed`.
+   */
+  appInstall(params: { digest: string; grant: string[]; asks?: string[] }): import("../engine/apps").InstalledAppView;
   /** Installs the waiting update whose new permissions the person accepted. */
   appUpdateAccept(params: { ref: string }): import("../engine/apps").InstalledAppView;
   /** The update check, now (the Apps page opened). Nothing is asked for with no app installed. */
@@ -707,9 +712,21 @@ export type EngineEvent =
   | { kind: "device-gate"; gate: import("../devices/gate").DeviceGateView };
 
 /**
- * A state as a client across a copying boundary gets it (`copyingSink`, the extension's port): `payments` and `wallet`
- * are left out when they are the ones that client was sent last, and the page keeps those.
+ * The pictures a posted state left out, as the ones that client was sent last: the profile's own (`settings.avatar`), and
+ * by id each chat's and group edge's contact's (`peerAvatar`) and each group's (`picture`). The public profile pictures:
+ * this profile's identities' by proof id (`identityProofs`) and its Nostr keys' by key (`nostrOwn`), and by chat id a
+ * contact's identities' (`received`) and Nostr keys' (`nostr`), the same way (`shared/keptPictures`).
  */
-export type PostedState = Omit<EngineState, "payments" | "wallet"> & Partial<Pick<EngineState, "payments" | "wallet">>;
+export interface KeptPictures {
+  avatar?: true; links?: string[]; edges?: string[]; groups?: string[];
+  identityProofs?: string[]; nostrOwn?: string[]; received?: Record<string, string[]>; nostr?: Record<string, string[]>;
+}
+
+/**
+ * A state as a client across a copying boundary gets it (`copyingSink`, the extension's port): `payments` and `wallet`
+ * are left out when they are the ones that client was sent last, and so is each picture (`keptPictures`); the page keeps
+ * those.
+ */
+export type PostedState = Omit<EngineState, "payments" | "wallet"> & Partial<Pick<EngineState, "payments" | "wallet">> & { keptPictures?: KeptPictures };
 /** What a page hears from the peer: an event, a state that may leave out what it already has, or an answer. */
 export type PostedEvent = Exclude<EngineEvent, { kind: "state" }> | { kind: "state"; state: PostedState } | RpcResponse;

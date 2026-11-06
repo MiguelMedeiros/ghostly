@@ -31,15 +31,19 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
   const { t } = useI18n();
   const titleId = useId();
   const fieldId = useId();
-  const backdrop = useBackdropDismiss(onClose);
-  const ref = useRef<HTMLDivElement>(null);
-  useDialogFocus(ref, onClose);
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const focusBack = useFocusBack(busy);
   const [error, setError] = useState<AppErrorView | null>(null);
   const [app, setApp] = useState<{ url: string; preview: AppPreview } | null>(null);
   const [store, setStore] = useState<AppStorePreview | null>(null);
+  // While Add store runs, Add stays, as the install screen's: closed, the store was added all the same. A Check may be
+  // left: it adds nothing.
+  const adding = busy && !!store;
+  const close = () => { if (!adding) onClose(); };
+  const backdrop = useBackdropDismiss(close);
+  const ref = useRef<HTMLDivElement>(null);
+  useDialogFocus(ref, close);
   // Which check is the field's: a link edited while Check runs drops the answer for the link it no longer holds.
   const asked = useRef(0);
   // The store's question takes the place of Check: the focus Check had would fall to the page, so it goes to the
@@ -52,7 +56,7 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
 
   const check = async () => {
     const typed = url.trim();
-    if (!typed) return;
+    if (!typed || adding) return;
     // The engine takes nothing but `https:` (`appPasteUrl`): any other text goes to it as typed, and it refuses it in the dialog's words.
     const link = typed.replace(LOOSE_SCHEME, "https://");
     const mine = ++asked.current;
@@ -94,12 +98,15 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
 
   // A store the person has already (by its key): Add takes only a newer index of it, so only that is offered. Another
   // index under the held sequence is not the one held: the store signed two lists (the engine marked it on the store).
+  // A store the person removed takes back no list older than the last one taken from it: Add would refuse this one.
   const held = store?.held;
-  const heldLine = !store || !held ? null
+  const heldLine = !store ? null
+    : store.refused ? t("apps.add.storeRemovedOlder")
+    : !held ? null
     : held.sequence === undefined || store.sequence > held.sequence ? t("apps.add.storeNewer")
     : store.sequence < held.sequence ? t("apps.add.storeOlder")
     : held.equivocation ? t("apps.add.storeEquivocation") : t("apps.add.storeHeld");
-  const offered = !!store && (!held || held.sequence === undefined || store.sequence > held.sequence);
+  const offered = !!store && !store.refused && (!held || held.sequence === undefined || store.sequence > held.sequence);
 
   if (app) return <AppInstallDialog source={{ url: app.url }} fetched={app.preview} onClose={onClose} onInstalled={onInstalled} />;
   return (
@@ -110,8 +117,10 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
         {/* noValidate: a link the field's type refuses is answered below in the app's words, not by the browser's own bubble. */}
         <form className="space-y-2" noValidate onSubmit={(e) => { e.preventDefault(); void check(); }}>
           <label htmlFor={fieldId} className="text-sm text-text-primary">{t("apps.add.label")}</label>
+          {/* Fixed while Add store runs: an edit (or Enter, which checks again) dropped the store's question and its busy
+              state, and Cancel then closed Add while the store was added all the same. */}
           <input id={fieldId} data-testid="apps-add-url" autoFocus className={input} type="url" inputMode="url" autoComplete="off" spellCheck={false} dir="ltr"
-            placeholder="https://github.com/owner/repo" value={url} onChange={(e) => edit(e.target.value)} />
+            readOnly={adding} placeholder="https://github.com/owner/repo" value={url} onChange={(e) => edit(e.target.value)} />
           <Notice>{t("apps.add.hint")}</Notice>
           {error && <Notice tone="error" testId="apps-add-error" details={error.info}>{error.text}</Notice>}
           {!store && (
@@ -135,10 +144,10 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
             </div>
             {heldLine && <Notice testId="apps-add-store-held" tone={held?.equivocation ? "warning" : undefined}>{heldLine}</Notice>}
             {/* A store held is still read from its own link: this one is not where it is read from. */}
-            {!held && <Notice>{t("apps.add.storeReads", { host: hostOf(store.url) })}</Notice>}
+            {offered && !held && <Notice>{t("apps.add.storeReads", { host: hostOf(store.url) })}</Notice>}
             {/* Wraps rather than push Cancel off the screen (a phone at a large text size), as the install screen's. */}
             <div className="flex flex-wrap justify-end gap-2">
-              <Button ref={storeCancel} onClick={onClose}>{offered ? t("common.cancel") : t("common.close")}</Button>
+              <Button ref={storeCancel} disabled={adding} onClick={onClose}>{offered ? t("common.cancel") : t("common.close")}</Button>
               {offered && <Button variant="primary" data-testid="apps-add-store-confirm" loading={busy} onClick={() => void addStore()}>{held ? t("apps.add.updateStore") : t("apps.add.addStore")}</Button>}
             </div>
           </div>

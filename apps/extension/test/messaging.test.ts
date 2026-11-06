@@ -63,7 +63,8 @@ describe("the service worker keeps one peer", () => {
       world.endOffscreen();
       world.onCreateDocument = async () => {};
       fire(world.chrome.runtime.onInstalled, { reason: "install" });
-      await vi.advanceTimersByTimeAsync(100 * 50 + 1000);
+      // Its wait, then a new document's in its place.
+      await vi.advanceTimersByTimeAsync(2 * 100 * 50 + 1000);
       expect(world.callsTo("tabs.create")).toEqual([[world.chrome.runtime.getURL("app.html")]]);
     } finally {
       vi.useRealTimers();
@@ -77,8 +78,11 @@ describe("the service worker keeps one peer", () => {
       world.endOffscreen();
       world.onCreateDocument = async () => {};
       const reply = send({ target: "background", type: "ensure-engine" });
-      await vi.advanceTimersByTimeAsync(100 * 50 + 1000);
+      await vi.advanceTimersByTimeAsync(2 * 100 * 50 + 1000);
       expect(await reply).toEqual({ ok: false, error: expect.stringContaining("did not start") });
+      // The silent document went, and the one made in its place was waited on too.
+      expect(world.callsTo("offscreen.closeDocument")).toHaveLength(1);
+      expect(world.callsTo("offscreen.createDocument")).toHaveLength(3);
     } finally {
       vi.useRealTimers();
     }
@@ -234,7 +238,7 @@ describe("the page and the peer talk over the 'ui' port", () => {
       const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
       const connecting = extensionHost.connect(() => {}, () => {});
       const failed = expect(connecting).rejects.toThrow("did not start");
-      await vi.advanceTimersByTimeAsync(6000);
+      await vi.advanceTimersByTimeAsync(11_000);
       await failed;
       expect(world.callsTo("runtime.connect")).toEqual([]);
     } finally {
@@ -666,6 +670,21 @@ describe("the toolbar button", () => {
     expect(world.callsTo("tabs.create")).toHaveLength(1);
     expect(world.callsTo("tabs.update")).toEqual([[tab.id, { active: true }]]);
     expect(world.callsTo("windows.update")).toEqual([[tab.windowId, { focused: true }]]);
+  });
+
+  it("opens the app even when the peer does not start, so the page can say why", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      // The document the worker made as it loaded went away, and the next one's script never listens.
+      world.endOffscreen();
+      world.onCreateDocument = async () => {};
+      fire(world.chrome.action.onClicked);
+      // The silent document is waited on, replaced once, and the new one waited on too, before the start gives up.
+      await vi.advanceTimersByTimeAsync(2 * 100 * 50 + 1000);
+      expect(world.callsTo("tabs.create")).toEqual([[world.chrome.runtime.getURL("app.html")]]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

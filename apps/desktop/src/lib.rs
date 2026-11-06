@@ -227,6 +227,7 @@ macro_rules! commands {
             native_call::native_camera_open,
             native_call::native_microphone_meter,
             native_call::native_microphone_meter_close,
+            native_call::native_pictures_shown,
             native_call::native_speaker_test,
             notifications::native_clear_notification,
             notifications::native_clear_notifications,
@@ -370,6 +371,10 @@ pub fn run() {
             if let Ok(dir) = app.path().app_log_dir() {
                 diagnostics::init(&dir);
             }
+            // The DHT node, unless the last run kept to the relays (Hide my IP from contacts).
+            app.state::<AppState>()
+                .pkarr
+                .start(app.path().app_data_dir().ok());
             notifications::install(app.handle());
             #[cfg(target_os = "linux")]
             {

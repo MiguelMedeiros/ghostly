@@ -62,6 +62,15 @@ describe("GroupChat: what the header says", () => {
     expect(screen.getByTestId("group-members").textContent).toBe("1 member");
   });
 
+  it("a community with nobody else in it says neither connecting nor relaying, as its connection icon says only you", () => {
+    // Its app is not a hub yet (its first beacon read, or the relays down): it said "connecting…" for as long as that lasted.
+    openGroup(active({ profile: "community", members: [members[0]], community: { hub: false, hubs: 0, connected: 0 } }));
+    expect(screen.getByTestId("group-members").textContent).toBe("1 member");
+    // A hub, alone: it relays for nobody.
+    act(() => fakeEngine.update({ groups: [active({ profile: "community", members: [members[0]], community: { hub: true, hubs: 1, connected: 0 } })] }));
+    expect(screen.getByTestId("group-members").textContent).toBe("1 member");
+  });
+
   it("says who invited me while it is an invitation, with Accept and Decline and nothing a member has", async () => {
     // On a phone the page is the only way in from the row: it was an empty chat with a field that took nothing.
     const { user, engine } = openGroup(groupView({ canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: ALICE, members: 3, accepted: false } }));
@@ -1167,7 +1176,8 @@ describe("GroupChat: history and sending", () => {
       stored({ id: "m2", member: "gone".padEnd(52, "y"), text: "bye" }),
       stored({ id: "m3", sender: "me", member: ME, text: "hello" }),
     ]);
-    expect(await screen.findByText("Alice joined")).toBeInTheDocument();
+    // Alice is the admin: her name in the line carries the admin's mark.
+    expect((await screen.findAllByTestId("group-event"))[0]).toHaveTextContent(/^Alice admin joined$/);
     expect(screen.getByText("You are now the admin")).toBeInTheDocument();
     expect(screen.getByText("~Alice")).toBeInTheDocument();
     // Someone no longer in the roster: named by their key.
