@@ -976,6 +976,47 @@ describe("invitations: what the admission exchange ignores", () => {
     sent.mockRestore();
   });
 
+  it("an invitation over a chat this app accepts by itself finds room among 32 waiting: the oldest of the chat holding the most goes", async () => {
+    const world = new World();
+    const carol = world.add("carol");
+    const host = (carol as unknown as { host: GroupsHost }).host;
+    // The CLI's `group auto on --from`: chat-owner, and chat-1 (whose invitations wait while its accept fails).
+    host.autoJoins = linkId => linkId === "chat-owner" || linkId === "chat-1";
+    const sent = vi.spyOn(host, "sendOnLink").mockImplementation(() => {});
+    let at = 1_000_000;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => at++);
+    try {
+      const admin = createIdentity().pubKeyZ32;
+      const id = (i: number) => `${String(i).padStart(2, "0")}${"C".repeat(20)}`;
+      const ids = () => carol.views().map(v => v.id);
+      // Eight contacts invite four times each: the 32 are full.
+      for (let i = 0; i < 32; i++) await carol.handleContactFrame(`chat-${i >> 2}`, { t: "group-invite", g: id(i), name: `g${i}`, admin, e: 0, n: 1 });
+      expect(carol.views()).toHaveLength(32);
+
+      // The owner's is kept: all chats hold four, so the oldest of all goes (chat-0's first), its inviter told no.
+      await carol.handleContactFrame("chat-owner", { t: "group-invite", g: id(40), name: "owner's", admin, e: 0, n: 1 });
+      expect(ids()).toContain(id(40));
+      expect(ids()).not.toContain(id(0));
+      expect(carol.views()).toHaveLength(32);
+      expect(view(carol, id(40)).invitation).toMatchObject({ linkId: "chat-owner", accepted: false });
+      // Again: chat-0 holds three now, so the oldest of those holding four goes. Not chat-1's, which is accepted by itself too.
+      await carol.handleContactFrame("chat-owner", { t: "group-invite", g: id(41), name: "owner's", admin, e: 0, n: 1 });
+      expect(ids()).toContain(id(41));
+      expect(ids()).toEqual(expect.arrayContaining([id(4), id(5), id(6), id(7)]));
+      expect(ids()).not.toContain(id(8));
+      expect(carol.views()).toHaveLength(32);
+
+      // Any other chat's still finds no room, takes none, and is told no.
+      await carol.handleContactFrame("chat-9", { t: "group-invite", g: id(42), name: "late", admin, e: 0, n: 1 });
+      expect(ids()).not.toContain(id(42));
+      expect(carol.views()).toHaveLength(32);
+      expect(sent.mock.calls).toEqual([["chat-0", { t: "group-decline", g: id(0) }], ["chat-2", { t: "group-decline", g: id(8) }], ["chat-9", { t: "group-decline", g: id(42) }]]);
+    } finally {
+      clock.mockRestore();
+      sent.mockRestore();
+    }
+  });
+
   it("one chat holds four invitations at a time: its next is answered as declined, and another contact's still arrives", async () => {
     const world = new World();
     const alice = world.add("alice"), bob = world.add("bob"), carol = world.add("carol");

@@ -63,6 +63,17 @@ export class GroupAutoJoin {
     return this.get();
   }
 
+  /**
+   * Whether an invitation over this chat is one this profile accepts by itself: the chat is on the list and its contact's
+   * key is still the one named. The engine asks it when 32 invitations wait (`NodeOptions.autoJoins`): such an invitation
+   * then takes the place of the oldest waiting from the chat that holds the most, so the invitations of contacts nobody
+   * answers here cannot keep the owner's out.
+   */
+  autoJoins(chat: string): boolean {
+    const grant = this.grants.find((g) => g.chat === chat);
+    return !!grant && this.host.engine.getState().links.find((link) => link.id === chat)?.peerPubKeyZ32 === grant.contact;
+  }
+
   /** A chat removed from this device leaves the list; the last one gone turns auto-join off. */
   forgetChat(chat: string): void {
     if (!this.grants.some((g) => g.chat === chat)) return;
