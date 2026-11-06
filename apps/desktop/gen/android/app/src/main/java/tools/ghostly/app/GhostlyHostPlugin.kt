@@ -157,6 +157,8 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       val since = shareTurns.last()
       thread(name = "ghostly-share-clean") { SharedCopies.stale(sharedRoot(), since).forEach { it.deleteRecursively() } }
     }
+    // The latest intent the activity got (MainActivity keeps a new one as its intent): one that came while the plugin
+    // was not loaded yet reaches the page too. One already taken is marked handled.
     take(activity.intent)
     watchNetwork()
     // The call notification's Hang up (CallService.kt): the page ends the call.
