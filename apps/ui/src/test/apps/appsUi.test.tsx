@@ -1140,18 +1140,26 @@ describe("with the apps flag on", () => {
     // 80 characters, a tagline's limit, with nowhere to break: a link, a German compound, a name in Latin letters.
     const long = `https://example.com/${"a".repeat(60)}`;
     const wraps = (el: HTMLElement) => expect(el.className).toContain("[overflow-wrap:anywhere]");
-    fakeEngine.on("appPreview", () => preview({ manifest: { ...preview().manifest, tagline: long, description: `${long}2` } }));
+    // A version has no space either, and a bundle allows 64 characters: "Version 1.0.0-rc.1+sha.…" ran 29 px off a 375 px phone.
+    const version = `1.0.0-rc.1+sha.${"0123456789abcdef".repeat(3)}`;
+    fakeEngine.on("appPreview", () => preview({ manifest: { ...preview().manifest, version, tagline: long, description: `${long}2` } }));
     const install = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
     const sheet = await screen.findByTestId("app-install");
     await within(sheet).findByText(long);
     wraps(within(sheet).getByText(long));
     wraps(within(sheet).getByText(`${long}2`));
+    // Broken over lines in Arabic, its "-" was drawn at the left of "1.0.0": "-1.0.0". It keeps its own direction.
+    expect(within(sheet).getByText(version)).toMatchObject({ tagName: "BDI", dir: "ltr" });
+    expect(within(sheet).getByText(version).parentElement).toHaveTextContent(`Version ${version}`);
+    wraps(within(sheet).getByText(version).parentElement!);
     install.unmount();
 
-    const app = installed({ title: long, tagline: `${long}3`, description: `${long}4` });
+    const app = installed({ title: long, version, tagline: `${long}3`, description: `${long}4` });
     const details = renderApp(<InstalledAppDialog app={app} onClose={() => {}} onOpen={() => {}} />);
     wraps(within(screen.getByTestId("app-details")).getByText(`${long}3`));
     wraps(within(screen.getByTestId("app-details")).getByText(`${long}4`));
+    expect(within(screen.getByTestId("app-details")).getByText(version)).toMatchObject({ tagName: "BDI", dir: "ltr" });
+    wraps(within(screen.getByTestId("app-details")).getByText(version).parentElement!);
     await details.user.click(screen.getByTestId("app-uninstall-open"));
     wraps(within(screen.getByTestId("app-uninstall")).getByRole("heading"));
     details.unmount();
