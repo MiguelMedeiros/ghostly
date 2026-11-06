@@ -134,6 +134,26 @@ describe("the push worker's table", () => {
     ], { ...words, db: "ghostly" });
   });
 
+  it("says when online notices are turned off, and is written again each time the switch changes", async () => {
+    const platform = fakePlatform();
+    setPushPlatform(platform);
+    session("chata", "peer-a");
+    const settings = { online: true, nick: "Ghost", relays: [], iceServers: [], mints: [], mintsInitialized: true, wake: { ...keys, vapid: generateVapidKeys() } };
+    const links = [linkView({ id: "l-a", peerPubKeyZ32: "peer-a", wakeToken: "tokenaaaaaaaaaaaaaaaaa" })];
+    fakeEngine.setState(engineState({ settings, links }));
+    const words = { title: "Ghostly", body: "New message", online: "{name} is online", onlineUnnamed: "A contact is online" };
+    renderHook(() => useWakeTableSync(words));
+    await waitFor(() => expect(platform.syncTable).toHaveBeenCalledTimes(1));
+    expect(platform.syncTable.mock.lastCall![2]).toEqual({ ...words, db: "ghostly" });
+    await act(async () => { fakeEngine.setState(engineState({ settings: { ...settings, wakeOnline: false }, links })); });
+    await waitFor(() => expect(platform.syncTable).toHaveBeenCalledTimes(2));
+    expect(platform.syncTable.mock.lastCall![2]).toEqual({ ...words, onlineOff: true, db: "ghostly" });
+    expect(platform.syncTable.mock.lastCall![1]).toEqual([{ token: "tokenaaaaaaaaaaaaaaaaa", path: "/chat/chata" }]);
+    await act(async () => { fakeEngine.setState(engineState({ settings, links })); });
+    await waitFor(() => expect(platform.syncTable).toHaveBeenCalledTimes(3));
+    expect(platform.syncTable.mock.lastCall![2]).toEqual({ ...words, db: "ghostly" });
+  });
+
   it("the online switch asks the engine, and reads its setting: on unless turned off", async () => {
     fakeEngine.on("setWakeOnline", () => undefined);
     await setWakeOnline(false);

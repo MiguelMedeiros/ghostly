@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_PAST_LIMIT_NAMES, MAX_SHARED_FILES, MAX_SHARE_BYTES, SHARE_TARGET_PATH, assetAnswer, classify, desktopOnlyFiles, installList, optionalFiles, precacheList, serviceWorkerFiles, pushScope, pushScopeProfile, readShare, readShareBody, wakeNotice } from "../../../../web/src/sw/policy";
+import { MAX_PAST_LIMIT_NAMES, MAX_SHARED_FILES, MAX_SHARE_BYTES, SHARE_TARGET_PATH, assetAnswer, classify, desktopOnlyFiles, installList, optionalFiles, precacheList, pushNotice, serviceWorkerFiles, pushScope, pushScopeProfile, readShare, readShareBody, wakeNotice } from "../../../../web/src/sw/policy";
 
 // covers: app.pwa.offline, app.pwa.share-target, push.wake.notify, push.wake.mute, push.wake.group, push.wake.online
 
@@ -346,6 +346,23 @@ describe("what a wake-up shows", () => {
     expect(online({ path: "/chat/abc", name: "Ana" }, true)).toBeNull();
     expect(online({ path: "/chat/abc", name: "Ana", mutedUntil: "forever" })).toBeNull();
     expect(online({ path: "/group/g1", name: "Team" })).toBeNull();
+  });
+
+  it("with \"Notify me when a contact comes online\" off here, an online push has no notice of its own, whatever a contact still sends; messages and calls show as before", () => {
+    const off = { ...text, online: "{name} is online", onlineUnnamed: "A contact is online", call: "Incoming call", onlineOff: true as const };
+    const kinds = (t: typeof off | typeof text, kind: "message" | "call" | "online", name?: string) =>
+      wakeNotice({ entry: { path: "/chat/abc", ...(name && { name }) }, text: t }, { now, appVisible: false, profile: "", kind });
+    // The worker shows its quiet notice for this, as for a token it does not know.
+    expect(kinds(off, "online", "Ana")).toBeNull();
+    expect(kinds(off, "online")).toBeNull();
+    expect(pushNotice({ token: "tok", kind: "online" }, { entry: { path: "/chat/abc", name: "Ana" }, text: off }, null, { now, appVisible: false, profile: "" })).toBeNull();
+    expect(kinds(off, "message")).toMatchObject({ body: "New message", tag: "wake::/chat/abc" });
+    expect(kinds(off, "call")).toMatchObject({ body: "Incoming call", call: true });
+    // On (no flag in the table): as before.
+    const { onlineOff: _, ...on } = off;
+    expect(kinds(on, "online", "Ana")).toMatchObject({ body: "Ana is online", tag: "wake-online::/chat/abc" });
+    expect(pushNotice({ token: "tok", kind: "online" }, { entry: { path: "/chat/abc", name: "Ana" }, text: on }, null, { now, appVisible: false, profile: "" }))
+      .toMatchObject({ body: "Ana is online" });
   });
 
   it("nothing for a token it no longer knows, while the app is on screen, or for a route that is not a chat", () => {
