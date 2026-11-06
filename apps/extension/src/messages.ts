@@ -19,6 +19,8 @@ export type RuntimeMessage =
   | { target: "engine"; type: "ping" }
   /** The worker is about to close the peer's document, to start it again as another profile. */
   | { target: "engine"; type: "stop" }
+  /** Chrome took back these host patterns (`permissions.onRemoved`): the apps at those hosts stop being shared. */
+  | { target: "engine"; type: "local-access-removed"; origins: string[] }
   | {
       target: "engine";
       type: "http-request";
