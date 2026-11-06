@@ -76,7 +76,8 @@ export function CallButtons({ blocked, busy, onCall, phone }: CallButtonsProps) 
           <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
         </svg>
       </button>}
-      <Toast toast={why.toast} onDismiss={why.dismiss} testId="call-blocked" />
+      {/* Under the header, near the button pressed: at the bottom of the window it sat over the message field's + and emoji. */}
+      <Toast toast={why.toast} onDismiss={why.dismiss} place="header" testId="call-blocked" />
     </>
   );
 }
