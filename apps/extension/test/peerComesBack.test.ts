@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fire, settle, type FakeWorld } from "./fakeChrome";
 import { engineControl, resetEngine } from "./fakeEngine";
 import { bootExtension, restartServiceWorker } from "./extension";
+import { UI_PORT } from "../src/messages";
 
 // covers: extension.engine
 
@@ -55,6 +56,65 @@ describe("the peer starts again by itself", () => {
     world.fireAlarm(check);
     await vi.waitFor(() => expect(engineControl().servers).toHaveLength(2));
     expect(documents()).toBe(2);
+  });
+});
+
+describe("a peer that stopped for good is not taken for a running one", () => {
+  const app = () => ({ id: world.chrome.runtime.id, url: world.chrome.runtime.getURL("app.html") });
+
+  /**
+   * "Clear all data" from a page: the engine takes back what it can and stops (`clearProfileData`), and the page goes
+   * away before it asks for a new peer (`restart-engine`, the clear's last step): closed or reloaded right then.
+   */
+  async function clearedAndTabClosed(): Promise<void> {
+    world = await bootExtension();
+    await vi.waitFor(() => expect(engineControl().servers).toHaveLength(1));
+    const tab = world.connectFrom(app(), UI_PORT);
+    tab.postMessage({ kind: "request", id: 1, method: "clearProfileData", params: undefined });
+    await vi.waitFor(() => expect(engineControl().servers[0].shutdowns).toBe(1));
+    await settle();
+    tab.disconnect();
+    await settle();
+  }
+
+  /** A new peer runs, in a new document, and a page that connects now is handed it, not the stopped one. */
+  async function newPeerRuns(): Promise<void> {
+    await vi.waitFor(() => expect(engineControl().servers).toHaveLength(2));
+    expect(engineControl().servers.map((s) => s.shutdowns)).toEqual([1, 0]);
+    expect(documents()).toBe(2);
+    const [stopped, fresh] = engineControl().servers;
+    const before = stopped.attached.length;
+    world.connectFrom(app(), UI_PORT);
+    await settle();
+    expect(stopped.attached).toHaveLength(before);
+    expect(fresh.attached).toHaveLength(1);
+  }
+
+  it("a tab opened later starts a new peer", async () => {
+    await clearedAndTabClosed();
+    expect(await world.chrome.runtime.sendMessage({ target: "background", type: "ensure-engine" })).toEqual({ ok: true });
+    await newPeerRuns();
+  });
+
+  it("the worker's next start brings a new peer", async () => {
+    await clearedAndTabClosed();
+    await restartServiceWorker(world);
+    await newPeerRuns();
+  });
+
+  it("the minute check brings a new peer", async () => {
+    await clearedAndTabClosed();
+    world.fireAlarm([...world.alarms.keys()][0]);
+    await newPeerRuns();
+  });
+
+  it("a worker gone mid-restart, after the peer stopped and before its document closed: the next start replaces it", async () => {
+    world = await bootExtension();
+    await vi.waitFor(() => expect(engineControl().servers).toHaveLength(1));
+    // What `replaceEngine` did before the worker went away: the peer stopped, its document still there.
+    expect(await world.chrome.runtime.sendMessage({ target: "engine", type: "stop" })).toBe(true);
+    await restartServiceWorker(world);
+    await newPeerRuns();
   });
 });
 
