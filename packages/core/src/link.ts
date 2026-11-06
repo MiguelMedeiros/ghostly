@@ -310,6 +310,10 @@ export class LinkSession {
   private lastCallSignalIn: string | null = null;
   /** The `_rtc` signal the last packet that went out carried. */
   private rtcSignalOut: string | null = null;
+  /** Counts the signals taken back (`setRtcSignal(null)`): each ends an attempt. */
+  private rtcAttempt = 0;
+  /** A publish that went out carried a signal of this attempt (since the last take-back). */
+  private rtcAttemptOut = false;
   private lastRtcSignalIn: string | null = null;
   /** The `_rtc` signal the peer's packet carried as last read (null: none), whether or not it was new. */
   private peerRtcSignal: string | null = null;
@@ -420,8 +424,11 @@ export class LinkSession {
     return this.presence;
   }
 
-  /** The packet the relays last took carries a WebRTC signal of this side: the attempt's answer, or an earlier one of it. */
-  get rtcSignalPublished(): boolean { return this.rtcSignalOut !== null; }
+  /**
+   * The relays took a WebRTC signal of this attempt: its answer, or an earlier one of it. Not an earlier attempt's still
+   * in the packet out: its take-back, a background write, is the first the relays' budget holds back.
+   */
+  get rtcSignalPublished(): boolean { return this.rtcAttemptOut; }
 
   /** The `_rtc` signal the peer's packet carries, as last read: null when it carries none. */
   get peerSignal(): string | null {
@@ -617,6 +624,7 @@ export class LinkSession {
   async setRtcSignal(signal: string | null, reportFailure = false): Promise<void> {
     if (this.rtcSignal === signal) return;
     this.rtcSignal = signal;
+    if (signal === null) { this.rtcAttempt++; this.rtcAttemptOut = false; }
     // A signal taken back (the session opened, or the attempt ended) is nothing the contact waits for: upkeep.
     if (reportFailure) await this.publish(signal === null);
     else await this.publish(signal === null).catch(() => {});
@@ -789,6 +797,7 @@ export class LinkSession {
 
   private async publishOnce(advertise: boolean, upkeep = false): Promise<number> {
     const rtcSignal = advertise ? this.rtcSignal : null;
+    const attempt = this.rtcAttempt;
     const started = Date.now();
     let keptMessages: number;
     try {
@@ -850,6 +859,7 @@ export class LinkSession {
       if (lapsed) this.pollNow();
     }
     this.rtcSignalOut = rtcSignal;
+    if (rtcSignal && attempt === this.rtcAttempt) this.rtcAttemptOut = true;
     traceLink(this.identity.pubKeyZ32, "publish", { ms, rtc: !!rtcSignal, advertise });
     this.events.onPublish?.({ ms, rtc: !!rtcSignal, ...(signalOut && { signalOut }) });
     this.discoveryResult("publish");
