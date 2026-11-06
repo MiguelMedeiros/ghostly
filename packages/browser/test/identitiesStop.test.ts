@@ -31,7 +31,8 @@ it("nothing is read after stop, when a re-check was under way at the stop", asyn
     ledger: id => ledgers.get(id),
     updateLedger: async (id, change) => { const next = change(structuredClone(ledgers.get(id)!)); ledgers.set(id, next); return next; },
     channel: () => undefined,
-    keys: () => ({}),
+    // The contact's key and this side's, as the proofs record them: proofs under a previous key are not re-checked.
+    keys: () => ({ mine: "a", theirs: "p" }),
     linkIds: () => [...ledgers.keys()],
     online: () => true,
     emit: () => {},

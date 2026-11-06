@@ -101,7 +101,8 @@ function received(checkedAt: number) {
 /** A host for many chats, none connected: their ledgers only. */
 function ledgerHost(ledgers: Map<string, IdentityLedger>): Omit<IdentityLinkHost, "resolve"> {
   return { ledger: id => ledgers.get(id), updateLedger: async (id, change) => { ledgers.set(id, change(structuredClone(ledgers.get(id)!))); return ledgers.get(id)!; },
-    channel: () => undefined, keys: () => ({}), linkIds: () => [...ledgers.keys()], online: () => true, emit: () => {}, publish: async () => {} };
+    // The contact's key and this side's, as `received` records them.
+    channel: () => undefined, keys: () => ({ mine: "a", theirs: "p" }), linkIds: () => [...ledgers.keys()], online: () => true, emit: () => {}, publish: async () => {} };
 }
 
 afterEach(() => { vi.useRealTimers(); });
@@ -933,14 +934,77 @@ describe("per chat", () => {
     expect(engines.b.linkView("chat", true)!.received[0].status).toBe("previous-key");
   });
 
-  it("a recheck is due only for providers that ask for one, once their interval passed", async () => {
+  it("a recheck is due only for providers that ask for one, once the app's own interval passed", async () => {
     const { engines, state } = await shared();
     expect(engines.b.linkView("chat", true)!.received[0].recheckDue).toBe(false);
     state.providers.b = [{ ...fakeKey, recheck: { afterSeconds: 3600 } } as IdentityProofProvider];
     expect(engines.b.linkView("chat", true)!.received[0].recheckDue).toBe(false);
     vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(Date.now() + 2 * 3600_000);
+    const t0 = Date.now();
+    // The provider's hour passed, but the app checks again on its own only a day after the last check.
+    vi.setSystemTime(t0 + 2 * 3600_000);
+    expect(engines.b.linkView("chat", true)!.received[0].recheckDue).toBe(false);
+    vi.setSystemTime(t0 + 86_400_000);
     expect(engines.b.linkView("chat", true)!.received[0].recheckDue).toBe(true);
+  });
+
+  /**
+   * `recheckDue` (printed by the CLI's `identity contact`) said a check was due for withdrawn, revoked and expired proofs,
+   * which the app never checks again, and 10 minutes after a GitHub/GitLab check, which the app repeats only after a day.
+   */
+  it("recheckDue is true only when the app itself would check the proof again: a GitHub key a day after its check, never a withdrawn, revoked or expired one", async () => {
+    const { engines, ledgers, state, id } = await shared();
+    // ssh-github / ssh-gitlab's own interval: ten minutes.
+    state.providers.b = [{ ...fakeKey, recheck: { afterSeconds: 600 } } as IdentityProofProvider];
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t0 = ledgers.b.received[0].checkedAt * 1000;
+    const due = (afterMs: number) => { vi.setSystemTime(t0 + afterMs); return engines.b.linkView("chat", true)!.received[0]; };
+    expect(due(11 * 60_000)).toMatchObject({ status: "verified", recheckDue: false });
+    expect(due(86_400_000)).toMatchObject({ status: "verified", recheckDue: true });
+    const as = (status: "withdrawn" | "revoked" | "unconfirmed") => { ledgers.b.received = ledgers.b.received.map(r => r.id === id ? { ...r, status } : r); };
+    as("unconfirmed");
+    expect(due(11 * 60_000)).toMatchObject({ status: "unconfirmed", recheckDue: false });
+    expect(due(86_400_000)).toMatchObject({ status: "unconfirmed", recheckDue: true });
+    for (const status of ["withdrawn", "revoked"] as const) {
+      as(status);
+      for (const after of [11 * 60_000, 86_400_000, 40 * 86_400_000]) expect(due(after), `${status} ${after} ms`).toMatchObject({ status, recheckDue: false });
+    }
+    as("unconfirmed");
+    // Past the proof's own expiry (30 days here): expired, never checked again.
+    expect(due(40 * 86_400_000)).toMatchObject({ status: "expired", recheckDue: false });
+  });
+
+  it("the automatic re-check picks exactly the proofs the chat's view marks due", async () => {
+    await clearStorage();
+    const t = Math.floor(Date.now() / 1000);
+    const day = 86_400;
+    const proof = (checkedAt: number, change: (r: ReturnType<typeof received>) => object = r => r) => ({ ...emptyIdentityLedger(), received: [change(received(checkedAt))] } as IdentityLedger);
+    const ledgers = new Map<string, IdentityLedger>([
+      ["verified-11min", proof(t - 11 * 60)],
+      ["verified-day", proof(t - day)],
+      ["verified-2days", proof(t - 2 * day)],
+      ["unconfirmed-day", proof(t - day, r => ({ ...r, status: "unconfirmed", error: "The record is not published" }))],
+      ["unconfirmed-hour", proof(t - 3600, r => ({ ...r, status: "unconfirmed", error: "The record is not published" }))],
+      ["withdrawn-2days", proof(t - 2 * day, r => ({ ...r, status: "withdrawn" }))],
+      ["revoked-2days", proof(t - 2 * day, r => ({ ...r, status: "revoked" }))],
+      ["expired-2days", proof(t - 2 * day, r => ({ ...r, verified: { ...r.verified, expiresAt: t - 60 } }))],
+      ["previous-key-2days", proof(t - 2 * day, r => ({ ...r, presenter: "an-earlier-key" }))],
+    ]);
+    const checked: string[] = [];
+    const provider = { ...fakeKey, recheck: { afterSeconds: 600 },
+      verify: async ({ id, binding }) => { checked.push(id); return { subject: binding.subject, source: "Test record" }; } } as IdentityProofProvider;
+    const engine = new IdentityProofs({ ...ledgerHost(ledgers), resolve: async () => null }, () => [provider]);
+    await engine.load();
+    const idOf = (linkId: string) => ledgers.get(linkId)!.received[0].id;
+    const marked = [...ledgers.keys()].filter(linkId => engine.linkView(linkId, true)!.received[0].recheckDue).sort();
+    expect(marked).toEqual(["unconfirmed-day", "verified-2days", "verified-day"]);
+    // The app runs for 20 minutes: its first re-check round (3 minutes after the start) and the next.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    engine.start();
+    await vi.advanceTimersByTimeAsync(20 * 60_000);
+    engine.stop();
+    expect(checked.map(id => [...ledgers.keys()].find(linkId => idOf(linkId) === id)).sort()).toEqual(marked);
+    expect([...ledgers.keys()].filter(linkId => engine.linkView(linkId, true)!.received[0].recheckDue)).toEqual([]);
   });
 
   it("a contact's proof is checked again on its own a day after the last check: one whose record is gone stops reading verified", async () => {

@@ -213,9 +213,10 @@ is shared. The contact's app never trusts the sender's check.
   revocation record first, and the app does so every 12 hours by itself. A revoked proof shows "Revoked by
   its owner".
 - A signature stays valid until expiry. A **published** record can disappear sooner: declare
-  `recheck: { afterSeconds }`. The contact's app shows when it last checked and always offers "Check again"
-  (`recheckDue` marks it due after that time), and shows a failed re-check honestly ("Could not be confirmed
-  on …"), without deleting the proof. `describeIdentityProof` then requires the harness to have `revoke()`.
+  `recheck: { afterSeconds }`. The contact's app shows when it last checked and always offers "Check again",
+  checks a verified or unconfirmed proof again by itself once that time, and at least a day, has passed since the
+  last check (`autoRecheckDue`, which `recheckDue` in the chat's view reports), and shows a failed re-check honestly
+  ("Could not be confirmed on …"), without deleting the proof. `describeIdentityProof` then requires the harness to have `revoke()`.
 
 ## On the wire
 

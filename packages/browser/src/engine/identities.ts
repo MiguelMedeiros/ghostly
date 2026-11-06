@@ -1,7 +1,7 @@
 import {
   budgetRetryMs, emptyIdentityLedger, fromBase64Url, isDiscoveryBudgetError, identityRevocationValue, identityStatement, IdentityCheckUnavailable, IdentityExchange, IDENTITY_REVOCATION_LABEL, isIdentityBinding, newIdentityBinding,
   receivedIdentityStatus, revokesIdentity, toBase64Url,
-  type IdentityBinding, type IdentityLedger, type IdentityScope, type ReceivedIdentity, type IdentityStatement, type LocalIdentityProof, type VerifiedIdentity,
+  type IdentityBinding, type IdentityLedger, type IdentityScope, type ReceivedIdentity, type IdentityStatement, type IdentityStatus, type LocalIdentityProof, type VerifiedIdentity,
 } from "@ghostly/core";
 import { STORES, store, transact, wrap } from "../shared/idb";
 import { openSecret, sealSecret, whenDataKeyDropped, type SealedSecret } from "./dataKey";
@@ -89,6 +89,17 @@ export const WITHDRAWN_REVOCATION_TRIES_MS = [20_000, 60_000, 180_000] as const;
  * listed key that is gone then stops reading verified.
  */
 export const AUTO_RECHECK_AFTER_S = 86_400;
+/**
+ * Whether the app re-checks a contact's proof on its own now: one rule for the automatic re-check and for `recheckDue` in
+ * the chat's view (what the CLI prints), so the two never disagree. Its provider asks for re-checks, the proof reads
+ * verified or unconfirmed (`status` as `receivedIdentityStatus` gives it: not withdrawn, revoked, expired or under the
+ * contact's previous key), and its last check is `AUTO_RECHECK_AFTER_S` old, or the provider's interval when longer.
+ * "Check again" is not gated by it. A check that could not reach the server also backs off (`recheckBackoff`), beside this rule.
+ */
+export function autoRecheckDue(r: Pick<ReceivedIdentity, "checkedAt">, status: IdentityStatus, provider: Pick<IdentityProofProvider, "recheck"> | undefined, t: number): boolean {
+  const after = provider?.recheck?.afterSeconds;
+  return after !== undefined && (status === "verified" || status === "unconfirmed") && t - r.checkedAt >= Math.max(after, AUTO_RECHECK_AFTER_S);
+}
 /** Due proofs are looked for this often (the first time a few minutes after the start), and only a few checked each time. */
 const AUTO_RECHECK_TICK_MS = 15 * 60_000;
 const AUTO_RECHECK_FIRST_MS = 3 * 60_000;
@@ -477,7 +488,7 @@ export class IdentityProofs {
     void transact([STORES.settings], stores => { stores[STORES.settings].put({ ...round, done: [...round.done] }, REVOCATIONS_ROUND); }).catch(() => {});
   }
   /**
-   * The contacts' proofs due for an automatic re-check (`AUTO_RECHECK_AFTER_S`), the longest unchecked first, a few at a
+   * The contacts' proofs due for an automatic re-check (`autoRecheckDue`), the longest unchecked first, a few at a
    * time, one after the other. A proof whose record or key is gone shows unconfirmed with the reason, as after "Check
    * again"; one whose server could not be reached (or a network that went away meanwhile) is left as it was and backs off.
    */
@@ -486,10 +497,10 @@ export class IdentityProofs {
     const t = now(), at = Date.now();
     const due: { linkId: string; r: ReceivedIdentity }[] = [];
     for (const linkId of this.host.linkIds()) {
+      const { mine, theirs } = this.host.keys(linkId);
       for (const r of this.host.ledger(linkId)?.received ?? []) {
-        const after = this.providers().find(p => p.id === r.binding.provider)?.recheck?.afterSeconds;
-        if (after === undefined || (r.status !== "verified" && r.status !== "unconfirmed") || !this.revocable(r)) continue;
-        if (t - r.checkedAt < Math.max(after, AUTO_RECHECK_AFTER_S) || (this.recheckBackoff.get(`${linkId}|${r.id}`)?.until ?? 0) > at) continue;
+        const provider = this.providers().find(p => p.id === r.binding.provider);
+        if (!autoRecheckDue(r, receivedIdentityStatus(r, theirs, mine, t), provider, t) || (this.recheckBackoff.get(`${linkId}|${r.id}`)?.until ?? 0) > at) continue;
         due.push({ linkId, r });
       }
     }
@@ -676,7 +687,7 @@ export class IdentityProofs {
         return { id: r.id, provider: r.binding.provider, subject: r.verified.subject, verified: r.verified, display: r.display,
           status, verifiedAt: r.verifiedAt, checkedAt: r.checkedAt,
           expiresAt: Math.min(r.binding.expiresAt, r.verified.expiresAt ?? Infinity), error: r.error,
-          recheckDue: !!provider?.recheck && t - r.checkedAt >= provider.recheck.afterSeconds,
+          recheckDue: autoRecheckDue(r, status, provider, t),
           ...(publicProfile ? { publicProfile } : {}) };
       }),
       error: this.errors.get(linkId),

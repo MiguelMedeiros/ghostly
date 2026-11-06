@@ -1754,7 +1754,10 @@ export interface ReceivedIdentityView {
   checkedAt: number;
   expiresAt: number;
   error?: string;
-  /** The provider's checks can go stale and the last one is old enough to repeat. */
+  /**
+   * The app re-checks this proof on its own now (`autoRecheckDue`): its provider's checks can go stale, it reads verified or
+   * unconfirmed, and its last check is a day old (or the provider's interval, when longer). "Check again" works at any time.
+   */
   recheckDue: boolean;
   /** Its public profile, while the proof is verified and current (PUBLIC-PROFILES.md). */
   publicProfile?: PublicProfileView;
