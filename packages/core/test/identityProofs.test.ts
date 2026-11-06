@@ -460,6 +460,29 @@ describe("identity timeline, from the exchange", () => {
     expect(tl(w, bob, alice)[2]).toMatchObject({ kind: "shared", state: "verified" });
   });
 
+  it("a newer proof of the same identity stops the older one's share on both sides, and nothing more once that one is removed", async () => {
+    const w = world(), { alice, bob } = w.ids;
+    const ab = w.peer(alice, bob, "a".repeat(64)); w.peer(bob, alice, "a".repeat(64));
+    const older = w.addProof();
+    w.advance(60);
+    const newer = w.addProof();
+    await ab.share(older, true);
+    await vi.waitFor(() => expect(tl(w, bob, alice)[0]?.state).toBe("verified"));
+    await ab.share(newer, true);
+    await vi.waitFor(() => expect(w.ledger(alice, bob).shared.find(s => s.id === newer)?.status).toBe("accepted"));
+    const steps = (me: string, them: string) => tl(w, me, them).map(e => `${e.proof === older ? "older" : "newer"}:${e.kind}:${e.state ?? e.reason}`);
+    // The contact no longer holds the older one: neither chat goes on showing it as a live, verified share.
+    expect(steps(bob, alice)).toEqual(["older:shared:verified", "newer:shared:verified", "older:stopped:withdrawn"]);
+    expect(steps(alice, bob)).toEqual(["older:shared:verified", "newer:shared:verified", "older:stopped:withdrawn"]);
+    expect(tl(w, bob, alice)[2]).toMatchObject({ provider: "test", subject: externalKey });
+    expect(tl(w, alice, bob)[2]).toMatchObject({ provider: "test", subject: externalKey });
+    // Taking the older one back now sends nothing and writes nothing more.
+    const sent = w.frames.length;
+    await ab.withdraw(older, true);
+    expect(w.frames).toHaveLength(sent);
+    expect(steps(alice, bob)).toHaveLength(3);
+  });
+
   it("a share taken back before it left leaves nothing; a revocation found is a stop", async () => {
     const w = world(), { alice, bob } = w.ids;
     const ab = w.peer(alice, bob, "a".repeat(64)); const ba = w.peer(bob, alice, "a".repeat(64));

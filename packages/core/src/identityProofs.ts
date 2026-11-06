@@ -471,10 +471,13 @@ export class IdentityExchange {
           const entry: SharedIdentity = { ...s, status: ok ? "accepted" : "rejected", at: this.now(), error };
           // The contact keeps one proof per identity (onPresent): the one it accepted replaced any other of the same
           // provider and subject it held from here, so that one is no longer shared in this chat.
+          // Its share stops on the timeline too, as the contact's does (onPresent).
           const replaced = (x: SharedIdentity) => ok && x.status === "accepted" && x.provider === s.provider && x.subject === s.subject;
-          await this.options.storage.update(l => this.log({ ...l, shared: [
-            ...l.shared.filter(x => x.id !== s.id).map(x => replaced(x) ? { ...x, status: "withdrawn" as const, at: entry.at } : x), entry,
-          ] }, { type: "result", side: "mine", proof: s.id, ok, error }));
+          await this.options.storage.update(l => l.shared.filter(x => x.id !== s.id && replaced(x)).reduce(
+            (out, x) => this.log(out, { type: "stopped", side: "mine", proof: x.id, provider: x.provider, subject: x.subject, reason: "withdrawn" }),
+            this.log({ ...l, shared: [
+              ...l.shared.filter(x => x.id !== s.id).map(x => replaced(x) ? { ...x, status: "withdrawn" as const, at: entry.at } : x), entry,
+            ] }, { type: "result", side: "mine", proof: s.id, ok, error })));
           return;
         }
         case "idp-withdraw": {
@@ -605,7 +608,11 @@ export class IdentityExchange {
       // Its owner withdrew it while it was being checked: kept as if the withdraw had come just after.
       const record: ReceivedIdentity = { id, binding, evidence, verified, presenter: scope.subject, audience: scope.audience, context: scope.context,
         verifiedAt: now, checkedAt: now, status: withdrawn ? "withdrawn" : "verified" };
-      const kept = { ...logged, challenges, received: [...received, record] };
+      // The older proof it replaced is no longer held: its share stops on the timeline (one already stopped has its stop).
+      const replaced = l.received.filter(r => r.id !== id && !received.includes(r) && r.binding.provider === binding.provider && r.verified.subject === subject
+        && r.status !== "withdrawn" && r.status !== "revoked");
+      const kept = replaced.reduce((out, r) => this.log(out, { type: "stopped", side: "theirs", proof: r.id, provider: r.binding.provider, subject: r.verified.subject, reason: "withdrawn" }),
+        { ...logged, challenges, received: [...received, record] });
       return withdrawn ? this.log(kept, { type: "stopped", side: "theirs", proof: id, provider: binding.provider, subject: verified.subject, reason: "withdrawn" }) : kept;
     });
     // A withdrawn one gets no result, verified or not: the owner has it withdrawn (`idp-withdrawn` went out), and a late
