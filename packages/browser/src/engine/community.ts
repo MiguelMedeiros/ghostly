@@ -823,8 +823,8 @@ export class Communities {
   }
 
   /**
-   * Whom a role that reached my leave goes on to: the member whose commit gave it to me (the admin who handed it, or the
-   * member who committed a leave that put the role back), while it stays; else the first other member whose edge is up,
+   * Whom a role that reached my leave goes on to: the member whose `role` commit gave it to me (`by`, whatever was
+   * committed on top since), while it stays; else the first other member whose edge is up,
    * else the first in the roster. Never one whose leave I heard, nor one I handed the role to myself (an admin who left):
    * with two leavers the role would go back and forth between them.
    */
