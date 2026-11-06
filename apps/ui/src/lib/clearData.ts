@@ -8,6 +8,7 @@ import { activeProfileId, registryKey } from "./profiles";
 import { profileDatabase } from "./profileData";
 import { linkedFilesDatabase } from "./apps/webFiles";
 import { pushPlatform } from "./wakePush";
+import { forgetGifSearches } from "./gifSearch";
 
 /** How long the peer may take to take things back from the network and stop, before the clear goes on without it. */
 export const CLEAR_ENGINE_MS = 15_000;
@@ -19,7 +20,7 @@ export const CLEAR_ENGINE_MS = 15_000;
  * 1. The peer takes back what it can from the network (items held for contacts, its DID, its identity proofs), stops,
  *    and empties its database but for the wallets (`clearProfileStores`). Never waited on for long: a peer that does
  *    not answer in time is left behind, and its database is emptied from here.
- * 2. The profile's local keys: chats, drafts, settings (lock screen and backup storage included).
+ * 2. The profile's local keys: chats, drafts, settings (lock screen and backup storage included), and its GIF searches.
  * 3. Its files, wherever they are kept, and on the web its apps' linked files (the paths and folders they were given;
  *    the Desktop's go with its files).
  * 4. Its push subscription ends at the push service, so contacts who kept it can no longer wake this app.
@@ -58,6 +59,8 @@ async function clearProfile(profileId: string): Promise<void> {
     }
   }
   keysToRemove.forEach((key) => localStorage.removeItem(key));
+  // Its GIF searches are kept in the tab's session, which the reload after the clear keeps.
+  forgetGifSearches();
   await removeFileBytes().catch(() => {});
   await new Promise<void>((resolve) => {
     try {
