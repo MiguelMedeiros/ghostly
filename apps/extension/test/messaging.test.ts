@@ -667,6 +667,20 @@ describe("the toolbar button", () => {
     expect(world.callsTo("tabs.update")).toEqual([[tab.id, { active: true }]]);
     expect(world.callsTo("windows.update")).toEqual([[tab.windowId, { focused: true }]]);
   });
+
+  it("opens the app even when the peer does not start, so the page can say why", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      // The document the worker made as it loaded went away, and the next one's script never listens.
+      world.endOffscreen();
+      world.onCreateDocument = async () => {};
+      fire(world.chrome.action.onClicked);
+      await vi.advanceTimersByTimeAsync(100 * 50 + 1000);
+      expect(world.callsTo("tabs.create")).toEqual([[world.chrome.runtime.getURL("app.html")]]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("the offscreen peer", () => {
