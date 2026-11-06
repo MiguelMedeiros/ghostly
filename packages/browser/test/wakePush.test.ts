@@ -387,6 +387,32 @@ describe("online notices: a contact whose app is closed hears that this one came
     expect(bodies(pushSend.mock.calls.slice(2), other.secret, other.auth)).toEqual([{ wake: 1, k: other.target.token }, { wake: 1, k: other.target.token, o: 1 }]);
   });
 
+  it("goes out ten a minute, so a push relay's minute (30) keeps room for message and call wake-ups", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const pushSend = vi.fn(async () => 201);
+      const node = engine({ pushSend });
+      const chats = [];
+      for (let i = 0; i < 25; i++) chats.push(await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: asked().target }));
+      node["sayOnline"]();
+      expect(pushSend).toHaveBeenCalledTimes(10);
+      // A call right after still has the relay's room.
+      const callee = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: contactTarget().target });
+      expect(await node.wakeForCall({ linkId: callee.id })).toBe(true);
+      expect(pushSend).toHaveBeenCalledTimes(11);
+      vi.advanceTimersByTime(59_999);
+      expect(pushSend).toHaveBeenCalledTimes(11);
+      // A contact whose chat went live meanwhile is not told.
+      (node["links"].get(chats[10]!.id)!.link as unknown as Stub).isDataLinkOpen = true;
+      vi.advanceTimersByTime(1);
+      expect(pushSend).toHaveBeenCalledTimes(21);
+      vi.advanceTimersByTime(60_000);
+      expect(pushSend).toHaveBeenCalledTimes(25);
+      vi.advanceTimersByTime(60_000);
+      expect(pushSend).toHaveBeenCalledTimes(25);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("is said a little after this app starts or comes back online, to those still away then", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {

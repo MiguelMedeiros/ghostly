@@ -93,6 +93,13 @@ export const WAKE_ONLINE_INTERVAL_MS = 30 * 60_000;
 export const WAKE_ONLINE_TTL_SECONDS = 5 * 60;
 /** How long after this side comes online it waits for the chat to go live before it says so: a live contact needs no push. */
 export const WAKE_ONLINE_DELAY_MS = 30_000;
+/**
+ * Most online notices that go out in `WAKE_ONLINE_BATCH_MS`; the rest wait for the next one. A page posts its wake-ups
+ * through a push relay, which takes 30 a minute from one address: all at once, a profile with 30 contacts that asked
+ * spent the whole minute, and a call or message wake-up right after was refused.
+ */
+export const WAKE_ONLINE_BATCH = 10;
+export const WAKE_ONLINE_BATCH_MS = 60_000;
 
 /** At most one call wake-up per contact in this long: a caller who tries again at once is not a new push. */
 export const WAKE_CALL_INTERVAL_MS = 30_000;
