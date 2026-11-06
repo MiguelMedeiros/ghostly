@@ -19,7 +19,7 @@ export function ComposerSheet({ ref, className = "", children, ...props }: HTMLA
   return (<>
     <div className="sheet-backdrop" />
     <div ref={box} {...props}
-      className={`composer-sheet sheet sheet-padded absolute bottom-full left-0 mb-2 z-50 animate-fade-in w-[400px] max-w-[min(100%,calc(100vw-1.5rem))] max-md:max-w-none bg-panel-header border border-border rounded-2xl shadow-2xl p-3 ${className}`}>
+      className={`composer-sheet sheet sheet-padded absolute bottom-full start-0 mb-2 z-50 animate-fade-in w-[400px] max-w-[min(100%,calc(100vw-1.5rem))] max-md:max-w-none bg-panel-header border border-border rounded-2xl shadow-2xl p-3 ${className}`}>
       {children}
     </div>
   </>);
