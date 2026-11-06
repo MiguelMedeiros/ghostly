@@ -114,12 +114,30 @@ function allowedAlgorithm(packet: OpenPGP.PublicKeyPacket | OpenPGP.SecretKeyPac
   const { algorithm, bits, curve } = packet.getAlgorithmInfo();
   const names: Record<string, string> = { nistP256: 'P-256', nistP384: 'P-384', nistP521: 'P-521',
     brainpoolP256r1: 'brainpoolP256r1', brainpoolP384r1: 'brainpoolP384r1', brainpoolP512r1: 'brainpoolP512r1' };
-  if ((algorithm === 'rsaEncryptSign' || (algorithm === 'rsaSign' && signing)) && bits && bits >= 2048) return `RSA ${bits}`;
+  if ((algorithm === 'rsaEncryptSign' || (algorithm === 'rsaSign' && signing)) && bits && bits >= 2048 && bits <= RSA_MAX_BITS) return `RSA ${bits}`;
   if (algorithm === 'ed25519' || (algorithm === 'eddsaLegacy' && curve === 'ed25519Legacy')) return 'Ed25519';
   if (algorithm === 'ed448') return 'Ed448';
   if (algorithm === 'ecdsa' && curve && names[curve]) return `ECDSA ${names[curve]}`;
   const shown = algorithm.startsWith('rsa') ? `RSA ${bits ?? '?'}` : curve ? `${algorithm} ${curve}` : algorithm;
-  throw new PgpProofError(`This key uses ${shown}, which Ghostly does not accept. Use Ed25519, ECDSA (P-256, P-384, P-521, brainpool) or RSA with at least 2048 bits.`);
+  throw new PgpProofError(`This key uses ${shown}, which Ghostly does not accept. Use Ed25519, ECDSA (P-256, P-384, P-521, brainpool) or RSA with 2048 to ${RSA_MAX_BITS} bits.`);
+}
+const RSA_MAX_BITS = 8192;
+/** GnuPG and OpenPGP.js make RSA keys with 65537 (17 bits). The same limit as SSH keys (core sshsig). */
+const RSA_MAX_EXPONENT_BITS = 64;
+const bitLength = (bytes: Uint8Array) => { const i = bytes.findIndex(b => b !== 0); return i < 0 ? 0 : (bytes.length - i - 1) * 8 + 32 - Math.clz32(bytes[i]); };
+/**
+ * Every RSA key in a key, primary and subkeys, sized before any signature on it is verified.
+ * Where WebCrypto refuses a key (Chromium: an exponent over 33 bits), OpenPGP.js verifies in
+ * JavaScript, one modular squaring per bit of the exponent, blocking the thread.
+ */
+function assertRsaSizes(key: OpenPGP.PublicKey): void {
+  for (const packet of [key.keyPacket, ...key.subkeys.map(s => s.keyPacket)]) {
+    if (!packet.getAlgorithmInfo().algorithm.startsWith('rsa')) continue;
+    const { n, e } = (packet as unknown as { publicParams: { n?: Uint8Array; e?: Uint8Array } }).publicParams;
+    const bits = n ? bitLength(n) : 0, exponentBits = e ? bitLength(e) : 0;
+    if (bits > RSA_MAX_BITS) throw new PgpProofError(`This key uses RSA ${bits}, which Ghostly does not accept. Use Ed25519, ECDSA (P-256, P-384, P-521, brainpool) or RSA with 2048 to ${RSA_MAX_BITS} bits.`);
+    if (exponentBits > RSA_MAX_EXPONENT_BITS) throw new PgpProofError(`This key uses RSA with a ${exponentBits}-bit public exponent, which Ghostly does not accept. Use a key made by GnuPG (exponent 65537).`);
+  }
 }
 const ALLOWED_HASHES = new Set([8, 9, 10, 11, 12, 14]); // SHA-256, -384, -512, -224, SHA3-256, SHA3-512
 
@@ -209,6 +227,7 @@ async function readOneKey(pgp: Pgp, input: { armored: string } | { binary: Uint8
   if (key.isPrivate()) throw new PgpProofError('This is a PRIVATE key. Ghostly only needs your public key (gpg --armor --export).');
   const version = key.keyPacket.version;
   if (version !== 4 && version !== 6) throw new PgpProofError(`OpenPGP v${version} keys are not accepted; use a v4 (RFC 4880) or v6 (RFC 9580) key.`);
+  assertRsaSizes(key as OpenPGP.PublicKey);
   return key as OpenPGP.PublicKey;
 }
 

@@ -85,7 +85,11 @@ it("a backup without a passphrase is made only when asked for by name, says so, 
 
   const run = await ghostly(["--home", dir, "profile", "backup", "--out", file, "--no-passphrase"], { env: NO_PASS });
   expect(ok(run)).toMatchObject({ path: file, protection: "none" });
-  expect(run.stderr).toContain("Not encrypted: this file holds the profile's keys, chats and wallet secrets in the clear.");
+  // The warning is a note like every other on stderr: it starts with "ghostly: ". Stdout stays the one JSON answer.
+  expect(run.stderr).toMatch(/^ghostly: Not encrypted: this file holds the profile's keys, chats and wallet secrets in the clear\./m);
+  expect(run.stderr).not.toMatch(/^Not encrypted/m);
+  expect(Object.keys(ok(run)).sort()).toEqual(["bytes", "files", "path", "protection"]);
+  expect(run.stdout.trim().split("\n"), "one JSON line, the warning not among it").toHaveLength(1);
   expect(header(file)).toEqual({ format: "ghostly-backup", version: 2, protection: "none", check: { name: "SHA-256-chain" } });
   // No passphrase is asked for, and one in the environment is not needed.
   expect(ok(await ghostly(["--home", dir, "profile", "restore", file, "copy"], { env: NO_PASS }))).toMatchObject({ restored: "copy", protection: "none" });

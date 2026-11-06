@@ -341,8 +341,9 @@ export interface AppsHost {
 /**
  * `store`: fetched from that store's listing, so installing it pins its updates to that store. `revocations`: its
  * publisher's, read beside it when it was fetched (Install refuses a version they stop, and the record starts with them).
+ * `asks`: what the last install screen of it listed (`AppPreview.asks`), for an Install that does not say.
  */
-interface Staged { bundle: AppBundle; bytes: Uint8Array; from: string; store?: string; revocations: SignedAppRevocation[]; at: number }
+interface Staged { bundle: AppBundle; bytes: Uint8Array; from: string; store?: string; revocations: SignedAppRevocation[]; asks: AppPermission[]; at: number }
 
 /**
  * `run` on every item, at most `limit` at a time (the next one starts when one ends): one promise per item, in the
@@ -631,6 +632,11 @@ export class Apps {
   private readonly verifying = new Map<string, Promise<AppBundle>>();
   /** Reads of a bundle's URL under way: an install screen opened again waits on the read the closed one began, not on a second. */
   private readonly bundleReads = new Map<string, Promise<{ bundle: AppBundle; bytes: Uint8Array }>>();
+  /**
+   * The last write of a bundle under way, by digest: a second write of the same files (Open while the update check
+   * fetches them, two Installs) waits for it and finds them stored, never removing the file the first one is filling.
+   */
+  private readonly bundleWrites = new Map<string, Promise<FileBytesKind>>();
   /**
    * The `icon.png` of each checked bundle, by digest (at most 256 KiB and 1024 × 1024 pixels, or null for none): every icon shown on the Apps
    * page, in a chat's cards and in the composer's Apps is read without the whole bundle again.
@@ -974,19 +980,24 @@ export class Apps {
   /**
    * Stores a bundle's bytes. A browser that keeps no files fails here: Safari's Private Browsing (and WebKit's in-memory
    * contexts) refuses a Blob in IndexedDB with "Error preparing Blob/File data to be stored in object store". Any such
-   * failure is `storage`, with the browser's own words after it for the logs, and leaves no piece behind.
+   * failure is `storage`, with the browser's own words after it for the logs, and leaves no piece behind. Writes of one
+   * digest run one after the other (`bundleWrites`): a file store takes a file's pieces only in order.
    */
-  private async writeBundle(digest: string, bytes: Uint8Array): Promise<FileBytesKind> {
+  private writeBundle(digest: string, bytes: Uint8Array): Promise<FileBytesKind> {
     this.written.add(digest);
     const writes = this.writes.get(digest) ?? { started: 0, running: 0 };
     this.writes.set(digest, writes);
     writes.started++;
     writes.running++;
-    try {
-      return await this.writeBundleBytes(digest, bytes);
-    } finally {
-      if (--writes.running === 0 && this.writes.get(digest) === writes) this.writes.delete(digest);
-    }
+    const before = this.bundleWrites.get(digest);
+    const write = (before ? before.catch(() => {}).then(() => this.writeBundleBytes(digest, bytes)) : this.writeBundleBytes(digest, bytes))
+      .finally(() => {
+        if (--writes.running === 0 && this.writes.get(digest) === writes) this.writes.delete(digest);
+      });
+    this.bundleWrites.set(digest, write);
+    const done = () => { if (this.bundleWrites.get(digest) === write) this.bundleWrites.delete(digest); };
+    write.then(done, done);
+    return write;
   }
 
   private async writeBundleBytes(digest: string, bytes: Uint8Array): Promise<FileBytesKind> {
@@ -1591,17 +1602,17 @@ export class Apps {
       await done(tx);
     }
     const revocations = [...await this.keptRevocationsOf(version.ref), ...read];
-    for (const [d, s] of this.staged) if (this.now() - s.at > STAGED.ms) this.staged.delete(d);
-    this.staged.delete(digest);
-    while (this.staged.size >= STAGED.max) this.staged.delete(this.staged.keys().next().value!);
-    this.staged.set(digest, { bundle, bytes, from, ...(fromStore !== undefined && { store: fromStore }), revocations, at: this.now() });
-    if (!this.sweep) this.sweepStaged();
-
     const [installed, stores] = await Promise.all([this.app(version.ref), this.stores()]);
     // What Install will answer: a clash with the update waiting is one too.
     const decision = installDecision(installed, version);
     const install = decision === "other-app" ? "new" : decision;
     const asks = install === "new" ? [...manifest.permissions] : install === "update" ? manifest.permissions.filter((p) => !installed!.permissions.includes(p)) : [];
+    for (const [d, s] of this.staged) if (this.now() - s.at > STAGED.ms) this.staged.delete(d);
+    this.staged.delete(digest);
+    while (this.staged.size >= STAGED.max) this.staged.delete(this.staged.keys().next().value!);
+    this.staged.set(digest, { bundle, bytes, from, ...(fromStore !== undefined && { store: fromStore }), revocations, asks, at: this.now() });
+    if (!this.sweep) this.sweepStaged();
+
     const listedBy = this.listedBy(version.ref, stores);
     return {
       digest, ref: version.ref, publisher: manifest.publisher, fingerprint: appFingerprint(manifest.publisher), manifest, from,
@@ -1616,14 +1627,18 @@ export class Apps {
   /**
    * Installs the bundle `preview` fetched, once the person pressed Install: `grant` must hold every permission it asks
    * for (WISP 1200 § Permissions: none is granted by a store or a contact). A revoked or removed version is not
-   * installed; neither is a rollback, nor another bundle under an installed `sequence` (marked on the app).
+   * installed; neither is a rollback, nor another bundle under an installed `sequence` (marked on the app). `asks` is
+   * what the person's screen listed (`AppPreview.asks`; the last screen of this bundle when not given): what this install
+   * adds to the record it writes over must be among it, else the screen is shown again first.
    */
-  async install({ digest, grant }: { digest: string; grant: string[] }): Promise<InstalledAppView> {
+  async install({ digest, grant, asks }: { digest: string; grant: string[]; asks?: string[] }): Promise<InstalledAppView> {
     const staged = this.staged.get(digest);
     if (!staged || this.now() - staged.at > STAGED.ms) { this.staged.delete(digest); fail("expired", "Fetch the app again"); }
     const { bundle, bytes, from, store: fromStore, revocations } = staged;
     const { manifest } = bundle;
     if (!Array.isArray(grant) || !manifest.permissions.every((p) => grant.includes(p))) fail("permissions", "Every permission the app asks for must be granted");
+    const shown: readonly string[] = asks ?? staged.asks;
+    if (!Array.isArray(shown)) fail("permissions", "The permissions shown must be a list");
     const version = versionOf(manifest, digest);
     // The files written here: left only while a record names them (a version refused after all keeps none).
     let wrote: FileBytesKind | undefined;
@@ -1648,6 +1663,10 @@ export class Apps {
           if (!(await this.putAppIfUnchanged({ ...installed!, equivocation: { sequence: version.sequence, digest, at: this.now() } }, installed))) continue;
           fail("equivocation", `Two different versions ${version.sequence} exist. Ghostly kept the one you have.`);
         }
+        // It grants only what the screen showed, worked out against the record read now: one opened before the app was
+        // uninstalled, or before the check installed a version that dropped a permission, is shown again first.
+        const added = installed ? addedAppPermissions(installed.permissions, manifest.permissions) : [...manifest.permissions];
+        if (added.some((p) => !shown.includes(p))) fail("permissions-changed", `This install now asks for ${added.join(", ")}; look at it again`);
         if (decision === "same" && installed) {
           // A restored profile's app that needs its files gets them back. The same version from a store's listing pins its
           // updates to that store (one by URL or card leaves the record as it is).

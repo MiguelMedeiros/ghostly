@@ -347,7 +347,9 @@ ghostly listen --type message.received --cursor "${GHOSTLY_HOME:-$HOME/.ghostly}
   chat, named as for `call auto on --from` (its id, its contact's key or a label given here). It is kept in the
   profile's `groups.json` (0600) with each chat's contact key: removing the chat takes it off the list, and a chat
   whose contact's key is no longer that one loses it. Each accept is a line in the daemon's log (the group's id and
-  the chat). A profile keeps at most 32 invitations waiting (4 per chat): when 32 wait, one over a chat on the list
+  the chat). Another contact's invitation under the same group id, come first, does not keep the owner's out: the
+  owner's, kept beside it (`others` in `group show`), is the one taken and the other contact is told no, as long as the
+  group held is only an invitation not answered yet; beside a group joined or accepted it waits for you. A profile keeps at most 32 invitations waiting (4 per chat): when 32 wait, one over a chat on the list
   takes the place of the oldest waiting from the chat that holds the most, whose inviter is told no, so the invitations
   nobody answers on a bot cannot keep its owner's out.
 

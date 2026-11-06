@@ -2,7 +2,7 @@ import { useId, useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupEdgeView, GroupView } from "@ghostly/browser/shared/types";
 import { useOutsideDismiss } from "../hooks/useDismiss";
-import { edgeDot, edgeLabel, edgeReconnects, edgeWaits, groupTransports, memberName } from "../lib/groups";
+import { edgeDot, edgeLabel, edgeReconnects, edgeWaits, groupTransports, memberName, sameNamed } from "../lib/groups";
 import { dots, focus, type ConnectionKind } from "../lib/connection";
 import { ConnectionIcon } from "./ConnectionIcon";
 import { useI18n, type Translate } from "../contexts/I18nContext";
@@ -106,7 +106,7 @@ export function GroupConnection({ group }: { group: GroupView }) {
                 <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${edgeDot(m)}`} />
                 <span className="min-w-0 flex-1">
                   {/* The name a member typed, in its own direction: in Arabic a long English one is cut at its end, not its start. */}
-                  <span dir="auto" className="block truncate text-text-primary">{memberName(m, t)}</span>
+                  <span dir="auto" className="block truncate text-text-primary">{memberName(m, t, sameNamed(group.members))}</span>
                   <span className="block truncate text-[11px]" data-testid="group-connection-member-status">{edgeLabel(m, now, t, agoIn(language))}</span>
                 </span>
                 {/* The app reconnects by itself: this only skips the wait, so it stays a quiet secondary action. */}

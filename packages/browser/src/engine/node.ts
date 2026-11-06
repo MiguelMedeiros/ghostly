@@ -2861,7 +2861,7 @@ export class GhostlyNode implements EngineImplementation {
   appStoreRemove(params: { key: string }): Promise<void> { return this.appStore.removeStore(params); }
   appStoreRefresh(params: { key?: string } = {}): Promise<AppStoreSummary[]> { return this.appStore.refreshStores(params); }
   appPreview(params: AppSource): Promise<AppPreview> { return this.appStore.preview(params); }
-  appInstall(params: { digest: string; grant: string[] }): Promise<InstalledAppView> { return this.appStore.install(params); }
+  appInstall(params: { digest: string; grant: string[]; asks?: string[] }): Promise<InstalledAppView> { return this.appStore.install(params); }
   appUpdateAccept(params: { ref: string }): Promise<InstalledAppView> { return this.appStore.acceptUpdate(params); }
   appCheckUpdates(): Promise<AppCheckResult[]> { return this.appStore.checkUpdates(); }
   /** Uninstalls an app. One running then is closed in every chat (the contact hears `close`), and the pages are told, to stop its frames. */
@@ -3693,15 +3693,21 @@ export class GhostlyNode implements EngineImplementation {
   private wakePeer(live: LiveLink, kind: WakeKind = "message"): void {
     const target = live.stored.peerWake, linkId = live.stored.id;
     if (!target || !live.stored.profile || live.stored.group || !this.networkOn) return;
-    if (!(kind === "call" ? this.callWakeLimiter : this.wakeLimiter).take(linkId)) return;
-    this.postWake(linkId, target, kind);
+    const limiter = kind === "call" ? this.callWakeLimiter : this.wakeLimiter, takenAt = Date.now();
+    if (!limiter.take(linkId, takenAt)) return;
+    // One that did not reach the push service is not the contact's wake-up: the next message's may go a little later.
+    this.postWake(linkId, target, kind, () => limiter.missed(linkId, takenAt));
   }
 
-  /** Posts one wake-up to the target a link holds; a subscription gone (404, 410) is forgotten. */
-  private postWake(linkId: string, target: WakeTarget, kind: WakeKind): void {
+  /**
+   * Posts one wake-up to the target a link holds; a subscription gone (404, 410) is forgotten. `missed`: it did not
+   * reach the push service (no network, the relay did not forward it, or the service answered 429 or 5xx).
+   */
+  private postWake(linkId: string, target: WakeTarget, kind: WakeKind, missed?: () => void): void {
     let request: PushRequest;
     try { request = wakeRequest(target, Date.now(), kind); } catch { return; }
     void this.postPush(request).then((status) => {
+      if (status === 429 || status >= 500) missed?.();
       // The subscription is gone (the contact turned it off, or its browser dropped it): forget it until it shares a new one.
       if ((status === 404 || status === 410) && this.links.get(linkId)?.stored.peerWake?.endpoint === target.endpoint) {
         const current = this.links.get(linkId)!;
@@ -3709,7 +3715,7 @@ export class GhostlyNode implements EngineImplementation {
         void db.patchLink(linkId, { peerWake: undefined });
         this.emitState();
       }
-    }).catch(() => { /* no network, or refused and no relay: the message still waits for the contact */ });
+    }).catch(() => { missed?.(); /* no network, or refused and no relay: the message still waits for the contact */ });
   }
 
   /**
@@ -5829,7 +5835,8 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * Pins a message of a chat or a group, or unpins (WISP 400 § Pinned message): one per chat, the last pin winning. A
    * 1:1 chat keeps it until the contact confirms it on a live session; a group sends it to its members, where the rule
-   * (`mayPin`) allows it. In a group, `n` is the pin's number, for `groupTaken`.
+   * (`mayPin`) allows it. In a group, `n` is the pin's number, for `groupTaken`. The message pinned already is not
+   * pinned again: nothing goes, and the pin stays its pinner's (`n` only when that is me).
    */
   async pinMessage({ linkId, messageId, remove }: { linkId: string; messageId?: string; remove?: boolean }): Promise<{ error: string | null; refused?: boolean; n?: number }> {
     if (typeof linkId !== "string" || !linkId) return { error: "No chat to pin in" };
@@ -5839,8 +5846,10 @@ export class GhostlyNode implements EngineImplementation {
       // Not a member (removed, say): refused with the reason the group shows, as a reaction is.
       if (!view || view.status !== "active") return { error: view?.statusReason ?? "You are not in this group", refused: true };
       if (!mayPinIn(view)) return { error: "Only the admin pins in a community" };
-      const pin = await myPin(host, linkId, messageId, !!remove, this.groups.pinOf(groupId));
+      const current = this.groups.pinOf(groupId), pin = await myPin(host, linkId, messageId, !!remove, current);
       if ("error" in pin) return pin;
+      // Pinned already: nothing goes. My own pin's number is still the one its edges take (`groupTaken`).
+      if ("already" in pin) return { error: null, ...(current?.by === "me" && { n: current.n }) };
       if (this.groups.isCommunityGroup(groupId)) {
         try { await this.groups.sendCommunityApp(groupId, { t: COMMUNITY_PIN_FRAME, id: pin.id, n: pin.n }, pinKey(pin.n)); } catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
         await this.groups.setPin(groupId, pin);
@@ -5858,6 +5867,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!live.stored.profile) return { error: "Pins need a current chat; this compatibility chat sends text only." };
     const pin = await myPin(host, linkId, messageId, !!remove, live.stored.pin);
     if ("error" in pin) return pin;
+    if ("already" in pin) return { error: null };
     await this.keepLinkPin(linkId, pin, { id: pin.id, n: pin.n });
     this.flushPin(linkId);
     return { error: null };

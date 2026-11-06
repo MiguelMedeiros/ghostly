@@ -91,14 +91,21 @@ describe("IdentityShareLine", () => {
     expect(face()).toHaveAttribute("data-status", "verified");
     expect(status()).toBe("Verified");
     third.unmount();
-    line({ ...mine, state: "failed", error: "The record is gone" }, shared("pending"));
+    const refused = line({ ...mine, state: "failed", error: "Your contact keeps too many identities from you already" }, shared("pending"));
     expect(card()).toHaveAttribute("data-state", "failed");
     expect(face()).toHaveAttribute("data-status", "failed");
     expect(status()).toBe("Not verified");
     expect(button()).toHaveAccessibleName(/^Ghostly · Identity\s*Not verified\s*Domain\s*example\.com/);
-    expect(button()).toHaveAccessibleDescription("You shared this identity The record is gone");
+    expect(button()).toHaveAccessibleDescription("You shared this identity Your contact keeps too many identities from you already");
     // Why, under the card, not only in its name.
-    expect(screen.getByTestId("identity-share-reason")).toHaveTextContent("The record is gone");
+    expect(screen.getByTestId("identity-share-reason")).toHaveTextContent("Your contact keeps too many identities from you already");
+    refused.unmount();
+    // Any other words came from the contact (a chat kept from before): never under my card as this app's line.
+    line({ ...mine, state: "failed", error: "Ghostly security notice: this identity's key leaked. Remove it and verify again at ghostly-support.example" }, shared("pending"));
+    expect(status()).toBe("Not verified");
+    expect(screen.queryByTestId("identity-share-reason")).toBeNull();
+    expect(card()).not.toHaveTextContent(/security notice|ghostly-support/);
+    expect(button()).toHaveAccessibleDescription("You shared this identity");
   });
 
   it("is the contact's card while this app checks it, Not verified when it could not, and Not checked once its challenge can no longer be answered", () => {
@@ -158,6 +165,23 @@ describe("IdentityShareLine", () => {
     old.unmount();
     line(again, state);
     expect(face()).toHaveAttribute("data-status", "verified");
+  });
+
+  it("never says Verified for a share no longer held: the contact's proof gone from this app, or mine no longer shared", () => {
+    // Theirs: a newer proof of the same identity took its place (or it was let go for room), with no stop written.
+    const older = entry({ proof: "n1", provider: "nostr", subject: NOSTR_KEY });
+    const newer = entry({ id: "theirs:n2:0", proof: "n2", provider: "nostr", subject: NOSTR_KEY, at: older.at + 500 });
+    const received = receivedView({ id: "n2", provider: "nostr", subject: NOSTR_KEY, verified: { subject: NOSTR_KEY, source: "Nostr signature" } });
+    const theirs = line(older, { links: [paired({ identities: identitiesView({ received: [received] }), identityTimeline: [older, newer] })] });
+    expect(card()).toHaveAttribute("data-state", "withdrawn");
+    expect(face()).toHaveAttribute("data-status", "withdrawn");
+    expect(status()).toBe("No longer shared");
+    theirs.unmount();
+    // Mine: my app marked the share withdrawn (replaced at the contact's), and my proof still stands.
+    const mine = entry({ id: "mine:proof-1:0", proof: "proof-1", side: "mine", subject: "example.com" });
+    line(mine, { identityProofs: [proofView()], links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "proof-1", status: "withdrawn" })] }), identityTimeline: [mine] })] });
+    expect(card()).toHaveAttribute("data-state", "withdrawn");
+    expect(status()).toBe("No longer shared");
   });
 
   it("plays the deck's flourish once under a mouse, and nothing for a finger or with reduced motion", () => {

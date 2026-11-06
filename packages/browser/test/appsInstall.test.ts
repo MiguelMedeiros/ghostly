@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { APP_BUNDLE_MAGIC, canonicalJsonBytes, toBase64Url, utf8Encode, type SignedAppRevocation } from "@ghostly/core";
+import { APP_BUNDLE_MAGIC, canonicalJsonBytes, toBase64Url, utf8Encode, type AppPermission, type SignedAppRevocation } from "@ghostly/core";
 import { fileBytes, resetFileBytes } from "../src/shared/fileBytes";
 import { STORES, openDb, wrap } from "../src/shared/idb";
 import {
@@ -234,6 +234,57 @@ describe("updates", () => {
     await expect(store.acceptUpdate({ ref: v1.ref })).rejects.toThrow(/^permissions-changed/);
     expect((await store.list())[0]).toMatchObject({ sequence: 1, permissions: [], pending: { sequence: 2, added: ["internet", "chat"] } });
     expect(await store.acceptUpdate({ ref: v1.ref })).toMatchObject({ sequence: 2, permissions: ["internet", "chat"] });
+  });
+
+  it("Install of a screen opened before the app was uninstalled grants nothing it did not show, and the screen read again asks for all", async () => {
+    const all: AppPermission[] = ["chat", "internet", "files", "name"];
+    const { store, v1 } = await installed({ permissions: all });
+    const v2 = await bundle({ sequence: 2, permissions: all });
+    net.put(PINNED_URL, v2.bytes);
+    // A card's screen: an update that asks nothing.
+    const screen = await store.preview({ url: PINNED_URL });
+    expect(screen).toMatchObject({ install: "update", asks: [] });
+    // Uninstalled (another tab, the Apps page) before Install is pressed: the permissions went with it.
+    await store.uninstall({ ref: v1.ref });
+    await expect(store.install({ digest: v2.digest, grant: all, asks: screen.asks })).rejects.toThrow(/^permissions-changed/);
+    await expect(store.install({ digest: v2.digest, grant: all }), "the screen the engine showed last asked nothing either").rejects.toThrow(/^permissions-changed/);
+    expect(await store.list()).toEqual([]);
+    expect(await bundleIds()).toEqual([]);
+    const again = await store.preview({ url: PINNED_URL });
+    expect(again).toMatchObject({ install: "new", asks: all });
+    expect(await store.install({ digest: v2.digest, grant: all, asks: again.asks })).toMatchObject({ sequence: 2, permissions: all });
+  });
+
+  it("Install of a screen opened before the check dropped a permission does not grant it back unshown", async () => {
+    const { store, v1 } = await installed({ permissions: ["chat", "internet"] });
+    const v3 = await bundle({ sequence: 3, permissions: ["chat", "internet"] });
+    const pinned3 = `https://cdn.jsdelivr.net/gh/ana/chess@${"c".repeat(40)}/app.ghostlyapp`;
+    net.put(pinned3, v3.bytes);
+    const screen = await store.preview({ url: pinned3 });
+    expect(screen).toMatchObject({ install: "update", asks: [] });
+    // Meanwhile the check installs 2, which drops internet, by itself.
+    const v2 = await bundle({ sequence: 2, permissions: ["chat"] });
+    net.put(PINNED_URL, v2.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v2, [PINNED_URL])] }));
+    await store.addStore({ url: STORE_URL });
+    expect((await store.checkUpdates())[0]!.outcome).toBe("updated");
+    expect((await store.list())[0]).toMatchObject({ sequence: 2, permissions: ["chat"] });
+    // A second screen of 3 shows internet; the first one's Install still grants only what that one showed.
+    const again = await store.preview({ url: pinned3 });
+    expect(again).toMatchObject({ install: "update", asks: ["internet"] });
+    await expect(store.install({ digest: v3.digest, grant: ["chat", "internet"], asks: screen.asks })).rejects.toThrow(/^permissions-changed/);
+    expect((await store.list())[0]).toMatchObject({ ref: v1.ref, sequence: 2, permissions: ["chat"] });
+    expect(await bundleIds()).toEqual([`app-${v2.digest}`]);
+    expect(await store.install({ digest: v3.digest, grant: ["chat", "internet"], asks: again.asks })).toMatchObject({ sequence: 3, permissions: ["chat", "internet"] });
+  });
+
+  it("Install of an update that asks nothing new is not refused, and the shown list may be more than it adds now", async () => {
+    const { store, v1 } = await installed({ permissions: ["chat"] });
+    const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"] });
+    net.put(PINNED_URL, v2.bytes);
+    const screen = await store.preview({ url: PINNED_URL });
+    expect(screen).toMatchObject({ install: "update", asks: ["name"] });
+    expect(await store.install({ digest: v2.digest, grant: ["chat", "name"], asks: screen.asks })).toMatchObject({ ref: v1.ref, sequence: 2, permissions: ["chat", "name"] });
   });
 
   it("the install screen says equivocation for a bundle that clashes with the update waiting, as Install answers", async () => {
@@ -1174,8 +1225,8 @@ describe("a browser that keeps no app files (Safari's Private Browsing)", () => 
 });
 
 describe("a restored profile (installed list, no bundle)", () => {
-  async function restored() {
-    const v1 = await bundle();
+  async function restored(data?: Uint8Array) {
+    const v1 = await bundle({ data });
     net.put(BUNDLE_URL, v1.bytes);
     const store = apps(net);
     await store.preview({ url: BUNDLE_URL });
@@ -1242,6 +1293,45 @@ describe("a restored profile (installed list, no bundle)", () => {
     await (await fileBytes()).remove(`app-${v1.digest}`);
     await store.preview({ url: PINNED_URL });
     expect(await store.install({ digest: v1.digest, grant: ["chat"] })).toMatchObject({ run: { status: "ok" } });
+  });
+
+  // Each case three times, with files of many pieces: a collision of the two writes depends on how their pieces interleave.
+  describe.each([1, 2, 3])("two fetches of its files at once share one write (run %i)", () => {
+    const large = () => restored(new Uint8Array(2_500_000));
+
+    it("Open while the update check fetches them: both get the files", async () => {
+      const { v1, store } = await large();
+      const [entry, check] = await Promise.all([store.entry({ ref: v1.ref }), store.checkUpdates()]);
+      expect(entry.digest).toBe(v1.digest);
+      expect(check[0]!.run).toEqual({ status: "ok" });
+      expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
+    });
+
+    it("Open twice", async () => {
+      const { v1, store } = await large();
+      const entries = await Promise.all([store.entry({ ref: v1.ref }), store.entry({ ref: v1.ref })]);
+      expect(entries.map((e) => e.digest)).toEqual([v1.digest, v1.digest]);
+      expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
+    });
+
+    it("Get its files twice", async () => {
+      const { v1, store } = await large();
+      expect(await Promise.all([store.fetchFiles({ ref: v1.ref }), store.fetchFiles({ ref: v1.ref })])).toEqual([{ status: "ok" }, { status: "ok" }]);
+      expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
+    });
+  });
+});
+
+describe.each([1, 2, 3])("two Installs of one app at once install it (run %i)", () => {
+  it.each([["small", 0], ["2.5 MB", 2_500_000]])("a %s bundle", async (_, size) => {
+    const v1 = await bundle({ data: new Uint8Array(size) });
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    const views = await Promise.all([store.install({ digest: v1.digest, grant: ["chat"] }), store.install({ digest: v1.digest, grant: ["chat"] })]);
+    expect(views.map((v) => v.run)).toEqual([{ status: "ok" }, { status: "ok" }]);
+    expect(await appRows()).toHaveLength(1);
+    expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
   });
 });
 
