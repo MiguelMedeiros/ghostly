@@ -64,7 +64,7 @@ import { IncomingCallNotification } from "../components/IncomingCallNotification
 import { useIsLocked, useRingOnLockScreen } from "../contexts/LockScreenContext";
 import { handOverCall, takeHandedCall } from "../lib/lockedRing";
 import { contactStatus } from "../lib/contactStatus";
-import { callEventText, callLineId, callsBlockedText } from "../lib/callLines";
+import { callEventText, callLineId, callsBlockedText, callsWaitForLive } from "../lib/callLines";
 import { PeerServices } from "../components/PeerServices";
 import { formatFileSize } from "../lib/format";
 import { playSound, startRinging } from "../lib/sounds";
@@ -696,7 +696,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // Not offline (Ghostly's switch or the device): no wake-up goes out, and the buttons say why instead of "did not open".
   const deviceOnline = useOnline();
   const canWakeForCall = paired && !chatLive && !!chatLink?.peerWakes && !!chatLink.id && !chatStop
-    && deviceOnline && engine.state?.settings.online !== false;
+    && deviceOnline && engine.state?.settings.online !== false && callsWaitForLive(deliveryPeer?.callsUnavailable);
   const placeCall = webrtc.startCall;
   const wakeCall = useWakeCall(chatLink?.id, paired && !callsBlocked, placeCall);
 
