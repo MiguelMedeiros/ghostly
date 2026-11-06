@@ -963,6 +963,28 @@ describe("MessageBubble: deleting", () => {
     expect(options("text a")).toHaveFocus();
   });
 
+  it("Cancel sending, which takes the row away with no confirmation, leaves the focus on the next message's ⋮ too", async () => {
+    function List() {
+      const [ids, setIds] = useState(["a", "b", "c"]);
+      return <div data-message-list>{ids.map((id) => (
+        <MessageBubble key={id} message={message({ id, sender: "me", text: `text ${id}`, delivery: "waiting" })} onDelete={() => setIds((all) => all.filter((x) => x !== id))} />
+      ))}</div>;
+    }
+    const { user } = renderApp(<List />);
+    const options = (text: string) => within(screen.getByText(text).closest<HTMLElement>("[data-message-row]")!).getByTestId("message-options");
+    const cancel = async (text: string) => {
+      options(text).focus();
+      await user.keyboard("{Enter}");
+      screen.getByTestId("message-cancel-sending").focus();
+      await user.keyboard("{Enter}");
+      expect(screen.queryByText(text)).not.toBeInTheDocument();
+    };
+    await cancel("text b");
+    expect(options("text c")).toHaveFocus();
+    await cancel("text c");
+    expect(options("text a")).toHaveFocus();
+  });
+
   it("offers no delete where the chat cannot be edited", () => {
     bubble({ text: "kept" });
     expect(screen.queryByRole("button", { name: "Delete message" })).not.toBeInTheDocument();
