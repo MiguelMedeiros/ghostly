@@ -5835,7 +5835,8 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * Pins a message of a chat or a group, or unpins (WISP 400 § Pinned message): one per chat, the last pin winning. A
    * 1:1 chat keeps it until the contact confirms it on a live session; a group sends it to its members, where the rule
-   * (`mayPin`) allows it. In a group, `n` is the pin's number, for `groupTaken`.
+   * (`mayPin`) allows it. In a group, `n` is the pin's number, for `groupTaken`. The message pinned already is not
+   * pinned again: nothing goes, and the pin stays its pinner's (`n` only when that is me).
    */
   async pinMessage({ linkId, messageId, remove }: { linkId: string; messageId?: string; remove?: boolean }): Promise<{ error: string | null; refused?: boolean; n?: number }> {
     if (typeof linkId !== "string" || !linkId) return { error: "No chat to pin in" };
@@ -5845,8 +5846,10 @@ export class GhostlyNode implements EngineImplementation {
       // Not a member (removed, say): refused with the reason the group shows, as a reaction is.
       if (!view || view.status !== "active") return { error: view?.statusReason ?? "You are not in this group", refused: true };
       if (!mayPinIn(view)) return { error: "Only the admin pins in a community" };
-      const pin = await myPin(host, linkId, messageId, !!remove, this.groups.pinOf(groupId));
+      const current = this.groups.pinOf(groupId), pin = await myPin(host, linkId, messageId, !!remove, current);
       if ("error" in pin) return pin;
+      // Pinned already: nothing goes. My own pin's number is still the one its edges take (`groupTaken`).
+      if ("already" in pin) return { error: null, ...(current?.by === "me" && { n: current.n }) };
       if (this.groups.isCommunityGroup(groupId)) {
         try { await this.groups.sendCommunityApp(groupId, { t: COMMUNITY_PIN_FRAME, id: pin.id, n: pin.n }, pinKey(pin.n)); } catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
         await this.groups.setPin(groupId, pin);
@@ -5864,6 +5867,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!live.stored.profile) return { error: "Pins need a current chat; this compatibility chat sends text only." };
     const pin = await myPin(host, linkId, messageId, !!remove, live.stored.pin);
     if ("error" in pin) return pin;
+    if ("already" in pin) return { error: null };
     await this.keepLinkPin(linkId, pin, { id: pin.id, n: pin.n });
     this.flushPin(linkId);
     return { error: null };
