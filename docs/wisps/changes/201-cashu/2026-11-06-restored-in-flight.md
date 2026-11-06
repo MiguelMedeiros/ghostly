@@ -1,1 +1,0 @@
-The change of a Lightning payment and the ecash of a paid invoice that arrive with a restored copy of a profile are stored as ecash still to be checked, as what a restored swap brings already was ([05](../../05-backups.md)).
