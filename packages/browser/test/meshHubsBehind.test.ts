@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { CommunityWorld, type Peer } from "./communityWorld";
+import { afterEach, describe, expect, it } from "vitest";
+import { CommunityWorld, sameRun, seededRandom, type Peer } from "./communityWorld";
 // covers: groups.hubs, groups.catch-up
 
 /**
@@ -11,8 +11,12 @@ import { CommunityWorld, type Peer } from "./communityWorld";
 
 interface Built { world: CommunityWorld; id: string; link: string; admin: Peer; peers: Peer[] }
 
-async function build(n: number, hubs: number[]): Promise<Built> {
-  const world = new CommunityWorld();
+let restore: (() => void) | undefined;
+afterEach(() => { restore?.(); restore = undefined; });
+
+async function build(n: number, hubs: number[], seed?: number): Promise<Built> {
+  const world = seed === undefined ? new CommunityWorld() : new CommunityWorld(undefined, null, seededRandom(seed));
+  if (seed !== undefined) restore = sameRun(world, seed);
   const admin = world.add("admin", undefined, { staysOnline: hubs.includes(0) });
   const id = await admin.groups.create("Hubs", "mesh");
   const link = await admin.groups.enableLink(id);
@@ -43,8 +47,8 @@ async function join(b: Built, name: string, staysOnline: boolean): Promise<Peer>
 }
 
 /** The group on hubs p2 and p5 (and `extra` hubs), settled: every member reaches every other, x counts on p2 and p5. */
-async function settled(extra: number[] = []) {
-  const b = await build(20, [2, 5, ...extra]);
+async function settled(extra: number[] = [], seed?: number) {
+  const b = await build(20, [2, 5, ...extra], seed);
   const { world, peers } = b;
   await world.until(() => peers.every(p => !!view(b, p).hubs) && allReach(b, peers), 10 * 60_000, 1000);
   await world.run(150_000);
@@ -95,6 +99,34 @@ describe("a member back behind the chain after every hub it knew went", () => {
     await x.groups.send(b.id, "x is back");
     await world.run(3_000);
     for (const p of online) expect(world.texts(p, b.id)).toContain("x is back");
+  }, 300_000);
+
+  for (const seed of [22, 33]) it(`C4A, then the admin closes and both of x's stand-ins leave: the next members stand in, x catches up (seed ${seed})`, async () => {
+    const { b, world, x } = await settled([], seed);
+    const [p2, p5] = [b.peers[2], b.peers[5]];
+    x.online = false;
+    await p2.groups.leave(b.id);
+    await world.until(() => view(b, b.admin).members.length === 19, 60_000, 500);
+    const newhub = await join(b, "newhub", true);
+    await world.until(() => view(b, newhub).hubs?.hub === true, 5 * 60_000, 1000);
+    p5.online = false;
+    const online = b.peers.filter(p => ![x, p2, p5].includes(p)).concat(newhub);
+    await world.until(() => online.every(p => view(b, p).hubs && current(b, p) && view(b, p).members.filter(m => !m.me && m.key !== keyOf(b, x) && m.key !== keyOf(b, p5)).every(m => m.online)), 10 * 60_000, 1000);
+    const standIns = online.filter(p => p !== newhub && holding(b, x, [p]).length);
+    expect(standIns).toHaveLength(2);
+    // The admin's app closes, so nobody commits the leaves: the two stand-ins' signed byes go round through the hub only.
+    b.admin.online = false;
+    for (const p of standIns) await p.groups.leave(b.id);
+    const staying = online.filter(p => p !== b.admin && !standIns.includes(p));
+    await world.run(60_000);
+    // Every member heard that they leave: two others stand in for x now.
+    const now = holding(b, x, staying).filter(name => name !== newhub.name);
+    expect(now, `holding x: ${holding(b, x, staying)}`).toHaveLength(2);
+    const lines = ["while away 1", "while away 2"];
+    for (const [i, line] of lines.entries()) { await staying.filter(p => p !== newhub)[i].groups.send(b.id, line); await world.run(2_000); }
+    const took = await back(b, x, lines);
+    // Before the fix: never (the others kept the leavers in `standing`, so nobody took their place).
+    expect(took, `x has ${lines.filter(l => world.texts(x, b.id).includes(l)).length}/2 lines`).toBeDefined();
   }, 300_000);
 
   it("C4B (control): the same, but p5 stays online: x catches up through it", async () => {
