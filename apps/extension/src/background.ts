@@ -3,6 +3,7 @@ import type { EngineStatus, HttpRequestReply, RuntimeMessage, ViewerPage } from 
 import { fromOwnPage } from "./shared/sender";
 import { parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
 import { rememberPendingUpdate, takePagesToReopen } from "./updates";
+import { localOriginAllowed } from "./localAllowList";
 import servicesEn from "../../ui/src/locales/en/services.json";
 
 /**
@@ -280,6 +281,11 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
       () => sendResponse({ ok: true }),
       (error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
     );
+    return true;
+  }
+  if (message.type === "local-access-allowed") {
+    if (typeof message.profile !== "string" || typeof message.origin !== "string") { sendResponse(false); return false; }
+    void localOriginAllowed(message.profile, message.origin).then((allowed) => sendResponse(allowed === true), () => sendResponse(false));
     return true;
   }
   if (message.type === "close-services") {
