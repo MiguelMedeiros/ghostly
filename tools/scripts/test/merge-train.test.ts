@@ -307,6 +307,16 @@ describe("the line", () => {
     expect(waiting(pr({ draft: true, fast: "success" }))).toMatch(/draft/);
   });
 
+  it("tells a pull request whose green full run does not count how to get one that does, even with its fast tier red", () => {
+    const pr = (extra = {}) => ({ number: 1, ci: "pending", draft: false, fork: false, fast: "failure", ...extra });
+    expect(waiting(pr({ misplanned: true }))).toMatch(/skipped jobs that its changes need.*close and reopen it for a new run/);
+    expect(waiting(pr({ retargeted: true }))).toMatch(/before its base was changed; close and reopen it/);
+    expect(waiting(pr({ shared: [{ number: 2, base: "epic/x" }] }))).toMatch(/another pull request from its branch \(#2 into `epic\/x`\)/);
+    expect(waiting(pr({ crowded: true }))).toMatch(/more pull requests than the train reads/);
+    expect(waiting(pr({ shared: [] }))).toMatch(/CI Success \(draft\) is red/);
+    expect(waiting(pr({ draft: true, misplanned: true }))).toBe("it is a draft");
+  });
+
   it("splits a red batch in halves down to one culprit", () => {
     expect(bisect([1, 2, 3, 4, 5])).toEqual({ culprit: null, first: [1, 2, 3], second: [4, 5] });
     expect(bisect([7])).toEqual({ culprit: 7, first: [], second: [] });
