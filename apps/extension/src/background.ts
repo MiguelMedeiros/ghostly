@@ -276,13 +276,14 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
   if (message.type === "open-service") {
     // Hide my IP from contacts is on: a contact's app does not open in a tab (see "viewer" below).
     if (message.relayOnly === true) { sendResponse({ ok: false, error: RELAY_ONLY_REFUSED }); return false; }
-    void openViewer(message.peerPubKeyZ32, message.serviceId, message.tag, viewerPageOf(message.page)).then(
+    void openViewer(message.peerPubKeyZ32, message.serviceId, message.tag, viewerPageOf(message.page), viewersClosed).then(
       () => sendResponse({ ok: true }),
       (error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
     );
     return true;
   }
   if (message.type === "close-services") {
+    viewersClosed++;
     void closeViewers().then(() => sendResponse({ ok: true }), () => sendResponse({ ok: true }));
     return true;
   }
@@ -371,6 +372,12 @@ async function bindingOf(tabId: number): Promise<ViewerBinding | null> {
 
 const forget = (tabId: number) => chrome.storage.session.remove(bindingKey(tabId));
 
+/**
+ * The pages' `close-services` heard so far (Hide my IP turned on, the lock screen). One that comes while `openViewer`
+ * makes its tab finds no binding yet, or none at all while the peer starts: that open counts it and leaves no tab.
+ */
+let viewersClosed = 0;
+
 chrome.tabs.onRemoved.addListener((tabId) => void forget(tabId));
 
 /**
@@ -396,11 +403,15 @@ export async function devtools(tabId: number, method: string, params?: Record<st
   await chrome.debugger.sendCommand({ tabId }, method, params);
 }
 
-async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string, page: ViewerPage): Promise<void> {
+/** `closedAt`: `viewersClosed` when the page asked; the tab is only made, and only shows the app, while no close came since. */
+async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string, page: ViewerPage, closedAt: number): Promise<void> {
   const url = viewerUrl(peerPubKeyZ32, serviceId, tag);
   const parsed = parseViewerUrl(url);
   if (!parsed || parsed.serviceId !== serviceId || parsed.peerPubKeyZ32 !== peerPubKeyZ32 || parsed.tag !== tag) throw new Error("Invalid service");
   await ensureEngine();
+  // The open ends as the tab would have, had it been made a moment sooner: closed with the others.
+  const closed = () => viewersClosed !== closedAt;
+  if (closed()) return;
 
   // The one tab DevTools ever attaches to: the one created right here, for this service.
   const tab = await chrome.tabs.create({ url: "about:blank" });
@@ -414,7 +425,16 @@ async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string,
     await devtools(tab.id, "Page.enable");
   } catch (error) {
     await chrome.tabs.remove(tab.id).catch(() => {});
+    // `closeViewers` took the tab while DevTools attached to it.
+    if (closed()) return;
     throw error;
+  }
+  // From here on the binding is written: a close that comes later finds the tab (`closeViewers`).
+  if (closed()) {
+    await forget(tab.id);
+    await chrome.debugger.detach({ tabId: tab.id }).catch(() => {});
+    await chrome.tabs.remove(tab.id).catch(() => {});
+    return;
   }
   await chrome.tabs.update(tab.id, { url });
 }
