@@ -220,6 +220,14 @@ export const LIVENESS_PING_MS = 15_000;
  */
 export const SWITCH_RETIRE_MS = 3_000;
 /**
+ * A move's native dial that found no announce of the contact (HyperDHT's PEER_NOT_FOUND) is made again this long after,
+ * for as long as the move lasts: the contact is live (its policy came over the open session), and its endpoint is not
+ * announced while a channel is live: a move back to HyperDHT within ~5 s of leaving it, before the session left behind
+ * had retired (`SWITCH_RETIRE_MS`) and the endpoint was announced again, found nobody. The move gave up at once and the
+ * chat waited the 20 s retry (20.0-20.1 s in 3 of 3 cycles on two CLI daemons, a 2 s gap between moves).
+ */
+const SWITCH_FIND_RETRY_MS = 1_000;
+/**
  * A receiver takes at most this many `paired-rtc` frames from a contact per `RTC_SIGNAL_RATE_WINDOW_MS`, counted before
  * their signature is checked; the rest are dropped. Each offer taken builds a new peer connection (and gathers for it).
  * A person's busiest minute is under half of it, 30 frames: five moves to WebRTC (one every 12 s, back and forth), each
@@ -4062,8 +4070,8 @@ export class GhostLink {
       }
       try {
         await new Promise<void>((resolve, reject) => {
-          let active = true;
-          const timer = setTimeout(() => { active = false; reject(new Error(`${transport} did not connect in time`)); }, 8_000);
+          let active = true, notFound: Error | undefined;
+          const timer = setTimeout(() => { active = false; reject(notFound ?? new Error(`${transport} did not connect in time`)); }, 8_000);
           const done = { resolve: () => { active = false; clearTimeout(timer); resolve(); }, reject: (error: Error) => { active = false; clearTimeout(timer); reject(error); } };
           if (transport === "webrtc/1") {
             this.rtcCandidateWaiter = done;
@@ -4081,13 +4089,22 @@ export class GhostLink {
             // One switch dial in flight per transport: a cancelled one runs to its own timeout (it cannot be aborted),
             // and the next waits for it rather than stacking another beside it.
             const turn = (this.switchDials.get(transport) ?? Promise.resolve()).then(async () => {
-              if (!active || epoch !== this.candidateEpoch || this.switcher.pending !== plan) return;
-              this.switcher.dialing(plan);
-              try {
-                const { channel, binding } = await endpoint.connect(descriptor);
-                if (!active || epoch !== this.candidateEpoch || this.switcher.pending !== plan) { channel.close(); return; }
-                void this.attachCandidate(channel, binding, plan).then(done.resolve, done.reject);
-              } catch (error) { done.reject(error instanceof Error ? error : new Error(String(error))); }
+              for (;;) {
+                if (!active || epoch !== this.candidateEpoch || this.switcher.pending !== plan) return;
+                this.switcher.dialing(plan);
+                try {
+                  const { channel, binding } = await endpoint.connect(descriptor);
+                  if (!active || epoch !== this.candidateEpoch || this.switcher.pending !== plan) { channel.close(); return; }
+                  void this.attachCandidate(channel, binding, plan).then(done.resolve, done.reject);
+                  return;
+                } catch (error) {
+                  const failure = error instanceof Error ? error : new Error(String(error));
+                  if (!/^PEER_NOT_FOUND\b/.test(failure.message)) { done.reject(failure); return; }
+                  // Not announced again yet (`SWITCH_FIND_RETRY_MS`): dialled again until the move's 8 s are up.
+                  notFound = failure;
+                  await new Promise(resolve => setTimeout(resolve, SWITCH_FIND_RETRY_MS));
+                }
+              }
             });
             this.switchDials.set(transport, turn);
             void turn.then(() => { if (this.switchDials.get(transport) === turn) this.switchDials.delete(transport); });
