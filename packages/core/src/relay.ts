@@ -49,6 +49,13 @@ const isTurnRead = (who: Asker): boolean => !who.write && !who.door && (who.back
 const firstWriter = (who: Asker): "chat" | "group" | null => (!who.write || who.background ? null : who.group ? "group" : "chat");
 /** A key's turn neither asked nor read in the last minute: it is dropped, and asking again starts a new one (`TURNS_PRUNE_MS`). */
 const staleTurn = (turn: { servedAt: number; askedAt: number }, now: number): boolean => now - Math.max(turn.askedAt, turn.servedAt) >= 60_000;
+/**
+ * The times of `list` (oldest first) within the last `ms`. One dated after now, the device clock gone back since (an NTP
+ * step, a clock that ran ahead fixed by hand), counts as of now: as just spent, not for as long as the clock went back.
+ * Counted as they were, an hour's step back held every background read for 59 minutes, and a daemon with 50 contacts
+ * away read 4 of them in the next 15 (bug hunt, 2026-11-07).
+ */
+const within = (list: number[], now: number, ms: number): number[] => list.map((at) => Math.min(at, now)).filter((at) => now - at < ms);
 
 /**
  * Keys and when each was last set, those of the last minute: how many and the latest, without walking them all (the
@@ -1004,8 +1011,9 @@ export class RelayTransport implements PkarrTransport {
     if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
     // A chat reading its contact at a slow pace has nothing due: the reserve kept for it lapses (`CHAT_RESERVE`).
     if (options.background && !options.urgent && !options.group) this.chatNeedLapsed(pubKeyZ32);
-    const readAt = this.readAt.get(pubKeyZ32);
-    if (readAt !== undefined && Date.now() - readAt < this.freshReadMs) return this.newest.get(pubKeyZ32) ?? null;
+    // Not one answered after now, the clock gone back since: its copy was not fresh for as long as the clock went back.
+    const readAt = this.readAt.get(pubKeyZ32), age = readAt === undefined ? Infinity : Date.now() - readAt;
+    if (age >= 0 && age < this.freshReadMs) return this.newest.get(pubKeyZ32) ?? null;
 
     const order = this.readOrder(pubKeyZ32);
     // Every relay left alone for failing: one of them is asked anyway, now and then (`allDownProbe`).
@@ -1202,7 +1210,7 @@ export class RelayTransport implements PkarrTransport {
    */
   private hedgeRoom(relay: string): boolean {
     const now = Date.now();
-    const recent = (this.spent.get(relay) ?? []).filter((at) => now - at < 60_000).length;
+    const recent = within(this.spent.get(relay) ?? [], now, 60_000).length;
     return recent < this.limitOf(relay) - this.reserveOf(relay);
   }
 
@@ -1383,11 +1391,11 @@ export class RelayTransport implements PkarrTransport {
    * without its own allowance (`ANSWER_READ_ALLOWANCE`).
    */
   private heldFor(relay: string, who: Asker, now = Date.now(), key?: string, turns = true, ownAllowance = true): number {
-    const recent = (this.spent.get(relay) ?? []).filter((at) => now - at < 60_000);
-    const recentBackground = (this.spentBackground.get(relay) ?? []).filter((at) => now - at < 60_000);
+    const recent = within(this.spent.get(relay) ?? [], now, 60_000);
+    const recentBackground = within(this.spentBackground.get(relay) ?? [], now, 60_000);
     this.spent.set(relay, recent);
     this.spentBackground.set(relay, recentBackground);
-    const recentBackgroundWrites = (this.spentBackgroundWrites.get(relay) ?? []).filter((at) => now - at < 60_000);
+    const recentBackgroundWrites = within(this.spentBackgroundWrites.get(relay) ?? [], now, 60_000);
     this.spentBackgroundWrites.set(relay, recentBackgroundWrites);
     // Until the `limit`-th newest request of the minute ages out; 0 while fewer than `limit` were made.
     const over = (list: number[], limit: number) => (list.length >= limit ? list[list.length - limit] + 60_000 - now : 0);
@@ -1399,12 +1407,12 @@ export class RelayTransport implements PkarrTransport {
     const share = isChatSignal(who) || departed ? SIGNALING_ALLOWANCE_SHARE : isGroupSignal(who) ? GROUP_SIGNALING_ALLOWANCE_SHARE : 0;
     const allowance = share ? Math.max(0, Math.floor(limit * share) - (who.write ? 0 : 1)) : 0;
     // The edges' signaling has its allowance whatever the chats spend: the limit and the chats' reserve wait for it.
-    const groupSignaled = (this.spentGroupSignal.get(relay) ?? []).filter((at) => now - at < 60_000);
+    const groupSignaled = within(this.spentGroupSignal.get(relay) ?? [], now, 60_000);
     this.spentGroupSignal.set(relay, groupSignaled);
     const groupFloor = isGroupSignal(who) && groupSignaled.length < allowance;
     let wait = groupFloor ? 0 : over(recent, limit + allowance);
     const starved = key !== undefined && this.starved(key, who, now);
-    const groupOver = (this.spentGroupOver.get(relay) ?? []).filter((at) => now - at < GROUP_OVER_PACE_MS);
+    const groupOver = within(this.spentGroupOver.get(relay) ?? [], now, GROUP_OVER_PACE_MS);
     this.spentGroupOver.set(relay, groupOver);
     if (isGroupSignal(who) && !who.write && recent.length >= limit && groupOver.length > 0) wait = Math.max(wait, groupOver[groupOver.length - 1] + GROUP_OVER_PACE_MS - now);
     if (who.background && !starved) {
@@ -1420,9 +1428,9 @@ export class RelayTransport implements PkarrTransport {
       if (signaling > 0 && !who.door) wait = Math.max(wait, Math.min(signaling, over(recentBackground, Math.min(this.backgroundWhileSignaling, Math.ceil(limit / 6)))));
     }
     // Groups' urgent reads: their share of the minute spread over it (`GROUP_BURST_MS`).
-    const burst = (this.spentGroupUrgent.get(relay) ?? []).filter((at) => now - at < GROUP_BURST_MS);
+    const burst = within(this.spentGroupUrgent.get(relay) ?? [], now, GROUP_BURST_MS);
     this.spentGroupUrgent.set(relay, burst);
-    const answerBurst = (this.spentAnswerUrgent.get(relay) ?? []).filter((at) => now - at < GROUP_BURST_MS);
+    const answerBurst = within(this.spentAnswerUrgent.get(relay) ?? [], now, GROUP_BURST_MS);
     this.spentAnswerUrgent.set(relay, answerBurst);
     if (isGroupUrgentRead(who)) {
       const most = Math.max(GROUP_BURST_ONE_LINK, Math.floor(limit * GROUP_BURST_MS / 60_000));
@@ -1431,7 +1439,7 @@ export class RelayTransport implements PkarrTransport {
       if (spent.length >= most) wait = Math.max(wait, spent[spent.length - most] + GROUP_BURST_MS - now);
     }
     // Watch reads: their share, spread over the minute, the keys read longest ago first.
-    const watched = (this.spentWatch.get(relay) ?? []).filter((at) => now - at < GROUP_RATION_WINDOW_MS);
+    const watched = within(this.spentWatch.get(relay) ?? [], now, GROUP_RATION_WINDOW_MS);
     this.spentWatch.set(relay, watched);
     // A key's turn among the others (`TURN_WAIT_MS`): apart, as a way back waits it whatever its allowance.
     let turn = 0;
@@ -1441,7 +1449,7 @@ export class RelayTransport implements PkarrTransport {
       if (this.readsAhead(key, now, watchLane(who)) > 0) turn = TURN_WAIT_MS;
     }
     // The chats' watch reads: theirs, the same way; not a departed read past the limit.
-    const chatWatched = (this.spentChatWatch.get(relay) ?? []).filter((at) => now - at < GROUP_RATION_WINDOW_MS);
+    const chatWatched = within(this.spentChatWatch.get(relay) ?? [], now, GROUP_RATION_WINDOW_MS);
     this.spentChatWatch.set(relay, chatWatched);
     if (isChatWatch(who) && !departed) {
       const most = Math.max(1, Math.ceil(limit * CHAT_WATCH_SHARE * GROUP_RATION_WINDOW_MS / 60_000));
@@ -1449,7 +1457,7 @@ export class RelayTransport implements PkarrTransport {
       if (this.readsAhead(key, now, watchLane(who)) > 0) turn = TURN_WAIT_MS;
     }
     // The groups' reads after one found the minute full: spread over it, in turn.
-    const rationed = (this.spentGroupReads.get(relay) ?? []).filter((at) => now - at < GROUP_RATION_WINDOW_MS);
+    const rationed = within(this.spentGroupReads.get(relay) ?? [], now, GROUP_RATION_WINDOW_MS);
     this.spentGroupReads.set(relay, rationed);
     // Not a read past the limit within the groups' allowance: it takes nothing the ration spreads, and goes one at a time.
     const pastLimit = isGroupSignal(who) && recent.length >= limit;
@@ -1495,7 +1503,7 @@ export class RelayTransport implements PkarrTransport {
    * than it in the last minute, and none within `ANSWER_READ_SPACING_MS`. None where the groups have no allowance.
    */
   private answerAllowanceFree(relay: string, now: number): boolean {
-    const spent = (this.spentAnswerAllowance.get(relay) ?? []).filter((at) => now - at < 60_000);
+    const spent = within(this.spentAnswerAllowance.get(relay) ?? [], now, 60_000);
     this.spentAnswerAllowance.set(relay, spent);
     const most = Math.min(ANSWER_READ_ALLOWANCE, Math.floor(this.limitOf(relay) * GROUP_SIGNALING_ALLOWANCE_SHARE));
     return spent.length < most && (spent.length === 0 || now - spent[spent.length - 1] >= ANSWER_READ_SPACING_MS);
@@ -1518,7 +1526,7 @@ export class RelayTransport implements PkarrTransport {
 
   /** What is left of the community members' way back allowance on this relay (`WAY_BACK_SHARE`); its reads leave a write the last of it. */
   private wayBackLeft(relay: string, who: Asker, now: number): number {
-    const spent = (this.spentWayBack.get(relay) ?? []).filter((at) => now - at < 60_000);
+    const spent = within(this.spentWayBack.get(relay) ?? [], now, 60_000);
     this.spentWayBack.set(relay, spent);
     return Math.floor(this.limitOf(relay) * WAY_BACK_SHARE) - (who.write ? 0 : 1) - spent.length;
   }
@@ -1557,9 +1565,17 @@ export class RelayTransport implements PkarrTransport {
 
   /** Drops the turns asked and read over a minute ago, at most once in `TURNS_PRUNE_MS` (or when the clock went back). */
   private pruneTurns<T extends { servedAt: number; askedAt: number }>(turns: Map<string, T>, now: number): void {
-    if (Math.abs(now - (this.turnsPrunedAt.get(turns) ?? -Infinity)) < TURNS_PRUNE_MS) return;
+    const prunedAt = this.turnsPrunedAt.get(turns) ?? -Infinity;
+    if (Math.abs(now - prunedAt) < TURNS_PRUNE_MS) return;
     this.turnsPrunedAt.set(turns, now);
-    for (const [key, turn] of turns) if (staleTurn(turn, now)) turns.delete(key);
+    // The clock went back: a turn read after now was read just now (`within`). Left after now, the keys read before the
+    // step went last for as long as it, and those read since took every turn: 22 of 50 contacts away were not read in
+    // the 15 minutes after an hour back.
+    const back = now < prunedAt;
+    for (const [key, turn] of turns) {
+      if (back) { turn.servedAt = Math.min(turn.servedAt, now); turn.askedAt = Math.min(turn.askedAt, now); }
+      if (staleTurn(turn, now)) turns.delete(key);
+    }
   }
 
   /**
@@ -1589,7 +1605,7 @@ export class RelayTransport implements PkarrTransport {
 
   /** This contact's departed reads past the limit in the last minute (`DEPARTED_READS`). */
   private departedReads(key: string, now: number): number {
-    const reads = (this.departedOver.get(key) ?? []).filter((at) => now - at < 60_000);
+    const reads = within(this.departedOver.get(key) ?? [], now, 60_000);
     if (reads.length) this.departedOver.set(key, reads); else this.departedOver.delete(key);
     return reads.length;
   }
@@ -1639,7 +1655,7 @@ export class RelayTransport implements PkarrTransport {
   private spareHeldFor(relay: string, now: number): number {
     const reserved = this.chatReservedFor(relay, now);
     if (reserved <= 0) return 0;
-    const recent = (this.spent.get(relay) ?? []).filter((at) => now - at < 60_000);
+    const recent = within(this.spent.get(relay) ?? [], now, 60_000);
     const keep = this.limitOf(relay) - this.chatReserveOf(relay, now);
     return recent.length >= keep ? Math.min(reserved, recent[recent.length - keep] + 60_000 - now) : 0;
   }
