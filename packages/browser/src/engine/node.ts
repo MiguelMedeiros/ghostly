@@ -3894,7 +3894,10 @@ export class GhostlyNode implements EngineImplementation {
     if (!trimmed) return { error: null };
 
     // Picked here (the CLI, a bot): past what just came, so an answer written in the same millisecond goes below it.
+    // Taken now, not when its row is stored: that counts a row of mine only up to the clock, so the next text sent in
+    // this millisecond took this same place, and the two went out and showed in either order.
     const timestamp = params.timestamp ?? arrivalKey(Date.now(), this.placedAt.get(linkId));
+    if (params.timestamp === undefined) this.placedAt.set(linkId, timestamp);
     // Sent: whatever this side was typing is done (the contact clears it on the message too).
     if (live.stored.profile) live.link?.setTyping(false);
     if (live.stored.profile) {
