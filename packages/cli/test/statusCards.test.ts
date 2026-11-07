@@ -628,6 +628,23 @@ describe("routines", () => {
     vi.useRealTimers();
   });
 
+  it("refuse a day the month does not have in numbers between spaces, commas or dots, as a JavaScript date reads them too", () => {
+    const next = (value: string) => (params("routine update", ["g1", "nightly", "--next", value]).card as { nextRunAt: number }).nextRunAt;
+    const refused = (value: string, month: string, days: number) => expect(() => next(value), value).toThrow(expect.objectContaining({ code: "usage", message: `--next takes a day the month has (${month} has ${days}), not ${JSON.stringify(value)}` }));
+    // Before, each was the next month's first day.
+    refused("2026.11.31", "2026-11", 30);
+    refused("2026.4.31 10:00", "2026-04", 30);
+    refused("2026 11 31", "2026-11", 30);
+    refused("2026, 11, 31", "2026-11", 30);
+    refused("2026-11.31", "2026-11", 30);
+    refused("11 31 2026", "2026-11", 30);
+    refused("11,31,2026", "2026-11", 30);
+    // Days the month has stay as they were, as local time.
+    expect(next("2026.11.30")).toBe(new Date(2026, 10, 30).getTime());
+    expect(next("2026 12 31 10:00")).toBe(new Date(2026, 11, 31, 10).getTime());
+    expect(next("12 31 2026")).toBe(new Date(2026, 11, 31).getTime());
+  });
+
   it("refuse a --next more than a year ahead as a usage error (exit 2) that names the flag and the last time it takes", () => {
     const zone = process.env.TZ;
     try {

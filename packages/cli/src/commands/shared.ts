@@ -403,18 +403,21 @@ const ISO_DAY = /^(?:[+-]\d{6}|\d{4})-\d{2}(-\d{2})?$/;
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 /** What `Date.parse` takes between a month's name and a number: `Apr 31`, `Apr-31`, `31/Apr`, `Apr.31`, `31 Apr,`. */
 const NAME_SEP = "[\\s,./-]*";
+/** What `Date.parse` takes between two numbers of a date: `2026-4-31`, `2026/4/31`, `2026.4.31`, `2026, 4, 31`. */
+const NUMBER_SEP = "[\\s,./-]+";
 const MONTH_DAY = new RegExp(`\\b(${MONTHS.join("|")})[a-z]*${NAME_SEP}(\\d{1,2})(?!\\d)`, "i");
 const DAY_MONTH = new RegExp(`(?<!\\d)(\\d{1,2})${NAME_SEP}(${MONTHS.join("|")})`, "i");
 
 /**
- * The year, month (1 to 12) and day a date is written with: `2026-04-31`, `2026/4/31`, `4/31/2026` (month first, as
- * `Date.parse` reads it, also with dashes or dots and a two-digit year), `Apr 31 2026`, `31-Apr-2026`. `Date.parse`
- * takes any day up to 31 and moves it past the month's end, so the day is checked here.
+ * The year, month (1 to 12) and day a date is written with: `2026-04-31`, `2026/4/31`, `2026.4.31`, `4/31/2026`
+ * (month first, as `Date.parse` reads it, also with a two-digit year), `Apr 31 2026`, `31-Apr-2026`. Between the numbers
+ * `Date.parse` takes dashes, slashes, dots, commas and spaces alike (`2026 4 31`), so these do too. `Date.parse` takes
+ * any day up to 31 and moves it past the month's end, so the day is checked here.
  */
 function writtenDay(text: string): [number, number, number] | undefined {
-  const numeric = /^([+-]\d{6}|\d{4})[-/](\d{1,2})[-/](\d{1,2})(?!\d)/.exec(text);
+  const numeric = new RegExp(`^([+-]\\d{6}|\\d{4})${NUMBER_SEP}(\\d{1,2})${NUMBER_SEP}(\\d{1,2})(?!\\d)`).exec(text);
   if (numeric) return [Number(numeric[1]), Number(numeric[2]), Number(numeric[3])];
-  const monthFirst = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4}|\d{2})(?!\d)/.exec(text);
+  const monthFirst = new RegExp(`^(\\d{1,2})${NUMBER_SEP}(\\d{1,2})${NUMBER_SEP}(\\d{4}|\\d{2})(?!\\d)`).exec(text);
   // A two-digit year is 1950 to 2049, as `Date.parse` takes it.
   const yy = (y: string) => (y.length === 2 ? Number(y) + (Number(y) < 50 ? 2000 : 1900) : Number(y));
   if (monthFirst) return [yy(monthFirst[3]!), Number(monthFirst[1]), Number(monthFirst[2])];
