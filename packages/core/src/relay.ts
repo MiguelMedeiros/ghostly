@@ -1569,8 +1569,12 @@ export class RelayTransport implements PkarrTransport {
       return at !== undefined && now - at < WRITE_FIRST_MS ? at + WRITE_FIRST_MS - now : 0;
     };
     // A departed or awaited read past the limit takes no request a waiting write could have either (it is no signal).
-    // A starved read goes before them (`READ_STARVED_MS`).
-    if (writer !== "chat" && !departed && !awaited && !starved) wait = Math.max(wait, waiting("chat"));
+    // Nor does a chat's read for a signal past it: an offer or answer has the allowance's last request, and any other
+    // write waits for the limit. Held for one, a live chat back after a reload, next to an invite whose packet the spent
+    // minute refused at every read, read its contact's answer only once the minute freed: 62 s, against 8 s (bug hunt,
+    // 2026-11-07). A starved read goes before them (`READ_STARVED_MS`).
+    const signalOver = isChatSignal(who) && !who.write && recent.length >= limit;
+    if (writer !== "chat" && !departed && !awaited && !signalOver && !starved) wait = Math.max(wait, waiting("chat"));
     // A read past the limit within the groups' allowance takes no request a waiting write could have (it is no signal).
     // An edge's read for its answer does not wait for one: the floor's other requests wait for it instead.
     if (((writer === null && who.group && !pastLimit && !isGroupAnswerRead(who)) || who.background) && !starved) wait = Math.max(wait, waiting("group"));

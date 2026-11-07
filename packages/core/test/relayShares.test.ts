@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GhostLink } from "../src/ghostlink";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { RELAY_POLL_INTERVALS } from "../src/link";
-import { RelayTransport } from "../src/relay";
+import { RelayTransport, REQUESTS_PER_MINUTE, SIGNALING_ALLOWANCE_SHARE } from "../src/relay";
 import { DiscoveryBudgetError, withRequestOptions, type PkarrTransport } from "../src/transport";
 import { emptyDhtDeliveryState, type DhtDeliveryState } from "../src/dhtDelivery";
 import { setLinkTraceSink } from "../src/linkTrace";
@@ -452,4 +452,67 @@ describe("the dialer's offer held back by its budget past the answerer's fast wi
     // background pace, and past 45 s the dialer too). Now: 2.6, 3.6, 3.6, 4.6, 6.6 and 12.6 s.
     expect(afterOffer, "live soon after the offer went out").toBeLessThanOrEqual(heldMs < 30_000 ? 5_000 : 16_000);
   }, 300_000);
+});
+
+/**
+ * A web app with 150 contacts away and a live chat, reloaded a moment after 4 New chat invites were made (bug hunt,
+ * 2026-11-07, v1.10.2 and dev alike): the start spent both relays' minute in its first second, the newest invite's
+ * presence was refused at every poll, and each refusal held every chat's read 5 s (`WRITE_FIRST_MS`), the live chat's
+ * reads for the answer to its offer too, though those may go past the limit. Live again 62 to 69 s after the reload,
+ * when the minute freed, against 8 s without the invites.
+ */
+describe("a live chat back after a restart, with many contacts away and invites this side just made", () => {
+  /** An invite made with New chat that nobody used yet (node.ts `startLink`): its joiner is due. */
+  function ownInvite(transport: PkarrTransport): GhostLink {
+    const side = invitationWhere("inviter").inviter;
+    const link = new GhostLink({
+      params: side.params,
+      pairing: { credentials: { seedB64: side.seedB64 }, pinPeer: async () => {}, trustOnFirstUse: true },
+      pairingProgress: { role: "inviter", startedAt: Date.now() },
+      madeAt: Date.now(),
+      native: { peerFallback: true, automatic: true },
+      transport,
+      pollIntervals: RELAY_POLL_INTERVALS,
+      autoConnect: true,
+      createPeerConnection: () => fakePeerConnection("invites"),
+      localFetch: vi.fn(), getServices: () => [{ id: "chat", type: "chat" }], getHostedHttpService: () => undefined,
+    });
+    links.push(link);
+    link.start();
+    return link;
+  }
+
+  it("is live again in seconds, not when the start's minute frees", async () => {
+    const relays = new MemoryRelays(["a.test", "b.test"]);
+    // Bob has the lower key: his offer stands, and he reads Alice's answer to it.
+    const chat = invitationWhere("joiner");
+    const alice = open("alice", relays.transport("alice"), chat.inviter, chat.joiner);
+    const bob = open("bob", relays.transport("bob"), chat.joiner, chat.inviter);
+    expect(await until(() => alice.isDataLinkOpen && bob.isDataLinkOpen, 120_000), "live at first").toBeLessThan(Infinity);
+    const liveSince = Date.now();
+    await run(30_000);
+    // The reload: Bob's page goes, and Alice notices a second later.
+    killRtc("bob", 1_000);
+    await bob.stop(false);
+    await run(500);
+    // Back, a fresh page with its own budget: the live chat, the start's reads of 150 contacts away (nobody publishes
+    // their keys), then the 4 invites, whose presence the spent minute refuses.
+    const page = relays.transport("bob2");
+    const back = open("bob", page, chat.joiner, chat.inviter, { resume: true, resumeFloor: liveSince });
+    for (let i = 0; i < 150; i++) void page.resolve(createIdentity().pubKeyZ32).catch(() => {});
+    const invites = Array.from({ length: 4 }, () => ownInvite(page));
+    // The newest invite's packet, which the spent minute refused: the web app put it again after each of its reads,
+    // every 4 s (the lab's link trace).
+    const newest = createIdentity();
+    loads.push(setInterval(() => void page.publish(newest, [{ label: "_ts", value: "1" }]).catch(() => {}), 4_000));
+    const startedAt = Date.now();
+    const liveMs = await until(() => back.isDataLinkOpen && alice.isDataLinkOpen, 180_000);
+    const minute = Object.fromEntries(relays.hosts.map(host => [host, relays.requests.filter(r => r.who === "bob2" && r.host === host && r.at < startedAt + 60_000).length]));
+    report({ scenario: "live-chat-back-with-fresh-invites", liveMs, minute, invites: invites.length });
+    // Dev (84572a93): 61.7 s, the reads for Alice's answer held from 1 s to the minute's end, 35 requests on each relay
+    // in that minute. Now: 2.6 s, 33.
+    expect(liveMs, "live again in seconds").toBeLessThanOrEqual(10_000);
+    // Within the relays' minute and the chats' allowance past it: no more requests than before.
+    for (const host of relays.hosts) expect(minute[host], host).toBeLessThanOrEqual(REQUESTS_PER_MINUTE + Math.floor(REQUESTS_PER_MINUTE * SIGNALING_ALLOWANCE_SHARE));
+  }, 400_000);
 });
