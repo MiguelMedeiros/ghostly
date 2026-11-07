@@ -851,6 +851,8 @@ describe("a push", () => {
     await w.taker.cancel();
     await until(() => w.giver.view()?.failure === "cancelled");
     expect(w.giverRecords.record.state).toBe("active");
+    // The standby chose not to move: nothing failed there, so no "Stopped" and no "Try again" (a pull) on its screen.
+    expect(w.taker.view()).toBeNull();
   });
 
   it("a request with the offer's id from another device is no answer to the offer", async () => {
