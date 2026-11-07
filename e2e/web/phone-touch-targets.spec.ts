@@ -152,3 +152,28 @@ test.describe("the voice recorder on a phone", () => {
     expect([...small.values()], "controls under 44 × 44 px on a phone").toEqual([]);
   });
 });
+
+/**
+ * Settings' on/off switches, in every section and on the Profile page, on a phone: 48 × 24 px drawn, and a tap landed on
+ * 64 × 40 px of it, short of the 44 the rest of the app gives a thumb.
+ */
+test("on a phone every on/off switch in Settings and Profile is a 44 px target", { tag: ["@feature:app.mobile-layout", "@feature:settings.sections"] }, async ({ peer }) => {
+  const { page } = await peer("switches", { mobile: true, viewport: { width: 375, height: 667 } });
+  const small: string[] = [];
+  let switches = 0;
+  for (const place of ["settings/profile", "settings/appearance", "settings/notifications", "settings/media", "settings/privacy", "settings/network", "settings/storage", "settings/about", "profile"]) {
+    await page.goto(`/#/${place}`);
+    await expect(page.locator("header.page-header").first()).toBeVisible();
+    // Each switch in view in turn: where a tap lands is measured on screen only.
+    for (const toggle of await page.getByRole("switch").all()) {
+      if (!(await toggle.isVisible())) continue;
+      await toggle.scrollIntoViewIfNeeded();
+      await toggle.evaluate((el) => el.setAttribute("data-measured", ""));
+      for (const target of await smallTargets(page, 44, "[data-measured]")) small.push(`${place}: ${target.name} ${target.width}×${target.height}`);
+      await toggle.evaluate((el) => el.removeAttribute("data-measured"));
+      switches++;
+    }
+  }
+  expect(switches, "switches seen").toBeGreaterThan(10);
+  expect(small, "switches under 44 × 44 px on a phone").toEqual([]);
+});
