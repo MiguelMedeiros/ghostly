@@ -298,6 +298,26 @@ describe("Settings, Network: Hide my IP from contacts", () => {
     expect(screen.getByTestId("network-turn-field")).toHaveTextContent("Hide my IP needs this TURN server. Turn it off first, then remove the server.");
   });
 
+  // Every connection to a contact goes through the TURN server then, and the engine keeps it: it is not optional.
+  for (const language of LANGUAGES) {
+    it(`${language}: while it is on, the TURN server's hint says it is required, not optional`, () => {
+      const { engine } = renderApp(<NetworkSettings />, { language });
+      act(() => engine.update({ transport, settings: { relays: RELAYS, iceServers: [TURN], relayOnly: true } }));
+      const field = screen.getByTestId("network-turn-field");
+      expect(field).not.toHaveTextContent(lookup(language, "network.turnHint")!);
+      expect(field).toHaveTextContent(lookup(language, "network.turnHintRelayOnly")!);
+      act(() => engine.update({ settings: { relays: RELAYS, iceServers: [TURN] } }));
+      expect(screen.getByTestId("network-turn-field")).toHaveTextContent(lookup(language, "network.turnHint")!);
+    });
+  }
+
+  it("while it is on, the TURN server's hint says so in English", () => {
+    const { engine } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport, settings: { relays: RELAYS, iceServers: [TURN], relayOnly: true } }));
+    expect(screen.getByTestId("network-turn-field")).toHaveTextContent("Required while Hide my IP is on: calls and chats go through it.");
+    expect(screen.getByTestId("network-turn-field")).not.toHaveTextContent("Optional");
+  });
+
   it("on the Desktop, while it is on, offers the HyperDHT relay its HyperDHT then goes through", async () => {
     const { engine, user } = renderApp(<NetworkSettings />);
     act(() => engine.update({ transport: { protocol: "Mainline DHT (BEP44) — Direct UDP", relays: [], direct: true }, settings: { relays: RELAYS, iceServers: [TURN], hyperdhtRelay: "" } }));
