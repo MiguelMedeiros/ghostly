@@ -14,6 +14,7 @@ import { SecretGuardDialog } from "./SecretGuardDialog";
 import { findSecret, type SecretFinding } from "../lib/parse/secrets";
 import { ExpressionPanel } from "./composer/ExpressionPanel";
 import { CameraCapture, cameraByFileInput, useHasCamera } from "./composer/CameraCapture";
+import { openAppSettings, useCameraRefusal } from "../lib/cameraRefusal";
 import { AppsGlyph, CameraGlyph, DocumentGlyph, IdentityGlyph, MediaGlyph, PaymentGlyph, ServicesGlyph, SmileIcon, TranslateIcon } from "./composer/icons";
 import type { ComposerServices } from "./composer/servicesRow";
 import { useMentionPicker, type ComposerMentions } from "./composer/MentionPicker";
@@ -205,6 +206,8 @@ export function MessageInput({
   const [text, setText] = useState(() => draftId ? getSessionDraft(draftId) : "");
   const textRef = useRef(text); textRef.current = text;
   const [toast, setToast] = useState<string | null>(null);
+  /** What the card offers to do about what it says (a camera blocked: Android's settings). */
+  const [toastAction, setToastAction] = useState<{ label: string; run: () => void } | null>(null);
   /**
    * `caption`: the guard asks about a pasted file's caption, not the draft; `translated`: about the translation shown;
    * `translate`: about the draft, before it is translated (what Send anyway does then).
@@ -357,6 +360,7 @@ export function MessageInput({
     toastTimerRef.current = null;
     toastHeld.current = { pointer: false, focus: false };
     setToast(null);
+    setToastAction(null);
   }, []);
 
   /** The card's time runs again, in full, unless it is pointed at or has the focus: it stays until it has been read. */
@@ -367,8 +371,9 @@ export function MessageInput({
     toastTimerRef.current = setTimeout(hideToast, toastMs.current);
   }, [hideToast]);
 
-  const showToast = useCallback((msg: string) => {
+  const showToast = useCallback((msg: string, action?: { label: string; run: () => void }) => {
     setToast(msg);
+    setToastAction(action ?? null);
     // Long enough to read in the app's language: a line in Japanese or Chinese takes twice the 5 s and more.
     toastMs.current = readingTime(msg, language, TOAST_DURATION);
     runToast();
@@ -384,6 +389,10 @@ export function MessageInput({
   const ownFilesId = useId();
   const filesId = draftId ?? ownFilesId;
   const { preparing, converting } = useFilesOnTheirWay(filesId, showToast);
+  // The phone's Camera refused by Android, which the file input takes as a cancel: said, with its settings once Android no longer asks.
+  const askCamera = useCameraRefusal((blocked) => blocked
+    ? showToast(t("composer.cameraBlocked"), { label: t("settings.noticesOpenSettings"), run: () => void openAppSettings() })
+    : showToast(t("composer.cameraRefused")));
 
   // The draft translated on Translate, shown above the field until something is sent.
   const drafting = useDraftTranslation({ config: translation, appLanguage: language, onFailure: (reason: DraftTranslationFailure, pair: string) => {
@@ -927,7 +936,7 @@ export function MessageInput({
     actions.push({ id: "media", label: t("composer.media"), icon: <MediaGlyph />, testId: "composer-media", unavailable: fileUnavailable,
       onSelect: () => mediaInputRef.current?.click() });
     if (hasCamera) actions.push({ id: "camera", label: t("composer.camera"), icon: <CameraGlyph />, testId: "composer-camera", unavailable: fileUnavailable,
-      onSelect: () => cameraByFileInput() ? cameraInputRef.current?.click() : setShowCamera(true) });
+      onSelect: () => { if (cameraByFileInput()) { askCamera(); cameraInputRef.current?.click(); } else setShowCamera(true); } });
   }
 
   // Translate (beside Send): in a chat with a language other than the app's, or a group with several, for a draft.
@@ -971,6 +980,12 @@ export function MessageInput({
       <span className="text-[13px] text-text-primary leading-snug flex-1 min-w-0 [overflow-wrap:anywhere]">
         {toast}
       </span>
+      {toastAction && (
+        <button type="button" data-testid="composer-toast-action" onClick={() => { toastAction.run(); hideToast(); }}
+          className="-my-1.5 min-h-8 max-md:min-h-11 shrink-0 cursor-pointer border-none bg-transparent px-1 py-0 text-[13px] font-medium text-accent hover:underline">
+          {toastAction.label}
+        </button>
+      )}
       <button
         type="button"
         onClick={hideToast}
