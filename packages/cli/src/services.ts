@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { GhostlyHttpError, LIMITS, parseLocalTarget, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
+import { GhostlyHttpError, LIMITS, guardViewerAnswer, parseLocalTarget, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
 import { bool, chatOf, findOwnNamedChat, node, num, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 import { isLive } from "./views";
@@ -151,10 +151,10 @@ function plain(response: ServerResponse, status: number, text: string, headers: 
  * cookies and storage are its own, apart from any other app on 127.0.0.1 or localhost, and a name that merely
  * resolves here (DNS rebinding) is not it. Only a browser given the link (which sets `OPEN_COOKIE`) is served; anyone
  * else on this machine who finds the port gets 404. The body streams through, bounded by `MAX_RESPONSE_BYTES`.
- * `relayOnly`: Hide my IP from contacts was on when it opened (`OPENED_SERVICE_CSP_RELAY_ONLY`).
+ * `relayOnly`: Hide my IP from contacts was on when it opened (`OPENED_SERVICE_CSP_RELAY_ONLY`), and each of the app's
+ * pages runs the WebRTC guard first (`guardViewerAnswer`): no policy keeps a page off WebRTC.
  */
 export async function openServiceServer(send: ServiceSend, port = 0, { relayOnly = false }: { relayOnly?: boolean } = {}): Promise<OpenedService> {
-  const policy = relayOnly ? OPENED_SERVICE_CSP_RELAY_ONLY : OPENED_SERVICE_CSP;
   const name = `${randomBytes(16).toString("hex")}.localhost`;
   const token = randomBytes(32).toString("hex");
   const cookies = new Set<string>();
@@ -180,14 +180,14 @@ export async function openServiceServer(send: ServiceSend, port = 0, { relayOnly
       }
       chunks.push(chunk);
     });
-    request.on("end", () => { if (!refused) void proxy(request, response, chunks, send, cookies, policy); });
+    request.on("end", () => { if (!refused) void proxy(request, response, chunks, send, cookies, relayOnly); });
   });
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(port, "127.0.0.1", () => { server.off("error", reject); resolve(); }); });
   host = `${name}:${(server.address() as AddressInfo).port}`;
   return { server, host, url: `http://${host}${OPEN_PATH}${token}` };
 }
 
-async function proxy(request: IncomingMessage, response: ServerResponse, chunks: Buffer[], send: ServiceSend, cookies: Set<string>, policy: string): Promise<void> {
+async function proxy(request: IncomingMessage, response: ServerResponse, chunks: Buffer[], send: ServiceSend, cookies: Set<string>, relayOnly: boolean): Promise<void> {
   // A browser that goes away stops the contact's answer too.
   const stop = new AbortController();
   response.on("close", () => { if (!response.writableFinished) stop.abort(); });
@@ -199,8 +199,11 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
         return own ? [[name, own]] : [];
       });
     const answer = await send({ method: request.method ?? "GET", path: request.url ?? "/", headers, body: chunks.length ? new Uint8Array(Buffer.concat(chunks)) : null, maxResponseBytes: MAX_RESPONSE_BYTES, signal: stop.signal });
+    // A page tells what it is by `Sec-Fetch-Dest`; a browser that sends none is taken as asking for a page.
+    const destination = request.headers["sec-fetch-dest"];
+    const { headers: answered, body } = relayOnly ? await guardViewerAnswer(answer.headers, answer.body, typeof destination === "string" ? destination : null) : answer;
     const out: Record<string, string | string[]> = {};
-    for (const [name, value] of answer.headers) {
+    for (const [name, value] of answered) {
       const lower = name.toLowerCase();
       if (lower === "transfer-encoding" || lower === "connection" || OPENED_SERVICE_DROPPED_HEADERS.includes(lower)) continue;
       if (lower === "set-cookie") {
@@ -213,10 +216,10 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
         if (policy) out[lower] = [...((out[lower] as string[] | undefined) ?? []), policy];
       } else out[lower] = value;
     }
-    out["content-security-policy"] = [...((out["content-security-policy"] as string[] | undefined) ?? []), policy];
+    out["content-security-policy"] = [...((out["content-security-policy"] as string[] | undefined) ?? []), relayOnly ? OPENED_SERVICE_CSP_RELAY_ONLY : OPENED_SERVICE_CSP];
     response.writeHead(answer.status, out);
     // Streamed, not gathered: past the cap (or when the contact drops it) the body stops and the connection closes.
-    await pipeline(Readable.from(answer.body, { objectMode: false }), response);
+    await pipeline(Readable.from(body, { objectMode: false }), response);
   } catch (error) {
     // Once the status line is out, a second one cannot follow: the response is cut, and the browser sees it end short.
     if (response.headersSent) { response.destroy(); return; }

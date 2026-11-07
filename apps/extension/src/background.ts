@@ -1,4 +1,4 @@
-import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders, viewerServicePolicy, withViewerPolicy } from "@ghostly/core";
+import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders, viewerServicePolicy, withViewerPolicy, VIEWER_GUARD_SCRIPT } from "@ghostly/core";
 import type { EngineStatus, HttpRequestReply, RuntimeMessage, ViewerPage } from "./messages";
 import { fromOwnPage } from "./shared/sender";
 import { parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
@@ -316,7 +316,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
 const PROTOCOL_VERSION = "1.3";
 
 /** The DevTools commands a viewer tab needs. Nothing else is ever sent. */
-const VIEWER_COMMANDS = new Set(["Fetch.enable", "Page.enable", "Fetch.fulfillRequest", "Fetch.failRequest"]);
+const VIEWER_COMMANDS = new Set(["Fetch.enable", "Page.enable", "Page.addScriptToEvaluateOnNewDocument", "Fetch.fulfillRequest", "Fetch.failRequest"]);
 
 interface PausedRequest {
   requestId: string;
@@ -402,6 +402,9 @@ async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string,
       patterns: [{ urlPattern: VIEWER_URL_PATTERN, requestStage: "Request" }],
     });
     await devtools(tab.id, "Page.enable");
+    // Hide my IP from contacts: no policy keeps the app off WebRTC. Chrome runs this first in each document of the
+    // tab from now on, every frame's included (`VIEWER_GUARD_SCRIPT`).
+    if (relayOnly) await devtools(tab.id, "Page.addScriptToEvaluateOnNewDocument", { source: VIEWER_GUARD_SCRIPT });
   } catch (error) {
     await chrome.tabs.remove(tab.id).catch(() => {});
     throw error;

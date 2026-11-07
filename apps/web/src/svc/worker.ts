@@ -116,7 +116,7 @@ async function forward(event: FetchEvent): Promise<Response> {
   const url = new URL(request.url);
   const headers: [string, string][] = [];
   request.headers.forEach((value, name) => { if (name !== "cookie") headers.push([name, value]); });
-  const message: ServiceRequestMessage = { type: "request", method: request.method, path: url.pathname + url.search, headers, body };
+  const message: ServiceRequestMessage = { type: "request", method: request.method, path: url.pathname + url.search, headers, body, destination: request.destination };
   const channel = new MessageChannel();
   const port = channel.port1;
   let controller!: ReadableStreamDefaultController<Uint8Array>;
