@@ -5,7 +5,7 @@ export type RuntimeMessage =
   | { target: "background"; type: "ensure-engine" }
   /** The peer stopped for good ("Clear all data"): its document closes and a new one starts. */
   | { target: "background"; type: "restart-engine" }
-  /** `relayOnly`: Hide my IP from contacts is on, and the tab keeps to its own origin (`viewerServicePolicy`). */
+  /** `relayOnly`: Hide my IP from contacts is on, and no tab opens (background.ts `RELAY_ONLY_REFUSED`). */
   | { target: "background"; type: "open-service"; peerPubKeyZ32: string; serviceId: string; tag: string; page?: ViewerPage; relayOnly?: boolean }
   /** The profile locked: every tab showing a contact's app closes (`closeServiceWindows`). */
   | { target: "background"; type: "close-services" }
