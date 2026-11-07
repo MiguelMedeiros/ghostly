@@ -1,5 +1,5 @@
 import { writeFileSync } from "node:fs";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { chat, connect, expect, link, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { smallTargets } from "../support/touchTargets";
@@ -372,4 +372,55 @@ test.describe("on a phone, Send files", () => {
       await expect(sheet).toHaveCount(0);
     });
   }
+});
+
+/**
+ * The screens a first visit opens, on a phone, control by control: every Settings section, the Profile and Services
+ * pages, and the New wallet, Add identity and Join dialogs. A row's ⓘ took taps on 41 × 40 px, a dialog's Close on
+ * 40 × 41, the colour swatches 32 × 32, Light / Dark / Auto and Compact / Comfortable were 32 px tall, the sound
+ * previews and Network's Reset 32 × 32, Generate random name 40 × 40, About's GitHub 40 px tall, Services' Online 37.
+ */
+test("on a phone every control in Settings, Profile, Services and the first dialogs is a 44 px target", { tag: ["@feature:app.mobile-layout", "@feature:settings.sections"] }, async ({ peer }) => {
+  test.setTimeout(5 * 60_000);
+  const { page } = await peer("first-visit", { mobile: true, viewport: { width: 375, height: 667 } });
+  const small: string[] = [];
+  let seen = 0;
+  // Each control in the middle of the screen in turn (a sheet scrolls; one cut by the screen's edge or under the tab bar
+  // would read short): measured on screen.
+  const measure = async (place: string, root: Locator) => {
+    for (const control of await root.locator("button, a[href], [role=button]").all()) {
+      if (!(await control.isVisible())) continue;
+      await control.evaluate((el) => { el.scrollIntoView({ block: "center", inline: "center" }); el.setAttribute("data-measured", ""); });
+      for (const target of await smallTargets(page, 44, "[data-measured]")) small.push(`${place}: ${target.name} ${target.width}×${target.height} (${target.stops})`);
+      await control.evaluate((el) => el.removeAttribute("data-measured"));
+      seen++;
+    }
+  };
+
+  for (const place of ["settings/profile", "settings/appearance", "settings/notifications", "settings/media", "settings/privacy", "settings/network", "settings/storage", "settings/about", "profile", "services"]) {
+    await page.goto(`/#/${place}`);
+    await expect(page.locator("header.page-header").first()).toBeVisible();
+    await measure(place, page.locator("body"));
+  }
+
+  await page.goto("/#/wallet");
+  await page.getByTestId("wallet-add").click();
+  await measure("new wallet", page.getByTestId("new-wallet"));
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("new-wallet")).toHaveCount(0);
+
+  await page.goto("/#/identities");
+  await page.getByTestId("identities-new").click();
+  await measure("add identity", page.getByTestId("add-identity"));
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("add-identity")).toHaveCount(0);
+
+  await page.goto("/#/");
+  await page.getByRole("button", { name: "Join chat", exact: true }).click();
+  const join = page.locator("dialog[open]");
+  await expect(join).toBeVisible();
+  await measure("join", join);
+
+  expect(seen, "controls seen").toBeGreaterThan(80);
+  expect(small, "controls under 44 × 44 px on a phone").toEqual([]);
 });

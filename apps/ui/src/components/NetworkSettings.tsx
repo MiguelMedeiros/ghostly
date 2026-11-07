@@ -173,7 +173,7 @@ export function NetworkSettings() {
   // A refused field: its border says so, and it names its error to assistive technology.
   const invalid = (name: FieldName) => problems[name] ? { "aria-invalid": true, "aria-describedby": `${FIELDS[name]}-error` } : {};
   const problemUnder = (name: FieldName) => <FieldError id={`${FIELDS[name]}-error`} testId="network-error">{problems[name]}</FieldError>;
-  const reset = "min-h-8 text-xs text-text-muted hover:text-accent transition-colors cursor-pointer";
+  const reset = "tap-target min-h-8 text-xs text-text-muted hover:text-accent transition-colors cursor-pointer";
 
   return (
     <Section title={t("network.title")}>
@@ -238,7 +238,7 @@ export function NetworkSettings() {
           <button
             onClick={() => void save()}
             data-testid="network-save"
-            className="px-4 py-2 min-h-10 bg-accent text-on-accent rounded-lg text-sm font-bold hover:bg-accent-hover transition-colors cursor-pointer"
+            className="tap-target px-4 py-2 min-h-10 bg-accent text-on-accent rounded-lg text-sm font-bold hover:bg-accent-hover transition-colors cursor-pointer"
           >
             {t("common.save")}
           </button>

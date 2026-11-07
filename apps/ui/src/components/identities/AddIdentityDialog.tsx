@@ -195,7 +195,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
             <h2 id="add-identity-title" className="text-lg font-medium text-text-primary">{t("identities.ghostly.addOne")}</h2>
             <p className="text-xs text-text-muted mt-1">{t("identities.add.lead")}</p>
           </div>
-          <button type="button" aria-label={t("common.close")} onClick={requestClose}className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer">×</button>
+          <button type="button" aria-label={t("common.close")} onClick={requestClose} className="tap-target grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer">×</button>
         </div>
 
         {!provider ? (
