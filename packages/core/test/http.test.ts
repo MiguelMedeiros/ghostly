@@ -21,6 +21,8 @@ import {
   utf8Decode,
   utf8Encode,
   viewerResponseHeaders,
+  VIEWER_DROPPED_DIRECTIVES,
+  VIEWER_DROPPED_HEADERS,
   VIEWER_SERVICE_CSP,
   VIEWER_SERVICE_CSP_RELAY_ONLY,
   viewerServicePolicy,
@@ -185,6 +187,36 @@ describe("header hygiene", () => {
       ["Set-Cookie", "other=2; HttpOnly"],
       ["X-Domain", "Domain=kept"],
     ]);
+  });
+
+  it("passes on none of a contact's headers that send reports or early requests to a place it names", () => {
+    // With Hide my IP from contacts on, a report to the contact's server showed it this device's address: Ghostly's
+    // policy refused the app's pictures from there, but a violation of the contact's own policy was reported to it.
+    expect(
+      viewerResponseHeaders([
+        ["Content-Type", "text/html"],
+        ["Content-Security-Policy", "default-src 'self'; report-uri https://contact.example/r; img-src *; Report-To main"],
+        ["content-security-policy", "report-uri https://contact.example/r, script-src 'self';report-to main"],
+        ["content-security-policy", "report-uri https://contact.example/r"],
+        ["Content-Security-Policy-Report-Only", "default-src 'none'; report-uri https://contact.example/r"],
+        ["Reporting-Endpoints", "main=\"https://contact.example/r\""],
+        ["Report-To", "{\"group\":\"main\",\"max_age\":86400,\"endpoints\":[{\"url\":\"https://contact.example/r\"}]}"],
+        ["NEL", "{\"report_to\":\"main\",\"max_age\":86400}"],
+        ["Link", "<https://contact.example>; rel=preconnect"],
+        ["X-Kept", "report-uri https://contact.example/r"],
+      ]),
+    ).toEqual([
+      ["Content-Type", "text/html"],
+      ["Content-Security-Policy", "default-src 'self'; img-src *"],
+      ["content-security-policy", "script-src 'self'"],
+      ["X-Kept", "report-uri https://contact.example/r"],
+    ]);
+  });
+
+  it("drops the headers and directives Desktop's viewer and `service open` drop", () => {
+    const list = (items: readonly string[]) => items.map((item) => `"${item}"`).join(", ");
+    expect(readFileSync(new URL("../../cli/src/services.ts", import.meta.url), "utf8")).toContain(`export const OPENED_SERVICE_DROPPED_HEADERS = [${list(VIEWER_DROPPED_HEADERS)}];`);
+    expect(readFileSync(new URL("../../cli/src/services.ts", import.meta.url), "utf8")).toContain(`export const OPENED_SERVICE_DROPPED_DIRECTIVES = [${list(VIEWER_DROPPED_DIRECTIVES)}];`);
   });
 
   it("adds Ghostly's connection policy after the contact's own, in one header, so theirs can only narrow it", () => {
