@@ -171,6 +171,7 @@
     "preparing": "正在准备 {{transport}}；当前通道：{{current}}。",
     "receiptPending": "回执等待至 {{time}}。",
     "reconnect": "重新连接",
+    "reconnecting": "正在重新连接…",
     "relaySettings": "检查中继设置",
     "relayed": "经中继",
     "relayedVia": "经 {{relays}} 中继",
