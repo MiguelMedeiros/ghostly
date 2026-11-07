@@ -53,7 +53,8 @@ export function SwitchLook({ checked, className = "", testId }: { checked: boole
 }
 
 /**
- * One choice among a few. `compact`: the smaller one for a page header. Wraps when the options do not fit. A radio
+ * One choice among a few. `compact`: the smaller one for a page header. Wraps when the options do not fit. On a phone
+ * a tap lands on 44 px of an option's height (`tap-target`), drawn 32 px tall. A radio
  * group: one Tab stop (the chosen option), the arrows, Home and End move; Space or Enter chooses, since choosing may be
  * an action (a wallet's network replaces the wallet).
  */
@@ -63,7 +64,7 @@ export function Segmented<T extends string>({ options, value, onChange, label, d
     <div role="radiogroup" aria-label={label} onKeyDown={radioGroupKeys} className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1 max-w-full">
       {options.map((option, i) => (
         <button key={option.value} type="button" role="radio" aria-checked={value === option.value} tabIndex={i === stop ? 0 : -1} disabled={disabled && value !== option.value} onClick={() => { if (option.value !== value) onChange(option.value); }}
-          className={`${compact ? "px-2.5 min-h-8 text-[13px]" : "px-3 min-h-8 text-sm"} whitespace-nowrap rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${value === option.value ? `bg-accent text-on-accent font-medium ${chosenInForcedColors}` : "text-text-secondary hover:text-text-primary"}`}>
+          className={`${compact ? "px-2.5 min-h-8 text-[13px]" : "px-3 min-h-8 text-sm"} tap-target whitespace-nowrap rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${value === option.value ? `bg-accent text-on-accent font-medium ${chosenInForcedColors}` : "text-text-secondary hover:text-text-primary"}`}>
           {option.label}
         </button>
       ))}
