@@ -50,6 +50,8 @@ class MainActivity : TauriActivity() {
   private var resumed = false
   private var focused = false
   private var cover: View? = null
+  /** The page's WebView, for the text size a font size change while the app runs asks for. */
+  private var webView: WebView? = null
 
   override fun onCreate(savedInstanceState: Bundle?) {
     // Before the page loads. Debug builds take `--ei ghostly_min_webview <major>`, so the screen can be seen on an
@@ -109,6 +111,7 @@ class MainActivity : TauriActivity() {
   /** The page's WebView is made: hidden, with the update screen over it, when the WebView is too old to run it. */
   override fun onWebViewCreate(webView: WebView) {
     super.onWebViewCreate(webView)
+    this.webView = webView
     // wry sets its WebChromeClient after this callback: the camera's capture goes in over it on the next turn.
     window.decorView.post {
       val wry = webView.webChromeClient
@@ -157,6 +160,17 @@ class MainActivity : TauriActivity() {
   override fun onNewIntent(intent: Intent) {
     setIntent(intent)
     super.onNewIntent(intent)
+  }
+
+  /**
+   * The system's font size changed while the app runs. The WebView takes it as its text zoom only as it is made, and
+   * the activity is not made again for it (configChanges, fontScale): the page kept the old size until the app was
+   * started again. The same zoom a WebView made now would take (100 × the font scale, cut to a whole percent).
+   */
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    val zoom = (100 * newConfig.fontScale).toInt()
+    webView?.settings?.let { if (it.textZoom != zoom) it.textZoom = zoom }
   }
 
   override fun onResume() {
