@@ -6,6 +6,7 @@ import type { CallDevices } from "../hooks/useCallDevices";
 import { applySpeaker, type DeviceKind } from "../lib/mediaDevices";
 import { useI18n } from "../contexts/I18nContext";
 import { useTabTrap } from "../hooks/useDismiss";
+import { useFocusKept } from "../hooks/useFocusKept";
 import { useVoiceRing } from "../hooks/useVoiceRing";
 import { callLevels } from "../lib/voiceLevels";
 import { Menu, MenuItem } from "./Menu";
@@ -148,6 +149,9 @@ export function CallOverlay({
       if (before?.isConnected && (!document.activeElement || document.activeElement === document.body)) before.focus({ preventScroll: true });
     };
   }, [mini, box]);
+  // The device notice goes by its Switch back, its close or its time, maybe with the focus on it: the focus goes to
+  // the Devices button it is about, not to the page's body.
+  useFocusKept(box, () => box.current?.querySelector<HTMLElement>("[data-testid=call-devices]") ?? null);
 
   // Your own picture keeps the shape of what it shows (camera or screen), so there are never bars around it.
   const [selfAspect, setSelfAspect] = useState(4 / 3);
