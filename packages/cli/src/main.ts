@@ -1340,8 +1340,10 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
   if (!spec.message) Object.assign(params, (await import("./buttons")).buttonsOf(parsed.options));
   print(await withSession(g, (s) => {
     if (spec.target === "chat") {
-      // A one-shot leaves once its command is done: by default it stays until the message went out.
-      params.wait = parsed.options.wait ?? (s.mode === "one-shot" ? (spec.message ? "confirmed" : "sent") : "none");
+      // A one-shot leaves once its command is done: by default it stays until the message went out (`send`'s default is
+      // the API's own, which knows a chat nobody joined yet) or the edit was confirmed.
+      if (parsed.options.wait !== undefined) params.wait = parsed.options.wait;
+      else if (spec.message) params.wait = s.mode === "one-shot" ? "confirmed" : "none";
       if (parsed.options.timeout !== undefined) params.timeout = parsed.options.timeout;
     } else {
       // A group has no receipts: `--wait sent` waits until an edge took it. None by default.
