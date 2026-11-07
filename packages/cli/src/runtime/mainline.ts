@@ -373,4 +373,9 @@ export class RelaysAndDht implements PkarrTransport {
   publishHeld(pubKeyZ32: string, options?: PkarrRequestOptions): DiscoveryBudgetError | null { return this.dht ? null : this.relays.publishHeld(pubKeyZ32, options); }
   onServerTime(listener: Parameters<RelayTransport["onServerTime"]>[0]): () => void { return this.relays.onServerTime(listener); }
   configure({ relays }: { relays: string[]; readRelays: boolean }): void { if (!this.pinned) this.relays.setRelays(relays); }
+  /**
+   * The relays' side only: the DHT side keeps nothing per key it puts. What it keeps per key it reads is bounded
+   * (`missing`, `MISSING_KEPT`; the background budget's two-minute window).
+   */
+  forget(keys: Iterable<string>): void { this.relays.forget(keys); }
 }
