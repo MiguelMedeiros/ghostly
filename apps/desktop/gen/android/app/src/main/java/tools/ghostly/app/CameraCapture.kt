@@ -3,6 +3,7 @@ package tools.ghostly.app
 import android.Manifest
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -67,6 +68,18 @@ object CameraFiles {
  */
 object CameraRefusal {
   @Volatile var told: ((blocked: Boolean) -> Unit)? = null
+
+  /** The app's own preferences: whether a refusal Android would ask again after ([REFUSED]) was seen. */
+  const val PREFS = "ghostly-camera"
+  const val REFUSED = "refused"
+
+  /**
+   * Whether Android no longer asks, from the rationale it gives `before` and `after` the ask, and whether a refusal
+   * it would ask again after was seen (`refusedBefore`). The rationale is false both when Android refused at once
+   * without asking and when the dialog was dismissed (Back) on a first ask, which Android does not count: it asks
+   * again then. So no rationale after means blocked only once a refusal came first.
+   */
+  fun blocked(before: Boolean, after: Boolean, refusedBefore: Boolean): Boolean = !after && (before || refusedBefore)
 }
 
 /**
@@ -87,12 +100,16 @@ class CameraChromeClient(private val activity: MainActivity, private val wry: We
       capture(filePathCallback, fileChooserParams)
     } else {
       // The manifest asks for CAMERA, so Android refuses ACTION_IMAGE_CAPTURE until it is granted.
+      val prefs = activity.getSharedPreferences(CameraRefusal.PREFS, Context.MODE_PRIVATE)
+      val before = activity.shouldShowRequestPermissionRationale(Manifest.permission.CAMERA)
       activity.requestPermissions(arrayOf(Manifest.permission.CAMERA)) { granted ->
         if (granted == true) {
+          prefs.edit().remove(CameraRefusal.REFUSED).apply()
           capture(filePathCallback, fileChooserParams)
         } else {
-          // Right after a refusal, no rationale to show means Android will not ask again.
-          CameraRefusal.told?.invoke(!activity.shouldShowRequestPermissionRationale(Manifest.permission.CAMERA))
+          val after = activity.shouldShowRequestPermissionRationale(Manifest.permission.CAMERA)
+          if (after) prefs.edit().putBoolean(CameraRefusal.REFUSED, true).apply()
+          CameraRefusal.told?.invoke(CameraRefusal.blocked(before, after, prefs.getBoolean(CameraRefusal.REFUSED, false)))
           filePathCallback.onReceiveValue(null)
         }
       }
