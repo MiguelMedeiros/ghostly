@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { formatVideoDuration, sanitizeFileName } from "@ghostly/core";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
+import { useTabTrap } from "../../hooks/useDismiss";
 import { useFocusKept } from "../../hooks/useFocusKept";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { downloadFile } from "../../lib/fileDownload";
@@ -67,6 +68,8 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   const rootRef = useRef<HTMLDivElement>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
   useFocusKept(bubbleRef);
+  // Filling the window, it is over everything: Tab goes round its own controls, not to the chat under it.
+  useTabTrap(rootRef, theater);
   const videoRef = useRef<HTMLVideoElement>(null);
   useChosenSpeaker(videoRef, phase === "playing" ? src : null);
   const srcRef = useRef<string | null>(null);
@@ -301,6 +304,8 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
               src={src}
               poster={poster}
               controls
+              // A stop of the frame's own Tab round: its controls are inside it. WebKit reaches it, but says tabIndex -1.
+              tabIndex={theater ? 0 : undefined}
               playsInline
               preload="auto"
               aria-label={file.name}
