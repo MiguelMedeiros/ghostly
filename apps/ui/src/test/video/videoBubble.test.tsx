@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NO_ROOM_TO_PLAY } from "@ghostly/browser/shared/fileBytes";
+import { IncomingCallNotification } from "../../components/IncomingCallNotification";
 import { MessageBubble } from "../../components/MessageBubble";
 import { VideoBubble } from "../../components/video/VideoBubble";
 import { videoBox } from "../../lib/videoPlayer";
@@ -406,6 +407,24 @@ describe("a video in the chat", () => {
     view.unmount();
     expect(fullscreenWindow).toHaveBeenLastCalledWith(false);
     expect(fullscreenWindow.mock.calls.filter(([on]) => on)).toHaveLength(4);
+  });
+
+  // Drawn over everything else, the video hid a call that rang meanwhile: its Accept and Decline under it, and the
+  // keys in a card nobody could see.
+  it("filling the window (Desktop on Linux), it makes way for a call that rings: the card is not under it", async () => {
+    const fullscreenWindow = vi.fn(async (_on: boolean) => {});
+    fakeEngine.fullscreenWindow = fullscreenWindow;
+    show(video());
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Full screen" }));
+    expect(screen.getByTestId("video-frame")).toHaveAttribute("data-theater", "true");
+    const ring = renderApp(<IncomingCallNotification peerName="Ana" hasVideo={false} onAcceptAudio={vi.fn()} onAcceptVideo={vi.fn()} onReject={vi.fn()} />);
+    expect(screen.getByTestId("video-frame")).not.toHaveAttribute("data-theater");
+    expect(fullscreenWindow).toHaveBeenLastCalledWith(false);
+    // The video goes on, in its place in the chat.
+    expect(screen.getByTestId("video-player")).toBeInTheDocument();
+    ring.unmount();
   });
 
   it("filling the window (Desktop on Linux), it goes on playing though the chat list no longer sees it", async () => {
