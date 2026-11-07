@@ -16,17 +16,31 @@ type Listener = (event: object) => void;
 /**
  * A window of the app. `says` is what its page answers when asked what it runs; undefined: it never answers (an older
  * build, or frozen). `takes`: what it answers once told to open a chat it was only guessed for; undefined, nothing.
+ * `frozen`: it answers that only once the tap has focused it (a frozen page runs nothing until then).
  */
-function appWindow(id: string, says?: { profile: string; peer: boolean }, extra: { focused?: boolean; visibilityState?: string; takes?: boolean } = {}) {
+function appWindow(id: string, says?: { profile: string; peer: boolean }, extra: { focused?: boolean; visibilityState?: string; takes?: boolean; frozen?: boolean } = {}) {
   const told: FromWorker[] = [];
+  let held: (() => void) | undefined;
   const window = {
     id, url: `${ORIGIN}/#/`, focused: false, visibilityState: "hidden", ...extra, told, focusedByTap: false,
+    /** The tap's one window interaction (`startPushWorker`): a focus spends it. */
+    interact: () => {},
     postMessage(message: FromWorker, transfer?: MessagePort[]) {
       if (message.type === "open-ask") { if (says) transfer?.[0]?.postMessage(says); return; }
-      told.push(message);
-      if (message.type === "open-chat" && extra.takes !== undefined) transfer?.[0]?.postMessage({ taken: extra.takes });
+      const answer = () => {
+        told.push(message);
+        if (message.type === "open-chat" && extra.takes !== undefined) transfer?.[0]?.postMessage({ taken: extra.takes });
+      };
+      if (extra.frozen && !window.focusedByTap) held = answer;
+      else answer();
     },
-    async focus() { window.focusedByTap = true; return window; },
+    async focus() {
+      window.interact();
+      window.focusedByTap = true;
+      held?.();
+      held = undefined;
+      return window;
+    },
   };
   return window;
 }
@@ -34,6 +48,13 @@ function appWindow(id: string, says?: { profile: string; peer: boolean }, extra:
 async function startPushWorker(windows: ReturnType<typeof appWindow>[]) {
   const listeners = new Map<string, Listener>();
   const opened: string[] = [];
+  // A tap lets the worker focus a window or open one, once: Chromium refuses the second ("Not allowed to open a window").
+  let interaction = true;
+  const interact = () => {
+    if (!interaction) throw new DOMException("Not allowed to open a window.", "InvalidAccessError");
+    interaction = false;
+  };
+  for (const window of windows) window.interact = interact;
   vi.stubGlobal("__SW_BUILD__", "test");
   vi.stubGlobal("__SW_PRECACHE__", ["/"]);
   vi.stubGlobal("self", {
@@ -41,7 +62,7 @@ async function startPushWorker(windows: ReturnType<typeof appWindow>[]) {
     registration: { scope: `${ORIGIN}/push/default/` },
     clients: {
       matchAll: async () => windows,
-      openWindow: async (url: string) => { opened.push(url); return null; },
+      openWindow: async (url: string) => { interact(); opened.push(url); return null; },
     },
     addEventListener: (type: string, listener: Listener) => { listeners.set(type, listener); },
   });
@@ -139,6 +160,24 @@ describe("a tap on a wake-up notification", () => {
     expect(frozen.told).toEqual([guessed("/chat/abc", "")]);
     expect(work.told).toEqual([]);
     expect(opened).toEqual(["/#/chat/abc"]);
+  });
+
+  it("another profile's tab on screen was busy when tapped: it hands the chat back, and a new window opens on it rather than it coming forward", async () => {
+    const busy = appWindow("busy", undefined, { focused: true, visibilityState: "visible", takes: false });
+    const { tap, opened } = await startPushWorker([busy]);
+    await tap("/chat/abc", "");
+    expect(busy.told).toEqual([guessed("/chat/abc", "")]);
+    expect(busy.focusedByTap).toBe(false);
+    expect(opened).toEqual(["/#/chat/abc"]);
+  });
+
+  it("the profile's own tab is frozen (hidden, it answers nothing until focused): the tap focuses it, and it takes the chat", async () => {
+    const frozen = appWindow("frozen", undefined, { takes: true, frozen: true });
+    const { tap, opened } = await startPushWorker([frozen]);
+    await tap("/chat/abc", "");
+    expect(frozen.focusedByTap).toBe(true);
+    expect(frozen.told).toEqual([guessed("/chat/abc", "")]);
+    expect(opened).toEqual([]);
   });
 
   it("no window of the app at all: a new one opens on the chat", async () => {
