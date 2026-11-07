@@ -1,5 +1,7 @@
+import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FromWorker } from "../../../../web/src/sw/messages";
+import { clearWakeEntries, writeWakeText } from "../../../../web/src/sw/wakeStore";
 
 // covers: push.wake.notify
 
@@ -45,7 +47,8 @@ function appWindow(id: string, says?: { profile: string; peer: boolean }, extra:
   return window;
 }
 
-async function startPushWorker(windows: ReturnType<typeof appWindow>[]) {
+/** `locks`: the peer locks held, by name, as the worker's Web Locks lists them; undefined, a browser without them in workers. */
+async function startPushWorker(windows: ReturnType<typeof appWindow>[], locks?: string[]) {
   const listeners = new Map<string, Listener>();
   const opened: string[] = [];
   // A tap lets the worker focus a window or open one, once: Chromium refuses the second ("Not allowed to open a window").
@@ -60,6 +63,7 @@ async function startPushWorker(windows: ReturnType<typeof appWindow>[]) {
   vi.stubGlobal("self", {
     location: { origin: ORIGIN },
     registration: { scope: `${ORIGIN}/push/default/` },
+    ...(locks && { navigator: { locks: { query: async () => ({ held: locks.map((name, at) => ({ name, clientId: `lock-${at}`, mode: "exclusive" })) }) } } }),
     clients: {
       matchAll: async () => windows,
       openWindow: async (url: string) => { interact(); opened.push(url); return null; },
@@ -93,8 +97,9 @@ const openChat = (path: string, profile: string): FromWorker => ({ type: "open-c
 /** Told to a window that said nothing: the worker only guessed it runs the profile. */
 const guessed = (path: string, profile: string): FromWorker => ({ type: "open-chat", path, profile, silent: true });
 
-afterEach(() => {
+afterEach(async () => {
   vi.unstubAllGlobals();
+  for (const profile of ["", "abc1234567"]) await clearWakeEntries(profile);
 });
 
 describe("a tap on a wake-up notification", () => {
@@ -177,6 +182,50 @@ describe("a tap on a wake-up notification", () => {
     await tap("/chat/abc", "");
     expect(frozen.focusedByTap).toBe(true);
     expect(frozen.told).toEqual([guessed("/chat/abc", "")]);
+    expect(opened).toEqual([]);
+  });
+
+  it.each([1, 2, 3])("the only window that says nothing is another profile's frozen tab, and nobody holds the notice's profile's peer lock: a new window opens on the chat, the frozen tab is left as it is (run %i)", async () => {
+    await writeWakeText("", { title: "Ghostly", body: "New message", db: "ghostly" });
+    const frozen = appWindow("frozen", undefined, { takes: false, frozen: true });
+    const { tap, opened } = await startPushWorker([frozen], ["ghostly-peer-work1"]);
+    await tap("/chat/abc", "");
+    expect(opened).toEqual(["/#/chat/abc"]);
+    expect(frozen.focusedByTap).toBe(false);
+    expect(frozen.told).toEqual([]);
+  });
+
+  it("the profile's own frozen tab holds its peer lock: the tap focuses it, as before", async () => {
+    await writeWakeText("", { title: "Ghostly", body: "New message", db: "ghostly" });
+    const frozen = appWindow("frozen", undefined, { takes: true, frozen: true });
+    const { tap, opened } = await startPushWorker([frozen], ["ghostly-peer"]);
+    await tap("/chat/abc", "");
+    expect(frozen.focusedByTap).toBe(true);
+    expect(frozen.told).toEqual([guessed("/chat/abc", "")]);
+    expect(opened).toEqual([]);
+  });
+
+  it("the lock is the one of the namespace the profile's page wrote (a handoff moved it), never another profile's", async () => {
+    await writeWakeText("abc1234567", { title: "Ghostly", body: "New message", db: "ghostly_k3p" });
+    const own = appWindow("own", undefined, { takes: true, frozen: true });
+    const { tap, opened } = await startPushWorker([own], ["ghostly-peer-k3p"]);
+    await tap("/chat/abc", "abc1234567");
+    expect(own.focusedByTap).toBe(true);
+    expect(opened).toEqual([]);
+
+    const other = appWindow("other", undefined, { takes: false, frozen: true });
+    const again = await startPushWorker([other], ["ghostly-peer", "ghostly-peer-abc1234567"]);
+    await again.tap("/chat/abc", "abc1234567");
+    expect(other.focusedByTap).toBe(false);
+    expect(again.opened).toEqual(["/#/chat/abc"]);
+  });
+
+  it("a browser without Web Locks in its workers: the window that says nothing gets the tap, as before (another profile's frozen tab then only comes forward)", async () => {
+    await writeWakeText("", { title: "Ghostly", body: "New message", db: "ghostly" });
+    const frozen = appWindow("frozen", undefined, { takes: false, frozen: true });
+    const { tap, opened } = await startPushWorker([frozen]);
+    await tap("/chat/abc", "");
+    expect(frozen.focusedByTap).toBe(true);
     expect(opened).toEqual([]);
   });
 
