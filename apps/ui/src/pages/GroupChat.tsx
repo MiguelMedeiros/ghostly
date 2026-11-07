@@ -771,7 +771,7 @@ export function GroupChat() {
               invitation has no member yet (the engine knows only the count the card says): its avatar and line open nothing. */}
           {invited ? <GroupAvatar picture={group.picture} size={40} glyph={20} testId="group-avatar" className="bg-accent/15" />
           : <button ref={avatarButton} onClick={() => (group.picture ? setViewingPicture(true) : setShowMembers(true))} data-testid="group-avatar-open"
-            className={`relative rounded-full shrink-0 ${group.picture ? "cursor-zoom-in" : ""}`}
+            className={`relative rounded-full shrink-0 max-md:p-0.5 ${group.picture ? "cursor-zoom-in" : ""}`}
             {...(group.picture ? { "aria-label": t("common.viewPhoto", { name: group.name || t("group.chat.unnamed") }) } : { title: t("group.chat.membersButton"), "aria-label": t("group.chat.membersButton") })}>
             <GroupAvatar picture={group.picture} size={40} glyph={20} testId="group-avatar" className="bg-accent/15" />
           </button>}
@@ -782,11 +782,15 @@ export function GroupChat() {
               <h1 dir="auto" className="text-[15px] font-normal m-0 leading-tight truncate text-text-primary" data-testid="group-name">{group.name || t("group.chat.unnamed")}</h1>
             </div>
             {invited ? <p data-testid="group-members" className="m-0 max-w-full text-xs text-text-muted truncate">{subtitle}</p>
-            : <button onClick={() => setShowMembers(true)} data-testid="group-members" className="block max-w-full text-xs text-text-muted truncate hover:text-accent cursor-pointer max-md:min-h-6">
+            // On a phone where a tap lands reaches up over the name: the line alone is 24px tall, under a thumb's 44px. The
+            // cut with … is inside it, so it does not clip that taller area.
+            : <button onClick={() => setShowMembers(true)} data-testid="group-members" className="relative block max-w-full text-start text-xs text-text-muted hover:text-accent cursor-pointer max-md:min-h-6 max-md:min-w-11 max-md:before:absolute max-md:before:inset-x-0 max-md:before:bottom-0 max-md:before:-top-5 max-md:before:content-['']">
+              <span className="block truncate">
               {/* Who is typing while it lasts, in place of the member count, as a 1:1 chat's header does. Only that is
                   said by a screen reader: the count, inside the live region, was read again each time they stopped. */}
               <span role="status" aria-live="polite">{typers.length > 0 && <GroupTypingText testId="group-typing" typers={typers} />}</span>
               {!typers.length && subtitle}
+              </span>
             </button>}
           </div>
         </div>
@@ -795,7 +799,7 @@ export function GroupChat() {
           {/* Only while a bot's card is here (WISP 405 · Status Cards). */}
           <TasksButton rows={cardRows} nameOf={author => nameOf("peer", author) ?? `…${author.slice(-6)}`} faceOf={memberFace} />
           {canShare && <button ref={shareRef} onClick={() => void openShare()} data-testid="group-share" title={t("group.chat.shareHint")} aria-label={t("group.chat.shareLink")}
-            className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-accent/15 px-3 text-sm font-semibold text-accent hover:bg-accent/25 max-md:min-h-11 max-md:px-2.5">
+            className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full bg-accent/15 px-3 text-sm font-semibold text-accent hover:bg-accent/25 max-md:min-h-11 max-md:min-w-11 max-md:px-2.5">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
             <span className="max-[480px]:hidden">{t("group.chat.shareLink")}</span>
           </button>}

@@ -19,7 +19,7 @@ import { problemLine, saveProblemLine } from "../../lib/problemText";
 type Phase = "poster" | "loading" | "playing";
 type Problem = "unsupported" | "too-large" | "no-room" | "missing" | "left-out" | "not-yet";
 
-const linkButton = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-black/30 border-none text-inherit cursor-pointer transition-colors";
+const linkButton = "text-xs px-2.5 py-0.5 max-md:min-h-11 max-md:px-4 rounded-full bg-black/20 hover:bg-black/30 border-none text-inherit cursor-pointer transition-colors";
 
 /** How long a playing video may be out of view before it stops: longer than a rotation's new layout takes to settle. */
 const OUT_OF_VIEW_MS = 1500;

@@ -923,7 +923,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 type="button"
                 ref={nameRef}
                 onClick={startEditLabel}
-                className={`group/name flex items-center min-w-0 text-start text-[15px] font-normal m-0 leading-tight cursor-pointer rounded hover:text-accent transition-colors ${focus} ${isAnonymous ? "text-text-muted italic" : "text-text-primary"}`}
+                className={`group/name relative flex items-center min-w-0 max-md:before:absolute max-md:before:inset-x-0 max-md:before:-top-3 max-md:before:-bottom-5 max-md:before:content-[''] text-start text-[15px] font-normal m-0 leading-tight cursor-pointer rounded hover:text-accent transition-colors ${focus} ${isAnonymous ? "text-text-muted italic" : "text-text-primary"}`}
                 title={t("chat.setNameHint")}
               >
                 {/* With no name, the word alone: the start of their key ("Contact · 1kwb54" elsewhere) is on the line
