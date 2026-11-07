@@ -1,7 +1,9 @@
 {
   "attach": "添付",
   "camera": "カメラ",
+  "cameraBlocked": "カメラがブロックされています。Android の設定で Ghostly にカメラを許可してください。",
   "cameraFailed": "カメラを起動できませんでした。",
+  "cameraRefused": "カメラを使用できません。もう一度「カメラ」をタップして許可してください。",
   "caption": "キャプションを追加",
   "captionTooLong": "このキャプションは {{bytes}} バイト（UTF-8）です。DHT は最大 {{max}} バイトまでです。",
   "category": {

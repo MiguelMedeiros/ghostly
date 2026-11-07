@@ -4,7 +4,7 @@ import { closeServiceWindows, hostErrorText, serviceFraming, setServiceWindowsCl
 import { loadLocale, translatorFor } from "../../locales";
 import { onAppInput } from "../../lib/apps/open";
 import { BRIDGE_READY, HEAD_TIMEOUT_MS, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
-import { GhostlyHttpError, type ClientRequest, type ClientResponse } from "@ghostly/core";
+import { GhostlyHttpError, VIEWER_SERVICE_CSP_RELAY_ONLY, type ClientRequest, type ClientResponse } from "@ghostly/core";
 
 // covers: services.web-open
 
@@ -114,6 +114,19 @@ describe("one request from the app, over the contact's link", () => {
     expect(replies[replies.length - 1]).toEqual({ type: "end" });
     expect(jar.header()).toBe("sid=abc; theme=dark");
     expect(closed()).toBe(true);
+  });
+
+  it("keeps the app to its own origin while Hide my IP from contacts is on: Ghostly's policy goes after the contact's", async () => {
+    // covers: settings.network.relay-only
+    const { port, replies } = recorder();
+    await serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null },
+      async () => answer(200, [["content-type", "text/html"], ["content-security-policy", "img-src *"]], ["<img src=\"https://contact.example/p.png\">"]), new CookieJar(), words, undefined, true);
+    expect(replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/html"], ["content-security-policy", "img-src *"], ["content-security-policy", VIEWER_SERVICE_CSP_RELAY_ONLY]] });
+    // Off: the contact's headers as they are.
+    const off = recorder();
+    await serve(off.port, { type: "request", method: "GET", path: "/", headers: [], body: null },
+      async () => answer(200, [["content-type", "text/html"], ["content-security-policy", "img-src *"]], ["<p>hi</p>"]), new CookieJar(), words, undefined, false);
+    expect(off.replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/html"], ["content-security-policy", "img-src *"]] });
   });
 
   it("says the contact is not reachable, in the profile's words, when the link is gone; any other failure as failed", async () => {
@@ -317,6 +330,23 @@ describe("a contact's app shown over the app", () => {
     expect(signals.map((s) => s.aborted), "the frame loaded again: the old page's requests end").toEqual([true, true, true, false, false]);
     document.querySelector<HTMLButtonElement>("[data-testid=service-view-close]")!.click();
     expect(signals.every((s) => s.aborted), "closed: every request ends").toBe(true);
+  });
+
+  it("answers every request of an app opened while Hide my IP from contacts is on with the policy that keeps it to its own origin", async () => {
+    for (const relayOnly of [true, false]) {
+      await openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service: "demo", title: "Demo", send: async () => answer(200, [["content-type", "text/html"]], ["<p>hi</p>"]), words, relayOnly });
+      const frame = document.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+      const inFrame = { postMessage: vi.fn() };
+      Object.defineProperty(frame, "contentWindow", { value: inFrame, configurable: true });
+      dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_READY }, origin: new URL(frame.src).origin, source: inFrame as unknown as Window }));
+      const channel = (inFrame.postMessage.mock.calls[0]![2] as MessagePort[])[0]!;
+      const reply = new MessageChannel();
+      const head = new Promise<ServiceReply>((resolve) => { reply.port1.onmessage = (event) => resolve(event.data as ServiceReply); });
+      channel.postMessage({ type: "request", method: "GET", path: "/", headers: [], body: null }, [reply.port2]);
+      const headers = (await head) as Extract<ServiceReply, { type: "head" }>;
+      expect(headers.headers.filter(([name]) => name === "content-security-policy"), String(relayOnly)).toEqual(relayOnly ? [["content-security-policy", VIEWER_SERVICE_CSP_RELAY_ONLY]] : []);
+      document.querySelector<HTMLButtonElement>("[data-testid=service-view-close]")!.click();
+    }
   });
 
   it("reads the app's name in its own direction: in the Arabic app a Latin name is cut at its end, not its start", async () => {

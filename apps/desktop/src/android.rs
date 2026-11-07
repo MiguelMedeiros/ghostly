@@ -21,6 +21,9 @@ const OPEN_EVENT: &str = "notification-open";
 const VISIBILITY_EVENT: &str = "app-visibility";
 /// The call notification's Hang up (CallService.kt): the page ends the call that is on.
 const HANG_UP_EVENT: &str = "call-hang-up";
+/// The composer's Camera was refused (CameraCapture.kt), "refused" or "blocked" (Android no longer asks): the file
+/// input itself only sees a cancel.
+const CAMERA_EVENT: &str = "camera-refused";
 
 /// Registered before the app's own `setup`: the Kotlin half loads with it and may report an intent at once (the one
 /// that started the app), so the app handle is kept first.
@@ -137,6 +140,11 @@ pub async fn cancel_notifications(keep: &[String]) -> Result<(), String> {
 /// The app's page in the system's notification settings.
 pub fn open_notification_settings() -> Result<(), String> {
     call::<Value>("openNotificationSettings", json!({})).map(drop)
+}
+
+/// The app's own page in the system's settings (its permissions: a camera Android no longer asks for).
+pub fn open_app_settings() -> Result<(), String> {
+    call::<Value>("openAppSettings", json!({})).map(drop)
 }
 
 #[derive(Deserialize)]
@@ -257,6 +265,9 @@ fn received(kind: &str, value: String) {
         }
         "call" => {
             let _ = app.emit_to("main", HANG_UP_EVENT, ());
+        }
+        "camera" => {
+            let _ = app.emit_to("main", CAMERA_EVENT, value);
         }
         "share" => match serde_json::from_str::<Shared>(&value) {
             Ok(shared) => {

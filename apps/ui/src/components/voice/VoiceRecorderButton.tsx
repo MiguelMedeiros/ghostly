@@ -4,6 +4,7 @@ import { mediaDeniedText, toChosenSpeaker } from "../../lib/mediaDevices";
 import { MICROPHONE_MESSAGES, MicrophoneError, VoiceRecorder, canRecordVoice, type MicrophoneProblem } from "../../lib/voiceRecorder";
 import { useT, type Translate } from "../../contexts/I18nContext";
 import { useIsLocked } from "../../contexts/LockScreenContext";
+import { androidApp } from "../../lib/touchOnly";
 
 /** The microphone's own problems, in the person's language; a browser's words about it stay as they are. */
 function microphoneText(t: Translate, problem: MicrophoneProblem): string {
@@ -90,6 +91,8 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   const [preview, setPreview] = useState<{ peaks: number[]; playing: boolean } | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [binned, setBinned] = useState(false);
+  /** The microphone ended under the recording: it waits, paused for good, to be sent or discarded. */
+  const [micEnded, setMicEnded] = useState(false);
 
   const recorderRef = useRef<VoiceRecorder | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -159,6 +162,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     setConfirmingBoth(false);
     setModeBoth("idle");
     setPhase("starting");
+    setMicEnded(false);
     setElapsed(0);
     setLevels([]);
     setDrag({ x: 0, y: 0 });
@@ -173,7 +177,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   const send = useCallback(async () => {
     const recorder = recorderRef.current;
     if (!recorder || sendingRef.current) return;
-    if (!recorder.recording && !recorder.paused) {
+    if (!recorder.recording && !recorder.paused && !recorder.ended) {
       // Hands-free, the send button shows before the microphone answers: a press then is kept, not lost.
       if (modeRef.current === "locked") { pendingSendRef.current = true; setPhase("sending"); return; }
       return cancel();
@@ -205,6 +209,17 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     recorderRef.current = recorder;
     recorder.onLevel = () => setLevels(recorder.recentLevels(48));
     recorder.onLimit = () => { showHint(t("chat.voice.limit", { minutes: VOICE_LIMITS.maxDurationMs / 60_000 })); void send(); };
+    // The microphone went: what was recorded shows as a paused recording, to play, send or discard.
+    recorder.onEnded = () => {
+      if (recorderRef.current !== recorder || sendingRef.current) return;
+      // Pause turns disabled under the focus.
+      focusOutOfBar();
+      setMicEnded(true);
+      setPhase("paused");
+      setElapsed(recorder.elapsed());
+      setPreview({ peaks: recorder.peaks(PREVIEW_BARS), playing: false });
+      showHint(microphoneText(t, "unavailable"));
+    };
     setModeBoth(next);
     setPhase("starting");
     try {
@@ -219,7 +234,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     setAnnounce(t("chat.voice.recording"));
     if (pendingSendRef.current) { pendingSendRef.current = false; void send(); return; }
     setPhase("recording");
-  }, [disabled, unavailable, onError, reset, showHint, send, t]);
+  }, [disabled, unavailable, onError, reset, showHint, send, focusOutOfBar, t]);
 
   // A chat left mid-recording gives the microphone back, and the contact stops seeing "recording audio…".
   useEffect(() => () => {
@@ -296,6 +311,21 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   useEffect(() => {
     if (isLocked && recorderRef.current && !sendingRef.current) cancel();
   }, [isLocked, cancel]);
+
+  // Android silences the microphone of an app out of sight (Home, the screen off) a few seconds after it goes, and the
+  // page is never told: the track stays live, the clock runs, and the rest of the recording is silence. Hands-free, it
+  // pauses as the page goes out of sight and comes back paused, with its preview, to resume, listen to or send.
+  useEffect(() => {
+    if (mode !== "locked" || phase !== "recording" || !androidApp()) return;
+    const onHidden = () => { if (document.visibilityState === "hidden") pauseRecording(); };
+    onHidden();
+    document.addEventListener("visibilitychange", onHidden);
+    window.addEventListener("pagehide", pauseRecording);
+    return () => {
+      document.removeEventListener("visibilitychange", onHidden);
+      window.removeEventListener("pagehide", pauseRecording);
+    };
+  }, [mode, phase, pauseRecording]);
 
   // Esc discards, Enter sends: wherever focus is while recording. Asking "discard?", Esc keeps. Not the keys of the
   // lock screen, nor of another dialog over the page (the lock screen is one): those keys are theirs. Most of the app's
@@ -407,7 +437,8 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
 
   const togglePreview = async () => {
     const recorder = recorderRef.current;
-    if (!recorder || !recorder.paused) return;
+    const held = () => recorder?.paused || recorder?.ended;
+    if (!recorder || !held()) return;
     const current = previewAudio.current;
     if (current && !current.audio.paused) { current.audio.pause(); return; }
     let audio = current?.audio;
@@ -416,7 +447,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
       previewPending.current = true;
       const turn = previewTurn.current;
       // Stopped (sent, resumed, discarded, the chat left) while the recording so far was being read: nothing plays.
-      const gone = () => turn !== previewTurn.current || recorderRef.current !== recorder || !recorder.paused;
+      const gone = () => turn !== previewTurn.current || recorderRef.current !== recorder || !held();
       let blob: Blob;
       try { blob = await recorder.preview(); } finally { previewPending.current = false; }
       if (gone()) return;
@@ -499,7 +530,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
               )}
               {locked && (
                 <button type="button" className="voice-icon-button voice-pause-button" data-testid="voice-pause" data-paused={paused || undefined}
-                  disabled={phase === "starting" || sending}
+                  disabled={phase === "starting" || sending || micEnded}
                   aria-label={paused ? t("chat.file.resume") : t("chat.file.pause")} title={paused ? t("chat.file.resume") : t("chat.file.pause")} onClick={togglePause}>
                   {paused ? <MicIcon size={20} color="var(--color-danger)" /> : <PauseIcon size={20} />}
                 </button>

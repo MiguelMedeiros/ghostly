@@ -147,9 +147,21 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       ShareTurns<Handover>(System.currentTimeMillis()) { thread(name = "ghostly-share-clean") { it.folder.deleteRecursively() } }
     /** Whether this run swept what earlier runs left in the share cache: once, as an activity made again may come. */
     private val sharesSwept = AtomicBoolean(false)
+    /** The plugin once loaded (Rust hears it), for a photo that comes back with no page waiting ([photoBack]). */
+    private var loaded: GhostlyHostPlugin? = null
+    /** Such photos that came before the plugin loaded: it hands them over as it loads. */
+    private val photosBack = mutableListOf<File>()
+
+    /**
+     * A photo the composer's camera took for a page that is gone (MainActivity `cameraAnswered`): it reaches the page
+     * as a share of it, now or once the plugin loads. On the main thread.
+     */
+    fun photoBack(photo: File) {
+      loaded?.handOver(photo) ?: photosBack.add(photo)
+    }
   }
 
-  /** Rust (src/android.rs): `kind` is "oidc", "share", "notification", "network", "visibility" or "call". */
+  /** Rust (src/android.rs): `kind` is "oidc", "share", "notification", "network", "visibility", "call" or "camera". */
   private external fun received(kind: String, value: String)
 
   private val pendingSave = SaveSlot<SaveArgs>()
@@ -166,6 +178,12 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     watchNetwork()
     // The call notification's Hang up (CallService.kt): the page ends the call.
     CallService.hangUp = { activity.runOnUiThread { received("call", "hangUp") } }
+    // The composer's Camera refused (CameraCapture.kt): the page says so, and where to allow it.
+    CameraRefusal.told = { blocked -> activity.runOnUiThread { received("camera", if (blocked) "blocked" else "refused") } }
+    activity.runOnUiThread {
+      loaded = this
+      photosBack.toList().also { photosBack.clear() }.forEach(::handOver)
+    }
   }
 
   override fun onNewIntent(intent: Intent) {
@@ -352,6 +370,28 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
           if (handed != null) received("share", handed.json)
         }
       }
+    }
+  }
+
+  /**
+   * The camera's photo with no page waiting for it ([photoBack]), handed to the page as a share of it: moved into a
+   * share's folder (the same cache, so nothing is copied), which goes as any share's does (`shareDone`). On the main thread.
+   */
+  private fun handOver(photo: File) {
+    val number = shareTurns.arrive()
+    val own = File(sharedRoot(), number.toString())
+    try {
+      val folder = File(own, "0")
+      SharedCopies.makeFolder(folder)
+      val file = File(folder, photo.name)
+      if (!photo.renameTo(file)) throw IOException("Not moved: $photo")
+      val files = JSONArray().put(JSONObject().put("path", file.path).put("mime", "image/jpeg"))
+      val json = JSONObject().put("title", "").put("text", "").put("files", files).toString()
+      shareTurns.ready(number, Handover(own, json))?.let { received("share", it.json) }
+    } catch (e: Exception) {
+      own.deleteRecursively()
+      photo.delete()
+      shareTurns.nothing(number)?.let { received("share", it.json) }
     }
   }
 
@@ -555,6 +595,18 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       invoke.resolve()
     } catch (e: ActivityNotFoundException) {
       invoke.reject("No notification settings to open")
+    }
+  }
+
+  /** The app's own page in Android's settings, where a permission Android no longer asks for is allowed again. */
+  @Command
+  fun openAppSettings(invoke: Invoke) {
+    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", activity.packageName, null))
+    try {
+      activity.startActivity(intent)
+      invoke.resolve()
+    } catch (e: ActivityNotFoundException) {
+      invoke.reject("No app settings to open")
     }
   }
 

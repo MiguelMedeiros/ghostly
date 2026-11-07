@@ -43,6 +43,12 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
 /// `packages/cli/src/services.ts` (`service open`).
 const SERVICE_CSP: &str = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
 
+/// The policy while Hide my IP from contacts is on (`relayOnly`, WISP 100 § Relay only) when the window opens:
+/// `SERVICE_CSP` without `https:`, so the app loads nothing but its own origin. A picture, script or frame from a
+/// server the contact names would show that server this device's address. The same value as
+/// `OPENED_SERVICE_CSP_RELAY_ONLY` in `packages/cli/src/services.ts`.
+const SERVICE_CSP_RELAY_ONLY: &str = "default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
+
 /// The contact's headers that are not passed on: each makes the WebView send
 /// something to a place it names, outside `connect-src` (violation and
 /// network-error reports, and the endpoints they go to; `Link` preloads,
@@ -102,6 +108,8 @@ struct Bound {
     site: String,
     /// What a request with no answer says.
     unreachable: String,
+    /// Hide my IP from contacts was on when it opened: `SERVICE_CSP_RELAY_ONLY` goes with every answer.
+    relay_only: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -267,6 +275,7 @@ pub fn open<R: tauri::Runtime>(
     tag: String,
     title: String,
     unreachable: Option<String>,
+    relay_only: Option<bool>,
 ) -> Result<(), String> {
     if !is_label_safe(&peer) || !is_label_safe(&service) || !is_tag(&tag) {
         return Err("Invalid service".into());
@@ -285,6 +294,7 @@ pub fn open<R: tauri::Runtime>(
                 service: service.clone(),
                 site: site.clone(),
                 unreachable: unreachable_text(unreachable),
+                relay_only: relay_only.unwrap_or(false),
             },
         );
 
@@ -358,6 +368,7 @@ pub async fn handle<R: tauri::Runtime>(
         service,
         site,
         unreachable,
+        relay_only,
     }) = state
         .windows
         .lock()
@@ -438,7 +449,14 @@ pub async fn handle<R: tauri::Runtime>(
             response = response.header(name.as_str(), value.as_str());
         }
     }
-    policies.push(SERVICE_CSP.to_string());
+    policies.push(
+        if relay_only {
+            SERVICE_CSP_RELAY_ONLY
+        } else {
+            SERVICE_CSP
+        }
+        .to_string(),
+    );
     response = response.header("content-security-policy", policies.join(", "));
     response
         .body(STANDARD.decode(answer.body_b64).unwrap_or_default())
@@ -549,6 +567,7 @@ mod tests {
                 service: "atlas".into(),
                 site: SITE.into(),
                 unreachable: UNREACHABLE.into(),
+                relay_only: false,
             },
         );
         let request = Request::builder()
@@ -790,6 +809,7 @@ mod routing_tests {
                 service: "atlas".into(),
                 site: format!("{PEER}.{TAG}"),
                 unreachable: UNREACHABLE.into(),
+                relay_only: false,
             },
         );
     }
@@ -839,6 +859,7 @@ mod routing_tests {
                     service.into(),
                     tag.into(),
                     "t".into(),
+                    None,
                     None
                 )
                 .unwrap_err(),
@@ -855,6 +876,7 @@ mod routing_tests {
             TAG.into(),
             "Atlas".into(),
             None,
+            None,
         )
         .unwrap();
         open(
@@ -864,6 +886,7 @@ mod routing_tests {
             TAG.into(),
             "Notes".into(),
             Some("Este serviço não está acessível.".into()),
+            None,
         )
         .unwrap();
         let windows = app.webview_windows();
@@ -882,6 +905,7 @@ mod routing_tests {
                 service: "atlas".into(),
                 site: format!("{PEER}.{TAG}"),
                 unreachable: UNREACHABLE.into(),
+                relay_only: false,
             }
         );
         assert_eq!(
@@ -891,6 +915,7 @@ mod routing_tests {
                 service: "notes".into(),
                 site: format!("{PEER}.{TAG}"),
                 unreachable: "Este serviço não está acessível.".into(),
+                relay_only: false,
             }
         );
     }
@@ -905,6 +930,7 @@ mod routing_tests {
                 service: "atlas".into(),
                 site: format!("{PEER}.{TAG}"),
                 unreachable: unreachable_text(Some("Este serviço não está acessível.".into())),
+                relay_only: false,
             },
         );
         let response = tauri::async_runtime::block_on(handle(
@@ -1067,11 +1093,98 @@ mod routing_tests {
         assert!(SERVICE_CSP.ends_with("; connect-src 'self'; form-action 'self'"));
     }
 
+    /// With Hide my IP from contacts on when the window opened, its pages load nothing but their own origin: a
+    /// picture, script or frame from a server the contact names would show it this device's address.
+    #[test]
+    fn with_hide_my_ip_on_the_app_keeps_to_its_own_origin() {
+        // covers: settings.network.relay-only
+        for relay_only in [true, false] {
+            let app = app();
+            app.state::<ViewerState>().windows.lock().unwrap().insert(
+                "svc-1".into(),
+                Bound {
+                    peer: PEER.into(),
+                    service: "atlas".into(),
+                    site: format!("{PEER}.{TAG}"),
+                    unreachable: UNREACHABLE.into(),
+                    relay_only,
+                },
+            );
+            let asked = requests(&app);
+            let pending = tauri::async_runtime::spawn(handle(
+                app.handle().clone(),
+                "svc-1".into(),
+                request("GET", &format!("{SCHEME}://atlas.{PEER}.{TAG}/"), b""),
+            ));
+            let carried = asked.recv_timeout(Duration::from_secs(5)).unwrap();
+            respond(
+                app.handle(),
+                carried["id"].as_u64().unwrap(),
+                ServiceResponse {
+                    status: 200,
+                    headers: vec![("content-security-policy".into(), "img-src *".into())],
+                    body_b64: STANDARD.encode(b"<img src=\"https://contact.example/p.png\">"),
+                },
+            );
+            let response = tauri::async_runtime::block_on(pending).unwrap();
+            let ours = if relay_only {
+                SERVICE_CSP_RELAY_ONLY
+            } else {
+                SERVICE_CSP
+            };
+            assert_eq!(
+                response.headers()["content-security-policy"],
+                format!("img-src *, {ours}").as_str(),
+                "{relay_only}"
+            );
+        }
+        assert_eq!(
+            SERVICE_CSP_RELAY_ONLY,
+            "default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'"
+        );
+    }
+
+    #[test]
+    fn the_window_keeps_the_setting_it_was_opened_with() {
+        let app = app();
+        for (service, relay_only) in [
+            ("atlas", Some(true)),
+            ("notes", Some(false)),
+            ("maps", None),
+        ] {
+            open(
+                app.handle(),
+                PEER.into(),
+                service.into(),
+                TAG.into(),
+                "t".into(),
+                None,
+                relay_only,
+            )
+            .unwrap();
+        }
+        let bound = app.state::<ViewerState>().windows.lock().unwrap().clone();
+        let relay_only = |service: &str| {
+            bound
+                .values()
+                .find(|b| b.service == service)
+                .unwrap()
+                .relay_only
+        };
+        assert!(relay_only("atlas"));
+        assert!(!relay_only("notes"));
+        // An older page that sends no setting: as before.
+        assert!(!relay_only("maps"));
+    }
+
     #[test]
     fn the_policy_is_the_one_service_open_adds() {
         let cli = include_str!("../../../packages/cli/src/services.ts");
         assert!(cli.contains(&format!(
             "export const OPENED_SERVICE_CSP = \"{SERVICE_CSP}\";"
+        )));
+        assert!(cli.contains(&format!(
+            "export const OPENED_SERVICE_CSP_RELAY_ONLY = \"{SERVICE_CSP_RELAY_ONLY}\";"
         )));
         let list = |names: &[&str]| {
             names
@@ -1200,6 +1313,7 @@ mod routing_tests {
                 TAG.into(),
                 "t".into(),
                 None,
+                None,
             )
             .unwrap();
         }
@@ -1227,6 +1341,7 @@ mod routing_tests {
             "atlas".into(),
             TAG.into(),
             "Atlas".into(),
+            None,
             None,
         )
         .unwrap();
@@ -1292,6 +1407,7 @@ mod download_tests {
                     "atlas".into(),
                     "ybndrfg8ejkmcpqx".into(),
                     "Atlas".into(),
+                    None,
                     None,
                 )
                 .unwrap()

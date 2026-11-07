@@ -49,8 +49,9 @@ test("a message in the background posts a private system notification", { tag: [
   const { page, adb } = app;
   const asks = adb.shell(`dumpsys package ${PKG}`).includes("android.permission.POST_NOTIFICATIONS");
   skipUntilA1("Notifications", !asks && "the app does not ask for POST_NOTIFICATIONS");
-  // Granted as a person would on the system's prompt (`pm clear` took any earlier answer away).
-  adb.run("shell", "pm", "grant", PKG, "android.permission.POST_NOTIFICATIONS");
+  // Granted as a person would on the system's prompt (`pm clear` took any earlier answer away). Below Android 13
+  // (API 33, the nightly's older emulator) there is no such permission to grant: notifications are allowed already.
+  if (Number(adb.shell("getprop ro.build.version.sdk").trim()) >= 33) adb.run("shell", "pm", "grant", PKG, "android.permission.POST_NOTIFICATIONS");
   await page.evaluate(() => { location.hash = "#/settings/notifications"; });
   const notices = page.getByRole("switch", { name: "System notifications", exact: true });
   await notices.click();

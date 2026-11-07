@@ -1,7 +1,9 @@
 {
   "attach": "Adjuntar",
   "camera": "Cámara",
+  "cameraBlocked": "Cámara bloqueada. Permite la cámara en los ajustes de Android para Ghostly.",
   "cameraFailed": "No se pudo iniciar la cámara.",
+  "cameraRefused": "Sin acceso a la cámara. Toca Cámara de nuevo y permítelo.",
   "caption": "Añadir un pie",
   "captionTooLong": "Este pie ocupa {{bytes}} bytes UTF-8. La DHT admite hasta {{max}}.",
   "category": {

@@ -351,6 +351,19 @@ pub fn open_web_link(url: String) -> Result<(), String> {
     launch(&url)
 }
 
+/// The app's own page in Android's settings, where a camera Android no longer asks for is allowed again. Android only.
+#[tauri::command]
+pub fn open_app_settings() -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        crate::android::open_app_settings()
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        Err("No app settings to open".into())
+    }
+}
+
 pub(crate) fn is_web_link(url: &str) -> bool {
     let Ok(parsed) = reqwest::Url::parse(url) else {
         return false;
@@ -420,8 +433,9 @@ pub fn open_service_window<R: tauri::Runtime>(
     tag: String,
     title: String,
     unreachable: Option<String>,
+    relay_only: Option<bool>,
 ) -> Result<(), String> {
-    viewer::open(&app, peer, service, tag, title, unreachable)
+    viewer::open(&app, peer, service, tag, title, unreachable, relay_only)
 }
 
 /// The profile locked: every contact's app window closes (`viewer::close_all`).

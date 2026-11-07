@@ -83,11 +83,11 @@ export function GroupConnection({ group }: { group: GroupView }) {
         aria-label={t("group.connection.labelWith", { state: label })} aria-describedby={`${id}-tip`} aria-expanded={menuOpen} aria-controls={`${id}-popover`}
         onPointerEnter={e => { if (e.pointerType !== "touch") setTip(true); }} onPointerLeave={() => setTip(false)}
         onFocus={e => { if (e.currentTarget.matches(":focus-visible")) setTip(true); }} onBlur={() => setTip(false)}
-        className={`relative flex cursor-pointer items-center justify-center rounded-full p-2 transition-colors max-md:p-2.5 hover:bg-surface-hover ${focus} ${kind === "failure" ? "text-danger" : kind === "offline" ? "text-text-muted hover:text-accent" : "text-text-secondary hover:text-accent"}`}>
+        className={`relative flex cursor-pointer items-center justify-center rounded-full p-2 transition-colors max-md:h-11 max-md:w-11 max-md:p-0 hover:bg-surface-hover ${focus} ${kind === "failure" ? "text-danger" : kind === "offline" ? "text-text-muted hover:text-accent" : "text-text-secondary hover:text-accent"}`}>
         <span className={`flex ${pulsing ? "motion-safe:animate-pulse" : ""}`} data-testid="group-connection-icon">
           <ConnectionIcon kind={iconKind} transport={carried?.transport} size={18} weight={2} />
         </span>
-        {dot && <span aria-hidden="true" data-testid="group-connection-dot" className={`pointer-events-none absolute end-1 top-1 h-2 w-2 rounded-full ring-2 ring-panel-header max-md:end-1.5 max-md:top-1.5 ${dot} ${kind === "waiting" && connecting || pulsing ? "motion-safe:animate-pulse" : ""}`} />}
+        {dot && <span aria-hidden="true" data-testid="group-connection-dot" className={`pointer-events-none absolute end-1 top-1 h-2 w-2 rounded-full ring-2 ring-panel-header max-md:end-2 max-md:top-2 ${dot} ${kind === "waiting" && connecting || pulsing ? "motion-safe:animate-pulse" : ""}`} />}
       </button>
       {menuOpen && <div role="dialog" id={`${id}-popover`} aria-label={t("group.connection.label")} className="absolute end-0 top-full max-md:fixed max-md:inset-x-2 max-md:top-[calc(3.5rem_+_env(safe-area-inset-top))] max-md:w-auto z-40 mt-2 w-[min(21rem,calc(100vw-1rem))] max-h-[70dvh] overflow-y-auto rounded-xl border border-border bg-panel-header p-4 text-xs leading-5 text-text-muted shadow-xl">
         <div className="flex items-center gap-2 font-medium text-text-primary" data-testid="group-connection-state">

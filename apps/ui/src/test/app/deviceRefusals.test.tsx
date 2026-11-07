@@ -107,10 +107,31 @@ describe("Profile, Devices on the active device", () => {
   it("Let <device> try again says when the engine refuses", async () => {
     const { user, engine } = renderApp(<DevicesSection />);
     engine.on("deviceSet", () => set());
-    engine.on("deviceHandoffView", () => ({ role: "giver", device: "iPhone", key: PHONE, step: "failed", bytes: 0, total: 0, failure: "password" }) satisfies HandoffView);
+    engine.on("deviceHandoffView", () => ({ role: "giver", device: "iPhone", key: PHONE, step: "failed", bytes: 0, total: 0, failure: "password", refused: true }) satisfies HandoffView);
     engine.on("deviceHandoffAllow", () => { throw new Error("That device is not one of this profile's"); });
     await user.click(await screen.findByTestId("handoff-allow", {}, { timeout: 3_000 }));
     await waitFor(() => expect(engine.callsTo("deviceHandoffAllow")).toEqual([{ key: PHONE }]));
     expect(await screen.findByTestId("handoff-allow-error")).toHaveTextContent("That device is not one of this profile's");
+  });
+
+  it("Let <device> try again, once done, takes its row away and gives the keyboard focus to that device's row", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    let failed = true;
+    engine.on("deviceSet", () => set());
+    engine.on("deviceHandoffView", () => failed ? ({ role: "giver", device: "iPhone", key: PHONE, step: "failed", bytes: 0, total: 0, failure: "password", refused: true }) satisfies HandoffView : null);
+    engine.on("deviceHandoffAllow", () => { failed = false; });
+    (await screen.findByTestId("handoff-allow", {}, { timeout: 3_000 })).focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.queryByTestId("handoff-wrong-password")).toBeNull(), { timeout: 3_000 });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId("device-move")));
+  });
+
+  it("a Use here that Mainnet money kept from happening says what to do here, as the Move dialog does", async () => {
+    const { engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => set());
+    engine.on("deviceHandoffView", () => ({ role: "giver", device: "iPhone", key: PHONE, step: "failed", bytes: 0, total: 0, failure: "mainnet", wallet: "ark" }) satisfies HandoffView);
+    const row = await screen.findByTestId("handoff-wallet-refusal", {}, { timeout: 3_000 });
+    expect(row).toHaveTextContent("Mainnet money can't move yet");
+    expect(row).toHaveTextContent("Empty your Mainnet wallets first.");
   });
 });

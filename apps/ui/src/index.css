@@ -1032,6 +1032,14 @@ html[data-standalone="true"] {
   }
 }
 
+/* In a chat's header (`toast-place-header`, the call buttons' why): just under the header, over the top of the chat's
+   column, near the button pressed. At the bottom it sat over the message field's + and emoji buttons on a desktop. */
+html .toast-place.toast-place-header,
+html[data-keyboard="true"] .toast-place.toast-place-header {
+  top: calc(3.5rem + env(safe-area-inset-top) + 0.75rem);
+  bottom: auto;
+}
+
 /* Where the card would cover the field it is about (a short screen with the keyboard up: a phone on its side shows
    about 200px), it goes to the top instead (Toast.tsx measures both). After the rules above, as specific as they are. */
 html .toast-place[data-at="top"] {
@@ -1482,6 +1490,12 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 .connection-switch input:disabled + .connection-switch-track { opacity: 0.55; }
 @media (prefers-reduced-motion: reduce) {
   .connection-switch-track, .connection-switch-track::after { transition: none; }
+}
+/* A thumb's 44px on a phone, for a control drawn smaller there: where a tap lands grows past its box, centred on it, and
+   it looks the same. Its own box must not clip (no overflow-hidden, no ::after of its own), nor what holds it. */
+@media (width < 48rem) {
+  .tap-target { position: relative; }
+  .tap-target::after { content: ""; position: absolute; top: 50%; left: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
 }
 @container chat-sidebar (max-width: 340px) {
   .sidebar-action-label { display: none; }

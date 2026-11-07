@@ -100,7 +100,8 @@ test("a push: Move to on the active device, Use here on the other; and a wrong p
   await connect(desktop, contact);
   await enrollDevice(desktop, phone);
 
-  // A wrong password: refused on the standby, noted on the active device with a way to let it try again.
+  // A wrong password: refused on the standby, noted on the active device. Let <device> try again waits until that device
+  // is refused (15, WISP 06): after one, it is not offered.
   await phone.page.getByTestId("handoff-use-here").click();
   await phone.page.getByTestId("handoff-password").fill("not the password");
   await phone.page.getByTestId("handoff-start").click();
@@ -108,6 +109,7 @@ test("a push: Move to on the active device, Use here on the other; and a wrong p
   await expect(phone.page.getByTestId("handoff-line")).toHaveText("Wrong password.");
   await desktop.page.goto("/#/profile");
   await expect(desktop.page.getByTestId("handoff-wrong-password")).toContainText("tried to move this profile with a wrong password");
+  await expect(desktop.page.getByTestId("handoff-allow")).toHaveCount(0);
   // Nothing moved: the desktop is still the active device.
   await expect(desktop.page.getByTitle("New Chat")).toBeVisible();
 

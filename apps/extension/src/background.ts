@@ -1,4 +1,4 @@
-import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders, VIEWER_SERVICE_CSP, withViewerPolicy } from "@ghostly/core";
+import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders, viewerServicePolicy, withViewerPolicy } from "@ghostly/core";
 import type { EngineStatus, HttpRequestReply, RuntimeMessage, ViewerPage } from "./messages";
 import { fromOwnPage } from "./shared/sender";
 import { parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
@@ -274,6 +274,8 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     return true;
   }
   if (message.type === "open-service") {
+    // Hide my IP from contacts is on: a contact's app does not open in a tab (see "viewer" below).
+    if (message.relayOnly === true) { sendResponse({ ok: false, error: RELAY_ONLY_REFUSED }); return false; }
     void openViewer(message.peerPubKeyZ32, message.serviceId, message.tag, viewerPageOf(message.page)).then(
       () => sendResponse({ ok: true }),
       (error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
@@ -305,6 +307,13 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
 // own guard for local addresses allows. A top-level navigation is beyond any
 // policy, and once the tab leaves the virtual origin it is no viewer any more.
 //
+// So no tab opens while Hide my IP from contacts is on (`RELAY_ONLY_REFUSED`):
+// the app could send the tab, or a frame, to a server of the contact's, and
+// Chrome connects there before any policy or DevTools refuses the page, which
+// shows that server this device's address. A frame whose page's `frame-src`
+// refuses it is connected to all the same (Chromium, 2026-11). Desktop's window
+// never leaves the app's origin (`may_navigate` in apps/desktop/src/viewer.rs).
+//
 // The `debugger` permission reaches every tab, so its use is kept narrow here,
 // the only place in the extension that calls `chrome.debugger`:
 // - pages ask for a service (peer key and service id), never for a tab;
@@ -314,6 +323,9 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
 // - only the four commands the viewer needs are ever sent.
 
 const PROTOCOL_VERSION = "1.3";
+
+/** Why a contact's app does not open while Hide my IP from contacts is on; the app says it in its language (errorText.ts). */
+const RELAY_ONLY_REFUSED = "A contact's app does not open in the browser extension while Hide my IP from contacts is on";
 
 /** The DevTools commands a viewer tab needs. Nothing else is ever sent. */
 const VIEWER_COMMANDS = new Set(["Fetch.enable", "Page.enable", "Fetch.fulfillRequest", "Fetch.failRequest"]);
@@ -483,7 +495,7 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
       { name: "content-type", value: "text/html; charset=utf-8" },
       { name: "cache-control", value: "no-store" },
       { name: "x-ghostly-error", value: reply.code },
-      { name: "content-security-policy", value: VIEWER_SERVICE_CSP },
+      { name: "content-security-policy", value: viewerServicePolicy(false) },
     ],
     body: toBase64(utf8Encode(html)),
   });

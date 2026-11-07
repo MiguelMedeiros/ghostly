@@ -717,8 +717,9 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
     setOpen(true);
   });
   const side = align === "left" ? "end" : "start";
-  // A delete takes this row away with its ⋮, where the confirmation gives the focus back: once the row is gone, the
-  // focus goes to the ⋮ of the message now in its place (the one before it at the end), not to the page.
+  // A delete (or Cancel sending, which asks nothing) takes this row away with its ⋮, where the confirmation gives the
+  // focus back: once the row is gone, the focus goes to the ⋮ of the message now in its place (the one before it at the
+  // end), not to the page.
   const after = useRef<HTMLElement[]>([]);
   useEffect(() => () => {
     const next = after.current;
@@ -744,8 +745,9 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
         aria-expanded={open}
         onClick={() => { setPointed(undefined); setOpen((v) => !v); }}
         // Faint but always reachable by touch; on a pointer it waits for the message to be hovered. The pseudo-element takes
-        // its 22 px to the 24 px a finger needs without moving the row.
-        className={`relative p-1 rounded-full before:absolute before:-inset-px before:content-[''] transition-all cursor-pointer hover:text-text-primary md:group-hover:opacity-100 md:focus-visible:opacity-100 ${
+        // its 22 px to the 24 px a finger needs without moving the row, and on a phone to a thumb's 44 px: away from the
+        // message, which is drawn over its own side.
+        className={`relative p-1 rounded-full before:absolute before:-inset-px max-md:before:-inset-y-3 ${align === "left" ? "max-md:before:-start-[22px]" : "max-md:before:-end-[22px]"} before:content-[''] transition-all cursor-pointer hover:text-text-primary md:group-hover:opacity-100 md:focus-visible:opacity-100 ${
           open || confirm ? "text-text-primary opacity-100" : "text-text-muted max-md:opacity-40 md:opacity-0"
         }`}
       >
@@ -782,7 +784,7 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
           icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 16v-4M12 8h.01" /></svg>}>
           {t("chat.message.details")}
         </MenuItem>
-        {onCancelSend && <MenuItem testId="message-cancel-sending" danger onClick={() => { setOpen(false); onCancelSend(); }} icon={cancelIcon}>
+        {onCancelSend && <MenuItem testId="message-cancel-sending" danger onClick={() => { setOpen(false); after.current = neighbourOptions(ref.current); onCancelSend(); }} icon={cancelIcon}>
           {t("chat.message.cancelSending")}
         </MenuItem>}
         {onDelete && !onCancelSend && <MenuItem testId="message-delete" danger onClick={() => { setOpen(false); setConfirm("here"); }} icon={trash}>

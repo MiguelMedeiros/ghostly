@@ -63,6 +63,10 @@ describe("the chat header's call buttons", () => {
     await user.click(screen.getByTestId("call-audio"));
     expect(screen.getByTestId("call-blocked-text")).toHaveTextContent("Calls need a live connection");
     expect(screen.getByTestId("call-blocked-region")).toHaveAttribute("role", "status");
+    // Under the header, beside the buttons: over the whole window it sat on the message field's + and emoji
+    // (e2e/web/paired-calls.spec.ts measures it).
+    expect(screen.getByTestId("call-blocked-region")).toHaveClass("toast-place-header");
+    expect(screen.getByTestId("call-blocked-region").parentElement).not.toBe(document.body);
     expect(onCall).not.toHaveBeenCalled();
 
     // During a call the buttons are off with no reason to give: nothing new is said.

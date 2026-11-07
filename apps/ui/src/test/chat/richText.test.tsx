@@ -133,6 +133,15 @@ describe("code blocks", () => {
     expect(writeText).toHaveBeenCalledWith(TRICKY);
   });
 
+  // In Arabic a bare <U+…> in the sentence had its < and > mirrored around the U: drawn as <…+U>.
+  it.each(["en", "pt", "es", "fr", "it", "ja", "zh", "ar"] as const)("name the marker left to right in the warning (%s)", (language) => {
+    renderApp(<MessageBubble message={message("```\nls ‮txt.exe\n```")} peerPubKey="peer" />, { language });
+    const note = screen.getByTestId("rich-codeblock-hidden");
+    const marker = note.querySelector("[dir=ltr]");
+    expect(marker).toHaveTextContent(/^<U\+…>$/);
+    expect(note.textContent!.split("<U+…>")).toHaveLength(2);
+  });
+
   it("draw the markers in a block that is not highlighted too", () => {
     bubble("```\nls \u202etxt.exe\n```");
     const block = screen.getByTestId("rich-codeblock");

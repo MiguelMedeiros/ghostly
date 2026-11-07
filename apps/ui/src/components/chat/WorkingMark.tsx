@@ -65,7 +65,7 @@ export function WorkingLine({ entry, open = false, onToggle }: { entry: WorkingE
       {onToggle
         ? <button type="button" data-testid="chat-working" data-state={state} aria-haspopup="dialog" aria-expanded={open}
             onPointerDown={() => { wasOpen.current = open; }} onClick={() => { onToggle(!wasOpen.current); wasOpen.current = false; }}
-            className={`${shape} rounded cursor-pointer max-md:-m-2 max-md:p-2 hover:text-accent focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent`}>{line}</button>
+            className={`${shape} relative rounded cursor-pointer max-md:-m-2 max-md:p-2 hover:text-accent focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent`}>{line}</button>
         : <span data-testid="chat-working" data-state={state} className={shape}>{line}</span>}
     </span>
   );

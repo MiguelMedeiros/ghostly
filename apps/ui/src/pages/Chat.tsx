@@ -64,7 +64,7 @@ import { IncomingCallNotification } from "../components/IncomingCallNotification
 import { useIsLocked, useRingOnLockScreen } from "../contexts/LockScreenContext";
 import { handOverCall, takeHandedCall } from "../lib/lockedRing";
 import { contactStatus } from "../lib/contactStatus";
-import { callEventText, callLineId, callsBlockedText } from "../lib/callLines";
+import { callEventText, callLineId, callsBlockedText, callsWaitForLive } from "../lib/callLines";
 import { PeerServices } from "../components/PeerServices";
 import { formatFileSize } from "../lib/format";
 import { playSound, startRinging } from "../lib/sounds";
@@ -318,6 +318,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     maxCandidates: session?.profile === "paired-chat/1" ? PAIRED_CALL_CANDIDATES : undefined,
     // The microphone and camera this profile chose in Settings → Audio & video.
     devices: callDevicePreferences,
+    // A burst of the contact's calls rings once though this chat, off screen, is let go between them (App's loaded chats).
+    chatId: sessionId,
   });
   const callDevices = useCallDevices(webrtc);
 
@@ -672,31 +674,37 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (sceneOn && messages.length === 0) document.getElementById(pairingSceneId)?.scrollIntoView({ block: "nearest" });
   }, [sceneOn, messages.length, pairingSceneId]);
 
-  // Only what is on screen has been read; a chat kept alive by a call has not, nor one in a hidden window (usePageShown).
+  // Only what is on screen has been read; a chat kept alive by a call has not, nor one in a hidden window (usePageShown),
+  // nor one under the lock screen: the app stays mounted there (LockGate), and only the lock screen is seen. Unlocked
+  // with the chat in front, it is read then.
   const pageShown = usePageShown();
+  // (Under the lock a ringing call would only hold the keys here too: the lock screen shows the call instead.)
+  const locked = useIsLocked();
+  const seen = visible && pageShown && !locked;
   useEffect(() => {
-    seenRef.current = visible && pageShown;
-    if (!visible || !pageShown) return;
+    seenRef.current = seen;
+    if (!seen) return;
     markSessionAsRead(sessionId);
-  }, [visible, pageShown, sessionId, messages.length]);
+  }, [seen, sessionId, messages.length]);
   // Its notification goes once the window has the focus too: one on screen behind another app's has just been told of
   // the message (AttentionFeedback), and taking it back then would take it back before anyone saw it. The window is
   // asked as it is now (`useWindowAway` runs this again when it comes back): its watch may start after this mounts.
   const away = useWindowAway();
+  // Under the lock they stay: nothing of the chat has been seen.
   useEffect(() => {
-    if (!visible || windowAway()) return;
+    if (!visible || locked || windowAway()) return;
     clearChatNotification(sessionId);
     // The installed web app: this chat's wake-up notices too (a ringing call's stays).
     closeWakeNotices(chatPath(sessionId));
-  }, [visible, away, sessionId, messages.length]);
+  }, [visible, locked, away, sessionId, messages.length]);
   // Nor does the icon count it meanwhile: a message landing here would show on it until the line above ran (appBadge).
-  useEffect(() => (visible && pageShown ? showChatOnScreen(sessionId) : undefined), [visible, pageShown, sessionId]);
+  useEffect(() => (seen ? showChatOnScreen(sessionId) : undefined), [seen, sessionId]);
 
   // The contact's app is closed but it shared how to wake it (WISP 401 § Wake-up push): a call wakes it, then rings.
   // Not offline (Ghostly's switch or the device): no wake-up goes out, and the buttons say why instead of "did not open".
   const deviceOnline = useOnline();
   const canWakeForCall = paired && !chatLive && !!chatLink?.peerWakes && !!chatLink.id && !chatStop
-    && deviceOnline && engine.state?.settings.online !== false;
+    && deviceOnline && engine.state?.settings.online !== false && callsWaitForLive(deliveryPeer?.callsUnavailable);
   const placeCall = webrtc.startCall;
   const wakeCall = useWakeCall(chatLink?.id, paired && !callsBlocked, placeCall);
 
@@ -740,8 +748,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (video !== undefined) webrtc.acceptCall(video);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per ring, for the offer that rings; `webrtc` changes with every render
   }, [callState, sessionId, holdForUnlock]);
-  // Under the lock it would only hold the keys: the lock screen shows the call instead.
-  const locked = useIsLocked();
   // A bot's usage card (WISP 405 § Usage): the meter in the header.
   const usage = useUsageOf(params?.peerPubKeyB64);
   // Whether the bot is working (WISP 405 § Showing a card): a line in the header that opens the Tasks panel.
@@ -931,7 +937,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 type="button"
                 ref={nameRef}
                 onClick={startEditLabel}
-                className={`group/name flex items-center min-w-0 text-start text-[15px] font-normal m-0 leading-tight cursor-pointer rounded hover:text-accent transition-colors ${focus} ${isAnonymous ? "text-text-muted italic" : "text-text-primary"}`}
+                className={`group/name relative flex items-center min-w-0 max-md:before:absolute max-md:before:inset-x-0 max-md:before:-top-3 max-md:before:-bottom-5 max-md:before:content-[''] text-start text-[15px] font-normal m-0 leading-tight cursor-pointer rounded hover:text-accent transition-colors ${focus} ${isAnonymous ? "text-text-muted italic" : "text-text-primary"}`}
                 title={t("chat.setNameHint")}
               >
                 {/* With no name, the word alone: the start of their key ("Contact · 1kwb54" elsewhere) is on the line

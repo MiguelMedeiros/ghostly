@@ -42,10 +42,18 @@ object CameraFiles {
 
   /**
    * Every photo a previous start left. The page reads a photo only when it sends it, so one on the sheet stays while
-   * the page lives; at the next start no page holds any.
+   * the page lives; at the next start no page holds any. But the one the camera app is `taking` (its name, from the
+   * activity's saved state): Android may end the app's process while the camera app is in front, and the activity
+   * made again gets the camera's answer, with that photo (MainActivity `cameraAnswered`).
    */
-  fun sweep(cacheDir: File) {
-    folder(cacheDir).deleteRecursively()
+  fun sweep(cacheDir: File, taking: String? = null) {
+    val folder = folder(cacheDir)
+    val keep = taking?.takeIf { it.isNotEmpty() && it != "." && it != ".." && File(it).name == it }
+    if (keep == null) {
+      folder.deleteRecursively()
+      return
+    }
+    folder.listFiles()?.filter { it.name != keep }?.forEach { it.deleteRecursively() }
   }
 
   /** A file input that asks for a photo from the camera (`capture`, accepting images and no video), which [CameraChromeClient] takes. */
@@ -54,11 +62,19 @@ object CameraFiles {
 }
 
 /**
+ * A camera refused, said to the page (GhostlyHostPlugin passes it to Rust): the file input only sees a cancel.
+ * `blocked`: Android no longer asks ("Don't allow" twice, or "Don't ask again"), so only its settings allow it.
+ */
+object CameraRefusal {
+  @Volatile var told: ((blocked: Boolean) -> Unit)? = null
+}
+
+/**
  * wry's WebChromeClient, with the camera's photo taken here, into [CameraFiles] and through [CameraPhoto]: a
  * cancelled or empty capture leaves nothing. Everything else goes to wry's client: each method it overrides (wry 0.57's `RustWebChromeClient`) is passed
  * on, so a wry update that overrides another needs it added here.
  */
-class CameraChromeClient(private val activity: WryActivity,private val wry: WebChromeClient) : WebChromeClient() {
+class CameraChromeClient(private val activity: MainActivity, private val wry: WebChromeClient) : WebChromeClient() {
   override fun onShowFileChooser(
     webView: WebView,
     filePathCallback: ValueCallback<Array<Uri?>?>,
@@ -72,7 +88,13 @@ class CameraChromeClient(private val activity: WryActivity,private val wry: WebC
     } else {
       // The manifest asks for CAMERA, so Android refuses ACTION_IMAGE_CAPTURE until it is granted.
       activity.requestPermissions(arrayOf(Manifest.permission.CAMERA)) { granted ->
-        if (granted == true) capture(filePathCallback, fileChooserParams) else filePathCallback.onReceiveValue(null)
+        if (granted == true) {
+          capture(filePathCallback, fileChooserParams)
+        } else {
+          // Right after a refusal, no rationale to show means Android will not ask again.
+          CameraRefusal.told?.invoke(!activity.shouldShowRequestPermissionRationale(Manifest.permission.CAMERA))
+          filePathCallback.onReceiveValue(null)
+        }
       }
     }
     return true
@@ -89,8 +111,9 @@ class CameraChromeClient(private val activity: WryActivity,private val wry: WebC
       .putExtra(MediaStore.EXTRA_OUTPUT, uri)
       .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
     try {
-      activity.launchActivityForResult(intent) { result ->
-        if (result?.resultCode == Activity.RESULT_OK && file.length() > 0) {
+      // Through the activity's own launcher, not wry's: its answer still comes when Android ended the process meanwhile.
+      activity.takePhoto(intent, file) { result ->
+        if (result.resultCode == Activity.RESULT_OK && file.length() > 0) {
           // The page sends the file as it is: without the camera's Exif (where, with what) first, off the main thread
           // (a 50 MP photo is tens of MB). One that is no whole JPEG is not sent.
           Thread {

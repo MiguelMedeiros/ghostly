@@ -344,6 +344,20 @@ describe("viewer tabs", () => {
     expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([policy]);
   });
 
+  it("opens no tab while Hide my IP from contacts is on, and says why", async () => {
+    // covers: settings.network.relay-only
+    // The app could send the tab, or a frame of its own, to a server of the contact's: Chrome connects there before
+    // any policy or DevTools refuses the page, and that server learns this device's address.
+    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, relayOnly: true });
+    expect(reply).toEqual({ ok: false, error: "A contact's app does not open in the browser extension while Hide my IP from contacts is on" });
+    expect(world.callsTo("tabs.create")).toEqual([]);
+    expect(world.callsTo("debugger.attach")).toEqual([]);
+    expect(world.session.size).toBe(0);
+    // A page that says anything but true counts as off.
+    const shown = await openViewer(world, PEER, SERVICE, OTHER_TAG, undefined, "yes");
+    expect(world.tabs.get(shown)!.url).toBe(`https://${SERVICE}.${PEER}.${OTHER_TAG}.invalid/`);
+  });
+
   it("joins a body DevTools hands over in several pieces", async () => {
     const tabId = await openViewer(world);
     const b64 = (s: string) => Buffer.from(s).toString("base64");

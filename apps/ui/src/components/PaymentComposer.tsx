@@ -12,7 +12,8 @@ import { WalletMark, type ChatRail } from "./WalletCards";
 import { CardDeck, WalletCardFace } from "./WalletDeck";
 import { ONCHAIN_FEE_CAP, byNetwork, cardNotSetUp, cardWallet, networkState, receivingFirst, spendable, walletCards, type InstanceCard } from "./walletCardData";
 import { sharedBalanceCards } from "./walletTotals";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
 import { ComposerSheet, ComposerSheetHead, ForwardArrow } from "./ComposerSheet";
 import { CardFlip, FlipTurnButton } from "./deck/Flip";
 import { useCardFlip } from "./deck/useCardFlip";
@@ -92,7 +93,10 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   const wallet = reviewContext?.wallet;
   const state = wallet?.getState();
   const chat = reviewContext?.peer;
-  const peer = useServicesPlatform()?.getPeer(chat ?? "");
+  // What the sheet reads of the platform as it draws, compared by content: the contact's link and the wallets' state.
+  // The whole platform drew it (every card, and the amount being typed) again on every engine state, up to 20 a second
+  // while a file moves.
+  const [peer] = usePlatformValue(() => [servicesPlatform?.getPeer(chat ?? ""), wallet?.getState()] as const);
   const who = contact || t("payments.composer.yourContact");
   const networkName = (card: InstanceCard) => `${card.network === "testnet" ? "Testnet" : "Mainnet"} ${card.name}`;
   /**

@@ -48,6 +48,7 @@ import { MemberColorsProvider } from "../contexts/MemberColorsContext";
 import { chatsByPeer } from "../lib/storage";
 import { useContactFaces, withContactFaces } from "../components/identities/contactFace";
 import type { ChatMessage } from "../lib/types";
+import { useIsLocked } from "../contexts/LockScreenContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { GroupAvatar } from "../components/GroupAvatar";
 import { AvatarViewer } from "../components/AvatarViewer";
@@ -550,24 +551,26 @@ export function GroupChat() {
   const myJoins = useMemo(() => pickMyJoin(messages), [pickMyJoin, messages]);
   const jump = useChatScroll({ rows: scrollRows, chat: groupId, window: rowWindow });
   const search = useChatSearch({ messages: shown, chat: groupId, active: !!group && !(group.invitation && (!group.invitation.viaLink || !group.status)), t, returnFocus: optionsRef });
-  // Read while the page shows; in a hidden window what comes stays unread (usePageShown).
+  // Read while the page shows; in a hidden window what comes stays unread (usePageShown), and under the lock screen too
+  // (the app stays mounted there): read once unlocked, as a chat's is.
   // Written only when something new was read, as a chat's is: every write wakes the other pages of the app (`storage`).
   const pageShown = usePageShown();
+  const locked = useIsLocked();
   // Up to the newest of what the list calls unread: after a restart a message written before the mark but handed over
   // later has lastMessageAt at its writing, lastPeerMessageAt and lastMentionAt at its arrival.
   const readGroupId = group?.id;
   const readUpTo = group && Math.max(group.lastMessageAt, groupUnreadAt(group), group.lastMentionAt ?? 0);
   useEffect(() => {
-    if (!readGroupId || readUpTo === undefined || !pageShown || groupReadAt(readGroupId) >= readUpTo) return;
+    if (!readGroupId || readUpTo === undefined || !pageShown || locked || groupReadAt(readGroupId) >= readUpTo) return;
     markGroupRead(readGroupId, Math.max(readUpTo, Date.now()));
-  }, [readGroupId, readUpTo, pageShown]);
-  // Its notification goes once the window has the focus too, as a chat's does (Chat.tsx).
+  }, [readGroupId, readUpTo, pageShown, locked]);
+  // Its notification goes once the window has the focus too, and not under the lock, as a chat's does (Chat.tsx).
   const away = useWindowAway();
   useEffect(() => {
-    if (!group || windowAway()) return;
+    if (!group || locked || windowAway()) return;
     clearChatNotification(`group:${group.id}`);
     closeWakeNotices(groupPath(group.id));
-  }, [group?.id, group?.lastMessageAt, group, away]);
+  }, [group?.id, group?.lastMessageAt, group, away, locked]);
 
   /** `extra.translated`: a translation from the composer's preview, whose original is kept beside it on this device. */
   const send = useCallback(async (text: string, mentions?: GroupMention[], extra?: { translated?: SentTranslation }): Promise<string | null> => {
@@ -779,7 +782,7 @@ export function GroupChat() {
               invitation has no member yet (the engine knows only the count the card says): its avatar and line open nothing. */}
           {invited ? <GroupAvatar picture={group.picture} size={40} glyph={20} testId="group-avatar" className="bg-accent/15" />
           : <button ref={avatarButton} onClick={() => (group.picture ? setViewingPicture(true) : setShowMembers(true))} data-testid="group-avatar-open"
-            className={`relative rounded-full shrink-0 ${group.picture ? "cursor-zoom-in" : ""}`}
+            className={`relative rounded-full shrink-0 max-md:p-0.5 ${group.picture ? "cursor-zoom-in" : ""}`}
             {...(group.picture ? { "aria-label": t("common.viewPhoto", { name: group.name || t("group.chat.unnamed") }) } : { title: t("group.chat.membersButton"), "aria-label": t("group.chat.membersButton") })}>
             <GroupAvatar picture={group.picture} size={40} glyph={20} testId="group-avatar" className="bg-accent/15" />
           </button>}
@@ -790,11 +793,15 @@ export function GroupChat() {
               <h1 dir="auto" className="text-[15px] font-normal m-0 leading-tight truncate text-text-primary" data-testid="group-name">{group.name || t("group.chat.unnamed")}</h1>
             </div>
             {invited ? <p data-testid="group-members" className="m-0 max-w-full text-xs text-text-muted truncate">{subtitle}</p>
-            : <button onClick={() => setShowMembers(true)} data-testid="group-members" className="block max-w-full text-xs text-text-muted truncate hover:text-accent cursor-pointer max-md:min-h-6">
+            // On a phone where a tap lands reaches up over the name: the line alone is 24px tall, under a thumb's 44px. The
+            // cut with … is inside it, so it does not clip that taller area.
+            : <button onClick={() => setShowMembers(true)} data-testid="group-members" className="relative block max-w-full text-start text-xs text-text-muted hover:text-accent cursor-pointer max-md:min-h-6 max-md:min-w-11 max-md:before:absolute max-md:before:inset-x-0 max-md:before:bottom-0 max-md:before:-top-5 max-md:before:content-['']">
+              <span className="block truncate">
               {/* Who is typing while it lasts, in place of the member count, as a 1:1 chat's header does. Only that is
                   said by a screen reader: the count, inside the live region, was read again each time they stopped. */}
               <span role="status" aria-live="polite">{typers.length > 0 && <GroupTypingText testId="group-typing" typers={typers} />}</span>
               {!typers.length && subtitle}
+              </span>
             </button>}
           </div>
         </div>
@@ -803,12 +810,12 @@ export function GroupChat() {
           {/* Only while a bot's card is here (WISP 405 · Status Cards). */}
           <TasksButton rows={cardRows} nameOf={author => nameOf("peer", author) ?? `…${author.slice(-6)}`} faceOf={memberFace} />
           {canShare && <button ref={shareRef} onClick={() => void openShare()} data-testid="group-share" title={t("group.chat.shareHint")} aria-label={t("group.chat.shareLink")}
-            className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-accent/15 px-3 text-sm font-semibold text-accent hover:bg-accent/25 max-md:min-h-11 max-md:px-2.5">
+            className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full bg-accent/15 px-3 text-sm font-semibold text-accent hover:bg-accent/25 max-md:min-h-11 max-md:min-w-11 max-md:px-2.5">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
             <span className="max-[480px]:hidden">{t("group.chat.shareLink")}</span>
           </button>}
           <div className="relative" ref={menuRef}>
-            <button ref={optionsRef} onClick={() => setMenuOpen(!menuOpen)} onKeyDown={openOnArrow(() => setMenuOpen(true))} className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer" title={t("chat.options")} aria-haspopup="true" aria-expanded={menuOpen} data-testid="group-options">
+            <button ref={optionsRef} onClick={() => setMenuOpen(!menuOpen)} onKeyDown={openOnArrow(() => setMenuOpen(true))} className="flex items-center justify-center p-2 max-md:h-11 max-md:w-11 max-md:p-0 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer" title={t("chat.options")} aria-haspopup="true" aria-expanded={menuOpen} data-testid="group-options">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1" /><circle cx="12" cy="5" r="1" /><circle cx="12" cy="19" r="1" /></svg>
             </button>
             <Menu testId="group-options-menu" open={menuOpen} onClose={closeMenu} anchorRef={menuRef} focusFirst>

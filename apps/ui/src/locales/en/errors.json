@@ -590,6 +590,8 @@
     "usdtRevertedNext": "No tokens were sent; the gas was spent."
   },
   "relayOnly": {
+    "appInExtension": "A contact's app does not open here while Hide my IP is on",
+    "appInExtensionNext": "The browser could show the app's servers your IP. Turn Hide my IP off to open it.",
     "keepsTurn": "Hide my IP needs this TURN server",
     "keepsTurnNext": "Turn it off first, then remove the server.",
     "needsTurn": "Add a TURN server first",

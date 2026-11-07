@@ -1140,18 +1140,26 @@ describe("with the apps flag on", () => {
     // 80 characters, a tagline's limit, with nowhere to break: a link, a German compound, a name in Latin letters.
     const long = `https://example.com/${"a".repeat(60)}`;
     const wraps = (el: HTMLElement) => expect(el.className).toContain("[overflow-wrap:anywhere]");
-    fakeEngine.on("appPreview", () => preview({ manifest: { ...preview().manifest, tagline: long, description: `${long}2` } }));
+    // A version has no space either, and a bundle allows 64 characters: "Version 1.0.0-rc.1+sha.…" ran 29 px off a 375 px phone.
+    const version = `1.0.0-rc.1+sha.${"0123456789abcdef".repeat(3)}`;
+    fakeEngine.on("appPreview", () => preview({ manifest: { ...preview().manifest, version, tagline: long, description: `${long}2` } }));
     const install = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
     const sheet = await screen.findByTestId("app-install");
     await within(sheet).findByText(long);
     wraps(within(sheet).getByText(long));
     wraps(within(sheet).getByText(`${long}2`));
+    // Broken over lines in Arabic, its "-" was drawn at the left of "1.0.0": "-1.0.0". It keeps its own direction.
+    expect(within(sheet).getByText(version)).toMatchObject({ tagName: "BDI", dir: "ltr" });
+    expect(within(sheet).getByText(version).parentElement).toHaveTextContent(`Version ${version}`);
+    wraps(within(sheet).getByText(version).parentElement!);
     install.unmount();
 
-    const app = installed({ title: long, tagline: `${long}3`, description: `${long}4` });
+    const app = installed({ title: long, version, tagline: `${long}3`, description: `${long}4` });
     const details = renderApp(<InstalledAppDialog app={app} onClose={() => {}} onOpen={() => {}} />);
     wraps(within(screen.getByTestId("app-details")).getByText(`${long}3`));
     wraps(within(screen.getByTestId("app-details")).getByText(`${long}4`));
+    expect(within(screen.getByTestId("app-details")).getByText(version)).toMatchObject({ tagName: "BDI", dir: "ltr" });
+    wraps(within(screen.getByTestId("app-details")).getByText(version).parentElement!);
     await details.user.click(screen.getByTestId("app-uninstall-open"));
     wraps(within(screen.getByTestId("app-uninstall")).getByRole("heading"));
     details.unmount();
@@ -1296,23 +1304,26 @@ describe("with the apps flag on", () => {
   const LONG = "Schachweltmeisterschaftsvorbereitungsapp";
   const BETA = "1.2.0-beta.12";
 
-  it("a card with a long title cuts the title alone and keeps the version whole after it", async () => {
+  it("a card with a long title cuts the title alone and keeps the version whole after it, up to half the line", async () => {
     fakeEngine.on("appList", () => []);
     const card: AppCard = { ...CARD, title: LONG, version: BETA };
     renderApp(<MessageBubble message={cardMessage({ card, text: statusCardText(card) })} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
     const title = await screen.findByTestId("app-card-title");
     expect(title).toHaveTextContent(`${LONG} ${BETA}`);
     expect(within(title).getByText(LONG)).toHaveClass("truncate", "min-w-0");
-    expect(within(title).getByText(BETA)).toHaveClass("shrink-0", "whitespace-nowrap");
+    // A longer version is cut at its end, past half the line, not the title (e2e/web/apps-long-version.spec.ts lays it out).
+    expect(within(title).getByText(BETA)).toHaveClass("shrink-0", "max-w-[50%]", "truncate");
+    expect(within(title).getByText(BETA)).toHaveAttribute("dir", "ltr");
     expect(within(title).getByText(LONG)).not.toContainElement(within(title).getByText(BETA));
   });
 
-  it("an installed app with a long title cuts the title alone in its row and keeps the version whole after it", async () => {
+  it("an installed app with a long title cuts the title alone in its row and keeps the version whole after it, up to half the line", async () => {
     fakeEngine.on("appList", () => [installed({ title: LONG, version: BETA })]).on("appStoreList", () => []).on("appCheckUpdates", () => []);
     renderApp(<Apps />, { route: "/apps" });
     const row = await screen.findByTestId("installed-app");
     expect(within(row).getByText(LONG)).toHaveClass("truncate", "min-w-0");
-    expect(within(row).getByText(BETA)).toHaveClass("shrink-0", "whitespace-nowrap");
+    expect(within(row).getByText(BETA)).toHaveClass("shrink-0", "max-w-[50%]", "truncate");
+    expect(within(row).getByText(BETA)).toHaveAttribute("dir", "ltr");
     expect(within(row).getByText(LONG)).not.toContainElement(within(row).getByText(BETA));
     // The version stays in the details button's name, right after the title, as the row shows it.
     expect(within(row).getByRole("button", { name: detailsOf(`${LONG} ${BETA}`) })).toBeInTheDocument();

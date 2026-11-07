@@ -16,7 +16,7 @@ import { LIGHT_FILE_BYTES, LIGHT_VOICE_BYTES, keptInLight, type LightMark } from
 import { getPrefix, getStorageProfile, ownsKey } from "./storage";
 import { assertUnlocked, identityKeysOf, profileIdentityKeys } from "./profileData";
 import { holdRestore, noteRestore, sweepInterruptedRestores, undoRestore } from "./restoreJournal";
-import { builtInNameBefore, currentProfile, isBuiltInName, listProfiles, namespaceOf, newProfileId, registerProfile, registryKey, storedProfileName, type ProfileEntry } from "./profiles";
+import { builtInNameBefore, currentProfile, hasBuiltInName, listProfiles, namespaceOf, newProfileId, registerProfile, registryKey, storedProfileName, type ProfileEntry } from "./profiles";
 import { NAME_STEP_SUFFIX } from "./nameStep";
 import { SENT_ORIGINALS_SUFFIX } from "./sentOriginals";
 
@@ -315,10 +315,11 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
     progress.stage = "writing";
     tell();
 
-    const name = storedProfileName(active ? currentProfile().id : id!) ?? "Profile";
+    const profileId = active ? currentProfile().id : id!;
+    const name = storedProfileName(profileId) ?? "Profile";
     const put = async (record: BackupRecord) => writer.json(await encode(record));
     const mark: LightMark | undefined = light ? { maxFileBytes: LIGHT_FILE_BYTES, maxVoiceBytes: LIGHT_VOICE_BYTES, files: leftOut, bytes: leftOutBytes } : undefined;
-    await put({ t: "profile", format: "ghostly-profile", version: 2, createdAt: Date.now(), profile: { name, builtIn: isBuiltInName(name) }, storage, files: carried.length, bytes: progress.bytesTotal, ...(mark && { light: mark }) });
+    await put({ t: "profile", format: "ghostly-profile", version: 2, createdAt: Date.now(), profile: { name, builtIn: hasBuiltInName(profileId) }, storage, files: carried.length, bytes: progress.bytesTotal, ...(mark && { light: mark }) });
     // Right after the head: a restore reads it before it writes anything (`openProfileBackup`).
     if (devices) await put({ t: "devices", ...devices });
     if (peer) {

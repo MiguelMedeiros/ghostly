@@ -66,6 +66,15 @@ export function DevicesSection() {
   // Cancel pressed in those steps: once they go, the keyboard focus goes to that device's row, not to the page.
   const [refocus, setRefocus] = useState<string | null>(null);
   const cancelRunning = async (key: string) => { await engine.call("deviceHandoffCancel"); setRefocus(key); };
+  // "Let <device> try again" done: its row goes at the next read, and the keyboard focus that was on it goes to that
+  // device's row, not to the page.
+  const wrongPassword = handoff?.failure === "password" && handoff.role === "giver";
+  const [allowed, setAllowed] = useState<string | null>(null);
+  useEffect(() => {
+    if (!allowed || wrongPassword) return;
+    setAllowed(null);
+    setRefocus(allowed);
+  }, [allowed, wrongPassword]);
   // Remove done: the device's row goes, and the ⋮ that opened the dialog with it. The keyboard focus goes to its Removed row.
   const removedBox = useRef<HTMLDivElement>(null);
   const [focusRemoved, setFocusRemoved] = useState(false);
@@ -161,12 +170,14 @@ export function DevicesSection() {
           {secret.error && <Notice problem={secret.error} testId="device-secret-error" />}
         </div>
       )}
-      {handoff?.failure === "password" && handoff.role === "giver" && (
+      {/* "Let <device> try again" only once that device is refused (15 with no success, WISP 06 § Authorizing a handoff):
+          before that, pressing it would start its count again before any limit. */}
+      {wrongPassword && (
         <Row testId="handoff-wrong-password" label={fillNames(t("devices.handoff.wrongPassword"), { device: handoffDevice })}>
-          <Button data-testid="handoff-allow" onClick={() => ask("allow", engine.call("deviceHandoffAllow", { key: handoff.key }))}>{fillNames(t("devices.handoff.allowAgain"), { device: handoffDevice })}</Button>
+          {handoff.refused && <Button data-testid="handoff-allow" onClick={() => ask("allow", engine.call("deviceHandoffAllow", { key: handoff.key }).then(() => setAllowed(handoff.key)))}>{fillNames(t("devices.handoff.allowAgain"), { device: handoffDevice })}</Button>}
         </Row>
       )}
-      {handoff?.failure === "password" && handoff.role === "giver" && refused.allow && <div className="px-4 py-3"><Notice problem={refused.allow} testId="handoff-allow-error" /></div>}
+      {wrongPassword && refused.allow &&<div className="px-4 py-3"><Notice problem={refused.allow} testId="handoff-allow-error" /></div>}
       {/* A move whose copy stopped (WISP 06 § Handoff progress, Failures): the profile is still here; Try again moves it. */}
       {thisActive && handoff?.role === "giver" && handoff.step === "failed" && handoff.failure && STOPPED.has(handoff.failure) && (() => {
         const name = handoffDevice || t("devices.join.otherDevice");
@@ -179,7 +190,7 @@ export function DevicesSection() {
       {/* A pull this device's wallets or a call on it kept from happening: what keeps the profile here (WISP 06 § Wallets). */}
       {handoff?.role === "giver" && handoff.step === "failed" && handoff.failure && WALLET_REFUSALS.has(handoff.failure) && (
         <Row testId="handoff-wallet-refusal" label={t(FAILURES[handoff.failure], { device: handoffDevice, wallet: walletNameOf(handoff.wallet) })}
-          hint={handoff.expiresAt !== undefined ? t("devices.handoff.staysExpires", { wallet: walletNameOf(handoff.wallet), date: dayText(handoff.expiresAt, language) }) : undefined} />
+          hint={handoff.expiresAt !== undefined ? t("devices.handoff.staysExpires", { wallet: walletNameOf(handoff.wallet), date: dayText(handoff.expiresAt, language) }) : nextOf(FAILURES[handoff.failure], t)} />
       )}
       {adding && <AddDeviceDialog onClose={() => setAdding(false)} />}
       {moving && <MoveDialog device={moving.name} deviceKey={moving.key} onClose={() => { setMoving(null); setMoveClosed(true); }} />}
