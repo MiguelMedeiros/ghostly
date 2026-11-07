@@ -143,6 +143,7 @@ What changes is where the choice is made: not in the invite, but in the chat's C
 | Inviter: the joiner just showed up (fresh presence packet); joiner: its first two minutes | 4 s, for two minutes |
 | A text of ours awaits its receipt | 4 s |
 | `on-dht`, chat open and app in front | 10 s |
+| The contact chose DHT only, on a headless daemon (every chat counts as open) | 10 s |
 | `on-dht`, in the background | 30 s |
 | `live` | Once as layer 1 comes up, then 5 min, and at once when layer 1 is lost |
 
