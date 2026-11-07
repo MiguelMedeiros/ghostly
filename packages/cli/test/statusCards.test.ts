@@ -663,6 +663,30 @@ describe("routines", () => {
     }
   });
 
+  it("refuse a date with no year, a negative number and milliseconds before 2000 as a usage error (exit 2) that names the flag and the date forms", () => {
+    const zone = process.env.TZ;
+    try {
+      process.env.TZ = "America/Sao_Paulo";
+      vi.useFakeTimers({ toFake: ["Date"], now: Date.UTC(2026, 10, 7, 12) });
+      const next = (value: string) => (params("routine send", ["g1", "--name", "r", "--schedule", "every day", "--next", value]).card as { nextRunAt: number }).nextRunAt;
+      const refused = (value: string) => expect(() => next(value), value).toThrow(expect.objectContaining({ code: "usage", message: `--next takes a date with its year, or milliseconds from 2000: 2026-09-30 or 2026-09-30 01:00 (no zone: local time; a date alone is its midnight), 2026-09-30T01:00:00Z or 2026-09-30T01:00+02:00, not ${JSON.stringify(value)}` }));
+      // Before, the year left out was 2001 (Nov 31 was 2001-12-01), 99 was 1999, and the digits were milliseconds since 1970.
+      for (const value of ["Dec 25 10:00", "Nov 8", "Nov 31", "20 Nov", "11/20", "1 2", "1/2", "Dec 25 10:00 GMT+0200", "Dec 25 10:00-03:00", "-5", "Nov 8 99", "Dec 25 1000", "1999-12-31", "2026", "20261120", "5", "999"]) refused(value);
+      // A year written in full or in two digits, and a time past from 2000, stay taken.
+      expect(next("Nov 8 26")).toBe(new Date(2026, 10, 8).getTime());
+      expect(next("30 Sep 26 10:00")).toBe(new Date(2026, 8, 30, 10).getTime());
+      expect(next("Wed, 30 Sep 2026 01:00:00 GMT")).toBe(Date.UTC(2026, 8, 30, 1));
+      expect(next("Dec 25 10:00 2026")).toBe(new Date(2026, 11, 25, 10).getTime());
+      expect(next("10:00 Dec-25 2026")).toBe(new Date(2026, 11, 25, 10).getTime());
+      expect(next("2026-11-20T10:00-03:00")).toBe(Date.UTC(2026, 10, 20, 13));
+      expect(next("2000-01-01")).toBe(new Date(2000, 0, 1).getTime());
+      expect(next(String(Date.UTC(2000, 0, 1)))).toBe(Date.UTC(2000, 0, 1));
+    } finally {
+      vi.useRealTimers();
+      if (zone === undefined) delete process.env.TZ; else process.env.TZ = zone;
+    }
+  });
+
   it("refuse a wrong state or a text too long or blank as a usage error (exit 2) that names the flag, not the card's field", () => {
     const usage = (name: string, argv: string[], message: RegExp) => expect(() => params(name, argv)).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(message) }));
     const send = (...flags: string[]) => ["g1", "--name", "Nightly", "--schedule", "every day", ...flags];
