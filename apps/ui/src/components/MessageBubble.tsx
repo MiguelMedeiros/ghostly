@@ -304,13 +304,13 @@ function EditGlyph() {
 
 /**
  * "edited" beside the time of an edited text (WISP 400 § Edits); the time of the edit on hover, or that the contact has
- * not been shown it yet. The earlier versions are in the message's details.
+ * not been shown it yet. The earlier versions are in the message's details. On a picture's dark chip, light as its time.
  */
-function EditedMark({ edit, group }: { edit: NonNullable<ChatMessage["edit"]>; group?: boolean }) {
+function EditedMark({ edit, group, onPicture }: { edit: NonNullable<ChatMessage["edit"]>; group?: boolean; onPicture?: boolean }) {
   const { t, language } = useI18n();
   const time = clockTime(edit.at, language);
   return (
-    <span data-testid="message-edited" data-pending={edit.pending || undefined} className="text-[11px] leading-none text-text-primary/65 italic"
+    <span data-testid="message-edited" data-pending={edit.pending || undefined} className={`text-[11px] leading-none italic ${onPicture ? "text-[hsla(0,0%,100%,0.9)]" : "text-text-primary/65"}`}
       title={edit.pending ? t(group ? "chat.message.editPendingGroup" : "chat.message.editPending") : t("chat.message.editedAt", { time })}>
       {t("chat.message.edited")}
     </span>
@@ -1254,11 +1254,12 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
 
   // The float and its gap follow the text beside them (the body's `dir="auto"`), what is inside the app's: on one box,
   // an Arabic message in the English app floated the time to its left with the gap on the far side, the time touching it.
+  // A question's buttons marked or closed by its bot is its normal life, not an edit to point out; a new text is.
+  const edit = message.edit && (!buttonsView || !!message.edit.history?.length) ? message.edit : undefined;
   const timestampEl = (
     <span className="msg-meta flex float-end relative top-[4px] ms-[8px] select-none">
       <span dir={dir} className="inline-flex items-center gap-[3px]">
-        {/* A question's buttons marked or closed by its bot is its normal life, not an edit to point out; a new text is. */}
-        {message.edit && (!buttonsView || !!message.edit.history?.length) && <EditedMark edit={message.edit} group={linkId?.startsWith("group:")} />}
+        {edit && <EditedMark edit={edit} group={linkId?.startsWith("group:")} />}
         <span data-testid="message-time" data-at={shownAt} className="text-[11px] leading-none text-text-primary/65">
           {time}
         </span>
@@ -1385,6 +1386,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
               <div data-testid="picture-link-reading" aria-busy="true" className="rounded-[4px] w-[120px] h-[120px] bg-black/10" />
             )}
             <span data-picture-time className="absolute bottom-[4px] end-[6px] inline-flex items-center gap-[3px] bg-[rgba(11,20,26,0.55)] rounded-full px-[6px] py-[3px]">
+              {edit && <EditedMark edit={edit} group={linkId?.startsWith("group:")} onPicture />}
               <span className="text-[11px] leading-none text-[hsla(0,0%,100%,0.9)]">
                 {time}
               </span>
