@@ -1492,9 +1492,10 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
   .connection-switch-track, .connection-switch-track::after { transition: none; }
 }
 /* A thumb's 44px on a phone, for a control drawn smaller there: where a tap lands grows past its box, centred on it, and
-   it looks the same. Its own box must not clip (no overflow-hidden, no ::after of its own), nor what holds it. */
+   it looks the same. Its own box must not clip (no overflow-hidden, no ::after of its own), nor what holds it. One
+   placed with `absolute` (a × in a tile's corner) stays where it is: it already holds its ::after. */
 @media (width < 48rem) {
-  .tap-target { position: relative; }
+  .tap-target:not(.absolute) { position: relative; }
   .tap-target::after { content: ""; position: absolute; top: 50%; left: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
 }
 @container chat-sidebar (max-width: 340px) {
