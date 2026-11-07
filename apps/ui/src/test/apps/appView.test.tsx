@@ -335,6 +335,25 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     expect(chatApp("link-1")).toBeUndefined();
   });
 
+  it("an Open in a chat still on its way when the chat closes starts nothing: never alone over the page the person went to", async () => {
+    windowIs(false);
+    const { unmount } = panel();
+    // Its files fetched again first (a restored profile), on a slow link: the person leaves the chat meanwhile.
+    let fetched!: () => void;
+    const slow = new Promise<void>((resolve) => { fetched = resolve; });
+    const entry = host.entry;
+    host.entry = (async (...args: Parameters<AppsPlatform["entry"]>) => { await slow; return entry(...args); }) as AppsPlatform["entry"];
+    try {
+      const opening = open(REF, "link-1");
+      unmount();
+      fetched();
+      await expect(opening).rejects.toThrow();
+      expect(started).toHaveLength(0);
+      expect(document.querySelector("[data-testid=mini-app]")).toBeNull();
+      expect(chatApp("link-1")).toBeUndefined();
+    } finally { host.entry = entry; }
+  });
+
   it("starts with the name the contact was told in that chat, none once the profile stops sharing it, and none alone", async () => {
     windowIs(false);
     panel();
