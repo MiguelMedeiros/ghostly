@@ -104,7 +104,8 @@ export function readGroupPair(raw: unknown): GroupPairFrame | null {
   if (f.t !== GROUP_PAIR_FRAME || typeof f.g !== "string" || !GROUP_ID.test(f.g)) return null;
   if (typeof f.from !== "string" || !isZ32Key(f.from) || typeof f.to !== "string" || !isZ32Key(f.to) || f.from === f.to) return null;
   if (typeof f.ts !== "number" || !Number.isSafeInteger(f.ts) || f.ts < 0) return null;
-  if (typeof f.e !== "string" || !B64.test(f.e) || typeof f.n !== "string" || !B64.test(f.n)) return null;
+  // A pair box's ephemeral key and nonce, as a community's (32 and 24 bytes): a hub keeps the nonce and cannot open the box.
+  if (typeof f.e !== "string" || f.e.length !== 43 || !B64.test(f.e) || typeof f.n !== "string" || f.n.length !== 32 || !B64.test(f.n)) return null;
   if (typeof f.c !== "string" || f.c.length > MAX_BOX || !B64.test(f.c)) return null;
   if (f.h !== undefined && f.h !== 1) return null;
   return { t: GROUP_PAIR_FRAME, g: f.g, from: f.from, to: f.to, ts: f.ts, e: f.e, n: f.n, c: f.c, ...(f.h === 1 ? { h: 1 as const } : {}) };
