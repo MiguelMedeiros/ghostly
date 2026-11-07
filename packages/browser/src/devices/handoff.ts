@@ -764,6 +764,9 @@ export class HandoffGiver {
     if (versions.older) return busy("older", 0);
     if (!pushed) {
       const allowed = handoffAttemptAllowed(record.handoffAttempts?.[from], this.now());
+      // A refused device asks again: "Let <device> try again" is offered here once more. The offer that came with its
+      // fifteenth wrong password is not kept across a restart, nor by the device the profile moved to with its count.
+      if (allowed === "refused") { this.peer = from; this.deviceName = name(record, from); this.failure = "password"; this.failed = {}; this.refused = true; this.changed(); }
       if (allowed !== "ok") return busy(allowed, allowed === "refused" ? 0 : handoffRetryAfter(record.handoffAttempts?.[from], this.now()));
       // A pull is counted as a try when it is asked for, before anything is answered, and taken back only when its
       // proof holds: a device that asks and never proves (holding this device in `authorizing`) spends its tries.
