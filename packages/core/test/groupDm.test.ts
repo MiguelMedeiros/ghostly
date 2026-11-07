@@ -37,6 +37,16 @@ describe("a private-message request", () => {
     expect(readDmBody(null)).toBeNull();
   });
 
+  it("is refused when its name has invisible or direction-changing characters, or nothing visible", () => {
+    const { inviteCode, invite } = createChatInvite();
+    const k = invite.peerParticipationKeyZ32;
+    for (const n of ["​", "Alice‮ecilA", "⁦Alice", "Al​ice", "⠀", "́"]) {
+      expect(readDmBody({ t: "req", c: inviteCode, k, n }), JSON.stringify(n)).toBeNull();
+      expect(() => dmRequest(inviteCode, n), JSON.stringify(n)).toThrow();
+    }
+    for (const n of ["Alice", "Zoë 🦊", "👩‍💻", "علي", "דנה", "さくら"]) expect(readDmBody({ t: "req", c: inviteCode, k, n })).toEqual({ t: "req", c: inviteCode, k, n });
+  });
+
   it("is answered by the request's key: shown (got) or declined (no)", () => {
     const k = dmRequest(createChatInvite().inviteCode).k;
     expect(readDmBody(dmAnswer("got", k))).toEqual({ t: "got", k });
