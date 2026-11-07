@@ -170,9 +170,15 @@ export class IdentityProofs {
     this.running = true;
     // A round under way at `stop` plans no next one: `stop` cleared the timers before it ended.
     const stops = this.stops;
+    // Each job keeps only its pending timer in `timers`: a fired one is taken off.
     const every = (ms: number, first: number, work: () => Promise<void>) => {
-      const tick = () => { void work().catch(() => {}).finally(() => { if (this.stops === stops) this.timers.push(setTimeout(tick, ms)); }); };
-      this.timers.push(setTimeout(tick, first));
+      let timer: ReturnType<typeof setTimeout>;
+      const plan = (wait: number) => { timer = setTimeout(tick, wait); this.timers.push(timer); };
+      const tick = () => {
+        this.timers = this.timers.filter(t => t !== timer);
+        void work().catch(() => {}).finally(() => { if (this.stops === stops) plan(ms); });
+      };
+      plan(first);
     };
     every(REPUBLISH_MS, 5_000, () => this.republish());
     // 60 s after the start, unless the last lookup (from an earlier run) was less than 12 h ago: then when those are up.
