@@ -626,7 +626,8 @@ export function MessageInput({
     if (next.length > Math.max(maxLength, 16_384)) return false;
     caretRef.current = start + words.length;
     setText(next);
-    onTyping?.(true);
+    // As a typed key: editing a sent message is not writing a new one.
+    if (!edit) onTyping?.(true);
     return true;
   };
   const insertRef = useRef(insertText); insertRef.current = insertText;
