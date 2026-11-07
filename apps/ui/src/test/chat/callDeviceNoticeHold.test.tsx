@@ -47,9 +47,11 @@ function Call() {
   );
 }
 
+/** The devices changed (`watchDevices`). */
+let changed = () => {};
+
 /** A call that began on the default with the chosen microphone missing, then the chosen one plugged in: "Mic m1 is back". */
 async function back() {
-  let changed = () => {};
   vi.mocked(watchDevices).mockImplementation((fn) => {
     changed = fn;
     return () => {};
@@ -75,6 +77,7 @@ describe("the call's Switch back notice, with the focus or the pointer on it", (
     vi.useRealTimers();
     vi.clearAllMocks();
     localStorage.clear();
+    (track as { readyState: string }).readyState = "live";
   });
 
   it("still closes by itself when nothing is on it", async () => {
@@ -106,6 +109,20 @@ describe("the call's Switch back notice, with the focus or the pointer on it", (
     await pass(DEVICE_NOTICE_MS * 3);
     expect(notice()).not.toBeNull();
     fireEvent.pointerLeave(notice()!);
+    await pass(DEVICE_NOTICE_MS);
+    expect(notice()).toBeNull();
+  });
+
+  it("runs out when Switch back leaves under the focus because another notice took its place", async () => {
+    await back();
+    act(() => screen.getByTestId("call-device-switch-back").focus());
+    // The microphone the call now uses goes: "… was disconnected" takes the place of "… is back", with no Switch back,
+    // and the focus goes to the call's Devices with no blur from the button that left.
+    (track as { readyState: string }).readyState = "ended";
+    await act(async () => changed());
+    await act(async () => {});
+    expect(notice()).toHaveAttribute("data-type", "lost");
+    expect(screen.queryByTestId("call-device-switch-back")).toBeNull();
     await pass(DEVICE_NOTICE_MS);
     expect(notice()).toBeNull();
   });
