@@ -332,6 +332,11 @@ export class PaymentDesk {
   private readonly reclaims = new Map<string, Promise<Reclaimed | undefined>>();
   /** Receipts older than `RECEIPT_FRESH_MS` said again in this run of the app, by payment id (`receiptOwed`). */
   private readonly receiptsSaid = new Set<string>();
+  /**
+   * Reviewed Cashu payments whose token went out in this run, by id: `replay` sends it again whenever the link opens
+   * again, so reconciling one does not (`resendCashu`).
+   */
+  private readonly cashuSent = new Set<string>();
   private checkingArk=false;
   private checkingUsdt=false;
   private checkingBark=false;
@@ -1428,13 +1433,22 @@ export class PaymentDesk {
   async recordCashu(review:PaymentReview,token:string):Promise<void> {
     if(!review.linkId || review.method!=="cashu")throw new Error("Cashu chat recipient missing");
     const link=this.requireLink(review.linkId);
-    await link.requirePaymentSupport();
     const existing=await openRow(STORES.payments,await wrap<StoredPayment|undefined>((await store(STORES.payments,"readonly")).get(review.id)));
     if(!existing || existing.linkId!==review.linkId || existing.requestId!==review.requestId)throw new Error("Cashu outbox does not match the reviewed payment");
+    // Known before the link is asked for: a contact away now gets it from `replay` once its link opens.
     this.payments.set(existing.id,existing);
     this.host.onChange();
+    await link.requirePaymentSupport();
     await this.host.storeMessage({linkId:review.linkId,id:`me_${review.createdAt}`,text:`${review.amount} ${arkSats(review.network)} via Cashu`,sender:"me",timestamp:review.createdAt,via:"datalink",paymentId:review.id});
     await this.sendTo(link, {id:review.id,timestamp:review.createdAt,requestId:review.requestId,amount:{value:String(review.amount),asset:UNIT},memo:review.memo,endpoint:[ENDPOINT.cashu,token]});
+    this.cashuSent.add(review.id);
+  }
+  /**
+   * A reviewed Cashu payment's token again, as reconciling it asks: only if it never went in this run. One that went is
+   * the same token on the same link, and `replay` sends it again when the link opens again (a contact who missed it).
+   */
+  async resendCashu(review:PaymentReview,token:string):Promise<void> {
+    if(!this.cashuSent.has(review.id))await this.recordCashu(review,token);
   }
   async confirmReviewedCashu(review:PaymentReview):Promise<void> {
     if(review.method!=="cashu" || review.state!=="settled")return;
@@ -1964,6 +1978,7 @@ export class PaymentDesk {
           id: payment.id, timestamp: payment.createdAt, requestId: payment.requestId,
           amount: { value: String(payment.amount), asset: UNIT }, memo: payment.memo, endpoint: [ENDPOINT.cashu, payment.token],
         });
+        this.cashuSent.add(payment.id);
       }
       else if (payment.kind === "request" && (payment.invoice || payment.mints?.length)) await link.sendPaymentRequest({
         id: payment.id, timestamp: payment.createdAt, amount: { value: String(payment.amount), asset: UNIT }, memo: payment.memo, network: paymentNetwork(payment),
