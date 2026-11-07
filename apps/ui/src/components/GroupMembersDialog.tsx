@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type RefObject } from "react";
+import { memo, useCallback, useEffect, useId, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { COMMUNITY_LIMITS, GROUP_LIMITS, MAX_GROUP_MEMBERS, MAX_GROUP_PICTURE_LENGTH, MESH_HUBS, groupName } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
@@ -7,6 +7,8 @@ import { useBackdropDismiss, useBackCloses } from "../hooks/useDismiss";
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { edgeDot, edgeLabel, groupStatusText, memberName, memberPhoto, sameNamed } from "../lib/groups";
 import { useGroupNameField } from "../hooks/useGroupNameField";
+import { useMinuteClock } from "../hooks/useMinuteClock";
+import { useEngineValue } from "../lib/engineState";
 import { agoIn } from "../lib/relativeTime";
 import { GroupLinkPanel } from "./GroupLinkPanel";
 import { RemoveMemberDialog } from "./RemoveMemberDialog";
@@ -22,14 +24,16 @@ import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { initial } from "../lib/initial";
 
-const subscribe = (listener: () => void) => engine.subscribe(listener);
-const snapshot = () => engine.state;
-
 /** The focus fell to the page: what had it went away. */
 const focusLost = () => !document.activeElement || document.activeElement === document.body;
 
 /** What the admin says about a member as a hub (WISP 902 · Group Mesh § Hubs): up to their app, always, or never. */
 const HUB_ROLES = ["auto", "pin", "exclude"] as const;
+
+/** Of each 1:1 chat's link, what the panel reads: its name and picture, and whether its contact can be invited. */
+type DialogLink = Pick<LinkView, "id" | "label" | "peerNick" | "peerPubKeyZ32" | "peerAvatar" | "profile" | "groups" | "dataLink">;
+const dialogLink = ({ id, label, peerNick, peerPubKeyZ32, peerAvatar, profile, groups, dataLink }: LinkView): DialogLink =>
+  ({ id, label, peerNick, peerPubKeyZ32, peerAvatar, profile, groups, dataLink });
 
 
 /** Who is in a group, with what role; what the admin can do about it; whom to invite; and who can read what. */
@@ -38,8 +42,13 @@ const HUB_ROLES = ["auto", "pin", "exclude"] as const;
 export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { group: GroupView; onClose(): void; focusKey?: string; returnFocus?: RefObject<HTMLElement | null> }) {
   const id = useId();
   const { t, language } = useI18n();
-  const contactName = (link: LinkView) => link.label || link.peerNick || t("common.unnamedContact", { key: contactTag(link.peerPubKeyZ32) });
-  const state = useSyncExternalStore(subscribe, snapshot);
+  const contactName = (link: DialogLink) => link.label || link.peerNick || t("common.unnamedContact", { key: contactTag(link.peerPubKeyZ32) });
+  // What the panel shows of the engine's state, each compared by content (lib/engineState): the whole state drew it and
+  // worked out every member's row again on every change, up to 20 a second while a file moves, with 256 in a community.
+  const live = useEngineValue(state => state?.groups.find(g => g.id === group.id)) ?? group;
+  const links = useEngineValue(state => state?.links.map(dialogLink));
+  const myNick = useEngineValue(state => state?.settings.nick);
+  const myAvatar = useEngineValue(state => state?.settings.avatar);
   const dialog = useRef<HTMLDialogElement>(null);
   const backdrop = useBackdropDismiss(onClose);
   useBackCloses(onClose);
@@ -59,7 +68,6 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
       if (back?.isConnected) back.focus();
     };
   }, [returnFocus]);
-  const live = state?.groups.find(g => g.id === group.id) ?? group;
   const run = async (key: string, action: () => Promise<unknown>) => {
     setBusy(key); setError(null);
     try { await action(); } catch (e) { setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("group.error.generic") }); } finally { setBusy(null); }
@@ -109,12 +117,12 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
     });
   };
   // Contacts: paired chats, minus members and pending invitations. Those without groups are shown, and say why.
-  const contacts = (state?.links ?? []).filter(l => l.profile && !live.memberLinks[l.id]);
+  const contacts = (links ?? []).filter(l => l.profile && !live.memberLinks[l.id]);
   const invited = new Set(live.invited), full = live.members.length + live.invited.length >= MAX_GROUP_MEMBERS;
   // A member who is also a contact: the identities they shared in that chat. Community members are not contacts.
   const contactOf = (key: string) => {
     const linkId = Object.keys(live.memberLinks).find(id => live.memberLinks[id] === key);
-    return linkId ? state?.links.find(l => l.id === linkId) : undefined;
+    return linkId ? links?.find(l => l.id === linkId) : undefined;
   };
   const contactKey = (key: string) => contactOf(key)?.peerPubKeyZ32;
   // In a community my app holds an edge only with a hub or two (as a hub, with its members): everyone else is reached
@@ -125,9 +133,9 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   const viaHubs = (m: GroupMemberView) => live.profile === "community" && !m.me && linked && m.edge?.state !== "open";
   // Left, removed, or a fork that went on without me: my app reaches none of them again, so no row says it will, nor dots as if live.
   const out = live.status === "left" || live.status === "removed" || live.status === "forked";
-  const photoOf = (m: GroupMemberView) => memberPhoto(live, m, state?.links, faces, state?.settings.avatar);
-  // What each row says of its member's edge, as of this draw ("3 min ago" in the interface's language).
-  const now = Date.now(), since = agoIn(language);
+  const photoOf = (m: GroupMemberView) => memberPhoto(live, m, links, faces, myAvatar);
+  // What each row says of its member's edge ("3 min ago" in the interface's language), moved on once a minute.
+  const now = useMinuteClock(dialog), since = agoIn(language);
   const hubChoice = live.profile === "mesh" && live.members.length > MESH_HUBS.threshold;
   // The member whose name or picture was tapped in the chat: their row, in sight and marked.
   const list = useRef<HTMLUListElement>(null);
@@ -188,7 +196,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
     </div>
     {live.status === "active" && (live.isAdmin || (live.profile === "community" && live.entryLink)) && <GroupLinkPanel group={live} />}
     <ul ref={list} tabIndex={-1} className="mt-3 max-h-56 space-y-1 overflow-y-auto rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent" data-testid="group-member-list">
-      {live.members.map(m => <MemberRow key={m.key} member={m} focused={m.key === focusKey} out={out} viaHub={viaHubs(m)} photo={photoOf(m)} myNick={m.me ? state?.settings.nick : undefined}
+      {live.members.map(m => <MemberRow key={m.key} member={m} focused={m.key === focusKey} out={out} viaHub={viaHubs(m)} photo={photoOf(m)} myNick={m.me ? myNick : undefined}
         peerKey={m.me ? undefined : contactKey(m.key)} status={m.me || out ? "" : viaHubs(m) ? t("group.member.viaHub") : edgeLabel(m, now, t, since)}
         tools={!live.isAdmin || m.me ? "" : hubChoice ? "hubs" : "admin"} busy={busy !== null} onHub={setHub} onPromote={setPromoting} onRemove={setRemoving} />)}
     </ul>
