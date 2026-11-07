@@ -170,9 +170,11 @@ export function DevicesSection() {
           {secret.error && <Notice problem={secret.error} testId="device-secret-error" />}
         </div>
       )}
+      {/* "Let <device> try again" only once that device is refused (15 with no success, WISP 06 § Authorizing a handoff):
+          before that, pressing it would start its count again before any limit. */}
       {wrongPassword && (
         <Row testId="handoff-wrong-password" label={fillNames(t("devices.handoff.wrongPassword"), { device: handoffDevice })}>
-          <Button data-testid="handoff-allow" onClick={() => ask("allow", engine.call("deviceHandoffAllow", { key: handoff.key }).then(() => setAllowed(handoff.key)))}>{fillNames(t("devices.handoff.allowAgain"), { device: handoffDevice })}</Button>
+          {handoff.refused && <Button data-testid="handoff-allow" onClick={() => ask("allow", engine.call("deviceHandoffAllow", { key: handoff.key }).then(() => setAllowed(handoff.key)))}>{fillNames(t("devices.handoff.allowAgain"), { device: handoffDevice })}</Button>}
         </Row>
       )}
       {wrongPassword && refused.allow &&<div className="px-4 py-3"><Notice problem={refused.allow} testId="handoff-allow-error" /></div>}
