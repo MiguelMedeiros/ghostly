@@ -660,6 +660,16 @@ export function MessageInput({
     if (!phone) textareaRef.current?.focus({ preventScroll: true });
   }, [showIdentities, phone]);
 
+  /**
+   * The payment sheet closed (its Close, Escape, a click outside): the focus in it goes to the message field, as a sent
+   * payment's does, not to the page. On a touch screen the field would bring the keyboard up: there it falls.
+   */
+  const closePayment = () => {
+    const at = document.activeElement;
+    setShowPayment(false);
+    if (at?.closest(".composer-sheet") && !touchOnly()) textareaRef.current?.focus({ preventScroll: true });
+  };
+
   /** Whatever the composer has open over it. */
   const closeAll = () => {
     setShowMenu(false);
@@ -1139,7 +1149,7 @@ export function MessageInput({
         {picker.element}
 
         {/* What the + opens */}
-        {showPayment && paymentComposer && !paymentsUnavailable && !disabled && paymentComposer(() => setShowPayment(false))}
+        {showPayment && paymentComposer && !paymentsUnavailable && !disabled && paymentComposer(closePayment)}
         {showPayment && !paymentComposer && payments && (paymentsConfigurable || !paymentsUnavailable) && !disabled && (
           <PaymentComposer
             reviewContext={payments.reviewContext}
@@ -1151,7 +1161,7 @@ export function MessageInput({
             payUnavailable={paymentsUnavailable}
             payUnavailableContact={paymentsUnavailableContact}
             onSaveMethods={payments.onSaveMethods}
-            onClose={() => setShowPayment(false)}
+            onClose={closePayment}
             // Sent or requested: back to the chat, where its bubble shows how it goes, and to writing.
             onDone={() => { setShowPayment(false); if (!touchOnly()) textareaRef.current?.focus({ preventScroll: true }); }}
           />
