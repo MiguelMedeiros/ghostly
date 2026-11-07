@@ -655,6 +655,21 @@ export class RelayTransport implements PkarrTransport {
     this.changed("recovered");
   }
 
+  /**
+   * `PkarrTransport.forget`: the packets and dates this client kept under these keys go, on every relay (`written`,
+   * `newest`, `lastTimestamp`, `seenTimestamp`, `lastPut`). A spare invite replaced unused left them here for its two keys
+   * for good: an idle CLI daemon gained 8 keys an hour (343 in `written` and 690 `lastPut` entries after a day). The maps
+   * that bound themselves (`readAt`, `lastReadFrom`, `heldBack`, `missing`, the turns) and the catch-ups, which go once
+   * put, are left as they are. A later put under one of these keys goes as a key's first.
+   */
+  forget(keys: Iterable<string>): void {
+    const gone = new Set(keys);
+    if (gone.size === 0) return;
+    for (const key of gone) for (const perKey of [this.lastTimestamp, this.seenTimestamp, this.newest, this.written]) perKey.delete(key);
+    // Per relay and key (`${relay} ${key}`), on the relays set now and any set before.
+    for (const slot of this.lastPut.keys()) if (gone.has(slot.slice(slot.lastIndexOf(" ") + 1))) this.lastPut.delete(slot);
+  }
+
   /** Called when a relay trips or recovers. */
   subscribe(listener: (change?: DiscoveryChange) => void): () => void {
     this.listeners.add(listener);

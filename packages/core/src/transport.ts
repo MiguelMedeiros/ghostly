@@ -100,6 +100,7 @@ export function withRequestOptions(transport: PkarrTransport, extra: PkarrReques
   if (transport.turnRead) wrapped.turnRead = (pubKeyZ32, options) => transport.turnRead!(pubKeyZ32, options);
   if (transport.turnPut) wrapped.turnPut = (pubKeyZ32, payload, conditions) => transport.turnPut!(pubKeyZ32, payload, conditions);
   if (transport.turnWarm) wrapped.turnWarm = () => transport.turnWarm!();
+  if (transport.forget) wrapped.forget = (keys) => transport.forget!(keys);
   return wrapped;
 }
 
@@ -212,4 +213,9 @@ export interface PkarrTransport {
   turnPut?(pubKeyZ32: string, payload: Uint8Array, conditions: TurnConditions): Promise<TurnSourcePut[]>;
   /** The profile has a device set: the turn's sources are made ready ahead of the first read (`TurnNetwork.turnWarm`). */
   turnWarm?(): Promise<void>;
+  /**
+   * Nothing will be put or read under these keys any more (a spare invite replaced unused): what the transport kept
+   * per key for them (the last packet put, its dates, each relay's last put) goes. Absent where nothing is kept.
+   */
+  forget?(keys: Iterable<string>): void;
 }
