@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { db } from "../src/engine/db";
-import { Outbox, RESEND_POLICY, type Resender } from "../src/engine/outbox";
+import { NotSent, Outbox, RESEND_POLICY, type Resender } from "../src/engine/outbox";
 import type { StoredMessage } from "../src/shared/types";
 // covers: chat.paired.offline-send, chat.paired.receipts, chat.dht.send, chat.waiting
 
@@ -706,5 +706,73 @@ describe("a session that opens (agents#2468)", () => {
       store.update = update;
       await box.stop();
     }
+  });
+});
+
+describe("texts written behind one no relay took", () => {
+  /**
+   * A DHT chat whose relays refuse every publication (`NotSent`), in a store that counts the rows it reads, one by one
+   * or in one go; `taken`: the relays take them now.
+   */
+  function refused() {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const rows: StoredMessage[] = [];
+    const reads = { rows: 0, whole: 0 };
+    const store = {
+      read: async () => { reads.whole++; return rows.map(row => ({ ...row })); },
+      get: async (id: string) => { reads.rows++; const row = rows.find(r => r.id === id); return row && { ...row }; },
+      getMany: async (ids: string[]) => { reads.rows += ids.length; return ids.map(id => { const row = rows.find(r => r.id === id); return row && { ...row }; }); },
+      update: async (id: string, delivery: NonNullable<StoredMessage["delivery"]>, error?: string, extra?: Partial<Pick<StoredMessage, "via" | "resendUntil">>) => {
+        const row = rows.find(r => r.id === id);
+        if (row && row.delivery !== "delivered") Object.assign(row, extra, { delivery, deliveryError: error });
+      },
+    };
+    const relays = { taken: false };
+    const sent: string[] = [];
+    const send = vi.fn(async (m: StoredMessage) => {
+      if (!relays.taken) return new NotSent("Publish failed on every relay.");
+      sent.push(m.text);
+      setTimeout(() => void box.received(m.wireId!), 1);
+      return null;
+    });
+    // The DHT path, free: the floor holds nothing, since nothing left this device.
+    const box = new Outbox(store, send, 20_000, undefined, { resender: { ready: () => true, via: () => "pkarr" } });
+    const write = async (i: number) => {
+      const wireId = `w${String(i).padStart(21, "0")}`;
+      rows.push({ linkId: "refused", id: `me_${wireId}`, wireId, text: `m${i}`, sender: "me", timestamp: Date.now(), via: "pkarr", delivery: "sending" });
+      await box.transmit(`me_${wireId}`);
+    };
+    return { rows, reads, relays, sent, send, box, write };
+  }
+
+  it("a new text costs a few row reads however many wait, an idle minute about one look, and they all go in order once a relay takes them", async () => {
+    const { rows, reads, relays, sent, send, box, write } = refused();
+    await write(0);
+    expect(rows[0].delivery).toBe("waiting");
+    const perSend: number[] = [];
+    for (let i = 1; i < 200; i++) {
+      const before = reads.rows + reads.whole;
+      await write(i);
+      perSend.push(reads.rows + reads.whole - before);
+      // As a person writes them, a moment apart.
+      await vi.advanceTimersByTimeAsync(9);
+    }
+    expect(rows.every(r => r.delivery === "waiting"), "all wait behind the first").toBe(true);
+    // Each new text read again every text already waiting, about 4 times: 780 reads per send at 200 waiting.
+    expect(Math.max(...perSend.slice(-50)), "row reads for one new text with ~200 waiting").toBeLessThanOrEqual(8);
+    // Left alone: each check walked every waiting text again the same way, about 4,500 row reads a minute.
+    await vi.advanceTimersByTimeAsync(RESEND_POLICY.backoffMs.slice(0, 3).reduce((a, b) => a + b));
+    const attempts = send.mock.calls.length;
+    reads.rows = reads.whole = 0;
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(reads.rows / 2, "row reads per idle minute").toBeLessThanOrEqual(20);
+    expect(reads.whole / 2, "whole-chat reads per idle minute").toBeLessThanOrEqual(2);
+    // Only the first is published again, at its own checks.
+    expect(send.mock.calls.slice(attempts).every(([m]) => m.text === "m0")).toBe(true);
+    relays.taken = true;
+    await vi.advanceTimersByTimeAsync(RESEND_POLICY.backoffMs.at(-1)!);
+    expect(sent).toEqual(rows.map(r => r.text));
+    expect(rows.every(r => r.delivery === "delivered")).toBe(true);
+    await box.stop();
   });
 });
