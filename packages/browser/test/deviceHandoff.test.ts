@@ -426,6 +426,26 @@ describe("the password proof and its limits", () => {
     expect(w.giver.view()).toBeNull();
   });
 
+  it("the giver's wrong password says the device is refused only at the fifteenth: not at the first, nor once it is locked out", async () => {
+    // WISP 06 § Authorizing a handoff, Attempts: "Let <device> try again" is for a refused device, never earlier.
+    const wrong = async (before: { recent: number[]; total: number } | undefined) => {
+      const w = world();
+      if (before) await w.giverRecords.amend({ handoffAttempts: { [B]: before } });
+      await w.taker.pull("not the password");
+      await until(() => w.giver.view()?.failure === "password");
+      return { view: w.giver.view(), attempts: w.giverRecords.record.handoffAttempts?.[B] };
+    };
+    const first = await wrong(undefined);
+    expect(first.attempts?.total).toBe(1);
+    expect(first.view?.refused).toBeUndefined();
+    const fifth = await wrong({ recent: Array(HANDOFF_ATTEMPTS.perHour - 1).fill(Date.now()), total: HANDOFF_ATTEMPTS.perHour - 1 });
+    expect(fifth.attempts?.until).toBeGreaterThan(Date.now());
+    expect(fifth.view?.refused).toBeUndefined();
+    const fifteenth = await wrong({ recent: [], total: HANDOFF_ATTEMPTS.total - 1 });
+    expect(fifteenth.attempts?.total).toBe(HANDOFF_ATTEMPTS.total);
+    expect(fifteenth.view).toMatchObject({ failure: "password", refused: true });
+  });
+
   it("five wrong in an hour lock the device out with a retry time; a right one after the hour starts the count again", { timeout: 30_000 }, async () => {
     const w = world();
     for (let i = 0; i < HANDOFF_ATTEMPTS.perHour; i++) {

@@ -107,7 +107,7 @@ describe("Profile, Devices on the active device", () => {
   it("Let <device> try again says when the engine refuses", async () => {
     const { user, engine } = renderApp(<DevicesSection />);
     engine.on("deviceSet", () => set());
-    engine.on("deviceHandoffView", () => ({ role: "giver", device: "iPhone", key: PHONE, step: "failed", bytes: 0, total: 0, failure: "password" }) satisfies HandoffView);
+    engine.on("deviceHandoffView", () => ({ role: "giver", device: "iPhone", key: PHONE, step: "failed", bytes: 0, total: 0, failure: "password", refused: true }) satisfies HandoffView);
     engine.on("deviceHandoffAllow", () => { throw new Error("That device is not one of this profile's"); });
     await user.click(await screen.findByTestId("handoff-allow", {}, { timeout: 3_000 }));
     await waitFor(() => expect(engine.callsTo("deviceHandoffAllow")).toEqual([{ key: PHONE }]));
@@ -118,7 +118,7 @@ describe("Profile, Devices on the active device", () => {
     const { user, engine } = renderApp(<DevicesSection />);
     let failed = true;
     engine.on("deviceSet", () => set());
-    engine.on("deviceHandoffView", () => failed ? ({ role: "giver", device: "iPhone", key: PHONE, step: "failed", bytes: 0, total: 0, failure: "password" }) satisfies HandoffView : null);
+    engine.on("deviceHandoffView", () => failed ? ({ role: "giver", device: "iPhone", key: PHONE, step: "failed", bytes: 0, total: 0, failure: "password", refused: true }) satisfies HandoffView : null);
     engine.on("deviceHandoffAllow", () => { failed = false; });
     (await screen.findByTestId("handoff-allow", {}, { timeout: 3_000 })).focus();
     await user.keyboard("{Enter}");
