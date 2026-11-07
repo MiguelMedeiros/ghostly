@@ -427,6 +427,31 @@ describe("a video in the chat", () => {
     ring.unmount();
   });
 
+  // Fixed over the whole window, it left Tab to the page: from Exit full screen on to the message's ⋮, the composer, the
+  // chat list, each under the video, and keys typed into a composer nobody saw.
+  it("filling the window (Desktop on Linux), Tab goes round its own controls, not to the chat under it", async () => {
+    fakeEngine.fullscreenWindow = vi.fn(async () => {});
+    renderApp(<button type="button">Message options</button>);
+    show(video());
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    const exit = screen.getByRole("button", { name: "Full screen" });
+    fireEvent.click(exit);
+    exit.focus();
+    const player = screen.getByTestId("video-player");
+    // The last of its controls: Tab goes back to the player (false: the browser's own move to the page is prevented).
+    expect(fireEvent.keyDown(exit, { key: "Tab" })).toBe(false);
+    expect(document.activeElement).toBe(player);
+    expect(fireEvent.keyDown(player, { key: "Tab", shiftKey: true })).toBe(false);
+    expect(document.activeElement).toBe(exit);
+    // Escape leaves it with the focus still on the video.
+    fireEvent.keyDown(exit, { key: "Escape" });
+    expect(screen.getByTestId("video-frame")).not.toHaveAttribute("data-theater");
+    expect(screen.getByTestId("video-frame")).toContainElement(document.activeElement as HTMLElement);
+    // In the chat again, Tab goes on to the page as before.
+    expect(fireEvent.keyDown(exit, { key: "Tab" })).toBe(true);
+  });
+
   it("filling the window (Desktop on Linux), it goes on playing though the chat list no longer sees it", async () => {
     let seen: ((entries: { isIntersecting: boolean }[]) => void) | null = null;
     vi.stubGlobal("IntersectionObserver", class {
