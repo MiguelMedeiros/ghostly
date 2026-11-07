@@ -41,16 +41,25 @@ export const SERVICE_LOCKED = "The profile locked before the contact's app opene
  */
 let viewCloser: (() => void) | null = null;
 let callWindows = 0;
+/** Others drawn over the whole app that make way too: a video filling the window (Desktop on Linux). */
+const makingWay = new Set<() => void>();
 
 /** How to close a contact's app drawn over the app: set by the web host. */
 export function setServiceViewCloser(next: (() => void) | null): void {
   viewCloser = next;
 }
 
+/** Calls `leave` when a call's window comes on screen, until the returned end. */
+export function onCallWindowShown(leave: () => void): () => void {
+  makingWay.add(leave);
+  return () => { makingWay.delete(leave); };
+}
+
 /** A call's window (a ringing call, a call full screen or small) on screen, from its effect: returns its end. */
 export function callWindowShown(): () => void {
   callWindows += 1;
   viewCloser?.();
+  for (const leave of [...makingWay]) leave();
   return () => { callWindows -= 1; };
 }
 
