@@ -52,6 +52,9 @@ interface SettingsContextValue {
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
 
+/** Translate received messages (Settings), on its own: every bubble reads it, and the whole settings drew them all. */
+const TranslateMessagesContext = createContext(false);
+
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
   // The settings as this page last read or saved them. The extension runs the app in several tabs at once: a change
@@ -197,9 +200,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         followStored,
       }}
     >
-      {children}
+      <TranslateMessagesContext.Provider value={settings.translateMessages}>{children}</TranslateMessagesContext.Provider>
     </SettingsContext.Provider>
   );
+}
+
+/** `settings.translateMessages`, drawing again only when it changes, not on every other setting. */
+export function useTranslateMessages(): boolean {
+  return useContext(TranslateMessagesContext);
 }
 
 export function useSettings(): SettingsContextValue {
