@@ -2,6 +2,7 @@ import "fake-indexeddb/auto";
 import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Chat } from "../../pages/Chat";
+import { servicesPlatform } from "../../lib/platform";
 import { saveSession } from "../../lib/storage";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -87,6 +88,34 @@ describe("calling a contact whose app is closed, with Ghostly offline", () => {
     expect(engine.callsTo("wakeForCall")).toEqual([]);
     expect(screen.queryByTestId("wake-call")).toBeNull();
     expect(await screen.findByTestId("call-blocked")).toHaveTextContent(missing);
+  });
+
+  it("or with Hide my IP on and call media that cannot keep to the relay: the buttons say calls are off, and nobody is woken", async () => {
+    // The Linux Desktop's own call engine (desktop/nativeCalls.ts): it gathers this device's addresses.
+    const native = { createPeerConnection: vi.fn(), getUserMedia: vi.fn() };
+    const platform = servicesPlatform as { callMedia?: () => unknown };
+    platform.callMedia = () => native;
+    try {
+      saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Ana", messages: [], createdAt: 1_700_000_000_000 });
+      const { user, engine } = renderApp(<Chat sessionId="chat-1" onCallChange={vi.fn()} callLayer={null} visible />);
+      engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("wakeForCall", () => true);
+      // Not live yet, as a chat whose transports are off with Hide my IP stays: the engine's reason is the live one.
+      act(() => engine.update({
+        settings: { relayOnly: true },
+        links: [linkView({ peerPubKeyZ32: PEER, profile: "paired-chat/1", pairing: { status: "connecting" }, dataLink: "idle", peerWakes: true, callsUnavailable: "Calls need a live connection" } as never)],
+      }));
+
+      const call = await screen.findByTestId("call-audio");
+      expect(call).toHaveAttribute("aria-disabled", "true");
+      expect(call).toHaveAccessibleDescription("Calls are off while Hide my IP is on");
+      await user.click(call);
+      expect(engine.callsTo("wakeForCall")).toEqual([]);
+      expect(screen.queryByTestId("wake-call")).toBeNull();
+      expect(native.createPeerConnection).not.toHaveBeenCalled();
+      expect(await screen.findByTestId("call-blocked")).toHaveTextContent("Calls are off while Hide my IP is on");
+    } finally {
+      delete platform.callMedia;
+    }
   });
 
   it("or with the device offline: no minute's wait for a wake-up that cannot go", async () => {
