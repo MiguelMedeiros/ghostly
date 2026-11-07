@@ -46,8 +46,8 @@ are in WISP 103, "Browser profile".
 | listens per client per minute, refused ones too (an app starts at most 8 on start or reconnect) | 60 | `GHOSTLY_RELAY_LISTENS_PER_MINUTE` |
 | dials per client per minute | 60 | `GHOSTLY_RELAY_CONNECTS_PER_MINUTE` |
 | HyperDHT streams one client holds open (its dials and incoming ones) | 64 | `GHOSTLY_RELAY_STREAMS` |
-| bytes waiting for a client that it has not read yet | 8 MiB | `GHOSTLY_RELAY_QUEUED_BYTES` |
-| bytes waiting unread over all clients (past it, the client holding the most is dropped) | 96 MiB | `GHOSTLY_RELAY_QUEUED_TOTAL_BYTES` |
+| bytes waiting for a client that it has not read yet, with what it sent that its far peers have not taken yet (one stream past half of it is closed) | 8 MiB | `GHOSTLY_RELAY_QUEUED_BYTES` |
+| bytes waiting, both ways, over all clients (past it, the client holding the most is dropped) | 96 MiB | `GHOSTLY_RELAY_QUEUED_TOTAL_BYTES` |
 | a client with no listen open and no dial | 30 s | `GHOSTLY_RELAY_IDLE_MS` |
 | ping, dropped when the last went unanswered | every 30 s | `GHOSTLY_RELAY_PING_MS` |
 | a connection's request before it upgrades | 15 s | `GHOSTLY_RELAY_REQUEST_MS` |
