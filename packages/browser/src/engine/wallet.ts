@@ -1179,8 +1179,16 @@ export class CashuWallet {
         // The outputs are for what is left after the mint's fee, so the records are known before the mint is asked.
         swap = { id: swapId(), mint, kind: "receive", swap: serializeSwapPreview(preview), createdAt: Date.now(), token, ...records(preview.amount.toNumber()) };
         await this.putSwap(swap);
+      } else if (payment && !this.swapAsk.due(swap.id, Date.now())) {
+        // A contact's payment sent already, and the mint did not take it: asked again at the wallet's own pace
+        // (`pollSwaps`), not each time its payer sends the same token again.
+        throw new SwapUnsettledError(swap);
       }
-      const { keep } = await this.completeSwap(swap);
+      const sent = swap;
+      const { keep } = await this.completeSwap(sent).catch((error: unknown) => {
+        if (error instanceof SwapUnsettledError) this.swapAsk.missed(sent.id, Date.now());
+        throw error;
+      });
       const credited = sats(keep);
       // What the mint signed is what is credited.
       if (swap.tx && credited !== swap.tx.amount) swap = { ...swap, ...records(credited), tx: { ...records(credited).tx, id: swap.tx.id, timestamp: swap.tx.timestamp } };
