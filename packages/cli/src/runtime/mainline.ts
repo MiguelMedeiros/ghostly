@@ -143,11 +143,20 @@ export class DhtBackgroundBudget {
   /** Per key, when it last asked (oldest first) and when its last lookup went. */
   private readonly askedAt = new Map<string, number>();
   private readonly lookedAt = new Map<string, number>();
+  /** The time of the last `take`: none of the above is dated after it. */
+  private latest = -Infinity;
 
   constructor(private readonly perMinute: () => number) {}
 
   /** 0: the lookup goes now (counted). Otherwise how long until this key's turn, in ms; nothing is counted. */
   take(pubKeyZ32: string, now = Date.now()): number {
+    // The clock went back (an NTP step, a clock that ran ahead fixed by hand): what is dated after now counts as of now,
+    // as just spent. Counted as it was, an hour's step back held every key's lookup for 56 minutes (bug hunt, 2026-11-07).
+    if (now < this.latest) {
+      this.spent.forEach((at, i) => { this.spent[i] = Math.min(at, now); });
+      for (const times of [this.askedAt, this.lookedAt]) for (const [key, at] of times) if (at > now) times.set(key, now);
+    }
+    this.latest = now;
     this.askedAt.delete(pubKeyZ32);
     this.askedAt.set(pubKeyZ32, now);
     for (const [key, at] of this.askedAt) {
