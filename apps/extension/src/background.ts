@@ -344,10 +344,60 @@ const forget = (tabId: number) => chrome.storage.session.remove(bindingKey(tabId
 chrome.tabs.onRemoved.addListener((tabId) => void forget(tabId));
 
 /**
+ * A reload of the extension (Update and restart, chrome://extensions, turned off and on) empties session storage, but a
+ * viewer tab is an ordinary tab and stays open, the contact's page and script in it. So each binding is also kept in
+ * `storage.local`, as the tab's DevTools targets: a target id is the tab's for as long as it lives, whatever it shows,
+ * and never comes back in a later browser run, where tab ids start over. A tab still open with no binding is one of
+ * those: it closes as the next worker starts, and at the latest with the next closer (`closeViewers`).
+ */
+chrome.storage.session.onChanged.addListener((changes) => {
+  for (const [key, { newValue }] of Object.entries(changes)) {
+    const tabId = boundTab(key);
+    if (tabId === null) continue;
+    void (newValue === undefined ? chrome.storage.local.remove(key) : rememberTargets(tabId)).catch(() => {});
+  }
+});
+
+/** The tab a binding's key names, or null for any other key. */
+function boundTab(key: string): number | null {
+  const match = /^viewer:(\d+)$/.exec(key);
+  return match ? Number(match[1]) : null;
+}
+
+async function rememberTargets(tabId: number): Promise<void> {
+  const targets = (await chrome.debugger.getTargets()).filter((target) => target.tabId === tabId).map((target) => target.id);
+  if (targets.length) await chrome.storage.local.set({ [bindingKey(tabId)]: targets });
+}
+
+async function closeLeftoverViewers(): Promise<void> {
+  try {
+    const kept = await chrome.storage.local.get(null);
+    const targets = await chrome.debugger.getTargets();
+    const unbound = async (tabId: number) => !(await bindingOf(tabId));
+    // A tab still at a contact's app address with no binding is one too, recorded or not.
+    const leftovers = new Set(targets.filter((target) => target.tabId !== undefined && parseViewerUrl(target.url)).map((target) => target.tabId!));
+    for (const key of Object.keys(kept)) {
+      const tabId = boundTab(key);
+      if (tabId === null) continue;
+      const ids = kept[key];
+      if (Array.isArray(ids) && targets.some((target) => target.tabId === tabId && ids.includes(target.id))) leftovers.add(tabId);
+      // A live viewer's record stays; any other is used up here (its tab closes, or it is long gone).
+      if (!(await unbound(tabId))) continue;
+      await chrome.storage.local.remove(key);
+    }
+    for (const tabId of leftovers) if (await unbound(tabId)) await chrome.tabs.remove(tabId).catch(() => {});
+  } catch {
+    // No target list now: the next start or closer tries again, and the records stay for it.
+  }
+}
+void closeLeftoverViewers();
+
+/**
  * Closes every viewer tab, as Desktop closes a contact's app windows (`close_service_windows`): on a profile switch,
  * a new peer, or the lock screen. Its binding goes first, so nothing it still asks for is served.
  */
 async function closeViewers(): Promise<void> {
+  await closeLeftoverViewers();
   const tabs = await chrome.tabs.query({});
   await Promise.all(
     tabs.map(async ({ id }) => {
