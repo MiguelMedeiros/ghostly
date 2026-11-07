@@ -165,6 +165,27 @@ it("dials a contact through a public relay or one of its own, never one on this 
 });
 
 /**
+ * A contact's relay at a public name may still resolve to this machine or its network. Where a resolver is at hand (the
+ * CLI), `publicRelay` is asked before each dial through a relay that is not one of the endpoint's own, and the wasm is
+ * never given one whose name answers otherwise.
+ */
+it("with publicRelay, dials a contact's relay only while its name resolves to public addresses", async () => {
+  const wasm = fakeWasm();
+  const asked: string[] = [];
+  const endpoint = await createIrohWebEndpoint(seed, { load: wasm.load, relays: ["https://relay.example.com/"],
+    publicRelay: async relay => { asked.push(relay); return !relay.includes("contact"); } });
+  const contact = (relay: string | null) => ({ id: "d".repeat(64), relay, addresses: [], relayed: true });
+  await expect(endpoint.connect(contact("https://relay.contact.example./"))).rejects.toThrow("not one this device dials");
+  await endpoint.connect(contact("https://relay.public.example/"));
+  // One of its own relays (either spelling), or none: nothing to ask.
+  await endpoint.connect(contact("https://relay.example.com./"));
+  await endpoint.connect(contact(null));
+  expect(asked).toEqual(["https://relay.contact.example/", "https://relay.public.example/"]);
+  expect(wasm.dialled.map(d => (d as { relay: string | null }).relay)).toEqual(["https://relay.public.example/", "https://relay.example.com/", null]);
+  await endpoint.close();
+});
+
+/**
  * Each endpoint pings every relay in its list about 1.3 times a minute, and an app runs up to 16 of them on one
  * network. The first measures; the others, started at the same time or later, home on its relay alone.
  */
