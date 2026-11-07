@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
+import { useBackCloses } from "../../hooks/useDismiss";
 import { safeAreaInsets } from "../../hooks/useFloatingBox";
 
 export interface SelectOption<V extends string = string> {
@@ -186,6 +187,9 @@ export function Select<V extends string = string>({
       document.removeEventListener("scroll", scrolled, true);
     };
   }, [open, host]);
+
+  // Back (Android's back gesture) closes it alone, as a menu, and the page or dialog under it stays; focus never left the button.
+  useBackCloses(() => setOpen(false), open);
 
   // A press anywhere else, or focus moving elsewhere, closes it without choosing.
   useEffect(() => {
