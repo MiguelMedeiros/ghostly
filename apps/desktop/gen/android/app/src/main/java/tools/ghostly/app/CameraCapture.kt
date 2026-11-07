@@ -62,6 +62,14 @@ object CameraFiles {
 }
 
 /**
+ * A camera refused, said to the page (GhostlyHostPlugin passes it to Rust): the file input only sees a cancel.
+ * `blocked`: Android no longer asks ("Don't allow" twice, or "Don't ask again"), so only its settings allow it.
+ */
+object CameraRefusal {
+  @Volatile var told: ((blocked: Boolean) -> Unit)? = null
+}
+
+/**
  * wry's WebChromeClient, with the camera's photo taken here, into [CameraFiles] and through [CameraPhoto]: a
  * cancelled or empty capture leaves nothing. Everything else goes to wry's client: each method it overrides (wry 0.57's `RustWebChromeClient`) is passed
  * on, so a wry update that overrides another needs it added here.
@@ -80,7 +88,13 @@ class CameraChromeClient(private val activity: MainActivity, private val wry: We
     } else {
       // The manifest asks for CAMERA, so Android refuses ACTION_IMAGE_CAPTURE until it is granted.
       activity.requestPermissions(arrayOf(Manifest.permission.CAMERA)) { granted ->
-        if (granted == true) capture(filePathCallback, fileChooserParams) else filePathCallback.onReceiveValue(null)
+        if (granted == true) {
+          capture(filePathCallback, fileChooserParams)
+        } else {
+          // Right after a refusal, no rationale to show means Android will not ask again.
+          CameraRefusal.told?.invoke(!activity.shouldShowRequestPermissionRationale(Manifest.permission.CAMERA))
+          filePathCallback.onReceiveValue(null)
+        }
       }
     }
     return true

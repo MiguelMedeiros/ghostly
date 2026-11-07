@@ -81,6 +81,7 @@ const COMMANDS: &[&str] = &[
     "oidc_loopback_cancel",
     "oidc_loopback_start",
     "oidc_loopback_wait",
+    "open_app_settings",
     "open_notification_settings",
     "open_payment_link",
     "open_project_link",
