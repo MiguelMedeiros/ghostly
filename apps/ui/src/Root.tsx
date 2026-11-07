@@ -32,6 +32,7 @@ import { LINK_GROUPS_WAITING, groupPath, linkGroupId, linkGroupsWaiting } from "
 import { useEngineValue } from "./lib/engineState";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useAnchorHome, useAppNavigation } from "./hooks/useAppNavigation";
+import { modalOpen } from "./hooks/useAppCommands";
 import { problemText, type Problem } from "./lib/problemText";
 import { Notice } from "./components/ui/Notice";
 import { watchWindowAway } from "./lib/windowAway";
@@ -174,7 +175,7 @@ function JoinNotice() {
 /**
  * A top notice there until closed: by its ×, by Escape, or by a tap on its words (not on its ⓘ, Copy or the details
  * they open). It sits over the sidebar's header, so it closes as the app's other top notices do. An Escape something
- * else answered (a menu, a popover) is not its own. The focus goes back where it was when it came (the New that could
+ * else answered (a menu, a popover, a dialog over it) is not its own. The focus goes back where it was when it came (the New that could
  * not make a chat) when it was on the notice or nowhere, not to the page; one in a field or a menu stays there.
  */
 function ClosableTopNotice({ problem, testId, onClose }: { problem: Problem; testId: string; onClose: () => void }) {
@@ -190,10 +191,11 @@ function ClosableTopNotice({ problem, testId, onClose }: { problem: Problem; tes
   };
   useEffect(() => {
     // Decided once the Escape has gone everywhere: one a menu, a field or a choice of messages spent is not its own,
-    // though their listeners came after this one (the window's run in the order they were added).
+    // though their listeners came after this one (the window's run in the order they were added). Nor is one pressed in
+    // a modal dialog: a <dialog> closes on the key's default action without cancelling it, and is gone by the timeout.
     let timer: ReturnType<typeof setTimeout> | undefined;
     const key = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || modalOpen()) return;
       clearTimeout(timer);
       timer = setTimeout(() => { if (!e.defaultPrevented) close.current(); });
     };
