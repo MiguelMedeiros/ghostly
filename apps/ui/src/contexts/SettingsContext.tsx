@@ -12,6 +12,7 @@ import {
 import {
   loadSettings,
   saveSettingsChanges,
+  sameSettings,
   settingsWithChanges,
   isSettingsStorageEvent,
   type AppSettings,
@@ -67,8 +68,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     // is. They are read (the language, the theme, the lock) and never written back.
     if (knownDeviceGate()?.full === false) return;
     const saved = saveSettingsChanges(synced.current, settings);
+    // The saved copy is always a new object. It is taken only when it holds something another tab stored: otherwise
+    // every reader of the settings would draw a second time for nothing.
+    if (sameSettings(saved, settings)) {
+      synced.current = settings;
+      return;
+    }
     synced.current = saved;
-    if (saved !== settings) setSettings(saved);
+    setSettings(saved);
   }, [settings]);
 
   const followStored = useCallback(() => {
