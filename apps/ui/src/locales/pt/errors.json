@@ -590,6 +590,8 @@
     "usdtRevertedNext": "Nenhum token foi enviado; o gas foi gasto."
   },
   "relayOnly": {
+    "appInExtension": "O app de um contato não abre aqui com Ocultar meu IP ligado",
+    "appInExtensionNext": "O navegador poderia mostrar seu IP aos servidores do app. Desligue Ocultar meu IP para abri-lo.",
     "keepsTurn": "Ocultar meu IP precisa deste servidor TURN",
     "keepsTurnNext": "Desligue primeiro e depois remova o servidor.",
     "needsTurn": "Adicione um servidor TURN antes",

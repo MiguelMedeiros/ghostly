@@ -590,6 +590,8 @@
     "usdtRevertedNext": "没有发送代币；gas 已花费。"
   },
   "relayOnly": {
+    "appInExtension": "开启隐藏 IP 时，联系人的应用无法在这里打开",
+    "appInExtensionNext": "浏览器可能会向该应用的服务器暴露你的 IP。要打开它，请先关闭隐藏 IP。",
     "keepsTurn": "隐藏 IP 需要这个 TURN 服务器",
     "keepsTurnNext": "请先关闭它，再移除服务器。",
     "needsTurn": "请先添加 TURN 服务器",

@@ -118,12 +118,11 @@ describe("the host the app page runs on", () => {
     expect(world.session.get(`viewer:${tabId}`)).toMatchObject({ page: { app: "Atlas" } });
   });
 
-  it("tells the worker Hide my IP from contacts is on, so the tab keeps to its own origin", async () => {
+  it("tells the worker Hide my IP from contacts is on, which opens no tab and says why", async () => {
     // covers: settings.network.relay-only
     const { extensionHost } = await load();
-    await extensionHost.openService!(PEER, SERVICE, TAG, true);
-    const [tabId] = [...world.tabs.keys()];
-    expect(world.session.get(`viewer:${tabId}`)).toMatchObject({ relayOnly: true });
+    await expect(extensionHost.openService!(PEER, SERVICE, TAG, true)).rejects.toThrow("A contact's app does not open in the browser extension while Hide my IP from contacts is on");
+    expect(world.tabs.size).toBe(0);
   });
 
   it("reports the manifest's version", async () => {
