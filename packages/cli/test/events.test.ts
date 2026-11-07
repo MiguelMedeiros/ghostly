@@ -623,6 +623,65 @@ describe("the event stream", () => {
       check(again);
     });
 
+    function allocated(work: () => void): number {
+      const alloc = Buffer.alloc;
+      let bytes = 0;
+      const spy = vi.spyOn(Buffer, "alloc").mockImplementation((size: number, ...rest: unknown[]) => { bytes += size; return alloc.call(Buffer, size, ...(rest as [])); });
+      try { work(); } finally { spy.mockRestore(); }
+      return bytes;
+    }
+
+    /**
+     * Each deletion read the journal's whole window from disk (up to 32 MiB) and searched it, a contact's delete for
+     * everyone included: 50 of them cost a daemon with a long journal 1.5 GiB of reads. Now a deletion reads from the
+     * first line that names the message on.
+     */
+    it("a contact deleting recent messages one by one reads the journal from their events on, not whole each time", async () => {
+      const { h, path } = await filled("recent.jsonl", 2_000);
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["m1989"] });
+      const size = statSync(path).size;
+      const read = allocated(() => {
+        for (let i = 1990; i < 2_000; i++) h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: [`m${i}`] });
+      });
+      expect(read).toBeLessThan(size / 10);
+      const journal = readFileSync(path, "utf8");
+      for (let i = 1989; i < 2_000; i++) expect(journal).not.toContain(`${text} ${i}"`);
+      expect(journal).toContain(`${text} 1988"`);
+      expect(h.replay(0).filter((e) => e.type === "message.received")).toHaveLength(1_989);
+    });
+
+    it("still finds a message's lines after the journal was written again, appended to and trimmed", async () => {
+      const { h, path } = await filled("rewritten.jsonl", 600);
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["m0"] });
+      // Many ids at once: the journal is written again, every line after them moved.
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: Array.from({ length: 100 }, (_, i) => `m${i + 1}`) });
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: [message("c1", "late", { text: "SECRET-LATE", replyTo: { id: "wire-m300", snippet: "SECRET-QUOTE", from: "peer", messageId: "m300" } })], deleted: [] });
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["m300"] });
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["late"] });
+      const journal = readFileSync(path, "utf8");
+      expect(journal).not.toContain(`${text} 300"`);
+      expect(journal).not.toContain("SECRET-LATE");
+      expect(journal).not.toContain("SECRET-QUOTE");
+      // A trim moves every line too.
+      for (let i = 0; i < 20_001; i++) h.emit("x", `x:${i}`);
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: [message("c1", "after", { text: "SECRET-AFTER" })], deleted: [] });
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["after"] });
+      expect(readFileSync(path, "utf8")).not.toContain("SECRET-AFTER");
+    }, 60_000);
+
+    it("a line cut short inside the journal that names a deleted message still goes", async () => {
+      const path = join(dir, "cut.jsonl");
+      const line = (seq: number, id: string, text: string) => JSON.stringify({ seq, id: `message.received:c1:${id}`, type: "message.received", at: 1, chat: "c1", message: { id, text } });
+      writeFileSync(path, [line(1, "m1", "kept one"), line(2, "m2", "SECRET-CUT").slice(0, 80), line(3, "m3", "kept two")].join("\n") + "\n");
+      const { h } = await hub("cut.jsonl");
+      h.baseline(state([link("c1")]), new Map([["c1", [message("c1", "m1"), message("c1", "m2"), message("c1", "m3")]]]));
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["m2"] });
+      const journal = readFileSync(path, "utf8");
+      expect(journal).not.toContain("SECRET-CUT");
+      expect(journal).toContain("kept one");
+      expect(journal).toContain("kept two");
+    });
+
     it("a change that deletes thousands of messages reads each line once", async () => {
       const { h, path } = await filled("many.jsonl", 5_000);
       const ids = Array.from({ length: 4_000 }, (_, i) => `m${i}`);
