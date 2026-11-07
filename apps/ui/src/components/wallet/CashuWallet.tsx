@@ -68,8 +68,11 @@ const shortFee = (t: Translate, ppk: number, testnet: boolean) => (ppk === 0 ? t
  * ecash held by the mints, filled and emptied over Lightning. The Cashu card also holds the mint
  * settings; the Lightning card is about invoices, and where they are paid into and from (its source).
  */
-export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = false }: { wallet: WalletPlatform; state: WalletState; rail: "cashu" | "lightning"; onOpenCashu: () => void; focusAmount?: boolean }) {
+export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focusAmount = false }: { wallet: WalletPlatform; state: WalletState; rail: "cashu" | "lightning"; sharedWith?: string; onOpenCashu: () => void; focusAmount?: boolean }) {
   const { t } = useI18n();
+  // A card that spends another card's balance (Lightning through the mints, Breez on the Spark wallet): its number
+  // stays, it is what it can spend, and a line says whose balance it is.
+  const sharedLine = sharedWith ? <span className="block text-xs text-text-muted mt-1" data-testid="wallet-shared-balance">{t("wallet.cards.sameBalance", { name: sharedWith })}</span> : null;
   const [action, setAction] = useState<Action>("receive");
   // The amount takes the focus when the person chose this wallet (`focusAmount`), chose Receive here or pressed Done.
   const [actionChosen, setActionChosen] = useState(false);
@@ -248,6 +251,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
                 run with it, glued to it ("100,000sats"). The unit stays in the line's direction. */}
             <bdi className="text-4xl font-semibold tabular-nums">{formatAmount(testnet ? testShown : realShown, t.language)}</bdi>
             <span className="text-text-muted text-sm ms-2">{unitFor(t, unit, testnet ? testShown : realShown)}</span>
+            {sharedLine}
             {/* A Testnet wallet's whole balance is test sats; a test mint's sats never count in a Mainnet one. */}
             {testMint && !testnet && <span className="block text-xs text-warn-ink mt-1" data-testid="wallet-test-balance">{t("wallet.cashu.testBalance", { amount: formatAmount(testShown, t.language) })}</span>}
             {!!state.setAside && (
@@ -275,6 +279,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
           <p className="text-text-primary" data-testid="wallet-balance">
             <bdi className="text-4xl font-semibold tabular-nums">{ln?.balance === undefined ? "—" : formatAmount(ln.balance, t.language)}</bdi>
             <span className="text-text-muted text-sm ms-2">{t("wallet.lightning.balanceSource", { unit, source: sourceName ?? t("wallet.lightning.theSource") })}</span>
+            {sharedLine}
             {ln?.status !== "ready" && <span className="block text-xs text-warn-ink mt-1" data-testid="lightning-source-state">{ln?.error ? problemLine(ln.error, t) : t("wallet.lightning.connecting")}</span>}
           </p>
         )}
