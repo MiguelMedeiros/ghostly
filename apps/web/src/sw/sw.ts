@@ -453,6 +453,20 @@ function tellSilent(client: WindowClient, message: Extract<FromWorker, { type: "
 }
 
 /**
+ * Whether a window holds `profile`'s peer lock (`ghostly-peer`, `ghostly-peer-<ns>`), named after the database its page
+ * wrote in the wake text (`ghostly`, `ghostly_<ns>`): what a frozen tab cannot say. Null when the worker cannot tell (no
+ * Web Locks in this browser's workers, or no page of the profile wrote its database name yet).
+ */
+async function profileRuns(profile: string): Promise<boolean | null> {
+  const db = (await readWakeText(profile).catch(() => undefined))?.db;
+  const lock = db === "ghostly" ? "ghostly-peer" : db?.startsWith("ghostly_") ? `ghostly-peer-${db.slice("ghostly_".length)}` : null;
+  const locks = worker.navigator?.locks;
+  if (!lock || !locks) return null;
+  const state = await locks.query().catch(() => null);
+  return state ? (state.held ?? []).some(({ name }) => name === lock) : null;
+}
+
+/**
  * A tap on a wake-up: the window that runs the notice's profile and holds its peer comes forward on that chat, the one
  * in front first. Never a tab waiting behind another (it opens nothing), and never another profile's window (it would
  * switch away from the profile it runs). No such window: the first window that does not say what it runs (a page of the
@@ -478,9 +492,11 @@ async function openFrom(notification: Shown): Promise<void> {
   // and the chat goes to a new window. A tap lets the worker focus a window or open one, not both (Chromium refuses the
   // second), so it is told before it is focused: one that hands the chat back has not spent the tap. Only a hidden page
   // can be frozen, and it answers nothing until focusing unfreezes it (the message waits for it): that one is focused
-  // after `OPEN_ASK_MS`; one on screen is busy, and has `OPEN_BACK_MS` to answer.
+  // after `OPEN_ASK_MS`; one on screen is busy, and has `OPEN_BACK_MS` to answer. A frozen tab of another profile would
+  // say so only once focused, with the tap spent: when no window holds the profile's peer lock, it is not the profile's,
+  // and the new window opens without it.
   const silent = windows.find((_, i) => !said[i]);
-  if (silent) {
+  if (silent && (await profileRuns(data.profile)) !== false) {
     const onScreen = silent.focused || silent.visibilityState === "visible";
     if ((await tellSilent(silent, message, onScreen ? OPEN_BACK_MS : OPEN_ASK_MS)) !== false) {
       await silent.focus?.().catch(() => undefined);
