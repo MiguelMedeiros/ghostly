@@ -209,6 +209,77 @@ test.describe("the voice recorder on a phone", () => {
   });
 });
 
+test.describe("a voice message on a phone", () => {
+  /** Ghostly's own Offline switch, on the Services page, then back to the chat (large-files.spec.ts). */
+  const setOnline = async ({ page }: Peer, online: boolean) => {
+    await page.getByTestId("account-services").click();
+    const toggle = page.getByTestId("online-toggle");
+    if ((await toggle.getAttribute("aria-checked")) !== String(online)) await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", String(online));
+    await page.goBack();
+    await expect(page.getByPlaceholder("Message…")).toBeVisible();
+  };
+
+  /** Drops what a page sends its contacts over WebRTC, until it restarts (large-files.spec.ts holds them instead). */
+  const dropSends = ({ page }: Peer) => page.evaluate(() => {
+    RTCDataChannel.prototype.send = () => {};
+  });
+
+  /**
+   * The speed pill shows only while a note plays or waits mid-way, and a sent note's round Resend only once it stopped
+   * on its way, so the screens above reach neither: the pill took taps on 42 × 26 px, the Resend on 37 × 36. Bob's note
+   * is played and paused. Alice's is offered while nothing she sends reaches Bob, Bob goes offline and her app restarts
+   * with it unsent: stuck since the start, it offers Send again.
+   */
+  test("the speed pill and a sent note's Resend are 44 px targets", { tag: ["@feature:app.mobile-layout", "@feature:files.voice.play", "@feature:files.large.resend"] }, async ({ peer }, testInfo) => {
+    test.setTimeout(4 * 60_000);
+    const [alice, bob] = await Promise.all([peer("voice-note-phone-alice", { mobile: true, viewport: { width: 375, height: 667 } }), peer("voice-note-phone-bob")]);
+    await pair(alice, bob);
+    const { page } = alice;
+    const small = new Map<string, string>();
+    const measure = async (screen: string) => {
+      for (const target of await smallTargets(page)) if (!small.has(target.name)) small.set(target.name, `${screen}: ${target.name} ${target.width}×${target.height} (${target.stops})`);
+    };
+    /** Hands-free from the keyboard (the recorder's test above), sent after `ms`. */
+    const record = async (who: Peer, ms: number) => {
+      const mic = who.page.getByTestId("voice-record");
+      await expect(mic).not.toHaveAttribute("aria-disabled");
+      await mic.focus();
+      await who.page.keyboard.press("Enter");
+      await expect(who.page.getByTestId("voice-bar")).toHaveAttribute("data-phase", "recording");
+      await who.page.waitForTimeout(ms);
+      await who.page.getByTestId("voice-send").click();
+      await expect(who.page.getByTestId("voice-bar")).toHaveCount(0);
+    };
+
+    await record(bob, 4_000);
+    const received = chat(alice).getByTestId("voice-bubble").last();
+    await expect(received.getByTestId("voice-play")).toBeEnabled({ timeout: 30_000 });
+    await received.getByTestId("voice-play").click();
+    await expect(received).toHaveAttribute("data-state", "playing");
+    await received.getByTestId("voice-play").click();
+    await expect(received).toHaveAttribute("data-state", "paused");
+    await expect(received.getByTestId("voice-speed")).toBeVisible();
+    await received.scrollIntoViewIfNeeded();
+    await measure("a received note paused mid-way (Play, speed)");
+    await page.screenshot({ path: testInfo.outputPath("voice-note-paused.png") });
+
+    await dropSends(alice);
+    await record(alice, 2_000);
+    const sent = chat(alice).getByTestId("voice-bubble").last();
+    await expect(sent).toHaveAttribute("data-voice-sender", "me");
+    await setOnline(bob, false);
+    await page.reload();
+    const resend = sent.locator("[data-testid=voice-resend], [data-testid=voice-retry]");
+    await expect(resend).toBeVisible({ timeout: 30_000 });
+    await sent.scrollIntoViewIfNeeded();
+    await measure("a sent note stuck on its way (Resend)");
+    await page.screenshot({ path: testInfo.outputPath("voice-note-resend.png") });
+
+    expect([...small.values()], "controls under 44 × 44 px on a phone").toEqual([]);
+  });
+});
+
 /**
  * Settings' on/off switches, in every section and on the Profile page, on a phone: 48 × 24 px drawn, and a tap landed on
  * 64 × 40 px of it, short of the 44 the rest of the app gives a thumb.
