@@ -125,6 +125,23 @@ const LIGHT_KEY_GETS: usize = 4;
 /// A second opinion (`pick_relay_other_than`) is asked only while the other relay has more than this share of its
 /// minute left (12 of 40): it is never the read that takes a relay's last requests, which go to first opinions.
 const SECOND_OPINION_ROOM_TENTHS: usize = 3;
+/// Background reads (`resolve_with`'s `background`: nobody waits on them) that go to a relay may spend this many thirds
+/// of its minute (`background_share`: 26 of 40, as the web client's `BACKGROUND_REQUESTS_PER_MINUTE`, 20 of 30), counted
+/// on their own; the rest stays for reads someone waits on. They reach a relay only where reads keep to the relays (Hide
+/// my IP from contacts, a DHT no node of which answers): links whose contacts are away, group edges and community doors
+/// read there at the background pace, and spent a relay's whole minute, so a signal due in the open chat found no request
+/// left for 60 s (bug hunt, Linux Desktop, 2026-11).
+///
+/// How it composes with the other rules on a minute of 40 (any cap of 5 to 90 keeps the same order, checked in tests):
+/// - background reads take at most 26; reads someone waits on always find at least the other 14;
+/// - of those 14, a key read often (`LIGHT_KEY_GETS`) stops where 8 are left (`light_keys_reserve`, a fifth), so keys
+///   read less keep the last 8 whatever ran before: 26 background + 6 busy + 8;
+/// - a second opinion is asked only while more than 12 are left (`second_opinion_room`), 12 being at most the 14;
+/// - the cap itself holds the total: 40 reads, whoever spent them.
+///
+/// A background read of a key read often meets both its share and the fifth; a second opinion asked for a background
+/// read counts as background.
+const BACKGROUND_SHARE_THIRDS: usize = 2;
 /// Once a relay said its limit (`x-ratelimit-limit`, a minute's worth per address), this client
 /// allows itself half of it, within these bounds: two apps on one machine share the address.
 const READS_PER_MINUTE_LEAST: usize = 5;
@@ -563,6 +580,9 @@ struct Reading {
     done: watch::Receiver<()>,
     /// A read waiting for it is urgent: the second opinion is asked as for an urgent read.
     urgent: Arc<std::sync::atomic::AtomicBool>,
+    /// Cleared by a read waiting for it that is not a background one: the read asks within the whole minute, not
+    /// within the background share (`BACKGROUND_SHARE_THIRDS`).
+    background: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// The read that asks the relays for its key while others wait (`Pkarr::relay_turn`); dropped, it lets them go.
@@ -571,12 +591,18 @@ struct Lead {
     key: PublicKey,
     id: u64,
     urgent: Arc<std::sync::atomic::AtomicBool>,
+    background: Arc<std::sync::atomic::AtomicBool>,
     _done: watch::Sender<()>,
 }
 
 impl Lead {
     fn urgent(&self) -> bool {
         self.urgent.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Nobody waits on it: it spends the relays' background share.
+    fn background(&self) -> bool {
+        self.background.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -621,6 +647,8 @@ struct Relay {
 #[derive(Default)]
 struct RelayBudget {
     spent: VecDeque<Instant>,
+    /// Those of `spent` that background reads spent (`BACKGROUND_SHARE_THIRDS`).
+    background_spent: VecDeque<Instant>,
     resting_until: Option<Instant>,
     /// What the relay last said it has left for this address (`x-ratelimit-remaining`), if it says.
     remaining: Option<i64>,
@@ -1368,7 +1396,9 @@ impl Pkarr {
     }
 
     /// `background`: a look that can wait (a link nobody is watching, nothing expected). It asks no
-    /// relay, keeping their budget for links that are signaling, and waits for the DHT lookup instead.
+    /// relay, keeping their budget for links that are signaling, and waits for the DHT lookup instead; where reads keep
+    /// to the relays (no DHT, or one no node of which answers) it asks them within their background share
+    /// (`BACKGROUND_SHARE_THIRDS`), and the rest of each relay's minute stays for reads someone waits on.
     /// `urgent`: a signal is due any moment. On the DHT, the read waits for the lookup's first answer even
     /// when a packet is known; with relay reads on, when the relay asked had nothing newer, a second relay
     /// with plenty of requests left is asked too (relays do not all serve a fresh packet at once).
@@ -1412,7 +1442,7 @@ impl Pkarr {
             }
             "dht"
         } else {
-            match self.relay_turn(key, urgent) {
+            match self.relay_turn(key, urgent, background) {
                 RelayTurn::Reuse => "relay-fresh",
                 RelayTurn::Wait(mut done) => {
                     // As long as the read asking can take; an error is that read over.
@@ -1469,7 +1499,7 @@ impl Pkarr {
         lead: Box<Lead>,
     ) -> &'static str {
         let source;
-        if let Some(url) = self.pick_relay_for(Some(key), true) {
+        if let Some(url) = self.pick_relay_for(Some(key), true, lead.background()) {
             let read = self.relay_get(&url, key);
             tokio::pin!(read);
             let answer = match lookup.clone() {
@@ -1512,7 +1542,7 @@ impl Pkarr {
             };
             // Nothing newer from that relay, and a signal is due: another relay may have it already.
             if lead.urgent() && self.newest(key).map(|p| p.timestamp()) == before {
-                if let Some(other) = self.pick_relay_other_than(&url, key) {
+                if let Some(other) = self.pick_relay_other_than(&url, key, lead.background()) {
                     let answer = self.relay_get(&other, key).await;
                     self.relay_answered(&other, answer);
                 }
@@ -1523,7 +1553,7 @@ impl Pkarr {
                 }
             }
         } else if self.newest(key).is_none() {
-            // No relay to ask (budget spent, or every one left alone): the lookup is all there is.
+            // No relay to ask (budget or background share spent, or every one left alone): the lookup is all there is.
             if let Some(done) = lookup {
                 let _ = tokio::time::timeout(BACKGROUND_LOOKUP_WAIT, finished(done)).await;
                 self.went(Path::Dht);
@@ -1544,8 +1574,8 @@ impl Pkarr {
 
     /// What a read of `key` does at the relays: wait for the read of it that is asking them, take their answer of a
     /// moment ago, or ask (`urgent`: a second opinion too, as an urgent read; a read that waits makes the one asking
-    /// urgent if it is).
-    fn relay_turn(&self, key: &PublicKey, urgent: bool) -> RelayTurn {
+    /// urgent if it is; `background`: within the relays' background share, until a read that is not one waits for it).
+    fn relay_turn(&self, key: &PublicKey, urgent: bool, background: bool) -> RelayTurn {
         let mut state = self.inner.state.lock().unwrap();
         let now = Instant::now();
         if state.keys.len() >= REMEMBERED_KEYS && !state.keys.contains_key(key) {
@@ -1563,6 +1593,11 @@ impl Pkarr {
                     .urgent
                     .store(true, std::sync::atomic::Ordering::Relaxed);
             }
+            if !background {
+                reading
+                    .background
+                    .store(false, std::sync::atomic::Ordering::Relaxed);
+            }
             return RelayTurn::Wait(reading.done.clone());
         }
         if reads
@@ -1573,10 +1608,12 @@ impl Pkarr {
         }
         let (done_tx, done) = watch::channel(());
         let urgent = Arc::new(std::sync::atomic::AtomicBool::new(urgent));
+        let background = Arc::new(std::sync::atomic::AtomicBool::new(background));
         reads.reading = Some(Reading {
             id,
             done,
             urgent: urgent.clone(),
+            background: background.clone(),
         });
         state.next_reading += 1;
         RelayTurn::Lead(Box::new(Lead {
@@ -1584,6 +1621,7 @@ impl Pkarr {
             key: key.clone(),
             id,
             urgent,
+            background,
             _done: done_tx,
         }))
     }
@@ -1636,12 +1674,18 @@ impl Pkarr {
     /// `budgeted`), and of those the one that says it has the most requests left for this address; in
     /// turn when none says.
     fn pick_relay(&self, budgeted: bool) -> Option<Url> {
-        self.pick_relay_for(None, budgeted)
+        self.pick_relay_for(None, budgeted, false)
     }
 
     /// `pick_relay` for a read of `key`: a key read often this minute (`LIGHT_KEY_GETS`) leaves the last of each
-    /// relay's minute (`light_keys_reserve`) to keys read less, and the GET counts as the key's.
-    fn pick_relay_for(&self, key: Option<&PublicKey>, budgeted: bool) -> Option<Url> {
+    /// relay's minute (`light_keys_reserve`) to keys read less, and the GET counts as the key's. A `background` read
+    /// asks only a relay whose background share (`BACKGROUND_SHARE_THIRDS`) is not spent, and spends of it.
+    fn pick_relay_for(
+        &self,
+        key: Option<&PublicKey>,
+        budgeted: bool,
+        background: bool,
+    ) -> Option<Url> {
         let mut state = self.inner.state.lock().unwrap();
         let now = Instant::now();
         let heavy = key.is_some_and(|key| {
@@ -1666,7 +1710,9 @@ impl Pkarr {
                 continue;
             };
             let kept = if heavy { light_keys_reserve(cap) } else { 0 };
-            if left <= kept {
+            if left <= kept
+                || (background && state.relays[index].budget.background_left(now, cap) == 0)
+            {
                 continue;
             }
             // Unknown counts as plenty: a relay that never said is one to ask.
@@ -1686,7 +1732,7 @@ impl Pkarr {
             state.relays[index].budget.breaker.begin(now);
         }
         if budgeted {
-            state.relays[index].budget.spend(now);
+            state.relays[index].budget.spend(now, background);
             if let Some(key) = key {
                 state
                     .keys
@@ -1700,8 +1746,9 @@ impl Pkarr {
     }
 
     /// Another relay for a second opinion on `key`: available, with `SECOND_OPINION_RESERVE` requests left there
-    /// by its own count, and more than `second_opinion_room` of this client's minute there.
-    fn pick_relay_other_than(&self, url: &Url, key: &PublicKey) -> Option<Url> {
+    /// by its own count, and more than `second_opinion_room` of this client's minute there; for a `background` read,
+    /// within the background share there too.
+    fn pick_relay_other_than(&self, url: &Url, key: &PublicKey, background: bool) -> Option<Url> {
         let mut state = self.inner.state.lock().unwrap();
         let now = Instant::now();
         let reads_per_minute = self.inner.reads_per_minute;
@@ -1711,12 +1758,15 @@ impl Pkarr {
                 && relay
                     .budget
                     .left(now, reads_per_minute, false)
-                    .is_some_and(|(left, cap)| left > second_opinion_room(cap))
+                    .is_some_and(|(left, cap)| {
+                        left > second_opinion_room(cap)
+                            && (!background || relay.budget.background_left(now, cap) > 0)
+                    })
                 && relay.budget.remaining.unwrap_or(i64::MAX) >= SECOND_OPINION_RESERVE
         })?;
         let budget = &mut state.relays[other].budget;
         budget.breaker.begin(now);
-        budget.spend(now);
+        budget.spend(now, background);
         state
             .keys
             .entry(key.clone())
@@ -2019,6 +2069,16 @@ fn second_opinion_room(cap: usize) -> usize {
     }
 }
 
+/// What background reads may spend of a relay's minute (`BACKGROUND_SHARE_THIRDS`: 26 of 40); no end where there is no
+/// cap.
+fn background_share(cap: usize) -> usize {
+    if cap == usize::MAX {
+        usize::MAX
+    } else {
+        cap * BACKGROUND_SHARE_THIRDS / 3
+    }
+}
+
 fn key_url(relay: &Url, key: &PublicKey) -> Url {
     let mut url = relay.clone();
     if let Ok(mut segments) = url.path_segments_mut() {
@@ -2086,8 +2146,28 @@ impl RelayBudget {
         Some((cap.saturating_sub(self.spent.len()), cap))
     }
 
-    fn spend(&mut self, now: Instant) {
+    /// What background reads have left of the relay's background share this minute, under `cap` (as `left` gives
+    /// it); no end where there is no cap (relays of one's own).
+    fn background_left(&mut self, now: Instant, cap: usize) -> usize {
+        if cap == usize::MAX {
+            return usize::MAX;
+        }
+        while self
+            .background_spent
+            .front()
+            .is_some_and(|at| now.duration_since(*at) >= Duration::from_secs(60))
+        {
+            self.background_spent.pop_front();
+        }
+        background_share(cap).saturating_sub(self.background_spent.len())
+    }
+
+    /// A read went to the relay: of the background share too when `background`.
+    fn spend(&mut self, now: Instant, background: bool) {
         self.spent.push_back(now);
+        if background {
+            self.background_spent.push_back(now);
+        }
     }
 
     fn rest(&mut self) {
@@ -4554,6 +4634,274 @@ mod fair_relay_reads {
         assert_eq!((gets_of(&a, &key), gets_of(&b, &key)), (2, 0));
         // With 13 left, it is asked.
         budget(&pkarr, &b, |budget| budget.spent.pop_front());
+        pkarr.resolve_with(&key, false, true).await.unwrap();
+        assert_eq!((gets_of(&a, &key), gets_of(&b, &key)), (3, 1));
+    }
+}
+
+#[cfg(test)]
+mod background_relay_share {
+    // covers: chat.paired.pair
+    use super::*;
+    use crate::test_support::{closed_port, pkarr_relay, Relay};
+    use pkarr::Keypair;
+
+    fn packet(keypair: &Keypair, value: &str) -> SignedPacket {
+        SignedPacket::builder()
+            .txt("_n".try_into().unwrap(), value.try_into().unwrap(), 300)
+            .sign(keypair)
+            .unwrap()
+    }
+
+    /// A key with a packet at `relay`.
+    fn published(relay: &Relay, value: &str) -> PublicKey {
+        let keypair = Keypair::random();
+        let packet = packet(&keypair, value);
+        relay.packets.lock().unwrap().insert(
+            keypair.public_key().to_z32(),
+            packet.to_relay_payload().to_vec(),
+        );
+        keypair.public_key()
+    }
+
+    fn value(packet: &SignedPacket) -> String {
+        let record = packet.all_resource_records().next().unwrap();
+        match &record.rdata {
+            simple_dns::rdata::RData::TXT(txt) => String::try_from(txt.clone()).unwrap(),
+            _ => unreachable!(),
+        }
+    }
+
+    fn gets(relay: &Relay) -> usize {
+        let requests = relay.requests.lock().unwrap();
+        requests.iter().filter(|r| r.starts_with("GET")).count()
+    }
+
+    fn gets_of(relay: &Relay, key: &PublicKey) -> usize {
+        let wanted = format!("GET /{}", key.to_z32());
+        let requests = relay.requests.lock().unwrap();
+        requests.iter().filter(|r| **r == wanted).count()
+    }
+
+    /// One relay and no DHT behind it, as with Hide my IP from contacts.
+    fn relay_only(relay: &Relay) -> Pkarr {
+        Pkarr::new(None, &[relay.url.parse().unwrap()])
+            .unwrap()
+            .reusing_for(Duration::ZERO)
+    }
+
+    /// Background reads of `count` keys read for the first time (each at the relay): how many came back.
+    async fn background_reads(pkarr: &Pkarr, relay: &Relay, count: usize) -> usize {
+        let mut found = 0;
+        for _ in 0..count {
+            let key = published(relay, "watched");
+            found += pkarr.resolve_with(&key, true, false).await.is_some() as usize;
+        }
+        found
+    }
+
+    /// The share of a 40-read minute background reads may spend (two thirds, as the web client's 20 of 30).
+    const SHARE: usize = READS_PER_MINUTE * 2 / 3;
+
+    #[tokio::test]
+    async fn background_reads_of_forty_keys_leave_an_urgent_read_of_a_contact_its_relay_get() {
+        let relay = pkarr_relay().await;
+        let pkarr = relay_only(&relay);
+        // Links whose contacts are away, group edges, community doors: forty keys, each read once in the background.
+        background_reads(&pkarr, &relay, READS_PER_MINUTE).await;
+        // A signal is due in the open chat: the contact's key is read urgently, and the relay is asked.
+        let contact = published(&relay, "offer");
+        let got = pkarr.resolve_with(&contact, false, true).await;
+        assert_eq!(
+            gets_of(&relay, &contact),
+            1,
+            "the urgent read asked nothing (relay at {} GETs)",
+            gets(&relay)
+        );
+        assert_eq!(got.as_ref().map(value).as_deref(), Some("offer"));
+        assert_eq!(gets(&relay), SHARE + 1, "background took {SHARE} of 40");
+    }
+
+    #[tokio::test]
+    async fn foreground_reads_have_the_whole_minute_while_background_is_idle() {
+        let relay = pkarr_relay().await;
+        let pkarr = relay_only(&relay);
+        let mut found = 0;
+        for _ in 0..READS_PER_MINUTE + 5 {
+            let key = published(&relay, "chat");
+            found += pkarr.resolve_with(&key, false, false).await.is_some() as usize;
+        }
+        assert_eq!((found, gets(&relay)), (READS_PER_MINUTE, READS_PER_MINUTE));
+    }
+
+    #[tokio::test]
+    async fn background_reads_stop_at_their_share_and_the_rest_is_the_foregrounds() {
+        let relay = pkarr_relay().await;
+        let pkarr = relay_only(&relay);
+        assert_eq!(
+            background_reads(&pkarr, &relay, READS_PER_MINUTE).await,
+            SHARE
+        );
+        assert_eq!(gets(&relay), SHARE);
+        // The rest of the minute, every request of it, goes to reads someone waits on; then the cap holds.
+        let mut found = 0;
+        for _ in 0..(READS_PER_MINUTE - SHARE) + 5 {
+            let key = published(&relay, "chat");
+            found += pkarr.resolve(&key).await.is_some() as usize;
+        }
+        assert_eq!(found, READS_PER_MINUTE - SHARE);
+        assert_eq!(gets(&relay), READS_PER_MINUTE);
+    }
+
+    #[tokio::test]
+    async fn foreground_reads_first_leave_background_its_share_of_what_is_left() {
+        // Counted on their own, as the web client's: a burst of reads someone waited on does not shrink the share,
+        // only the minute's cap holds the total.
+        let relay = pkarr_relay().await;
+        let pkarr = relay_only(&relay);
+        let foreground = 10;
+        for _ in 0..foreground {
+            let key = published(&relay, "chat");
+            assert!(pkarr.resolve(&key).await.is_some());
+        }
+        assert_eq!(
+            background_reads(&pkarr, &relay, READS_PER_MINUTE).await,
+            SHARE
+        );
+        assert_eq!(gets(&relay), foreground + SHARE);
+    }
+
+    #[tokio::test]
+    async fn the_share_follows_the_limit_the_relay_says() {
+        // pkarr.pubky.org allows 50 a minute per address: this client takes 25 of them, background 16.
+        let relay = pkarr_relay().await;
+        relay
+            .headers
+            .lock()
+            .unwrap()
+            .push(("x-ratelimit-limit".into(), "50".into()));
+        let pkarr = relay_only(&relay);
+        assert_eq!(background_reads(&pkarr, &relay, 30).await, 16);
+        let contact = published(&relay, "answer");
+        assert_eq!(
+            pkarr
+                .resolve_with(&contact, false, true)
+                .await
+                .as_ref()
+                .map(value)
+                .as_deref(),
+            Some("answer")
+        );
+        assert_eq!(gets(&relay), 17);
+    }
+
+    #[tokio::test]
+    async fn relays_of_ones_own_have_no_background_share() {
+        let relay = pkarr_relay().await;
+        let pkarr = Pkarr::private(&[relay.url.parse().unwrap()])
+            .unwrap()
+            .reusing_for(Duration::ZERO);
+        let many = READS_PER_MINUTE * 2;
+        assert_eq!(background_reads(&pkarr, &relay, many).await, many);
+        assert_eq!(gets(&relay), many);
+    }
+
+    #[tokio::test]
+    async fn with_a_dht_no_node_answers_background_reads_leave_the_rest_to_reads_someone_waits_on()
+    {
+        // UDP blocked, a VPN: the released path. Lookups heard from no node, so reads (background ones too) go to the
+        // relay; the lookups behind them find nothing.
+        let relay = pkarr_relay().await;
+        let nowhere: SocketAddrV4 = format!("127.0.0.1:{}", closed_port()).parse().unwrap();
+        let pkarr = Pkarr::direct(
+            Dht::mainline(Some(vec![nowhere])).unwrap(),
+            &[relay.url.parse().unwrap()],
+        )
+        .unwrap()
+        .reusing_for(Duration::ZERO);
+        pkarr.inner.state.lock().unwrap().dht_silent = DHT_SILENT_LOOKUPS;
+        assert_eq!(background_reads(&pkarr, &relay, SHARE).await, SHARE);
+        assert_eq!(gets(&relay), SHARE);
+        // The next background read asks no relay; its lookup is all it has.
+        let watched = published(&relay, "watched");
+        assert!(pkarr.resolve_with(&watched, true, false).await.is_none());
+        assert_eq!(gets_of(&relay, &watched), 0);
+        // A signal due in the open chat still gets its GET.
+        let contact = published(&relay, "offer");
+        let got = pkarr.resolve_with(&contact, false, true).await;
+        assert_eq!(got.as_ref().map(value).as_deref(), Some("offer"));
+        assert_eq!(gets_of(&relay, &contact), 1);
+        assert!(pkarr.inner.state.lock().unwrap().dht_silent >= DHT_SILENT_LOOKUPS);
+    }
+
+    #[test]
+    fn the_shares_of_a_minute_nest_at_every_cap() {
+        // Reads someone waits on keep cap - share; within it the second opinion's margin, within that the fifth that
+        // keys read less keep. So none of #5678's rules can be starved by the background share.
+        for cap in (READS_PER_MINUTE_LEAST..=READS_PER_MINUTE_MOST).chain([READS_PER_MINUTE]) {
+            let foreground = cap - background_share(cap);
+            assert!(background_share(cap) > 0, "cap {cap}");
+            assert!(
+                light_keys_reserve(cap) <= second_opinion_room(cap),
+                "cap {cap}"
+            );
+            assert!(second_opinion_room(cap) <= foreground, "cap {cap}");
+        }
+        assert_eq!(background_share(READS_PER_MINUTE), SHARE);
+        assert_eq!((SHARE, READS_PER_MINUTE - SHARE), (26, 14));
+        assert_eq!(background_share(usize::MAX), usize::MAX);
+    }
+
+    #[tokio::test]
+    async fn a_busy_key_read_in_the_background_meets_its_share_then_the_fifth_and_keys_read_less_keep_the_last(
+    ) {
+        let relay = pkarr_relay().await;
+        let pkarr = relay_only(&relay);
+        let busy = published(&relay, "busy");
+        for _ in 0..READS_PER_MINUTE {
+            pkarr.resolve_with(&busy, true, false).await.unwrap();
+        }
+        assert_eq!(gets(&relay), SHARE, "the background share");
+        // Read in the foreground now, it is still a key read often: it stops where the fifth begins.
+        for _ in 0..READS_PER_MINUTE {
+            pkarr.resolve_with(&busy, false, true).await.unwrap();
+        }
+        let fifth = light_keys_reserve(READS_PER_MINUTE);
+        assert_eq!(
+            gets(&relay),
+            READS_PER_MINUTE - fifth,
+            "26 + 6, the last 8 kept"
+        );
+        let mut answered = 0;
+        for _ in 0..fifth + 5 {
+            let fresh = published(&relay, "fresh");
+            answered += pkarr.resolve(&fresh).await.is_some() as usize;
+        }
+        assert_eq!((answered, gets(&relay)), (fifth, READS_PER_MINUTE));
+    }
+
+    #[tokio::test]
+    async fn a_second_opinion_for_a_background_read_stays_within_the_other_relays_share() {
+        let (a, b) = (pkarr_relay().await, pkarr_relay().await);
+        let pkarr = Pkarr::new(None, &[a.url.parse().unwrap(), b.url.parse().unwrap()])
+            .unwrap()
+            .reusing_for(Duration::ZERO);
+        // Reads go to `a` (it says it has the most left); `b` spent its background share, 14 of its 40 are left.
+        pkarr.with_budget(&a.url.parse().unwrap(), |budget| {
+            budget.remaining = Some(1_000)
+        });
+        pkarr.with_budget(&b.url.parse().unwrap(), |budget| {
+            budget.remaining = Some(500);
+            for _ in 0..SHARE {
+                budget.spend(Instant::now(), true);
+            }
+        });
+        let key = published(&a, "1");
+        pkarr.resolve(&key).await.unwrap();
+        // Nothing newer at `a`, and urgent, but nobody waits: no second opinion at `b`.
+        pkarr.resolve_with(&key, true, true).await.unwrap();
+        assert_eq!((gets_of(&a, &key), gets_of(&b, &key)), (2, 0));
+        // A read someone waits on gets it: 14 left is more than the 12 a second opinion leaves.
         pkarr.resolve_with(&key, false, true).await.unwrap();
         assert_eq!((gets_of(&a, &key), gets_of(&b, &key)), (3, 1));
     }
