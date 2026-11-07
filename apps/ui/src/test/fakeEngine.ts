@@ -158,6 +158,8 @@ export class FakeEngine implements BrowserHost {
   readClipboardText?: BrowserHost["readClipboardText"];
   /** The desktop host's native read of copied files or a picture, when a test gives one. */
   readClipboardFiles?: BrowserHost["readClipboardFiles"];
+  /** The Android app's sensitive copy, when a test gives one; left out, a secret is copied by the page. */
+  copySecret?: BrowserHost["copySecret"];
   /** The desktop host's "Keep this computer awake", when a test gives one (WISP 06). */
   keepAwake?: BrowserHost["keepAwake"];
   /** Where mini-apps run (the web app's runner page), when a test turns Apps on; left out, no client runs apps. */
@@ -240,6 +242,7 @@ export class FakeEngine implements BrowserHost {
     this.fullscreenWindow = undefined;
     this.readClipboardText = undefined;
     this.readClipboardFiles = undefined;
+    this.copySecret = undefined;
     this.keepAwake = undefined;
     this.appRunner = undefined;
     this.appRunnerServed = undefined;

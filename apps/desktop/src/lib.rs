@@ -131,6 +131,7 @@ macro_rules! commands {
             app_sandbox::app_open,
             app_sandbox::app_post,
             app_sandbox::app_title,
+            clipboard::copy_secret,
             clipboard::incoming_share_done,
             clipboard::incoming_share_take,
             clipboard::read_clipboard_files,

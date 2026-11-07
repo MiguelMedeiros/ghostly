@@ -24,6 +24,7 @@
     "allow-app-title",
     "allow-bitcoind-rpc",
     "allow-close-service-windows",
+    "allow-copy-secret",
     "allow-create-keypair",
     "allow-decrypt-text",
     "allow-device-state-read",

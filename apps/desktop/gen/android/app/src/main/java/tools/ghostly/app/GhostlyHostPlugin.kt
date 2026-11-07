@@ -6,6 +6,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.ActivityNotFoundException
+import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -16,6 +17,7 @@ import android.net.LinkProperties
 import android.net.Network
 import android.net.Uri
 import android.os.Build
+import android.os.PersistableBundle
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.provider.Settings
@@ -440,6 +442,20 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       // Not text (or gone): the URI itself, as coerceToText gives.
       invoke.resolve(JSObject().put("text", text ?: uri.toString()))
     }
+  }
+
+  /**
+   * A secret the person copied (an invite, a device's link, a group's link, ecash), marked sensitive: Android 13 and up
+   * shows dots for it in the copy preview, and keyboards keep it out of their clipboard history. The WebView's own copy
+   * cannot mark it. The key's name is the same before 13 (`ClipDescription.EXTRA_IS_SENSITIVE`), which keyboards read.
+   */
+  @Command
+  fun clipboardWriteSecret(invoke: Invoke) {
+    val text = invoke.parseArgs(TextArgs::class.java).text
+    val clip = ClipData.newPlainText("", text)
+    clip.description.extras = PersistableBundle().apply { putBoolean("android.content.extra.IS_SENSITIVE", true) }
+    (activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
+    invoke.resolve()
   }
 
   // ---- Notifications ----

@@ -24,6 +24,7 @@ import { formatAmount } from "../../lib/amount";
 import { formatAt } from "../../lib/time";
 import { problemLine, problemText } from "../../lib/problemText";
 import { exactText } from "../../lib/exactText";
+import { copySecret } from "../../lib/shareLink";
 
 const TX_LABEL = {
   "lightning-in": "wallet.cashu.tx.lightningIn",
@@ -453,7 +454,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
           </Section>
           <Section title={t("wallet.cashu.settings")} testId="wallet-backup">
             <Row label={t("wallet.cashu.copyEcash")} hint={t("wallet.cashu.copyEcashHint")}>
-              <Button loading={running === "backup"} disabled={busy || state.balance === 0} onClick={() => { setCopied(false); void run(async () => { const tokens = await wallet.exportTokens(); await navigator.clipboard.writeText(tokens.map((token) => token.token).join("\n")); setCopied(true); }, "backup"); }}>{t("wallet.cashu.copyBackup")}</Button>
+              <Button loading={running === "backup"} disabled={busy || state.balance === 0} onClick={() => { setCopied(false); void run(async () => { const tokens = await wallet.exportTokens(); await copySecret(tokens.map((token) => token.token).join("\n")); setCopied(true); }, "backup"); }}>{t("wallet.cashu.copyBackup")}</Button>
               <p role="status" className="sr-only">{copied ? t("wallet.cashu.backupCopied") : ""}</p>
             </Row>
             {(copied || (error && backupFailed)) && <Block>{copied ? <Notice tone="success" testId="wallet-notice">{t("wallet.cashu.backupCopied")}</Notice> : error && <Notice problem={error} testId="wallet-error" />}</Block>}

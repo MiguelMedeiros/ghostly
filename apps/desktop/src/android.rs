@@ -95,6 +95,13 @@ pub fn clipboard_text() -> Result<String, String> {
         .unwrap_or_default())
 }
 
+/// Puts `text` on the clipboard marked sensitive (`ClipDescription.EXTRA_IS_SENSITIVE`): a secret the person copied.
+pub async fn copy_secret(text: String) -> Result<(), String> {
+    call_async::<Value>("clipboardWriteSecret", json!({ "text": text }))
+        .await
+        .map(drop)
+}
+
 #[derive(Deserialize)]
 struct Permission {
     state: String,

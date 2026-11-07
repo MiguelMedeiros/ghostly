@@ -4,7 +4,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { useBackdropDismiss, useBackCloses } from "../hooks/useDismiss";
-import { copyText, shareLink } from "../lib/shareLink";
+import { copySecret, shareLink } from "../lib/shareLink";
 import { groupLinkUrl } from "../lib/groups";
 import { COMMUNITY_LIMITS, MAX_GROUP_MEMBERS } from "@ghostly/core";
 import { GroupAvatar } from "./GroupAvatar";
@@ -61,7 +61,7 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
   };
   const copy = async () => {
     setError(null);
-    try { await copyText(url); flash("copied"); } catch { setError({ tone: "error", title: t("group.link.copyFailed") }); }
+    try { await copySecret(url); flash("copied"); } catch { setError({ tone: "error", title: t("group.link.copyFailed") }); }
   };
   const share = async () => {
     setError(null);

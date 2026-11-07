@@ -2,7 +2,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { useSameValue } from "../hooks/useSameValue";
-import { copyText } from "../lib/shareLink";
+import { copySecret } from "../lib/shareLink";
 import { CopiedStatus } from "./chat/LinkQrDialog";
 
 interface QRCodeDisplayProps {
@@ -33,7 +33,8 @@ export function QRCodeDisplay({ value, qr, label, copyLabel }: QRCodeDisplayProp
   const handleCopy = async () => {
     setError(""); setCopied(false); clearTimeout(copiedTimer.current);
     try {
-      await copyText(value);
+      // An invite or a device's link: a secret.
+      await copySecret(value);
       if (currentValue.current !== value) return;
       setRefused(false); setCopied(true);
       copiedTimer.current = setTimeout(() => setCopied(false), 2000);
