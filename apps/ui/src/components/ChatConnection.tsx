@@ -5,7 +5,7 @@ import { useFocusBack } from "../hooks/useFocusBack";
 import { Link } from "react-router-dom";
 import type { PairedTransport } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
-import { useEffect, useId, useRef, useState, type FocusEvent } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { dots, focus, transportName, type ConnectionKind } from "../lib/connection";
 import { connectionSummary, lasting, liveAttemptText, namedReason, transportWaitText } from "../lib/transportEvents";
@@ -29,6 +29,7 @@ import { Notice } from "./ui/Notice";
 import { useWindowAway } from "../lib/windowAway";
 import { useOnline } from "../hooks/useOnline";
 import { useEngineValue } from "../lib/engineState";
+import { focusLost } from "../lib/focus";
 
 const name = transportName;
 /**
@@ -255,6 +256,19 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
     try { await engine.call("connect", { linkId }); } catch (e) { if (dial.current === round) setError(said(e)); }
     finally { if (dial.current === round) setDialing(false); }
   }
+  // Reconnect is there only while the chat is not live: when the contact comes back with the focus on it (pressed or
+  // tabbed to), it goes from under the focus, which fell to the page. The state line, which then says the chat is
+  // live, takes it. Its ref is let go before it leaves the page, the focus still on it then; a focus elsewhere stays.
+  const stateLine = useRef<HTMLDivElement>(null), reconnectButton = useRef<HTMLButtonElement | null>(null), reconnectLeft = useRef(false);
+  const reconnectRef = useCallback((el: HTMLButtonElement | null) => {
+    if (!el && reconnectButton.current && reconnectButton.current === document.activeElement) reconnectLeft.current = true;
+    reconnectButton.current = el;
+  }, []);
+  useLayoutEffect(() => {
+    if (!reconnectLeft.current) return;
+    reconnectLeft.current = false;
+    if (root.current?.open && focusLost()) stateLine.current?.focus({ preventScroll: true });
+  });
   async function run(action: () => Promise<unknown>, fail = setError) {
     focusBack();
     dial.current++; setDialing(false);
@@ -278,7 +292,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
       {!glyph && (dots[kind] || retrying) && <span aria-hidden="true" data-testid="connection-dot" className={`pointer-events-none absolute end-1 top-1 h-2 w-2 rounded-full ring-2 ring-panel-header ${phone ? "end-2 top-2" : "max-md:end-1.5 max-md:top-1.5"} ${dots[kind] ?? "bg-text-muted"} ${connecting || retrying ? "motion-safe:animate-pulse" : ""}`} />}
     </summary>
     <div role="dialog" aria-label={t("connection.panel.title")} className="absolute end-0 top-full max-md:fixed max-md:inset-x-2 max-md:top-[calc(3.5rem_+_env(safe-area-inset-top))] max-md:w-auto z-40 mt-2 w-[min(20rem,calc(100vw-1rem))] max-h-[70dvh] overflow-y-auto rounded-xl border border-border bg-panel-header p-3 text-xs leading-5 text-text-muted shadow-xl">
-      <div className="flex items-center gap-2 px-1 font-medium text-text-primary" data-testid="connection-state">
+      <div ref={stateLine} tabIndex={-1} className={`flex items-center gap-2 rounded-md px-1 font-medium text-text-primary ${focus}`} data-testid="connection-state">
         {glyph ? <PairingGlyph stage={stage!} direction={direction} size={16} /> : <ConnectionIcon kind={iconKind} transport={liveOn} holding={holding} size={16} weight={1.7} />}
         <span className="min-w-0 break-words">{label}{rtt !== undefined && <span className="font-normal text-text-secondary"> · <bdi data-testid="connection-rtt">{t("connection.ms", { ms: rtt })}</bdi></span>}{elapsed && <span className="font-normal tabular-nums text-text-secondary"> · {elapsed}</span>}</span>
       </div>
@@ -307,7 +321,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
             Not while the contact keeps the chat on DHT only either: the engine refuses the dial, and the refusal read as a connection issue.
             Nor in the seconds after a live link closed with messages held: the contact may have chosen it and not said so yet. */}
         {!dht && link?.dhtDelivery?.peerMode !== "dht" && labelState !== "heldPlain" && !ready && !awaitingJoin && online && link && <button className={`-mx-1 min-h-9 rounded-md px-2 text-accent hover:bg-surface-hover disabled:opacity-40 aria-disabled:opacity-40 ${focus}`} disabled={busy}
-          aria-disabled={dialing || undefined} data-testid="connection-reconnect"
+          ref={reconnectRef} aria-disabled={dialing || undefined} data-testid="connection-reconnect"
           onClick={() => void reconnect(link.id)}>{t(dialing ? "connection.panel.reconnecting" : "connection.panel.reconnect")}</button>}
         <details className="text-[11px]" data-testid="connection-details">
           <summary data-testid="connection-details-summary" className={`w-fit cursor-pointer rounded-md px-1 py-2 text-text-secondary ${focus}`}>{t("connection.panel.details")}</summary>
