@@ -131,6 +131,21 @@ describe("hedged relay reads", () => {
     expect(logs).toEqual([]);
   });
 
+  it("a relay still silent when the other said 404 past the missing-key hedge is slow: later reads of the key do not wait for it", async () => {
+    // A blackholed relay (it takes the connection, never answers) and one that says 404 at once: a key nobody published yet.
+    const { transport, calls, logs } = relays({ "dead.test": { delayMs: 1e9 }, "up.test": { delayMs: 50, status: 404 } });
+    const times: number[] = [];
+    for (let i = 0; i < 8; i++) {
+      times.push((await timed(() => transport.resolve(id.pubKeyZ32))).ms);
+      await vi.advanceTimersByTimeAsync(5_000);
+    }
+    // The first read hedges at HEDGE_MS, the second (the key known missing) at HEDGE_MISSING_MS; then the silent relay
+    // goes after the other one, not first in every read of the key for good, 6 s each.
+    expect(times.slice(2).every((ms) => ms < 200)).toBe(true);
+    expect(calls.filter((host) => host === "dead.test")).toHaveLength(2);
+    expect(logs).toEqual([]);
+  });
+
   it("a background read never hedges: nobody waits on it", async () => {
     const { transport, calls } = relays({ "slow.test": { delayMs: 8_000 }, "fast.test": { delayMs: 50 } });
     const { ms } = await timed(() => transport.resolve(id.pubKeyZ32, { background: true }));

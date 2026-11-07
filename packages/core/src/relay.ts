@@ -1168,10 +1168,12 @@ export class RelayTransport implements PkarrTransport {
         else this.breaker.cancel(relay);
       }
       // The relays still asked are dropped, after the winner's own outcome (a probe that answered is a relay to ask
-      // again). One asked no later than the winner, which a relay beat with the packet, is slow.
+      // again). One asked no later than the winner, which a relay beat with the packet, is slow. So is one beaten by a 404
+      // while still silent past `HEDGE_MISSING_MS`, more than a relay takes to say 404: a relay that takes connections
+      // and never answers was asked first in every read of a key nobody published yet, each one 6 s, and never tripped.
       for (const loser of asked.values()) {
         loser.controller.abort();
-        if (outcome.kind === "packet" && loser.started <= attempt.started) this.slow(loser.relay);
+        if (loser.started <= attempt.started && (outcome.kind === "packet" || Date.now() - loser.started >= HEDGE_MISSING_MS)) this.slow(loser.relay);
         else this.breaker.cancel(loser.relay);
       }
       this.lastRelay = relay;
