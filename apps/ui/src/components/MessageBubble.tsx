@@ -955,8 +955,11 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `names` is what `reactionName` answers
   const chips = useMemo(() => reactionChips(message.reactions, by => reactionName?.(by) ?? by.slice(0, 8), t("chat.reply.you")), [message.reactions, reactionName, t, names]);
   const swipe = useSwipeReply(onReply);
-  const [imgError, setImgError] = useState(false);
-  const [revealed, setRevealed] = useState(false);
+  // Both name the address they were for: an edit to another one asks again, and is read again.
+  /** The picture link that could not be read or drawn. */
+  const [failed, setFailed] = useState<string | null>(null);
+  /** The picture link Show picture was pressed for: never another, even of the same host (each read says the chat is open). */
+  const [revealed, setRevealed] = useState<string | null>(null);
   /** The picture link whose picture has loaded: until it has, its box keeps a placeholder's height. */
   const [pictureLoaded, setPictureLoaded] = useState<string | null>(null);
   const isMe = message.sender === "me";
@@ -1021,12 +1024,14 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // What the sender's clock said, never later than when the message came (WISP 400, requirement 10).
   const shownAt = shownTime(message);
   const time = clockTime(shownAt, language);
-  const contentType = imgError || message.file || message.paymentId || pressed ? "text" : detectContentType(message.text);
+  const contentType = failed === message.text.trim() || message.file || message.paymentId || pressed ? "text" : detectContentType(message.text);
   // The picture this bubble shows, if it shows one (a card or a system line never does).
   const picture = contentType === "image" && !isSystem && !showsCard(message.card) && !appCard ? message.text.trim() : null;
+  // Whether a picture waits for Show picture: a contact's, or a copy of one I forwarded (mine here, never asked for).
+  const asks = picture !== null && (!isMe || !!message.forwarded) && revealed !== picture && !needsNoClick(picture);
   // No shell's policy lets the page load a picture from any address but the GIF sources': the app reads the others
   // itself, once asked (my own at once), and the bubble shows what came (lib/pictureLink.ts).
-  const readHere = picture !== null && !autoLoads(picture) && (isMe || revealed || needsNoClick(picture)) ? picture : null;
+  const readHere = picture !== null && !autoLoads(picture) && !asks ? picture : null;
   const [pictureRead, setPictureRead] = useState<{ link: string; read: PictureRead } | null>(null);
   useEffect(() => {
     if (!readHere) return;
@@ -1034,7 +1039,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     void pictureLinkUrl(readHere).then((read) => {
       if (!shown) return;
       if (read) setPictureRead({ link: readHere, read });
-      else setImgError(true);
+      else setFailed(readHere);
     });
     return () => { shown = false; };
   }, [readHere]);
@@ -1350,11 +1355,11 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             <InvoiceBubble money={money} mine={isMe} peerPubKey={peerPubKey} payee={payee} />
             {timestampEl}
           </div>
-        ) : contentType === "image" && !isMe && !revealed && !needsNoClick(message.text.trim()) ? (
+        ) : asks ? (
           // Loading a picture tells its server this device's address: from anywhere but the GIF sources,
           // a contact's picture waits for a click.
           <div className="clearfix">
-            <button type="button" data-testid="image-reveal" onClick={() => setRevealed(true)}
+            <button type="button" data-testid="image-reveal" onClick={() => setRevealed(picture)}
               className="text-sm text-link underline decoration-dotted cursor-pointer break-all text-start">
               {t("chat.showPicture", { host: hostOf(message.text.trim()) })}
             </button>
@@ -1373,7 +1378,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
                 style={{ ...(linkPicture && linkPictureBox(linkPicture)), ...(isWaybackGif(message.text.trim()) && { imageRendering: "pixelated" }) }}
                 loading="lazy"
                 onLoad={() => setPictureLoaded(message.text.trim())}
-                onError={() => setImgError(true)}
+                onError={() => setFailed(message.text.trim())}
               />
             ) : (
               // Being read: the placeholder a picture has until it loads.
