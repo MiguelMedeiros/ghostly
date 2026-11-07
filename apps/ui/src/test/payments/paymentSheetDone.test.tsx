@@ -79,6 +79,35 @@ describe("requested", () => {
   });
 });
 
+describe("closed", () => {
+  /** A payment the mint left unconfirmed: its review, with Check and Close. */
+  async function unconfirmed() {
+    rememberRail("peer", "cashu:testnet");
+    const { user, engine } = composer();
+    engine.on("approvePayment", (params) => ({ ...reviewOf({ target: { method: "cashu", network: "cashu-test", provider: TEST_MINT, address: "peer", asset: "BTC", unit: "sat", expiresAt: Date.now() + 60_000 }, amount: 21, feeCap: 10, payee: "peer", linkId: "link-1" }), id: params.id, state: "unknown" }));
+    await start(user, "cashu-testnet");
+    await user.click(screen.getByTestId("payment-send"));
+    await user.click(await screen.findByTestId("review-approve"));
+    await within(screen.getByTestId("payment-review")).findByRole("button", { name: "Close" });
+    return user;
+  }
+
+  it("the review's Close gives the keyboard back to the message field, not to the page", async () => {
+    const user = await unconfirmed();
+    await user.click(within(screen.getByTestId("payment-review")).getByRole("button", { name: "Close" }));
+    expect(sheet()).not.toBeInTheDocument();
+    expect(field()).toHaveFocus();
+  });
+
+  it("Escape in the review does the same", async () => {
+    const user = await unconfirmed();
+    expect(sheet()).toContainElement(document.activeElement as HTMLElement);
+    await user.keyboard("{Escape}");
+    expect(sheet()).not.toBeInTheDocument();
+    expect(field()).toHaveFocus();
+  });
+});
+
 describe("a failure stays", () => {
   it("an approval that throws: the error shows, and Approve is there to try again", async () => {
     rememberRail("peer", "cashu:testnet");
