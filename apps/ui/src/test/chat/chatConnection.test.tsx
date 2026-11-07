@@ -620,6 +620,26 @@ describe("ChatConnection: what the panel does", () => {
     expect(screen.queryByTestId("connection-failure")).not.toBeInTheDocument();
   });
 
+  // The contact came back while the focus was on Reconnect: the button went with the chat live, and the focus fell to
+  // the page with the panel still open. Seen on a web build with two Chromium peers.
+  it("gives the focus to the panel's state line when the chat goes live with it on Reconnect", async () => {
+    const away = { dataLink: "idle", peerOnline: false, peerParticipationKey: "saved" } as Partial<LinkView>;
+    const { user, engine } = banner(away);
+    let answer: () => void = () => {};
+    engine.on("connect", () => new Promise<void>(resolve => { answer = resolve; }));
+    await user.click(screen.getByTestId("connection-options"));
+    await user.click(screen.getByRole("button", { name: "Reconnect" }));
+    await act(async () => {
+      engine.update({ links: [linkView({ availableTransports: all, ...away, dataLink: "open", peerOnline: true, pairing: ready({ peerKey: "peer" }) })] });
+      answer();
+    });
+    expect(screen.queryByTestId("connection-reconnect")).not.toBeInTheDocument();
+    const state = screen.getByTestId("connection-state");
+    expect(state).toHaveTextContent("Connected · WebRTC");
+    expect(state).toHaveFocus();
+    expect(screen.getByTestId("connection-menu")).toHaveAttribute("open");
+  });
+
   it("keeps a failed choice made while live: it is about that choice, not about getting live", async () => {
     const { user, engine } = banner({ pairing: ready() });
     engine.on("setChatTransport", () => { throw new Error("Transport unavailable"); });

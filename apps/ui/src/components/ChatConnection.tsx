@@ -2,6 +2,7 @@ import { useOutsideDismiss } from "../hooks/useDismiss";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useCopyKey } from "../hooks/useCopyKey";
 import { useFocusBack } from "../hooks/useFocusBack";
+import { useFocusKept } from "../hooks/useFocusKept";
 import { Link } from "react-router-dom";
 import type { PairedTransport } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
@@ -241,6 +242,10 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   };
   // The choice or button pressed is disabled while its work runs, which drops the focus to the page: it gets it back.
   const focusBack = useFocusBack(busy);
+  // A control the panel takes out with the focus on it (Reconnect, once the chat is live) left it on the page, the
+  // panel still open: it goes to the state line, which says what took it out ("Connected · WebRTC").
+  const panel = useRef<HTMLDivElement>(null), stateLine = useRef<HTMLDivElement>(null);
+  useFocusKept(panel, () => stateLine.current);
   // The error as it came: the failure line says it in a few words, its English behind the ⓘ.
   const said = (e: unknown) => e instanceof Error ? rawError(e) || t("connection.panel.updateFailed") : t("connection.panel.updateFailed");
   // A Reconnect waits for the contact's app, up to the engine's 90 s: it is not the panel's `busy`, which held every
@@ -277,8 +282,8 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
       {glyph ? <PairingGlyph stage={stage!} direction={direction} size={phone ? 20 : 18} /> : <ConnectionIcon kind={iconKind} transport={liveOn} holding={holding} size={phone ? 20 : 18} weight={2} />}
       {!glyph && (dots[kind] || retrying) && <span aria-hidden="true" data-testid="connection-dot" className={`pointer-events-none absolute end-1 top-1 h-2 w-2 rounded-full ring-2 ring-panel-header ${phone ? "end-2 top-2" : "max-md:end-1.5 max-md:top-1.5"} ${dots[kind] ?? "bg-text-muted"} ${connecting || retrying ? "motion-safe:animate-pulse" : ""}`} />}
     </summary>
-    <div role="dialog" aria-label={t("connection.panel.title")} className="absolute end-0 top-full max-md:fixed max-md:inset-x-2 max-md:top-[calc(3.5rem_+_env(safe-area-inset-top))] max-md:w-auto z-40 mt-2 w-[min(20rem,calc(100vw-1rem))] max-h-[70dvh] overflow-y-auto rounded-xl border border-border bg-panel-header p-3 text-xs leading-5 text-text-muted shadow-xl">
-      <div className="flex items-center gap-2 px-1 font-medium text-text-primary" data-testid="connection-state">
+    <div ref={panel} role="dialog" aria-label={t("connection.panel.title")} className="absolute end-0 top-full max-md:fixed max-md:inset-x-2 max-md:top-[calc(3.5rem_+_env(safe-area-inset-top))] max-md:w-auto z-40 mt-2 w-[min(20rem,calc(100vw-1rem))] max-h-[70dvh] overflow-y-auto rounded-xl border border-border bg-panel-header p-3 text-xs leading-5 text-text-muted shadow-xl">
+      <div ref={stateLine} tabIndex={-1} className={`flex items-center gap-2 rounded-md px-1 font-medium text-text-primary ${focus}`} data-testid="connection-state">
         {glyph ? <PairingGlyph stage={stage!} direction={direction} size={16} /> : <ConnectionIcon kind={iconKind} transport={liveOn} holding={holding} size={16} weight={1.7} />}
         <span className="min-w-0 break-words">{label}{rtt !== undefined && <span className="font-normal text-text-secondary"> · <bdi data-testid="connection-rtt">{t("connection.ms", { ms: rtt })}</bdi></span>}{elapsed && <span className="font-normal tabular-nums text-text-secondary"> · {elapsed}</span>}</span>
       </div>
