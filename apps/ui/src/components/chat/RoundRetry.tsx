@@ -58,7 +58,7 @@ export function WhyButton({ open, onToggle, controls, testId, danger = false }: 
   const more = useOptionalI18n()?.t("common.moreInfo") ?? "More info";
   return (
     <button type="button" data-testid={testId} aria-expanded={open} aria-controls={controls} aria-label={more} title={more} onClick={onToggle}
-      className={`relative shrink-0 inline-grid place-items-center w-4 h-4 rounded-full border-none bg-transparent p-0 cursor-pointer before:absolute before:-inset-2 before:content-[''] ${danger ? "text-danger-ink" : "text-text-primary/65"} hover:opacity-80`}>
+      className={`relative shrink-0 inline-grid place-items-center w-4 h-4 rounded-full border-none bg-transparent p-0 cursor-pointer before:absolute before:-inset-2 max-md:before:-inset-3.5 before:content-[''] ${danger ? "text-danger-ink" : "text-text-primary/65"} hover:opacity-80`}>
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5" /><path d="M12 11v5.5M12 7.5v.01" /></svg>
     </button>
   );

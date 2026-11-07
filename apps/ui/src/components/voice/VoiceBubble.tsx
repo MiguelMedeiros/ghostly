@@ -493,7 +493,7 @@ export function VoiceBubble({ file, sender, peerName: named, timestamp }: { file
               disabled={!ready}
               aria-disabled={state === "loading" || undefined}
               onClick={() => (state === "loading" ? undefined : state === "playing" ? pause() : void play())}
-              className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full bg-transparent border-none text-text-primary/90 cursor-pointer disabled:opacity-40 disabled:cursor-default aria-disabled:opacity-40 aria-disabled:cursor-default hover:bg-black/15"
+              className="tap-target w-9 h-9 shrink-0 flex items-center justify-center rounded-full bg-transparent border-none text-text-primary/90 cursor-pointer disabled:opacity-40 disabled:cursor-default aria-disabled:opacity-40 aria-disabled:cursor-default hover:bg-black/15"
             >
               {state === "playing" ? (
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
