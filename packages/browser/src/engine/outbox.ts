@@ -59,6 +59,18 @@ export interface Resender {
   sendFile?(message: StoredMessage): Promise<void>;
 }
 
+/**
+ * What a send hands back when the message did not leave this device: every relay refused it or was not asked, and it
+ * was not out before (`PublishFailedError`). Nothing about it is unconfirmed: a message that had not gone before waits
+ * again (`waiting`, so it can be cancelled), and the ones written after it wait behind it (`NotSent.REASON`).
+ */
+export class NotSent {
+  /** What a message that waits again says, in its details. */
+  static readonly REASON = "No relay took it, so it has not left this device. It is sent by itself once one does.";
+  /** `error`: what the send said, kept as it was for a message queued already. */
+  constructor(readonly error: string) {}
+}
+
 /** How long one turn of an outbox may hold the next one back: a send that never returns must not stop the chat. */
 const TURN_MS = 30_000;
 /** The most rows a new message's look reads one by one (`Outbox.look`), where the store cannot read them in one go. */
@@ -96,6 +108,11 @@ export class Outbox {
   private waiting = new Map<string, { timer?: ReturnType<typeof setTimeout>; at: number; step: number; since: number }>();
   private attempts = new Map<string, number>();
   private busy = new Set<string>();
+  /**
+   * Texts whose last send did not leave this device (`NotSent`) and had not gone before, by id, with their time: what
+   * was written after one goes only once it has (`behindUnsent`), so the contact reads them in order.
+   */
+  private unsent = new Map<string, number>();
   /** Still in flight when the look a reopened chat asked for began (`flush({ reopened })`): sent again once that send returns. */
   private reopenedWhileBusy = new Set<string>();
   /** The turns taken so far, one after the other (`turn`). */
@@ -129,7 +146,7 @@ export class Outbox {
   private readonly policy: ResendPolicy;
   private readonly now: () => number;
   constructor(private store: OutboxStore,
-    private send: (message: StoredMessage) => Promise<string | null>,
+    private send: (message: StoredMessage) => Promise<string | null | NotSent>,
     private timeoutMs: number | ((message: StoredMessage) => number) = 20_000,
     private pendingUntil?: (message: StoredMessage) => number | undefined,
     options: { resender?: Resender; policy?: Partial<ResendPolicy>; now?: () => number } = {}) {
@@ -337,6 +354,8 @@ export class Outbox {
     // The link closed under this look: it stays where it is, and keeps a check of its own (the one that brought it
     // here cleared its timer as it fired), so a link that comes back without a look at the chat does not leave it behind.
     if (!this.sameLink) { if (!this.stopped && !this.waiting.get(message.id)?.timer) this.schedule(message.id); return true; }
+    // An older text has not left this device yet: the file's offer goes after it.
+    if (await this.behindUnsent(message)) { if (!this.waiting.get(message.id)?.timer) this.schedule(message.id); return true; }
     await this.resender.sendFile!(message).catch(() => {});
     this.forget(message.id);
     // Its row may wait still (its offer went on the DHT floor, or the link closed): the next new message reads the chat.
@@ -384,6 +403,16 @@ export class Outbox {
     try {
       let message = read ?? await this.one(id);
       if (!message?.wireId || !message.delivery || message.delivery === "delivered") return;
+      // An older text has not left this device yet: this one waits behind it, as it would behind one on its way. One
+      // sent before stays queued (it may be out).
+      if (!manual && await this.behindUnsent(message)) {
+        if (message.delivery === "sending") await this.waitsItsTurn(message);
+        else if (message.delivery !== "waiting") await this.queue(message, message.deliveryError ?? "Not confirmed yet.");
+        else if (!this.waiting.get(id)?.timer) this.schedule(id);
+        return;
+      }
+      // Never sent before: a send that does not leave this device leaves it so.
+      const unsentBefore = message.delivery === "waiting" || (message.delivery === "sending" && !this.attempts.get(id));
       const wait = this.waiting.get(id);
       if (wait?.timer) { clearTimeout(wait.timer); wait.timer = undefined; }
       if (manual) { this.attempts.delete(id); this.waiting.delete(id); }
@@ -396,11 +425,16 @@ export class Outbox {
       this.track(id, typeof this.timeoutMs === "number" ? this.timeoutMs : this.timeoutMs(message));
       this.sentUnder.set(id, this.opened);
       const error = await this.send(message);
-      if (error) {
+      if (!(error instanceof NotSent)) this.unsent.delete(id);
+      if (error instanceof NotSent && unsentBefore) {
         this.clear(id);
-        await this.requeue(id, error);
+        await this.notSent(id);
+      } else if (error) {
+        this.clear(id);
+        await this.requeue(id, error instanceof NotSent ? error.error : error);
       } else if (this.receipts.has(id)) await this.store.update(id, "sent");
     } catch (error) {
+      this.unsent.delete(id);
       this.clear(id);
       await this.requeue(id, error instanceof Error ? error.message : "Sending failed");
     } finally { this.busy.delete(id); again = this.reopenedWhileBusy.delete(id); }
@@ -588,6 +622,34 @@ export class Outbox {
     return false;
   }
 
+  /**
+   * A send that did not leave this device, of a message that had not gone before: it waits again, as it did, and counts
+   * no attempt. It keeps the path a new message's turn gives it (`waitsItsTurn`): it goes the way the chat can carry it.
+   */
+  private async notSent(id: string): Promise<void> {
+    const left = (this.attempts.get(id) ?? 1) - 1;
+    if (left > 0) this.attempts.set(id, left); else this.attempts.delete(id);
+    const message = await this.one(id);
+    if (!message || message.delivery === "delivered") return;
+    this.unsent.set(id, message.timestamp);
+    await this.store.update(id, "waiting", NotSent.REASON, { via: "datalink", resendUntil: message.resendUntil ?? this.now() + this.policy.windowMs });
+    if (!this.stopped) this.schedule(id);
+  }
+
+  /**
+   * An older text of mine has not left this device (`unsent`) and still waits to go: this one must not go before it.
+   * One cancelled meanwhile (its row gone) or gone another way (held, failed) holds nothing back any more.
+   */
+  private async behindUnsent(message: StoredMessage): Promise<boolean> {
+    for (const [id, timestamp] of this.unsent) {
+      if (id === message.id || timestamp > message.timestamp) continue;
+      const older = await this.one(id);
+      if (older && toGo(older)) return true;
+      this.unsent.delete(id);
+    }
+    return false;
+  }
+
   /** After a failed attempt: queued again, unless its window or its attempts are spent. */
   private async requeue(id: string, reason: string): Promise<void> {
     const message = await this.one(id);
@@ -628,6 +690,7 @@ export class Outbox {
   }
 
   private forget(id: string): void {
+    this.unsent.delete(id);
     const wait = this.waiting.get(id);
     if (wait?.timer) clearTimeout(wait.timer);
     this.waiting.delete(id);
