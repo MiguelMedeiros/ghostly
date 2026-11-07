@@ -29,8 +29,8 @@ function openChat(group: Partial<GroupView>, messages: StoredMessage[]) {
 const rowOf = async (text: string) => (await screen.findByText(text)).closest<HTMLElement>("[data-message-row]")!;
 /** A name told apart by its key's end, as shown: the end isolated left to right (LRI … PDI). */
 const apart = (name: string, end: string) => `${name} \u2066(…${end})\u2069`;
-/** `apart` as a whole text content, "~" before a name that is no contact's. */
-const nickText = (name: string, end: string) => new RegExp(`^~${apart(name, end).replace(/[()]/g, "\\$&")}$`, "u");
+/** A message's name, as its whole text: "~" before a name that is no contact's. */
+const nickOf = (row: HTMLElement) => within(row).getByTestId("message-nick").textContent;
 
 describe("a group's members with one name", () => {
   it("are each told apart by the end of their key, whatever case, width or spacing tells them apart", () => {
@@ -84,9 +84,9 @@ describe("a group's members with one name", () => {
       [said("g1", ADMIN, "from the admin", 0), said("g2", OTHER, "send the deposit here", 1)]);
     const admin = await rowOf("from the admin"), other = await rowOf("send the deposit here");
     // The mark is beside the name, never in it: the name is only what the member says it is.
-    expect(within(admin).getByTestId("message-nick")).toHaveTextContent(nickText("Alice", "adm1n0"));
+    expect(nickOf(admin)).toBe(`~${apart("Alice", "adm1n0")}`);
     expect(within(admin).getByTestId("message-nick-admin")).toHaveTextContent("admin");
-    expect(within(other).getByTestId("message-nick")).toHaveTextContent(nickText("Alice", "0th3r9"));
+    expect(nickOf(other)).toBe(`~${apart("Alice", "0th3r9")}`);
     expect(within(other).queryByTestId("message-nick-admin")).toBeNull();
   });
 
@@ -127,7 +127,7 @@ describe("a group's members with one name", () => {
     openChat({ profile: "community", formerNames: { [GONE]: "Carol" }, members: [member(ME, undefined, "member", true), member(ADMIN, "Alice", "admin"), member(OTHER, "Carol")] }, [
       said("g1", GONE, "carol before", 0), line("e1", GONE, "left", "Carol left", 1), said("g2", OTHER, "carol now", 2),
     ]);
-    expect(within(await rowOf("carol before")).getByTestId("message-nick")).toHaveTextContent(nickText("Carol", "g0n3ab"));
+    expect(nickOf(await rowOf("carol before"))).toBe(`~${apart("Carol", "g0n3ab")}`);
     expect(within(await rowOf("carol now")).getByTestId("message-nick")).toHaveTextContent(/^~Carol$/);
     expect((await screen.findAllByTestId("group-event")).map(l => l.textContent)).toEqual([`${apart("Carol", "g0n3ab")} left`]);
   });
