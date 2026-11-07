@@ -14,6 +14,7 @@ import { PaymentCoordinator } from "./paymentAdapters/coordinator";
 import { intentRepository } from "./paymentAdapters/persistence";
 import type { ArkPrepared } from "./paymentAdapters/arkade";
 import { CashuAdapter } from "./paymentAdapters/cashu";
+import { AskBackoff } from "./askBackoff";
 import type { CashuPrepared } from "./wallet";
 import { CASHU_CARD, LightningCards } from "./paymentAdapters/providers/lightningCards";
 import { BitcoinService, type BitcoinPrepared } from "./paymentAdapters/providers/bitcoinService";
@@ -1124,6 +1125,12 @@ export class GhostlyNode implements EngineImplementation {
    * from a read of the store or a change of a review, and leaves when the poll finds its review ended or gone.
    */
   private openReviews: Set<string> | null = null;
+  /**
+   * The pace of each submitted Cashu payment the contact has not taken: asked at 10 s while new, then twice as late up
+   * to 10 min (as a payee retries a redeem). At the poll's own 10 s, a contact online whose redeems fail cost the mint
+   * 12 checkstates a minute for each such payment, for as long as the app ran. The contact taking one says so at once.
+   */
+  private readonly cashuPayAsk = new AskBackoff(10_000, 600_000);
   private noteOpenReviews(reviews: readonly PaymentReview[]): void {
     const open = this.openReviews ??= new Set();
     for (const review of reviews) if (review.state === "submitted" || review.state === "unknown") open.add(review.id);
@@ -1203,7 +1210,7 @@ export class GhostlyNode implements EngineImplementation {
     // With the intent's own save: a payment that never reached the mint is marked abandoned before its sats come back.
     reconcile:(review,prepared,persist)=>{
       if(!persist)throw new Error("A Cashu payment is reconciled with its intent saved");
-      return new CashuAdapter(this.wallet,(r,t)=>this.desk.recordCashu(r,t)).reconcile(review,prepared as CashuPrepared,persist);
+      return new CashuAdapter(this.wallet,(r,t)=>this.desk.resendCashu(r,t)).reconcile(review,prepared as CashuPrepared,persist);
     },
   }], (review) => {
     if (this.openReviews) this.noteOpenReviews([review]);
@@ -2232,13 +2239,17 @@ export class GhostlyNode implements EngineImplementation {
       // The whole store once, when nothing has read it yet; after that, the open reviews alone.
       if(!this.openReviews)this.noteOpenReviews((await intentRepository.list()).map((saved)=>saved.review));
       const open=this.openReviews!;
+      this.cashuPayAsk.keepOnly(open);
       for(const id of [...open]){
-        const review=(await intentRepository.get(id))?.review;
+        if(!this.cashuPayAsk.due(id,Date.now()))continue;
+        const saved=await intentRepository.get(id),review=saved?.review;
         if(!review || !["submitted","unknown"].includes(review.state)){open.delete(id);continue;}
         // Each through its own network's wallet, once that one is open.
         const network=walletNetworkOf(review.network);
         if((review.method==="arkade" && !this.arkWallets[network].adapter) || (review.method==="bark" && !this.barkWallets[network].adapter) || (review.method==="spark" && !this.sparkWallets[network].adapter) || (review.method==="usdt" && !this.usdtWallets[network].adapter) || (review.method==="bitcoin" && !this.bitcoins[network].sources.active) || (review.method==="fedimint" && !this.fedimintWallets[network].federation(review.provider)))continue;
-        await this.reconcilePayment({id:review.id}).catch(()=>{});
+        const after=await this.reconcilePayment({id:review.id}).catch(()=>review);
+        // A token out and not taken yet: new for its first minute. A swap with no token yet keeps the poll's pace.
+        if(review.method==="cashu" && (saved!.prepared as CashuPrepared).token && ["submitted","unknown"].includes(after.state))this.cashuPayAsk.missed(id,Date.now(),Date.now()<(review.submittedAt ?? review.createdAt)+60_000);
       }
     } finally {if(!this.shuttingDown)this.paymentTimer=setTimeout(()=>void this.pollPaymentStatus(),10000);}
   }
