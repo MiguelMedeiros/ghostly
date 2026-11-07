@@ -8,16 +8,16 @@ export type SmallTarget = { name: string; width: number; height: number; stops: 
  * where a tap lands on it, not its box: from the control's centre, the run of points along each axis whose topmost
  * element is the control (or inside it), so padding, a `::before` grown past the box and an invisible hit area count,
  * and a neighbour drawn over it does not. Hidden, covered and off-screen controls are left out, and so is a link inside
- * a sentence (WCAG 2.5.8's inline exception).
+ * a sentence (WCAG 2.5.8's inline exception). `controls`: which elements count (by default every button and link).
  */
-export function smallTargets(page: Page, min = 44): Promise<SmallTarget[]> {
-  return page.evaluate((min) => {
+export function smallTargets(page: Page, min = 44, controls = "button, a[href], [role=button]"): Promise<SmallTarget[]> {
+  return page.evaluate(([min, controls]) => {
     const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;
     const out: { name: string; width: number; height: number; stops: string }[] = [];
     const named = (el: Element | null) => !el ? "the screen's edge" : el instanceof HTMLElement && el.dataset.testid ? el.dataset.testid
       : `${el.tagName.toLowerCase()}${el.className && typeof el.className === "string" ? `.${el.className.trim().split(/\s+/).slice(0, 3).join(".")}` : ""}`;
     const seen = new Set<Element>();
-    for (const el of document.querySelectorAll<HTMLElement>("button, a[href], [role=button]")) {
+    for (const el of document.querySelectorAll<HTMLElement>(controls)) {
       if (seen.has(el)) continue;
       seen.add(el);
       const box = el.getBoundingClientRect();
@@ -49,5 +49,5 @@ export function smallTargets(page: Page, min = 44): Promise<SmallTarget[]> {
       out.push({ name: `${el.tagName.toLowerCase()}${label ? ` "${label}"` : ""}`, width, height, stops: `left ${stops[0]}, right ${stops[1]}, top ${stops[2]}, bottom ${stops[3]}` });
     }
     return out;
-  }, min);
+  }, [min, controls] as const);
 }
