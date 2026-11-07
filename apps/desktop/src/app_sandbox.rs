@@ -106,6 +106,17 @@ const RUNNER: &str = r#"<!doctype html>
     };
     Object.defineProperty(Document.prototype, "execCommand", { configurable: true, writable: true, value: commands });
   }
+  // Nor the async Clipboard API: WebKit and Firefox let `navigator.clipboard` write the system clipboard whatever the
+  // window's settings or the frame's `allow=""` say (only Chromium refuses it). The app finds no `navigator.clipboard`,
+  // no `ClipboardItem` and no method on `Clipboard.prototype`. Both runners, the same text.
+  const CLIPBOARD = ["read", "readText", "write", "writeText"];
+  try { delete Navigator.prototype.clipboard; } catch (e) { /* stays: refused below */ }
+  try { delete window.ClipboardItem; } catch (e) { /* stays: refused below */ }
+  if (typeof Clipboard === "function") {
+    for (const name of CLIPBOARD) { try { delete Clipboard.prototype[name]; } catch (e) { /* stays: refused below */ } }
+  }
+  const clipboardLeft = () => "clipboard" in navigator || "ClipboardItem" in window
+    || (typeof Clipboard === "function" && CLIPBOARD.some((name) => name in Clipboard.prototype));
   const stop = (why) => {
     document.documentElement.textContent = "This app cannot run here.";
     document.documentElement.setAttribute("data-ghostly-refused", why);
@@ -114,7 +125,7 @@ const RUNNER: &str = r#"<!doctype html>
   const label = internals && internals.metadata && internals.metadata.currentWindow && internals.metadata.currentWindow.label;
   if (self.origin !== "null" || !internals || typeof label !== "string" || !/^app-[A-Za-z0-9]+$/.test(label)) return stop("origin");
   if (Object.getOwnPropertyNames(window).some((name) => /^(webkit)?RTC/.test(name))) return stop("webrtc");
-  if (document.execCommand !== commands) return stop("clipboard");
+  if (document.execCommand !== commands || clipboardLeft()) return stop("clipboard");
 
   const invoke = internals.invoke.bind(internals);
   const clockNow = Date.now;
@@ -2474,7 +2485,8 @@ mod tests {
     }
 
     /// Both runners answer false to an app's clipboard commands (`execCommand` copy, cut, paste) with the very same
-    /// wrapper, installed before the app's code is written, and refuse to run when it is not in place.
+    /// wrapper and delete the async Clipboard API with the very same code, before the app's code is written, and
+    /// refuse to run when either is not in place.
     #[test]
     fn the_runners_refuse_the_clipboard_commands_alike() {
         let web = include_str!("../../web/public/app-frame.html");
@@ -2490,9 +2502,30 @@ mod tests {
         let refused =
             r#"if (named === "copy" || named === "cut" || named === "paste") return false;"#;
         assert!(desktop.contains(refused));
-        let check = r#"if (document.execCommand !== commands) return stop("clipboard");"#;
+        let check = r#"if (document.execCommand !== commands || clipboardLeft()) return stop("clipboard");"#;
         let check = RUNNER.find(check).unwrap();
         assert!(at < check);
+        assert!(web.contains(
+            r#"if (document.execCommand !== commands || clipboardLeft()) return stop("clipboard");"#
+        ));
+        // The async Clipboard API is deleted with the very same text, before the check.
+        let api = |runner: &'static str| {
+            let start = runner.find("const CLIPBOARD = [").unwrap();
+            let end = start + runner[start..].find("const stop = ").unwrap();
+            (start, &runner[start..end])
+        };
+        let (deleted, desktop) = api(RUNNER);
+        assert_eq!(desktop, api(web).1);
+        for line in [
+            r#"const CLIPBOARD = ["read", "readText", "write", "writeText"];"#,
+            "delete Navigator.prototype.clipboard;",
+            "delete window.ClipboardItem;",
+            "delete Clipboard.prototype[name];",
+            r#""clipboard" in navigator || "ClipboardItem" in window"#,
+        ] {
+            assert!(desktop.contains(line), "{line}");
+        }
+        assert!(deleted < check);
         for later in [
             "const invoke = ",
             "document.open()",

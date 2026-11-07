@@ -457,10 +457,40 @@ test("an app writes nothing to the clipboard: not on load, not in a tap, not fro
   await appPage(page);
   const ref = "evilpublisherkey/clipboard";
   // Every way the app has to `execCommand` a clipboard command, on a selected textarea; the browser's answer (true:
-  // it wrote) goes to storage. The async Clipboard API is the frame's `allow=""`'s to refuse.
+  // it wrote) goes to storage. And the async Clipboard API, which only Chromium refuses for the frame's `allow=""`:
+  // whether the app finds each of its calls ("none": it does not), and how a write it tries ends.
   const entry = `<!doctype html><title>clip</title><body style="margin:0"><textarea id=t></textarea><div id=pad style="width:100vw;height:90vh"></div><script>
     const g = window.ghostly, t = document.getElementById("t"), proto = Document.prototype;
     const exec = proto.execCommand;
+    const api = {};
+    const asks = (tag) => {
+      const c = navigator.clipboard, out = { item: typeof ClipboardItem === "function" ? "there" : "none" };
+      const text = "bc1q-APP-" + tag + "-api";
+      const writes = {
+        writeText: () => c.writeText(text),
+        write: () => c.write([new ClipboardItem({ "text/plain": new Blob([text], { type: "text/plain" }) })]),
+      };
+      for (const way of ["writeText", "write", "readText", "read"]) {
+        if (!c || typeof c[way] !== "function") { out[way] = "none"; continue; }
+        if (!writes[way]) { out[way] = "there"; continue; }
+        out[way] = "pending";
+        try {
+          writes[way]().then(() => { out[way] = "wrote"; g.storage.set("api", api); }, (e) => { out[way] = e.name; g.storage.set("api", api); });
+        } catch (e) { out[way] = e.name; }
+      }
+      api[tag] = out;
+      g.storage.set("api", api);
+    };
+    const framed = () => {
+      try {
+        const frame = document.createElement("iframe");
+        document.body.appendChild(frame);
+        const w = frame.contentWindow, c = w && w.navigator.clipboard;
+        if (!c || typeof c.writeText !== "function") { g.storage.set("framed", "none"); return; }
+        c.writeText("bc1q-APP-framed").then(() => g.storage.set("framed", "wrote"), (e) => g.storage.set("framed", e.name));
+      } catch (e) { g.storage.set("framed", e.name); }
+    };
+    asks("load");
     const tries = (tag) => {
       const out = {};
       const ways = {
@@ -483,6 +513,8 @@ test("an app writes nothing to the clipboard: not on load, not in a tap, not fro
     let taps = 0;
     document.getElementById("pad").addEventListener("pointerdown", () => {
       if (taps++) return;
+      asks("tap");
+      framed();
       tries("tap");
       t.value = "";
       t.focus();
@@ -501,6 +533,12 @@ test("an app writes nothing to the clipboard: not on load, not in a tap, not fro
   for (const tag of ["load", "tap", "timer"]) {
     for (const [way, wrote] of Object.entries(seen[tag] as Record<string, unknown>)) expect(`${tag} ${way}: ${String(wrote)}`).toBe(`${tag} ${way}: false`);
   }
+  // The app finds no async Clipboard API, on load or in a tap (WebKit and Firefox let it write, on load too).
+  const none = { item: "none", writeText: "none", write: "none", readText: "none", read: "none" };
+  expect(seen.api).toEqual({ load: none, tap: none });
+  // Nor through a frame it makes.
+  expect(seen.framed).toBeDefined();
+  expect(seen.framed).not.toBe("wrote");
   // None of the app's text is in the system clipboard, and an editing command still edits.
   if (browserName === "chromium") expect(await page.evaluate(() => navigator.clipboard.readText())).not.toContain("bc1q-APP");
   expect(seen.edit).toBe("true typed");

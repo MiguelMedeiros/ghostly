@@ -8,7 +8,7 @@
   Before any app code:
   - the WebRTC constructors are deleted from this realm;
   - so are History's methods and the Navigation API: the frame shares the page's session history;
-  - `execCommand` refuses the clipboard's commands (copy, cut, paste);
+  - `execCommand` refuses the clipboard's commands (copy, cut, paste), and the async Clipboard API is deleted;
   - the runner refuses to run unless its origin is "null" and it has a parent;
   - the page is locked with a nonce: a second policy, `script-src 'nonce-N' 'wasm-unsafe-eval'`, where N is random and
     lives only in this script's closure (never in an attribute). A frame the app makes (srcdoc, about:blank) has
@@ -59,6 +59,17 @@
     };
     Object.defineProperty(Document.prototype, "execCommand", { configurable: true, writable: true, value: commands });
   }
+  // Nor the async Clipboard API: WebKit and Firefox let `navigator.clipboard` write the system clipboard whatever the
+  // window's settings or the frame's `allow=""` say (only Chromium refuses it). The app finds no `navigator.clipboard`,
+  // no `ClipboardItem` and no method on `Clipboard.prototype`. Both runners, the same text.
+  const CLIPBOARD = ["read", "readText", "write", "writeText"];
+  try { delete Navigator.prototype.clipboard; } catch (e) { /* stays: refused below */ }
+  try { delete window.ClipboardItem; } catch (e) { /* stays: refused below */ }
+  if (typeof Clipboard === "function") {
+    for (const name of CLIPBOARD) { try { delete Clipboard.prototype[name]; } catch (e) { /* stays: refused below */ } }
+  }
+  const clipboardLeft = () => "clipboard" in navigator || "ClipboardItem" in window
+    || (typeof Clipboard === "function" && CLIPBOARD.some((name) => name in Clipboard.prototype));
   const stop = (why) => {
     document.documentElement.textContent = "This app cannot run here.";
     document.documentElement.setAttribute("data-ghostly-refused", why);
@@ -66,7 +77,7 @@
   if (self.origin !== "null" || window.parent === window) return stop("origin");
   if (Object.getOwnPropertyNames(window).some((name) => /^(webkit)?RTC/.test(name))) return stop("webrtc");
   if (HISTORY.some((name) => name in history) || "navigation" in window) return stop("history");
-  if (document.execCommand !== commands) return stop("clipboard");
+  if (document.execCommand !== commands || clipboardLeft()) return stop("clipboard");
 
   // What the runner keeps for itself, taken before the app can touch a prototype.
   const nonceProperty = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "nonce");
