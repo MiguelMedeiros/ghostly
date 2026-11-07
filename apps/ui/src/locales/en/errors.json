@@ -42,6 +42,8 @@
     "selectMint": "Select a configured mint",
     "testCoinsPending": "{{host}} hasn't sent the test coins yet",
     "testCoinsPendingNext": "They show up here once it does.",
+    "unknownKeyset": "Its mint does not know this ecash",
+    "unknownKeysetNext": "It cannot be redeemed. Ask whoever sent it for new ecash.",
     "unreachable": "Can't reach {{host}}",
     "unreachableNext": "Check the address: it should be a Cashu mint."
   },
