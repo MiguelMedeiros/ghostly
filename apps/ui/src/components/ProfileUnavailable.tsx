@@ -1,9 +1,10 @@
-import { useId, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { getBrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { ProfileOpenFailure } from "@ghostly/browser/shared/idb";
 import { useI18n } from "../contexts/I18nContext";
 import { useUpdate } from "../contexts/UpdateContext";
+import { useFocusKept } from "../hooks/useFocusKept";
 import { externalLinkProps } from "../lib/externalLink";
 import { activeProfileId, listProfiles, switchProfile } from "../lib/profiles";
 
@@ -20,7 +21,7 @@ export function ProfileGate({ children }: { children: ReactNode }) {
   return failure ? <ProfileUnavailable failure={failure} /> : <>{children}</>;
 }
 
-const BUTTON = "px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed";
+const BUTTON = "px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer aria-disabled:opacity-60 aria-disabled:cursor-progress";
 const QUIET = "px-3 py-1.5 rounded-lg text-sm text-text-secondary border border-border hover:bg-surface-hover cursor-pointer";
 
 /**
@@ -76,29 +77,35 @@ export function ProfileUnavailable({ failure }: { failure: ProfileOpenFailure })
   );
 }
 
-/** The way to a newer version, where this client has one: look for it, then put it in place (or point at the download). */
+/**
+ * The way to a newer version, where this client has one: look for it, then put it in place (or point at the download).
+ * While it works the button is busy, not disabled: that would drop a keyboard's focus to the page. Once a version is
+ * found, the focus goes on to what takes the button's place.
+ */
 function UpdateAction() {
   const { t } = useI18n();
   const { supported, update, stage, progress, error, lastCheckedAt, check, install, downloadUrl } = useUpdate();
+  const box = useRef<HTMLDivElement>(null);
+  useFocusKept(box, () => box.current?.querySelector<HTMLElement>("a, button") ?? null);
   if (!supported) return null;
-  if (update) {
-    return update.apply === "manual"
-      ? <a {...externalLinkProps(downloadUrl)} data-testid="profile-unavailable-update" className={`${BUTTON} inline-block`}>{t("updates.download")}</a>
-      : (
-        <button type="button" data-testid="profile-unavailable-update" disabled={stage === "installing"} onClick={() => void install()} className={BUTTON}>
-          {stage === "installing"
-            ? (progress > 0 ? t("updates.downloading", { percent: String(Math.round(progress * 100)) }) : t("updates.installing"))
-            : t(update.apply === "restart" ? "updates.restart" : "updates.reload")}
-        </button>
-      );
-  }
+  const busy = (update ? stage === "installing" : stage === "checking") || undefined;
   return (
-    <div className="space-y-2">
-      <button type="button" data-testid="profile-unavailable-check" disabled={stage === "checking"} onClick={() => void check()} className={BUTTON}>
-        {t(stage === "checking" ? "updates.checking" : "updates.checkNow")}
-      </button>
-      {error ? <p className="text-xs text-danger break-words">{error}</p>
-        : lastCheckedAt !== null && stage === "idle" && <p data-testid="profile-unavailable-no-update" className="text-xs text-text-muted break-words">{t("app.profileUnavailable.noUpdate")}</p>}
+    <div ref={box} className="space-y-2">
+      {update && update.apply === "manual"
+        ? <a {...externalLinkProps(downloadUrl)} data-testid="profile-unavailable-update" className={`${BUTTON} inline-block`}>{t("updates.download")}</a>
+        : update ? (
+          <button type="button" data-testid="profile-unavailable-update" aria-disabled={busy} aria-busy={busy} onClick={() => { if (!busy) void install(); }} className={BUTTON}>
+            {stage === "installing"
+              ? (progress > 0 ? t("updates.downloading", { percent: String(Math.round(progress * 100)) }) : t("updates.installing"))
+              : t(update.apply === "restart" ? "updates.restart" : "updates.reload")}
+          </button>
+        ) : (
+          <button type="button" data-testid="profile-unavailable-check" aria-disabled={busy} aria-busy={busy} onClick={() => { if (!busy) void check(); }} className={BUTTON}>
+            {t(stage === "checking" ? "updates.checking" : "updates.checkNow")}
+          </button>
+        )}
+      {!update && (error ? <p className="text-xs text-danger break-words">{error}</p>
+        : lastCheckedAt !== null && stage === "idle" && <p data-testid="profile-unavailable-no-update" className="text-xs text-text-muted break-words">{t("app.profileUnavailable.noUpdate")}</p>)}
     </div>
   );
 }
