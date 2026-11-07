@@ -18,7 +18,7 @@ import { UpdateProvider } from "../../contexts/UpdateContext";
 import { Settings } from "../../pages/Settings";
 import { setAppOpener, setLinkedFiles } from "../../lib/apps/open";
 import { appsAvailable, forgetAppsAvailable, webKitAppLeak } from "../../lib/apps/flag";
-import { forgetInstalledApps } from "../../lib/apps/installed";
+import { forgetInstalledApps, useInstalledApps } from "../../lib/apps/installed";
 import type { ChatMessage } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { shownInName } from "../labelInName";
@@ -496,7 +496,35 @@ describe("with the apps flag on", () => {
     expect(within(update).getByTestId("app-permissions")).not.toHaveTextContent("Keep its own data");
     expect(fakeEngine.callsTo("appUpdateAccept")).toEqual([]);
     await user.click(screen.getByTestId("app-update-accept"));
-    expect(fakeEngine.callsTo("appUpdateAccept")).toEqual([{ ref: REF }]);
+    expect(fakeEngine.callsTo("appUpdateAccept")).toEqual([{ ref: REF, sequence: 8, added: ["name"] }]);
+  });
+
+  it("Update on a screen drawn before the check found a newer update grants nothing it did not list, and shows the newer one", async () => {
+    let list = [installed({ pending: { sequence: 8, version: "1.3.0", added: ["name"] } })];
+    fakeEngine.on("appList", () => list).on("appUpdateAccept", (p: { sequence?: number; added?: string[] }) => {
+      // As the engine does: the update waiting now, unless it is not the one the screen listed.
+      const waits = list[0]!.pending!;
+      if (p.sequence !== undefined && p.sequence !== waits.sequence) throw new Error("permissions-changed: Another update waits now, which adds name, internet; look at it again");
+      list = [installed({ version: waits.version, sequence: waits.sequence, permissions: ["chat", ...waits.added] })];
+      return list[0]!;
+    });
+    function Shown() {
+      const shown = useInstalledApps(true)?.find((a) => a.ref === REF);
+      return shown ? <InstalledAppDialog app={shown} onClose={() => {}} onOpen={() => {}} /> : null;
+    }
+    const { user } = renderApp(<Shown />);
+    const update = await screen.findByTestId("app-update");
+    expect(within(update).getByTestId("app-permissions")).not.toHaveTextContent("Use the internet");
+    // The check swaps in 1.4.0, which adds internet as well; the page has not read the list again.
+    list = [installed({ pending: { sequence: 9, version: "1.4.0", added: ["name", "internet"] } })];
+    await user.click(screen.getByTestId("app-update-accept"));
+    expect(await screen.findByTestId("app-details-error")).toHaveTextContent("This update now adds other permissions");
+    expect(list[0]!.permissions).not.toContain("internet");
+    await waitFor(() => expect(screen.getByTestId("app-update")).toHaveTextContent("Version 1.4.0 is ready."));
+    expect(within(screen.getByTestId("app-update")).getByTestId("app-permissions")).toHaveTextContent("Use the internet");
+    await user.click(screen.getByTestId("app-update-accept"));
+    await waitFor(() => expect(list[0]!.permissions).toEqual(["chat", "name", "internet"]));
+    expect(fakeEngine.callsTo("appUpdateAccept")).toEqual([{ ref: REF, sequence: 8, added: ["name"] }, { ref: REF, sequence: 9, added: ["name", "internet"] }]);
   });
 
   it("keeps what an installed app may do now on its screen while an update that asks for more waits", async () => {

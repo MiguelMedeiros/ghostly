@@ -577,8 +577,11 @@ export interface EngineApi {
    * `asks` what the screen listed (`AppPreview.asks`): an install that adds more now is refused with `permissions-changed`.
    */
   appInstall(params: { digest: string; grant: string[]; asks?: string[] }): import("../engine/apps").InstalledAppView;
-  /** Installs the waiting update whose new permissions the person accepted. */
-  appUpdateAccept(params: { ref: string }): import("../engine/apps").InstalledAppView;
+  /**
+   * Installs the waiting update whose new permissions the person accepted; `sequence` and `added` what the screen listed
+   * (`InstalledAppView.pending`): another update waiting now, or one that adds more, is refused with `permissions-changed`.
+   */
+  appUpdateAccept(params: { ref: string; sequence?: number; added?: string[] }): import("../engine/apps").InstalledAppView;
   /** The update check, now (the Apps page opened). Nothing is asked for with no app installed. */
   appCheckUpdates(): import("../engine/apps").AppCheckResult[];
   /** Uninstalls an app: its files, its record and its storage in every chat. */
