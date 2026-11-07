@@ -169,6 +169,7 @@
     "preparing": "{{transport}} を準備中。現在のチャネル: {{current}}。",
     "receiptPending": "{{time}} まで受信確認待ち。",
     "reconnect": "再接続",
+    "reconnecting": "再接続中…",
     "relaySettings": "リレー設定を確認してください",
     "relayed": "リレー経由",
     "relayedVia": "{{relays}} のリレー経由",

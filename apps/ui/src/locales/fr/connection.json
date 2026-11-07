@@ -169,6 +169,7 @@
     "preparing": "Préparation de {{transport}} ; canal actuel : {{current}}.",
     "receiptPending": "Accusé de réception en attente jusqu'à {{time}}.",
     "reconnect": "Reconnecter",
+    "reconnecting": "Reconnexion…",
     "relaySettings": "vérifiez les réglages des relais",
     "relayed": "Relayé",
     "relayedVia": "Relayé via {{relays}}",
