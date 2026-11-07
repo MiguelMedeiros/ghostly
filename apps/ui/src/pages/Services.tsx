@@ -129,7 +129,7 @@ export function Services() {
       // with a name that stays put, rather than a state and a hint about shares.
       <button type="button" role="switch" aria-checked={online} data-testid="online-toggle" onClick={() => void platform.setOnline(!online)}
         title={!online ? t("services.goOnline") : canShare ? t("services.goOffline") : t("services.offDisconnectsChats")}
-        className={`flex items-center gap-2 rounded-full px-3 min-h-9 text-sm border transition-colors cursor-pointer ${online ? "border-accent/40 bg-accent/10 text-accent" : "border-border bg-surface-alt text-text-muted"}`}>
+        className={`tap-target flex items-center gap-2 rounded-full px-3 min-h-9 text-sm border transition-colors cursor-pointer ${online ? "border-accent/40 bg-accent/10 text-accent" : "border-border bg-surface-alt text-text-muted"}`}>
         {canShare ? <span aria-hidden="true" className={`w-2 h-2 rounded-full ${online ? "bg-accent" : "bg-gray-500"}`} /> : <SwitchLook checked={online} className="scale-75 -mx-1.5" />}
         <span>{canShare ? (online ? t("services.online") : t("services.offline")) : t("services.ghostlyOnline")}</span>
       </button>
