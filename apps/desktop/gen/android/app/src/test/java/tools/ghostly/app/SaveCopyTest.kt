@@ -61,6 +61,31 @@ class SaveCopyTest {
   }
 
   @Test
+  fun anAnswerAfterTheProcessEndedFinishesTheCopy() {
+    val document = picked()
+    val from = stored(100_000)
+    var dropped = 0
+    assertEquals(true, SaveCopy.restored(from, { document.outputStream() }, { dropped++ }))
+    assertArrayEquals(from.readBytes(), document.readBytes())
+    assertEquals(0, dropped)
+  }
+
+  @Test
+  fun anAnswerAfterTheProcessEndedWithTheStoredFileGoneDeletesTheDocument() {
+    val document = picked()
+    assertEquals(false, SaveCopy.restored(File(folder.root, "gone"), { document.outputStream() }, { document.delete() }))
+    assertEquals(false, document.exists())
+  }
+
+  @Test
+  fun anAnswerWithNoSaveKeptDeletesTheDocument() {
+    val document = picked()
+    assertEquals(false, SaveCopy.restored(null, { document.outputStream() }, { document.delete() }))
+    assertEquals(false, document.exists())
+    assertEquals(false, SaveCopy.restored(null, { document.outputStream() }, { throw UnsupportedOperationException("Delete not supported") }))
+  }
+
+  @Test
   fun aProviderThatDeletesNothingStillFails() {
     val document = picked()
     val failed = SaveCopy.copy(File(folder.root, "gone"), { document.outputStream() }, { throw UnsupportedOperationException("Delete not supported") })

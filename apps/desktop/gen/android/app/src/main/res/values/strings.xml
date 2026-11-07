@@ -20,4 +20,7 @@
     <!-- Under the app's mark on the cover over the page while the lock screen is on and the app is not in front, as in
          the app switcher (MainActivity). The app may be unlocked then (a permission prompt over it), so not "locked". -->
     <string name="lock_cover">Your chats stay hidden</string>
+    <!-- A toast when Save a copy's picker answered after Android ended the app's process and the copy failed: the empty
+         file it made is removed (SavePicker). "Download" is the file's button in the chat. -->
+    <string name="save_failed">Couldn\'t save the file there. Tap Download in the chat to try again.</string>
 </resources>

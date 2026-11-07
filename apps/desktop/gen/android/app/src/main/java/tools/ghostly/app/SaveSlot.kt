@@ -7,7 +7,9 @@ package tools.ghostly.app
  * started. Plain Kotlin, so a JVM unit test reads it.
  */
 class SaveSlot<T : Any> {
-  private var open: T? = null
+  /** The save whose picker is open, kept in the activity's saved state (SavePicker) while the picker is in front. */
+  var open: T? = null
+    private set
 
   /** Takes `save` when no picker is open; false (the save is not started) while one is. */
   fun take(save: T): Boolean {

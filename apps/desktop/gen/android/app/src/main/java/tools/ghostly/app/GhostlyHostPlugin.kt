@@ -27,7 +27,6 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.view.WindowCompat
 import app.tauri.PermissionState
-import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.Permission
@@ -151,8 +150,6 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
 
   /** Rust (src/android.rs): `kind` is "oidc", "share", "notification", "network", "visibility" or "call". */
   private external fun received(kind: String, value: String)
-
-  private val pendingSave = SaveSlot<SaveArgs>()
 
   override fun load(webView: WebView) {
     // Copies an earlier run left (a share never read, the app stopped): only shares this run takes are kept.
@@ -561,41 +558,26 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
   // ---- Saving a file ----
 
   /**
-   * Android's document picker, then a copy of the stored file to where the person chose. A save asked for while a
-   * picker is open (SaveSlot) opens none and answers as a cancelled one: the open picker's answer stays its own.
+   * Android's document picker (SavePicker), then a copy of the stored file to where the person chose. A save asked for
+   * while a picker is open opens none and answers as a cancelled one: the open picker's answer stays its own.
    */
   @Command
   fun saveFile(invoke: Invoke) {
     val args = invoke.parseArgs(SaveArgs::class.java)
-    if (!pendingSave.take(args)) {
-      invoke.resolve(JSObject().put("saved", false))
-      return
-    }
-    val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
-      .addCategory(Intent.CATEGORY_OPENABLE)
-      .setType("*/*")
-      .putExtra(Intent.EXTRA_TITLE, args.name)
-    try {
-      startActivityForResult(invoke, intent, "saveChosen")
-    } catch (e: Exception) {
-      // No picker opened (none on this phone): no answer will free the slot.
-      pendingSave.answered()
-      throw e
-    }
+    val opened = SavePicker.open(SavePicker.Save(args.path, args.name)) { save, result -> saveChosen(invoke, save, result) }
+    if (!opened) invoke.resolve(JSObject().put("saved", false))
   }
 
-  @ActivityCallback
-  private fun saveChosen(invoke: Invoke, result: ActivityResult) {
-    val args = pendingSave.answered()
+  private fun saveChosen(invoke: Invoke, save: SavePicker.Save?, result: ActivityResult) {
     val target = result.data?.data
-    if (result.resultCode != Activity.RESULT_OK || target == null || args == null) {
+    if (result.resultCode != Activity.RESULT_OK || target == null || save == null) {
       invoke.resolve(JSObject().put("saved", false))
       return
     }
     thread(name = "ghostly-save") {
       val resolver = activity.contentResolver
       val saved = SaveCopy.copy(
-        File(args.path),
+        File(save.path),
         { resolver.openOutputStream(target, "wt") },
         { DocumentsContract.deleteDocument(resolver, target) },
       )

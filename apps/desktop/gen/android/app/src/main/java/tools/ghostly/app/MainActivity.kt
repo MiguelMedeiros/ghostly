@@ -82,6 +82,8 @@ class MainActivity : TauriActivity() {
     CameraFiles.sweep(cacheDir)
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+    // Save a copy's picker: its answer reaches this activity even when Android ended the process meanwhile.
+    SavePicker.register(this, savedInstanceState)
     // Edge to edge is enforced from Android 15 (target SDK 35 and up), so the page would draw under the status bar,
     // the gesture bar and the keyboard. The page sits between them instead: the content view is padded by the system
     // bars, the display cutout and the keyboard, and the WebView inside it sees no insets of its own.
@@ -157,6 +159,11 @@ class MainActivity : TauriActivity() {
   override fun onNewIntent(intent: Intent) {
     setIntent(intent)
     super.onNewIntent(intent)
+  }
+
+  override fun onSaveInstanceState(outState: Bundle) {
+    super.onSaveInstanceState(outState)
+    SavePicker.keep(outState)
   }
 
   override fun onResume() {

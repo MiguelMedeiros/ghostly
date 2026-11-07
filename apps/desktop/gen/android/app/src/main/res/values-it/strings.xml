@@ -12,4 +12,5 @@
     <string name="webview_text">Ghostly funziona in Android System WebView, e quella di questo telefono è troppo vecchia (versione %1$s; Ghostly richiede la %2$d o successiva). Aggiornala dal Play Store, poi riapri Ghostly.</string>
     <string name="webview_update">Aggiorna</string>
     <string name="lock_cover">Le tue chat restano nascoste</string>
+    <string name="save_failed">Impossibile salvare il file lì. Tocca Scarica nella chat per riprovare.</string>
 </resources>
