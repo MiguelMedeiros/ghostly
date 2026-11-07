@@ -211,6 +211,8 @@ function world(names: Record<string, string>) {
   const peers = new Map<string, { payments: PaymentView[]; engine: GroupPayments; sent: { to: string; frame: Record<string, unknown> }[]; down: Set<string> }>();
   /** Members who left: out of everyone's roster, and no edge to them. */
   const gone = new Set<string>();
+  /** When the membership of each member began (`GroupPaymentsHost.membership`); none: as an older host, no bound. */
+  const since = new Map<string, number>();
   const roster = () => Object.entries(names).filter(([n]) => !gone.has(n));
   for (const [me, key] of Object.entries(names)) {
     const sent: { to: string; frame: Record<string, unknown> }[] = [];
@@ -220,7 +222,7 @@ function world(names: Record<string, string>) {
       payments: () => payments,
       edgeOf: linkId => { const other = Object.entries(names).find(([n]) => linkId === `${me}${n}`); return other ? { groupId: "g1", member: other[1] } : undefined; },
       edges: () => new Map(roster().filter(([n]) => n !== me).map(([n, k]) => [k, `${me}${n}`])),
-      membership: () => ({ me: key, members: new Set(roster().map(([, k]) => k)) }),
+      membership: () => ({ me: key, members: new Set(roster().map(([, k]) => k)), ...(since.has(me) ? { since: since.get(me) } : {}) }),
       send: (linkId, frame) => { if (down.has(linkId)) throw new Error("down"); sent.push({ to: linkId, frame: frame as Record<string, unknown> }); },
       messages: async () => history.get(me) ?? [],
       putMessage: async message => { const list = (history.get(me) ?? []).filter(m => m.id !== message.id); history.set(me, [...list, message]); },
@@ -234,7 +236,7 @@ function world(names: Record<string, string>) {
     }
   };
   const noteOf = (name: string, id: string) => history.get(name)?.find(m => m.groupPay?.id === id)?.groupPay;
-  return { peers, deliver, noteOf, history, leave: (name: string) => gone.add(name) };
+  return { peers, deliver, noteOf, history, since, leave: (name: string) => gone.add(name) };
 }
 
 describe("GroupPayments: every member hears it, the parties say it", () => {
@@ -436,6 +438,71 @@ describe("GroupPayments: a payer who left after paying", () => {
     expect(noteOf("A", "req-00003")!.mine).toMatchObject({ st: "open" });
     await a.engine.edgeReady("g1", "AD");
     expect(a.sent.map(s => s.frame.st), "nor said again when an edge opens").toEqual(["open"]);
+  });
+});
+
+describe("GroupPayments: what a membership said stays in it", () => {
+  it("a record of mine made before this membership began is not said; a later one is, and received ones keep their sender's date", async () => {
+    const { peers, since, noteOf } = world({ A, B, C });
+    const a = peers.get("A")!;
+    since.set("A", 1_000);
+    a.payments.push(
+      pay({ id: "req-old0001", linkId: "group:g1", group: "g1", createdAt: 999, memo: "made in the last membership" }),
+      pay({ id: "pay-old0001", kind: "payment", linkId: "AB", createdAt: 999 }),
+      pay({ id: "req-new0001", linkId: "group:g1", group: "g1", createdAt: 1_000, memo: "made in this one" }),
+      // B's payment to A, dated by B's clock (behind A's): still A's to say it was paid.
+      pay({ id: "pay-in00001", kind: "payment", direction: "in", state: "settled", linkId: "AB", createdAt: 500 }),
+    );
+    await a.engine.sync();
+    expect([...new Set(a.sent.map(s => s.frame.id))].sort()).toEqual(["pay-in00001", "req-new0001"]);
+    expect(noteOf("A", "req-old0001")).toBeUndefined();
+    expect(noteOf("A", "pay-old0001")).toBeUndefined();
+    expect(noteOf("A", "req-new0001")).toMatchObject({ state: "open", memo: "made in this one" });
+  });
+
+  it("forgotten, the group's notes go: an edge opening says nothing of them, and a pass under way writes none back", async () => {
+    const { peers, history } = world({ A, B, C });
+    const a = peers.get("A")!;
+    a.payments.push(pay({ id: "req-00001", linkId: "group:g1", group: "g1" }));
+    await a.engine.sync();
+    a.sent.length = 0;
+    // Left: the history goes (the engine deletes it), and so does what this run kept of it.
+    history.delete("A");
+    a.engine.forget("g1");
+    await a.engine.edgeReady("g1", "AB");
+    expect(a.sent).toEqual([]);
+
+    // Forgotten while a pass reads the group's history: nothing goes back into it.
+    let open!: () => void;
+    const gate = new Promise<void>(resolve => { open = resolve; });
+    const written: StoredMessage[] = [];
+    const engine = new GroupPayments({ payments: () => [pay({ id: "req-00002", linkId: "group:g1", group: "g1" })], edgeOf: () => undefined, edges: () => new Map([[B, "AB"]]),
+      membership: () => ({ me: A, members }), send: () => { throw new Error("not sent"); }, messages: async () => { await gate; return []; }, putMessage: async m => { written.push(m); } });
+    const pass = engine.sync();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    engine.forget("g1");
+    open();
+    await pass;
+    expect(written).toEqual([]);
+  });
+
+  it("an edge opening hears only what I said under my key now, not a note kept from an earlier membership", async () => {
+    const { peers, history } = world({ A, B, C });
+    const a = peers.get("A")!;
+    a.payments.push(pay({ id: "req-00001", linkId: "group:g1", group: "g1" }));
+    await a.engine.sync();
+    // What a history kept across memberships holds (removed, then invited again): my note under another key.
+    const kept = history.get("A")!.map(m => ({ ...m, groupPay: { ...m.groupPay!, to: X, mine: { ...m.groupPay!.mine!, to: X } } }));
+    const said: string[] = [];
+    const again = new GroupPayments({ payments: () => [], edgeOf: () => undefined, edges: () => new Map(), membership: () => ({ me: A, members }),
+      send: linkId => { said.push(linkId); }, messages: async () => kept, putMessage: async () => {} });
+    await again.edgeReady("g1", "AB");
+    expect(said).toEqual([]);
+    // Under the key it names, it is said again as before.
+    const before = new GroupPayments({ payments: () => [], edgeOf: () => undefined, edges: () => new Map(), membership: () => ({ me: X, members: new Set([...members, X]) }),
+      send: linkId => { said.push(linkId); }, messages: async () => kept, putMessage: async () => {} });
+    await before.edgeReady("g1", "AB");
+    expect(said).toEqual(["AB"]);
   });
 });
 

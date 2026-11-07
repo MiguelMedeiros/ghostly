@@ -211,7 +211,7 @@ import { settleAhead } from "./arrival";
 import { Groups, meshEdgeIntervals, otherEndSeen, pinKey, reactionKey } from "./groups";
 import { AUTHOR_ORDER_ROOM } from "./groupAuthorOrder";
 import { edgeView, keptMeshPeer, meshPeersKeeping } from "./groupEdges";
-import { GroupPayments } from "./groupPayments";
+import { GroupPayments, paymentsMembership } from "./groupPayments";
 import { Reactions,groupReactionsToResend, latestReaction, noteAfterChange, noteIfStanding } from "./reactions";
 import { mayPinIn, myPin, pinView, pinnedRow, type PinsHost } from "./pins";
 import { GroupEdits } from "./groupEdits";
@@ -1977,7 +1977,7 @@ export class GhostlyNode implements EngineImplementation {
     },
     // In a community, notes go to everyone at once, through the group.
     edges: groupId => this.groups.isCommunityGroup(groupId) ? new Map([["*", groupLinkId(groupId)]]) : this.memberEdges(groupId),
-    membership: groupId => this.membership(groupId),
+    membership: groupId => paymentsMembership(this.groups.view(groupId)),
     send: (linkId, frame) => {
       const pay = parsePayLink(linkId);
       if (pay) { void this.groups.sendCommunityApp(pay.groupId, frame as Record<string, unknown>).catch(() => {}); return; }
@@ -3616,8 +3616,10 @@ export class GhostlyNode implements EngineImplementation {
    */
   private groupHistoryGone(groupId: string): void {
     const linkId = `group:${groupId}`;
-    // Every way a group ends here comes by: what its edits kept of each edge goes, as with `forgetGroup`.
+    // Every way a group ends here comes by: what its edits kept of each edge goes, as with `forgetGroup`, and what its
+    // payment notes kept (a membership under the same id later, by its link or another group's, inherits none).
     this.groupEdits.forget(groupId);
+    this.groupPayments.forget(groupId);
     this.newestAt.delete(linkId);
     this.lateAt.delete(linkId);
     for (const clock of this.clockLeads.keys()) if (clock.startsWith(`${linkId} `)) this.clockLeads.delete(clock);
