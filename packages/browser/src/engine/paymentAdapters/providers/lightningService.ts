@@ -216,6 +216,7 @@ export class LightningService {
     // paid nor expire, and its chat request would wait for good. A source that reports its own (the mints) is told.
     if (!provider.capabilities.lookup && !provider.settlesItself) throw new Error(`${descriptor.label} cannot look up its invoices, so a payment to it would never be seen: receive with another Lightning card, or connect it with invoice lookup allowed`);
     const created = await provider.createInvoice(amount, context.memo ?? "Ghostly");
+    this.sources.answered(provider);
     const decoded = decodeBolt11(created.invoice);
     // What goes to a contact must be the invoice we asked for: this amount, this hash, the right chain.
     if (!decoded || decoded.amountSat !== amount || (decoded.paymentHash && decoded.paymentHash !== created.paymentHash) || created.amount !== amount) throw new Error(`${descriptor.label} returned an invoice that does not match the request`);
@@ -314,6 +315,7 @@ export class LightningService {
     if (this.mode === "testnet" && decoded.network === "bitcoin" && !(provider instanceof CashuMintLightning)) throw new Error(BITCOIN_INVOICE_ON_TESTNET);
     if (!provider.capabilities.send) throw new Error(`${descriptor.label} cannot pay invoices`);
     const maxFee = provider.estimateFee ? await provider.estimateFee(decoded.invoice, decoded.amountSat) : defaultFeeCap(decoded.amountSat);
+    if (provider.estimateFee) this.sources.answered(provider);
     if (!Number.isSafeInteger(maxFee) || maxFee < 0) throw new Error(`${descriptor.label} returned an invalid fee`);
     const id = crypto.randomUUID();
     this.quotes.set(id, { providerId: descriptor.id, provider, invoice: decoded.invoice, amount: decoded.amountSat, maxFee, paymentHash: decoded.paymentHash });
@@ -340,6 +342,8 @@ export class LightningService {
     paying += 1;
     try {
       const result = await quote.provider.payInvoice(quote.invoice, quote.maxFee, context.note);
+      // The source answered: a card that could not read its balance reads it now (the payment changed it).
+      this.sources.answered(quote.provider);
       op = result.state === "paid" ? { ...op, state: "paid", fee: result.fee, ref: result.ref ?? op.ref, settledAt: Date.now() } : { ...op, state: "pending", ref: result.ref ?? op.ref };
     } catch (error) {
       if (isNothingSpentError(error)) { await this.put({ ...op, state: "failed", error: redact(error) }); throw error; }
@@ -416,6 +420,7 @@ export class LightningService {
           if (op.providerId !== providerId || !provider.interruptedPayment || notYet(op)) continue;
           try {
             const outcome = await provider.interruptedPayment({ invoice: op.invoice, paymentHash: op.paymentHash, ref: op.ref });
+            this.sources.answered(provider);
             if (outcome === "pending") missed(op);
             if (outcome !== "paid" && outcome !== "failed") continue;
             this.outAsk.forget(op.paymentHash);
@@ -444,12 +449,14 @@ export class LightningService {
           if (op.direction === "in") {
             const status = await provider.invoiceStatus({ invoice: op.invoice, paymentHash: op.paymentHash, amount: op.amount, expiresAt: op.expiresAt, ref: op.ref });
             this.invoiceAsk.forget(op.paymentHash);
+            this.sources.answered(provider);
             if (!(await unchanged())) continue;
             if (status.state === "paid") { await this.put({ ...op, state: "paid", settledAt: Date.now() }); this.events.received(op); }
             else if (status.state === "expired" || op.expiresAt + INVOICE_PACE.expiryGraceMs < Date.now()) await this.put({ ...op, state: "expired" });
             else invoiceDue = Math.min(invoiceDue, this.nextAsk(op, Date.now()));
           } else {
             const status = await provider.paymentStatus({ invoice: op.invoice, paymentHash: op.paymentHash, ref: op.ref });
+            this.sources.answered(provider);
             if (status.state === "pending") { missed(op); continue; }
             this.outAsk.forget(op.paymentHash);
             // Written only over the state that was asked about: anything newer wins.
