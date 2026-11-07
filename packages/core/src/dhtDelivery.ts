@@ -304,7 +304,7 @@ export class DhtDelivery {
     pollMs?: number;
     /**
      * How often a contact that chose DHT only is read with the chat in the background, where every chat counts as open
-     * (a CLI daemon: `ACTIVE_DHT_POLL_MS`). Absent: at the background pace (WISP 403, poll pace).
+     * (a CLI daemon: `ACTIVE_DHT_POLL_MS`), while that contact is there (`pollMs`). Absent: at the background pace (WISP 403, poll pace).
      */
     peerDhtPollMs?: number;
     /**
@@ -1106,7 +1106,12 @@ export class DhtDelivery {
     if (this.state.pending && this.state.pending.expires > now) return DHT_POLL_MS;
     if (this.active) return ACTIVE_DHT_POLL_MS;
     // A contact that chose DHT only, read where every chat is open (a daemon): its texts come in seconds, not at 30 s.
-    return this.state.peerMode === "dht" && this.options.peerDhtPollMs ? Math.min(this.options.peerDhtPollMs, STREAM_POLL_MS) : STREAM_POLL_MS;
+    // Only while it is there (an envelope of its own in this run, newer than any before: its keep-alive every four minutes
+    // or a text, `peerNewAt`). A daemon read 8 such contacts that were gone for good every 10 s each, as plain reads, for as
+    // long as it ran: its relays' whole minute, and a contact back on a live method was not read once in 3 minutes (bug
+    // hunt, 2026-11-07). Just started, a contact there is read at the background pace until its next envelope.
+    const there = now - this.peerNewAt < PRESENCE_WINDOW;
+    return this.state.peerMode === "dht" && this.options.peerDhtPollMs && there ? Math.min(this.options.peerDhtPollMs, STREAM_POLL_MS) : STREAM_POLL_MS;
   }
   /**
    * How long ago this side's invite was made (or joined), while nobody used it (or its inviter never answered,
