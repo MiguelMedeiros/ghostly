@@ -79,7 +79,7 @@ export function AttachmentSheet({ files, alert, status, returnFocus, onPaste, on
   const picture = (i: number) => broken.has(files[i]) ? undefined : pictures[i];
   const lost = (file: File) => setBroken((was) => new Set(was).add(file));
   const single = files.length === 1 ? files[0] : null;
-  const button = "min-h-10 px-4 rounded-full text-sm font-medium cursor-pointer";
+  const button = "min-h-10 max-md:min-h-11 px-4 rounded-full text-sm font-medium cursor-pointer";
 
   return createPortal(
     // \`keyboard-layer\` (index.css): with a phone's keyboard up the layer ends where the keyboard starts, so the panel is
@@ -105,8 +105,10 @@ export function AttachmentSheet({ files, alert, status, returnFocus, onPaste, on
           // up), it scrolls. Rows that shrank with it drew each row of square tiles over the one above.
           <ul className={`list-none m-0 p-3 overflow-y-auto min-h-0 grid auto-rows-max gap-2 ${single ? "grid-cols-1" : "grid-cols-3"}`} data-testid="attachment-list">
             {files.map((file, i) => (
-              <li key={i} data-testid="attachment-item" className={`relative rounded-lg border border-border bg-surface-alt overflow-hidden ${single ? "flex items-center gap-3 p-3" : "aspect-square"}`}>
-                {picture(i) ? <img src={picture(i)} alt={file.name} onError={() => lost(file)} className="w-full h-full object-cover" />
+              // A tile with a × does not clip (its picture is rounded itself): on a phone where a tap lands on the × reaches a
+              // little past the tile's corner, into the gap. `min-w-0 min-h-0` keep the sizes `overflow-hidden` gave the grid.
+              <li key={i} data-testid="attachment-item" className={`relative rounded-lg border border-border bg-surface-alt ${single ? "overflow-hidden flex items-center gap-3 p-3" : "aspect-square min-w-0 min-h-0"}`}>
+                {picture(i) ? <img src={picture(i)} alt={file.name} onError={() => lost(file)} className="w-full h-full object-cover rounded-[7px]" />
                   : <div className={`${single ? "flex items-center gap-3 min-w-0" : "h-full flex flex-col items-center justify-center gap-1 p-2 text-center"} text-text-secondary`}>
                     <span className="shrink-0" aria-hidden="true"><DocumentGlyph /></span>
                     <span className={`min-w-0 ${single ? "" : "w-full"}`}>
@@ -116,7 +118,7 @@ export function AttachmentSheet({ files, alert, status, returnFocus, onPaste, on
                   </div>}
                 {files.length > 1 && (
                   <button type="button" ref={(element) => { removers.current[i] = element; }} onClick={() => remove(i)} aria-label={t("composer.removeFile", { name: file.name })} title={t("composer.removeFile", { name: file.name })}
-                    className="absolute top-1 end-1 w-7 h-7 rounded-full bg-black/60 text-white flex items-center justify-center cursor-pointer">
+                    className="tap-target absolute top-1 end-1 w-7 h-7 rounded-full bg-black/60 text-white flex items-center justify-center cursor-pointer">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
                   </button>
                 )}
