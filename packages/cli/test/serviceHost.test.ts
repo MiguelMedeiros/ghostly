@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { request as httpRequest } from "node:http";
 import { createServer as createNetServer, Server as NetServer, type AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GhostlyHttpError, LIMITS, type ClientRequest, type ClientResponse } from "@ghostly/core";
+import { GhostlyHttpError, LIMITS, VIEWER_GUARD_CSP, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT, type ClientRequest, type ClientResponse } from "@ghostly/core";
 import { keepServing } from "../src/host";
 import type { ApiContext } from "../src/api";
 import { hostOnlyCookie, OPEN_COOKIE, OPENED_SERVICE_CSP, OPENED_SERVICE_CSP_RELAY_ONLY, openServiceServer, ownCookies, SERVICE_METHODS, setCookieName, type OpenedService, type ServiceSend } from "../src/services";
@@ -11,10 +11,10 @@ import { hostOnlyCookie, OPEN_COOKIE, OPENED_SERVICE_CSP, OPENED_SERVICE_CSP_REL
 interface Reply { status: number; headers: Record<string, string | string[] | undefined>; body: string; aborted: boolean }
 
 /** A request to the opened service's port with any `Host` (fetch would not let a test set one). */
-function get(opened: OpenedService, path: string, { host = opened.host, cookie, method = "GET", body }: { host?: string; cookie?: string; method?: string; body?: Buffer } = {}): Promise<Reply> {
+function get(opened: OpenedService, path: string, { host = opened.host, cookie, method = "GET", body, dest }: { host?: string; cookie?: string; method?: string; body?: Buffer; dest?: string } = {}): Promise<Reply> {
   const port = Number(opened.host.split(":")[1]);
   return new Promise((resolve, reject) => {
-    const req = httpRequest({ host: "127.0.0.1", port, path, method, headers: { host, ...(cookie ? { cookie } : {}) } }, (res) => {
+    const req = httpRequest({ host: "127.0.0.1", port, path, method, headers: { host, ...(cookie ? { cookie } : {}), ...(dest ? { "sec-fetch-dest": dest } : {}) } }, (res) => {
       const parts: Buffer[] = [];
       let aborted = false;
       res.on("data", (c: Buffer) => parts.push(c));
@@ -220,10 +220,30 @@ describe("an opened service's host and link", () => {
     const hidden = await openServiceServer(send, 0, { relayOnly: true });
     servers.push(hidden);
     const hiddenCookie = String((await get(hidden, new URL(hidden.url).pathname)).headers["set-cookie"]).split(";")[0];
-    expect((await get(hidden, "/", { cookie: hiddenCookie })).headers["content-security-policy"]).toBe(`img-src *, ${OPENED_SERVICE_CSP_RELAY_ONLY}`);
+    expect((await get(hidden, "/", { cookie: hiddenCookie })).headers["content-security-policy"]).toBe(`img-src *, ${VIEWER_GUARD_CSP}, ${OPENED_SERVICE_CSP_RELAY_ONLY}`);
     // Off: as before.
     const { service, cookie } = await opened(send);
     expect((await get(service, "/", { cookie })).headers["content-security-policy"]).toBe(`img-src *, ${OPENED_SERVICE_CSP}`);
+  });
+
+  it("puts the WebRTC guard first in each page while Hide my IP from contacts is on, and in nothing else", async () => {
+    // covers: settings.network.relay-only
+    const page = "<!doctype html><title>Atlas</title><script nonce=a>new RTCPeerConnection()</script>";
+    const send: ServiceSend = async () => answer(200, [["content-type", "text/html"], ["content-length", String(page.length)], ["content-security-policy", "script-src 'nonce-a'"]], [page.slice(0, 5), page.slice(5)]);
+    const hidden = await openServiceServer(send, 0, { relayOnly: true });
+    servers.push(hidden);
+    const cookie = String((await get(hidden, new URL(hidden.url).pathname)).headers["set-cookie"]).split(";")[0];
+    for (const dest of ["iframe", "document", undefined]) {
+      const served = await get(hidden, "/", { cookie, dest });
+      expect(served.body, String(dest)).toBe(`<!doctype html><script>${VIEWER_GUARD_SCRIPT}</script><title>Atlas</title><script nonce=a>new RTCPeerConnection()</script>`);
+      // The contact's own policy lets it run; the length is the new body's (no content-length of the contact's).
+      expect(served.headers["content-security-policy"]).toBe(`script-src 'nonce-a' ${VIEWER_GUARD_HASH}, ${VIEWER_GUARD_CSP}, ${OPENED_SERVICE_CSP_RELAY_ONLY}`);
+      expect(served.headers["content-length"]).toBeUndefined();
+    }
+    // A fetch of the same page reads it as the contact sent it.
+    expect((await get(hidden, "/", { cookie, dest: "empty" })).body).toBe(page);
+    const { service, cookie: own } = await opened(send);
+    expect((await get(service, "/", { cookie: own, dest: "iframe" })).body).toBe(page);
   });
 
   it("`service open` reads Hide my IP from contacts from the profile's settings when it opens the app", async () => {
@@ -236,7 +256,7 @@ describe("an opened service's host and link", () => {
       try {
         const parsed = new URL(url), service = { host: parsed.host } as OpenedService;
         const cookie = String((await get(service, parsed.pathname)).headers["set-cookie"]).split(";")[0];
-        expect((await get(service, "/", { cookie })).headers["content-security-policy"], String(relayOnly)).toBe(relayOnly ? OPENED_SERVICE_CSP_RELAY_ONLY : OPENED_SERVICE_CSP);
+        expect((await get(service, "/", { cookie })).headers["content-security-policy"], String(relayOnly)).toBe(relayOnly ? `${VIEWER_GUARD_CSP}, ${OPENED_SERVICE_CSP_RELAY_ONLY}` : OPENED_SERVICE_CSP);
       } finally {
         await SERVICE_METHODS["service.close"](ctx, params);
       }

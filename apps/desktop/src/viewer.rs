@@ -49,6 +49,68 @@ const SERVICE_CSP: &str = "default-src 'self' https: data: blob: 'unsafe-inline'
 /// `OPENED_SERVICE_CSP_RELAY_ONLY` in `packages/cli/src/services.ts`.
 const SERVICE_CSP_RELAY_ONLY: &str = "default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
 
+/// With Hide my IP from contacts on, no policy keeps the app off WebRTC (CSP does not cover ICE): a
+/// `new RTCPeerConnection` with a STUN server the contact names shows that server this device's address
+/// (WebView2 and WKWebView have WebRTC; WebKitGTK only when built with it). This runs first in every frame
+/// of the window (`initialization_script_for_all_frames`): it deletes the WebRTC constructors, opens new
+/// windows with `noopener`, and runs again in each frame and `srcdoc` of a document as it is made. The same
+/// text as `VIEWER_GUARD_SCRIPT` in `packages/core/src/viewerGuard.ts`.
+const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
+  "use strict";
+  try {
+    const apply = Reflect.apply;
+    const own = "<script>(" + noWebRtc + ")(window)<" + "/script>";
+    for (const name of Object.getOwnPropertyNames(w)) {
+      if (/^(webkit)?RTC/.test(name)) { try { delete w[name]; } catch (e) {} }
+    }
+    if (w.trustedTypes && !w.trustedTypes.defaultPolicy) {
+      try {
+        w.trustedTypes.createPolicy("default", {
+          createHTML: (input) => input,
+          createScript: (input, type, sink) => (sink === "Location href" ? null : input),
+          createScriptURL: (input) => input,
+        });
+      } catch (e) {}
+    }
+    const open = w.open;
+    w.open = function (url, target) {
+      apply(open, this, [url === undefined ? "" : url, target === undefined ? "_blank" : target, "noopener"]);
+      return null;
+    };
+    const reopen = w.Document.prototype.open;
+    w.Document.prototype.open = function () {
+      return arguments.length > 2 ? w.open(arguments[0], arguments[1]) : apply(reopen, this, arguments);
+    };
+    const { getAttribute, setAttribute, removeAttribute } = w.Element.prototype;
+    const first = (frame) => {
+      const doc = apply(getAttribute, frame, ["srcdoc"]);
+      if (doc === null || doc.slice(0, own.length) === own) return;
+      try { apply(setAttribute, frame, ["srcdoc", own + doc]); } catch (e) { apply(removeAttribute, frame, ["srcdoc"]); }
+    };
+    new w.MutationObserver((records) => {
+      for (const record of records) {
+        if (record.type === "attributes") first(record.target);
+        else for (const node of record.addedNodes) {
+          if (node.nodeType !== 1) continue;
+          if (node.localName === "iframe") first(node);
+          if (node.firstElementChild) for (const frame of node.querySelectorAll("iframe[srcdoc]")) first(frame);
+        }
+      }
+    }).observe(w.document, { subtree: true, childList: true, attributes: true, attributeFilter: ["srcdoc"] });
+    w.document.addEventListener("load", (event) => {
+      let inner = null;
+      try { inner = event.target.contentWindow; } catch (e) {}
+      try { if (inner && ("RTCPeerConnection" in inner || "webkitRTCPeerConnection" in inner)) noWebRtc(inner); } catch (e) {}
+    }, true);
+  } catch (e) {}
+})(window)"#;
+
+/// Sent with the guard: frames only from the app's own origin (a `data:` or `blob:` frame would run before
+/// the guard where the WebView does not run it there), and Trusted Types, which hands each `javascript:` URL
+/// to the guard's policy before it runs. `VIEWER_GUARD_CSP` in `packages/core/src/viewerGuard.ts`.
+const SERVICE_GUARD_CSP: &str =
+    "frame-src 'self'; object-src 'self'; require-trusted-types-for 'script'";
+
 /// The contact's headers that are not passed on: each makes the WebView send
 /// something to a place it names, outside `connect-src` (violation and
 /// network-error reports, and the endpoints they go to; `Link` preloads,
@@ -281,6 +343,7 @@ pub fn open<R: tauri::Runtime>(
         return Err("Invalid service".into());
     }
     let site = format!("{}.{}", peer, tag);
+    let relay_only = relay_only.unwrap_or(false);
     let state = app.state::<ViewerState>();
     let label = format!("svc-{}", state.next_id.fetch_add(1, Ordering::Relaxed));
     state
@@ -294,7 +357,7 @@ pub fn open<R: tauri::Runtime>(
                 service: service.clone(),
                 site: site.clone(),
                 unreachable: unreachable_text(unreachable),
-                relay_only: relay_only.unwrap_or(false),
+                relay_only,
             },
         );
 
@@ -304,12 +367,15 @@ pub fn open<R: tauri::Runtime>(
         .map_err(|e| format!("URL: {}", e))?;
     let (link_site, link_service) = (site.clone(), service.clone());
     let opened_outside = Mutex::new(OpenedOutside::default());
-    #[allow(unused_mut)]
     let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::CustomProtocol(url));
     // On Windows the app keeps its storage in a WebView2 profile of its own, gone whole once it is forgotten.
     #[cfg(windows)]
     if let Some(folder) = crate::forget_origins::app_folder(app, &format!("{service}.{site}")) {
         builder = builder.data_directory(folder);
+    }
+    // Hide my IP from contacts: the app's every frame runs the WebRTC guard before its own code.
+    if relay_only {
+        builder = builder.initialization_script_for_all_frames(SERVICE_GUARD);
     }
     builder
         .title(format!("{} — Ghostly", title))
@@ -448,6 +514,9 @@ pub async fn handle<R: tauri::Runtime>(
         } else {
             response = response.header(name.as_str(), value.as_str());
         }
+    }
+    if relay_only {
+        policies.push(SERVICE_GUARD_CSP.to_string());
     }
     policies.push(
         if relay_only {
@@ -1128,9 +1197,9 @@ mod routing_tests {
             );
             let response = tauri::async_runtime::block_on(pending).unwrap();
             let ours = if relay_only {
-                SERVICE_CSP_RELAY_ONLY
+                format!("{SERVICE_GUARD_CSP}, {SERVICE_CSP_RELAY_ONLY}")
             } else {
-                SERVICE_CSP
+                SERVICE_CSP.to_string()
             };
             assert_eq!(
                 response.headers()["content-security-policy"],
@@ -1142,6 +1211,21 @@ mod routing_tests {
             SERVICE_CSP_RELAY_ONLY,
             "default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'"
         );
+    }
+
+    /// The WebRTC guard every frame of a window opened with Hide my IP on runs, and the policy sent with it,
+    /// are the extension's and the web runner's, word for word.
+    #[test]
+    fn the_webrtc_guard_is_the_one_the_other_viewers_run() {
+        // covers: settings.network.relay-only
+        let core = include_str!("../../../packages/core/src/viewerGuard.ts");
+        assert!(core.contains(&format!(
+            "export const VIEWER_GUARD_SCRIPT = `{SERVICE_GUARD}`;"
+        )));
+        assert!(core.contains(&format!(
+            "export const VIEWER_GUARD_CSP = \"{SERVICE_GUARD_CSP}\";"
+        )));
+        assert!(SERVICE_GUARD.starts_with("(function noWebRtc(w) {"));
     }
 
     #[test]
