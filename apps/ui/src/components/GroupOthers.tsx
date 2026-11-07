@@ -1,6 +1,8 @@
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView } from "@ghostly/browser/shared/types";
+import { useState } from "react";
 import { useI18n } from "../contexts/I18nContext";
+import { DeleteChatDialog } from "./DeleteChatDialog";
 
 type Other = NonNullable<GroupView["others"]>[number];
 
@@ -8,10 +10,13 @@ type Other = NonNullable<GroupView["others"]>[number];
  * Another group came under this one's id (a contact's invitation, or a link opened): a private group's id names no
  * genesis, so anyone who knows it can make a group of their own under it. Only one of them is kept on this device:
  * the band says so and lets the person pick. Keep this one turns the others down (their inviters are told); Switch
- * takes the other in its place, as Delete takes this one. `act`: the page's runner, which says why one did not go.
+ * takes the other in its place, as Delete takes this one, and so is asked first as Delete is: the dialog names the other
+ * picked, Cancel has the focus, and closed it gives the focus back to that Switch. `act`: the page's runner, which says
+ * why one did not go.
  */
 export function GroupOthers({ group, act }: { group: GroupView; act: (action: () => Promise<unknown>) => Promise<void> }) {
   const { t } = useI18n();
+  const [asking, setAsking] = useState<Other | null>(null);
   const others = group.others;
   if (!others?.length) return null;
   const line = (other: Other) => {
@@ -32,10 +37,17 @@ export function GroupOthers({ group, act }: { group: GroupView; act: (action: ()
         const to = "link" in other ? other.link : other.linkId;
         return <li key={to} data-testid="group-other" className="flex items-center justify-between gap-2">
           <span className="min-w-0 break-words">{line(other)}</span>
-          <button data-testid="group-other-switch" onClick={() => void act(() => engine.call("switchGroup", { groupId: group.id, to }))}
+          {/* Focused before it asks: a browser that leaves a clicked button unfocused (Safari) still gets it back. */}
+          <button data-testid="group-other-switch" onClick={e => { e.currentTarget.focus(); setAsking(other); }}
             className={`${button} text-text-secondary hover:bg-surface-hover`}>{t("group.others.switch")}</button>
         </li>;
       })}
     </ul>
+    {asking && <DeleteChatDialog name={line(asking)} title={t("group.others.switchTitle")} body={t("group.others.switchBody", { other: line(asking) })}
+      confirm={t("group.others.switchConfirm")} onClose={() => setAsking(null)} onConfirm={() => {
+        const to = "link" in asking ? asking.link : asking.linkId;
+        setAsking(null);
+        void act(() => engine.call("switchGroup", { groupId: group.id, to }));
+      }} />}
   </div>;
 }
