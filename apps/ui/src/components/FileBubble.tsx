@@ -5,7 +5,7 @@ import { useTransfer } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
 import { downloadFile } from "../lib/fileDownload";
 import { canRetryFile, failedReason, fileHeld, filePercent, fileStatus, groupFileHint, isGroupFile, sentWhole, stalledAction, statusSize } from "../lib/fileStatus";
-import { knownPictureSize, pictureBox, PLACEHOLDER_BOX, rememberPictureSize, sameShape } from "../lib/pictureBox";
+import { knownPictureSize, MAX_EDGE, pictureBox, PLACEHOLDER_BOX, rememberPictureSize, sameShape } from "../lib/pictureBox";
 import { forgetPicture, readPicture, type HeldPicture } from "../lib/pictureReads";
 import type { FileAction } from "../lib/platform";
 import { AvatarViewer } from "./AvatarViewer";
@@ -195,7 +195,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
       {box && (
         <div data-testid="file-picture" data-box={size ? "sized" : "placeholder"} {...(gone && { "data-gone": "" })}
           className={`rounded-[4px] overflow-hidden mb-1 ${blobUrl && loaded?.url === blobUrl ? "" : "bg-black/10"}`}
-          style={{ width: box.width, maxWidth: "100%", aspectRatio: box.ratio }}>
+          style={{ width: box.width, maxWidth: "100%", maxHeight: MAX_EDGE, aspectRatio: box.ratio }}>
           {blobUrl && (
             // A tap opens it large. Not a <button>: a long press on a control is not the message's long press (the
             // reactions' bar), and on a picture it must stay one; the tap that ends a long press opens nothing.
