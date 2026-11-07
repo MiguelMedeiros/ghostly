@@ -274,7 +274,9 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     return true;
   }
   if (message.type === "open-service") {
-    void openViewer(message.peerPubKeyZ32, message.serviceId, message.tag, viewerPageOf(message.page), message.relayOnly === true).then(
+    // Hide my IP from contacts is on: a contact's app does not open in a tab (see "viewer" below).
+    if (message.relayOnly === true) { sendResponse({ ok: false, error: RELAY_ONLY_REFUSED }); return false; }
+    void openViewer(message.peerPubKeyZ32, message.serviceId, message.tag, viewerPageOf(message.page)).then(
       () => sendResponse({ ok: true }),
       (error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
     );
@@ -305,6 +307,13 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
 // own guard for local addresses allows. A top-level navigation is beyond any
 // policy, and once the tab leaves the virtual origin it is no viewer any more.
 //
+// So no tab opens while Hide my IP from contacts is on (`RELAY_ONLY_REFUSED`):
+// the app could send the tab, or a frame, to a server of the contact's, and
+// Chrome connects there before any policy or DevTools refuses the page, which
+// shows that server this device's address. A frame whose page's `frame-src`
+// refuses it is connected to all the same (Chromium, 2026-11). Desktop's window
+// never leaves the app's origin (`may_navigate` in apps/desktop/src/viewer.rs).
+//
 // The `debugger` permission reaches every tab, so its use is kept narrow here,
 // the only place in the extension that calls `chrome.debugger`:
 // - pages ask for a service (peer key and service id), never for a tab;
@@ -314,6 +323,9 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
 // - only the four commands the viewer needs are ever sent.
 
 const PROTOCOL_VERSION = "1.3";
+
+/** Why a contact's app does not open while Hide my IP from contacts is on; the app says it in its language (errorText.ts). */
+const RELAY_ONLY_REFUSED = "A contact's app does not open in the browser extension while Hide my IP from contacts is on";
 
 /** The DevTools commands a viewer tab needs. Nothing else is ever sent. */
 const VIEWER_COMMANDS = new Set(["Fetch.enable", "Page.enable", "Fetch.fulfillRequest", "Fetch.failRequest"]);
@@ -335,8 +347,6 @@ interface ViewerBinding {
   tag: string;
   /** Its error page, in the language of the page that opened it. */
   page: ViewerPage;
-  /** Hide my IP from contacts was on when it opened: every answer keeps the app to its own origin. */
-  relayOnly: boolean;
 }
 
 /** The English page, for a request that came without one. */
@@ -386,7 +396,7 @@ export async function devtools(tabId: number, method: string, params?: Record<st
   await chrome.debugger.sendCommand({ tabId }, method, params);
 }
 
-async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string, page: ViewerPage, relayOnly: boolean): Promise<void> {
+async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string, page: ViewerPage): Promise<void> {
   const url = viewerUrl(peerPubKeyZ32, serviceId, tag);
   const parsed = parseViewerUrl(url);
   if (!parsed || parsed.serviceId !== serviceId || parsed.peerPubKeyZ32 !== peerPubKeyZ32 || parsed.tag !== tag) throw new Error("Invalid service");
@@ -395,7 +405,7 @@ async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string,
   // The one tab DevTools ever attaches to: the one created right here, for this service.
   const tab = await chrome.tabs.create({ url: "about:blank" });
   if (tab.id === undefined) throw new Error("Could not open a tab");
-  await chrome.storage.session.set({ [bindingKey(tab.id)]: { peerPubKeyZ32, serviceId, tag, page, relayOnly } satisfies ViewerBinding });
+  await chrome.storage.session.set({ [bindingKey(tab.id)]: { peerPubKeyZ32, serviceId, tag, page } satisfies ViewerBinding });
   try {
     await chrome.debugger.attach({ tabId: tab.id }, PROTOCOL_VERSION);
     await devtools(tab.id, "Fetch.enable", {
@@ -466,7 +476,7 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
     await devtools(tabId, "Fetch.fulfillRequest", {
       requestId: paused.requestId,
       responseCode: reply.status,
-      responseHeaders: withViewerPolicy(viewerResponseHeaders(reply.headers), binding.relayOnly === true).map(([name, value]) => ({ name, value })),
+      responseHeaders: withViewerPolicy(viewerResponseHeaders(reply.headers)).map(([name, value]) => ({ name, value })),
       body: reply.bodyB64,
     });
     return;
@@ -485,7 +495,7 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
       { name: "content-type", value: "text/html; charset=utf-8" },
       { name: "cache-control", value: "no-store" },
       { name: "x-ghostly-error", value: reply.code },
-      { name: "content-security-policy", value: viewerServicePolicy(binding.relayOnly === true) },
+      { name: "content-security-policy", value: viewerServicePolicy(false) },
     ],
     body: toBase64(utf8Encode(html)),
   });

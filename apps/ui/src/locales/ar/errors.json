@@ -594,6 +594,8 @@
     "usdtRevertedNext": "لم تُرسل أي رموز؛ وأُنفق الغاز."
   },
   "relayOnly": {
+    "appInExtension": "لا يُفتح تطبيق جهة الاتصال هنا أثناء تشغيل إخفاء IP",
+    "appInExtensionNext": "قد يكشف المتصفح عنوان IP الخاص بك لخوادم التطبيق. أوقف إخفاء IP لفتحه.",
     "keepsTurn": "إخفاء IP يحتاج إلى خادم TURN هذا",
     "keepsTurnNext": "أوقفه أولًا، ثم أزل الخادم.",
     "needsTurn": "أضف خادم TURN أولًا",

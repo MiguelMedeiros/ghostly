@@ -654,6 +654,8 @@ const RULES: readonly Rule[] = [
   // "Hide my IP from contacts" without the TURN server it needs (packages/browser/src/engine/node.ts, updateSettings).
   { match: /^Add a TURN server first$/, key: "errors.relayOnly.needsTurn", next: "errors.relayOnly.needsTurnNext" },
   { match: /^Hide my IP from contacts needs a TURN server\. Turn it off first$/, key: "errors.relayOnly.keepsTurn", next: "errors.relayOnly.keepsTurnNext" },
+  // A contact's app the extension does not open while it is on (apps/extension/src/background.ts, RELAY_ONLY_REFUSED).
+  { match: /^A contact's app does not open in the browser extension while Hide my IP from contacts is on$/, key: "errors.relayOnly.appInExtension", next: "errors.relayOnly.appInExtensionNext" },
   // An Iroh, push, Pkarr or Nostr relay refused (packages/browser/src/platform/irohWeb.ts, shared/pushRelay.ts,
   // packages/core/src/relay.ts, nostr/relay.ts): the address typed stays in the line, which has no ⓘ. A Pkarr relay
   // list's line may hold spaces ("relay .example.org").
