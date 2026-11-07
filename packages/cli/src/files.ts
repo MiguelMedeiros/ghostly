@@ -174,6 +174,21 @@ async function sendable(path: string, mime: string, voice: VoiceMeta | undefined
 }
 
 /**
+ * A read of the file at `path` through the Blob `openAsBlob` gave it. Node refuses every read of that Blob once the file
+ * changed on disk (it grew, shrank or was written again: a log still written to, a file being saved), with a bare
+ * DOMException "The blob could not be read" that named neither the file nor why, as `engine`. Said with its path, as
+ * `unavailable`: sent again once nothing writes to it, it goes, and nothing of this try was kept (`stage` removes its copy).
+ */
+async function whileUnchanged<T>(path: string, read: () => Promise<T>): Promise<T> {
+  try { return await read(); } catch (error) {
+    if (error && typeof error === "object" && (error as { name?: unknown }).name === "NotReadableError") {
+      throw new CliError("unavailable", `${path} changed while it was being sent: send it again once nothing is writing to it`, { reason: "file_changed", path });
+    }
+    throw error;
+  }
+}
+
+/**
  * A file announced in a group (WISP 503): its bytes staged under a group file id with their digest, as a chat's are, then
  * the announcement. This device is its first holder and serves the members who ask.
  */
@@ -190,14 +205,14 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
   const check = await node(ctx).groupFileCheck({ groupId: group.id });
   if (check.error) throw check.refused ? new CliError("refused", check.error) : groupSendRefused(check.error);
   const { voice, warning } = await voiceOf(params, path, mime, picked);
-  const source = await sendable(path, mime, voice);
+  const source = await whileUnchanged(path, () => sendable(path, mime, voice));
   const size = source.size;
-  const image = voice ? undefined : await readImageMeta(source, mime);
+  const image = voice ? undefined : await whileUnchanged(path, () => readImageMeta(source, mime));
   const fileId = groupFileId(group.id, "out");
   const file: MessageFile = { id: fileId, name: sanitizeFileName(str(params, "name") ?? basename(path)), size, mime, ...(voice ? { voice } : {}), ...(image ? { image } : {}) };
   const timestamp = Date.now();
   const bytes = await fileBytes();
-  const digest = await bytes.stage(fileId, source);
+  const digest = await whileUnchanged(path, () => bytes.stage(fileId, source));
   await fileStore.put({
     id: fileId, linkId: `group:${group.id}`, bytes: bytes.kind, digest, createdAt: timestamp, direction: "out",
     metadata: { name: file.name, size, mime, timestamp, ...(voice ? { voice } : {}), ...(image ? { image } : {}) },
@@ -298,14 +313,14 @@ export const FILE_METHODS: Record<string, Method> = {
       if (!await findMessage(ctx, link.id, (m) => m.id === replyTo || replyRef(m) === replyTo)) throw noMessage(replyTo, { group: false, ref: str(params, "chat", true) }, { tail: ", or it cannot be replied to" });
     }
     const { voice, warning } = await voiceOf(params, path, mime, info.size);
-    const source = await sendable(path, mime, voice);
+    const source = await whileUnchanged(path, () => sendable(path, mime, voice));
     // A picture goes with its size, read from its first bytes as the apps read it (PNG, JPEG, GIF, WebP).
-    const image = voice ? undefined : await readImageMeta(source, mime);
+    const image = voice ? undefined : await whileUnchanged(path, () => readImageMeta(source, mime));
     const wireId = toBase64Url(randomBytes(12));
     const file: MessageFile = { id: `${link.id}-out-${wireId}`, name: sanitizeFileName(str(params, "name") ?? basename(path)), size: source.size, mime, ...(voice ? { voice } : {}), ...(image ? { image } : {}) };
     const timestamp = sentAt();
     const bytes = await fileBytes();
-    const digest = await bytes.stage(file.id, source);
+    const digest = await whileUnchanged(path, () => bytes.stage(file.id, source));
     await fileStore.put({
       id: file.id, linkId: link.id, bytes: bytes.kind, digest, createdAt: timestamp, direction: "out", wireId,
       metadata: { name: file.name, size: file.size, mime: file.mime, timestamp, ...(voice ? { voice } : {}), ...(image ? { image } : {}) },
