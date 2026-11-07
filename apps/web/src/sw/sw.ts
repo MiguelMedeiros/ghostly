@@ -19,7 +19,7 @@ import { readPushDeviceView } from "./deviceState";
 import { deviceNoticeWords } from "./deviceWords";
 import { takeWakeSlot } from "./wakeLimit";
 import { readWake } from "../../../../packages/core/src/pairedWake";
-import { MAX_HELD_SHARES, OPEN_ASK_MS, SHARE_HOLD_MS, SHARE_LOCK_LOOK_MS, type FromWorker, type ToWorker, type WindowSays } from "./messages";
+import { MAX_HELD_SHARES, OPEN_ASK_MS, OPEN_BACK_MS, SHARE_HOLD_MS, SHARE_LOCK_LOOK_MS, type ChatTaken, type FromWorker, type ToWorker, type WindowSays } from "./messages";
 
 declare const __SW_BUILD__: string;
 declare const __SW_PRECACHE__: string[];
@@ -413,27 +413,45 @@ function askWindow(client: WindowClient): Promise<WindowSays | null> {
   });
 }
 
+/** Tells a window it only guessed at (`silent`) to open the chat; false when it hands it back, null when it says nothing in time. */
+function tellSilent(client: WindowClient, message: Extract<FromWorker, { type: "open-chat" }>): Promise<boolean | null> {
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    const done = (taken: boolean | null) => { clearTimeout(timer); channel.port1.close(); resolve(taken); };
+    const timer = setTimeout(() => done(null), OPEN_BACK_MS);
+    channel.port1.onmessage = ({ data }: MessageEvent<Partial<ChatTaken> | null>) => done(typeof data?.taken === "boolean" ? data.taken : null);
+    try { client.postMessage({ ...message, silent: true }, [channel.port2]); } catch { done(null); }
+  });
+}
+
 /**
  * A tap on a wake-up: the window that runs the notice's profile and holds its peer comes forward on that chat, the one
  * in front first. Never a tab waiting behind another (it opens nothing), and never another profile's window (it would
  * switch away from the profile it runs). No such window: the first window that does not say what it runs (a page of the
- * build before this one, or a frozen or busy one) gets it; none of those either: a new one opens there.
+ * build before this one, or a frozen or busy one) gets it; none of those either, or that one turns out to run another
+ * profile's peer (it hands the chat back): a new one opens there.
  */
 async function openFrom(notification: Shown): Promise<void> {
   notification.close();
   const data = notification.data as { path?: unknown; profile?: unknown } | null;
   if (typeof data?.path !== "string" || typeof data.profile !== "string") return;
-  const message: FromWorker = { type: "open-chat", path: data.path, profile: data.profile };
+  const message = { type: "open-chat", path: data.path, profile: data.profile } as const satisfies FromWorker;
   const windows = await appWindows();
   const said = await Promise.all(windows.map(askWindow));
   const ours = windows.filter((_, i) => said[i]?.peer && said[i].profile === data.profile);
-  // None says it runs the profile, but one said nothing: it may be the profile's own, frozen or busy (focusing
-  // unfreezes it, and the message waits for it), so it gets the chat rather than a new window stuck behind its lock.
-  const open = ours.find((client) => client.focused || client.visibilityState === "visible") ?? ours[0] ?? windows.find((_, i) => !said[i]);
+  const open = ours.find((client) => client.focused || client.visibilityState === "visible") ?? ours[0];
   if (open) {
     await open.focus?.().catch(() => undefined);
     open.postMessage(message);
     return;
+  }
+  // None says it runs the profile, but one said nothing: it may be the profile's own, frozen or busy (focusing
+  // unfreezes it, and the message waits for it), so it gets the chat rather than a new window stuck behind its lock.
+  // It may as well be another profile's frozen tab: that one says so once unfrozen, and the chat goes to a new window.
+  const silent = windows.find((_, i) => !said[i]);
+  if (silent) {
+    await silent.focus?.().catch(() => undefined);
+    if ((await tellSilent(silent, message)) !== false) return;
   }
   // A new window of the app: it takes the chat (and the profile) from this message once it has started.
   const opened = await worker.clients.openWindow(`/#${data.path}`);
