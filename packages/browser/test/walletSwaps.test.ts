@@ -413,6 +413,10 @@ describe("redeeming a token", () => {
     mintApi.restore.mockRejectedValue(lost());
     const { wallet } = setup();
     await expect(wallet.receiveToken(TOKEN, "ecash-in", undefined, { payment: incoming })).rejects.toBeInstanceOf(SwapUnsettledError);
+    // Sent again at once (its payer's app repeats it): the mint is not asked again before the wallet's own time.
+    await expect(wallet.receiveToken(TOKEN, "ecash-in", undefined, { payment: incoming })).rejects.toBeInstanceOf(SwapUnsettledError);
+    expect(mintApi.completeSwap).toHaveBeenCalledOnce();
+    vi.setSystemTime(Date.now() + 30_000);
     mintApi.completeSwap.mockResolvedValueOnce(receiveAnswer());
     await expect(wallet.receiveToken(TOKEN, "ecash-in", undefined, { payment: incoming })).resolves.toEqual({ amount: 62, mint: MINT, fee: 2 });
     expect(await all<StoredPayment>(STORES.payments)).toMatchObject([{ id: "p1", amount: 62 }]);
