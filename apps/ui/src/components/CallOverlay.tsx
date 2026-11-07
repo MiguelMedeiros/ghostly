@@ -123,10 +123,15 @@ export function CallOverlay({
     }
   };
   const phone = window.innerWidth < 768;
+  // On a touch screen the small window's buttons take a thumb on 44 px (index.css): five of them, Hang up apart, and
+  // the row clear of the corner grips below it need 264 × 168. At 190 × 136 they were 32 px, 5 px apart.
+  const touch = typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
   const miniWindow = useFloatingBox(
     "ghostly_call_window_box",
-    () => (phone ? { x: window.innerWidth - 206, y: window.innerHeight - 240, w: 190, h: 136 } : { x: window.innerWidth - 364, y: window.innerHeight - 316, w: 340, h: 220 }),
-    { enabled: mini, minWidth: 190, minHeight: 128 },
+    () => (phone
+      ? touch ? { x: window.innerWidth - 280, y: window.innerHeight - 272, w: 264, h: 168 } : { x: window.innerWidth - 206, y: window.innerHeight - 240, w: 190, h: 136 }
+      : { x: window.innerWidth - 364, y: window.innerHeight - 316, w: 340, h: 220 }),
+    { enabled: mini, minWidth: touch ? 264 : 190, minHeight: touch ? 168 : 128 },
   );
 
   // Whole-screen, the call covers its chat: the focus comes into it and Tab stays in it, as with a ringing call. Not in

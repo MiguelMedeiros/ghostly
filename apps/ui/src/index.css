@@ -731,6 +731,65 @@ html[data-standalone="true"] {
   font-size: 13px;
 }
 
+/* On a touch screen every button of the small window takes a thumb on 44 px: they were 32 px, 5 px apart, the corner
+   button 30, and Hang up beside Share screen, where a thumb aimed at Share screen could end the call. Hang up stands
+   16 px apart from the others (6 px between those). Five in a row are 254 px: the window is 264 × 168 there at least
+   (CallOverlay.tsx), and the row sits 26 px up, above the corner grips (26 px), which were taking the bottom of the
+   end buttons. The corner button is 44 px at 4 px, the state line beside it, and the avatars in the 48 px between
+   them and the row, ring and all. */
+@media (pointer: coarse) {
+  .call-mini .call-resize {
+    top: 4px;
+    left: 4px;
+    width: 44px;
+    height: 44px;
+  }
+
+  .call-mini .call-resize svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .call-mini .call-top {
+    top: 16px;
+    left: 56px;
+  }
+
+  .call-mini .call-controls,
+  .call-mini .call-controls:has(> :nth-child(5)) {
+    bottom: 26px;
+    gap: 6px;
+  }
+
+  .call-mini .call-controls button,
+  .call-mini .call-controls:has(> :nth-child(5)) button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .call-mini .call-controls svg,
+  .call-mini .call-controls:has(> :nth-child(5)) svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .call-mini .call-controls > button:last-child {
+    margin-inline-start: 10px;
+  }
+
+  .call-mini .call-sides {
+    inset: 50px 0 70px;
+  }
+
+  .call-mini .call-share-notice {
+    bottom: 76px;
+  }
+
+  .call-mini .call-share-error {
+    bottom: 100px;
+  }
+}
+
 /* A low small window (a phone opens it 136 px high, a pulled corner stops at 128): the band is 48 to 56 px, and an
    avatar over its name with the ring around it (44 + 4 + 20 px, the ring 7 px out) covered the state line and ran
    into the buttons. Each side is a row instead, its avatar smaller, ring and all inside the band. Your own name goes
