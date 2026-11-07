@@ -1092,7 +1092,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       {/* Our call found no path to the contact (a VPN or firewall that blocks UDP, on either side): where a TURN server
           is set, and the guide. It stays until closed, so it is a line under the header, never over its controls. */}
       {(webrtc.noPath || noPathShown) && !webrtc.mediaProblem && (
-        <CallNoPathNotice iceServers={engine.state?.settings.iceServers} onClose={() => { webrtc.dismissNoPath(); setCallNoPath(sessionId, false); }} />
+        <CallNoPathNotice iceServers={engine.state?.settings.iceServers} returnFocus={optionsRef} onClose={() => { webrtc.dismissNoPath(); setCallNoPath(sessionId, false); }} />
       )}
       <ChatSearchBar search={search} />
       {appHere && <ChatAppResume linkId={appHere} />}
