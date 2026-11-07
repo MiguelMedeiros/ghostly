@@ -47,8 +47,9 @@ const SEQUENCE_BLOCK = 64;
 /** The wait before publication attempt `attempts + 1` of a text, or of a receipt the contact still asks for. */
 const backoff = (attempts: number) => Math.min(60_000, 4_000 * 2 ** attempts);
 /**
- * The contact's mailbox is read this often while this side is DHT-only (a contact that chose it is read at the chat's
- * pace: `ACTIVE_DHT_POLL_MS` open, or on a daemon, `peerDhtPollMs`), and otherwise…
+ * The contact's mailbox is read this often while this side is DHT-only, unless that contact is away with nothing of
+ * ours waiting on it (`dhtOnlyIdle`; a contact that chose it is read at the chat's pace: `ACTIVE_DHT_POLL_MS` open,
+ * or on a daemon, `peerDhtPollMs`), and otherwise…
  */
 const DHT_POLL_MS = 4_000;
 const STREAM_POLL_MS = 30_000;
@@ -1070,7 +1071,7 @@ export class DhtDelivery {
       if (!this.running) return;
       // Only the slow, periodic looks (every 5 minutes while live, every 30 s for a chat in the background) are
       // background requests, served from the relays' background share; a chat on screen, a first contact, DHT
-      // only, a drop or a text awaiting its receipt reads as signaling. The share also carries held items'
+      // only with the contact there, a drop or a text awaiting its receipt reads as signaling. The share also carries held items'
       // pointers, which a busy mailbox must not starve.
       const background = !this.urgent && this.pollMs >= STREAM_POLL_MS;
       const signal = this.signalReads > 0;
@@ -1120,7 +1121,7 @@ export class DhtDelivery {
     const unused = this.running ? this.unusedInviteAge(now) : undefined;
     const readers = countUnusedInvite(this.options.transport, this, unused !== undefined && !this.active && now >= this.fastUntil);
     if (unused !== undefined && !this.active && now >= this.fastUntil) return unusedInviteWait(unused, this.mode === "dht" ? DHT_POLL_MS : STREAM_POLL_MS, readers);
-    if (this.mode === "dht" || (this.state.peerMode === "dht" && now < this.leavingUntil) || now < this.fastUntil) return DHT_POLL_MS;
+    if ((this.mode === "dht" && !this.dhtOnlyIdle(now)) || (this.state.peerMode === "dht" && now < this.leavingUntil) || now < this.fastUntil) return DHT_POLL_MS;
     if (this.live) return LIVE_POLL_MS;
     // Our text awaits its receipt: the receipt is what the person is looking at.
     if (this.state.pending && this.state.pending.expires > now) return DHT_POLL_MS;
@@ -1132,6 +1133,19 @@ export class DhtDelivery {
     // hunt, 2026-11-07). Just started, a contact there is read at the background pace until its next envelope.
     const there = now - this.peerNewAt < PRESENCE_WINDOW;
     return this.state.peerMode === "dht" && this.options.peerDhtPollMs && there ? Math.min(this.options.peerDhtPollMs, STREAM_POLL_MS) : STREAM_POLL_MS;
+  }
+  /**
+   * This side is DHT only, and nothing waits on the contact's mailbox: the contact, pinned, is away (nothing new of its
+   * own in `PRESENCE_WINDOW`; it puts a keep-alive every four minutes while there), no text of ours awaits its receipt,
+   * and the chat is not on screen. Its mailbox is then read at the background pace, as background reads, not every 4 s:
+   * a daemon with 50 such chats looked each contact up on the Mainline DHT every ~3 s, 1,081 lookups a minute for as
+   * long as it ran, since its relays' budget held those reads and a held read nobody marked background goes to the DHT.
+   * The contact's next envelope (its first on coming back, or a text) is read at the next of those reads, and the
+   * 4 s pace is back from there. Just started, a contact there is read so until its next envelope too.
+   */
+  private dhtOnlyIdle(now: number): boolean {
+    if (this.active || !this.options.credentials.peerKey || now - this.peerNewAt < PRESENCE_WINDOW) return false;
+    return !(this.state.pending && this.state.pending.expires > now);
   }
   /**
    * How long ago this side's invite was made (or joined), while nobody used it (or its inviter never answered,
