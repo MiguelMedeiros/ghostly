@@ -117,16 +117,27 @@ test.describe("on a phone a system line that wraps", () => {
     await expect(page.locator("html")).toHaveAttribute("dir", dir);
   };
 
-  /** The contact's joined line (not mine) wraps, and its ⋮ is inside the screen and a 44 px target where a tap lands. */
-  const checkJoined = async ({ page }: Peer, mine: string, label: string) => {
+  /**
+   * The contact's joined line (not mine) wraps, and its ⋮ is inside the screen and a 44 px target where a tap lands. How
+   * wide the line is depends on the machine's fonts (GitHub's runner has no Japanese one and draws narrower boxes): the
+   * screen narrows 20 px at a time, down to 280, until the line takes two lines.
+   */
+  const checkJoined = async ({ page }: Peer, mine: string, language: string) => {
     const line = page.getByTestId("join-line").filter({ hasNotText: mine });
     await expect(line).toHaveCount(1, { timeout: 30_000 });
     const row = page.locator("[data-message-row]").filter({ has: line });
     const options = row.getByTestId("message-options");
-    await row.scrollIntoViewIfNeeded();
-    // Two lines of text: otherwise the line has room to spare and this proves nothing.
-    expect((await line.boundingBox())!.height, `${label}: the contact's joined line wraps`).toBeGreaterThan(36);
-    const vw = page.viewportSize()!.width;
+    const { width: start, height } = page.viewportSize()!;
+    let vw = start;
+    for (;;) {
+      await row.scrollIntoViewIfNeeded();
+      // Two lines of text: otherwise the line has room to spare and this proves nothing.
+      if ((await line.boundingBox())!.height > 36) break;
+      expect(vw - 20, `${language}: the contact's joined line wraps from ${start} down to 280 px`).toBeGreaterThanOrEqual(280);
+      vw -= 20;
+      await page.setViewportSize({ width: vw, height });
+    }
+    const label = `${language} at ${vw} px`;
     const box = (await options.boundingBox())!;
     expect(box.x, `${label}: the ⋮ starts inside the screen`).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width, `${label}: the ⋮ ends inside the screen`).toBeLessThanOrEqual(vw);
@@ -142,13 +153,13 @@ test.describe("on a phone a system line that wraps", () => {
     await connect(alice, bob);
 
     await speak(alice, "ja", "ltr");
-    await checkJoined(alice, "あなたがチャットに参加しました", "ja at 375 px");
+    await checkJoined(alice, "あなたがチャットに参加しました", "ja");
     await alice.page.screenshot({ path: testInfo.outputPath("joined-ja-375.png") });
 
     // Arabic's line is shorter: it wraps on the narrowest phone, with the ⋮ at the left edge.
     await alice.page.setViewportSize({ width: 320, height: 568 });
     await speak(alice, "ar", "rtl");
-    await checkJoined(alice, "انضممت إلى المحادثة", "ar at 320 px");
+    await checkJoined(alice, "انضممت إلى المحادثة", "ar");
     await alice.page.screenshot({ path: testInfo.outputPath("joined-ar-320.png") });
 
     await speak(alice, "en", "ltr");
