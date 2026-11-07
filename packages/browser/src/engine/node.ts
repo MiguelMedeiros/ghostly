@@ -729,6 +729,11 @@ export interface NodeOptions {
   /** How long a chat reads a contact that left a live session no slower than the idle pace (GhostLink `watchPeerIdleMs`): the CLI's daemon, `DAEMON_WATCH_PEER_IDLE_MS`. */
   watchPeerIdleMs?: number;
   /**
+   * How often a chat reads a contact that chose DHT only, on screen or not (GhostLink `dht.peerDhtPollMs`): the CLI's
+   * daemon, where every chat is open, `ACTIVE_DHT_POLL_MS`. Absent: at the background pace off screen.
+   */
+  peerDhtPollMs?: number;
+  /**
    * Tests only: group links behave as before they could go native (WISP 902 § Transports): WebRTC alone, no `_tr` read
    * or published, no native endpoint. A compatibility test runs this app as one from before against a current one.
    */
@@ -8409,6 +8414,7 @@ export class GhostlyNode implements EngineImplementation {
       },
         // Started again: the first control envelope goes after the links' first packets (a text or a receipt at once).
         firstControlAfterMs: STARTUP_QUIET_MS,
+        ...(this.options.peerDhtPollMs ? { peerDhtPollMs: this.options.peerDhtPollMs } : {}),
         // The capability record's revision rides every envelope; a newer one from the contact is read (WISP 03).
         capsRev: () => live.caps?.rev, peerCapsRev: rev => live.caps?.peerRev(rev),
         // A contact whose record lacks dht-text/1 gets nothing on the DHT: what would go there waits for live.

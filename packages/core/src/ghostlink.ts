@@ -712,6 +712,8 @@ export interface GhostLinkOptions {
   deviceCapabilities?: readonly DeviceCapability[];
   dht?: {
     state?: DhtDeliveryState; save(state: DhtDeliveryState): Promise<void>; pollMs?: number;
+    /** How often a contact that chose DHT only is read with the chat in the background (a CLI daemon's, `DhtDelivery`). */
+    peerDhtPollMs?: number;
     /** A chat already paired, started again: its first control envelope waits this long (`DhtDelivery`). */
     firstControlAfterMs?: number;
     /** This side's capability-record revision, told in every envelope (WISP 03). */
@@ -1138,6 +1140,7 @@ export class GhostLink {
     this.dht = options.params.profile && options.pairing && options.dht ? new DhtDelivery({
       params: options.params, mode: this.deliveryMode, state: options.dht.state, credentials: options.pairing.credentials, transport: options.transport,
       save: options.dht.save, pollMs: options.dht.pollMs, firstControlAfterMs: options.dht.firstControlAfterMs,
+      ...(options.dht.peerDhtPollMs && { peerDhtPollMs: options.dht.peerDhtPollMs }),
       ...(backsOff && { inviteMadeAt: options.madeAt ?? Date.now() }),
       capsRev: options.dht.capsRev, peerCapsRev: options.dht.peerCapsRev, peerAcceptsText: options.dht.peerAcceptsText, peerAcceptsFile: options.dht.peerAcceptsFile,
       ...(options.dht.ratchet && { ratchet: options.dht.ratchet }),
