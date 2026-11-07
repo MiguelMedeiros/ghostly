@@ -651,6 +651,10 @@ export class RelayTransport implements PkarrTransport {
   private readonly hedgeMs: number;
   /** Until when each relay found slow (`SLOW_MS`) goes after the others in a read (`readOrder`). */
   private readonly slowUntil = new Map<string, number>();
+  /** Per relay, when each of this client's requests still waiting for its answer went out (`unanswering`). */
+  private readonly waiting = new Map<string, Set<{ at: number }>>();
+  /** When each relay last answered a request of this client, whatever it said (`unanswering`). */
+  private readonly answeredAt = new Map<string, number>();
   /** Keys whose last read was answered 404: their next read hedges later (`HEDGE_MISSING_MS`). */
   private readonly missing = new Set<string>();
   private readonly listeners = new Set<(change?: DiscoveryChange) => void>();
@@ -1220,7 +1224,8 @@ export class RelayTransport implements PkarrTransport {
   }
 
   /**
-   * The order a key's read asks the relays in: in turn per key (see `resolve`), relays found slow lately last. A relay
+   * The order a key's read asks the relays in: in turn per key (see `resolve`), relays found slow lately or leaving a
+   * request unanswered (`unanswering`) last. A relay
    * with a small share of its own (`RELAY_REQUESTS_PER_MINUTE` under `REQUESTS_PER_MINUTE`: pkarr.miguelmedeiros.dev's 5)
    * takes no turns: it comes after the others, for when they refuse, fail or are slow, unless every relay is one. In the
    * turn, it was spent in seconds and the relay after it took its turns too: pkarr.pubky.org got two reads in three and
@@ -1234,8 +1239,20 @@ export class RelayTransport implements PkarrTransport {
     const after = lastAt < 0 ? -1 : ring.findIndex((relay) => this.relays.indexOf(relay) > lastAt);
     const start = lastAt < 0 ? this.cursor++ : after < 0 ? 0 : after;
     const turn = [...ring.map((_, i) => ring[(start + i) % ring.length]), ...this.relays.filter((relay) => !ring.includes(relay))];
-    const now = Date.now(), slow = (relay: string) => (this.slowUntil.get(relay) ?? 0) > now;
-    return [...turn.filter((relay) => !slow(relay)), ...turn.filter(slow)];
+    const now = Date.now(), behind = (relay: string) => (this.slowUntil.get(relay) ?? 0) > now || this.unanswering(relay, now);
+    return [...turn.filter((relay) => !behind(relay)), ...turn.filter(behind)];
+  }
+
+  /**
+   * A request of this client has waited on the relay for `HEDGE_MS` and it has answered none since: it goes after the
+   * others in a read (`readOrder`), at no cost of a request. A relay that took connections and never answered held a
+   * fresh device's first pairing at its turn: the key's last read had found nothing (`HEDGE_MISSING_MS`), so the read
+   * waited 6 s on it before asking the relay that had held the packet all along (8 s join to live, not 2.5 s).
+   */
+  private unanswering(relay: string, now: number): boolean {
+    const since = this.answeredAt.get(relay) ?? -Infinity;
+    for (const request of this.waiting.get(relay) ?? []) if (request.at > since && now - request.at >= this.hedgeMs) return true;
+    return false;
   }
 
   /** One GET of a key at one relay, which `controller` drops. Never rejects: what happened is the outcome. */
@@ -1873,14 +1890,20 @@ export class RelayTransport implements PkarrTransport {
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     const drop = () => controller.abort();
     cancel?.addEventListener("abort", drop, { once: true });
+    // The relay is the URL up to the key (`unanswering`).
+    const relay = url.slice(0, url.lastIndexOf("/")), request = { at: Date.now() };
+    const waiting = this.waiting.get(relay) ?? new Set<{ at: number }>();
+    this.waiting.set(relay, waiting.add(request));
     try {
       // Relays answer with `cache-control: max-age=300`; polling needs fresh data.
       const sent = Date.now();
       const response = await this.fetchFn(url, { ...init, cache: "no-store", signal: controller.signal });
+      this.answeredAt.set(relay, Date.now());
       this.serverTime(url, response, sent);
       await read?.(response, controller.signal);
       return response;
     } finally {
+      waiting.delete(request);
       clearTimeout(timer);
       cancel?.removeEventListener("abort", drop);
     }
