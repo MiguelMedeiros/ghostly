@@ -1335,15 +1335,11 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
   if (parsed.options.reply !== undefined) params.reply = parsed.options.reply;
   if (!spec.message) Object.assign(params, (await import("./buttons")).buttonsOf(parsed.options));
   print(await withSession(g, (s) => {
-    if (spec.target === "chat") {
-      // A one-shot leaves once its command is done: by default it stays until the message went out.
-      params.wait = parsed.options.wait ?? (s.mode === "one-shot" ? (spec.message ? "confirmed" : "sent") : "none");
-      if (parsed.options.timeout !== undefined) params.timeout = parsed.options.timeout;
-    } else {
-      // A group has no receipts: `--wait sent` waits until an edge took it. None by default.
-      if (parsed.options.wait !== undefined) params.wait = parsed.options.wait;
-      if (parsed.options.timeout !== undefined) params.timeout = parsed.options.timeout;
-    }
+    // The wait is the API's own when none is given: a one-shot's in a chat stays until the message went out or the edit
+    // was confirmed, but not on a chat nobody joined yet. A group has no receipts: `--wait sent` waits until an edge took
+    // it. None by default.
+    if (parsed.options.wait !== undefined) params.wait = parsed.options.wait;
+    if (parsed.options.timeout !== undefined) params.timeout = parsed.options.timeout;
     return s.call(spec.method, params);
   }, { deferGroups: spec.target === "chat", deferChats: spec.target === "chat" }));
 }

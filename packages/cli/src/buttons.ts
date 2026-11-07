@@ -1,7 +1,7 @@
 import { BUTTONS_CAPABILITY, BUTTON_STYLES, STATUS_CARD_LIMITS, buttonLabelClash, checkStatusCard, randomBytes, toBase64Url, type ButtonsCard } from "@ghostly/core";
 import type { LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import type { Parsed } from "./args";
-import { bool, chatOrGroup, messageOf, node, num, oneOf, str, type Method, type Params } from "./apiKit";
+import { bool, chatOrGroup, messageOf, node, num, oneOf, oneShotWaits, str, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 import { findSecret, secretWords } from "./secretGuard";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
@@ -145,7 +145,7 @@ async function pressButton(ctx: Parameters<Method>[0], params: Params): Promise<
   if (!button) throw new CliError("not_found", `That message has no button ${JSON.stringify(buttonId)}; its buttons: ${message.card.buttons.map((b) => b.id).join(", ")}`);
   const wait = target.group
     ? oneOf(params, "wait", ["none", "sent"] as const, "none")
-    : oneOf(params, "wait", ["none", "sent", "delivered"] as const, ctx.mode === "one-shot" ? "sent" : "none");
+    : oneOf(params, "wait", ["none", "sent", "delivered"] as const, oneShotWaits(ctx, target.linkId) ? "sent" : "none");
   const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
   const result = await node(ctx).pressButton({ linkId: target.linkId, messageId: message.id, buttonId });
   if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error, result.paced ? { paced: true } : undefined);

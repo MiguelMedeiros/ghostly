@@ -274,6 +274,28 @@ export function startNamedChats(ctx: ApiContext, params: Params): void {
 
 export const chatOf = (ctx: ApiContext, params: Params) => findChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
 
+/** A chat of mine whose invite nobody took yet: no contact's key, so nothing goes out until they join. */
+export const nobodyJoined = (link: LinkView): boolean => !!(link.profile && link.inviteCode && !link.peerParticipationKey);
+
+/** `nobodyJoined` by the chat's id: a group's (`group:<id>`) is never one. */
+export const nobodyJoinedChat = (ctx: ApiContext, chat: string): boolean => {
+  const link = state(ctx).links.find((l) => l.id === chat);
+  return !!link && nobodyJoined(link);
+};
+
+/**
+ * Whether a one-shot waits by default on what it did in a 1:1 chat: it leaves with its process, so it stays until that
+ * went out or the contact confirmed it. Not on a chat nobody joined yet: there is no one to wait for, and `edit`, `react`,
+ * `pin`, a card or a file sat their whole wait (a file 300 s), then failed `timeout`, exit 4, which a bot retries: one
+ * more card or file each time. What was done is kept and goes once they join; the answer says so (`keptForJoin`).
+ */
+export const oneShotWaits = (ctx: ApiContext, chat: string): boolean => ctx.mode === "one-shot" && !nobodyJoinedChat(ctx, chat);
+
+/** An answer's `note` on a chat nobody joined yet: `what` is kept and goes once they join. Nothing on any other chat. */
+export const keptForJoin = (ctx: ApiContext, chat: string, what: string): { note?: string } => nobodyJoinedChat(ctx, chat)
+  ? { note: `Nobody joined this chat yet: ${what} goes once they join${ctx.mode === "one-shot" ? " while this profile is online (`ghostly daemon --detach`)" : ""}` }
+  : {};
+
 /**
  * A chat whose invite nobody took yet: nobody is there to pay or to dial, and its stage says so. Before, `chat pay`
  * waited 15 s and `chat connect` 25 s for the contact, then answered `engine`. A chat whose invite someone else used
@@ -281,7 +303,7 @@ export const chatOf = (ctx: ApiContext, params: Params) => findChat(state(ctx).l
  * then answered `timeout`, a code a bot retries).
  */
 export function inviteTaken(link: LinkView): void {
-  if (link.profile && link.inviteCode && !link.peerParticipationKey) throw new CliError("unavailable", "Nobody joined this chat yet: its invite is still waiting to be taken");
+  if (nobodyJoined(link)) throw new CliError("unavailable", "Nobody joined this chat yet: its invite is still waiting to be taken");
   if (link.dhtDelivery?.inviteTaken && link.textDelivery !== "stream") throw new CliError("refused", INVITE_TAKEN);
 }
 

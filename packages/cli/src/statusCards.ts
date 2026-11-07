@@ -1,7 +1,7 @@
 import { STATUS_CARD_LIMITS, cardLine, checkStatusCard, randomBytes, statusCardBytes, toBase64Url, type StatusCard } from "@ghostly/core";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
 import { findSecret, secretWords } from "./secretGuard";
-import { bool, chatOrGroup, node, num, oneOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOrGroup, keptForJoin, node, num, oneOf, oneShotWaits, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError, asCliError } from "./errors";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 
@@ -219,7 +219,7 @@ async function sendCard(ctx: ApiContext, params: Params, kind: Kind): Promise<Re
   // A one-shot leaves once its command is done, and the card with it: in a chat it stays until it went out, as `send`.
   const wait = target.group
     ? oneOf(params, "wait", ["none", "sent"] as const, "none")
-    : oneOf(params, "wait", ["none", "sent", "delivered"] as const, ctx.mode === "one-shot" ? "sent" : "none");
+    : oneOf(params, "wait", ["none", "sent", "delivered"] as const, oneShotWaits(ctx, target.linkId) ? "sent" : "none");
   const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
   if (target.group) {
     const result = await node(ctx).sendGroupMessage({ groupId: target.id, text, card });
@@ -234,7 +234,7 @@ async function sendCard(ctx: ApiContext, params: Params, kind: Kind): Promise<Re
   carried(carriersOf(ctx), carrierKey(target.linkId, kind, id), result.messageId);
   let message = await node(ctx).getMessage(target.linkId, result.messageId);
   if (wait !== "none") message = await waitForMessage(ctx, target.linkId, result.messageId, wait, ms);
-  return answer(target, kind, id, result.messageId, { card, delivery: message?.delivery ?? null });
+  return answer(target, kind, id, result.messageId, { card, delivery: message?.delivery ?? null, ...keptForJoin(ctx, target.linkId, "the card") });
 }
 
 /** Edits the card's message with its merged card, now. */
@@ -266,7 +266,7 @@ async function updateCard(ctx: ApiContext, params: Params, kind: Kind): Promise<
   // In a chat a one-shot stays until the contact confirmed the update, as `edit`: the process leaving took it along.
   const wait = target.group
     ? oneOf(params, "wait", ["none", "sent"] as const, "none")
-    : oneOf(params, "wait", ["none", "confirmed"] as const, ctx.mode === "one-shot" ? "confirmed" : "none");
+    : oneOf(params, "wait", ["none", "confirmed"] as const, oneShotWaits(ctx, target.linkId) ? "confirmed" : "none");
   const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
   const last = Math.max(pace.last, message.edit?.at ?? message.timestamp);
   const due = last + CARD_UPDATE_GAP_MS - Date.now();
@@ -297,7 +297,7 @@ async function updateCard(ctx: ApiContext, params: Params, kind: Kind): Promise<
   return answer(target, kind, id, message.id, {
     card, queued, edits: edited?.edit?.seq ?? 0,
     // An update still waiting for its time went nowhere yet: it is not confirmed, whatever the message's last edit says.
-    ...(target.group ? { ...(edges !== undefined && { edges }) } : { confirmed: (!queued || wait !== "none") && !!edited && !edited.edit?.pending }),
+    ...(target.group ? { ...(edges !== undefined && { edges }) } : { confirmed: (!queued || wait !== "none") && !!edited && !edited.edit?.pending, ...keptForJoin(ctx, target.linkId, "the update") }),
   });
 }
 
@@ -330,7 +330,7 @@ async function reportUsage(ctx: ApiContext, ref: string, fields: Record<string, 
   checked(report);
   const sent = await cardMessage(ctx, target, "usage", id).catch(() => undefined);
   // A one-shot's report in a chat stays until it went out (a new card) or the contact confirmed it (an update).
-  const wait = oneOf(params, "wait", ["none", "sent"] as const, !target.group && ctx.mode === "one-shot" ? "sent" : "none");
+  const wait = oneOf(params, "wait", ["none", "sent"] as const, !target.group && oneShotWaits(ctx, target.linkId) ? "sent" : "none");
   if (!sent || (sent.edit?.seq ?? 0) >= STATUS_CARD_LIMITS.edits) {
     const answer = await sendCard(ctx, { ...params, chat: ref, card: report, wait }, "usage");
     return { ...answer, updated: false };
