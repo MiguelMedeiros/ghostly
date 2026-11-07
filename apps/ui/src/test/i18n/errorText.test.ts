@@ -205,6 +205,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["testnut.example has not paid its test coins yet: they show up here once it does", `${BROWSER}/engine/wallet.ts`, " has not paid its test coins yet: they show up here once it does"],
   ["Select a configured mint", `${BROWSER}/engine/wallet.ts`],
   ["That is not a valid ecash token", `${BROWSER}/engine/wallet.ts`],
+  // Redeem of a token whose keyset its mint does not have (a crafted token, or one of a keyset the mint dropped): the library's words.
+  ["Keyset '009a1f293253e41e' is not a keyset of this mint", "node_modules/@cashu/cashu-ts/lib/cashu-ts.es.js", "' is not a keyset of this mint"],
   ["Ecash from mint.example is not accepted", `${BROWSER}/engine/wallet.ts`, " is not accepted"],
   ["Add a mint in Settings first", `${BROWSER}/engine/wallet.ts`],
   ["Not enough sats in your wallet", CODES],

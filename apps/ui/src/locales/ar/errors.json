@@ -42,6 +42,8 @@
     "selectMint": "اختر دار سكّ مهيّأة",
     "testCoinsPending": "لم ترسل {{host}} العملات التجريبية بعد",
     "testCoinsPendingNext": "ستظهر هنا عند وصولها.",
+    "unknownKeyset": "دار سك هذا الـ ecash لا تعرفه",
+    "unknownKeysetNext": "لا يمكن استرداده. اطلب ecash جديدًا ممن أرسله.",
     "unreachable": "تعذر الوصول إلى {{host}}",
     "unreachableNext": "تحقق من العنوان: يجب أن يكون دار سك Cashu."
   },

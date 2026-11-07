@@ -42,6 +42,8 @@
     "selectMint": "请选择一个已配置的铸币厂",
     "testCoinsPending": "{{host}} 还没有发送测试币",
     "testCoinsPendingNext": "到账后会显示在这里。",
+    "unknownKeyset": "此 ecash 的铸币厂不认识它",
+    "unknownKeysetNext": "它无法兑换。请向发送者索要新的 ecash。",
     "unreachable": "无法连接 {{host}}",
     "unreachableNext": "请检查地址：它应当是一个 Cashu 铸币厂。"
   },

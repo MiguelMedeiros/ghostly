@@ -42,6 +42,8 @@
     "selectMint": "Selecciona un mint configurado",
     "testCoinsPending": "{{host}} aún no envió las monedas de prueba",
     "testCoinsPendingNext": "Aparecen aquí cuando lleguen.",
+    "unknownKeyset": "El mint de este ecash no lo reconoce",
+    "unknownKeysetNext": "No se puede canjear. Pide un ecash nuevo a quien te lo envió.",
     "unreachable": "No se llega a {{host}}",
     "unreachableNext": "Revisa la dirección: debe ser un mint Cashu."
   },
