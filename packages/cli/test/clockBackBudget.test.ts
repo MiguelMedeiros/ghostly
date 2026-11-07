@@ -75,7 +75,11 @@ describe("a daemon after the device clock is set back", { timeout: 120_000 }, ()
     // Before: 3-4 of the 50 after an hour back, 0-8 relay reads a minute (47-60 with no step). The minute of the step
     // counts as just spent, at most.
     expect(rows.filter((row) => read.has(row.peerPubKeyZ32)).length).toBeGreaterThanOrEqual(48);
-    expect(Math.min(...perMinute.slice(2))).toBeGreaterThan(30);
+    // The rate, and no minute stalled. Not more than 30 in every single minute: the minutes are fake but the reads wait on
+    // real work, so on a loaded runner one minute's reads spill into the next (26-29 then 58-60 under a 40% CPU quota).
+    const later = perMinute.slice(2);
+    expect(later.reduce((sum, n) => sum + n, 0) / later.length).toBeGreaterThan(30);
+    expect(Math.min(...later)).toBeGreaterThan(10);
   });
 
   it("set back an hour: a chat opened reads its contact at once", async () => {
