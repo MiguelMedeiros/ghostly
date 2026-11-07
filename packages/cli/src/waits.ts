@@ -17,7 +17,7 @@ const DELIVERY_RANK: Record<string, number> = { sending: 0, waiting: 1, queued: 
  * What a timed-out wait says of what happens next: a daemon goes on, a one-shot's profile closes now. A one-shot's
  * `edit` and `group edit` said "while this profile is online" too, as it was about to leave. Ctrl-C says the same.
  */
-const goesOn = (ctx: ApiContext) => ctx.mode === "daemon" && stopped(ctx) ? "goes by itself once this profile is online again" : goesOnIn(ctx.mode);
+export const goesOn = (ctx: ApiContext) => ctx.mode === "daemon" && stopped(ctx) ? "goes by itself once this profile is online again" : goesOnIn(ctx.mode);
 
 /**
  * A daemon that stops (`ApiContext.stopping`) ends every wait still open at once, with what it knows, as a timeout:
