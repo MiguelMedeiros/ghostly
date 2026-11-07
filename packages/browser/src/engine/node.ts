@@ -13,7 +13,7 @@ import type { SparkPrepared } from "./paymentAdapters/spark";
 import { PaymentCoordinator } from "./paymentAdapters/coordinator";
 import { intentRepository } from "./paymentAdapters/persistence";
 import type { ArkPrepared } from "./paymentAdapters/arkade";
-import { CashuAdapter } from "./paymentAdapters/cashu";
+import { CashuAdapter, swapSettledAt } from "./paymentAdapters/cashu";
 import { AskBackoff } from "./askBackoff";
 import type { CashuPrepared } from "./wallet";
 import { CASHU_CARD, LightningCards } from "./paymentAdapters/providers/lightningCards";
@@ -2208,8 +2208,12 @@ export class GhostlyNode implements EngineImplementation {
         const network=walletNetworkOf(review.network);
         if((review.method==="arkade" && !this.arkWallets[network].adapter) || (review.method==="bark" && !this.barkWallets[network].adapter) || (review.method==="spark" && !this.sparkWallets[network].adapter) || (review.method==="usdt" && !this.usdtWallets[network].adapter) || (review.method==="bitcoin" && !this.bitcoins[network].sources.active) || (review.method==="fedimint" && !this.fedimintWallets[network].federation(review.provider)))continue;
         const after=await this.reconcilePayment({id:review.id}).catch(()=>review);
-        // A token out and not taken yet: new for its first minute. A swap with no token yet keeps the poll's pace.
-        if(review.method==="cashu" && (saved!.prepared as CashuPrepared).token && ["submitted","unknown"].includes(after.state))this.cashuPayAsk.missed(id,Date.now(),Date.now()<(review.submittedAt ?? review.createdAt)+60_000);
+        // A token out and not taken yet: new for its first minute. A swap with no token yet (its mint gave no answer):
+        // new while it may still land, so the mint's word that it never did is asked at once after that.
+        if(review.method==="cashu" && ["submitted","unknown"].includes(after.state)){
+          const prepared=saved!.prepared as CashuPrepared;
+          this.cashuPayAsk.missed(id,Date.now(),Date.now()<(prepared.token?(review.submittedAt ?? review.createdAt)+60_000:swapSettledAt(review,prepared)));
+        }
       }
     } finally {if(!this.shuttingDown)this.paymentTimer=setTimeout(()=>void this.pollPaymentStatus(),10000);}
   }
