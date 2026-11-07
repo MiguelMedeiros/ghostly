@@ -54,9 +54,10 @@ export type ChatTaken = { taken: boolean };
 export const OPEN_ASK_MS = 500;
 
 /**
- * How long the push worker waits for a window it only guessed at (`silent` `open-chat`) to take the chat or hand it back:
- * a frozen one answers once focusing has unfrozen it. Well inside the time the browser lets a tap open a window (10 s in
- * Chromium); a page of an older build never answers, and then nothing more is opened.
+ * How long the push worker waits for a window on screen it only guessed at (`silent` `open-chat`) to take the chat or
+ * hand it back, before it focuses it: a busy one answers once its work is done. A hidden one, maybe frozen, waits only
+ * `OPEN_ASK_MS` (it answers once focusing has unfrozen it). Well inside the time the browser lets a tap open a window
+ * (10 s in Chromium); a page of an older build never answers, and then nothing more is opened.
  */
 export const OPEN_BACK_MS = 5000;
 

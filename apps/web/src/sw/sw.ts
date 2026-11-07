@@ -413,12 +413,12 @@ function askWindow(client: WindowClient): Promise<WindowSays | null> {
   });
 }
 
-/** Tells a window it only guessed at (`silent`) to open the chat; false when it hands it back, null when it says nothing in time. */
-function tellSilent(client: WindowClient, message: Extract<FromWorker, { type: "open-chat" }>): Promise<boolean | null> {
+/** Tells a window it only guessed at (`silent`) to open the chat; false when it hands it back, null when it says nothing within `wait`. */
+function tellSilent(client: WindowClient, message: Extract<FromWorker, { type: "open-chat" }>, wait: number): Promise<boolean | null> {
   return new Promise((resolve) => {
     const channel = new MessageChannel();
     const done = (taken: boolean | null) => { clearTimeout(timer); channel.port1.close(); resolve(taken); };
-    const timer = setTimeout(() => done(null), OPEN_BACK_MS);
+    const timer = setTimeout(() => done(null), wait);
     channel.port1.onmessage = ({ data }: MessageEvent<Partial<ChatTaken> | null>) => done(typeof data?.taken === "boolean" ? data.taken : null);
     try { client.postMessage({ ...message, silent: true }, [channel.port2]); } catch { done(null); }
   });
@@ -445,13 +445,19 @@ async function openFrom(notification: Shown): Promise<void> {
     open.postMessage(message);
     return;
   }
-  // None says it runs the profile, but one said nothing: it may be the profile's own, frozen or busy (focusing
-  // unfreezes it, and the message waits for it), so it gets the chat rather than a new window stuck behind its lock.
-  // It may as well be another profile's frozen tab: that one says so once unfrozen, and the chat goes to a new window.
+  // None says it runs the profile, but one said nothing: it may be the profile's own, frozen or busy, so it gets the chat
+  // rather than a new window stuck behind its lock. It may as well be another profile's: that one hands the chat back,
+  // and the chat goes to a new window. A tap lets the worker focus a window or open one, not both (Chromium refuses the
+  // second), so it is told before it is focused: one that hands the chat back has not spent the tap. Only a hidden page
+  // can be frozen, and it answers nothing until focusing unfreezes it (the message waits for it): that one is focused
+  // after `OPEN_ASK_MS`; one on screen is busy, and has `OPEN_BACK_MS` to answer.
   const silent = windows.find((_, i) => !said[i]);
   if (silent) {
-    await silent.focus?.().catch(() => undefined);
-    if ((await tellSilent(silent, message)) !== false) return;
+    const onScreen = silent.focused || silent.visibilityState === "visible";
+    if ((await tellSilent(silent, message, onScreen ? OPEN_BACK_MS : OPEN_ASK_MS)) !== false) {
+      await silent.focus?.().catch(() => undefined);
+      return;
+    }
   }
   // A new window of the app: it takes the chat (and the profile) from this message once it has started.
   const opened = await worker.clients.openWindow(`/#${data.path}`);
