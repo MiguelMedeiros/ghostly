@@ -177,9 +177,23 @@ describe("Profile, Devices", () => {
     const { engine } = renderApp(<DevicesSection />);
     // The handoff view keeps the name the device had when the move failed; the set has its new one.
     engine.on("deviceSet", () => set({ devices: set().devices.map((device) => (device.key === PHONE ? { ...device, name: "Pixel" } : device)) }));
-    engine.on("deviceHandoffView", () => ({ role: "giver", device: "iPhone", key: PHONE, step: "failed", bytes: 0, total: 0, failure: "password" }) satisfies HandoffView);
+    engine.on("deviceHandoffView", () => ({ role: "giver", device: "iPhone", key: PHONE, step: "failed", bytes: 0, total: 0, failure: "password", refused: true }) satisfies HandoffView);
     const row = await screen.findByTestId("handoff-wrong-password");
     await waitFor(() => expect(row).toHaveTextContent("Pixel tried to move this profile with a wrong password." + "Let Pixel try again"));
+  });
+
+  it("a wrong password before the device is refused: the row says so, with no Let <device> try again (WISP 06: only at 15)", async () => {
+    // At 1 and at 5 (locked out for an hour) the giver's view carries no `refused`: pressing it then would start the count again.
+    const { engine } = renderApp(<DevicesSection />);
+    let view: HandoffView = { role: "giver", device: "iPhone", key: PHONE, step: "failed", bytes: 0, total: 0, failure: "password" };
+    engine.on("deviceSet", () => set());
+    engine.on("deviceHandoffView", () => view);
+    const row = await screen.findByTestId("handoff-wrong-password");
+    expect(row).toHaveTextContent("iPhone tried to move this profile with a wrong password.");
+    expect(screen.queryByTestId("handoff-allow")).toBeNull();
+    // The fifteenth: refused until the person lets it try again.
+    view = { ...view, refused: true };
+    expect(await screen.findByTestId("handoff-allow", {}, { timeout: 3_000 })).toHaveTextContent("Let iPhone try again");
   });
 
   it("a move under way whose dialog was closed: its steps and Cancel stay in the section, and no second Move to is offered", async () => {
