@@ -65,7 +65,7 @@ const KEYFRAME_UNTIL_PICTURE: Duration = Duration::from_secs(1);
 /// The Ghostly window's page is out of sight (`native_pictures_shown`). The page draws no picture then
 /// (`Picture.show`), so each picture goes to it until one has gone, and the ones after are left out before they
 /// are scaled or made a JPEG: a video call's two took 6% of a core here, and 1 MB a second through Tauri's channel,
-/// for nobody. Back in sight, the next one goes.
+/// for nobody. Back in sight, the next one goes. A call's levels wait for it too ([`Shared::hears`]).
 pub static PAGE_HIDDEN: AtomicBool = AtomicBool::new(false);
 
 /// A JPEG frame for the page, or an event: whatever the page is told.
@@ -687,11 +687,22 @@ impl Shared {
 
     /// Where a side's loudness goes on its way to the page, for who is speaking: `{"levels":{"mic":0.4}}`, 0 to 1
     /// as Settings' meter reads it. `side` is "mic" for what the microphone sends (silence while muted) and
-    /// "peer" for the peer's sound. A level is said when it changes, so silence is said once.
+    /// "peer" for the peer's sound. A level is said when it changes, so silence is said once. None is said while
+    /// the page is out of sight ([`PAGE_HIDDEN`]): it draws no ring then, and a voice changes its level at nearly
+    /// every reading, 25 evals a second for both sides. Back in sight, the next reading is said.
     fn hears(self: &Arc<Self>, side: &'static str) -> Heard {
+        self.hears_while(side, &PAGE_HIDDEN)
+    }
+
+    /// [`Shared::hears`], none said while `hidden` is set.
+    fn hears_while(self: &Arc<Self>, side: &'static str, hidden: &'static AtomicBool) -> Heard {
         let shared = self.clone();
         let last = AtomicU64::new(u64::MAX);
         Arc::new(move |level: f64| {
+            if hidden.load(Ordering::Relaxed) {
+                last.store(u64::MAX, Ordering::Relaxed);
+                return;
+            }
             let hundredths = (level * 100.0).round() as u64;
             if last.swap(hundredths, Ordering::Relaxed) == hundredths
                 || shared.closed.load(Ordering::Relaxed)
@@ -2153,6 +2164,44 @@ mod tests {
         let shown = pictures.load(Ordering::Relaxed);
         assert!(shown > 1, "{shown} pictures shown once back in sight");
         assert_eq!(encoded.load(Ordering::Relaxed), shown);
+    }
+
+    /// The page out of sight: no level goes to it (12 a second each side while someone speaks, an eval each, for a
+    /// ring nobody sees), and back in sight the next reading is said, even one the same as the last said.
+    #[test]
+    fn out_of_sight_no_level_is_said_and_the_next_is_once_back() {
+        static HIDDEN: AtomicBool = AtomicBool::new(false);
+        let told = Arc::new(Mutex::new(Vec::<String>::new()));
+        let into = told.clone();
+        let shared = Arc::new(Shared {
+            fake: true,
+            events: Arc::new(move |bytes| {
+                into.lock().unwrap().push(String::from_utf8(bytes).unwrap());
+            }),
+            counts: Counts::default(),
+            ice: Mutex::new("new".into()),
+            told_connected: AtomicBool::new(false),
+            gathering: Gathering::default(),
+            receiving: Mutex::default(),
+            speaker: Mutex::default(),
+            sound: Mutex::default(),
+            pictures: AtomicBool::new(true),
+            closed: AtomicBool::new(false),
+        });
+        let heard = shared.hears_while("peer", &HIDDEN);
+        heard(0.4);
+        heard(0.4);
+        HIDDEN.store(true, Ordering::Relaxed);
+        for level in [0.5, 0.6, 0.0, 0.4] {
+            heard(level);
+        }
+        HIDDEN.store(false, Ordering::Relaxed);
+        heard(0.4);
+        heard(0.4);
+        assert_eq!(
+            *told.lock().unwrap(),
+            [r#"{"levels":{"peer":0.4}}"#, r#"{"levels":{"peer":0.4}}"#]
+        );
     }
 
     /// The page out of sight: a camera's preview is made a JPEG until one has gone to the page, then none, until it
