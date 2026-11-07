@@ -1086,7 +1086,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const refusedPayment = shownRefusal(message);
   if (refusedPayment) {
     return (
-      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x ${enter}`}>
+      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x system-row-x ${enter}`}>
         <div data-testid="refused-line" className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-surface-alt/80 text-text-secondary ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
           <span>{refusedLine(refusedPayment, t)}</span>
           <span className="text-text-muted text-[10px] whitespace-nowrap shrink-0">{time}</span>
@@ -1106,7 +1106,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     const pubKeyShort = joiner ? publicKeyLabel(joiner) : "";
 
     return (
-      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x ${enter}`}>
+      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x system-row-x ${enter}`}>
         <div data-testid="join-line" title={joiner || undefined} className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-blue-500/10 text-link ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
           <svg
             width="14"
@@ -1144,7 +1144,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     const isMissed = type === "call_missed" || type === "call_rejected" || type === "call_failed" || type === "call_unanswered";
     
     return (
-      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x ${enter}`}>
+      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x system-row-x ${enter}`}>
         <div
           className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
             isMissed

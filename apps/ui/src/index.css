@@ -1121,6 +1121,15 @@ html .toast-place.toast-place-page[data-at="top"] {
 @container message-list (width < 36rem) { .message-row-x { padding-inline: 10px; } }
 
 /*
+ * A system line (a contact joined, a call, a refused payment) with its ⋮ beside it: on a phone the ⋮'s hit area
+ * reaches 22px past its box towards the row's end (MessageBubble.tsx `MessageMenu`), more than the row's 10px, so a
+ * line long enough to wrap pushed it against the screen's edge, which cut the 44px a thumb needs to 33. The row keeps
+ * those 22px on both sides (the line stays centred, and in Arabic the ⋮ is on the left with the same room).
+ */
+@media (width < 48rem) { .message-row-x.system-row-x { padding-inline: 22px; } }
+@container message-list (width < 36rem) { .message-row-x.system-row-x { padding-inline: 22px; } }
+
+/*
  * A group member's picture beside the last bubble of a run of theirs, or its empty place beside the others
  * (chat/SenderAvatar.tsx): smaller on a phone, and gone in a very narrow chat (a 330px pane), where the bubbles need
  * the room and the name's colour alone tells who wrote.
