@@ -34,6 +34,7 @@ import { stopHeld } from "./lib/nowPlaying";
 import { groupRouteId } from "./lib/groups";
 import { sessionPeerKey } from "./lib/storage";
 import { useEngineValue } from "./lib/engineState";
+import { useServiceWindowsHideIp } from "./hooks/useServiceWindowsHideIp";
 
 /** The browser's status bar follows the header of whichever theme is active. */
 function useThemeColor() {
@@ -206,6 +207,8 @@ export function App() {
   // Desktop: the computer stays awake for a handoff, while the person keeps it so for a standby (WISP 06), and while a
   // file is on its way.
   useComputerAwake();
+  // Hide my IP from contacts turned on: the contacts' apps opened with it off close.
+  useServiceWindowsHideIp();
   const chats = useLoadedChats();
   useOnScreenLink();
   const mainRef = useRef<HTMLElement>(null);
