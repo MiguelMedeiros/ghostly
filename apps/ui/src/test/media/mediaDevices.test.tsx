@@ -661,6 +661,7 @@ describe("the call window's device menu", () => {
     notice: null,
     dismiss: vi.fn(),
     switchBack: vi.fn(),
+    hold: vi.fn(),
     ...over,
   });
 

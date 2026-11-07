@@ -30,6 +30,7 @@ function Call({ mini = false }: { mini?: boolean }) {
     notice,
     dismiss: () => setNotice(null),
     switchBack: () => setNotice(null),
+    hold: () => {},
   };
   return (
     <CallOverlay callState="connected" localStream={null} remoteStream={null} isMuted={false} isVideoOff canSendVideo remoteHasVideo={false}
