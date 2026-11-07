@@ -315,7 +315,8 @@ function Links() {
 
 /**
  * One of those devices. Check connection is there only while its link is connected: when the link drops under the
- * keyboard focus, the focus goes to this line, which now says Not connected, not to the page.
+ * keyboard focus, the focus goes to this line, which now says Not connected, not to the page. The name keeps its
+ * width (only one longer than the row is cut): on a narrow phone the button goes to a line of its own instead.
  */
 function LinkRow({ device, answer, onCheck }: { device: DeviceSetView["devices"][number]; answer?: string; onCheck(): void }) {
   const { t } = useI18n();
@@ -325,7 +326,7 @@ function LinkRow({ device, answer, onCheck }: { device: DeviceSetView["devices"]
   return (
     <li ref={row} data-testid="device-standby-link" data-status={device.status ?? "none"} className="flex flex-wrap items-center gap-3 px-4 py-3">
       <DeviceGlyph name={device.name} active={device.active} />
-      <div className="min-w-0 flex-1">
+      <div className="max-w-full flex-1">
         <p dir="auto" className="truncate text-text-primary">{device.name}</p>
         <p className="text-xs text-text-muted">
           {device.active ? `${t("devices.section.active")} · ` : ""}
@@ -336,7 +337,7 @@ function LinkRow({ device, answer, onCheck }: { device: DeviceSetView["devices"]
           {answer && <span data-testid="device-standby-check-result" role="status" className="block">{answer}</span>}
         </p>
       </div>
-      {live && <button type="button" data-testid="device-standby-check" onClick={onCheck} className="min-h-10 max-md:min-h-11 rounded-lg border border-border px-3 text-xs text-text-secondary hover:bg-surface-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">{t("devices.section.check")}</button>}
+      {live && <button type="button" data-testid="device-standby-check" onClick={onCheck} className="ms-auto min-h-10 max-md:min-h-11 rounded-lg border border-border px-3 text-xs text-text-secondary hover:bg-surface-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">{t("devices.section.check")}</button>}
     </li>
   );
 }
