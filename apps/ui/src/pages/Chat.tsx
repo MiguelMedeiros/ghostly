@@ -4,6 +4,7 @@ import { PeerAvatar } from "../components/Avatar";
 import { AvatarOpener } from "../components/AvatarViewer";
 import { useBackdropDismiss, useDialogFocus } from "../hooks/useDismiss";
 import { useComposition } from "../hooks/useComposition";
+import { useOpenedHeading } from "../hooks/useOpenedHeading";
 import { draftDirection } from "../lib/documentLanguage";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { setChatOnCall } from "../lib/chatsOnCall";
@@ -586,6 +587,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // Off screen (another chat opened while this one stays loaded), its Tech info closes, as a message's details do (`ChatOnScreen`).
   useEffect(() => { if (!visible) setShowTechInfo(false); }, [visible]);
   const labelInputRef = useRef<HTMLInputElement>(null), nameRef = useRef<HTMLButtonElement>(null);
+  // On a touch screen the focus goes to the chat's name as it opens, not to the page (hooks/useOpenedHeading.ts).
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useOpenedHeading(headingRef, visible ? sessionId : null);
   const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -934,8 +938,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
             ) : (
               <div className="flex items-center gap-1.5 max-md:gap-1 min-w-0">
               {/* The one way to rename the chat: a button, so the keyboard reaches it too. Inside the screen's heading,
-                  as a menu page's title is (layout/Page.tsx). */}
-              <h1 className="m-0 flex min-w-0 text-[15px] font-normal leading-tight">
+                  as a menu page's title is (layout/Page.tsx), focusable by the page alone, never by Tab. */}
+              <h1 ref={headingRef} tabIndex={-1} className="m-0 flex min-w-0 text-[15px] font-normal leading-tight outline-none">
               <button
                 type="button"
                 ref={nameRef}
