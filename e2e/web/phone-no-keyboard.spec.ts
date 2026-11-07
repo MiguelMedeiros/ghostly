@@ -57,7 +57,7 @@ test.describe("a touch screen: the focus as a chat opens", () => {
     await expect(input).not.toBeFocused();
 
     await page.getByTestId("chat-back").click();
-    await page.getByTestId("chat-row-open").first().click();
+    await page.getByTestId("chat-row").first().click();
     await expect(input).toBeVisible();
     await expect(chatHeading).toBeFocused();
     await expect(input).not.toBeFocused();
@@ -69,7 +69,7 @@ test.describe("a touch screen: the focus as a chat opens", () => {
     await page.getByTestId("new-group-create").click();
     await page.getByTestId("group-share-dialog").getByTestId("group-share-done").click();
     await page.getByTestId("group-chat").getByTestId("chat-back").click();
-    await page.getByTestId("group-row").filter({ hasText: "Quiet" }).getByTestId("group-row-open").click();
+    await page.getByTestId("group-row").filter({ hasText: "Quiet" }).click();
     const groupInput = page.getByTestId("group-chat").getByPlaceholder("Message…");
     await expect(groupInput).toBeVisible();
     await expect(page.getByTestId("group-name")).toBeFocused();
