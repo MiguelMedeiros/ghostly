@@ -563,7 +563,8 @@ function DeviceMenu({ devices }: { devices: CallDevices }) {
   );
 }
 
-/** A device went away and the default took over (or none could), the chosen one is back (with the way to switch to it), or one chosen could not be used. */
+/** A device went away and the default took over (or none could), the chosen one is back (with the way to switch to it), or one chosen could not be used.
+ *  On a phone its buttons take a tap on 44 px (`.tap-target`): the ×'s grows into the 12 px gap, up to Switch back. */
 function DeviceNoticeBar({ devices }: { devices: CallDevices }) {
   const { t } = useI18n();
   const notice = devices.notice!;
@@ -574,12 +575,12 @@ function DeviceNoticeBar({ devices }: { devices: CallDevices }) {
       <span className="min-w-0 truncate">{t(NOTICE_TEXT[notice.type], { name })}</span>
       {notice.type === "back" && (
         <button type="button" data-testid="call-device-switch-back" onClick={devices.switchBack}
-          className="shrink-0 rounded-full bg-accent text-on-accent px-2.5 py-1 font-medium cursor-pointer hover:bg-accent-hover">
+          className="tap-target shrink-0 rounded-full bg-accent text-on-accent px-2.5 py-1 font-medium cursor-pointer hover:bg-accent-hover">
           {t("calls.devices.switchBack")}
         </button>
       )}
       <button type="button" onClick={devices.dismiss} aria-label={t("common.close")} title={t("common.close")}
-        className="shrink-0 grid place-items-center w-5 h-5 rounded-full text-white/70 hover:text-white cursor-pointer">
+        className="tap-target shrink-0 grid place-items-center w-5 h-5 rounded-full text-white/70 hover:text-white cursor-pointer">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
       </button>
     </div>
