@@ -113,6 +113,16 @@ export class Outbox {
    * was written after one goes only once it has (`behindUnsent`), so the contact reads them in order.
    */
   private unsent = new Map<string, number>();
+  /**
+   * Texts found waiting behind an unsent one, with their time. While that one cannot go in a turn (`parkedBehind`), a
+   * look does not read them: none of them can go before it, and each new text read every one of them again, 200 rows
+   * per send with 200 waiting.
+   */
+  private behind = new Map<string, number>();
+  /** The unsent texts this turn read and found still to go: read once per turn, not once per text behind them. */
+  private stillUnsent = new Map<string, StoredMessage>();
+  /** Unsent texts whose followers this turn's look did not read: they go at their own check, not in this turn. */
+  private parked = new Set<string>();
   /** Still in flight when the look a reopened chat asked for began (`flush({ reopened })`): sent again once that send returns. */
   private reopenedWhileBusy = new Set<string>();
   /** The turns taken so far, one after the other (`turn`). */
@@ -189,6 +199,8 @@ export class Outbox {
       // A link that closed since: what was unconfirmed on it is queued again before anything else goes.
       if (this.dropped) { this.dropped = false; await this.requeueUnconfirmed(); }
       this.began = this.closed;
+      this.stillUnsent.clear();
+      this.parked.clear();
       return run();
     });
     this.line = before.then(() => new Promise<void>(next => {
@@ -273,10 +285,36 @@ export class Outbox {
    * are never more than the history.
    */
   private async look(id?: string): Promise<StoredMessage[]> {
-    if (!this.store.get || !this.known || (!this.store.getMany && this.waiting.size + this.receipts.size + this.onTheirWay.size > KNOWN_ROWS)) return this.store.read();
-    const ids = new Set([...(id === undefined ? [] : [id]), ...this.waiting.keys(), ...this.receipts.keys(), ...this.onTheirWay.keys()]);
+    if (!this.store.get || !this.known) return this.store.read();
+    const { skip, parked } = await this.parkedBehind();
+    const waiting = [...this.waiting.keys()].filter(known => known === id || !skip.has(known) || this.receipts.has(known) || this.onTheirWay.has(known));
+    if (!this.store.getMany && waiting.length + this.receipts.size + this.onTheirWay.size > KNOWN_ROWS) return this.store.read();
+    // Those it holds back stay where they are in this turn whatever the chat does meanwhile, so the ones behind them do too.
+    if (waiting.length < this.waiting.size) for (const unsent of parked) this.parked.add(unsent);
+    const ids = new Set([...(id === undefined ? [] : [id]), ...waiting, ...this.receipts.keys(), ...this.onTheirWay.keys()]);
     const rows = this.store.getMany ? await this.store.getMany([...ids]) : await Promise.all([...ids].map(known => this.store.get!(known)));
     return rows.filter((row): row is StoredMessage => !!row);
+  }
+
+  /**
+   * The texts no relay took that cannot go in this turn: each waits for its own check to be published again (`attempt`),
+   * and is still to go, within its window. What waits behind one of them (`behind`) cannot go in this turn either.
+   */
+  private async parkedBehind(): Promise<{ skip: Set<string>; parked: string[] }> {
+    const skip = new Set<string>(), parked: string[] = [];
+    if (!this.behind.size || !this.resender.via) return { skip, parked };
+    let from = Infinity;
+    for (const [id, timestamp] of this.unsent) {
+      if (!this.waiting.get(id)?.timer || this.busy.has(id)) continue;
+      const row = this.stillUnsent.get(id) ?? await this.one(id);
+      if (!row || !toGo(row)) continue;
+      this.stillUnsent.set(id, row);
+      if ((row.resendUntil ?? Infinity) <= this.now() || this.resender.via(row) !== "pkarr") continue;
+      parked.push(id);
+      from = Math.min(from, timestamp);
+    }
+    for (const [id, timestamp] of this.behind) if (timestamp >= from && !parked.includes(id)) skip.add(id);
+    return { skip, parked };
   }
 
   /**
@@ -405,12 +443,8 @@ export class Outbox {
       if (!message?.wireId || !message.delivery || message.delivery === "delivered") return;
       // An older text has not left this device yet: this one waits behind it, as it would behind one on its way. One
       // sent before stays queued (it may be out).
-      if (!manual && await this.behindUnsent(message)) {
-        if (message.delivery === "sending") await this.waitsItsTurn(message);
-        else if (message.delivery !== "waiting") await this.queue(message, message.deliveryError ?? "Not confirmed yet.");
-        else if (!this.waiting.get(id)?.timer) this.schedule(id);
-        return;
-      }
+      if (!manual && await this.behindUnsent(message)) return await this.waitBehind(message);
+      this.behind.delete(id);
       // Never sent before: a send that does not leave this device leaves it so.
       const unsentBefore = message.delivery === "waiting" || (message.delivery === "sending" && !this.attempts.get(id));
       const wait = this.waiting.get(id);
@@ -594,6 +628,7 @@ export class Outbox {
     this.reopenedWhileBusy.clear();
     for (const wait of this.waiting.values()) if (wait.timer) clearTimeout(wait.timer);
     this.waiting.clear();
+    this.behind.clear();
     this.dropped = false;
     await this.requeueUnconfirmed();
   }
@@ -607,6 +642,13 @@ export class Outbox {
   private async attempt(id: string, passed?: StoredMessage[], read?: StoredMessage): Promise<boolean> {
     if (this.stopped || this.busy.has(id)) return true;
     if (read && this.waitsOn(read)) { if (!this.waiting.get(id)?.timer) this.schedule(id); return false; }
+    // The chat can carry it but an older text has not left this device: it waits behind that one as read, where it
+    // was read again, sent to `transmitNow`, read there again with the unsent one, for each text waiting at each look.
+    if (read?.wireId && this.unsent.size && !this.unsent.has(id) && !this.receipts.has(id) && (read.delivery === "queued" || read.delivery === "waiting")
+      && read.via !== "hold" && (read.resendUntil ?? Infinity) > this.now() && this.resender.ready(read)) {
+      if (passed) await this.catchUp(passed);
+      if (!this.busy.has(id) && await this.behindUnsent(read)) { await this.waitBehind(read); return true; }
+    }
     const message = await this.one(id);
     if (!message || (message.delivery !== "queued" && message.delivery !== "waiting") || message.via === "hold") { this.forget(id); return true; }
     if ((message.resendUntil ?? Infinity) <= this.now()) {
@@ -620,6 +662,8 @@ export class Outbox {
     // once, about 70 refused PUTs a second, until the relays' budget was spent and it showed as sent. A live link takes
     // it at once.
     if (wait?.timer && this.unsent.has(id) && this.resender.via?.(message) === "pkarr") return false;
+    // The look in progress left the ones behind it unread (`parkedBehind`): it waits for its check even if the chat changed meanwhile.
+    if (this.parked.has(id)) { if (!wait?.timer) this.schedule(id); return false; }
     if (this.resender.ready(message)) { if (passed) await this.catchUp(passed); await this.transmitNow(id); return true; }
     if (this.resender.divert && wait && this.now() - wait.since >= this.policy.holdAfterMs && await this.resender.divert(message)) { this.forget(id); return true; }
     // A flush between two checks leaves the backoff where it was.
@@ -648,11 +692,20 @@ export class Outbox {
   private async behindUnsent(message: StoredMessage): Promise<boolean> {
     for (const [id, timestamp] of this.unsent) {
       if (id === message.id || timestamp > message.timestamp) continue;
-      const older = await this.one(id);
-      if (older && toGo(older)) return true;
+      // Read once per turn: the texts behind it each read it again.
+      const older = this.stillUnsent.get(id) ?? await this.one(id);
+      if (older && toGo(older)) { this.stillUnsent.set(id, older); this.behind.set(message.id, message.timestamp); return true; }
       this.unsent.delete(id);
     }
+    this.behind.delete(message.id);
     return false;
+  }
+
+  /** A message behind an unsent text: it waits as it did, and one that was about to go waits its turn. */
+  private async waitBehind(message: StoredMessage): Promise<void> {
+    if (message.delivery === "sending") await this.waitsItsTurn(message);
+    else if (message.delivery !== "waiting") await this.queue(message, message.deliveryError ?? "Not confirmed yet.");
+    else if (!this.waiting.get(message.id)?.timer) this.schedule(message.id);
   }
 
   /** After a failed attempt: queued again, unless its window or its attempts are spent. */
@@ -696,6 +749,7 @@ export class Outbox {
 
   private forget(id: string): void {
     this.unsent.delete(id);
+    this.behind.delete(id);
     const wait = this.waiting.get(id);
     if (wait?.timer) clearTimeout(wait.timer);
     this.waiting.delete(id);
