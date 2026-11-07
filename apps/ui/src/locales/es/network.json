@@ -38,6 +38,7 @@
   "turnCredential": "Credencial TURN",
   "turnCredentialAgain": "Escribe la credencial otra vez: las copias de seguridad no la guardan.",
   "turnHint": "Opcional. Solo se usa cuando falla una conexión directa.",
+  "turnHintRelayOnly": "Obligatorio con Ocultar mi IP activado: llamadas y chats pasan por él.",
   "turnInfo": "Reenvía paquetes WebRTC cifrados. Es infraestructura de conectividad, no un servidor de Ghostly.",
   "turnUrl": "URL del servidor TURN",
   "turnUsername": "Usuario TURN",

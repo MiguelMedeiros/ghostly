@@ -215,7 +215,9 @@ export function NetworkSettings() {
         </div>}
       </Field>
 
-      <Field id={TURN_FIELD} testId="network-turn-field" label={t("network.turn")} htmlFor="network-turn-url" hint={t(credentialGone ? "network.turnCredentialAgain" : "network.turnHint")} info={t("network.turnInfo")}>
+      {/* With Hide my IP from contacts on (every client), every connection to a contact goes through it: not optional. */}
+      <Field id={TURN_FIELD} testId="network-turn-field" label={t("network.turn")} htmlFor="network-turn-url"
+        hint={t(credentialGone ? "network.turnCredentialAgain" : network.relayOnly === true ? "network.turnHintRelayOnly" : "network.turnHint")} info={t("network.turnInfo")}>
         <input id={FIELDS.turnUrl} aria-label={t("network.turnUrl")} value={turn.urls} onChange={(e) => { setTurn({ ...turn, urls: e.target.value }); edited("turnUrl"); }}
           placeholder="turn:turn.example.org:3478" {...exactText} dir="ltr" {...invalid("turnUrl")} className={`${field} font-mono text-sm`} />
         {problemUnder("turnUrl")}
