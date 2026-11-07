@@ -14,6 +14,7 @@ import { appSlot, chatApp, setChatApp, updateChatApp } from "./running";
 import { runnerPolicy } from "./runnerCheck";
 import { LOCKED, lockedSince, registerRunningApp, type AppOpener, type AppTakedown } from "./open";
 import type { AppsPlatform, LinkedFilesHost } from "../platform";
+import { openLayer } from "../layerHistory";
 
 export interface WebOpenerOptions {
   apps: () => AppsPlatform | null | undefined;
@@ -134,8 +135,12 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     alone.set(place, overlay);
     for (const node of under) node.inert = true;
     close.focus({ preventScroll: true });
+    // Back (Android's back gesture) closes it, as it does every dialog and sheet: without an entry of its own, Back moved
+    // the page under it to the one before, the app stayed on top, and Close then left the focus nowhere.
+    const closed = openLayer(() => end());
 
     const dismiss = () => {
+      closed();
       for (const node of under) node.inert = false;
       overlay.remove();
       if (alone.get(place) === overlay) alone.delete(place);

@@ -472,6 +472,32 @@ describe("keys and focus in a mini-app", () => {
     page.remove();
     lock.remove();
   });
+
+  it("alone: Back (Android's back gesture) closes it and leaves the page under it where it was", async () => {
+    /** Waits for a traversal's popstate, or for none. */
+    const settled = () => new Promise<void>((resolve) => { const done = () => { removeEventListener("popstate", done); resolve(); }; addEventListener("popstate", done); setTimeout(done, 200); });
+    history.pushState(null, "", "#/apps");
+    const page = document.createElement("div");
+    page.className = "two-pane";
+    const button = document.createElement("button");
+    page.append(button);
+    document.body.append(page);
+    button.focus();
+    await open(REF, null);
+    // The layer's entry is pushed once the open settles.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const pop = settled();
+    history.back();
+    await pop;
+    // The app is closed, the Apps page still there under it, and the focus back on what opened it.
+    expect(screen.queryByTestId("mini-app")).not.toBeInTheDocument();
+    expect(started[0]!.stop).toHaveBeenCalled();
+    expect(location.hash).toBe("#/apps");
+    expect(page.inert).toBe(false);
+    expect(button).toHaveFocus();
+    page.remove();
+    await settled();
+  });
 });
 
 describe("opening an app from the Apps page", () => {
