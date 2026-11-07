@@ -54,6 +54,11 @@ export interface PkarrRequestOptions {
    */
   departed?: boolean;
   /**
+   * A 1:1 chat's read of an invite this side made, while its joiner is due (`AWAITING_PEER_MS` in link.ts) and has not
+   * shown: the joiner's knock is read there. A few may go over the relay's minute (`AWAITED_READS` in relay.ts).
+   */
+  awaited?: boolean;
+  /**
    * A read of a contact that was live when this app last ran, made before any read of it this run was answered
    * (`LinkSessionOptions.resumed`): the link's offer waits on it. A group edge's goes on the edges' floor
    * (`GROUP_SIGNALING_ALLOWANCE_SHARE` in relay.ts).

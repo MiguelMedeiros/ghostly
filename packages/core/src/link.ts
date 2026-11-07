@@ -904,6 +904,8 @@ export class LinkSession {
       // In its first seconds, when an app that restarts has its offer out (`PkarrRequestOptions.departed`). Not `watch`
       // alone: a packet the contact put just before its goodbye, read only after it, advertises, and looks like it is back.
       const departed = !signal && Date.now() < this.departedUntil;
+      // An invite this side made, its joiner due: the knock is read here (`PkarrRequestOptions.awaited`).
+      const awaited = !signal && this.ownInvite() && this.awaitingPeer();
       // A daemon's idle-pace reads of a contact long gone (`watchPeer`'s `idleMs`) can wait as much.
       const background = pace === "background" || pace === "connected" || (pace === "idle" && !this.active);
       // Back after a restart: the offer waits on this read (`PkarrRequestOptions.resume`).
@@ -912,7 +914,7 @@ export class LinkSession {
       // the answer, the link never said it could not read its contact, and the engine let a gone contact's HyperDHT
       // listener go for the whole outage (`contactUnread`), where only that listener could bring the contact back.
       let unread: RelaysFailedError | undefined;
-      const packet = await this.transport.resolve(this.peerPubKeyZ32, { background, urgent: pace === "fast", ...(signal && { signal }), ...(watch && { watch }), ...(departed && { departed }), ...(resume && { resume }) }, false)
+      const packet = await this.transport.resolve(this.peerPubKeyZ32, { background, urgent: pace === "fast", ...(signal && { signal }), ...(watch && { watch }), ...(departed && { departed }), ...(awaited && { awaited }), ...(resume && { resume }) }, false)
         .catch((error: unknown) => { if (!(error instanceof RelaysFailedError)) throw error; unread = error; return error.kept; });
       if (!this.running) return;
       this.discoveryResult("read", unread);
