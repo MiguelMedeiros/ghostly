@@ -327,7 +327,8 @@ ghostly listen --type message.received --cursor "${GHOSTLY_HOME:-$HOME/.ghostly}
   numbers: [AI agents § Reporting usage](AI-AGENTS.md#reporting-usage).
 - Buttons: `ghostly send <chat> "Want the $30 one? Reply yes or no" --button yes:Yes --button no:No --once` puts
   buttons under the question (`group send` too). A press comes back as `button.pressed` (`messageId`, `button`,
-  `label`, `by`), then `ghostly button update <chat|group> <message> --chosen yes --close` shows the answer and
+  `label`, `by`); with `--turns`, a press in a 1:1 chat is the `agent.turn` that carries `press` instead
+  ([Agent turns](#agent-turns)). Then `ghostly button update <chat|group> <message> --chosen yes --close` shows the answer and
   takes no more. Someone else's question is answered with `ghostly button press <chat> <message> <button>`, as a
   tap in the app. The text is what apps without buttons show, so it says how to answer in words
   ([WISP 406 · Message Buttons](wisps/406-message-buttons.md)). A typed answer is matched by label or id, ignoring
