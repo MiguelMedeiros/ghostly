@@ -14,7 +14,7 @@ import { SecretGuardDialog } from "./SecretGuardDialog";
 import { findSecret, type SecretFinding } from "../lib/parse/secrets";
 import { ExpressionPanel } from "./composer/ExpressionPanel";
 import { CameraCapture, cameraByFileInput, useHasCamera } from "./composer/CameraCapture";
-import { openAppSettings, useCameraRefusal } from "../lib/cameraRefusal";
+import { openAppSettings, useCameraRefusal } from "../desktop/androidCameraRefusal";
 import { AppsGlyph, CameraGlyph, DocumentGlyph, IdentityGlyph, MediaGlyph, PaymentGlyph, ServicesGlyph, SmileIcon, TranslateIcon } from "./composer/icons";
 import type { ComposerServices } from "./composer/servicesRow";
 import { useMentionPicker, type ComposerMentions } from "./composer/MentionPicker";

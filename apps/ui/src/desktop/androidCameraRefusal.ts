@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { androidApp } from "./touchOnly";
+import { androidApp } from "../lib/touchOnly";
 
 /*
  * The composer's Camera refused in the Android app. The phone's camera opens from a file input, and a refusal of
