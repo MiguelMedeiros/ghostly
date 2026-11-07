@@ -1,5 +1,5 @@
 import { writeFileSync } from "node:fs";
-import { chat, connect, expect, link, say, test } from "../support/fixtures";
+import { chat, connect, expect, link, say, test, type Peer } from "../support/fixtures";
 import { smallTargets } from "../support/touchTargets";
 
 /**
@@ -97,4 +97,59 @@ test("on a phone every button, link and control on the main screens is a 44 px t
   expect(actions.x + actions.width, "Join ends inside the screen").toBeLessThanOrEqual(320);
 
   expect([...small.values()], "controls under 44 × 44 px on a phone").toEqual([]);
+});
+
+/**
+ * A system line long enough to wrap (the contact's "joined the chat", in Japanese at 375 px: "<key> がチャットに参加しました")
+ * took the row's whole width, which put its ⋮ against the screen's edge: the edge cut where a tap lands on it to 33 px
+ * wide. A system row keeps the room the ⋮'s hit area takes, on both sides: in Arabic the ⋮ is on the left.
+ */
+test.describe("on a phone a system line that wraps", () => {
+  /** The app in `language` (the setting a reload reads), back on the chat that was open. */
+  const speak = async ({ page }: Peer, language: string, dir: "ltr" | "rtl") => {
+    await page.evaluate((language) => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+    }, language);
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("dir", dir);
+  };
+
+  /** The contact's joined line (not mine) wraps, and its ⋮ is inside the screen and a 44 px target where a tap lands. */
+  const checkJoined = async ({ page }: Peer, mine: string, label: string) => {
+    const line = page.getByTestId("join-line").filter({ hasNotText: mine });
+    await expect(line).toHaveCount(1, { timeout: 30_000 });
+    const row = page.locator("[data-message-row]").filter({ has: line });
+    const options = row.getByTestId("message-options");
+    await row.scrollIntoViewIfNeeded();
+    // Two lines of text: otherwise the line has room to spare and this proves nothing.
+    expect((await line.boundingBox())!.height, `${label}: the contact's joined line wraps`).toBeGreaterThan(36);
+    const vw = page.viewportSize()!.width;
+    const box = (await options.boundingBox())!;
+    expect(box.x, `${label}: the ⋮ starts inside the screen`).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width, `${label}: the ⋮ ends inside the screen`).toBeLessThanOrEqual(vw);
+    const small = (await smallTargets(page)).filter((target) => target.name.includes("message-options"));
+    expect(small.map((t) => `${t.name} ${t.width}×${t.height} (${t.stops})`), `${label}: a system line's ⋮ under 44 × 44 px`).toEqual([]);
+  };
+
+  test("keeps its ⋮ a 44 px target inside the screen, in Japanese and in Arabic", { tag: ["@feature:app.mobile-layout", "@feature:app.i18n", "@feature:chat.paired.join-notice"] }, async ({ peer }, testInfo) => {
+    test.setTimeout(3 * 60_000);
+    const alice = await peer("alice", { mobile: true, viewport: { width: 375, height: 667 } });
+    const bob = await peer("bob");
+    await link(alice, bob);
+    await connect(alice, bob);
+
+    await speak(alice, "ja", "ltr");
+    await checkJoined(alice, "あなたがチャットに参加しました", "ja at 375 px");
+    await alice.page.screenshot({ path: testInfo.outputPath("joined-ja-375.png") });
+
+    // Arabic's line is shorter: it wraps on the narrowest phone, with the ⋮ at the left edge.
+    await alice.page.setViewportSize({ width: 320, height: 568 });
+    await speak(alice, "ar", "rtl");
+    await checkJoined(alice, "انضممت إلى المحادثة", "ar at 320 px");
+    await alice.page.screenshot({ path: testInfo.outputPath("joined-ar-320.png") });
+
+    await speak(alice, "en", "ltr");
+    await alice.page.screenshot({ path: testInfo.outputPath("joined-en-320.png") });
+  });
 });
