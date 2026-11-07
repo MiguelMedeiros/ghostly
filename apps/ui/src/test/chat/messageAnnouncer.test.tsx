@@ -153,6 +153,29 @@ describe("a new message, read out to a screen reader", () => {
     expect(region()).toHaveTextContent("");
   });
 
+  it("a message that comes as my last one takes its sent id, or goes, is still read out", () => {
+    // Sent at the same moment as the contact's answer: mine is drawn under a draft id, then takes its own, and the
+    // answer came in that same update. The row known last was no longer there, so the answer was taken for nothing new.
+    const draft = { ...mine("crossed"), id: "me_1794035724000" };
+    const { update } = setup([...HISTORY, draft]);
+    const sent = [...HISTORY, { ...draft, id: "me_7LjSmwilpLn" }, peer("crossed too")];
+    update(sent);
+    wait(ANNOUNCE_WINDOW_MS);
+    expect(region()).toHaveTextContent(/^Alice: crossed too$/);
+    wait(ANNOUNCE_CLEAR_MS);
+    // The last one deleted in the same update as a new one coming.
+    update([...HISTORY, sent[2], peer("after a delete")]);
+    wait(ANNOUNCE_WINDOW_MS);
+    expect(region()).toHaveTextContent(/^Alice: after a delete$/);
+  });
+
+  it("a list with none of the rows known is not read out as news", () => {
+    const { update } = setup(HISTORY);
+    update([peer("x"), peer("y")]);
+    wait(ANNOUNCE_WINDOW_MS * 2);
+    expect(region()).toHaveTextContent("");
+  });
+
   it("another chat opening is not news either, and nothing of the last one is read out in it", () => {
     const { update } = setup(HISTORY);
     update([...HISTORY, peer("for chat 1")]);

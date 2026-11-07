@@ -139,9 +139,11 @@ export function MessageAnnouncer({ chat, messages, nameOf, active = true }: {
       return;
     }
     // Only what comes after the last message known: older history loaded above it is not new. It is looked for from the
-    // end, where a message coming in leaves it, so a long chat's history is not walked for each one.
+    // end, where a message coming in leaves it, so a long chat's history is not walked for each one. That one may be
+    // gone in this same update (deleted, or mine taking its sent id as the contact's answer came): the one known
+    // before it then.
     let at = messages.length - 1;
-    while (at >= 0 && messages[at].id !== known.last) at--;
+    while (at >= 0 && !known.ids.has(messages[at].id)) at--;
     const from = known.last === undefined ? 0 : at + 1;
     const fresh = from > 0 || known.last === undefined ? messages.slice(from).filter(m => !known.ids.has(m.id)) : [];
     // The rows above it are known already unless some came or went there (older history, a late one sorted in, one
