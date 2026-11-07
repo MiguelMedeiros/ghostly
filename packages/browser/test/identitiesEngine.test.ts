@@ -650,7 +650,23 @@ describe("removing a proof and its revocation", () => {
     engines.b.stop();
   });
 
-  it("a proof removed while the contact is still checking it: the contact keeps it withdrawn, not verified, then finds it revoked", async () => {
+  it("a contact's request that is never presented leaves the chat's timeline once its challenge ends, with no request after it", async () => {
+    const { engines, ledgers } = pair();
+    await clearStorage();
+    await engines.b.load();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    engines.b.start();
+    // A asks for a challenge and never presents (its app closed, or the proof left its profile): A's engine has no such share.
+    await engines.b.frame("chat", { t: "idp-request", id: "e".repeat(64), provider: "fake-key" });
+    expect(ledgers.b.timeline).toEqual([expect.objectContaining({ side: "theirs", state: "verifying" })]);
+    expect(ledgers.b.challenges).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(ledgers.b.timeline).toEqual([]);
+    expect(ledgers.b.challenges).toEqual([]);
+    engines.b.stop();
+  });
+
+  it("a proof removed while the contact is still checking it:the contact keeps it withdrawn, not verified, then finds it revoked", async () => {
     const { engines, state, resolved, pkarr } = pair();
     await clearStorage();
     await engines.a.load(); await engines.b.load();
