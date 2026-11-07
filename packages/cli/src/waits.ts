@@ -1,5 +1,5 @@
 import type { StoredMessage } from "@ghostly/browser/shared/types";
-import { node, type ApiContext } from "./apiKit";
+import { noMessage, node, type ApiContext } from "./apiKit";
 import { CliError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import { goesOn as goesOnIn } from "./waitNotice";
@@ -37,7 +37,7 @@ export async function waitForEdit(ctx: ApiContext, chat: string, messageId: stri
   const until = performance.now() + ms;
   for (;;) {
     const message = await node(ctx).getMessage(chat, messageId);
-    if (!message) throw new CliError("not_found", `No message ${messageId} in this chat`);
+    if (!message) throw noMessage(messageId, { group: false, ref: chat });
     if (!message.edit?.pending) return message;
     if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the contact has not confirmed the edit yet (it needs a live chat and a contact's app that shows edits). It ${goesOn(ctx)}`, known(ctx, { messageId, edits: message.edit.seq }));
     await new Promise((resolve) => setTimeout(resolve, 250));

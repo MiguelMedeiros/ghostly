@@ -101,7 +101,9 @@ export function AttachmentSheet({ files, alert, status, returnFocus, onPaste, on
             </figcaption>
           </figure>
         ) : (
-          <ul className={`list-none m-0 p-3 overflow-y-auto min-h-0 grid gap-2 ${single ? "grid-cols-1" : "grid-cols-3"}`} data-testid="attachment-list">
+          // Each row as tall as its tiles (`auto-rows-max`): where the list is shortened (a phone on its side, the keyboard
+          // up), it scrolls. Rows that shrank with it drew each row of square tiles over the one above.
+          <ul className={`list-none m-0 p-3 overflow-y-auto min-h-0 grid auto-rows-max gap-2 ${single ? "grid-cols-1" : "grid-cols-3"}`} data-testid="attachment-list">
             {files.map((file, i) => (
               <li key={i} data-testid="attachment-item" className={`relative rounded-lg border border-border bg-surface-alt overflow-hidden ${single ? "flex items-center gap-3 p-3" : "aspect-square"}`}>
                 {picture(i) ? <img src={picture(i)} alt={file.name} onError={() => lost(file)} className="w-full h-full object-cover" />

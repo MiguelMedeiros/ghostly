@@ -640,8 +640,8 @@ describe("chats", () => {
     expect(await page("c", 2)).toEqual({ messages: [], more: false });
     expect(await page(2, "b")).toEqual({ messages: [], more: false });
     // A message that is not there is still said, on either side.
-    await expect(page("zz", "c")).rejects.toMatchObject({ code: "not_found", message: "No message zz" });
-    await expect(page("a", "zz")).rejects.toMatchObject({ code: "not_found", message: "No message zz" });
+    await expect(page("zz", "c")).rejects.toMatchObject({ code: "not_found", message: 'No message "zz" in this chat (ghostly chat history chat-one)' });
+    await expect(page("a", "zz")).rejects.toMatchObject({ code: "not_found", message: 'No message "zz" in this chat (ghostly chat history chat-one)' });
   });
 
   it("a history limit that is not a whole number is bad_request, not the engine failing", async () => {

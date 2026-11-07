@@ -63,6 +63,18 @@ describe("the offer of a move, on a standby", () => {
   });
 });
 
+describe("a Use here the active device refused, on a standby", () => {
+  it("says where to let this device try again, for the 15 wrong passwords the same answer covers", async () => {
+    fakeEngine.on("deviceSet", standby);
+    fakeEngine.on("deviceHandoffView", () => ({ role: "taker", device: "MacBook", key: DESKTOP, step: "failed", bytes: 0, total: 0, failure: "refused" }) satisfies HandoffView);
+    fakeEngine.on("deviceTakeoverInfo", () => ({ offered: false }));
+    renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />);
+    const line = await screen.findByTestId("handoff-line", {}, { timeout: 3_000 });
+    expect(line).toHaveTextContent("MacBook did not let this device take the profile.");
+    expect(line).toHaveTextContent("If wrong passwords were typed here, unlock MacBook and let this device try again.");
+  });
+});
+
 describe("the new device list, on a standby", () => {
   it("OK and This is wrong say when the answer could not be kept", async () => {
     fakeEngine.on("deviceSet", standby);

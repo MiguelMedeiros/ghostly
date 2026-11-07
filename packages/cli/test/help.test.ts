@@ -137,6 +137,24 @@ describe("help", () => {
     expect(existsSync(join(dir, "profiles"))).toBe(false);
   });
 
+  it("a mistyped global option before the command is an unknown option, as after it, not a command", async () => {
+    // Before: "Unknown command: --porfile (ghostly help)", where `status --profle x` named --profile.
+    const dir = home("global-typos");
+    for (const [args, message] of [
+      [["--porfile", "bot", "send", "alice", "hi"], "Unknown option --porfile (did you mean --profile? ghostly help)"],
+      [["--porfile=bot", "status"], "Unknown option --porfile (did you mean --profile? ghostly help)"],
+      [["--hme", "/tmp", "status"], "Unknown option --hme (did you mean --home? ghostly help)"],
+      [["-x", "status"], "Unknown option -x (ghostly help)"],
+      [["--pretty", "--bogus", "status"], "Unknown option --bogus (ghostly help)"],
+      [["-", "status"], "Unknown command: - (ghostly help)"],
+    ] as const) {
+      const result = await ghostly(["--home", dir, ...args]);
+      expect(result.code, args.join(" ")).toBe(2);
+      expect(result.json, args.join(" ")).toEqual({ error: { code: "usage", message } });
+    }
+    expect(existsSync(join(dir, "profiles"))).toBe(false);
+  });
+
   it("--help=false is the command, and a global boolean's --no- form may come before the command", async () => {
     // `--no-pretty status` was "Unknown command: --no-pretty status"; `--help=true` ran the command (a `chat remove --yes` too).
     for (const args of [["--no-pretty", "version"], ["version", "--help=false"]]) {

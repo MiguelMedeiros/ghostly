@@ -32,8 +32,8 @@ describe("not-found words", () => {
       saveMessage: vi.fn(async () => ({ error: "That message is not in this chat" })),
     };
     const ctx = { runtime: { server: { node } }, mode: "daemon" } as unknown as ApiContext;
-    await expect(callApi(ctx, "saved.add", { chat: "group:g1", message: "abc" })).rejects.toMatchObject({ code: "not_found", message: 'No message "abc" in this group' });
-    await expect(callApi(ctx, "saved.add", { chat: "Alice", message: "abc" })).rejects.toMatchObject({ code: "not_found", message: 'No message "abc" in this chat' });
+    await expect(callApi(ctx, "saved.add", { chat: "group:g1", message: "abc" })).rejects.toMatchObject({ code: "not_found", message: 'No message "abc" in this group (ghostly group history group:g1)' });
+    await expect(callApi(ctx, "saved.add", { chat: "Alice", message: "abc" })).rejects.toMatchObject({ code: "not_found", message: 'No message "abc" in this chat (ghostly chat history Alice)' });
     await expect(callApi(ctx, "saved.remove", { chat: "Crew", message: "abc" })).rejects.toMatchObject({ code: "not_found", message: 'No saved message "abc" in this group (ghostly saved list shows the saved ones)' });
   });
 });

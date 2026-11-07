@@ -3049,6 +3049,8 @@ export class GhostLink {
   }
   /** What awaits its receipt on the DHT floor now, if anything does. */
   get dhtPendingId(): string | undefined { return this.dht?.pendingId; }
+  /** The last DHT send of this text went nowhere: no relay holds it, and it is off the floor (`DhtDelivery.wentNowhereFor`). */
+  dhtWentNowhere(id: string): boolean { return !!this.dht?.wentNowhereFor(id); }
   /** What went on the DHT floor under this id needs no more retries there (it went live, or was withdrawn). */
   async settleDht(id: string): Promise<void> { await this.dht?.acknowledge(id); }
 

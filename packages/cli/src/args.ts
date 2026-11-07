@@ -121,15 +121,23 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
  * `Unknown option --wiat for ghostly send (did you mean --wait? ghostly help send)`. The `--` hint only where text comes
  * and for a word with one dash, which may be text (`-1`, `-x`): `version -x` has no text to put after `--`.
  */
-function unknownOption(arg: string, all: Record<string, OptionSpec>, parsing: ParseFor | undefined): CliError {
+function unknownOption(arg: string, all: Record<string, OptionSpec>, parsing: ParseFor | undefined, help = parsing ? `ghostly help ${parsing.command}` : undefined): CliError {
   const names = Object.entries(all).flatMap(([name, o]) => (o.type === "boolean" ? [name, `no-${name}`] : [name]));
   const near = nearest(arg.replace(/^--?/, ""), names);
   const hints = [
     ...(near ? [`did you mean --${near}?`] : []),
     ...(parsing?.text && /^-[^-]/.test(arg) ? ["put -- before text that starts with a dash;"] : []),
-    ...(parsing ? [`ghostly help ${parsing.command}`] : []),
+    ...(help ? [help] : []),
   ];
   return new CliError("usage", `Unknown option ${arg}${parsing ? ` for ghostly ${parsing.command}` : ""}${hints.length ? ` (${hints.join(" ")})` : ""}`);
+}
+
+/**
+ * A first word that starts with a dash and is no global option (`ghostly --porfile bot send …`, `ghostly -x status`):
+ * `Unknown option --porfile (did you mean --profile? ghostly help)`, as after the command. Before, "Unknown command".
+ */
+export function unknownGlobalOption(arg: string): CliError {
+  return unknownOption(arg.startsWith("--") ? arg.split("=")[0] : arg, GLOBAL_OPTIONS, undefined, "ghostly help");
 }
 
 /**

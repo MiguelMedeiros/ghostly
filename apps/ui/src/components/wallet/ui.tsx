@@ -27,13 +27,14 @@ export const chosenInForcedColors = "forced-colors:forced-color-adjust-none forc
 
 /**
  * An on/off switch. `unavailable`: it cannot be turned on here for now (`aria-disabled`, still reachable by the keys so
- * its reason is read), with that reason in the element `describedBy` names.
+ * its reason is read), with that reason in the element `describedBy` names. A tap lands on 64 × 44 px around its
+ * 48 × 24 px track: a thumb's 44 px, as on every other control on a phone.
  */
 export function Switch({ checked, onChange, label, disabled, unavailable, describedBy, testId, ref }: { checked: boolean; onChange: (next: boolean) => void; label: string; disabled?: boolean; unavailable?: boolean; describedBy?: string; testId?: string; ref?: React.Ref<HTMLButtonElement> }) {
   return (
     <button ref={ref} type="button" role="switch" data-testid={testId} aria-checked={checked} aria-label={label} aria-disabled={unavailable || undefined} aria-describedby={describedBy} disabled={disabled}
       onClick={() => { if (!unavailable) onChange(!checked); }}
-      className={`${switchTrack(checked)} cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:cursor-not-allowed before:absolute before:-inset-2 before:content-['']`}>
+      className={`${switchTrack(checked)} cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:cursor-not-allowed before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']`}>
       <SwitchKnob checked={checked} />
     </button>
   );
