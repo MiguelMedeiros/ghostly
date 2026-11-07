@@ -42,6 +42,8 @@
     "selectMint": "設定済みのミントを選んでください",
     "testCoinsPending": "{{host}} はまだテストコインを送っていません",
     "testCoinsPendingNext": "届くとここに表示されます。",
+    "unknownKeyset": "この ecash はミントに認識されません",
+    "unknownKeysetNext": "受け取れません。送った人に新しい ecash を頼んでください。",
     "unreachable": "{{host}} に接続できません",
     "unreachableNext": "アドレスを確認してください。Cashu ミントである必要があります。"
   },
