@@ -1,4 +1,5 @@
 import { writeFileSync } from "node:fs";
+import type { Page } from "@playwright/test";
 import { chat, connect, expect, link, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { smallTargets } from "../support/touchTargets";
@@ -231,4 +232,73 @@ test("on a phone every on/off switch in Settings and Profile is a 44 px target",
   }
   expect(switches, "switches seen").toBeGreaterThan(10);
   expect(small, "switches under 44 × 44 px on a phone").toEqual([]);
+});
+
+/**
+ * Send files (files pasted, dropped or shared into a chat) only opens on a paste, so the walk above never reaches it:
+ * each file's × was 28 × 28 px and Cancel / Send 40 px tall. A picture and three files pasted into a chat, measured
+ * upright and on its side; the × of two tiles side by side must not reach over each other either.
+ */
+test.describe("on a phone, Send files", () => {
+  /** A picture and `others` more files, pasted into the message field at once. */
+  const pasteFiles = (page: Page, others: number) => page.evaluate(async (others) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 900;
+    canvas.height = 1200;
+    canvas.getContext("2d")!.fillRect(0, 0, 900, 1200);
+    const blob = await new Promise<Blob>((done) => canvas.toBlob((b) => done(b!), "image/png"));
+    const data = new DataTransfer();
+    data.items.add(new File([blob], "IMG_0042.png", { type: "image/png" }));
+    for (let i = 1; i <= others; i++) data.items.add(new File([new Uint8Array(100 * i)], `notes-${i}.txt`, { type: "text/plain" }));
+    document.querySelector("textarea")!.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+  }, others);
+
+  /** Where a tap lands on each × of the sheet, as a box 44 px wide grown around it would be: their overlaps, in px². */
+  const removersOverlap = (page: Page) => page.getByTestId("attachment-list").evaluate((list) => {
+    const boxes = [...list.querySelectorAll<HTMLElement>("button[aria-label^='Remove ']")].map((button) => {
+      const box = button.getBoundingClientRect(), [cx, cy] = [box.left + box.width / 2, box.top + box.height / 2];
+      return { left: cx - 22, right: cx + 22, top: cy - 22, bottom: cy + 22 };
+    });
+    let worst = 0;
+    for (const [i, a] of boxes.entries()) for (const b of boxes.slice(i + 1)) {
+      worst = Math.max(worst, Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)));
+    }
+    return Math.round(worst);
+  });
+
+  for (const screen of [{ name: "upright", width: 375, height: 667 }, { name: "on its side", width: 667, height: 375 }]) {
+    test(`${screen.name} (${screen.width} × ${screen.height}): each file's ×, Cancel and Send are 44 px targets`, { tag: ["@feature:app.mobile-layout", "@feature:app.composer.paste-files"] }, async ({ peer }, testInfo) => {
+      const { page } = await peer("send-files-targets", { mobile: true, viewport: { width: screen.width, height: screen.height } });
+      await page.getByTestId("sidebar-new-chat").filter({ visible: true }).first().click();
+      await expect(page.locator("textarea")).toBeVisible();
+      await pasteFiles(page, 3);
+      const sheet = page.getByTestId("attachment-sheet");
+      await expect(sheet.getByTestId("attachment-item")).toHaveCount(4);
+      await expect(sheet.getByRole("img", { name: "IMG_0042.png" })).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath(`send-files-${screen.width}x${screen.height}.png`) });
+
+      // Each one brought into view (the list scrolls on a short screen), a tap at its centre reaching it, then measured.
+      const small: string[] = [];
+      const controls = [...await sheet.getByRole("button", { name: /^Remove / }).all(), sheet.getByTestId("attachment-cancel"), sheet.getByTestId("attachment-send")];
+      expect(controls).toHaveLength(6);
+      for (const control of controls) {
+        await control.scrollIntoViewIfNeeded();
+        const name = await control.evaluate((el) => `${el.tagName.toLowerCase()} "${el.dataset.testid ?? el.getAttribute("aria-label")}"`);
+        const reached = await control.evaluate((el) => {
+          const box = el.getBoundingClientRect();
+          const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+          return !!hit && (hit === el || el.contains(hit));
+        });
+        expect(reached, `a tap at the centre of ${name} reaches it`).toBe(true);
+        for (const target of await smallTargets(page)) if (target.name === name) small.push(`${target.name} ${target.width}×${target.height} (${target.stops})`);
+      }
+      expect(await removersOverlap(page), "where a tap lands on one × reaches over another's (px²)").toBe(0);
+      await sheet.getByTestId("attachment-list").evaluate((list) => list.scrollTo({ top: 0 }));
+      await page.screenshot({ path: testInfo.outputPath(`send-files-${screen.width}x${screen.height}-measured.png`) });
+      expect(small, `Send files' controls under 44 × 44 px, ${screen.name}`).toEqual([]);
+
+      await sheet.getByTestId("attachment-cancel").click();
+      await expect(sheet).toHaveCount(0);
+    });
+  }
 });
