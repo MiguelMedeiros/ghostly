@@ -46,10 +46,14 @@ export function parseGroupPay(raw: unknown, groupId: string): GroupPayFrame | nu
  * Whether `author` may say this. A request's state (open, paid, closed) is the payee's to say; a member who paid
  * it says so about itself (`sent`, `by` = itself), and takes that back (`closed`) when its payment came back. A
  * payment without a request: the payer says it sent it (or took it back), the payee that it was paid. Whoever a
- * note names must be in the group.
+ * note names must be in the group, but for the payee's `paid` naming a payer who left since: `known` (the note so
+ * far) shows that payer was in the group when a note naming it was believed (its own `sent`, or the request or
+ * payment made with it as the payer).
  */
-export function mayAuthor(frame: GroupPayFrame, author: string, members: ReadonlySet<string>): boolean {
-  if (!members.has(author) || !members.has(frame.to) || (frame.f !== "*" && !members.has(frame.f)) || (frame.by && !members.has(frame.by))) return false;
+export function mayAuthor(frame: GroupPayFrame, author: string, members: ReadonlySet<string>, known?: GroupPayNote): boolean {
+  const left = (key: string) => frame.st === "paid" && author === frame.to && !!known && (known.from === key || (key === frame.by && !!known.claims?.includes(key)));
+  const named = (key: string) => members.has(key) || left(key);
+  if (!members.has(author) || !members.has(frame.to) || (frame.f !== "*" && !named(frame.f)) || (frame.by && !named(frame.by))) return false;
   if (frame.by && (frame.by === frame.to || (frame.f !== "*" && frame.by !== frame.f))) return false;
   if (frame.k === "req") {
     if (author === frame.to) return frame.st !== "sent";
@@ -64,16 +68,19 @@ const fieldsOf = (frame: GroupPayFrame): Omit<GroupPayNote, "state" | "by" | "cl
   ...(frame.x ? { test: true } : {}), ...(frame.m ? { memo: frame.m } : {}), ...(frame.a ? { ask: true } : {}), createdAt: frame.ts,
 });
 
+/** Whether `author`'s `frame` may count for the note kept so far: one about another payment under the same id never does. */
+const believed = (current: GroupPayNote | undefined, frame: GroupPayFrame, author: string, members: ReadonlySet<string>): boolean =>
+  mayAuthor(frame, author, members, current) && (!current || (current.kind === (frame.k === "req" ? "request" : "payment") && current.to === frame.to));
+
 /**
  * The note after `author` said `frame`, or undefined when that changes nothing (or may not be believed). What a
  * payment is (who, how much, over what) is its initiator's to say: the payee's for a request, the payer's for a
  * payment; anyone else's description only stands in until the initiator's arrives. States only move forward.
  */
 export function mergeGroupPay(current: GroupPayNote | undefined, frame: GroupPayFrame, author: string, members: ReadonlySet<string>): GroupPayNote | undefined {
-  if (!mayAuthor(frame, author, members)) return undefined;
+  if (!believed(current, frame, author, members)) return undefined;
   const initiator = frame.k === "req" ? frame.to : frame.f;
   const fields = fieldsOf(frame);
-  if (current && (current.kind !== fields.kind || current.to !== fields.to)) return undefined;
   let next: GroupPayNote = current ? { ...current } : { ...fields, state: "open", ...(author === initiator ? {} : { undescribed: true as const }) };
   // Until the initiator's own note arrives, a claim's description stands in for it, on this device only: a note
   // still `undescribed` stays out of the group's history (GroupPayments.write), so no member is shown asking for or
@@ -215,8 +222,14 @@ export class GroupPayments {
       const notes = await this.load(at.groupId);
       const current = notes.get(paymentWireId(p.id));
       const frame = authoredNote(p, at, answers.get(p.id) ?? [], current, linkId => this.host.edgeOf(linkId)?.member, federation => this.host.federationNetwork?.(federation));
-      if (!frame || JSON.stringify(frame) === JSON.stringify(current?.mine)) continue;
-      const merged = mergeGroupPay(current, frame, at.me, membership(at.groupId)!.members) ?? current;
+      if (!frame) continue;
+      const members = membership(at.groupId)!.members;
+      // What my own merge refuses is neither kept as said nor sent: every member would refuse it too, and say it
+      // again when an edge opens. Said already, it is still merged once more: an older app kept it unmerged.
+      if (!believed(current, frame, at.me, members)) continue;
+      const next = mergeGroupPay(current, frame, at.me, members);
+      if (!next && JSON.stringify(frame) === JSON.stringify(current?.mine)) continue;
+      const merged = next ?? current;
       if (!merged) continue;
       await this.write(at.groupId, at.me, { ...merged, mine: frame });
       for (const linkId of this.host.edges(at.groupId).values()) { try { this.host.send(linkId, frame); } catch { /* sent again when that edge opens */ } }
