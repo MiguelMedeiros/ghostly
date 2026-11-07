@@ -241,11 +241,25 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   };
   // The choice or button pressed is disabled while its work runs, which drops the focus to the page: it gets it back.
   const focusBack = useFocusBack(busy);
+  // The error as it came: the failure line says it in a few words, its English behind the ⓘ.
+  const said = (e: unknown) => e instanceof Error ? rawError(e) || t("connection.panel.updateFailed") : t("connection.panel.updateFailed");
+  // A Reconnect waits for the contact's app, up to the engine's 90 s: it is not the panel's `busy`, which held every
+  // choice, Fallback and Reconnect itself off for that long, the focus dropped to the page. A choice made meanwhile
+  // takes over (`dial` moves on), and the dial it ended is not said as a connection issue.
+  const [dialing, setDialing] = useState(false);
+  const dial = useRef(0);
+  async function reconnect(linkId: string) {
+    if (dialing) return;
+    const round = ++dial.current;
+    setDialing(true); setError("");
+    try { await engine.call("connect", { linkId }); } catch (e) { if (dial.current === round) setError(said(e)); }
+    finally { if (dial.current === round) setDialing(false); }
+  }
   async function run(action: () => Promise<unknown>, fail = setError) {
     focusBack();
+    dial.current++; setDialing(false);
     setBusy(true); fail("");
-    // The error as it came: the failure line says it in a few words, its English behind the ⓘ.
-    try { await action(); } catch (e) { fail(e instanceof Error ? rawError(e) || t("connection.panel.updateFailed") : t("connection.panel.updateFailed")); }
+    try { await action(); } catch (e) { fail(said(e)); }
     finally { setBusy(false); }
   }
   // The header shows only the icon: the label is in its tooltip, its accessible name and the panel.
@@ -292,8 +306,9 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
         {/* Its own row: beside Details it took a column down the whole open Details, and host names broke mid-word.
             Not while the contact keeps the chat on DHT only either: the engine refuses the dial, and the refusal read as a connection issue.
             Nor in the seconds after a live link closed with messages held: the contact may have chosen it and not said so yet. */}
-        {!dht && link?.dhtDelivery?.peerMode !== "dht" && labelState !== "heldPlain" && !ready && !awaitingJoin && online && link && <button className={`-mx-1 min-h-9 rounded-md px-2 text-accent hover:bg-surface-hover disabled:opacity-40 ${focus}`} disabled={busy}
-          onClick={() => void run(() => engine.call("connect", {linkId:link.id}))}>{t("connection.panel.reconnect")}</button>}
+        {!dht && link?.dhtDelivery?.peerMode !== "dht" && labelState !== "heldPlain" && !ready && !awaitingJoin && online && link && <button className={`-mx-1 min-h-9 rounded-md px-2 text-accent hover:bg-surface-hover disabled:opacity-40 aria-disabled:opacity-40 ${focus}`} disabled={busy}
+          aria-disabled={dialing || undefined} data-testid="connection-reconnect"
+          onClick={() => void reconnect(link.id)}>{t(dialing ? "connection.panel.reconnecting" : "connection.panel.reconnect")}</button>}
         <details className="text-[11px]" data-testid="connection-details">
           <summary data-testid="connection-details-summary" className={`w-fit cursor-pointer rounded-md px-1 py-2 text-text-secondary ${focus}`}>{t("connection.panel.details")}</summary>
           <div className="space-y-2 px-1 pb-2">

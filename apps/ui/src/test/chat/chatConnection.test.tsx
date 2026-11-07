@@ -594,6 +594,32 @@ describe("ChatConnection: what the panel does", () => {
     expect(screen.queryByTestId("connection-failure")).not.toBeInTheDocument();
   });
 
+  // The engine's dial waits up to 90 s for an away contact: Reconnect held the whole panel off for that long (DHT only,
+  // Fallback, Reconnect), said nothing, and dropped the focus to the page. Measured on a web build: 90 s.
+  it("leaves the panel usable while Reconnect waits for the contact, and a choice meanwhile takes over", async () => {
+    const away = { dataLink: "idle", peerOnline: false, peerParticipationKey: "saved" } as Partial<LinkView>;
+    const { user, engine } = banner(away);
+    let refuse: (e: Error) => void = () => {};
+    engine.on("connect", () => new Promise<void>((_, reject) => { refuse = reject; }));
+    engine.on("setChatTransport", () => undefined);
+    await user.click(screen.getByTestId("connection-options"));
+    const button = screen.getByRole("button", { name: "Reconnect" });
+    await user.click(button);
+    const dhtOnly = screen.getByRole("radio", { name: "DHT only" });
+    expect(dhtOnly).toBeEnabled();
+    expect(screen.getByRole("switch", { name: "Fallback" })).toBeEnabled();
+    expect(button).toHaveFocus();
+    expect(button).toHaveTextContent("Reconnecting…");
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    await user.click(button);
+    expect(engine.callsTo("connect")).toHaveLength(1);
+    await user.click(dhtOnly);
+    expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "dht" }]);
+    // DHT only closed the dial: its refusal is not the chat's connection issue.
+    await act(async () => refuse(new Error("Connection attempt cancelled")));
+    expect(screen.queryByTestId("connection-failure")).not.toBeInTheDocument();
+  });
+
   it("keeps a failed choice made while live: it is about that choice, not about getting live", async () => {
     const { user, engine } = banner({ pairing: ready() });
     engine.on("setChatTransport", () => { throw new Error("Transport unavailable"); });
