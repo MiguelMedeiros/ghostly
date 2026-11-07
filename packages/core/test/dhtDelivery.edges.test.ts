@@ -90,11 +90,13 @@ function setup(options: { mode?: "stream" | "dht"; pollMs?: number | null; state
   const publishedAt = () => (transport.publish.mock.lastCall![0] as { pubKeyZ32: string }).pubKeyZ32;
   const last = () => saved.at(-1) ?? options.state ?? emptyDhtDeliveryState();
   const setFailSave = (on: boolean) => { failSave = on; };
+  /** Puts a packet at every address the fixture answers for, without letting a read happen. */
+  const setPacket = (p: SignedPacket | null) => { packet = p; };
   /** The body of the last first-contact envelope Bob published. */
   const openPublished = (): unknown[] => JSON.parse(decrypt(transport.publish.mock.lastCall![1][0].value, envelopeKey))[0];
   /** The body of the last envelope Bob published sealed to Alice. */
   const openPublishedSealed = (): unknown[] => JSON.parse(decrypt(transport.publish.mock.lastCall![1][0].value, sealedKey(bobParticipation.pubKeyZ32)))[0];
-  return { setFailSave, openPublished, link, alice, bob, credentials, mailbox, envelopeKey, transport, saved, messages, receipts, views, pins, body, signature,
+  return { setFailSave, setPacket, openPublished, link, alice, bob, credentials, mailbox, envelopeKey, transport, saved, messages, receipts, views, pins, body, signature,
     invitePacket, pinnedPacket, put, last, bobParticipation, openPublishedSealed, alicePinned, bobPinned, bobInvite, putAt, reads, publishedAt };
 }
 
@@ -687,6 +689,75 @@ describe("DHT delivery: sending and lifecycle", () => {
     for (let seq = 1; seq <= 3; seq++) { await there.put(there.invitePacket(there.body({ 6: null }, seq))); await vi.advanceTimersByTimeAsync(4 * 60_000); }
     expect(there.last().peerMode).toBe("dht");
     expect(await readsAMinute(there), "the open chat's pace").toEqual({ reads: 6, background: 0 });
+  });
+
+  describe("DHT only here, the contact away", () => {
+    const readsAMinute = async (h: ReturnType<typeof setup>, stop = true) => {
+      const first = h.transport.resolve.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(60_000 + 10);
+      const reads = (h.transport.resolve.mock.calls as unknown[][]).slice(first);
+      if (stop) await h.bob.stop();
+      return { reads: reads.length, background: reads.filter(([, o]) => (o as { background?: boolean } | undefined)?.background).length };
+    };
+    /** Every 4 s (15 a minute, give or take the one at the minute's edge), none as background. */
+    const fast = { reads: expect.toSatisfy((n: number) => n >= 14 && n <= 16), background: 0 };
+    /** Every 30 s (2 a minute, 3 with one at each edge), all as background reads. */
+    const slow = expect.toSatisfy((r: { reads: number; background: number }) => r.reads >= 2 && r.reads <= 3 && r.background === r.reads);
+    /** A DHT-only chat whose contact was read once, then was away for `PRESENCE_WINDOW` (and one slow read more). */
+    const awayChat = async () => {
+      const h = setup({ pollMs: null });
+      await h.bob.start(); await h.put(h.invitePacket(h.body({ 6: null })));
+      await vi.advanceTimersByTimeAsync(PRESENCE_WINDOW + 30_000);
+      return h;
+    };
+
+    it("reads its mailbox at the background pace, as background reads; every 4 s while the contact is there", async () => {
+      // Nothing new from it in `PRESENCE_WINDOW`. Before: every 4 s, none as background, for as long as it ran (a daemon's
+      // relays held most of them, and each held one went to the Mainline DHT: 1,081 lookups a minute at 50 such chats).
+      expect(await readsAMinute(await awayChat()), "away: 30 s, as background reads").toEqual(slow);
+      // Just started, nothing new from it yet (its last envelope read in an earlier run): the background pace too.
+      const restarted = setup({ pollMs: null, state: { ...emptyDhtDeliveryState(), peerMode: "dht" }, bobCredentials: pinned() });
+      await restarted.bob.start(); await vi.advanceTimersByTimeAsync(0);
+      expect(await readsAMinute(restarted), "just started: 30 s until its next envelope").toEqual(slow);
+      // There: its keep-alive every four minutes.
+      const there = setup({ pollMs: null });
+      await there.bob.start();
+      for (let seq = 1; seq <= 4; seq++) { await there.put(there.invitePacket(there.body({ 6: null }, seq))); await vi.advanceTimersByTimeAsync(4 * 60_000); }
+      expect(await readsAMinute(there), "there: every 4 s, as today").toEqual(fast);
+      // A first contact (nobody pinned yet) keeps the DHT pace.
+      const first = setup({ pollMs: null }); await first.bob.start(); await vi.advanceTimersByTimeAsync(PRESENCE_WINDOW);
+      expect(await readsAMinute(first), "a first contact: every 4 s").toEqual(fast);
+    });
+
+    it("a text of ours awaiting its receipt, or the chat on screen, reads every 4 s", async () => {
+      const sending = await awayChat();
+      expect(await sending.bob.send("are you there?", Date.now(), ID)).toBeNull();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(await readsAMinute(sending, false), "a text awaits its receipt").toEqual(fast);
+      // Its five minutes over with no receipt: the background pace again.
+      await vi.advanceTimersByTimeAsync(DHT_MESSAGE_TTL);
+      expect(await readsAMinute(sending), "the text expired").toEqual(slow);
+
+      const open = await awayChat();
+      open.bob.setActive(true); await vi.advanceTimersByTimeAsync(0);
+      expect(await readsAMinute(open, false), "on screen").toEqual(fast);
+      open.bob.setActive(false); await vi.advanceTimersByTimeAsync(30_000);
+      expect(await readsAMinute(open), "off screen again").toEqual(slow);
+    });
+
+    it("a contact coming back is read within 30 s of its first envelope, and every 4 s from there", async () => {
+      for (const offset of [0, 1_000, 15_000, 29_000]) {
+        const h = await awayChat();
+        await vi.advanceTimersByTimeAsync(offset);
+        // Back, with a text: its envelope is in its mailbox from now on.
+        const back = Date.now();
+        h.setPacket(h.invitePacket(h.body({}, 2)));
+        while (h.messages.length === 0 && Date.now() - back <= 60_000) await vi.advanceTimersByTimeAsync(500);
+        expect(h.messages.map((m) => m.text), `read ${Date.now() - back} ms after it came back`).toEqual(["hello"]);
+        expect(Date.now() - back).toBeLessThanOrEqual(30_000);
+        expect(await readsAMinute(h), "there again: every 4 s").toEqual(fast);
+      }
+    });
   });
 
   it("announces a change of method at once, however recently it last published", async () => {

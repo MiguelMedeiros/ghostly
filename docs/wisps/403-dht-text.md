@@ -139,7 +139,8 @@ What changes is where the choice is made: not in the invite, but in the chat's C
 
 | Situation | Pace |
 |---|---|
-| This side DHT only, or it left DHT only less than two minutes ago while the contact is still there | 4 s |
+| This side DHT only while the contact is there (a new envelope of its own read in the last 10 minutes), the chat is open and app in front, or nobody is pinned yet; or it left DHT only less than two minutes ago while the contact is still there | 4 s |
+| This side DHT only, the contact away (and after a restart, until its next envelope) | 30 s, as background reads |
 | Inviter: the joiner just showed up (fresh presence packet); joiner: its first two minutes | 4 s, for two minutes |
 | A text of ours awaits its receipt | 4 s |
 | `on-dht`, chat open and app in front | 10 s |
