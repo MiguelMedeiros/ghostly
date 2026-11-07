@@ -235,6 +235,7 @@ macro_rules! commands {
             notifications::native_notification_tap,
             notifications::native_private_notification,
             notifications::open_notification_settings,
+            oidc::oidc_interrupted,
             oidc::oidc_loopback_cancel,
             oidc::oidc_loopback_start,
             oidc::oidc_loopback_wait,

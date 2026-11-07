@@ -44,6 +44,7 @@
     "dayOne": "1 día",
     "days": "{{count}} días",
     "experimental": "Experimental: aún no probado con todas las herramientas.",
+    "interrupted": "El inicio de sesión se interrumpió",
     "keepOpen": "Mantener abierto",
     "keyAbout": "Solo quien tiene esta clave puede hacer esta prueba.",
     "kinds": "Tipos de identidad",
@@ -57,6 +58,7 @@
     "redirectHint": "{{provider}} te pedirá que inicies sesión. Luego avala la cuenta ante Ghostly con un token firmado; tu contraseña nunca llega a Ghostly.",
     "signWith": "Firmar con",
     "signWithNamed": "Firmar con {{signer}}",
+    "tryAgain": "Reintentar",
     "validFor": "Válida durante",
     "verifyAndSave": "Verificar y guardar"
   },
