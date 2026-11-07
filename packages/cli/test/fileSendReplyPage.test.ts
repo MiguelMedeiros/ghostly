@@ -42,7 +42,7 @@ function fake(page: { id: string }[], more: boolean, all: { id: string }[]) {
   return { node, ctx };
 }
 
-const NOT_HERE = "That message is not in this chat, or cannot be replied to";
+const NOT_HERE = 'No message "peer_gone" in this chat, or it cannot be replied to (ghostly chat history Alice)';
 
 describe("file send --reply", () => {
   it("in a chat, finds the message among the newest without reading the whole history", async () => {
@@ -78,7 +78,7 @@ describe("file send --reply", () => {
     await expect(callApi(older.ctx, "file.send", { chat: "group:g1", path, reply: "k:0:1" })).rejects.toMatchObject({ code: "refused" });
     expect(older.node.groupMessages).toHaveBeenCalledWith({ groupId: "g1" });
     const nowhere = fake([{ id: "k:0:2" }], true, [{ id: "k:0:2" }]);
-    await expect(callApi(nowhere.ctx, "file.send", { chat: "group:g1", path, reply: "k:0:9" })).rejects.toMatchObject({ code: "not_found", message: "That message is not in this group, or cannot be replied to" });
+    await expect(callApi(nowhere.ctx, "file.send", { chat: "group:g1", path, reply: "k:0:9" })).rejects.toMatchObject({ code: "not_found", message: 'No message "k:0:9" in this group, or it cannot be replied to (ghostly group history group:g1)' });
     expect(nowhere.node.groupFileCheck).not.toHaveBeenCalled();
   });
 });

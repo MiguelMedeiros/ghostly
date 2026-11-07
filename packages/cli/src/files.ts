@@ -10,7 +10,7 @@ import { replyRef } from "@ghostly/browser/shared/replies";
 import type { FileTransferView, GroupView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
 import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
 import { childEnv } from "./childEnv";
-import { bool, chatOf, findChatOrGroup, list, node, num, oneOf, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, findChatOrGroup, list, noFile, noMessage, node, num, oneOf, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
 import { groupSendRefused } from "./api";
 import { CliError } from "./errors";
 import { guardText } from "./secretGuard";
@@ -107,14 +107,14 @@ function fileChat(ctx: ApiContext, params: Params, fileId: string): { linkId: st
   const groupId = groupOfFile(fileId, state(ctx).groups.map((g) => g.id));
   if (groupId) {
     const named = params.chat === undefined ? undefined : chatOrGroupOf(ctx, params);
-    if (named && !("group" in named && named.group.id === groupId)) throw new CliError("not_found", `No file ${fileId} in this ${"group" in named ? "group" : "chat"}`);
+    if (named && !("group" in named && named.group.id === groupId)) throw noFile(fileId, { group: "group" in named, ref: str(params, "chat", true) });
     return { linkId: `group:${groupId}`, where: { group: groupId } };
   }
   const link = params.chat === undefined
     ? state(ctx).links.find((l) => fileId.startsWith(`${l.id}-in-`) || fileId.startsWith(`${l.id}-out-`))
     : chatOf(ctx, params);
-  if (!link) throw new CliError("not_found", `No file ${fileId}`);
-  if (!fileId.startsWith(`${link.id}-`)) throw new CliError("not_found", `No file ${fileId} in this chat`);
+  if (!link) throw noFile(fileId);
+  if (!fileId.startsWith(`${link.id}-`)) throw noFile(fileId, { group: false, ref: str(params, "chat", true) });
   return { linkId: link.id, where: { chat: link.id } };
 }
 
@@ -183,7 +183,7 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
   const mime = mimeOf(path, str(params, "mime"));
   const replyTo = str(params, "reply");
   if (replyTo) {
-    if (!await findMessage(ctx, `group:${group.id}`, (m) => m.id === replyTo || replyRef(m) === replyTo)) throw new CliError("not_found", "That message is not in this group, or cannot be replied to");
+    if (!await findMessage(ctx, `group:${group.id}`, (m) => m.id === replyTo || replyRef(m) === replyTo)) throw noMessage(replyTo, { group: true, ref: str(params, "chat", true) }, { tail: ", or it cannot be replied to" });
   }
   // A send the group would refuse anyway (its files of the minute are taken, or this device is not in it) is refused
   // before a byte is copied in: a retry loop writes nothing. The announcement checks again.
@@ -295,7 +295,7 @@ export const FILE_METHODS: Record<string, Method> = {
     // A reply names a message of this chat, as `send --reply` does: checked before anything is stored.
     const replyTo = str(params, "reply");
     if (replyTo) {
-      if (!await findMessage(ctx, link.id, (m) => m.id === replyTo || replyRef(m) === replyTo)) throw new CliError("not_found", "That message is not in this chat, or cannot be replied to");
+      if (!await findMessage(ctx, link.id, (m) => m.id === replyTo || replyRef(m) === replyTo)) throw noMessage(replyTo, { group: false, ref: str(params, "chat", true) }, { tail: ", or it cannot be replied to" });
     }
     const { voice, warning } = await voiceOf(params, path, mime, info.size);
     const source = await sendable(path, mime, voice);
@@ -402,7 +402,7 @@ export const FILE_METHODS: Record<string, Method> = {
     const fileId = str(params, "file", true);
     const { where } = fileChat(ctx, params, fileId);
     const stored = await fileStore.get(fileId);
-    if (!stored && !state(ctx).transfers[fileId]) throw new CliError("not_found", `No file ${fileId}`);
+    if (!stored && !state(ctx).transfers[fileId]) throw noFile(fileId);
     const ms = num(params, "timeout", 300, { min: 1, max: 86_400 }) * 1000;
     // A received file that waits for this person's `file accept` (over 25 MiB, or a group's file that did not come by
     // itself) does not move however long this waits: said at once, naming the command. Before, it waited out its
@@ -433,7 +433,7 @@ export const FILE_METHODS: Record<string, Method> = {
     if (params.chat !== undefined) fileChat(ctx, params, fileId);
     if (bool(params, "wait")) await FILE_METHODS["file.wait"](ctx, { file: fileId, timeout: params.timeout });
     const stored = await fileStore.get(fileId);
-    if (!stored?.metadata) throw new CliError("not_found", `No file ${fileId}`);
+    if (!stored?.metadata) throw noFile(fileId);
     if (stored.leftOut) throw new CliError("not_found", "Not in this backup: the light backup this profile was restored from left the file out");
     // A sent file's bytes were staged whole at send: its transfer is the contact's download, not bytes missing here.
     const transfer = stored.direction === "out" ? undefined : state(ctx).transfers[fileId] ?? stored.transfer;
