@@ -3073,7 +3073,11 @@ export class GhostlyNode implements EngineImplementation {
   private prepareSpare(after = 0, aged = false): void {
     if (this.shuttingDown || !this.networkOn) return;
     if (this.spare && after === 0 && (aged || Date.now() - this.spare.madeAt >= SPARE_INVITE_MAX_AGE_MS)) {
-      for (const identity of [identityFromSeedB64(this.spare.mine.seedB64), this.spare.inviteKey]) this.warmedKeys.delete(identity.pubKeyZ32);
+      // Replaced unused, its two keys are nobody's: the transport forgets what it kept for them (one taken is a chat's,
+      // `takeInvite`, and never gets here). Kept, they added 8 keys an hour to an idle daemon's relay bookkeeping.
+      const keys = [identityFromSeedB64(this.spare.mine.seedB64), this.spare.inviteKey].map((identity) => identity.pubKeyZ32);
+      for (const key of keys) this.warmedKeys.delete(key);
+      this.transport.forget?.(keys);
       this.spare = null;
     }
     if (!this.spare) this.spare = this.makeSpare();
