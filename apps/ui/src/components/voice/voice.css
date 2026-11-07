@@ -233,6 +233,25 @@
 .voice-text-button:hover { filter: brightness(1.1); }
 .voice-text-button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
 .voice-text-danger { color: var(--color-danger); }
+/*
+ * A phone: beside Keep and Discard the question had a word or two of the bar ("¿Descartar …" at 375 px). It stands over
+ * the bar, as the hint does, wrapping if it must, and the two buttons share the bar.
+ */
+@media (max-width: 479px) {
+  .voice-confirm-text {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    inset-inline-start: 0;
+    width: max-content;
+    max-width: calc(100vw - 16px);
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: var(--color-surface);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    white-space: normal;
+  }
+  .voice-confirm .voice-text-button { flex: 1; }
+}
 
 /* A slide to cancel ends in the bin: it drops in, the lid shuts, it fades. */
 .voice-binned {
