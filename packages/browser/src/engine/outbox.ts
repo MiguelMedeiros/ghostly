@@ -614,8 +614,13 @@ export class Outbox {
       else await this.fail(id, `Not confirmed within ${days(this.policy.windowMs)}.`);
       return true;
     }
-    if (this.resender.ready(message)) { if (passed) await this.catchUp(passed); await this.transmitNow(id); return true; }
     const wait = this.waiting.get(id);
+    // No relay took it a moment ago (`notSent`): on the DHT it goes again at its own check, not at each look before it.
+    // Its failure changes the floor's view, and each change looks again: with texts waiting behind it, it went again at
+    // once, about 70 refused PUTs a second, until the relays' budget was spent and it showed as sent. A live link takes
+    // it at once.
+    if (wait?.timer && this.unsent.has(id) && this.resender.via?.(message) === "pkarr") return false;
+    if (this.resender.ready(message)) { if (passed) await this.catchUp(passed); await this.transmitNow(id); return true; }
     if (this.resender.divert && wait && this.now() - wait.since >= this.policy.holdAfterMs && await this.resender.divert(message)) { this.forget(id); return true; }
     // A flush between two checks leaves the backoff where it was.
     if (!wait?.timer) this.schedule(id);

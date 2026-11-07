@@ -21,17 +21,19 @@ const ECONNREFUSED = () => Object.assign(new TypeError("fetch failed"), { cause:
 function fakeRelays() {
   const packets = new Map<string, Uint8Array>();
   const modes: Record<"a" | "b", Mode> = { a: "ok", b: "ok" };
+  /** The PUTs refused so far. */
+  const refused = { count: 0 };
   const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input)), key = url.pathname.slice(1), mode = modes[url.host.startsWith("a.") ? "a" : "b"];
     if (init?.method !== "PUT") return packets.has(key) ? new Response(packets.get(key)! as BodyInit) : new Response(null, { status: 404 });
-    if (mode === "refuse") return new Response(null, { status: 403 });
+    if (mode === "refuse") { refused.count++; return new Response(null, { status: 403 }); }
     if (mode === "noConnection") throw ECONNREFUSED();
     if (mode === "timeout") return new Promise<Response>((_, reject) => init.signal!.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
     packets.set(key, new Uint8Array(init.body as Uint8Array));
     return new Response(null, { status: 204 });
   }) as typeof globalThis.fetch;
   const set = (a: Mode, b: Mode = a) => { modes.a = a; modes.b = b; };
-  return { packets, fetch, set };
+  return { packets, fetch, set, refused };
 }
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -101,6 +103,26 @@ it("every relay refusing: the texts after the first wait behind it, and go in or
   await contact.start();
   await vi.waitFor(() => expect([...new Set(received)]).toEqual(["one", "two"]), { timeout: 40_000, interval: 200 });
 }, 50_000);
+
+it("every relay refusing: the first text is published again at its own check, not at once and over and over", async () => {
+  const { relays, contact, row, send } = await chat();
+  // The contact was here: its app's mode is known, as in a chat whose contact went away.
+  await contact.start();
+  const before = await send("while the relays take it", Date.now());
+  await vi.waitFor(async () => expect((await row(before))?.delivery).toBe("delivered"), { timeout: 30_000, interval: 100 });
+  await contact.stop();
+  relays.set("refuse");
+  const t = Date.now();
+  const first = await send("refused, then left to wait", t), second = await send("behind it", t + 1);
+  const after = relays.refused.count;
+  const third = await send("and behind that", t + 2);
+  // With texts waiting behind it, each refusal changed the floor's view, and each change looked at the outbox again,
+  // which sent the first again at once: 70 refused PUTs a second in a real browser, until the relays' budget was spent
+  // and it showed as sent.
+  await new Promise((resolve) => setTimeout(resolve, 2_000));
+  expect(relays.refused.count - after).toBeLessThanOrEqual(2);
+  expect([(await row(first))?.delivery, (await row(second))?.delivery, (await row(third))?.delivery]).toEqual(["waiting", "waiting", "waiting"]);
+}, 45_000);
 
 it("no relay reachable (connection refused, as Node says it): the first text waits, cancellable", async () => {
   const { relays, row, send, floor } = await chat();
