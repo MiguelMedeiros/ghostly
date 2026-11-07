@@ -307,6 +307,8 @@ const RULES: readonly Rule[] = [
   exact("This wallet has no test mint to ask for test coins", "errors.cashu.noTestMint"),
   exact("Select a configured mint", "errors.cashu.selectMint"),
   exact("That is not a valid ecash token", "errors.cashu.badToken"),
+  // Redeeming a token whose keyset its mint does not have (cashu-ts): a crafted token, or one of a keyset the mint dropped.
+  { match: /^Keyset '[^']*' is not a keyset of this mint$/, key: "errors.cashu.unknownKeyset", next: "errors.cashu.unknownKeysetNext" },
   exact("Add a mint in Settings first", "errors.cashu.addMint"),
   exact("Not enough sats in your wallet", "errors.cashu.notEnough"),
   { match: /^Not enough sats in your wallet: (?<amount>\d[\d.,\s']*?) sats leave room for the fee$/, key: "errors.cashu.notEnoughForFee", params: ({ amount }, t) => ({ amount: sats(amount, t) }) },
