@@ -955,7 +955,9 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `names` is what `reactionName` answers
   const chips = useMemo(() => reactionChips(message.reactions, by => reactionName?.(by) ?? by.slice(0, 8), t("chat.reply.you")), [message.reactions, reactionName, t, names]);
   const swipe = useSwipeReply(onReply);
-  const [imgError, setImgError] = useState(false);
+  /** The picture link that did not load: its text is shown instead, until an edit makes it another link. */
+  const [failedPicture, setFailedPicture] = useState<string | null>(null);
+  const imgError = failedPicture === message.text.trim();
   const [revealed, setRevealed] = useState(false);
   /** The picture link whose picture has loaded: until it has, its box keeps a placeholder's height. */
   const [pictureLoaded, setPictureLoaded] = useState<string | null>(null);
@@ -1034,7 +1036,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     void pictureLinkUrl(readHere).then((read) => {
       if (!shown) return;
       if (read) setPictureRead({ link: readHere, read });
-      else setImgError(true);
+      else setFailedPicture(readHere);
     });
     return () => { shown = false; };
   }, [readHere]);
@@ -1373,7 +1375,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
                 style={{ ...(linkPicture && linkPictureBox(linkPicture)), ...(isWaybackGif(message.text.trim()) && { imageRendering: "pixelated" }) }}
                 loading="lazy"
                 onLoad={() => setPictureLoaded(message.text.trim())}
-                onError={() => setImgError(true)}
+                onError={() => setFailedPicture(message.text.trim())}
               />
             ) : (
               // Being read: the placeholder a picture has until it loads.
