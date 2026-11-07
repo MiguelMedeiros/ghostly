@@ -49,6 +49,8 @@ function open(answer: (request: { type: string; id?: number }) => string, clock 
   const window = {
     origin: "null",
     atob,
+    // A window's navigator, its async Clipboard API already gone (the runner checks that none is left).
+    navigator: {},
     setTimeout,
     Date: { now: () => clock.t },
     addEventListener,

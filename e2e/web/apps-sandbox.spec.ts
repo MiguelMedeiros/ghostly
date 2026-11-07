@@ -586,7 +586,8 @@ test("the person's copy and cut in an app put what they selected on the clipboar
   await page.keyboard.press("ControlOrMeta+C");
   expect(await pasted()).toBe("bc1qREALADDRESS");
 
-  await frame.locator("#t").focus();
+  // A click, as the person does: a focus moved into the app by script alone is taken back (the app beside a chat cannot take it).
+  await frame.locator("#t").click();
   await page.keyboard.press("ControlOrMeta+A");
   await page.keyboard.press("ControlOrMeta+X");
   expect(await pasted()).toBe("bc1qCUTADDRESS");

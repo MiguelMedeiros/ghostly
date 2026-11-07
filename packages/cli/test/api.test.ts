@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AWAITING_PEER_MS, OwnInviteError, type PairingProgress } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, findChat, findGroup, hideStateSecrets, mentionsFor, redactSettings, type ApiContext } from "../src/api";
-import { chatOrGroup, findChatOrGroup } from "../src/apiKit";
+import { chatOrGroup, findChatOrGroup, findOwnNamedChat } from "../src/apiKit";
 import { parseArgs } from "../src/args";
 import { COMMANDS } from "../src/commands";
 import { ENGINE_PARAMS } from "../src/engineMethods";
