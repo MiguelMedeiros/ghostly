@@ -3781,6 +3781,14 @@ export class GhostlyNode implements EngineImplementation {
     // nothing the link hears until it stops is taken (`whileChat`). Nor is a row stored for the chat later on.
     this.links.delete(linkId);
     this.removedChats.set(linkId, (this.removedChats.get(linkId) ?? 0) + 1);
+    // What this run noted of its history goes with it, as a group's does (`groupHistoryGone`): the same invite joined
+    // again (the same id) showed the deleted chat's last reaction, with its message's words, on the chat list.
+    this.newestAt.delete(linkId);
+    this.clockLeads.delete(linkId);
+    this.placedAt.delete(linkId);
+    this.reactionNotes.delete(linkId);
+    this.reactionNotesBefore.delete(linkId);
+    this.reactionNotesWhole.delete(linkId);
     if (filesEnded) setTimeout(() => void live.link?.stop(true), FILES_END_MS);
     else void live.link?.stop(true);
     void live.caps?.stop();
