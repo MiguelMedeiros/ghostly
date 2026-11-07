@@ -766,6 +766,20 @@ describe("sending on Ark, Bark, on-chain and USDT", () => {
     expect(send()).toBeEnabled();
   });
 
+  it("gives up 45 s after Send asked, though the chat behind redraws the sheet with a new context every few seconds", async () => {
+    // The chat page builds its review context on every draw (a message, a link or wallet change): the 45 s started
+    // again at each, and in a live chat the sheet said "Asking for an address…" for good, Send disabled.
+    const { rerender, onSend, onRequest, onClose } = await ask("arkade:testnet", "3");
+    for (let s = 10; s <= 40; s += 10) {
+      tick(10_000);
+      rerender(<><PaymentComposer balance={1_000} onSend={onSend} onRequest={onRequest} onClose={onClose} reviewContext={reviewContext()} contact="Alice" /><Where /></>);
+      expect(send()).toHaveTextContent("Asking for an address…");
+    }
+    tick(5_600);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Your contact's app didn't answer");
+    expect(send()).toBeEnabled();
+  });
+
   it("shows why the contact could not be asked", async () => {
     rememberRail("peer", "bark:testnet");
     const { user, engine } = open();
