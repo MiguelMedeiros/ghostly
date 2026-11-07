@@ -8,7 +8,7 @@ import { identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign, verify, 
 import type { LinkParams } from "./invite";
 import type { PairingCredentials } from "./pairedSession";
 import { measureRecords, MAX_DNS_PACKET_BYTES, PKARR_FUTURE_SKEW_MS, type GhostRecord, type SignedPacket } from "./pkarr";
-import { budgetRetryMs, isDiscoveryBudgetError, type PkarrRequestOptions, type PkarrTransport } from "./transport";
+import { budgetRetryMs, isDiscoveryBudgetError, publishedNowhere, type PkarrRequestOptions, type PkarrTransport } from "./transport";
 import { traceLink } from "./linkTrace";
 import { AWAITING_PEER_MS, countUnusedInvite, PRESENCE_WINDOW, UNUSED_INVITE_UPKEEP_MS, unusedInviteWait } from "./link";
 import { REACTION_LIMITS, readDhtReactions, validReactionNumber, type WireReaction } from "./reactions";
@@ -262,6 +262,8 @@ export class DhtDelivery {
    */
   private readHeldUntil = 0;
   private errors: Partial<Record<"publish" | "read", string>> = {};
+  /** Texts whose last `send` went nowhere (`wentNowhereFor`), newest last. */
+  private wentNowhere = new Set<string>();
   /** When the device's network last came back (`networkBack`): a read or publication started before failed for want of it. */
   private networkBackAt = -Infinity;
   private foreignKeySeenAt?: number;
@@ -596,11 +598,14 @@ export class DhtDelivery {
    */
   async send(text: string, timestamp: number, id: string, reply?: string, edit?: DhtEdit, forwarded?: number): Promise<string | null> {
     return this.serialize(async () => {
+      this.wentNowhere.delete(id);
       const error = this.validate(text, timestamp, id, reply, edit);
       if (error) return error;
       const now = Date.now(), pending = this.state.pending;
       const hops = edit ? undefined : readForwarded(forwarded);
-      let next = pending?.message[0] === id && pending.expires > now ? pending : { message: [id, timestamp, text] as Message, expires: now + DHT_MESSAGE_TTL, attempts: 0, next: now, ...(reply && { reply }), ...(edit && { edit }), ...(hops && { forwarded: hops }) };
+      // Already the floor's text: an earlier publication of it may be out.
+      const again = pending?.message[0] === id && pending.expires > now;
+      let next = again ? pending! : { message: [id, timestamp, text] as Message, expires: now + DHT_MESSAGE_TTL, attempts: 0, next: now, ...(reply && { reply }), ...(edit && { edit }), ...(hops && { forwarded: hops }) };
       if (next.forwarded && !this.roomForHops(next.message, next.expires, next.reply, next.forwarded)) { const { forwarded: _dropped, ...alone } = next; next = alone; }
       if (next.reply && this.packetError(next.message, next.expires, next.reply)) { const { reply: _dropped, ...alone } = next; next = alone; }
       await this.persist({ ...this.state, pending: next }); this.changed();
@@ -609,10 +614,25 @@ export class DhtDelivery {
       catch (error) {
         // Held back by the relays' request budget: the text is queued and goes as soon as the budget frees a request.
         if (isDiscoveryBudgetError(error)) { this.schedule(); return null; }
-        this.errors.publish = `DHT publication failed: ${String(error instanceof Error ? error.message : error)}. Bounded retry continues until expiry.`; this.changed(); return this.errors.publish;
+        this.errors.publish = `DHT publication failed: ${String(error instanceof Error ? error.message : error)}. Bounded retry continues until expiry.`;
+        // No relay holds this text (each refused it or was not asked), and it was not out before: it has not left this
+        // device. (An edit keeps the floor: nothing else sends it again.)
+        // It leaves the floor, so nothing publishes it behind the sender's back; the sender sends it again in its turn,
+        // or drops it (`wentNowhere`).
+        if (!again && !edit && publishedNowhere(error) && this.state.pending?.message[0] === id) {
+          await this.persist({ ...this.state, pending: undefined });
+          this.wentNowhere.add(id);
+          if (this.wentNowhere.size > 64) this.wentNowhere.delete(this.wentNowhere.values().next().value!);
+        }
+        this.changed(); return this.errors.publish;
       }
     });
   }
+  /**
+   * The last `send` of this id failed with no relay holding it, and it was not out before (`PublishFailedError`): it
+   * never left this device, and is no longer the floor's to publish.
+   */
+  wentNowhereFor(id: string): boolean { return this.wentNowhere.has(id); }
   /**
    * The envelope a file's offer would go in, as `send` builds a text's: the most it can say that fits the packet and
    * what a reader reads (`MAX_ENVELOPE_PLAINTEXT`). Its meta goes first (a voice note's waveform thinned if it must),

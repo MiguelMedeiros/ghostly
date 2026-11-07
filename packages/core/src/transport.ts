@@ -123,6 +123,29 @@ export function isDiscoveryBudgetError(error: unknown): error is DiscoveryBudget
 }
 
 /**
+ * A publish no relay took (`RelayTransport`), saying whether one of them may hold the packet all the same. Not
+ * `mayBeStored` only when every relay was not asked now (its budget, its rate limit, its breaker, its network
+ * cooldown), answered that it did not take it (a 4xx), or could not be reached before the request went (a refused
+ * connection or a name that does not resolve, where the runtime says so: Node does, a browser does not), or when there
+ * is no relay at all. A relay that did not answer in time, dropped the connection, or answered with a server error
+ * may have stored it. The message is the publish's usual one.
+ */
+export class PublishFailedError extends Error {
+  readonly code = "publish-failed";
+  constructor(message: string, readonly mayBeStored: boolean) { super(message); }
+}
+
+/**
+ * Whether `error` is a publish that went nowhere (`PublishFailedError` with `mayBeStored` false), also from another
+ * copy of this module. Anything else (a timeout, the DHT's own failure beside the relays', a Desktop's error in
+ * words) may have left this device.
+ */
+export function publishedNowhere(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "publish-failed"
+    && (error as { mayBeStored?: unknown }).mayBeStored === false;
+}
+
+/**
  * A publish Ghostly Desktop's Rust relay client held back, as it says it in words (`pkarr_network.rs`
  * `publish_failure`: "Publish held back on every relay…; retry in N ms: …"), as the `DiscoveryBudgetError` it is: every
  * relay held the packet back for its rate limit, or held it back beside relays left alone for failing, and nothing failed
