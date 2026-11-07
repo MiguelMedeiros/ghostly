@@ -25,7 +25,7 @@ beforeAll(async () => {
   registerFileBytes("native", async () => new NodeFileBytes(join(dir, "files")), true);
 });
 
-function contextFor(mode: "daemon" | "one-shot", transfers: Record<string, unknown> = {}) {
+function contextFor(mode: "daemon" | "one-shot", transfers: Record<string, unknown> = {}, stopping?: AbortSignal) {
   const sent: number[] = [];
   const node = {
     getState: () => ({ links: [link], groups: [], settings: {}, transport: {}, transfers }) as unknown as EngineState,
@@ -33,9 +33,12 @@ function contextFor(mode: "daemon" | "one-shot", transfers: Record<string, unkno
     getMessage: vi.fn(async () => undefined),
     sendFile: vi.fn(async ({ timestamp }: { timestamp: number }) => { sent.push(timestamp); }),
   };
-  const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode, version: "test" } as unknown as ApiContext;
+  const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode, version: "test", stopping } as unknown as ApiContext;
   return { ctx, sent };
 }
+
+/** What a call answers within 2 s, or "still waiting". */
+const within2s = (call: Promise<unknown>) => Promise.race([call.then(() => null, (e: unknown) => e), new Promise((r) => setTimeout(() => r("still waiting"), 2_000))]);
 
 async function timedOut(ctx: ApiContext, name: string): Promise<CliError> {
   const path = join(dir, name);
@@ -68,5 +71,34 @@ describe("file send whose wait runs out", () => {
     const error = await timedOut(ctx, "moving.txt");
     expect(error.details).toMatchObject({ chat: "chat-away", messageId: `me_${sent[0]}`, transferred: 1_000, size: 5_000, stage: "asking" });
     expect(error.message).toContain("1000 of 5000 bytes, waiting for the contact to take it");
+  });
+
+  /**
+   * A daemon that stops (a restart, an upgrade) answers its waits before it ends their connections, as a `send --wait`
+   * does. A file send's wait went on until the connection ended, and the client could only say "The daemon stopped
+   * before it answered file.send, which may be done": no messageId, no file, though the file was kept and went on.
+   */
+  it("answers at once with the message and the file when the daemon stops under the wait", async () => {
+    const stop = new AbortController();
+    const { ctx, sent } = contextFor("daemon", {}, stop.signal);
+    const path = join(dir, "restart.txt");
+    writeFileSync(path, "notes");
+    const sending = callApi(ctx, "file.send", { chat: "Bob", path, wait: "sent", timeout: 300 });
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    stop.abort();
+    const error = await within2s(sending) as CliError;
+    expect(error).toBeInstanceOf(CliError);
+    expect(error.code).toBe("timeout");
+    expect(error.details).toMatchObject({ chat: "chat-away", messageId: `me_${sent[0]}`, file: expect.stringMatching(/^chat-away-out-/), reason: "daemon-stopped" });
+    expect(error.message).toMatch(/^The daemon stopped before the wait ended/);
+    expect(error.message).toContain("kept here and goes by itself once this profile is online again");
+  });
+
+  it("chat wait answers at once too, as a timeout with reason daemon-stopped", async () => {
+    const stop = new AbortController();
+    const { ctx } = contextFor("daemon", {}, stop.signal);
+    const waiting = callApi(ctx, "chat.wait", { chat: "Bob", until: "text", timeout: 300 });
+    stop.abort();
+    expect(await within2s(waiting)).toMatchObject({ code: "timeout", message: "The daemon stopped before the wait ended: it was waiting for chat chat-away to carry text", details: { reason: "daemon-stopped" } });
   });
 });

@@ -16,7 +16,7 @@ import { CliError } from "./errors";
 import { guardText } from "./secretGuard";
 import { endTyping } from "./typing";
 import { measureVoice } from "./voicePeaks";
-import { goesOn } from "./waitNotice";
+import { goesOn } from "./waits";
 
 /**
  * Files and voice notes in a chat (WISP 1100, phase 3), as the app's composer sends them (packages/browser
@@ -327,7 +327,7 @@ export const FILE_METHODS: Record<string, Method> = {
     // answered only "Timed out … waiting for file <id> to arrive", so a bot could not name it and a person sent it again.
     if (wait === "sent") await FILE_METHODS["file.wait"](ctx, { chat: link.id, file: file.id, timeout: seconds }).catch((error: unknown) => {
       if (!(error instanceof CliError) || error.code !== "timeout") throw error;
-      throw new CliError("timeout", `${error.message}. It is kept here and ${goesOn(ctx.mode)}`, { ...error.details, chat: link.id, messageId, file: file.id });
+      throw new CliError("timeout", `${error.message}. It is kept here and ${goesOn(ctx)}`, { ...error.details, chat: link.id, messageId, file: file.id });
     });
     return { chat: link.id, messageId, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}) };
   },
@@ -412,7 +412,7 @@ export const FILE_METHODS: Record<string, Method> = {
       return now && (now.state === "done" || now.state === "failed" || (now.stage === "asking" && now.direction === "in")) ? now : undefined;
     }, ms, `file ${fileId} to arrive`).catch((error: unknown) => {
       const now = state(ctx).transfers[fileId];
-      if (error instanceof CliError && error.code === "timeout" && now) throw new CliError("timeout", `${error.message} (${now.transferred} of ${now.size} bytes${now.stage ? `, ${stageWords(now)}` : ""})`, { file: fileId, transferred: now.transferred, size: now.size, stage: now.stage ?? null });
+      if (error instanceof CliError && error.code === "timeout" && now) throw new CliError("timeout", `${error.message} (${now.transferred} of ${now.size} bytes${now.stage ? `, ${stageWords(now)}` : ""})`, { ...error.details, file: fileId, transferred: now.transferred, size: now.size, stage: now.stage ?? null });
       throw error;
     });
     if (transfer.state === "failed") throw new CliError("engine", transfer.error ?? "The transfer failed", { file: fileId, ...where, retry: !!transfer.retry });

@@ -372,21 +372,26 @@ export async function messageOf(ctx: ApiContext, linkId: string, ref: string, ke
 /**
  * Resolves with `check`'s first defined answer: now, or on a later state; `timeout` error after `ms`. A check that
  * throws on a later state (`chat wait`'s chat removed) ends the wait with its error: the hub swallows what its
- * listeners throw, and the wait went on to its timeout.
+ * listeners throw, and the wait went on to its timeout. A daemon that stops (`ApiContext.stopping`) ends it at once as a
+ * timeout with `reason: "daemon-stopped"`, as waits.ts ends its own: it went on until the connection ended, and a
+ * `file send --wait sent` answered with no messageId and no file, though the file was kept and went on.
  */
 export function waitForState<T>(ctx: ApiContext, check: (state: EngineState) => T | undefined, ms: number, what: string): Promise<T> {
   const now = check(state(ctx));
   if (now !== undefined) return Promise.resolve(now);
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => { off(); reject(new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s waiting for ${what}`)); }, ms);
+    const end = () => { clearTimeout(timer); off(); ctx.stopping?.removeEventListener("abort", stopped); };
+    const stopped = () => { end(); reject(new CliError("timeout", `The daemon stopped before the wait ended: it was waiting for ${what}`, { reason: "daemon-stopped" })); };
+    const timer = setTimeout(() => { end(); reject(new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s waiting for ${what}`)); }, ms);
     const off = ctx.hub.onState((next) => {
       let value: T | undefined;
-      try { value = check(next); } catch (error) { clearTimeout(timer); off(); reject(error); return; }
+      try { value = check(next); } catch (error) { end(); reject(error); return; }
       if (value === undefined) return;
-      clearTimeout(timer);
-      off();
+      end();
       resolve(value);
     });
+    if (ctx.stopping?.aborted) stopped();
+    else ctx.stopping?.addEventListener("abort", stopped, { once: true });
   });
 }
 
