@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, HOLD, holdBatch, holdText, isBatch, LABEL, MAX_WAIT, MIN_BATCH, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, positionText, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt, wakeIn } from "../merge-train.mjs";
+import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, HOLD, HOLD_HELP, holdBatch, holdText, isBatch, LABEL, MAX_WAIT, MIN_BATCH, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, positionText, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt, wakeIn } from "../merge-train.mjs";
 
 type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; closedAt?: string; open: boolean; base: string; merged?: boolean; author?: string };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
@@ -2239,6 +2239,189 @@ describe("one pull request alone", () => {
     await repo.run();
     expect(repo.landed).toEqual([]); // the planted mark would say "rebased onto dev0, green": the train rebases it itself
     expect(repo.pushes).toHaveLength(1);
+  });
+});
+
+describe("a queue:priority pull request while CI Success on the base itself is red", () => {
+  const said = (repo: ReturnType<typeof fakeRepo>, n: number) => repo.comments.get(n)!.at(-1)!.body;
+  /** Batch #9000 [#11 #12] red on dev0, and CI Success red on dev0 itself: the train holds the batch. */
+  const heldBatch = async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12]) repo.add(n);
+    await repo.run();
+    repo.runs.set("dev0", red);
+    repo.settle([11, 12]);
+    expect((await repo.run()).log.join("\n")).toMatch(/HOLD #9000: .*itself is red/);
+    return repo;
+  };
+  /** #11 alone, rebased and red on dev0, with CI Success red on dev0 itself: the train holds it. */
+  const heldLone = async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run();
+    repo.runs.set("dev0", red);
+    repo.settle([11]);
+    expect((await repo.run()).log.join("\n")).toMatch(/HOLD #11: .*itself is red/);
+    return repo;
+  };
+
+  it("lands alone ahead of the held batch, which stays open and is rebuilt on the new tip at the next run", async () => {
+    const repo = await heldBatch();
+    repo.add(13, { priority: true }); // the fix for dev: green on its own full run, at dev's tip
+    const r = await repo.run();
+    expect(r.merged).toEqual([13]);
+    expect(repo.landed).toEqual(["#13"]);
+    expect(repo.tips.dev).toBe("s13");
+    // The held batch is parked, not closed: still in flight, its members still aboard.
+    expect(r.inFlight).toBe(9000);
+    expect(r.closed).toEqual([]);
+    expect(repo.members()).toEqual([11, 12]);
+    const next = await repo.run();
+    expect(next.closed).toEqual([9000]);
+    expect(repo.members()).toEqual([11, 12]);
+    expect(readState(repo.batch()!.body)).toMatchObject({ baseSha: "s13" });
+    expect(repo.batch()!.number).toBe(9001);
+  });
+
+  it("flies alone on a rebase past the held batch, across runs, and lands once green", async () => {
+    const repo = await heldBatch();
+    repo.add(13, { priority: true, behind: true });
+    const r = await repo.run();
+    expect(r.inFlight).toBe(9000);
+    const head = repo.pulls.get(13)!.sha;
+    expect(repo.pushes).toEqual([`fix-13=${head}`]);
+    expect(repo.alone(13)).toMatchObject({ sha: head, baseSha: "dev0", past: 9000 });
+    expect(repo.comments.get(13)!.at(-1)!.body).toMatch(/next into `dev`, alone\. Rebased onto `dev` \(dev0\), waiting for CI Success on .* ahead of #9000/);
+    // A fresh run reads both from GitHub: the held batch from its body, the flight from #13's position comment.
+    repo.runs.set(head, running);
+    const wait = await repo.run();
+    expect(wait.inFlight).toBe(9000);
+    expect(repo.pulls.get(13)!.sha).toBe(head);
+    expect(repo.alone(13)).toMatchObject({ sha: head, past: 9000 });
+    expect(repo.landed).toEqual([]);
+    repo.settle([11, 12]); // #13's rebase goes green, the batch stays red
+    const done = await repo.run();
+    expect(done.merged).toEqual([13]);
+    expect(repo.landed).toEqual(["#13"]);
+    await repo.run();
+    expect(repo.members()).toEqual([11, 12]);
+    expect(readState(repo.batch()!.body)).toMatchObject({ baseSha: "s13" });
+  });
+
+  it("lands ahead of a held red lone pull request, which keeps its flight and is rebased onto the new tip", async () => {
+    const repo = await heldLone();
+    const held = repo.pulls.get(11)!.sha;
+    repo.add(13, { priority: true });
+    const r = await repo.run();
+    expect(r.merged).toEqual([13]);
+    expect(r.inFlight).toBe(11);
+    expect(repo.alone(11)).toMatchObject({ sha: held, baseSha: "dev0", retried: false });
+    const next = await repo.run();
+    expect(next.inFlight).toBe(11);
+    expect(repo.alone(11)).toMatchObject({ baseSha: "s13", retried: false });
+    expect(repo.pulls.get(11)!.sha).not.toBe(held);
+  });
+
+  it("flies a priority pull request on a rebase past a held lone one too", async () => {
+    const repo = await heldLone();
+    repo.add(13, { priority: true, behind: true });
+    await repo.run();
+    expect(repo.alone(13)).toMatchObject({ baseSha: "dev0", past: 11 });
+    expect(repo.alone(11)).toMatchObject({ baseSha: "dev0" });
+    repo.settle([11]);
+    const done = await repo.run();
+    expect(done.merged).toEqual([13]);
+    expect(done.inFlight).toBe(11);
+  });
+
+  it("fails a red priority pull request by the usual rules, and the held batch keeps holding with nothing else aboard", async () => {
+    const repo = await heldBatch();
+    repo.add(13, { priority: true, behind: true });
+    repo.add(14);
+    await repo.run();
+    const first = repo.pulls.get(13)!.sha;
+    repo.settle([11, 12, 13]);
+    await repo.run(); // red: one more run on a fresh rebase, not a hold
+    expect(repo.pulls.get(13)!.sha).not.toBe(first);
+    expect(repo.alone(13)).toMatchObject({ retried: true, past: 9000 });
+    repo.settle([11, 12, 13]);
+    const r = await repo.run();
+    expect(r.failed).toEqual([13]);
+    expect(repo.pulls.get(13)!.labels).toEqual([LABEL.failed]);
+    expect(said(repo, 13)).toMatch(/failed twice with only this pull request on `dev`/);
+    expect(r.inFlight).toBe(9000);
+    expect(repo.members()).toEqual([11, 12]);
+    expect(repo.landed).toEqual([]);
+    const after = await repo.run();
+    expect(after.opened).toEqual([]);
+    expect(repo.alone(14)).toBeNull();
+    expect(said(repo, 14)).toMatch(/\*\*1st\*\*.*on hold/);
+  });
+
+  it("lets one priority pull request go at a time", async () => {
+    const repo = await heldBatch();
+    repo.add(13, { priority: true, behind: true });
+    repo.add(14, { priority: true, behind: true });
+    await repo.run();
+    expect(repo.alone(13)).toMatchObject({ past: 9000 });
+    expect(repo.alone(14)).toBeNull();
+    repo.runs.set(repo.pulls.get(13)!.sha, running);
+    await repo.run();
+    expect(repo.alone(14)).toBeNull();
+    expect(repo.pushes).toHaveLength(1);
+  });
+
+  it("boards nothing past the hold that lacks queue:priority, nor anything while CI on the base is still running", async () => {
+    const repo = await heldBatch();
+    repo.add(13);
+    const r = await repo.run();
+    expect(r.merged).toEqual([]);
+    expect(r.opened).toEqual([]);
+    expect(repo.alone(13)).toBeNull();
+    expect(said(repo, 13)).toMatch(/\*\*1st\*\*.*on hold: CI Success on `dev` itself is red/);
+
+    const pending = fakeRepo();
+    for (const n of [11, 12]) pending.add(n);
+    await pending.run();
+    pending.runs.set("dev0", running);
+    pending.settle([11, 12]);
+    pending.add(13, { priority: true });
+    const p = await pending.run();
+    expect(p.log.join("\n")).toMatch(/HOLD #9000: .*itself is still running/);
+    expect(p.merged).toEqual([]);
+    expect(pending.landed).toEqual([]);
+  });
+
+  it("goes the normal way while the base is green: a red batch is split, and the priority pull request waits for it", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12]) repo.add(n);
+    await repo.run();
+    repo.settle([11]);
+    repo.add(13, { priority: true });
+    const r = await repo.run();
+    expect(r.merged).toEqual([]);
+    expect(repo.members()).toEqual([11]);
+    expect(repo.alone(13)).toBeNull();
+  });
+
+  it("says what a person can do once the hold has lasted HOLD_HELP", async () => {
+    const repo = await heldBatch();
+    const at = "2026-10-08T01:00:00Z";
+    repo.runs.set("dev0", [{ ...red[0], completed_at: "2026-10-08T00:50:00Z" }]);
+    repo.runs.set(repo.batch()!.sha, [{ ...red[0], completed_at: at }]);
+    repo.add(13);
+    const help = /re-run the failed jobs of CI on `dev` \(dev0\).*`queue:priority`/;
+    await repo.run({ now: Date.parse(at) + HOLD_HELP - 60_000 });
+    for (const n of [11, 12, 13]) expect(said(repo, n)).not.toMatch(help);
+    const r = await repo.run({ now: Date.parse(at) + HOLD_HELP });
+    for (const n of [11, 12, 13]) expect(said(repo, n)).toMatch(help);
+    expect(r.log.join("\n")).toMatch(/HOLD #9000: .*itself is red; nobody is blamed until it is green\./);
+
+    const lone = await heldLone();
+    const head = lone.pulls.get(11)!.sha;
+    lone.runs.set(head, [{ ...red[0], completed_at: at }]);
+    await lone.run({ now: Date.parse(at) + HOLD_HELP });
+    expect(said(lone, 11)).toMatch(help);
   });
 });
 
