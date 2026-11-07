@@ -217,7 +217,7 @@ import { mayPinIn, myPin, pinView, pinnedRow, type PinsHost } from "./pins";
 import { GroupEdits } from "./groupEdits";
 import { CommunityPay, groupLinkId, parsePayLink } from "./communityPay";
 import { mayReach } from "./serviceAccess";
-import { Outbox } from "./outbox";
+import { NotSent, Outbox } from "./outbox";
 import { HoldEngine, holdStoragePlace } from "./hold";
 import { RTT_STEP_MS, TransportLog, resumeHere } from "./transportLog";
 import { ProfilePeek, readPathOf, type PeekResult } from "./profilePeek";
@@ -4476,6 +4476,8 @@ export class GhostlyNode implements EngineImplementation {
         await this.noteTextSend(linkId, message, snapshot, at, error, link);
         // On the DHT floor a card goes as its text alone: it goes again once live (`restoreCards`).
         if (!error && message.via === "pkarr") await this.cardWentBare(linkId, message);
+        // No relay took it and none may hold it: it has not left this device (the outbox lets it wait, cancellable).
+        if (error && message.via === "pkarr" && message.wireId && link.dhtWentNowhere(message.wireId)) return new NotSent(error);
         return error;
       }, message => message.via === "pkarr" ? DHT_MESSAGE_TTL : 20_000, message => {
         const pending = this.links.get(linkId)?.stored.dhtDeliveryState?.pending;
