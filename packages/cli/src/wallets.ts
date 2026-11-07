@@ -162,10 +162,14 @@ function badMintUrl(error: unknown): boolean {
   return code === "invalidMintUrl" || code === "mintNotHttps";
 }
 
+/** What the engine's faucet says with no test mint to ask. */
+const NO_TEST_MINT = /^The faucet did not pay: This wallet has no test mint\b/;
+
 /**
  * The engine's wallet refusals about what the person asked, by the words it writes (they carry no `engineCode`): a
  * wallet or card that is not there, a token or invoice that is not one, a wallet already made, no mint or source to do
- * it with. Before, each was `engine` (exit 1), which a bot reads as the engine failing and may retry.
+ * it with. Before, each was `engine` (exit 1), which a bot reads as the engine failing and may retry. With no wallet of
+ * the type at all, `wallet faucet`, `wallet receive` and `wallet address` say which to make first (`noWalletOf`).
  */
 const WALLET_REFUSALS: [RegExp, ErrorCode][] = [
   [/^There is no .+ to remove$/, "not_found"],
@@ -174,24 +178,26 @@ const WALLET_REFUSALS: [RegExp, ErrorCode][] = [
   [/^You already have a .+ wallet$/, "refused"],
   [/^No mint could create an invoice: No mint configured$/, "unavailable"],
   [/^No Bitcoin source is set up$/, "unavailable"],
-  [/^The faucet did not pay: This wallet has no test mint\b/, "unavailable"],
+  [NO_TEST_MINT, "unavailable"],
   [/^Ghostly cannot ask this wallet's faucet by itself\b/, "unavailable"],
 ];
 
+const WALLET_NAMES: Record<WalletType, string> = { cashu: "Cashu", lightning: "Lightning", arkade: "Arkade", bark: "Bark", spark: "Spark", bitcoin: "Bitcoin", fedimint: "Fedimint", usdt: "USDT" };
+
 /**
- * `chat pay` or `chat request` refused for want of a Cashu wallet of that network at all: the engine says the wallet
- * is short of sats, or that no mint could make an invoice, and names nothing to do. `refused` with the command that
- * makes one, as a contact with no wallet is told; `details.reason` `no_wallet`. With a wallet, the engine's own words.
+ * A request refused for want of a wallet of that type and network at all: `chat pay`, `chat request`, `wallet receive`
+ * and the Cashu faucet with no Cashu wallet, an address with no wallet of its type. The engine says the wallet is short
+ * of sats, that it has no mint or source, and names nothing to do. `refused` with the command that makes one, as a
+ * contact with no wallet is told; `details.reason` `no_wallet`. With a wallet, the engine's own words.
  */
-function noWalletOf(ctx: ApiContext, n: WalletNetwork, error: unknown): unknown {
-  if ((state(ctx).wallet.wallets ?? []).some((w) => w.type === "cashu" && w.network === n)) return error;
+function noWalletOf(ctx: ApiContext, n: WalletNetwork, error: unknown, type: WalletType = "cashu"): unknown {
+  if ((state(ctx).wallet.wallets ?? []).some((w) => w.type === type && w.network === n)) return error;
   const name = n === "mainnet" ? "Mainnet" : "Testnet";
-  return new CliError("refused", `You have no ${name} Cashu wallet: ghostly wallet create cashu${n === "mainnet" ? " --network mainnet" : ""}`, { reason: "no_wallet" });
+  return new CliError("refused", `You have no ${name} ${WALLET_NAMES[type]} wallet: ghostly wallet create ${type}${n === "mainnet" ? " --network mainnet" : ""}`, { reason: "no_wallet" });
 }
 const engineCode = (error: unknown) => error instanceof Error ? (error as { engineCode?: unknown }).engineCode : undefined;
 /** What the engine says to a Cashu request it has no mint for: no mint for the invoice, or none to name for ecash. */
 const NO_MINT = /^(No mint could create an invoice: No mint configured|You have no (Mainnet|Testnet) Cashu wallet: create one in Wallet → New)$/;
-
 function walletRefusal(error: unknown): unknown {
   if (!(error instanceof Error) || error instanceof CliError) return error;
   const code = WALLET_REFUSALS.find(([pattern]) => pattern.test(error.message))?.[1];
@@ -251,7 +257,9 @@ const WALLETS: Record<string, Method> = {
     const type = oneOf(params, "type", WALLET_TYPES, "cashu");
     if (network(params) !== "testnet") throw new CliError("refused", "Test coins are for Testnet wallets only");
     const card = cardOf(ctx, params, type);
-    return node(ctx).walletTestCoins({ type, network: "testnet", ...(card ? { card } : {}) });
+    // No test mint: the faucet of Cashu and of a Lightning card through the mints, which a Cashu wallet brings.
+    return node(ctx).walletTestCoins({ type, network: "testnet", ...(card ? { card } : {}) })
+      .catch((error: unknown) => { throw error instanceof Error && NO_TEST_MINT.test(error.message) ? noWalletOf(ctx, "testnet", error) : error; });
   },
 
   async "wallet.history"(ctx, params) {
@@ -267,17 +275,22 @@ const WALLETS: Record<string, Method> = {
     const n = network(params);
     await federationsOpen(ctx);
     const card = cardOf(ctx, params, "lightning");
-    const invoice = await node(ctx).walletReceiveLightning({ amount, network: n, ...(card ? { card } : {}) });
+    const invoice = await node(ctx).walletReceiveLightning({ amount, network: n, ...(card ? { card } : {}) })
+      .catch((error: unknown) => { throw error instanceof Error && NO_MINT.test(error.message) ? noWalletOf(ctx, n, error) : error; });
     return { network: n, amount, invoice: invoice.invoice, expiresAt: invoice.expiresAt, paymentHash: invoice.paymentHash ?? null, source: invoice.source };
   },
 
   async "wallet.address"(ctx, params) {
     const type = oneOf(params, "type", ADDRESS_TYPES, "bitcoin");
     const n = network(params);
-    if (type === "bitcoin") return { type, network: n, address: await node(ctx).bitcoinReceiveAddress({ network: n }) };
+    if (type === "bitcoin") {
+      const address = await node(ctx).bitcoinReceiveAddress({ network: n })
+        .catch((error: unknown) => { throw error instanceof Error && /^No Bitcoin source is set up$/.test(error.message) ? noWalletOf(ctx, n, error, "bitcoin") : error; });
+      return { type, network: n, address };
+    }
     const view = netView(state(ctx), n);
     const address = type === "arkade" ? view?.ark?.address : type === "spark" ? view?.spark?.address : view?.usdt?.address;
-    if (!address) throw new CliError("unavailable", `No ${type} wallet with an address on ${n}`);
+    if (!address) throw noWalletOf(ctx, n, new CliError("unavailable", `No ${type} wallet with an address on ${n}`), type);
     return { type, network: n, address };
   },
 
