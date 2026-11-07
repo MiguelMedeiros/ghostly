@@ -124,10 +124,11 @@ describe("what a wait says", () => {
     expect(waitNotice("chat.pin", { chat: "group:crew", message: "m" }, "one-shot")?.waiting).toBe("waiting for a member's edge in group crew to take it (up to 30 s; Ctrl-C stops waiting, it still goes)");
     expect(waitNotice("file.send", { chat: "group:crew", path: "/f" }, "one-shot")).toBeNull();
     expect(waitNotice("task.send", { chat: "bob", title: "t" }, "one-shot")).not.toBeNull();
+    expect(waitNotice("chat.send", { chat: "bob", text: "hi" }, "one-shot")?.waiting).toBe("waiting for it to go out to bob (up to 30 s; Ctrl-C stops waiting, it still goes)");
     // Asked not to wait, or through a daemon (it answers at once), or a call that never waits: nothing.
     expect(waitNotice("file.send", { chat: "bob", path: "/f", wait: "none" }, "one-shot")).toBeNull();
     expect(waitNotice("file.send", { chat: "bob", path: "/f" }, "daemon")).toBeNull();
     expect(waitNotice("chat.delete", { chat: "bob", message: "m" }, "one-shot")).toBeNull();
-    expect(waitNotice("chat.send", { chat: "bob", text: "hi" }, "one-shot")).toBeNull();
+    expect(waitNotice("chat.send", { chat: "bob", text: "hi" }, "daemon")).toBeNull();
   });
 });
