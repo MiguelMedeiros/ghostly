@@ -196,11 +196,13 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
   const here = named.length ? new Set(shown.messages.map((m) => m.id)) : undefined;
   const gone = named.filter((id) => here!.has(id));
   if (gone.length) {
-    for (const id of gone) deleteMessage(shown.id, id);
+    // Out of the session held here, not one read again (a parse and a merge of a chat of thousands), and as the list
+    // last mirrored left it but for these rows: what changes next is still all the mirror below looks at.
+    const kept = untouched(linkId, shown.id);
+    for (const id of gone) shown = deleteMessage(shown.id, id, shown) ?? shown;
     forget(shown.id);
+    if (kept) mirrored.set(linkId, { ...mirrored.get(linkId)!, stored: storedSession(shown.id) });
     notifySessionsChanged();
-    shown = sessionForPeer(link.peerPubKeyZ32);
-    if (!shown) return;
     // Nothing unread left: the chat's notification goes, as reading the chat takes it (the Android and Linux apps keep one).
     if (!getUnreadCount(shown)) clearChatNotification(shown.id);
   }
