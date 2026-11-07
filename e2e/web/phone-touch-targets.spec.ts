@@ -1,5 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { chat, connect, expect, link, say, test } from "../support/fixtures";
+import { pair } from "../support/paired";
 import { smallTargets } from "../support/touchTargets";
 
 /**
@@ -97,6 +98,59 @@ test("on a phone every button, link and control on the main screens is a 44 px t
   expect(actions.x + actions.width, "Join ends inside the screen").toBeLessThanOrEqual(320);
 
   expect([...small.values()], "controls under 44 × 44 px on a phone").toEqual([]);
+});
+
+test.describe("the voice recorder on a phone", () => {
+  /**
+   * The hands-free recorder's bar shows only while it records, so the screens above never reach it: its bin, Pause /
+   * Resume and the preview's Play were 36 × 36 px, the Discard question's Keep and Discard 34 px tall. Chromium's fake
+   * microphone (the web project's launch flags) records; the mic is started from the keyboard, which always records
+   * hands-free (a tap of a finger on it only shows how it works).
+   */
+  test("its bin, Pause, Resume, the preview's Play and the Discard question's Keep and Discard are 44 px targets", { tag: ["@feature:app.mobile-layout", "@feature:files.voice.record"] }, async ({ peer }, testInfo) => {
+    test.setTimeout(3 * 60_000);
+    const [alice, bob] = await Promise.all([peer("voice-phone-alice", { mobile: true, viewport: { width: 375, height: 667 } }), peer("voice-phone-bob")]);
+    await pair(alice, bob);
+    const { page } = alice;
+    const bar = page.getByTestId("voice-bar");
+    const small = new Map<string, string>();
+    const measure = async (screen: string) => {
+      for (const target of await smallTargets(page)) if (!small.has(target.name)) small.set(target.name, `${screen}: ${target.name} ${target.width}×${target.height} (${target.stops})`);
+    };
+
+    const mic = page.getByTestId("voice-record");
+    await expect(mic).not.toHaveAttribute("aria-disabled");
+    await mic.focus();
+    await page.keyboard.press("Enter");
+    await expect(bar).toHaveAttribute("data-mode", "locked");
+    await expect(bar).toHaveAttribute("data-phase", "recording");
+    await expect(page.getByTestId("voice-delete")).toBeVisible();
+    // Past the 3 s after which Esc asks before it throws the recording away.
+    await page.waitForTimeout(4_000);
+    await measure("recording (bin, Pause)");
+    await page.screenshot({ path: testInfo.outputPath("voice-recording.png") });
+
+    await page.getByTestId("voice-pause").click();
+    await expect(bar).toHaveAttribute("data-phase", "paused");
+    await expect(page.getByTestId("voice-preview")).toBeVisible();
+    await measure("paused (bin, preview Play, Resume)");
+    await page.screenshot({ path: testInfo.outputPath("voice-paused.png") });
+
+    await page.getByTestId("voice-pause").click();
+    await expect(bar).toHaveAttribute("data-phase", "recording");
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("voice-confirm")).toBeVisible();
+    await measure("Discard? (Keep, Discard)");
+    await page.screenshot({ path: testInfo.outputPath("voice-discard-question.png") });
+    for (const id of ["voice-confirm-keep", "voice-confirm-discard"]) {
+      const box = (await page.getByTestId(id).boundingBox())!;
+      expect(box.height, `${id} drawn as before, inside the bar`).toBeLessThan(44);
+    }
+    await page.getByTestId("voice-confirm-discard").click();
+    await expect(bar).toHaveCount(0);
+
+    expect([...small.values()], "controls under 44 × 44 px on a phone").toEqual([]);
+  });
 });
 
 /**

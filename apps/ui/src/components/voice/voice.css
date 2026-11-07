@@ -183,6 +183,7 @@
   animation: fade-in 120ms ease-out;
 }
 
+/* The bar's buttons are `.tap-target` too (index.css): on a phone a tap lands on 44 × 44 px around them, the bar unmoved. */
 .voice-icon-button {
   width: 36px;
   height: 36px;
