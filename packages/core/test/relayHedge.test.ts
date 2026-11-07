@@ -26,7 +26,8 @@ describe("hedged relay reads", () => {
       calls.push(host);
       const b = behaviour[host];
       if (b.refused) { reject(new TypeError("fetch failed: connection refused")); return; }
-      const timer = setTimeout(() => resolve((b.status ?? 200) === 200 ? new Response(packetOf(key) as BodyInit) : new Response(null, { status: 404 })), b.delayMs);
+      // A PUT is always taken; `status` is what a GET finds.
+      const timer = setTimeout(() => resolve(init?.method === "PUT" || (b.status ?? 200) === 200 ? new Response(packetOf(key) as BodyInit) : new Response(null, { status: 404 })), b.delayMs);
       init?.signal?.addEventListener("abort", () => { clearTimeout(timer); dropped.push(host); reject(new DOMException("The operation was aborted", "AbortError")); });
     })) as typeof fetch;
     const transport = new RelayTransport({
@@ -144,6 +145,39 @@ describe("hedged relay reads", () => {
     expect(times.slice(2).every((ms) => ms < 200)).toBe(true);
     expect(calls.filter((host) => host === "dead.test")).toHaveLength(2);
     expect(logs).toEqual([]);
+  });
+
+  it("a relay that has not answered a request of this client for HEDGE_MS goes after the others: a missing key's next read does not wait HEDGE_MISSING_MS on it", async () => {
+    // silent.test takes connections and never answers (each request runs to the 10 s timeout).
+    const r = relays({ "fast.test": { delayMs: 50, status: 404 }, "silent.test": { delayMs: 60_000 } });
+    const key = newKey();
+    // A fresh client's first read of a key nobody published yet: fast.test's turn, a 404.
+    expect((await timed(() => r.transport.resolve(key))).value).toBeNull();
+    // Its own packet goes out: fast.test takes it, silent.test's PUT hangs.
+    const own = createIdentity();
+    ids.set(own.pubKeyZ32, own);
+    await timed(() => r.transport.publish(own, [{ label: "_ts", value: "1" }]));
+    await vi.advanceTimersByTimeAsync(2_000);
+    // The key is published meanwhile. Its next read's turn is silent.test's, and the key was missing last time.
+    r.behaviour["fast.test"].status = 200;
+    r.calls.length = 0;
+    const { ms, value } = await timed(() => r.transport.resolve(key));
+    expect(value?.timestampMicros).toBe(1_000n);
+    expect(ms).toBeLessThan(200);
+    expect(r.calls).toEqual(["fast.test"]);
+  });
+
+  it("a relay that has a request waiting is in turn again once it answers one", async () => {
+    const r = relays({ "fast.test": { delayMs: 50 }, "late.test": { delayMs: 3_000 } });
+    const own = createIdentity();
+    ids.set(own.pubKeyZ32, own);
+    await timed(() => r.transport.publish(own, [{ label: "_ts", value: "1" }]));
+    // late.test's PUT is answered at 3 s: from then on it is a relay that answers, and takes its turns.
+    await vi.advanceTimersByTimeAsync(3_000);
+    r.behaviour["late.test"].delayMs = 50;
+    r.calls.length = 0;
+    for (const k of [newKey(), newKey()]) await timed(() => r.transport.resolve(k));
+    expect([...r.calls].sort()).toEqual(["fast.test", "late.test"]);
   });
 
   it("a background read never hedges: nobody waits on it", async () => {
