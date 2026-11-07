@@ -1,7 +1,9 @@
 {
   "attach": "Anexar",
   "camera": "Câmera",
+  "cameraBlocked": "Câmera bloqueada. Permita a câmera nos ajustes do Android para o Ghostly.",
   "cameraFailed": "Não foi possível abrir a câmera.",
+  "cameraRefused": "Sem acesso à câmera. Toque em Câmera de novo e permita.",
   "caption": "Adicionar legenda",
   "captionTooLong": "Esta legenda tem {{bytes}} bytes UTF-8. A DHT aceita até {{max}}.",
   "category": {

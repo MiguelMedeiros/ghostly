@@ -153,6 +153,7 @@ macro_rules! commands {
             commands::local_fetch,
             commands::local_service_allow,
             commands::local_service_forget,
+            commands::open_app_settings,
             commands::open_payment_link,
             commands::open_project_link,
             commands::open_pubky_passport,

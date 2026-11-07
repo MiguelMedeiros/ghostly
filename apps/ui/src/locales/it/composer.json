@@ -1,7 +1,9 @@
 {
   "attach": "Allega",
   "camera": "Fotocamera",
+  "cameraBlocked": "Fotocamera bloccata. Consenti la fotocamera a Ghostly nelle impostazioni di Android.",
   "cameraFailed": "Impossibile avviare la fotocamera.",
+  "cameraRefused": "Nessun accesso alla fotocamera. Tocca di nuovo Fotocamera e consentila.",
   "caption": "Aggiungi una didascalia",
   "captionTooLong": "Questa didascalia è di {{bytes}} byte UTF-8. La DHT ne consente al massimo {{max}}.",
   "category": {

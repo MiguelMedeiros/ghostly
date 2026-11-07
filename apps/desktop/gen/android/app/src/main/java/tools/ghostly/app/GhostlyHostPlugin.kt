@@ -161,7 +161,7 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
-  /** Rust (src/android.rs): `kind` is "oidc", "share", "notification", "network", "visibility" or "call". */
+  /** Rust (src/android.rs): `kind` is "oidc", "share", "notification", "network", "visibility", "call" or "camera". */
   private external fun received(kind: String, value: String)
 
   private val pendingSave = SaveSlot<SaveArgs>()
@@ -178,6 +178,8 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     watchNetwork()
     // The call notification's Hang up (CallService.kt): the page ends the call.
     CallService.hangUp = { activity.runOnUiThread { received("call", "hangUp") } }
+    // The composer's Camera refused (CameraCapture.kt): the page says so, and where to allow it.
+    CameraRefusal.told = { blocked -> activity.runOnUiThread { received("camera", if (blocked) "blocked" else "refused") } }
     activity.runOnUiThread {
       loaded = this
       photosBack.toList().also { photosBack.clear() }.forEach(::handOver)
@@ -593,6 +595,18 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       invoke.resolve()
     } catch (e: ActivityNotFoundException) {
       invoke.reject("No notification settings to open")
+    }
+  }
+
+  /** The app's own page in Android's settings, where a permission Android no longer asks for is allowed again. */
+  @Command
+  fun openAppSettings(invoke: Invoke) {
+    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", activity.packageName, null))
+    try {
+      activity.startActivity(intent)
+      invoke.resolve()
+    } catch (e: ActivityNotFoundException) {
+      invoke.reject("No app settings to open")
     }
   }
 

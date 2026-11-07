@@ -1,7 +1,9 @@
 {
   "attach": "Attach",
   "camera": "Camera",
+  "cameraBlocked": "Camera blocked. Allow the camera in Android's settings for Ghostly.",
   "cameraFailed": "The camera could not start.",
+  "cameraRefused": "No access to the camera. Tap Camera again and allow it.",
   "caption": "Add a caption",
   "captionTooLong": "This caption is {{bytes}} UTF-8 bytes. DHT allows up to {{max}}.",
   "category": {
