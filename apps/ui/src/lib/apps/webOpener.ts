@@ -12,7 +12,7 @@
 import { runnerFor, startApp, type AppStopReason, type AppView, type RunningApp } from "./broker";
 import { appSlot, chatApp, setChatApp, updateChatApp } from "./running";
 import { runnerPolicy } from "./runnerCheck";
-import { LOCKED, lockedSince, registerRunningApp, type AppOpener, type AppTakedown } from "./open";
+import { CHAT_CLOSED, LOCKED, lockedSince, registerRunningApp, type AppOpener, type AppTakedown } from "./open";
 import type { AppsPlatform, LinkedFilesHost } from "../platform";
 import { openLayer } from "../layerHistory";
 
@@ -69,8 +69,11 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
       locale: () => document.documentElement.lang || navigator.language,
     };
 
-    // In a chat: its panel. The same app there is shown again; another one takes its place.
+    // In a chat: its panel. The same app there is shown again; another one takes its place. A chat closed while it
+    // opened (its files fetched again, the runner asked) has no panel: the app never starts, nor alone over the page the
+    // person went to.
     const slot = linkId ? appSlot(linkId) : undefined;
+    if (linkId && !slot) throw new Error(CHAT_CLOSED);
     if (linkId && slot) {
       const there = chatApp(linkId);
       if (there?.ref === ref && !there.stopped) { updateChatApp(linkId, { shown: true }); return "shown"; }
