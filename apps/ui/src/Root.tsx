@@ -225,8 +225,9 @@ function ChatNotStoredNotice() {
 
 /**
  * A group's link opened in the app (`#/join/group1/…` or `#/join/group2/…`): it leaves the address at once, like an
- * invite; once the app is unlocked the engine joins and the group opens, saying it waits for the admin's app. A refusal
- * is a notice as JoinDialog shows one (a title, what to do, the engine's English behind the ⓘ), there until closed.
+ * invite; once the app is unlocked (again, when it locked after) the engine joins and the group opens, saying it waits
+ * for the admin's app. A refusal is a notice as JoinDialog shows one (a title, what to do, the engine's English behind
+ * the ⓘ), there until closed.
  * A link to a group not here joins only while few groups joined by links wait to be let in (`LINK_GROUPS_WAITING`),
  * counted once the engine has loaded its groups.
  */
@@ -234,7 +235,7 @@ function GroupLinkIntake() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const nav = useAppNavigation();
-  const { hasUnlocked } = useLockScreen();
+  const { isLocked, hasUnlocked } = useLockScreen();
   const groupsLoaded = useEngineValue((state) => !!state?.groupsLoaded);
   const [code, setCode] = useState("");
   const [problem, setProblem] = useState<Problem | null>(null);
@@ -251,7 +252,7 @@ function GroupLinkIntake() {
     navigate("/", { replace: true });
   }, [pathname, navigate, t]);
   useEffect(() => {
-    if (!code || !hasUnlocked || !groupsLoaded) return;
+    if (!code || isLocked || !hasUnlocked || !groupsLoaded) return;
     setCode("");
     const groups = engine.state?.groups ?? [];
     const id = linkGroupId(code);
@@ -266,7 +267,7 @@ function GroupLinkIntake() {
       .catch((cause: unknown) => setProblem(cause instanceof Error ? problemText(cause, t) : { tone: "error", title: t("group.link.broken") }))
       .finally(() => { if (id) joining.current.delete(id); });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `nav` changes with every location
-  }, [code, hasUnlocked, groupsLoaded]);
+  }, [code, isLocked, hasUnlocked, groupsLoaded]);
   return problem ? <ClosableTopNotice problem={problem} testId="group-link-invalid" onClose={() => setProblem(null)} /> : null;
 }
 
