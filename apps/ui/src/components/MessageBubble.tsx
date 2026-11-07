@@ -745,8 +745,9 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
         aria-expanded={open}
         onClick={() => { setPointed(undefined); setOpen((v) => !v); }}
         // Faint but always reachable by touch; on a pointer it waits for the message to be hovered. The pseudo-element takes
-        // its 22 px to the 24 px a finger needs without moving the row.
-        className={`relative p-1 rounded-full before:absolute before:-inset-px before:content-[''] transition-all cursor-pointer hover:text-text-primary md:group-hover:opacity-100 md:focus-visible:opacity-100 ${
+        // its 22 px to the 24 px a finger needs without moving the row, and on a phone to a thumb's 44 px: away from the
+        // message, which is drawn over its own side.
+        className={`relative p-1 rounded-full before:absolute before:-inset-px max-md:before:-inset-y-3 ${align === "left" ? "max-md:before:-start-[22px]" : "max-md:before:-end-[22px]"} before:content-[''] transition-all cursor-pointer hover:text-text-primary md:group-hover:opacity-100 md:focus-visible:opacity-100 ${
           open || confirm ? "text-text-primary opacity-100" : "text-text-muted max-md:opacity-40 md:opacity-0"
         }`}
       >
