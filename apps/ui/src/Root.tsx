@@ -21,7 +21,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { menuPage } from "./components/MenuPage";
 import { ProfileGate } from "./components/ProfileUnavailable";
 import { DeviceStandby } from "./components/DeviceStandby";
-import { LimitedStartGate } from "./components/devices/LimitedStart";
+import { LimitedStartGate, useLimited } from "./components/devices/LimitedStart";
 import { useDeviceGate } from "./hooks/useDeviceGate";
 import { JoinHost } from "./components/devices/JoinHost";
 import { isDeviceCode, offerDeviceLink, readDeviceLink, takeDeviceLinkFromAddress } from "./lib/devices";
@@ -64,17 +64,21 @@ function namedDeviceLink(pathname: string, hash: string): string | null {
  * An invite link, or a chat address from before chats were routed by session
  * id, carries the chat's keys. They leave the address at once, so they stay
  * out of the history: the address must not wait for the password. The chat
- * itself is made once the lock is passed, as a group's link is joined, and
+ * itself is made once the lock is passed and a limited start's question answered, as a group's link is joined, and
  * only while few link-made chats still wait for an answer (`LINK_CHATS_WAITING`).
  */
 function ChatLinkIntake() {
   const { pathname, hash } = useLocation();
   const navigate = useNavigate();
   const { t } = useI18n();
+  // "Can't check which device is active" asks first: the answer may make this copy a standby, which must stay as it
+  // is, so the invite waits as it does under the lock (in memory: Try again starts the app again without it).
   const { isLocked } = useLockScreen();
-  const locked = useRef(isLocked);
-  locked.current = isLocked;
-  /** The invite a link brought while locked: the last one, kept in memory only. */
+  const asking = useLimited() === "ask";
+  const waits = isLocked || asking;
+  const locked = useRef(waits);
+  locked.current = waits;
+  /** The invite a link brought while locked or asking: the last one, kept in memory only. */
   const [held, setHeld] = useState<SessionKeys | null>(null);
   const [invalid, setInvalid] = useState<(typeof INVITE_REFUSAL_MESSAGE)[keyof typeof INVITE_REFUSAL_MESSAGE] | "join.invalid" | "join.tooManyLinks" | "join.chatGone" | null>(null);
 
@@ -130,10 +134,10 @@ function ChatLinkIntake() {
   }, [pathname, hash, navigate, open]);
 
   useEffect(() => {
-    if (!held || isLocked) return;
+    if (!held || waits) return;
     setHeld(null);
     open(held);
-  }, [held, isLocked, open]);
+  }, [held, waits, open]);
 
   useEffect(() => {
     if (!invalid) return;
