@@ -1,4 +1,5 @@
 use iroh::{
+    dns::DnsResolver,
     endpoint::{presets, Connection, QuicTransportConfig, VarInt},
     Endpoint, EndpointAddr, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey,
 };
@@ -76,7 +77,12 @@ pub fn default_relays() -> RelayMap {
     relays
 }
 
-pub async fn endpoint(seed: [u8; 32], local_only: bool) -> Result<Endpoint, String> {
+/// `dns`, when given, is what the endpoint resolves names with (relays among them) instead of the system's.
+pub async fn endpoint(
+    seed: [u8; 32],
+    local_only: bool,
+    dns: Option<DnsResolver>,
+) -> Result<Endpoint, String> {
     let builder = if local_only {
         Endpoint::builder(presets::Minimal)
             .clear_ip_transports()
@@ -84,6 +90,10 @@ pub async fn endpoint(seed: [u8; 32], local_only: bool) -> Result<Endpoint, Stri
             .map_err(|e| e.to_string())?
     } else {
         Endpoint::builder(presets::N0).relay_mode(RelayMode::Custom(default_relays()))
+    };
+    let builder = match dns {
+        Some(dns) => builder.dns_resolver(dns),
+        None => builder,
     };
     builder
         .secret_key(SecretKey::from_bytes(&seed))
@@ -96,10 +106,19 @@ pub async fn endpoint(seed: [u8; 32], local_only: bool) -> Result<Endpoint, Stri
 
 /// An endpoint homed on the given relays instead of n0's defaults: a
 /// self-hosted `iroh-relay`, or the e2e one. Direct paths are kept, so two
-/// native peers still hole-punch; a browser peer reaches it through the relay.
-pub async fn endpoint_with_relays(seed: [u8; 32], relays: &[String]) -> Result<Endpoint, String> {
-    Endpoint::builder(presets::Minimal)
-        .relay_mode(RelayMode::Custom(relay_map(relays)?))
+/// native peers still hole-punch; a browser peer reaches it through the relay. `dns` as in `endpoint`.
+pub async fn endpoint_with_relays(
+    seed: [u8; 32],
+    relays: &[String],
+    dns: Option<DnsResolver>,
+) -> Result<Endpoint, String> {
+    let builder =
+        Endpoint::builder(presets::Minimal).relay_mode(RelayMode::Custom(relay_map(relays)?));
+    let builder = match dns {
+        Some(dns) => builder.dns_resolver(dns),
+        None => builder,
+    };
+    builder
         .secret_key(SecretKey::from_bytes(&seed))
         .alpns(vec![ALPN.to_vec()])
         .transport_config(transport())
