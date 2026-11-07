@@ -120,6 +120,37 @@ describe("a link preview in a message", () => {
     expect(container.querySelector("iframe, video, embed, object")).toBeNull();
   });
 
+  it("never names another site than the link's, and keeps the end of a long host, which says whose it is", () => {
+    const url = "https://paypal.com.receipts.account-verify.secure-login-session-0042.attacker-owned.example/r/91";
+    renderApp(<MessageBubble message={{ id: "m6", text: `[Your PayPal receipt](${url})`, sender: "peer", timestamp: 1_700_000_000_000,
+      preview: { u: url, t: "PayPal: receipt for your payment", d: "You sent $250.00 USD", s: "paypal.com" } }} />);
+    const card = screen.getByTestId("link-preview-card");
+    const host = "paypal.com.receipts.account-verify.secure-login-session-0042.attacker-owned.example";
+    // The sender's site name reads as another address: the link's own host is drawn instead.
+    expect(within(card).getByTestId("link-preview-site")).toHaveTextContent(host);
+    expect(within(card).getByTestId("link-preview-site")).not.toHaveTextContent(/^paypal\.com$/);
+    // The address line is cut at its start, never its end, and reads left to right on its own.
+    for (const id of ["link-preview-site", "link-preview-url"]) {
+      const line = within(card).getByTestId(id);
+      expect(line.className).not.toMatch(/\btruncate\b/);
+      expect(line.querySelector("bdi[dir=ltr]")).toHaveTextContent(host);
+    }
+  });
+
+  it("keeps a site name that is a name, or the link's own host", () => {
+    for (const [u, s] of [["https://github.com/x", "GitHub"], ["https://www.theverge.com/a", "The Verge"], ["https://news.github.com/a", "github.com"], ["https://a.example/", "Example 📰 News"]]) {
+      const view = renderApp(<MessageBubble message={{ id: "m7", text: u, sender: "peer", timestamp: 1_700_000_000_000, preview: { u, t: "A page", s } }} />);
+      expect(screen.getByTestId("link-preview-site")).toHaveTextContent(s);
+      view.unmount();
+    }
+    // Another host, a look-alike, or hidden characters: the link's host instead.
+    for (const s of ["paypal.com", "https://paypal.com/login", "paypal。com", "‮moc.lapyap", "Pay​Pal"]) {
+      const view = renderApp(<MessageBubble message={{ id: "m8", text: "https://evil.example/a", sender: "peer", timestamp: 1_700_000_000_000, preview: { u: "https://evil.example/a", t: "A page", s } }} />);
+      expect(screen.getByTestId("link-preview-site"), s).toHaveTextContent(/^evil\.example$/);
+      view.unmount();
+    }
+  });
+
   it("shows nothing extra for a message without a preview or a place", () => {
     renderApp(<MessageBubble message={{ id: "m3", text: "https://news.example/story", sender: "peer", timestamp: 1_700_000_000_000 }} />);
     expect(screen.queryByTestId("message-link-cards")).toBeNull();
@@ -139,6 +170,14 @@ describe("a location card", () => {
     expect(tiles).toHaveLength(4);
     for (const tile of tiles) expect(tile.getAttribute("src")).toMatch(/^https:\/\/tile\.openstreetmap\.org\/15\/\d+\/\d+\.png$/);
     expect(within(card).getByTestId("location-open").getAttribute("href")).toMatch(/^(https:\/\/maps\.apple\.com\/|geo:|https:\/\/www\.openstreetmap\.org\/)/);
+  });
+
+  it("names the map link's site cut at its start, as a preview's address", () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)");
+    renderApp(<MessageBubble message={{ id: "m9", text: "https://www.google.com/maps/place/@38.6916,-9.2160,17z", sender: "peer", timestamp: 1_700_000_000_000 }} />);
+    const source = screen.getByTestId("location-source");
+    expect(source.className).not.toMatch(/\btruncate\b/);
+    expect(source.querySelector("bdi[dir=ltr]")).toHaveTextContent("google.com");
   });
 
   it("comes from a map link too", () => {
