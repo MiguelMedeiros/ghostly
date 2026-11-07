@@ -4,6 +4,7 @@ import { openPair, sealPair } from "./groupCrypto";
 import type { Identity } from "./identity";
 import { readInviteCode } from "./invite";
 import { RateWindow } from "./pairedEdits";
+import { hasVisible, stripHidden } from "./text";
 
 /**
  * A private message started from a group (WISP 902 § Private messages, 903 § Pair payloads, 801 § An invite handed
@@ -52,7 +53,7 @@ export function dmRequest(code: string, name?: string): DmBody {
   const reading = readInviteCode(code);
   const k = reading.ok ? reading.params.peerParticipationKeyZ32 : undefined;
   const body = k && readDmBody({ t: "req", c: code, k, ...(name ? { n: name } : {}) });
-  if (!body) throw new Error("A private-message request needs a ghostly1 invite and a name of at most 64 characters");
+  if (!body) throw new Error("A private-message request needs a ghostly1 invite and a name of at most 64 characters, with no hidden ones");
   return body;
 }
 
@@ -70,7 +71,8 @@ export function readDmBody(raw: unknown): DmBody | null {
   if (f.t !== "req" || typeof f.c !== "string" || !BARE_CODE.test(f.c)) return null;
   const reading = readInviteCode(f.c);
   if (!reading.ok || reading.format !== "ghostly1" || reading.params.peerParticipationKeyZ32 !== f.k) return null;
-  if (f.n !== undefined && (typeof f.n !== "string" || !f.n.trim() || [...f.n].length > DM_LIMITS.nameChars)) return null;
+  if (f.n !== undefined && (typeof f.n !== "string" || !f.n.trim() || [...f.n].length > DM_LIMITS.nameChars
+    || stripHidden(f.n) !== f.n || !hasVisible(f.n))) return null;
   return { t: "req", c: f.c, k: f.k, ...(f.n !== undefined ? { n: f.n } : {}) };
 }
 
