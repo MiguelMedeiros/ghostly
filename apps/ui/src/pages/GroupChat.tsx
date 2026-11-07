@@ -9,6 +9,7 @@ import { JumpToLatest } from "../components/chat/JumpToLatest";
 import { DaySections } from "../components/chat/DaySections";
 import { leftOn, leftScrolledUp, useChatScroll, type ScrollRow } from "../hooks/useChatScroll";
 import { useRowWindow } from "../hooks/useRowWindow";
+import { useOpenedHeading } from "../hooks/useOpenedHeading";
 import { GroupMembersDialog } from "../components/GroupMembersDialog";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { LeaveGroupDialog } from "../components/LeaveGroupDialog";
@@ -642,6 +643,10 @@ export function GroupChat() {
     if (at && at !== document.body && !at.closest("[data-composer]")) return;
     (noticeRef.current ?? optionsRef.current)?.focus();
   }, [canSend, active]);
+  // On a touch screen the focus goes to the group's name as it opens, not to the page (hooks/useOpenedHeading.ts): once
+  // its header is drawn (the engine's state, then the group).
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useOpenedHeading(headingRef, started && group ? groupId : null);
   if (!started) return null;
   const back = <button onClick={nav.up} className="md:hidden w-11 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0" title={t("common.back")} aria-label={t("common.back")} data-testid="chat-back">
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="rtl:-scale-x-100"><path d="M15 19l-7-7 7-7" /></svg>
@@ -789,8 +794,8 @@ export function GroupChat() {
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-1.5">
               {/* In its own direction: a Latin name in Arabic is cut at its end, as in English, not at its start. The
-                  screen's heading, as a menu page's title is (layout/Page.tsx). */}
-              <h1 dir="auto" className="text-[15px] font-normal m-0 leading-tight truncate text-text-primary" data-testid="group-name">{group.name || t("group.chat.unnamed")}</h1>
+                  screen's heading, as a menu page's title is (layout/Page.tsx), focusable by the page alone, never by Tab. */}
+              <h1 ref={headingRef} tabIndex={-1} dir="auto" className="text-[15px] font-normal m-0 leading-tight truncate text-text-primary outline-none" data-testid="group-name">{group.name || t("group.chat.unnamed")}</h1>
             </div>
             {invited ? <p data-testid="group-members" className="m-0 max-w-full text-xs text-text-muted truncate">{subtitle}</p>
             // On a phone where a tap lands reaches up over the name: the line alone is 24px tall, under a thumb's 44px. The

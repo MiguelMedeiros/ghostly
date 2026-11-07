@@ -41,6 +41,42 @@ test("a touch screen: opening a chat or a group leaves the keyboard down; a tap 
   await expect(groupInput).not.toBeFocused();
 });
 
+test.describe("a touch screen: the focus as a chat opens", () => {
+  // The field waits for a tap, and the row or New that opened the chat is hidden with the list: the focus fell to the
+  // page's body. The chat's name takes it, as a Settings section's title does on a phone.
+  test("a chat from New chat and from its row, and a group from its row: the focus is on the name at the top, not the page", { tag: ["@feature:app.mobile-layout", "@feature:app.accessibility"] }, async ({ peer }) => {
+    const { page } = await peer("alice", { mobile: true, viewport: { width: 375, height: 667 } });
+    const input = page.getByPlaceholder("Message…");
+    const chatHeading = page.locator("h1", { has: page.getByTestId("chat-name") });
+    const onBody = () => page.evaluate(() => document.activeElement === document.body);
+
+    await page.getByTitle("New Chat").click();
+    await expect(input).toBeVisible();
+    await expect(chatHeading).toBeFocused();
+    expect(await onBody()).toBe(false);
+    await expect(input).not.toBeFocused();
+
+    await page.getByTestId("chat-back").click();
+    await page.getByTestId("chat-row-open").first().click();
+    await expect(input).toBeVisible();
+    await expect(chatHeading).toBeFocused();
+    await expect(input).not.toBeFocused();
+
+    await page.getByTestId("chat-back").click();
+    await page.getByTestId("sidebar-new-more").click();
+    await page.getByTestId("new-group").click();
+    await page.getByTestId("new-group-name").fill("Quiet");
+    await page.getByTestId("new-group-create").click();
+    await page.getByTestId("group-share-dialog").getByTestId("group-share-done").click();
+    await page.getByTestId("group-chat").getByTestId("chat-back").click();
+    await page.getByTestId("group-row").filter({ hasText: "Quiet" }).getByTestId("group-row-open").click();
+    const groupInput = page.getByTestId("group-chat").getByPlaceholder("Message…");
+    await expect(groupInput).toBeVisible();
+    await expect(page.getByTestId("group-name")).toBeFocused();
+    await expect(groupInput).not.toBeFocused();
+  });
+});
+
 test("with a mouse: opening a chat puts the caret in the message field, and a send keeps it there", { tag: ["@feature:chat.paired.send"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await page.getByTitle("New Chat").click();

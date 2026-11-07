@@ -32,6 +32,17 @@ export function focusLost(): boolean {
 }
 
 /**
+ * The focus is where nobody can be: lost as `focusLost` says, or on a control no longer on screen. A phone keeps its
+ * chat list mounted but hidden under the chat it opened, and the row or New that opened it keeps the focus until the
+ * browser moves it to the page, a moment later.
+ */
+export function focusOffScreen(): boolean {
+  if (focusLost()) return true;
+  const active = document.activeElement as HTMLElement;
+  return !!active.closest("[hidden], [inert]") || !(active.checkVisibility?.() ?? true);
+}
+
+/**
  * A step of a dialog replaced the control that had the focus (Next, They match, Add): the focus fell to the page, and
  * the next Tab started from the top of it. It goes to `container`, the step's own content, instead.
  */
