@@ -583,8 +583,15 @@ function DeviceNoticeBar({ devices }: { devices: CallDevices }) {
     hold(on.current.focus || on.current.pointer);
   };
   useEffect(() => () => hold(false), [hold]);
+  // A newer notice can take its place with the focus on Switch back, which leaves with no blur (a removed element says
+  // none): where the focus is, is read again, or the new notice would never run out.
+  const bar = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    on.current.focus = !!bar.current?.contains(document.activeElement);
+    hold(on.current.focus || on.current.pointer);
+  }, [notice, hold]);
   return (
-    <div role="status" data-testid="call-device-notice" data-type={notice.type} data-kind={notice.kind}
+    <div ref={bar} role="status" data-testid="call-device-notice" data-type={notice.type} data-kind={notice.kind}
       onFocus={() => set("focus", true)} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) set("focus", false); }}
       onPointerEnter={() => set("pointer", true)} onPointerLeave={() => set("pointer", false)}
       className="call-share-error absolute bottom-32 max-md:bottom-[calc(8.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-10 w-max max-w-[calc(100%-2rem)] flex items-center gap-3 rounded-lg bg-black/70 px-3 py-2 text-xs text-white">
