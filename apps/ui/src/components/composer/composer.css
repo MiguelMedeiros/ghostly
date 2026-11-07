@@ -238,6 +238,12 @@
   overscroll-behavior: contain;
   padding: 0 8px 8px;
 }
+/*
+ * About 1,900 emoji in one grid: styled and laid out all at once, opening the sheet cost ~240 ms on a fast computer and
+ * over 800 ms on a phone's processor. Only the categories near the view are drawn; one not drawn yet keeps a guessed
+ * height, then its real one once seen, so a category's icon still lands on its heading (`scrollToSection`).
+ */
+.expression-scroll > section[data-section] { content-visibility: auto; contain-intrinsic-size: auto 480px; }
 .expression-section-title {
   margin: 10px 6px 4px;
   font-size: 13px;
