@@ -518,6 +518,23 @@ describe("the password proof and its limits", () => {
     await until(() => w.quiesced.length === 1);
   });
 
+  it("a device refused before this giver started (the app restarted since, or the profile moved here) asks again: Let <device> try again is offered", { timeout: 30_000 }, async () => {
+    // The offer was only on the wrong password that left the device refused, kept in memory: after a restart, the refused
+    // device's every ask was turned away with nothing on this screen, and nothing else lets it try again.
+    const w = world();
+    await w.giverRecords.amend({ handoffAttempts: { [B]: { recent: [], total: HANDOFF_ATTEMPTS.total } } });
+    expect(w.giver.view()).toBeNull();
+    await w.taker.pull(PASSWORD);
+    await until(() => w.taker.view()?.failure === "refused");
+    await until(() => w.giver.view() !== null);
+    expect(w.giver.view()).toMatchObject({ role: "giver", key: B, step: "failed", failure: "password", refused: true });
+    await w.giver.allowAgain(B);
+    expect(w.giver.view()).toBeNull();
+    w.profile.add("f1", bytesOf(100));
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1);
+  });
+
   it("an attempt is counted before the second message goes out: a taker that stops there has used a try", async () => {
     const w = world();
     w.link.meddle = (from, frame) => (from === B && frame.t === "handoff-pake" && frame.n === 3 ? null : frame);
