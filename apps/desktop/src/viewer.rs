@@ -260,6 +260,14 @@ pub fn may_download(event: &tauri::webview::DownloadEvent<'_>) -> bool {
     !matches!(event, tauri::webview::DownloadEvent::Requested { .. })
 }
 
+/// The window's `WebKitSettings` on Linux. Never element full screen: it would take the title bar, and with it the
+/// "— Ghostly" that says whose page this is, and WebKitGTK 2.50 aborts the whole app on it (`fullscreen.rs`).
+#[cfg(target_os = "linux")]
+fn viewer_settings(settings: &webkit2gtk::Settings) {
+    use webkit2gtk::SettingsExt;
+    settings.set_enable_fullscreen(false);
+}
+
 pub fn open<R: tauri::Runtime>(
     app: &AppHandle<R>,
     peer: String,
@@ -301,7 +309,7 @@ pub fn open<R: tauri::Runtime>(
     if let Some(folder) = crate::forget_origins::app_folder(app, &format!("{service}.{site}")) {
         builder = builder.data_directory(folder);
     }
-    builder
+    let window = builder
         .title(format!("{} — Ghostly", title))
         // The window itself never leaves its origin: a plain link to another site, a script or a frame that
         // goes there is refused, with no click to tell them apart.
@@ -323,7 +331,33 @@ pub fn open<R: tauri::Runtime>(
         .inner_size(1100.0, 760.0)
         .build()
         .map_err(|e| format!("Window: {}", e))?;
+    if let Err(e) = no_element_fullscreen(&window) {
+        let _ = window.close();
+        return Err(format!("Window: {}", e));
+    }
     Ok(())
+}
+
+/// No element full screen, before the page has a click to ask for it. On macOS wry turns it on as it builds the
+/// webview, so it goes off again here, as in an app window. WebView2's only fills the webview: the title stays.
+fn no_element_fullscreen<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> tauri::Result<()> {
+    #[cfg(target_os = "linux")]
+    let done = window.with_webview(|platform| {
+        use webkit2gtk::WebViewExt;
+        if let Some(settings) = WebViewExt::settings(&platform.inner()) {
+            viewer_settings(&settings);
+        }
+    });
+    #[cfg(target_os = "macos")]
+    let done = window.with_webview(|platform| {
+        crate::app_sandbox::webkit::no_element_fullscreen(platform.inner())
+    });
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    let done = {
+        let _ = window;
+        Ok(())
+    };
+    done
 }
 
 pub fn respond<R: tauri::Runtime>(app: &AppHandle<R>, id: u64, response: ServiceResponse) {
@@ -1271,7 +1305,7 @@ mod routing_tests {
     }
 }
 
-/// The real window on WebKitGTK: what a contact's page can leave on disk.
+/// The real window on WebKitGTK: what a contact's page can leave on disk, or take of the screen.
 #[cfg(all(test, target_os = "linux"))]
 mod download_tests {
     use super::*;
@@ -1298,5 +1332,24 @@ mod download_tests {
             },
         );
         assert_eq!(saved, Vec::<String>::new());
+    }
+
+    /// The window never goes full screen on its own (WebKitGTK has `enable-fullscreen` on by default): its title
+    /// bar, with "— Ghostly", stays.
+    #[test]
+    fn a_contacts_page_has_no_element_full_screen() {
+        use webkit2gtk::glib::translate::from_glib_full;
+        use webkit2gtk::SettingsExt;
+        // A WebKitSettings reads GTK's own settings, and GTK stops the process without a display (CI's runners).
+        if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
+            eprintln!("a_contacts_page_has_no_element_full_screen: no display, not run");
+            return;
+        }
+        // A plain GObject: no display, so not `Settings::new`, which wants GTK started.
+        let settings: webkit2gtk::Settings =
+            unsafe { from_glib_full(webkit2gtk::ffi::webkit_settings_new()) };
+        assert!(settings.enables_fullscreen(), "WebKitGTK's default");
+        viewer_settings(&settings);
+        assert!(!settings.enables_fullscreen());
     }
 }

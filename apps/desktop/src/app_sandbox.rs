@@ -1292,7 +1292,7 @@ const OFF: &[&str] = &[
 ///   window opens anyway.
 #[cfg(target_os = "macos")]
 #[cfg_attr(test, allow(dead_code))]
-mod webkit {
+pub(crate) mod webkit {
     use super::Guard;
     use objc2::rc::Retained;
     use objc2::runtime::{AnyClass, AnyObject, Bool};
