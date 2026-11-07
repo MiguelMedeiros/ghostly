@@ -1659,6 +1659,11 @@ export function useWebRTC({
      * that call first, and `startCall` places nothing until it has ended.
      */
     otherCallOn,
+    /**
+     * "Hide my IP from contacts" is on and this app's media cannot keep to the relay: `startCall` and `acceptCall`
+     * refuse every call (`CallRelayError("relayOnly")`), live chat or not. The call buttons say so before anything else.
+     */
+    relayOnlyCallsOff: relayOnly === true && !(media ?? browserMedia).keepsToRelays,
     startCall,
     acceptCall,
     hangUp,

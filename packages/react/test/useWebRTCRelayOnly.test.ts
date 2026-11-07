@@ -43,6 +43,7 @@ async function answering(call: ReturnType<typeof renderCall>) {
 describe("a call while Hide my IP from contacts is on", () => {
   it("the caller's connection keeps to the TURN server, and its offer carries the relay candidate only, without the related address", async () => {
     const call = renderCall(undefined, undefined, relayOnly);
+    expect(call.result.current.relayOnlyCallsOff).toBe(false);
     await calling(call);
     const [pc] = FakePeerConnection.instances;
     expect(pc.config.iceTransportPolicy).toBe("relay");
@@ -78,6 +79,8 @@ describe("a call while Hide my IP from contacts is on", () => {
   it("call media that cannot keep to a relay (the Linux Desktop's) places no call: no microphone asked, nothing rings, it says why", async () => {
     const linux: CallMedia = { createPeerConnection: (config) => new FakePeerConnection(config) as never, getUserMedia: (c) => navigator.mediaDevices.getUserMedia(c) };
     const call = renderCall(linux, undefined, relayOnly);
+    // Said before any call: the chat's call buttons give it as their reason.
+    expect(call.result.current.relayOnlyCallsOff).toBe(true);
     act(() => { void call.result.current.startCall(false); });
     await settle();
     expect(devices.userMedia).toEqual([]);
@@ -99,6 +102,7 @@ describe("a call while Hide my IP from contacts is on", () => {
 
   it("off, the same media calls as before", async () => {
     const call = renderCall(undefined, undefined, { iceServers: [TURN] });
+    expect(call.result.current.relayOnlyCallsOff).toBe(false);
     await calling(call);
     expect(FakePeerConnection.instances[0].config.iceTransportPolicy).toBeUndefined();
     expect(candidates(call.published[0]).map((c) => / typ (\S+)/.exec(c)?.[1])).toEqual(["host", "srflx"]);

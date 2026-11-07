@@ -373,8 +373,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const compat = !!session && !paired;
   const deliveryPeer = platform?.getPeer(session?.peerPubKeyB64 ?? "");
   const pairedReady = deliveryPeer?.pairing?.status === "ready";
-  // A paired chat calls over its live session (`calls/1`); why it cannot right now, if it cannot.
-  const callsBlocked = paired ? callsBlockedText(t, deliveryPeer?.callsUnavailable) : null;
+  // A paired chat calls over its live session (`calls/1`); why it cannot right now, if it cannot. With Hide my IP on,
+  // media that cannot keep to the relay (the Linux Desktop's) makes no call at all, live or not: that first.
+  const callsBlocked = webrtc.relayOnlyCallsOff ? t("calls.relayOnlyOff")
+    : paired ? callsBlockedText(t, deliveryPeer?.callsUnavailable) : null;
   // The one chat (WISP 400): live over layer 1, or not; what cannot go now waits (a clock beside its time) or is held.
   const chatLive = pairedReady && deliveryPeer?.dataLink === "open";
   // A security rejection (a stream authenticated another key than the pinned one) stops the chat on both layers until the person acts.
@@ -702,8 +704,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
   // The contact's app is closed but it shared how to wake it (WISP 401 § Wake-up push): a call wakes it, then rings.
   // Not offline (Ghostly's switch or the device): no wake-up goes out, and the buttons say why instead of "did not open".
+  // Nor with calls off under Hide my IP: the contact would be shown "Incoming call" for a call that never starts.
   const deviceOnline = useOnline();
-  const canWakeForCall = paired && !chatLive && !!chatLink?.peerWakes && !!chatLink.id && !chatStop
+  const canWakeForCall = paired && !chatLive && !!chatLink?.peerWakes && !!chatLink.id && !chatStop && !webrtc.relayOnlyCallsOff
     && deviceOnline && engine.state?.settings.online !== false && callsWaitForLive(deliveryPeer?.callsUnavailable);
   const placeCall = webrtc.startCall;
   const wakeCall = useWakeCall(chatLink?.id, paired && !callsBlocked, placeCall);
