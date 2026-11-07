@@ -100,6 +100,7 @@ export function withRequestOptions(transport: PkarrTransport, extra: PkarrReques
   if (transport.turnRead) wrapped.turnRead = (pubKeyZ32, options) => transport.turnRead!(pubKeyZ32, options);
   if (transport.turnPut) wrapped.turnPut = (pubKeyZ32, payload, conditions) => transport.turnPut!(pubKeyZ32, payload, conditions);
   if (transport.turnWarm) wrapped.turnWarm = () => transport.turnWarm!();
+  if (transport.forget) wrapped.forget = (keys) => transport.forget!(keys);
   return wrapped;
 }
 
@@ -120,6 +121,29 @@ export class DiscoveryBudgetError extends Error {
 export function isDiscoveryBudgetError(error: unknown): error is DiscoveryBudgetError {
   return error instanceof DiscoveryBudgetError || (typeof error === "object" && error !== null && (error as { code?: unknown }).code === "discovery-budget"
     && typeof (error as { retryInMs?: unknown }).retryInMs === "number");
+}
+
+/**
+ * A publish no relay took (`RelayTransport`), saying whether one of them may hold the packet all the same. Not
+ * `mayBeStored` only when every relay was not asked now (its budget, its rate limit, its breaker, its network
+ * cooldown), answered that it did not take it (a 4xx), or could not be reached before the request went (a refused
+ * connection or a name that does not resolve, where the runtime says so: Node does, a browser does not), or when there
+ * is no relay at all. A relay that did not answer in time, dropped the connection, or answered with a server error
+ * may have stored it. The message is the publish's usual one.
+ */
+export class PublishFailedError extends Error {
+  readonly code = "publish-failed";
+  constructor(message: string, readonly mayBeStored: boolean) { super(message); }
+}
+
+/**
+ * Whether `error` is a publish that went nowhere (`PublishFailedError` with `mayBeStored` false), also from another
+ * copy of this module. Anything else (a timeout, the DHT's own failure beside the relays', a Desktop's error in
+ * words) may have left this device.
+ */
+export function publishedNowhere(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "publish-failed"
+    && (error as { mayBeStored?: unknown }).mayBeStored === false;
 }
 
 /**
@@ -212,4 +236,9 @@ export interface PkarrTransport {
   turnPut?(pubKeyZ32: string, payload: Uint8Array, conditions: TurnConditions): Promise<TurnSourcePut[]>;
   /** The profile has a device set: the turn's sources are made ready ahead of the first read (`TurnNetwork.turnWarm`). */
   turnWarm?(): Promise<void>;
+  /**
+   * Nothing will be put or read under these keys any more (a spare invite replaced unused): what the transport kept
+   * per key for them (the last packet put, its dates, each relay's last put) goes. Absent where nothing is kept.
+   */
+  forget?(keys: Iterable<string>): void;
 }

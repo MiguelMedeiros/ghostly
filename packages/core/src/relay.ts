@@ -1,7 +1,7 @@
 import type { Identity } from "./identity";
 import { createRelayPayload, newerPacket, openRelayPayload, parseRelayPayload, readOwnRelayPayload, RELAY_PAYLOAD_MAX_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
 import { RelayBreaker, type DiscoveryStatus, type RelayBreakerOptions, type RelayFailure } from "./relayBreaker";
-import { DiscoveryBudgetError, isDiscoveryBudgetError, type DiscoveryChange, type PkarrRequestOptions, type PkarrTransport, type ServerTime } from "./transport";
+import { DiscoveryBudgetError, isDiscoveryBudgetError, PublishFailedError, publishedNowhere, type DiscoveryChange, type PkarrRequestOptions, type PkarrTransport, type ServerTime } from "./transport";
 import { traceLink } from "./linkTrace";
 import type { TurnConditions, TurnSourceAnswer, TurnSourcePut } from "./turnRead";
 
@@ -498,6 +498,33 @@ function looksLikeHost(text: string): boolean {
 class RelayLeftAloneError extends Error {}
 
 /**
+ * A relay a put did not get an answer from. `sent` false: the request never left (its network cooling down after a
+ * failure, or a connection that could not be made, `connectFailed`); true: it may have reached the relay.
+ */
+class RelayNoAnswerError extends Error {
+  constructor(message: string, readonly sent: boolean) { super(message); }
+}
+
+/** What Node says of a connection it could not make: the request never left. A browser's TypeError says nothing either way. */
+const CONNECT_FAILURES = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH", "ENETUNREACH", "ENETDOWN", "EHOSTDOWN", "EADDRNOTAVAIL", "UND_ERR_CONNECT_TIMEOUT"]);
+
+/** A fetch that failed before its request left this device: Node's `cause.code` (each of an AggregateError's, for several addresses). */
+function connectFailed(error: unknown): boolean {
+  const cause = (error as { cause?: unknown } | null)?.cause as { code?: unknown; errors?: unknown } | undefined;
+  if (!cause || typeof cause !== "object") return false;
+  if (Array.isArray(cause.errors) && cause.errors.length) return cause.errors.every((e) => CONNECT_FAILURES.has((e as { code?: unknown } | null)?.code as string));
+  return CONNECT_FAILURES.has(cause.code as string);
+}
+
+/**
+ * The error a publish ends with after a second round dated past a relay's later copy failed too: one that may have
+ * stored the first round's packet still may, whatever the second round's relays said.
+ */
+function laterRound(first: unknown, later: unknown): unknown {
+  return publishedNowhere(later) && !publishedNowhere(first) ? new PublishFailedError((later as Error).message, true) : later;
+}
+
+/**
  * A read the relays failed (or left alone for failing before), when its caller has another path to ask
  * (`RelayTransport.resolve` with `keptOnFailure` false): `kept` is the newest packet the relays gave for the key before.
  */
@@ -655,6 +682,21 @@ export class RelayTransport implements PkarrTransport {
     this.changed("recovered");
   }
 
+  /**
+   * `PkarrTransport.forget`: the packets and dates this client kept under these keys go, on every relay (`written`,
+   * `newest`, `lastTimestamp`, `seenTimestamp`, `lastPut`). A spare invite replaced unused left them here for its two keys
+   * for good: an idle CLI daemon gained 8 keys an hour (343 in `written` and 690 `lastPut` entries after a day). The maps
+   * that bound themselves (`readAt`, `lastReadFrom`, `heldBack`, `missing`, the turns) and the catch-ups, which go once
+   * put, are left as they are. A later put under one of these keys goes as a key's first.
+   */
+  forget(keys: Iterable<string>): void {
+    const gone = new Set(keys);
+    if (gone.size === 0) return;
+    for (const key of gone) for (const perKey of [this.lastTimestamp, this.seenTimestamp, this.newest, this.written]) perKey.delete(key);
+    // Per relay and key (`${relay} ${key}`), on the relays set now and any set before.
+    for (const slot of this.lastPut.keys()) if (gone.has(slot.slice(slot.lastIndexOf(" ") + 1))) this.lastPut.delete(slot);
+  }
+
   /** Called when a relay trips or recovers. */
   subscribe(listener: (change?: DiscoveryChange) => void): () => void {
     this.listeners.add(listener);
@@ -690,7 +732,7 @@ export class RelayTransport implements PkarrTransport {
    * Returns once one relay took the packet: the others finish in the background.
    */
   async publish(identity: Identity, records: GhostRecord[], options: PkarrRequestOptions = {}): Promise<void> {
-    if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
+    if (this.relays.length === 0) throw new PublishFailedError("No Pkarr relays configured", false);
     await this.publishDated(identity, records, (key, payload, timestamp, conflict) => this.putEverywhere(key, payload, timestamp, options, conflict), options);
   }
 
@@ -748,7 +790,7 @@ export class RelayTransport implements PkarrTransport {
     catch (error) {
       // Refused everywhere, and somewhere for a later-dated packet: what the publication dated past it did is the answer.
       const pending = redated as Promise<boolean> | undefined;
-      if (!pending || !(await pending)) throw error;
+      if (!pending || !(await pending.catch((later: unknown) => { throw laterRound(error, later); }))) throw error;
     }
   }
 
@@ -819,7 +861,7 @@ export class RelayTransport implements PkarrTransport {
    * gives it.
    */
   async putSigned(pubKeyZ32: string, payload: Uint8Array, timestamp: bigint, options: PkarrRequestOptions = {}, conflict?: (relay: string) => void): Promise<void> {
-    if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
+    if (this.relays.length === 0) throw new PublishFailedError("No Pkarr relays configured", false);
     await this.putEverywhere(pubKeyZ32, payload, timestamp, options, conflict);
   }
 
@@ -828,7 +870,7 @@ export class RelayTransport implements PkarrTransport {
    * (`signedAt`) and is not checked again. `conflict`: as `publishDated` gives it.
    */
   async publishPayload(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions = {}, conflict?: (relay: string) => void): Promise<void> {
-    if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
+    if (this.relays.length === 0) throw new PublishFailedError("No Pkarr relays configured", false);
     const seq = options.signedAt ?? openRelayPayload(pubKeyZ32, payload).seq;
     if (options.signedAt === undefined || !options.redate) return this.putEverywhere(pubKeyZ32, payload, seq, options, conflict);
     await this.putRedated(pubKeyZ32, payload, seq, options, PAYLOAD_REDATES);
@@ -876,7 +918,7 @@ export class RelayTransport implements PkarrTransport {
     try { await this.putEverywhere(key, payload, timestamp, options, conflict); }
     catch (error) {
       const pending = redated as Promise<boolean> | undefined;
-      if (!pending || !(await pending)) throw error;
+      if (!pending || !(await pending.catch((later: unknown) => { throw laterRound(error, later); }))) throw error;
     }
   }
 
@@ -912,7 +954,9 @@ export class RelayTransport implements PkarrTransport {
     // background looks. A member reading the other relay found the edge's older offer (or none) until its next packet.
     const edgeSignal = isGroupSignal(asker(options, true));
     const failed = new Set<string>();
-    const puts = this.relays.map(async (relay) => {
+    // Each relay that surely does not hold the packet: not asked now, refused in an answer (a 4xx), or never reached.
+    const nowhere = this.relays.map(() => false);
+    const puts = this.relays.map(async (relay, i) => {
       const slot = `${relay} ${pubKeyZ32}`;
       const previous = this.lastPut.get(slot);
       this.lastPut.set(slot, timestamp);
@@ -924,6 +968,7 @@ export class RelayTransport implements PkarrTransport {
       // That relay's answer is waited for `SLOW_MS` at most: one slow to say it took the packet (up to the 10 s
       // timeout) held the copy here, and a contact reading this relay found nothing, as long.
       if (first && isChat(asker(options, true)) && this.spareHeldFor(relay, Date.now()) > 0 && await answeredWithin(first, SLOW_MS)) {
+        nowhere[i] = true;
         throw new DiscoveryBudgetError(Math.max(CATCH_UP_MIN_MS, this.spareHeldFor(relay, Date.now())));
       }
       // A relay refuses (428) to replace a packet whose DHT put is still in flight, unless told which
@@ -935,8 +980,11 @@ export class RelayTransport implements PkarrTransport {
         if (response.status === 412) response = await this.put(relay, pubKeyZ32, payload, undefined, asker(options, true));
       } catch (error) {
         if (!isDiscoveryBudgetError(error) && !(error instanceof RelayLeftAloneError)) failed.add(relay);
+        nowhere[i] = isDiscoveryBudgetError(error) || error instanceof RelayLeftAloneError || (error instanceof RelayNoAnswerError && !error.sent);
         throw error;
       }
+      // The relay answered that it did not take it. A server error (5xx) says nothing of what it kept.
+      nowhere[i] = response.status >= 400 && response.status < 500;
       if (response.status >= 500 || response.status === 428) failed.add(relay);
       // 409: this relay holds a packet under the key dated at or after this one (`publishDated` reads it and dates past it).
       if (response.status === 409) conflict?.(relay);
@@ -981,7 +1029,7 @@ export class RelayTransport implements PkarrTransport {
         const reasons = results.map((r) => (r.status === "rejected" ? String(r.reason) : "")).join("; ");
         if (waits.length === results.length) reject(new DiscoveryBudgetError(Math.min(...waits.map((e) => e.retryInMs)), `Publish held back on every relay: ${reasons}`));
         else if (waits.length && results.every((r, i) => held[i] !== null || leftAlone(r))) reject(new DiscoveryBudgetError(Math.min(...waits.map((e) => e.retryInMs)), `Publish held back on every relay not left alone: ${reasons}`));
-        else reject(new Error(`Publish failed on every relay: ${reasons}`));
+        else reject(new PublishFailedError(`Publish failed on every relay: ${reasons}`, !nowhere.every(Boolean)));
       });
     });
   }
@@ -1293,7 +1341,7 @@ export class RelayTransport implements PkarrTransport {
 
   /** `sent`: told, once the budget took the request, whether the relay takes the packet (a 2xx). */
   private async put(relay: string, pubKeyZ32: string, payload: Uint8Array, replaces: bigint | undefined, who: Asker, probe = false, sent?: (ok: Promise<boolean>) => void): Promise<Response> {
-    if (!probe && this.networkCoolingDown(relay, "PUT")) throw new Error(`${relay} did not answer a moment ago; retry shortly`);
+    if (!probe && this.networkCoolingDown(relay, "PUT")) throw new RelayNoAnswerError(`${relay} did not answer a moment ago; retry shortly`, false);
     const limited = this.rateLimitedFor(relay);
     if (limited > 0) throw new DiscoveryBudgetError(limited, "Discovery relay is cooling down after a 429; retry shortly");
     const blocked = probe ? 0 : this.breaker.blockedFor(relay);
@@ -1310,11 +1358,12 @@ export class RelayTransport implements PkarrTransport {
     });
     sent?.(request.then((r) => r.ok, () => false));
     let response: Response;
-    try { response = await request; } catch {
+    try { response = await request; } catch (error) {
       this.networkCooldown.set(`PUT ${relay}`, Date.now() + NETWORK_ERROR_COOLDOWN_MS);
       this.answered(relay, { kind: "error", reason: "no answer" });
-      // Node's own words for it ("TypeError: fetch failed") named neither the relay nor what happened.
-      throw new Error(`${relay} did not answer`);
+      // Node's own words for it ("TypeError: fetch failed") named neither the relay nor what happened. A timeout or a
+      // connection dropped on the way may have left the packet there; one never made did not.
+      throw new RelayNoAnswerError(`${relay} did not answer`, !connectFailed(error));
     }
     // 409, 412 and 428 are the relay working as it should; its rate limit and its own errors count against it.
     if (response.status === 429) this.answered(relay, { kind: "throttled", reason: "rate limited (429)" });

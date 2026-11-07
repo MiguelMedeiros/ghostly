@@ -155,6 +155,28 @@ function noChat(ref: string, groups: readonly GroupView[]): CliError {
   return new CliError("not_found", `No chat ${JSON.stringify(ref)} (ghostly chat list)`);
 }
 
+/** A chat or group ref as a next step shows it: as given, quoted only when it holds more than a word. */
+const shownRef = (ref: string) => (/^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref));
+
+/** The chat or the group a message or a file was looked for in, as the command was given it (`ref`). */
+export type RefPlace = { group: boolean; ref: string };
+
+/**
+ * No message by `id` in a chat or a group, said one way by every command that takes one, as `noChat` says a chat: the id
+ * quoted as given, and where the ids are. `whose` ("of yours", "from someone else") is what it had to be; `tail` what
+ * else it may have failed for (", or it takes no reaction", ": only your own messages are sent again").
+ */
+export function noMessage(id: string, place: RefPlace, { whose, tail }: { whose?: string; tail?: string } = {}): CliError {
+  const history = `ghostly ${place.group ? "group" : "chat"} history ${shownRef(place.ref)}`;
+  return new CliError("not_found", `No message ${JSON.stringify(id)}${whose ? ` ${whose}` : ""} in this ${place.group ? "group" : "chat"}${tail ?? ""} (${history})`);
+}
+
+/** No file by `id`, as `noMessage` says a message: in the chat or group named (`place`), or in none when none was. */
+export function noFile(id: string, place?: RefPlace): CliError {
+  const where = place ? ` in this ${place.group ? "group" : "chat"}` : "";
+  return new CliError("not_found", `No file ${JSON.stringify(id)}${where} (ghostly file list ${place ? shownRef(place.ref) : "<chat|group>"})`);
+}
+
 /** `findChat`, and whether only what the contact controls (`theirName`: a prefix of the id, its own name) found the chat. */
 function chatBy(links: readonly LinkView[], ref: string, groups: readonly GroupView[] = []): { link: LinkView; theirName: boolean } {
   // "" (an unset variable in a script) is a prefix of every id: it took the only chat.

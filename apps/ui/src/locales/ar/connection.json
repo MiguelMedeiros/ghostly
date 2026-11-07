@@ -187,6 +187,7 @@
     "preparing": "جارٍ تجهيز {{transport}}؛ القناة الحالية: {{current}}.",
     "receiptPending": "الإيصال معلّق حتى {{time}}.",
     "reconnect": "إعادة الاتصال",
+    "reconnecting": "جارٍ إعادة الاتصال…",
     "relaySettings": "راجع إعدادات المرحّلات",
     "relayed": "عبر مرحّل",
     "relayedVia": "عبر المرحّل {{relays}}",

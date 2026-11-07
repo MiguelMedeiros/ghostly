@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { connect } from "node:net";
 import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
-import { GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, type OptionSpec, type Parsed } from "./args";
+import { GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, unknownGlobalOption, type OptionSpec, type Parsed } from "./args";
 import { connectDaemon, DaemonClient, endedUnanswered, isNotTheDaemon } from "./client";
 import { childEnv, dropSecretEnv } from "./childEnv";
 import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_COMMANDS } from "./commands";
@@ -1570,6 +1570,8 @@ export async function main(input: string[]): Promise<number> {
   if (two && table(two)) { await tableCommand(two, argv.slice(2)); return 0; }
   if (text(first)) { await textCommand(first, argv.slice(1)); return 0; }
   if (table(first)) { await tableCommand(first, argv.slice(1)); return 0; }
+  // Lifting stopped at it: a word with a dash there is a mistyped global option, not a command (`-` and `--` are none).
+  if (first.startsWith("-") && first !== "-" && first !== "--") throw unknownGlobalOption(first);
   throw unknownCommand(first, two ? second : undefined, three ? third : undefined);
 }
 

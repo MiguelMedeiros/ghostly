@@ -171,6 +171,7 @@
     "preparing": "Preparing {{transport}}; current channel: {{current}}.",
     "receiptPending": "Receipt pending until {{time}}.",
     "reconnect": "Reconnect",
+    "reconnecting": "Reconnecting…",
     "relaySettings": "review relay settings",
     "relayed": "Relayed",
     "relayedVia": "Relayed via {{relays}}",

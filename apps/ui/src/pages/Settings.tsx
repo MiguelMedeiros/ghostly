@@ -865,11 +865,11 @@ export function Settings() {
                 {t("updates.download")}
               </a>
             ) : update.update ? (
-              <Button variant="primary" onClick={() => void update.install()} disabled={update.stage === "installing"}>
+              <Button variant="primary" onClick={() => void update.install()} loading={update.stage === "installing"}>
                 {update.stage === "installing" ? t("updates.installing") : t(update.update.apply === "restart" ? "updates.restart" : "updates.reload")}
               </Button>
             ) : (
-              <Button onClick={() => void update.check()} disabled={update.stage === "checking"}>
+              <Button onClick={() => void update.check()} loading={update.stage === "checking"}>
                 {update.stage === "checking" ? t("updates.checking") : t("updates.checkNow")}
               </Button>
             )}

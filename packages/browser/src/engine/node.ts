@@ -217,7 +217,7 @@ import { mayPinIn, myPin, pinView, pinnedRow, type PinsHost } from "./pins";
 import { GroupEdits } from "./groupEdits";
 import { CommunityPay, groupLinkId, parsePayLink } from "./communityPay";
 import { mayReach } from "./serviceAccess";
-import { Outbox } from "./outbox";
+import { NotSent, Outbox } from "./outbox";
 import { HoldEngine, holdStoragePlace } from "./hold";
 import { RTT_STEP_MS, TransportLog, resumeHere } from "./transportLog";
 import { ProfilePeek, readPathOf, type PeekResult } from "./profilePeek";
@@ -3114,7 +3114,11 @@ export class GhostlyNode implements EngineImplementation {
   private prepareSpare(after = 0, aged = false): void {
     if (this.shuttingDown || !this.networkOn) return;
     if (this.spare && after === 0 && (aged || Date.now() - this.spare.madeAt >= SPARE_INVITE_MAX_AGE_MS)) {
-      for (const identity of [identityFromSeedB64(this.spare.mine.seedB64), this.spare.inviteKey]) this.warmedKeys.delete(identity.pubKeyZ32);
+      // Replaced unused, its two keys are nobody's: the transport forgets what it kept for them (one taken is a chat's,
+      // `takeInvite`, and never gets here). Kept, they added 8 keys an hour to an idle daemon's relay bookkeeping.
+      const keys = [identityFromSeedB64(this.spare.mine.seedB64), this.spare.inviteKey].map((identity) => identity.pubKeyZ32);
+      for (const key of keys) this.warmedKeys.delete(key);
+      this.transport.forget?.(keys);
       this.spare = null;
     }
     if (!this.spare) this.spare = this.makeSpare();
@@ -4484,6 +4488,8 @@ export class GhostlyNode implements EngineImplementation {
         await this.noteTextSend(linkId, message, snapshot, at, error, link);
         // On the DHT floor a card goes as its text alone: it goes again once live (`restoreCards`).
         if (!error && message.via === "pkarr") await this.cardWentBare(linkId, message);
+        // No relay took it and none may hold it: it has not left this device (the outbox lets it wait, cancellable).
+        if (error && message.via === "pkarr" && message.wireId && link.dhtWentNowhere(message.wireId)) return new NotSent(error);
         return error;
       }, message => message.via === "pkarr" ? DHT_MESSAGE_TTL : 20_000, message => {
         const pending = this.links.get(linkId)?.stored.dhtDeliveryState?.pending;

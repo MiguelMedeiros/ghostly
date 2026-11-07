@@ -70,6 +70,10 @@ export class CallAudio {
   private lastQuiet: Buffer | null = null;
   private same = 0;
   private quiet: Buffer | null = null;
+  /** The contact's last packet decoded, what it decoded to, and whether the one before was the same and gave the same (see `decoded`). */
+  private lastIn: Buffer | null = null;
+  private lastPcm: Buffer | null = null;
+  private steady = false;
   /** Whether the encoder's FEC is on (`OpusCodec.fec`); unknown until the first frame. */
   private fecOn: boolean | undefined;
   private stopped = false;
@@ -153,13 +157,37 @@ export class CallAudio {
     if (!rtp || rtp.payloadType !== this.options.payloadType) return;
     for (const item of this.reorder.push(rtp)) {
       let pcm: Buffer;
-      if ("lost" in item) pcm = this.conceal();
+      if ("lost" in item) { this.forgetSteady(); pcm = this.conceal(); }
       else {
         this.concealed = null;
-        try { pcm = this.options.decoder.decode(item.payload); } catch { pcm = this.silence; }
+        pcm = this.decoded(item.payload);
       }
       this.emit(pcm);
     }
+  }
+
+  /**
+   * A packet of the contact's, decoded. Their silence settles into one packet sent again and again (the CLI's own,
+   * `settle`; an app's muted microphone), and the decoder settles with it: once the same packet gave the same audio
+   * twice in a row, it is not decoded again while it lasts, and the program gets that audio again. The audio after it
+   * decodes to the same bytes as with every packet decoded, and decoding it was half of a quiet call's work on the
+   * daemon's thread (libopus in WebAssembly, 50 times a second).
+   */
+  private decoded(payload: Buffer): Buffer {
+    if (this.steady && this.lastIn!.equals(payload)) return this.lastPcm!;
+    let pcm: Buffer;
+    try { pcm = this.options.decoder.decode(payload); } catch { this.forgetSteady(); return this.silence; }
+    this.steady = !!this.lastIn?.equals(payload) && !!this.lastPcm?.equals(pcm);
+    // Copies: the packet's buffer and the decoder's are not this call's to keep.
+    this.lastIn = Buffer.from(payload);
+    this.lastPcm = Buffer.from(pcm);
+    return pcm;
+  }
+
+  /** A packet lost or unreadable: the decoder moved on without the packet (`decoded`) that came last. */
+  private forgetSteady(): void {
+    this.lastIn = this.lastPcm = null;
+    this.steady = false;
   }
 
   /**
