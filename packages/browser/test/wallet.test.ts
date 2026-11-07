@@ -280,6 +280,20 @@ describe("Lightning out: melts", () => {
     expect(rows<WalletTx>("walletTx").filter((tx) => tx.kind === "fee")).toEqual([]);
   });
 
+  it("a refused payment's review pays when Pay is pressed again, as its refusal says it can", async () => {
+    mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
+    mint.completeMelt.mockRejectedValueOnce(new MintOperationError(20000, "Lightning payment failed: no route"))
+      .mockResolvedValueOnce({ quote: meltQuote("PAID"), change: [], outputData: [] });
+    mint.checkProofsStates.mockResolvedValue([{ state: "UNSPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }]);
+    const { wallet } = setup();
+    const { quote, mint: at } = await wallet.quoteInvoice(INVOICE);
+
+    await expect(wallet.payQuote(quote, at)).rejects.toMatchObject({ engineCode: "lightningRefused" });
+    // The same review, Pay again: the quote is still the invoice and amount shown, and the mint's quote is unpaid.
+    expect(await wallet.payQuote(quote, at)).toBe(true);
+    expect(mint.completeMelt).toHaveBeenCalledTimes(2);
+  });
+
   it("books the fee the split before a refused payment cost, and says it", async () => {
     // The split to exact proofs cost the mint's input fee (1 sat): 108 in, 8 kept and 99 to send. The mint then refuses
     // the melt (a test mint says "Invoice already paid" to an invoice it made itself): 107 come back, 1 is gone for good.
