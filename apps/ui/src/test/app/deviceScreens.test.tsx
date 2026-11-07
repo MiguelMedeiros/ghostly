@@ -1,5 +1,6 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createLink, encodeInviteCode } from "@ghostly/core";
 import type { BrowserHost } from "@ghostly/browser/host";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import type { HandoffView } from "@ghostly/browser/devices/handoff";
@@ -620,6 +621,24 @@ describe("a limited start (WISP 06 § When a device checks)", () => {
       act(() => fakeEngine.setState({}));
       await waitFor(() => expect(screen.queryByTestId("limited-banner")).toBeNull());
     } finally { delete (fakeEngine as BrowserHost).restartEngine; }
+  });
+
+  it("an invite link opened while it asks makes no chat until Start anyway: the copy may turn out to be a standby", async () => {
+    fakeEngine.setState({ limited: true });
+    window.location.hash = `#/chat/${encodeInviteCode(createLink().invite)}`;
+    const chats = () => Object.values(localStorage).filter((value) => value.includes("\"mySeedB64\""));
+    try {
+      render(<Root />);
+      expect(await screen.findByTestId("limited-start")).toBeInTheDocument();
+      // The keys leave the address at once, as under the lock, but no chat is written while the question shows.
+      await waitFor(() => expect(window.location.hash).not.toContain("/chat/pair"));
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+      expect(chats()).toEqual([]);
+      // Start anyway: the profile offline, where an invite makes its chat as it does offline.
+      act(() => screen.getByTestId("limited-start-go-on").click());
+      await waitFor(() => expect(chats()).toHaveLength(1));
+      expect(chats()[0]).toContain("\"viaLink\":true");
+    } finally { window.location.hash = ""; }
   });
 
   it("a check while going online is not a limited start: no question, and the line only once it lasts", async () => {
