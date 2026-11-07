@@ -15,7 +15,8 @@ export interface ChatJson {
   /** The contact's key for this chat (z-base-32). */
   peer: string;
   createdAt: number;
-  lastMessageAt: number;
+  /** When its latest message came, or null before the first (the engine keeps 0). */
+  lastMessageAt: number | null;
   /** A live session carries the chat now, in this run (text, files, payments go at once). */
   live: boolean;
   /** The transport of the live session, or null. */
@@ -60,7 +61,7 @@ export function chatJson(link: LinkView, showSecret?: boolean): ChatJson {
     peerName,
     peer: link.peerPubKeyZ32,
     createdAt: link.createdAt,
-    lastMessageAt: link.lastMessageAt,
+    lastMessageAt: link.lastMessageAt || null,
     live,
     transport: live ? (link.pairing?.transport ?? link.pairingProgress?.transport ?? null) : null,
     text: link.textDelivery ?? (link.profile ? "unavailable" : "dht"),
@@ -243,7 +244,7 @@ export function groupJson(group: GroupView, showSecret = false) {
     me: group.myKey ?? null,
     canSend: group.canSend,
     link: group.entryLink ? (showSecret ? group.entryLink : "<hidden>") : null,
-    lastMessageAt: group.lastMessageAt,
+    lastMessageAt: group.lastMessageAt || null,
     // Past 16 members with hubs (WISP 902 · Group Mesh § Hubs): who is one, who is reached through them, what the admin chose.
     members: group.members.map((m) => ({ key: m.key, name: m.nick ?? null, role: m.role, me: m.me, online: m.online,
       ...(m.hub ? { hub: true } : {}), ...(m.viaHub ? { viaHub: true } : {}), ...(m.hubRole ? { hubRole: m.hubRole } : {}) })),
