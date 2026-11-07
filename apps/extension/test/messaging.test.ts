@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fire, settle, type FakeWorld } from "./fakeChrome";
 import { engineControl, okResponse, resetEngine } from "./fakeEngine";
-import { OTHER_PEER, OTHER_TAG, PEER, SERVICE, TAG, bodyText, bootExtension, engine, openViewer, pauseRequest } from "./extension";
+import { OTHER_PEER, OTHER_TAG, PEER, SERVICE, TAG, bodyText, bootExtension, endBootPeer, engine, openViewer, pauseRequest } from "./extension";
 
 // covers: extension.engine, services.open, payments.external
 
@@ -356,6 +356,58 @@ describe("viewer tabs", () => {
     // A page that says anything but true counts as off.
     const shown = await openViewer(world, PEER, SERVICE, OTHER_TAG, undefined, "yes");
     expect(world.tabs.get(shown)!.url).toBe(`https://${SERVICE}.${PEER}.${OTHER_TAG}.invalid/`);
+  });
+
+  describe("an open still in progress when the pages close every viewer (Hide my IP turned on, the lock screen)", () => {
+    const open = { target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG };
+    const close = { target: "background", type: "close-services" };
+
+    /** No tab is left for the app, none was ever sent to its address, and nothing would serve it. */
+    async function expectNoViewer() {
+      await settle();
+      expect([...world.tabs.values()]).toEqual([]);
+      expect(world.callsTo("tabs.update")).toEqual([]);
+      expect([...world.session.keys()].filter((key) => key.startsWith("viewer:"))).toEqual([]);
+    }
+
+    it("opens nothing when both come in the same tick", async () => {
+      const opened = send(open);
+      const closed = send(close);
+      expect(await closed).toEqual({ ok: true });
+      expect(await opened).toEqual({ ok: true });
+      await expectNoViewer();
+    });
+
+    it("opens nothing when the close comes while the open waits on a peer that is starting", async () => {
+      let ready!: () => void;
+      endBootPeer(world);
+      engineControl().ready = new Promise<void>((resolve) => (ready = resolve));
+      const opened = send(open);
+      await settle();
+      expect(await send(close)).toEqual({ ok: true });
+      ready();
+      expect(await opened).toEqual({ ok: true });
+      await expectNoViewer();
+    });
+
+    it("closes the tab it was making when the close comes right after the tab is created", async () => {
+      const create = world.chrome.tabs.create.bind(world.chrome.tabs);
+      let closed: Promise<unknown> | undefined;
+      world.chrome.tabs.create = (async (props: { url: string }) => {
+        const tab = await create(props);
+        closed = send(close);
+        return tab;
+      }) as typeof world.chrome.tabs.create;
+      expect(await send(open)).toEqual({ ok: true });
+      expect(await closed).toEqual({ ok: true });
+      await expectNoViewer();
+    });
+
+    it("a close before the open does not keep a later open from opening", async () => {
+      expect(await send(close)).toEqual({ ok: true });
+      const tabId = await openViewer(world);
+      expect(world.tabs.get(tabId)!.url).toBe(`https://${SERVICE}.${PEER}.${TAG}.invalid/`);
+    });
   });
 
   it("joins a body DevTools hands over in several pieces", async () => {
