@@ -1,15 +1,13 @@
-import { useEffect, useId, useRef, useState, useSyncExternalStore, type RefObject } from "react";
+import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { COMMUNITY_LIMITS, groupName } from "@ghostly/core";
 import { useBackdropDismiss, useBackCloses } from "../hooks/useDismiss";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { useGroupNameField } from "../hooks/useGroupNameField";
+import { useEngineValue } from "../lib/engineState";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
-
-const subscribe = (listener: () => void) => engine.subscribe(listener);
-const snapshot = () => engine.state;
 
 type Kind = "community" | "mesh";
 const kinds = (t: Translate): { kind: Kind; title: string; body: string }[] => [
@@ -35,7 +33,8 @@ export function NewGroupDialog({ onClose, onCreated, returnFocus }: { onClose():
   useBackCloses(onClose);
   // An app with no transport for a group's links (no WebRTC, no native transport) could make the group and show its
   // link, but never let anyone in, nor reach a member (GroupConnection says the same once in). It says so here instead.
-  const noLinks = useSyncExternalStore(subscribe, snapshot)?.transport.groupLinks === false;
+  // Read alone (lib/engineState): the whole state drew the dialog again on every change, up to 20 a second while a file moves.
+  const noLinks = useEngineValue(state => state?.transport.groupLinks === false);
   const created = useRef(false);
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null, opener = returnFocus?.current;
