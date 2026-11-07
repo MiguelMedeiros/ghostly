@@ -278,6 +278,21 @@ export function unregisterProfile(id: string): void {
 }
 
 /**
+ * The profile this page runs as was removed from this device ("Remove this profile here", WISP 06): its data must
+ * already be gone. Another profile goes off the list, and the next page starts as the first one, if it was the choice.
+ * The first profile keeps its place, pointed at its own namespace again, and starts empty.
+ */
+export function forgetProfileHere(id: string): void {
+  const registry = read();
+  if (id) { write({ ...registry, active: registry.active === id ? "" : registry.active, profiles: registry.profiles.filter((p) => p.id !== id) }); return; }
+  write({ ...registry, profiles: registry.profiles.map((p) => {
+    if (p.id) return p;
+    const { space: _was, ...rest } = p;
+    return rest;
+  }) });
+}
+
+/**
  * Gives a profile a new name. A restored one stays marked restored (the Profile page's tag takes the mark off): the
  * field edits the name only, and the word for restored typed or pasted into it is the mark, never part of the name.
  */

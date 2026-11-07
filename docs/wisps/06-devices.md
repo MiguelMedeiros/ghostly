@@ -837,12 +837,14 @@ Copy follows the app's rules: short labels, one-line hints, details behind ⓘ. 
 | The device state cannot be read | "Can't read this device's state" | "Nothing was started." | "Try again" |
 | `superseded` | "This device was replaced" | "<device> took over without this one. This device has stopped." | "Use here", "It wasn't me"; a line "3 messages and 1 payment are only on this device" |
 | `moving` | "Almost there" | "Open Ghostly on <device> to finish." | link "My other device is lost or broken" |
-| `moving`, no `set-update` it can accept | "Your devices changed while this one was off" | "Add this device again from the device you use now." | "Add this device to my profile" |
+| `moving`, no `set-update` it can accept | "Your devices changed while this one was off" | "Add this device again from the device you use now." | "Add this device to my profile", "Remove this profile here" |
 | After a `set-update` was accepted, once | "Your devices are now: <names>" | "If this list looks wrong, do not use this device." | "OK", "This is wrong" (stays out and asks for enrollment) |
-| `removed` | "This device was removed" | "Add it again from <device>." | "Remove this profile here" |
+| `removed` | "This device was removed" | "Add it again from <device>." | "Add this device to my profile", "Remove this profile here" |
 | Enrollment not finished | "Not finished" | "Start again on <device>." | "Remove" |
 
 ⓘ on the standby screen: "Only one device sends, receives and pays at a time, so your messages and money are never in two places."
+
+**Remove this profile here** is the way to take the frozen copy, which is not encrypted, off a device that is out of the set for good. It asks "Remove <profile> from this device?", "Its chats, keys and wallets go from this device. Your other devices keep the profile.", and for the profile's name typed, as deleting a profile does ([04](04-profiles.md)). It deletes what deleting a profile deletes on this device (the namespace the profile runs on, its wallets' own storage, its files and keys, the forks its device record lists, and the device record), and nothing on the network. Any other profile then goes off the list and the app opens the first one. The first profile, which cannot be deleted, keeps its place on the list ("An empty profile takes its place here."): its pointer goes back to its own namespace, and it opens empty, from where the device can be added to a profile again.
 
 The account switcher ([04](04-profiles.md)) shows such a profile with the word "Standby" in place of its unread count.
 
