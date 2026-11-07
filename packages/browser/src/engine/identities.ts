@@ -1,5 +1,5 @@
 import {
-  budgetRetryMs, emptyIdentityLedger, fromBase64Url, isDiscoveryBudgetError, identityRevocationValue, identityStatement, IdentityCheckUnavailable, IdentityExchange, IDENTITY_REVOCATION_LABEL, isIdentityBinding, newIdentityBinding,
+  budgetRetryMs, emptyIdentityLedger, fromBase64Url, isDiscoveryBudgetError, identityRevocationValue, identityStatement, IdentityCheckUnavailable, IdentityExchange, IDENTITY_CHALLENGE_WINDOW, IDENTITY_REVOCATION_LABEL, isIdentityBinding, newIdentityBinding,
   receivedIdentityStatus, revokesIdentity, toBase64Url,
   type IdentityBinding, type IdentityLedger, type IdentityScope, type ReceivedIdentity, type IdentityStatement, type LocalIdentityProof, type VerifiedIdentity,
 } from "@ghostly/core";
@@ -180,6 +180,8 @@ export class IdentityProofs {
     const due = Math.min(REVOCATION_CHECK_MS, this.revocationsCheckedAt + REVOCATION_CHECK_MS - Date.now());
     this.lookUpIn(Math.max(60_000, due));
     every(AUTO_RECHECK_TICK_MS, AUTO_RECHECK_FIRST_MS, () => this.recheckDue());
+    // A contact's request whose challenge ended unanswered, with no request after it, leaves the timeline within a window.
+    every(IDENTITY_CHALLENGE_WINDOW * 1000, IDENTITY_CHALLENGE_WINDOW * 1000, () => this.expireChallenges());
     this.unlisten ??= whenDataKeyDropped(() => this.forgetSeeds());
   }
   /** The network is back: a revocation lookup that could not run, and a revocation not published offline, go now. */
@@ -503,6 +505,13 @@ export class IdentityProofs {
         const failures = (this.recheckBackoff.get(key)?.failures ?? 0) + 1;
         this.recheckBackoff.set(key, { failures, until: Date.now() + Math.min(AUTO_RECHECK_BACKOFF_MS * 2 ** (failures - 1), AUTO_RECHECK_AFTER_S * 1000) });
       }
+    }
+  }
+  /** Every chat's challenges whose window ended unanswered, and their verifying lines (`IdentityExchange.expire`). */
+  async expireChallenges(): Promise<void> {
+    for (const linkId of this.host.linkIds()) {
+      if (this.ended || !this.running) return;
+      if (this.host.ledger(linkId)?.challenges.length) await this.exchange(linkId)?.expire().catch(() => {});
     }
   }
   /** The 12 h lookup's wait between two reads, or for the budget: false when `stop` ended it. */
