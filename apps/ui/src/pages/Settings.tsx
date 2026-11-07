@@ -60,6 +60,8 @@ import {
   type Language,
 } from "../lib/settings";
 import { deleteAllSessions, listSessions } from "../lib/storage";
+import { stopPlayingFrom } from "../lib/nowPlaying";
+import { chatPath } from "../lib/url";
 import { anyChatOnCall, useAnyChatOnCall } from "../lib/chatsOnCall";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { peekEnabled, peekNotifies } from "../lib/profilePeek";
@@ -487,6 +489,8 @@ export function Settings() {
   };
   const deleteChats = () => {
     if (anyChatOnCall()) return;
+    // What plays on from one of them (the now-playing bar) stops with it, as with a chat deleted from the chat list.
+    for (const session of listSessions()) stopPlayingFrom(chatPath(session.id), false);
     deleteAllSessions();
     // Confirm goes and Delete comes back off (no chat left): the focus goes on to the next row's button.
     focusDataButton.current = confirmClearData ? "clearCancel" : "clear";
