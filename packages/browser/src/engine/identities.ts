@@ -1,7 +1,7 @@
 import {
   budgetRetryMs, emptyIdentityLedger, fromBase64Url, isDiscoveryBudgetError, identityRevocationValue, identityStatement, IdentityCheckUnavailable, IdentityExchange, IDENTITY_MAX_VALIDITY, IDENTITY_REVOCATION_LABEL, isIdentityBinding, newIdentityBinding,
-  receivedIdentityStatus, revokesIdentity, toBase64Url,
-  boundIdentityDisplay, type IdentityBinding, type IdentityLedger, type IdentityScope, type ReceivedIdentity, type IdentityStatement, type LocalIdentityProof, type VerifiedIdentity,
+  identityRefusal, receivedIdentityStatus, revokesIdentity, toBase64Url,
+  boundIdentityDisplay, type IdentityBinding, type IdentityLedger, type IdentityScope, type ReceivedIdentity, type IdentityStatement, type LocalIdentityProof, type SharedIdentity, type VerifiedIdentity,
 } from "@ghostly/core";
 import { STORES, store, transact, wrap } from "../shared/idb";
 import { openSecret, sealSecret, whenDataKeyDropped, type SealedSecret } from "./dataKey";
@@ -114,6 +114,16 @@ export const IDENTITY_DRAFT_TTL_MS = 30 * 60_000;
 export const IDENTITY_MAX_DRAFTS = 4;
 const MAX_PROOFS = 32;
 const now = () => Math.floor(Date.now() / 1000);
+
+/**
+ * A share of mine as every reader gets it (the app, the CLI, `getState`): its reason only in words this app writes
+ * (identityRefusal), else none. A ledger kept from before that check holds the contact's own words there.
+ */
+const ownRefusal = (s: SharedIdentity): SharedIdentity => {
+  if (s.error === undefined || identityRefusal(s.error) !== undefined) return s;
+  const { error: _contactWords, ...rest } = s;
+  return rest;
+};
 
 /**
  * Identity proofs, engine side: the profile's own proofs (made once, on the Identities page) and, per
@@ -700,7 +710,7 @@ export class IdentityProofs {
     return {
       support: supported,
       contactProviders: supported ? this.exchanges.get(linkId)?.contactProviders?.slice() : undefined,
-      shared: ledger.shared,
+      shared: ledger.shared.map(ownRefusal),
       received: ledger.received.map(r => {
         const provider = this.providers().find(p => p.id === r.binding.provider);
         const status = receivedIdentityStatus(r, theirs, mine, t);
