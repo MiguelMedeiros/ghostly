@@ -223,7 +223,7 @@ export const DEPARTED_READS = 6;
 /**
  * A 1:1 chat's reads of an invite this side made, while its joiner is due and has not shown (`awaited`, `AWAITING_PEER_MS`
  * in link.ts), may go over a relay's minute within the chat's allowance (`SIGNALING_ALLOWANCE_SHARE`) the same way: at
- * most this many of each invite's in a minute, every relay together. And while one asked in the last minute, the departed
+ * most this many in a minute, every invite and every relay together. And while one asked in the last minute, the departed
  * reads leave them half of that on each relay: the last `AWAITED_READS / 2` of the allowance's reads (`DEPARTED_READS`
  * then take at most 3 on a relay of 30, against 5). Read every 2 to 4 s, they cover the seconds in which a joiner that
  * opened the link at once knocks. Within the chats' allowance, they add nothing to what a relay may see in a minute
@@ -231,6 +231,9 @@ export const DEPARTED_READS = 6;
  * another on relays of 30 spent the minute on both 12 s in (two pairings, about 15 requests a relay each), the departed
  * reads of the contact that had just left took the allowance, and the third invite's key was read once, then not until
  * the minute freed: the joiner's knock 48 s late, and join to live in 60 s, against 2.6 and 4.6 s (CLI lab, 2026-11-07).
+ * Not this many per invite: a web profile with 150 chats added from old sessions, each an invite awaited from that start,
+ * had their reads take the whole allowance at every refill, and a live contact's reads after a reload went once a
+ * minute: the chat came back in 2 to 7 min, against 41 to 69 s before (2026-11-07).
  */
 export const AWAITED_READS = 4;
 /**
@@ -595,8 +598,8 @@ export class RelayTransport implements PkarrTransport {
   private readonly spentAnswerAllowance = new Map<string, number[]>();
   /** Per contact, its departed reads past the limit in the last minute, every relay together (`DEPARTED_READS`). */
   private readonly departedOver = new Map<string, number[]>();
-  /** Per invite, its awaited reads past the limit in the last minute, every relay together (`AWAITED_READS`). */
-  private readonly awaitedOver = new Map<string, number[]>();
+  /** The awaited reads past the limit in the last minute, every invite and every relay together (`AWAITED_READS`). */
+  private awaitedOver: number[] = [];
   /** When an awaited invite's read last asked: the departed reads leave it room for a minute (`AWAITED_READS`). */
   private awaitedAt = -Infinity;
   /**
@@ -1455,7 +1458,7 @@ export class RelayTransport implements PkarrTransport {
     if (isGroupSignal(who)) this.spentGroupSignal.get(relay)!.push(now);
     const departedOver = isDepartedRead(who) && this.spent.get(relay)!.length >= this.limitOf(relay);
     if (departedOver) this.overAdd(this.departedOver, key, now);
-    if (isAwaitedRead(who) && this.spent.get(relay)!.length >= this.limitOf(relay)) this.overAdd(this.awaitedOver, key, now);
+    if (isAwaitedRead(who) && this.spent.get(relay)!.length >= this.limitOf(relay)) this.awaitedOver = [...within(this.awaitedOver, now, 60_000), now];
     this.spent.get(relay)!.push(now);
     if (who.background) this.spentBackground.get(relay)!.push(now);
     if (who.background && who.write) this.spentBackgroundWrites.get(relay)!.push(now);
@@ -1492,9 +1495,10 @@ export class RelayTransport implements PkarrTransport {
     // A chat's signaling may go over the minute by its allowance; its reads leave the last of it to a write.
     // A group edge's, for a member that may be back, by a smaller one, its reads one at a time past the limit.
     // A chat's read of a contact that just went away, past the limit: within the chat's allowance, a few per contact.
-    // So is its read of an invite this side made while the joiner is due, a few per invite.
+    // So is its read of an invite this side made while the joiner is due, a few for every invite together.
     const departed = isDepartedRead(who) && key !== undefined && recent.length >= limit && this.overReads(this.departedOver, key, now) < DEPARTED_READS;
-    const awaited = isAwaitedRead(who) && key !== undefined && recent.length >= limit && this.overReads(this.awaitedOver, key, now) < AWAITED_READS;
+    if (isAwaitedRead(who)) this.awaitedOver = within(this.awaitedOver, now, 60_000);
+    const awaited = isAwaitedRead(who) && key !== undefined && recent.length >= limit && this.awaitedOver.length < AWAITED_READS;
     const share = isChatSignal(who) || departed || awaited ? SIGNALING_ALLOWANCE_SHARE : isGroupSignal(who) ? GROUP_SIGNALING_ALLOWANCE_SHARE : 0;
     let allowance = share ? Math.max(0, Math.floor(limit * share) - (who.write ? 0 : 1)) : 0;
     // The departed reads leave the last of it to an awaited invite's, while one is (`AWAITED_READS`).
@@ -1696,7 +1700,7 @@ export class RelayTransport implements PkarrTransport {
     return !who.group && !who.write && !who.door && since !== undefined && now - since >= READ_STARVED_MS;
   }
 
-  /** This key's departed or awaited reads past the limit in the last minute (`DEPARTED_READS`, `AWAITED_READS`). */
+  /** This key's departed reads past the limit in the last minute (`DEPARTED_READS`). */
   private overReads(over: Map<string, number[]>, key: string, now: number): number {
     const reads = within(over.get(key) ?? [], now, 60_000);
     if (reads.length) over.set(key, reads); else over.delete(key);
