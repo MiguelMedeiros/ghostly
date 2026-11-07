@@ -490,19 +490,19 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
           {confirming ? (
             <div className="voice-confirm" role="alertdialog" aria-label={t("chat.voice.discardAsk")} data-testid="voice-confirm">
               <span className="voice-confirm-text">{t("chat.voice.discardAsk")}</span>
-              <button ref={keepRef} type="button" className="voice-text-button" data-testid="voice-confirm-keep" onClick={keep}>{t("chat.voice.keep")}</button>
-              <button type="button" className="voice-text-button voice-text-danger" data-testid="voice-confirm-discard" onClick={() => cancel()}>{t("chat.voice.discard")}</button>
+              <button ref={keepRef} type="button" className="voice-text-button tap-target" data-testid="voice-confirm-keep" onClick={keep}>{t("chat.voice.keep")}</button>
+              <button type="button" className="voice-text-button voice-text-danger tap-target" data-testid="voice-confirm-discard" onClick={() => cancel()}>{t("chat.voice.discard")}</button>
             </div>
           ) : (
             <>
               {locked && (
-                <button type="button" className="voice-icon-button" data-testid="voice-delete" aria-label={t("chat.voice.discard")} title={t("chat.voice.discard")} disabled={sending} onClick={() => cancel()}>
+                <button type="button" className="voice-icon-button tap-target" data-testid="voice-delete" aria-label={t("chat.voice.discard")} title={t("chat.voice.discard")} disabled={sending} onClick={() => cancel()}>
                   <BinIcon />
                 </button>
               )}
               {paused && preview ? (
                 <>
-                  <button type="button" className="voice-icon-button" data-testid="voice-preview"
+                  <button type="button" className="voice-icon-button tap-target" data-testid="voice-preview"
                     aria-label={preview.playing ? t("chat.voice.pausePlayback") : t("chat.voice.playback")} title={preview.playing ? t("chat.voice.pausePlayback") : t("chat.voice.playback")} onClick={() => void togglePreview()}>
                     {preview.playing ? <PauseIcon /> : <PlayIcon />}
                   </button>
@@ -529,7 +529,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
                 </>
               )}
               {locked && (
-                <button type="button" className="voice-icon-button voice-pause-button" data-testid="voice-pause" data-paused={paused || undefined}
+                <button type="button" className="voice-icon-button voice-pause-button tap-target" data-testid="voice-pause" data-paused={paused || undefined}
                   disabled={phase === "starting" || sending || micEnded}
                   aria-label={paused ? t("chat.file.resume") : t("chat.file.pause")} title={paused ? t("chat.file.resume") : t("chat.file.pause")} onClick={togglePause}>
                   {paused ? <MicIcon size={20} color="var(--color-danger)" /> : <PauseIcon size={20} />}
