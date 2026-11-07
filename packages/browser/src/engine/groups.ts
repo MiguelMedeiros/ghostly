@@ -3201,6 +3201,8 @@ export class Groups {
       if (session.status !== "active" || this.stored.get(groupId)?.left) continue;
       // What I wrote while behind on the chain, for the members let in meanwhile (WISP 902 § Catch-up).
       void session.reseal().catch(() => {});
+      // What I wrote before a hub I count on was let in, for it to carry to the members who can read it (WISP 902 § Catch-up).
+      void session.carryOwn().catch(() => {});
       // A text of mine an app killed mid-send saved but did not store or say (WISP 902 § Messages).
       void session.resume().catch(() => {});
       // My name, to members that may have no edge with me: once per start and on a rename (WISP 902 § Messages).
