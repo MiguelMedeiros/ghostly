@@ -2,6 +2,7 @@ import { clearProfileStores } from "@ghostly/browser/shared/idb";
 import { removeFileBytes } from "@ghostly/browser/shared/fileBytes";
 import { forgetServicesOf, getBrowserHost, releaseUnusedLocalAccessOf } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
+import { forgetDevice } from "@ghostly/browser/devices/store";
 import { LEGACY_JOIN_PREFIX, getStorageProfile, ownsKey } from "./storage";
 import { activeProfileId, registryKey } from "./profiles";
 import { profileDatabase } from "./profileData";
@@ -24,7 +25,8 @@ export const CLEAR_ENGINE_MS = 15_000;
  * 4. Its push subscription ends at the push service, so contacts who kept it can no longer wake this app.
  *    On the web and Desktop, what the contacts' apps it opened kept on their own origins goes too (`forgetServices`);
  *    in the extension, Chrome's access to each local host it shared an app at, unless another profile shares one there.
- * 5. A host whose peer outlives the page starts a new one. The caller then reloads.
+ * 5. Its device state (WISP 06): the device record, Desktop's copy of it, and this device's signing key for the profile.
+ * 6. A host whose peer outlives the page starts a new one. The caller then reloads.
  *
  * All of it is the profile's this page runs as, should another tab switch to another profile meanwhile.
  */
@@ -67,6 +69,9 @@ async function clearProfile(profileId: string): Promise<void> {
   await forgetServicesOf({ profile: profileId });
   // Its shared apps went with its database: the extension gives back the local hosts no other profile shares one at.
   await releaseUnusedLocalAccessOf();
+  // Its device state, as Delete profile drops it (WISP 06): the record (and Desktop's copy) and this device's signing
+  // key for it. The emptied profile starts again as a device of no set, and keeps no key the other devices trust.
+  await forgetDevice(profileDatabase(profileId)).catch(() => {});
   let host: ReturnType<typeof getBrowserHost> | null = null;
   try { host = getBrowserHost(); } catch { /* none in tests */ }
   await host?.restartEngine?.().catch(() => {});
