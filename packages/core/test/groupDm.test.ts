@@ -107,6 +107,11 @@ describe("the group-pair frame of a private group", () => {
     expect(readGroupPair({ ...frame, h: 2 })).toBeNull();
     expect(readGroupPair({ ...frame, ts: "1" })).toBeNull();
     expect(readGroupPair({ ...frame, n: "!" })).toBeNull();
+    // A pair box's key and nonce, as a community's: 32 and 24 bytes.
+    expect(readGroupPair({ ...frame, n: `${frame.n}A` })).toBeNull();
+    expect(readGroupPair({ ...frame, n: "A".repeat(4_096) })).toBeNull();
+    expect(readGroupPair({ ...frame, e: frame.e.slice(1) })).toBeNull();
+    expect(readGroupPair({ ...frame, e: "A".repeat(4_096) })).toBeNull();
     expect(() => sealGroupPair(alice, GROUP, bob.pubKeyZ32, { pad: "x".repeat(DM_LIMITS.payloadBytes) })).toThrow();
   });
 
@@ -127,6 +132,15 @@ describe("the group-pair frame of a private group", () => {
     expect(passed).toBe(PAIRS_PER_MINUTE);
     now += 60_000;
     expect(relay.pass(sealGroupPair(alice, GROUP, carol.pubKeyZ32, payload, now), ctx)).not.toBeNull();
+  });
+
+  it("is not passed on by a hub when its key or nonce is not a pair box's, which the hub cannot open to tell", () => {
+    const relay = new GroupPairRelay();
+    const ctx = { group: GROUP, edge: alice.pubKeyZ32, member };
+    const frame = sealGroupPair(alice, GROUP, bob.pubKeyZ32, payload);
+    expect(relay.pass({ ...clone(frame), n: "A".repeat(4_096) }, ctx)).toBeNull();
+    expect(relay.pass({ ...clone(frame), e: "A".repeat(4_096) }, ctx)).toBeNull();
+    expect(relay.pass(clone(frame), ctx)).toEqual({ ...frame, h: 1 });
   });
 });
 
