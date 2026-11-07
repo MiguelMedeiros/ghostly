@@ -160,7 +160,7 @@ export function Profile() {
         <Row label={t("profile.mode")}><Segmented label={t("profile.mode")} value={settings.colorScheme} options={schemes} onChange={updateColorScheme} /></Row>
         <Row label={t("profile.nameInChats")}>
           <input data-testid="account-nickname" aria-label={t("settings.nicknamePlaceholder")} className={`${input} w-44 flex-1`} placeholder={t("common.anonymous")} {...nickname} />
-          <button type="button" onClick={randomizeNickname} title={t("settings.randomizeName")} aria-label={t("settings.randomizeName")} className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer">↻</button>
+          <button type="button" onClick={randomizeNickname} title={t("settings.randomizeName")} aria-label={t("settings.randomizeName")} className="tap-target grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer">↻</button>
         </Row>
         {/* Per profile: contacts are told at once, or told there is nothing to show (WISP 401 § name and picture). */}
         <Row label={t("settings.shareProfile")} hint={t("settings.shareProfileHint")}>

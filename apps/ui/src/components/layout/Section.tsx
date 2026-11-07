@@ -47,14 +47,14 @@ export function Row({ label, hint, info, value, leading, children, testId }: {
 
 /**
  * The ⓘ mark: a round button that shows or hides the longer story beside a short line. Its hit area is larger than the
- * mark, it says whether the text is open, and it names the text it opens (`controls`).
+ * mark (40 px, a thumb's 44 on a phone), it says whether the text is open, and it names the text it opens (`controls`).
  */
 export function InfoButton({ open, onToggle, controls, label, testId, className = "" }: { open: boolean; onToggle: () => void; controls: string; label?: string; testId?: string; className?: string }) {
   const i18n = useOptionalI18n();
   const more = label ?? i18n?.t("common.moreInfo") ?? "More info";
   return (
     <button type="button" data-testid={testId} aria-expanded={open} aria-controls={controls} aria-label={more} title={more} onClick={onToggle}
-      className={`relative shrink-0 grid place-items-center w-5 h-5 rounded-full text-text-muted hover:text-accent aria-expanded:text-accent transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent before:absolute before:-inset-2.5 before:content-[''] ${className}`}>
+      className={`relative shrink-0 grid place-items-center w-5 h-5 rounded-full text-text-muted hover:text-accent aria-expanded:text-accent transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent before:absolute before:-inset-2.5 max-md:before:-inset-3 before:content-[''] ${className}`}>
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5" /><path d="M12 11v5.5M12 7.5v.01" /></svg>
     </button>
   );
