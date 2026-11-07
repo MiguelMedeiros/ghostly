@@ -967,6 +967,18 @@ describe("per chat", () => {
     expect(engines.b.linkView("chat", true)!.received[0].display).toEqual(found.display);
   });
 
+  it("a looked-up public name is stored without hidden or direction-changing characters, and none when nothing visible is left", async () => {
+    const { engines, ledgers, state } = await shared();
+    const id = engines.b.linkView("chat", true)!.received[0].id;
+    const found: { display?: IdentityDisplay } = { display: { name: "‮a​b@x.io ", source: "Test directory‏", fetchedAt: 1 } };
+    state.providers.b = [{ ...fakeKey, lookupDisplay: async () => found.display } as IdentityProofProvider];
+    await engines.b.lookupDisplay({ linkId: "chat", id });
+    expect(ledgers.b.received[0].display).toEqual({ name: "ab@x.io", source: "Test directory", fetchedAt: 1 });
+    found.display = { name: "‏​", source: "Test directory", fetchedAt: 2 };
+    await engines.b.lookupDisplay({ linkId: "chat", id });
+    expect(ledgers.b.received[0].display).toEqual({ source: "Test directory", fetchedAt: 2 });
+  });
+
   it("a proof received under the contact's previous key is shown as such, not verified", async () => {
     const { engines, state } = await shared();
     expect(engines.b.linkView("chat", true)!.received[0].status).toBe("verified");

@@ -1,7 +1,7 @@
 import {
   budgetRetryMs, emptyIdentityLedger, fromBase64Url, isDiscoveryBudgetError, identityRevocationValue, identityStatement, IdentityCheckUnavailable, IdentityExchange, IDENTITY_MAX_VALIDITY, IDENTITY_REVOCATION_LABEL, isIdentityBinding, newIdentityBinding,
   receivedIdentityStatus, revokesIdentity, toBase64Url,
-  type IdentityBinding, type IdentityLedger, type IdentityScope, type ReceivedIdentity, type IdentityStatement, type LocalIdentityProof, type VerifiedIdentity,
+  boundIdentityDisplay, type IdentityBinding, type IdentityLedger, type IdentityScope, type ReceivedIdentity, type IdentityStatement, type LocalIdentityProof, type VerifiedIdentity,
 } from "@ghostly/core";
 import { STORES, store, transact, wrap } from "../shared/idb";
 import { openSecret, sealSecret, whenDataKeyDropped, type SealedSecret } from "./dataKey";
@@ -652,8 +652,10 @@ export class IdentityProofs {
     const r = this.host.ledger(linkId)?.received.find(x => x.id === id);
     const provider = r && this.providers().find(p => p.id === r.binding.provider);
     if (!r || !provider?.lookupDisplay) throw new Error("No public profile for this identity");
-    const display = await provider.lookupDisplay(r.verified.subject, { signal: AbortSignal.timeout(15_000) });
-    if (!display) throw new Error("No public profile found");
+    const found = await provider.lookupDisplay(r.verified.subject, { signal: AbortSignal.timeout(15_000) });
+    if (!found) throw new Error("No public profile found");
+    // Held to the rule a proof's own display is (no hidden or direction-changing characters in its name).
+    const display = boundIdentityDisplay(found);
     await this.host.updateLedger(linkId, l => ({ ...l, received: l.received.map(x => x.id === id && x.verified.subject === r.verified.subject ? { ...x, display } : x) }));
     this.host.emit();
   }
