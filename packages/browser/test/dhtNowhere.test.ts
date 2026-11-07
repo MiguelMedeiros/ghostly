@@ -4,7 +4,7 @@ import { createIdentity, createLink, createRelayPayload, DhtDelivery, parseRelay
 import { GhostlyNode } from "../src/engine/node";
 import { NotSent } from "../src/engine/outbox";
 import { db } from "../src/engine/db";
-// covers: chat.dht.send, chat.waiting, chat.cancel-sending
+// covers: chat.dht.send, chat.waiting
 
 /*
  * A contact away, the chat on the DHT, and the relays not taking what is published. A text whose publication every
