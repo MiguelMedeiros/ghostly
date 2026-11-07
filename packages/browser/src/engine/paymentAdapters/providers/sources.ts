@@ -156,6 +156,11 @@ export class ProviderSources<P extends Connectable> {
   private stopped = false;
   /** When the balance is read next, while reads get no answer (one key: this source). */
   private readonly reads: AskBackoff<"balance">;
+  /** Balance reads under way, and whether another call to the source got its answer meanwhile (`answered`). */
+  private reading = 0;
+  private answeredMeanwhile = false;
+  /** An answer to another call already brought a read since the last read that answered: the next ones wait their turn. */
+  private answerRead = false;
   view: SourceView = { mode: "mainnet", status: "none", offered: [] };
 
   constructor(private readonly options: SourcesOptions<P>) {
@@ -231,6 +236,21 @@ export class ProviderSources<P extends Connectable> {
     if (this.stopped) return;
     if (this.provider) { this.reads.forget("balance"); void this.refresh(); return; }
     if (this.failures && !this.connecting) void this.retryNow();
+  }
+
+  /**
+   * The connected source answered another call (a payment, a fee estimate, an invoice made or looked up): it is back.
+   * While its balance reads get no answer, the balance is read now rather than when the wait they earned ends; a
+   * read that answers forgets that wait, as any does. A read already under way is left to say it (if it gets no
+   * answer, the next one is `refreshMs` later). Once per stretch of failed reads, and one that fails keeps doubling
+   * the wait: a source that answers everything but its balance keeps the slow pace. A source whose reads answer:
+   * nothing changes.
+   */
+  answered(provider: P) {
+    if (this.stopped || provider !== this.provider || !this.options.refresh || !this.view.error || this.answerRead) return;
+    this.answerRead = true;
+    if (this.reading) { this.answeredMeanwhile = true; return; }
+    void this.refresh();
   }
 
   private async connect(eager = false) {
@@ -456,17 +476,25 @@ export class ProviderSources<P extends Connectable> {
     if (!this.options.refresh) { if (!this.view.read) { this.view = { ...this.view, read: true }; this.options.changed(); } return; }
     const before = this.view;
     let wait = this.options.refreshMs ?? REFRESH_MS;
+    this.reading++;
     try {
       const details = await this.options.refresh(provider);
       if (provider !== this.provider) return;
       this.view = { ...this.view, ...details, read: true, balanceAt: undefined, error: undefined };
       this.remember(details);
       this.reads.forget("balance");
+      this.answerRead = false;
     } catch (error) {
       if (provider !== this.provider) return;
       // Its error stays shown until a read answers.
       this.view = { ...this.view, error: `Could not read the balance: ${redact(error, this.secrets)}` };
       wait = this.reads.missed("balance", Date.now());
+      // The source answered another call while this read was under way (it may have started before the source was
+      // back): the next read comes soon, once, and the wait goes on doubling from where it was.
+      if (this.answeredMeanwhile) wait = this.options.refreshMs ?? REFRESH_MS;
+    } finally {
+      this.reading--;
+      if (!this.reading) this.answeredMeanwhile = false;
     }
     // A read that says what the view already did (the same balance, or none) changes nothing: every 15 s it made a
     // whole wallet view and engine state, with no wallet at all.
@@ -489,7 +517,7 @@ export class ProviderSources<P extends Connectable> {
 
   /** `forget`: the source is removed, so what it keeps on this device goes too (a provider's own `forget`). */
   private async disconnect(forget = false) {
-    clearTimeout(this.timer); clearTimeout(this.retry); this.reads.forget("balance");
+    clearTimeout(this.timer); clearTimeout(this.retry); this.reads.forget("balance"); this.answerRead = false;
     this.controller.abort(); this.controller = new AbortController();
     const provider = this.provider as (P & { forget?: () => Promise<void> }) | undefined;
     this.provider = undefined; this.descriptor = undefined; this.secrets = {};
