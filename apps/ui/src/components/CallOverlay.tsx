@@ -568,8 +568,19 @@ function DeviceNoticeBar({ devices }: { devices: CallDevices }) {
   const { t } = useI18n();
   const notice = devices.notice!;
   const name = notice.name || t(KIND_NAME[notice.kind]);
+  // Its time stops while the keyboard focus or the pointer is on it, or Switch back (offered once) could go from under
+  // someone who Tabbed to it or is reading it; it starts over when both have left, or when it goes.
+  const on = useRef({ focus: false, pointer: false });
+  const { hold } = devices;
+  const set = (what: "focus" | "pointer", value: boolean) => {
+    on.current[what] = value;
+    hold(on.current.focus || on.current.pointer);
+  };
+  useEffect(() => () => hold(false), [hold]);
   return (
     <div role="status" data-testid="call-device-notice" data-type={notice.type} data-kind={notice.kind}
+      onFocus={() => set("focus", true)} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) set("focus", false); }}
+      onPointerEnter={() => set("pointer", true)} onPointerLeave={() => set("pointer", false)}
       className="call-share-error absolute bottom-32 max-md:bottom-[calc(8.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-10 w-max max-w-[calc(100%-2rem)] flex items-center gap-3 rounded-lg bg-black/70 px-3 py-2 text-xs text-white">
       <span className="min-w-0 truncate">{t(NOTICE_TEXT[notice.type], { name })}</span>
       {notice.type === "back" && (

@@ -523,7 +523,7 @@ describe("the contact's sound", () => {
     try {
       const remote = new FakeMediaStream([new FakeTrack("audio"), new FakeTrack("video")]);
       const devices = { list: { audioinput: [], videoinput: [], audiooutput: [], defaults: {}, named: true }, current: { audioinput: "", videoinput: "", audiooutput: "spk" },
-        speaker: "spk", speakers: true, choose: vi.fn(), notice: null, dismiss: vi.fn(), switchBack: vi.fn() };
+        speaker: "spk", speakers: true, choose: vi.fn(), notice: null, dismiss: vi.fn(), switchBack: vi.fn(), hold: vi.fn() };
       overlay({ remoteStream: remote as unknown as MediaStream, remoteHasVideo: true, devices });
       const showing = [...document.querySelectorAll<HTMLMediaElement>("audio, video")].filter((element) => given.get(element) === remote);
       // The <audio> and the picture both show the contact's stream; only one may sound, or the voice comes out twice.
