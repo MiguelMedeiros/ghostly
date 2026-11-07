@@ -24,6 +24,11 @@ on:
         required: false
         default: ""
         type: string
+      release_tag:
+        description: "The tag release.yml publishes (VITE_RELEASE_TAG: Home's version link opens its page); empty otherwise"
+        required: false
+        default: ""
+        type: string
     outputs:
       signed:
         description: "true when the APK is a release build signed with the upload key, false for a debug APK"
@@ -104,6 +109,7 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           THROWAWAY_KEY: ${{ github.event_name == 'pull_request' }}
+          VITE_RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           version="$(node -p "require('./apps/desktop/tauri.conf.json').version")"
           if [ "$THROWAWAY_KEY" = "true" ]; then
