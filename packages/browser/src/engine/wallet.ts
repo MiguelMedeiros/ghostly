@@ -1712,6 +1712,9 @@ export class CashuWallet {
       if (swap) stores[STORES.swaps].delete(swap.id);
     });
     this.shownQuotes.delete(quoteId);
+    // Not paid: the review that showed it is still the invoice and amount shown, and Pay on it again pays (the refusal
+    // says it is safe to try again), checked against the mint's quote as the first time.
+    const unpaid = () => { this.shownQuotes.set(quoteId, shown); };
 
     let result: MeltProofsResponse<MeltQuoteBolt11Response>;
     try {
@@ -1722,6 +1725,7 @@ export class CashuWallet {
       // The mint answered (a refusal), or took the proofs and only the change failed: its word decides.
       const outcome = await this.settleMelt(melt, true).catch((): MeltOutcome => "pending");
       if (outcome === "unpaid") {
+        unpaid();
         const lost = this.takeFailedFee(melt.quote);
         // Its ecash was spent somewhere else: said in plain words, whatever the mint's own were.
         if (this.spentAway.delete(melt.quote)) throw Object.assign(engineError("ecashAlreadySpent"), { cause: error });
@@ -1737,7 +1741,9 @@ export class CashuWallet {
       await this.finishMelt(melt, result.change);
       return "paid";
     }
-    return this.settleMelt(melt, true).catch((): MeltOutcome => "pending");
+    const outcome = await this.settleMelt(melt, true).catch((): MeltOutcome => "pending");
+    if (outcome === "unpaid") unpaid();
+    return outcome;
   }
 
   /**
