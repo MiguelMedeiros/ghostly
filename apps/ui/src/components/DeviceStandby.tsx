@@ -149,9 +149,17 @@ function StandbyHandoff({ gate }: { gate: DeviceGateView }) {
   useEffect(() => {
     if (!follow || !running) return;
     setFollow(false);
-    if (document.activeElement && document.activeElement !== document.body) return;
-    (box.current?.querySelector<HTMLElement>('[data-testid="handoff-cancel"]') ?? box.current?.querySelector<HTMLElement>('[data-testid="handoff-progress"]'))?.focus();
+    focusMove(box.current);
   }, [follow, running]);
+  // The offer answered (Use here, Not now) or taken back by the other device: its buttons go with it, and the keyboard
+  // focus goes the same way (the move's Cancel, else its steps, else Use here), not to the page.
+  const offered = view?.step === "offer";
+  const wasOffered = useRef(offered);
+  useEffect(() => {
+    const was = wasOffered.current;
+    wasOffered.current = offered;
+    if (was && !offered) focusMove(box.current);
+  }, [offered]);
   if (!view && gate.state === "releasing") return null;
   // Not while the new device list waits for an answer: "If this list looks wrong, do not use this device". A replaced
   // device takes the profile back the same way (WISP 06 § User experience): what only it holds stays, in Data and storage.
@@ -170,6 +178,13 @@ function StandbyHandoff({ gate }: { gate: DeviceGateView }) {
       {asking && <UseHereDialog device={device} onClose={() => setAsking(false)} onStarted={() => setFollow(true)} />}
     </div>
   );
+}
+
+/** The keyboard focus that went to the page goes to the move in `box`: its Cancel, else its steps, else Use here. */
+function focusMove(box: HTMLElement | null): void {
+  if (document.activeElement && document.activeElement !== document.body) return;
+  const find = (testId: string) => box?.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
+  (find("handoff-cancel") ?? find("handoff-progress") ?? find("handoff-use-here"))?.focus();
 }
 
 /** How often coming back to the front may read the turn: the relays' budget is shared with everything else. */
