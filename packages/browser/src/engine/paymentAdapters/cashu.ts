@@ -81,12 +81,11 @@ export class CashuAdapter implements PaymentAdapter<CashuPrepared> {
  async reconcile(review:PaymentReview,prepared:CashuPrepared,persist:()=>Promise<void>){
   if(prepared.abandoned)return this.abandon(prepared,persist);
   if(prepared.spentElsewhere)return this.spentElsewhere(prepared,persist);
+  // Asked once a round: the contact taking a token it just got says so (`onReviewedPaymentResult`), and the next round asks.
   const known=await this.outcome(review,prepared);
   if(known)return known;
   const token=prepared.token ?? await this.wallet.recoverReviewedCashu(review,prepared);
   if(token)await this.publish(review,token); // Repeat the same token, never mint a replacement.
-  const after=await this.outcome(review,prepared);
-  if(after)return after;
   // No token: the swap may never have reached the mint (it was unreachable when approved). Only the mint can say so,
   // and only once no request of it can still be on its way: then the payment failed and its inputs come back.
   if(!token && Date.now()>=swapSettledAt(review,prepared) && await this.wallet.reviewedCashuNeverSwapped(prepared))return this.abandon(prepared,persist);
