@@ -1391,9 +1391,7 @@ impl Pkarr {
             let silent = state.dht_silent >= DHT_SILENT_LOOKUPS;
             (state.read_relays || silent, silent)
         };
-        let source;
-
-        if !read_relays {
+        let source = if !read_relays {
             // The DHT, directly (there is one: without it, relay reads are always on).
             if let Some(progress) = lookup {
                 if background && self.newest(key).is_none() {
@@ -1403,7 +1401,7 @@ impl Pkarr {
                 }
             }
             self.went(Path::Dht);
-            source = "dht";
+            "dht"
         } else if background && lookup.is_some() && !dht_silent {
             // (With no DHT, a private network's relays are all there is: a background read asks them too, or it
             // would only ever hand back what is known, and a key watched in the background never changed.)
@@ -1412,9 +1410,9 @@ impl Pkarr {
                     let _ = tokio::time::timeout(BACKGROUND_LOOKUP_WAIT, finished(done)).await;
                 }
             }
-            source = "dht";
+            "dht"
         } else {
-            source = match self.relay_turn(key, urgent) {
+            match self.relay_turn(key, urgent) {
                 RelayTurn::Reuse => "relay-fresh",
                 RelayTurn::Wait(mut done) => {
                     // As long as the read asking can take; an error is that read over.
@@ -1423,8 +1421,8 @@ impl Pkarr {
                     "relay-shared"
                 }
                 RelayTurn::Lead(lead) => self.ask_relays(key, before, lookup, lead).await,
-            };
-        }
+            }
+        };
 
         let found = self.newest(key);
         let ms = started.elapsed().as_millis();
