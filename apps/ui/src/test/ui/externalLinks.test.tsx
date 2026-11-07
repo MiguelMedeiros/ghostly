@@ -20,9 +20,9 @@ import { renderApp } from "../render";
  * fails on a `target="_blank"` written anywhere else.
  */
 
-const tauri = vi.hoisted(() => ({ invoke: vi.fn(async (_command: string, _args?: unknown): Promise<unknown> => undefined) }));
+const tauri = vi.hoisted(() => ({ invoke: vi.fn(async (_command: string, _args?: unknown): Promise<unknown> => undefined), version: "0.4.0" }));
 // The UI tests alias every `@tauri-apps/api/*` to one stand-in (packages/browser/src/platform/tauri.ts): one mock.
-vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke, listen: async () => () => {}, getVersion: async () => "0.4.0" }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke, listen: async () => () => {}, getVersion: async () => tauri.version }));
 
 const update = vi.hoisted(() => ({
   update: { version: "0.5.0", apply: "manual" },
@@ -75,8 +75,8 @@ const click = (link: HTMLElement) => !fireEvent.click(link, { button: 0 });
 const anchor = (href: string, options?: Parameters<typeof externalLinkProps>[1]) =>
   renderApp(<a {...externalLinkProps(href, options)}>link</a>).container.querySelector("a")!;
 
-beforeEach(() => { tauri.invoke.mockReset(); tauri.invoke.mockResolvedValue(undefined); });
-afterEach(() => setDesktop(false));
+beforeEach(() => { tauri.invoke.mockReset(); tauri.invoke.mockResolvedValue(undefined); tauri.version = "0.4.0"; });
+afterEach(() => { setDesktop(false); vi.unstubAllEnvs(); });
 
 describe("a new window is asked for only through externalLinkProps", () => {
   it("no file in apps/ui/src/ spells _blank but apps/ui/src/lib/externalLink.ts", () => {
@@ -185,11 +185,33 @@ describe("links that had no way out on Desktop", () => {
   });
 
   it("Home's version link is named with the version it shows, so \"click v0.4.0\" finds it", async () => {
+    vi.stubEnv("VITE_RELEASE_TAG", "v0.4.0");
     renderApp(<HomeProjectLinks />);
     const version = await screen.findByRole("link", { name: /^v0\.4\.0/ });
     expect(version).toHaveTextContent("v0.4.0");
     expect(version).toHaveAccessibleName(shownInName(version));
     expect(version).toHaveAccessibleDescription("View this release");
+  });
+
+  it("a release build links its own version's release, whatever the version (1.10.2 was \"Local version\")", async () => {
+    tauri.version = "1.10.2";
+    vi.stubEnv("VITE_RELEASE_TAG", "v1.10.2");
+    renderApp(<HomeProjectLinks />);
+    const version = await screen.findByRole("link", { name: /^v1\.10\.2/ });
+    expect(version).toHaveAttribute("href", "https://github.com/MiguelMedeiros/ghostly/releases/tag/v1.10.2");
+    expect(version).toHaveAccessibleDescription("View this release");
+  });
+
+  it.each([
+    ["a local build", ""],
+    ["a build whose tag is not the version it runs", "v1.10.1"],
+  ])("%s says \"Local version\" and links the releases index", async (_name, tag) => {
+    tauri.version = "1.10.2";
+    vi.stubEnv("VITE_RELEASE_TAG", tag);
+    renderApp(<HomeProjectLinks />);
+    const version = await screen.findByRole("link", { name: /^v1\.10\.2/ });
+    expect(version).toHaveAttribute("href", "https://github.com/MiguelMedeiros/ghostly/releases");
+    expect(version).toHaveAccessibleDescription("Local version — view published releases");
   });
 
   it("Android: no app for the link reads as the app's notice in the person's language, the reason behind the ⓘ", async () => {
