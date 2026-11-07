@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { schnorr } from "@noble/curves/secp256k1.js";
 import {
-  createIdentity, DEFAULT_RELAYS, DiscoveryBudgetError, domainWellKnownFile, emptyIdentityLedger, IdentityCheckUnavailable, identityFromSeed, identityRevocationValue, identityStatement, IDENTITY_REVOCATION_LABEL,
+  ATPROTO_PROOF_COLLECTION, atprotoProofRecord, createIdentity, DEFAULT_RELAYS, DiscoveryBudgetError, domainWellKnownFile, emptyIdentityLedger, IdentityCheckUnavailable, identityFromSeed, identityRevocationValue, identityStatement, IDENTITY_REVOCATION_LABEL,
   newIdentityBinding, RelayTransport, type IdentityDisplay, type IdentityLedger, type VerifiedIdentity,
 } from "@ghostly/core";
 import { STORES, clearProfileStores, store, transact, wrap } from "../src/shared/idb";
@@ -10,8 +10,10 @@ import { IdentityProofs, type IdentityLinkHost } from "../src/engine/identities"
 import { fakeKey, fakeKeySign, fakeKeySubject } from "../src/proofs/testing";
 import type { IdentityProofProvider } from "../src/proofs/contract";
 import { domain } from "../src/proofs/providers/domain";
+import { createAtprotoIdentityProvider } from "../src/proofs/providers/atproto";
 import { clearDomainCache } from "../src/proofs/domain";
 import { answerDoh, queryFromUrl, type Zone } from "./helpers/dohZone";
+import { testAtprotoNetwork } from "./helpers/atprotoNetwork";
 import { signNostr } from "./helpers/nostrSign";
 // covers: proofs.revoke, proofs.expiry, proofs.recheck, proofs.binding, profiles.public
 
@@ -1123,6 +1125,60 @@ describe("per chat", () => {
       zone.a = {};
       for (let day = 0; day < 3 && p.engines.b.linkView("chat", true)!.received[0].status === "verified"; day++) await vi.advanceTimersByTimeAsync(25 * 60 * 60_000);
       expect(p.engines.b.linkView("chat", true)!.received[0]).toMatchObject({ status: "unconfirmed", error: `${host} has no address` });
+      p.engines.b.stop();
+    } finally { vi.unstubAllGlobals(); clearDomainCache(); }
+  });
+
+  it("an AT Protocol proof of a did:web account whose domain stops existing reads unconfirmed at the next daily check; its server's name gone, or resolvers that fail, keep it verified", async () => {
+    // The contact's real AT Protocol provider over the in-memory network, behind the global fetch.
+    const net = testAtprotoNetwork();
+    const web = net.account("web");
+    net.accounts.delete(web.did);
+    const host = "alice.example.com";
+    web.did = `did:web:${host}`;
+    web.doc.id = web.did;
+    (web.doc.verificationMethod as { id: string }[])[0].id = "#atproto";
+    net.accounts.set(web.did, web);
+    net.zone.a![host] = ["203.0.113.11"];
+    const resolvers = { down: false };
+    vi.stubGlobal("fetch", async (url: string) => {
+      if (resolvers.down && new URL(url).hostname === "dns.quad9.net") throw new TypeError("Failed to fetch");
+      const r = await net.fetch(url);
+      return new Response(r.bytes, { status: r.status, headers: { "content-type": r.contentType } });
+    });
+    clearDomainCache();
+    try {
+      const atproto = createAtprotoIdentityProvider({ host: () => undefined });
+      const p = pair();
+      p.state.providers = { a: [atproto], b: [atproto] };
+      await clearStorage();
+      await p.engines.a.load(); await p.engines.b.load();
+      const { draftId, binding } = p.engines.a.begin({ provider: "atproto", subject: web.did });
+      const s = identityStatement(binding);
+      web.records.set(`${ATPROTO_PROOF_COLLECTION}/${binding.key}`, atprotoProofRecord(s, new Date(binding.issuedAt * 1000)));
+      const view = await p.engines.a.complete({ draftId, evidence: {} });
+      await p.engines.a.share({ linkId: "chat", id: view.id });
+      await vi.waitFor(() => expect(p.ledgers.b.received.find(r => r.id === view.id)?.status).toBe("verified"));
+
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      p.engines.b.start();
+      const status = () => p.engines.b.linkView("chat", true)!.received[0].status;
+      // The server the account's document names has no address: the operator's name, which may come back.
+      delete net.zone.a!["pds.example.com"];
+      const asked = net.asked.length;
+      await vi.advanceTimersByTimeAsync(25 * 60 * 60_000);
+      expect(net.asked.length, "checked").toBeGreaterThan(asked);
+      expect(status()).toBe("verified");
+      net.zone.a!["pds.example.com"] = ["203.0.113.10"];
+      // No resolver answers: the check could not run, and the proof stands.
+      resolvers.down = true;
+      await vi.advanceTimersByTimeAsync(25 * 60 * 60_000);
+      expect(status()).toBe("verified");
+      // The account's domain is gone: for a did:web account that is the identity, an answer about the proof.
+      resolvers.down = false;
+      delete net.zone.a![host];
+      for (let day = 0; day < 3 && status() === "verified"; day++) await vi.advanceTimersByTimeAsync(25 * 60 * 60_000);
+      expect(p.engines.b.linkView("chat", true)!.received[0]).toMatchObject({ status: "unconfirmed", error: `The account's DID no longer resolves: ${host} has no address` });
       p.engines.b.stop();
     } finally { vi.unstubAllGlobals(); clearDomainCache(); }
   });
