@@ -648,8 +648,10 @@ describe("DHT delivery: sending and lifecycle", () => {
 
   it("where every chat is open (a daemon), reads a contact that chose DHT only at the open chat's pace, and no other chat faster", async () => {
     const readsAMinute = async (peerMode: "dht" | "stream", peerDhtPollMs?: number) => {
-      const h = setup({ pollMs: null, mode: "stream", state: { ...emptyDhtDeliveryState(), peerMode }, bobCredentials: pinned(), peerDhtPollMs });
-      await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
+      const h = setup({ pollMs: null, mode: "stream", peerDhtPollMs });
+      // The contact is there: its envelope, saying its method, was just read.
+      await h.bob.start(); await h.put(h.invitePacket(h.body({ 5: peerMode, 6: null })));
+      expect(h.last().peerMode).toBe(peerMode);
       const first = h.transport.resolve.mock.calls.length;
       await vi.advanceTimersByTimeAsync(60_000 + 10);
       const reads = (h.transport.resolve.mock.calls as unknown[][]).slice(first);
@@ -659,6 +661,32 @@ describe("DHT delivery: sending and lifecycle", () => {
     expect(await readsAMinute("dht", ACTIVE_DHT_POLL_MS), "6 a minute, as the chat open, and none as background").toEqual({ reads: 6, background: 0 });
     expect(await readsAMinute("dht"), "an app with the chat in the background: 30 s").toMatchObject({ reads: 2 });
     expect(await readsAMinute("stream", ACTIVE_DHT_POLL_MS), "a contact on a live method: 30 s still").toMatchObject({ reads: 2 });
+  });
+
+  it("where every chat is open, reads a contact that chose DHT only at the open chat's pace only while it is there", async () => {
+    const readsAMinute = async (h: ReturnType<typeof setup>) => {
+      const first = h.transport.resolve.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(60_000 + 10);
+      const reads = (h.transport.resolve.mock.calls as unknown[][]).slice(first);
+      await h.bob.stop();
+      return { reads: reads.length, background: reads.filter(([, o]) => (o as { background?: boolean } | undefined)?.background).length };
+    };
+    // Gone for good (its app removed): nothing new from it in `PRESENCE_WINDOW`. A daemon read 8 such contacts, every
+    // 10 s each, with the whole of its relays' minute, and a contact back on a live method was not read once in 3 minutes.
+    const gone = setup({ pollMs: null, mode: "stream", peerDhtPollMs: ACTIVE_DHT_POLL_MS });
+    await gone.bob.start(); await gone.put(gone.invitePacket(gone.body({ 6: null })));
+    await vi.advanceTimersByTimeAsync(PRESENCE_WINDOW);
+    expect(await readsAMinute(gone), "the background pace, as background reads").toEqual({ reads: 2, background: 2 });
+    // Just started, nothing new from it yet (its last envelope read in an earlier run): the background pace too.
+    const restarted = setup({ pollMs: null, mode: "stream", state: { ...emptyDhtDeliveryState(), peerMode: "dht" }, bobCredentials: pinned(), peerDhtPollMs: ACTIVE_DHT_POLL_MS });
+    await restarted.bob.start(); await vi.advanceTimersByTimeAsync(0);
+    expect(await readsAMinute(restarted), "the background pace until its next envelope").toEqual({ reads: 2, background: 2 });
+    // There: its keep-alive every four minutes.
+    const there = setup({ pollMs: null, mode: "stream", peerDhtPollMs: ACTIVE_DHT_POLL_MS });
+    await there.bob.start();
+    for (let seq = 1; seq <= 3; seq++) { await there.put(there.invitePacket(there.body({ 6: null }, seq))); await vi.advanceTimersByTimeAsync(4 * 60_000); }
+    expect(there.last().peerMode).toBe("dht");
+    expect(await readsAMinute(there), "the open chat's pace").toEqual({ reads: 6, background: 0 });
   });
 
   it("announces a change of method at once, however recently it last published", async () => {
