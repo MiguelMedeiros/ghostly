@@ -76,6 +76,9 @@ export function appsRunning(): boolean {
 /** Why an open that the profile's lock overtook did not start. */
 export const LOCKED = "The profile locked before the app started";
 
+/** Why an open in a chat that closed meanwhile (the person went elsewhere) did not start. */
+export const CHAT_CLOSED = "The chat closed before the app started";
+
 /** How many times the profile locked (`stopRunningApps`): an open still on its way when it locks never starts. */
 let locks = 0;
 
