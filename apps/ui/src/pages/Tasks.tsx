@@ -243,7 +243,7 @@ export function Tasks() {
     <div ref={pageRef} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-chat-bg" data-testid="tasks-page">
       <PageHeader title={t("cards.board.title")} trailing={
         <button type="button" data-testid="tasks-info" aria-expanded={info} onClick={() => setInfo(!info)} aria-label={t("common.moreInfo")} title={t("common.moreInfo")}
-          className="grid h-10 w-10 max-md:h-11 max-md:w-11 shrink-0 cursor-pointer place-items-center rounded-full text-text-muted hover:bg-surface-hover hover:text-accent aria-expanded:text-accent">
+          className="tap-target grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-full text-text-muted hover:bg-surface-hover hover:text-accent aria-expanded:text-accent">
           <svg {...icon} width={18} height={18}><circle cx="12" cy="12" r="9.5" /><path d="M12 11v5.5M12 7.5v.01" /></svg>
         </button>} />
       {info && <p data-testid="tasks-info-text" className="m-0 shrink-0 border-b border-border bg-panel-header px-4 py-2 text-xs leading-relaxed text-text-secondary">{t("cards.board.info")}</p>}
