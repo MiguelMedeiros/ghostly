@@ -139,6 +139,45 @@ for (const { name, viewport, narrowest } of smallRows) {
 }
 
 /**
+ * A phone's small call window: its corner button took taps on 30 × 30 px and its five buttons on 32 × 32, 5 px apart,
+ * Hang up beside Share screen, where a thumb aimed at Share screen could end the call. Each takes a tap on 44 px now,
+ * and Hang up stands apart from the others.
+ */
+test("on a phone the small call window's buttons are 44 px targets, Hang up apart from Share screen", { tag: ["@feature:calls.mini-window", "@feature:app.mobile-layout"] }, async ({ peer }, testInfo) => {
+  const alice = await peer("alice");
+  const bob = await peer("bob", { mobile: true, viewport: { width: 375, height: 667 } });
+  await link(alice, bob);
+  await connect(alice, bob);
+  await alice.page.getByTestId("call-audio").click();
+  await bob.page.getByTitle("Accept audio call").click();
+  await expect(bob.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
+  await bob.page.getByTestId("call-minimize").click();
+  const small = bob.page.getByTestId("call-window");
+  await expect(small).toHaveAttribute("data-mini", "true");
+  await expect(bob.page.getByTestId("share-screen")).toBeVisible();
+  await bob.page.screenshot({ path: testInfo.outputPath("small-call-window-375.png") });
+
+  // Every one of them is there to tap (none under a corner grip or out of the window), on 44 × 44 px.
+  const ids = ["call-minimize", "call-mute", "call-camera", "call-devices", "share-screen", "call-hang-up"];
+  const reached = await small.evaluate((el, ids) => ids.filter((id) => {
+    const b = el.querySelector(`[data-testid=${id}]`)!.getBoundingClientRect();
+    const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+    return !!hit?.closest(`[data-testid=${id}]`);
+  }), ids);
+  expect(reached).toEqual(ids);
+  const tiny = (await smallTargets(bob.page, 44, "[data-testid=call-window] button")).map((t) => `${t.name} ${t.width}×${t.height} (${t.stops})`);
+  expect(tiny, "the small window's buttons under 44 × 44 px").toEqual([]);
+  // Hang up is kept apart: a tap that misses Share screen by a few px lands on neither.
+  const share = (await bob.page.getByTestId("share-screen").boundingBox())!, hangUp = (await bob.page.getByTestId("call-hang-up").boundingBox())!;
+  expect(hangUp.x - (share.x + share.width), "room between Share screen and Hang up").toBeGreaterThanOrEqual(12);
+
+  await bob.page.getByTestId("call-mute").click();
+  await expect(bob.page.getByTestId("call-mute")).toHaveAttribute("title", "Unmute");
+  await bob.page.getByTestId("call-hang-up").click();
+  await expect(alice.page.getByTestId("call-status")).toHaveCount(0);
+});
+
+/**
  * The small call window's state line ("Audio call" and the clock), measured against the window's corner button, the
  * own camera's preview of a video call and its edges: what of it lies under one of them or is cut, and whether the
  * words are shown beside the clock.
@@ -185,8 +224,8 @@ for (const language of ["pt", "ar"]) {
     await bob.page.getByTestId("call-minimize").click();
     const small = bob.page.getByTestId("call-window");
     await expect(small).toHaveAttribute("data-mini", "true");
-    // A phone-wide window opens it at its narrowest.
-    await expect.poll(async () => Math.round((await small.boundingBox())!.width)).toBe(190);
+    // A phone opens it at its narrowest (264 px on a touch screen; the line was measured at 190 before then).
+    await expect.poll(async () => Math.round((await small.boundingBox())!.width)).toBe(264);
     // "Chamada de áudio 00:05" was centred over the whole 190 px and started at 27: behind the button, which ends at 38.
     await expect.poll(async () => (await stateLine(bob.page)).wrong).toEqual([]);
     await bob.page.getByTestId("call-hang-up").click();
@@ -206,7 +245,7 @@ for (const width of [320, 414]) {
     await bob.page.getByTestId("call-minimize").click();
     const small = bob.page.getByTestId("call-window");
     await expect(small).toHaveAttribute("data-mini", "true");
-    await expect.poll(async () => Math.round((await small.boundingBox())!.width)).toBe(190);
+    await expect.poll(async () => Math.round((await small.boundingBox())!.width)).toBe(264);
     await expect(bob.page.getByTestId("call-self-view")).toBeVisible();
     // The clock was centred between the corner button and the right edge, and its last 11 px ran under the preview.
     await expect.poll(async () => (await stateLine(bob.page)).wrong).toEqual([]);
