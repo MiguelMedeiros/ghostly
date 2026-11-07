@@ -1181,6 +1181,8 @@ export class HandoffTaker {
     return this.exclusive(async () => {
       if (this.phase === "verified" || this.phase === "installing" || this.phase === "settling" || this.phase === "unsettled" || this.phase === "done") return;
       if (this.peer && this.ports.links.live(this.peer)) this.out(handoffCancelFrame("cancelled"));
+      // An offer declined here failed nothing: this device goes back to idle (the giver still says it stopped).
+      if (this.phase === "offer") { await this.end(); this.failure = undefined; this.retry = undefined; this.changed(); return; }
       await this.giveUp("cancelled");
     });
   }
