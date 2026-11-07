@@ -51,6 +51,12 @@ describe("GroupChat: what the header says", () => {
     expect(screen.getByTestId("group-members").className.split(/\s+/)).toContain("max-md:min-h-6");
   });
 
+  it("makes ⋮ and the connection button 44 px on a phone, as the chat header's and the group's own Back", () => {
+    // They were 38 px (`max-md:p-2.5` around an 18 px icon) beside the 44 px Back.
+    openGroup(active());
+    for (const id of ["group-options", "group-connection-options"]) expect(screen.getByTestId(id)).toHaveClass("max-md:h-11", "max-md:w-11", "max-md:p-0");
+  });
+
   it("names a group that has no name", () => {
     openGroup(active({ name: "", members: [members[0]] }));
     expect(screen.getByTestId("group-name")).toHaveTextContent("A group");
