@@ -282,8 +282,9 @@ describe("Pkarr over the Mainline DHT, beside the relays", { timeout: 60_000 }, 
     const reader = await join();
     const store = { down: true, packets: new Map<string, Uint8Array>() };
     const me = createIdentity();
-    const ahead = BigInt(Date.now() + 2 * 3_600_000) * 1000n;
-    // Before the restart: dated two hours ahead. Then that app quits.
+    // Within the skew a reader allows: one dated further ahead is not followed (core relayFarAheadDate.test.ts).
+    const ahead = BigInt(Date.now() + 5 * 60_000) * 1000n;
+    // Before the restart: dated five minutes ahead. Then that app quits.
     const old = await join();
     const before = new RelaysAndDht(old, { relays: RELAYS, fetch: relays(store), log: () => {} });
     before.relays.sawTimestamp(me.pubKeyZ32, ahead);
