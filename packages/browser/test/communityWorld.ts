@@ -2,7 +2,7 @@ import { DiscoveryBudgetError, identityFromSeedB64, type GhostRecord } from "@gh
 import { Groups, meshEdgeScale, type GroupStore, type GroupsHost } from "../src/engine/groups";
 import { communityEdgeScale } from "../src/engine/communityEdgePace";
 import { COMMUNITY_TIMINGS, type CommunityTimings } from "../src/engine/community";
-import type { GroupLight, GroupLive, StoredGroup, StoredMessage } from "../src/shared/types";
+import type { GroupLight, GroupLive, StoredGroup, StoredLeftCommunity, StoredMessage } from "../src/shared/types";
 
 /**
  * Headless peers running the real group engine (`Groups` → `Communities` → `CommunitySession`),
@@ -130,9 +130,9 @@ export function sameRun(world: CommunityWorld, seed: number, start = Date.UTC(20
   };
 }
 
-/** With the private groups' small rows (`GroupLive`) and pin and deletion rows (`GroupLight`), as the engine's database keeps them. */
+/** With the private groups' small rows (`GroupLive`), pin and deletion rows (`GroupLight`) and the communities left that are followed (`StoredLeftCommunity`), as the engine's database keeps them. */
 function memoryStore(messages: StoredMessage[]): GroupStore {
-  const groups = new Map<string, StoredGroup>(), live = new Map<string, GroupLive>(), light = new Map<string, GroupLight>();
+  const groups = new Map<string, StoredGroup>(), live = new Map<string, GroupLive>(), light = new Map<string, GroupLight>(), left = new Map<string, StoredLeftCommunity>();
   return {
     getGroups: async () => [...groups.values()].map(g => structuredClone(g)),
     putGroup: async (g, row) => {
@@ -146,6 +146,9 @@ function memoryStore(messages: StoredMessage[]): GroupStore {
     putGroupLive: async (id, row) => { live.set(id, structuredClone(row)); },
     getGroupLight: async () => structuredClone(light),
     putGroupLight: async (id, row) => { light.set(id, structuredClone(row)); },
+    getGroupsLeft: async () => [...left.values()].map(row => structuredClone(row)),
+    putGroupLeft: async row => { left.set(row.id, structuredClone(row)); },
+    deleteGroupLeft: async id => { left.delete(id); },
   };
 }
 

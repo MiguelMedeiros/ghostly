@@ -1800,6 +1800,21 @@ export class CommunitySession {
     });
   }
 
+  /** What `followAfterLeave` brings back (the secret of the epoch I left in), for the app to keep while it follows. */
+  get leftKept(): { h: string; s: string } | undefined { return this.following ? this.leftSecret : undefined; }
+
+  /**
+   * A community I left and followed (`leave(true)`), on the app's next start: it follows its chain again from what the
+   * app kept of it, with the secret of the epoch I left in (`leftKept`), as `followAfterLeave` does.
+   */
+  resumeFollowing(kept: { h: string; s: string } | undefined): Promise<void> {
+    return this.serialize(async () => {
+      if (this.state.status !== "left") return;
+      this.following = true;
+      this.leftSecret = kept;
+    }).then(() => this.followAfterLeave());
+  }
+
   /**
    * After I left, a chain that names me the admin (a hand-over that crossed my leave): the role goes on to
    * `pick(<the member who handed it to me>)` with a `role` commit of mine, as an admin's leave hands it. Who handed it is

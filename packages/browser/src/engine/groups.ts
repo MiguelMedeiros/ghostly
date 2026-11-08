@@ -5,7 +5,7 @@ import {
   GROUP_HAVE_FRAME, GROUP_VERSION_FILES, GROUP_WANT_FRAME, GROUP_WANT_NO_FRAME, type GroupFileMeta,
   type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
-import type { GroupEvent, GroupJoinStage, GroupLight, GroupLive, GroupView, OtherGroup, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
+import type { GroupEvent, GroupJoinStage, GroupLight, GroupLive, GroupView, OtherGroup, StoredGroup, StoredLeftCommunity, StoredMessage, StoredPin } from "../shared/types";
 import type { Removal } from "./removals";
 import { groupReply } from "../shared/replies";
 import { droppedPin, pinOfFormerMember, pinView } from "./pins";
@@ -237,6 +237,13 @@ export interface GroupStore {
    */
   getGroupLight?(): Promise<Map<string, GroupLight>>;
   putGroupLight?(groupId: string, light: GroupLight): Promise<void>;
+  /**
+   * The communities I left whose chain my app still follows (`StoredLeftCommunity`): a restart resumes the follow. A
+   * store without them follows in memory only, as before.
+   */
+  getGroupsLeft?(): Promise<StoredLeftCommunity[]>;
+  putGroupLeft?(left: StoredLeftCommunity): Promise<void>;
+  deleteGroupLeft?(groupId: string): Promise<void>;
 }
 
 const MESSAGE_LINK = (groupId: string) => `group:${groupId}`;
