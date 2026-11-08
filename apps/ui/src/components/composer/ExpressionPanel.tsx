@@ -120,7 +120,7 @@ export function ExpressionPanel({ boundsRef, dismissRef, onEmoji, onGif, onClose
         : <GifTab key="gif" onSelect={onGif} onEmojiTab={() => choose("emoji")} autoFocus={!phone} />}
       <div role="tablist" aria-label={t("composer.expressions")} className="expression-switch" onKeyDown={tabKeys}>
         {TABS.map((id) => (
-          <button key={id} type="button" role="tab" data-testid={`expression-tab-${id}`} aria-selected={tab === id} tabIndex={tab === id ? 0 : -1}
+          <button key={id} type="button" role="tab" className="tap-target" data-testid={`expression-tab-${id}`} aria-selected={tab === id} tabIndex={tab === id ? 0 : -1}
             aria-label={t(`composer.${id}` as const)} title={t(`composer.${id}` as const)} onClick={() => choose(id)}>
             {id === "emoji" ? <SmileIcon size={20} /> : <GifIcon size={20} />}
           </button>
