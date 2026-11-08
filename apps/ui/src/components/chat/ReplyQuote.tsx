@@ -14,7 +14,7 @@ function QuoteBody({ name, snippet, mine, member, note, italic }: { name?: strin
   // The name is someone's own words: laid out by its own letters, so a Latin one cut in Arabic keeps its start, and as
   // wide as it is, so a short one stays at the line's start.
   return (
-    <span className={`flex min-w-0 flex-col border-s-4 ps-2 pe-1 py-1 ${mine ? "border-accent" : colour ? `border-current ${colour}` : "border-link"}`}>
+    <span className={`quote-body flex min-w-0 flex-col border-s-4 ps-2 pe-1 py-1 ${mine ? "border-accent" : colour ? `border-current ${colour}` : "border-link"}`}>
       {name && <span data-testid="reply-quote-name" data-key={colour && member} dir="auto" className={`max-w-full self-start truncate text-[12.8px] font-medium leading-[18px] ${mine ? "text-accent-hover" : colour ?? "text-link"}`}>{name}</span>}
       <span data-testid="reply-quote-snippet" dir="auto" className={`truncate text-[13px] leading-[18px] text-text-primary/70 ${italic ? "italic" : ""}`}>{snippet}</span>
       {note && <span data-testid="reply-quote-note" className="truncate text-[11px] leading-[15px] text-text-muted">{note}</span>}
@@ -58,7 +58,7 @@ export function EditBar({ snippet, onCancel }: { snippet: string; onCancel: () =
   const { t } = useI18n();
   return (
     <div data-testid="composer-edit" role="status" aria-label={t("chat.edit.editing")}
-      className="mb-2 flex items-stretch gap-1 overflow-hidden rounded-lg bg-surface-alt animate-fade-in">
+      className="composer-quote mb-2 flex items-stretch gap-1 overflow-hidden rounded-lg bg-surface-alt animate-fade-in">
       <span className="min-w-0 flex-1"><QuoteBody name={t("chat.edit.editing")} snippet={snippet} mine /></span>
       <button type="button" data-testid="composer-edit-cancel" onClick={onCancel} aria-label={t("chat.edit.cancel")} title={t("chat.edit.cancel")}
         className="shrink-0 w-9 flex items-center justify-center text-text-muted hover:text-text-primary cursor-pointer bg-transparent border-0 text-lg leading-none">
@@ -73,7 +73,7 @@ export function ReplyBar({ name, snippet, mine, member, onCancel }: { name?: str
   const { t } = useI18n();
   return (
     <div data-testid="composer-reply" role="status" aria-label={t("chat.reply.replyingTo", { name: name ?? "" })}
-      className="mb-2 flex items-stretch gap-1 overflow-hidden rounded-lg bg-surface-alt animate-fade-in">
+      className="composer-quote mb-2 flex items-stretch gap-1 overflow-hidden rounded-lg bg-surface-alt animate-fade-in">
       <span className="min-w-0 flex-1"><QuoteBody name={name} snippet={snippet} mine={mine} member={member} /></span>
       <button type="button" data-testid="composer-reply-cancel" onClick={onCancel} aria-label={t("chat.reply.cancel")} title={t("chat.reply.cancel")}
         className="shrink-0 w-9 flex items-center justify-center text-text-muted hover:text-text-primary cursor-pointer bg-transparent border-0 text-lg leading-none">
