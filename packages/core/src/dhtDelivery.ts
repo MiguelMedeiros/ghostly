@@ -68,6 +68,13 @@ export const LEAVING_DHT_FAST_MS = 2 * 60_000;
  * side's offer and its reads for the answer go over the minute on (`SIGNALING_ALLOWANCE_SHARE` in relay.ts).
  */
 export const LEAVING_SIGNAL_READS = 3;
+/**
+ * How long a fresh link packet of a contact that still says DHT only after the reads it started waits before it may
+ * start them again (`peerLinkPacket`), doubling up to `LEAVING_PROBE_MAX_GAP_MS`. One that really left says so in
+ * seconds; one that stays (or anyone holding the invite) cannot keep this side reading its mailbox at the DHT pace.
+ */
+export const LEAVING_PROBE_GAP_MS = 2 * 60_000;
+export const LEAVING_PROBE_MAX_GAP_MS = 16 * 60_000;
 /** Only this often while layer 1 carries the chat (WISP 403, Q7): the relays' per-IP budget is shared by every chat. */
 export const LIVE_POLL_MS = 5 * 60_000;
 /**
@@ -240,6 +247,9 @@ export class DhtDelivery {
   private signalReads = 0;
   /** The read as this side leaves DHT only, before the signaling ones (`setMode`): a plain one. */
   private leavingRead = false;
+  /** Until when a fresh link packet of the contact starts no signaling reads, and the wait it was held to (`peerLinkPacket`). */
+  private probeAt = 0;
+  private probeGap = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   /** The first control envelope of a start that waits (`firstControlAfterMs`). */
   private controlTimer: ReturnType<typeof setTimeout> | null = null;
@@ -570,6 +580,21 @@ export class DhtDelivery {
     if (signal) this.signalReads = LEAVING_SIGNAL_READS;
     if (until <= this.fastUntil && !signal) return;
     this.fastUntil = Math.max(this.fastUntil, until); this.urgent = true; void this.tick();
+  }
+  /**
+   * A fresh link packet of a contact still saying DHT only (`expect`, signaling). Nothing signed says it is the contact's,
+   * and one that stays on DHT only (or anyone holding the invite) can put one before every read: the reads it starts are
+   * then held to a wait that doubles from `LEAVING_PROBE_GAP_MS` to `LEAVING_PROBE_MAX_GAP_MS`, and start over once the
+   * contact says it left. False when held. Its offer, signed by its pinned key, is not held (`expect` directly).
+   */
+  peerLinkPacket(ms: number): boolean {
+    const now = Date.now();
+    // A clock stepped back would hold it past the wait: that wait is over.
+    if (now < this.probeAt && this.probeAt - now <= this.probeGap) return false;
+    this.probeGap = Math.min(this.probeGap * 2 || LEAVING_PROBE_GAP_MS, LEAVING_PROBE_MAX_GAP_MS);
+    this.probeAt = now + this.probeGap;
+    this.expect(ms, true);
+    return true;
   }
   /**
    * Layer 1 carries the chat, or no longer does. While it does, the mailbox is read every 5 minutes, after one
@@ -1133,7 +1158,7 @@ export class DhtDelivery {
       // relay.ts) used them up, and the next ones, plain reads, waited out the minute.
       if (signal && this.readHeldUntil > 0) this.signalReads++;
       // The contact says it left DHT only: nothing waits on its mailbox any more.
-      if (this.state.peerMode !== "dht") this.signalReads = 0;
+      if (this.state.peerMode !== "dht") { this.signalReads = 0; this.probeAt = this.probeGap = 0; }
       await this.publishOnTick();
       this.changed();
     });

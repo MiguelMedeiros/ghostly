@@ -1606,8 +1606,9 @@ export class GhostLink {
     if (!this.dht || this.dht.peerMode !== "dht" || this.deliveryMode === "dht" || !presence.online) return;
     if (Date.now() - presenceSeenAt(presence) >= EXPECT_PEER_MS || presence.lastPacketAt === this.leftDhtSeenFor) return;
     this.leftDhtSeenFor = presence.lastPacketAt;
-    traceLink(this.myPubKeyZ32, "peer-link-packet", { age: Date.now() - presenceSeenAt(presence) });
-    this.dht.expect(EXPECT_PEER_MS, true);
+    // Held to a growing wait while the contact's mailbox still says DHT only after the reads one started (`peerLinkPacket`).
+    const read = this.dht.peerLinkPacket(EXPECT_PEER_MS);
+    traceLink(this.myPubKeyZ32, "peer-link-packet", { age: Date.now() - presenceSeenAt(presence), ...(!read && { held: true }) });
   }
 
   /**
