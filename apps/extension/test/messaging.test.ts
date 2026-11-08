@@ -287,7 +287,7 @@ describe("viewer tabs", () => {
     ["a chat tag with a dot", PEER, SERVICE, `${TAG}.evil`],
     ["a chat tag outside z-base-32", PEER, SERVICE, "l".repeat(16)],
   ])("refuses %s before opening a tab", async (_, peer, service, tag) => {
-    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: peer, serviceId: service, tag });
+    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: peer, serviceId: service, tag, profile: "" });
     expect(reply).toEqual({ ok: false, error: "Invalid service" });
     expect(world.callsTo("tabs.create")).toEqual([]);
     expect(world.callsTo("debugger.attach")).toEqual([]);
@@ -295,7 +295,7 @@ describe("viewer tabs", () => {
 
   it("closes the tab and forgets it when DevTools cannot attach", async () => {
     world.failDebuggerAttach = "Another debugger is already attached to the tab.";
-    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG });
+    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, profile: "" });
     expect(reply).toEqual({ ok: false, error: "Another debugger is already attached to the tab." });
     const [[tabId]] = world.callsTo("tabs.remove") as [[number]];
     expect(world.tabs.has(tabId)).toBe(false);
@@ -382,7 +382,7 @@ describe("viewer tabs", () => {
   });
 
   describe("an open still in progress when the pages close every viewer (Hide my IP turned on, the lock screen)", () => {
-    const open = { target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG };
+    const open = { target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, profile: "" };
     const close = { target: "background", type: "close-services" };
 
     /** No tab is left for the app, none was ever sent to its address, and nothing would serve it. */
@@ -640,7 +640,7 @@ describe("the debugger stays on the tabs the worker opened", () => {
 
   it("attaches only to the tab it just created, whatever tab a page names", async () => {
     const bank = await world.chrome.tabs.create({ url: "https://bank.example/" });
-    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, tabId: bank.id });
+    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, profile: "", tabId: bank.id });
     expect(reply).toEqual({ ok: true });
     const viewer = [...world.tabs.values()].find((t) => t.url === url)!;
     expect(viewer.id).not.toBe(bank.id);

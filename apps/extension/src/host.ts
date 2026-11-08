@@ -94,6 +94,8 @@ export const extensionHost: BrowserHost = {
       peerPubKeyZ32,
       serviceId,
       tag,
+      // The page's own, as checked just above.
+      profile: activeNamespace(),
       page: viewerPage(engine.linkByPeer(peerPubKeyZ32)?.peerServices?.find((s) => s.id === serviceId)?.name),
       relayOnly,
     } satisfies RuntimeMessage);

@@ -455,6 +455,69 @@ describe("a contact's app open as the profile before", () => {
     expect(world.callsTo("debugger.sendCommand").filter(([, method]) => method === "Fetch.fulfillRequest")).toEqual([]);
   });
 
+  describe("still opening when another tab switches", () => {
+    // A page of the first profile.
+    const open = () => world.chrome.runtime.sendMessage({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, profile: "" });
+
+    /** No tab is left for the app, none was ever sent to its address, and nothing would serve it. */
+    async function expectNoViewer() {
+      await settle(5);
+      expect([...world.tabs.values()]).toEqual([]);
+      expect(world.callsTo("tabs.update")).toEqual([]);
+      expect([...world.session.keys()].filter((key) => key.startsWith("viewer:"))).toEqual([]);
+    }
+
+    it("opens nothing when the switch comes while the open waits on a peer that is starting", async () => {
+      let ready!: () => void;
+      endBootPeer(world);
+      engineControl().ready = new Promise<void>((resolve) => (ready = resolve));
+      const opened = open();
+      await settle();
+      useProfile(world, WORK);
+      const switched = ensure();
+      ready();
+      expect(await switched).toEqual({ ok: true });
+      expect(await opened).toEqual({ ok: true });
+      expect(log()).toEqual(["start ghostly", "stop ghostly", `start ghostly_${WORK}`]);
+      await expectNoViewer();
+    });
+
+    it("opens nothing when the peer it waited on read the switch as it loaded, and started as the other profile", async () => {
+      endBootPeer(world);
+      const opened = open();
+      // Before the new document reads the registry, as Chrome makes one slower than a page writes it.
+      useProfile(world, WORK);
+      expect(await opened).toEqual({ ok: true });
+      expect(log()).toEqual([`start ghostly_${WORK}`]);
+      await expectNoViewer();
+    });
+
+    it("still opens once its own profile's peer came back", async () => {
+      endBootPeer(world);
+      expect(await open()).toEqual({ ok: true });
+      expect(log()).toEqual(["start ghostly"]);
+      expect([...world.tabs.values()].map((tab) => tab.url)).toEqual([`https://${SERVICE}.${PEER}.${TAG}.invalid/`]);
+    });
+
+    it("refuses an open that does not say its page's profile", async () => {
+      const reply = await world.chrome.runtime.sendMessage({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG });
+      expect(reply).toEqual({ ok: false, error: "Invalid service" });
+      expect(world.callsTo("tabs.create")).toEqual([]);
+    });
+
+    it("opens nothing when the switch lands between the open's peer check and its tab", async () => {
+      const create = world.chrome.tabs.create.bind(world.chrome.tabs);
+      world.chrome.tabs.create = (async (props: { url: string }) => {
+        useProfile(world, WORK);
+        expect(await ensure()).toEqual({ ok: true });
+        return create(props);
+      }) as typeof world.chrome.tabs.create;
+      expect(await open()).toEqual({ ok: true });
+      expect(servers().at(-1)!.database).toBe(`ghostly_${WORK}`);
+      await expectNoViewer();
+    });
+  });
+
   it("closes when the profile locks (the lock screen's closeServiceWindows), as Desktop's windows do", async () => {
     const tabId = await openViewer(world);
     await world.load("page", () => import("../src/host.ts"));
