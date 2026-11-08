@@ -389,6 +389,7 @@
   "lnurl": {
     "http": "{{host}} が HTTP {{status}} を返しました",
     "invoiceExpired": "サービスが返した請求書はすでに期限切れです",
+    "mismatchNext": "何も支払われていません。もう一度試すか、別の方法で支払ってください。",
     "noInvoice": "{{domain}} は請求書を返しませんでした",
     "noJson": "{{host}} は JSON で応答しませんでした",
     "noJsonStatus": "{{host}} は JSON で応答しませんでした（HTTP {{status}}）",

@@ -389,6 +389,7 @@
   "lnurl": {
     "http": "{{host}} respondió HTTP {{status}}",
     "invoiceExpired": "La factura que envió el servicio ya ha caducado",
+    "mismatchNext": "No se pagó nada. Inténtalo de nuevo o paga de otra forma.",
     "noInvoice": "{{domain}} no respondió con una factura",
     "noJson": "{{host}} no respondió con JSON",
     "noJsonStatus": "{{host}} no respondió con JSON (HTTP {{status}})",

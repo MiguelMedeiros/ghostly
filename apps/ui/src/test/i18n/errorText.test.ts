@@ -409,6 +409,9 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["shop.example did not answer with a pay request", `${CORE}/lnurl.ts`, " did not answer with a pay request"],
   ["shop.example did not answer with an invoice", `${CORE}/lnurl.ts`, " did not answer with an invoice"],
   ["The invoice the service answered with has already expired", `${CORE}/lnurl.ts`],
+  // An invoice the Lightning address answered with for another amount than the one chosen, or for any amount.
+  ["The invoice asks for 1,234,567 sats, not the 21,000 sats you chose", `${CORE}/lnurl.ts`, "The invoice asks for "],
+  ["The invoice asks for any amount, not the 21 sats you chose", `${CORE}/lnurl.ts`, "\"any amount\""],
   ["Give the profile a name", "apps/ui/src/lib/profiles.ts"],
   ["That profile already exists", "apps/ui/src/lib/profiles.ts"],
   ["The first profile cannot be removed", "apps/ui/src/lib/profiles.ts"],
@@ -842,6 +845,13 @@ describe("errors in the app's language", () => {
       const said = problemText(new Error(`${resolver} could not be reached`), t);
       expect(said.title).toBe(t("errors.proof.resolverUnreachable"));
       expect(`${said.title} ${said.next}`).not.toContain(resolver);
+    }
+  });
+
+  it("a Lightning address's invoice for another amount says so and what to do, in the language; the amounts stay behind the ⓘ", () => {
+    for (const raw of ["The invoice asks for 1,234,567 sats, not the 21,000 sats you chose", "The invoice asks for any amount, not the 21 sats you chose"]) {
+      expect(knownErrorParts(raw, translators.pt)).toEqual({ title: "A fatura não bate com o valor que você escolheu", next: "Nada foi pago. Tente de novo ou pague de outro jeito.", detail: raw });
+      expect(knownErrorParts(raw)).toEqual({ title: "The invoice does not match the amount you chose", next: "Nothing was paid. Try again, or pay another way.", detail: raw });
     }
   });
 
