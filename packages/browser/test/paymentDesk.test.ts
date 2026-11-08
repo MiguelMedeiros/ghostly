@@ -1241,6 +1241,22 @@ describe("the line kept with a payment message (the CLI and older apps show it)"
     expect(texts()).toEqual(["⚡ Requested 1,234 test sats", "⚡ Requested 50 sats"]);
   });
 
+  it("writes the amount in English on a device whose own numbers use other digits", async () => {
+    const real = Number.prototype.toLocaleString;
+    const bengali = vi.spyOn(Number.prototype, "toLocaleString").mockImplementation(function (this: number, locales?: Intl.LocalesArgument, options?: Intl.NumberFormatOptions) {
+      return real.call(this, locales ?? "bn-BD", options);
+    });
+    try {
+      const { desk, wallet, texts } = setup();
+      await desk.onPaymentRequest("l", { id: "rt", timestamp: 3, amount: { value: "21000", asset: "sat" }, endpoints: [[ENDPOINT.cashu, cashuRequestPayload([TEST_MINT])]], network: "testnet" });
+      wallet.createToken.mockImplementationOnce(async (_amount, _mints, _memo, outbox) => { outbox("cashuBtest", TEST_MINT); return { token: "cashuBtest", mint: TEST_MINT }; });
+      await desk.send({ linkId: "l", amount: 21000, timestamp: 4, network: "testnet" });
+      expect(texts()).toEqual(["⚡ Requested 21,000 test sats", "⚡ 21,000 test sats"]);
+    } finally {
+      bengali.mockRestore();
+    }
+  });
+
   it("ecash sent from a test mint says test sats", async () => {
     const { desk, wallet, texts } = setup();
     wallet.createToken.mockImplementationOnce(async (_amount, _mints, _memo, outbox) => { outbox("cashuBtest", TEST_MINT); return { token: "cashuBtest", mint: TEST_MINT }; });
