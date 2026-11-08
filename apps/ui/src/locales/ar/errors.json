@@ -394,6 +394,7 @@
   "lnurl": {
     "http": "أجاب {{host}} بـ HTTP {{status}}",
     "invoiceExpired": "انتهت صلاحية الفاتورة التي أرسلتها الخدمة",
+    "mismatchNext": "لم يُدفع شيء. حاول مرة أخرى، أو ادفع بطريقة أخرى.",
     "noInvoice": "لم يُجب {{domain}} بفاتورة",
     "noJson": "لم يُجب {{host}} بصيغة JSON",
     "noJsonStatus": "لم يُجب {{host}} بصيغة JSON \u200f(HTTP {{status}})",
