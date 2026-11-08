@@ -944,6 +944,29 @@ describe("community admin changes are final", { timeout: 60_000 }, () => {
     expect(bob.session.state.side).toHaveLength(3);
   });
 
+  it("losing branches kept, however many, never push out the secrets of the branch followed", async () => {
+    const { net, alice, bob, carol, mallory } = await group();
+    const tip = alice.session.top, tipRoster = alice.session.roster;
+    // Mallory signs more admissions after the tip than secrets are kept, each a branch of its own.
+    const flood = Array.from({ length: COMMUNITY_LIMITS.secrets + 4 }, () => forge(mallory, tip, tipRoster, { k: "add", s: createIdentity().pubKeyZ32 }).commit);
+    for (const commit of flood) for (const m of [alice, bob, carol]) await m.session.handle(mallory.session.myKey, commitFrame(commit));
+    await net.settle();
+    for (const m of [alice, bob, carol]) {
+      // One of them may be followed (it is as long as the others): every member the same one.
+      expect(m.session.topHash).toBe(alice.session.topHash);
+      expect(m.session.state.side.length).toBeGreaterThan(COMMUNITY_LIMITS.secrets - COMMUNITY_LIMITS.window);
+      expect(m.session.canSend).toBe(true);
+    }
+    await say(net, bob, "after the flood");
+    expect(net.texts(carol)).toContain("after the flood");
+    // And past the admin's next commit.
+    await alice.session.rotate();
+    await net.settle();
+    await say(net, carol, "after the rotation");
+    expect(net.texts(bob)).toContain("after the rotation");
+    for (const m of [alice, bob, carol]) expect(m.session.state.secrets[alice.session.topHash]).toBeDefined();
+  });
+
   it("a member away through the change who hears the longer branch first ends on the admin's", async () => {
     const { net, alice, bob, carol, mallory } = await group();
     const before = alice.session.top, beforeRoster = alice.session.roster, beforeSecret = fromBase64Url(mallory.session.state.secrets[alice.session.topHash]);

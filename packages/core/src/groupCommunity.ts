@@ -1405,9 +1405,17 @@ export class CommunitySession {
     }
   }
 
+  /**
+   * Those of the main branch's window always stay, the current epoch's included; side commits, however many are
+   * kept, only get what is left of the bound, the most recent first.
+   */
   private pruneSecrets(): void {
-    const order = [...this.state.chain.slice(-COMMUNITY_LIMITS.window - 1), ...this.state.side].map(c => communityCommitHash(c));
-    const keep = new Set(order.slice(-COMMUNITY_LIMITS.secrets));
+    const keep = new Set(this.state.chain.slice(-COMMUNITY_LIMITS.window - 1).map(c => communityCommitHash(c)));
+    let room = COMMUNITY_LIMITS.secrets - [...keep].filter(h => this.state.secrets[h]).length;
+    for (let i = this.state.side.length - 1; i >= 0 && room > 0; i--) {
+      const h = communityCommitHash(this.state.side[i]);
+      if (this.state.secrets[h] && !keep.has(h)) { keep.add(h); room--; }
+    }
     for (const h of Object.keys(this.state.secrets)) if (!keep.has(h)) delete this.state.secrets[h];
   }
 
