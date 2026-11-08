@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { createIdentity } from "../src/identity";
 import {
-  emptyIdentityLedger, IDENTITY_CHECK_UNAVAILABLE, IdentityCheckUnavailable, identityStatement, identityStatementText, IdentityExchange, isIdentityBinding, newIdentityBinding,
+  emptyIdentityLedger, IDENTITY_CHECK_UNAVAILABLE, IdentityCheckUnavailable, identityRefusal, identityStatement, identityStatementText, IdentityExchange, isIdentityBinding, newIdentityBinding,
   receivedIdentityStatus, revokesIdentity, identityRevocationValue, IDENTITY_REVOCATION_LABEL, signIdentityPresentation, verifyIdentityPresentation, IDENTITY_CHALLENGE_WINDOW,
   type IdentityBinding, type IdentityLedger, type IdentityStatement, type LocalIdentityProof, type VerifiedIdentity,
 } from "../src/identityProofs";
@@ -482,6 +482,35 @@ describe("identity timeline, from the exchange", () => {
     await ab.withdraw(older, true);
     expect(w.frames).toHaveLength(sent);
     expect(steps(alice, bob)).toHaveLength(3);
+  });
+
+  for (const slower of ["older", "newer"] as const) for (const run of [1, 2, 3])
+  it(`two proofs of one identity checked at once: the newer is kept on both sides when the ${slower} check ends last (run ${run})`, async () => {
+    const w = world(), { alice, bob } = w.ids;
+    const older = w.addProof();
+    w.advance(60);
+    const newer = w.addProof();
+    // The slower proof's check ends only once the other one is stored.
+    let release!: () => void;
+    const gate = new Promise<void>(r => { release = r; });
+    const slowId = slower === "older" ? older : newer;
+    const ab = w.peer(alice, bob, "a".repeat(64));
+    w.peer(bob, alice, "a".repeat(64), { verify: async (s, e) => { if (s.id === slowId) await gate; return fakeVerify(s, e); } });
+    await ab.share(older, false);
+    await ab.share(newer, false);
+    ab.ready();
+    await vi.waitFor(() => expect(w.ledger(bob, alice).received.map(r => r.id)).toEqual([slower === "older" ? newer : older]));
+    release();
+    const status = (id: string) => w.ledger(alice, bob).shared.find(s => s.id === id)?.status;
+    await vi.waitFor(() => expect(status(older)).not.toBe("pending"));
+    await vi.waitFor(() => expect(status(newer)).toBe("accepted"));
+    expect(w.ledger(bob, alice).received.map(r => `${r.id === older ? "older" : "newer"}:${r.status}`)).toEqual(["newer:verified"]);
+    expect(status(older)).toBe(slower === "older" ? "rejected" : "withdrawn");
+    if (slower === "older") expect(identityRefusal(w.ledger(alice, bob).shared.find(s => s.id === older)?.error)).toMatch(/newer proof/);
+    expect(w.ledger(alice, bob).shared.filter(s => s.status === "accepted").map(s => s.id)).toEqual([newer]);
+    // Nothing on the contact's timeline stops the newer share.
+    expect(tl(w, bob, alice).some(e => e.proof === newer && e.kind === "stopped")).toBe(false);
+    expect(tl(w, alice, bob).some(e => e.proof === newer && e.kind === "stopped")).toBe(false);
   });
 
   it("a share taken back before it left leaves nothing; a revocation found is a stop", async () => {
