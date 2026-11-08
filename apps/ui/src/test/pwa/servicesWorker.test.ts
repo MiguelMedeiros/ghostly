@@ -92,6 +92,26 @@ describe("a navigation the services worker hands to the contact", () => {
   });
 });
 
+describe("an answer of the contact's app the worker passes on", () => {
+  it("carries Ghostly's viewer policy after the app's own, Hide my IP on or off, whatever policy the app sends", async () => {
+    const { CookieJar, serve } = await import("../../../../web/src/svc/opener");
+    const { VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY } = await import("@ghostly/core");
+    const words = { unreachable: "", failed: "", close: "", callOn: "", tooSlow: "", offline: "", retry: "", label: "", owner: "", hostError: () => null };
+    for (const own of [null, "connect-src *"]) {
+      for (const relayOnly of [false, true]) {
+        // The bridge hands the request to the real `serve`, and the contact answers with or without a policy of its own.
+        bridge.postMessage.mockImplementation((message: unknown, transfer: Transferable[]) => {
+          const headers: [string, string][] = [["content-type", "text/html"], ...(own ? [["content-security-policy", own] as [string, string]] : [])];
+          void serve(transfer[0] as MessagePort, message, async () => ({ status: 200, headers, body: (async function* () {})(), bytes: async () => new Uint8Array() }), new CookieJar(), words, undefined, relayOnly);
+        });
+        const response = await fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
+        const policy = relayOnly ? VIEWER_SERVICE_CSP_RELAY_ONLY : VIEWER_SERVICE_CSP;
+        expect(response.headers.get("content-security-policy"), `${own} ${relayOnly}`).toBe([own, policy, "frame-ancestors 'self' https://app.ghostly.example"].filter(Boolean).join(", "));
+      }
+    }
+  });
+});
+
 describe("a request the app's page could not get an answer to", () => {
   it("is said in the profile's language and direction, as a page with nothing to run: never the worker's plain English", async () => {
     bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
