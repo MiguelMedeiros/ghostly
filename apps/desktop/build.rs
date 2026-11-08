@@ -60,6 +60,7 @@ const COMMANDS: &[&str] = &[
     "native_call_close",
     "native_call_devices",
     "native_call_devices_watch",
+    "native_call_levels",
     "native_call_microphone",
     "native_call_mute",
     "native_call_offer",

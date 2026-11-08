@@ -583,6 +583,22 @@ pub fn native_call_mute(id: String, muted: bool) -> Result<(), String> {
     }
 }
 
+/// The page draws who is speaking, or no longer does: the call says each side's level only while it does
+/// ([`engine::Call::set_levels`]).
+#[tauri::command]
+pub fn native_call_levels(id: String, on: bool) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        call(&id)?.set_levels(on);
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (id, on);
+        Err(ELSEWHERE.into())
+    }
+}
+
 /// The page is in sight, or out of it (`document.hidden`): out of sight, the cameras' previews and the call's
 /// pictures are not made JPEGs for it past the first ([`engine::PAGE_HIDDEN`]).
 #[tauri::command]

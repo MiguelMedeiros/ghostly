@@ -72,6 +72,7 @@
     "allow-native-call-close",
     "allow-native-call-devices",
     "allow-native-call-devices-watch",
+    "allow-native-call-levels",
     "allow-native-call-microphone",
     "allow-native-call-mute",
     "allow-native-call-offer",
