@@ -37,7 +37,8 @@ export function SearchIcon({ className }: { className?: string }) {
   return <svg {...icon} className={className}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>;
 }
 
-const button ="shrink-0 grid place-items-center w-8 h-8 max-md:w-10 max-md:h-10 rounded-full text-text-secondary enabled:hover:text-accent enabled:hover:bg-surface-hover disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default";
+// On a phone a thumb's 44 px, as every other control there.
+const button = "shrink-0 grid place-items-center w-8 h-8 max-md:w-11 max-md:h-11 rounded-full text-text-secondary enabled:hover:text-accent enabled:hover:bg-surface-hover disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default";
 
 /**
  * The bar under a chat's header while its search is open (useChatSearch): the words, how many messages hold them and
@@ -55,7 +56,8 @@ export function ChatSearchBar({ search }: { search: ChatSearch }) {
   const more = t("common.moreInfo");
   return (
     <div data-testid="chat-search" className="shrink-0 border-b border-border bg-panel-header px-3 py-1.5 max-md:px-2">
-      <div role="search" className="flex items-center gap-1">
+      {/* On a phone the buttons' own 44 px keep them apart: the gaps go to the words, on the narrowest phone too. */}
+      <div role="search" className="flex items-center gap-1 max-md:gap-0">
         <SearchIcon className="shrink-0 text-text-muted" />
         <input
           ref={search.inputRef}

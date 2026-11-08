@@ -386,6 +386,42 @@ test.describe("on a phone, Send files", () => {
 });
 
 /**
+ * A chat's search bar on a phone: its ⓘ, ↑, ↓ and ✕ took taps on 40 × 40 px. On the narrowest phone, and in Arabic
+ * (right to left, the buttons on the left), they are 44 px targets and the field keeps room for a word.
+ */
+test("on a phone the chat's search bar takes taps on 44 px and keeps room for the words", { tag: ["@feature:app.mobile-layout", "@feature:chat.search", "@feature:app.i18n"] }, async ({ peer }, testInfo) => {
+  test.setTimeout(3 * 60_000);
+  const [alice, bob] = await Promise.all([peer("search-phone-alice", { mobile: true, viewport: { width: 375, height: 667 } }), peer("search-phone-bob")]);
+  await link(alice, bob);
+  await connect(alice, bob);
+  await say(bob, "find this word");
+  await expect(chat(alice).getByText("find this word")).toBeVisible();
+  const { page } = alice;
+  for (const [language, dir, width] of [["en", "ltr", 375], ["en", "ltr", 320], ["ar", "rtl", 320]] as const) {
+    if (language === "ar") {
+      await page.evaluate(() => {
+        const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+        localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language: "ar" }));
+      });
+      await page.reload();
+      await expect(page.locator("html")).toHaveAttribute("dir", dir);
+    }
+    await page.setViewportSize({ width, height: 667 });
+    await page.getByTestId("chat-options").click();
+    await page.getByTestId("chat-search-open").click();
+    await page.getByTestId("chat-search-input").fill("word");
+    await expect(page.getByTestId("chat-search-older")).toBeEnabled();
+    const label = `${language} at ${width} px`;
+    const small = await smallTargets(page, 44, "[data-testid=chat-search] button");
+    expect(small.map((t) => `${t.name} ${t.width}×${t.height} (${t.stops})`), `${label}: search bar controls under 44 × 44 px`).toEqual([]);
+    expect((await page.getByTestId("chat-search-input").boundingBox())!.width, `${label}: the search field's width`).toBeGreaterThanOrEqual(64);
+    await page.screenshot({ path: testInfo.outputPath(`chat-search-${language}-${width}.png`) });
+    await page.getByTestId("chat-search-close").click();
+    await expect(page.getByTestId("chat-search")).toHaveCount(0);
+  }
+});
+
+/**
  * The screens a first visit opens, on a phone, control by control: every Settings section, the Profile and Services
  * pages, and the New wallet, Add identity and Join dialogs. A row's ⓘ took taps on 41 × 40 px, a dialog's Close on
  * 40 × 41, the colour swatches 32 × 32, Light / Dark / Auto and Compact / Comfortable were 32 px tall, the sound
