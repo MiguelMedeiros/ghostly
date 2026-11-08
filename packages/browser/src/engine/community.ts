@@ -841,16 +841,18 @@ export class Communities {
     if (!rosterHas(s.roster, s.myKey) && !this.handedToLeaver(left)) await this.dropLeftBehind(groupId);
     else if (now - left.since > LEFT_FOLLOW_MS) await this.dropLeftBehind(groupId);
     else if (!rosterHas(s.roster, s.myKey)) left.handOnAt = undefined;
-    else if (s.admin !== s.myKey) left.handOnAt = undefined;
     else {
-      // The secret of my tip went missing (a fresh one sealed to me was lost): asked of whoever I am connected to, as a
-      // member catches up, now and then until it comes. It is of an epoch before the commit that takes me out.
-      if (s.leftWaitsForSecret && now - (left.askedAt ?? 0) >= 5_000) {
+      // Where the chain stands, asked of whoever I am connected to as a member catches up: every half minute, as nobody
+      // sends a commit again unasked (the one that made me the admin, lost on its way, left the group a departed admin
+      // for good); every few seconds while the secret of my tip is missing (a fresh one sealed to me was lost). Only what
+      // I still read comes back: epochs before the commit that takes me out.
+      if (now - (left.askedAt ?? 0) >= (s.leftWaitsForSecret ? 5_000 : 30_000)) {
         left.askedAt = now;
         const ready = [...this.host.edges(groupId)].filter(([key, id]) => key !== s.myKey && this.host.linkReady(id, 2) && rosterHas(s.roster, key)).map(([key]) => key);
         for (const key of ready.slice(0, 3)) s.catchUp(key);
       }
-      if (left.handOnAt === undefined) left.handOnAt = now + LEFT_HAND_ON_MS;
+      if (s.admin !== s.myKey) left.handOnAt = undefined;
+      else if (left.handOnAt === undefined) left.handOnAt = now + LEFT_HAND_ON_MS;
       else if (now >= left.handOnAt) await this.handOn(groupId, now);
     }
   }
