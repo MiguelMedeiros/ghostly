@@ -58,6 +58,8 @@ async function replaceEngine(next?: string): Promise<void> {
     await createEngineDocument();
     // Just made: one that does not answer is replaced at the next start (`waitForEngine`).
     const status = (await answerOf()) ?? notStarted();
+    // Again: a tab still on the peer before posted one while that peer stopped. The next profile's pages wait on this start.
+    await clearNotices(next);
     if (status.profile === status.active) return;
     next = status.activeId;
   }
