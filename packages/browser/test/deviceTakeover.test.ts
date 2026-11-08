@@ -204,6 +204,18 @@ describe("what keeps a forced takeover from locking the owner out", () => {
     expect(phone.store.record.takeoverAttempts).toEqual({ recent: [], total: 0 });
   });
 
+  it("five wrong passwords while this device's clock ran a day ahead do not lock it out once the clock is put right", async () => {
+    const phone = await device(network, 1, "standby");
+    network.seed(phone.stored);
+    const right = clock.t;
+    clock.t += 24 * 3_600_000;
+    for (let i = 0; i < 5; i++) {
+      await expect(forceTakeover(ports(phone.store, phone.keeper, async (_v: unknown, p: string) => p === PASSWORD), { password: "guess", name: "Desktop" })).rejects.toThrow("takeover-password");
+    }
+    clock.t = right + 2 * 3_600_000;
+    expect((await forceTakeover(ports(phone.store, phone.keeper, async (_v: unknown, p: string) => p === PASSWORD), { password: PASSWORD, name: "Desktop" })).kind).toBe("start");
+  });
+
   it("wrong passwords sent at once are each counted: no more than five are checked in the hour", async () => {
     const phone = await device(network, 1, "standby");
     let checks = 0;
