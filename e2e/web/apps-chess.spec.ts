@@ -470,7 +470,9 @@ test("a card of a version its publisher revoked says Stopped, as the Apps page d
   publisher.revoke(chess, "Leaked the game to the wrong chat");
   await ana.page.goto("/#/apps");
   await expect(ana.page.getByTestId("installed-app").getByTestId("installed-app-hint")).toHaveText("Stopped");
-  await ana.page.goBack();
+  // Back to her chat with Bob by its row (going back from the Apps page lands on the chat list, no chat open).
+  await ana.page.goto("/#/");
+  await ana.page.getByTestId("chat-row").first().click();
   await expect(card.getByTestId("app-card-check")).toHaveText("Stopped");
   await expect(card.getByTestId("app-card-open")).toHaveCount(0);
   await expect(card.getByTestId("app-card-run-anyway")).toHaveCount(0);
