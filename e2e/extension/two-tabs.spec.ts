@@ -110,3 +110,37 @@ test("a call ringing in two tabs rings in one of them", { tag: ["@client:extensi
   for (const tab of [ext, second]) await expect(tab.page.getByText("Incoming audio call...")).toHaveCount(0, { timeout: 15_000 });
   await expect.poll(ringLocks, { timeout: 10_000 }).toEqual({ held: 0, pending: 0 });
 });
+
+/**
+ * Each tab tells the peer which chat it shows, and the chat on screen carries its connection story in every state the
+ * peer sends to every tab. A closed tab says nothing first: its chat stayed on screen for the peer until the last tab
+ * closed, read 3x as often while its contact was away, its story still sent to the tabs left. It goes with the tab now.
+ */
+test("a chat on screen in a tab that closes is no longer on screen for the tabs left", { tag: ["@client:extension", "@client:web", "@feature:extension.engine"] }, async ({ extensionPeer, webPeer }) => {
+  const [ext, web] = await Promise.all([extensionPeer("two-tabs-on-screen"), webPeer("two-tabs-on-screen-contact")]);
+  await pair(web, ext);
+  await expect(chat(ext)).toBeVisible({ timeout: 30_000 });
+  // A tab on the chat list, which hears every state the peer sends: whether a chat in it carries its story.
+  const list = await ext.context.newPage();
+  await list.addInitScript(() => {
+    type State = { kind?: string; state?: { links?: { transportHistory?: unknown }[] } };
+    type Port = { onMessage: { addListener(listener: (message: State) => void): void } };
+    const page = globalThis as unknown as { __storyShown?: boolean; chrome: { runtime: { connect: (...args: unknown[]) => Port } } };
+    const runtime = page.chrome.runtime, connect = runtime.connect.bind(runtime);
+    runtime.connect = (...args: unknown[]) => {
+      const port = connect(...args);
+      port.onMessage.addListener((message) => {
+        if (message?.kind === "state" && message.state?.links) page.__storyShown = message.state.links.some((link) => link.transportHistory !== undefined);
+      });
+      return port;
+    };
+  });
+  await list.goto(ext.page.url().replace(/#.*$/, "#/"));
+  await expect(list.getByTitle("New Chat")).toBeVisible({ timeout: 30_000 });
+  const storyShown = () => list.evaluate(() => (globalThis as unknown as { __storyShown?: boolean }).__storyShown);
+  await expect.poll(storyShown, { timeout: 30_000 }).toBe(true);
+
+  await ext.page.close();
+  // The tabs left hear a state as the closed tab's chat leaves the screen, and none carries its story any more.
+  await expect.poll(storyShown, { timeout: 30_000 }).toBe(false);
+});

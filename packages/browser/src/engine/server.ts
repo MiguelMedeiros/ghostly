@@ -48,6 +48,11 @@ export class EngineServer implements PeerServer {
    * that goes away is taken out with it.
    */
   private readonly present = new Set<EngineClientSink>();
+  /**
+   * Per client, the chat or group it shows (`setActiveLink`): the engine's chats on screen are all of them, and a client
+   * that goes away (a tab closed or moved elsewhere, which says nothing first) takes its own with it.
+   */
+  private readonly shown = new Map<EngineClientSink, string>();
   /** How many history changes the engine told; per chat or group, the count at its last one (`historyMark`). */
   private changes = 0;
   private readonly changedAt = new Map<string, number>();
@@ -156,7 +161,9 @@ export class EngineServer implements PeerServer {
   detach(client: EngineClientSink): void {
     this.clients.delete(client);
     this.histories.delete(client);
+    if (this.shown.delete(client) && this.clients.size > 0) this.node.setOnScreen(this.shown.values());
     if (this.clients.size === 0) {
+      this.shown.clear();
       this.node.setActiveLink({ linkId: null });
       // Apps run in the pages: with none left, none runs, and the contacts hear so.
       this.node.appsCloseAll();
@@ -195,7 +202,8 @@ export class EngineServer implements PeerServer {
       if (typeof method !== "function") throw new Error(`Unknown method: ${request.method}`);
       // Limited mode (WISP 06): only what reads history, writes messages and changes settings.
       if (this.node.limited && !LIMITED_MODE_METHODS.has(String(request.method))) throw new Error(LIMITED_MODE_ERROR);
-      if (tell) response.result = await method.call(this.node, params);
+      if (request.method === "setActiveLink") response.result = this.show(client, params);
+      else if (tell) response.result = await method.call(this.node, params);
     } catch (error) {
       response.error = errorLine(error);
     }
@@ -204,6 +212,15 @@ export class EngineServer implements PeerServer {
     } catch {
       // the client went away
     }
+  }
+
+  /** One client's chat or group on screen (none: `linkId` null): the engine hears every client's, this one's just opened. */
+  private show(client: EngineClientSink, params: unknown): void {
+    const linkId = (params as { linkId?: unknown } | undefined)?.linkId;
+    if (typeof linkId === "string" && linkId) {
+      if (this.clients.has(client)) this.shown.set(client, linkId);
+    } else this.shown.delete(client);
+    this.node.setOnScreen(this.shown.values(), typeof linkId === "string" && linkId && this.shown.has(client) ? linkId : null);
   }
 
   /**

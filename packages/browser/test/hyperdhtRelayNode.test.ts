@@ -213,7 +213,7 @@ it("starts the chat opened while the relay is out of reach before every other ch
   };
   await run(1);
   const opened = ids[19], at = Date.now();
-  node["activeLinkId"] = opened;
+  node["onScreen"].add(opened);
   void node["ensureNativeEndpoints"](opened, true);
   await run(20);
   const seed = () => node["links"].get(opened)!.stored.transportSeeds?.["hyperdht/1"];
