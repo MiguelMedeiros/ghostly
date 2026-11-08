@@ -180,12 +180,12 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
           const again = document.createElement("button");
           again.type = "button";
           again.setAttribute("data-testid", "mini-app-open-again");
-          again.className = "mx-auto min-h-11 rounded px-4 py-1 text-sm font-medium text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
+          again.className = "mx-auto min-h-11 rounded border border-accent px-4 py-1 text-sm font-medium text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
           again.textContent = openAgainLabel();
           const failed = document.createElement("p");
           failed.setAttribute("role", "alert");
           failed.setAttribute("data-testid", "mini-app-open-again-error");
-          failed.className = "m-0 px-6 py-2 text-center text-sm text-danger empty:hidden";
+          failed.className = "m-0 px-6 py-2 text-center text-sm text-danger-ink empty:hidden";
           again.addEventListener("click", () => {
             if (again.getAttribute("aria-busy") === "true") return;
             again.setAttribute("aria-busy", "true");

@@ -192,11 +192,11 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
       {shown && app?.stopped?.why === "unresponsive" && appOpener && (
         <button type="button" data-testid="mini-app-open-again" onClick={openAgain}
           aria-busy={againHere?.busy || undefined} aria-disabled={againHere?.busy || undefined}
-          className="mx-auto min-h-11 rounded px-4 py-1 text-sm font-medium text-accent hover:bg-surface-hover cursor-pointer aria-disabled:cursor-wait aria-disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+          className="mx-auto min-h-11 rounded border border-accent px-4 py-1 text-sm font-medium text-accent hover:bg-surface-hover cursor-pointer aria-disabled:cursor-wait aria-disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
           {t("apps.view.openAgain")}
         </button>
       )}
-      {shown && app?.stopped && againHere?.error && <p role="alert" data-testid="mini-app-open-again-error" className="m-0 px-6 py-2 text-center text-sm text-danger">
+      {shown && app?.stopped && againHere?.error && <p role="alert" data-testid="mini-app-open-again-error" className="m-0 px-6 py-2 text-center text-sm text-danger-ink">
         {againHere.error}
       </p>}
       <div ref={box} data-testid="mini-app-frame" className="chat-app-frame" />
