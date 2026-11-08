@@ -37,7 +37,7 @@ import { focus } from "../lib/connection";
 import { PairingScene } from "../components/pairing/PairingScene";
 import { usePairingProgress } from "../hooks/usePairingProgress";
 import { contactArrived } from "../lib/pairingProgress";
-import { useEffect, useId, useRef, useState, useCallback, useMemo } from "react";
+import { memo, useEffect, useId, useRef, useState, useCallback, useMemo } from "react";
 import { InfoButton } from "../components/layout/Section";
 import { Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
@@ -51,7 +51,7 @@ import { useWebRTC } from "../hooks/useWebRTC";
 import { useCallDevices } from "../hooks/useCallDevices";
 import { mediaDeniedText, preferredDevice } from "../lib/mediaDevices";
 import { useSettings } from "../contexts/SettingsContext";
-import { MessageBubble } from "../components/MessageBubble";
+import { MessageBubble, sameMessageRow } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { heldOriginal, messageSnippet, quoteFor, replyIndexer, replyTarget, sentReply, type NameOf } from "../lib/replies";
 import { buttonsViews, compactPresses } from "../lib/buttons";
@@ -100,6 +100,8 @@ import { useOnline } from "../hooks/useOnline";
 import { useIncomingCallNotice } from "../hooks/useIncomingCallNotice";
 import { useChatLink } from "../hooks/useChatLink";
 import { useSameValue } from "../hooks/useSameValue";
+import { useHandler } from "../hooks/useHandler";
+import { useEngineValue } from "../lib/engineState";
 import { useTypingSender } from "../hooks/useTyping";
 import { ChatSubtitle } from "../components/TypingIndicator";
 import { TransportLine } from "../components/TransportTimeline";
@@ -189,6 +191,14 @@ function removableForEveryone(message: ChatMessage): boolean {
   return message.sender === "me" && !!message.ref && message.delivery !== "waiting" && !message.paymentId && !message.systemEvent && !message.callEvent;
 }
 
+/**
+ * A message row, drawn again only when what it shows changes: the page is drawn again for much that changes no row (a
+ * message arriving, a pin, the composer), and each of the 100 to 150 rows it draws was drawn with it. Its callbacks count
+ * only by whether they are there: the page's own are one function each for its life (`useHandler`), and the rest close
+ * over the row's message and setters.
+ */
+const MessageRow = memo(MessageBubble, sameMessageRow);
+
 export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnlock = false }: ChatProps) {
   const nav = useAppNavigation();
   const { t, language } = useI18n();
@@ -216,7 +226,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const {
     messages,
     status,
-    lastSync,
     sendMessage,
     techInfo,
     peerAck,
@@ -450,30 +459,19 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
    *
    * A message of mine still waiting to be sent (Cancel sending) is the engine's to send: it goes from the chat only
    * once the engine took the delete. One refused (limited mode) stays, and the rejection says why under it.
+   *
+   * This and the other actions of a message row are one function each for the page's life, doing what the page says when
+   * pressed: a row is drawn again only when what it shows changes (`MessageRow`), so it holds them from an earlier draw.
    */
-  const forgetMessage = useCallback(
-    async (messageId: string, waiting = false): Promise<void> => {
-      if (waiting) {
-        if (peerKey && platform) await platform.deleteMessage(peerKey, messageId);
-        deleteMessage(messageId);
-        return;
-      }
+  const forgetMessage = useHandler(async (messageId: string, waiting = false): Promise<void> => {
+    if (waiting) {
+      if (peerKey && platform) await platform.deleteMessage(peerKey, messageId);
       deleteMessage(messageId);
-      if (peerKey) void platform?.deleteMessage(peerKey, messageId).catch(() => {});
-    },
-    [deleteMessage, platform, peerKey],
-  );
-
-  /**
-   * Deletes a message of mine for everyone: the engine sends its removal, and the chat's copy goes once it took it. One
-   * refused (limited mode) rejects, and the bubble says why under it.
-   */
-  const removeForEveryone = async (messageId: string): Promise<void> => {
-    if (!chatLink) return;
-    const result = await engine.call("removeMessage", { linkId: chatLink.id, messageId });
-    if (result.error) throw new Error(result.error);
+      return;
+    }
     deleteMessage(messageId);
-  };
+    if (peerKey) void platform?.deleteMessage(peerKey, messageId).catch(() => {});
+  });
 
   const wallet = platform?.wallet;
   const walletState = wallet?.getState() ?? null;
@@ -518,6 +516,18 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // (the extension's pages), the rest is asked for while the chat is open.
   const chatLinkId = chatLink?.id;
   useEffect(() => (chatLinkId ? engine.keepWhole(chatLinkId) : undefined), [chatLinkId]);
+
+  /**
+   * Deletes a message of mine for everyone: the engine sends its removal, and the chat's copy goes once it took it. One
+   * refused (limited mode) rejects, and the bubble says why under it.
+   */
+  const removeForEveryone = useHandler(async (messageId: string): Promise<void> => {
+    if (!chatLink) return;
+    const result = await engine.call("removeMessage", { linkId: chatLink.id, messageId });
+    if (result.error) throw new Error(result.error);
+    deleteMessage(messageId);
+  });
+
   // Saved messages: kept on this device, never sent; the Saved view lists them.
   const savedHere = useSavedIn(chatLink?.id);
   // What tells the contact when this side writes (WISP 401 § Typing): 1:1 paired chats only.
@@ -752,6 +762,20 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const cardRows = useMemo(() => pickCardRow(messages), [pickCardRow, messages]);
   const goingCards = useMemo(() => goingCardCount(cardEntries(cardRows)), [cardRows]);
   useEffect(() => { setTasksOpen(false); setShowMore(false); }, [sessionId]);
+  // Reactions (WISP 400 § Reactions): the engine keeps them and tells the contact; a failure leaves the chips as they were.
+  const react = useHandler((messageId: string, emoji: string) => {
+    if (chatLink?.id) void engine.call("react", { linkId: chatLink.id, messageId, emoji }).catch(() => {});
+  });
+  const reactionName = useCallback((by: string) => by === "peer" ? shownName : by.slice(0, 8), [shownName]);
+  // The pinned message (WISP 400 § Pinned message): one per chat; the engine keeps it and tells the contact.
+  const pin = paired ? chatLink?.pin : undefined;
+  const pinMessage = useHandler((messageId: string | undefined, remove: boolean = false) => {
+    if (chatLink?.id) void engine.call("pinMessage", { linkId: chatLink.id, messageId, remove }).catch(() => {});
+  });
+  const pinRow = useHandler((message: ChatMessage) => pinMessage(message.id, replyTarget(message) === pin?.id));
+  const saveRow = useHandler((messageId: string) => {
+    if (chatLink?.id) void setSaved(chatLink.id, messageId, savedHere.has(messageId)).catch(() => {});
+  });
 
   if (!params) {
     // A chat still on a call has nowhere better to be; only the one on screen leaves.
@@ -780,16 +804,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const truncatedPeerKey = publicKeyLabel(params.peerPubKeyB64);
   // A reply's quote and the composer's bar name the author as this chat does.
   const nameOf: NameOf = (from) => from === "me" ? t("chat.reply.you") : from === "peer" ? shownName : undefined;
-  // Reactions (WISP 400 § Reactions): the engine keeps them and tells the contact; a failure leaves the chips as they were.
-  const react = (messageId: string, emoji: string) => {
-    if (chatLink?.id) void engine.call("react", { linkId: chatLink.id, messageId, emoji }).catch(() => {});
-  };
-  const reactionName = (by: string) => by === "peer" ? shownName : by.slice(0, 8);
-  // The pinned message (WISP 400 § Pinned message): one per chat; the engine keeps it and tells the contact.
-  const pin = paired ? chatLink?.pin : undefined;
-  const pinMessage = (messageId: string | undefined, remove = false) => {
-    if (chatLink?.id) void engine.call("pinMessage", { linkId: chatLink.id, messageId, remove }).catch(() => {});
-  };
   const replyBar = replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer"), snippet: messageSnippet(replyingTo, t),
     mine: replyingTo.sender === "me", onCancel: () => setReplyingTo(null) } : undefined;
   // Until live: the connection icon tells the pairing; the "connected" moment belongs to the scene.
@@ -1155,7 +1169,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                   setIdentityCard({ side: e.side, id: e.proof }); setShowIdentities(true);
                 }} />
               : (
-              <MessageBubble
+              <MessageRow
                 key={row.message.id}
                 message={row.message}
                 peerAck={peerAck}
@@ -1174,9 +1188,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 linkId={paired ? chatLink?.id : undefined}
                 // The same: a compatibility chat has no room for a reaction.
                 onReact={paired && replyTarget(row.message) ? emoji => react(row.message.id, emoji) : undefined}
-                onPin={paired && replyTarget(row.message) ? () => pinMessage(row.message.id, replyTarget(row.message) === pin?.id) : undefined}
+                onPin={paired && replyTarget(row.message) ? () => pinRow(row.message) : undefined}
                 pinned={!!pin && replyTarget(row.message) === pin.id}
-                onSave={chatLink?.id ? () => void setSaved(chatLink.id, row.message.id, savedHere.has(row.message.id)).catch(() => {}) : undefined}
+                onSave={chatLink?.id ? () => saveRow(row.message.id) : undefined}
                 saved={savedHere.has(row.message.id)}
                 reactionName={reactionName}
                 highlight={search.highlight(row.message.id)}
@@ -1352,7 +1366,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           <TechInfoSection title={t("chat.tech.sync")}>
             <TechInfoRow label={t("chat.tech.status")} value={status in STATUS_TEXT ? t(STATUS_TEXT[status]) : status} />
             <TechInfoRow label={t("chat.tech.pollInterval")} value={`${Math.round(techInfo.currentPollInterval / 1000)}s`} />
-            <TechInfoRow label={t("chat.tech.lastSync")} value={lastSync ? formatAt(lastSync, { timeStyle: "medium" }, language) : "—"} />
+            <LastSyncRow peerKey={params.peerPubKeyB64} />
             <TechInfoRow label={t("chat.tech.messages")} value={messages.length.toString()} />
           </TechInfoSection>
           <TechInfoSection title={t("chat.tech.ackStatus")}>
@@ -1445,6 +1459,13 @@ function ForwardSecrecyRow({ state }: { state: "on" | "starting" | "unsupported"
       {open && <p id={id} className="mt-1.5 text-text-secondary leading-relaxed">{t(why)} {t("chat.tech.forwardSecrecyLive")}</p>}
     </div>
   );
+}
+
+/** The tech panel's last sync, read where it shows: each poll of the open chat draws this row, not the page. */
+function LastSyncRow({ peerKey }: { peerKey: string }) {
+  const { t, language } = useI18n();
+  const lastSync = useEngineValue((state) => state?.links.find(l => l.peerPubKeyZ32 === peerKey)?.lastSyncAt || null);
+  return <TechInfoRow label={t("chat.tech.lastSync")} value={lastSync ? formatAt(lastSync, { timeStyle: "medium" }, language) : "—"} />;
 }
 
 function TechInfoRow({ label, value, mono, copyable }: { label: string; value: string; mono?: boolean; copyable?: boolean }) {
