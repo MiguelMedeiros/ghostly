@@ -452,6 +452,27 @@ describe("a video in the chat", () => {
     expect(fireEvent.keyDown(exit, { key: "Tab" })).toBe(true);
   });
 
+  // WebKitGTK takes the focus off the player once it is no longer a stop of its own (its tabIndex goes with the full
+  // window): Escape left the keyboard on the page body, and the next Tab started from the top of the app.
+  it("filling the window (Desktop on Linux), Escape from the player gives the focus back to Full screen, not the page", async () => {
+    fakeEngine.fullscreenWindow = vi.fn(async () => {});
+    show(video());
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Full screen" }));
+    const player = screen.getByTestId("video-player");
+    // WebKit's focus fixup, after the render: a focused element that lost its tabindex is blurred.
+    const fixup = new MutationObserver(() => { if (!player.hasAttribute("tabindex") && document.activeElement === player) player.blur(); });
+    fixup.observe(player, { attributes: true, attributeFilter: ["tabindex"] });
+    player.focus();
+    expect(document.activeElement).toBe(player);
+    fireEvent.keyDown(player, { key: "Escape" });
+    await flush();
+    fixup.disconnect();
+    expect(screen.getByTestId("video-frame")).not.toHaveAttribute("data-theater");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Full screen" }));
+  });
+
   it("filling the window (Desktop on Linux), it goes on playing though the chat list no longer sees it", async () => {
     let seen: ((entries: { isIntersecting: boolean }[]) => void) | null = null;
     vi.stubGlobal("IntersectionObserver", class {
