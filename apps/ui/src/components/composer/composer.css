@@ -79,10 +79,11 @@
   .composer-textarea { min-height: 44px; padding: 11px 4px; }
   .composer-row > .voice-bar { border-radius: 24px; }
 }
-/* A narrow chat column (a phone held upright, or the chat list dragged wide): the message keeps the room. */
+/* A narrow chat column (a phone held upright, or the chat list dragged wide): the message keeps the room around the
+   buttons. The + and the smiley stay 44 px wide, as every control a thumb presses on a phone; on a 320 px phone the
+   message still has about 156 px. */
 @container composer (max-width: 340px) {
   .composer-field { gap: 0; padding-inline: 2px; }
-  .composer-icon-button { width: 36px; }
 }
 
 /* The + menu: a coloured glyph per row, as WhatsApp's attach menu. Light themes take darker inks, so every glyph
