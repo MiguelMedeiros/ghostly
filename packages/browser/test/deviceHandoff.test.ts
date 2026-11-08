@@ -614,6 +614,82 @@ describe("a device that asks and never proves", () => {
     await w.taker.accept();
     await until(() => w.quiesced.length === 1);
   });
+
+  // The taker can check its password on the giver's second message alone: one that stops there (no third, its link closed
+  // or the minute out) has made a guess, and is said as a wrong password, like the one it sends (WISP 06 § Authorizing a
+  // handoff: "Every failure raises a notice on the active device").
+  const noticed = (w: World): string[] => {
+    const notices: string[] = [];
+    (w.giver as unknown as { ports: GiverPorts }).ports.notice = (kind, device) => notices.push(`${kind}:${device}`);
+    return notices;
+  };
+  const noThird = (w: World) => { w.link.meddle = (from, frame) => (from === B && frame.t === "handoff-pake" && frame.n === 3 ? null : frame); };
+
+  it("a wrong password the taker says: the notice, and the giver says it was a wrong password", async () => {
+    const w = world();
+    const notices = noticed(w);
+    await w.taker.pull("not the password");
+    await until(() => w.giver.view()?.failure === "password");
+    expect(notices).toEqual([`wrong-password:${w.giver.view()!.device}`]);
+  });
+
+  it("a taker that closes its link after the second message: the same notice, counted once, and not said as a dropped link", async () => {
+    const w = world();
+    const notices = noticed(w);
+    noThird(w);
+    await w.taker.pull("not the password");
+    await until(() => w.link.count("handoff-pake", A) === 1);
+    await settle();
+    w.link.drop();
+    await until(() => w.giver.view()?.step === "failed");
+    expect(w.giver.view()).toMatchObject({ step: "failed", failure: "password" });
+    expect(w.giver.view()?.refused).toBeUndefined();
+    expect(notices).toEqual([`wrong-password:${w.giver.view()!.device}`]);
+    expect(w.giverRecords.record.handoffAttempts?.[B]?.total).toBe(1);
+  });
+
+  it("a taker that waits out the minute after the second message: the same notice", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"], shouldAdvanceTime: true });
+    const w = world();
+    const notices = noticed(w);
+    noThird(w);
+    await w.taker.pull("not the password");
+    await until(() => w.link.count("handoff-pake", A) === 1);
+    await settle();
+    await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.idleMs + 1);
+    await until(() => w.giver.view()?.step === "failed");
+    expect(w.giver.view()).toMatchObject({ step: "failed", failure: "password" });
+    expect(notices).toEqual([`wrong-password:${w.giver.view()!.device}`]);
+    expect(w.giverRecords.record.handoffAttempts?.[B]?.total).toBe(1);
+  });
+
+  it("the fifteenth guess that stops after the second message leaves the device refused, and Let <device> try again is offered with it", async () => {
+    const w = world();
+    await w.giverRecords.amend({ handoffAttempts: { [B]: { recent: [], total: HANDOFF_ATTEMPTS.total - 1 } } });
+    const notices = noticed(w);
+    noThird(w);
+    await w.taker.pull("not the password");
+    await until(() => w.link.count("handoff-pake", A) === 1);
+    await settle();
+    w.link.drop();
+    await until(() => w.giver.view()?.step === "failed");
+    expect(w.giver.view()).toMatchObject({ failure: "password", refused: true });
+    expect(notices).toHaveLength(1);
+    expect(w.giverRecords.record.handoffAttempts?.[B]?.total).toBe(HANDOFF_ATTEMPTS.total);
+  });
+
+  it("a link that drops before the second message went out: the move stopped, no notice, and the try still counted", async () => {
+    const w = world();
+    const notices = noticed(w);
+    w.link.meddle = (from, frame) => (from === B && frame.t === "handoff-pake" ? null : frame);
+    await w.taker.pull(PASSWORD);
+    await until(() => w.giver.view()?.step === "authorizing");
+    w.link.drop();
+    await until(() => w.giver.view()?.step === "failed");
+    expect(w.giver.view()).toMatchObject({ step: "failed", failure: "dropped" });
+    expect(notices).toEqual([]);
+    expect(w.giverRecords.record.handoffAttempts?.[B]?.total).toBe(1);
+  });
 });
 
 describe("a giver that went back to active", () => {

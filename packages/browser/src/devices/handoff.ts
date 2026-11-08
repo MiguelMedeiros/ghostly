@@ -613,7 +613,7 @@ export class HandoffGiver {
         this.sender.stop();
         // Before quiesce a drop pauses (the taker says what it holds when it is back). In pass 2 this device is frozen:
         // a link that does not come back within a minute makes it the active one again (WISP 06 § States and events).
-        if (this.phase === "authorizing") this.reset("dropped");
+        if (this.phase === "authorizing") await this.unproved(key);
         if (this.phase === "pass2") this.arm(HANDOFF_TIMINGS.idleMs, () => this.backToActive());
         this.changed();
         return;
@@ -805,7 +805,7 @@ export class HandoffGiver {
       // The try was counted with the request (`onRequest`).
       try { this.pake = await startPakeGiver(verifier, pake.m!); } catch { await this.wrongPassword(from); return; }
       this.out(handoffPakeFrame({ n: 2, m: this.pake.second }), from);
-      this.arm(HANDOFF_TIMINGS.idleMs, () => this.reset("dropped"));
+      this.arm(HANDOFF_TIMINGS.idleMs, () => this.unproved(from));
       return;
     }
     if (pake.n !== 3 || !this.pake) return;
@@ -829,6 +829,17 @@ export class HandoffGiver {
     // The try was counted with the request: was it the one that leaves this device refused?
     const record = await this.ports.records.read();
     this.reset("password", handoffAttemptAllowed(record?.handoffAttempts?.[from], this.now()) === "refused");
+  }
+
+  /**
+   * A pull that ends in `authorizing` with no proof (its link closed, or the minute out). Past the second message the
+   * taker could check its password on it alone, so stopping there is a guess like a wrong password, and said as one;
+   * before it, the move just stopped. The try stays counted either way.
+   */
+  private async unproved(from: string): Promise<void> {
+    if (this.phase !== "authorizing") return;
+    if (this.pake) await this.wrongPassword(from);
+    else this.reset("dropped");
   }
 
   /** The proof held (a pull) or the person agreed (a push): the first session's key, and pass 1. */
