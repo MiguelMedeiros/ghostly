@@ -771,6 +771,17 @@ export class PaymentDesk {
     return running;
   }
 
+  /**
+   * The Take it back of this payment under way, if one is: settles, never rejects, once it is over, with the
+   * payment's state then (`reclaimed` when the ecash came back, `settled` when the contact had taken it first).
+   * A status check waits for it: the mint reads ecash this wallet is taking back as spent too.
+   */
+  takingBack(paymentId: string): Promise<StoredPayment["state"] | undefined> | undefined {
+    const running = this.reclaims.get(paymentId);
+    const after = () => this.payments.get(paymentId)?.state;
+    return running?.then(after, after);
+  }
+
   private async reclaimOnce(paymentId: string): Promise<Reclaimed | undefined> {
     const payment = this.payments.get(paymentId);
     if (payment?.target?.method === "fedimint" && payment.direction === "out" && payment.kind === "payment") {
@@ -1435,13 +1446,20 @@ export class PaymentDesk {
     const link=this.requireLink(review.linkId);
     const existing=await openRow(STORES.payments,await wrap<StoredPayment|undefined>((await store(STORES.payments,"readonly")).get(review.id)));
     if(!existing || existing.linkId!==review.linkId || existing.requestId!==review.requestId)throw new Error("Cashu outbox does not match the reviewed payment");
+    // Taken back (or being taken back), or settled: its token is not the contact's to have any more.
+    if(!this.cashuSendable(this.payments.get(existing.id) ?? existing))return;
     // Known before the link is asked for: a contact away now gets it from `replay` once its link opens.
     this.payments.set(existing.id,existing);
     this.host.onChange();
     await link.requirePaymentSupport();
+    // Waiting for the chat can take a while (a restart dials the contact): Take it back may have run meanwhile.
+    if(!this.cashuSendable(this.payments.get(existing.id) ?? existing))return;
     await this.host.storeMessage({linkId:review.linkId,id:`me_${review.createdAt}`,text:`${review.amount} ${arkSats(review.network)} via Cashu`,sender:"me",timestamp:review.createdAt,via:"datalink",paymentId:review.id});
     await this.sendTo(link, {id:review.id,timestamp:review.createdAt,requestId:review.requestId,amount:{value:String(review.amount),asset:UNIT},memo:review.memo,endpoint:[ENDPOINT.cashu,token]});
     this.cashuSent.add(review.id);
+  }
+  private cashuSendable(payment:StoredPayment):boolean {
+    return payment.state==="pending" && !this.reclaims.has(payment.id);
   }
   /**
    * A reviewed Cashu payment's token again, as reconciling it asks: only if it never went in this run. One that went is

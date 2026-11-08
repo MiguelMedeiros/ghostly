@@ -37,9 +37,15 @@ export function keysetRefused(error:unknown):boolean{
 }
 export const NEVER_REACHED_MINT="The payment never reached the mint: nothing was sent, and the sats are back in your wallet. You can pay again.";
 
+/**
+ * A Take it back of the payment under way, if one is (`PaymentDesk.takingBack`): settles once it is over, with the
+ * payment's state then.
+ */
+export type TakingBack=(paymentId:string)=>Promise<string|undefined>|undefined;
+
 export class CashuAdapter implements PaymentAdapter<CashuPrepared> {
  readonly method='cashu' as const;
- constructor(private wallet:CashuWallet,private publish:(review:PaymentReview,token:string)=>Promise<void>){}
+ constructor(private wallet:CashuWallet,private publish:(review:PaymentReview,token:string)=>Promise<void>,private takingBack:TakingBack=()=>undefined){}
  async prepare(target:PaymentTarget,amount:number,feeCap:number){
   // A test mint (the public ones, or one on this machine) pays in test sats, named cashu-test; any other in sats.
   if(target.method!=='cashu' || target.network!==(mintNetwork(target.provider)==='testnet'?'cashu-test':'bitcoin'))throw new Error('Cashu mint/network mismatch');
@@ -71,11 +77,25 @@ export class CashuAdapter implements PaymentAdapter<CashuPrepared> {
   * What the mint and this wallet know of a payment whose token went out: paid once the mint reads its ecash spent,
   * unless this wallet is the one that spent it, taking the payment back. Asked in that order: ecash taken back while
   * the mint was being asked reads spent too. Undefined while the contact has not taken it.
+  * A Take it back of it under way when the mint is asked, or started while it answers, is waited for: its swap makes
+  * the ecash read spent before the ecash is back here. Ended with the ecash back, the payment was taken back; ended
+  * with the mint saying the contact had it first, it is paid; ended any other way, this round's spent read proves
+  * nothing, and the next round asks again (nothing is sent meanwhile).
   */
  private async outcome(review:PaymentReview,prepared:CashuPrepared){
+  const before=this.takingBack(review.id);
   const spent=await this.wallet.reviewedCashuSpent(prepared);
-  if(await this.wallet.reviewedCashuTakenBack(review.id))return {settled:false,failed:true,error:engineText('paymentTakenBack')};
+  const reclaim=this.takingBack(review.id) ?? before;
+  const ended=await reclaim;
+  const back=await this.takenBack(review.id);
+  if(back)return back;
+  if(reclaim && ended!=='settled')return {settled:false};
   return spent?{settled:true}:undefined;
+ }
+ /** Taken back, waiting for a Take it back under way first: the payment then ends failed, its sats back here. */
+ private async takenBack(id:string){
+  await this.takingBack(id);
+  return await this.wallet.reviewedCashuTakenBack(id)?{settled:false,failed:true,error:engineText('paymentTakenBack')}:undefined;
  }
  /** `persist` saves the intent as it is: required, since the abandon path must be durable before it releases anything. */
  async reconcile(review:PaymentReview,prepared:CashuPrepared,persist:()=>Promise<void>){
@@ -85,7 +105,12 @@ export class CashuAdapter implements PaymentAdapter<CashuPrepared> {
   const known=await this.outcome(review,prepared);
   if(known)return known;
   const token=prepared.token ?? await this.wallet.recoverReviewedCashu(review,prepared);
-  if(token)await this.publish(review,token); // Repeat the same token, never mint a replacement.
+  if(token){
+   await this.publish(review,token); // Repeat the same token, never mint a replacement.
+   // Sending it can wait on the chat for a while (a restart dials the contact): Take it back may have ended it meanwhile.
+   const back=await this.takenBack(review.id);
+   if(back)return back;
+  }
   // No token: the swap may never have reached the mint (it was unreachable when approved). Only the mint can say so,
   // and only once no request of it can still be on its way: then the payment failed and its inputs come back.
   if(!token && Date.now()>=swapSettledAt(review,prepared) && await this.wallet.reviewedCashuNeverSwapped(prepared))return this.abandon(prepared,persist);
