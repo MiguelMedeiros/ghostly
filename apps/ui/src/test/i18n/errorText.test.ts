@@ -883,6 +883,14 @@ describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
     expect(errorText("Your contact has payments off in this chat, or needs an updated Ghostly", english)).toBe(english("chat.payments.offOrOld"));
   });
 
+  it.each([
+    ["en", "Nothing to take back"], ["pt", "Não há nada para pegar de volta"], ["es", "No hay nada que recuperar"], ["fr", "Rien à reprendre"],
+    ["it", "Niente da riprendere"], ["ja", "取り戻すものはありません"], ["zh", "没有可取回的内容"], ["ar", "لا يوجد ما يُستعاد"],
+  ] as const)("Take it back with nothing left says so with the button's verb in %s, not Redeem's, on Cashu as on Fedimint", (language, said) => {
+    expect(errorText("Nothing to reclaim", translators[language])).toBe(said);
+    expect(errorText("Nothing to take back", translators[language])).toBe(said);
+  });
+
   it("the values stay, and amounts are written the app's way", () => {
     expect(errorText("shop.example takes between 5 and 1,000,000 sats", translators.pt)).toBe("shop.example aceita de 5 a 1.000.000 sats");
     expect(errorText("Could not reach rpc.example", translators.pt)).toBe("Não foi possível acessar rpc.example");

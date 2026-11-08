@@ -432,7 +432,6 @@
     "notesRedeemed": "These notes were already redeemed",
     "notesTooSmall": "These notes are worth less than a sat",
     "notesUnknownFederation": "These notes are from a federation I have not joined",
-    "nothingToReclaim": "Nothing to reclaim",
     "nothingToTakeBack": "Nothing to take back",
     "offHere": "{{network}} {{method}} is off in this chat",
     "offline": "You are offline",

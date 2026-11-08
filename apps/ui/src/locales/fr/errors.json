@@ -432,7 +432,6 @@
     "notesRedeemed": "Ces notes ont déjà été encaissées",
     "notesTooSmall": "Ces notes valent moins d'un sat",
     "notesUnknownFederation": "Ces notes viennent d'une fédération que je n'ai pas rejointe",
-    "nothingToReclaim": "Rien à récupérer",
     "nothingToTakeBack": "Rien à reprendre",
     "offHere": "{{method}} {{network}} est désactivé dans cette discussion",
     "offline": "Vous êtes hors ligne",

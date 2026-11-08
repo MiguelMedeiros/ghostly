@@ -432,7 +432,6 @@
     "notesRedeemed": "Estas notas ya se canjearon",
     "notesTooSmall": "Estas notas valen menos de un sat",
     "notesUnknownFederation": "Estas notas son de una federación a la que no me he unido",
-    "nothingToReclaim": "No hay nada que reclamar",
     "nothingToTakeBack": "No hay nada que recuperar",
     "offHere": "{{method}} {{network}} está desactivado en este chat",
     "offline": "Estás sin conexión",
