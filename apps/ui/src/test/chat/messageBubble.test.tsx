@@ -707,7 +707,7 @@ describe("MessageBubble: delivery", () => {
   it("⋮ → Cancel sending drops what waits for your contact, in the place of Delete and with no confirmation", async () => {
     const { user, engine } = bubble({ sender: "me", delivery: "waiting", deliveryError: "Longer than the 256 bytes the DHT carries: it is sent when you are live." });
     act(() => engine.update({ links: [linkView()] }));
-    engine.on("deleteMessage", () => undefined);
+    engine.on("deleteMessage", () => ({ everyone: false }));
     await user.click(screen.getByTestId("message-options"));
     expect(screen.queryByTestId("message-retry")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Cancel sending" }));

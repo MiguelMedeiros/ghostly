@@ -571,8 +571,10 @@ const METHODS: Record<string, Method> = {
     const link = chatNotGroup(ctx, params, "message delete", `${/^[\w.:<>-]+$/.test(ref) ? ref : JSON.stringify(ref)} --everyone`);
     const messageId = str(params, "message", true);
     if (!(await node(ctx).getMessage(link.id, messageId))) throw noMessage(messageId, { group: false, ref: str(params, "chat", true) });
-    await node(ctx).deleteMessage({ linkId: link.id, messageId });
-    return { chat: link.id, messageId, deleted: messageId, everyone: false };
+    // A waiting text of mine is cancelled; one the outbox already handed to the link may be out, so the engine deletes it
+    // for everyone instead, and `everyone` says so.
+    const { everyone } = node(ctx).deleteMessage({ linkId: link.id, messageId });
+    return { chat: link.id, messageId, deleted: messageId, everyone };
   },
   /** A chat's or a group's (`group:<id>`, or its name) message, as the app's details show it; a group's said `No chat`. */
   async "chat.details"(ctx, params) {
