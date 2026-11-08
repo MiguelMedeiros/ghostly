@@ -187,8 +187,10 @@ class NoEcashError extends Error {
 const arkSats=(network:string)=>network==="bitcoin"?"sats":"test sats";
 /** The English line kept with a payment message (the CLI and older apps show it): test sats say so. */
 const satsOn=(network:WalletNetwork)=>network==="testnet"?"test sats":"sats";
+/** An amount in that line, "21,000" whatever digits the device's own language writes numbers with. */
+const englishAmount=(amount:number)=>amount.toLocaleString("en-US");
 /** The sender's chat line of ecash sent in a chat, from its record: one id, whether written as it goes or on a later start. */
-const ecashLine=(payment:StoredPayment):StoredMessage=>({linkId:payment.linkId,id:`me_${payment.createdAt}`,text:`⚡ ${payment.amount.toLocaleString()} ${satsOn(paymentNetwork(payment))}`,
+const ecashLine=(payment:StoredPayment):StoredMessage=>({linkId:payment.linkId,id:`me_${payment.createdAt}`,text:`⚡ ${englishAmount(payment.amount)} ${satsOn(paymentNetwork(payment))}`,
   sender:"me",timestamp:payment.createdAt,via:"datalink",paymentId:payment.id});
 type AskMethod = "arkade" | "usdt" | "bark" | "bitcoin" | "spark" | "fedimint";
 const ENDPOINT_OF: Record<Exclude<AskMethod, "usdt" | "fedimint">, string> = { arkade: ENDPOINT.arkade, bark: ENDPOINT.bark, bitcoin: ENDPOINT.bitcoin, spark: ENDPOINT.spark };
@@ -490,7 +492,7 @@ export class PaymentDesk {
       const invoice = invoiceFederation ? (await fedimint.createInvoice(invoiceFederation, params.amount, memo ?? "Ghostly request", id)).invoice : undefined;
       const test = fedimint.federation(federations[0])?.network !== "bitcoin";
       await this.save({id,linkId:params.linkId,kind:"request",direction:"out",amount:params.amount,unit:UNIT,memo,state:"pending",createdAt:params.timestamp,federations,invoice,federation:invoiceFederation,ask:params.ask,network});
-      await this.host.storeMessage({linkId:params.linkId,id:`me_${params.timestamp}`,text:`Requested ${params.amount.toLocaleString()} ${test ? "test sats" : "sats"} on Fedimint`,sender:"me",timestamp:params.timestamp,via:"datalink",paymentId:id});
+      await this.host.storeMessage({linkId:params.linkId,id:`me_${params.timestamp}`,text:`Requested ${englishAmount(params.amount)} ${test ? "test sats" : "sats"} on Fedimint`,sender:"me",timestamp:params.timestamp,via:"datalink",paymentId:id});
       await link.sendPaymentRequest({id,timestamp:params.timestamp,amount:{value:String(params.amount),asset:UNIT},memo,ask:params.ask,network,
         endpoints:[[ENDPOINT.fedimint,fedimintRequestPayload(federations)],...(invoice ? [[ENDPOINT.bolt11,invoice] as [string,string]] : [])]});
       return {paymentId:id};
@@ -547,7 +549,7 @@ export class PaymentDesk {
     await this.host.storeMessage({
       linkId: params.linkId,
       id: `me_${params.timestamp}`,
-      text: `⚡ Requested ${params.amount.toLocaleString()} ${network === "testnet" ? "test sats" : "sats"}`,
+      text: `⚡ Requested ${englishAmount(params.amount)} ${network === "testnet" ? "test sats" : "sats"}`,
       sender: "me",
       timestamp: params.timestamp,
       via: held ? "hold" : "datalink",
@@ -590,7 +592,7 @@ export class PaymentDesk {
     if (params.rail === "cashu" && !mints.length) throw new Error(`You have no ${networkLabel(network)} Cashu wallet: create one in Wallet → New`);
     const linkId = `group:${params.groupId}`;
     await this.save({ id, linkId, group: params.groupId, kind: "request", direction: "out", amount: params.amount, unit: UNIT, memo, state: "pending", createdAt: params.timestamp, invoice: quote?.invoice, mints, network });
-    await this.host.storeMessage({ linkId, id: `me_${params.timestamp}`, text: `⚡ Requested ${params.amount.toLocaleString()} ${satsOn(network)} from the group`, sender: "me", timestamp: params.timestamp, via: "datalink", paymentId: id });
+    await this.host.storeMessage({ linkId, id: `me_${params.timestamp}`, text: `⚡ Requested ${englishAmount(params.amount)} ${satsOn(network)} from the group`, sender: "me", timestamp: params.timestamp, via: "datalink", paymentId: id });
     // Members whose edge is down get it when it opens (replay).
     for (const edge of this.host.groupLinks?.(params.groupId) ?? []) await this.sendGroupRequest(edge, this.payments.get(id)!).catch(() => {});
     return { paymentId: id };
@@ -982,7 +984,7 @@ export class PaymentDesk {
     await this.host.storeMessage({
       linkId,
       id: `peer_${request.timestamp}`,
-      text: `⚡ Requested ${amount.toLocaleString()} ${satsOn(network)}`,
+      text: `⚡ Requested ${englishAmount(amount)} ${satsOn(network)}`,
       sender: "peer",
       timestamp: request.timestamp,
       via: held ? "hold" : "datalink",
@@ -1113,7 +1115,7 @@ export class PaymentDesk {
     await this.host.storeMessage({
       linkId,
       id: `peer_${record.createdAt}`,
-      text: `⚡ ${amount.toLocaleString()} ${isWorthlessMint(mint) ? "test sats" : "sats"}`,
+      text: `⚡ ${englishAmount(amount)} ${isWorthlessMint(mint) ? "test sats" : "sats"}`,
       sender: "peer",
       timestamp: record.createdAt,
       via: "datalink",
@@ -1667,7 +1669,7 @@ export class PaymentDesk {
       if (!known || known.linkId !== review.linkId) throw new Error("The Fedimint payment is not in the journal");
       // Written down first: from here on these notes are the only copy of that money.
       await this.save({ ...known, token: notes, fedimintOp: operationId });
-      await this.host.storeMessage({ linkId: review.linkId!, id: `me_${review.createdAt}`, text: `${review.amount.toLocaleString()} ${review.network === "bitcoin" ? "sats" : "test sats"} on Fedimint`, sender: "me", timestamp: review.createdAt, via: "datalink", paymentId: review.id });
+      await this.host.storeMessage({ linkId: review.linkId!, id: `me_${review.createdAt}`, text: `${englishAmount(review.amount)} ${review.network === "bitcoin" ? "sats" : "test sats"} on Fedimint`, sender: "me", timestamp: review.createdAt, via: "datalink", paymentId: review.id });
       await this.sendFedimint(this.payments.get(review.id)!);
     },
     republish: async (review: PaymentReview) => { const known = this.payments.get(review.id); if (known?.token && known.state === "pending") await this.sendFedimint(known); },
@@ -1767,7 +1769,7 @@ export class PaymentDesk {
     // Written once the federation took the notes (as Cashu's once the mint took the ecash); the same id on a retry.
     if (state) {
       const test = fedimintNetwork(fedimint.federation(payment.federation)?.network) === "testnet";
-      await this.host.storeMessage({ linkId: payment.linkId, id: `peer_${payment.createdAt}`, text: `⚡ ${payment.amount.toLocaleString()} ${test ? "test sats" : "sats"} on Fedimint`, sender: "peer", timestamp: payment.createdAt, via: "datalink", paymentId: id });
+      await this.host.storeMessage({ linkId: payment.linkId, id: `peer_${payment.createdAt}`, text: `⚡ ${englishAmount(payment.amount)} ${test ? "test sats" : "sats"} on Fedimint`, sender: "peer", timestamp: payment.createdAt, via: "datalink", paymentId: id });
     }
     if (state !== "done") return;
     await this.save({ ...this.current(payment), state: "settled", token: undefined, error: undefined });
