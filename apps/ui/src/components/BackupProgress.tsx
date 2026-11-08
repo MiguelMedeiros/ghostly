@@ -16,7 +16,18 @@ export function BackupProgress({ job, onCancel }: { job: BackupJob; onCancel: ()
   const { t } = useI18n();
   const phone = useIsMobile();
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => { ref.current?.focus({ preventScroll: true }); }, []);
+  // Closed, the focus goes back to the button that opened it, as the work's end enables it again (a frame later): it
+  // was left on the page, and a refused restore had the next Tab start from the top. Not if it went on elsewhere.
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    ref.current?.focus({ preventScroll: true });
+    return () => {
+      requestAnimationFrame(() => {
+        const lost = !document.activeElement || document.activeElement === document.body;
+        if (lost && opener?.isConnected) opener.focus({ preventScroll: true });
+      });
+    };
+  }, []);
   // Tab and Shift+Tab stay on Cancel (or the dialog, once Cancel is gone): from Cancel they went on to the page behind.
   useTabTrap(ref);
   const moving = job.bytesTotal > 0 && (job.stage === "writing" || job.stage === "restoring");
