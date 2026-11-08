@@ -433,7 +433,6 @@
     "notesRedeemed": "这些票据已经兑换过了",
     "notesTooSmall": "这些票据的价值不到 1 sat",
     "notesUnknownFederation": "这些票据来自一个我没有加入的联盟",
-    "nothingToReclaim": "没有可收回的内容",
     "nothingToTakeBack": "没有可取回的内容",
     "offHere": "此聊天中已关闭 {{network}} {{method}}",
     "offline": "你已离线",
