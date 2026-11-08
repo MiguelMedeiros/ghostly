@@ -12,9 +12,11 @@
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} new messages",
     "messagesFrom": "{{count}} new messages from {{name}}",
+    "notSent": "Your message “{{text}}” was not sent",
     "notSentCount": "{{count}} messages not sent",
     "pinMoved": "Moved to place {{place}} of {{count}} pinned chats",
     "rowMoved": "Moved to place {{place}} of {{count}}",
+    "waiting": "Your message “{{text}}” is waiting for your contact to be online",
     "waitingCount": "{{count}} messages waiting for your contact to be online"
   },
   "audio": {
