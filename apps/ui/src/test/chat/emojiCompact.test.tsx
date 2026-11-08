@@ -11,10 +11,11 @@ import { renderApp } from "../render";
 // covers: app.emoji-picker, app.composer.expressions, app.mobile-layout
 
 /**
- * A phone on its side with the keyboard up for the panel's search: the grabber, the categories, the search row and
- * the Emoji/GIF switch took the whole sheet above the keyboard and left its results 8 px (667 × 375, 175 px visible;
- * the same in two panes at 874 × 402, 162 px visible). There the panel goes compact: the search with the switch beside
- * it over the results, as tall as what the keyboard leaves. What a browser measures (two whole rows of 44 px emoji):
+ * A short screen with the keyboard up for the panel's search: the grabber, the categories, the search row and the
+ * Emoji/GIF switch took the whole sheet above the keyboard and left its results 8 px on a phone on its side (667 × 375,
+ * 175 px visible; the same in two panes at 874 × 402, 162 px visible), and one row of emoji on the smallest phone held
+ * upright (320 × 568, 315 px visible). There the panel goes compact: the search with the switch beside it over the
+ * results, as tall as what the keyboard leaves. What a browser measures (two whole rows of 44 px emoji):
  * e2e/web/emoji-position.spec.ts.
  */
 const CSS = readFileSync(join(fileURLToPath(import.meta.url), "../../../components/composer/composer.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
@@ -97,11 +98,19 @@ describe("the emoji/GIF panel with the keyboard up on a short screen", () => {
     expect(panel).not.toHaveAttribute("data-compact");
   });
 
-  it("a phone held upright keeps the usual panel with the keyboard up (320 × 568, 253 px keyboard), as does one on its side with the keyboard down", async () => {
+  it("the smallest phone held upright (320 × 568, 253 px keyboard): compact too, the usual panel would show one row of emoji", async () => {
     keyboardUp(320, 568, 253);
     const { panel } = await openAndSearch();
+    expect(panel).toHaveAttribute("data-compact");
+    expect(panel.style.getPropertyValue("--expression-height")).toBe(`${315 - 8}px`);
+    expect(panel.style.maxHeight).toBe(`${315 - 8}px`);
+  });
+
+  it("a phone held upright with room for two rows (375 × 667, 260 px keyboard) keeps the usual panel", async () => {
+    keyboardUp(375, 667, 260);
+    const { panel } = await openAndSearch();
     expect(panel).not.toHaveAttribute("data-compact");
-    expect(panel.style.getPropertyValue("--expression-height")).toBe(`${Math.round(315 * 0.82)}px`);
+    expect(panel.style.getPropertyValue("--expression-height")).toBe(`${Math.round(407 * 0.82)}px`);
   });
 
   it("on its side with the keyboard down, it is not compact either", async () => {

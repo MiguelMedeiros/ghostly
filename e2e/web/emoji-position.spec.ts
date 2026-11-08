@@ -69,16 +69,16 @@ test("mobile emoji sheet stays visible and supports touch selection and dismissa
 });
 
 /**
- * A phone on its side with the keyboard up for the panel's search (iOS's keyboard: only the visual viewport gets
- * shorter): the grabber, the categories, the search and the switch left the results 8 px and no emoji. The panel goes
- * compact there, the switch beside the search, and two whole rows of 44 px emoji show above the keyboard. Held upright,
- * the panel is the usual one, as before.
+ * A short screen with the keyboard up for the panel's search (iOS's keyboard: only the visual viewport gets shorter):
+ * the grabber, the categories, the search and the switch left the results 8 px and no emoji on a phone on its side,
+ * and one row on the smallest phone upright. The panel goes compact there, the switch beside the search, and two whole
+ * rows of 44 px emoji show above the keyboard. A phone upright with room for two rows keeps the usual panel.
  */
 test.describe("emoji search with the keyboard up",()=>{
  const cases=[
   {name:"a phone on its side",width:667,height:375,keys:200,compact:true,rows:2},
   {name:"two panes on a phone on its side",width:874,height:402,keys:240,compact:true,rows:2},
-  {name:"the smallest phone upright",width:320,height:568,keys:253,compact:false,rows:1},
+  {name:"the smallest phone upright",width:320,height:568,keys:253,compact:true,rows:2},
   {name:"a phone upright",width:375,height:667,keys:260,compact:false,rows:2},
  ];
  for(const c of cases){

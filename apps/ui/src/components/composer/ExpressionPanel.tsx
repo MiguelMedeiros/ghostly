@@ -25,12 +25,18 @@ const MARGIN = 8, GAP = 8, WIDTH = 460, HEIGHT = 440;
 /** The sheet's categories, search and switch take about 160 px: below this a phone on its side shows no emoji row. */
 const SHEET_FLOOR = 290;
 /**
- * A visible height under this with the keyboard up (a phone on its side, typing a search) leaves the grabber, the
- * categories, the search and the switch no room for any emoji row: the panel goes compact (`data-compact`), the
- * search with the switch beside it over the results, as tall as the screen above the keyboard. A phone held upright
- * (315 px left by the smallest one's keyboard) keeps the usual panel.
+ * With the keyboard up (typing a search), a visible height under this leaves the usual panel fewer than two whole rows
+ * of 44 px emoji, whichever way the phone is held: the panel goes compact (`data-compact`), the search with the switch
+ * beside it over the results, as tall as the screen above the keyboard.
+ * The usual phone sheet takes 82% of the visible height, and its chrome about 210 px: the top border 1, the grabber
+ * 16 (8 + 4 + 4), the categories 46 (2 + 44), the search row 50 (10 + 36 + 4), the results' heading 34 (10 + 19.5 + 4)
+ * and the list's 8 px bottom padding, the tab's border 1, the switch 54 (8 + 3 + 32 + 3 + 8). Two rows need
+ * 210 + 2 × 44 = 298 px of sheet, 298 / 0.82 ≈ 364 px visible. So the smallest phone upright (320 × 568, 253 px
+ * keyboard: 315 px, one row) and a phone on its side (175 px, none) go compact; a 375 × 667 one upright (260 px
+ * keyboard: 407 px, a 334 px sheet, two rows) keeps the usual panel. The two-pane popover has no grabber but stands
+ * on the composer, which takes about as much: the same height holds there.
  */
-export const COMPACT_BELOW = 280;
+export const COMPACT_BELOW = 364;
 
 /**
  * Emoji and GIFs in one panel, as WhatsApp has them: category icons and a search field on top, the grid, and a
@@ -73,9 +79,10 @@ export function ExpressionPanel({ boundsRef, dismissRef, onEmoji, onGif, onClose
       const left = viewport?.offsetLeft ?? 0, top = viewport?.offsetTop ?? 0;
       const width = viewport?.width ?? window.innerWidth, height = viewport?.height ?? window.innerHeight;
       const keyboard = document.documentElement.dataset.keyboard === "true";
-      // Compact while the keyboard is up on a short screen and the focus is in the panel (its search). A tap on its
-      // switch or an emoji can leave the focus nowhere for a moment: it stays compact until the keyboard goes down,
-      // so nothing moves under the finger. A field outside it (the message) gets the usual panel back.
+      // Compact while the keyboard is up, the usual panel would show fewer than two rows of results (COMPACT_BELOW)
+      // and the focus is in the panel (its search). A tap on its switch or an emoji can leave the focus nowhere for a
+      // moment: it stays compact until the keyboard goes down, so nothing moves under the finger. A field outside it
+      // (the message) gets the usual panel back.
       const focused = document.activeElement;
       const inside = !!focused && !!ref.current?.contains(focused);
       const nowhere = !focused || focused === document.body;
