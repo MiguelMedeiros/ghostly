@@ -1179,11 +1179,11 @@ export class GhostlyNode implements EngineImplementation {
   }, {
     method:"cashu",
     prepare:(target,amount,feeCap)=>new CashuAdapter(this.wallet,(r,t)=>this.desk.recordCashu(r,t)).prepare(target,amount,feeCap),
-    execute:(review,prepared,persist)=>new CashuAdapter(this.wallet,(r,t)=>this.desk.recordCashu(r,t)).execute(review,prepared as CashuPrepared,persist),
+    execute:(review,prepared,persist)=>new CashuAdapter(this.wallet,(r,t)=>this.desk.recordCashu(r,t),(id)=>this.desk.takingBack(id)).execute(review,prepared as CashuPrepared,persist),
     // With the intent's own save: a payment that never reached the mint is marked abandoned before its sats come back.
     reconcile:(review,prepared,persist)=>{
       if(!persist)throw new Error("A Cashu payment is reconciled with its intent saved");
-      return new CashuAdapter(this.wallet,(r,t)=>this.desk.resendCashu(r,t)).reconcile(review,prepared as CashuPrepared,persist);
+      return new CashuAdapter(this.wallet,(r,t)=>this.desk.resendCashu(r,t),(id)=>this.desk.takingBack(id)).reconcile(review,prepared as CashuPrepared,persist);
     },
   }], (review) => {
     if (this.openReviews) this.noteOpenReviews([review]);
