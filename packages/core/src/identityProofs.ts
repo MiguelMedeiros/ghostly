@@ -588,6 +588,8 @@ export class IdentityExchange {
     let reason: string | undefined;
     /** Its owner withdrew the proof while this check ran: no result goes out (see below). */
     let withdrawn = false;
+    /** The check could not run on this side (IdentityCheckUnavailable). */
+    let unavailable = false;
     try {
       // Before anything is checked or looked up: a contact past the bound costs this side nothing more.
       // The checked subject is not known yet: an identity kept under the binding's subject may be the one replaced.
@@ -603,7 +605,7 @@ export class IdentityExchange {
       // fails is not a refusal, a revocation found is.
       if (await this.options.revoked?.(statement).catch(() => false)) throw new Error(REVOKED);
       verified = result;
-    } catch (e) { error = peerError(e); reason = shortError(e); }
+    } catch (e) { error = peerError(e); reason = shortError(e); unavailable = e instanceof IdentityCheckUnavailable; }
     // Consuming the nonce and recording the outcome are one transaction.
     await this.options.storage.update(l => {
       const challenge = challengeOf(l);
@@ -620,9 +622,18 @@ export class IdentityExchange {
       if (verified && revokedHere(l.received, id)) { verified = undefined; error = reason = REVOKED; }
       const received = verified && receivedWithRoom(l.received, id, r => r.binding.provider === binding.provider && r.verified.subject === subject, now);
       if (verified && !received) { verified = undefined; error = reason = TOO_MANY_RECEIVED; }
+      // This proof, held from this contact already, presented again (its result was lost, so it was asked again): the
+      // check settles the held copy. One that could not run leaves a verified copy standing, and the contact is told it
+      // is held; one that failed turns it unconfirmed, as a re-check does.
+      const held = verified ? undefined : l.received.find(r => r.id === id && r.presenter === scope.subject && r.audience === scope.audience &&
+        (r.status === "verified" || r.status === "unconfirmed"));
+      const stands = held?.status === "verified" && unavailable;
+      if (stands) { verified = held.verified; error = reason = undefined; }
       const logged = this.log(l, { type: "result", side: "theirs", proof: id, requested: challenge.id, provider: binding.provider,
         subject: verified?.subject ?? binding.subject, ok: !!verified, ...(reason ? { error: reason } : {}) });
-      if (!verified || !received) return { ...logged, challenges };
+      if (stands) return { ...logged, challenges };
+      if (!verified || !received) return { ...logged, challenges, received: held && !unavailable
+        ? l.received.map(r => r === held ? { ...r, checkedAt: now, status: "unconfirmed" as const, error: reason } : r) : l.received };
       // Its owner withdrew it while it was being checked: kept as if the withdraw had come just after.
       const record: ReceivedIdentity = { id, binding, evidence, verified, presenter: scope.subject, audience: scope.audience, context: scope.context,
         verifiedAt: now, checkedAt: now, status: withdrawn ? "withdrawn" : "verified" };

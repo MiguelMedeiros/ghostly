@@ -500,3 +500,58 @@ describe("identity timeline, from the exchange", () => {
     expect(tl(w, bob, alice).map(e => e.reason ?? e.kind)).toEqual(["shared", "revoked"]);
   });
 });
+
+describe("a share asked again after its result was lost", () => {
+  /** Alice shares; Bob verifies and keeps it, but his result never reaches her (the link closed during his check). */
+  async function lostResult(second: () => Promise<VerifiedIdentity>) {
+    const w = world(), { alice, bob } = w.ids;
+    let check = 0;
+    let release!: () => void;
+    const held = new Promise<void>(r => { release = r; });
+    const ab = w.peer(alice, bob, "a".repeat(64));
+    w.peer(bob, alice, "a".repeat(64), { verify: async (s, e) => {
+      if (++check === 1) { await held; return fakeVerify(s, e); }
+      return second();
+    } });
+    const id = w.addProof();
+    await ab.share(id, true);
+    await vi.waitFor(() => expect(check).toBe(1));
+    w.online.delete(`${alice}>${bob}`);
+    release();
+    await vi.waitFor(() => expect(w.ledger(bob, alice).received[0]?.status).toBe("verified"));
+    await new Promise(r => setTimeout(r, 0));
+    expect(w.ledger(alice, bob).shared[0].status).toBe("pending");
+    // Reconnect: the share still pending is asked again, and Bob checks it a second time.
+    w.online.add(`${alice}>${bob}`);
+    w.advance(10);
+    ab.ready();
+    await vi.waitFor(() => expect(check).toBe(2));
+    await vi.waitFor(() => expect(w.ledger(alice, bob).shared[0].status).not.toBe("pending"));
+    const card = (me: string, them: string) => (w.ledger(me, them).timeline ?? []).map(e => `${e.kind}:${e.state}`);
+    return { w, alice, bob, card };
+  }
+
+  it("a second check that could not run leaves the held copy standing, and both sides say it is held", async () => {
+    const { w, alice, bob, card } = await lostResult(async () => { throw new IdentityCheckUnavailable("probe resolver could not be reached"); });
+    expect(w.ledger(bob, alice).received[0].status).toBe("verified");
+    expect(w.ledger(alice, bob).shared[0].status).toBe("accepted");
+    expect(card(alice, bob)).toEqual(["shared:verified"]);
+    expect(card(bob, alice)).toEqual(["shared:verified"]);
+  });
+
+  it("a second check that fails for a real reason turns the held copy unconfirmed, and the sharer is told", async () => {
+    const { w, alice, bob, card } = await lostResult(async () => { throw new Error("The record is gone"); });
+    expect(w.ledger(bob, alice).received[0]).toMatchObject({ status: "unconfirmed", error: "The record is gone", checkedAt: w.now() });
+    expect(w.ledger(alice, bob).shared[0]).toMatchObject({ status: "rejected", error: "Your contact could not verify it" });
+    expect(card(alice, bob)).toEqual(["shared:failed"]);
+    expect(card(bob, alice)).toEqual(["shared:failed"]);
+  });
+
+  it("a second check that passes refreshes the held copy and settles the share", async () => {
+    const { w, alice, bob, card } = await lostResult(async () => ({ subject: externalKey, source: "Test signature" }));
+    expect(w.ledger(bob, alice).received).toEqual([expect.objectContaining({ status: "verified", checkedAt: w.now() })]);
+    expect(w.ledger(alice, bob).shared[0].status).toBe("accepted");
+    expect(card(alice, bob)).toEqual(["shared:verified"]);
+    expect(card(bob, alice)).toEqual(["shared:verified"]);
+  });
+});
