@@ -165,7 +165,7 @@ describe("the chat's Apps with an app that comes with Ghostly, never opened here
   const offer: BuiltInAppOffer = { ref: REF, publisher: REF.split("/")[0]!, name: "chess", fingerprint: "yz7m oxuc bd4u 8aqt", digest: "d", url: "https://raw.githubusercontent.com/a/chess/HEAD/app.ghostlyapp", title: "Chess", tagline: "Play chess" };
   const carried: AppPreview = {
     digest: "d", ref: REF, publisher: offer.publisher, fingerprint: offer.fingerprint, from: offer.url, icon: null, install: "new", asks: ["chat"], carried: true,
-    run: { status: "ok" }, listedBy: [], unknownPublisher: false,
+    run: { status: "ok" }, listedBy: [], unknownPublisher: false, stage: "screen",
     manifest: { ghostlyApp: 1, publisher: offer.publisher, name: "chess", version: "1.2.0", sequence: 7, kind: "mini-app", title: "Chess", tagline: "Play chess",
       entry: "index.html", permissions: ["chat"], runtime: { host: ">=1.2", clients: ["web", "desktop"] }, license: "MIT", files: [] },
   };

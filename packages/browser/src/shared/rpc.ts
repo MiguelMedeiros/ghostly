@@ -585,7 +585,7 @@ export interface EngineApi {
    * Installs (or updates to) the app `appPreview` fetched, by its digest; `grant` holds every permission it asks for,
    * `asks` what the screen listed (`AppPreview.asks`): an install that adds more now is refused with `permissions-changed`.
    */
-  appInstall(params: { digest: string; grant: string[]; asks?: string[] }): import("../engine/apps").InstalledAppView;
+  appInstall(params: { stage?: string; digest: string; grant: string[]; asks?: string[] }): import("../engine/apps").InstalledAppView;
   /**
    * Installs the waiting update whose new permissions the person accepted; `sequence` and `added` what the screen listed
    * (`InstalledAppView.pending`): another update waiting now, or one that adds more, is refused with `permissions-changed`.
