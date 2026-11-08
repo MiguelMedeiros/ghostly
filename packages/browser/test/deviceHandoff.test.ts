@@ -846,6 +846,98 @@ describe("a copy that stops (WISP 06 § States and events)", () => {
   });
 });
 
+describe("a staging namespace that is not installed (WISP 06 § Installing the staged state)", () => {
+  const FAKE = { toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] as const, shouldAdvanceTime: true };
+
+  /** A pull that has staged some of the files, and goes on no further. */
+  async function partlyStaged(w: World): Promise<string> {
+    for (let i = 0; i < 4; i++) w.profile.add(`f${i}`, bytesOf(HANDOFF_PIECE_BYTES * 2 + i));
+    let pieces = 0;
+    w.link.meddle = (from, frame) => (from === A && frame.t === "handoff-data" && ++pieces > 4 ? null : frame);
+    await w.taker.pull(PASSWORD);
+    await until(() => [...w.storage.spaces.values()].some((space) => space.held.size > 0));
+    return w.takerRecords.record.handoff!.staging!;
+  }
+
+  it("Cancel during the copy: the whole staging goes, files and all, and the record names none", async () => {
+    const w = world();
+    const staged = await partlyStaged(w);
+    await w.taker.cancel();
+    expect(w.taker.view()).toMatchObject({ step: "failed", failure: "cancelled" });
+    expect(w.storage.dropped).toEqual([staged]);
+    expect(w.storage.spaces.has(staged)).toBe(false);
+    expect(w.takerRecords.record.handoff?.staging).toBeUndefined();
+    expect(w.takerRecords.record.state).toBe("standby");
+    // Try again starts a new staging and moves the profile.
+    w.link.meddle = undefined;
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1);
+    expect(w.takerRecords.record.handoff!.staging).not.toBe(staged);
+  });
+
+  it("Cancel, and the staging's files could not all be removed: the record still names it, and the next start drops it", async () => {
+    const w = world();
+    const staged = await partlyStaged(w);
+    const drop = w.storage.drop.bind(w.storage);
+    w.storage.drop = async () => { throw new Error("The file is locked"); };
+    await w.taker.cancel();
+    expect(w.taker.view()).toMatchObject({ step: "failed", failure: "cancelled" });
+    expect(w.takerRecords.record.handoff).toMatchObject({ step: "stopped", staging: staged });
+    w.storage.drop = drop;
+    await w.takerRecords.amend({ handoff: { ...w.takerRecords.record.handoff!, at: Date.now() - HANDOFF_TIMINGS.stagingMs - 1 } });
+    await reloadTaker(w);
+    expect(w.storage.dropped).toEqual([staged]);
+    expect(w.takerRecords.record.handoff?.staging).toBeUndefined();
+  });
+
+  it("the giver's Cancel during the copy: the taker drops the whole staging too", async () => {
+    const w = world();
+    const staged = await partlyStaged(w);
+    await w.giver.cancel();
+    await until(() => w.taker.view()?.step === "failed");
+    expect(w.storage.dropped).toEqual([staged]);
+    expect(w.takerRecords.record.handoff?.staging).toBeUndefined();
+  });
+
+  it("a copy that stalled keeps its staged files for Try again", async () => {
+    vi.useFakeTimers({ ...FAKE, toFake: [...FAKE.toFake] });
+    const w = world();
+    const staged = await partlyStaged(w);
+    // Nothing from the giver reaches the taker any more.
+    w.link.meddle = (from, frame) => (from === A ? null : frame);
+    await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.stuckMs + HANDOFF_TIMINGS.stuckMs / 4);
+    await until(() => w.taker.view()?.failure === "stalled");
+    expect(w.storage.dropped).toEqual([]);
+    expect(w.storage.spaces.get(staged)!.held.size).toBeGreaterThan(0);
+    expect(w.takerRecords.record.handoff).toMatchObject({ step: "stopped", staging: staged });
+  });
+
+  it("a stopped staging kept past 24 hours goes at the next start; a younger one stays", async () => {
+    const w = world();
+    const note = { role: "taking" as const, step: "stopped", id: "x".repeat(22), peer: A, from: N, old: "ghostly" };
+    await w.storage.open("ghostly_stage8");
+    await w.takerRecords.amend({ handoff: { ...note, staging: "ghostly_stage8", at: Date.now() - HANDOFF_TIMINGS.stagingMs + 60_000 } });
+    await reloadTaker(w);
+    expect(w.storage.dropped).toEqual([]);
+    expect(w.takerRecords.record.handoff?.staging).toBe("ghostly_stage8");
+
+    await w.takerRecords.amend({ handoff: { ...note, staging: "ghostly_stage8", at: Date.now() - HANDOFF_TIMINGS.stagingMs - 1 } });
+    await reloadTaker(w);
+    expect(w.storage.dropped).toEqual(["ghostly_stage8"]);
+    expect(w.takerRecords.record.handoff?.staging).toBeUndefined();
+    expect(w.taker.view()).toBeNull();
+  });
+
+  it("a note that stopped mid-copy and is over 24 hours old: given up at start, its staging with it", async () => {
+    const w = world();
+    await w.storage.open("ghostly_stage8");
+    await w.takerRecords.amend({ handoff: { role: "taking", step: "receiving", id: "x".repeat(22), peer: A, from: N, old: "ghostly", staging: "ghostly_stage8", secret: toBase64Url(randomBytes(32)), at: Date.now() - HANDOFF_TIMINGS.giveUpMs - 1 } });
+    await reloadTaker(w);
+    expect(w.storage.dropped).toEqual(["ghostly_stage8"]);
+    expect(w.takerRecords.record.handoff?.staging).toBeUndefined();
+  });
+});
+
 describe("a push", () => {
   it("offers, and the taker's Use here moves the profile with no password", async () => {
     const w = world();
@@ -1424,21 +1516,21 @@ describe("pass 2 and the release", () => {
     expect(releases[0]).toBe(releases[1]);
   });
 
-  it("the giver cancels before the release: the taker drops the rest of pass 2, keeps its staged files and stays on standby", async () => {
+  it("the giver cancels before the release: the taker drops its whole staging and stays on standby", async () => {
     const w = world();
-    const file = w.profile.add("f1", bytesOf(5_000));
+    w.profile.add("f1", bytesOf(5_000));
     w.link.meddle = (from, frame) => (frame.t === "handoff-verified" ? null : frame);
     await w.taker.pull(PASSWORD);
     await until(() => w.quiesced.length === 1);
     await reloadGiver(w);
     await until(() => w.takerRecords.record.handoff?.step === "verified");
+    const staged = w.takerRecords.record.handoff!.staging!;
     await w.giver.cancel();
     await until(() => w.taker.view()?.step === "failed");
     expect(w.activeAgain).toBe(1);
     expect(w.giverRecords.record.state).toBe("active");
-    const space = w.storage.spaces.get(w.takerRecords.record.handoff!.staging!)!;
-    expect(space.restored).toBeNull();
-    expect([...space.held.values()].map((f) => f.sha256)).toEqual([file.sha256]);
+    expect(w.storage.dropped).toEqual([staged]);
+    expect(w.takerRecords.record.handoff?.staging).toBeUndefined();
     expect(w.takerRecords.record.state).toBe("standby");
   });
 
