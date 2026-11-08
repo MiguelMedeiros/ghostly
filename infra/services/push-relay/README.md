@@ -9,7 +9,7 @@ This is that relay: one Node file, no dependencies, nothing stored. It only post
 services (Google, Apple, Mozilla, Microsoft) on their default port, only forwards a request signed for Web Push
 (a VAPID `Authorization`) with the Web Push headers, and limits each address (an IPv6 one by its /64) to 30
 requests a minute, and each subscription (an endpoint with its VAPID key) to 30 forwards a minute from all
-addresses together. When its table of addresses, or of subscriptions, is full it forgets the one seen longest ago. A client has 15 seconds
+addresses together; a forward the push service refuses (a 4xx other than 429) counts against the sender's address only. When its table of addresses, or of subscriptions, is full it forgets the one seen longest ago. A client has 15 seconds
 to send its whole request; a request is weighed in bytes and one too large is refused before it is read, and so is
 a header named twice, or a Web Push header whose value `fetch` would not send (a NUL, a line break, another control
 character, a character above U+00FF), with a 400 that names the header (`{"error":"Bad TTL value"}`). It learns
