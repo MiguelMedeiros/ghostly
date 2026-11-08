@@ -856,7 +856,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       )}
       {/* A call could not use the microphone or camera (refused, or none there), or "Hide my IP from contacts" kept it
           from starting (the TURN server did not answer, or this app's calls cannot keep to it): it says why, and how to fix it. */}
-      {webrtc.mediaProblem && <CallMediaProblem problem={webrtc.mediaProblem} />}
+      {webrtc.mediaProblem && <CallMediaProblem problem={webrtc.mediaProblem} of={webrtc.mediaProblemOf} />}
       {/* The system paused our microphone in a call (an iPhone's Home Screen app while the screen is locked): the
           contact hears nothing until Ghostly is back on screen, and the call is still on. */}
       {webrtc.micPaused && !webrtc.mediaProblem && (

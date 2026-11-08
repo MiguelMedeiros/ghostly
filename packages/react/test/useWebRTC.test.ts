@@ -1115,6 +1115,7 @@ describe("when the prompt is refused or there is no device", () => {
     expect(call.fastPoll()).toBe(false);
     // The person is told why, for a while, and the chat's "call started" line is not left without an end.
     expect(call.result.current.mediaProblem).toBe("denied");
+    expect(call.result.current.mediaProblemOf).toBe("mic");
     expect(call.addCallEventMessage.mock.calls.map(([type]) => type)).toEqual(["call_started", "call_failed"]);
     act(() => { vi.advanceTimersByTime(MEDIA_PROBLEM_SHOWN_MS); });
     expect(call.result.current.mediaProblem).toBeNull();
@@ -1150,6 +1151,7 @@ describe("when the prompt is refused or there is no device", () => {
 
     expect(call.result.current.callState).toBe("connected");
     expect(call.result.current.mediaProblem).toBe("denied");
+    expect(call.result.current.mediaProblemOf).toBe("camera");
   });
 
   it.each([
@@ -1163,21 +1165,103 @@ describe("when the prompt is refused or there is no device", () => {
     expect(mediaProblem(new DOMException("", name))).toBe(problem);
   });
 
-  it("no camera when answering with video reports the error and hangs up instead of answering", async () => {
+  it("no camera when answering with video answers as a voice call, and says the camera is off", async () => {
     const call = renderCall();
     call.receive(remote.offer(Date.now(), true));
     act(() => { void call.result.current.acceptCall(true); });
-    const error = new DOMException("Requested device not found", "NotFoundError");
+    expect(devices.userMedia[0].constraints).toEqual({ audio: true, video: true });
 
-    devices.userMedia[0].deny(error);
+    devices.userMedia[0].deny(new DOMException("Requested device not found", "NotFoundError"));
+    await settle();
+    expect(devices.userMedia[1].constraints).toEqual({ audio: true, video: false });
+    const stream = devices.userMedia[1].grant();
+    await settle();
+
+    expect(call.result.current.callState).toBe("connecting");
+    expect(call.result.current.localStream).toBe(stream);
+    expect(call.result.current.isVideoOff).toBe(true);
+    const answer = JSON.parse(call.published[0]!);
+    expect(answer).toMatchObject({ t: "a", v: 0 });
+    expect(answer.k).toBeUndefined();
+    expect(call.result.current.mediaProblem).toBe("unavailable");
+    expect(call.result.current.mediaProblemOf).toBe("camera");
+    expect(call.onError).not.toHaveBeenCalled();
+  });
+
+  it("a camera refused when placing a video call starts it as a voice call, and says the camera is off", async () => {
+    const call = renderCall();
+    act(() => { void call.result.current.startCall(true); });
+    expect(devices.userMedia[0].constraints).toEqual({ audio: true, video: true });
+
+    devices.userMedia[0].deny(denied());
+    await settle();
+    expect(devices.userMedia[1].constraints).toEqual({ audio: true, video: false });
+    devices.userMedia[1].grant();
+    await settle();
+
+    expect(call.result.current.callState).toBe("offering");
+    expect(call.result.current.isVideoOff).toBe(true);
+    const offer = JSON.parse(call.published[0]!);
+    expect(offer).toMatchObject({ t: "o", v: 0 });
+    expect(offer.k).toBeUndefined();
+    // Still a video section the camera can be turned on in later.
+    expect(FakePeerConnection.instances[0].getTransceivers().map((t) => t.receiver.track.kind)).toEqual(["audio", "video"]);
+    expect(call.result.current.mediaProblem).toBe("denied");
+    expect(call.result.current.mediaProblemOf).toBe("camera");
+    expect(lines(call)).toEqual(["call_started"]);
+    expect(call.onError).not.toHaveBeenCalled();
+  });
+
+  it("a video call whose microphone is refused too fails as before, and names the microphone", async () => {
+    const call = renderCall();
+    act(() => { void call.result.current.startCall(true); });
+    devices.userMedia[0].deny(denied());
+    await settle();
+    const error = denied();
+    devices.userMedia[1].deny(error);
     await settle();
 
     expect(call.onError).toHaveBeenCalledExactlyOnceWith(error);
     expect(call.result.current.callState).toBe("idle");
-    expect(FakePeerConnection.instances).toEqual([]);
-    // No answer, but a hang-up: the caller stops ringing now.
-    expect(call.publishedKinds()).toEqual(["h"]);
-    expect(call.result.current.mediaProblem).toBe("unavailable");
+    expect(call.published).toEqual([]);
+    expect(lines(call)).toEqual(["call_started", "call_failed"]);
+    expect(call.result.current.mediaProblem).toBe("denied");
+    expect(call.result.current.mediaProblemOf).toBe("mic");
+  });
+
+  it("names the microphone and the camera when the browser says both are refused", async () => {
+    const query = vi.fn(async ({ name }: { name: string }) => ({ state: name === "camera" ? "denied" : "prompt" }));
+    const previous = Object.getOwnPropertyDescriptor(navigator, "permissions");
+    Object.defineProperty(navigator, "permissions", { configurable: true, value: { query } });
+    try {
+      const call = renderCall();
+      call.receive(remote.offer(Date.now(), true));
+      act(() => { void call.result.current.acceptCall(true); });
+      devices.userMedia[0].deny(denied());
+      await settle();
+      devices.userMedia[1].deny(denied());
+      await settle();
+
+      expect(call.result.current.callState).toBe("idle");
+      expect(call.publishedKinds()).toEqual(["h"]);
+      expect(query).toHaveBeenCalledWith({ name: "camera" });
+      expect(call.result.current.mediaProblemOf).toBe("both");
+    } finally {
+      if (previous) Object.defineProperty(navigator, "permissions", previous);
+      else delete (navigator as { permissions?: unknown }).permissions;
+    }
+  });
+
+  it("a video call hung up while the camera is asked for asks nothing more", async () => {
+    const call = renderCall();
+    act(() => { void call.result.current.startCall(true); });
+    act(() => call.result.current.hangUp());
+    devices.userMedia[0].deny(denied());
+    await settle();
+
+    expect(devices.getUserMedia).toHaveBeenCalledOnce();
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.result.current.mediaProblem).toBeNull();
   });
 
   it("an answer the connection refuses reports the error and closes everything", async () => {
