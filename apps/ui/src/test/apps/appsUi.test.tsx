@@ -16,7 +16,7 @@ import { AppChatPicker } from "../../components/apps/AppChatPicker";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { Settings } from "../../pages/Settings";
-import { setAppOpener, setLinkedFiles } from "../../lib/apps/open";
+import { registerRunningApp, setAppOpener, setLinkedFiles } from "../../lib/apps/open";
 import { appsAvailable, forgetAppsAvailable, webKitAppLeak } from "../../lib/apps/flag";
 import { forgetInstalledApps, useInstalledApps } from "../../lib/apps/installed";
 import type { ChatMessage } from "../../lib/types";
@@ -915,6 +915,33 @@ describe("with the apps flag on", () => {
     await user.click(screen.getByTestId("app-store-refresh"));
     await waitFor(() => expect(within(row).getByTestId("installed-app-hint")).toHaveTextContent("Stopped"));
     expect(within(row).queryByTestId("installed-app-open")).not.toBeInTheDocument();
+  });
+
+  it("a store added that removed an installed app stops it on the page at once, and a running one is stopped", async () => {
+    const removedRun = { status: "removed" as const, by: [{ store: "s", name: "Ghostly", reason: "Malware", at: 1 }] };
+    const LINK = "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json";
+    let added = false;
+    const store = { key: "s", fingerprint: "abcd efgh ijkl mnop", url: LINK, preloaded: false, name: "Ghostly", kind: "curated" as const, sequence: 1,
+      expires: 2_000_000_000, expired: false, fetchedAt: 1, apps: [{ ref: REF, sequence: 7, digest: DIGEST, urls: [URL_], title: "Chess", tagline: "Play chess with a contact" }],
+      removed: [{ ref: REF, digest: DIGEST, reason: "Malware", at: 1 }] };
+    fakeEngine.on("appList", () => [installed(added ? { run: removedRun } : {})]).on("appStoreList", () => (added ? [store] : [])).on("appCheckUpdates", () => [])
+      .on("appStorePreview", ({ url }) => ({ url, key: "s", name: "Ghostly", kind: "curated", sequence: 1, apps: 1, fingerprint: "abcd efgh ijkl mnop", expires: 9e9, expired: false }))
+      .on("appStoreAdd", () => { added = true; return store; });
+    const takeDown = vi.fn();
+    // Chess runs in a chat: the store's removal stops it there too, as after Refresh or an update check.
+    const unregister = registerRunningApp({ ref: REF, digest: DIGEST, runAnyway: false, takeDown, stop: () => {} });
+    try {
+      const { user } = renderApp(<Apps />, { route: "/apps" });
+      const row = await screen.findByTestId("installed-app");
+      expect(within(row).getByTestId("installed-app-open")).toBeInTheDocument();
+      await user.click(screen.getByTestId("apps-add"));
+      await user.type(screen.getByTestId("apps-add-url"), LINK);
+      await user.click(screen.getByTestId("apps-add-check"));
+      await user.click(within(await screen.findByTestId("apps-add-store")).getByTestId("apps-add-store-confirm"));
+      await waitFor(() => expect(within(row).getByTestId("installed-app-hint")).toHaveTextContent("Stopped"));
+      expect(within(row).queryByTestId("installed-app-open")).not.toBeInTheDocument();
+      expect(takeDown).toHaveBeenCalledWith({ why: "removed", store: "Ghostly" });
+    } finally { unregister(); }
   });
 
   it("Refresh shows it is working until the store is read: a turning ring, busy, no second click", async () => {
