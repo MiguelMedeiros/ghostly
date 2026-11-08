@@ -71,6 +71,12 @@ export const COMMUNITY_LIMITS = {
   window: 64,
   /** Commits known off the main branch. */
   side: 512,
+  /**
+   * Of those, the branches one member's commit ends (its newest), and the commits it signed: a handful of races, and
+   * one full run of its admissions (`memberAdmissions`, with the leaves among them). The admin's are not counted.
+   */
+  sideTips: 8,
+  sideCommits: 64,
   /** Commits waiting for their parent. */
   pendingCommits: 64,
   /** Epoch secrets waiting for their commit. */
@@ -1431,10 +1437,36 @@ export class CommunitySession {
     if (key !== this.state.entry.key) this.state.entry = { key, seedB64: "" };
   }
 
-  /** Side commits stay up to a bound, the most recent ones (a longer branch being assembled included). */
+  /**
+   * Side commits stay up to a bound, the most recent ones (a longer branch being assembled included), and a member's
+   * newest only: past `sideTips` of the branches it ends or `sideCommits` of its commits, its oldest branch goes, from
+   * the tip down, so nothing kept loses its parent. Each is weighed at every commit taken and saved with the group, so
+   * what one member signs off the main branch costs every member a bounded amount. What it signs last is kept, so a
+   * branch it grows still comes in commit by commit (one let go comes again from where it parts in a catch-up).
+   */
   private pruneSide(): void {
-    this.state.side = this.state.side.slice(-COMMUNITY_LIMITS.side);
-    const keep = new Set(this.state.side.map(c => communityCommitHash(c)));
+    const admin = this.admin, hashes = new Map<CommunityCommit, string>();
+    const hash = (c: CommunityCommit) => { let h = hashes.get(c); if (!h) hashes.set(c, h = communityCommitHash(c)); return h; };
+    let side = this.state.side.slice(-COMMUNITY_LIMITS.side);
+    for (;;) {
+      const held = new Set(side.map(hash)), parents = new Set(side.map(c => c.p)), drop = new Set<CommunityCommit>();
+      const signed = new Map<string, number>(), tips = new Map<string, number>(), oldest = new Map<string, CommunityCommit>(), cut = new Set<string>();
+      for (const c of side) signed.set(c.by, (signed.get(c.by) ?? 0) + 1);
+      // Newest first: a member's newest branches are those kept.
+      for (let i = side.length - 1; i >= 0; i--) {
+        const c = side[i];
+        if (!held.has(c.p) && !this.mainIndex.has(c.p)) { drop.add(c); continue; }
+        if (parents.has(hash(c))) continue;
+        const n = (tips.get(c.by) ?? 0) + 1;
+        tips.set(c.by, n);
+        if (c.by !== admin && n > COMMUNITY_LIMITS.sideTips) { drop.add(c); cut.add(c.by); } else oldest.set(c.by, c);
+      }
+      for (const [by, n] of signed) if (by !== admin && n > COMMUNITY_LIMITS.sideCommits && !cut.has(by) && oldest.has(by)) drop.add(oldest.get(by)!);
+      if (!drop.size) break;
+      side = side.filter(c => !drop.has(c));
+    }
+    this.state.side = side;
+    const keep = new Set(side.map(hash));
     for (const [h, c] of [...this.known]) {
       if (this.mainIndex.has(h)) { if (this.mainIndex.get(h)! < this.state.chain.length - 1 - COMMUNITY_LIMITS.window) this.rosters.delete(h); continue; }
       if (!keep.has(h)) { this.known.delete(h); this.rosters.delete(h); void c; }
