@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { appFingerprint, appRefPublisher, type AppCard } from "@ghostly/core";
 import { useI18n } from "../../contexts/I18nContext";
 import { usePlatformValue } from "../../hooks/useServicesPlatform";
@@ -47,6 +47,19 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
   const [opening, setOpening] = useState<"open" | "anyway" | null>(null);
   const app = useInstalledApp(card.ref);
   const stopped = !!app && appStopped(app);
+  // Open goes when the app stops (found revoked or removed, often by an update check): its focus would drop to the
+  // page. The ref's cleanup runs while the button is still there. The focus stays on the card: on Run anyway when it
+  // is offered, else on the "Stopped" it now says, never taken from where the person went meanwhile.
+  const openHadFocus = useRef(false);
+  const openRef = useCallback((button: HTMLButtonElement) => () => { openHadFocus.current = document.activeElement === button; }, []);
+  const runAnywayRef = useRef<HTMLButtonElement>(null);
+  const checkRef = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    if (!openHadFocus.current) return;
+    openHadFocus.current = false;
+    const active = document.activeElement;
+    if (stopped && (!active || active === document.body)) (runAnywayRef.current ?? checkRef.current)?.focus({ preventScroll: true });
+  });
   // Installed here: the app's own checked title and version, the one Open starts, never the sender's words for it.
   const title = app ? app.title : card.title;
   const version = app ? app.version : card.version;
@@ -75,17 +88,17 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
           <p data-testid="app-card-who" className={`text-xs text-text-secondary ${mine ? "truncate" : "flex min-w-0 overflow-hidden whitespace-nowrap"}`}>{who}</p>
           <p className="flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
             <Fingerprint value={appFingerprint(appRefPublisher(card.ref))} />
-            <span data-testid="app-card-check" className={stopped ? "text-danger-ink" : undefined}>{stopped ? t("apps.app.stopped") : app ? t("apps.card.installed") : t("apps.card.notChecked")}</span>
+            <span ref={checkRef} tabIndex={stopped ? -1 : undefined} data-testid="app-card-check" className={stopped ? "text-danger-ink" : undefined}>{stopped ? t("apps.app.stopped") : app ? t("apps.card.installed") : t("apps.card.notChecked")}</span>
           </p>
         </div>
       </div>
       {waiting && <p className="text-xs text-text-secondary" data-testid="app-card-waiting">{waiting}</p>}
       {error && <p role="alert" className="text-xs text-danger" data-testid="app-card-error">{error}</p>}
       <div className="flex items-center gap-2">
-        {stopped ? null : app ? <Button variant="primary" data-testid="app-card-open" loading={opening === "open"} onClick={() => open()}>{t("apps.page.open")}</Button>
+        {stopped ? null : app ? <Button ref={openRef} variant="primary" data-testid="app-card-open" loading={opening === "open"} onClick={() => open()}>{t("apps.page.open")}</Button>
           : card.url ? <Button variant="primary" data-testid="app-card-install" onClick={() => setInstalling(true)}>{t("apps.card.join")}</Button>
             : <span className="text-xs text-text-muted" data-testid="app-card-ask">{mine ? t("apps.card.noLink") : t("apps.card.ask", { name: contact })}</span>}
-        {app && (removed || app.run.status === "removed") && <Button data-testid="app-card-run-anyway" loading={opening === "anyway"} onClick={() => open(true)}>{t("apps.app.runAnyway")}</Button>}
+        {app && (removed || app.run.status === "removed") && <Button ref={runAnywayRef} data-testid="app-card-run-anyway" loading={opening === "anyway"} onClick={() => open(true)}>{t("apps.app.runAnyway")}</Button>}
         <span className="ms-auto flex items-center gap-1 text-[11px] text-text-muted">{time}{marks}</span>
       </div>
       {installing && card.url && (
