@@ -611,6 +611,9 @@
     "paste": "粘贴",
     "scan": "扫描"
   },
+  "sentEcash": {
+    "title": "在已删除的聊天中发送"
+  },
   "setup": {
     "failed": "{{wallet}}：{{reason}}",
     "progress": "正在创建你的 Mainnet 钱包…",

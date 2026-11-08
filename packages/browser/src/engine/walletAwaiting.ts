@@ -20,6 +20,8 @@ export interface AwaitingSources {
   lightningOwner?: (op: LightningOp) => string | undefined;
   payments: readonly StoredPayment[];
   now: number;
+  /** Whether a payment's chat was deleted (`WalletAwaitingView.chatGone`); absent while the chats are not loaded yet. */
+  chatGone?: (linkId: string) => boolean;
 }
 
 /** An invoice or a quote a minute past its expiry can no longer be paid (the mints poll with the same grace). */
@@ -31,7 +33,7 @@ const TARGETED = new Set<WalletType>(["arkade", "bark", "spark", "bitcoin", "usd
  * close. A request of ours counts only for the wallet it can be paid through, and only when there is one: a request a
  * Cashu mint and another Lightning source can both be paid through is not lost when one of them goes.
  */
-export function walletAwaiting({ network, mints, quotes, lightningOps, lightningSource, lightningCard, lightningOwner = (op) => op.card, payments, now }: AwaitingSources): WalletAwaitingView[] {
+export function walletAwaiting({ network, mints, quotes, lightningOps, lightningSource, lightningCard, lightningOwner = (op) => op.card, payments, now, chatGone }: AwaitingSources): WalletAwaitingView[] {
   const at = new Set(mints);
   const live = (expiresAt: number | null | undefined) => !expiresAt || expiresAt + GRACE_MS > now;
   const invoiceKey = (invoice: string) => invoice.trim().toLowerCase();
@@ -98,15 +100,17 @@ export function walletAwaiting({ network, mints, quotes, lightningOps, lightning
   for (const q of openQuotes) { const owner = ownerOf(q); if ((!owner || !requests.has(owner)) && !answered(q, owner)) out.push({ type: "cashu", kind: "invoice", amount: q.amount, ...withOwner(owner) }); }
   for (const op of openOps) { const owner = ownerOf(op); if ((!owner || !requests.has(owner)) && !answered(op, owner)) out.push({ type: "lightning", kind: "invoice", amount: op.amount, ...withOwner(owner), ...onCard(lightningOwner(op)) }); }
 
-  // Ecash sent that the contact has not taken yet: only the wallet it came from can take it back.
+  // Ecash sent that the contact has not taken yet: only the wallet it came from can take it back. One whose chat was
+  // deleted is kept for that (`PaymentDesk.forgetLink`), and says so: nothing else offers it back.
   for (const p of payments) {
     if (p.kind !== "payment" || p.direction !== "out" || p.state !== "pending" || !p.token) continue;
+    const gone = chatGone?.(p.linkId) ? { chatGone: true as const } : {};
     if (p.target?.method === "fedimint" || p.federation) {
-      if (paymentNetwork(p) === network) out.push({ type: "fedimint", kind: "sent", amount: p.amount, paymentId: p.id });
+      if (paymentNetwork(p) === network) out.push({ type: "fedimint", kind: "sent", amount: p.amount, paymentId: p.id, ...gone });
       continue;
     }
     const mint = p.mint ?? (p.target?.method === "cashu" ? p.target.provider : undefined);
-    if (mint && at.has(mint)) out.push({ type: "cashu", kind: "sent", amount: p.amount, paymentId: p.id });
+    if (mint && at.has(mint)) out.push({ type: "cashu", kind: "sent", amount: p.amount, paymentId: p.id, ...gone });
   }
   return out;
 }

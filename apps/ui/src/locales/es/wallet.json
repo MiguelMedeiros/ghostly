@@ -611,6 +611,9 @@
     "paste": "Pegar",
     "scan": "Escanear"
   },
+  "sentEcash": {
+    "title": "Enviado en un chat eliminado"
+  },
   "setup": {
     "failed": "{{wallet}}: {{reason}}",
     "progress": "Creando tus billeteras de Mainnet…",

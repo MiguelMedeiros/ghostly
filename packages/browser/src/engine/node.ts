@@ -2094,11 +2094,13 @@ export class GhostlyNode implements EngineImplementation {
   /** What each network's wallets still wait for, and each mint on its own (`mints`, only the mints that wait for something). */
   private async readAwaiting(): Promise<{ networks: Record<WalletNetwork, WalletAwaitingView[]>; mints: Map<string, WalletAwaitingView[]> }> {
     const quotes = await this.wallet.quotes(), payments = this.desk.records(), now = Date.now();
+    // A chat is known gone only once the chats are loaded (`transfersRestored`); a payment link of a community is no chat.
+    const chatGone = this.transfersRestored ? (linkId: string) => !this.links.has(linkId) && !parsePayLink(linkId) : undefined;
     const out = {} as Record<WalletNetwork, WalletAwaitingView[]>;
     const mints = new Map<string, WalletAwaitingView[]>();
     for (const network of WALLET_NETWORKS) {
       const lightning = this.lightnings[network];
-      out[network] = walletAwaiting({ network, mints: this.networkMints(network), quotes, lightningOps: await lightning.list(), lightningSource: lightning.view?.providerId, lightningCard: lightning.receivingId, lightningOwner: (op) => lightning.owner(op), payments, now });
+      out[network] = walletAwaiting({ network, mints: this.networkMints(network), quotes, lightningOps: await lightning.list(), lightningSource: lightning.view?.providerId, lightningCard: lightning.receivingId, lightningOwner: (op) => lightning.owner(op), payments, now, chatGone });
       for (const url of this.networkMints(network)) {
         const waits = mintAwaiting(url, { network, quotes, payments, now });
         if (waits.length) mints.set(url, waits);
@@ -2352,6 +2354,8 @@ export class GhostlyNode implements EngineImplementation {
       if (stored.profile) await this.outboxFor(stored.id).recover(messages);
     }
     this.transfersRestored = true;
+    // The chats are known now: ecash sent in one deleted before is offered back on the Wallet page.
+    this.awaitingSoon();
     // With the chats loaded, profiles of identities no longer verified can be told apart and dropped.
     this.publicProfiles.start();
     // The chats first, most recently live first, then the group edges (`nativeStartOrder`).
@@ -3825,6 +3829,8 @@ export class GhostlyNode implements EngineImplementation {
     if (live.stored.wakeToken) void this.rotateWake().then(() => this.emitState());
     void db.deleteLink(linkId);
     void this.desk.forgetLink(linkId);
+    // Ecash the contact has not taken is kept: the Wallet page offers it back, now that its bubble is gone.
+    this.awaitingSoon();
     this.emitState();
   }
 

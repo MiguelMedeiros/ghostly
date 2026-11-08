@@ -18,6 +18,7 @@ import { RemoveWalletSection } from "../components/wallet/RemoveWallet";
 import { TestCoins } from "../components/wallet/TestCoins";
 import { WalletAway } from "../components/wallet/WalletAway";
 import { BackupReminder } from "../components/wallet/BackupReminder";
+import { SentEcash } from "../components/wallet/SentEcash";
 import { useBackupDue } from "../hooks/useBackupDue";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import type { BackupDue } from "@ghostly/browser/shared/backupReminder";
@@ -230,6 +231,8 @@ export function Wallet() {
                 </div>
               )}
             </div>
+            {/* Ecash sent in a chat deleted since and not taken: the chat's Take it back went with it. */}
+            <SentEcash wallet={wallet.forNetwork(network)} network={network} awaiting={state.networks?.[network]?.awaiting} />
             {selected && <div role="tabpanel" id="wallet-panel" aria-labelledby={`wallet-tab-${selected.id}`} data-testid="wallet-panel" data-network={selected.network} className="space-y-6">
               <p className="flex flex-wrap items-center gap-2 text-sm text-text-secondary" data-testid="wallet-panel-title">
                 <NetworkTag network={selected.network} testId="wallet-panel-network" />

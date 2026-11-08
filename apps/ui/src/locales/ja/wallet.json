@@ -611,6 +611,9 @@
     "paste": "貼り付け",
     "scan": "スキャン"
   },
+  "sentEcash": {
+    "title": "削除したチャットで送ったもの"
+  },
   "setup": {
     "failed": "{{wallet}}：{{reason}}",
     "progress": "Mainnet のウォレットを作成しています…",

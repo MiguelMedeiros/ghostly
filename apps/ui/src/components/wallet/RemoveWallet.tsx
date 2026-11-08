@@ -11,6 +11,7 @@ import { exportBackup, reveal } from "./walletPhrase";
 import { NETWORK_NAME, WALLET_NAME, walletLabel } from "./names";
 import { useRun } from "./run";
 import { removalWords } from "./removalWords";
+import { TakeBack } from "./SentEcash";
 import { Block, Button, Notice, Row, Section } from "./ui";
 
 /**
@@ -77,6 +78,11 @@ export function RemoveWalletDialog({ removal, wallet, source, lead, onClose, onR
   const [understood, setUnderstood] = useState(false);
   const { busy, error, run } = useRun();
   const backup = useRun();
+  // Ecash sent and not taken yet can be taken back before the wallet goes, as from its chat's bubble.
+  const back = useRun();
+  const takeBack = (item: { kind: string; paymentId?: string }) => item.kind === "sent" && item.paymentId
+    ? <TakeBack wallet={wallet} paymentId={item.paymentId} busy={back.busy || busy} run={back.run} running={back.running} testId="wallet-remove-take-back" />
+    : null;
   const [notice, setNotice] = useState("");
   const dialog = useRef<HTMLDialogElement>(null), cancel = useRef<HTMLButtonElement>(null);
   const close = () => { if (!busy) onClose(); };
@@ -123,16 +129,32 @@ export function RemoveWalletDialog({ removal, wallet, source, lead, onClose, onR
         <div className="space-y-2" data-testid="wallet-remove-awaiting">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">{t("wallet.remove.awaiting")}</h3>
           <ul className="bg-surface rounded-xl divide-y divide-border text-sm">
-            {awaiting.map((item, i) => <li key={`${item.kind}-${item.paymentId ?? i}`} className="px-3 py-2" data-testid="wallet-remove-awaiting-item" data-kind={item.kind}>{item.text}</li>)}
+            {awaiting.map((item, i) => (
+              <li key={`${item.kind}-${item.paymentId ?? i}`} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2" data-testid="wallet-remove-awaiting-item" data-kind={item.kind}>
+                <span>{item.text}</span>{takeBack(item)}
+              </li>
+            ))}
           </ul>
           <p className="text-xs text-text-secondary" data-testid="wallet-remove-awaiting-note">{requests ? t("wallet.remove.closesRequests", { afterwards }) : afterwards}</p>
         </div>
       )}
       {returnable.length > 0 && (
-        <Notice testId="wallet-remove-returnable">
-          {t("wallet.remove.returnable", { amounts: returnable.map((i) => i.amount).join(", ") })}
-        </Notice>
+        <div className="space-y-2">
+          <Notice testId="wallet-remove-returnable">
+            {t("wallet.remove.returnable", { amounts: returnable.map((i) => i.amount).join(", ") })}
+          </Notice>
+          {returnable.some((item) => item.paymentId) && (
+            <ul className="bg-surface rounded-xl divide-y divide-border text-sm" data-testid="wallet-remove-returnable-items">
+              {returnable.filter((item) => item.paymentId).map((item) => (
+                <li key={item.paymentId} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2" data-testid="wallet-remove-returnable-item">
+                  <span>{item.text}</span>{takeBack(item)}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
+      {back.error && <Notice problem={back.error} testId="wallet-remove-take-back-error" />}
       {removal.pending > 0 && <Notice tone="error" testId="wallet-remove-pending">{t("wallet.remove.pending", { count: removal.pending })}</Notice>}
       {offerBackup && (
         <div className="space-y-2" data-testid="wallet-remove-backup">

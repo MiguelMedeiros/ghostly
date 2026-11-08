@@ -851,6 +851,11 @@ export interface WalletAwaitingView {
   paymentId?: string;
   /** Lightning: the card it goes through. */
   card?: string;
+  /**
+   * `sent`: the chat it went in was deleted since. Its bubble, the chat's Take it back, went with the chat, so the
+   * Wallet page offers it instead.
+   */
+  chatGone?: true;
 }
 
 /**

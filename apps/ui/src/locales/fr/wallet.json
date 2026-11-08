@@ -611,6 +611,9 @@
     "paste": "Coller",
     "scan": "Scanner"
   },
+  "sentEcash": {
+    "title": "Envoyé dans une conversation supprimée"
+  },
   "setup": {
     "failed": "{{wallet}} : {{reason}}",
     "progress": "Création de vos portefeuilles Mainnet…",
