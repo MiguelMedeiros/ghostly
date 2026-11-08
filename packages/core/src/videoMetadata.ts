@@ -295,8 +295,8 @@ function selfContained(b: Uint8Array, minf: Box): boolean {
 
 /**
  * `moov` with its metadata boxes emptied and its headers' times zeroed, read whole: whether it has a video track, the
- * byte ranges of its metadata and timecode tracks' samples (zeroed by the caller where they are), whether a metadata
- * track has any, and every track's sample table.
+ * byte ranges of its metadata and timecode tracks' samples (zeroed by the caller where they are), whether it has a
+ * metadata or timecode track, and every track's sample table.
  */
 function stripMoov(b: Uint8Array): { video: boolean; fragmented: boolean; metadata: boolean; zeroed: [number, number][]; tables: Box[] } {
   let video = false, fragmented = false, metadata = false;
@@ -325,11 +325,12 @@ function stripMoov(b: Uint8Array): { video: boolean; fragmented: boolean; metada
     tables.push(stbl);
     if (handler === "meta") {
       check(selfContained(b, minf));
-      const ranges = sampleRanges(b, stbl);
-      metadata ||= ranges.length > 0;
-      for (const range of ranges) zeroed.push(range);
+      // The track itself, not its table in `moov`: a fragmented movie's tables are empty, its samples in fragments.
+      metadata = true;
+      for (const range of sampleRanges(b, stbl)) zeroed.push(range);
     } else if (handler === "tmcd" && selfContained(b, minf)) {
       // A camera's timecode starts at the time of day it recorded: it starts at 0 instead.
+      metadata = true;
       for (const range of sampleRanges(b, stbl)) zeroed.push(range);
     } else check(HANDLERS.has(handler));
     if (handler === "vide") video = true;
@@ -494,7 +495,7 @@ export async function videoMetadataPatches(file: VideoSource, mime: string): Pro
     }
   }
 
-  // A metadata track's samples in fragments are not looked for: such a video is refused.
+  // A metadata or timecode track's samples in fragments are not looked for: such a video is refused.
   check(!fragmented || !metadata);
   const sizes = dropped.length && fragmented ? defaultSampleSizes(moov) : undefined;
   for (const box of top) {

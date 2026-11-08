@@ -459,6 +459,9 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     // Their bytes stay in Rust, read by token; the page never names a path. Once the page has them, Rust lets them
     // go (`incoming_share_done`, named after a share, takes a paste's tokens too): a pasted picture's PNG is not kept.
     readClipboardFiles: async () => shelved(await invoke<ShelvedItem[]>("read_clipboard_files")),
+    // Android shows every copy in a preview and keyboards keep a history of them; the WebView's copy cannot mark one
+    // sensitive. A secret (an invite, a device's link, ecash) is copied by Kotlin, marked so.
+    ...(androidApp() && { copySecret: (text: string) => invoke<void>("copy_secret", { text }) }),
     // Rust asks in a native dialog naming the exact address (the page can neither draw nor answer it), and keeps the
     // answer per profile: `local_fetch` reaches only an address allowed there. The dialog is in the page's language.
     requestLocalAccess: (_pattern, origin) => invoke<boolean>("local_service_allow", { space: fileSpace(), origin, lang: dialogLanguage() }),

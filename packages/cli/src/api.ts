@@ -95,7 +95,8 @@ const CHAT_NAME_LENGTH = 48;
  * A chat's name on this side (`chat rename`, an invite's `--label`), as the engine stores it (`cleanName`): a tab or a
  * line break is a space, invisible characters go, and what is left is counted. Longer than the engine keeps whole is
  * refused, not cut. An empty name (or spaces) is the documented one of `chat rename` (the contact's own name) and no
- * label for an invite; a name with nothing that shows is refused: given as is, the engine cleared the chat's name.
+ * label for an invite; a name with nothing that shows is refused: given as is, the engine cleared the chat's name. A
+ * name starting with `group:` is refused: `group:<ref>` names a group in every command (`groupPrefixed`).
  */
 function chatName(params: Params, name: string): string | undefined {
   const value = str(params, name);
@@ -103,6 +104,7 @@ function chatName(params: Params, name: string): string | undefined {
   const clean = cleanName(value, CHAT_NAME_LENGTH);
   if (clean === undefined) throw new CliError("bad_request", `A chat's name is up to ${CHAT_NAME_LENGTH} characters on one line`);
   if (!clean) throw new CliError("bad_request", `A chat's name needs a character that shows (an empty name gives back the contact's own)`);
+  if (groupPrefixed(clean) !== null) throw new CliError("bad_request", `A chat's name can't start with "group:": that names a group`);
   return clean;
 }
 

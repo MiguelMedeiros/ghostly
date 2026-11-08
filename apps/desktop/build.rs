@@ -13,6 +13,7 @@ const COMMANDS: &[&str] = &[
     "bitcoind_rpc",
     "call_service",
     "close_service_windows",
+    "copy_secret",
     "create_keypair",
     "decrypt_text",
     "device_state_read",

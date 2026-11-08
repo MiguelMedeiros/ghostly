@@ -78,6 +78,29 @@ pub async fn read_clipboard_text<R: tauri::Runtime>(
     bounded(text)
 }
 
+/// Copies a secret someone asked to copy (an invite, a device's link, a group's link, ecash), marked sensitive: Android
+/// 13 and up shows dots for it in the copy preview, and keyboards keep it out of their clipboard history. The WebView's
+/// own copy cannot mark it. Android only; the page copies elsewhere (`copySecret` in `apps/ui/src/lib/shareLink.ts`).
+/// Main window only, as the paste.
+#[tauri::command]
+pub async fn copy_secret<R: tauri::Runtime>(
+    window: tauri::WebviewWindow<R>,
+    text: String,
+) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("Not allowed from this window".into());
+    }
+    #[cfg(target_os = "android")]
+    {
+        crate::android::copy_secret(text).await
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        drop(text);
+        Err("No sensitive copy on this platform".into())
+    }
+}
+
 fn bounded(text: String) -> Result<String, String> {
     if text.len() > MAX_CLIPBOARD_BYTES {
         return Err("The clipboard holds too much text".into());

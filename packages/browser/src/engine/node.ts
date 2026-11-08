@@ -31,6 +31,7 @@ import { FILE_LIMITS, GROUP_FILE_LIMITS, formatFileSize, groupFileFallback, read
 import { IdentityProofs } from './identities';
 import { X401Credentials } from './x401';
 import { setOwnDidSource } from '../proofs/ownDid';
+import { setPkarrRelaySource } from '../proofs/pkarrRelays';
 import { ProfileDid } from './did';
 import { ContactLinks } from './contactLinks';
 import { ContactAsks } from './contactAsks';
@@ -2294,6 +2295,8 @@ export class GhostlyNode implements EngineImplementation {
     await this.did.load();
     // The DID provider refuses this profile's own did:dht as an external identity.
     setOwnDidSource(() => this.did.id);
+    // A contact's did:dht is read from this profile's Pkarr relays, as every other Pkarr read.
+    setPkarrRelaySource(() => this.settings.relays);
     this.did.start();
     await this.contactLinks.load();
     this.contactLinks.start();
@@ -2886,7 +2889,7 @@ export class GhostlyNode implements EngineImplementation {
   appStoreRefresh(params: { key?: string } = {}): Promise<AppStoreSummary[]> { return this.appStore.refreshStores(params); }
   appPreview(params: AppSource): Promise<AppPreview> { return this.appStore.preview(params); }
   appInstall(params: { digest: string; grant: string[]; asks?: string[] }): Promise<InstalledAppView> { return this.appStore.install(params); }
-  appUpdateAccept(params: { ref: string }): Promise<InstalledAppView> { return this.appStore.acceptUpdate(params); }
+  appUpdateAccept(params: { ref: string; sequence?: number; added?: string[] }): Promise<InstalledAppView> { return this.appStore.acceptUpdate(params); }
   appCheckUpdates(): Promise<AppCheckResult[]> { return this.appStore.checkUpdates(); }
   /** Uninstalls an app. One running then is closed in every chat (the contact hears `close`), and the pages are told, to stop its frames. */
   async appUninstall(params: { ref: string }): Promise<void> {

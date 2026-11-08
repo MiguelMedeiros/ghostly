@@ -349,6 +349,15 @@
       "hint": "Adicione este dispositivo de novo a partir do dispositivo que você usa agora.",
       "title": "Seus dispositivos mudaram enquanto este estava desligado"
     },
+    "removeHere": {
+      "button": "Remover este perfil daqui",
+      "confirm": "Digite {{name}} para confirmar",
+      "first": "Um perfil vazio fica no lugar dele aqui.",
+      "go": "Remover",
+      "hint": "As conversas, chaves e carteiras dele saem deste dispositivo. Seus outros dispositivos continuam com o perfil.",
+      "removing": "Removendo…",
+      "title": "Remover {{name}} deste dispositivo?"
+    },
     "title": {
       "moving": "Quase lá",
       "releasing": "Movendo para outro dispositivo",

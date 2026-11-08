@@ -106,6 +106,17 @@ const RUNNER: &str = r#"<!doctype html>
     };
     Object.defineProperty(Document.prototype, "execCommand", { configurable: true, writable: true, value: commands });
   }
+  // Nor the async Clipboard API: WebKit and Firefox let `navigator.clipboard` write the system clipboard whatever the
+  // window's settings or the frame's `allow=""` say (only Chromium refuses it). The app finds no `navigator.clipboard`,
+  // no `ClipboardItem` and no method on `Clipboard.prototype`. Both runners, the same text.
+  const CLIPBOARD = ["read", "readText", "write", "writeText"];
+  try { delete Navigator.prototype.clipboard; } catch (e) { /* stays: refused below */ }
+  try { delete window.ClipboardItem; } catch (e) { /* stays: refused below */ }
+  if (typeof Clipboard === "function") {
+    for (const name of CLIPBOARD) { try { delete Clipboard.prototype[name]; } catch (e) { /* stays: refused below */ } }
+  }
+  const clipboardLeft = () => "clipboard" in navigator || "ClipboardItem" in window
+    || (typeof Clipboard === "function" && CLIPBOARD.some((name) => name in Clipboard.prototype));
   const stop = (why) => {
     document.documentElement.textContent = "This app cannot run here.";
     document.documentElement.setAttribute("data-ghostly-refused", why);
@@ -114,10 +125,13 @@ const RUNNER: &str = r#"<!doctype html>
   const label = internals && internals.metadata && internals.metadata.currentWindow && internals.metadata.currentWindow.label;
   if (self.origin !== "null" || !internals || typeof label !== "string" || !/^app-[A-Za-z0-9]+$/.test(label)) return stop("origin");
   if (Object.getOwnPropertyNames(window).some((name) => /^(webkit)?RTC/.test(name))) return stop("webrtc");
-  if (document.execCommand !== commands) return stop("clipboard");
+  if (document.execCommand !== commands || clipboardLeft()) return stop("clipboard");
 
   const invoke = internals.invoke.bind(internals);
   const clockNow = Date.now;
+  const reflectApply = Reflect.apply;
+  const listen = EventTarget.prototype.addEventListener;
+  const stopImmediately = Event.prototype.stopImmediatePropagation;
   // Every answer and event comes as its JSON text, parsed here (`json_response`, `event_script`): evaluated as a
   // JavaScript literal, a `__proto__` member would set the object's prototype instead of staying a key, as the web
   // broker keeps it (jsonValueOf).
@@ -224,8 +238,33 @@ const RUNNER: &str = r#"<!doctype html>
       said = at;
       try { send("activity", []).catch(() => {}); } catch (error) {}
     };
-    addEventListener("pointerdown", heard, true);
-    addEventListener("keydown", heard, true);
+    // The runner's own listeners on the window, put on now and again whenever the document is opened again.
+    const keepRunnerListeners = () => {
+      reflectApply(listen, window, ["pointerdown", heard, true]);
+      reflectApply(listen, window, ["keydown", heard, true]);
+    };
+    // The person's copy or cut in the app puts on the clipboard what they selected, never what the app says in its
+    // place: an app has no clipboard permission (WISP 1200), so none of its listeners hears one (a listener could set
+    // the event's clipboardData and cancel it). This capture listener on the window runs before any of the app's and
+    // stops the event there, so nothing cancels it and the browser copies the selection. One the app makes writes nothing.
+    const selectionOnly = (event) => { if (event.isTrusted === true) reflectApply(stopImmediately, event, []); };
+    // A document opened again (`document.open` with no close, or a write once the page is parsed) erases the window's
+    // listeners, and the app runs on: every one of the runner's goes back on as it opens, before any the app adds after,
+    // through what the runner took before the app's code ran.
+    const keepListeners = () => {
+      keepRunnerListeners();
+      reflectApply(listen, window, ["copy", selectionOnly, true]);
+      reflectApply(listen, window, ["cut", selectionOnly, true]);
+    };
+    keepListeners();
+    for (const name of ["open", "write", "writeln"]) {
+      const opens = Document.prototype[name];
+      Object.defineProperty(Document.prototype, name, { configurable: true, writable: true, value: function () {
+        const result = reflectApply(opens, this, arguments);
+        keepListeners();
+        return result;
+      } });
+    }
     document.write(entry);
     document.close();
   }, () => stop("broker")), (error) => {
@@ -1253,7 +1292,7 @@ const OFF: &[&str] = &[
 ///   window opens anyway.
 #[cfg(target_os = "macos")]
 #[cfg_attr(test, allow(dead_code))]
-mod webkit {
+pub(crate) mod webkit {
     use super::Guard;
     use objc2::rc::Retained;
     use objc2::runtime::{AnyClass, AnyObject, Bool};
@@ -2446,7 +2485,8 @@ mod tests {
     }
 
     /// Both runners answer false to an app's clipboard commands (`execCommand` copy, cut, paste) with the very same
-    /// wrapper, installed before the app's code is written, and refuse to run when it is not in place.
+    /// wrapper and delete the async Clipboard API with the very same code, before the app's code is written, and
+    /// refuse to run when either is not in place.
     #[test]
     fn the_runners_refuse_the_clipboard_commands_alike() {
         let web = include_str!("../../web/public/app-frame.html");
@@ -2462,15 +2502,140 @@ mod tests {
         let refused =
             r#"if (named === "copy" || named === "cut" || named === "paste") return false;"#;
         assert!(desktop.contains(refused));
-        let check = r#"if (document.execCommand !== commands) return stop("clipboard");"#;
+        let check = r#"if (document.execCommand !== commands || clipboardLeft()) return stop("clipboard");"#;
         let check = RUNNER.find(check).unwrap();
         assert!(at < check);
+        assert!(web.contains(
+            r#"if (document.execCommand !== commands || clipboardLeft()) return stop("clipboard");"#
+        ));
+        // The async Clipboard API is deleted with the very same text, before the check.
+        let api = |runner: &'static str| {
+            let start = runner.find("const CLIPBOARD = [").unwrap();
+            let end = start + runner[start..].find("const stop = ").unwrap();
+            (start, &runner[start..end])
+        };
+        let (deleted, desktop) = api(RUNNER);
+        assert_eq!(desktop, api(web).1);
+        for line in [
+            r#"const CLIPBOARD = ["read", "readText", "write", "writeText"];"#,
+            "delete Navigator.prototype.clipboard;",
+            "delete window.ClipboardItem;",
+            "delete Clipboard.prototype[name];",
+            r#""clipboard" in navigator || "ClipboardItem" in window"#,
+        ] {
+            assert!(desktop.contains(line), "{line}");
+        }
+        assert!(deleted < check);
         for later in [
             "const invoke = ",
             "document.open()",
             "document.write(entry)",
         ] {
             assert!(check < RUNNER.find(later).unwrap(), "{later}");
+        }
+    }
+
+    /// The person's copy or cut in an app puts what they selected on the clipboard: both runners stop it before any of
+    /// the app's listeners with the very same text, added after `document.open` (which drops a window's listeners) and
+    /// before the entry is written, through what each took before the app's code runs, and put back whenever the
+    /// document is opened again.
+    #[test]
+    fn the_runners_keep_the_persons_copy_alike() {
+        let web = include_str!("../../web/public/app-frame.html");
+        let begin = "    // The person's copy or cut in the app";
+        let finish = "        keepListeners();\n        return result;\n      } });\n    }\n";
+        let guard = |runner: &'static str| {
+            let start = runner.find(begin).unwrap();
+            let end = start + runner[start..].find(finish).unwrap() + finish.len();
+            (start, &runner[start..end])
+        };
+        let (at, desktop) = guard(RUNNER);
+        let (web_at, web_guard) = guard(web);
+        assert_eq!(desktop, web_guard);
+        for line in [
+            r#"if (event.isTrusted === true) reflectApply(stopImmediately, event, []);"#,
+            r#"reflectApply(listen, window, ["copy", selectionOnly, true]);"#,
+            r#"reflectApply(listen, window, ["cut", selectionOnly, true]);"#,
+            r#"for (const name of ["open", "write", "writeln"]) {"#,
+        ] {
+            assert!(desktop.contains(line), "{line}");
+        }
+        assert!(RUNNER.find("document.open()").unwrap() < at);
+        assert!(at < RUNNER.find("document.write(entry)").unwrap());
+        assert!(web.find("    document.open();").unwrap() < web_at);
+        assert!(
+            web_at
+                < web
+                    .find("reflectApply(documentWrite, document, [html]);")
+                    .unwrap()
+        );
+        for (runner, written) in [(RUNNER, at), (web, web_at)] {
+            for taken in [
+                "const reflectApply = Reflect.apply;",
+                "const listen = EventTarget.prototype.addEventListener;",
+                "const stopImmediately = Event.prototype.stopImmediatePropagation;",
+            ] {
+                assert!(runner.find(taken).unwrap() < written, "{taken}");
+            }
+        }
+    }
+
+    /// An app that opens its document again (`document.open` with no close, or a write once the page is parsed) erases
+    /// the window's listeners and runs on: each runner puts every listener it adds after its own `document.open` back on
+    /// as the document opens, not only the copy guard. On the web: the one that keeps other frames' messages out and the
+    /// one that makes a "#" link a reload; on both: the one that says `activity` for the person's taps and keys.
+    #[test]
+    fn the_runners_put_every_listener_back_when_the_document_opens_again() {
+        let web = include_str!("../../web/public/app-frame.html");
+        let wrapper = "        const result = reflectApply(opens, this, arguments);\n        keepListeners();\n";
+        let keep = "    const keepListeners = () => {\n      keepRunnerListeners();\n";
+        for (name, runner, opened, written, listeners) in [
+            (
+                "desktop",
+                RUNNER,
+                "document.open();",
+                "document.write(entry);",
+                &[
+                    r#"["pointerdown", heard, true]"#,
+                    r#"["keydown", heard, true]"#,
+                ][..],
+            ),
+            (
+                "web",
+                web,
+                "    document.open();",
+                "reflectApply(documentWrite, document, [html]);",
+                &[
+                    r#"["message", deaf, true]"#,
+                    r#"["messageerror", deaf, true]"#,
+                    r#"["hashchange", fragment, true]"#,
+                    r#"["pointerdown", heard, true]"#,
+                    r#"["keydown", heard, true]"#,
+                ][..],
+            ),
+        ] {
+            let start = runner.find(opened).unwrap();
+            let end = runner.find(written).unwrap();
+            let section = &runner[start..end];
+            assert!(section.contains(wrapper), "{name}");
+            assert!(section.contains(keep), "{name}");
+            let begin = "    const keepRunnerListeners = () => {\n";
+            let own = section.find(begin).unwrap_or_else(|| panic!("{name}"));
+            let own = &section[own + begin.len()..];
+            let own = &own[..own.find("    };\n").unwrap()];
+            let added: Vec<&str> = own.lines().map(str::trim).collect();
+            let expected: Vec<String> = listeners
+                .iter()
+                .map(|args| format!("reflectApply(listen, window, {args});"))
+                .collect();
+            assert_eq!(added, expected, "{name}");
+            // Every listener the runner adds on the window from its `document.open` on is one of those it puts back.
+            assert_eq!(
+                section.matches("reflectApply(listen, window, [").count(),
+                listeners.len() + 2,
+                "{name}"
+            );
+            assert!(!section.contains("addEventListener("), "{name}");
         }
     }
 
