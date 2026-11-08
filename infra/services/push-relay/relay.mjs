@@ -37,13 +37,19 @@ const VAPID = /^vapid t=[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+, ?k=[A-Za
 
 const b64url = text => Buffer.from(text.replace(/-/g, '+').replace(/_/g, '/'), 'base64')
 
+/**
+ * The endpoint as the push service receives it, so one subscription is one count however it is spelt: no fragment
+ * (`fetch` never sends one) and no empty `?`. The rest `URL` already writes one way (host case, a default port, `./`).
+ */
+const asSent = url => { url.hash = ''; if (!url.search) url.search = ''; return url }
+
 /** The request to forward, or a reason it is refused. */
 export function readRelayRequest (text, { hosts = PUSH_HOSTS, bodyBytes = DEFAULT_LIMITS.bodyBytes } = {}) {
   let request
   try { request = JSON.parse(text) } catch { return { error: 'Not JSON' } }
   const { endpoint, headers, body } = request ?? {}
   let url
-  try { url = new URL(endpoint) } catch { return { error: 'No endpoint' } }
+  try { url = asSent(new URL(endpoint)) } catch { return { error: 'No endpoint' } }
   if (url.protocol !== 'https:' || url.username || url.password || url.port || !hosts.some(host => host.test(url.hostname))) return { error: 'Not a push service' }
   if (typeof body !== 'string' || !/^[A-Za-z0-9_-]*$/.test(body)) return { error: 'No body' }
   const bytes = b64url(body)
