@@ -71,6 +71,16 @@ describe("amounts and mint addresses", () => {
     expect(mint.createMintQuoteBolt11).not.toHaveBeenCalled();
   });
 
+  // The app reads the limit back out of the English line (errorText.ts) to say it in its language. A browser in
+  // Egyptian Arabic writes its numbers "١٬٠٠٠٬٠٠٠" by itself, which no rule read: the line showed in English.
+  it("says the limit in the English line the app translates, whatever the browser's own numbers", () => {
+    const own = Number.prototype.toLocaleString;
+    vi.spyOn(Number.prototype, "toLocaleString").mockImplementation(function (this: number, locales?: Intl.LocalesArgument, options?: Intl.NumberFormatOptions) {
+      return own.call(this, locales ?? "ar-EG", options);
+    });
+    expect(() => assertAmount(1_000_001)).toThrow(/^Amounts above 1,000,000 sats are not supported$/);
+  });
+
   it("takes only https mints, or plain http on this very machine, and drops the trailing slash", () => {
     expect(normalizeMintUrl("  https://mint.example/Bitcoin//  ")).toBe("https://mint.example/Bitcoin");
     expect(normalizeMintUrl("http://localhost:3338/")).toBe("http://localhost:3338");
