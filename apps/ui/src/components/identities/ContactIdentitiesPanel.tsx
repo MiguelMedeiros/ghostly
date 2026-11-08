@@ -52,7 +52,7 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
   const link = useEngineValue(state => state?.links.find(l => l.peerPubKeyZ32 === peerKey));
   const links = useEngineValue(state => (state?.links ?? []).map((l): ChipLink => ({ id: l.id, peerPubKeyZ32: l.peerPubKeyZ32, identities: l.identities && { received: l.identities.received } })));
   const { t, language } = useI18n();
-  const ref = useRef<HTMLElement>(null), backdrop = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLDivElement>(null), backdrop = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const beside = useBeside(backdrop);
   const besideNow = useRef(beside); besideNow.current = beside;
@@ -71,8 +71,9 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
 
   return (<>
     <div ref={backdrop} className="contact-panel-backdrop" aria-hidden="true" onClick={onClose} />
-    {/* Beside the chat, a region of the page beside it (Tab goes on to the chat, F6 between them); over it, a dialog. */}
-    <aside ref={ref} tabIndex={-1} role={beside ? undefined : "dialog"} aria-modal={beside ? undefined : true} aria-labelledby={titleId} data-testid="chat-identities" className="contact-panel focus:outline-none">
+    {/* Beside the chat, a region of the page beside it (Tab goes on to the chat, F6 between them); over it, a dialog.
+        A <div> with either role: `dialog` is not one an <aside> may take (ARIA in HTML), and checkers flagged it. */}
+    <div ref={ref} tabIndex={-1} role={beside ? "complementary" : "dialog"} aria-modal={beside ? undefined : true} aria-labelledby={titleId} data-testid="chat-identities" className="contact-panel focus:outline-none">
       <div className="contact-panel-head">
         <div className="flex min-w-0 items-start gap-3">
           {/* Their picture as the chat shows it; with one, a click opens it large (AvatarViewer.tsx). */}
@@ -100,7 +101,7 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
         {link?.identities?.error && <p className="contact-panel-note" role="alert" data-testid="chat-identities-link-error">{problemLine(link.identities.error, t)}</p>}
         <p className="contact-panel-note" data-testid="chat-identities-share-yours">{t("identities.contact.shareYours")}</p>
       </div>
-    </aside>
+    </div>
   </>);
 }
 
