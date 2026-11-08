@@ -494,6 +494,7 @@
     "limit": "语音消息最长 {{minutes}} 分钟",
     "message": "语音消息",
     "micDenied": "无法使用麦克风。请在浏览器或系统设置中允许。",
+    "micDeniedAndroid": "无法使用麦克风。请在 Android 询问时允许，或在 Android 设置中允许 Ghostly 使用麦克风。",
     "micUnavailable": "未找到麦克风。请连接一个，或关闭正在使用它的应用。",
     "micUnsupported": "此浏览器无法录制语音消息。",
     "pause": "暂停语音消息",

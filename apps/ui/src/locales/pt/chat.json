@@ -494,6 +494,7 @@
     "limit": "Mensagens de voz têm no máximo {{minutes}} minutos",
     "message": "Mensagem de voz",
     "micDenied": "Sem acesso ao microfone. Permita nos ajustes do navegador ou do sistema.",
+    "micDeniedAndroid": "Sem acesso ao microfone. Permita quando o Android pedir, ou nos ajustes do Android para o Ghostly.",
     "micUnavailable": "Nenhum microfone encontrado. Conecte um, ou feche o app que o usa.",
     "micUnsupported": "Este navegador não grava mensagens de voz.",
     "pause": "Pausar mensagem de voz",

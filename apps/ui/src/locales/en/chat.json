@@ -494,6 +494,7 @@
     "limit": "Voice messages are at most {{minutes}} minutes",
     "message": "Voice message",
     "micDenied": "No access to the microphone. Allow it in your browser or system settings.",
+    "micDeniedAndroid": "No access to the microphone. Allow it when Android asks, or in Android's settings for Ghostly.",
     "micUnavailable": "No microphone found. Connect one, or close the app using it.",
     "micUnsupported": "This browser can't record voice messages.",
     "pause": "Pause voice message",

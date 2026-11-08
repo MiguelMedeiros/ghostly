@@ -5391,11 +5391,14 @@ export class GhostlyNode implements EngineImplementation {
     if (transport === "dht") { await this.setDeliveryMode({ linkId, mode: "dht" }); return; }
     if (live?.stored.deliveryMode === "dht") {
       // The choice is recorded first, so the line that says the chat left DHT only names it. The native adapters
-      // were released with DHT only: the preference reaches the link once they are back.
+      // were released with DHT only: the preference reaches the link once they are back. Only a choice that names one
+      // waits for them: WebRTC, or Automatic on an app with WebRTC, goes live without them, and waiting kept the web's
+      // Connection panel greyed out 24 to 44 s with Iroh's relay out of reach, the chat live again in a second.
       const preferredTransport = transport === "auto" ? undefined : transport;
+      const native = transport === "auto" ? !live.link?.availableTransports.includes("webrtc/1") : transport !== "webrtc/1";
       live.stored = { ...live.stored, preferredTransport };
       await db.patchLink(linkId, { preferredTransport });
-      await this.switchDeliveryMode(linkId, "stream", true);
+      await this.switchDeliveryMode(linkId, "stream", native);
     }
     if (transport !== "auto") {
       // A choice on the wire too; out of DHT only, the log leaves the row to the one that says so (it names it).
