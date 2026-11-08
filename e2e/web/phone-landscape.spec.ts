@@ -196,3 +196,61 @@ test("a phone on its side: an open select's list stays clear of the notch", { ta
   expect(box.y + box.height).toBeLessThanOrEqual(LANDSCAPE.height - HOME);
   await expect(options.first()).toBeVisible();
 });
+
+for (const screen of [{ name: "a small phone", width: 667, height: 375, keyboard: 200 }, { name: "two panes", ...LANDSCAPE, keyboard: 240 }]) {
+  test(`a phone on its side with the keyboard up (${screen.name}): a pinned message and a reply leave the message field above the keyboard`, { tag: ["@feature:app.mobile-layout", "@feature:chat.pins", "@feature:chat.replies", "@feature:chat.edit"] }, async ({ peer }) => {
+    // The pinned bar and the reply or edit bar stood between the header and the field on top of each other: the list
+    // was 0px tall, and the field went under the keyboard (109-227 of 175 visible at 667×375), what was typed out of sight.
+    const visible = screen.height - screen.keyboard;
+    const [alice, bob] = await Promise.all([peer(`side-bars-a-${screen.width}`), peer(`side-bars-b-${screen.width}`, { mobile: true, viewport: { width: screen.width, height: screen.height } })]);
+    await pair(alice, bob);
+    for (let i = 0; i < 3; i++) { await say(alice, `From alice ${i}`); await say(bob, `From bob ${i}`); }
+    const page = bob.page;
+    const row = (text: string) => page.locator(".chat-wallpaper [data-message-row]").filter({ hasText: text }).last();
+    await expect(row("From alice 2")).toBeVisible();
+    await iosKeyboard(page);
+    await expect(row("From alice 2")).toBeVisible();
+    const menu = async (text: string, item: string) => {
+      await row(text).hover();
+      await row(text).getByTestId("message-options").click({ force: true });
+      await page.getByTestId(item).click();
+    };
+    const input = page.getByPlaceholder("Message…");
+    const composer = page.locator("[data-composer]");
+    const pinned = page.getByTestId("pinned-bar");
+    // The whole composer (+, the field, Send) stands on the keyboard.
+    const fits = async () => { const box = (await composer.boundingBox())!; return box.y + box.height <= visible + 1; };
+
+    await menu("From alice 1", "message-pin");
+    await expect(pinned).toBeVisible();
+    await input.focus();
+    await keyboard(page, screen.keyboard);
+    await expect(page.locator("html")).toHaveAttribute("data-keyboard", "true");
+    await expect.poll(fits).toBe(true);
+    // The pinned bar waits behind the keyboard, as the tab bar does: the chat keeps that room.
+    await expect(pinned).toBeHidden();
+
+    await keyboard(page, 0);
+    await input.blur();
+    await expect(pinned).toBeVisible();
+    await menu("From alice 2", "message-reply");
+    await input.focus();
+    await keyboard(page, screen.keyboard);
+    await expect.poll(fits).toBe(true);
+    await input.fill("one\ntwo\nthree\nfour");
+    await expect.poll(fits).toBe(true);
+    await expect(page.getByTestId("reply-quote-snippet")).toBeVisible();
+
+    await input.fill("");
+    await keyboard(page, 0);
+    await page.keyboard.press("Escape");
+    await input.blur();
+    await menu("From bob 2", "message-edit");
+    await keyboard(page, screen.keyboard);
+    await expect.poll(fits).toBe(true);
+    // Keyboard down: the pinned message is back.
+    await keyboard(page, 0);
+    await input.blur();
+    await expect(pinned).toBeVisible();
+  });
+}
