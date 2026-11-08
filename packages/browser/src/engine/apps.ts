@@ -638,6 +638,11 @@ export class Apps {
    */
   private readonly bundleWrites = new Map<string, Promise<FileBytesKind>>();
   /**
+   * Fetches of an installed app's files under way, by `ref digest`: Open or Get its files while the update check fetches
+   * them waits for that fetch, with no download, hash or read-back of its own.
+   */
+  private readonly filesFetches = new Map<string, Promise<AppRunStatus>>();
+  /**
    * The `icon.png` of each checked bundle, by digest (at most 256 KiB and 1024 × 1024 pixels, or null for none): every icon shown on the Apps
    * page, in a chat's cards and in the composer's Apps is read without the whole bundle again.
    */
@@ -1956,6 +1961,15 @@ export class Apps {
    */
   async fetchFiles({ ref }: { ref: string }): Promise<AppRunStatus> {
     const app = await this.installedOrFail(ref);
+    const key = `${app.ref} ${app.digest}`;
+    const under = this.filesFetches.get(key);
+    if (under) return under;
+    const fetching = this.fetchFilesOf(app).finally(() => { this.filesFetches.delete(key); });
+    this.filesFetches.set(key, fetching);
+    return fetching;
+  }
+
+  private async fetchFilesOf(app: InstalledApp): Promise<AppRunStatus> {
     const stores = await this.stores();
     if (await this.hasBundle(app.bytes, app.digest, app.manifest)) return this.runCheckOf(app, stores);
     // The version this build carries (a restored profile's built-in app): its files are here, no source is asked.
