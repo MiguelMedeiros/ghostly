@@ -266,6 +266,25 @@ describe("withoutVideoMetadata", () => {
     await expect(withoutVideoMetadata(new Blob([inSefd]), "video/mp4")).rejects.toThrow(NO_VIDEO_METADATA);
   });
 
+  it("a fragmented video with a metadata or timecode track is refused, its samples in a fragment", async () => {
+    const u32 = (n: number) => Buffer.from([n >>> 24, (n >> 16) & 255, (n >> 8) & 255, n & 255]);
+    const fragmented = await repack(false, "fragmented");
+    const sample = Buffer.from(`GPS ${PLACE} motion`, "latin1");
+    // The track's table in `moov` holds no byte of it, its one sample is in a fragment at the end: a run that starts
+    // past its `moof` (the base is the `moof`'s start), of one sample of its size.
+    const moof = (offset: number) => box("moof", box("mfhd", u32(0), u32(99)),
+      box("traf", box("tfhd", u32(0x20000), u32(0)), box("trun", u32(0x201), u32(1), u32(offset), u32(sample.length))));
+    const tail = Buffer.concat([moof(moof(0).length + 8), box("mdat", sample)]);
+    for (const [handler, mime] of [["meta", "video/mp4"], ["meta", "video/quicktime"], ["tmcd", "video/quicktime"]]) {
+      const file = Buffer.concat([withMovie(fragmented, [], Buffer.alloc(0), handler), tail]);
+      expect(hasPlace(file)).toBe(true);
+      await expect(withoutVideoMetadata(new Blob([file]), mime), `${handler} ${mime}`).rejects.toThrow(NO_VIDEO_METADATA);
+    }
+    // The same fragmented video without such a track goes, its frames as they were.
+    const out = await bytesOf((await withoutVideoMetadata(new Blob([fragmented as BlobPart]), "video/mp4"))!);
+    expect(await played(out)).toEqual(await played(fragmented));
+  });
+
   it("a fragmented video with a box it empties in each fragment is checked once per fragment, not against every other fragment", async () => {
     // A live encoder's recording: a `prft` (when the fragment was made) before each of 16,000 fragments, two samples each.
     const u32 = (n: number) => Buffer.from([n >>> 24, (n >> 16) & 255, (n >> 8) & 255, n & 255]);

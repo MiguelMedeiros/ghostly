@@ -191,16 +191,18 @@ export function boundVerifiedIdentity(v: VerifiedIdentity): VerifiedIdentity {
   const attester = clean(v.attester, 253);
   if (attester) out.attester = attester;
   if (v.expiresAt !== undefined) { if (!isInt(v.expiresAt)) throw new Error("Provider returned an invalid expiry"); out.expiresAt = v.expiresAt; }
-  if (v.display) {
-    const d = v.display;
-    const display: IdentityDisplay = { source: clean(d.source, 120) ?? "Self-described", fetchedAt: isInt(d.fetchedAt) ? d.fetchedAt : nowSeconds() };
-    const name = clean(d.name, 64);
-    if (name) display.name = name;
-    if (typeof d.avatar === "string" && d.avatar.length <= 48 * 1024 && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(d.avatar)) display.avatar = d.avatar;
-    if (typeof d.url === "string" && d.url.length <= 512) { try { const u = new URL(d.url); if (u.protocol === "https:" && !u.username && !u.password) display.url = u.href; } catch { /* dropped */ } }
-    out.display = display;
-  }
+  if (v.display) out.display = boundIdentityDisplay(v.display);
   return out;
+}
+
+/** Bounds a provider's public name/picture (from a proof or `lookupDisplay`): a name with nothing visible left is dropped. */
+export function boundIdentityDisplay(d: IdentityDisplay): IdentityDisplay {
+  const display: IdentityDisplay = { source: clean(d.source, 120) ?? "Self-described", fetchedAt: isInt(d.fetchedAt) ? d.fetchedAt : nowSeconds() };
+  const name = clean(d.name, 64);
+  if (name) display.name = name;
+  if (typeof d.avatar === "string" && d.avatar.length <= 48 * 1024 && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(d.avatar)) display.avatar = d.avatar;
+  if (typeof d.url === "string" && d.url.length <= 512) { try { const u = new URL(d.url); if (u.protocol === "https:" && !u.username && !u.password) display.url = u.href; } catch { /* dropped */ } }
+  return display;
 }
 
 // ---------------------------------------------------------------------------------------------

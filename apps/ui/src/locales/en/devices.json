@@ -349,6 +349,15 @@
       "hint": "Add this device again from the device you use now.",
       "title": "Your devices changed while this one was off"
     },
+    "removeHere": {
+      "button": "Remove this profile here",
+      "confirm": "Type {{name}} to confirm",
+      "first": "An empty profile takes its place here.",
+      "go": "Remove",
+      "hint": "Its chats, keys and wallets go from this device. Your other devices keep the profile.",
+      "removing": "Removing…",
+      "title": "Remove {{name}} from this device?"
+    },
     "title": {
       "moving": "Almost there",
       "releasing": "Moving to another device",

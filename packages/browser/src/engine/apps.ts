@@ -1728,10 +1728,16 @@ export class Apps {
     };
   }
 
-  /** The person accepted the permissions a waiting update adds: it is installed now. */
-  async acceptUpdate({ ref }: { ref: string }): Promise<InstalledAppView> {
+  /**
+   * The person accepted the permissions a waiting update adds: it is installed now. `sequence` and `added` are the
+   * waiting update its screen listed (`InstalledAppView.pending`): another one waiting now (the check found a newer one
+   * after the screen was drawn), or one that adds more than `added`, is refused with `permissions-changed`.
+   */
+  async acceptUpdate({ ref, sequence, added: shown }: { ref: string; sequence?: number; added?: readonly string[] }): Promise<InstalledAppView> {
+    if (shown !== undefined && !Array.isArray(shown)) fail("permissions", "The permissions shown must be a list");
     const installed = await this.installedOrFail(ref);
     const pending = installed.pending ?? fail("no-update", "No update waits for this app");
+    if (sequence !== undefined && pending.sequence !== sequence) fail("permissions-changed", `Another update waits now, which adds ${pending.added.length ? pending.added.join(", ") : "no permission"}; look at it again`);
     const bytes = await this.readBundleBytes(pending.bytes, pending.digest);
     const read = bytes ? await readAppBundleAsync(bytes) : null;
     if (!read?.ok || read.bundle.digest !== pending.digest) {
@@ -1754,6 +1760,7 @@ export class Apps {
       await this.putApp({ ...installed, pending: { ...pending, added: added as AppPermission[] } });
       fail("permissions-changed", `This update now adds ${added.length ? added.join(", ") : "no permission"}; look at it again`);
     }
+    if (shown && added.some((p) => !shown.includes(p))) fail("permissions-changed", `This update now adds ${added.join(", ")}; look at it again`);
     const { pending: _p, ...without } = installed;
     const next = this.versionRecord(without, read.bundle, pending.bytes, pending.from, installed.store);
     // Only over the record read above: an app uninstalled meanwhile (another tab, Uninstall while Update was busy) is

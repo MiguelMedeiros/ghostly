@@ -1,11 +1,25 @@
 import { useMemo, useState } from "react";
 import { previewImageSize, type LinkPreview } from "@ghostly/core";
+import { labelMisleads } from "../lib/parse";
 import { videoSite } from "../lib/parse/linkPreview";
 import { formatCoordinates, locationIn, mapTiles, mapsUrl, openStreetMapUrl, type Place } from "../lib/parse/location";
 import { externalLinkProps, mapsPlatform } from "../lib/externalLink";
 import { useT } from "../contexts/I18nContext";
 
 const hostOf = (url: string) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return url; } };
+
+/**
+ * A host on one line, cut at its START when it does not fit ("…secure-login.attacker.example"): its end says whose it
+ * is, and the start is whatever its owner chose. It reads left to right on its own, and the whole of it is the
+ * `title`, the link's long-press menu, and what a screen reader reads.
+ */
+function HostLine({ host, className, testId }: { host: string; className: string; testId: string }) {
+  return (
+    <span data-testid={testId} title={host} className={`${className} overflow-hidden text-ellipsis whitespace-nowrap [direction:rtl] text-left rtl:text-right`}>
+      <bdi dir="ltr">{host}</bdi>
+    </span>
+  );
+}
 
 function PlayIcon() {
   return (
@@ -24,7 +38,8 @@ function PlayIcon() {
  */
 export function LinkPreviewCard({ preview }: { preview: LinkPreview }) {
   const video = videoSite(preview.u);
-  const site = preview.s ?? hostOf(preview.u);
+  // The sender's site name, unless it reads as another address than the link's (or hides characters): the host then.
+  const site = preview.s && !labelMisleads(preview.s, preview.u) ? preview.s : undefined;
   // Its box from the JPEG's header, so the card is its full height before the picture decodes (the chat does not move).
   const size = useMemo(() => previewImageSize(preview.i), [preview.i]);
   return (
@@ -38,10 +53,11 @@ export function LinkPreviewCard({ preview }: { preview: LinkPreview }) {
         </span>
       )}
       <span className="block px-2.5 py-2">
-        <span className="block text-[12px] text-text-secondary truncate" data-testid="link-preview-site">{site}</span>
+        {site ? <span className="block text-[12px] text-text-secondary truncate" data-testid="link-preview-site">{site}</span>
+          : <HostLine host={hostOf(preview.u)} testId="link-preview-site" className="block text-[12px] text-text-secondary" />}
         {preview.t && <span className="block text-[13.5px] font-semibold leading-snug line-clamp-2" data-testid="link-preview-title">{preview.t}</span>}
         {preview.d && <span className="block text-[12.5px] text-text-secondary leading-snug line-clamp-2 mt-0.5" data-testid="link-preview-description">{preview.d}</span>}
-        <span className="block text-[11px] text-link truncate mt-1" data-testid="link-preview-url">{hostOf(preview.u)}</span>
+        <HostLine host={hostOf(preview.u)} testId="link-preview-url" className="block text-[11px] text-link mt-1" />
       </span>
     </a>
   );
@@ -111,7 +127,9 @@ export function LocationCard({ place }: { place: Place }) {
       <div className="mt-1.5 flex gap-3 text-[12.5px]">
         <a {...externalLinkProps(open)} data-testid="location-open" className="text-link underline">{t("chat.location.open")}</a>
         {open !== openStreetMapUrl(place) && /^https?:/.test(place.source) && hostOf(place.source) !== hostOf(open) && (
-          <a {...externalLinkProps(place.source)} className="text-link underline truncate">{hostOf(place.source)}</a>
+          <a {...externalLinkProps(place.source)} className="min-w-0 text-link underline">
+            <HostLine host={hostOf(place.source)} testId="location-source" className="block" />
+          </a>
         )}
       </div>
     </div>
