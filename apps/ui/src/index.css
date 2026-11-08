@@ -1536,6 +1536,13 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 @media (min-width: 768px) and (pointer: coarse) and (max-height: 500px) {
   html[data-keyboard="true"] .account-footer { display: none; }
 }
+/* A chat's search with the keyboard up on a short screen (a phone on its side): the chat's header, the search bar and
+   the composer took all the keyboard leaves, and "1 of 8" showed no message. While the search has the focus, the
+   composer goes behind the keyboard and the bar keeps only its buttons' height. */
+@media (pointer: coarse) and (max-height: 500px) {
+  html[data-keyboard="true"]:has(.chat-search-bar:focus-within) [data-composer] { display: none; }
+  html[data-keyboard="true"] .chat-search-bar:focus-within { padding-block: 0; }
+}
 
 .conversation-pin { transform-origin: center; transition: transform 180ms ease-out; }
 
