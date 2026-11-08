@@ -1213,6 +1213,8 @@ export class HandoffTaker {
       else await this.exclusive(() => this.install(record));
       return;
     }
+    // A staging kept for Try again goes after 24 hours at the latest, whether or not another pull comes (WISP 06).
+    if (handoff.step === "stopped" && handoff.staging && (handoff.at === undefined || this.now() - handoff.at >= HANDOFF_TIMINGS.stagingMs)) await this.dropStaging();
     if (!takes(record.state) || handoff.step === "stopped") return;
     // Verified before the reload, and no release yet: the staged state is whole. It asks for the release again.
     if (handoff.step === "verified" && handoff.h && handoff.staging && this.secret) {
@@ -1790,11 +1792,27 @@ export class HandoffTaker {
     await ports.staging.revert(handoff.old, handoff.staging);
   }
 
-  /** The handoff ended without a release: the staged parts of pass 2 go, the staged files stay for a later try. */
+  /**
+   * The handoff ended without a release: the staged parts of pass 2 go. The staged files stay for a later try only after
+   * a copy that stalled or a device that did not answer; any other end deletes the whole staging (WISP 06 § Installing
+   * the staged state), so a standby holds none of the profile's files after a move it did not finish.
+   */
   private async giveUp(failure: HandoffFailure): Promise<void> {
     await this.end();
+    if (failure !== "stalled" && failure !== "unreachable") await this.dropStaging();
     this.failure = failure;
     this.changed();
+  }
+
+  /** The record's staging namespace goes, files and notes, and the record names none. Never one that holds a release. */
+  private async dropStaging(): Promise<void> {
+    const record = await this.ports.records.read().catch(() => null);
+    const handoff = record?.handoff;
+    this.staging = null;
+    if (!record || handoff?.role !== "taking" || !handoff.staging || handoff.release || handoff.staging === record.profile || !takes(record.state)) return;
+    // Not all of it gone: the record still names it, for the check at start and a later pull to drop it again.
+    if (!(await this.ports.staging.drop(handoff.staging).then(() => true, () => false))) return;
+    await this.ports.records.amend({ handoff: { ...handoff, staging: undefined } }).catch(() => {});
   }
 
   /** What ending a handoff before its release leaves: no timers, nothing of pass 2, the record's note stopped. */
