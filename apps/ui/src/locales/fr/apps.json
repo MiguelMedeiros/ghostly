@@ -157,6 +157,7 @@
     "title": "Ouvrir {{title}} dans une discussion"
   },
   "store": {
+    "clockLate": "La liste de cette boutique est datée après l'horloge de cet appareil. Vérifiez la date et l'heure de cet appareil.",
     "count": "{{count}} apps",
     "count_one": "{{count}} app",
     "count_other": "{{count}} apps",

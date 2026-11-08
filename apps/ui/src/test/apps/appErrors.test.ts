@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LOCALES as locales } from "../i18n/locales";
 import { translateWith } from "../../locales/translate";
-import { appErrorCode, appErrorView, appStoreErrorView } from "../../lib/apps/errors";
+import { appErrorCode, appErrorView, appStoreErrorView, appStoreProblemText } from "../../lib/apps/errors";
 // covers: apps.page
 
 /*
@@ -49,6 +49,20 @@ describe("app errors", () => {
     expect(appStoreErrorView(new Error("rollback: This store's index is older than the one you have (sequence 4)"), en))
       .toEqual({ text: "This store's link now holds an older list than yours. Ghostly kept yours." });
     expect(appStoreErrorView(new Error("too-large: Too large"), en)).toEqual({ text: "This store's list is too large for Ghostly to read." });
+  });
+
+  it("a store's list dated too far ahead names this device's clock, in every language, never that the link holds no valid store", () => {
+    const refused = new Error("expires-too-far: This is not a store Ghostly can read");
+    const problem = { problem: "expires-too-far" } as const;
+    const en = translateWith(locales.en);
+    expect(appStoreErrorView(refused, en)).toEqual({ text: "This store's list is dated ahead of this device's clock. Check the date and time on this device." });
+    expect(appStoreProblemText(problem, en)).toBe("This store's list is dated ahead of this device's clock. Check the date and time on this device.");
+    expect(appStoreProblemText(problem, translateWith(locales.pt))).toBe("A lista desta loja tem uma data à frente do relógio deste dispositivo. Confira a data e a hora deste dispositivo.");
+    for (const [name, locale] of Object.entries(locales)) {
+      const t = translateWith(locale);
+      expect(appStoreErrorView(refused, t).text, name).not.toBe(t("apps.errors.notStore"));
+      expect(appStoreErrorView(refused, t).text, name).not.toMatch(/apps\.store/);
+    }
   });
 
   it("other errors have no ⓘ", () => {

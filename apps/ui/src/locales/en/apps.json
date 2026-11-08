@@ -157,6 +157,7 @@
     "title": "Open {{title}} in a chat"
   },
   "store": {
+    "clockLate": "This store's list is dated ahead of this device's clock. Check the date and time on this device.",
     "count": "{{count}} apps",
     "count_one": "{{count}} app",
     "count_other": "{{count}} apps",

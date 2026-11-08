@@ -157,6 +157,7 @@
     "title": "在聊天中打开 {{title}}"
   },
   "store": {
+    "clockLate": "该商店列表的日期晚于此设备的时钟。请检查此设备的日期和时间。",
     "count": "{{count}} 个应用",
     "count_one": "{{count}} 个应用",
     "count_other": "{{count}} 个应用",

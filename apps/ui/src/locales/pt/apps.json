@@ -157,6 +157,7 @@
     "title": "Abrir {{title}} em uma conversa"
   },
   "store": {
+    "clockLate": "A lista desta loja tem uma data à frente do relógio deste dispositivo. Confira a data e a hora deste dispositivo.",
     "count": "{{count}} apps",
     "count_one": "{{count}} app",
     "count_other": "{{count}} apps",
