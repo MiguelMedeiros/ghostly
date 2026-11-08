@@ -38,7 +38,7 @@ import { forgetSentOriginal } from "../lib/sentOriginals";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { GroupInvitationCard, focusPastRow, rowAfter } from "../components/GroupInvitation";
 import { GroupOthers } from "../components/GroupOthers";
-import { authorName, forgetGroupLocal, groupPath, groupReadAt, groupStatusText, groupUnreadAt, markGroupRead, formerName, memberName, memberPhoto, sameNamed } from "../lib/groups";
+import { authorName, forgetGroupLocal, groupPath, groupReadAt, groupStatusText, groupUnreadAt, markGroupRead, formerName, memberName, memberPhoto, othersName, sameNamed } from "../lib/groups";
 import { NowPlayingChat, stopPlayingFrom } from "../lib/nowPlaying";
 import { clearChatNotification } from "../lib/notifications";
 import { useWindowAway, windowAway } from "../lib/windowAway";
@@ -97,7 +97,7 @@ function rosterNames(group: Pick<GroupView, "profile" | "members" | "formerNames
   const same = sameNamed(group.members, myName);
   const members = group.members.map(m => {
     const name = memberName(m, t, same);
-    if (!byKey.has(m.key)) byKey.set(m.key, name);
+    if (!byKey.has(m.key)) byKey.set(m.key, m.me ? name : othersName(name, t));
     return { key: m.key, me: m.me, name: m.me ? myName : name };
   });
   // A former member's name is told apart from the roster's in a community (`authorName`).
@@ -233,7 +233,7 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate, nameS
     if (message.event === "joined" && !message.member && text.startsWith("You joined. ")) return t("group.event.withNote", { event: t("group.event.youJoined"), note: readNote(group, t) });
     if (message.event === "joined" && !message.member && text === "You joined again") return t("group.event.youJoinedAgain");
     // The name stored, in a community told apart from a member's of the same name by the end of its key (`formerName`).
-    const nameOf = (stored: string) => message.member && !me ? formerName(group, message.member, writtenName(stored, t)) : writtenName(stored, t);
+    const nameOf = (stored: string) => message.member && !me ? othersName(formerName(group, message.member, writtenName(stored, t)), t) : writtenName(stored, t);
     const gone = " is no longer a member";
     if (message.event === "gone" && text.endsWith(gone)) return t("group.event.gone", { name: nameOf(text.slice(0, -gone.length)) });
     const left = " left";
@@ -250,7 +250,9 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate, nameS
     const fixed = (FIXED_EVENTS as Map<string, string>).get(text);
     return fixed === "rotated" ? t("group.event.rotated") : fixed === "removed" ? t("group.event.removed") : fixed === "forked" ? t("group.event.forked") : text;
   }
-  const name = nameSlot ?? (member ? memberName(member, t, sameNamed(group.members)) : authorName(group, message.member!, t));
+  const shown = nameSlot ?? (member ? memberName(member, t, sameNamed(group.members)) : authorName(group, message.member!, t));
+  // A member who named themselves as the app calls me is quoted (`othersName`): "“You” joined" is not my "You joined.".
+  const name = me || nameSlot ? shown : othersName(shown, t);
   if (message.event === "joined") return t("group.event.joined", { name });
   // A member back in the group (invited again): the line of their earlier removal or leave is theirs too. Mine says
   // what happened to me in its own words.
@@ -283,7 +285,7 @@ function eventLine(message: StoredMessage, group: GroupView, t: Translate): Reac
   if (!member || member.me || member.role !== "admin" || message.event === "admin") return eventText(message, group, t);
   const [before, after, ...more] = eventText(message, group, t, NAME_SLOT).split(NAME_SLOT);
   if (after === undefined || more.length) return eventText(message, group, t);
-  return <>{before}<bdi>{memberName(member, t, sameNamed(group.members))}</bdi> <AdminMark testId="group-event-admin" />{after}</>;
+  return <>{before}<bdi>{othersName(memberName(member, t, sameNamed(group.members)), t)}</bdi> <AdminMark testId="group-event-admin" />{after}</>;
 }
 
 /**
