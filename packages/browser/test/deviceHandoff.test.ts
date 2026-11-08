@@ -178,6 +178,8 @@ interface World {
   giverRecords: Records; takerRecords: Records;
   giver: HandoffGiver; taker: HandoffTaker;
   busy: { why: LocalBusy | BusyReport | null };
+  /** The device set is changing on the giver (a device being added, a move of the set). */
+  setChanging: boolean;
   /** Who the giver said would take, at each check of its wallets, and at quiesce. */
   asked: (HandoffTakerFacts | undefined)[]; quiescedFor: (HandoffTakerFacts | undefined)[];
   /** What the engine adds to the record at quiesce (the Breez databases of wallets that move), and what stays here. */
@@ -198,7 +200,7 @@ function world(options: { verifier?: boolean } = {}): World {
   const w = {
     link: new Link(), profile: new Profile(), storage: new Storage(),
     giverRecords: new Records(recordFor("ghostly_a", 0, "active")), takerRecords: new Records(recordFor("ghostly", 1, "standby")),
-    busy: { why: null }, asked: [], quiescedFor: [], quiesceExtra: {}, stays: [], droppedDatabases: [], quiesced: [], reloads: 0, activeAgain: 0, takes: [], giverSelf: {}, takerSelf: {},
+    busy: { why: null }, setChanging: false, asked: [], quiescedFor: [], quiesceExtra: {}, stays: [], droppedDatabases: [], quiesced: [], reloads: 0, activeAgain: 0, takes: [], giverSelf: {}, takerSelf: {},
     takeOutcome: () => ({ kind: "start", read: { result: "mine", good: true, seen: 0n, invalid: [], unsigned: [], conditions: {}, record: { sequence: (N + 1) * 2 ** 20 + 1 } } }) as unknown as TurnOutcome,
   } as unknown as World;
   w.makeGiver = (phase) => {
@@ -207,6 +209,7 @@ function world(options: { verifier?: boolean } = {}): World {
       self: async () => self(w.giverSelf), source: w.profile,
       verifier: async () => (options.verifier === false || phase === "gated" ? null : verifier()),
       busy: async (taker) => { w.asked.push(taker); return w.busy.why; },
+      setChanging: () => w.setChanging,
       staying: async () => w.stays,
       ...(phase === "active" ? { quiesce: async (patch: DevicePatch, taker?: HandoffTakerFacts) => { w.quiesced.push(patch); w.quiescedFor.push(taker); await w.giverRecords.move("releasing", { ...patch, ...w.quiesceExtra }); } } : {}),
       ...(phase === "gated" ? {
@@ -1100,6 +1103,25 @@ describe("refusals before a byte is copied", () => {
     expect(w.giver.view()).toMatchObject({ role: "giver", key: B, step: "failed", failure: "expiry", wallet: "bark", expiresAt: 1_800_000_000_000 });
     // The check knew the taker from its hello: its key, its kind and its wallet SDK pins.
     expect(w.asked.at(-1)).toEqual({ key: B, kind: "web", pins: { ark: "0.4.76" } });
+  });
+
+  it("a device being added or a move of the set on the giver: the pull is told it is busy, Move to is refused, and nothing is frozen", async () => {
+    const w = world();
+    w.setChanging = true;
+    await w.taker.pull(PASSWORD);
+    await until(() => w.taker.view()?.step === "failed");
+    expect(w.taker.view()!.failure).toBe("busy");
+    expect(w.link.sent.filter((s) => s.frame.t === "handoff-busy").map((s) => s.frame.why)).toEqual(["handoff"]);
+    expect(w.link.count("handoff-pake", A)).toBe(0);
+    expect(w.giverRecords.record.handoffAttempts).toBeUndefined();
+    expect(w.quiesced).toEqual([]);
+    expect(w.giverRecords.record.state).toBe("active");
+    await expect(w.giver.push(B)).rejects.toThrow("handoff-busy: Another move is in progress.");
+    expect(w.link.count("handoff-offer")).toBe(0);
+    // Once the set stops changing, the profile moves.
+    w.setChanging = false;
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1);
   });
 
   it("a taker with an older database: Update Ghostly on this device first", async () => {
