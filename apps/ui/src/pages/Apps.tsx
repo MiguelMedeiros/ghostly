@@ -356,6 +356,17 @@ export function Apps() {
     if (active && active !== document.body && active.isConnected) return;
     document.querySelector<HTMLElement>("[data-testid=apps-add]")?.focus({ preventScroll: true });
   }, [gone, details, installed, builtIns, stores]);
+  // Try again worked: its block went with the button that had the focus, so the focus goes to the section's first
+  // control (what was read), else to Add. A read that fails again keeps its block, and Try again keeps the focus.
+  const [retried, setRetried] = useState<"installed" | "stores" | null>(null);
+  useEffect(() => {
+    if (!retried || (retried === "installed" ? installedFailure != null || installed === null : storesFailure != null || stores === null)) return;
+    setRetried(null);
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    const first = document.querySelector(`[data-testid=apps-${retried}]`)?.querySelector<HTMLElement>("button:not(:disabled)");
+    (first ?? document.querySelector<HTMLElement>("[data-testid=apps-add]"))?.focus({ preventScroll: true });
+  }, [retried, installedFailure, installed, storesFailure, stores]);
   const notice = useToast();
   const { show } = notice;
   const fail = useCallback((e: unknown) => show(appErrorText(e, t)), [show, t]);
@@ -389,7 +400,7 @@ export function Apps() {
       trailing={<PageAction label={t("apps.page.add")} title={t("apps.page.addHint")} testId="apps-add" onClick={() => setAdding(true)} />}>
       <p className="text-sm text-text-secondary">{t("apps.page.intro")}</p>
       <Section title={t("apps.page.installed")} testId="apps-installed">
-        {installedFailure != null && <ReadFailed error={installedFailure} testId="apps-installed-error" onRetry={() => void refreshInstalledApps()} />}
+        {installedFailure != null && <ReadFailed error={installedFailure} testId="apps-installed-error" onRetry={() => { setRetried("installed"); void refreshInstalledApps(); }} />}
         {installed === null ? <Block><Notice>{t("apps.page.loading")}</Notice></Block>
           : installed.length === 0 && builtIns.length === 0 ? installedFailure == null && <Block testId="apps-none"><Notice>{t("apps.page.none")}</Notice></Block>
             : <>
@@ -398,7 +409,7 @@ export function Apps() {
             </>}
       </Section>
       <Section title={t("apps.page.stores")} testId="apps-stores">
-        {storesFailure != null && <ReadFailed error={storesFailure} testId="apps-stores-error" onRetry={() => void reloadStores()} />}
+        {storesFailure != null && <ReadFailed error={storesFailure} testId="apps-stores-error" onRetry={() => { setRetried("stores"); void reloadStores(); }} />}
         {stores === null ? <Block><Notice>{t("apps.page.loading")}</Notice></Block>
           : stores.length === 0 ? storesFailure == null && <Block testId="apps-no-stores"><Notice>{t("apps.page.noStores")}</Notice></Block>
             : stores.map((store) => <StoreBlock key={store.key} store={store} alone={stores.length === 1} installed={installed ?? []} onError={fail} onProblem={show} onRemoved={() => setGone({ store: store.key })}
