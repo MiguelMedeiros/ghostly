@@ -20,6 +20,7 @@ export type DeliveryMode = "stream" | "dht";
 export const DHT_TEXT_BYTES = 256;
 export const DHT_MESSAGE_TTL = 5 * 60_000;
 const DHT_TEXT_TOO_LONG = `DHT text is limited to ${DHT_TEXT_BYTES} UTF-8 bytes. Shorten it or choose a live connection.`;
+const DHT_PACKET_BUDGET = "Text and authentication exceed the DHT packet budget. Shorten the message.";
 const CONTROL_TTL = 10 * 60_000;
 /**
  * How far apart two devices' clocks may be for an envelope's expiry: a reader takes one until this long after `expires`
@@ -439,12 +440,36 @@ export class DhtDelivery {
     if (json !== this.saved) { await this.options.save(structuredClone(next)); this.saved = json; }
     this.state = next;
   }
+  /** The key an envelope between this side and `peer` is sealed with: the same for the same contact, so derived once. */
+  private sealedKeys?: { peer: string; key: Uint8Array };
   private sealedKey(peer: string): Uint8Array {
-    const shared = x25519.getSharedSecret(ed25519.utils.toMontgomerySecret(this.participation.seed), ed25519.utils.toMontgomery(publicKeyFromZ32(peer)));
-    return hkdf(sha256, shared, this.key, utf8Encode("ghostly-dht-participation-envelope/1"), 32);
+    if (this.sealedKeys?.peer !== peer) {
+      const shared = x25519.getSharedSecret(ed25519.utils.toMontgomerySecret(this.participation.seed), ed25519.utils.toMontgomery(publicKeyFromZ32(peer)));
+      this.sealedKeys = { peer, key: hkdf(sha256, shared, this.key, utf8Encode("ghostly-dht-participation-envelope/1"), 32) };
+    }
+    return this.sealedKeys.key;
   }
   private signed(body: Body, recipient = "invite"): Uint8Array { return utf8Encode(JSON.stringify(["ghostly-dht-envelope", this.from, this.to, recipient, body])); }
   private records(body: Body, recipient = this.options.credentials.peerKey): GhostRecord[] { return this.envelope(body, recipient).records; }
+  /**
+   * Whether an envelope to `recipient` whose plaintext is this many bytes fits the packet: its size depends on the
+   * length alone, so it is measured on a placeholder, with no signature, key or encryption.
+   */
+  private fits(bytes: number, recipient: string | undefined): boolean {
+    if (bytes > MAX_ENVELOPE_PLAINTEXT) return false;
+    const ratchet = this.ratcheted(recipient);
+    const sealed = ratchet ? 4 * Math.ceil((RATCHET_OVERHEAD + bytes) / 3) : sealedLength(bytes);
+    // The `_dmk` hint's value is the participation key sealed with the chat key: as long as any other one.
+    const hint = recipient ? [{ label: "_dmk", value: "A".repeat(sealedLength(utf8Encode(this.participation.pubKeyZ32).length)), ttl: ENVELOPE_TTL }] : [];
+    return measureRecords(this.identity.pubKeyZ32, [{ label: ratchet ? "_dr" : "_dm", value: "A".repeat(sealed), ttl: ENVELOPE_TTL }, ...hint]) <= ENVELOPE_PACKET_BYTES;
+  }
+  /**
+   * Whether `body` fits an envelope to `recipient`, as `envelope` would find it, without building one: the signature is
+   * always 86 characters of base64url.
+   */
+  private bodyFits(body: Body, recipient: string | undefined): boolean {
+    return this.fits(utf8Encode(JSON.stringify([body, "x".repeat(86)])).length, recipient);
+  }
   /**
    * The envelope's records. Ratcheted (`ratcheted`), its `_dr` record is the right length but not sealed yet: `seal`
    * gives its bytes, under the chat's lock, once the publication is sure to go. Measuring a packet takes no key.
@@ -456,11 +481,9 @@ export class DhtDelivery {
     const ratchet = this.ratcheted(recipient);
     const sealedBytes = (bytes: number) => ratchet ? 4 * Math.ceil((RATCHET_OVERHEAD + bytes) / 3) : sealedLength(bytes);
     const label = ratchet ? "_dr" : "_dm";
-    // The packet a plaintext of this many bytes makes: its size depends on the length alone.
-    const fits = (bytes: number) => bytes <= MAX_ENVELOPE_PLAINTEXT &&
-      measureRecords(this.identity.pubKeyZ32, [{ label, value: "A".repeat(sealedBytes(bytes)), ttl: ENVELOPE_TTL }, ...hint]) <= ENVELOPE_PACKET_BYTES;
+    const fits = (bytes: number) => this.fits(bytes, recipient);
     const bytes = utf8Encode(plaintext).length;
-    if (!fits(bytes)) throw new Error("Text and authentication exceed the DHT packet budget. Shorten the message.");
+    if (!fits(bytes)) throw new Error(DHT_PACKET_BUDGET);
     // Padded with spaces up to the largest that fits, so a keep-alive is as long as a text. JSON allows spaces after the
     // value: readers from before read the envelope as ever.
     let padded = bytes;
@@ -615,15 +638,18 @@ export class DhtDelivery {
     const error = this.packetError(next.message, next.expires, next.reply, next.edit);
     return error && next.reply ? this.packetError(next.message, next.expires) : error;
   }
+  /**
+   * Measured, not built (`bodyFits`): the outbox asks it of every waiting text at each look, and a text that waits as no
+   * relay takes it would cost a signature and a seal each time, for an answer that does not change.
+   */
   private packetError(message: Message, expires: number, reply?: string, edit?: DhtEdit): string | null {
-    try { this.records(this.body(this.sequence + 1, Date.now(), expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", reply, [], edit), this.options.credentials.peerKey ?? this.participation.pubKeyZ32); return null; }
-    catch (error) { return error instanceof Error ? error.message : String(error); }
+    const body = this.body(this.sequence + 1, Date.now(), expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", reply, [], edit);
+    return this.bodyFits(body, this.options.credentials.peerKey ?? this.participation.pubKeyZ32) ? null : DHT_PACKET_BUDGET;
   }
   /** Whether a text with its hop count fits the packet and what a reader reads (`MAX_ENVELOPE_PLAINTEXT`). */
   private roomForHops(message: Message, expires: number, reply: string | undefined, forwarded: number): boolean {
     const body = this.body(this.sequence + 1, Date.now(), expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", reply, [], undefined, forwarded);
-    try { this.records(body, this.options.credentials.peerKey ?? this.participation.pubKeyZ32); } catch { return false; }
-    return utf8Encode(JSON.stringify([body, "x".repeat(86)])).length <= MAX_ENVELOPE_PLAINTEXT;
+    return this.bodyFits(body, this.options.credentials.peerKey ?? this.participation.pubKeyZ32);
   }
   /**
    * `forwarded`: a forwarded text's hop count (WISP 403 § Forwards). Like a reply's id it goes only when the packet has
@@ -683,8 +709,7 @@ export class DhtDelivery {
     const hops = readForwarded(forwarded);
     const fits = (element: DhtFileElement, withReply: boolean, withHops: boolean) => {
       const body = this.body(this.sequence + 1, now, expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", withReply ? reply : undefined, [], undefined, withHops ? hops : undefined, element);
-      try { this.records(body, this.options.credentials.peerKey ?? this.participation.pubKeyZ32); } catch { return false; }
-      return utf8Encode(JSON.stringify([body, "x".repeat(86)])).length <= MAX_ENVELOPE_PLAINTEXT;
+      return this.bodyFits(body, this.options.credentials.peerKey ?? this.participation.pubKeyZ32);
     };
     const elements = dhtFileElements(file), bare = elements[elements.length - 1];
     const tries: [DhtFileElement, boolean, boolean][] = [...elements.map(e => [e, !!reply, !!hops] as [DhtFileElement, boolean, boolean]), [bare, !!reply, false], [bare, false, false]];
