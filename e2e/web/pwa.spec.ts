@@ -191,6 +191,8 @@ test.describe("service worker", () => {
       await ana.page.getByTestId("share-cancel").click();
       await expect(text(ana.page)).toHaveText(`share number ${n}`);
       await expect(ana.page.getByTestId("share-dropped")).toBeHidden();
+      // The next share takes a press only once it has been said.
+      await expect(ana.page.getByTestId("share-next")).toContainText(`share number ${n}`);
     }
     await ana.page.getByTestId("share-cancel").click();
     await expect(ana.page).toHaveURL(/#\/$/);
@@ -203,13 +205,7 @@ test.describe("service worker", () => {
     await controlled(ana.page);
     await ana.page.goto("/#/");
     const text = ana.page.getByTestId("share-text");
-    // Each from a tab of its own, as a desktop system delivers them: the app's tab gets them all.
-    const shareFromTab = async (value: string) => {
-      const tab = await ana.context.newPage();
-      await tab.goto("/");
-      await postShare(tab, value);
-      await expect(tab.getByTestId("other-tab")).toHaveAttribute("data-state", "shared");
-    };
+    const shareFromTab = (value: string) => shareFromOwnTab(ana, value);
 
     await shareFromTab("share number 1");
     await expect(ana.page).toHaveURL(/#\/shared$/, { timeout: 15_000 });
@@ -221,6 +217,8 @@ test.describe("service worker", () => {
     await ana.page.getByTestId("share-chat").click();
     await expect(text).toHaveText("share number 2");
     await expect(ana.page).toHaveURL(/#\/shared$/);
+    // The next share takes a press only once it has been said.
+    await expect(ana.page.getByTestId("share-next")).toContainText("share number 2");
     await ana.page.getByTestId("share-chat").click();
     await expect(ana.page).toHaveURL(/#\/chat\//);
     // Both went to that chat's composer, in their order.
@@ -231,7 +229,52 @@ test.describe("service worker", () => {
     await expect(ana.page).toHaveURL(/#\/shared$/, { timeout: 15_000 });
     await expect(text).toHaveText("share number 3");
   });
+
+  test.describe("the next share waiting", () => {
+    test("is said and gets the focus off the button pressed: a second Enter or a double click never acts on it unseen", { tag: ["@feature:app.pwa.share-target"] }, async ({ peer }) => {
+      const ana = await peer("Ana", { serviceWorkers: "allow" });
+      const bo = await peer("Bo");
+      await link(ana, bo);
+      await controlled(ana.page);
+      await ana.page.goto("/#/");
+      const text = ana.page.getByTestId("share-text");
+      const said = ana.page.getByTestId("share-next");
+      const heading = ana.page.getByTestId("share-picker").getByRole("heading", { level: 1 });
+      await shareFromOwnTab(ana, "share number 1");
+      await expect(ana.page).toHaveURL(/#\/shared$/, { timeout: 15_000 });
+      for (const n of [2, 3]) await shareFromOwnTab(ana, `share number ${n}`);
+      await expect(text).toHaveText("share number 1");
+
+      // A chat picked with Enter: the focus goes to the page's heading, so Enter again picks nothing.
+      await ana.page.getByTestId("share-chat").focus();
+      await ana.page.keyboard.press("Enter");
+      await expect(text).toHaveText("share number 2");
+      await expect(heading).toBeFocused();
+      await ana.page.keyboard.press("Enter");
+      await expect(said).toContainText("share number 2");
+      await expect(said).toHaveAttribute("aria-live", "polite");
+      await expect(text).toHaveText("share number 2");
+      await expect(ana.page).toHaveURL(/#\/shared$/);
+
+      // A double click (or tap) on Cancel puts aside the share it was pressed for, not the next one too.
+      await ana.page.getByTestId("share-cancel").dblclick();
+      await expect(text).toHaveText("share number 3");
+      await expect(said).toContainText("share number 3");
+      await expect(ana.page).toHaveURL(/#\/shared$/);
+      await ana.page.getByTestId("share-chat").click();
+      await expect(ana.page).toHaveURL(/#\/chat\//);
+      await expect(ana.page.getByPlaceholder("Message…")).toHaveValue("share number 1\nshare number 3");
+    });
+  });
 });
+
+/** A share from a tab of its own, as a desktop system delivers them: the app's tab (`ana`'s page) gets them all. */
+async function shareFromOwnTab(ana: Peer, value: string): Promise<void> {
+  const tab = await ana.context.newPage();
+  await tab.goto("/");
+  await postShare(tab, value);
+  await expect(tab.getByTestId("other-tab")).toHaveAttribute("data-state", "shared");
+}
 
 /** What the system does when a person shares text into the installed app: a navigation of `page` that posts the manifest's form. */
 async function postShare(page: Page, text: string): Promise<void> {
