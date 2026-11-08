@@ -4681,15 +4681,17 @@ export class GhostlyNode implements EngineImplementation {
     if (marked) { await this.messagesChanged(linkId, [message.id]); this.emitState(); }
   }
 
-  deleteMessage({ linkId, messageId }: { linkId: string; messageId: string }): void {
+  /** `everyone`: whether it is deleted for everyone, a waiting text the outbox already handed to the link; else only here. */
+  deleteMessage({ linkId, messageId }: { linkId: string; messageId: string }): { everyone: boolean } {
     // The chat's outbox never sends it from now on, whatever its retry in progress read (`Outbox.cancel`). Cancel sending
     // that comes once that retry handed the waiting text to the link is too late to stop it: it may be out, so it is
     // deleted for everyone (its removal goes after it), never gone here and kept by the contact.
     if (this.outboxes.get(linkId)?.cancel(messageId)) {
       void this.removeMessage({ linkId, messageId }).then(({ refused }) => refused ? this.forgetMessage(linkId, messageId) : undefined).catch(() => {});
-      return;
+      return { everyone: true };
     }
     void this.forgetMessage(linkId, messageId);
+    return { everyone: false };
   }
 
   /**

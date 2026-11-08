@@ -208,8 +208,12 @@ export interface EngineApi {
   appRemoteRead(params: { linkId: string; ref: string; serve: string; offset: number; length: number; digest?: string }): { bytes: Uint8Array; size: number } | { error: string };
   /** One message's details view (WISP 400 § Message details): how it travelled, as stored, plus what the engine knows around it now. */
   messageDetails(params: { linkId: string; messageId: string }): MessageDetailsView | null;
-  /** Forgets one message and the bytes of the file it carried. Nothing is sent: the peer keeps its copy. */
-  deleteMessage(params: { linkId: string; messageId: string }): void;
+  /**
+   * Forgets one message and the bytes of the file it carried. Nothing is sent: the peer keeps its copy. A waiting text
+   * of mine is cancelled (Cancel sending); one the outbox's retry already handed to the link is deleted for everyone
+   * instead, and `everyone` says so.
+   */
+  deleteMessage(params: { linkId: string; messageId: string }): { everyone: boolean };
   /**
    * Deletes a message of mine for everyone (WISP 400 § Delete for everyone): gone here at once, and from every member's
    * device as its last edit. A chat's or a group's (`group:<id>`); refused for someone else's, a payment or a notice.
