@@ -73,6 +73,8 @@ export class NotSent {
 
 /** How long one turn of an outbox may hold the next one back: a send that never returns must not stop the chat. */
 const TURN_MS = 30_000;
+/** The newest messages deleted here an outbox keeps from going (`Outbox.cancel`); their rows are long gone by the oldest. */
+const KEPT_CANCELLED = 1_000;
 /** The most rows a new message's look reads one by one (`Outbox.look`), where the store cannot read them in one go. */
 const KNOWN_ROWS = 16;
 
@@ -152,6 +154,13 @@ export class Outbox {
   private looks = 0;
   private looked = 0;
   private stopped = false;
+  /**
+   * Messages deleted here (`cancel`): never handed to `send`, whatever a look in progress read of them. A look reads a
+   * row, then marks it and sends what it read: a Cancel sending in between deleted the row and the text went anyway.
+   */
+  private cancelled = new Set<string>();
+  /** Handed to `send` and not back yet, each with whether it was waiting (it had not left this device) when its send began. */
+  private handed = new Map<string, boolean>();
   private readonly resender: Resender;
   private readonly policy: ResendPolicy;
   private readonly now: () => number;
@@ -217,6 +226,21 @@ export class Outbox {
   private get scheduled(): boolean {
     for (const wait of this.waiting.values()) if (wait.timer) return true;
     return false;
+  }
+
+  /**
+   * The message is deleted here (Cancel sending, a delete, a delete for everyone): from now on it never goes, and
+   * nothing of it is retried. A send already handed to the link cannot be called back: true when that send is of a text
+   * that was waiting (it had not left this device), so the caller, who meant it never to leave, removes it from the
+   * contact too. No row is read: the answer is what this outbox is doing with it right now.
+   */
+  cancel(id: string): boolean {
+    this.cancelled.delete(id);
+    this.cancelled.add(id);
+    if (this.cancelled.size > KEPT_CANCELLED) this.cancelled.delete(this.cancelled.values().next().value!);
+    this.clear(id);
+    this.forget(id);
+    return this.handed.get(id) === true;
   }
 
   /** One message as stored now: by its id when the store can, else picked out of the chat's history. */
@@ -394,6 +418,7 @@ export class Outbox {
     if (!this.sameLink) { if (!this.stopped && !this.waiting.get(message.id)?.timer) this.schedule(message.id); return true; }
     // An older text has not left this device yet: the file's offer goes after it.
     if (await this.behindUnsent(message)) { if (!this.waiting.get(message.id)?.timer) this.schedule(message.id); return true; }
+    if (this.cancelled.has(message.id)) { this.forget(message.id); return true; }
     await this.resender.sendFile!(message).catch(() => {});
     this.forget(message.id);
     // Its row may wait still (its offer went on the DHT floor, or the link closed): the next new message reads the chat.
@@ -435,7 +460,7 @@ export class Outbox {
 
   /** `read`: the message's row, when it was read just now with nothing awaited since. */
   private async transmitNow(id: string, { manual = false }: { manual?: boolean } = {}, read?: StoredMessage): Promise<void> {
-    if (this.stopped || this.busy.has(id) || this.receipts.has(id)) return;
+    if (this.stopped || this.busy.has(id) || this.receipts.has(id) || this.cancelled.has(id)) return;
     this.busy.add(id);
     let again: boolean;
     try {
@@ -451,14 +476,22 @@ export class Outbox {
       if (wait?.timer) { clearTimeout(wait.timer); wait.timer = undefined; }
       if (manual) { this.attempts.delete(id); this.waiting.delete(id); }
       this.attempts.set(id, (this.attempts.get(id) ?? 0) + 1);
-      const via = this.resender.via?.(message) ?? message.via;
+      const via = this.resender.via?.(message) ?? message.via, wasWaiting = message.delivery === "waiting";
+      // Deleted here while its row was read: it is not marked, and it never goes.
+      if (this.cancelled.has(id)) return this.forget(id);
       await this.store.update(id, "sending", undefined, { via, ...(manual ? { resendUntil: undefined } : {}) });
       message = { ...message, via, ...(manual ? { resendUntil: undefined } : {}) };
       if (this.stopped) { await this.queue({ ...message, delivery: "sending", deliveryError: undefined }, "Connection closed. Delivery is unconfirmed."); return; }
+      // Deleted here while it was marked: the last moment it can still be kept from going (`cancel`).
+      if (this.cancelled.has(id)) return this.forget(id);
       // Install before send: a fast receipt must be able to cancel it.
       this.track(id, typeof this.timeoutMs === "number" ? this.timeoutMs : this.timeoutMs(message));
       this.sentUnder.set(id, this.opened);
-      const error = await this.send(message);
+      this.handed.set(id, wasWaiting);
+      let error: string | null | NotSent;
+      try { error = await this.send(message); } finally { this.handed.delete(id); }
+      // Deleted here while it went: its row is gone, or about to be, and nothing of it is written or retried.
+      if (this.cancelled.has(id)) { this.clear(id); return this.forget(id); }
       if (!(error instanceof NotSent)) this.unsent.delete(id);
       if (error instanceof NotSent && unsentBefore) {
         this.clear(id);
@@ -641,6 +674,7 @@ export class Outbox {
    */
   private async attempt(id: string, passed?: StoredMessage[], read?: StoredMessage): Promise<boolean> {
     if (this.stopped || this.busy.has(id)) return true;
+    if (this.cancelled.has(id)) { this.forget(id); return true; }
     if (read && this.waitsOn(read)) { if (!this.waiting.get(id)?.timer) this.schedule(id); return false; }
     // The chat can carry it but an older text has not left this device: it waits behind that one as read, where it
     // was read again, sent to `transmitNow`, read there again with the unsent one, for each text waiting at each look.
@@ -739,6 +773,7 @@ export class Outbox {
   }
 
   private schedule(id: string): void {
+    if (this.cancelled.has(id)) return;
     const wait = this.waiting.get(id) ?? { step: 0, since: this.now(), at: 0 };
     if (wait.timer) clearTimeout(wait.timer);
     const delay = this.policy.backoffMs[Math.min(wait.step, this.policy.backoffMs.length - 1)];
