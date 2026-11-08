@@ -411,8 +411,15 @@ export class Outbox {
 
   /** A waiting file is said on the link, after the older messages passed by that can go now. False: the link cannot carry it. */
   private async fileGoes(message: StoredMessage, passed?: StoredMessage[]): Promise<boolean> {
-    // Not yet: it is looked at again as a queued text is, so a file alone in the chat does not wait for the next link.
-    if (!this.resender.ready(message)) { if (!this.waiting.get(message.id)?.timer) this.schedule(message.id); return false; }
+    if (!this.resender.ready(message)) {
+      // Its offer is on the DHT floor already, or cannot go there: only the live link takes it, and the link's opening
+      // looks (`flush({ reopened })`). It is held with no check of its own: each one read the chat's whole history every
+      // five minutes for as long as the contact was away, and could not send it (60 reads an hour for 10 such files).
+      if (message.fileOnFloor) { this.holdUnchecked(message.id); return false; }
+      // Not yet: it is looked at again as a queued text is, so a file alone in the chat does not wait for the next link.
+      if (!this.waiting.get(message.id)?.timer) this.schedule(message.id);
+      return false;
+    }
     if (passed) await this.catchUp(passed);
     // The link closed under this look: it stays where it is, and keeps a check of its own (the one that brought it
     // here cleared its timer as it fired), so a link that comes back without a look at the chat does not leave it behind.
@@ -781,6 +788,14 @@ export class Outbox {
     wait.at = this.now() + delay;
     wait.timer = setTimeout(() => { wait.timer = undefined; wait.step++; void this.turn(() => this.check(id)).catch(() => {}); }, delay);
     this.waiting.set(id, wait);
+  }
+
+  /** Held, so a look reads its row by id (`look`), with no timer: nothing but a look at the chat sends it. */
+  private holdUnchecked(id: string): void {
+    if (this.cancelled.has(id)) return;
+    const wait = this.waiting.get(id);
+    if (wait?.timer) { clearTimeout(wait.timer); wait.timer = undefined; }
+    if (!wait) this.waiting.set(id, { step: 0, since: this.now(), at: 0 });
   }
 
   private forget(id: string): void {

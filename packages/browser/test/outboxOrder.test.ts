@@ -424,6 +424,49 @@ describe("while the contact is away, a file's offer takes its place on the DHT f
     await vi.waitFor(() => expect(c.said).toEqual(["m1 floor", "f2 floor", "m3 floor"]));
     await c.box.stop();
   });
+
+  // Ten files sent a minute apart to an away contact, each said on the floor: each kept a check of its own every five
+  // minutes, which read the chat's whole history and could not send it, 60 whole reads an hour for as long as the
+  // contact stayed away (300,600 rows an hour at 5,000 messages).
+  it("files whose offers are on the floor read none of the chat's history while the contact stays away", async () => {
+    vi.useFakeTimers();
+    const rows = Array.from({ length: 5_000 }, (_, i) => row(i + 1, "delivered")), said: string[] = [];
+    const counted = { reads: 0, rows: 0 }, state = { live: false };
+    const store = {
+      read: async () => { counted.reads++; counted.rows += rows.length; return rows.map(m => ({ ...m })); },
+      get: async (id: string) => { const m = rows.find(r => r.id === id); return m && { ...m }; },
+      getMany: async (ids: string[]) => ids.map(id => { const m = rows.find(r => r.id === id); return m && { ...m }; }),
+      update: async (id: string, delivery: Delivery, error?: string, extra?: Partial<Pick<StoredMessage, "via" | "resendUntil">>) => {
+        const found = rows.find(m => m.id === id);
+        if (found && found.delivery !== "delivered") Object.assign(found, extra, { delivery, deliveryError: error });
+      },
+    };
+    const box = new Outbox(store, async () => null, 60_000, undefined, { resender: {
+      ready: m => state.live || (!!m.file && !m.wireId && !m.fileOnFloor),
+      via: () => (state.live ? "datalink" : "pkarr"),
+      sendFile: async message => {
+        const found = rows.find(m => m.id === message.id)!;
+        said.push(`${message.text} ${state.live ? "live" : "floor"}`);
+        if (state.live) delete found.delivery; else found.fileOnFloor = "sent";
+      },
+    } });
+    for (let n = 1; n <= 10; n++) {
+      await box.storing(Promise.resolve(rows.push(file(10_000 + n))));
+      // A look at the chat as each is sent: its offer goes on the floor.
+      await box.flush({ reopened: true });
+      await vi.advanceTimersByTimeAsync(60_000);
+    }
+    expect(said).toHaveLength(10);
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    counted.reads = 0; counted.rows = 0;
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(counted).toEqual({ reads: 0, rows: 0 });
+    // Back live: every file goes, in the order they were written.
+    state.live = true;
+    await box.flush({ reopened: true });
+    expect(said.slice(10)).toEqual(Array.from({ length: 10 }, (_, i) => `f${10_001 + i} live`));
+    await box.stop();
+  });
 });
 
 /**
