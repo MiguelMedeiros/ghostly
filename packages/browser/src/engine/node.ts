@@ -9973,12 +9973,16 @@ export class GhostlyNode implements EngineImplementation {
         live.nativeTakenAt = { ...live.nativeTakenAt, [key]: Date.now() };
       }
       if (this.shuttingDown || live.link !== link) return false;
-      const seed = live.stored.transportSeeds?.[key] ?? createIdentity().seedB64;
+      const stored = live.stored.transportSeeds?.[key];
+      const seed = stored ?? createIdentity().seedB64;
       // Kept before anything is awaited: another transport's listener for this chat starts beside this one, and
-      // each must write the seeds the other already drew.
-      const transportSeeds = { ...live.stored.transportSeeds, [key]: seed };
-      live.stored = { ...live.stored, transportSeeds };
-      await db.patchLink(linkId, { transportSeeds });
+      // each must write the seeds the other already drew. One already stored is not written again: with Iroh's relay
+      // out of reach, the failed starts' retries wrote a chat's row back unchanged every 10 s (bug hunt, 2026-11-08).
+      if (!stored) {
+        const transportSeeds = { ...live.stored.transportSeeds, [key]: seed };
+        live.stored = { ...live.stored, transportSeeds };
+        await db.patchLink(linkId, { transportSeeds });
+      }
       // A stop does not wait for a listener still starting (HyperDHT takes seconds to listen on a busy machine, and a
       // daemon stopped soon after it started waited 3 to 5 s for it): it is closed once it is up, its seed already saved.
       const starting = factory(seed);
