@@ -55,7 +55,7 @@ export function ChatSearchBar({ search }: { search: ChatSearch }) {
   const searched = !!search.term.trim() && search.term === search.query;
   const more = t("common.moreInfo");
   return (
-    <div data-testid="chat-search" className="shrink-0 border-b border-border bg-panel-header px-3 py-1.5 max-md:px-2">
+    <div data-testid="chat-search" className="chat-search-bar shrink-0 border-b border-border bg-panel-header px-3 py-1.5 max-md:px-2">
       {/* On a phone the buttons' own 44 px keep them apart: the gaps go to the words, on the narrowest phone too. */}
       <div role="search" className="flex items-center gap-1 max-md:gap-0">
         <SearchIcon className="shrink-0 text-text-muted" />
