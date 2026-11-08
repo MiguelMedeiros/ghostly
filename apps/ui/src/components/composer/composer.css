@@ -173,6 +173,20 @@
 .expression-category:hover { color: var(--color-text-secondary); }
 .expression-category[data-active] { color: var(--color-text-primary); border-bottom-color: var(--color-accent); }
 .expression-category:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; border-radius: 6px; }
+/* A thumb's 44 px each way on a phone: icons that don't fit (nine with Recent at 375 px, eight at 320) scroll sideways
+   rather than shrink, and the underlined one is kept in view (`CategoryBar`). The row's line is drawn inside it, so
+   the scroll doesn't clip the underline that covers it. */
+@media (max-width: 767px) {
+  .expression-categories {
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    border-bottom: 0;
+    box-shadow: inset 0 -1px 0 var(--color-border);
+  }
+  .expression-category { flex: 1 0 auto; min-width: 44px; min-height: 44px; padding: 12px 0 9px; margin-bottom: 0; }
+}
 
 .expression-search-row { display: flex; align-items: center; gap: 6px; padding: 10px 12px 4px; }
 .expression-search {
@@ -267,9 +281,10 @@
 }
 .emoji-cell:hover { background: var(--color-surface-hover); }
 .emoji-cell:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+/* A narrow phone: the grid's sides give the room, so seven emoji still fit a row at 320 px, each a thumb's 44 px. */
 @container expression (max-width: 360px) {
-  .emoji-grid { grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); }
-  .emoji-cell { height: 40px; font-size: 25px; }
+  .expression-scroll { padding-inline: 4px; }
+  .emoji-cell { font-size: 25px; }
 }
 .expression-empty {
   display: flex;
