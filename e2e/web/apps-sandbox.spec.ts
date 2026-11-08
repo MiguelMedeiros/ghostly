@@ -587,6 +587,8 @@ test("the person's copy and cut in an app put what they selected on the clipboar
   expect(await pasted()).toBe("bc1qREALADDRESS");
 
   // A click, as the person does: a focus moved into the app by script alone is taken back (the app beside a chat cannot take it).
+  // The person typed the paste in Ghostly's own field, so the pointer comes back onto the app for this click.
+  await page.mouse.move(0, 0);
   await frame.locator("#t").click();
   await page.keyboard.press("ControlOrMeta+A");
   await page.keyboard.press("ControlOrMeta+X");
