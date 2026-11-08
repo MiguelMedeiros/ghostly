@@ -43,6 +43,19 @@ export const IDENTITY_MAX_RECEIVED = 16;
 /** `idp-*` frames a paired session reads from the contact per `IDENTITY_FRAME_WINDOW_MS`; the rest are dropped unread. */
 export const IDENTITY_FRAME_LIMIT = 40;
 export const IDENTITY_FRAME_WINDOW_MS = 60_000;
+/**
+ * A proof this side holds verified, presented again with the same evidence between the same keys, is answered from that
+ * check while it is younger than this (seconds): the contact chooses how often it presents, and each check costs this
+ * device a provider lookup (a forge's per-IP quota, a DNS query, a contact's server) and a Pkarr read. An hour keeps an
+ * answer as fresh as a re-share can expect; past it, and between, the daily re-check (or Check again) asks the provider.
+ */
+export const IDENTITY_REUSE_CHECK_S = 3600;
+/**
+ * Presentations a verifier checks with their provider per contact in an hour; past it the contact is told the check
+ * could not run. Room for every proof it may keep (`IDENTITY_MAX_RECEIVED`) and a few retries: a contact making fresh
+ * proofs cannot spend a forge's per-IP quota (GitHub: 60 an hour) for every chat and app on this network.
+ */
+export const IDENTITY_MAX_CHECKS_PER_HOUR = 20;
 
 export const IDENTITY_PROVIDER_ID = /^[a-z][a-z0-9-]{0,31}$/;
 /** Printable ASCII without spaces, so the statement can be built but never needs parsing. */
@@ -355,6 +368,8 @@ export class IdentityExchange {
   private requested = new Set<string>();
   /** The nonces of the presentations in their provider's check now. */
   private checking = new Set<string>();
+  /** When the contact's presentations were checked with their provider (seconds), for `IDENTITY_MAX_CHECKS_PER_HOUR`. */
+  private checks: number[] = [];
   constructor(private options: IdentityExchangeOptions) {}
   private now() { return (this.options.now ?? nowSeconds)(); }
   /** The ledger with one more step on the chat's timeline, in milliseconds (a test's clock, in seconds, when given). */
@@ -592,6 +607,8 @@ export class IdentityExchange {
     let withdrawn = false;
     /** The check could not run on this side (IdentityCheckUnavailable). */
     let unavailable = false;
+    /** The same proof this side holds verified, checked recently: its answer is reused (`IDENTITY_REUSE_CHECK_S`). */
+    let reused: ReceivedIdentity | undefined;
     try {
       // Before anything is checked or looked up: a contact past the bound costs this side nothing more.
       // The checked subject is not known yet: an identity kept under the binding's subject may be the one replaced.
@@ -601,11 +618,20 @@ export class IdentityExchange {
       if (JSON.stringify(evidence ?? null).length > IDENTITY_MAX_EVIDENCE) throw new Error("Evidence too large");
       if (!verifyIdentityPresentation(binding.key, sig as string, id, scope, nonce, issuedAt)) throw new Error("The proof key did not sign this conversation's challenge");
       if (binding.issuedAt > now + IDENTITY_CLOCK_SKEW) throw new Error("The proof is dated in the future");
-      const result = boundVerifiedIdentity(await this.options.verify(statement, evidence));
+      const evidenceJson = JSON.stringify(evidence ?? null);
+      reused = this.options.storage.read().received.find(r => r.id === id && r.status === "verified" && r.presenter === scope.subject &&
+        r.audience === scope.audience && r.context === scope.context && r.checkedAt <= now && now - r.checkedAt < IDENTITY_REUSE_CHECK_S &&
+        JSON.stringify(r.evidence ?? null) === evidenceJson);
+      if (!reused) {
+        this.checks = this.checks.filter(t => t > now - 3600 && t <= now);
+        if (this.checks.length >= IDENTITY_MAX_CHECKS_PER_HOUR) throw new IdentityCheckUnavailable("Too many of this contact's proofs to check this hour");
+        this.checks.push(now);
+      }
+      const result = reused ? reused.verified : boundVerifiedIdentity(await this.options.verify(statement, evidence));
       if (Math.min(binding.expiresAt, result.expiresAt ?? Infinity) <= now) throw new Error(EXPIRED);
       // A presentation needs the proof key, so this only matters when its seed leaked: a lookup that
-      // fails is not a refusal, a revocation found is.
-      if (await this.options.revoked?.(statement).catch(() => false)) throw new Error(REVOKED);
+      // fails is not a refusal, a revocation found is. A held proof was looked up with its check.
+      if (!reused && await this.options.revoked?.(statement).catch(() => false)) throw new Error(REVOKED);
       verified = result;
     } catch (e) { error = peerError(e); reason = shortError(e); unavailable = e instanceof IdentityCheckUnavailable; }
     // Consuming the nonce and recording the outcome are one transaction.
@@ -625,6 +651,11 @@ export class IdentityExchange {
       // Checked beside a newer one that is stored already: the binding's date decides, not which check ended last.
       if (verified && l.received.some(r => r.id !== id && r.binding.provider === binding.provider && r.verified.subject === subject &&
         r.binding.issuedAt > binding.issuedAt && standing(r, now))) { verified = undefined; error = reason = NEWER_HELD; }
+      // A held proof's record as it is now: one a re-check found unconfirmed meanwhile is not written back verified.
+      const prior = reused && l.received.find(r => r.id === id);
+      if (verified && reused && prior?.status !== (withdrawn ? "withdrawn" : "verified")) {
+        verified = undefined; error = IDENTITY_CHECK_UNAVAILABLE; reason = "It was checked again while it was presented";
+      }
       const received = verified && receivedWithRoom(l.received, id, r => r.binding.provider === binding.provider && r.verified.subject === subject, now);
       if (verified && !received) { verified = undefined; error = reason = TOO_MANY_RECEIVED; }
       // This proof, held from this contact already, presented again (its result was lost, so it was asked again): the
@@ -641,7 +672,7 @@ export class IdentityExchange {
         ? l.received.map(r => r === held ? { ...r, checkedAt: now, status: "unconfirmed" as const, error: reason } : r) : l.received };
       // Its owner withdrew it while it was being checked: kept as if the withdraw had come just after.
       const record: ReceivedIdentity = { id, binding, evidence, verified, presenter: scope.subject, audience: scope.audience, context: scope.context,
-        verifiedAt: now, checkedAt: now, status: withdrawn ? "withdrawn" : "verified" };
+        verifiedAt: prior?.verifiedAt ?? now, checkedAt: prior?.checkedAt ?? now, status: withdrawn ? "withdrawn" : "verified" };
       // The older proof it replaced is no longer held: its share stops on the timeline (one already stopped has its stop).
       const replaced = l.received.filter(r => r.id !== id && !received.includes(r) && r.binding.provider === binding.provider && r.verified.subject === subject
         && r.status !== "withdrawn" && r.status !== "revoked");
