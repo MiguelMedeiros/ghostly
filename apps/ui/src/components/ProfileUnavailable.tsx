@@ -38,14 +38,18 @@ export function ProfileUnavailable({ failure }: { failure: ProfileOpenFailure })
   const newer = other === null;
   const versions = { app: appVersion(), supported: String(failure.supportedVersion), stored: String(failure.storedVersion ?? `>${failure.supportedVersion}`) };
   const others = otherProfiles();
+  // It takes the app's place with no word from the person, so its title and reason are an alert, said once on arrival.
+  // Only those: an alert is read whole again on every change inside it, and the ⓘ and Check / Update change.
   return (
-    <div role="alert" data-testid="profile-unavailable" data-reason={failure.reason} className="h-dvh overflow-y-auto grid place-items-center bg-chat-bg p-6 text-center">
+    <div data-testid="profile-unavailable" data-reason={failure.reason} className="h-dvh overflow-y-auto grid place-items-center bg-chat-bg p-6 text-center">
       <div className="max-w-md space-y-3">
         <div className="text-5xl" aria-hidden="true">👻</div>
-        <p className="text-text-primary font-semibold break-words">
-          {t(newer ? "app.profileUnavailable.newerTitle" : "app.profileUnavailable.title")}
-        </p>
-        {other && <p data-testid="profile-unavailable-reason" className="text-text-secondary text-sm break-words">{t(`app.profileUnavailable.reason.${other}`)}</p>}
+        <div role="alert" className="space-y-3">
+          <h1 className="text-text-primary font-semibold break-words">
+            {t(newer ? "app.profileUnavailable.newerTitle" : "app.profileUnavailable.title")}
+          </h1>
+          {other && <p data-testid="profile-unavailable-reason" className="text-text-secondary text-sm break-words">{t(`app.profileUnavailable.reason.${other}`)}</p>}
+        </div>
         <p className="flex items-start justify-center gap-1.5 text-text-secondary text-sm">
           <span className="min-w-0 break-words">{t(other ? `app.profileUnavailable.try.${other}` : "app.profileUnavailable.newerHint")}</span>
           <button type="button" data-testid="profile-unavailable-info" aria-expanded={open} aria-controls={id} aria-label={t("common.moreInfo")} title={t("common.moreInfo")}
@@ -89,23 +93,28 @@ function UpdateAction() {
   useFocusKept(box, () => box.current?.querySelector<HTMLElement>("a, button") ?? null);
   if (!supported) return null;
   const busy = (update ? stage === "installing" : stage === "checking") || undefined;
+  const downloading = (percent: number) => percent > 0 ? t("updates.downloading", { percent: String(percent) }) : t("updates.installing");
+  const label = update
+    ? stage === "installing" ? downloading(Math.round(progress * 100)) : t(update.apply === "restart" ? "updates.restart" : "updates.reload")
+    : t(stage === "checking" ? "updates.checking" : "updates.checkNow");
+  // The desktop's download reports every chunk: said aloud, the percent moves in tens.
+  const said = stage === "installing" ? downloading(Math.floor(progress * 10) * 10) : label;
   return (
-    <div ref={box} className="space-y-2">
+    <div ref={box}>
       {update && update.apply === "manual"
         ? <a {...externalLinkProps(downloadUrl)} data-testid="profile-unavailable-update" className={`${BUTTON} inline-block`}>{t("updates.download")}</a>
         : update ? (
-          <button type="button" data-testid="profile-unavailable-update" aria-disabled={busy} aria-busy={busy} onClick={() => { if (!busy) void install(); }} className={BUTTON}>
-            {stage === "installing"
-              ? (progress > 0 ? t("updates.downloading", { percent: String(Math.round(progress * 100)) }) : t("updates.installing"))
-              : t(update.apply === "restart" ? "updates.restart" : "updates.reload")}
-          </button>
+          <button type="button" data-testid="profile-unavailable-update" aria-disabled={busy} aria-busy={busy} onClick={() => { if (!busy) void install(); }} className={BUTTON}>{label}</button>
         ) : (
-          <button type="button" data-testid="profile-unavailable-check" aria-disabled={busy} aria-busy={busy} onClick={() => { if (!busy) void check(); }} className={BUTTON}>
-            {t(stage === "checking" ? "updates.checking" : "updates.checkNow")}
-          </button>
+          <button type="button" data-testid="profile-unavailable-check" aria-disabled={busy} aria-busy={busy} onClick={() => { if (!busy) void check(); }} className={BUTTON}>{label}</button>
         )}
-      {!update && (error ? <p className="text-xs text-danger break-words">{error}</p>
-        : lastCheckedAt !== null && stage === "idle" && <p data-testid="profile-unavailable-no-update" className="text-xs text-text-muted break-words">{t("app.profileUnavailable.noUpdate")}</p>)}
+      {/* Where it is and how it ended, said politely in a line of its own: on the screen's alert each step was the
+          whole screen read again. Always there, as a live region must be before what it says. */}
+      <div role="status">
+        {busy && <span className="sr-only">{said}</span>}
+        {!update && (error ? <p className="mt-2 text-xs text-danger break-words">{error}</p>
+          : lastCheckedAt !== null && stage === "idle" && <p data-testid="profile-unavailable-no-update" className="mt-2 text-xs text-text-muted break-words">{t("app.profileUnavailable.noUpdate")}</p>)}
+      </div>
     </div>
   );
 }
