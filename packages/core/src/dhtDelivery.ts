@@ -44,8 +44,19 @@ const MAX_ATTEMPTS = 8;
  * nothing; one the budget turned away is not used again, as it may have gone out on the DHT (the CLI puts there too).
  */
 const SEQUENCE_BLOCK = 64;
+/** The longest the relays' request budget holds publications back (`budgetUntil`). */
+const BUDGET_HOLD_MAX_MS = 60_000;
+/** The longest wait `backoff` gives. */
+const BACKOFF_MAX_MS = 60_000;
 /** The wait before publication attempt `attempts + 1` of a text, or of a receipt the contact still asks for. */
-const backoff = (attempts: number) => Math.min(60_000, 4_000 * 2 ** attempts);
+const backoff = (attempts: number) => Math.min(BACKOFF_MAX_MS, 4_000 * 2 ** attempts);
+/**
+ * A time this side set by its clock, at most `ms` after the moment it was set, read back `now`. One further ahead was set
+ * before the device clock went back (an NTP step, a clock that ran ahead set right): it counts from now, not for as long
+ * as the clock went back, as `relay.ts` counts its budget times. One already past (the clock set forward) stays past:
+ * what it timed ends early, never late.
+ */
+const bounded = (at: number, now: number, ms = 0): number => Math.min(at, now + ms);
 /**
  * The contact's mailbox is read this often while this side is DHT-only, unless that contact is away with nothing of
  * ours waiting on it (`dhtOnlyIdle`; a contact that chose it is read at the chat's pace: `ACTIVE_DHT_POLL_MS` open,
@@ -564,6 +575,27 @@ export class DhtDelivery {
     this.active = active;
     if (active && !this.live) void this.tick(); else this.schedule();
   }
+  /**
+   * The device clock now, with every time this side set by it kept no further ahead than it is ever set (`bounded`).
+   * The outbox times a text's receipt on a timer, which a step of the clock does not move; these times are judged by
+   * the clock. Taken as they were, a clock set back an hour (or one an hour ahead set right) while a text awaited its
+   * receipt held every later text of the chat for that hour though the outbox showed the text failed at five minutes,
+   * the text was not published again meanwhile and the chat read every 4 s; and a contact away counted as there, its
+   * mailbox read every 4 s for most of the hour (bug hunt, 2026-11-08). Kept so in memory; the next save writes them.
+   */
+  private clock(): number {
+    const now = Date.now(), { pending, receipt } = this.state;
+    if (pending && (pending.expires > now + DHT_MESSAGE_TTL || pending.next > now + BACKOFF_MAX_MS))
+      this.state = { ...this.state, pending: { ...pending, expires: bounded(pending.expires, now, DHT_MESSAGE_TTL), next: bounded(pending.next, now, BACKOFF_MAX_MS) } };
+    if (receipt && (receipt.expires > now + DHT_MESSAGE_TTL || (receipt.next ?? 0) > now + BACKOFF_MAX_MS))
+      this.state = { ...this.state, receipt: { ...receipt, expires: bounded(receipt.expires, now, DHT_MESSAGE_TTL), ...(receipt.next !== undefined && { next: bounded(receipt.next, now, BACKOFF_MAX_MS) }) } };
+    this.peerNewAt = bounded(this.peerNewAt, now); this.lastPublish = bounded(this.lastPublish, now);
+    this.networkBackAt = bounded(this.networkBackAt, now); this.pinnedProbeAt = bounded(this.pinnedProbeAt, now);
+    this.controlDue = bounded(this.controlDue, now, Math.max(4 * 60_000, UNUSED_INVITE_UPKEEP_MS, this.options.firstControlAfterMs ?? 0));
+    this.budgetUntil = bounded(this.budgetUntil, now, BUDGET_HOLD_MAX_MS);
+    this.leavingUntil = bounded(this.leavingUntil, now, LEAVING_DHT_FAST_MS);
+    return now;
+  }
   validate(text: string, timestamp: number, id: string, reply?: string, edit?: DhtEdit): string | null {
     // Every chat's first contact runs here too (WISP 403): before the pin the text is sealed with the invite key.
     if (this.options.peerAcceptsText?.() === false) return DHT_TEXT_REFUSED;
@@ -573,7 +605,7 @@ export class DhtDelivery {
     if (edit !== undefined && (reply !== undefined || !ID.test(edit[0]) || !validEditNumber(edit[1]))) return "Invalid message.";
     if (utf8Encode(text).length > DHT_TEXT_BYTES) return DHT_TEXT_TOO_LONG;
     if (/cashu[AB][A-Za-z0-9_-]+/i.test(text)) return "Payment tokens cannot be sent through DHT delivery.";
-    const now = Date.now(), pending = this.state.pending;
+    const now = this.clock(), pending = this.state.pending;
     if (pending && pending.expires > now && pending.message[0] !== id) return "One DHT text can await a receipt at a time. Wait for its receipt or expiry before sending another.";
     if (pending?.message[0] === id && pending.expires > now && pending.attempts >= MAX_ATTEMPTS) return "DHT retry budget exhausted. Wait for expiry before retrying this message.";
     const next = pending?.message[0] === id && pending.expires > now ? pending : { message: [id, timestamp, text] as Message, expires: now + DHT_MESSAGE_TTL, attempts: 0, next: now, ...(reply && { reply }), ...(edit && { edit }) };
@@ -687,8 +719,8 @@ export class DhtDelivery {
   }
   /** The id of what awaits its receipt on the floor now, if anything does. */
   get pendingId(): string | undefined {
-    const pending = this.state.pending;
-    return pending && pending.expires > Date.now() && pending.attempts < MAX_ATTEMPTS ? pending.message[0] : undefined;
+    const now = this.clock(), pending = this.state.pending;
+    return pending && pending.expires > now && pending.attempts < MAX_ATTEMPTS ? pending.message[0] : undefined;
   }
   /**
    * This side's capability record has a new revision (WISP 03): an envelope names it now. Otherwise the contact
@@ -703,7 +735,7 @@ export class DhtDelivery {
       // An envelope went out a moment ago (a first contact's, as the link's transports are still coming up): this one
       // waits out the publication spacing and names the newest revision then, or none if the chat went live meanwhile
       // (a live session carries the news itself).
-      const wait = this.lastPublish + 4_000 - Date.now();
+      const wait = this.lastPublish + 4_000 - this.clock();
       if (wait > 0) {
         this.announceTimer ??= setTimeout(() => { this.announceTimer = null; if (!this.live) void this.announce(); }, wait);
         return;
@@ -759,7 +791,7 @@ export class DhtDelivery {
     return { body, ...this.envelope(body), reactions: 0 };
   }
   private async publish(force = false): Promise<void> {
-    const now = Date.now();
+    const now = this.clock();
     if (!this.running || (!force && (now - this.lastPublish < 4_000 || now < this.budgetUntil))) return;
     const pending = this.state.pending && this.state.pending.expires > now && this.state.pending.attempts < MAX_ATTEMPTS ? this.state.pending : undefined;
     const receipt = this.state.receipt && this.state.receipt.expires > now && this.state.receipt.attempts < MAX_ATTEMPTS ? this.state.receipt : undefined;
@@ -831,7 +863,7 @@ export class DhtDelivery {
    */
   private async heldBack(error: Parameters<typeof budgetRetryMs>[0], now: number, before: { lastPublish: number; controlDue: number },
     pending: DhtDeliveryState["pending"], receipt: DhtDeliveryState["receipt"]): Promise<void> {
-    const at = now + budgetRetryMs(error, 1_000, 60_000);
+    const at = now + budgetRetryMs(error, 1_000, BUDGET_HOLD_MAX_MS);
     this.budgetUntil = at;
     this.lastPublish = before.lastPublish; this.controlDue = Math.min(before.controlDue, at);
     traceLink(this.from, "dht-publish-waits", { retryInMs: at - now });
@@ -1116,7 +1148,7 @@ export class DhtDelivery {
     if (this.options.pollMs) return this.options.pollMs;
     const taken = this.takenInviteWait();
     if (taken !== undefined) return taken;
-    const now = Date.now();
+    const now = this.clock();
     // An invite nobody used, no longer awaited: the older it is, the less often its mailbox is read, as far as their count needs.
     const unused = this.running ? this.unusedInviteAge(now) : undefined;
     const readers = countUnusedInvite(this.options.transport, this, unused !== undefined && !this.active && now >= this.fastUntil);
@@ -1172,7 +1204,7 @@ export class DhtDelivery {
     if (!this.running || this.ticking) return;
     if (this.timer) clearTimeout(this.timer);
     // A publication the budget held back goes when the budget frees a request, if that comes before the next read.
-    const held = this.budgetUntil - Date.now();
+    const held = this.budgetUntil - this.clock();
     // Reactions to carry, or to say taken, go once the publication spacing allows, not at the next read.
     // So does the envelope sealed to a contact just pinned (`resealDue`), live too, where the next read is minutes away;
     // after a failed one, at the chat's pace, and never before the budget frees a request.
