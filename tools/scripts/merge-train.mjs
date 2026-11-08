@@ -49,9 +49,11 @@
 //   stays parked in flight. Landed, the base moved, and the held one is rebuilt (or rebased) on the new tip at the next
 //   run; red, it is blamed by the usual rules. One whose commits do not rebase onto the tip (a conflict resolved in a
 //   merge of the base) cannot go alone, and no batch goes: it leaves the line with `queue:conflict` and a comment saying
-//   to rebase it without the merge, and the next one with `queue:priority` goes, in the same run. Once the hold has
-//   lasted 30 minutes (HOLD_HELP), the position comments say what a person can do: re-run the base's failed jobs, or
-//   give its fix `queue:priority`.
+//   to rebase it without the merge, and the next one with `queue:priority` goes, in the same run. A red batch or lone
+//   pull request that holds a `queue:priority` one is not held for the base's red (only while its CI still runs): it is
+//   split, or run once more, as on a green base, so a fix that boarded with others or flaked once is not parked for
+//   good. Once the hold has lasted 30 minutes (HOLD_HELP), the position comments say what a person can do: re-run the
+//   base's failed jobs, or give its fix `queue:priority`.
 // - One pull request alone (the next batch would hold only it) skips the batch: when its head already holds the base's
 //   tip and CI Success is green on it, the train merges the pull request itself (dev: GitHub's squash merge at that
 //   head; an epic: a fast-forward), with no batch and no new CI run. When it is behind, the train rebases its branch
@@ -1043,7 +1045,9 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       // Red on an old tip says nothing about the batch on the new one, and green on an old tip must not land.
       await retire(batch, `Merge train: \`${base}\` moved, so this batch is rebuilt on its new tip.`);
       inFlight = await board(members, next, { retried: state.retried });
-    } else if (ci === "failure" && (baseCi === "failure" || baseCi === "pending")) {
+    } else if (ci === "failure" && (baseCi === "pending" || (baseCi === "failure" && !members.some((p) => p?.priority)))) {
+      // A batch with a `queue:priority` member is not held for the base's red: that member is most likely the base's
+      // fix, and held it would wait for good (only one not in the held batch goes past it). It is split, as on a green base.
       held = baseCi === "failure" ? "red" : "still running";
       holdSince(state.baseSha, gateDoneAt(jobs, "CI Success"), gateDoneAt(baseJobs, "CI Success"));
       say(`HOLD #${batch.number}: CI Success on \`${base}\` itself is ${held}; nobody is blamed until it is green.`);
@@ -1192,10 +1196,11 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     // Red on an old tip says nothing about the new one, and green on an old tip must not land.
     if (tip !== mark.baseSha) return goAlone(p, { retried: mark.retried, past });
     if (p.ci === "failure") {
-      // Past a hold, the base is red by definition: the fix it was meant to be is not one, so it is blamed as usual.
+      // Past a hold, the base is red by definition: the fix it was meant to be is not one, so it is blamed as usual. Nor
+      // is a `queue:priority` one held for the base's red: it is most likely the base's fix (as for a batch above).
       const baseJobs = past ? null : await gh.ciJobs(mark.baseSha, planned(null));
       const baseCi = baseJobs && ciState(baseJobs);
-      if (baseCi === "failure" || baseCi === "pending") {
+      if (baseCi === "pending" || (baseCi === "failure" && !p.priority)) {
         held = baseCi === "failure" ? "red" : "still running";
         holdSince(mark.baseSha, p.redAt, gateDoneAt(baseJobs, "CI Success"));
         say(`HOLD #${p.number}: CI Success on \`${base}\` itself is ${held}; nobody is blamed until it is green.`);

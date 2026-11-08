@@ -2358,6 +2358,50 @@ describe("a queue:priority pull request while CI Success on the base itself is r
     expect(said(repo, 14)).toMatch(/\*\*1st\*\*.*on hold/);
   });
 
+  it("splits a red batch that holds a priority pull request instead of holding it, so the fix lands and the line moves", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(13, { priority: true }); // the fix for dev, queued while #11 waited: it boards with it at once
+    await repo.run();
+    expect(repo.members()).toEqual([13, 11]);
+    repo.runs.set("dev0", red);
+    repo.settle([11]);
+    const r = await repo.run();
+    expect(r.log.join("\n")).not.toMatch(/HOLD/);
+    expect(repo.members()).toEqual([13]);
+    expect(said(repo, 13)).not.toMatch(/on hold/);
+    repo.settle([11]);
+    const done = await repo.run();
+    expect(done.merged).toEqual([13]);
+    expect(repo.members()).toEqual([11]);
+  });
+
+  it("gives a red lone priority pull request its second run while the base is red, as with a green base", async () => {
+    const repo = fakeRepo();
+    repo.add(13, { priority: true, behind: true });
+    await repo.run();
+    const first = repo.pulls.get(13)!.sha;
+    repo.runs.set("dev0", red);
+    repo.settle([13]); // a flake on its own run
+    const r = await repo.run();
+    expect(r.log.join("\n")).not.toMatch(/HOLD/);
+    expect(repo.pulls.get(13)!.sha).not.toBe(first);
+    expect(repo.alone(13)).toMatchObject({ retried: true });
+    repo.settle();
+    expect((await repo.run()).merged).toEqual([13]);
+  });
+
+  it("still holds a red batch with a priority pull request while CI on the base is still running", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(13, { priority: true });
+    await repo.run();
+    repo.runs.set("dev0", running);
+    repo.settle([11]);
+    expect((await repo.run()).log.join("\n")).toMatch(/HOLD #9000: .*itself is still running/);
+    expect(repo.members()).toEqual([13, 11]);
+  });
+
   it("lets one priority pull request go at a time", async () => {
     const repo = await heldBatch();
     repo.add(13, { priority: true, behind: true });

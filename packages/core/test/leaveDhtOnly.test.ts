@@ -227,6 +227,37 @@ describe("leaving DHT-only with the relay minute spent", () => {
       expect(took, "live after both left DHT-only").toBeLessThanOrEqual(15_000);
     }, 60_000);
   }
+
+  /**
+   * The minute spent before either side leaves (E2E full, 2026-11-07 and 2026-11-08: the matrix's steps before, an
+   * identity, a wallet, a group and a DHT chat, had spent the extension's in 30 s). The side that left first held back
+   * its envelope saying so (55 s) and, where the contact dials, its presence too: the contact held the offer, or never
+   * dialled, until then. The side that dials read the answer 31 s late: its read as it left took one of the few
+   * requests past the minute. Each contact is pinned (`peerPinned: "seen"`), as after a pairing a while ago.
+   */
+  for (const dialer of ["a", "b"] as const) for (const first of ["a", "b"] as const) for (const kind of ["writes", "reads"] as const) {
+    it(`is live in seconds with the minute spent before · ${dialer.toUpperCase()} dials · ${first.toUpperCase()} leaves first, its minute spent by ${kind}`, async () => {
+      const fetch = relayFetch();
+      const relay = { a: new RelayTransport({ relays: ["https://relay.test"], log: () => {}, fetch }),
+        b: new RelayTransport({ relays: ["https://relay.test"], log: () => {}, fetch }) };
+      const pair = pairWhere(dialer);
+      for (const s of [pair.a, pair.b]) s.state = { ...s.state, peerPinned: "seen" };
+      const a = open(pair.a, relay.a, false), b = open(pair.b, relay.b, false);
+      await run(20_000);
+      const [one, two] = first === "a" ? [a, b] : [b, a];
+      const spender = first === "a" ? relay.a : relay.b, other = createIdentity();
+      for (let i = 0; i < 40; i++) {
+        if (kind === "writes") await spender.publish(other, [{ label: "_x", value: `${i}` }]).catch(() => {});
+        else await spender.resolve(createIdentity().pubKeyZ32).catch(() => {});
+      }
+      await run(5_000);
+      await one.setDeliveryMode("stream");
+      await run(900);
+      await two.setDeliveryMode("stream");
+      const took = await untilLive(a, b, 60_000);
+      expect(took, "live after both left DHT-only").toBeLessThanOrEqual(10_000);
+    }, 60_000);
+  }
 });
 
 describe("back from a hold after the contact read the mailbox", () => {
