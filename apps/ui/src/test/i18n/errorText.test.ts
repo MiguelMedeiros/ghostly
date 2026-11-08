@@ -7,6 +7,7 @@ import { ERROR_RULES, errorText, knownErrorParts, rawError } from "../../lib/err
 import { english } from "../../lib/english";
 import { failedReason, failedStatus } from "../../lib/fileStatus";
 import { problemLine, problemText } from "../../lib/problemText";
+import { liveAttemptText } from "../../lib/transportEvents";
 import type { TranslationKey } from "../../contexts/I18nContext";
 import { translateWith } from "../../locales/translate";
 import { LANGUAGES, LOCALES } from "./locales";
@@ -114,6 +115,10 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["The HyperDHT relay did not let this chat listen", `${BROWSER}/platform/hyperdhtRelay.ts`],
   ["Iroh endpoint is stopped", `${BROWSER}/platform/irohWeb.ts`],
   ["Iroh relay unreachable", "native/transports/iroh-web/src/lib.rs"],
+  // A contact's Iroh relay this device does not dial: not a public https one, or not one of the person's own with Hide my IP on.
+  ["The contact's Iroh relay is not one this device dials", `${BROWSER}/platform/irohWeb.ts`],
+  ["The contact's Iroh relay is not one this device dials", "apps/desktop/src/paired_transport.rs"],
+  ["The contact is not on one of this profile's Iroh relays", `${BROWSER}/platform/irohWeb.ts`],
   ["The connection changed. Compare the current code again.", "packages/core/src/pairedSession.ts"],
   ["Compare the current code again.", "packages/core/src/ghostlink.ts"],
   ["The connection closed. Compare again after reconnecting.", "packages/core/src/pairedSession.ts"],
@@ -570,6 +575,11 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Could not pick up held items: the contact's app sealed them for the device this profile was on before. They come once it seals them again for this one.", `${BROWSER}/engine/hold.ts`],
   ["Refused a held item from the contact: The held item is larger than allowed", `${BROWSER}/engine/hold.ts`, "Refused a held item from the contact: "],
   ["Picked up, but could not acknowledge: The storage answered 403", `${BROWSER}/engine/hold.ts`, "Picked up, but could not acknowledge: "],
+  // A Lightning card asked for an invoice it could not look up (a Receive, a chat request on it).
+  ["Alby Hub cannot look up its invoices, so a payment to it would never be seen: receive with another Lightning card, or connect it with invoice lookup allowed", `${BROWSER}/engine/paymentAdapters/providers/lightningService.ts`, " cannot look up its invoices, so a payment to it would never be seen: receive with another Lightning card, or connect it with invoice lookup allowed"],
+  // An OpenPGP key of a kind or size the Add dialog refuses.
+  ["This key uses RSA 16384, which Ghostly does not accept. Use Ed25519, ECDSA (P-256, P-384, P-521, brainpool) or RSA with 2048 to 8192 bits.", `${BROWSER}/proofs/openpgp.ts`, ", which Ghostly does not accept. Use Ed25519, ECDSA (P-256, P-384, P-521, brainpool) or RSA with 2048 to ${RSA_MAX_BITS} bits."],
+  ["This key uses RSA with a 65-bit public exponent, which Ghostly does not accept. Use a key made by GnuPG (exponent 65537).", `${BROWSER}/proofs/openpgp.ts`, "-bit public exponent, which Ghostly does not accept. Use a key made by GnuPG (exponent 65537)."],
 ];
 
 const translators = Object.fromEntries(LANGUAGES.map((l) => [l, translateWith(LOCALES[l], l)]));
@@ -680,6 +690,40 @@ describe("errors in the app's language", () => {
     expect(knownErrorParts("The HyperDHT relay closed the connection", t)).toEqual({ title: t("errors.transport.hyperdhtClosed"), next: t("errors.transport.hyperdhtCheckNext") });
     expect(knownErrorParts("The HyperDHT relay did not let this chat listen", t)).toEqual({ title: t("errors.transport.hyperdhtRefused"), next: t("errors.transport.hyperdhtRefusedNext") });
     for (const key of ["hyperdhtUnreachableNext", "hyperdhtCheckNext", "hyperdhtRefusedNext"] as const) expect(t(`errors.transport.${key}`)).not.toBe(`errors.transport.${key}`);
+  });
+
+  // These were the engine's English in a chat's not-live box, the wallet's Receive, and "Something went wrong" (over
+  // `readable`'s length) in Identities → Add → OpenPGP, in every language.
+  it.each(LANGUAGES)("a contact's Iroh relay this device does not dial says why and what to do in %s, in the not-live box too", (language) => {
+    const t = translators[language];
+    const cases: [string, TranslationKey, TranslationKey][] = [
+      ["The contact's Iroh relay is not one this device dials", "errors.transport.irohRelayNotDialled", "errors.transport.irohRelayNotDialledNext"],
+      ["The contact is not on one of this profile's Iroh relays", "errors.transport.irohNotOwnRelay", "errors.transport.irohNotOwnRelayNext"],
+    ];
+    for (const [raw, key, next] of cases) {
+      expect(problemText(new Error(raw), t), raw).toEqual({ tone: "error", title: t(key), next: t(next) });
+      const lines = liveAttemptText({ at: 1, side: "dialled", failed: [{ transport: "iroh/1", error: raw }] }, "you", "Ana", () => "17:02", t)!.lines;
+      expect(lines, raw).toEqual([t("connection.attempt.failure", { transport: "Iroh", reason: t(key).replace(/\.$/, "") })]);
+    }
+  });
+
+  it.each(LANGUAGES)("a Lightning card that cannot look up its invoices says so and what to do in %s, its name kept", (language) => {
+    const t = translators[language];
+    const raw = "Alby Hub cannot look up its invoices, so a payment to it would never be seen: receive with another Lightning card, or connect it with invoice lookup allowed";
+    expect(problemText(new Error(raw), t)).toEqual({ tone: "error", title: t("errors.wallet.noLookup", { label: "Alby Hub" }), next: t("errors.wallet.noLookupNext") });
+    expect(knownErrorParts(raw, t)?.title).toContain("Alby Hub");
+  });
+
+  it.each(LANGUAGES)("an OpenPGP key of a kind or size Ghostly refuses says so and which keys to use in %s, not \"Something went wrong\"", (language) => {
+    const t = translators[language];
+    for (const kind of ["RSA 16384", "RSA 1024", "elgamal", "dsa"]) {
+      const raw = `This key uses ${kind}, which Ghostly does not accept. Use Ed25519, ECDSA (P-256, P-384, P-521, brainpool) or RSA with 2048 to 8192 bits.`;
+      const said = problemText(new Error(raw), t);
+      expect(said, raw).toEqual({ tone: "error", title: t("errors.proof.pgpKeyKind", { kind }), next: t("errors.proof.pgpKeyKindNext", { max: "8192" }) });
+      expect(said.title).not.toBe(t("errors.generic"));
+    }
+    const exponent = "This key uses RSA with a 65-bit public exponent, which Ghostly does not accept. Use a key made by GnuPG (exponent 65537).";
+    expect(problemText(new Error(exponent), t)).toEqual({ tone: "error", title: t("errors.proof.pgpExponent", { bits: "65" }), next: t("errors.proof.pgpExponentNext") });
   });
 
   it.each(LANGUAGES)("a file said on the floor that ended here says why and what to do in %s, never the engine's English", (language) => {
