@@ -5,7 +5,7 @@ import { openAppSettings } from "../desktop/androidCameraRefusal";
 import { useMediaDevices } from "../hooks/useMediaDevices";
 import { applySpeaker, canPickSpeaker, captureCamera, chooseDevice, deviceSource, isMediaDenied, mediaDeniedText, resolveDevice, type DeviceKind, type DeviceList } from "../lib/mediaDevices";
 import { soundUrl } from "../lib/sounds";
-import { androidApp } from "../lib/touchOnly";
+import { mediaDeniedOnAndroid } from "../desktop/androidMediaDenied";
 import { Row, Section } from "./layout";
 import { Select, type SelectOption } from "./ui/Select";
 import { Button } from "./wallet/ui";
@@ -24,11 +24,11 @@ const failureOf = (error: unknown): Failure => (isMediaDenied(error) ? "denied" 
  * Where to allow a refused microphone or camera again. The Android app has no browser: Android asks again, or once it
  * no longer does ("Don't allow" twice), only its settings for the app allow them, which Open settings opens.
  */
-const deniedText = () => (androidApp() ? "settings.media.deniedAndroid" : mediaDeniedText());
+const deniedText = () => (mediaDeniedOnAndroid() ? "settings.media.deniedAndroid" : mediaDeniedText());
 
 function OpenSettings() {
   const { t } = useI18n();
-  if (!androidApp()) return null;
+  if (!mediaDeniedOnAndroid()) return null;
   return <Button data-testid="settings-media-open-settings" onClick={() => void openAppSettings()}>{t("settings.noticesOpenSettings")}</Button>;
 }
 
