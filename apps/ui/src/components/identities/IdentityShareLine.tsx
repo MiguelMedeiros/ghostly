@@ -45,7 +45,7 @@ function shareState(entry: IdentityTimelineEntry, link: Pick<LinkView, "identiti
  * still. A stop is a line of its own, after the card. Local only: not a message, never sent, never unread. The card
  * is a button: it opens the chat's identities on that card.
  */
-export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: IdentityTimelineEntry; link: LinkView | undefined; contact: string; onOpen: (entry: IdentityTimelineEntry) => void }) {
+export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: IdentityTimelineEntry; link: Pick<LinkView, "identities" | "identityTimeline"> | undefined; contact: string; onOpen: (entry: IdentityTimelineEntry) => void }) {
   const mine = entry.side === "mine";
   // My proof as this app holds it now, and nothing else of the engine's state: the chat's timeline shows one line per
   // share, and on the whole state each was drawn again on every state (up to 20 a second while a file moves).

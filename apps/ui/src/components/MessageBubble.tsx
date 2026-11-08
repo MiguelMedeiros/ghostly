@@ -860,9 +860,9 @@ export function MessageBubble(props: MessageBubbleProps) {
     onToggle: () => latest.current.selection?.onToggle?.(),
     reactionName: (by: string) => latest.current.reactionName?.(by) ?? by.slice(0, 8),
   }), []);
-  const { message, peerAck = 0, selection } = props;
+  const { message, selection } = props;
   // Only a message of mine without its own delivery state reads the contact's acknowledgement: one number per bubble.
-  const acked = message.sender === "me" && !message.delivery && peerAck >= message.timestamp;
+  const acked = ackedBy(props);
   const names = message.reactions ? Object.keys(message.reactions).map(stable.reactionName).join("\n") : "";
   return (
     <SameBubble
@@ -879,12 +879,30 @@ export function MessageBubble(props: MessageBubbleProps) {
 
 const CALLBACKS = ["onDelete", "onDeleteForEveryone", "onReply", "onEdit", "onReact", "onForward", "onSelect", "onPin", "onSave", "onOpenAuthor"] as const;
 
-/** The same bubble to draw: see `MessageBubble`. */
-function sameBubble(a: BubbleViewProps, b: BubbleViewProps): boolean {
-  return a.peerAck === b.peerAck && a.peerPubKey === b.peerPubKey && a.payee === b.payee && a.peerNick === b.peerNick && a.contactName === b.contactName && a.linkId === b.linkId && a.names === b.names && a.highlight === b.highlight && !a.pinned === !b.pinned && !a.saved === !b.saved && !a.compactPress === !b.compactPress
+/** What both comparisons below read alike: everything a bubble draws with but its acknowledgement and reactions' names. */
+function sameShown(a: MessageBubbleProps, b: MessageBubbleProps): boolean {
+  return a.peerPubKey === b.peerPubKey && a.payee === b.payee && a.peerNick === b.peerNick && a.contactName === b.contactName && a.linkId === b.linkId && a.highlight === b.highlight && !a.pinned === !b.pinned && !a.saved === !b.saved && !a.compactPress === !b.compactPress
     && CALLBACKS.every(name => !a[name] === !b[name])
     && !a.selection === !b.selection && a.selection?.selected === b.selection?.selected && !a.selection?.onToggle === !b.selection?.onToggle
     && sameValue(a.quote, b.quote) && sameValue(a.author, b.author) && sameValue(a.buttons, b.buttons) && sameValue(a.message, b.message);
+}
+
+/** The same bubble to draw: see `MessageBubble`. */
+function sameBubble(a: BubbleViewProps, b: BubbleViewProps): boolean {
+  return a.peerAck === b.peerAck && a.names === b.names && sameShown(a, b);
+}
+
+/** Whether the contact's acknowledgement covers this message of mine: what `MessageBubble` draws of `peerAck`. */
+const ackedBy = ({ message, peerAck = 0 }: MessageBubbleProps) => message.sender === "me" && !message.delivery && peerAck >= message.timestamp;
+
+/**
+ * The same `MessageBubble` to draw again, for a list that keeps its rows from drawing when nothing of them changed
+ * (`memo(MessageBubble, sameMessageRow)`). As `sameBubble`, callbacks only by whether they are there, so the list's
+ * callbacks must do what the list says when called (one function for its life, or one closing over the row's values),
+ * not what it said when the row was last drawn. `reactionName` by identity: the names it answers are drawn.
+ */
+export function sameMessageRow(a: MessageBubbleProps, b: MessageBubbleProps): boolean {
+  return ackedBy(a) === ackedBy(b) && a.reactionName === b.reactionName && sameShown(a, b);
 }
 
 const SameBubble = memo(function SameBubble(props: BubbleViewProps) {

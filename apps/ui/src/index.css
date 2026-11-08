@@ -924,7 +924,9 @@ html[data-standalone="true"] {
     z-index: 60;
     width: 100%;
     max-height: min(82dvh, calc(var(--app-height, 100dvh) - env(safe-area-inset-top) - 1rem));
-    margin: 0;
+    /* A dialog that caps its width (the invite QR, New wallet on a phone on its side) stands in the middle, not on the
+       left edge with the page showing beside it. */
+    margin: 0 auto;
     overflow-y: auto;
     border-width: 1px 0 0;
     border-radius: 18px 18px 0 0;
