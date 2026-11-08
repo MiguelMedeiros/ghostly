@@ -291,6 +291,8 @@ export interface AppPreview {
   unknownPublisher: boolean;
   /** Read from the bundle this build carries (a built-in app): no server was asked for it, `from` notwithstanding. */
   carried?: true;
+  /** This screen's bundle and source, for `install`: Install on it installs from where it said, whatever screen opened since. */
+  stage: string;
 }
 
 export type AppCheckOutcome = "updated" | "ask" | "equivocation" | "none";
@@ -330,6 +332,8 @@ export interface AppsHost {
  * `asks`: what the last install screen of it listed (`AppPreview.asks`), for an Install that does not say.
  */
 interface Staged { bundle: AppBundle; bytes: Uint8Array; from: string; store?: string; revocations: SignedAppRevocation[]; asks: AppPermission[]; at: number }
+/** What a staged bundle is kept under (`AppPreview.stage`): one install screen's version and source, so another screen of it does not change it. */
+const stagedKey = (digest: string, from: string, store: string | undefined) => `${digest}\n${from}\n${store ?? ""}`;
 
 /**
  * `run` on every item, at most `limit` at a time (the next one starts when one ends): one promise per item, in the
@@ -1518,11 +1522,11 @@ export class Apps {
 
     // The install screen opened again on the version it showed (a listing, a card naming its digest): the bundle read and
     // checked from that URL within `STAGED.ms` is taken as it is, and only its revocations are read again.
-    const kept = expect?.digest !== undefined ? this.staged.get(expect.digest) : undefined;
     let last: unknown = null;
     for (const url of urls) {
       try {
-        const { bundle, bytes } = kept && kept.from === url && this.now() - kept.at <= STAGED.ms ? kept : await this.fetchBundle(url);
+        const kept = expect?.digest !== undefined ? this.staged.get(stagedKey(expect.digest, url, fromStore)) : undefined;
+        const { bundle, bytes } = kept && this.now() - kept.at <= STAGED.ms ? kept : await this.fetchBundle(url);
         const version = versionOf(bundle.manifest, bundle.digest);
         if (expect) {
           if (version.ref !== expect.ref) fail("other-app", "The URL holds another app");
@@ -1539,7 +1543,7 @@ export class Apps {
   /** Drops the staged bundles past `STAGED.ms`, and comes back when the oldest left is due. */
   private sweepStaged(): void {
     this.sweep = null;
-    for (const [digest, s] of this.staged) if (this.now() - s.at >= STAGED.ms) this.staged.delete(digest);
+    for (const [key, s] of this.staged) if (this.now() - s.at >= STAGED.ms) this.staged.delete(key);
     const oldest = this.staged.values().next().value;
     if (oldest) this.sweep = setTimeout(() => this.sweepStaged(), STAGED.ms - (this.now() - oldest.at));
   }
@@ -1566,9 +1570,10 @@ export class Apps {
     const install = decision === "other-app" ? "new" : decision;
     const asks = install === "new" ? [...manifest.permissions] : install === "update" ? manifest.permissions.filter((p) => !installed!.permissions.includes(p)) : [];
     for (const [d, s] of this.staged) if (this.now() - s.at > STAGED.ms) this.staged.delete(d);
-    this.staged.delete(digest);
+    const stage = stagedKey(digest, from, fromStore);
+    this.staged.delete(stage);
     while (this.staged.size >= STAGED.max) this.staged.delete(this.staged.keys().next().value!);
-    this.staged.set(digest, { bundle, bytes, from, ...(fromStore !== undefined && { store: fromStore }), revocations, asks, at: this.now() });
+    this.staged.set(stage, { bundle, bytes, from, ...(fromStore !== undefined && { store: fromStore }), revocations, asks, at: this.now() });
     if (!this.sweep) this.sweepStaged();
 
     const listedBy = this.listedBy(version.ref, stores);
@@ -1579,6 +1584,7 @@ export class Apps {
       run: this.runStatus(version, this.storeViews(stores), [...(installed?.revocations ?? []), ...revocations]),
       listedBy, unknownPublisher: !listedBy.some((s) => s.kind === "curated"),
       ...(carried && { carried: true as const }),
+      stage,
     };
   }
 
@@ -1587,11 +1593,15 @@ export class Apps {
    * for (WISP 1200 § Permissions: none is granted by a store or a contact). A revoked or removed version is not
    * installed; neither is a rollback, nor another bundle under an installed `sequence` (marked on the app). `asks` is
    * what the person's screen listed (`AppPreview.asks`; the last screen of this bundle when not given): what this install
-   * adds to the record it writes over must be among it, else the screen is shown again first.
+   * adds to the record it writes over must be among it, else the screen is shown again first. `stage` is the screen's
+   * (`AppPreview.stage`): it installs from that screen's source and store; without it, only while one source of the
+   * bundle waits.
    */
-  async install({ digest, grant, asks }: { digest: string; grant: string[]; asks?: string[] }): Promise<InstalledAppView> {
-    const staged = this.staged.get(digest);
-    if (!staged || this.now() - staged.at > STAGED.ms) { this.staged.delete(digest); fail("expired", "Fetch the app again"); }
+  async install({ stage, digest, grant, asks }: { stage?: string; digest: string; grant: string[]; asks?: string[] }): Promise<InstalledAppView> {
+    const live = [...this.staged].filter(([key, s]) => s.bundle.digest === digest && (stage === undefined || key === stage) && this.now() - s.at <= STAGED.ms);
+    if (live.length > 1) fail("screens", "This app was fetched from more than one place; install it from its screen");
+    const [key, staged] = live[0] ?? [stage ?? ""];
+    if (!staged) { this.staged.delete(key); fail("expired", "Fetch the app again"); }
     const { bundle, bytes, from, store: fromStore, revocations } = staged;
     const { manifest } = bundle;
     if (!Array.isArray(grant) || !manifest.permissions.every((p) => grant.includes(p))) fail("permissions", "Every permission the app asks for must be granted");
@@ -1636,7 +1646,7 @@ export class Apps {
             // A newer version found under the other rule does not wait any more.
             if (pin && pending) await this.removeBundle(pending.bytes, pending.digest);
           }
-          this.staged.delete(digest);
+          this.staged.delete(key);
           return this.view((await this.app(version.ref))!, stores);
         }
         const kind = wrote = await this.writeBundle(digest, bytes);
@@ -1648,7 +1658,7 @@ export class Apps {
         if (!installed && this.builtIn(version.ref)) await this.keepBuiltIn(version.ref);
         if (installed && installed.digest !== digest) await this.removeBundle(installed.bytes, installed.digest);
         if (installed?.pending && next.pending?.digest !== installed.pending.digest && installed.pending.digest !== digest) await this.removeBundle(installed.pending.bytes, installed.pending.digest);
-        this.staged.delete(digest);
+        this.staged.delete(key);
         return this.view(next, stores);
       }
     } catch (error) {

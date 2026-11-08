@@ -35,6 +35,7 @@ vi.mock("@ghostly/browser/shared/features", async (importOriginal) =>
 const KEY = "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo";
 const REF = `${KEY}/chess`;
 const DIGEST = "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4";
+const STAGE = `${DIGEST}\nscreen`;
 const URL_ = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp";
 const CARD: AppCard = { kind: "app", id: appCardId(REF), ref: REF, digest: DIGEST, sequence: 7, title: "Chess", version: "1.2.0", url: URL_, opened: true };
 
@@ -45,7 +46,7 @@ const installed = (patch: Partial<InstalledAppView> = {}): InstalledAppView => (
 });
 const preview = (patch: Partial<AppPreview> = {}): AppPreview => ({
   digest: DIGEST, ref: REF, publisher: KEY, fingerprint: "yz7m oxuc bd4u 8aqt", from: URL_, icon: null, install: "new", asks: ["chat"],
-  run: { status: "ok" }, listedBy: [], unknownPublisher: true,
+  run: { status: "ok" }, listedBy: [], unknownPublisher: true, stage: STAGE,
   manifest: { ghostlyApp: 1, publisher: KEY, name: "chess", version: "1.2.0", sequence: 7, kind: "mini-app", title: "Chess", tagline: "Play chess with a contact",
     entry: "index.html", permissions: ["chat"], runtime: { host: ">=1.2", clients: ["web", "desktop"] }, license: "MIT", files: [] },
   ...patch,
@@ -290,7 +291,7 @@ describe("with the apps flag on", () => {
       "Ghostly downloads the app from raw.githubusercontent.com, which learns your IP address and when. The app has no internet access, but its publisher may still learn your IP address and when you open it.");
     expect(within(screenEl).queryByTestId("app-webkit-line")).not.toBeInTheDocument();
     await user.click(within(screenEl).getByRole("button", { name: "Install and open" }));
-    expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: ["chat"], asks: ["chat"] }]);
+    expect(fakeEngine.callsTo("appInstall")).toEqual([{ stage: STAGE, digest: DIGEST, grant: ["chat"], asks: ["chat"] }]);
     // Installing from a card opens it in that chat.
     await waitFor(() => expect(opener).toHaveBeenCalledWith(REF, "link-1", { runAnyway: false }));
     expect(fetches).toEqual([]);
@@ -572,7 +573,7 @@ describe("with the apps flag on", () => {
     expect(screen.getByTestId("app-install-confirm")).toHaveTextContent("Install");
     await user.click(screen.getByTestId("app-install-confirm"));
     await waitFor(() => expect(onInstalled).toHaveBeenCalled());
-    expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: all, asks: [] }, { digest: DIGEST, grant: all, asks: all }]);
+    expect(fakeEngine.callsTo("appInstall")).toEqual([{ stage: STAGE, digest: DIGEST, grant: all, asks: [] }, { stage: STAGE, digest: DIGEST, grant: all, asks: all }]);
   });
 
   it("an update refused for what it asks, whose read again fails, says why and takes no Update until Try again reads it", async () => {
@@ -614,7 +615,7 @@ describe("with the apps flag on", () => {
     expect(screen.getByTestId("app-install-confirm")).toHaveFocus();
     await user.click(screen.getByTestId("app-install-confirm"));
     await waitFor(() => expect(onInstalled).toHaveBeenCalled());
-    expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: all, asks: [] }, { digest: DIGEST, grant: all, asks: ["name"] }]);
+    expect(fakeEngine.callsTo("appInstall")).toEqual([{ stage: STAGE, digest: DIGEST, grant: all, asks: [] }, { stage: STAGE, digest: DIGEST, grant: all, asks: ["name"] }]);
   });
 
   it("a new install refused for what it asks, whose read again fails, says the read's error, and Try again shows the install's words", async () => {
@@ -643,7 +644,7 @@ describe("with the apps flag on", () => {
     expect(screen.getByTestId("app-install-confirm")).toBeEnabled();
     await user.click(screen.getByTestId("app-install-confirm"));
     await waitFor(() => expect(onInstalled).toHaveBeenCalled());
-    expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: all, asks: ["chat"] }, { digest: DIGEST, grant: all, asks: all }]);
+    expect(fakeEngine.callsTo("appInstall")).toEqual([{ stage: STAGE, digest: DIGEST, grant: all, asks: ["chat"] }, { stage: STAGE, digest: DIGEST, grant: all, asks: all }]);
   });
 
   it("shows the internet permission with what it means behind ⓘ, and an update that adds it asks again", async () => {
@@ -1421,7 +1422,7 @@ describe("an app that comes with Ghostly (WISP 1200 § Built-in apps)", () => {
     expect(fakeEngine.callsTo("appInstall")).toEqual([]);
 
     await user.click(within(screenOf).getByTestId("app-install-confirm"));
-    await waitFor(() => expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: ["chat", "name"], asks: ["chat", "name"] }]));
+    await waitFor(() => expect(fakeEngine.callsTo("appInstall")).toEqual([{ stage: STAGE, digest: DIGEST, grant: ["chat", "name"], asks: ["chat", "name"] }]));
     // Installed: its own row now, and (an app that runs in a chat) the question of which chat.
     expect(await screen.findByTestId("installed-app")).toHaveTextContent("Chess");
     expect(screen.queryByTestId("built-in-app")).not.toBeInTheDocument();
