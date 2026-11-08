@@ -274,6 +274,8 @@ function handLoop() {
   vi.stubGlobal("clearTimeout", (timer: unknown) => { timers = timers.filter((t) => t !== timer); });
   vi.stubGlobal("setImmediate", (run: () => void) => { immediates.push(run); });
   vi.spyOn(Date, "now").mockImplementation(() => time);
+  // The call's own clock (`monotonic`) too: the loop's time is what passed, whatever the time of day says.
+  vi.spyOn(performance, "now").mockImplementation(() => time);
   return {
     turn(ms: number, read: () => void): void {
       time += ms;
@@ -435,6 +437,8 @@ describe("a call's audio through Opus", () => {
 
   it("catches up after the daemon stalls, so a program writing at real time is not heard later and later", async () => {
     vi.useFakeTimers();
+    // A stall is time that passed with nothing run: the call's own clock (`monotonic`) moves with the faked one.
+    const clock = vi.spyOn(performance, "now").mockImplementation(() => Date.now());
     try {
       const { a, b } = await pair(48000);
       const frame = tone(440, 48000, 20);
@@ -459,6 +463,7 @@ describe("a call's audio through Opus", () => {
       clearInterval(writer);
       a.stop(); b.stop();
     } finally {
+      clock.mockRestore();
       vi.useRealTimers();
     }
   });

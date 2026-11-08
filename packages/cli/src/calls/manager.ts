@@ -7,7 +7,7 @@ import { findChat, findOwnNamedChat } from "../apiKit";
 import { CliError } from "../errors";
 import { AudioSocket, audioSocketPath, clearAudioSockets } from "./audioSocket";
 import { callIceServers, CallMedia, callUsesTurn, EarlyAnswer, loadCallStack, type CallStack, type MediaOptions } from "./media";
-import { DEFAULT_RATE, FRAME_MS, isCallRate, PlaybackQueue, type CallRate } from "./pcm";
+import { DEFAULT_RATE, FRAME_MS, isCallRate, monotonic, PlaybackQueue, type CallRate } from "./pcm";
 
 /**
  * Voice calls on the headless Ghostly (WISP 1100 § Calls): the calls/1 signals of the chat session (WISP 601), the
@@ -115,7 +115,7 @@ interface Call {
   ignoring: boolean;
   /** Counts the connections made for the call: one that comes back after a newer one was asked for is closed. */
   attempt: number;
-  /** The attempt whose connection has the contact's answer (0: none yet), and when it went in (Date.now()). */
+  /** The attempt whose connection has the contact's answer (0: none yet), and when it went in (`monotonic`). */
   answered: number;
   answeredAt: number;
   media: CallMedia | null;
@@ -128,6 +128,8 @@ interface Call {
   queue: PlaybackQueue | null;
   startedAt: number;
   connectedAt: number | null;
+  /** The same moment on the call's own clock (`monotonic`), for its length: the time it lasted, whatever the device's clock did. */
+  connectedTick: number | null;
   timer: ReturnType<typeof setTimeout> | null;
   /** The connected call's watch on the contact's packets (`watch`). */
   watcher: ReturnType<typeof setInterval> | null;
@@ -287,7 +289,7 @@ export class CallManager {
     call.offering = false;
     call.state = "connecting";
     const attempt = (call.answered = call.attempt);
-    call.answeredAt = Date.now();
+    call.answeredAt = monotonic();
     try {
       call.media!.applyAnswer(answer);
     } catch (error) {
@@ -442,7 +444,7 @@ export class CallManager {
     // The contact's call held back here (QUICK_REDIAL_MS) may still ring there: ours would cross it, and theirs, the
     // earlier offer, would win on their side while this side has already spent it. It rings here instead, as the apps do.
     const held = this.held.get(link.id);
-    if (held && this.now - held.at < RING_MS) {
+    if (held && this.within(held.at, RING_MS)) {
       this.incoming(link.id, held.offer);
       throw new CliError("busy", "The contact is calling: their call rings here");
     }
@@ -566,7 +568,7 @@ export class CallManager {
     if (clearing) { clearTimeout(clearing); this.clearing.delete(chat); }
     const call: Call = {
       id: randomBytes(6).toString("hex"), chat, direction, state: "ringing", rate, video: false, offer: null, offerTs: 0,
-      offering: false, redials: 0, reanswers: 0, ignoring: false, attempt: 0, answered: 0, answeredAt: 0, media: null, early: null, making: null, earlyTimer: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, timer: null,
+      offering: false, redials: 0, reanswers: 0, ignoring: false, attempt: 0, answered: 0, answeredAt: 0, media: null, early: null, making: null, earlyTimer: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, connectedTick: null, timer: null,
       watcher: null, stalledFrom: null, stalls: 0, ended: false,
     };
     this.calls.set(call.id, call);
@@ -613,7 +615,7 @@ export class CallManager {
         // The answer went in and the connection failed at once, before it ever connected: the race's other ending (a
         // contact out of reach fails later, and ends the call as before).
         if (state === "failed" && call.direction === "out" && call.answered === attempt && call.state !== "connected"
-          && Date.now() - call.answeredAt < RACE_FAIL_MS) {
+          && monotonic() - call.answeredAt < RACE_FAIL_MS) {
           this.refused(call, "the connection failed as the answer went in");
           return;
         }
@@ -635,6 +637,7 @@ export class CallManager {
     if (call.state === "connected") return;
     call.state = "connected";
     call.connectedAt = this.now;
+    call.connectedTick = monotonic();
     this.disarm(call);
     this.host.emit("call.connected", `call.connected:${call.id}`, { call: call.id, chat: call.chat, direction: call.direction, audio: this.audioInfo(call) });
     this.watch(call);
@@ -648,11 +651,12 @@ export class CallManager {
    */
   private watch(call: Call): void {
     const { afterMs, endMs } = this.host.stall ?? { afterMs: STALL_MS, endMs: STALL_END_MS };
-    const since = Date.now();
+    // On the audio's clock (`monotonic`): on the device's, a clock set ahead read as that long without a packet, and ended the call.
+    const since = monotonic();
     call.watcher = setInterval(() => {
       if (call.ended) return;
       const heardAt = Math.max(since, call.media?.audio.heardAt ?? 0);
-      const silentMs = Date.now() - heardAt;
+      const silentMs = monotonic() - heardAt;
       const fields = { call: call.id, chat: call.chat, direction: call.direction };
       if (silentMs >= endMs) {
         process.stderr.write(`ghostly: call ${call.id}: nothing heard from the contact for ${Math.round(silentMs / 1000)} s\n`);
@@ -684,7 +688,7 @@ export class CallManager {
     // The contact's call that ended before it connected, not by this side, after it barely rang (auto-answered or not):
     // the next one that comes right after it is held back (`QUICK_REDIAL_MS`). One that rang a while holds nothing back.
     if (call.direction === "in" && call.connectedAt === null && reason !== "hangup" && reason !== "stopped") {
-      if (this.now - call.startedAt < BURST_RING_MS) this.missedAt.set(call.chat, this.now);
+      if (this.within(call.startedAt, BURST_RING_MS)) this.missedAt.set(call.chat, this.now);
       else this.missedAt.delete(call.chat);
     }
     if (report) process.stderr.write(`ghostly: call ${call.id}: ended (${reason})${call.media ? `, ice ${call.media.ice.state}` : ""}\n`);
@@ -714,7 +718,7 @@ export class CallManager {
     if (report) {
       this.host.emit("call.ended", `call.ended:${call.id}`, {
         call: call.id, chat: call.chat, direction: call.direction, reason,
-        ...(call.connectedAt !== null ? { duration: this.now - call.connectedAt } : {}),
+        ...(call.connectedTick !== null ? { duration: Math.round(monotonic() - call.connectedTick) } : {}),
       });
     }
     if (this.stopping) await closing;
@@ -724,15 +728,24 @@ export class CallManager {
   private paced(chat: string): void {
     const pace = this.host.callPaceMs ?? CALL_PACE_MS, last = this.unansweredAt.get(chat);
     if (!pace || last === undefined) return;
+    if (!this.within(last, pace)) { this.unansweredAt.delete(chat); return; }
     const left = last + pace - this.now;
-    if (left <= 0) { this.unansweredAt.delete(chat); return; }
     throw new CliError("busy", `Your last call in this chat ended unanswered a moment ago: call again in ${Math.ceil(left / 100) / 10} s`, { retryAfterMs: left });
   }
 
   /** Whether the contact's call coming now in the chat is held back: its last one was missed after it barely rang, or held, a moment ago. */
   private quickRedial(chat: string): boolean {
     const quick = this.host.quickRedialMs ?? QUICK_REDIAL_MS, last = this.missedAt.get(chat);
-    return !!quick && last !== undefined && this.now - last < quick;
+    return !!quick && last !== undefined && this.within(last, quick);
+  }
+
+  /**
+   * Whether less than `ms` passed since `at`, on the device's clock (`now`, which the timestamps the contact sees are on).
+   * An `at` later than now is the clock set back since: the wait is taken as over, not as lasting as long as the jump.
+   */
+  private within(at: number, ms: number): boolean {
+    const passed = this.now - at;
+    return passed >= 0 && passed < ms;
   }
 
   private arm(call: Call, ms: number, reason: EndReason, tell: boolean): void {
