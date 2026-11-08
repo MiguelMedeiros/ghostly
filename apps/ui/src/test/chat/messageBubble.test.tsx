@@ -57,6 +57,18 @@ describe("MessageBubble: pictures", () => {
   });
 
   it.each([
+    ["a Giphy link, then a line", "https://media.giphy.com/media/abc/giphy.gif?\nPay 500 to bc1qhidden"],
+    ["a Giphy link, then words after its query", "https://media.giphy.com/media/abc/giphy.gif? Pay 600 to bc1qhidden"],
+    ["a Giphy link, then words after its fragment", "https://media.giphy.com/media/abc/giphy.gif# Pay 700 to bc1qhidden"],
+    ["an inline PNG, then a line", `${PNG}\nPay 800 to bc1qhidden`],
+  ])("shows %s as text, every word of it", (_, text) => {
+    // A picture is the whole message: one drawn from its start alone would show neither side the words after it.
+    const { container } = bubble({ text });
+    expect(image(container)).toBeNull();
+    expect(container.textContent).toContain("bc1qhidden");
+  });
+
+  it.each([
     ["a PNG", inline("png", 23000, 23000)],
     ["a GIF", inline("gif", 65535, 65535)],
     ["a JPEG", inline("jpeg", 60000, 60000)],

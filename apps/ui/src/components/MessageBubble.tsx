@@ -378,7 +378,8 @@ function ReplyAction({ onReply }: { onReply: () => void }) {
 
 const IMAGE_URL_RE =
   /^https:\/\/\S+\.(gif|png|jpe?g|webp)(\?\S*)?$/i;
-const GIPHY_RE = /^https:\/\/media\d*\.giphy\.com\//i;
+/** The whole message, as the other picture links: words after the link would show on neither side under a picture. */
+const GIPHY_RE = /^https:\/\/media\d*\.giphy\.com\/\S+$/i;
 /** A Wayback Machine capture of a GIF: `/web/`, an optional timestamp (and `im_`/`id_`), then the archived http(s) URL. */
 const WAYBACK_GIF_PATH_RE = /^\/web\/(?:\d{1,14}(?:im_|id_)?\/)?https?:\/\/[^/?#\s]+\/[^?#\s]*\.gif$/i;
 
