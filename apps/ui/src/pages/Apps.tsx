@@ -6,6 +6,7 @@ import type { AppListing } from "@ghostly/core";
 import { Block, Page, PageAction, Section } from "../components/layout";
 import { Button, Notice } from "../components/wallet/ui";
 import { Toast } from "../components/ui/Toast";
+import { SearchStatus } from "../components/ui/SearchStatus";
 import { useToast } from "../hooks/useToast";
 import { useFocusBack } from "../hooks/useFocusBack";
 import { useI18n, type Translate } from "../contexts/I18nContext";
@@ -264,6 +265,7 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
           <input type="search" data-testid="app-store-filter" value={filter} dir={draftDirection(filter)} onChange={(e) => { setFilter(e.target.value); setLimit(LISTING_PAGE); setAdded(null); }}
             placeholder={t("apps.store.filter")} aria-label={t("apps.store.filter")}
             className="w-full rounded-lg border-none bg-search-bg px-2.5 py-1.5 text-sm text-text-primary placeholder-text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-accent" />
+          <SearchStatus testId="app-store-found" text={!filter.trim() ? "" : matching.length ? t("apps.store.count", { count: matching.length }) : t("apps.store.noMatch")} />
         </div>
       )}
       {open && (
