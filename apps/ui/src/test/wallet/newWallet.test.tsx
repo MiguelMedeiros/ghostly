@@ -34,6 +34,12 @@ describe("a profile with no wallet yet", () => {
     expect(screen.queryByRole("tablist", { name: "Wallet integrations" })).not.toBeInTheDocument();
   });
 
+  it("takes a tap on 44 px of the New in its sentence on a phone (where a tap lands is a browser's measure: e2e/web/phone-touch-targets.spec.ts)", async () => {
+    const { engine } = renderApp(<Wallet />);
+    engine.update({ wallet: empty() });
+    expect(await screen.findByTestId("wallet-first-new")).toHaveClass("tap-target");
+  });
+
   it("makes Cashu and USDT on the network chosen, one after the other, and then shows their cards", async () => {
     const { user, engine } = renderApp(<Wallet />);
     engine.update({ wallet: empty() });
