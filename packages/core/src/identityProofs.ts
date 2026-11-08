@@ -320,6 +320,8 @@ export const IDENTITY_CHECK_UNAVAILABLE = "Your contact's app could not check it
 
 const TOO_MANY_RECEIVED = "Your contact keeps too many identities from you already";
 
+const NEWER_HELD = "Your contact keeps a newer proof of this identity from you";
+
 const peerError = (e: unknown) => e instanceof IdentityCheckUnavailable ? IDENTITY_CHECK_UNAVAILABLE : shortError(e);
 
 const UNSUPPORTED_KIND = "Your contact's app cannot verify this kind of identity yet";
@@ -327,7 +329,7 @@ const NOT_IN_PROFILE = "That identity is no longer in your profile";
 const CONTACT_REFUSED = "Your contact could not verify it";
 const EXPIRED = "The proof has expired";
 /** The refusals a contact's app writes itself (onRequest, onPresent): the only words of its `idp-result` kept as they came. */
-const CONTACT_REFUSALS = new Set([UNSUPPORTED_KIND, IDENTITY_CHECK_UNAVAILABLE, TOO_MANY_RECEIVED, REVOKED, EXPIRED]);
+const CONTACT_REFUSALS = new Set([UNSUPPORTED_KIND, IDENTITY_CHECK_UNAVAILABLE, TOO_MANY_RECEIVED, REVOKED, EXPIRED, NEWER_HELD]);
 
 /**
  * Why a share of mine was not accepted, as this app may say it under my identity: one of the refusals above or my own
@@ -620,6 +622,9 @@ export class IdentityExchange {
       const subject = verified?.subject;
       // A re-check may have found it revoked while it was being checked.
       if (verified && revokedHere(l.received, id)) { verified = undefined; error = reason = REVOKED; }
+      // Checked beside a newer one that is stored already: the binding's date decides, not which check ended last.
+      if (verified && l.received.some(r => r.id !== id && r.binding.provider === binding.provider && r.verified.subject === subject &&
+        r.binding.issuedAt > binding.issuedAt && standing(r, now))) { verified = undefined; error = reason = NEWER_HELD; }
       const received = verified && receivedWithRoom(l.received, id, r => r.binding.provider === binding.provider && r.verified.subject === subject, now);
       if (verified && !received) { verified = undefined; error = reason = TOO_MANY_RECEIVED; }
       // This proof, held from this contact already, presented again (its result was lost, so it was asked again): the
