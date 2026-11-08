@@ -1447,19 +1447,26 @@ export class PaymentDesk {
     const existing=await openRow(STORES.payments,await wrap<StoredPayment|undefined>((await store(STORES.payments,"readonly")).get(review.id)));
     if(!existing || existing.linkId!==review.linkId || existing.requestId!==review.requestId)throw new Error("Cashu outbox does not match the reviewed payment");
     // Taken back (or being taken back), or settled: its token is not the contact's to have any more.
-    if(!this.cashuSendable(this.payments.get(existing.id) ?? existing))return;
+    if(!await this.cashuSendable(this.payments.get(existing.id) ?? existing))return;
     // Known before the link is asked for: a contact away now gets it from `replay` once its link opens.
     this.payments.set(existing.id,existing);
     this.host.onChange();
     await link.requirePaymentSupport();
     // Waiting for the chat can take a while (a restart dials the contact): Take it back may have run meanwhile.
-    if(!this.cashuSendable(this.payments.get(existing.id) ?? existing))return;
+    if(!await this.cashuSendable(this.payments.get(existing.id) ?? existing))return;
     await this.host.storeMessage({linkId:review.linkId,id:`me_${review.createdAt}`,text:`${review.amount} ${arkSats(review.network)} via Cashu`,sender:"me",timestamp:review.createdAt,via:"datalink",paymentId:review.id});
     await this.sendTo(link, {id:review.id,timestamp:review.createdAt,requestId:review.requestId,amount:{value:String(review.amount),asset:UNIT},memo:review.memo,endpoint:[ENDPOINT.cashu,token]});
     this.cashuSent.add(review.id);
   }
-  private cashuSendable(payment:StoredPayment):boolean {
-    return payment.state==="pending" && !this.reclaims.has(payment.id);
+  private async cashuSendable(payment:StoredPayment):Promise<boolean> {
+    return payment.state==="pending" && !await this.cashuTakingBack(payment.id);
+  }
+  /**
+   * A Take it back of this payment under way: running here, or its redeem written down after the mint's answer was lost
+   * (`CashuWallet.cashuTakingBack`), whose ecash the mint already reads spent. Unreadable: not sent now, asked again.
+   */
+  private async cashuTakingBack(id:string):Promise<boolean> {
+    return this.reclaims.has(id) || await Promise.resolve(this.wallet.cashuTakingBack?.(id)).then(Boolean, () => true);
   }
   /**
    * A reviewed Cashu payment's token again, as reconciling it asks: only if it never went in this run. One that went is
@@ -1989,6 +1996,8 @@ export class PaymentDesk {
       }
       if(payment.state !== "pending")continue;
       if (payment.kind === "payment" && payment.token) {
+        // Its Take it back reached the mint, whose answer was lost: the token is spent, by us.
+        if (await this.cashuTakingBack(payment.id)) continue;
         // Its line, when the app ended after the token was written down and before the line was: a line already
         // there (or deleted here) stays as it is.
         await this.host.storeMessage(ecashLine(payment));
