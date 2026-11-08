@@ -996,6 +996,49 @@ html[data-standalone="true"] {
   }
 }
 
+/* A connected call on a phone on its side (320-480 px high, 320-350 in a browser): the avatars and names are centred in
+   the window, and an avatar over its name (96 + 16 + 28 px, the ring 12 px out) ran into the buttons along its bottom,
+   names over Camera, Devices and Share screen. The avatars are smaller and the buttons (still 56 or 64 px) sit lower.
+   With your side beside the contact's (a voice call, no picture of yours at the top right) each side is a row, its
+   name beside it; the contact alone keeps its name under the avatar, below your picture. At 320 px they stay above
+   212 px down, ring and all, and the buttons start at 232. */
+@media (max-height: 480px) {
+  :not(.call-mini) > .call-controls {
+    bottom: calc(1.5rem + env(safe-area-inset-bottom));
+  }
+
+  :not(.call-mini) > .call-sides {
+    align-items: center;
+  }
+
+  :not(.call-mini) > .call-sides .call-peer {
+    gap: 4px;
+  }
+
+  :not(.call-mini) > .call-sides:has(> .call-self) .call-peer {
+    flex-direction: row;
+    gap: 12px;
+  }
+
+  :not(.call-mini) > .call-sides .call-avatar {
+    width: 72px;
+    height: 72px;
+  }
+
+  :not(.call-mini) > .call-sides .call-avatar span {
+    font-size: 1.5rem;
+  }
+
+  :not(.call-mini) > .call-sides .call-self .call-avatar {
+    width: 48px;
+    height: 48px;
+  }
+
+  :not(.call-mini) > .call-sides .call-self .call-avatar span {
+    font-size: 1.125rem;
+  }
+}
+
 /* A phone on its side with the keyboard up leaves 150-175px: a pinned message's bar and a reply or edit bar between the
    chat's header and the field took it all, and the field went under the keyboard. The pinned bar goes behind the
    keyboard, as the tab bar does, and the reply or edit bar says who and what on one line. */
