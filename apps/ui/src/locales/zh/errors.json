@@ -390,6 +390,7 @@
   "lnurl": {
     "http": "{{host}} 返回了 HTTP {{status}}",
     "invoiceExpired": "服务返回的发票已经过期",
+    "mismatchNext": "没有支付任何款项。请重试，或换一种方式支付。",
     "noInvoice": "{{domain}} 没有返回发票",
     "noJson": "{{host}} 没有返回 JSON",
     "noJsonStatus": "{{host}} 没有返回 JSON（HTTP {{status}}）",

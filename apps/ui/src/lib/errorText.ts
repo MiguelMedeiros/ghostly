@@ -451,6 +451,9 @@ const RULES: readonly Rule[] = [
   { match: /^(?<domain>\S+) did not answer with a pay request$/, key: "errors.lnurl.noPayRequest" },
   { match: /^(?<domain>\S+) did not answer with an invoice$/, key: "errors.lnurl.noInvoice" },
   exact("The invoice the service answered with has already expired", "errors.lnurl.invoiceExpired"),
+  // An invoice for another amount than the one chosen, or for any amount (lnurl.ts parseInvoiceCallback): nothing was
+  // paid; the amounts the service and the person named go behind the ⓘ.
+  { match: /^The invoice asks for (?:any amount|[\d,]+ sats), not the [\d,]+ sats you chose$/, key: "wallet.lightning.mismatch", next: "errors.lnurl.mismatchNext", detail: true },
 
   // Groups (packages/core/src/groupSession.ts and groupCommunity.ts, packages/browser/src/engine/groups.ts and
   // community.ts): why a group stopped (its notice, the line under its name, its row in the list), what a send or an
