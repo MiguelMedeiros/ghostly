@@ -50,7 +50,9 @@ export interface PkarrRequestOptions {
   watch?: boolean;
   /**
    * A 1:1 chat's read of a contact that went away from a live session within `DEPARTED_READ_MS` (link.ts): an app that
-   * restarts publishes its offer then. A few may go over the relay's minute (`DEPARTED_READS` in relay.ts).
+   * restarts publishes its offer then. So is a chat's read of the mailbox of a contact on DHT only, this side not, out of
+   * the background (`DhtDelivery.departedRead`): its envelope saying it left is what the live link waits on. A few may go
+   * over the relay's minute (`DEPARTED_READS` in relay.ts).
    */
   departed?: boolean;
   /**
