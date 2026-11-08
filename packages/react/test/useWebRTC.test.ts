@@ -735,6 +735,53 @@ describe("answering a call", () => {
     expect(lines(call)).toEqual(["call_received", "call_missed", "call_received"]);
   });
 
+  it("a call that comes once a person could have redialled rings though the device's clock was set back after the missed one", () => {
+    const call = renderCall();
+    let theirs = Date.now();
+    call.receive(remote.offer(theirs));
+    call.receive(remote.hangUp(theirs + 1));
+    // This side's clock goes back 90 s (the contact's does not), and the contact calls again 30 s later.
+    vi.setSystemTime(Date.now() - 90_000);
+    act(() => { vi.advanceTimersByTime(30_000); });
+    theirs += 30_000;
+    call.receive(remote.offer(theirs));
+
+    expect(call.result.current.callState).toBe("incoming");
+    expect(lines(call)).toEqual(["call_received", "call_missed", "call_received"]);
+  });
+
+  it("a call that rang a while holds nothing back though the device's clock was set back while it rang", () => {
+    const call = renderCall();
+    let theirs = Date.now();
+    call.receive(remote.offer(theirs));
+    act(() => { vi.advanceTimersByTime(3000); });
+    vi.setSystemTime(Date.now() - 90_000);
+    act(() => { vi.advanceTimersByTime(2000); });
+    theirs += 5000;
+    call.receive(remote.hangUp(theirs));
+    act(() => { vi.advanceTimersByTime(1200); });
+    theirs += 1200;
+    call.receive(remote.offer(theirs));
+
+    expect(call.result.current.callState).toBe("incoming");
+    expect(lines(call)).toEqual(["call_received", "call_missed", "call_received"]);
+  });
+
+  it("calling back once the held-back call rang out there places a call of its own though the clock was set back", () => {
+    const call = renderCall();
+    call.receive(remote.offer(Date.now()));
+    call.receive(remote.hangUp(Date.now() + 1));
+    act(() => { vi.advanceTimersByTime(500); });
+    call.receive(remote.offer(Date.now()));
+    // Its hang-up never comes here; the clock goes back 90 s, and the person calls back past the held call's ring.
+    vi.setSystemTime(Date.now() - 90_000);
+    act(() => { vi.advanceTimersByTime(RING_MS + 1000); });
+
+    act(() => { void call.result.current.startCall(false); });
+    expect(call.result.current.callState).toBe("offering");
+    expect(call.removeCallEventMessage).not.toHaveBeenCalled();
+  });
+
   it("a chat let go between a burst's calls (off screen, loaded only for its call) still holds the next one back", () => {
     const first = renderCall(undefined, undefined, {}, "chat-burst");
     first.receive(remote.offer(Date.now()));
