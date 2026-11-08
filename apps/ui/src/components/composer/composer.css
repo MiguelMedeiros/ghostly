@@ -382,3 +382,20 @@
 .expression-switch button:hover { color: var(--color-text-primary); }
 .expression-switch button[aria-selected="true"] { background: var(--color-surface-hover); color: var(--color-text-primary); }
 .expression-switch button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+
+/* Compact (ExpressionPanel's `data-compact`: the keyboard up, the focus in the panel, and too little height above the
+   keyboard for two rows of results in the usual panel, as a phone on its side or the smallest one upright typing a
+   search): the grabber, the categories and the results' heading go, and the switch stands beside the search, so two
+   rows of emoji or more show above the keyboard. They are all back once the keyboard is down. */
+.expression-panel[data-compact] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.expression-panel[data-compact]::before,
+.expression-panel[data-compact] .expression-categories,
+.expression-panel[data-compact] .expression-section-title { display: none; }
+.expression-panel[data-compact] > .expression-tab { display: contents; }
+.expression-panel[data-compact] > .expression-tab > * { grid-column: 1 / -1; grid-row: 2; }
+.expression-panel[data-compact] .expression-search-row { grid-column: 1; grid-row: 1; padding-block: 6px 4px; padding-inline-end: 4px; }
+.expression-panel[data-compact] .expression-switch { grid-column: 2; grid-row: 1; margin-block: 4px 2px; margin-inline: 0 12px; }
