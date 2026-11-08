@@ -331,6 +331,13 @@ const RELAY_ONLY_REFUSED = "A contact's app does not open in the browser extensi
 /** The DevTools commands a viewer tab needs. Nothing else is ever sent. */
 const VIEWER_COMMANDS = new Set(["Fetch.enable", "Page.enable", "Fetch.fulfillRequest", "Fetch.failRequest"]);
 
+/**
+ * Added to Ghostly's policy on every page a viewer serves: the app opens no window or tab of its own, which would run
+ * on its origin with no DevTools and no binding, so no close (lock, profile switch, Hide my IP) would reach it. The web
+ * view's frame has the same flags (apps/web/src/svc/opener.ts); Desktop's viewer opens no window either.
+ */
+const sandboxed = (policy: string) => `${policy}; sandbox allow-scripts allow-same-origin allow-forms`;
+
 interface PausedRequest {
   requestId: string;
   request: {
@@ -546,7 +553,8 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
     await devtools(tabId, "Fetch.fulfillRequest", {
       requestId: paused.requestId,
       responseCode: reply.status,
-      responseHeaders: withViewerPolicy(viewerResponseHeaders(reply.headers)).map(([name, value]) => ({ name, value })),
+      // Ghostly's policy is the header's last one, after the contact's.
+      responseHeaders: withViewerPolicy(viewerResponseHeaders(reply.headers)).map(([name, value]) => ({ name, value: name === "content-security-policy" ? sandboxed(value) : value })),
       body: reply.bodyB64,
     });
     return;
@@ -565,7 +573,7 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
       { name: "content-type", value: "text/html; charset=utf-8" },
       { name: "cache-control", value: "no-store" },
       { name: "x-ghostly-error", value: reply.code },
-      { name: "content-security-policy", value: viewerServicePolicy(false) },
+      { name: "content-security-policy", value: sandboxed(viewerServicePolicy(false)) },
     ],
     body: toBase64(utf8Encode(html)),
   });
