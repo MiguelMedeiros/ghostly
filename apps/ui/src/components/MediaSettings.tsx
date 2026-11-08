@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { voiceLevel } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
+import { openAppSettings } from "../desktop/androidCameraRefusal";
 import { useMediaDevices } from "../hooks/useMediaDevices";
 import { applySpeaker, canPickSpeaker, captureCamera, chooseDevice, deviceSource, isMediaDenied, mediaDeniedText, resolveDevice, type DeviceKind, type DeviceList } from "../lib/mediaDevices";
 import { soundUrl } from "../lib/sounds";
+import { androidApp } from "../lib/touchOnly";
 import { Row, Section } from "./layout";
 import { Select, type SelectOption } from "./ui/Select";
 import { Button } from "./wallet/ui";
@@ -17,6 +19,18 @@ const from = (id: string | undefined): MediaTrackConstraints | true => (id ? { d
 /** Why trying a device failed: refused (the page says where to allow it), or it would not open. */
 type Failure = false | "failed" | "denied";
 const failureOf = (error: unknown): Failure => (isMediaDenied(error) ? "denied" : "failed");
+
+/**
+ * Where to allow a refused microphone or camera again. The Android app has no browser: Android asks again, or once it
+ * no longer does ("Don't allow" twice), only its settings for the app allow them, which Open settings opens.
+ */
+const deniedText = () => (androidApp() ? "settings.media.deniedAndroid" : mediaDeniedText());
+
+function OpenSettings() {
+  const { t } = useI18n();
+  if (!androidApp()) return null;
+  return <Button data-testid="settings-media-open-settings" onClick={() => void openAppSettings()}>{t("settings.noticesOpenSettings")}</Button>;
+}
 
 /**
  * Settings → Audio & video: which microphone, camera and speaker this profile uses, each with a way to try it.
@@ -43,8 +57,9 @@ export function MediaSettings() {
           while its list is on the way and then goes, moving everything under it. */}
       {!source && !list.named && (
         <Row label={t("settings.media.names")} testId="settings-media-names"
-          hint={denied ? <span role="alert" data-testid="settings-media-denied" className="text-danger">{t(mediaDeniedText())}</span> : t("settings.media.namesHint")}>
+          hint={denied ? <span role="alert" data-testid="settings-media-denied" className="text-danger">{t(deniedText())}</span> : t("settings.media.namesHint")}>
           <Button data-testid="settings-media-allow" onClick={() => void allowNames()}>{t("settings.media.allow")}</Button>
+          {denied && <OpenSettings />}
         </Row>
       )}
       <DeviceRow kind="audioinput" list={list} choices={choices} info={t("settings.media.microphoneInfo")}>
@@ -98,9 +113,10 @@ function DeviceRow({ kind, list, choices, info, children, below }: {
     <div>
       <Row label={name} info={info} testId={`${TEST_ID[kind]}-row`}
         hint={missing ? <span role="status" data-testid={`${TEST_ID[kind]}-missing`}>{t("settings.media.missing", { name: missing })}</span>
-          : failed ? <span role="alert" data-testid={`${TEST_ID[kind]}-failed`} data-failure={failed} className="text-danger">{t(failed === "denied" ? mediaDeniedText() : "settings.media.failed")}</span> : undefined}>
+          : failed ? <span role="alert" data-testid={`${TEST_ID[kind]}-failed`} data-failure={failed} className="text-danger">{t(failed === "denied" ? deniedText() : "settings.media.failed")}</span> : undefined}>
         <Select fit aria-label={name} data-testid={TEST_ID[kind]} value={id ?? ""} options={options} onChange={pick} />
         {children(id, setFailed)}
+        {failed === "denied" && <OpenSettings />}
       </Row>
       {below && <div className="px-4 pb-3.5">{below(id, setFailed)}</div>}
     </div>
