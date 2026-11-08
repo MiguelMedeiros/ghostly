@@ -20,8 +20,11 @@ export interface AwaitingSources {
   lightningOwner?: (op: LightningOp) => string | undefined;
   payments: readonly StoredPayment[];
   now: number;
-  /** Whether a payment's chat was deleted (`WalletAwaitingView.chatGone`); absent while the chats are not loaded yet. */
-  chatGone?: (linkId: string) => boolean;
+  /**
+   * Whether the chat line of a payment (by its id) is in no chat the person can open (`WalletAwaitingView.chatGone`);
+   * absent while the chats are not loaded yet.
+   */
+  chatGone?: (paymentId: string) => boolean;
 }
 
 /** An invoice or a quote a minute past its expiry can no longer be paid (the mints poll with the same grace). */
@@ -101,10 +104,10 @@ export function walletAwaiting({ network, mints, quotes, lightningOps, lightning
   for (const op of openOps) { const owner = ownerOf(op); if ((!owner || !requests.has(owner)) && !answered(op, owner)) out.push({ type: "lightning", kind: "invoice", amount: op.amount, ...withOwner(owner), ...onCard(lightningOwner(op)) }); }
 
   // Ecash sent that the contact has not taken yet: only the wallet it came from can take it back. One whose chat was
-  // deleted is kept for that (`PaymentDesk.forgetLink`), and says so: nothing else offers it back.
+  // deleted is kept for that (`PaymentDesk.forgetLink`), and one whose line is in no chat says so: nothing else offers it back.
   for (const p of payments) {
     if (p.kind !== "payment" || p.direction !== "out" || p.state !== "pending" || !p.token) continue;
-    const gone = chatGone?.(p.linkId) ? { chatGone: true as const } : {};
+    const gone = chatGone?.(p.id) ? { chatGone: true as const } : {};
     if (p.target?.method === "fedimint" || p.federation) {
       if (paymentNetwork(p) === network) out.push({ type: "fedimint", kind: "sent", amount: p.amount, paymentId: p.id, ...gone });
       continue;

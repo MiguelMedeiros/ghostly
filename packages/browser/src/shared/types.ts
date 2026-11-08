@@ -852,8 +852,9 @@ export interface WalletAwaitingView {
   /** Lightning: the card it goes through. */
   card?: string;
   /**
-   * `sent`: the chat it went in was deleted since. Its bubble, the chat's Take it back, went with the chat, so the
-   * Wallet page offers it instead.
+   * `sent`: its bubble, with the chat's Take it back, is in no chat that can be opened: the chat it went in was deleted
+   * since (or joined again by the same invite, without its old history), or its group is gone. The Wallet page offers
+   * it instead. A group member who left, whose edge closed, leaves the bubble in the group: not this.
    */
   chatGone?: true;
 }

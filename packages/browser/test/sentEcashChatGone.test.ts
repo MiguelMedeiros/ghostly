@@ -1,8 +1,9 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Wallet, createBlindSignature, createNewMintKeys, hashToCurve, pointFromHex, serializeMintKeys, verifyUnblindedSignature, type Proof } from "@cashu/cashu-ts";
-import { createIdentity, type Payment } from "@ghostly/core";
+import { createIdentity, type GroupSession, type Payment } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
+import { db } from "../src/engine/db";
 import { CashuWallet } from "../src/engine/wallet";
 import { fakeInvoice } from "../src/engine/paymentAdapters/providers/testing";
 import { TEST_MINT } from "../src/shared/mints";
@@ -85,16 +86,21 @@ function fakeMint() {
 
 const balance = async () => (await wrap<StoredProof[]>((await store(STORES.proofs, "readonly")).getAll())).filter((p) => !p.reserved).reduce((sum, p) => sum + p.amount, 0);
 
-/** A connected contact who never takes the ecash: what goes out is kept, nothing comes back. */
-function addChat(node: GhostlyNode, frames: Payment[]): StoredLink {
+/**
+ * A connected contact who never takes the ecash: what goes out is kept, nothing comes back. `as`: the chat's row as it
+ * is stored (the same invite joined again, or a group member's edge), else a new 1:1 chat.
+ */
+function addChat(node: GhostlyNode, frames: Payment[], as?: StoredLink): StoredLink {
   const link = {
     requirePaymentSupport: vi.fn(async () => {}), allowsPayment: vi.fn(() => true), paymentEnabled: vi.fn(() => true),
     isDataLinkOpen: true, supportsPayments: true,
     sendPayment: vi.fn(async (payment: Payment) => { frames.push(payment); }),
     sendPaymentRequest: vi.fn(async () => {}), sendPaymentAsk: vi.fn(async () => {}), sendPaymentResult: vi.fn(),
     stop: vi.fn(async () => {}), depart: vi.fn(),
+    // A group member's edge: no group frame goes over it here.
+    supportsGroupVersion: vi.fn(() => false),
   };
-  const row: StoredLink = { id: `chat-${crypto.randomUUID().slice(0, 8)}`, profile: "paired-chat/1", createdAt: 1, seedB64: createIdentity().seedB64,
+  const row: StoredLink = as ?? { id: `chat-${crypto.randomUUID().slice(0, 8)}`, profile: "paired-chat/1", createdAt: 1, seedB64: createIdentity().seedB64,
     encKeyB64: createIdentity().seedB64, peerPubKeyZ32: createIdentity().pubKeyZ32, participationSeed: createIdentity().seedB64 };
   node["links"].set(row.id, { stored: row, myPubKeyZ32: "me", link: link as never, status: "online", dataLink: "open",
     presence: { online: true, lastPacketAt: 0, services: null }, lastMessageAt: 0, peerAck: 0, lastSyncAt: 0,
@@ -185,5 +191,53 @@ describe("ecash sent in a chat deleted before the contact took it", () => {
     node["transfersRestored"] = true;
     await node["refreshWallet"]();
     expect(sent(node)).toEqual([{ type: "cashu", kind: "sent", amount: 5, paymentId, chatGone: true }]);
+  });
+
+  it("is offered back when the same invite is joined again: the chat has the same id, and not the payment's bubble", async () => {
+    const node = await engine();
+    const frames: Payment[] = [];
+    const chat = addChat(node, frames);
+    const { paymentId } = await node.sendPayment({ linkId: chat.id, amount: 8, timestamp: 4_000, network: "testnet" });
+    node.removeLink({ linkId: chat.id });
+    await vi.waitFor(() => expect(sent(node)).toEqual([expect.objectContaining({ paymentId, chatGone: true })]));
+    await vi.waitFor(async () => expect(await db.getMessage(chat.id, "me_4000")).toBeUndefined());
+
+    // Joined again: a chat under the same id, whose history began anew.
+    addChat(node, frames, chat);
+    await node["refreshWallet"]();
+    expect(sent(node)).toEqual([{ type: "cashu", kind: "sent", amount: 8, paymentId, chatGone: true }]);
+
+    // Its line comes back (the payment goes out again once the chat is live, `PaymentDesk.replay`): its bubble offers it.
+    await node["storeMessage"]({ linkId: chat.id, id: "me_4000", text: "⚡ 8 test sats", sender: "me", timestamp: 4_000, via: "datalink", paymentId });
+    await vi.waitFor(() => expect(sent(node)).toEqual([{ type: "cashu", kind: "sent", amount: 8, paymentId }]));
+  });
+
+  it("is not offered as of a deleted chat when a group member leaves: the payment's bubble is still in the group", async () => {
+    const node = await engine();
+    const { groupId } = await node.createGroup({ name: "Ghosts", profile: "mesh" });
+    const session = (node["groups"] as unknown as { sessions: Map<string, GroupSession> }).sessions.get(groupId)!;
+    const member = createIdentity().pubKeyZ32;
+    await session.admit(member);
+    const edgeOf = () => [...node["links"].values()].find((live) => live.stored.group === groupId && live.stored.groupPeer === member && !live.stored.groupEntry)?.stored;
+    await vi.waitFor(() => expect(edgeOf()).toBeDefined(), { timeout: 10_000 });
+    // The edge to that member, able to carry a payment, as a live one is.
+    const edge = addChat(node, [], edgeOf()!);
+    const { paymentId } = await node.sendPayment({ linkId: edge.id, amount: 3, timestamp: 5_000, network: "testnet" });
+    // Its bubble is in the group's history.
+    await vi.waitFor(async () => expect(await db.getMessage(`group:${groupId}`, `${edge.id}:me_5000`)).toMatchObject({ paymentId }));
+    await node["refreshWallet"]();
+    expect(sent(node)).toEqual([{ type: "cashu", kind: "sent", amount: 3, paymentId }]);
+
+    // The member leaves: their edge closes here, the group and its history stay.
+    await node["closeGroupLink"](edge.id);
+    expect(node["links"].has(edge.id)).toBe(false);
+    await node["refreshWallet"]();
+    expect(sent(node)).toEqual([{ type: "cashu", kind: "sent", amount: 3, paymentId }]);
+
+    // The group deleted here: its history, and the bubble, go. (Its goodbye to the others is not what is looked at: an
+    // admin is refused it with nobody online to take over.)
+    vi.spyOn(node["groups"], "leave").mockResolvedValue();
+    await node.forgetGroup({ groupId });
+    await vi.waitFor(() => expect(sent(node)).toEqual([{ type: "cashu", kind: "sent", amount: 3, paymentId, chatGone: true }]));
   });
 });

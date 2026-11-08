@@ -175,6 +175,7 @@ import type {
   SettingsPatch,
   StoredLink,
   StoredMessage,
+  StoredPayment,
   StoredPin,
   StoredService,
   NetworkWalletsView,
@@ -1941,6 +1942,8 @@ export class GhostlyNode implements EngineImplementation {
     const moved = row ?? (this.groups.movedMarks(groupId, id) ? await db.getMessage(chat, id) : undefined);
     await this.groups.removed(groupId, id);
     await db.deleteMessage(chat, id);
+    // A payment line of mine (`<link>:me_<time>`, `storeNewMessage`): ecash not taken yet is offered back elsewhere.
+    if (id.includes(":me_")) this.awaitingSoon();
     if (moved) await this.groups.unmark(groupId, moved);
     // Its quotes cost no read of the group each (`QuoteSweeps`): a member can post and remove at the pace of edits.
     this.quoteSweeps.add(chat, id, id);
@@ -2095,8 +2098,9 @@ export class GhostlyNode implements EngineImplementation {
   /** What each network's wallets still wait for, and each mint on its own (`mints`, only the mints that wait for something). */
   private async readAwaiting(): Promise<{ networks: Record<WalletNetwork, WalletAwaitingView[]>; mints: Map<string, WalletAwaitingView[]> }> {
     const quotes = await this.wallet.quotes(), payments = this.desk.records(), now = Date.now();
-    // A chat is known gone only once the chats are loaded (`transfersRestored`); a payment link of a community is no chat.
-    const chatGone = this.transfersRestored ? (linkId: string) => !this.links.has(linkId) && !parsePayLink(linkId) : undefined;
+    // A chat is known gone only once the chats are loaded (`transfersRestored`): at a start, every chat is missing for a moment.
+    const lost = this.transfersRestored ? await this.sentWithoutLine(payments) : undefined;
+    const chatGone = lost && ((paymentId: string) => lost.has(paymentId));
     const out = {} as Record<WalletNetwork, WalletAwaitingView[]>;
     const mints = new Map<string, WalletAwaitingView[]>();
     for (const network of WALLET_NETWORKS) {
@@ -2108,6 +2112,46 @@ export class GhostlyNode implements EngineImplementation {
       }
     }
     return { networks: out, mints };
+  }
+
+  /**
+   * The ecash sent and not taken yet whose chat line, the bubble with its Take it back, is in no chat the person can
+   * open (`WalletAwaitingView.chatGone`): its 1:1 chat deleted, or joined again by the same invite (the same id) without
+   * its old history, or its group gone. Asked of the line itself, not of the link it went over: a member's edge closes
+   * when they leave the group, and the line stays in the group's history.
+   *
+   * The line's id is the payment's own (`me_<createdAt>`, as `paymentMessage` reads it first); a member's is filed in
+   * the group under the edge's id (`storeNewMessage`). An edge closed since says no more which group it was: every
+   * group here is asked, one row each. A community's payment link with no member is no chat: never said gone.
+   */
+  private async sentWithoutLine(payments: readonly StoredPayment[]): Promise<Set<string>> {
+    const lost = new Set<string>();
+    const sent = payments.filter((p) => p.kind === "payment" && p.direction === "out" && p.state === "pending" && p.token);
+    if (!sent.length) return lost;
+    let groups: string[] | undefined;
+    const everyGroup = () => groups ??= this.groups.views().map((g) => g.id);
+    const groupHere = (groupId: string) => !!this.groups.view(groupId);
+    // Per chat, the rows to read: their ids and the payment each would carry.
+    const asked = new Map<string, Map<string, string[]>>();
+    const ask = (chat: string, id: string, paymentId: string) => {
+      const ids = asked.get(chat) ?? new Map<string, string[]>();
+      asked.set(chat, ids.set(id, [...ids.get(id) ?? [], paymentId]));
+    };
+    for (const p of sent) {
+      const line = `me_${p.createdAt}`, stored = this.links.get(p.linkId)?.stored, pay = parsePayLink(p.linkId);
+      if (pay && !pay.member) continue;
+      lost.add(p.id);
+      if (stored && !stored.group) ask(p.linkId, line, p.id);
+      else if (stored?.group && stored.groupPeer && !stored.groupEntry) { if (groupHere(stored.group)) ask(`group:${stored.group}`, `${p.linkId}:${line}`, p.id); }
+      else if (pay) { if (groupHere(pay.groupId)) ask(`group:${pay.groupId}`, `${p.linkId}:${line}`, p.id); }
+      else if (!stored) for (const groupId of everyGroup()) ask(`group:${groupId}`, `${p.linkId}:${line}`, p.id);
+    }
+    for (const [chat, ids] of asked) {
+      const keys = [...ids.keys()];
+      const rows = await db.getMessagesById(chat, keys);
+      rows.forEach((row, i) => { for (const paymentId of ids.get(keys[i])!) if (row?.sender === "me" && row.paymentId === paymentId) lost.delete(paymentId); });
+    }
+    return lost;
   }
 
   /** A mint as the wallet page shows it, with what it still waits for when it does (asked about before it is removed). */
@@ -3650,6 +3694,8 @@ export class GhostlyNode implements EngineImplementation {
     this.reactionNotesBefore.delete(linkId);
     this.reactionNotesWhole.delete(linkId);
     this.events.onMessages(linkId, []);
+    // The lines of my payments in it went too: ecash not taken yet is offered back on the Wallet page.
+    this.awaitingSoon();
   }
 
   private async setGroupWakeMuted(groupId: string, muted: boolean): Promise<void> {
@@ -4835,6 +4881,8 @@ export class GhostlyNode implements EngineImplementation {
       this.transfers.delete(message.file.id);
     }
     await db.deleteMessage(linkId, messageId);
+    // The line of a payment of mine gone: ecash not taken yet is offered back on the Wallet page (`sentWithoutLine`).
+    if (message?.sender === "me" && message.paymentId) this.awaitingSoon();
     live.lastMessageAt = (await db.getMessagePage(linkId, { limit: 1 })).messages[0]?.timestamp ?? 0;
     // Its quotes cost no read of the chat each (`QuoteSweeps`): a contact can send and remove, or name ids that never were.
     if (removed) this.quoteSweeps.add(linkId, messageId, replyRef(message ?? { id: messageId, linkId }));
@@ -10012,6 +10060,8 @@ export class GhostlyNode implements EngineImplementation {
       message = { ...message, details: { ...withSend(message.details, { at, ...pathSnapshot(live, message.via), result: "sent" }), sentAt: at } };
     }
     if (!(await this.addRowWhile(message, kept))) return false;
+    // The line of a payment of mine: ecash sent and not taken yet has its Take it back here now (`sentWithoutLine`).
+    if (message.sender === "me" && message.paymentId) this.awaitingSoon();
     // It waits for the live link: `sendWaiting` finds it by its id (a list not read yet reads it from the history).
     if (live && waitsForLive(message)) void live.waitingSends?.then(known => known.add(message.id), () => {});
     // A row a reply names by another id than its own: `resolveReply` finds it by that id.
