@@ -879,7 +879,7 @@ export function GroupChat() {
         </div>
         : !error && (group.profile === "community" && group.status === "removed" ? t("group.chat.removedCommunity") : outOfIt)}
       </div>}
-      <GroupOthers group={group} act={act} />
+      <GroupOthers group={group} act={act} focusAfter={headingRef} />
 
 
       {invited && !invitedFresh && <GroupInvitationCard group={group} compact returnFocus={optionsRef} />}
