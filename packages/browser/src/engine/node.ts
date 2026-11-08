@@ -4809,10 +4809,7 @@ export class GhostlyNode implements EngineImplementation {
     if (message?.paymentId && message.sender === "peer") await this.desk.dropReceipt(message.paymentId).catch(() => {});
     // A file whose offer went on the floor, deleted before it went live: the contact's bubble is told on the next session.
     if (message?.sender === "me" && message.file && message.delivery === "waiting" && (message.fileOnFloor === "sent" || message.fileOnFloor === "seen")) {
-      const wireId = message.file.id.slice(`${linkId}-out-`.length);
-      void live.link?.settleDht(dhtFileId(wireId)).catch(() => {});
-      live.stored = { ...live.stored, withdrawnFiles: [...(live.stored.withdrawnFiles ?? []).filter(id => id !== wireId), wireId].slice(-64) };
-      await db.patchLink(linkId, { withdrawnFiles: live.stored.withdrawnFiles });
+      await this.withdrawFloorFile(live, message.file.id.slice(`${linkId}-out-`.length));
     }
     if (message?.file) {
       const stored = await fileStore.get(message.file.id);
@@ -5006,7 +5003,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   private async sendWaitingFile(linkId: string, message: StoredMessage, cancelled: () => boolean): Promise<void> {
     const live = this.links.get(linkId), file = message.file;
-    if (live?.link && file && !live.link.isDataLinkOpen) return this.sayFileOnFloor(live, message);
+    if (live?.link && file && !live.link.isDataLinkOpen) return this.sayFileOnFloor(live, message, cancelled);
     if (!live?.link?.isDataLinkOpen || !file) return;
     // Said on the floor before: it needs no more retries there, it goes live now.
     if (message.fileOnFloor === "sent" || message.fileOnFloor === "seen") void live.link.settleDht(dhtFileId(file.id.slice(`${linkId}-out-`.length))).catch(() => {});
@@ -5049,8 +5046,9 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * Says a waiting file's offer on the DHT floor: the contact's chat shows its bubble in its place, and the bytes go once
    * live (the file stays `waiting`). Once only: an offer that cannot go there (a name too long) waits as before.
+   * `cancelled`: whether it was deleted here since the outbox read it (`Outbox.cancel`).
    */
-  private async sayFileOnFloor(live: LiveLink, message: StoredMessage): Promise<void> {
+  private async sayFileOnFloor(live: LiveLink, message: StoredMessage, cancelled: () => boolean = () => false): Promise<void> {
     const link = live.link, file = message.file, linkId = live.stored.id;
     if (!link || !file || message.fileOnFloor || !this.fileFloorReady(live, message)) return;
     const offer = GhostlyNode.floorOffer(linkId, file), at = Date.now();
@@ -5059,9 +5057,22 @@ export class GhostlyNode implements EngineImplementation {
     if (!said && error !== DHT_FILE_TOO_LARGE) return;
     const noted = await db.patchMessage(linkId, message.id, current => current.delivery !== "waiting" || current.fileOnFloor ? null
       : { fileOnFloor: said ? "sent" : "unfit", ...(said && { details: withSend(current.details, { at, ...pathSnapshot(live, "pkarr"), result: "sent" }) }) });
+    // Cancel sending while it was being said: the delete read no `fileOnFloor` on its row, so it withdrew nothing, and
+    // the contact may have its bubble already. Withdrawn here as one cancelled after it was said (`forgetMessage`).
+    if (said && cancelled()) await this.withdrawFloorFile(live, offer.wireId);
     // Its receipt finds it by its floor id; a list not read yet reads it from the history (`floorFilesOf`).
-    if (said && noted) await live.floorFiles?.then(known => known.set(dhtFileId(offer.wireId), message.id), () => {});
+    else if (said && noted) await live.floorFiles?.then(known => known.set(dhtFileId(offer.wireId), message.id), () => {});
     await this.messagesChanged(linkId, [message.id]);
+  }
+
+  /**
+   * A file of mine said on the floor and deleted here before it went live: the floor stops saying it, and the next
+   * session that carries files/3 tells the contact's bubble it was cancelled (`sayWithdrawnFiles`).
+   */
+  private async withdrawFloorFile(live: LiveLink, wireId: string): Promise<void> {
+    void live.link?.settleDht(dhtFileId(wireId)).catch(() => {});
+    live.stored = { ...live.stored, withdrawnFiles: [...(live.stored.withdrawnFiles ?? []).filter(id => id !== wireId), wireId].slice(-64) };
+    await db.patchLink(live.stored.id, { withdrawnFiles: live.stored.withdrawnFiles });
   }
 
   /** A receipt on the DHT floor that names a waiting file's offer (`dhtFileId`): its bubble is in place on the contact's side. */
@@ -5146,7 +5157,9 @@ export class GhostlyNode implements EngineImplementation {
       if (message.file) {
         if (!GhostlyNode.takesFiles(live.link)) { await db.updateDelivery(linkId, message.id, "failed", "Your contact's app cannot receive files."); continue; }
         const file = message.file, wireId = file.id.slice(`${linkId}-out-`.length);
-        await db.putMessage(sentNow(message));
+        // Marked on its row as it is now, never written back as read before the wait: a row deleted meanwhile stays gone.
+        const sent = await db.patchMessage(linkId, message.id, current => current.delivery !== "waiting" ? null : { delivery: undefined, deliveryError: undefined, resendUntil: undefined });
+        if (!sent) { known.delete(message.id); continue; }
         void this.transferFile(live, file, wireId, message.timestamp, error => {
           this.transfers.set(file.id, { state: "failed", transferred: 0, size: file.size, error });
           this.emitState();
