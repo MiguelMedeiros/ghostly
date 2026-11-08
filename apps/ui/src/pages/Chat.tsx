@@ -481,8 +481,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       const card = lightningCard ? onNetwork.forLightning(lightningCard) : onNetwork;
       try {
         const { timestamp, paymentId } = await (kind === "request" ? card.request(peerKey, amount, memo || undefined, method) : card.send(peerKey, amount, memo || undefined, confirmedReal));
-        const sats = network === "testnet" ? "test sats" : "sats";
-        const text = method === "usdt" ? "Token payment request" : kind === "send" ? `⚡ ${amount.toLocaleString()} ${sats}` : `⚡ Requested ${amount.toLocaleString()} ${sats}`;
+        // The engine's English line (payments.ts), its digits too: the bubble reads it back in the app's language.
+        const sats = `${amount.toLocaleString("en-US")} ${network === "testnet" ? "test sats" : "sats"}`;
+        const text = method === "usdt" ? "Token payment request" : kind === "send" ? `⚡ ${sats}` : `⚡ Requested ${sats}`;
         addSystemMessage({ id: `me_${timestamp}`, text, sender: "me", timestamp, paymentId });
         return null;
       } catch (e) {
