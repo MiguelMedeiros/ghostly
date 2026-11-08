@@ -159,6 +159,8 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
   const forwards = countedLog(log, 'forwarded')
   const failures = countedLog(log, 'failed')
   const flush = () => { refusals.flush(); forwards.flush(); failures.flush() }
+  // Forwards waiting on the push service: counted once it answers, so the ones a stop cuts are said apart.
+  let forwarding = 0
   const pruning = setInterval(() => { prune(Date.now()); flush() }, 60_000)
   pruning.unref?.()
   // Once per start: a proxy in front the relay was not told about makes every client count as that proxy.
@@ -216,6 +218,7 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
       const request = readRelayRequest(Buffer.concat(chunks).toString('utf8'), { hosts, bodyBytes })
       // `<name> twice` names a header the client chose: the log says only which kind it was.
       if (request.error) return refuse(request.error.endsWith(' twice') ? 'header twice' : request.error, 400, { error: request.error })
+      forwarding++
       try {
         const response = await fetch(request.endpoint, { method: 'POST', headers: request.headers, body: request.body, redirect: 'error', signal: AbortSignal.timeout(10_000) })
         forwards.count(response.status)
@@ -225,6 +228,8 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
         if (refusedByFetch(error)) return refuse('Not a request fetch can send', 400, { error: 'Not a request fetch can send' })
         failures.count(failure(error))
         answer(502, { error: 'The push service did not answer' })
+      } finally {
+        forwarding--
       }
     })
   })
@@ -239,11 +244,18 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
       clients: () => new Promise(done => server.getConnections((_, count) => done(count ?? 0))),
       // `server.close` stops the check that ends a slow request, so a client holding half a request would hold the
       // close for as long as it stays: a request still open after `stopMs` (a forward in flight, a slow client) is cut.
+      // The counts are written once the requests have ended or been cut, so a forward that ends while the relay stops
+      // is in a line before it stops; one still waiting on the push service then (cut, or its client gone) is said as a
+      // count, since its status will never be logged.
       close: ({ stopMs = 3000 } = {}) => new Promise(done => {
         clearInterval(pruning)
-        flush()
         const cut = setTimeout(() => server.closeAllConnections(), stopMs)
-        server.close(() => { clearTimeout(cut); done() })
+        server.close(() => {
+          clearTimeout(cut)
+          flush()
+          if (forwarding) log('cut', `${forwarding} ${forwarding === 1 ? 'forward' : 'forwards'} in flight`)
+          done()
+        })
       }),
     }))
   })
