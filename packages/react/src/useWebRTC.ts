@@ -318,13 +318,20 @@ export function useWebRTC({
   const [screenShareError, setScreenShareErrorState] = useState<string | null>(null);
   /** Our call rang out unanswered, for a few seconds (`NO_ANSWER_SHOWN_MS`). */
   const [noAnswer, setNoAnswer] = useState(false);
-  /** The microphone or camera a call asked for could not be used, and why, for a few seconds (`MEDIA_PROBLEM_SHOWN_MS`). */
-  const [mediaProblemShown, setMediaProblemShown] = useState<MediaProblem | null>(null);
+  /**
+   * The microphone or camera a call asked for could not be used, and why, for a few seconds (`MEDIA_PROBLEM_SHOWN_MS`).
+   * `id` is new at each time: a call refused again while the reason shows is a new notice, with its whole time.
+   */
+  const [mediaProblemShown, setMediaProblemShownState] = useState<{ problem: MediaProblem; id: number } | null>(null);
+  const mediaProblemIdRef = useRef(0);
+  const setMediaProblemShown = useCallback((problem: MediaProblem) => {
+    setMediaProblemShownState({ problem, id: ++mediaProblemIdRef.current });
+  }, []);
   /** Tells the person why a call could not use the microphone or camera, when that is what `error` was. */
   const showMediaProblem = useCallback((error: unknown) => {
     const problem = mediaProblem(error);
     if (problem) setMediaProblemShown(problem);
-  }, []);
+  }, [setMediaProblemShown]);
   /**
    * Our last call never connected because ICE found no path to the contact: it failed, or did not connect in time, or
    * found no candidate at all (`showNoPath`), or the contact's side said it could not (`r: "u"`) after the answer. A
@@ -1458,7 +1465,7 @@ export function useWebRTC({
     traceCallEnd("relay-only", { state: callStateRef.current });
     hangUpRef.current(true, true);
     setMediaProblemShown("relayOnlyNow");
-  }, [relayOnly]);
+  }, [relayOnly, setMediaProblemShown]);
   useEffect(() => {
     if (callState !== "offering" && callState !== "incoming") return;
     const ringing = callState;
@@ -1565,7 +1572,7 @@ export function useWebRTC({
 
   useEffect(() => {
     if (!mediaProblemShown) return;
-    const timer = setTimeout(() => setMediaProblemShown(null), MEDIA_PROBLEM_SHOWN_MS);
+    const timer = setTimeout(() => setMediaProblemShownState(null), MEDIA_PROBLEM_SHOWN_MS);
     return () => clearTimeout(timer);
   }, [mediaProblemShown]);
 
@@ -1638,7 +1645,9 @@ export function useWebRTC({
     screenShareError,
     /** Our last call rang out with no answer, for a few seconds. */
     noAnswer,
-    mediaProblem: mediaProblemShown,
+    mediaProblem: mediaProblemShown?.problem ?? null,
+    /** New at each `mediaProblem` shown, the same reason again too: the notice is drawn (and said) anew. */
+    mediaProblemId: mediaProblemShown?.id,
     /** Our last call never connected: ICE found no path to the contact (a VPN or firewall may block calls). */
     noPath,
     dismissNoPath,
