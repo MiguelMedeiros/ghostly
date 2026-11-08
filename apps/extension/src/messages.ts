@@ -17,6 +17,11 @@ export type RuntimeMessage =
   /** The offscreen peer asks whether profile `profile` may reach `origin` for a contact (localAllowList.ts): a boolean. */
   | { target: "background"; type: "local-access-allowed"; profile: string; origin: string }
   /**
+   * The peer heard a message while no tab was open: the worker shows a notification with `body`, which opens `chat`
+   * when clicked (apps/extension/src/attentionNotices.ts).
+   */
+  | { target: "background"; type: "notify"; body: string; chat?: string }
+  /**
    * A notification was clicked: the app page that showed it opens its chat and answers `true`; no answer, and the
    * worker shows the app itself (apps/ui/src/lib/notifications.ts).
    */
