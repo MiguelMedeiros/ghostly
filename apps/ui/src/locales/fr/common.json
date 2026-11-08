@@ -26,6 +26,7 @@
     "title": "En attente"
   },
   "notCopied": "Non copié",
+  "quotedName": "« {{name}} »",
   "save": "Enregistrer",
   "size": {
     "b": "{{n}} o",
