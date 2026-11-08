@@ -12,8 +12,10 @@
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} mensajes nuevos",
     "messagesFrom": "{{count}} mensajes nuevos de {{name}}",
+    "notSentCount": "{{count}} mensajes no enviados",
     "pinMoved": "Movido al puesto {{place}} de {{count}} chats fijados",
-    "rowMoved": "Ahora en el puesto {{place}} de {{count}}"
+    "rowMoved": "Ahora en el puesto {{place}} de {{count}}",
+    "waitingCount": "{{count}} mensajes esperando a que tu contacto esté en línea"
   },
   "audio": {
     "cantPlay": "Este dispositivo no puede reproducir este audio ({{format}}). Descárgalo para escucharlo.",

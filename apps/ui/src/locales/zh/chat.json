@@ -12,8 +12,10 @@
     "message": "{{name}}：{{text}}",
     "messages": "{{count}} 条新消息",
     "messagesFrom": "来自 {{name}} 的 {{count}} 条新消息",
+    "notSentCount": "{{count}} 条消息未发送",
     "pinMoved": "已移到 {{count}} 个置顶聊天中的第 {{place}} 位",
-    "rowMoved": "已移到 {{count}} 项中的第 {{place}} 位"
+    "rowMoved": "已移到 {{count}} 项中的第 {{place}} 位",
+    "waitingCount": "{{count}} 条消息正在等待联系人上线"
   },
   "audio": {
     "cantPlay": "此设备无法播放此音频（{{format}}）。请下载后收听。",
