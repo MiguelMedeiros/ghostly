@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NO_ROOM_TO_PLAY } from "@ghostly/browser/shared/fileBytes";
+import { CallOverlay } from "../../components/CallOverlay";
 import { IncomingCallNotification } from "../../components/IncomingCallNotification";
 import { MessageBubble } from "../../components/MessageBubble";
 import { VideoBubble } from "../../components/video/VideoBubble";
@@ -425,6 +426,34 @@ describe("a video in the chat", () => {
     // The video goes on, in its place in the chat.
     expect(screen.getByTestId("video-player")).toBeInTheDocument();
     ring.unmount();
+  });
+
+  // A call already in its small window was drawn under it: Mute, End call and the contact's picture all under the video,
+  // and nothing on screen said a call was on.
+  it("filling the window (Desktop on Linux), a call already in its small window stays over it, and its whole one too", async () => {
+    fakeEngine.fullscreenWindow = vi.fn(async () => {});
+    const z = (element: Element) => Number(element.className.match(/\bz-\[?(\d+)\]?/)?.[1] ?? 0);
+    const call = (pinned: boolean) => (
+      <CallOverlay callState="connected" pinned={pinned} localStream={null} remoteStream={null} isMuted={false} isVideoOff remoteHasVideo={false}
+        callStartedAt={Date.now()} peerName="Ana" onHangUp={vi.fn()} onToggleMute={vi.fn()} onToggleVideo={vi.fn()} />
+    );
+    const callView = renderApp(call(true));
+    show(video());
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Full screen" }));
+    const frame = screen.getByTestId("video-frame");
+    expect(frame).toHaveAttribute("data-theater", "true");
+    expect(z(screen.getByTestId("call-window"))).toBeGreaterThan(z(frame));
+    // Its Back to full screen, now in reach: the whole call window is over the video too.
+    callView.rerender(call(false));
+    expect(screen.getByTestId("call-window")).toHaveAttribute("data-mini", "false");
+    expect(z(screen.getByTestId("call-window"))).toBeGreaterThan(z(frame));
+    // Out of full screen, the call is back in its usual place, under dialogs and menus.
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(frame).not.toHaveAttribute("data-theater");
+    expect(z(screen.getByTestId("call-window"))).toBe(50);
+    callView.unmount();
   });
 
   // Fixed over the whole window, it left Tab to the page: from Exit full screen on to the message's ⋮, the composer, the

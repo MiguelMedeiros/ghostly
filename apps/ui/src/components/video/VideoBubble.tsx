@@ -8,7 +8,7 @@ import { downloadFile } from "../../lib/fileDownload";
 import { formatFileSize } from "../../lib/format";
 import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, sentWhole, stalledAction, statusSize } from "../../lib/fileStatus";
 import type { FileAction } from "../../lib/platform";
-import { onCallWindowShown } from "../../lib/serviceWindows";
+import { onCallWindowShown, windowFilled } from "../../lib/serviceWindows";
 import type { ChatFile } from "../../lib/types";
 import { claimPlayback, registerVoicePlayer, releasePlayback } from "../../lib/voicePlayback";
 import { openStoredMedia, type StoredMedia } from "../../lib/storedMedia";
@@ -131,8 +131,11 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
     document.addEventListener("keydown", onKey);
     // A call that rings or starts is drawn under it: it makes way, as a contact's app drawn over the app does.
     const stop = onCallWindowShown(() => setTheater(false));
+    // One already in its small window stays over it.
+    const unfill = windowFilled();
     return () => {
       stop();
+      unfill();
       document.removeEventListener("keydown", onKey);
       void fullscreen(false).catch(() => {});
     };
