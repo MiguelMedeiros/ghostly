@@ -1,3 +1,4 @@
+import { createLink } from "@ghostly/core";
 import type { Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 import { chat, expect, say, test } from "../support/fixtures";
@@ -85,6 +86,56 @@ test("a phone on its side with the keyboard up: the account bar goes behind it a
     await expect(bar).toBeVisible();
   }
 });
+
+for (const screen of [{ name: "a small phone", width: 667, height: 375, keyboard: 200 }, { name: "two panes", ...LANDSCAPE, keyboard: 240 }]) {
+  test(`a phone on its side with the keyboard up (${screen.name}): a chat's search shows the message it found`, { tag: ["@feature:app.mobile-layout", "@feature:chat.search"] }, async ({ peer }) => {
+    // The chat's header, the search bar and the composer took all of what the keyboard leaves: the list was 0px tall,
+    // and "1 of 8" showed no message. While the search has the focus the composer goes behind the keyboard.
+    const visible = screen.height - screen.keyboard;
+    const { page } = await peer(`side-find-${screen.width}`, { mobile: true, viewport: { width: screen.width, height: screen.height } });
+    await iosKeyboard(page);
+    const mine = createLink().mine;
+    await page.evaluate(({ mine }) => {
+      const id = crypto.randomUUID().replaceAll("-", "");
+      const start = Date.now() - 86_400_000;
+      const messages = Array.from({ length: 120 }, (_, i) => ({
+        id: `m${i}`, sender: i % 2 ? "peer" : "me", timestamp: start + i * 60_000, delivery: i % 2 ? undefined : "delivered",
+        text: i % 30 === 5 ? `Needle ${i}` : `Message ${i}`,
+      }));
+      localStorage.setItem(`ghostly_${id}`, JSON.stringify({ id, mySeedB64: mine.seedB64, peerPubKeyB64: mine.peerPubKeyZ32, encKeyB64: mine.encKeyB64, messages, createdAt: start }));
+      localStorage.setItem(`ghostly_join_${id}`, "true");
+      window.dispatchEvent(new Event("session-updated"));
+      location.hash = `/chat/${id}`;
+    }, { mine });
+    const composer = page.locator("[data-composer]");
+    await expect(composer).toBeVisible();
+    await page.getByTestId("chat-options").click();
+    await page.getByTestId("chat-search-open").click();
+    const field = page.getByTestId("chat-search-input");
+    await expect(field).toBeFocused();
+    await keyboard(page, screen.keyboard);
+    await expect(page.locator("html")).toHaveAttribute("data-keyboard", "true");
+
+    // A marked word between the search bar and the keyboard (rows drawn out of sight carry marks too).
+    const shown = () => page.evaluate((visible) => {
+      const top = document.querySelector("[data-testid=chat-search]")!.getBoundingClientRect().bottom;
+      return [...document.querySelectorAll("[data-search-match]")].some((mark) => { const box = mark.getBoundingClientRect(); return box.top >= top && box.bottom <= visible; });
+    }, visible);
+    await field.fill("needle");
+    await expect(page.getByTestId("chat-search-count")).toHaveText("1 of 4");
+    await expect.poll(shown).toBe(true);
+    await field.press("Enter");
+    await expect(page.getByTestId("chat-search-count")).toHaveText("2 of 4");
+    await expect.poll(shown).toBe(true);
+    await expect(composer).toBeHidden();
+
+    // Typing a message again: the composer is back, on the keyboard.
+    await page.getByTestId("chat-search-close").click();
+    await page.getByPlaceholder("Message…").focus();
+    await expect(composer).toBeVisible();
+    expect((await composer.boundingBox())!.y + (await composer.boundingBox())!.height).toBeLessThanOrEqual(visible + 1);
+  });
+}
 
 test("a phone on its side: the chat beside the list uses its width, and a video keeps its shape", { tag: ["@feature:app.mobile-layout", "@feature:files.video.play"] }, async ({ peer }) => {
   // Two panes from 768px: the chat is what the list and the notch leave (about 330px here). Its rows kept a desktop's
