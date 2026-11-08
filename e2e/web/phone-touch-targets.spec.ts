@@ -101,22 +101,49 @@ test("on a phone every button, link and control on the main screens is a 44 px t
   expect([...small.values()], "controls under 44 × 44 px on a phone").toEqual([]);
 });
 
+/** The app in `language` (the setting a reload reads), back on the chat that was open. */
+const speak = async ({ page }: Peer, language: string, dir: "ltr" | "rtl") => {
+  await page.evaluate((language) => {
+    const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+  }, language);
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("dir", dir);
+};
+
+/**
+ * The narrowest phone (320 × 568): the composer's + and smiley were 36 px wide, to leave the message more room, and the
+ * chat's Back 36 px, to leave the name more. They are 44 px targets as everywhere else, and the message field is still
+ * wide enough to write in, in English and in Arabic.
+ */
+test("on a 320 px phone the chat's Back and the composer's + and smiley are 44 px targets", { tag: ["@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }, testInfo) => {
+  test.setTimeout(3 * 60_000);
+  const [alice, bob] = await Promise.all([peer("narrow-chat-alice", { mobile: true, viewport: { width: 375, height: 667 } }), peer("narrow-chat-bob")]);
+  await pair(alice, bob);
+  const { page } = alice;
+  await page.setViewportSize({ width: 320, height: 568 });
+  const small: string[] = [];
+  for (const [language, dir] of [["en", "ltr"], ["ar", "rtl"]] as const) {
+    await speak(alice, language, dir);
+    const field = page.locator(".composer-textarea");
+    await expect(field).toBeVisible();
+    // The chat's rows slide in after the reload: measured where they come to rest.
+    await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== "running" || a.effect?.getComputedTiming().endTime === Infinity));
+    for (const target of await smallTargets(page)) small.push(`${language}: ${target.name} ${target.width}×${target.height} (${target.stops})`);
+    await page.screenshot({ path: testInfo.outputPath(`chat-320-${language}.png`) });
+    const width = (await field.boundingBox())!.width;
+    testInfo.annotations.push({ type: "message field", description: `${language}: ${width} px wide at 320 px` });
+    expect(width, `${language}: the message field keeps room to write in`).toBeGreaterThanOrEqual(150);
+  }
+  expect(small, "controls under 44 × 44 px on a 320 px phone").toEqual([]);
+});
+
 /**
  * A system line long enough to wrap (the contact's "joined the chat", in Japanese at 375 px: "<key> がチャットに参加しました")
  * took the row's whole width, which put its ⋮ against the screen's edge: the edge cut where a tap lands on it to 33 px
  * wide. A system row keeps the room the ⋮'s hit area takes, on both sides: in Arabic the ⋮ is on the left.
  */
 test.describe("on a phone a system line that wraps", () => {
-  /** The app in `language` (the setting a reload reads), back on the chat that was open. */
-  const speak = async ({ page }: Peer, language: string, dir: "ltr" | "rtl") => {
-    await page.evaluate((language) => {
-      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
-      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
-    }, language);
-    await page.reload();
-    await expect(page.locator("html")).toHaveAttribute("dir", dir);
-  };
-
   /**
    * The contact's joined line (not mine) wraps, and its ⋮ is inside the screen and a 44 px target where a tap lands. How
    * wide the line is depends on the machine's fonts (GitHub's runner has no Japanese one and draws narrower boxes): the
