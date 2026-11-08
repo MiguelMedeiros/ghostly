@@ -319,21 +319,32 @@ const ANSWER_WINDOW_MS = 5_000;
  * hears it, with what the member says live beside it, and the edits its app says again), then
  * `GROUP_LIMITS.messagesPerAuthor` and `messageBytesPerAuthor` per `messageWindowMs`, as a community's `MessagePace`.
  * One not taken is neither seen nor kept nor passed on, so a sync still names it (`miss`) and a catch-up hands it again.
- * What another member hands on in its answer to my sync is not counted: it took each at its author's pace already, and
- * a catch-up holds many.
+ * What another member hands on in its answer to my sync (or what waited for a secret) is counted too, and may run the
+ * author's allowance below nothing by one answer's worth (`AUTHOR_OWED`): a catch-up holds more than a burst, and lands
+ * at once; the author's next frames wait until the pace pays it back. Not counted, a member at the other end of my sync
+ * handed on all a second member signed, at any rate.
  */
 const AUTHOR_BURST = { frames: 2 * GROUP_LIMITS.outlog, bytes: 2 * GROUP_LIMITS.outlogBytes };
+/** How far below nothing an answer may run an author's allowance: all its messages one answer hands on, or edits. */
+const AUTHOR_OWED = {
+  messages: { frames: GROUP_LIMITS.relay, bytes: GROUP_LIMITS.relayBytes },
+  edits: { frames: GROUP_LIMITS.handOnEdits, bytes: GROUP_LIMITS.relayEditBytes },
+} as const;
 class AuthorPace {
   private frames: number = AUTHOR_BURST.frames;
   private bytes: number = AUTHOR_BURST.bytes;
   private at: number | undefined;
 
-  take(bytes: number, now: number): boolean {
+  constructor(private readonly owed: { frames: number; bytes: number }) {}
+
+  /** `answer`: handed on in an answer to my sync, or waited, so it may run the allowance below nothing (`owed`). */
+  take(bytes: number, now: number, answer = false): boolean {
     const elapsed = Math.max(0, now - (this.at ?? now)) / GROUP_LIMITS.messageWindowMs;
     this.at = now;
     this.frames = Math.min(AUTHOR_BURST.frames, this.frames + elapsed * GROUP_LIMITS.messagesPerAuthor);
     this.bytes = Math.min(AUTHOR_BURST.bytes, this.bytes + elapsed * GROUP_LIMITS.messageBytesPerAuthor);
-    if (this.frames < 1 || this.bytes < bytes) return false;
+    const floor = answer ? this.owed : { frames: 0, bytes: 0 };
+    if (this.frames + floor.frames < 1 || this.bytes + floor.bytes < bytes) return false;
     this.frames -= 1; this.bytes -= bytes;
     return true;
   }
@@ -1693,7 +1704,6 @@ export class GroupSession {
     if (raw.s === this.myKey) { await this.ownFrame(raw); return; }
     const relayed = raw.s !== from;
     const now = this.now(), answer = (this.answering.get(from) ?? 0) > now;
-    if (answer) this.answering.set(from, now + ANSWER_WINDOW_MS);
     if (relayed && (!rosterHas(this.roster, from) || !this.handsOn(raw.s))) return;
     // One I took whole already (markSeen) is dropped, signed or not, before its signature costs a check: in a mesh, every
     // member a member back hears from hands it on. A copy taken stripped is not seen yet, and goes on to be checked.
@@ -1704,6 +1714,8 @@ export class GroupSession {
     // signature time, ~0.19 s of 256 messages at 1x CPU, ~1.1 s at 6x (agents#1656). No `xs`, or one that fails: `sig`.
     const signedWhole = relayed && this.wholeSigned(raw);
     if (!signedWhole && !verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return;
+    // A frame of the answer keeps it open (it goes a slice at a time); a copy I hold already, or one no member signed, not.
+    if (answer) this.answering.set(from, now + ANSWER_WINDOW_MS);
     if (raw.e > this.epoch) { this.park(from, raw); return; }
     // Its replay window is gone (markSeen), even if a sparse set of secrets still holds its secret.
     if (raw.e < this.epoch - GROUP_LIMITS.secrets) return;
@@ -1719,8 +1731,8 @@ export class GroupSession {
       if (this.provisional.has(own)) return;
       delete raw.m; delete raw.r; delete raw.f; delete raw.sc; delete raw.fl; delete raw.o; delete raw.xs;
     }
-    // At its author's pace, once it is known to be theirs, unless a member hands it on in its answer to my sync.
-    if (!(relayed && (answer || waited)) && !this.paced(this.messagePace, raw.s, frameBytes(raw))) return;
+    // At its author's pace, once it is known to be theirs; handed on in an answer to my sync, one catch-up past it.
+    if (!this.paced(this.messagePace, raw.s, frameBytes(raw), relayed && (answer || waited))) return;
     // Said again under a later epoch (its author was behind, `resealBehind`): the message it first was, by that one's id.
     const first = raw.o === undefined ? null : readFirstPlace(raw.o, raw.e);
     if (raw.o !== undefined && !first) return;
@@ -1788,7 +1800,7 @@ export class GroupSession {
     if (!commit || !rosterHas(commit.m, raw.s)) return;
     // At its author's pace (`AuthorPace`), as a message is; one I hold already (another hub's copy) costs nothing.
     const held = (this.state.relayEdits ?? []).some(f => f.s === raw.s && f.e === raw.e && f.n === raw.n && f.v >= raw.v);
-    if (!held && !(raw.s !== from && (this.awaitsAnswer(from) || waited)) && !this.paced(this.editPace, raw.s, raw.c.length + 400)) return;
+    if (!held && !this.paced(this.editPace, raw.s, raw.c.length + 400, raw.s !== from && (this.awaitsAnswer(from) || waited))) return;
     // Of an epoch from before I was let in (a hub let in after the message): nothing for me to read, but the author's
     // signed word for the members who can, kept and passed on as is while the author is in the roster. Hubs change, and
     // most members of that epoch reach the author only through whoever is a hub now.
@@ -1829,10 +1841,10 @@ export class GroupSession {
     this.ask(from);
   }
 
-  private paced(paces: Map<string, AuthorPace>, author: string, bytes: number): boolean {
+  private paced(paces: Map<string, AuthorPace>, author: string, bytes: number, answer: boolean): boolean {
     let pace = paces.get(author);
-    if (!pace) paces.set(author, pace = new AuthorPace());
-    return pace.take(bytes, this.now());
+    if (!pace) paces.set(author, pace = new AuthorPace(paces === this.editPace ? AUTHOR_OWED.edits : AUTHOR_OWED.messages));
+    return pace.take(bytes, this.now(), answer);
   }
 
   private wholeSigned(raw: GroupMessageFrame): boolean {
