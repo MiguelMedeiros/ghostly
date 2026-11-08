@@ -354,7 +354,8 @@ const RULES: readonly Rule[] = [
   { match: /^The Lightning fee \((?<fee>\d+) sats\) is too high$/, key: "errors.pay.feeTooHigh" },
   exact("Nothing to take back", "errors.pay.nothingToTakeBack"),
   exact("The federation has not answered yet: try again in a moment", "errors.pay.federationSilent"),
-  exact("Nothing to reclaim", "errors.pay.nothingToReclaim"),
+  // The Cashu side of Take it back: said in the button's words, as the Fedimint side above.
+  exact("Nothing to reclaim", "errors.pay.nothingToTakeBack"),
   { match: /^Your contact does not accept (?<method>.+) in this chat$/, key: "errors.pay.contactRefuses", params: ({ method }, t) => ({ method: railName(method, t) }) },
   exact("This request cannot be paid from another wallet", "errors.pay.notFromOtherWallet"),
   exact("You are offline", "errors.pay.offline"),
