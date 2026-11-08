@@ -730,10 +730,17 @@ export interface KeptPictures {
 }
 
 /**
- * A state as a client across a copying boundary gets it (`copyingSink`, the extension's port): `payments` and `wallet`
- * are left out when they are the ones that client was sent last, and so is each picture (`keptPictures`); the page keeps
- * those.
+ * The chats (`links`) and groups a posted state left out as the ones that client was sent last: each list here is every
+ * id of the state's list, in its order, and the state's list holds only the views that changed or are new. An id the
+ * state's list lacks is the page's view from the state before (its pictures with it); an id no longer here is gone.
  */
-export type PostedState = Omit<EngineState, "payments" | "wallet"> & Partial<Pick<EngineState, "payments" | "wallet">> & { keptPictures?: KeptPictures };
+export interface KeptViews { links?: string[]; groups?: string[] }
+
+/**
+ * A state as a client across a copying boundary gets it (`copyingSink`, the extension's port): `payments` and `wallet`
+ * are left out when they are the ones that client was sent last, and so is each picture (`keptPictures`) and each chat's
+ * and group's view (`keptViews`); the page keeps those.
+ */
+export type PostedState = Omit<EngineState, "payments" | "wallet"> & Partial<Pick<EngineState, "payments" | "wallet">> & { keptPictures?: KeptPictures; keptViews?: KeptViews };
 /** What a page hears from the peer: an event, a state that may leave out what it already has, or an answer. */
 export type PostedEvent = Exclude<EngineEvent, { kind: "state" }> | { kind: "state"; state: PostedState } | RpcResponse;
