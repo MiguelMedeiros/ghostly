@@ -220,6 +220,35 @@ describe("placing a call", () => {
     expect(call.publishedKinds()).toEqual(["o", "h", null]);
   });
 
+  it("the end line keeps the time the call lasted when the device's clock is set forward or back meanwhile", async () => {
+    const hour = 60 * 60_000;
+    const call = renderCall();
+    const { pc } = await offered(call);
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    act(() => pc.setIceState("connected"));
+    act(() => { vi.advanceTimersByTime(3000); });
+    vi.setSystemTime(Date.now() + hour);
+    act(() => { vi.advanceTimersByTime(4000); });
+
+    act(() => call.result.current.hangUp());
+    expect(call.addCallEventMessage).toHaveBeenLastCalledWith("call_ended", false, 7000);
+
+    // The contact going away ends the next one, the clock set back meanwhile: still its own length, never a negative one.
+    act(() => { void call.result.current.startCall(false); });
+    devices.userMedia[1].grant();
+    await settle();
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    act(() => FakePeerConnection.instances[1].setIceState("connected"));
+    act(() => { vi.advanceTimersByTime(2000); });
+    vi.setSystemTime(Date.now() - 2 * hour);
+    act(() => { vi.advanceTimersByTime(3000); });
+
+    act(() => FakePeerConnection.instances[1].setIceState("failed"));
+    expect(call.addCallEventMessage).toHaveBeenLastCalledWith("call_ended", false, 5000);
+  });
+
   it("a call nobody answers hangs up after RING_MS and says \"No answer\" for a while", async () => {
     const call = renderCall();
     const { stream, pc } = await offered(call);
