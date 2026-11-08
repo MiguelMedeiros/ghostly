@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { formatVideoDuration, sanitizeFileName } from "@ghostly/core";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
 import { useTabTrap } from "../../hooks/useDismiss";
@@ -71,6 +71,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   // Filling the window, it is over everything: Tab goes round its own controls, not to the chat under it.
   useTabTrap(rootRef, theater);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const fullRef = useRef<HTMLButtonElement>(null);
   useChosenSpeaker(videoRef, phase === "playing" ? src : null);
   const srcRef = useRef<string | null>(null);
   /** The source playing: a blob URL, or a file the platform streams (released when it stops). */
@@ -200,6 +201,15 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
     });
   }, [phase, src]);
 
+  // Out of the full window with the keyboard on the player: it goes to Full screen. WebKitGTK's player drops the
+  // control that had it as it shrinks back into the chat, and the focus fell to the page.
+  const filled = useRef(false);
+  useLayoutEffect(() => {
+    const left = filled.current && !theater;
+    filled.current = theater;
+    if (left && videoRef.current && document.activeElement === videoRef.current) (fullRef.current ?? rootRef.current)?.focus({ preventScroll: true });
+  }, [theater]);
+
   // Another video or voice message starts: this one stops and lets go of its bytes, so only one is ever held.
   useEffect(() => registerVoicePlayer(file.id, { play: () => void play(), pause: () => { if (srcRef.current) unload(); } }), [file.id, play, unload]);
 
@@ -325,6 +335,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
             />
             {canTheater && (
               <button
+                ref={fullRef}
                 type="button"
                 data-testid="video-fullscreen"
                 aria-label={theater ? t("chat.video.exitFullScreen") : t("chat.video.fullScreen")}
