@@ -180,7 +180,7 @@ export function NetworkSettings() {
       {network.clockOffMs !== undefined && <Row label={t("connection.clockOff.title")} {...clockOffTexts(t, network.clockOffMs, language)} testId="network-clock-off" />}
       {network.directBlocked && <Row label={t("connection.directBlocked.title")} hint={t("connection.directBlocked.hint")} info={t("connection.directBlocked.info")} testId="network-direct-blocked" />}
       {direct && <Row label={t("network.readRelays")} hint={t(relayOnly ? "network.readRelaysRelayOnly" : "network.readRelaysHint")} info={t("network.readRelaysInfo")} testId="network-read-relays-row">
-        <Switch label={t("network.readRelays")} checked={network.readRelays === true || relayOnly} disabled={switching || relayOnly} onChange={(on) => void readRelays(on)} testId="network-read-relays" />
+        <Switch label={t("network.readRelays")} checked={network.readRelays === true || relayOnly} disabled={relayOnly} busy={switching} onChange={(on) => void readRelays(on)} testId="network-read-relays" />
       </Row>}
       <Field testId="network-relays-field" label={t("network.relays")} htmlFor="network-relays" hint={t("network.relaysHint")} info={t(direct ? "network.relaysInfoDirect" : "network.relaysInfoWeb")}
         trailing={<button onClick={() => setRelays(network.defaultRelays.join("\n"))} aria-label={t("network.resetRelays")} className={reset}>{t("network.reset")}</button>}>
@@ -232,7 +232,7 @@ export function NetworkSettings() {
       </Field>
 
       <Row label={t("network.relayOnly")} hint={t("network.relayOnlyHint")} info={t("network.relayOnlyInfo")} testId="network-relay-only-row">
-        <Switch label={t("network.relayOnly")} checked={network.relayOnly === true} disabled={switching} onChange={(on) => void hideMyIp(on)} testId="network-relay-only" />
+        <Switch label={t("network.relayOnly")} checked={network.relayOnly === true} busy={switching} onChange={(on) => void hideMyIp(on)} testId="network-relay-only" />
       </Row>
 
       <Block>

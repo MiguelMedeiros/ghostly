@@ -55,7 +55,7 @@ export function ChatHoldDialog({ peer, name, onSave, onClose }: { peer: PeerLink
               <p className="text-sm text-text-primary">{t("chat.hold.switch")}</p>
               <p className="text-[11px] text-text-secondary" data-testid="chat-hold-contact">{contact}</p>
             </div>
-            <Switch testId="chat-hold-toggle" label={t("chat.hold.switch")} checked={enabled} disabled={busy} onChange={setEnabled} />
+            <Switch testId="chat-hold-toggle" label={t("chat.hold.switch")} checked={enabled} busy={busy} onChange={setEnabled} />
           </div>
           <div className="px-4 py-3 space-y-1">
             <p className="text-[11px] text-text-secondary" data-testid="chat-hold-storage">{hold?.storage ? t("chat.hold.storage") : t("chat.hold.noStorage")}</p>
@@ -70,9 +70,10 @@ export function ChatHoldDialog({ peer, name, onSave, onClose }: { peer: PeerLink
         {error && <p role="alert" className="text-xs text-danger">{error}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm bg-surface-alt text-text-primary border border-border hover:bg-surface-hover cursor-pointer">{t("common.cancel")}</button>
-          <button type="button" data-testid="chat-hold-save" disabled={enabled === initial || busy}
-            onClick={() => { setBusy(true); setError(""); void onSave(enabled).then(onClose, (e) => { setError(problemLine(e, t)); setBusy(false); }); }}
-            className="px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+          {/* Busy while it saves, not disabled: that would drop a keyboard's focus to the page, and keep it there on a refusal. */}
+          <button type="button" data-testid="chat-hold-save" disabled={enabled === initial && !busy} aria-disabled={busy || undefined} aria-busy={busy || undefined}
+            onClick={() => { if (busy) return; setBusy(true); setError(""); void onSave(enabled).then(onClose, (e) => { setError(problemLine(e, t)); setBusy(false); }); }}
+            className="px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:cursor-not-allowed">
             {busy ? t("chat.hold.saving") : t("common.save")}
           </button>
         </div>
