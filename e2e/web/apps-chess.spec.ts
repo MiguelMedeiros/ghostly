@@ -447,3 +447,31 @@ test("a version its publisher revoked never runs", { tag: ["@feature:apps.chess.
   await expect(details.getByTestId("app-run-anyway")).toHaveCount(0);
   await expect(details.getByTestId("app-keep-stopped")).toBeVisible();
 });
+
+test("a card of a version its publisher revoked says Stopped, as the Apps page does, and offers no Open", { tag: ["@feature:apps.chess.web", "@feature:apps.chat.card", "@feature:apps.page"] }, async ({ peer, browserName }) => {
+  const publisher = new ChessPublisher();
+  const chess = publisher.publish({ sequence: SEQUENCE });
+  publisher.signStore({ apps: [chess] });
+  const [ana, bob] = await openPeers(peer, browserName, "ana", "bob");
+  await publisher.serve(ana.context);
+  await installFromStore(ana.page);
+  await ana.page.goto("/#/");
+  await pair(ana, bob);
+  // Ana opens Chess in her chat with Bob: her own card names the installed app, with Open.
+  await (await composerRow(ana.page, "composer-apps")).click();
+  await ana.page.getByTestId("chat-apps").getByTestId("chat-app-open").click();
+  await expect(miniApp(ana.page)).toBeVisible();
+  await miniApp(ana.page).getByRole("button", { name: "Close" }).click();
+  const card = chat(ana).getByTestId("app-card");
+  await expect(card.getByTestId("app-card-check")).toHaveText("Installed");
+  await expect(card.getByTestId("app-card-open")).toBeVisible();
+
+  // The publisher revokes it; the Apps page's update check reads it, and the card says what the page says.
+  publisher.revoke(chess, "Leaked the game to the wrong chat");
+  await ana.page.goto("/#/apps");
+  await expect(ana.page.getByTestId("installed-app").getByTestId("installed-app-hint")).toHaveText("Stopped");
+  await ana.page.goBack();
+  await expect(card.getByTestId("app-card-check")).toHaveText("Stopped");
+  await expect(card.getByTestId("app-card-open")).toHaveCount(0);
+  await expect(card.getByTestId("app-card-run-anyway")).toHaveCount(0);
+});
