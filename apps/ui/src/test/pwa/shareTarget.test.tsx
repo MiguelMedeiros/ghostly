@@ -172,6 +172,20 @@ describe("in the composer", () => {
     expect(field.value).toHaveLength(13_500);
   });
 
+  it("two shares picked for one chat: both texts go in the draft and every file on the sheet, in their order", async () => {
+    act(() => {
+      receiveShare(share({ text: "one", files: [file("a.txt")] }), { queue: true });
+      receiveShare(share({ text: "two", files: [file("b.txt")] }), { queue: true });
+      sendShareTo("chat-1");
+      sendShareTo("chat-1");
+    });
+    renderApp(<LockScreenProvider><MessageInput draftId="chat-1" onSend={onSend} onSendFile={onSendFile} /></LockScreenProvider>);
+    const sheet = await screen.findByTestId("attachment-sheet");
+    expect(within(sheet).getAllByTestId("attachment-item").map((item) => item.textContent)).toEqual([expect.stringContaining("a.txt"), expect.stringContaining("b.txt")]);
+    expect(screen.getByPlaceholderText<HTMLTextAreaElement>("Message…").value).toBe("one\ntwo");
+    expect(takeShareFor("chat-1")).toBeNull();
+  });
+
   it("another chat's composer leaves it alone", () => {
     renderApp(<LockScreenProvider><MessageInput draftId="chat-2" onSend={onSend} onSendFile={onSendFile} /></LockScreenProvider>);
     act(() => {
@@ -250,6 +264,36 @@ describe("the Share to… picker", () => {
     await user.click(screen.getByTestId("share-cancel"));
     expect(incomingShare()).toBeNull();
     expect(screen.getByTestId("where")).toHaveTextContent("/");
+  });
+
+  it("two shares waiting: picking a chat for the first shows the second, and the last one picked opens its chat", async () => {
+    receiveShare(share({ text: "one" }), { queue: true });
+    receiveShare(share({ text: "two", files: [file("photo.jpg")] }), { queue: true });
+    const { user } = picker();
+    expect(screen.getByTestId("share-text")).toHaveTextContent("one");
+    await user.click(screen.getByTestId("share-chat"));
+    // Still the picker, now on the share that waited behind: none is left where nothing shows it.
+    expect(screen.queryByTestId("where")).toBeNull();
+    expect(screen.getByTestId("share-files")).toHaveTextContent("photo.jpg");
+    expect(screen.getByTestId("share-text")).toHaveTextContent("two");
+    await user.click(screen.getByTestId("share-group"));
+    expect(screen.getByTestId("where")).toHaveTextContent("/group/g1");
+    // Each waits for the composer of the chat picked for it.
+    expect(takeShareFor("chat1")?.text).toBe("one");
+    expect(takeShareFor(groupChat("g1"))?.files.map((f) => f.name)).toEqual(["photo.jpg"]);
+  });
+
+  it("the same chat picked for two shares gets both, in their order", async () => {
+    receiveShare(share({ text: "one", files: [file("a.txt")] }), { queue: true });
+    receiveShare(share({ text: "two", url: "https://b.example", files: [file("b.txt")] }), { queue: true });
+    const { user } = picker();
+    await user.click(screen.getByTestId("share-chat"));
+    await user.click(screen.getByTestId("share-chat"));
+    expect(screen.getByTestId("where")).toHaveTextContent("/chat/chat1");
+    const both = takeShareFor("chat1")!;
+    expect(shareText(both)).toBe("one\ntwo\nhttps://b.example");
+    expect(both.files.map((f) => f.name)).toEqual(["a.txt", "b.txt"]);
+    expect(takeShareFor("chat1")).toBeNull();
   });
 
   it("names the files too large to share and how to send them; with nothing else, offers no chat", () => {
