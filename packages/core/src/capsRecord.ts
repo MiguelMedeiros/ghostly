@@ -9,7 +9,7 @@ import type { PairingCredentials } from "./pairedSession";
 import { RELAY_URL, RELAY_WITH_SECRETS, relayUrl, type TransportDescriptors } from "./pairedTransports";
 import { measureRecords, MAX_DNS_PACKET_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
 import { sanitizeNick } from "./text";
-import { budgetRetryMs, isDiscoveryBudgetError, type PkarrTransport } from "./transport";
+import { budgetRetryMs, isDiscoveryBudgetError, type PkarrRequestOptions, type PkarrTransport } from "./transport";
 
 /**
  * The layer-0 capability record of a chat (WISP 03, revision 0.2): what each side accepts on the DHT
@@ -341,6 +341,7 @@ export class CapsExchange {
   private running = false;
   private lastRead = 0;
   private readTimer: ReturnType<typeof setTimeout> | null = null;
+  private readBackground = false;
   /** The newest revision of the contact's record an envelope named, and the reads made again since for it. */
   private named = -1;
   private retries = 0;
@@ -458,28 +459,37 @@ export class CapsExchange {
     this.timer = setTimeout(() => void this.update().catch(() => {}), inMs ?? Math.max(60_000, CAPS_REFRESH_MS - age));
   }
 
-  /** An envelope named this revision of the contact's record: read it when it is newer than the one known. */
+  /**
+   * An envelope named this revision of the contact's record: read it when it is newer than the one known. The number is
+   * the contact's word, not a record: read at the spacing, as background upkeep, and the read-again chain is not started
+   * over for it (a new record read does that). An envelope every 4 s naming a higher one each time made 45 reads a minute.
+   */
   peerRev(rev: number): void {
     if (!Number.isSafeInteger(rev) || rev <= (this.state.peer?.rev ?? -1)) return;
-    if (rev > this.named) { this.named = rev; this.retries = 0; }
-    this.refresh(true);
+    if (rev > this.named) this.named = rev;
+    this.refresh(false, true);
   }
 
-  /** Reads the contact's record now (or right after the last read, when that was a moment ago). */
-  refresh(force = false): void {
-    if (!this.running || this.readTimer) return;
+  /**
+   * Reads the contact's record now (or right after the last read, when that was a moment ago). `background`: upkeep,
+   * on the background share of the relays' budget; a read asked for meanwhile that is not makes it one that is not.
+   */
+  refresh(force = false, background = false): void {
+    if (!this.running) return;
+    if (this.readTimer) { this.readBackground &&= background; return; }
+    this.readBackground = background;
     const wait = force ? 0 : Math.max(0, this.lastRead + CAPS_READ_SPACING_MS - Date.now());
-    const run = () => { this.readTimer = null; void this.read().catch(() => {}); };
+    const run = () => { this.readTimer = null; void this.read(this.readBackground ? { background: true } : undefined).catch(() => {}); };
     if (!wait) { this.readTimer = setTimeout(run, 0); return; }
     this.readTimer = setTimeout(run, wait);
   }
 
   /** Reads and checks the contact's record; the last good one stays when this one is refused. */
-  read(): Promise<CapsRecord | undefined> {
+  read(options?: PkarrRequestOptions): Promise<CapsRecord | undefined> {
     const read = this.serialize(async () => {
       if (!this.running) return this.state.peer;
       this.lastRead = Date.now();
-      const packet = await this.options.transport.resolve(this.keys.peerAddress);
+      const packet = await this.options.transport.resolve(this.keys.peerAddress, options);
       if (!packet || !this.running) return this.state.peer;
       let record: CapsRecord;
       try {
@@ -512,6 +522,6 @@ export class CapsExchange {
     const behind = this.named > (peer?.rev ?? -1);
     const starting = !!peer && described(this.options.local()).some(t => peer.transports.includes(t) && !peer.descriptors[t]);
     if (!behind && !starting) return;
-    this.retryTimer = setTimeout(() => { this.retryTimer = null; void this.read().catch(() => {}); }, CAPS_READ_RETRY_MS[this.retries++]);
+    this.retryTimer = setTimeout(() => { this.retryTimer = null; void this.read({ background: true }).catch(() => {}); }, CAPS_READ_RETRY_MS[this.retries++]);
   }
 }
