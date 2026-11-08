@@ -26,7 +26,8 @@ const FIELD_VALUE = /^[\t\x20-\x7e\x80-\xff]*$/
 /**
  * `perMinute`: requests a minute from one address. `perEndpoint`: forwards a minute to one subscription (its endpoint
  * and VAPID key), from all addresses together: a contact wakes it once per message every 5 minutes at most and twice a
- * minute while calling, so 30 is fifteen contacts calling it at once, and no pool of addresses wakes it more.
+ * minute while calling, so 30 is fifteen contacts calling it at once, and no pool of addresses wakes it more. A forward
+ * the push service refuses (a 4xx other than 429) wakes nothing and is not counted there.
  * `tracked`: addresses, and subscriptions apart, whose counts are kept at most. Past it, the ones idle for a minute go
  * first, then the oldest: a full table forgets a count rather than turn away every newcomer.
  * `requestMs`: how long a client has to send a whole request (headers and body) before the connection is closed.
@@ -90,6 +91,12 @@ export function failure (error) {
  * above U+00FF) or with undici's invalid-argument code (a control character). A network failure is a `TypeError`
  * `fetch failed` with its cause.
  */
+/**
+ * Whether the push service refused the request for what it is (400, 401, 403, 404, 410, 413…): delivered nowhere. Its
+ * 429 is not one (it is swamped, the request may be fine), nor a 5xx (the push may have gone).
+ */
+const refusedPush = status => status >= 400 && status < 500 && status !== 429
+
 const refusedByFetch = error => error instanceof TypeError && (!('cause' in error) || error.cause?.code === 'UND_ERR_INVALID_ARG')
 
 /**
@@ -183,6 +190,12 @@ function minuteCounts (perMinute, tracked) {
       recent.set(key, times)
       return true
     },
+    /** Gives back the one `take` counted for a key at `now` (nothing if the table has forgotten it since). */
+    giveBack: (key, now) => {
+      const times = recent.get(key)
+      const at = times?.indexOf(now) ?? -1
+      if (at >= 0) times.splice(at, 1)
+    },
   }
 }
 
@@ -250,9 +263,13 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
       // `<name> twice` names a header the client chose: the log says only which kind it was.
       if (request.error) return refuse(request.error.endsWith(' twice') ? 'header twice' : request.error, 400, { error: request.error })
       // Counted only for a request it would forward: a refused one wakes nobody.
-      if (!subscriptions.take(request.subscription, Date.now())) return refuse('subscription rate', 429, { error: 'Too many' })
+      const taken = Date.now()
+      if (!subscriptions.take(request.subscription, taken)) return refuse('subscription rate', 429, { error: 'Too many' })
       try {
         const response = await fetch(request.endpoint, { method: 'POST', headers: request.headers, body: request.body, redirect: 'error', signal: AbortSignal.timeout(10_000) })
+        // The push service refused the request itself (a token it does not accept, a subscription gone, a malformed
+        // push): it woke nobody, so the subscription's count is given back and only the sender's address has spent one.
+        if (refusedPush(response.status)) subscriptions.giveBack(request.subscription, taken)
         forwards.count(response.status)
         answer(200, { status: response.status })
       } catch (error) {
