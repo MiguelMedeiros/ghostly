@@ -80,16 +80,18 @@ export class CashuAdapter implements PaymentAdapter<CashuPrepared> {
   * A Take it back of it under way when the mint is asked, or started while it answers, is waited for: its swap makes
   * the ecash read spent before the ecash is back here. Ended with the ecash back, the payment was taken back; ended
   * with the mint saying the contact had it first, it is paid; ended any other way, this round's spent read proves
-  * nothing, and the next round asks again (nothing is sent meanwhile).
+  * nothing, and the next round asks again (nothing is sent meanwhile). One whose answer from the mint was lost is still
+  * under way while its redeem is written down: asked before whether the ecash is back, which is stored as it ends.
   */
  private async outcome(review:PaymentReview,prepared:CashuPrepared){
   const before=this.takingBack(review.id);
   const spent=await this.wallet.reviewedCashuSpent(prepared);
   const reclaim=this.takingBack(review.id) ?? before;
   const ended=await reclaim;
+  const unsettled=await this.wallet.cashuTakingBack(review.id);
   const back=await this.takenBack(review.id);
   if(back)return back;
-  if(reclaim && ended!=='settled')return {settled:false};
+  if(unsettled || (reclaim && ended!=='settled'))return {settled:false};
   return spent?{settled:true}:undefined;
  }
  /** Taken back, waiting for a Take it back under way first: the payment then ends failed, its sats back here. */

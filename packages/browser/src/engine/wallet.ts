@@ -1093,6 +1093,14 @@ export class CashuWallet {
     return (await wrap<StoredPayment|undefined>((await store(STORES.payments,"readonly")).get(id)))?.state==="reclaimed";
   }
 
+  /**
+   * Whether a Take it back of this payment of ours is still written down: its redeem reached the mint, whose answer was
+   * lost (`SwapUnsettledError`), and `pollSwaps` settles it. Its ecash reads SPENT meanwhile, by this wallet.
+   */
+  async cashuTakingBack(id:string):Promise<boolean> {
+    return (await this.readSwaps()).some((s)=>s.kind==="receive" && !s.released && s.payment?.id===id && s.payment.direction==="out");
+  }
+
   async reviewedCashuSpent(prepared:CashuPrepared):Promise<boolean> {
     const outputs=(prepared.swap.sendOutputs??[]).map((await loadCashu()).OutputData.deserialize);
     const states=await (await this.wallet(prepared.mint,true)).checkProofsStates(outputs.map(o=>({secret:new TextDecoder().decode(o.secret),id:o.blindedMessage.id})));
