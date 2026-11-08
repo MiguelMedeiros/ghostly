@@ -287,7 +287,8 @@ export function parseInvoiceCallback(body: unknown, params: LnurlPayParams, amou
   if (!isRecord(body) || typeof body.pr !== "string") throw new Error(`${params.callbackDomain} did not answer with an invoice`);
   const invoice = decodeBolt11(body.pr);
   if (!invoice) throw new Error(`${params.callbackDomain} answered with an invoice that does not decode`);
-  if (invoice.amountMsat !== BigInt(amountSat) * 1000n) throw new Error(`The invoice asks for ${invoice.amountSat === null ? "any amount" : `${invoice.amountSat.toLocaleString()} sats`}, not the ${amountSat.toLocaleString()} sats you chose`);
+  // Its amounts in en-US, whatever the language of the process (a browser's worker): the app matches this English (errorText.ts).
+  if (invoice.amountMsat !== BigInt(amountSat) * 1000n) throw new Error(`The invoice asks for ${invoice.amountSat === null ? "any amount" : `${invoice.amountSat.toLocaleString("en-US")} sats`}, not the ${amountSat.toLocaleString("en-US")} sats you chose`);
   if (!invoice.paymentHash) throw new Error("The invoice has no payment hash");
   if (invoice.descriptionHash !== params.descriptionHash && invoice.description !== params.metadata) throw new Error("The invoice does not commit to what the service said the payment is for");
   if (invoice.expiresAt * 1000 < Date.now()) throw new Error("The invoice the service answered with has already expired");
