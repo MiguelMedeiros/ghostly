@@ -168,7 +168,8 @@ export function normalizeMintUrl(input: string): string {
 
 export function assertAmount(amount: number): void {
   if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error("Enter an amount in sats");
-  if (amount > MAX_AMOUNT) throw new Error(`Amounts above ${MAX_AMOUNT.toLocaleString()} sats are not supported`);
+  // Written the English way whatever the browser's own (errorText.ts reads the amount back to say it in the app's language).
+  if (amount > MAX_AMOUNT) throw new Error(`Amounts above ${MAX_AMOUNT.toLocaleString("en-US")} sats are not supported`);
 }
 
 /** Stored proofs are plain objects (amounts as numbers), which is what the library calls ProofLike. */

@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ENDPOINT, PaymentPreflightError, parseFedimintRequestPayload, randomBytes, validatePaymentTarget, type GhostLink, type PaymentReview } from "@ghostly/core";
 import { FedimintAdapter } from "../src/engine/paymentAdapters/fedimint";
-import { FedimintWallet, fedimintTiming, historyEntry, normalizeInvite } from "../src/engine/paymentAdapters/fedimintWallet";
+import { FedimintWallet, assertFedimintAmount, fedimintTiming, historyEntry, normalizeInvite } from "../src/engine/paymentAdapters/fedimintWallet";
 import { federationInfo } from "../src/engine/paymentAdapters/fedimintSdk";
 import { WrongNetworkError } from "../src/engine/paymentAdapters/modeGate";
 import { PaymentCoordinator } from "../src/engine/paymentAdapters/coordinator";
@@ -554,6 +554,27 @@ describe("the Fedimint Lightning source", () => {
     const tooMuch = fakeInvoice(5_000, new Uint8Array(32).fill(3));
     fake.external.set(tooMuch, 5_000_000);
     expect(isNothingSpentError(await source.payInvoice(tooMuch, 100).catch((e: unknown) => e))).toBe(true);
+  });
+
+  // The app reads the amounts back out of these English lines (errorText.ts) to say them in its language. A browser in
+  // Egyptian Arabic writes its numbers "١٬٥٠٠" by itself, which no rule read: the lines showed in English.
+  it("says what it has and needs in the English lines the app translates, whatever the browser's own numbers", async () => {
+    const own = Number.prototype.toLocaleString;
+    const numbers = vi.spyOn(Number.prototype, "toLocaleString").mockImplementation(function (this: number, locales?: Intl.LocalesArgument, options?: Intl.NumberFormatOptions) {
+      return own.call(this, locales ?? "ar-EG", options);
+    });
+    try {
+      const w = await funded(1_500);
+      const { desk } = chat(w);
+      await expect(new FedimintAdapter(w, desk.fedimintPublisher).prepare(w.target(federation.id, "r"), 2_000, 10)).rejects.toThrow(/^Not enough in this federation: 1,500 sats$/);
+      const outside = fakeInvoice(5_000, new Uint8Array(32).fill(5));
+      fake.external.set(outside, 5_000_000);
+      const refused = await new FedimintLightning(w, federation.id).payInvoice(outside, 100).catch((e: unknown) => e);
+      expect((refused as Error).message).toMatch(/^Not enough in this federation \(1,500 sats; 5,\d{3} needed\)$/);
+      expect(() => assertFedimintAmount(10_000_001)).toThrow(/^Amounts above 10,000,000 sats are not supported$/);
+    } finally {
+      numbers.mockRestore();
+    }
   });
 
   it("an invoice of the same federation is paid inside it, with no gateway fee; a payment in flight is pending", async () => {
