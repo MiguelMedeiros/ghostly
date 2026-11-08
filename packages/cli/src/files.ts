@@ -505,8 +505,9 @@ export const FILE_METHODS: Record<string, Method> = {
         if (free && refused?.code === "confirm" && n <= 1000) { target = `${stem} (${n})${ext}`; continue; }
         throw refused ?? error;
       }
-      // A contact chose its bytes and its name (`.command`, `.lnk`): marked as downloaded. One sent from here needs none.
-      if (stored.direction !== "out") await markDownloaded(target);
+      // A contact chose its bytes and its name (`.command`, `.lnk`): marked as downloaded. Every save is, as Desktop's:
+      // one sent from here may be a contact's forwarded (`copyForForward`), its record "out" with nothing of where it came from.
+      await markDownloaded(target);
     } catch (error) {
       throw asked(error, target);
     } finally {
