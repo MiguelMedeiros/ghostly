@@ -4,6 +4,7 @@ import { Route, Routes, useLocation } from "react-router-dom";
 import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { SharePicker } from "../../pages/SharePicker";
+import { SEARCH_STATUS_SETTLE_MS } from "../../components/ui/SearchStatus";
 import { groupChat } from "../../lib/chatMute";
 import { incomingShare, receiveShare, resetIncomingShare, sendShareTo, sharePreview, shareText, takeShareFor, type IncomingShare } from "../../lib/incomingShare";
 import { saveSession, setSessionDraft } from "../../lib/storage";
@@ -202,6 +203,9 @@ describe("the Share to… picker", () => {
     return <p data-testid="where">{useLocation().pathname}</p>;
   }
   const picker = () => renderApp(<Routes><Route path="/shared" element={<SharePicker />} /><Route path="*" element={<Where />} /></Routes>, { route: "/shared" });
+  /** The next share shown is said before a press acts on it: the clock moved past that. */
+  const settled = () => vi.setSystemTime(Date.now() + SEARCH_STATUS_SETTLE_MS);
+  afterEach(() => vi.useRealTimers());
 
   beforeEach(() => {
     saveSession({ id: "chat1", mySeedB64: "s", peerPubKeyB64: "peerkey", encKeyB64: "e", nick: "Ana", createdAt: 1, messages: [] } as unknown as ChatSession);
@@ -276,6 +280,7 @@ describe("the Share to… picker", () => {
     expect(screen.queryByTestId("where")).toBeNull();
     expect(screen.getByTestId("share-files")).toHaveTextContent("photo.jpg");
     expect(screen.getByTestId("share-text")).toHaveTextContent("two");
+    settled();
     await user.click(screen.getByTestId("share-group"));
     expect(screen.getByTestId("where")).toHaveTextContent("/group/g1");
     // Each waits for the composer of the chat picked for it.
@@ -283,11 +288,59 @@ describe("the Share to… picker", () => {
     expect(takeShareFor(groupChat("g1"))?.files.map((f) => f.name)).toEqual(["photo.jpg"]);
   });
 
+  it("two shares waiting: a chat picked with Enter moves the focus to the heading and says the next share; Enter or a double tap again acts on nothing", async () => {
+    receiveShare(share({ text: "first text" }), { queue: true });
+    receiveShare(share({ text: "second unseen", files: [file("photo.jpg")] }), { queue: true });
+    const { user } = picker();
+    const ana = screen.getByTestId("share-chat");
+    ana.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("share-text")).toHaveTextContent("second unseen");
+    // The focus left the row just pressed: a second Enter (a key held down, or pressed again because nothing seemed to
+    // happen) lands on the heading, not on the share nobody saw yet.
+    expect(document.activeElement).toBe(within(screen.getByTestId("share-picker")).getByRole("heading", { level: 1 }));
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("where")).toBeNull();
+    expect(incomingShare()?.text).toBe("second unseen");
+    // A press on the row itself before the new share is said (a double tap) does nothing either.
+    await user.click(ana);
+    expect(screen.queryByTestId("where")).toBeNull();
+    expect(incomingShare()?.text).toBe("second unseen");
+    // Said to a screen reader, from the words on the card.
+    await waitFor(() => expect(screen.getByTestId("share-next")).toHaveTextContent("From another app or website. Nothing is sent until you send it. photo.jpg second unseen"));
+    expect(screen.getByTestId("share-next")).toHaveAttribute("aria-live", "polite");
+    settled();
+    await user.click(ana);
+    expect(screen.getByTestId("where")).toHaveTextContent("/chat/chat1");
+    expect(shareText(takeShareFor("chat1")!)).toBe("first text\nsecond unseen");
+  });
+
+  it("two shares waiting: Cancel shows the next one the same way, and a double tap on it never drops the next unseen", async () => {
+    receiveShare(share({ text: "never mind" }), { queue: true });
+    receiveShare(share({ text: "second unseen" }), { queue: true });
+    const { user } = picker();
+    await user.click(screen.getByTestId("share-cancel"));
+    expect(screen.getByTestId("share-text")).toHaveTextContent("second unseen");
+    expect(document.activeElement).toBe(within(screen.getByTestId("share-picker")).getByRole("heading", { level: 1 }));
+    await user.keyboard("{Enter}");
+    expect(incomingShare()?.text).toBe("second unseen");
+    // The second tap of a double tap lands on Cancel again: it puts nothing aside.
+    await user.click(screen.getByTestId("share-cancel"));
+    expect(screen.queryByTestId("where")).toBeNull();
+    expect(incomingShare()?.text).toBe("second unseen");
+    await waitFor(() => expect(screen.getByTestId("share-next")).toHaveTextContent("From another app or website. Nothing is sent until you send it. second unseen"));
+    settled();
+    await user.click(screen.getByTestId("share-cancel"));
+    expect(incomingShare()).toBeNull();
+    expect(screen.getByTestId("where")).toHaveTextContent("/");
+  });
+
   it("the same chat picked for two shares gets both, in their order", async () => {
     receiveShare(share({ text: "one", files: [file("a.txt")] }), { queue: true });
     receiveShare(share({ text: "two", url: "https://b.example", files: [file("b.txt")] }), { queue: true });
     const { user } = picker();
     await user.click(screen.getByTestId("share-chat"));
+    settled();
     await user.click(screen.getByTestId("share-chat"));
     expect(screen.getByTestId("where")).toHaveTextContent("/chat/chat1");
     const both = takeShareFor("chat1")!;
