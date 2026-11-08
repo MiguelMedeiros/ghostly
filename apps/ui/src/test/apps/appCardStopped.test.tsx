@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { appCardId, type AppCard } from "@ghostly/core";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -6,7 +6,7 @@ import { AppCardView } from "../../components/apps/AppCardView";
 import { Apps } from "../../pages/Apps";
 import { setAppOpener, type AppOpener } from "../../lib/apps/open";
 import { forgetAppsAvailable } from "../../lib/apps/flag";
-import { forgetInstalledApps } from "../../lib/apps/installed";
+import { forgetInstalledApps, refreshInstalledApps } from "../../lib/apps/installed";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
@@ -92,5 +92,40 @@ describe("an app card for an installed app taken down", () => {
     expect(within(card).queryByTestId("app-card-run-anyway")).not.toBeInTheDocument();
     await user.click(within(card).getByTestId("app-card-open"));
     expect(opened).toHaveBeenCalledWith(REF, "link-1", { runAnyway: false });
+  });
+});
+
+/*
+ * An app that stops while its card's Open has the keyboard's focus (an update check found it revoked or removed): Open
+ * goes, and the focus stays on the card instead of dropping to the page, where the next Tab starts again from the top.
+ */
+describe("an app card whose app stops while Open has the focus", () => {
+  /** A card that may run, with a button beside it, the list read again once `run` is set to `next`. */
+  async function stopWith(next: InstalledAppView["run"], focus: "open" | "elsewhere") {
+    run = { status: "ok" };
+    renderApp(<><button type="button" data-testid="elsewhere">Elsewhere</button><AppCardView card={CARD} mine={false} contact="Ana" linkId="link-1" peerKey="peer" /></>);
+    const card = screen.getByTestId("app-card");
+    const open = await within(card).findByTestId("app-card-open");
+    (focus === "open" ? open : screen.getByTestId("elsewhere")).focus();
+    run = next;
+    await act(() => refreshInstalledApps());
+    expect(within(card).getByTestId("app-card-check")).toHaveTextContent(/^Stopped$/);
+    expect(within(card).queryByTestId("app-card-open")).not.toBeInTheDocument();
+    return card;
+  }
+
+  it("removed by a store: the focus goes to Run anyway", async () => {
+    const card = await stopWith(REMOVED, "open");
+    expect(document.activeElement).toBe(within(card).getByTestId("app-card-run-anyway"));
+  });
+
+  it("revoked: the focus goes to the card's \"Stopped\", so it is read out where the person was", async () => {
+    const card = await stopWith({ status: "revoked" }, "open");
+    expect(document.activeElement).toBe(within(card).getByTestId("app-card-check"));
+  });
+
+  it("the focus elsewhere is left where it is", async () => {
+    await stopWith(REMOVED, "elsewhere");
+    expect(document.activeElement).toBe(screen.getByTestId("elsewhere"));
   });
 });
