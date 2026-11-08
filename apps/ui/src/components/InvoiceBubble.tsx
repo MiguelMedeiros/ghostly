@@ -338,7 +338,7 @@ function CashuCard({ value, mine, offOn, onNetwork }: { value: string; mine: boo
   const [feeKept, setFeeKept] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
-  const { copied, failed, copy } = useMoneyCopy(value);
+  const { copied, failed, copy } = useMoneyCopy(value, inspection?.kind === "token");
   // Redeemed (or Already spent) takes the place of the Redeem that was pressed, and its keys: not when the token was
   // redeemed before.
   const redeemedLine = useRef<HTMLSpanElement>(null);
