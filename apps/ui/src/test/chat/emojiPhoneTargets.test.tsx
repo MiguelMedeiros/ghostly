@@ -21,7 +21,7 @@ const CSS = readFileSync(join(fileURLToPath(import.meta.url), "../../../componen
 /** The phone's rules (`@media (max-width: 767px)`) for `selector`. */
 const phoneRule = (selector: string) => {
   const phone = [...CSS.matchAll(/@media \(max-width: 767px\) \{([\s\S]*?)\n\}/g)].map((m) => m[1]).join("\n");
-  return phone.match(new RegExp(`^\\s*${selector.replace(/[.-]/g, "\\$&")} \\{([^}]*)\\}`, "m"))?.[1] ?? "";
+  return phone.match(new RegExp(`^\\s*${selector.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&")} \\{([^}]*)\\}`, "m"))?.[1] ?? "";
 };
 
 beforeAll(() => loadEmoji());
