@@ -103,7 +103,7 @@ test("on a phone every button, link and control on the main screens is a 44 px t
   expect([...small.values()], "controls under 44 × 44 px on a phone").toEqual([]);
 });
 
-/** The app in `language` (the setting a reload reads), back on the chat that was open. */
+/** The app in `language` (the setting a reload reads), back on the screen that was open. */
 const speak = async ({ page }: Peer, language: string, dir: "ltr" | "rtl") => {
   await page.evaluate((language) => {
     const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
@@ -499,4 +499,71 @@ test("on a phone every control in Settings, Profile, Services and the first dial
 
   expect(seen, "controls seen").toBeGreaterThan(80);
   expect(small, "controls under 44 × 44 px on a phone").toEqual([]);
+});
+
+/**
+ * The composer's emoji panel, a sheet on a phone: its category icons took taps on 45 × 40 px (38 × 40 at 320 px), the
+ * skin tone on 36 × 36, Emoji and GIF on 57 × 32, and at 320 px each emoji on 43 × 40. In English and in Arabic, at 375
+ * and 320 px, each in turn brought into view and measured; the grid still never scrolls sideways, seven emoji to a row
+ * at 320 px, and the category row keeps the one underlined in view as the grid scrolls.
+ */
+test("on a phone the emoji panel's categories, skin tone, Emoji / GIF switch and emoji are 44 px targets", { tag: ["@feature:app.mobile-layout", "@feature:app.emoji-picker", "@feature:app.i18n"] }, async ({ peer }, testInfo) => {
+  test.setTimeout(3 * 60_000);
+  const alice = await peer("emoji-targets", { mobile: true, viewport: { width: 375, height: 667 } });
+  const { page } = alice;
+  const small: string[] = [];
+  const panel = page.getByTestId("expression-panel");
+  const grid = panel.getByTestId("emoji-grid");
+  const measure = async (place: string, controls: Locator[]) => {
+    for (const control of controls) {
+      await control.evaluate((el) => { el.scrollIntoView({ block: "nearest", inline: "center" }); el.setAttribute("data-measured", ""); });
+      for (const target of await smallTargets(page, 44, "[data-measured]")) small.push(`${place}: ${target.name} ${target.width}×${target.height} (${target.stops})`);
+      await control.evaluate((el) => el.removeAttribute("data-measured"));
+    }
+  };
+
+  const field = page.locator("textarea");
+  for (const [language, dir] of [["en", "ltr"], ["ar", "rtl"]] as const) {
+    // A new chat, the first time; after that the reload comes back to it.
+    await speak(alice, language, dir);
+    const newChat = page.getByTestId("sidebar-new-chat").filter({ visible: true }).first();
+    await expect(field.or(newChat)).toBeVisible();
+    if (!(await field.isVisible())) await newChat.click();
+    await expect(field).toBeVisible();
+    for (const [width, height] of [[375, 667], [320, 568]]) {
+      const place = `${language} at ${width} px`;
+      await page.setViewportSize({ width, height });
+      await page.getByTestId("composer-expressions").click();
+      await expect(grid.locator("[data-emoji]").first()).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath(`emoji-${language}-${width}.png`) });
+
+      const categories = await panel.locator("[data-testid^='emoji-category-']").all();
+      expect(categories.length, place).toBeGreaterThanOrEqual(8);
+      // The first two rows of emoji, whole in the grid's view.
+      const cells = (await grid.getByTestId("emoji-section-people").locator("[data-emoji]").all()).slice(0, 14);
+      await measure(place, [...categories, panel.getByTestId("emoji-skin"), panel.getByTestId("expression-tab-emoji"), panel.getByTestId("expression-tab-gif"), ...cells]);
+
+      const layout = await grid.evaluate((box) => ({
+        sideways: box.scrollWidth - box.clientWidth,
+        columns: getComputedStyle(box.querySelector(".emoji-grid")!).gridTemplateColumns.split(" ").length,
+      }));
+      expect(layout.sideways, `${place}: the grid scrolls sideways by`).toBe(0);
+      if (width === 320) expect(layout.columns, `${place}: emoji to a row`).toBe(7);
+
+      // The last category, reached by scrolling the grid: its icon is underlined and whole in the row.
+      await grid.evaluate((box) => { box.scrollTop = box.scrollHeight; });
+      const last = categories[categories.length - 1];
+      await expect(last).toHaveAttribute("aria-pressed", "true");
+      await expect.poll(() => last.evaluate((icon) => {
+        const row = icon.parentElement!.getBoundingClientRect(), box = icon.getBoundingClientRect();
+        return box.left >= row.left - 0.5 && box.right <= row.right + 0.5;
+      }), `${place}: the underlined category is in view`).toBe(true);
+      await page.screenshot({ path: testInfo.outputPath(`emoji-${language}-${width}-last.png`) });
+
+      await page.keyboard.press("Escape");
+      await expect(panel).toHaveCount(0);
+    }
+  }
+
+  expect(small, "the emoji panel's controls under 44 × 44 px on a phone").toEqual([]);
 });

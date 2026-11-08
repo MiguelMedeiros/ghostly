@@ -134,7 +134,7 @@ function LoadedEmojiTab({ onPick, autoFocus }: EmojiTabProps) {
       <PanelSearch value={query} onChange={setQuery} placeholder={t("composer.searchEmoji")} inputRef={search} onKeyDown={searchKeys}
         after={<div className="relative">
           <button type="button" data-testid="emoji-skin" aria-label={t("composer.skinTone")} title={t("composer.skinTone")} aria-expanded={choosingSkin}
-            onClick={() => setChoosingSkin((v) => !v)} className="expression-skin">{TONES[skin]}</button>
+            onClick={() => setChoosingSkin((v) => !v)} className="expression-skin tap-target">{TONES[skin]}</button>
           {/* Choosing closes the row, so the arrows only move; Space or Enter chooses. */}
           {choosingSkin && <div role="radiogroup" aria-label={t("composer.skinTone")} className="expression-skins" data-testid="emoji-skins" onKeyDown={radioGroupKeys}>
             {TONES.map((tone, i) => <button key={tone} type="button" role="radio" aria-checked={i === skin} aria-label={tone} data-testid={`emoji-skin-${i}`} tabIndex={i === skin ? 0 : -1}
