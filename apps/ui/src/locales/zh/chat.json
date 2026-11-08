@@ -12,9 +12,11 @@
     "message": "{{name}}：{{text}}",
     "messages": "{{count}} 条新消息",
     "messagesFrom": "来自 {{name}} 的 {{count}} 条新消息",
+    "notSent": "你的消息“{{text}}”未发送",
     "notSentCount": "{{count}} 条消息未发送",
     "pinMoved": "已移到 {{count}} 个置顶聊天中的第 {{place}} 位",
     "rowMoved": "已移到 {{count}} 项中的第 {{place}} 位",
+    "waiting": "你的消息“{{text}}”正在等待联系人上线",
     "waitingCount": "{{count}} 条消息正在等待联系人上线"
   },
   "audio": {

@@ -190,11 +190,12 @@ export function MessageAnnouncer({ chat, messages, nameOf, active = true }: {
       if (!active) return;
       const failed = batch.filter(b => b.turn === "failed").map(b => b.message);
       const waiting = online ? batch.filter(b => b.turn === "waiting").map(b => b.message) : [];
-      // One text: its mark's own name, then what it says, in the line a message is read in ("Not sent: …").
-      const line = (list: Announceable[], state: "chat.delivery.failed" | "chat.delivery.waiting", count: "chat.announce.notSentCount" | "chat.announce.waitingCount") =>
-        list.length === 1 ? t("chat.announce.message", { name: t(state), text: short(spoken(list[0], t)) }) : t(count, { count: list.length });
-      if (failed.length) sayRef.current(line(failed, "chat.delivery.failed", "chat.announce.notSentCount"));
-      if (waiting.length) sayRef.current(line(waiting, "chat.delivery.waiting", "chat.announce.waitingCount"));
+      // One text: a sentence of its own with what it says inside it. Not the line a message is read in ("Not sent: …"),
+      // which a contact named "Not sent" would say word for word with any text it sends.
+      const line = (list: Announceable[], one: "chat.announce.notSent" | "chat.announce.waiting", count: "chat.announce.notSentCount" | "chat.announce.waitingCount") =>
+        list.length === 1 ? t(one, { text: short(spoken(list[0], t)) }) : t(count, { count: list.length });
+      if (failed.length) sayRef.current(line(failed, "chat.announce.notSent", "chat.announce.notSentCount"));
+      if (waiting.length) sayRef.current(line(waiting, "chat.announce.waiting", "chat.announce.waitingCount"));
     }, ANNOUNCE_WINDOW_MS);
   };
 
