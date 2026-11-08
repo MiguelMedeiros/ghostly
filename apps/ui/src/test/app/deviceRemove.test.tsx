@@ -134,6 +134,37 @@ describe("Remove, on the active device", () => {
     await waitFor(() => expect(engine.callsTo("deviceSecretOfferDismiss")).toHaveLength(1));
   });
 
+  it("once Not now takes the takeover's offer away, the keyboard focus goes to the stopped device's row, not to the page", async () => {
+    let secretOffer: DeviceSetView["secretOffer"] = { key: PHONE, device: "Phone", lost: true };
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => activeSet({ ...(secretOffer && { secretOffer }) }));
+    engine.on("deviceSecretOfferDismiss", () => { secretOffer = undefined; });
+    await user.click(await screen.findByTestId("device-secret-offer-dismiss"));
+    await waitFor(() => expect(screen.queryByTestId("device-secret-offer")).toBeNull(), { timeout: 5_000 });
+    // The Phone is not connected: no Move to, so its ⋮.
+    await waitFor(() => expect(within(screen.getAllByTestId("device-row")[1]).getByTestId("device-menu")).toHaveFocus());
+  });
+
+  it("once a new secret takes an unnamed offer away, the keyboard focus goes to Add a device", async () => {
+    let secretOffer: DeviceSetView["secretOffer"] = { key: "X".repeat(43), device: "Old" };
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => activeSet({ ...(secretOffer && { secretOffer }) }));
+    engine.on("deviceNewSecret", () => { secretOffer = undefined; return activeSet(); });
+    await user.click(await screen.findByTestId("device-secret-offer-new"));
+    await waitFor(() => expect(screen.queryByTestId("device-secret-offer")).toBeNull(), { timeout: 5_000 });
+    expect(await screen.findByTestId("device-secret-done")).toHaveTextContent("New device secret made.");
+    await waitFor(() => expect(screen.getByTestId("device-add-open")).toHaveFocus());
+  });
+
+  it("a Not now the engine refuses keeps the offer and the focus on Not now", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => activeSet({ secretOffer: { key: PHONE, device: "Phone" } }));
+    engine.on("deviceSecretOfferDismiss", () => { throw new Error("The device record could not be written"); });
+    await user.click(await screen.findByTestId("device-secret-offer-dismiss"));
+    await screen.findByTestId("device-secret-offer-error");
+    expect(screen.getByTestId("device-secret-offer-dismiss")).toHaveFocus();
+  });
+
   it("after a takeover, Remove and the checklist's Remove take out the device that stopped by its key, whatever the names", async () => {
     // A lost "Phone" (stopped) and another "Phone" listed before it.
     const OTHER = "O".repeat(43);
