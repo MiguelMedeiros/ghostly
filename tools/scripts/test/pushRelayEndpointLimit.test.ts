@@ -59,6 +59,25 @@ describe("the push relay's limit per push endpoint (infra/services/push-relay)",
     expect(delivered.get("https://127.0.0.1/sub/two")).toBe(1);
   });
 
+  it("counts an endpoint as the push service receives it: a fragment or an empty query is no new budget", async () => {
+    const { delivered, post } = await relayed({ perMinute: 100, perEndpoint: 2 });
+    expect((await post(1, "https://127.0.0.1/sub/one")).status).toBe(200);
+    expect((await post(2, "https://127.0.0.1/sub/one#1")).status).toBe(200);
+    for (const endpoint of ["https://127.0.0.1/sub/one?", "https://127.0.0.1/sub/one#2", "https://127.0.0.1/sub/one?#", "https://127.0.0.1/sub/one#"]) {
+      expect((await post(3, endpoint)).status).toBe(429);
+    }
+    expect(delivered.get("https://127.0.0.1/sub/one")).toBe(2);
+    expect([...delivered.keys()]).toEqual(["https://127.0.0.1/sub/one"]);
+  });
+
+  it("at its defaults, 60 addresses each with its own fragment forward 30 to one endpoint, not 60", async () => {
+    const { delivered, post } = await relayed({});
+    const statuses: number[] = [];
+    for (let address = 0; address < 60; address++) statuses.push((await post(address, `https://127.0.0.1/sub/one#${address}`)).status);
+    expect(statuses.filter(status => status === 200)).toHaveLength(DEFAULT_LIMITS.perEndpoint);
+    expect([...delivered.values()].reduce((sum, n) => sum + n, 0)).toBe(DEFAULT_LIMITS.perEndpoint);
+  });
+
   it("at its defaults, bounds one endpoint below what a few dozen addresses could send", async () => {
     const { delivered, post } = await relayed({});
     for (let address = 0; address < 4; address++) for (let n = 0; n < DEFAULT_LIMITS.perMinute; n++) await post(address);
