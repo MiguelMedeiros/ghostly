@@ -437,7 +437,6 @@
     "notesRedeemed": "استُردّت هذه الأوراق من قبل",
     "notesTooSmall": "قيمة هذه الأوراق أقل من sat واحد",
     "notesUnknownFederation": "هذه الأوراق من اتحاد لم أنضم إليه",
-    "nothingToReclaim": "لا يوجد ما يُسترد",
     "nothingToTakeBack": "لا يوجد ما يُستعاد",
     "offHere": "{{method}} {{network}} متوقف في هذه المحادثة",
     "offline": "أنت غير متصل",
