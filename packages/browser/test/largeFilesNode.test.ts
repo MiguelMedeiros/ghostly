@@ -9,7 +9,7 @@ import { knownErrorParts } from "../../../apps/ui/src/lib/errorText";
 import { fileBytes, registerFileBytes } from "../src/shared/fileBytes";
 import { IdbFileBytes } from "../src/shared/fileBytesIdb";
 import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
-// covers: files.large.offer, files.large.resume, files.large.integrity, files.storage, files.large.resend, files.large.request, chat.order
+// covers: files.large.offer, files.large.resume, files.large.integrity, files.storage, files.large.resend, files.large.request, chat.order, chat.waiting
 
 /**
  * files/3 in the engine: a real node (the app) and its contact's link over stand-ins for Iroh and HyperDHT, the
@@ -471,6 +471,70 @@ it("texts and files written while the contact is away reach it in the order they
   expect(t.arrivals).toEqual(["one", "file between-01", "two", "file between-02", "three"]);
   await vi.waitFor(() => expect(t.records.get("in:between-02")?.state).toBe("done"), { timeout: 30_000 });
 }, 120_000);
+
+/**
+ * A file written while the contact is away waits, with Cancel sending on its ⋮. When the chat goes live the outbox
+ * sends it (`sendWaitingFile`), which first waits a little for the contact's capabilities. A Cancel sending in that
+ * wait deleted it here, and the send then wrote back the row it had read before the wait: the file was back in the
+ * chat as sent, after a restart too, and the contact never got it.
+ */
+async function cancelWaitingFile(when: "in the wait" | "as the wait ends" | "at its offer", run: number) {
+  const t = await setup();
+  t.contact.disconnect();
+  await vi.waitFor(() => expect(t.files.live).toBe(false));
+  const wireId = `cancel-${run}-${when === "at its offer" ? "o" : when === "in the wait" ? "w" : "e"}`, after = `after-${wireId}`;
+  const file = await put(t, wireId, 50_000, Date.now());
+  const row = async () => (await db.getMessages(t.id)).find((m) => m.file?.id === file.id);
+  await vi.waitFor(async () => expect((await row())?.delivery).toBe("waiting"));
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  // A file written after it: once it is done there, whatever was going to happen to the first has happened.
+  await put(t, after, 20_000, Date.now());
+  const messageId = (await row())!.id;
+  let fired = false;
+  const cancel = () => { if (fired) return; fired = true; t.node().deleteMessage({ linkId: t.id, messageId }); };
+  const engine = GhostlyNode as unknown as { largeFilesAgreed: (link: GhostLink) => Promise<boolean> };
+  const agreed = engine.largeFilesAgreed.bind(GhostlyNode);
+  const spy = vi.spyOn(engine, "largeFilesAgreed").mockImplementation(async (link) => {
+    if (when === "in the wait") { const waited = agreed(link); cancel(); return waited; }
+    const answer = await agreed(link);
+    // Deleted here just before the send goes on: its row and its file are gone by the time it does.
+    if (when === "as the wait ends") { cancel(); await vi.waitFor(async () => expect(await row()).toBeUndefined()); }
+    return answer;
+  });
+  cleanup.push(async () => spy.mockRestore());
+  if (when === "at its offer") t.watch((record) => { if (record.direction === "in" && record.id === wireId) cancel(); });
+  void t.contact.connect(5_000).catch(() => {});
+  const arrived = await vi.waitFor(() => expect(t.records.get(`in:${after}`)?.state).toBe("done"), { timeout: 15_000 }).then(() => true, () => false);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  expect(fired).toBe(true);
+  return { t, wireId, row, messageId, arrived };
+}
+
+for (const when of ["in the wait", "as the wait ends"] as const) {
+  for (const run of [1, 2, 3]) {
+    it(`Cancel sending on a waiting file ${when} for the contact's capabilities as the chat goes live: it stays gone, and never reaches the contact (run ${run})`, async () => {
+      const { t, wireId, row, messageId, arrived } = await cancelWaitingFile(when, run);
+      expect(await row()).toBeUndefined();
+      expect((await db.getLinks()).find((l) => l.id === t.id)?.deletedIds).toContain(messageId);
+      expect(t.records.get(`in:${wireId}`)).toBeUndefined();
+      expect(t.arrivals).not.toContain(`file ${wireId}`);
+      // The file written after it went as usual.
+      expect(arrived).toBe(true);
+      // And after a restart: nothing of it comes back here, and nothing goes.
+      await t.restartApp();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(await row()).toBeUndefined();
+      expect(t.records.get(`in:${wireId}`)).toBeUndefined();
+    }, 60_000);
+  }
+}
+
+it("Cancel sending on a waiting file once its offer reached the contact: gone here, and the contact is told it was cancelled", async () => {
+  const { t, wireId, row, arrived } = await cancelWaitingFile("at its offer", 1);
+  expect(arrived).toBe(true);
+  await vi.waitFor(() => expect(t.records.get(`in:${wireId}`)).toMatchObject({ state: "cancelled", error: "Cancelled by the sender" }));
+  expect(await row()).toBeUndefined();
+}, 60_000);
 
 it("a received file is placed where its offer came: a text that comes right after it goes below it", async () => {
   const t = await setup();
