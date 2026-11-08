@@ -285,6 +285,38 @@ describe("withoutVideoMetadata", () => {
     expect(await played(out)).toEqual(await played(fragmented));
   });
 
+  it("a subtitle or caption track's samples (a drone's or a dashcam's GPS and home point each second) are zeroed where they are", async () => {
+    const line = Buffer.from(`F/2.8, SS 1000, ISO 100, GPS ${PLACE} HOME ${PLACE} 2026-11-08 14:02:11`, "latin1");
+    const sample = Buffer.concat([Buffer.from([0, line.length]), line]);
+    for (const handler of ["text", "sbtl", "subt", "clcp"]) {
+      for (const mime of ["video/mp4", "video/quicktime"]) {
+        const captioned = withMovie(H264_MP4, [], sample, handler);
+        expect(hasPlace(captioned)).toBe(true);
+        const out = await bytesOf((await withoutVideoMetadata(new Blob([captioned]), mime))!);
+        expect(hasPlace(out), `${handler} ${mime}`).toBe(false);
+        const zeroed = await bytesOf((await withoutVideoMetadata(new Blob([withMovie(H264_MP4, [], Buffer.alloc(sample.length), handler)]), mime))!);
+        expect(Buffer.from(out).equals(zeroed), `${handler} ${mime}`).toBe(true);
+        expect(await played(out)).toEqual(await played(captioned));
+      }
+    }
+
+    // Fragmented: the track's table in `moov` holds none of it, its samples are in a fragment's run, zeroed there.
+    const u32 = (n: number) => Buffer.from([n >>> 24, (n >> 16) & 255, (n >> 8) & 255, n & 255]);
+    const fragmented = await repack(false, "fragmented");
+    const moof = (offset: number) => box("moof", box("mfhd", u32(0), u32(99)),
+      box("traf", box("tfhd", u32(0x20000), u32(0)), box("trun", u32(0x201), u32(1), u32(offset), u32(sample.length))));
+    const tail = Buffer.concat([moof(moof(0).length + 8), box("mdat", sample)]);
+    for (const handler of ["text", "sbtl", "subt", "clcp"]) {
+      const file = Buffer.concat([withMovie(fragmented, [], Buffer.alloc(0), handler), tail]);
+      expect(hasPlace(file)).toBe(true);
+      const out = await bytesOf((await withoutVideoMetadata(new Blob([file]), "video/mp4"))!);
+      expect(hasPlace(out), handler).toBe(false);
+      expect(out.length).toBe(file.length);
+      expect(out.subarray(-sample.length).every((b) => b === 0), handler).toBe(true);
+      expect(await played(out)).toEqual(await played(file));
+    }
+  });
+
   it("a fragmented video with a box it empties in each fragment is checked once per fragment, not against every other fragment", async () => {
     // A live encoder's recording: a `prft` (when the fragment was made) before each of 16,000 fragments, two samples each.
     const u32 = (n: number) => Buffer.from([n >>> 24, (n >> 16) & 255, (n >> 8) & 255, n & 255]);
