@@ -1150,3 +1150,96 @@ describe("DHT delivery: the relays' request budget", () => {
   // Two and a half minutes of polls, each one opening and checking the contact's envelope: an envelope is now checked until ten minutes past its expiry, not dropped at it unchecked.
   }, 20_000);
 });
+
+describe("DHT delivery: the device clock stepped (an NTP step, a clock fixed by hand)", () => {
+  const HOUR = 60 * 60_000;
+  /**
+   * Bob, DHT only, his contact away, sends text A; 20 s later the device clock moves by `step` (`ahead`: it was that far
+   * ahead when A went). What the chat does from there: when a second text could go (ms after A), how many envelopes went
+   * out between one and five minutes, and the read pace and the text awaiting its receipt at six minutes.
+   */
+  const afterStep = async (step: number, ahead = 0) => {
+    if (ahead) vi.setSystemTime(Date.now() + ahead);
+    const h = setup({ pollMs: null, bobCredentials: pinned() });
+    await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
+    expect(await h.bob.send("A", Date.now(), ID)).toBeNull();
+    await vi.advanceTimersByTimeAsync(20_000);
+    vi.setSystemTime(Date.now() + step);
+    let elapsed = 20_000, free: number | undefined, at1 = 0, at5 = 0, pollMs = 0, pendingId: string | undefined;
+    while (elapsed < 2 * HOUR && (free === undefined || elapsed < 6 * 60_000)) {
+      await vi.advanceTimersByTimeAsync(1_000); elapsed += 1_000;
+      if (free === undefined && h.bob.validate("B", Date.now(), ID2) === null) free = elapsed;
+      if (elapsed === 60_000) at1 = h.transport.publish.mock.calls.length;
+      if (elapsed === 5 * 60_000) at5 = h.transport.publish.mock.calls.length;
+      if (elapsed === 6 * 60_000) ({ pollMs, pendingId } = h.bob);
+    }
+    const result = { free, puts: at5 - at1, pollMs, pendingId };
+    await h.bob.stop();
+    return result;
+  };
+
+  it("a clock set back while a text awaits its receipt: the next text goes once its five minutes are over, as without the step", async () => {
+    const control = await afterStep(0);
+    expect(control).toMatchObject({ free: DHT_MESSAGE_TTL, pollMs: 30_000, pendingId: undefined });
+    // Before: A's `expires`, an hour ahead of the clock, held B for 65 minutes (the outbox had shown A failed at five),
+    // no envelope went out in that time, and the chat read every 4 s.
+    const back = await afterStep(-HOUR);
+    expect(back.free, "B can go").toBeLessThanOrEqual(DHT_MESSAGE_TTL + 30_000);
+    expect(back.puts, "A is published again at its own pace").toBeGreaterThanOrEqual(control.puts - 1);
+    expect(back, "the background pace again").toMatchObject({ pollMs: 30_000, pendingId: undefined });
+  }, 30_000);
+
+  it("a clock that ran ahead when the text went, then set right: the same", async () => {
+    const control = await afterStep(0);
+    const fixed = await afterStep(-HOUR, HOUR);
+    expect(fixed.free).toBeLessThanOrEqual(DHT_MESSAGE_TTL + 30_000);
+    expect(fixed.puts).toBeGreaterThanOrEqual(control.puts - 1);
+    expect(fixed).toMatchObject({ pollMs: 30_000, pendingId: undefined });
+    // Set forward: A's five minutes are over at once, and nothing waits on it.
+    const forward = await afterStep(HOUR);
+    expect(forward).toMatchObject({ free: 21_000, pollMs: 30_000, pendingId: undefined });
+  }, 30_000);
+
+  it("a text saved by a clock an hour ahead (the app restarted since) holds the next one no longer than five minutes", async () => {
+    const now = Date.now();
+    const state: DhtDeliveryState = { ...emptyDhtDeliveryState(), pending: { message: [ID, now + HOUR, "A"], expires: now + HOUR + DHT_MESSAGE_TTL, attempts: 1, next: now + HOUR + 4_000 } };
+    const h = setup({ pollMs: null, bobCredentials: pinned(), state });
+    await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
+    expect(h.bob.pendingId).toBe(ID);
+    // Published again at its pace, not an hour from now.
+    expect(h.transport.publish.mock.calls.length).toBeGreaterThan(0);
+    await vi.advanceTimersByTimeAsync(DHT_MESSAGE_TTL);
+    expect(h.bob.validate("B", Date.now(), ID2)).toBeNull();
+    expect(h.bob.pendingId).toBeUndefined();
+    await h.bob.stop();
+  });
+
+  it("a contact away, the clock set back: its mailbox is still read at the background pace", async () => {
+    const readsAMinute = async (h: ReturnType<typeof setup>) => {
+      const first = h.transport.resolve.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(60_000 + 10);
+      const reads = (h.transport.resolve.mock.calls as unknown[][]).slice(first);
+      return { reads: reads.length, background: reads.filter(([, o]) => (o as { background?: boolean } | undefined)?.background).length };
+    };
+    const slow = expect.toSatisfy((r: { reads: number; background: number }) => r.reads >= 2 && r.reads <= 3 && r.background === r.reads);
+    const fast = { reads: expect.toSatisfy((n: number) => n >= 14 && n <= 16), background: 0 };
+    for (const step of [-HOUR, HOUR]) {
+      // Read once (pinned), then away for 15 minutes.
+      const h = setup({ pollMs: null });
+      await h.bob.start(); await h.put(h.invitePacket(h.body({ 6: null })));
+      await vi.advanceTimersByTimeAsync(PRESENCE_WINDOW + 5 * 60_000);
+      expect(await readsAMinute(h)).toEqual(slow);
+      // Set back an hour, its last envelope was read 45 minutes in the future: it counts as read when the step is first seen
+      // (the next read, 30 s at most), so the contact is there for `PRESENCE_WINDOW` from then at most. Before: there, and read every 4 s, for 52 minutes.
+      vi.setSystemTime(Date.now() + step);
+      await vi.advanceTimersByTimeAsync(PRESENCE_WINDOW + 30_000);
+      expect(await readsAMinute(h), `${step / 60_000} min`).toEqual(slow);
+      // Back with a text: every 4 s from there, as without a step.
+      h.setPacket(h.invitePacket(h.body({}, 2)));
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(h.messages.map(m => m.text)).toEqual(["hello"]);
+      expect(await readsAMinute(h)).toEqual(fast);
+      await h.bob.stop();
+    }
+  });
+});
