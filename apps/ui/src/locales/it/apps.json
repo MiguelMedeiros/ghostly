@@ -157,6 +157,7 @@
     "title": "Apri {{title}} in una chat"
   },
   "store": {
+    "clockLate": "L'elenco di questo store ha una data successiva all'orologio di questo dispositivo. Controlla la data e l'ora di questo dispositivo.",
     "count": "{{count}} app",
     "count_one": "{{count}} app",
     "count_other": "{{count}} app",
