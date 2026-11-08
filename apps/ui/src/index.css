@@ -994,6 +994,17 @@ html[data-standalone="true"] {
   }
 }
 
+/* A phone on its side with the keyboard up leaves 150-175px: a pinned message's bar and a reply or edit bar between the
+   chat's header and the field took it all, and the field went under the keyboard. The pinned bar goes behind the
+   keyboard, as the tab bar does, and the reply or edit bar says who and what on one line. */
+@media (pointer: coarse) and (max-height: 500px) {
+  html[data-keyboard="true"] .pinned-bar { display: none; }
+  html[data-keyboard="true"] .composer-quote { margin-bottom: 4px; }
+  html[data-keyboard="true"] .composer-quote .quote-body { flex-direction: row; align-items: baseline; gap: 6px; padding-block: 2px; }
+  html[data-keyboard="true"] .composer-quote .quote-body > :first-child:not(:last-child) { flex-shrink: 0; max-width: 50%; }
+  html[data-keyboard="true"] .composer-quote .quote-body > :last-child { min-width: 0; flex: 1; }
+}
+
 @keyframes fade-in {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
