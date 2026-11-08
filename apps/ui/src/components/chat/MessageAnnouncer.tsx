@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { StatusCard } from "@ghostly/core";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
+import { useOnline } from "../../hooks/useOnline";
 import { filePreview, previewText } from "../../lib/chatList";
 import { fileMoment, fileMomentLine, fileOfferLine, type FileMoment } from "../../lib/fileAnnounce";
 import { isGroupFile } from "../../lib/fileStatus";
@@ -20,6 +21,8 @@ export interface Announceable {
   /** A voice message or a video: read out as the chat list says it too, its text being the history's English line. */
   file?: ChatFile;
   member?: string;
+  /** Where a message of mine is (ChatMessage's `delivery`): one that turns not sent, or starts waiting, is said. */
+  delivery?: string;
   systemEvent?: unknown;
   callEvent?: unknown;
   event?: unknown;
@@ -61,6 +64,16 @@ interface FileHeard { message: Announceable & { file: ChatFile }; moment: FileMo
 const followed = (m: Announceable): m is Announceable & { file: ChatFile } =>
   !!m.file && !isGroupFile(m.file) && !m.systemEvent && !m.callEvent && !m.event;
 
+/** The steps of a text of mine that need the person: it was not sent (send it again), or it waits for the contact. */
+type Turn = "failed" | "waiting";
+const turnOf = (delivery: string | undefined): Turn | undefined =>
+  delivery === "failed" ? "failed" : delivery === "waiting" ? "waiting" : undefined;
+
+/** A message of mine whose delivery is followed: a file says its own steps (fileMomentLine), a chat's note none. */
+const mineFollowed = (m: Announceable) => m.sender === "me" && !m.file && !m.systemEvent && !m.callEvent && !m.event;
+/** A text of mine as last seen: where it was in the list, and its delivery. */
+interface Watched { at: number; delivery: string }
+
 const heardNow = (message: Announceable & { file: ChatFile }, since: number): FileHeard =>
   ({ message, moment: fileMoment(servicesPlatform?.getTransfer(message.file.id) ?? null), since });
 
@@ -74,6 +87,11 @@ const heardNow = (message: Announceable & { file: ChatFile }, since: number): Fi
  * each later step its person did not take is read out once (the contact accepted, declined, paused, went on or
  * cancelled; it arrived; it failed), never its progress. A step within the arrival window of a file just in the chat
  * is part of how it arrived (a small file done at once), not news of its own.
+ *
+ * A text of mine says only the steps that need me: it turned not sent, or it started waiting for the contact to be
+ * online (said only while this device is online: offline, every text waits for this device instead). Sent, delivered
+ * and read are not said. What the chat had as it opened is not said either; steps that come together are one line,
+ * a count when there are several.
  */
 export function MessageAnnouncer({ chat, messages, nameOf, active = true }: {
   chat: string;
@@ -83,13 +101,18 @@ export function MessageAnnouncer({ chat, messages, nameOf, active = true }: {
   active?: boolean;
 }) {
   const { t } = useI18n();
+  const online = useOnline();
   const [text, setText] = useState("");
   /** `at`: where `last` was, so rows that came or went above it are noticed. */
   const seen = useRef<{ chat: string; ids: Set<string>; last?: string; at: number } | null>(null);
   const pending = useRef<Announceable[]>([]);
-  const timers = useRef<{ flush?: ReturnType<typeof setTimeout>; clear?: ReturnType<typeof setTimeout> }>({});
-  const words = useRef({ t, nameOf, active });
-  words.current = { t, nameOf, active };
+  const timers = useRef<{ flush?: ReturnType<typeof setTimeout>; clear?: ReturnType<typeof setTimeout>; turns?: ReturnType<typeof setTimeout> }>({});
+  const words = useRef({ t, nameOf, active, online });
+  words.current = { t, nameOf, active, online };
+  /** My texts that can still take a step (not delivered yet), by message id: a change to not sent or waiting is said. */
+  const watched = useRef(new Map<string, Watched>());
+  /** My texts that took such a step since the last line, by id: said together once the window is over. */
+  const turns = useRef(new Map<string, { message: Announceable; turn: Turn }>());
   /** Lines waiting for the one being read to clear: two that come together are both read, one after the other. */
   const queued = useRef<string[]>([]);
   /** The chat's 1:1 files, by file id: kept as the rows come, so a step is not looked for in the whole history. */
@@ -127,15 +150,68 @@ export function MessageAnnouncer({ chat, messages, nameOf, active = true }: {
   };
   useEffect(() => servicesPlatform?.subscribe(() => checkFiles.current()), []);
 
+  /**
+   * Looks at the delivery of my texts that can still take a step: one that turned not sent or started waiting is kept
+   * for the next line. A text just in the chat (sent now) counts from nothing; one that was there as the chat opened, or
+   * appeared above (older history), is history. Only those texts are looked at, where they were, and the new rows: the
+   * whole list only when rows came or went above (`reread`), as for the messages themselves.
+   */
+  const checkDeliveries = useRef((_messages: readonly Announceable[], _fresh: readonly Announceable[], _from: number, _reread: boolean) => {});
+  checkDeliveries.current = (messages, fresh, from, reread) => {
+    const before = watched.current;
+    const now = new Set(fresh.map(m => m.id));
+    // A watched text not where it was (it took another id in place): the whole list then.
+    let whole = reread;
+    if (!whole) for (const [id, { at }] of before) if (messages[at]?.id !== id) { whole = true; break; }
+    const after = whole ? new Map<string, Watched>() : before;
+    const look = (m: Announceable, at: number) => {
+      if (!mineFollowed(m)) return;
+      const was = before.get(m.id);
+      const prior = was ? was.delivery : now.has(m.id) ? undefined : m.delivery;
+      // Delivered is where a text stays; a text with no delivery state is one from before them.
+      if (m.delivery && m.delivery !== "delivered") after.set(m.id, { at, delivery: m.delivery });
+      else after.delete(m.id);
+      const turn = turnOf(m.delivery);
+      if (turn && turnOf(prior) !== turn && words.current.active) turns.current.set(m.id, { message: m, turn });
+    };
+    if (whole) messages.forEach(look);
+    else {
+      for (const { at } of [...before.values()]) look(messages[at], at);
+      for (let at = from; at < messages.length; at++) if (now.has(messages[at].id)) look(messages[at], at);
+    }
+    watched.current = after;
+    if (!turns.current.size || timers.current.turns) return;
+    timers.current.turns = setTimeout(() => {
+      timers.current.turns = undefined;
+      const { t, active, online } = words.current;
+      // Only what still stands: a text sent again (or delivered after all) within the window is no news.
+      const batch = [...turns.current.values()].filter(({ message, turn }) => turnOf(watched.current.get(message.id)?.delivery) === turn);
+      turns.current.clear();
+      if (!active) return;
+      const failed = batch.filter(b => b.turn === "failed").map(b => b.message);
+      const waiting = online ? batch.filter(b => b.turn === "waiting").map(b => b.message) : [];
+      // One text: its mark's own name, then what it says, in the line a message is read in ("Not sent: …").
+      const line = (list: Announceable[], state: "chat.delivery.failed" | "chat.delivery.waiting", count: "chat.announce.notSentCount" | "chat.announce.waitingCount") =>
+        list.length === 1 ? t("chat.announce.message", { name: t(state), text: short(spoken(list[0], t)) }) : t(count, { count: list.length });
+      if (failed.length) sayRef.current(line(failed, "chat.delivery.failed", "chat.announce.notSentCount"));
+      if (waiting.length) sayRef.current(line(waiting, "chat.delivery.waiting", "chat.announce.waitingCount"));
+    }, ANNOUNCE_WINDOW_MS);
+  };
+
   useEffect(() => {
     const known = seen.current;
     // A chat just opened (or another one): what it already has is history, not news.
     if (!known || known.chat !== chat) {
       seen.current = { chat, ids: new Set(messages.map(m => m.id)), last: messages[messages.length - 1]?.id, at: messages.length - 1 };
       files.current = new Map(messages.filter(followed).map(m => [m.file.id, heardNow(m, -Infinity)]));
+      watched.current = new Map();
+      messages.forEach((m, at) => { if (mineFollowed(m) && m.delivery && m.delivery !== "delivered") watched.current.set(m.id, { at, delivery: m.delivery }); });
       pending.current = [];
+      turns.current.clear();
       clearTimeout(timers.current.flush);
+      clearTimeout(timers.current.turns);
       timers.current.flush = undefined;
+      timers.current.turns = undefined;
       return;
     }
     // Only what comes after the last message known: older history loaded above it is not new. It is looked for from the
@@ -158,6 +234,7 @@ export function MessageAnnouncer({ chat, messages, nameOf, active = true }: {
     const now = Date.now();
     for (const m of fresh) if (followed(m) && !files.current.has(m.file.id)) files.current.set(m.file.id, heardNow(m, now));
     checkFiles.current();
+    checkDeliveries.current(messages, fresh, from, reread);
     if (messages.length) known.last = messages[messages.length - 1].id;
     known.at = messages.length - 1;
     const incoming = fresh.filter(m => m.sender === "peer" && !m.systemEvent && !m.callEvent && !m.event);
@@ -181,7 +258,7 @@ export function MessageAnnouncer({ chat, messages, nameOf, active = true }: {
     }, ANNOUNCE_WINDOW_MS);
   }, [chat, messages, active]);
 
-  useEffect(() => () => { clearTimeout(timers.current.flush); clearTimeout(timers.current.clear); }, []);
+  useEffect(() => () => { clearTimeout(timers.current.flush); clearTimeout(timers.current.clear); clearTimeout(timers.current.turns); }, []);
   // Another chat: nothing of the last one is read out in this one.
   useEffect(() => {
     setText("");
