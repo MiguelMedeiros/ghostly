@@ -5,7 +5,7 @@ import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, type OptionSpec, type Parsed } from "./args";
 import { connectDaemon, DaemonClient, isNotTheDaemon } from "./client";
 import { childEnv, dropSecretEnv } from "./childEnv";
-import { COMMANDS, idSlot, noMoreThan, positionals, takesText, TEXT_COMMANDS } from "./commands";
+import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_COMMANDS } from "./commands";
 import { here, inRange, INPUT_BYTES, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS } from "./engineMethods";
 import { asCliError, CliError, EXIT, localFileError } from "./errors";
@@ -20,7 +20,7 @@ import { format } from "node:util";
 import { completeWithPipedEvidence, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, settingValue, textFromStdin } from "./secretInput";
 import type { Translator } from "./translate";
 import {
-  checkProfileName, checkShownName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
+  checkProfileName, checkShownName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, noProfile, profileExists, profilePaths, selectProfile,
   startingDaemon,
   type ProfilePaths,
 } from "./profiles";
@@ -72,16 +72,12 @@ function globals(parsed: Parsed): Globals {
 function requireProfile(g: Globals): void {
   if (profileExists(g.home, g.profile)) return;
   if (g.profile === DEFAULT_PROFILE) { createProfile(g.home, g.profile); return; }
-  throw noProfile(g);
-}
-
-function noProfile(g: Globals): CliError {
-  return new CliError("not_found", `No profile ${g.profile}: make it with \`ghostly profile create ${g.profile}\``);
+  throw noProfile(g.profile);
 }
 
 /** For a command that only reads: a mistyped profile is named as one, and `default` is not made by asking about it. */
 function knownProfile(g: Globals): void {
-  if (g.profile !== DEFAULT_PROFILE && !profileExists(g.home, g.profile)) throw noProfile(g);
+  if (g.profile !== DEFAULT_PROFILE && !profileExists(g.home, g.profile)) throw noProfile(g.profile);
 }
 
 /**
@@ -719,7 +715,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       const path = here(out) as string;
       const params = unsealed ? { path, noPassphrase: true, ...light } : { path, passphrase: backupPassphrase(parsed.options["passphrase-file"]), ...light };
       const made = await withSession(g, (s) => s.call("profile.backup", params), { offline: true });
-      if (unsealed) process.stderr.write("Not encrypted: this file holds the profile's keys, chats and wallet secrets in the clear. Anyone who gets it gets everything in it, including any money in its wallets.\n");
+      if (unsealed) process.stderr.write("ghostly: Not encrypted: this file holds the profile's keys, chats and wallet secrets in the clear. Anyone who gets it gets everything in it, including any money in its wallets.\n");
       print(made);
       return;
     }
@@ -1341,7 +1337,7 @@ async function identityAddCommand(argv: string[]): Promise<void> {
 
 async function tableCommand(name: string, argv: string[]): Promise<void> {
   const command = COMMANDS[name];
-  const parsed = parseArgs(argv, command.options ?? {}, idSlot(command), { command: name, text: takesText(command) });
+  const parsed = parseArgs(argv, command.options ?? {}, idSlot(command), { command: name, text: takesText(command), number: numberSlot(command) });
   const g = globals(parsed);
   pretty = g.pretty;
   const args = positionals(command, parsed.positionals);

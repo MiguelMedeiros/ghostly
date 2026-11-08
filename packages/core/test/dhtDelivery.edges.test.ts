@@ -7,7 +7,7 @@ import { decrypt, encrypt } from "../src/crypto";
 import { createIdentity, identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign } from "../src/identity";
 import { createLink } from "../src/invite";
 import { PRESENCE_WINDOW } from "../src/link";
-import { DhtDelivery, DHT_EXPIRY_SKEW_MS, DHT_ISSUED_BACK_MS, DHT_MESSAGE_TTL, DHT_TEXT_REFUSED, LEAVING_DHT_FAST_MS, LIVE_POLL_MS, emptyDhtDeliveryState, type DhtDeliveryState, type DhtDeliveryView } from "../src/dhtDelivery";
+import { ACTIVE_DHT_POLL_MS, DhtDelivery, DHT_EXPIRY_SKEW_MS, DHT_ISSUED_BACK_MS, DHT_MESSAGE_TTL, DHT_TEXT_REFUSED, LEAVING_DHT_FAST_MS, LIVE_POLL_MS, emptyDhtDeliveryState, type DhtDeliveryState, type DhtDeliveryView } from "../src/dhtDelivery";
 import { setLinkTraceSink } from "../src/linkTrace";
 import type { PairingCredentials } from "../src/pairedSession";
 import type { GhostRecord, SignedPacket } from "../src/pkarr";
@@ -26,7 +26,7 @@ const ID = "abcdefghijklmnopqrstuv", ID2 = "bcdefghijklmnopqrstuvw", ID3 = "cdef
 const pinned = (): PairingCredentials => ({ seedB64: createIdentity().seedB64, peerKey: createIdentity().pubKeyZ32 });
 
 function setup(options: { mode?: "stream" | "dht"; pollMs?: number | null; state?: DhtDeliveryState; bobCredentials?: PairingCredentials;
-  capsRev?: number; peerCapsRev?: (rev: number) => void; peerAcceptsText?: () => boolean } = {}) {
+  capsRev?: number; peerCapsRev?: (rev: number) => void; peerAcceptsText?: () => boolean; peerDhtPollMs?: number } = {}) {
   const link = createLink();
   const alice = identityFromSeedB64(createIdentity().seedB64), bobSeed = createIdentity().seedB64;
   const bobParticipation = identityFromSeedB64(bobSeed);
@@ -55,6 +55,7 @@ function setup(options: { mode?: "stream" | "dht"; pollMs?: number | null; state
     save: async state => { if (failSave) throw new Error("disk full"); saved.push(structuredClone(state)); }, pin: async key => { pins.push(key); },
     message: async m => { messages.push(m); }, receipt: async id => { receipts.push(id); }, changed: view => { views.push(view); },
     capsRev: () => options.capsRev, peerCapsRev: options.peerCapsRev, peerAcceptsText: options.peerAcceptsText,
+    ...(options.peerDhtPollMs && { peerDhtPollMs: options.peerDhtPollMs }),
     ...(options.pollMs === null ? {} : { pollMs: options.pollMs ?? 100 }) });
 
   type Body = unknown[];
@@ -643,6 +644,21 @@ describe("DHT delivery: sending and lifecycle", () => {
     await vi.advanceTimersByTimeAsync(1_010);
     expect(stream.transport.resolve).toHaveBeenCalledTimes(2);
     await stream.bob.stop();
+  });
+
+  it("where every chat is open (a daemon), reads a contact that chose DHT only at the open chat's pace, and no other chat faster", async () => {
+    const readsAMinute = async (peerMode: "dht" | "stream", peerDhtPollMs?: number) => {
+      const h = setup({ pollMs: null, mode: "stream", state: { ...emptyDhtDeliveryState(), peerMode }, bobCredentials: pinned(), peerDhtPollMs });
+      await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
+      const first = h.transport.resolve.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(60_000 + 10);
+      const reads = (h.transport.resolve.mock.calls as unknown[][]).slice(first);
+      await h.bob.stop();
+      return { reads: reads.length, background: reads.filter(([, o]) => (o as { background?: boolean } | undefined)?.background).length };
+    };
+    expect(await readsAMinute("dht", ACTIVE_DHT_POLL_MS), "6 a minute, as the chat open, and none as background").toEqual({ reads: 6, background: 0 });
+    expect(await readsAMinute("dht"), "an app with the chat in the background: 30 s").toMatchObject({ reads: 2 });
+    expect(await readsAMinute("stream", ACTIVE_DHT_POLL_MS), "a contact on a live method: 30 s still").toMatchObject({ reads: 2 });
   });
 
   it("announces a change of method at once, however recently it last published", async () => {

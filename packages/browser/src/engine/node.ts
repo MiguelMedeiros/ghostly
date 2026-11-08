@@ -30,6 +30,7 @@ import { FILE_LIMITS, GROUP_FILE_LIMITS, formatFileSize, groupFileFallback, read
 import { IdentityProofs } from './identities';
 import { X401Credentials } from './x401';
 import { setOwnDidSource } from '../proofs/ownDid';
+import { setPkarrRelaySource } from '../proofs/pkarrRelays';
 import { ProfileDid } from './did';
 import { ContactLinks } from './contactLinks';
 import { ContactAsks } from './contactAsks';
@@ -728,6 +729,11 @@ export interface NodeOptions {
   staysOnline?: boolean;
   /** How long a chat reads a contact that left a live session no slower than the idle pace (GhostLink `watchPeerIdleMs`): the CLI's daemon, `DAEMON_WATCH_PEER_IDLE_MS`. */
   watchPeerIdleMs?: number;
+  /**
+   * How often a chat reads a contact that chose DHT only, on screen or not (GhostLink `dht.peerDhtPollMs`): the CLI's
+   * daemon, where every chat is open, `ACTIVE_DHT_POLL_MS`. Absent: at the background pace off screen.
+   */
+  peerDhtPollMs?: number;
   /**
    * Tests only: group links behave as before they could go native (WISP 902 § Transports): WebRTC alone, no `_tr` read
    * or published, no native endpoint. A compatibility test runs this app as one from before against a current one.
@@ -2233,6 +2239,8 @@ export class GhostlyNode implements EngineImplementation {
     await this.did.load();
     // The DID provider refuses this profile's own did:dht as an external identity.
     setOwnDidSource(() => this.did.id);
+    // A contact's did:dht is read from this profile's Pkarr relays, as every other Pkarr read.
+    setPkarrRelaySource(() => this.settings.relays);
     this.did.start();
     await this.contactLinks.load();
     this.contactLinks.start();
@@ -2279,6 +2287,8 @@ export class GhostlyNode implements EngineImplementation {
       this.links.get(stored.id)!.waitingSends = Promise.resolve(new Set(messages.filter(waitsForLive).map(m => m.id)));
       // So are the cards due to go again: a session that opens reads no history for them when there are none.
       this.links.get(stored.id)!.cardsDue = Promise.resolve(new Set(messages.filter(cardDue).map(m => m.id)));
+      // And my edits and removals on their way: the session that opens first reads those rows alone, not the history again.
+      this.editsFor(stored.id).learn([...messages, ...(stored.removals ?? []).map(r => removalRow(stored.id, r))]);
       this.links.get(stored.id)!.pkarrSeenAt = pkarrSeenAt(messages);
       // What the contact's clock was when the chat was last live: its first message of this run is read by it.
       for (const message of messages.slice(-4 * CLOCK_SAMPLES)) this.clockSample(message);
@@ -2821,7 +2831,7 @@ export class GhostlyNode implements EngineImplementation {
   appStoreRefresh(params: { key?: string } = {}): Promise<AppStoreSummary[]> { return this.appStore.refreshStores(params); }
   appPreview(params: AppSource): Promise<AppPreview> { return this.appStore.preview(params); }
   appInstall(params: { digest: string; grant: string[]; asks?: string[] }): Promise<InstalledAppView> { return this.appStore.install(params); }
-  appUpdateAccept(params: { ref: string }): Promise<InstalledAppView> { return this.appStore.acceptUpdate(params); }
+  appUpdateAccept(params: { ref: string; sequence?: number; added?: string[] }): Promise<InstalledAppView> { return this.appStore.acceptUpdate(params); }
   appCheckUpdates(): Promise<AppCheckResult[]> { return this.appStore.checkUpdates(); }
   /** Uninstalls an app. One running then is closed in every chat (the contact hears `close`), and the pages are told, to stop its frames. */
   async appUninstall(params: { ref: string }): Promise<void> {
@@ -3765,7 +3775,10 @@ export class GhostlyNode implements EngineImplementation {
     if (!trimmed) return { error: null };
 
     // Picked here (the CLI, a bot): past what just came, so an answer written in the same millisecond goes below it.
+    // Taken now, not when its row is stored: that counts a row of mine only up to the clock, so the next text sent in
+    // this millisecond took this same place, and the two went out and showed in either order.
     const timestamp = params.timestamp ?? arrivalKey(Date.now(), this.placedAt.get(linkId));
+    if (params.timestamp === undefined) this.placedAt.set(linkId, timestamp);
     // Sent: whatever this side was typing is done (the contact clears it on the message too).
     if (live.stored.profile) live.link?.setTyping(false);
     if (live.stored.profile) {
@@ -4110,7 +4123,8 @@ export class GhostlyNode implements EngineImplementation {
   private async applyPeerEditNow(linkId: string, message: StoredMessage, edit: WireEdit): Promise<void> {
     const updated = await db.patchMessage(linkId, message.id, current => {
       if (!takesPeerEdit(current, edit.m) || (current.edit?.seq ?? 0) >= edit.e) return null;
-      const next = withEdit(current, { seq: edit.e, at: heardTime(edit.ts), text: edit.m, preview: edit.pv, card: edit.sc });
+      const now = Date.now();
+      const next = withEdit(current, { seq: edit.e, at: heardTime(edit.ts, now), heardAt: now, text: edit.m, preview: edit.pv, card: edit.sc });
       return { text: next.text, edit: next.edit, preview: next.preview, card: next.card };
     });
     if (updated) await this.messagesChanged(linkId, [message.id]);
@@ -7113,9 +7127,10 @@ export class GhostlyNode implements EngineImplementation {
    * The active device's links to the other devices, and its stored turn record put again (WISP 06 § Publishing and
    * reading: "The active device puts its stored bytes at start"). This is also what completes an enrollment that a
    * crash stopped after the record with the new device was stored and before it was put. `justRead`: it starts on a good
-   * turn read made a moment before (the read at start, or limited mode's), which counts while it is fresh.
+   * turn read made a moment before (the read at start, or limited mode's), which counts while it is fresh. `added`: the
+   * signing key of a device an enrollment just added, whose link awaits it (`DeviceLinks.expectDevice`).
    */
-  private async startDeviceSet({ justRead = false }: { justRead?: boolean } = {}): Promise<void> {
+  private async startDeviceSet({ justRead = false, added }: { justRead?: boolean; added?: string } = {}): Promise<void> {
     // An enrollment that finished with the network off (past its point of no return): the links wait for it to come back.
     if (this.shuttingDown || !this.networkOn) return;
     // This device's signing key, as its record names it: whose the profile's push subscription is (WISP 06 § Push and the phone).
@@ -7131,9 +7146,13 @@ export class GhostlyNode implements EngineImplementation {
         pushSend: (request) => this.postPush(request),
         onActiveHint: () => void this.readActiveTurn().catch(() => {}),
       });
+      if (added) this.deviceLinks.expectDevice(added);
       await this.deviceLinks.start();
       await this.startHandoff().catch(() => {});
-    } else await this.deviceLinks.refresh();
+    } else {
+      if (added) this.deviceLinks.expectDevice(added);
+      await this.deviceLinks.refresh();
+    }
     // The profile's subscription is this device's own: the record holds it too, so a standby here can still share it.
     if (this.settings.wake?.device && this.settings.wake.device === this.ownDeviceKey) await this.deviceLinks.setOwnPush(this.settings.wake).catch(() => {});
     // This device has a subscription of its own and the profile gives contacts another device's (it came back active
@@ -7427,7 +7446,7 @@ export class GhostlyNode implements EngineImplementation {
       // The new standby reaches the other devices through the person's relays and servers (`devices/network.ts`).
       networkSettings: () => deviceNetworkOf(this.settings),
       // The record now lists the new device: the network settings go into it, and the links start.
-      afterWrite: async () => { await this.syncDeviceNetwork(); await this.startDeviceSet(); },
+      afterWrite: async (added) => { await this.syncDeviceNetwork(); await this.startDeviceSet({ added }); },
       // An enrollment that ended after its grant went out and before the new device said it stored it: that device
       // may hold the secret, so the set moves to a new one (once this enrollment is over). Any end tries it: one that
       // a second Add cancelled was refused while that one ran, and is due once it is over, done included.
@@ -8401,6 +8420,7 @@ export class GhostlyNode implements EngineImplementation {
       },
         // Started again: the first control envelope goes after the links' first packets (a text or a receipt at once).
         firstControlAfterMs: STARTUP_QUIET_MS,
+        ...(this.options.peerDhtPollMs ? { peerDhtPollMs: this.options.peerDhtPollMs } : {}),
         // The capability record's revision rides every envelope; a newer one from the contact is read (WISP 03).
         capsRev: () => live.caps?.rev, peerCapsRev: rev => live.caps?.peerRev(rev),
         // A contact whose record lacks dht-text/1 gets nothing on the DHT: what would go there waits for live.
@@ -9621,7 +9641,8 @@ export class GhostlyNode implements EngineImplementation {
    * of a group's history (a membership change, a rename) is not a message: it stays at its commit's time, but never
    * ahead of this clock nor above a row placed here since the app started. The admin's clock picks that time: two
    * minutes ahead, "X joined" sat under everything said in the next two minutes; behind, it went above what the
-   * members had just read. Read late with nothing newer here (a member back after a while), it keeps its moment.
+   * members had just read. Read late with nothing newer here (a member back after a while), it keeps its moment, and
+   * `heardAt` says when it came here.
    * `place`: a received row's place given already (`placeAbove`): it takes it, and the next row still goes past the last.
    */
   private placed(message: StoredMessage, place?: number): StoredMessage {
@@ -9630,7 +9651,7 @@ export class GhostlyNode implements EngineImplementation {
       if (message.sender !== "peer") return message;
       const timestamp = Math.max(Math.min(receivedTimestamp(message.timestamp, now), now), last + 1);
       this.placedAt.set(message.linkId, timestamp);
-      return { ...message, timestamp };
+      return { ...message, timestamp, heardAt: now };
     }
     if (message.sender === "peer" && message.sentAt === undefined) {
       const sentAt = claimedTime(message.timestamp);

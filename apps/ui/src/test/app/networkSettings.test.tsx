@@ -275,7 +275,7 @@ describe("Settings, Network: a refused field is said in the page's language, und
     await user.click(screen.getByTestId("network-save"));
     expect(engine.callsTo("updateSettings")).toEqual([]);
     // Not "Use a wss:// relay address" in an Arabic page.
-    expect(hyperdht).toHaveAccessibleDescription("استخدم wss:// في عنوان المرحّل");
+    expect(hyperdht).toHaveAccessibleDescription("استخدم \u2066wss://\u2069 في عنوان المرحّل");
     expect(push).toHaveAccessibleDescription("أزِل اسم المستخدم وكلمة المرور من العنوان");
     expect(marked()).toEqual(["network-hyperdht-relay", "network-push-relay"]);
     // The error sits right under the field that points at it.
@@ -314,7 +314,7 @@ describe("Settings, Network: a refused field is said in the page's language, und
     const url = screen.getByLabelText(arNetwork.turnUrl);
     await user.type(url, "https://turn.example.org");
     await user.click(screen.getByTestId("network-save"));
-    expect(url).toHaveAccessibleDescription("ليس عنوان TURN أو STUN (مثل turn:host:port): https://turn.example.org");
+    expect(url).toHaveAccessibleDescription("ليس عنوان TURN أو STUN (مثل \u2066turn:host:port\u2069): https://turn.example.org");
     expect(marked()).toEqual(["network-turn-url"]);
     expect(url).toHaveFocus();
     await user.clear(url);

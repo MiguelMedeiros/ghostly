@@ -13,7 +13,7 @@ import { Select } from "./ui/Select";
 import { NetworkTag, satsIn } from "./NetworkTag";
 import { useI18n } from "../contexts/I18nContext";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
-import { paymentIsTest, paymentTitle, railLine } from "./paymentWords";
+import { paymentIsTest, paymentTitle, railLine, storedPaymentLine } from "./paymentWords";
 import { formatAmount, formatTokenAmount } from "../lib/amount";
 import { useAmountText } from "../hooks/useAmountText";
 import { problemLine, problemText, type Problem } from "../lib/problemText";
@@ -37,7 +37,7 @@ function FeeCapInput({ label, value, onChange, decimals }: { label: string; valu
 }
 
 /** A payment or a payment request in the chat. The amounts are live: they follow what the wallet knows. */
-export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { paymentId: string; peerPubKey: string; fallbackText: string }) {
+export function PaymentBubble({ paymentId, peerPubKey, fallbackText, mine = false }: { paymentId: string; peerPubKey: string; fallbackText: string; mine?: boolean }) {
   const { t } = useI18n();
   // Drawn again when the wallets, this payment or the chat's ways of paying change, not on every engine state.
   const wallet = useWalletPlatform();
@@ -90,7 +90,8 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   }, [state]);
   const amountShown = useCountUp(celebrate ? (payment?.amount ?? 0) : 0, 650);
 
-  if (!wallet || !payment) return <span className="text-[14.2px] leading-[19px]">{fallbackText}</span>;
+  // The message's own line, said in the app's language, until the wallet is there (or once its record is gone).
+  if (!wallet || !payment) return <span className="text-[14.2px] leading-[19px]">{storedPaymentLine(t, fallbackText, mine)}</span>;
 
   const run = async (task: () => Promise<void>, key: NonNullable<typeof running>) => {
     if (busy) return;

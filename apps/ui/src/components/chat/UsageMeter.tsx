@@ -168,7 +168,7 @@ export function UsageButton({ entry }: { entry: UsageEntry }) {
   return (
     <span ref={ref} className="inline-flex shrink-0">
       <button ref={button} type="button" data-testid="chat-usage-open" aria-haspopup="dialog" aria-expanded={open} onClick={() => (open ? close() : setOpen(true))}
-        className="inline-flex rounded-full cursor-pointer hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent">
+        className="relative inline-flex rounded-full cursor-pointer hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent">
         <UsagePill entry={entry} testId="chat-usage" reset />
       </button>
       {open && <UsagePanel entry={entry} anchorRef={ref} onClose={close} />}

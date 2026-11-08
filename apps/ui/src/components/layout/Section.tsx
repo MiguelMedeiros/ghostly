@@ -83,7 +83,7 @@ function RowText({ label, hint, info, htmlFor, trailing }: { label: ReactNode; h
  * A field that takes the card's whole width (a list of relays, an address): the same label, hint and ⓘ as a
  * `Row`, `trailing` beside the label (a Reset), and the field under them.
  */
-export function Field({ label, hint, info, htmlFor, trailing, children, testId }: {
+export function Field({ label, hint, info, htmlFor, trailing, children, testId, id }: {
   label: ReactNode;
   hint?: ReactNode;
   info?: ReactNode;
@@ -92,9 +92,11 @@ export function Field({ label, hint, info, htmlFor, trailing, children, testId }
   trailing?: ReactNode;
   children: ReactNode;
   testId?: string;
+  /** The block's own id: a link can name it for the page to go to (Settings' `field`). */
+  id?: string;
 }) {
   return (
-    <div className="px-4 py-3.5 space-y-2.5 min-w-0" data-testid={testId}>
+    <div id={id} className="px-4 py-3.5 space-y-2.5 min-w-0 scroll-mt-2" data-testid={testId}>
       <RowText label={label} hint={hint} info={info} htmlFor={htmlFor} trailing={trailing} />
       {children}
     </div>

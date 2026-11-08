@@ -416,6 +416,36 @@ describe("the password proof and its limits", () => {
     await until(() => w.giver.view()?.failure === "password");
   });
 
+  it("Let <device> try again answers the wrong password it was offered for: the count starts again and the giver shows it no more", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(5_000));
+    await w.taker.pull("not the password");
+    await until(() => w.giver.view()?.failure === "password");
+    await w.giver.allowAgain(B);
+    expect(w.giverRecords.record.handoffAttempts?.[B]).toBeUndefined();
+    expect(w.giver.view()).toBeNull();
+  });
+
+  it("the giver's wrong password says the device is refused only at the fifteenth: not at the first, nor once it is locked out", async () => {
+    // WISP 06 § Authorizing a handoff, Attempts: "Let <device> try again" is for a refused device, never earlier.
+    const wrong = async (before: { recent: number[]; total: number } | undefined) => {
+      const w = world();
+      if (before) await w.giverRecords.amend({ handoffAttempts: { [B]: before } });
+      await w.taker.pull("not the password");
+      await until(() => w.giver.view()?.failure === "password");
+      return { view: w.giver.view(), attempts: w.giverRecords.record.handoffAttempts?.[B] };
+    };
+    const first = await wrong(undefined);
+    expect(first.attempts?.total).toBe(1);
+    expect(first.view?.refused).toBeUndefined();
+    const fifth = await wrong({ recent: Array(HANDOFF_ATTEMPTS.perHour - 1).fill(Date.now()), total: HANDOFF_ATTEMPTS.perHour - 1 });
+    expect(fifth.attempts?.until).toBeGreaterThan(Date.now());
+    expect(fifth.view?.refused).toBeUndefined();
+    const fifteenth = await wrong({ recent: [], total: HANDOFF_ATTEMPTS.total - 1 });
+    expect(fifteenth.attempts?.total).toBe(HANDOFF_ATTEMPTS.total);
+    expect(fifteenth.view).toMatchObject({ failure: "password", refused: true });
+  });
+
   it("five wrong in an hour lock the device out with a retry time; a right one after the hour starts the count again", { timeout: 30_000 }, async () => {
     const w = world();
     for (let i = 0; i < HANDOFF_ATTEMPTS.perHour; i++) {
@@ -483,6 +513,23 @@ describe("the password proof and its limits", () => {
     await until(() => w.taker.view()?.failure === "refused");
     await w.giver.allowAgain(B);
     expect(w.giverRecords.record.handoffAttempts?.[B]).toBeUndefined();
+    w.profile.add("f1", bytesOf(100));
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1);
+  });
+
+  it("a device refused before this giver started (the app restarted since, or the profile moved here) asks again: Let <device> try again is offered", { timeout: 30_000 }, async () => {
+    // The offer was only on the wrong password that left the device refused, kept in memory: after a restart, the refused
+    // device's every ask was turned away with nothing on this screen, and nothing else lets it try again.
+    const w = world();
+    await w.giverRecords.amend({ handoffAttempts: { [B]: { recent: [], total: HANDOFF_ATTEMPTS.total } } });
+    expect(w.giver.view()).toBeNull();
+    await w.taker.pull(PASSWORD);
+    await until(() => w.taker.view()?.failure === "refused");
+    await until(() => w.giver.view() !== null);
+    expect(w.giver.view()).toMatchObject({ role: "giver", key: B, step: "failed", failure: "password", refused: true });
+    await w.giver.allowAgain(B);
+    expect(w.giver.view()).toBeNull();
     w.profile.add("f1", bytesOf(100));
     await w.taker.pull(PASSWORD);
     await until(() => w.quiesced.length === 1);

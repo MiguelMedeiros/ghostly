@@ -51,6 +51,12 @@ describe("GroupChat: what the header says", () => {
     expect(screen.getByTestId("group-members").className.split(/\s+/)).toContain("max-md:min-h-6");
   });
 
+  it("makes ⋮ and the connection button 44 px on a phone, as the chat header's and the group's own Back", () => {
+    // They were 38 px (`max-md:p-2.5` around an 18 px icon) beside the 44 px Back.
+    openGroup(active());
+    for (const id of ["group-options", "group-connection-options"]) expect(screen.getByTestId(id)).toHaveClass("max-md:h-11", "max-md:w-11", "max-md:p-0");
+  });
+
   it("names a group that has no name", () => {
     openGroup(active({ name: "", members: [members[0]] }));
     expect(screen.getByTestId("group-name")).toHaveTextContent("A group");
@@ -59,6 +65,15 @@ describe("GroupChat: what the header says", () => {
 
   it("with nobody else in it (just created, or everyone left), counts the members and no reachability", () => {
     openGroup(active({ members: [members[0]] }));
+    expect(screen.getByTestId("group-members").textContent).toBe("1 member");
+  });
+
+  it("a community with nobody else in it says neither connecting nor relaying, as its connection icon says only you", () => {
+    // Its app is not a hub yet (its first beacon read, or the relays down): it said "connecting…" for as long as that lasted.
+    openGroup(active({ profile: "community", members: [members[0]], community: { hub: false, hubs: 0, connected: 0 } }));
+    expect(screen.getByTestId("group-members").textContent).toBe("1 member");
+    // A hub, alone: it relays for nobody.
+    act(() => fakeEngine.update({ groups: [active({ profile: "community", members: [members[0]], community: { hub: true, hubs: 1, connected: 0 } })] }));
     expect(screen.getByTestId("group-members").textContent).toBe("1 member");
   });
 

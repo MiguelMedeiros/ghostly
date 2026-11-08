@@ -19,7 +19,7 @@ export function TransportLine({ entry, contact, earlier = [] }: { entry: Transpo
     // Not part of the conversation: a run of voice messages goes on past it (lib/voicePlayback.ts).
     <div className="mb-3.5 flex flex-col items-center message-row-x" data-testid="transport-line" data-kind={entry.kind} data-voice-passes>
       <button type="button" aria-expanded={open} aria-controls={`${id}-details`} onClick={() => setOpen(!open)}
-        className={`inline-flex max-w-full items-center gap-1.5 rounded-lg px-3 py-1.5 text-start text-xs transition-colors ${warn ? "bg-surface-alt/80 text-text-muted" : "bg-surface-alt/80 text-text-secondary"} hover:bg-surface-hover ${focus}`}>
+        className={`tap-target inline-flex max-w-full items-center gap-1.5 rounded-lg px-3 py-1.5 text-start text-xs transition-colors ${warn ? "bg-surface-alt/80 text-text-muted" : "bg-surface-alt/80 text-text-secondary"} hover:bg-surface-hover ${focus}`}>
         <TransportLineIcon entry={entry} />
         <span className="min-w-0 break-words" data-testid="transport-line-text">{transportLineText(entry, contact, t)}</span>
         {earlier.length > 0 && <span className="shrink-0 text-[10px] text-text-muted" data-testid="transport-line-earlier-count"
@@ -69,7 +69,7 @@ export function ConnectionHistory({ events, contact }: { events: readonly Transp
     : formatAt(at, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }, language);
   return (
     <details className="mt-2 border-t border-border pt-1 text-[11px]" data-testid="connection-history">
-      <summary className={`w-fit cursor-pointer rounded-md py-2 pr-2 text-text-secondary ${focus}`}>{t("connection.history.title", { count: events.length })}</summary>
+      <summary className={`w-fit cursor-pointer rounded-md py-2 pe-2 text-text-secondary ${focus}`}>{t("connection.history.title", { count: events.length })}</summary>
       <ol className="space-y-1 pb-2" aria-label={t("connection.history.list")}>
         {shown.map((e, i) => (
           <li key={`${e.at}-${i}`} className="grid grid-cols-[auto_1fr] gap-x-2" data-testid="connection-history-event" data-kind={e.kind}>

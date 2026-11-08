@@ -548,6 +548,25 @@ describe("choosing several", () => {
     expect(screen.queryByTestId("select-bar")).toBeNull();
   });
 
+  // A <dialog> opened over the chat while messages were chosen (Delete chat from the header's ⋮): the browser closes it
+  // on the Escape's default action, which the choice's own listener cancelled. The first Escape ended the choice behind
+  // and left the dialog open.
+  it("an Escape in a dialog over the chat is the dialog's: the choice stays, and the key is not cancelled", async () => {
+    const { user } = renderApp(<Timeline messages={messages} />);
+    await user.click(screen.getAllByTestId("message-options")[0]!);
+    await user.click(screen.getByTestId("message-select-start"));
+    const dialog = document.createElement("dialog");
+    document.body.append(dialog);
+    dialog.setAttribute("open", "");
+    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    act(() => { dialog.dispatchEvent(escape); });
+    expect(escape.defaultPrevented).toBe(false);
+    expect(screen.getByTestId("select-bar")).toBeInTheDocument();
+    dialog.remove();
+    act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true })); });
+    expect(screen.queryByTestId("select-bar")).toBeNull();
+  });
+
   /** The chat's column as the pages lay it out: the list, the bar, and the composer, kept but hidden while messages are chosen. */
   function Column({ disabled = false }: { disabled?: boolean }) {
     const forwarding = useForwarding("link-bo", messages);

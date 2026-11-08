@@ -26,6 +26,7 @@ import { APP_SERVE_METHODS } from "./appServe";
 import { APP_CHAT_METHODS } from "./appChat";
 import { WALLET_METHODS } from "./wallets";
 import { TRANSPORT_NAMES } from "./words";
+import { chatState } from "./waitNotice";
 import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, isLive, messageJson, type MessageJson } from "./views";
 
 /**
@@ -94,7 +95,8 @@ const CHAT_NAME_LENGTH = 48;
  * A chat's name on this side (`chat rename`, an invite's `--label`), as the engine stores it (`cleanName`): a tab or a
  * line break is a space, invisible characters go, and what is left is counted. Longer than the engine keeps whole is
  * refused, not cut. An empty name (or spaces) is the documented one of `chat rename` (the contact's own name) and no
- * label for an invite; a name with nothing that shows is refused: given as is, the engine cleared the chat's name.
+ * label for an invite; a name with nothing that shows is refused: given as is, the engine cleared the chat's name. A
+ * name starting with `group:` is refused: `group:<ref>` names a group in every command (`groupPrefixed`).
  */
 function chatName(params: Params, name: string): string | undefined {
   const value = str(params, name);
@@ -102,6 +104,7 @@ function chatName(params: Params, name: string): string | undefined {
   const clean = cleanName(value, CHAT_NAME_LENGTH);
   if (clean === undefined) throw new CliError("bad_request", `A chat's name is up to ${CHAT_NAME_LENGTH} characters on one line`);
   if (!clean) throw new CliError("bad_request", `A chat's name needs a character that shows (an empty name gives back the contact's own)`);
+  if (groupPrefixed(clean) !== null) throw new CliError("bad_request", `A chat's name can't start with "group:": that names a group`);
   return clean;
 }
 
@@ -173,6 +176,19 @@ function showUntilPaired(ctx: ApiContext, linkId: string): void {
   timer.unref?.();
   const off = ctx.hub.onState((s) => { if (done(s)) hide(); });
   inviteShown.set(ctx, stop);
+}
+
+/**
+ * `invite create`'s `reason` when no relay took the invite. The engine's words ("Publish failed on every relay: Error:
+ * http://… did not answer a moment ago; retry shortly; Error: …") read as the CLI failing, a class name per relay, beside
+ * a `note` that says the invite is good: the relays are named, and nothing is asked of whoever reads it.
+ */
+function inviteNotOut(detail: string): string {
+  if (!detail.startsWith("Publish failed on every relay:")) return detail;
+  const hosts = [...new Set([...detail.matchAll(/\bhttps?:\/\/[^\s;,]+/g)].map(([url]) => URL.canParse(url) ? new URL(url).host : url))];
+  const named = hosts.length ? ` (${hosts.join(", ")})` : "";
+  // A relay that answered with an error status took the request: "did not answer" would not be true of it.
+  return `${/ responded \d{3}\b/.test(detail) ? "No relay took the invite" : "No relay answered"}${named}: it goes out once one does`;
 }
 
 /** V8's words for reading what a value does not have: an `engine.call` given a parameter of the wrong kind. */
@@ -281,7 +297,7 @@ const METHODS: Record<string, Method> = {
     return {
       ...answer,
       ...(waitUntil !== undefined && { retryInMs: Math.max(0, waitUntil - Date.now()) }),
-      ...(progress?.detail && { reason: progress.detail }),
+      ...(progress?.detail && { reason: inviteNotOut(progress.detail) }),
       note: "The invite is good: it goes out by itself once a relay answers, while a daemon runs for this profile",
     };
   },
@@ -603,12 +619,13 @@ const METHODS: Record<string, Method> = {
     const view = await waitForState(ctx, (s) => {
       const now = s.links.find((l) => l.id === link.id);
       if (!now) throw new CliError("not_found", `Chat ${link.id} was removed`);
-      // Live: a session that exists now, never one remembered from the last run (`isLive`).
+      // Live: a session that exists now, never one remembered from the last run (`isLive`). Paired: the contact's key
+      // kept (`peerParticipationKey`) is a fact of the chat, whether the contact is online now or not.
       const ok = until === "live" ? isLive(now)
         : until === "text" ? now.textDelivery === "stream" || now.textDelivery === "dht" || now.textDelivery === "hold"
-        : !!now.pairingProgress?.peerSeen || now.pairing?.status === "ready" || isLive(now);
+        : !!now.peerParticipationKey || !!now.pairingProgress?.peerSeen || now.pairing?.status === "ready" || isLive(now);
       return ok ? now : undefined;
-    }, ms, `chat ${link.id} to be ${until}`);
+    }, ms, `chat ${link.id} ${chatState(until).to}`);
     return chatJson(view);
   },
 
@@ -974,9 +991,13 @@ async function connectWithin(ctx: ApiContext, link: LinkView, ms: number): Promi
 async function saveMark(ctx: ApiContext, params: Params, remove: boolean) {
   const target = chatOrGroup(ctx, str(params, "chat", true)), messageId = str(params, "message", true);
   const result = await node(ctx).saveMessage({ linkId: target.linkId, messageId, remove });
-  // An unsave whose id names neither a saved message nor one of the chat's (a typo): said, with where the ids are.
-  if (result.error && remove && /not in this chat/.test(result.error)) throw new CliError("not_found", `No saved message ${JSON.stringify(messageId)} in this chat (ghostly saved list shows the saved ones)`);
-  if (result.error) throw new CliError(/not in this chat/.test(result.error) ? "not_found" : "bad_request", result.error);
+  // An id that names no message of the chat or group (a typo): said as pin and message details say it, in a group too
+  // (the engine's line says "chat"); an unsave's with where the saved ids are.
+  const where = target.group ? "group" : "chat";
+  if (result.error && /not in this chat/.test(result.error)) {
+    throw new CliError("not_found", remove ? `No saved message ${JSON.stringify(messageId)} in this ${where} (ghostly saved list shows the saved ones)` : `No message ${JSON.stringify(messageId)} in this ${where}`);
+  }
+  if (result.error) throw new CliError("bad_request", result.error);
   return { [target.group ? "group" : "chat"]: target.id, messageId, saved: !remove };
 }
 

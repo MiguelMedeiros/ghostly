@@ -352,7 +352,7 @@
   },
   "lightning": {
     "alreadyPaid": "هذه الفاتورة مدفوعة من قبل",
-    "breezNotEnough": "لا توجد sats كافية في محفظة Breez ‏({{have}}؛ المطلوب {{need}})",
+    "breezNotEnough": "لا توجد sats كافية في محفظة Breez \u200f({{have}}؛ المطلوب {{need}})",
     "browserDidNotPay": "لم تدفع محفظة المتصفح",
     "browserNotEnough": "لا يوجد ما يكفي في محفظة المتصفح ({{amount}} sats)",
     "canceled": "أُلغيت الدفعة",
@@ -393,7 +393,7 @@
     "invoiceExpired": "انتهت صلاحية الفاتورة التي أرسلتها الخدمة",
     "noInvoice": "لم يُجب {{domain}} بفاتورة",
     "noJson": "لم يُجب {{host}} بصيغة JSON",
-    "noJsonStatus": "لم يُجب {{host}} بصيغة JSON ‏(HTTP {{status}})",
+    "noJsonStatus": "لم يُجب {{host}} بصيغة JSON \u200f(HTTP {{status}})",
     "noNetwork": "لا توجد طريقة للوصول إلى الشبكة هنا",
     "noPayRequest": "لم يُجب {{domain}} بطلب دفع",
     "refused": "رفض {{host}} الطلب",
@@ -489,6 +489,8 @@
     "noRoom": "لا مساحة لهذه النسخة الاحتياطية",
     "noRoomNext": "حرّر بعض المساحة ثم حاول مجددًا.",
     "notABackup": "لا تحتوي هذه النسخة الاحتياطية على ملف شخصي",
+    "notDeleted": "تعذّر حذف بيانات هذا الملف الشخصي",
+    "notDeletedNext": "لم يُحذف شيء. حاول مجددًا.",
     "notGhostlyBackup": "هذه ليست نسخة احتياطية من Ghostly. اختر ملف .ghostly-backup.",
     "openElsewhere": "هذا الملف الشخصي مفتوح في نافذة أخرى. أغلقها، ثم حاول مجددًا.",
     "shortPassphrase": "استخدم 12 حرفاً على الأقل لعبارة مرور النسخة الاحتياطية.",
@@ -508,7 +510,7 @@
     "btcSingleKey": "يتحقق Ghostly من إثباتات العناوين ذات المفتاح الواحد فقط (bc1q…، bc1p…، 3…، 1…)، لا عناوين التوقيع المتعدد أو السكربت",
     "didAlone": "أدخل الـ DID وحده، دون #جزء أو ?استعلام أو /مسار",
     "didDhtLength": "معرّف did:dht من 52 حرفًا بترميز z-base-32",
-    "didEnter": "أدخل DID، مثل did:key:z6Mk… أو did:web:example.com",
+    "didEnter": "أدخل DID، مثل \u2066did:key:z6Mk…\u2069 أو \u2066did:web:example.com\u2069",
     "didJwkNone": "هذا الـ did:jwk لا يحتوي على JSON Web Key",
     "didJwkPrivate": "هذا الـ did:jwk يحتوي على مفتاح خاص",
     "didJwkPrivateNext": "لا تشاركه أبدًا: أنشئ مفتاحًا جديدًا.",
@@ -516,7 +518,7 @@
     "didKeyUnknown": "هذا الـ did:key ليس مفتاح Ed25519 أو secp256k1 أو P-256 يستطيع Ghostly قراءته",
     "didKeyX25519": "هذا الـ did:key مفتاح تشفير X25519: لا يمكنه التوقيع",
     "didLowercase": "اكتب الطريقة بأحرف صغيرة: {{example}}",
-    "didNotDid": "هذا ليس DID: شكله did:<method>:<identifier>",
+    "didNotDid": "هذا ليس DID: شكله \u2066did:<method>:<identifier>\u2069",
     "didSpecial": "لا يحتوي الـ DID على مسافات أو رموز خاصة أخرى",
     "didTooLong": "هذا الـ DID طويل جدًا (بحد أقصى {{max}} حرفًا)",
     "didUnsupported": "did:{{method}} غير مدعوم بعد. يتحقق Ghostly من {{list}}.",
@@ -598,14 +600,14 @@
   },
   "relays": {
     "atLeastOne": "أدخل عنوان مرحّل واحدًا على الأقل",
-    "enterAddress": "أدخل عنوان مرحّل ({{example}}…)",
+    "enterAddress": "أدخل عنوان مرحّل (\u2066{{example}}…\u2069)",
     "irohAtMost": "استخدم خمسة مرحّلات Iroh على الأكثر",
     "noLogin": "أزِل اسم المستخدم وكلمة المرور من العنوان",
     "noneAnswered": "لم تستجب المرحّلات",
     "noneAnsweredNext": "تحقّق من اتصالك، ثم أعد المحاولة.",
     "notAddress": "ليس عنوان مرحّل: {{address}}",
-    "useHttps": "استخدم https:// في عنوان المرحّل: {{address}}",
-    "useWss": "استخدم wss:// في عنوان المرحّل"
+    "useHttps": "استخدم \u2066https://\u2069 في عنوان المرحّل: {{address}}",
+    "useWss": "استخدم \u2066wss://\u2069 في عنوان المرحّل"
   },
   "services": {
     "addressNext": "استخدم عنوانًا على هذا الكمبيوتر، مثل localhost:3400.",
@@ -673,7 +675,7 @@
   "turn": {
     "enterAddress": "أدخل عنوان خادم TURN",
     "needsLogin": "يحتاج خادم TURN إلى اسم المستخدم وبيانات الاعتماد",
-    "notAddress": "ليس عنوان TURN أو STUN (مثل turn:host:port): {{address}}"
+    "notAddress": "ليس عنوان TURN أو STUN (مثل \u2066turn:host:port\u2069): {{address}}"
   },
   "verify": {
     "closed": "أُغلق الاتصال",
@@ -719,7 +721,7 @@
       "recoverable": "القابل للاسترداد",
       "sync": "المزامنة"
     },
-    "pasteInvite": "الصق رمز دعوة الاتحاد (fed11…)",
+    "pasteInvite": "الصق رمز دعوة الاتحاد (\u2066fed11…\u2069)",
     "readFailedArk": "تعذّرت قراءة {{parts}} من مزوّد Ark",
     "readFailedBark": "تعذّرت قراءة {{parts}} من خادم Bark",
     "readFailedNext": "قد تكون القيم المعروضة قديمة.",

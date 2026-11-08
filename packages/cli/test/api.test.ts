@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AWAITING_PEER_MS, OwnInviteError, type PairingProgress } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, findChat, findGroup, hideStateSecrets, mentionsFor, redactSettings, type ApiContext } from "../src/api";
-import { chatOrGroup, findChatOrGroup } from "../src/apiKit";
+import { chatOrGroup, findChatOrGroup, findOwnNamedChat } from "../src/apiKit";
 import { parseArgs } from "../src/args";
 import { COMMANDS } from "../src/commands";
 import { ENGINE_PARAMS } from "../src/engineMethods";
@@ -212,13 +212,41 @@ describe("chats", () => {
     // An ambiguous name stays what it is, from either side; group:<id> is a group only.
     expect(refused([link("chatA", { label: "Twin" }), link("chatB", { label: "Twin" })], "twin")).toMatchObject({ code: "bad_request", message: expect.stringMatching(/more than one chat/) });
     expect(() => findChatOrGroup([], [room, { ...room, id: "h".repeat(22) } as unknown as GroupView], "team room")).toThrow(/more than one group/);
-    expect(refused([asName], "group:zed")).toEqual({ code: "not_found", message: 'No group "zed" (ghostly group list)' });
+    expect(refused([asName], "group:zed")).toEqual({ code: "not_found", message: 'No group "group:zed" (ghostly group list)' });
     const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o";
     expect(refused([asName], KEY)).toMatchObject({ code: "not_found", message: `No chat with "${KEY}" (ghostly chat list)` });
     // The same bytes with the last character respelled: no key, and never a name (a contact calling itself that is not found by it).
     const respelled = KEY.slice(0, 51) + "t";
     expect(refused([link("chatMallory", { peerNick: respelled })], respelled)).toMatchObject({ code: "bad_request", message: expect.stringMatching(/not a contact key/) });
     expect(findChatOrGroup([asName], [room], "ggg")).toEqual({ group: room });
+  });
+
+  it("a ref shaped as a chat's id is that chat or none: never a contact's own name, a group's name or a group's prefix", () => {
+    // The id of a chat removed since, which its contact (and whoever saw its invite) knows.
+    const ID = "mkodukaftkmj9cf3";
+    const carol = link("jmc8f4ousct61qo8", { label: "c", peerNick: ID });
+    const refused = (links: LinkView[], groups: GroupView[], ref: string) => { try { findChatOrGroup(links, groups, ref); } catch (error) { return (error as { toJSON(): unknown }).toJSON(); } };
+    for (const ref of [ID, ID.toUpperCase(), ` ${ID}${String.fromCharCode(0x200b)}`]) {
+      expect(() => findChat([carol], ref), JSON.stringify(ref)).toThrow(expect.objectContaining({ code: "not_found", message: `No chat ${JSON.stringify(ref)} (ghostly chat list)` }));
+      expect(refused([carol], [], ref)).toMatchObject({ code: "not_found", message: `No chat ${JSON.stringify(ref)} (ghostly chat list)` });
+      expect(() => findOwnNamedChat([carol], ref)).toThrow(expect.objectContaining({ code: "not_found" }));
+    }
+    // Nor a group whose admin named it so, or whose id its creator made start so: `group:<ref>` names those.
+    const named = { ...group, id: "g".repeat(22), name: ID, status: "active" } as unknown as GroupView;
+    const prefixed = { ...group, id: `${ID}gggggg`, name: "Room", status: "active" } as unknown as GroupView;
+    expect(refused([], [named], ID)).toMatchObject({ code: "not_found", message: `No chat "${ID}" (ghostly chat list)` });
+    expect(refused([], [prefixed], ID)).toMatchObject({ code: "not_found" });
+    expect(findChatOrGroup([], [named], `group:${ID}`)).toEqual({ group: named });
+    // The chat with that id is that chat; a label given here still names one (only this side chose it).
+    const kept = link(ID, { label: "bob" });
+    expect(findChat([carol, kept], ID).id).toBe(ID);
+    expect(findChatOrGroup([carol, kept], [named], ID)).toEqual({ link: kept });
+    const labelled = link("jmc8f4ousct61qo8", { label: ID, peerNick: "Carol" });
+    expect(findChat([labelled], ID).id).toBe(labelled.id);
+    expect(findChatOrGroup([labelled], [named], ID)).toEqual({ link: labelled });
+    // A name of another length, or with a letter no id has (l, v, 0, 2), is a name as before.
+    expect(findChat([link("chatNick", { peerNick: "processingqueue" })], "processingqueue").id).toBe("chatNick");
+    expect(findChat([link("chatNick", { peerNick: "mkodukaftkmj9cf2" })], "mkodukaftkmj9cf2").id).toBe("chatNick");
   });
 
   it("an id prefix (the contact may choose it) never takes a label this side gave, nor a group's name", async () => {
@@ -294,7 +322,7 @@ describe("chats", () => {
     const refused = expect.objectContaining(refusal);
     expect(() => findGroup(groups, "k3x9q2")).toThrow(refused);
     expect(() => findChatOrGroup([], groups, "k3x9q2")).toThrow(refused);
-    expect(() => findChatOrGroup([], groups, "group:k3x9q2")).toThrow(refused);
+    expect(() => findChatOrGroup([], groups, "group:k3x9q2")).toThrow(expect.objectContaining({ ...refusal, message: '"group:k3x9q2" names more than one group: use its id' }));
     // Its id (as is, or group:<id>), a prefix only it fits, and a name only one group has still name it.
     expect(findGroup(groups, mine.id).id).toBe(mine.id);
     expect(findChatOrGroup([], groups, `group:${mine.id}`)).toEqual({ group: mine });
@@ -322,7 +350,7 @@ describe("chats", () => {
       expect(() => findGroup([crew], ref)).toThrow(expect.objectContaining({ code: "bad_request", message: `${JSON.stringify(ref)} names no group` }));
       expect(() => findChatOrGroup([bob], [crew], ref)).toThrow(expect.objectContaining({ code: "bad_request" }));
     }
-    expect(() => findChatOrGroup([bob], [crew], "group:")).toThrow(expect.objectContaining({ code: "bad_request", message: "\"\" names no group" }));
+    expect(() => findChatOrGroup([bob], [crew], "group:")).toThrow(expect.objectContaining({ code: "bad_request", message: "\"group:\" names no group" }));
     // What a daemon's caller (the API, not the command line) gets: forward never reaches the only chat or group.
     const node = { getState: () => ({ links: [bob], groups: [crew] }), getMessage: vi.fn(async () => msg("m1", 1)), sendMessage: vi.fn(), sendGroupMessage: vi.fn() };
     const ctx = { runtime: { server: { node } }, mode: "daemon" } as unknown as ApiContext;
@@ -354,15 +382,15 @@ describe("chats", () => {
     const list = await allowlist([], [`group:${team.id}`], call, async () => null);
     expect(await list.allows(event(team.id))).toBe(true);
     expect(await list.allows(event(other.id))).toBe(false);
-    // What names more than one group, or none, or a chat, is refused as without the prefix (the message names the ref after group:).
-    const both = { code: "bad_request", message: '"k3x9q2" names more than one group: use its id', details: { matches: [team.id, other.id] } };
+    // What names more than one group, or none, or a chat, is refused as without the prefix (the message echoes the ref as given).
+    const both = { code: "bad_request", message: '"group:k3x9q2" names more than one group: use its id', details: { matches: [team.id, other.id] } };
     await expect(call("group.get", { group: "group:k3x9q2" })).rejects.toMatchObject(both);
     await expect(allowlist([], ["group:k3x9q2"], call, async () => null)).rejects.toMatchObject(both);
-    await expect(call("group.get", { group: "group:zed" })).rejects.toMatchObject({ code: "not_found", message: 'No group "zed" (ghostly group list)' });
+    await expect(call("group.get", { group: "group:zed" })).rejects.toMatchObject({ code: "not_found", message: 'No group "group:zed" (ghostly group list)' });
     // group:<a chat> is no group: never that chat (without the prefix, the chat's name says it is a chat).
-    for (const ref of [chat.id, "desk"]) await expect(call("group.get", { group: `group:${ref}` })).rejects.toMatchObject({ code: "not_found", message: `No group ${JSON.stringify(ref)} (ghostly group list)` });
+    for (const ref of [chat.id, "desk"]) await expect(call("group.get", { group: `group:${ref}` })).rejects.toMatchObject({ code: "not_found", message: `No group ${JSON.stringify(`group:${ref}`)} (ghostly group list)` });
     await expect(call("group.get", { group: "desk" })).rejects.toMatchObject({ code: "not_found", details: { chat: chat.id } });
-    await expect(call("group.get", { group: "group:" })).rejects.toMatchObject({ code: "bad_request", message: '"" names no group' });
+    await expect(call("group.get", { group: "group:" })).rejects.toMatchObject({ code: "bad_request", message: '"group:" names no group' });
   });
 
   it("a command that takes a chat or a group names both when neither has the name", async () => {
@@ -766,17 +794,36 @@ describe("chat wait", () => {
     expect(await callApi(ctx, "status", {})).toMatchObject({ chats: 1, live: 0 });
   });
 
-  it("--until text takes the DHT floor or a hold, and --until paired the contact seen or a session, not the last run's", async () => {
+  it("--until text takes the DHT floor or a hold, and --until paired the contact seen or a session", async () => {
     const { ctx, set } = moving(remembered({ textDelivery: "unavailable" }));
     await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "text", timeout: 1 })).rejects.toMatchObject({ code: "timeout" });
     set(remembered({ textDelivery: "dht" }));
     expect(await callApi(ctx, "chat.wait", { chat: "Alice", until: "text", timeout: 1 })).toMatchObject({ live: false, text: "dht" });
-    set(remembered({ textDelivery: "stream" }));
+    // An invite nobody took yet: no contact's key, nothing to answer.
+    const invite = { inviteCode: "ghostly1-code", peerParticipationKey: undefined, transportHistory: undefined } as Partial<LinkView>;
+    set(remembered({ ...invite, textDelivery: "unavailable" }));
     await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "paired", timeout: 1 })).rejects.toMatchObject({ code: "timeout" });
-    set(remembered({ pairingProgress: { stage: "waiting", peerSeen: true } } as Partial<LinkView>));
+    set(remembered({ ...invite, pairingProgress: { stage: "waiting", peerSeen: true } } as Partial<LinkView>));
     expect(await callApi(ctx, "chat.wait", { chat: "Alice", until: "paired", timeout: 1 })).toMatchObject({ live: false });
     set(remembered(session));
     expect(await callApi(ctx, "chat.wait", { chat: "Alice", until: "paired", timeout: 1 })).toMatchObject({ live: true });
+  });
+
+  it("--until paired answers at once for a chat paired before, while its contact is away; --until live still waits", async () => {
+    // Paired long ago (the contact's key kept), the contact's daemon stopped: the pairing reads `connecting` again,
+    // with no pairing in progress, and texts go on the DHT. Paired is a fact of the chat, not of the contact being online.
+    const { ctx } = moving(remembered({ textDelivery: "dht" }));
+    const from = Date.now();
+    expect(await callApi(ctx, "chat.wait", { chat: "Alice", until: "paired", timeout: 5 })).toMatchObject({ id: "chat-one", live: false, text: "dht" });
+    expect(Date.now() - from).toBeLessThan(1000);
+    await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "live", timeout: 1 })).rejects.toMatchObject({ code: "timeout" });
+  });
+
+  it("a timeout names the state in words that read: text is carried, not been", async () => {
+    // It read "waiting for chat chat-one to be text".
+    const { ctx } = moving(remembered({ textDelivery: "unavailable" }));
+    await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "text", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat chat-one to carry text" });
+    await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "live", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat chat-one to be live" });
   });
 
   it("a chat removed while it is waited for answers not_found at once, not a timeout at the end", async () => {
@@ -835,9 +882,22 @@ describe("invite create", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(failed.answer()).toEqual({
       chat: "inv1", invite: "ghostly1abc", link: expect.stringContaining("ghostly1abc"), published: false,
-      reason: "Publish failed on every relay: Error: https://a.test did not answer a moment ago; retry shortly",
+      reason: "No relay answered (a.test): it goes out once one does",
       note: "The invite is good: it goes out by itself once a relay answers, while a daemon runs for this profile",
     });
+  });
+
+  /** The engine's words read "Publish failed on every relay: Error: … retry shortly": a class name per relay, beside a note that says the invite is good. */
+  it.each([
+    ["one relay", "Publish failed on every relay: Error: http://127.0.0.1:9 did not answer", "No relay answered (127.0.0.1:9): it goes out once one does"],
+    ["two relays", "Publish failed on every relay: Error: http://127.0.0.1:9 did not answer a moment ago; retry shortly; Error: http://127.0.0.1:7 did not answer a moment ago; retry shortly",
+      "No relay answered (127.0.0.1:9, 127.0.0.1:7): it goes out once one does"],
+    ["a relay that answered with an error", "Publish failed on every relay: Error: https://a.test responded 503; Error: https://b.test is left alone after failing; asked again in 12 s",
+      "No relay took the invite (a.test, b.test): it goes out once one does"],
+  ])("says plainly which relays did not take it: %s", async (_, detail, reason) => {
+    const failed = inviting("daemon", { stage: "failed", reason: "publish", retryable: true, detail });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(failed.answer()).toMatchObject({ published: false, reason });
   });
 
   it("a one-shot still waits for the invite to go out before it leaves, and says when it did not", async () => {

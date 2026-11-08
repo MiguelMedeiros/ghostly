@@ -456,6 +456,17 @@ export const FILE_METHODS: Record<string, Method> = {
     // full disk) leaves no file, and with --force the one it was to replace as it was. Before, --force emptied that file
     // as it opened it, and the failure removed it.
     const partial = join(dirname(target), `.ghostly-save-${process.pid}-${toBase64Url(randomBytes(6))}.partial`);
+    // That name is the save's own: never typed, new on every try, gone after. An error on it (a folder it may not write,
+    // a full disk) names `where` instead, the folder or the file asked for. Before, the answer and its `details.path`
+    // named the hidden file.
+    const asked = (error: unknown, where: string): unknown => {
+      const failed = error as NodeJS.ErrnoException;
+      if (failed instanceof Error && failed.path === partial) {
+        failed.path = where;
+        failed.message = failed.message.replaceAll(partial, where);
+      }
+      return error;
+    };
     let out: FileHandle | null;
     try { out = await open(partial, "wx", 0o600); } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
@@ -466,7 +477,8 @@ export const FILE_METHODS: Record<string, Method> = {
         if (!there) throw new CliError("not_found", `No such file or folder: ${folder}`);
         if (!there.isDirectory()) throw new CliError("not_found", `${folder} is a file, not a folder`);
       }
-      throw error;
+      // Not made at all: the folder refused it.
+      throw asked(error, dirname(target));
     }
     let written = 0, complete = false;
     try {
@@ -495,6 +507,8 @@ export const FILE_METHODS: Record<string, Method> = {
       }
       // A contact chose its bytes and its name (`.command`, `.lnk`): marked as downloaded. One sent from here needs none.
       if (stored.direction !== "out") await markDownloaded(target);
+    } catch (error) {
+      throw asked(error, target);
     } finally {
       await out?.close();
       await rm(partial, { force: true });

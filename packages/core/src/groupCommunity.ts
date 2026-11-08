@@ -952,11 +952,14 @@ export class CommunitySession {
    * it was in. What one who left wrote while in the group is taken and handed on, its goodbye included, up to what the
    * member who committed the leave had heard of it then (its `group-left` mark), never past it: the leaver still holds
    * those epochs' secrets, and anything it signs later is not heard (WISP 903 § Leaving and removal). No mark here
-   * (one not come yet, or a committer's app before it) and nothing of it is heard.
+   * (one not come yet, or a committer's app before it) and nothing of it is heard. A key let in only on a branch that
+   * lost is heard no more either, as one removed, once this member knows it lost.
    */
   private heardAfterOut(f: { s: string; e: number; h: string; n: number }): boolean {
     const i = this.outIndex(f.s);
-    if (i < 0) return true;
+    // Let in only on a branch that lost: in no roster anyone sees (`isRecentMember`), and heard no more, as one removed,
+    // whatever epoch of its branch it signs for (WISP 903 § A key no commit names).
+    if (i < 0) return rosterHas(this.roster, f.s) || this.isRecentMember(f.s) || !this.lostAt(f.s);
     const commit = this.state.chain[i];
     if (commit.k !== "leave") return false;
     const high = this.state.left?.[communityCommitHash(commit)]?.hi[seenKey(f.e, f.h)];
@@ -1299,6 +1302,10 @@ export class CommunitySession {
     if (this.state.status === "lost" && rosterHas(this.roster, this.myKey)) { this.state.status = "active"; delete this.state.statusReason; }
     this.followEntry();
     this.pruneSide();
+    // A held request goes once the branch I follow takes its member out (its leave or a removal), as committing it drops
+    // it on a hub: a member who never commits kept up to 64 for members long gone, and handed them on in every sync answer.
+    // One a lost fork drops is held again from the dropped commit (`holdDroppedLeaves`).
+    this.state.pendingLeaves = this.state.pendingLeaves.filter(r => rosterHas(this.roster, r.s));
     // Saved at once only when my place in the group changed (removed, left, lost, back in); otherwise within a second, as
     // messages are. Each commit of a catch-up saved the whole state: 1,000 commits were 1,051 whole-record writes, 241 MB
     // of journal on the CLI store (agents#1767). A save lost to a crash is asked again at the next sync: the commits are on
@@ -1470,7 +1477,8 @@ export class CommunitySession {
   get adminWork(): boolean { return this.hooks.adminWork?.() !== false; }
   private requireAdmin(): void { this.requireMember(); if (!this.isAdmin) throw new Error("Only the admin can do that"); }
 
-  private async commit(kind: CommunityKind, fields: { s?: string; x?: string; ls?: string; ls3?: string }, now: number): Promise<{ commit: CommunityCommit; hash: string; secret: Uint8Array }> {
+  /** `alongside`: what else the commit changes in the state, saved in the same write (only once the commit is signed). */
+  private async commit(kind: CommunityKind, fields: { s?: string; x?: string; ls?: string; ls3?: string }, now: number, alongside?: () => void): Promise<{ commit: CommunityCommit; hash: string; secret: Uint8Array }> {
     if (!this.adminWork) throw new Error(GROUP_ADMIN_OFF_ERROR);
     if (this.hooks.adminTurn && !(await this.hooks.adminTurn())) throw engineError("groupTurnUnconfirmed");
     if (this.state.chain.length >= COMMUNITY_LIMITS.chain) throw new Error("This group has reached its membership history limit. Create a new group.");
@@ -1497,6 +1505,7 @@ export class CommunitySession {
     this.state.secrets[hash] = toBase64Url(secret);
     this.state.seq = 0; this.state.seqH = hash;
     this.pruneSide();
+    alongside?.();
     await this.persist();
     this.hooks.broadcast({ t: "group-commit", v: 2, g: this.id, commit });
     // A key respelled in its last character could be pinned and added by a build before `MEMBER_KEY` was canonical, and
@@ -1620,9 +1629,8 @@ export class CommunitySession {
     return this.serialize(async () => {
       this.requireAdmin();
       const entry = off ? null : identityFromSeedB64(toBase64Url(randomBytes(32)));
-      await this.commit("link", { x: entry?.pubKeyZ32 ?? "" }, now);
-      this.state.entry = { key: entry?.pubKeyZ32 ?? "", seedB64: entry?.seedB64 ?? "" };
-      await this.persist();
+      // The new key is saved with the commit naming it: one write of the state (the chain, the secrets), not two.
+      await this.commit("link", { x: entry?.pubKeyZ32 ?? "" }, now, () => { this.state.entry = { key: entry?.pubKeyZ32 ?? "", seedB64: entry?.seedB64 ?? "" }; });
       // Every member can answer the new link: its seed, sealed to each. One agreement a member, ~1 ms in JavaScript: sealed
       // a slice at a time, so a page sharing the thread draws meanwhile (250 members held it 230 ms).
       if (entry) {
@@ -2417,9 +2425,13 @@ export class CommunitySession {
     if (!answered.take()) return;
     // Let in only on a branch that lost: the commits from where it parts up to the one that makes it lose, and nothing
     // else (no secret, no frame, no later link), as `farewell` tells one taken out. Its app then knows to ask again.
+    // A new link's commit is never among them: its `x` is the link. When it is what makes the branch lose, the answer
+    // stops before it, and the key is not told it lost.
     if (lost) {
       const at = this.mainIndex.get(frame.h);
-      const commits = this.state.chain.slice(at !== undefined ? at + 1 : lost.fork + 1, lost.end + 1);
+      let commits = this.state.chain.slice(at !== undefined ? at + 1 : lost.fork + 1, lost.end + 1);
+      const link = commits.findIndex(c => c.k === "link" && !!c.x);
+      if (link >= 0) commits = commits.slice(0, link);
       if (commits.length) this.answers.handOut(from, commits.map(commit => ({ t: "group-commit" as const, v: 2 as const, g: this.id, commit })));
       return;
     }
@@ -2497,8 +2509,8 @@ export class CommunitySession {
     if (unheard.size !== (this.state.unheard?.length ?? 0)) { this.state.unheard = [...unheard]; this.persistSoon(); }
     // The link's seed, so they can answer it too.
     if (rosterHas(this.roster, from)) { const entry = this.entryFrame(from); if (entry) answer.push(entry); }
-    // Pending leaves travel too, so whoever commits next can.
-    for (const request of this.state.pendingLeaves) answer.push({ t: "group-leave", v: 2, g: this.id, ...request });
+    // Pending leaves travel too, so whoever commits next can: those of members still in (a receiver drops the others).
+    for (const request of this.state.pendingLeaves) if (rosterHas(this.roster, request.s)) answer.push({ t: "group-leave", v: 2, g: this.id, ...request });
     // Or here, those after every message.
     answer.push(...metas.map(m => m.frame));
     // And where I am, so they can hand me what I lack (asked once in a while, not in a loop).

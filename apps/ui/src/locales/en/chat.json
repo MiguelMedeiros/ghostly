@@ -372,7 +372,7 @@
     "copied": "Copied",
     "copy": "Copy",
     "copyCode": "Copy code",
-    "hiddenChars": "This code holds hidden or direction-changing characters, shown as <U+…>. Copy code copies them too.",
+    "hiddenChars": "This code holds hidden or direction-changing characters, shown as {{marker}}. Copy code copies them too.",
     "localTime": "{{time}} your time",
     "showAll": "Show all",
     "showLess": "Show less",

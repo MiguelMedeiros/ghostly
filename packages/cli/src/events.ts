@@ -1,4 +1,4 @@
-import { appendFileSync, closeSync, existsSync, fstatSync, ftruncateSync, openSync, readFileSync, readSync, renameSync, rmSync, truncateSync, writeFileSync, writeSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, fstatSync, ftruncateSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, truncateSync, writeFileSync, writeSync } from "node:fs";
 import type { AppFrameEvent } from "@ghostly/core";
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { EngineEvent, RpcResponse } from "@ghostly/browser/shared/rpc";
@@ -14,6 +14,11 @@ export interface GhostlyEvent { seq: number; id: string; type: string; at: numbe
 
 /** Events the journal keeps for `listen --since`. */
 export const JOURNAL_KEEP = 10_000;
+/**
+ * Seqs reserved ahead in `<journal>.reserved` (`EventHub.reserve`): a new reservation is written when fewer than half
+ * of them are left, so the mark is rewritten once per 128 events, and a full disk that refuses it still leaves 128.
+ */
+export const SEQS_RESERVED = 256;
 /** Bytes the journal keeps at most: a contact's long texts never make it too large to read. */
 export const JOURNAL_KEEP_BYTES = 16 * 1024 * 1024;
 /** A journal past this is trimmed, and only this much of its end is ever read. */
@@ -27,8 +32,9 @@ const SEEN_DB = "ghostly-cli";
 const SEEN = "seen";
 
 /**
- * How long the seen set keeps the note of a settled message after its last activity (its arrival, its edit, a reaction):
- * older notes are dropped, and a message that came here longer ago with no note is no news. A daemon kept a note per
+ * How long the seen set keeps the note of a settled message after its last activity (its arrival, its edit, a reaction),
+ * each as this device's clock has it: older notes are dropped, and a message that came here longer ago with no note is
+ * no news. A daemon kept a note per
  * message of its whole history in memory, for as long as it ran.
  */
 export const SEEN_KEEP_MS = 30 * 86_400_000;
@@ -66,10 +72,27 @@ export class EventHub {
   private marked = false;
   /** Whether `dropped` is ahead of `<journal>.dropped` (a full disk refused it): the next event's write tries it again. */
   private markOwed = false;
+  /**
+   * The highest seq `<journal>.reserved` holds: no event is told a seq past it before the mark says so, and a start
+   * numbers on from it. A full disk can take an event and its `.dropped` mark both, after it was told; the next start
+   * then never gives its seq again, and a replay across it says `events.gap`. A stop gives back what it did not use.
+   */
+  private reserved = 0;
   /** Typing changes told this run: a change's id carries it, as it takes no seq of its own (`emitLive`). */
   private typingChanges = 0;
   private journalLines = 0;
   private journalBytes = 0;
+  /**
+   * Where the journal first names each chat, group and message (`namedIn`), by the hash of the id as written
+   * (`hashOfId`; two ids that share one only read more), so `forget` reads it from there on: each deletion read the
+   * whole journal (up to 32 MiB) from disk and searched it, a contact's delete for everyone included. Built from the
+   * journal at the first `forget`, kept by `emit`; null again once lines move (a trim, a rewrite).
+   */
+  private firstNamed: Map<number, number> | null = null;
+  /** The journal's size `firstNamed` covers: another size (a write it did not see) builds it again. */
+  private namedSize = 0;
+  /** Where the first line that cannot be read is, which `forget` reads from too: it may name what is removed. */
+  private unreadableAt = Infinity;
   private readonly listeners = new Set<Listener>();
   private readonly stateListeners = new Set<(state: EngineState) => void>();
   private readonly callListeners = new Set<(chat: string, signal: string) => void>();
@@ -105,6 +128,7 @@ export class EventHub {
   /** Loads the journal's last seq and the seen set; call before `sink` is attached. */
   async open(): Promise<void> {
     // A journal that cannot be read never keeps the profile from opening: it is set aside and a new one begins.
+    const reserved = readDropped(this.journalPath + ".reserved") ?? 0;
     try {
       const dropped = readDropped(this.journalPath + ".dropped");
       if (existsSync(this.journalPath)) {
@@ -136,6 +160,13 @@ export class EventHub {
       this.journalLines = 0;
       this.journalBytes = 0;
       this.markDropped(this.seq);
+    }
+    // Seqs the last run reserved and did not give back (a crash, or a stop that could not write): some may have been told
+    // with no line here. None is given again, and a replay across them says `events.gap`.
+    this.reserved = reserved;
+    if (reserved > this.seq) {
+      this.seq = reserved;
+      this.markDropped(Math.max(this.dropped, reserved));
     }
     this.db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(this.seenDb, 1);
@@ -194,10 +225,18 @@ export class EventHub {
 
   /**
    * Drops the notes of settled messages, and of reactions, whose last activity is older than `SEEN_KEEP_MS`: from memory
-   * and from the store. A message of mine still on its way (or failed, which a retry sends again) keeps its note.
+   * and from the store. A message of mine still on its way (or failed, which a retry sends again) keeps its note. The
+   * 30 days count back from the newest activity the set knows when the clock reads later than it: a clock run ahead (a
+   * wrong RTC, a VM restored with a skewed clock) would otherwise drop the notes of the recent history, which the next
+   * start with the clock right reports again.
    */
   sweep(): number {
-    const cutoff = this.now() - SEEN_KEEP_MS;
+    let newest = 0;
+    for (const [chat, known] of this.seen) {
+      if (chat === FORMAT || chat.startsWith("said:")) continue;
+      for (const note of known.values()) newest = Math.max(newest, timeIn(note) ?? 0);
+    }
+    const cutoff = Math.min(this.now(), newest) - SEEN_KEEP_MS;
     let dropped = 0;
     for (const [chat, known] of this.seen) {
       if (chat === FORMAT || chat.startsWith("said:")) continue;
@@ -227,7 +266,7 @@ export class EventHub {
     return messages.every((message) => {
       const note = known?.get(message.id), before = note === undefined ? undefined : stateIn(note);
       // Its note dropped, and nothing about it since (`SEEN_KEEP_MS`): nothing to report of it.
-      if (note === undefined && message.timestamp < cutoff && activityOf(message) < cutoff) return true;
+      if (note === undefined && cameAt(message) < cutoff && activityOf(message) < cutoff) return true;
       let state = stateOf(message);
       // As `messages` reads it: a mention reported stays reported.
       if (before !== undefined && mentionedIn(before) && !mentionedIn(state)) state = withFlag(state, MENTIONED);
@@ -285,7 +324,43 @@ export class EventHub {
       this.marked = true;
       this.markOwed = false;
     } catch (error) {
-      this.markOwed = true;
+      // A full disk refuses the copy (a new file), not a rewrite of the mark there: that takes no new block.
+      try {
+        writeMark(this.journalPath + ".dropped", seq, false);
+        this.marked = true;
+        this.markOwed = false;
+      } catch {
+        this.markOwed = true;
+        process.stderr.write(`ghostly: event journal error: ${error instanceof Error ? error.message : String(error)}\n`);
+      }
+    }
+  }
+
+  /**
+   * Reserves seqs ahead of the one about to be told, in `<journal>.reserved`, rewritten where it is (no new block, so a
+   * full disk takes it): written before the event goes anywhere, as `markDropped` is. Refused, the event still goes
+   * (the reservation made before covers the next ones), and the next event tries again.
+   */
+  private reserve(): void {
+    if (this.reserved - this.seq >= SEQS_RESERVED / 2) return;
+    try {
+      writeMark(this.journalPath + ".reserved", this.seq + SEQS_RESERVED, true);
+      this.reserved = this.seq + SEQS_RESERVED;
+    } catch (error) {
+      process.stderr.write(`ghostly: event journal error: ${error instanceof Error ? error.message : String(error)}\n`);
+    }
+  }
+
+  /**
+   * At a stop: the seqs reserved past the last one told are given back, so the next start numbers on from it, with no
+   * jump. Not written (a disk that takes no rewrite either), the next start numbers past the reservation instead.
+   */
+  release(): void {
+    if (this.reserved <= this.seq) return;
+    try {
+      writeMark(this.journalPath + ".reserved", this.seq, true);
+      this.reserved = this.seq;
+    } catch (error) {
       process.stderr.write(`ghostly: event journal error: ${error instanceof Error ? error.message : String(error)}\n`);
     }
   }
@@ -295,14 +370,19 @@ export class EventHub {
   /** Emits an event the host makes itself (`daemon.started`). */
   emit(type: string, id: string, fields: Record<string, unknown> = {}): GhostlyEvent {
     const event: GhostlyEvent = { seq: ++this.seq, id, type, at: this.now(), ...fields };
+    this.reserve();
     // The journal failing never keeps an event from the listeners.
     let written = false;
     try {
       // A mark a full disk refused goes first, as `markDropped` would have it: ahead of the journal.
       if (this.markOwed) this.markDropped(this.dropped);
       const line = Buffer.from(JSON.stringify(event) + "\n");
-      appendWhole(this.journalPath, line);
+      const at = appendWhole(this.journalPath, line);
       written = true;
+      if (this.firstNamed && at === this.namedSize) {
+        for (const id of namedIn(event)) if (!this.firstNamed.has(hashOfId(id))) this.firstNamed.set(hashOfId(id), at);
+        this.namedSize = at + line.length;
+      } else this.firstNamed = null;
       this.journalBytes += line.length;
       if (++this.journalLines > JOURNAL_KEEP * 2 || this.journalBytes > JOURNAL_MAX_BYTES) this.trimJournal();
     } catch (error) {
@@ -340,6 +420,7 @@ export class EventHub {
     const kept = lines.slice(start);
     const first = firstSeq(kept);
     this.markDropped(Math.max(this.dropped, first === undefined ? this.seq : first - 1));
+    this.firstNamed = null;
     writeFileSync(this.journalPath + ".tmp", kept.length ? kept.join("\n") + "\n" : "", { mode: 0o600 });
     renameSync(this.journalPath + ".tmp", this.journalPath);
     this.journalLines = kept.length;
@@ -358,7 +439,10 @@ export class EventHub {
     try {
       rmSync(this.journalPath + ".unreadable", { force: true });
       if (!existsSync(this.journalPath)) return;
-      const { bytes, start, at } = journalWindow(this.journalPath);
+      // Only from the first line that names one of them on, and nothing when none does.
+      const named = this.namedFrom(ids);
+      if (named === undefined) return;
+      let { bytes, start, at } = journalWindow(this.journalPath, named);
       // A few ids: looked for in the bytes, and only the lines that name one are read. None named: nothing to write.
       // Many (a chat removed with its history, a long change): every line is read once, against all of them at once.
       const needles = ids.map((id) => JSON.stringify(id)), few = ids.length <= FORGET_SEARCHED_IDS;
@@ -393,6 +477,13 @@ export class EventHub {
         }
         return;
       }
+      // Written again whole: what came before the lines read is read too, and every line after the first edit moves.
+      this.firstNamed = null;
+      if (start === 0 && at > 0) {
+        const window = journalWindow(this.journalPath);
+        for (const edit of edits) { edit.from += at - window.at; edit.to += at - window.at; }
+        ({ bytes, start, at } = window);
+      }
       const parts: Buffer[] = [];
       let from = start, removed = 0;
       for (const edit of edits) {
@@ -408,8 +499,43 @@ export class EventHub {
       this.journalLines -= removed;
       this.journalBytes = written.length;
     } catch (error) {
+      this.firstNamed = null;
       process.stderr.write(`ghostly: event journal error: ${error instanceof Error ? error.message : String(error)}\n`);
     }
+  }
+
+  /**
+   * The first place in the journal a line may name one of these ids (`namedIn`), or undefined when none does. The
+   * first call reads the journal for it once.
+   */
+  private namedFrom(ids: readonly string[]): number | undefined {
+    if (!this.firstNamed || statSync(this.journalPath).size !== this.namedSize) {
+      // In the bytes, never made into text: each value of a key `namedIn` reads (and of any `id`), by its hash.
+      const { bytes, start, at, size } = journalWindow(this.journalPath);
+      const firstNamed = new Map<number, number>();
+      for (const key of NAMING_KEYS) {
+        for (let found = bytes.indexOf(key, start); found !== -1; found = bytes.indexOf(key, found + key.length)) {
+          const open = found + key.length;
+          if (bytes[open] !== 0x22) continue;
+          let close = open + 1;
+          while (close < bytes.length && bytes[close] !== 0x22 && bytes[close] !== 0x0a) close += bytes[close] === 0x5c ? 2 : 1;
+          if (bytes[close] !== 0x22) continue;
+          const hash = hashOf(bytes, open, close + 1), line = at + Math.max(start, bytes.lastIndexOf(0x0a, found) + 1);
+          if ((firstNamed.get(hash) ?? Infinity) > line) firstNamed.set(hash, line);
+        }
+      }
+      // A line cut short (not `{…}`) cannot be read for what it names.
+      this.unreadableAt = Infinity;
+      for (const [from, to] of linesOf(bytes, start)) {
+        if (bytes[from] === 0x7b && bytes[to - 1] === 0x7d) continue;
+        if (bytes.subarray(from, to).some((byte) => byte !== 0x20)) { this.unreadableAt = at + from; break; }
+      }
+      this.firstNamed = firstNamed;
+      this.namedSize = size;
+    }
+    let from = this.unreadableAt;
+    for (const id of ids) from = Math.min(from, this.firstNamed.get(hashOfId(id)) ?? Infinity);
+    return from === Infinity ? undefined : from;
   }
 
   private handle(message: EngineEvent | RpcResponse): void {
@@ -626,15 +752,17 @@ export class EventHub {
       const note = known.get(message.id), before = note === undefined ? undefined : stateIn(note);
       const at = activityOf(message);
       const json = () => group ? groupMessageJson(message, this.state?.groups.find((g) => g.id === group)) : chatMessageJson(message, this.state?.links.find((l) => l.id === chat));
-      if (before === undefined && message.timestamp < cutoff) {
+      if (before === undefined && cameAt(message) < cutoff) {
         // Came here longer ago than `SEEN_KEEP_MS`, with no note: its note was dropped (or it came, that long ago, while
         // nothing ran). No news, and no note again, unless it was active since: then an edit since is reported, once.
+        // Both by this device's clock: a line read a month after its commit, an edit its author's clock dates a month
+        // back, came here now.
         if (at < cutoff) continue;
         const noted = noteOf(state, at);
         known.set(message.id, noted);
         changes.push([message.id, noted]);
         const edit = message.edit;
-        if (quiet || !edit || edit.at < cutoff || (message.sender === "me" && edit.restore)) continue;
+        if (quiet || !edit || editedAt(edit) < cutoff || (message.sender === "me" && edit.restore)) continue;
         if (group) this.emit("group.message.edited", `group.message.edited:${group}:${message.id}:${edit.seq}`, { group, messageId: message.id, edits: edit.seq, message: json() });
         else this.emit("message.edited", `message.edited:${chat}:${message.id}:${edit.seq}`, { chat, messageId: message.id, edits: edit.seq, message: json() });
         continue;
@@ -802,9 +930,20 @@ function timeIn(note: string): number | undefined {
   const at = note.lastIndexOf("@");
   return at === -1 ? undefined : parseInt(note.slice(at + 1), 36);
 }
+/**
+ * When a message came here: its place (a received row's is when it was stored here), or for a group's line, whose place
+ * is its commit's moment, when this device stored it (`heardAt`; absent on lines stored before it).
+ */
+function cameAt(message: StoredMessage): number {
+  return Math.max(message.timestamp, message.heardAt ?? 0);
+}
+/** When an edit came here: a contact's or member's is dated by their clock (`at`), and taken here at `heardAt`. */
+function editedAt(edit: NonNullable<StoredMessage["edit"]>): number {
+  return Math.max(edit.at, edit.heardAt ?? 0);
+}
 /** The last time a message changed here: it came, it was edited, someone reacted. */
 function activityOf(message: StoredMessage): number {
-  let at = Math.max(message.timestamp, message.edit?.at ?? 0);
+  let at = Math.max(cameAt(message), message.edit ? editedAt(message.edit) : 0);
   for (const r of Object.values(message.reactions ?? {})) at = Math.max(at, r.at ?? 0);
   return at;
 }
@@ -913,7 +1052,10 @@ function firstSeq(lines: readonly string[]): number | undefined {
   return undefined;
 }
 
-/** The journal's dropped mark (`EventHub.dropped`), or undefined when there is none (a journal from before it). */
+/**
+ * The journal's dropped mark (`EventHub.dropped`) or its reserved one (`EventHub.reserved`), or undefined when there is
+ * none (a journal from before it).
+ */
 function readDropped(path: string): number | undefined {
   try {
     const seq = Number(readFileSync(path, "utf8").trim());
@@ -922,10 +1064,31 @@ function readDropped(path: string): number | undefined {
 }
 
 /**
- * Appends a line whole or not at all: what a full disk took of it is cut back (as the store's journal does), so the
- * next line, once there is room, starts a line of its own instead of making one no reader can parse with it.
+ * Writes a mark over the one there, as a line of fixed width (`000…0042`, which `readDropped` reads, v1.10's too): a
+ * rewrite never grows the file past its first block, so a full disk takes it, and one cut short leaves the new mark's
+ * first digits before the old one's last, never a number below the old one when the mark grows. `create`: a file that
+ * is not there is made (a first start).
  */
-function appendWhole(path: string, line: Buffer): void {
+function writeMark(path: string, seq: number, create: boolean): void {
+  const line = Buffer.from(String(seq).padStart(19, "0") + "\n");
+  let fd: number;
+  try { fd = openSync(path, "r+"); } catch (error) {
+    if (!create || (error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    fd = openSync(path, "wx", 0o600);
+  }
+  try {
+    for (let at = 0; at < line.length;) at += writeSync(fd, line, at, line.length - at, at);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Appends a line whole or not at all: what a full disk took of it is cut back (as the store's journal does), so the
+ * next line, once there is room, starts a line of its own instead of making one no reader can parse with it. Returns
+ * where the line begins in the file.
+ */
+function appendWhole(path: string, line: Buffer): number {
   const fd = openSync(path, "a", 0o600);
   let whole = -1;
   try {
@@ -937,7 +1100,30 @@ function appendWhole(path: string, line: Buffer): void {
   } finally {
     closeSync(fd);
   }
+  return whole;
 }
+
+/**
+ * The ids an event is of, as `forget`'s callers tell what is removed: its chat, its group, its message (`messageId`,
+ * `message.id`), the reply that pressed it (`replyId`) and the message it quotes (`message.replyTo.id`).
+ */
+function namedIn(event: GhostlyEvent): string[] {
+  const message = event.message as { id?: unknown; replyTo?: { id?: unknown } } | undefined;
+  return [event.chat, event.group, event.messageId, event.replyId, message?.id, message?.replyTo?.id].filter((id): id is string => typeof id === "string");
+}
+
+/** The keys whose values `namedIn` reads, as a journal line has them: `id` stands for `message.id` and its quote's. */
+const NAMING_KEYS = ['"chat":', '"group":', '"messageId":', '"replyId":', '"id":'].map((key) => Buffer.from(key));
+
+/** FNV-1a of these bytes. */
+function hashOf(bytes: Uint8Array, from = 0, to = bytes.length): number {
+  let hash = 0x811c9dc5;
+  for (let i = from; i < to; i++) hash = Math.imul(hash ^ bytes[i], 0x01000193);
+  return hash >>> 0;
+}
+
+/** The hash of an id as a journal line writes it (quoted, escaped). */
+const hashOfId = (id: string) => hashOf(Buffer.from(JSON.stringify(id)));
 
 /** The bounds in `bytes` of each line from `start` on, its newline left out. */
 function linesOf(bytes: Buffer, start: number): [number, number][] {
@@ -965,14 +1151,14 @@ function linesNaming(bytes: Buffer, start: number, needles: readonly string[]): 
 
 /**
  * The bytes of the journal's last `JOURNAL_MAX_BYTES`, `start` where its first whole line begins in them, `at` where
- * they begin in the file, and its size.
+ * they begin in the file, and its size. `lineAt`: where a line begins, read from there on when it is within them.
  */
-function journalWindow(path: string): { bytes: Buffer; start: number; at: number; size: number } {
+function journalWindow(path: string, lineAt = 0): { bytes: Buffer; start: number; at: number; size: number } {
   const fd = openSync(path, "r");
   try {
     const size = fstatSync(fd).size;
     // From one byte before the cut, so a line that begins exactly at it is kept whole.
-    const from = Math.max(0, size - JOURNAL_MAX_BYTES - 1);
+    const cut = Math.max(0, size - JOURNAL_MAX_BYTES - 1), from = Math.max(cut, lineAt);
     const buffer = Buffer.alloc(size - from);
     let read = 0;
     while (read < buffer.length) {
@@ -982,7 +1168,7 @@ function journalWindow(path: string): { bytes: Buffer; start: number; at: number
     }
     const bytes = buffer.subarray(0, read);
     // The line cut by the window is not whole: it is left out.
-    return { bytes, start: from > 0 ? bytes.indexOf(10) + 1 || bytes.length : 0, at: from, size };
+    return { bytes, start: from > cut || from === 0 ? 0 : bytes.indexOf(10) + 1 || bytes.length, at: from, size };
   } finally {
     closeSync(fd);
   }

@@ -72,6 +72,23 @@ describe("calling a contact whose app is closed, with Ghostly offline", () => {
     expect(screen.queryByTestId("wake-call")).toBeNull();
   });
 
+  it("or with this app unable to call at all: the contact is not woken for a call that cannot start", async () => {
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Ana", messages: [], createdAt: 1_700_000_000_000 });
+    const { user, engine } = renderApp(<Chat sessionId="chat-1" onCallChange={vi.fn()} callLayer={null} visible />);
+    engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("wakeForCall", () => true);
+    // The Linux Desktop without GStreamer's plugins: the engine names what to install, live or not.
+    const missing = "Calls need GStreamer's good plugins: install gst-plugins-good.";
+    act(() => engine.update({ links: [linkView({ peerPubKeyZ32: PEER, profile: "paired-chat/1", pairing: { status: "connecting" }, dataLink: "idle", peerWakes: true, callsUnavailable: missing } as never)] }));
+
+    const call = await screen.findByTestId("call-audio");
+    expect(call).toHaveAttribute("aria-disabled", "true");
+    expect(call).toHaveAccessibleDescription(missing);
+    await user.click(call);
+    expect(engine.callsTo("wakeForCall")).toEqual([]);
+    expect(screen.queryByTestId("wake-call")).toBeNull();
+    expect(await screen.findByTestId("call-blocked")).toHaveTextContent(missing);
+  });
+
   it("or with the device offline: no minute's wait for a wake-up that cannot go", async () => {
     const offline = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
     try {

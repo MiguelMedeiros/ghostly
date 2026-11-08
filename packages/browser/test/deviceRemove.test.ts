@@ -347,7 +347,7 @@ describe("who a moving device believes", () => {
     expect(checkSetUpdate({ ...phone.record, tombstone: undefined, reenroll: undefined }, forged, 1)).toMatchObject({ kind: "accept" });
   });
 
-  it("an online standby that never read a handoff takes the remover's frame, through the record the frame carries", async () => {
+  it("an online standby that never read a handoff is added again: a record the frame carries moves nothing", async () => {
     const { record } = await setOf(network, 4);
     // The tablet was active at turn N; it handed the turn to the desktop (N + 1, a release the tablet signed). The phone
     // was on but did not read meanwhile: it still believes the tablet. The desktop then removes the laptop.
@@ -359,23 +359,38 @@ describe("who a moving device believes", () => {
     const desktop = memory({ ...record(0, "active"), turn: N + 1, rev: 0, turnPacket: toBase64Url(desktopAtN1), seenSequence: undefined });
     await moveSet(ports(desktop, network), { remove: slot(3).key });
     const frame = pendingFrames(desktop.record).find((p) => p.key === slot(1).key)!.frame;
-    expect(frame.rec).toBe(toBase64Url(desktopAtN1));
-    // The tombstone now hides the desktop's record; the frame's record proves the handoff by the tablet's own signature.
-    expect(await deliver(phone, frame)).toBe(true);
-    expect(phone.record).toMatchObject({ state: "standby", d: desktop.record.d, activeSlot: 0 });
-    // Without that record, or with one that does not chain from the device the phone believes, it is refused.
-    const fresh = () => ({ ...record(1, "standby"), activeSlot: 2, turn: N, rev: 0, turnPacket: toBase64Url(tabletAtN), seenSequence: undefined, saved: 1 });
-    const { rec: _rec, ...bare } = frame;
-    expect(checkSetUpdate(fresh(), bare, 1)).toMatchObject({ kind: "refuse", why: "signer" });
-    const forcedRec = await signTurnPacket(oldKeys, { turn: N + 1, rev: 0, author: 0, active: 0, slots: [0, 1, 2, 3].map((i) => ({ key: signers[i].publicKey, name: NAMES[i] })), instance: label(6).slice(0, 8) }, sign(0));
-    expect(checkSetUpdate(fresh(), { ...frame, rec: toBase64Url(forcedRec) }, 1)).toMatchObject({ kind: "refuse", why: "signer" });
-    // A record no newer than the one the phone holds says nothing new.
-    expect(checkSetUpdate({ ...fresh(), turnPacket: toBase64Url(desktopAtN1), activeSlot: 2 }, frame, 1)).toMatchObject({ kind: "refuse", why: "signer" });
-    // With no packet stored, the stored turn is the floor: a real release from that turn or before, replayed, is refused.
-    const bareRecord = () => ({ ...fresh(), turnPacket: undefined });
-    expect(checkSetUpdate({ ...bareRecord(), turn: N + 1 }, frame, 1), "a real release at the stored turn, replayed").toMatchObject({ kind: "refuse", why: "signer" });
-    expect(checkSetUpdate({ ...bareRecord(), turn: N + 5 }, frame, 1), "a real release from an older turn, replayed").toMatchObject({ kind: "refuse", why: "signer" });
-    expect(checkSetUpdate({ ...bareRecord(), turn: N }, frame, 1), "the same release, newer than the stored turn").toMatchObject({ kind: "accept" });
+    expect(frame.rec).toBeUndefined();
+    // The tombstone hides the desktop's record. A record with a release the tablet signed would show the handoff, but
+    // a device the tablet handed the turn to and then removed holds one just as real: no such record moves the phone's
+    // belief, as an older build's frame carries it or not. The phone is added again, as after a takeover it missed.
+    expect(await keeperOf(phone, network, 1).check(false)).toMatchObject({ kind: "gated", state: "moving" });
+    expect(checkSetUpdate(phone.record, { ...frame, rec: toBase64Url(desktopAtN1) }, 1)).toEqual({ kind: "refuse", why: "signer", reenroll: true });
+    expect(await deliver(phone, frame)).toBe(false);
+    expect(phone.record).toMatchObject({ state: "moving", d: toBase64Url(OLD_D), activeSlot: 2, reenroll: true });
+  });
+
+  it("a device the stored active device once handed the turn to, and removed since, cannot take a standby that missed both", async () => {
+    const { record } = await setOf(network);
+    // The desktop handed the turn to the tablet at N + 1 (a release the desktop signed), took it back and removed the
+    // tablet. The phone read none of it: it holds the desktop's record at N and believes the desktop.
+    const release = await signTurnRelease(oldKeys.address, N + 1, 0, 2, signers[2].publicKey, label(4), sign(0));
+    const tabletAtN1 = await signTurnPacket(oldKeys, { turn: N + 1, rev: 0, author: 2, active: 2, slots: [0, 1, 2, 3].map((i) => (i < 3 ? { key: signers[i].publicKey, name: NAMES[i] } : null)), instance: label(5).slice(0, 8), release }, sign(2));
+    const desktop = memory({ ...record(0, "active"), turn: N + 2 });
+    await moveSet(ports(desktop, network), { remove: slot(2).key });
+    // The tablet still holds the old D: a tombstone of its own listing the phone and itself, a set of its own, and its
+    // old record with the desktop's real release.
+    const tSet = [null, { key: signers[1].publicKey, name: "Phone" }, { key: signers[2].publicKey, name: "Tablet" }];
+    const tTomb = await signTombstone(oldKeys, 2, [...tSet, null], sign(2));
+    const forged = await setUpdateFrame(oldKeys.address, { d: label(0xee), set: tSet, turn: N + 1, rev: 0, tomb: tTomb, rec: tabletAtN1 }, signers[2]);
+    // A standby that read no tombstone yet, and a moving one that read the tablet's in place of the desktop's: refused.
+    const phone = record(1, "standby");
+    expect(checkSetUpdate(phone, forged, 1)).toMatchObject({ kind: "refuse", why: "signer" });
+    const moving = memory({ ...record(1, "moving"), tombstone: toBase64Url(tTomb) });
+    expect(checkSetUpdate(moving.record, forged, 1)).toEqual({ kind: "refuse", why: "signer", reenroll: true });
+    expect(await deliver(moving, forged)).toBe(false);
+    expect(moving.record).toMatchObject({ state: "moving", d: toBase64Url(OLD_D), activeSlot: 0, deviceSet: record(1, "standby").deviceSet });
+    // The desktop's own frame still takes it.
+    expect(await deliver(memory(phone), pendingFrames(desktop.record)[0].frame)).toBe(true);
   });
 
   it("goes to removed on a valid tombstone that no longer lists it, in a frame the device it believes signed", async () => {
@@ -504,7 +519,7 @@ describe("New device secret", () => {
     expect(pendingFrames(desktop.record).some((p) => p.key === slot(1).key)).toBe(false);
   });
 
-  it("a device off across two moves by two devices, the profile handed over between them, still reaches the newest secret", async () => {
+  it("a device off across two moves by two devices, the profile handed over between them, takes the first and is added again", async () => {
     const { record } = await setOf(network, 4);
     const desktop = memory(record(0, "active")), phone = memory(record(1, "standby")), laptop = memory(record(3, "standby"));
     // The desktop removes the tablet; the phone takes the frame, the laptop is off.
@@ -523,11 +538,18 @@ describe("New device secret", () => {
     // The frame the desktop signed goes on as the desktop signed it: the laptop believes the desktop.
     const toLaptop = () => pendingFrames(phone.record).filter((p) => p.key === slot(3).key);
     expect(toLaptop().find((p) => p.d === record(0, "active").d)!.frame).toEqual(desktopFrame);
-    // The laptop comes back and takes each frame waiting for it, the oldest first: each session brings the next one.
-    for (let session = 0; session < 3 && laptop.record.d !== phone.record.d; session++) {
-      for (const pending of toLaptop()) if (await deliver(laptop, pending.frame)) await phone.amend("ghostly", acknowledged(phone.record, slot(3).key, pending.d) ?? {});
-    }
-    expect(laptop.record).toMatchObject({ state: "standby", d: phone.record.d, activeSlot: 1, deviceSet: [null, slot(1), null, slot(3)] });
+    // The laptop comes back and takes the desktop's frame: standby in the first new set, believing the desktop.
+    expect(await deliver(laptop, toLaptop().find((p) => p.d === record(0, "active").d)!.frame)).toBe(true);
+    expect(laptop.record).toMatchObject({ state: "standby", d: firstD, activeSlot: 0 });
+    // There it finds the phone's tombstone, which no longer lists the desktop: the phone's frame cannot move it on. The
+    // release the desktop signed for the phone does not either, as a device the desktop handed the turn to and later
+    // removed holds one just as real. The laptop is added again.
+    expect(await keeperOf(laptop, network, 3).check(false)).toMatchObject({ kind: "gated", state: "moving" });
+    expect(laptop.record.reenroll).toBe(true);
+    const phoneFrame = toLaptop().find((p) => p.d === firstD)!.frame;
+    expect(checkSetUpdate(laptop.record, { ...phoneFrame, rec: toBase64Url(phoneAtN1) }, 1)).toEqual({ kind: "refuse", why: "signer", reenroll: true });
+    expect(await deliver(laptop, phoneFrame)).toBe(false);
+    expect(laptop.record).toMatchObject({ state: "moving", d: firstD });
   });
 
   it("a device off across two moves with a device added between them still takes the newest secret", async () => {

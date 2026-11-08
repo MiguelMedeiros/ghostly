@@ -54,7 +54,7 @@ by IP), so about 3 invites a minute go out at once. Past that, `invite create` s
 `"published":false` and `retryInMs`: the invite goes out by itself when the relays' minute frees a request, and the
 link works from then on. A one-shot (no daemon) waits up to 20 s for it before it leaves.
 
-With no relay answering at all, `invite create` answers `"published":false` with a `reason` (what the relays said) and a
+With no relay answering at all, `invite create` answers `"published":false` with a `reason` naming the relays (`No relay answered (127.0.0.1:9): it goes out once one does`) and a
 `note`. The invite is good, so don't make another: it goes out by itself once a relay answers, while a daemon runs for
 the profile.
 
@@ -130,7 +130,9 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 {"seq":6,"id":"message.received:f3gg…:peer_jY7N…","type":"message.received","at":1790450767762,"chat":"f3gg…","message":{"id":"peer_jY7N…","from":"peer","text":"hello","timestamp":1790450767735}}
 ```
 
-- `seq` grows by one per event in the profile, across restarts. `id` is stable for the fact it reports: dedupe on it.
+- `seq` grows by one per event in the profile, across restarts, and a seq is never given to two events. After a crash,
+  or a full disk that kept events out of the journal, it can skip numbers: a replay across them starts with
+  `events.gap`. `id` is stable for the fact it reports: dedupe on it.
 - A message's `timestamp` is its place in the history: when this profile sent it, or when it arrived here. A
   received message also has `sentAt`, the time its sender's clock said. Histories are ordered by `timestamp`.
 - `--since <seq>` replays from the journal (the last 10,000 events, and no more than their last 16 MiB); `--cursor <file>` remembers the last event
@@ -246,8 +248,13 @@ key), which every answer and event carries. What the CLI does when names meet:
   chat found only by a prefix of its id or the name its contact gave itself never takes what also names a group. The group's id is the
   group; a prefix of it or the name of a group you are in is refused (exit 1, `bad_request`, `details.chat` and `details.groups`):
   use the chat's id or `group:<id>`. A label you gave the chat still wins.
+- `group:<ref>` is a group in every command, never a chat: a chat-only command answers it as a group (exit 3,
+  `not_found`). `chat rename` and `invite create --label` refuse a name starting with `group:` (exit 1, `bad_request`);
+  a chat named so before is named by its id (or its contact's key) and renamed with `ghostly chat rename <id> <name>`.
 - A label you gave a chat wins over an id prefix: a contact can choose how a chat's id begins (yours is made from
   their invite code). A prefix that fits one chat and the name a contact gave another is refused.
+- A whole chat's id (16 characters, as `chat` prints it) is that chat or a label you gave, never a contact's own name
+  or a group's name or id prefix: once the chat is removed, its id answers `not_found` (exit 3).
 - Where a command moves money or gives something lasting to a chat (`chat pay`, `chat pay-request`, `pay --chat`,
   `identity share|withdraw`, `service share`, `group invite`, `call auto on --from`), only the chat's id, its contact's
   key or a label you gave it names the chat. A prefix of its id or the name its contact gave itself is refused (exit 1,
@@ -377,7 +384,9 @@ Voice only: a video call is answered as a voice call. The details are in the
 
 The CLI publishes every Pkarr packet to the relays in its settings and to the Mainline DHT (BEP 44, over UDP, as the
 Desktop does), and reads the relays first, the DHT when every relay fails. So a bot keeps finding its contacts, and its
-group's edges come up, while the relays answer errors. `GHOSTLY_DHT=0` leaves the DHT out (relays only, as the web app);
+group's edges come up, while the relays answer errors. Its background reads (the periodic looks at contacts away) keep
+to the share the relays would give them there, 20 lookups a minute per relay in all, each contact in its turn; a read
+someone waits on (a chat open, a signal due, a text awaiting its receipt) goes at once. `GHOSTLY_DHT=0` leaves the DHT out (relays only, as the web app);
 `GHOSTLY_DHT_BOOTSTRAP=host:port,…` replaces the public bootstrap routers (a private testnet). The daemon is then a DHT node like any
 other: it answers other nodes' queries and keeps the small values they store for a while, as the Desktop's Pkarr client
 does.

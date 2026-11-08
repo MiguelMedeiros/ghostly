@@ -8,6 +8,7 @@ import { useLockPassedNow } from "../contexts/LockScreenContext";
 import { listNamesFor, reenrollHere, reloadIntoGate, useConnectionCheck, useDeviceSet } from "../lib/devices";
 import { HandoffOffer, HandoffProgress, UseHereDialog } from "./devices/Handoff";
 import { TakeoverDialog } from "./devices/TakeoverDialog";
+import { RemoveHereDialog } from "./devices/RemoveHereDialog";
 import { DeviceGlyph } from "./devices/DeviceGlyph";
 import { SCREEN_BUTTON, SCREEN_QUIET } from "./devices/DeviceDialog";
 import { InfoButton } from "./layout/Section";
@@ -46,6 +47,7 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
   const reenroll = !!gate.reenroll && (gate.state === "moving" || gate.state === "removed");
   const offersReenroll = reenroll || gate.state === "removed";
   const reenrollButton = useRef<HTMLButtonElement>(null);
+  const [removingHere, setRemovingHere] = useState(false);
   // Removed while this screen was open: what had the keyboard focus (Use here, its dialog, a Check connection) went with
   // that change. The focus goes to Add this device, not to the page; a screen that opens removed leaves it where it is.
   const offered = useRef(offersReenroll);
@@ -102,8 +104,13 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
         {unfinished && <Unfinished />}
         {gate.state === "standby" && gate.notice && <SetNotice names={gate.notice} />}
         {offersReenroll && (
-          <Actions><button ref={reenrollButton} type="button" data-testid="device-standby-reenroll" onClick={() => reenrollHere()} className={SCREEN_BUTTON}>{t("devices.join.addThis")}</button></Actions>
+          <Actions>
+            <button ref={reenrollButton} type="button" data-testid="device-standby-reenroll" onClick={() => reenrollHere()} className={SCREEN_BUTTON}>{t("devices.join.addThis")}</button>
+            {/* The frozen copy this device keeps is not encrypted (WISP 06 § Removing a device): it can be taken off here. */}
+            <button type="button" data-testid="device-standby-remove-here" onClick={() => setRemovingHere(true)} className={SCREEN_QUIET}>{t("devices.standby.removeHere.button")}</button>
+          </Actions>
         )}
+        {removingHere && <RemoveHereDialog onClose={() => setRemovingHere(false)} />}
         {!unfinished && !restored && (gate.state === "standby" || gate.state === "superseded" || gate.state === "releasing" || gate.state === "taking") && <StandbyHandoff gate={gate} />}
         {!unfinished && takeover?.offered && <Takeover gate={gate} info={takeover} />}
         {gate.state !== "unreadable" && gate.state !== "removed" && !unfinished && <Links />}

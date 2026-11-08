@@ -260,7 +260,9 @@ export interface AppStoreSummary {
  * removed), with the `sequence` of the index held (absent when none was read yet), and `equivocation` when this index
  * is another one signed under that sequence (the preview marks the held store with it). Add then takes only a newer index.
  */
-export interface AppStorePreview { url: string; key: string; fingerprint: string; name: string; description?: string; kind: AppStoreKind; sequence: number; expires: number; expired: boolean; apps: number; held?: { sequence?: number; equivocation?: true } }
+export interface AppStorePreview { url: string; key: string; fingerprint: string; name: string; description?: string; kind: AppStoreKind; sequence: number; expires: number; expired: boolean; apps: number; held?: { sequence?: number; equivocation?: true };
+  /** A store the person removed, whose index here is older than the last one taken from it, or another under its sequence: `addStore` refuses it so. */
+  refused?: "rollback" | "equivocation" }
 
 /** Where to fetch an app from: a pasted URL, a store's listing, or a chat card's pointer. */
 export type AppSource =
@@ -1294,10 +1296,13 @@ export class Apps {
     const other = !!held && !held.removed && !!held.index
       && appStoreDecision({ key: held.key, sequence: held.index.sequence, digest: held.digest ?? "" }, { key: index.key, sequence: index.sequence, digest }) === "equivocation";
     if (other && held.equivocation?.digest !== digest) await this.putStore(this.withIndex(held, index, digest));
+    // A store removed takes back no index older than the last one taken from it (`addStore`): Add is not offered for it.
+    const seen = held?.removed && held.seen && appStoreDecision({ key: held.key, ...held.seen }, { key: index.key, sequence: index.sequence, digest });
     return {
       url: at, key: index.key, fingerprint: appFingerprint(index.key), name: index.name, kind: index.kind, sequence: index.sequence,
       expires: index.expires, expired: read.store.expired, apps: index.apps.length, ...(index.description !== undefined && { description: index.description }),
       ...(held && !held.removed && { held: held.index ? { sequence: held.index.sequence, ...(other && { equivocation: true as const }) } : {} }),
+      ...((seen === "rollback" || seen === "equivocation") && { refused: seen }),
     };
   }
 
@@ -1659,10 +1664,16 @@ export class Apps {
     };
   }
 
-  /** The person accepted the permissions a waiting update adds: it is installed now. */
-  async acceptUpdate({ ref }: { ref: string }): Promise<InstalledAppView> {
+  /**
+   * The person accepted the permissions a waiting update adds: it is installed now. `sequence` and `added` are the
+   * waiting update its screen listed (`InstalledAppView.pending`): another one waiting now (the check found a newer one
+   * after the screen was drawn), or one that adds more than `added`, is refused with `permissions-changed`.
+   */
+  async acceptUpdate({ ref, sequence, added: shown }: { ref: string; sequence?: number; added?: readonly string[] }): Promise<InstalledAppView> {
+    if (shown !== undefined && !Array.isArray(shown)) fail("permissions", "The permissions shown must be a list");
     const installed = await this.installedOrFail(ref);
     const pending = installed.pending ?? fail("no-update", "No update waits for this app");
+    if (sequence !== undefined && pending.sequence !== sequence) fail("permissions-changed", `Another update waits now, which adds ${pending.added.length ? pending.added.join(", ") : "no permission"}; look at it again`);
     const bytes = await this.readBundleBytes(pending.bytes, pending.digest);
     const read = bytes ? await readAppBundleAsync(bytes) : null;
     if (!read?.ok || read.bundle.digest !== pending.digest) {
@@ -1685,6 +1696,7 @@ export class Apps {
       await this.putApp({ ...installed, pending: { ...pending, added: added as AppPermission[] } });
       fail("permissions-changed", `This update now adds ${added.length ? added.join(", ") : "no permission"}; look at it again`);
     }
+    if (shown && added.some((p) => !shown.includes(p))) fail("permissions-changed", `This update now adds ${added.join(", ")}; look at it again`);
     const { pending: _p, ...without } = installed;
     const next = this.versionRecord(without, read.bundle, pending.bytes, pending.from, installed.store);
     // Only over the record read above: an app uninstalled meanwhile (another tab, Uninstall while Update was busy) is

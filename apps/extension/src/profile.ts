@@ -46,12 +46,26 @@ export function followEngineRestart(onRestart: () => void): () => void {
   return () => removeEventListener("storage", restarted);
 }
 
+let unfinished: () => Promise<unknown> | null = () => null;
+/**
+ * What this page finishes before it starts again for a switch (ui/main.tsx: a "Clear all data" in progress). Cut short,
+ * most of the profile's data would stay after the page said it was cleared.
+ */
+export function finishBeforeSwitching(work: () => Promise<unknown> | null): void {
+  unfinished = work;
+}
+
 /**
  * Starts this page again as the profile in use, on the page that profile was left on, as the tab that switched does
  * (`switchProfile`). The address this page showed belongs to the profile before the switch: a chat or group of its
- * own reads as gone from this device in the other one.
+ * own reads as gone from this device in the other one. Once what it has to finish is over.
  */
 export function startAsProfileInUse(): void {
+  const work = unfinished();
+  if (work) {
+    void work.catch(() => {}).then(startAsProfileInUse);
+    return;
+  }
   history.replaceState(null, "", `#${lastRouteOf(activeProfileId())}`);
   location.reload();
 }

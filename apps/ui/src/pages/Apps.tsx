@@ -67,11 +67,12 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
         aria-label={t("apps.page.details", { title: shown })}>
         <AppIcon installed={app} />
         <span className="min-w-0">
-          {/* A long title is cut alone: the version stays whole after it. The row goes the page's way, from the icon;
-              only the title reads in its own direction. */}
+          {/* A long title is cut alone: the version stays whole after it, unless it is too long for half the line (a
+              pre-release with build data), cut at its end then, or it took the title's place. The row goes the page's
+              way, from the icon; the title and version read in their own. */}
           <span className="flex items-baseline gap-1 text-sm text-text-primary">
             <span dir="auto" className="truncate min-w-0">{app.title}</span>{" "}
-            <span className="shrink-0 whitespace-nowrap text-text-muted text-xs">{app.version}</span>
+            <span dir="ltr" className="shrink-0 max-w-[50%] truncate text-text-muted text-xs">{app.version}</span>
           </span>
           {/* A space between the lines in the text, as in the name: the version's last digit and the line's first word apart. */}
           {" "}

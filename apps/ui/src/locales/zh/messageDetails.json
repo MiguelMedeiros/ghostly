@@ -162,6 +162,12 @@
     "voice": "语音",
     "wire": "传输格式"
   },
+  "send": {
+    "failed": "失败",
+    "failedBecause": "失败：{{error}}",
+    "sending": "发送中",
+    "sent": "已发送"
+  },
   "storage": {
     "blob": "整个文件存于 IndexedDB",
     "idb": "分块存于 IndexedDB",

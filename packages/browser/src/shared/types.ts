@@ -1001,6 +1001,11 @@ export interface StoredMessage {
   member?: string;
   /** Group history lines that are not messages. */
   event?: GroupEvent;
+  /**
+   * A line of a group's history: when it was first stored on this device. Its `timestamp` keeps its commit's moment
+   * (`placed`), which can be long before it came here (a member back after a month). Absent on lines stored before it.
+   */
+  heardAt?: number;
   /** A private group's removal line (`gone`): the member key of the admin who removed `member`. */
   by?: string;
   /** Group history: a payment between members, as the group knows it (WISP 902 § Payments). */
@@ -1139,6 +1144,11 @@ export interface MessageEdit {
   /** The edit shown: its number (1 for the first; the highest one wins) and when its author made it. */
   seq: number;
   at: number;
+  /**
+   * A contact's or a member's edit: when this device took it. Their `at` is their clock's (never later than this), and
+   * can be long before it came. Absent on mine, made here at `at`, and on edits stored before it.
+   */
+  heardAt?: number;
   /** Earlier versions, oldest first (the newest `EDIT_HISTORY_KEEP`): when each was written, and its text. */
   history: MessageVersion[];
   /** Mine: the contact has not confirmed this edit yet. It goes by itself once the chat is live and both sides offer edit/1. */

@@ -276,6 +276,32 @@ describe("the RTCPeerConnection stand-in", () => {
     }
   });
 
+  it("tells Rust when the window goes out of sight and back: meanwhile it makes no picture past the first for it", async () => {
+    // The page draws none out of sight, and Rust's JPEGs of two pictures were 6% of a core and 1 MB a second through Tauri's channel.
+    const hidden = { on: false };
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockImplementation(() => (hidden.on ? "hidden" : "visible"));
+    const hiddenSpy = vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden.on);
+    const show = (on: boolean) => { hidden.on = !on; document.dispatchEvent(new Event("visibilitychange")); };
+    const told = () => tauri.invoke.mock.calls.filter(([command]) => command === "native_pictures_shown").map(([, args]) => args);
+    try {
+      const pc = new NativePeerConnection({});
+      show(false);
+      await vi.waitFor(() => expect(told()).toEqual([{ shown: false }]));
+      show(true);
+      await vi.waitFor(() => expect(told()).toEqual([{ shown: false }, { shown: true }]));
+      // One window, one word for it: a second call (or a camera) does not say it twice.
+      const second = new NativePeerConnection({});
+      show(false);
+      await vi.waitFor(() => expect(told()).toEqual([{ shown: false }, { shown: true }, { shown: false }]));
+      pc.close();
+      second.close();
+    } finally {
+      show(true);
+      visibility.mockRestore();
+      hiddenSpy.mockRestore();
+    }
+  });
+
   it("answers an offer through Rust, the lanes known as soon as the offer is", async () => {
     const pc = new NativePeerConnection({});
     await pc.setRemoteDescription({ type: "offer", sdp: "their offer" });
@@ -643,6 +669,39 @@ describe("the devices, which are GStreamer's and known by name", () => {
     expect(tauri.invoke).toHaveBeenCalledWith("native_call_microphone", { id: pc.id, device: "Headset" });
     expect(tauri.invoke).toHaveBeenCalledWith("native_call_speaker", { id: pc.id, device: "Headphones" });
     expect(headset.getSettings().deviceId).toBe("Headset");
+    pc.close();
+  });
+
+  it("a microphone picked while the call catches up on earlier picks stays the one sent, not the earlier pick", async () => {
+    let described!: () => void;
+    let spoken!: () => void;
+    tauri.invoke.mockImplementation(async (command, args) => {
+      if (command === "native_call_offer") { await new Promise<void>((done) => { described = done; }); return { sdp: "sdp", microphone: null }; }
+      // Rust relaunches the call's sound on the new speaker: the person picks another microphone meanwhile.
+      if (command === "native_call_speaker") { await new Promise<void>((done) => { spoken = done; }); return undefined; }
+      if (command === "native_call_microphone") return args?.device ?? null;
+      return undefined;
+    });
+    const media = nativeCallMedia();
+    const pc = new NativePeerConnection({});
+    const [audio] = pc.getTransceivers();
+    pc.addTrack((await media.getUserMedia({ audio: true })).getAudioTracks()[0]);
+    const describing = pc.createOffer();
+    await vi.waitFor(() => expect(described).toBeTypeOf("function"));
+    // While Rust gathers: a headset, both ways.
+    await audio.sender.replaceTrack((await media.getUserMedia({ audio: { deviceId: { exact: "Headset" } } })).getAudioTracks()[0]);
+    nativeDevices.playCallOn("Headphones");
+    described();
+    await vi.waitFor(() => expect(spoken).toBeTypeOf("function"));
+    // The call has started in Rust: this one goes at once.
+    const usb = (await media.getUserMedia({ audio: { deviceId: { exact: "USB Mic" } } })).getAudioTracks()[0];
+    await audio.sender.replaceTrack(usb);
+    spoken();
+    await describing;
+
+    const microphones = tauri.invoke.mock.calls.filter(([command]) => command === "native_call_microphone").map(([, args]) => args?.device);
+    expect(microphones[microphones.length - 1], "the last microphone Rust was told").toBe("USB Mic");
+    expect(usb.getSettings().deviceId).toBe("USB Mic");
     pc.close();
   });
 

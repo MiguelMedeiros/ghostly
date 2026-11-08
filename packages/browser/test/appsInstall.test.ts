@@ -236,6 +236,30 @@ describe("updates", () => {
     expect(await store.acceptUpdate({ ref: v1.ref })).toMatchObject({ sequence: 2, permissions: ["internet", "chat"] });
   });
 
+  it("Update of a screen drawn before the check found a newer update grants nothing it did not show, and the newer one is shown", async () => {
+    const { store, v1 } = await installed({ permissions: ["chat"] });
+    const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"] });
+    net.put(PINNED_URL, v2.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v2, [PINNED_URL])] }));
+    await store.addStore({ url: STORE_URL });
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    const screen = (await store.list())[0]!.pending!;
+    expect(screen).toMatchObject({ sequence: 2, added: ["name"] });
+    // Before Update is pressed, the next check finds 3, which adds internet as well: it waits in 2's place.
+    const v3 = await bundle({ sequence: 3, permissions: ["chat", "name", "internet"] });
+    const pinned3 = `https://cdn.jsdelivr.net/gh/ana/chess@${"c".repeat(40)}/app.ghostlyapp`;
+    net.put(pinned3, v3.bytes);
+    await net.putStore(await storeFiles({ sequence: 2, apps: [listing(v3, [pinned3])] }));
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    await expect(store.acceptUpdate({ ref: v1.ref, sequence: screen.sequence, added: screen.added })).rejects.toThrow(/^permissions-changed/);
+    // The same number with a list that lacks one of its permissions (a screen drawn before a version was installed) neither.
+    await expect(store.acceptUpdate({ ref: v1.ref, sequence: 3, added: ["name"] })).rejects.toThrow(/^permissions-changed/);
+    const again = (await store.list())[0]!;
+    expect(again).toMatchObject({ sequence: 1, digest: v1.digest, permissions: ["chat"], pending: { sequence: 3, added: ["name", "internet"] } });
+    expect(await store.acceptUpdate({ ref: v1.ref, sequence: again.pending!.sequence, added: again.pending!.added }))
+      .toMatchObject({ sequence: 3, permissions: ["chat", "name", "internet"] });
+  });
+
   it("Install of a screen opened before the app was uninstalled grants nothing it did not show, and the screen read again asks for all", async () => {
     const all: AppPermission[] = ["chat", "internet", "files", "name"];
     const { store, v1 } = await installed({ permissions: all });

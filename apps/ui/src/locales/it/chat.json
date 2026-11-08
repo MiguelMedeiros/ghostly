@@ -373,7 +373,7 @@
     "copied": "Copiato",
     "copy": "Copia",
     "copyCode": "Copia codice",
-    "hiddenChars": "Questo codice contiene caratteri nascosti o che cambiano la direzione del testo, mostrati come <U+…>. Copia codice copia anche quelli.",
+    "hiddenChars": "Questo codice contiene caratteri nascosti o che cambiano la direzione del testo, mostrati come {{marker}}. Copia codice copia anche quelli.",
     "localTime": "{{time}} nel tuo fuso orario",
     "showAll": "Mostra tutto",
     "showLess": "Mostra meno",

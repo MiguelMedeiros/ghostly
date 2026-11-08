@@ -163,6 +163,13 @@ export class LightningService {
   private readonly asked = new Map<string, number>();
   /** Per invoice the screen shows (payment hash): until when (`watch`). */
   private readonly watched = new Map<string, number>();
+  /**
+   * Per open invoice whose source did not answer about it, or answered with an error (payment hash): as Cashu quotes',
+   * on top of its own pace. Asked every minute for good, one invoice cost 60 lookups an hour at a dead node, 20 cost 1,200.
+   */
+  private readonly invoiceAsk = new AskBackoff(INVOICE_PACE.missedMs, INVOICE_PACE.missedCapMs);
+  /** When an open invoice in `recent` next reads as expired (`shownExpiredAt`): the view is read again then. */
+  private recentTurns = Infinity;
   /** Per outgoing payment left pending or unknown (payment hash): when its source is asked next, in this run. */
   private readonly outAsk = new AskBackoff(OUT_POLL_MS, OUT_SLOW_POLL_MS);
   private passes: Promise<void> = Promise.resolve();
@@ -205,6 +212,9 @@ export class LightningService {
   async createInvoice(amount: number, context: { memo?: string; paymentId?: string } = {}): Promise<LightningInvoice & { source: string }> {
     const { provider, descriptor } = await this.sources.use();
     if (!provider.capabilities.receive) throw new Error(`${descriptor.label} cannot create invoices`);
+    // Receiving needs looking up, as paying does: an invoice the source cannot be asked about would never be seen
+    // paid nor expire, and its chat request would wait for good. A source that reports its own (the mints) is told.
+    if (!provider.capabilities.lookup && !provider.settlesItself) throw new Error(`${descriptor.label} cannot look up its invoices, so a payment to it would never be seen: receive with another Lightning card, or connect it with invoice lookup allowed`);
     const created = await provider.createInvoice(amount, context.memo ?? "Ghostly");
     const decoded = decodeBolt11(created.invoice);
     // What goes to a contact must be the invoice we asked for: this amount, this hash, the right chain.
@@ -226,6 +236,8 @@ export class LightningService {
     const op = hash ? await this.get("in", hash) : undefined;
     if (!op || !this.owns(op) || op.state !== "open") return false;
     this.watched.set(op.paymentHash, Date.now() + INVOICE_PACE.watchMs);
+    // Its source may be back: the screen asks whatever wait its silence earned.
+    this.invoiceAsk.forget(op.paymentHash);
     this.schedule(0);
     return true;
   }
@@ -239,6 +251,7 @@ export class LightningService {
     const op = hash ? await this.get("in", hash) : undefined;
     if (!op || !this.owns(op) || op.state !== "open") return false;
     this.watched.set(op.paymentHash, Date.now() + INVOICE_PACE.watchMs);
+    this.invoiceAsk.forget(op.paymentHash);
     await this.reconcile(false, op.paymentHash);
     return true;
   }
@@ -351,9 +364,10 @@ export class LightningService {
 
   /**
    * Asks the active source about everything of its that is open, pending or unknown. One pass at a time. `paced`: an
-   * open invoice only when its pace says so (`nextInvoiceAsk`), and a payment left pending or unknown only when its
-   * own does (`outAsk`); otherwise every one now. `only`: the open invoice with
-   * this payment hash alone (a payer says it paid it, `check`).
+   * open invoice only when its pace says so (`nextInvoiceAsk`, and not before the wait its source's silence earned,
+   * `invoiceAsk`), and a payment left pending or unknown only when its own does (`outAsk`); otherwise every one now.
+   * Once one open invoice got no answer in a pass, the others due in it wait as that one does, unasked. `only`: the
+   * open invoice with this payment hash alone (a payer says it paid it, `check`).
    */
   reconcile(paced = false, only?: string): Promise<void> {
     const pass = this.passes.then(() => this.reconcileOnce(paced, only));
@@ -375,6 +389,13 @@ export class LightningService {
     };
     /** When the next open invoice is due. */
     let invoiceDue = Infinity;
+    /** An open invoice got no answer in this pass: the source is taken as down until the next one. */
+    let down = false;
+    /** An open invoice of ours got no answer: asked again later, and later each time (on top of its own pace). */
+    const unanswered = (op: LightningOp) => {
+      this.invoiceAsk.missed(op.paymentHash, Date.now());
+      invoiceDue = Math.min(invoiceDue, this.nextAsk(op, Date.now()));
+    };
     const writes = this.writes;
     try {
       const provider = this.sources.active, providerId = this.sources.activeId;
@@ -382,6 +403,7 @@ export class LightningService {
       // What this run knows of invoices that are no longer open goes with them.
       const open = new Set(ops.filter((op) => op.direction === "in" && op.state === "open").map((op) => op.paymentHash));
       for (const pace of [this.asked, this.watched]) for (const hash of pace.keys()) if (!open.has(hash)) pace.delete(hash);
+      this.invoiceAsk.keepOnly(open);
       this.outAsk.keepOnly(new Set(ops.filter((op) => op.direction === "out" && ["pending", "unknown"].includes(op.state)).map((op) => op.paymentHash)));
       for (const op of ops) {
         if (!this.owns(op) || (only !== undefined && (op.direction !== "in" || op.paymentHash !== only))) continue;
@@ -414,11 +436,14 @@ export class LightningService {
           const due = this.nextAsk(op, Date.now());
           if (paced && due > Date.now() + INVOICE_PACE.dueSlackMs) { invoiceDue = Math.min(invoiceDue, due); continue; }
           this.asked.set(op.paymentHash, Date.now());
+          // Its source did not answer about another invoice just now: this one waits as that one does.
+          if (down) { unanswered(op); continue; }
         } else if (notYet(op)) continue;
         try {
           const unchanged = async () => (await this.get(op.direction, op.paymentHash))?.state === op.state;
           if (op.direction === "in") {
             const status = await provider.invoiceStatus({ invoice: op.invoice, paymentHash: op.paymentHash, amount: op.amount, expiresAt: op.expiresAt, ref: op.ref });
+            this.invoiceAsk.forget(op.paymentHash);
             if (!(await unchanged())) continue;
             if (status.state === "paid") { await this.put({ ...op, state: "paid", settledAt: Date.now() }); this.events.received(op); }
             else if (status.state === "expired" || op.expiresAt + INVOICE_PACE.expiryGraceMs < Date.now()) await this.put({ ...op, state: "expired" });
@@ -433,27 +458,27 @@ export class LightningService {
             this.events.resolved(op, status.state === "paid");
           }
         } catch {
-          // The source cannot be asked right now: ask again later, nothing changes.
-          if (op.direction === "in") invoiceDue = Math.min(invoiceDue, this.nextAsk(op, Date.now()));
+          // The source cannot be asked right now: ask again later (later each time for an invoice), nothing changes.
+          if (op.direction === "in") { down = true; unanswered(op); }
           else missed(op);
         }
       }
     } finally {
       // Only a pass that settled something, or whose recent list reads otherwise, is news to the wallet view.
       if (await this.loadRecent() || this.writes !== writes) this.events.changed();
-      const wait = Math.min(again || Infinity, invoiceDue - Date.now());
+      const wait = Math.min(again || Infinity, invoiceDue - Date.now(), this.recentTurns - Date.now());
       if (wait < Infinity) this.schedule(Math.max(0, wait));
     }
   }
 
-  /** When the source is next asked about this open invoice of ours. */
+  /** When the source is next asked about this open invoice of ours: at its pace, and not before the wait its silence earned. */
   private nextAsk(op: LightningOp, now: number): number {
-    return nextInvoiceAsk({
+    return Math.max(this.invoiceAsk.at(op.paymentHash, 0), nextInvoiceAsk({
       createdAt: op.createdAt,
       expiresAt: op.expiresAt,
       watchedUntil: this.watched.get(op.paymentHash),
       closed: !!op.paymentId && !!this.events.requestClosed?.(op.paymentId),
-    }, this.asked.get(op.paymentHash), now);
+    }, this.asked.get(op.paymentHash), now));
   }
 
   /** The next pass in `ms`, unless one is due sooner. It asks only what is due (`reconcile(true)`). */
@@ -497,9 +522,23 @@ export class LightningService {
 
   /** True when the recent list reads otherwise than before. */
   private async loadRecent(): Promise<boolean> {
-    const was = this.recent;
-    this.recent = (await this.list()).filter((op) => this.owns(op)).sort((a, b) => b.createdAt - a.createdAt).slice(0, RECENT)
-      .map(({ ref: _ref, note: _note, selfSettled: _self, ...view }) => view);
+    const was = this.recent, now = Date.now();
+    const ops = (await this.list()).filter((op) => this.owns(op)).sort((a, b) => b.createdAt - a.createdAt).slice(0, RECENT);
+    this.recentTurns = Math.min(Infinity, ...ops.map((op) => shownExpiredAt(op)).filter((at) => at > now));
+    this.recent = ops.map((op) => {
+      const { ref: _ref, note: _note, selfSettled: _self, ...view } = op;
+      return shownExpiredAt(op) <= now ? { ...view, state: "expired" as const } : view;
+    });
     return JSON.stringify(was) !== JSON.stringify(this.recent);
   }
+}
+
+/**
+ * When an open invoice of ours that this engine asks about reads as expired, though no answer said so: past its expiry
+ * and the grace a source's own "expired" gets. Its source may not answer for hours (a node that is off, an NWC relay
+ * gone), and "waiting for payment" on an invoice nobody can pay any more is wrong. The journal keeps it open, and it is
+ * still asked about (`invoiceAsk`), so a late "paid" counts. Infinity: shown as it is stored.
+ */
+function shownExpiredAt(op: LightningOp): number {
+  return op.direction === "in" && op.state === "open" && !op.selfSettled && op.expiresAt > 0 ? op.expiresAt + INVOICE_PACE.expiryGraceMs + 1 : Infinity;
 }

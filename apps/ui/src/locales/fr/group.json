@@ -254,6 +254,9 @@
     "keep": "Garder celui-ci",
     "link": "Un lien de groupe que vous avez ouvert",
     "switch": "Passer à celui-ci",
+    "switchBody": "{{other}}. Vous quittez ce groupe, il est supprimé de cet appareil avec son historique, et l'autre prend sa place.",
+    "switchConfirm": "Changer",
+    "switchTitle": "Passer à l'autre groupe ?",
     "title": "Un autre groupe a l'identifiant de ce groupe"
   },
   "readNote": "Chaque membre du groupe peut lire tout ce qui est envoyé tant qu'il en fait partie. Une personne retirée garde ce qu'elle a déjà reçu et ne peut pas lire la suite ; une personne arrivée plus tard ne peut pas lire ce qui précède. Les messages vont à chaque membre ; qui était absent reçoit ce qu'il a manqué de n'importe quel membre qui l'a (les {{count}} derniers messages du groupe) quand ils se retrouvent.",

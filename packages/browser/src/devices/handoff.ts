@@ -81,6 +81,11 @@ export interface HandoffView {
   failure?: HandoffFailure;
   /** Seconds until the other device may try again (`locked-out`). */
   retry?: number;
+  /**
+   * The giver, after a wrong password: that device is refused now (15 with no success, WISP 06 § Authorizing a
+   * handoff), until the person lets it try again. Before that, "Let <device> try again" is not offered.
+   */
+  refused?: true;
   /** A push from the active device, waiting for Use here: about this many bytes. */
   offer?: number;
   /** The taker runs a newer database: the giver must update before it takes the profile back. */
@@ -428,6 +433,8 @@ export class HandoffGiver {
   private failure: HandoffFailure | undefined;
   /** What a failure about one wallet names. */
   private failed: { wallet?: string; expiresAt?: number } = {};
+  /** The wrong password (`failure: "password"`) left that device refused. */
+  private refused = false;
   private stays: HandoffStay[] = [];
   private retry: number | undefined;
   private newer = false;
@@ -478,7 +485,7 @@ export class HandoffGiver {
   }
 
   view(): HandoffView | null {
-    if (this.phase === "idle" || !this.peer) return this.failure && this.peer ? { role: "giver", device: this.deviceName, key: this.peer, step: "failed", bytes: 0, total: 0, failure: this.failure, ...(this.retry ? { retry: this.retry } : {}), ...this.failedDetail() } : null;
+    if (this.phase === "idle" || !this.peer) return this.failure && this.peer ? { role: "giver", device: this.deviceName, key: this.peer, step: "failed", bytes: 0, total: 0, failure: this.failure, ...(this.retry ? { retry: this.retry } : {}), ...(this.refused && this.failure === "password" ? { refused: true as const } : {}), ...this.failedDetail() } : null;
     const confirmed = [...this.sender.confirmed.values()].reduce((a, b) => a + b, 0);
     const step: HandoffView["step"] = this.phase === "offered" ? "connecting" : this.phase === "authorizing" ? "authorizing" : this.paused ? "paused" : this.phase === "pass1" ? "copying"
       : this.phase === "quiescing" ? "ready" : this.phase === "pass2" ? "rest" : this.phase === "released" ? "switching" : "failed";
@@ -573,12 +580,21 @@ export class HandoffGiver {
     });
   }
 
-  /** "Let <device> try again": the count of wrong passwords of that device starts again. */
-  async allowAgain(key: string): Promise<void> {
-    const record = await this.ports.records.read();
-    if (!record?.handoffAttempts?.[key]) return;
-    const { [key]: _, ...rest } = record.handoffAttempts;
-    await this.ports.records.amend({ handoffAttempts: rest });
+  /**
+   * "Let <device> try again": the count of wrong passwords of that device starts again. The wrong password it was
+   * offered for is answered: the screen shows it no more (it stayed, and the press looked like it did nothing).
+   */
+  allowAgain(key: string): Promise<void> {
+    return this.exclusive(async () => {
+      const record = await this.ports.records.read();
+      if (record?.handoffAttempts?.[key]) {
+        const { [key]: _, ...rest } = record.handoffAttempts;
+        await this.ports.records.amend({ handoffAttempts: rest });
+      }
+      if (this.phase !== "idle" || this.peer !== key || this.failure !== "password") return;
+      this.failure = undefined;
+      this.changed();
+    });
   }
 
   /** The link to `key` opened (a new session) or closed. */
@@ -748,6 +764,9 @@ export class HandoffGiver {
     if (versions.older) return busy("older", 0);
     if (!pushed) {
       const allowed = handoffAttemptAllowed(record.handoffAttempts?.[from], this.now());
+      // A refused device asks again: "Let <device> try again" is offered here once more. The offer that came with its
+      // fifteenth wrong password is not kept across a restart, nor by the device the profile moved to with its count.
+      if (allowed === "refused") { this.peer = from; this.deviceName = name(record, from); this.failure = "password"; this.failed = {}; this.refused = true; this.changed(); }
       if (allowed !== "ok") return busy(allowed, allowed === "refused" ? 0 : handoffRetryAfter(record.handoffAttempts?.[from], this.now()));
       // A pull is counted as a try when it is asked for, before anything is answered, and taken back only when its
       // proof holds: a device that asks and never proves (holding this device in `authorizing`) spends its tries.
@@ -775,7 +794,7 @@ export class HandoffGiver {
       const verifier = await this.ports.verifier();
       if (!verifier) { this.out(handoffBusyFrame("refused", 0), from); this.reset("refused"); return; }
       // The try was counted with the request (`onRequest`).
-      try { this.pake = await startPakeGiver(verifier, pake.m!); } catch { this.wrongPassword(from); return; }
+      try { this.pake = await startPakeGiver(verifier, pake.m!); } catch { await this.wrongPassword(from); return; }
       this.out(handoffPakeFrame({ n: 2, m: this.pake.second }), from);
       this.arm(HANDOFF_TIMINGS.idleMs, () => this.reset("dropped"));
       return;
@@ -783,10 +802,10 @@ export class HandoffGiver {
     if (pake.n !== 3 || !this.pake) return;
     const giver = this.pake;
     this.pake = null;
-    if (pake.wrong) { this.wrongPassword(from); return; }
+    if (pake.wrong) { await this.wrongPassword(from); return; }
     let key: Uint8Array;
     try { key = await giver.finish(pake.m!, pake.c!, handoffContext(this.ports.turnAddress, this.ports.ownKey, fromBase64Url(from), session.transcript)); }
-    catch (error) { if (error instanceof HandoffPasswordError) { this.wrongPassword(from); return; } throw error; }
+    catch (error) { if (error instanceof HandoffPasswordError) { await this.wrongPassword(from); return; } throw error; }
     // The proof held: this device's count goes (no count is a fresh start).
     const record = await this.ports.records.read();
     const attempts = record ? setAttempts(record, record.handoffAttempts) : {};
@@ -795,10 +814,12 @@ export class HandoffGiver {
     this.authorized(session, key);
   }
 
-  private wrongPassword(from: string): void {
+  private async wrongPassword(from: string): Promise<void> {
     this.out(handoffCancelFrame("password"), from);
     this.ports.notice?.("wrong-password", this.deviceName);
-    this.reset("password");
+    // The try was counted with the request: was it the one that leaves this device refused?
+    const record = await this.ports.records.read();
+    this.reset("password", handoffAttemptAllowed(record?.handoffAttempts?.[from], this.now()) === "refused");
   }
 
   /** The proof held (a pull) or the person agreed (a push): the first session's key, and pass 1. */
@@ -965,7 +986,7 @@ export class HandoffGiver {
     this.sender = new PartSender(this.now);
   }
 
-  private reset(failure: HandoffFailure): void {
+  private reset(failure: HandoffFailure, refused = false): void {
     this.sender.stop();
     clearInterval(this.stallTimer);
     clearInterval(this.stuckTimer);
@@ -973,6 +994,7 @@ export class HandoffGiver {
     if (this.timer) clearTimeout(this.timer);
     this.phase = "idle";
     this.failure = failure;
+    this.refused = refused;
     this.pake = null; this.have = null; this.planned = null; this.secret = null; this.bundleMade = null;
     this.changed();
   }

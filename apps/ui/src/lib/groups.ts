@@ -31,11 +31,18 @@ export const fitGroupNameEdit = (before: string, after: string, caret: number | 
   fitTextEdit(before, after, caret, fitsGroupName);
 
 /**
- * A name as two are compared: told apart by neither case, width, spacing nor the key's end a name already shows
- * ("Alice (…3r69cg)"), so "alice " and "Alice (…k1p0aa)" are both "Alice".
+ * What a name may hold that draws nothing by itself, and that `sanitizeNick` keeps since a name may need it beside
+ * something else: the joiners, the fillers, the variation selectors and the other default-ignorable code points, and
+ * the blank Braille pattern.
+ */
+const DRAWS_NOTHING = /[\p{Default_Ignorable_Code_Point}⠀]/gu;
+
+/**
+ * A name as two are compared: told apart by neither case, width, spacing, what draws nothing (`DRAWS_NOTHING`) nor the
+ * key's end a name already shows ("Alice (…3r69cg)"), so "alice ", "Ali‍ce" and "Alice (…k1p0aa)" are all "Alice".
  */
 const sameNameForm = (nick: string) =>
-  nick.normalize("NFKC").replace(/\s*\(\s*\.\.\.[^()]*\)\s*$/u, "").replace(/\s+/gu, " ").trim().toLocaleLowerCase();
+  nick.normalize("NFKC").replace(DRAWS_NOTHING, "").replace(/\s*\(\s*\.\.\.[^()]*\)\s*$/u, "").replace(/\s+/gu, " ").trim().toLocaleLowerCase();
 
 /** `sameNamed` of a roster already read: a page names many of its rows, each by the same roster. */
 const sameNamedOf = new WeakMap<readonly object[], ReadonlySet<string>>();
@@ -58,8 +65,11 @@ export function sameNamed(members: readonly Pick<GroupMemberView, "key" | "me" |
   return keys;
 }
 
-/** A name told apart by the end of its key, as "@" offers a member. */
-const withKeyEnd = (nick: string, key: string) => `${nick} (…${key.slice(-6)})`;
+/**
+ * A name told apart by the end of its key, as "@" offers a member. The end is isolated left to right (LRI … PDI): in
+ * an Arabic name's direction "محمد (…k1p0aa)" is laid out as "(k1p0aa…) محمد", the key's end read as its start.
+ */
+const withKeyEnd = (nick: string, key: string) => `${nick} \u2066(…${key.slice(-6)})\u2069`;
 
 /** `sameNamed`: a member whose name another member shows too is told apart by the end of their key (`withKeyEnd`). */
 export const memberName = (m: { key: string; me: boolean; nick?: string }, t: Translate = english, sameNamed?: ReadonlySet<string>) =>

@@ -270,6 +270,51 @@ describe("MessageBubble: a picture link under each shell's img-src", () => {
     expect(image(container)).toBeNull();
   });
 
+  it.each([
+    ["a chat", {}],
+    ["a group", { linkId: "group:g1" }],
+  ])("in %s, a contact's picture shown once and edited to another address asks again before it is read", async (_, props) => {
+    const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(async () => answer(PNG_BYTES));
+    const { user, rerender } = bubble({ text: "https://img.example.org/cat.gif" }, props);
+    await user.click(screen.getByTestId("image-reveal"));
+    expect(await screen.findByTestId("picture-link")).toBeInTheDocument();
+    // Each edit to another address (another host, or the same host's other picture) is not what Show picture was for.
+    const edits = ["https://tracker.example.net/u/1.gif", "https://tracker.example.net/u/2.gif", "https://img.example.org/dog.gif"];
+    for (const [i, edited] of edits.entries()) {
+      rerender(<MessageBubble message={message({ text: edited, edit: { seq: i + 1, at: 1_700_000_000_000 + i, history: [] } })} peerPubKey="peer" {...props} />);
+      expect(screen.getByTestId("image-reveal")).toHaveTextContent(`Show picture · ${new URL(edited).host}`);
+      expect(screen.queryByTestId("picture-link")).not.toBeInTheDocument();
+      await act(async () => {});
+      expect(fetched).not.toHaveBeenCalledWith(edited, expect.anything());
+    }
+    expect(fetched).toHaveBeenCalledTimes(1);
+    // Asked for: that address is read.
+    await user.click(screen.getByTestId("image-reveal"));
+    expect(await screen.findByTestId("picture-link")).toBeInTheDocument();
+    expect(fetched).toHaveBeenLastCalledWith("https://img.example.org/dog.gif", expect.anything());
+  });
+
+  it("a picture that could not be read is shown once the message is edited to one that can", async () => {
+    const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => String(url).includes("gone") ? new Response("", { status: 404 }) : answer(PNG_BYTES));
+    const { user, rerender } = bubble({ text: "https://cdn.example.com/gone.png" });
+    await user.click(screen.getByTestId("image-reveal"));
+    expect(await screen.findByRole("link", { name: "https://cdn.example.com/gone.png" })).toBeInTheDocument();
+    rerender(<MessageBubble message={message({ text: "https://cdn.example.com/cat.png" })} peerPubKey="peer" />);
+    await user.click(screen.getByTestId("image-reveal"));
+    expect(await screen.findByTestId("picture-link")).toBeInTheDocument();
+    expect(fetched).toHaveBeenLastCalledWith("https://cdn.example.com/cat.png", expect.anything());
+  });
+
+  it("my forwarded copy of a picture link waits for a click, as the contact's did", async () => {
+    // What I forward is mine in the chat it went to, but I never asked to read it: its address may be a contact's.
+    const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(async () => answer(PNG_BYTES));
+    const { user } = bubble({ text: "https://tracker.example.net/u/1.gif", sender: "me", forwarded: 1 });
+    expect(screen.getByTestId("image-reveal")).toHaveTextContent("Show picture · tracker.example.net");
+    expect(fetched).not.toHaveBeenCalled();
+    await user.click(screen.getByTestId("image-reveal"));
+    expect(await screen.findByTestId("picture-link")).toBeInTheDocument();
+  });
+
   it("never asks an address on this machine or the local network", async () => {
     const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(async () => answer(PNG_BYTES));
     const url = "https://192.168.1.1/cat.png";
@@ -960,6 +1005,28 @@ describe("MessageBubble: deleting", () => {
     expect(options("text c")).toHaveFocus();
     // The last one: the one before it.
     await remove("text c");
+    expect(options("text a")).toHaveFocus();
+  });
+
+  it("Cancel sending, which takes the row away with no confirmation, leaves the focus on the next message's ⋮ too", async () => {
+    function List() {
+      const [ids, setIds] = useState(["a", "b", "c"]);
+      return <div data-message-list>{ids.map((id) => (
+        <MessageBubble key={id} message={message({ id, sender: "me", text: `text ${id}`, delivery: "waiting" })} onDelete={() => setIds((all) => all.filter((x) => x !== id))} />
+      ))}</div>;
+    }
+    const { user } = renderApp(<List />);
+    const options = (text: string) => within(screen.getByText(text).closest<HTMLElement>("[data-message-row]")!).getByTestId("message-options");
+    const cancel = async (text: string) => {
+      options(text).focus();
+      await user.keyboard("{Enter}");
+      screen.getByTestId("message-cancel-sending").focus();
+      await user.keyboard("{Enter}");
+      expect(screen.queryByText(text)).not.toBeInTheDocument();
+    };
+    await cancel("text b");
+    expect(options("text c")).toHaveFocus();
+    await cancel("text c");
     expect(options("text a")).toHaveFocus();
   });
 

@@ -11,7 +11,8 @@ import { PaymentReview } from "./PaymentReview";
 import { WalletMark, type ChatRail } from "./WalletCards";
 import { CardDeck, WalletCardFace } from "./WalletDeck";
 import { ONCHAIN_FEE_CAP, byNetwork, cardNotSetUp, cardWallet, networkState, receivingFirst, spendable, walletCards, type InstanceCard } from "./walletCardData";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
 import { ComposerSheet, ComposerSheetHead, ForwardArrow } from "./ComposerSheet";
 import { CardFlip, FlipTurnButton } from "./deck/Flip";
 import { useCardFlip } from "./deck/useCardFlip";
@@ -91,7 +92,10 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   const wallet = reviewContext?.wallet;
   const state = wallet?.getState();
   const chat = reviewContext?.peer;
-  const peer = useServicesPlatform()?.getPeer(chat ?? "");
+  // What the sheet reads of the platform as it draws, compared by content: the contact's link and the wallets' state.
+  // The whole platform drew it (every card, and the amount being typed) again on every engine state, up to 20 a second
+  // while a file moves.
+  const [peer] = usePlatformValue(() => [servicesPlatform?.getPeer(chat ?? ""), wallet?.getState()] as const);
   const who = contact || t("payments.composer.yourContact");
   const networkName = (card: InstanceCard) => `${card.network === "testnet" ? "Testnet" : "Mainnet"} ${card.name}`;
   /**
@@ -271,12 +275,17 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
     } catch (e) { setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("payments.composer.error.prepare") }); }
     finally { setBusy(null); }
   };
-  // The contact's app answers an ask with a request: review it here, as Pay on that request would.
+  // The contact's app answers an ask with a request: review it here, as Pay on that request would. The wait is the ask's
+  // own: the chat behind builds its review context and the card its wallet on every draw, and a poll keyed on those
+  // started its 45 s again at each, so in a live chat it never gave up. It reads them as they are now instead.
+  const askWith = useRef({ reviewContext, bound, who, t });
+  askWith.current = { reviewContext, bound, who, t };
   useEffect(() => {
-    if (!asking || !reviewContext || !bound) return;
-    const context = reviewContext, started = Date.now();
+    if (!asking) return;
+    const started = Date.now();
     const timer = setInterval(() => {
-      const answer = context.wallet.answerTo(asking);
+      const { reviewContext: context, bound, who, t } = askWith.current;
+      const answer = context && bound ? context.wallet.answerTo(asking) : undefined;
       if (answer && !answer.target && answer.federations) {
         // Fedimint, but no federation in common: their request carries an invoice of their federation instead.
         clearInterval(timer);
@@ -284,7 +293,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
         setError(answer.invoice
           ? { tone: "error", title: t("payments.composer.error.noFederationInvoice", { name: who }), next: t("payments.composer.error.noFederationInvoiceNext") }
           : { tone: "error", title: t("payments.composer.error.noFederation", { name: who }), next: t("payments.composer.error.noFederationNext") });
-      } else if (answer?.target) {
+      } else if (answer?.target && context && bound) {
         clearInterval(timer);
         const token = answer.target.method === "usdt";
         void bound.preparePayment({ target: answer.target, amount: answer.amount, feeCap: token ? parsePaymentAmount("0.001", 18) : answer.target.method === "bitcoin" ? ONCHAIN_FEE_CAP : CASHU_FEE_CAP, payee: context.peer, linkId: answer.linkId, requestId: answer.id })
@@ -297,7 +306,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
       }
     }, 400);
     return () => clearInterval(timer);
-  }, [asking, reviewContext, bound, who, t]);
+  }, [asking]);
 
   const request = async () => {
     setError(null); setBusy("request");

@@ -712,6 +712,8 @@ export interface GhostLinkOptions {
   deviceCapabilities?: readonly DeviceCapability[];
   dht?: {
     state?: DhtDeliveryState; save(state: DhtDeliveryState): Promise<void>; pollMs?: number;
+    /** How often a contact that chose DHT only is read with the chat in the background (a CLI daemon's, `DhtDelivery`). */
+    peerDhtPollMs?: number;
     /** A chat already paired, started again: its first control envelope waits this long (`DhtDelivery`). */
     firstControlAfterMs?: number;
     /** This side's capability-record revision, told in every envelope (WISP 03). */
@@ -1138,6 +1140,7 @@ export class GhostLink {
     this.dht = options.params.profile && options.pairing && options.dht ? new DhtDelivery({
       params: options.params, mode: this.deliveryMode, state: options.dht.state, credentials: options.pairing.credentials, transport: options.transport,
       save: options.dht.save, pollMs: options.dht.pollMs, firstControlAfterMs: options.dht.firstControlAfterMs,
+      ...(options.dht.peerDhtPollMs && { peerDhtPollMs: options.dht.peerDhtPollMs }),
       ...(backsOff && { inviteMadeAt: options.madeAt ?? Date.now() }),
       capsRev: options.dht.capsRev, peerCapsRev: options.dht.peerCapsRev, peerAcceptsText: options.dht.peerAcceptsText, peerAcceptsFile: options.dht.peerAcceptsFile,
       ...(options.dht.ratchet && { ratchet: options.dht.ratchet }),
@@ -1347,10 +1350,16 @@ export class GhostLink {
       },
       onClose: () => {
         if (this.activeBinding) return;
-        // A live WebRTC session the contact closed: dialled again at once, and watched for it to come back.
+        // A live WebRTC session that closed: dialled again at once, and the contact watched for it to come back.
         const wasLive = !!this.channel && this.paired?.state.status === "ready";
         this.detach();
-        if (wasLive) this.peerLost("closed");
+        if (!wasLive) return;
+        // Ended here, not by an offer of the contact's (the data link is idle): its network changed, say, and the
+        // contact's connection may hold on for half a minute (node-datachannel never says `disconnected`). The side
+        // whose key does not dial resumes as after an absence: it dials once, and the contact's offer, should one cross
+        // it, is settled by key. It waited for the contact's connection to give up: 31-34 s offline with a CLI contact.
+        if (this.dataLink.state === "idle" && this.awaitsContactDial()) this.resumeAfterAbsence();
+        this.peerLost("closed");
       },
       onState: (state) => {
         const was = this.lastDataLinkState;

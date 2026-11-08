@@ -372,7 +372,7 @@
     "copied": "Copiado",
     "copy": "Copiar",
     "copyCode": "Copiar código",
-    "hiddenChars": "Este código tiene caracteres ocultos o que cambian la dirección del texto, mostrados como <U+…>. Copiar código también los copia.",
+    "hiddenChars": "Este código tiene caracteres ocultos o que cambian la dirección del texto, mostrados como {{marker}}. Copiar código también los copia.",
     "localTime": "{{time}} en tu hora",
     "showAll": "Mostrar todo",
     "showLess": "Mostrar menos",

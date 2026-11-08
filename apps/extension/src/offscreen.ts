@@ -22,6 +22,11 @@ const VIEWER_MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 /** How long a peer being replaced gets to say goodbye to its contacts before its document closes. */
 const STOP_GRACE_MS = 3_000;
 /**
+ * How long a peer being replaced in the middle of "Clear all data" gets to end it (take back what it can, stop, empty
+ * its database: `CLEAR_WITHDRAW_MS` and a little more), as long as the page gives it (clearData.ts `CLEAR_ENGINE_MS`).
+ */
+const CLEAR_GRACE_MS = 15_000;
+/**
  * Each chat's newest rows a page gets when it connects (`EngineServer.attach`'s `newest`), not its whole history: this
  * port carries JSON, and every chat's whole history went across to each tab opened or reloaded (about 20 MiB for 50
  * chats of 2,000 messages). Twice what a page keeps of a chat (`STORED_MESSAGES`, 200): a chat that got fewer than 200
@@ -88,7 +93,10 @@ chrome.runtime.onConnect.addListener((port) => {
       const handled = s.handle(client, request);
       // "Clear all data" stops the peer for good (`clearProfileData`): once it is over, the worker replaces this document
       // at the next start it is asked for, should the page go away before it asks for a new peer (`restart-engine`).
-      if (request?.kind === "request" && request.method === "clearProfileData") void handled.finally(() => { cleared = true; });
+      if (request?.kind === "request" && request.method === "clearProfileData") {
+        void handled.finally(() => { cleared = true; });
+        clearing = handled.catch(() => {});
+      }
     }
   }));
 });
@@ -164,11 +172,14 @@ async function turnOffAppsAt(patterns: string[]): Promise<void> {
 let stopping: Promise<void> | null = null;
 /** A page's "Clear all data" stopped the peer: it does not run again in this document. */
 let cleared = false;
+/** A page's "Clear all data" in progress in the peer: it ends with the peer stopped. */
+let clearing: Promise<void> | null = null;
 /**
  * Stops the peer, once: before the worker closes this document for a switch, or as the page goes away. One "Clear all
- * data" stopped is not stopped again: nothing it held is written over the emptied database.
+ * data" stopped is not stopped again: nothing it held is written over the emptied database. One clearing stops once
+ * its clear is over: a switch in another tab no longer leaves its database half emptied.
  */
-const stopPeer = () => (stopping ??= cleared ? Promise.resolve() : (running ? running.stop() : server.then((s) => s.stop())).catch(() => {}));
+const stopPeer = () => (stopping ??= cleared ? Promise.resolve() : clearing ?? (running ? running.stop() : server.then((s) => s.stop())).catch(() => {}));
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {
   if (message?.target !== "engine" || !fromOwnPage(sender)) return false;
@@ -182,7 +193,8 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
   }
   if (message.type === "stop") {
     // Its contacts see it leave, if that takes a moment; a peer that hangs does not hold up the switch.
-    void Promise.race([stopPeer(), new Promise((resolve) => setTimeout(resolve, STOP_GRACE_MS))]).then(() => sendResponse(true));
+    const grace = clearing && !cleared ? CLEAR_GRACE_MS : STOP_GRACE_MS;
+    void Promise.race([stopPeer(), new Promise((resolve) => setTimeout(resolve, grace))]).then(() => sendResponse(true));
     return true;
   }
   if (message.type === "http-request") {

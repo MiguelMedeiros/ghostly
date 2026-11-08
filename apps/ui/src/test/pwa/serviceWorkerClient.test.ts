@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SHARE_FORWARD_AFTER_MS, applyUpdate, askForShare, buildGone, followNewVersion, forwardShare, handShareOver, listenForShares, listenForTaps, onBuildGone, openedForShare, prepareUpdate } from "../../../../web/src/pwa/serviceWorker";
 import { carryIncomingShare, dropIncomingShare, incomingShare, resetIncomingShare } from "../../lib/incomingShare";
-import { activeProfileId } from "../../lib/profiles";
+import { activeProfileId, createProfile, unregisterProfile } from "../../lib/profiles";
 
 // covers: app.pwa.update, app.pwa.share-target
 
@@ -393,5 +393,44 @@ describe("a wake-up notification tapped, on the page's side", () => {
     listenForTaps(() => false);
     container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "open-chat", path: "/chat/abc", profile: activeProfileId() } }));
     expect(window.location.hash).toBe("#/chat/abc");
+  });
+
+  describe("told on a guess (it said nothing in time: frozen or busy)", () => {
+    /** A `silent` open-chat for `profile`: whether this page switched, and what it answered on the port. */
+    const guess = (profile: string) => {
+      const port = { postMessage: vi.fn() };
+      const switched: string[] = [];
+      const heard = (event: Event) => switched.push((event as CustomEvent<{ id: string }>).detail.id);
+      addEventListener("profile-switching", heard);
+      container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "open-chat", path: "/chat/abc", profile, silent: true }, ports: [port] }));
+      removeEventListener("profile-switching", heard);
+      return { switched, answered: port.postMessage.mock.calls };
+    };
+    let other: string;
+    // A switch restarts the page a moment later: that moment never comes here.
+    beforeEach(() => { vi.useFakeTimers(); other = createProfile("Work").id; });
+    afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); sessionStorage.clear(); unregisterProfile(other); });
+
+    it("running another profile's peer, it stays that profile and hands the chat back", () => {
+      listenForTaps(() => true);
+      const { switched, answered } = guess(other);
+      expect(switched).toEqual([]);
+      expect(window.location.hash).toBe("");
+      expect(answered).toEqual([[{ taken: false }]]);
+    });
+
+    it("its own profile's frozen window takes it", () => {
+      listenForTaps(() => true);
+      const { answered } = guess(activeProfileId());
+      expect(window.location.hash).toBe("#/chat/abc");
+      expect(answered).toEqual([[{ taken: true }]]);
+    });
+
+    it("a tab that runs nothing yet (waiting behind another) switches to the notice's profile, as before", () => {
+      listenForTaps(() => false);
+      const { switched, answered } = guess(other);
+      expect(switched).toEqual([other]);
+      expect(answered).toEqual([[{ taken: true }]]);
+    });
   });
 });

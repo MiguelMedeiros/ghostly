@@ -272,10 +272,13 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate, nameS
 /** What `eventLine` writes in place of the admin's name (a private-use character), to put the name and its mark there. */
 const NAME_SLOT = "";
 
-/** A membership line (`eventText`), the admin's name in it with the admin's mark, which no name a member picks can be. */
+/**
+ * A membership line (`eventText`), the admin's name in it with the admin's mark, which no name a member picks can be.
+ * Not the line that makes them the admin: it says so in its own words, and the mark would only repeat "admin".
+ */
 function eventLine(message: StoredMessage, group: GroupView, t: Translate): ReactNode {
   const member = message.member ? group.members.find(m => m.key === message.member) : undefined;
-  if (!member || member.me || member.role !== "admin") return eventText(message, group, t);
+  if (!member || member.me || member.role !== "admin" || message.event === "admin") return eventText(message, group, t);
   const [before, after, ...more] = eventText(message, group, t, NAME_SLOT).split(NAME_SLOT);
   if (after === undefined || more.length) return eventText(message, group, t);
   return <>{before}<bdi>{memberName(member, t, sameNamed(group.members))}</bdi> <AdminMark testId="group-event-admin" />{after}</>;
@@ -729,7 +732,8 @@ export function GroupChat() {
   const outOfIt = group.status && group.status !== "active" ? (group.statusReason ? problemLine(group.statusReason, t) : groupStatusText(group.status, t)) : undefined;
   const count = group.members.length === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count: group.members.length });
   const subtitle = joiningByLink ? (group.invitation!.admin ? t("group.chat.joining") : t("group.chat.joiningByLink"))
-    : community && group.status === "active" ? (community.hub ? t("group.chat.communityHub", { members: count })
+    // A community with nobody else in it, as a private group: not "connecting…" (to nobody) nor relaying for others.
+    : community && group.status === "active" ? (others.length === 0 ? count : community.hub ? t("group.chat.communityHub", { members: count })
       : community.connected ? t("group.chat.communityConnected", { members: count }) : t("group.chat.communityConnecting", { members: count }))
     : group.invitation?.takenBack ? t("sidebar.group.takenBack")
     : group.invitation && !knockingAgain ? (group.invitation.contact ? t("group.chat.invitation", { contact: group.invitation.contact }) : t("group.chat.invitationUnknown"))
@@ -767,7 +771,7 @@ export function GroupChat() {
               invitation has no member yet (the engine knows only the count the card says): its avatar and line open nothing. */}
           {invited ? <GroupAvatar picture={group.picture} size={40} glyph={20} testId="group-avatar" className="bg-accent/15" />
           : <button ref={avatarButton} onClick={() => (group.picture ? setViewingPicture(true) : setShowMembers(true))} data-testid="group-avatar-open"
-            className={`relative rounded-full shrink-0 ${group.picture ? "cursor-zoom-in" : ""}`}
+            className={`relative rounded-full shrink-0 max-md:p-0.5 ${group.picture ? "cursor-zoom-in" : ""}`}
             {...(group.picture ? { "aria-label": t("common.viewPhoto", { name: group.name || t("group.chat.unnamed") }) } : { title: t("group.chat.membersButton"), "aria-label": t("group.chat.membersButton") })}>
             <GroupAvatar picture={group.picture} size={40} glyph={20} testId="group-avatar" className="bg-accent/15" />
           </button>}
@@ -778,11 +782,15 @@ export function GroupChat() {
               <h1 dir="auto" className="text-[15px] font-normal m-0 leading-tight truncate text-text-primary" data-testid="group-name">{group.name || t("group.chat.unnamed")}</h1>
             </div>
             {invited ? <p data-testid="group-members" className="m-0 max-w-full text-xs text-text-muted truncate">{subtitle}</p>
-            : <button onClick={() => setShowMembers(true)} data-testid="group-members" className="block max-w-full text-xs text-text-muted truncate hover:text-accent cursor-pointer max-md:min-h-6">
+            // On a phone where a tap lands reaches up over the name: the line alone is 24px tall, under a thumb's 44px. The
+            // cut with … is inside it, so it does not clip that taller area.
+            : <button onClick={() => setShowMembers(true)} data-testid="group-members" className="relative block max-w-full text-start text-xs text-text-muted hover:text-accent cursor-pointer max-md:min-h-6 max-md:min-w-11 max-md:before:absolute max-md:before:inset-x-0 max-md:before:bottom-0 max-md:before:-top-5 max-md:before:content-['']">
+              <span className="block truncate">
               {/* Who is typing while it lasts, in place of the member count, as a 1:1 chat's header does. Only that is
                   said by a screen reader: the count, inside the live region, was read again each time they stopped. */}
               <span role="status" aria-live="polite">{typers.length > 0 && <GroupTypingText testId="group-typing" typers={typers} />}</span>
               {!typers.length && subtitle}
+              </span>
             </button>}
           </div>
         </div>
@@ -791,12 +799,12 @@ export function GroupChat() {
           {/* Only while a bot's card is here (WISP 405 · Status Cards). */}
           <TasksButton rows={cardRows} nameOf={author => nameOf("peer", author) ?? `…${author.slice(-6)}`} faceOf={memberFace} />
           {canShare && <button ref={shareRef} onClick={() => void openShare()} data-testid="group-share" title={t("group.chat.shareHint")} aria-label={t("group.chat.shareLink")}
-            className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-accent/15 px-3 text-sm font-semibold text-accent hover:bg-accent/25 max-md:min-h-11 max-md:px-2.5">
+            className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full bg-accent/15 px-3 text-sm font-semibold text-accent hover:bg-accent/25 max-md:min-h-11 max-md:min-w-11 max-md:px-2.5">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
             <span className="max-[480px]:hidden">{t("group.chat.shareLink")}</span>
           </button>}
           <div className="relative" ref={menuRef}>
-            <button ref={optionsRef} onClick={() => setMenuOpen(!menuOpen)} onKeyDown={openOnArrow(() => setMenuOpen(true))} className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer" title={t("chat.options")} aria-haspopup="true" aria-expanded={menuOpen} data-testid="group-options">
+            <button ref={optionsRef} onClick={() => setMenuOpen(!menuOpen)} onKeyDown={openOnArrow(() => setMenuOpen(true))} className="flex items-center justify-center p-2 max-md:h-11 max-md:w-11 max-md:p-0 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer" title={t("chat.options")} aria-haspopup="true" aria-expanded={menuOpen} data-testid="group-options">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1" /><circle cx="12" cy="5" r="1" /><circle cx="12" cy="19" r="1" /></svg>
             </button>
             <Menu testId="group-options-menu" open={menuOpen} onClose={closeMenu} anchorRef={menuRef} focusFirst>
@@ -869,7 +877,7 @@ export function GroupChat() {
           </div>
           <h2 className="mt-4 text-base font-semibold text-text-primary">{joining.title}</h2>
           <p className="mt-2 text-sm leading-relaxed text-text-muted">{joining.body}</p>
-          {!linkReplaced && <ol data-testid="group-joining-steps" data-stage={stage} className="mx-auto mt-4 w-fit space-y-1.5 text-left text-xs">
+          {!linkReplaced && <ol data-testid="group-joining-steps" data-stage={stage} className="mx-auto mt-4 w-fit space-y-1.5 text-start text-xs">
             {joinSteps(group.profile === "community", t).map(step => {
               const state = joinStepState(stage, step.stage);
               const done = state === "done", current = state === "current";

@@ -16,8 +16,11 @@ export interface OptionSpec {
   choices?: readonly string[];
 }
 export interface Parsed { positionals: string[]; options: Record<string, string | number | boolean | string[] | undefined> }
-/** The command a line is parsed for, as its unknown options name it: `send`, and whether text comes on its line. */
-export interface ParseFor { command: string; text?: boolean }
+/**
+ * The command a line is parsed for, as its unknown options name it: `send`, whether text comes on its line, and which
+ * positionals take a number (`<sats>`): there a word like `-5` is that number, refused as one, not an unknown option.
+ */
+export interface ParseFor { command: string; text?: boolean; number?: (index: number) => boolean }
 
 /**
  * Options every command takes. They may come anywhere on the line.
@@ -37,7 +40,9 @@ export const GLOBAL_OPTIONS: Record<string, OptionSpec> = {
  * the ghostly-cli lesson of #208). So is a positional that `idSlot` says takes an id, a key or a draft: there a word
  * that starts with `-`, is longer than two characters and is no option of the command is the value (`--` starts one
  * id in 4096; `-x` stays an option). Any other positional that starts with `-` is refused instead of sent: a
- * mistyped flag must not reach a contact as text. Put `--` before a message that starts with a dash.
+ * mistyped flag must not reach a contact as text. Put `--` before a message that starts with a dash. Where `parsing`
+ * says a number comes, a word of a dash and a digit (`-5`) that is no option is that number, for the command to refuse
+ * in its own words (`<sats> takes a whole number from 1 up, not -5`); no option's name starts with a digit.
  *
  * An unknown option names the command `parsing` gives, the nearest of its options and its help.
  */
@@ -58,6 +63,7 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--") { positionals.push(...argv.slice(i + 1)); break; }
+    if (/^-\d/.test(arg) && parsing?.number?.(positionals.length) && !isOption(arg)) { positionals.push(arg); continue; }
     if (arg.startsWith("-") && arg.length > 2 && idSlot(positionals.length) && !isOption(arg)) { positionals.push(arg); continue; }
     if (arg.startsWith("--") || (arg.startsWith("-") && arg.length === 2 && arg !== "-")) {
       let name: string, inline: string | undefined;

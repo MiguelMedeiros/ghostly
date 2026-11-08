@@ -1238,10 +1238,13 @@ export class Groups {
     return { me: session.myKey, community: false, onHubs: this.hubs.active(groupId, session, this.now()), inRoster: key => rosterHas(session.roster, key), couldRead: (key, messageId, ts) => session.couldRead(key, messageId, ts) };
   }
 
-  /** Why this device is out of the group for good, as `fileCheck` says it; undefined while it is in it, or not loaded. */
+  /**
+   * Why this device is out of the group for good, as `fileCheck` says it; undefined while it is in it, or not loaded. A
+   * community join that lost a race (`lost`) is asked again and back in by itself: its files wait, not stop for good.
+   */
   private fileOut(groupId: string): string | undefined {
     const session = this.isCommunity(groupId) ? this.communities.session(groupId) : this.sessions.get(groupId);
-    if (!session || session.status === "active") return undefined;
+    if (!session || session.status === "active" || session.status === "lost") return undefined;
     return session.state.statusReason ?? "You are no longer in this group";
   }
 
@@ -3122,6 +3125,8 @@ export class Groups {
         this.files?.arrivedAgain(state.id, id, frame.e);
       },
       edit: e => this.host.groupEdit?.(state.id, e),
+      // My edit of a message older than my hubs goes to them too: they carry it to the members of its epoch (WISP 902 § Hubs).
+      carriers: () => this.hubs.active(state.id, session, this.now()) ? this.hubs.hubs(state.id, session, this.now()) : [],
       changed: () => {
         // Taken out as a hub: my edges stay a moment, for my last act, passing on the commit that says so (WISP 902 § Hubs).
         if (session.status === "removed" && this.hubs.isHub(state.id) && !this.removedAt.has(state.id)) this.removedAt.set(state.id, this.now());

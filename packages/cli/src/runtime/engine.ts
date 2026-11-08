@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DAEMON_WATCH_PEER_IDLE_MS, fromBase64Url, RTC_CONFIG, setLinkTraceSink } from "@ghostly/core";
+import { ACTIVE_DHT_POLL_MS, DAEMON_WATCH_PEER_IDLE_MS, fromBase64Url, RTC_CONFIG, setLinkTraceSink } from "@ghostly/core";
 import { MAX_IROH_RELAYS, irohRelayProblem } from "@ghostly/browser/platform/irohWeb";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { loadCallStack } from "../calls/media";
@@ -309,6 +309,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     staysOnline: envSwitch("GHOSTLY_HUB", true),
     // A contact that left (a phone that put the app to sleep) is read every 10 s for 5 minutes, not every 30 s past 2.
     watchPeerIdleMs: DAEMON_WATCH_PEER_IDLE_MS,
+    // A bot is the chat open: a contact that chose DHT only is read every 10 s (WISP 403, poll pace), not every 30 s.
+    peerDhtPollMs: ACTIVE_DHT_POLL_MS,
     localFetch: nodeLocalFetch,
     // A wake-up goes to a push service only, on public addresses only (./pushSend.ts), as the Desktop's does.
     pushSend: (request) => nodePushSend(request),
