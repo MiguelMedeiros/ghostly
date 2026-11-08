@@ -1866,14 +1866,16 @@ export class GroupSession {
    */
   private async receiveEdit(from: string, raw: unknown, waited = false): Promise<void> {
     if (!isEditFrame(raw) || raw.s === this.myKey || !rosterHas(this.roster, from)) return;
+    // One I took already, or a later one of its message (another hub's copy: a member on hubs hears each edit from each
+    // of them), is dropped before its signature costs a check, as a message I saw is: signed or not, it changes nothing.
+    if ((this.state.relayEdits ?? []).some(f => f.s === raw.s && f.e === raw.e && f.n === raw.n && f.v >= raw.v)) return;
     const member = rosterHas(this.roster, raw.s);
     if (!verify(fromBase64Url(raw.sig), editSigned(raw), publicKeyFromZ32(raw.s))) return;
     if (raw.e > this.epoch) { this.parkEdit(from, raw); return; }
     const commit = this.state.chain[raw.e];
     if (!commit || !rosterHas(commit.m, raw.s)) return;
-    // At its author's pace (`AuthorPace`), as a message is; one I hold already (another hub's copy) costs nothing.
-    const held = (this.state.relayEdits ?? []).some(f => f.s === raw.s && f.e === raw.e && f.n === raw.n && f.v >= raw.v);
-    if (!held && !this.paced(this.editPace, raw.s, raw.c.length + 400, raw.s !== from && (this.awaitsAnswer(from) || waited))) return;
+    // At its author's pace (`AuthorPace`), as a message is.
+    if (!this.paced(this.editPace, raw.s, raw.c.length + 400, raw.s !== from && (this.awaitsAnswer(from) || waited))) return;
     // Of an epoch from before I was let in (a hub let in after the message): nothing for me to read, but the author's
     // signed word for the members who can, kept and passed on as is while the author is in the roster. Hubs change, and
     // most members of that epoch reach the author only through whoever is a hub now. An author out of the roster: kept

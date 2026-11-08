@@ -155,6 +155,9 @@ export class RateWindow {
     return true;
   }
 
+  /** Gives back the last one counted (`take`): what it was counted for turned out to change nothing. */
+  giveBack(): void { this.recent.pop(); }
+
   /** Milliseconds until the window has room again; 0 when it has room now. */
   wait(): number {
     const now = this.now();
