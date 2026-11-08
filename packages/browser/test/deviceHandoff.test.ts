@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import {
-  HANDOFF_ATTEMPTS, HANDOFF_PIECE_BYTES, HANDOFF_TIMINGS, fromBase64Url, handoffDigest, randomBytes, readHandoffHave, readHandoffManifest, readTurnPacket, seedSigner,
+  HANDOFF_ATTEMPTS, HANDOFF_PIECE_BYTES, HANDOFF_TIMINGS, fromBase64Url, handoffAttemptAllowed, handoffDigest, randomBytes, readHandoffHave, readHandoffManifest, readTurnPacket, seedSigner,
   toBase64Url, turnReleaseMessage, verify, type DeviceFrame, type HandoffPart, type TurnRelease,
 } from "@ghostly/core";
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type StoredDeviceState } from "../src/devices/state";
@@ -496,6 +496,20 @@ describe("the password proof and its limits", () => {
     await w.takerRecords.amend({ handoffAttempts: { [C]: { recent: [], total: HANDOFF_ATTEMPTS.total } } });
     await fullPull(w);
     expect(w.takerRecords.record.handoffAttempts?.[C]).toBeUndefined();
+  });
+
+  it("a lock-out the giver counted while its clock ran days ahead lasts at most an hour on the device that takes the profile", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    const ahead = Date.now() + 2 * 24 * HANDOFF_ATTEMPTS.hourMs;
+    await w.giverRecords.amend({ handoffAttempts: { [C]: { recent: [ahead], total: 5, until: ahead + HANDOFF_ATTEMPTS.hourMs } } });
+    await fullPull(w);
+    const carried = w.takerRecords.record.handoffAttempts![C];
+    expect(carried.total).toBe(5);
+    expect(carried.until).toBeGreaterThan(Date.now());
+    expect(carried.until).toBeLessThanOrEqual(Date.now() + HANDOFF_ATTEMPTS.hourMs);
+    expect(handoffAttemptAllowed(carried, Date.now() + HANDOFF_ATTEMPTS.hourMs)).toBe("ok");
+    expect(carried.recent.every((at) => at <= Date.now())).toBe(true);
   });
 
   it("a count the giver no longer holds (a right password cleared it) goes from the taker's old copy too", async () => {
