@@ -7350,6 +7350,10 @@ export class GhostlyNode implements EngineImplementation {
     if (this.options.singleDevice) throw new Error("enroll-single: A profile of the command line is on one device only");
     if (this.limitedMode) throw new Error(LIMITED_MODE_ERROR);
     if (!this.networkOn) throw new Error("enroll-offline: You are offline");
+    // One change of the set at a time, as `setMoveAllowed` keeps it the other way.
+    if (this.settingMove) throw new Error("enroll-busy: The device set is already changing. Try again after it.");
+    const handoff = this.handoffGiver?.view();
+    if (handoff && handoff.step !== "failed") throw new Error("enroll-busy: The profile is moving. Try again after it.");
   }
 
   /**
@@ -7514,6 +7518,15 @@ export class GhostlyNode implements EngineImplementation {
     if (view && view.step !== "done" && view.step !== "failed") throw new Error(`${prefix}-busy: A device is being added. Try again after it.`);
     const handoff = this.handoffGiver?.view();
     if (handoff && handoff.step !== "failed") throw new Error(`${prefix}-busy: The profile is moving. Try again after it.`);
+  }
+
+  /**
+   * A device being added or a move of the set in progress: the handoff waits for it (`GiverPorts.setChanging`). A move
+   * that cancelled an Add after its grant went out would leave the note of that grant on a device no longer active.
+   */
+  private deviceSetChanging(): boolean {
+    const view = this.enrollment?.current();
+    return this.settingMove !== null || (!!view && view.step !== "done" && view.step !== "failed");
   }
 
   private async moveDeviceSet(remove?: string): Promise<DeviceSetView> {
@@ -7801,6 +7814,7 @@ export class GhostlyNode implements EngineImplementation {
       source: host.source(profile),
       verifier: () => this.handoffVerifier(),
       busy: (taker) => this.handoffBusy(taker),
+      setChanging: () => this.deviceSetChanging(),
       staying: (taker) => this.handoffStaying(taker),
       quiesce: (patch, taker) => this.quiesceForHandoff(patch, taker),
     });

@@ -211,6 +211,11 @@ export interface GiverPorts extends Common {
    * not read yet. Said to the person on this device; the other device is told only that it is busy.
    */
   busy(taker?: HandoffTakerFacts): Promise<LocalBusy | BusyReport | null>;
+  /**
+   * The device set is changing here (a device being added, a move of the set): one change of the set at a time, so a
+   * handoff waits for it as for another move. The note of a grant that did not finish stays on this device only.
+   */
+  setChanging?(): boolean;
   /** The wallets that stay on this device in a handoff to `taker` (shown on this device's screen). */
   staying?(taker: HandoffTakerFacts): Promise<HandoffStay[]>;
   /**
@@ -537,6 +542,7 @@ export class HandoffGiver {
       const record = await this.ports.records.read();
       if (!record || record.state !== "active") throw new Error("handoff-refused: Only the active device moves the profile.");
       if (slotOf(record, key) < 0) throw new Error("handoff-refused: That device is not one of this profile's.");
+      if (this.ports.setChanging?.()) throw new Error("handoff-busy: Another move is in progress.");
       const busy = reportOf(await this.ports.busy(this.takerFacts(key)));
       // The wallet a refusal is about goes in the message, between colons, for the screen to name it.
       if (busy) throw new Error(`handoff-${busy.why}:${busy.wallet ? `${busy.wallet}:` : ""} This device cannot move the profile now.`);
@@ -752,6 +758,7 @@ export class HandoffGiver {
     if (slotOf(record, from) < 0) return busy("refused", 0);
     const pushed = this.phase === "offered" && from === this.peer && request.id === this.id;
     if (this.phase !== "idle" && this.phase !== "failed" && !pushed) return busy("handoff");
+    if (this.ports.setChanging?.()) return busy("handoff");
     const session = this.sessionFor(from);
     if (!session?.peer) return busy("handoff", 5);
     // Why is said on this device; the other one is told it is busy, and that a call is on when one is (`wireWhy`).
