@@ -24,6 +24,8 @@ test("on a phone every button, link and control on the main screens is a 44 px t
   const tabs = page.getByTestId("mobile-tabs");
   await tabs.getByRole("button", { name: "Wallets" }).click();
   await expect(page.getByTestId("wallet")).toBeVisible();
+  // A new profile's first-run card (no setup runs under test), its inline New with it: measured once it is there.
+  await expect(page.getByTestId("wallet-first").getByTestId("wallet-first-new")).toBeVisible();
   await measure("wallet");
   await tabs.getByRole("button", { name: "Apps" }).click();
   await expect(page.getByTestId("apps-page")).toBeVisible();
