@@ -1772,8 +1772,12 @@ export class GhostLink {
     this.autoConnectFailures = 0;
     this.lastAutoConnectAt = 0;
     if (mode === "dht") { this.disconnect(); this.heldSignal = null; }
-    // The link session runs before the contact can learn the new method (from the envelope setMode publishes).
-    else if (!this.quietForTaken) this.session.start();
+    // The link session runs before the contact can learn the new method (from the envelope setMode publishes). Where the
+    // contact dials (the lower key offers), this side's first presence is what it dials on: signaling (`LinkSession.presenceDue`).
+    else if (!this.quietForTaken) {
+      if (this.myPubKeyZ32 > this.options.params.peerPubKeyZ32) this.session.presenceDue();
+      this.session.start();
+    }
     await this.dht.setMode(mode);
     if (mode === "dht") {
       await this.session.stop(false);
