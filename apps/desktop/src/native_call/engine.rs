@@ -667,6 +667,8 @@ struct Shared {
     sound: Mutex<Option<Playing>>,
     /// The peer takes our pictures (`Call::send_pictures`).
     pictures: AtomicBool,
+    /// The page draws who is speaking (`Call::set_levels`): the levels are said only then.
+    levels: AtomicBool,
     closed: AtomicBool,
 }
 
@@ -688,8 +690,9 @@ impl Shared {
     /// Where a side's loudness goes on its way to the page, for who is speaking: `{"levels":{"mic":0.4}}`, 0 to 1
     /// as Settings' meter reads it. `side` is "mic" for what the microphone sends (silence while muted) and
     /// "peer" for the peer's sound. A level is said when it changes, so silence is said once. None is said while
-    /// the page is out of sight ([`PAGE_HIDDEN`]): it draws no ring then, and a voice changes its level at nearly
-    /// every reading, 25 evals a second for both sides. Back in sight, the next reading is said.
+    /// the page is out of sight ([`PAGE_HIDDEN`]) or draws no ring (a video call; `Call::set_levels`): a voice
+    /// changes its level at nearly every reading, 25 evals a second for both sides. Back in sight or asked again,
+    /// the next reading is said.
     fn hears(self: &Arc<Self>, side: &'static str) -> Heard {
         self.hears_while(side, &PAGE_HIDDEN)
     }
@@ -699,7 +702,7 @@ impl Shared {
         let shared = self.clone();
         let last = AtomicU64::new(u64::MAX);
         Arc::new(move |level: f64| {
-            if hidden.load(Ordering::Relaxed) {
+            if hidden.load(Ordering::Relaxed) || !shared.levels.load(Ordering::Relaxed) {
                 last.store(u64::MAX, Ordering::Relaxed);
                 return;
             }
@@ -1452,6 +1455,7 @@ impl Call {
             speaker: Mutex::new(devices.speaker),
             sound: Mutex::default(),
             pictures: AtomicBool::new(true),
+            levels: AtomicBool::new(false),
             closed: AtomicBool::new(false),
         });
         // By address: webrtc-rs would otherwise resolve the name on its driver, ahead of the host candidates.
@@ -1754,6 +1758,11 @@ impl Call {
         let volume = self.volume.lock().unwrap();
         self.voice.muted.store(muted, Ordering::Relaxed);
         volume.set_property("mute", muted);
+    }
+
+    /// The page draws who is speaking, or no longer does ([`Shared::hears`]). Not blocking, like `set_muted`.
+    pub fn set_levels(&self, on: bool) {
+        self.shared.levels.store(on, Ordering::Relaxed);
     }
 
     pub fn video_input(&self) -> gst_app::AppSrc {
@@ -2171,6 +2180,26 @@ mod tests {
     #[test]
     fn out_of_sight_no_level_is_said_and_the_next_is_once_back() {
         static HIDDEN: AtomicBool = AtomicBool::new(false);
+        let (shared, told) = telling();
+        shared.levels.store(true, Ordering::Relaxed);
+        let heard = shared.hears_while("peer", &HIDDEN);
+        heard(0.4);
+        heard(0.4);
+        HIDDEN.store(true, Ordering::Relaxed);
+        for level in [0.5, 0.6, 0.0, 0.4] {
+            heard(level);
+        }
+        HIDDEN.store(false, Ordering::Relaxed);
+        heard(0.4);
+        heard(0.4);
+        assert_eq!(
+            *told.lock().unwrap(),
+            [r#"{"levels":{"peer":0.4}}"#, r#"{"levels":{"peer":0.4}}"#]
+        );
+    }
+
+    /// A call's `Shared`, and what it tells its page (as text).
+    fn telling() -> (Arc<Shared>, Arc<Mutex<Vec<String>>>) {
         let told = Arc::new(Mutex::new(Vec::<String>::new()));
         let into = told.clone();
         let shared = Arc::new(Shared {
@@ -2186,21 +2215,34 @@ mod tests {
             speaker: Mutex::default(),
             sound: Mutex::default(),
             pictures: AtomicBool::new(true),
+            levels: AtomicBool::new(false),
             closed: AtomicBool::new(false),
         });
-        let heard = shared.hears_while("peer", &HIDDEN);
-        heard(0.4);
-        heard(0.4);
-        HIDDEN.store(true, Ordering::Relaxed);
-        for level in [0.5, 0.6, 0.0, 0.4] {
+        (shared, told)
+    }
+
+    /// No level goes to a page that draws no one speaking (a video call: 20 evals a second for nothing), until it
+    /// asks; then the next reading is said, even one the same as the last said; and none once it lets them go.
+    #[test]
+    fn no_level_is_said_until_the_page_asks_and_none_once_it_stops() {
+        static SHOWN: AtomicBool = AtomicBool::new(false);
+        let (shared, told) = telling();
+        let heard = shared.hears_while("mic", &SHOWN);
+        for level in [0.4, 0.5] {
             heard(level);
         }
-        HIDDEN.store(false, Ordering::Relaxed);
-        heard(0.4);
-        heard(0.4);
+        shared.levels.store(true, Ordering::Relaxed);
+        heard(0.5);
+        heard(0.5);
+        shared.levels.store(false, Ordering::Relaxed);
+        for level in [0.3, 0.5] {
+            heard(level);
+        }
+        shared.levels.store(true, Ordering::Relaxed);
+        heard(0.5);
         assert_eq!(
             *told.lock().unwrap(),
-            [r#"{"levels":{"peer":0.4}}"#, r#"{"levels":{"peer":0.4}}"#]
+            [r#"{"levels":{"mic":0.5}}"#, r#"{"levels":{"mic":0.5}}"#]
         );
     }
 
@@ -2420,6 +2462,9 @@ mod tests {
         .unwrap();
         let answer = b.answer(&offer, false).await.unwrap();
         a.accept(&answer).await.unwrap();
+        // Both pages draw who is speaking (a voice call's window).
+        a.set_levels(true);
+        b.set_levels(true);
         let stats = || {
             format!(
                 "a {} b {}",
@@ -2761,6 +2806,7 @@ mod tests {
         )
         .await
         .unwrap();
+        a.set_levels(true);
         until(
             "the microphone runs",
             10,
