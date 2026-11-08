@@ -39,7 +39,9 @@ export function SharePicker() {
 
   const pick = (chat: string, path: string) => {
     sendShareTo(chat);
-    nav.conversation(path);
+    // Another share waited behind this one (the web app's, `receiveShare` with `queue`): the picker shows it now, and
+    // this one waits for its chat's composer. The last one picked opens its chat.
+    if (!incomingShare()) nav.conversation(path);
   };
   const cancel = () => {
     dropIncomingShare();
