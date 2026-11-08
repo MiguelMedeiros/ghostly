@@ -455,13 +455,20 @@ function dropOldCallLines(session: ChatSession): void {
 export function deleteMessage(
   sessionId: string,
   messageId: string,
+  /**
+   * The session as it is stored now, read already (the mirror's, `platform/sync.ts`), as `addMessages` takes it. Without
+   * it, the chat as the page's cache holds it (`loadShownSession`): one gone already (the mirror took it out when the
+   * engine told of its removal) costs no parse and merge of a chat of thousands. Neither is changed in place.
+   */
+  held?: ChatSession,
 ): ChatSession | null {
-  const session = loadSession(sessionId);
-  if (!session) return null;
+  const shown = held ?? loadShownSession(sessionId);
+  if (!shown) return null;
 
-  const index = session.messages.findIndex((m) => m.id === messageId);
+  const index = shown.messages.findIndex((m) => m.id === messageId);
   if (index === -1) return null;
 
+  const session = { ...shown, messages: shown.messages.slice() };
   session.messages.splice(index, 1);
   session.deletedIds = [...(session.deletedIds ?? []), messageId].slice(-MAX_DELETED_IDS);
   saveSession(session);

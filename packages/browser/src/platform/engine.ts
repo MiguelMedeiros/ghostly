@@ -162,6 +162,16 @@ class EngineClient {
     return this.changed.has(linkId);
   }
 
+  /**
+   * Ends the tick now: its listeners hear what changed at once. A call whose change the engine told before answering (a
+   * message of mine deleted for everyone) is then mirrored before its caller goes on, from what changed only.
+   */
+  tellChangesNow(): void {
+    if (!this.changesTimer) return;
+    clearTimeout(this.changesTimer);
+    this.tellChanges();
+  }
+
   onAttention(listener: (event: AttentionEvent) => void): () => void {
     this.attentionListeners.add(listener);
     return () => this.attentionListeners.delete(listener);
