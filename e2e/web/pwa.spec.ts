@@ -195,6 +195,42 @@ test.describe("service worker", () => {
     await ana.page.getByTestId("share-cancel").click();
     await expect(ana.page).toHaveURL(/#\/$/);
   });
+
+  test("a share picked for a chat with another waiting shows the next one, and a share made later opens the picker again", { tag: ["@feature:app.pwa.share-target"] }, async ({ peer }) => {
+    const ana = await peer("Ana", { serviceWorkers: "allow" });
+    const bo = await peer("Bo");
+    await link(ana, bo);
+    await controlled(ana.page);
+    await ana.page.goto("/#/");
+    const text = ana.page.getByTestId("share-text");
+    // Each from a tab of its own, as a desktop system delivers them: the app's tab gets them all.
+    const shareFromTab = async (value: string) => {
+      const tab = await ana.context.newPage();
+      await tab.goto("/");
+      await postShare(tab, value);
+      await expect(tab.getByTestId("other-tab")).toHaveAttribute("data-state", "shared");
+    };
+
+    await shareFromTab("share number 1");
+    await expect(ana.page).toHaveURL(/#\/shared$/, { timeout: 15_000 });
+    await expect(text).toHaveText("share number 1");
+    await shareFromTab("share number 2");
+    await expect(text).toHaveText("share number 1");
+
+    // Picked for a chat: the picker shows the one that waited behind it, and the last one picked opens its chat.
+    await ana.page.getByTestId("share-chat").click();
+    await expect(text).toHaveText("share number 2");
+    await expect(ana.page).toHaveURL(/#\/shared$/);
+    await ana.page.getByTestId("share-chat").click();
+    await expect(ana.page).toHaveURL(/#\/chat\//);
+    // Both went to that chat's composer, in their order.
+    await expect(ana.page.getByPlaceholder("Message…")).toHaveValue("share number 1\nshare number 2");
+
+    // A later share opens the picker again.
+    await shareFromTab("share number 3");
+    await expect(ana.page).toHaveURL(/#\/shared$/, { timeout: 15_000 });
+    await expect(text).toHaveText("share number 3");
+  });
 });
 
 /** What the system does when a person shares text into the installed app: a navigation of `page` that posts the manifest's form. */
