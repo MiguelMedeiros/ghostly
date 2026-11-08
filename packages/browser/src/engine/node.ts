@@ -4682,6 +4682,13 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   deleteMessage({ linkId, messageId }: { linkId: string; messageId: string }): void {
+    // The chat's outbox never sends it from now on, whatever its retry in progress read (`Outbox.cancel`). Cancel sending
+    // that comes once that retry handed the waiting text to the link is too late to stop it: it may be out, so it is
+    // deleted for everyone (its removal goes after it), never gone here and kept by the contact.
+    if (this.outboxes.get(linkId)?.cancel(messageId)) {
+      void this.removeMessage({ linkId, messageId }).then(({ refused }) => refused ? this.forgetMessage(linkId, messageId) : undefined).catch(() => {});
+      return;
+    }
     void this.forgetMessage(linkId, messageId);
   }
 
@@ -4701,8 +4708,10 @@ export class GhostlyNode implements EngineImplementation {
     if (!canRemove(message)) return refuse("A payment, a request or a notice cannot be deleted for everyone");
     const out = `${linkId}-out-`;
     const wireId = message.wireId ?? (message.file?.id.startsWith(out) ? message.file.id.slice(out.length) : undefined);
-    // Never left this device: deleting it here is all there is.
-    if (!wireId || message.delivery === "waiting") { await this.forgetMessage(linkId, messageId, message); return { error: null }; }
+    // Never left this device: deleting it here is all there is, unless the outbox's retry of it handed it to the link
+    // meanwhile (`Outbox.cancel`, which also keeps it from going from now on): then it may be out, and its removal goes.
+    const going = this.outboxes.get(linkId)?.cancel(messageId) ?? false;
+    if (!wireId || (message.delivery === "waiting" && !going)) { await this.forgetMessage(linkId, messageId, message); return { error: null }; }
     const removal: Removal = { id: messageId, wireId, e: removalNumber(message.edit?.seq), at: Date.now(), pending: true };
     live.stored = { ...live.stored, removals: withRemoval(live.stored.removals, removal) };
     const written = this.writeDeletions(linkId, { removals: live.stored.removals });
