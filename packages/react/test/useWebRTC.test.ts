@@ -1120,6 +1120,27 @@ describe("when the prompt is refused or there is no device", () => {
     expect(call.result.current.mediaProblem).toBeNull();
   });
 
+  it("a call refused again while the reason still shows shows it anew, for its whole time", async () => {
+    const call = renderCall();
+    act(() => { void call.result.current.startCall(false); });
+    devices.userMedia[0].deny(denied());
+    await settle();
+    const first = call.result.current.mediaProblemId;
+    act(() => { vi.advanceTimersByTime(MEDIA_PROBLEM_SHOWN_MS - 2000); });
+
+    act(() => { void call.result.current.startCall(false); });
+    devices.userMedia[1].deny(denied());
+    await settle();
+
+    // A new notice (a screen reader hears it again), whose time starts over.
+    expect(call.result.current.mediaProblem).toBe("denied");
+    expect(call.result.current.mediaProblemId).not.toBe(first);
+    act(() => { vi.advanceTimersByTime(MEDIA_PROBLEM_SHOWN_MS - 1000); });
+    expect(call.result.current.mediaProblem).toBe("denied");
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(call.result.current.mediaProblem).toBeNull();
+  });
+
   it("a microphone refused while answering tells the caller at once, instead of leaving it ringing", async () => {
     const call = renderCall();
     call.receive(remote.offer(Date.now()));
