@@ -1295,6 +1295,31 @@ describe("a restored profile (installed list, no bundle)", () => {
     expect(await store.install({ digest: v1.digest, grant: ["chat"] })).toMatchObject({ run: { status: "ok" } });
   });
 
+  it("Open while the update check writes its files waits for that fetch: one download, one write, one read-back", async () => {
+    const { v1, store } = await restored(new Uint8Array(2_500_000));
+    const digest = vi.spyOn(await fileBytes(), "digest");
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let writing!: () => void;
+    const started = new Promise<void>((resolve) => { writing = resolve; });
+    const engine = store as unknown as { writeBundle: (...args: unknown[]) => Promise<unknown> };
+    const write = engine.writeBundle.bind(store);
+    const spy = vi.spyOn(engine, "writeBundle").mockImplementation(async (...args: unknown[]) => { writing(); await held; return write(...args); });
+    const check = store.checkUpdates();
+    await started;
+    // The download is read, its write is under way: Open is pressed.
+    const entry = store.entry({ ref: v1.ref });
+    for (let i = 0; i < 50 && spy.mock.calls.length < 2; i++) await new Promise((resolve) => setImmediate(resolve));
+    release();
+    expect((await entry).digest).toBe(v1.digest);
+    expect((await check)[0]!.run).toEqual({ status: "ok" });
+    expect(spy, "one write").toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+    expect(net.requests.filter((url) => url === BUNDLE_URL), "peeked, then read whole, once").toEqual([BUNDLE_URL, BUNDLE_URL]);
+    expect(digest, "the stored file read back and hashed once").toHaveBeenCalledTimes(1);
+    expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
+  });
+
   // Each case three times, with files of many pieces: a collision of the two writes depends on how their pieces interleave.
   describe.each([1, 2, 3])("two fetches of its files at once share one write (run %i)", () => {
     const large = () => restored(new Uint8Array(2_500_000));
