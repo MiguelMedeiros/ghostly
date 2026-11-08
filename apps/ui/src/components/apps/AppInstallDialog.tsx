@@ -408,8 +408,9 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
           <p className="text-sm text-text-primary">{t("apps.app.updateWaits", { version: app.pending.version })}</p>
           {/* An update that no longer adds a permission to the version installed meanwhile has nothing to list. */}
           {app.pending.added.length > 0 && <Permissions asks={app.pending.added} update />}
+          {/* Update grants only the update listed here: another one found since is refused, and the list read again shows it. */}
           <div className="flex justify-end">
-            <Button variant="primary" data-testid="app-update-accept" disabled={busy} loading={pending === "update"} onClick={() => void act(() => engine.call("appUpdateAccept", { ref: app.ref }), false, "update")}>{t("apps.install.update")}</Button>
+            <Button variant="primary" data-testid="app-update-accept" disabled={busy} loading={pending === "update"} onClick={() => void act(() => engine.call("appUpdateAccept", { ref: app.ref, sequence: app.pending!.sequence, added: [...app.pending!.added] }), false, "update")}>{t("apps.install.update")}</Button>
           </div>
         </div>
       )}

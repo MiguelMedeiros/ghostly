@@ -55,8 +55,9 @@ export interface Resender {
    * Sends a file (a voice note is one) that waits for the live link. It has its own sender, and goes in its place
    * among the texts that wait: this returns once it is said on the link (its offer, never its bytes), so a text
    * written after it goes after its bubble and does not wait for the transfer. `ready` says whether it can go.
+   * `cancelled`: whether it was deleted here since (`Outbox.cancel`), asked after each wait of the send.
    */
-  sendFile?(message: StoredMessage): Promise<void>;
+  sendFile?(message: StoredMessage, cancelled: () => boolean): Promise<void>;
 }
 
 /**
@@ -419,7 +420,7 @@ export class Outbox {
     // An older text has not left this device yet: the file's offer goes after it.
     if (await this.behindUnsent(message)) { if (!this.waiting.get(message.id)?.timer) this.schedule(message.id); return true; }
     if (this.cancelled.has(message.id)) { this.forget(message.id); return true; }
-    await this.resender.sendFile!(message).catch(() => {});
+    await this.resender.sendFile!(message, () => this.cancelled.has(message.id)).catch(() => {});
     this.forget(message.id);
     // Its row may wait still (its offer went on the DHT floor, or the link closed): the next new message reads the chat.
     this.stamp++;

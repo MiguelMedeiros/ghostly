@@ -47,8 +47,13 @@
 //   request stays in flight, held, until the base moves or its CI turns green. While the base is red, one pull request
 //   with `queue:priority` that is not the held one goes ahead of it alone, on the tip, as any lone one does; the held one
 //   stays parked in flight. Landed, the base moved, and the held one is rebuilt (or rebased) on the new tip at the next
-//   run; red, it is blamed by the usual rules. Once the hold has lasted 30 minutes (HOLD_HELP), the position comments
-//   say what a person can do: re-run the base's failed jobs, or give its fix `queue:priority`.
+//   run; red, it is blamed by the usual rules. One whose commits do not rebase onto the tip (a conflict resolved in a
+//   merge of the base) cannot go alone, and no batch goes: it leaves the line with `queue:conflict` and a comment saying
+//   to rebase it without the merge, and the next one with `queue:priority` goes, in the same run. A red batch or lone
+//   pull request that holds a `queue:priority` one is not held for the base's red (only while its CI still runs): it is
+//   split, or run once more, as on a green base, so a fix that boarded with others or flaked once is not parked for
+//   good. Once the hold has lasted 30 minutes (HOLD_HELP), the position comments say what a person can do: re-run the
+//   base's failed jobs, or give its fix `queue:priority`.
 // - One pull request alone (the next batch would hold only it) skips the batch: when its head already holds the base's
 //   tip and CI Success is green on it, the train merges the pull request itself (dev: GitHub's squash merge at that
 //   head; an epic: a fast-forward), with no batch and no new CI run. When it is behind, the train rebases its branch
@@ -517,6 +522,9 @@ const conflictText = (base, reason) =>
   reason === "empty"
     ? `Merge train: this pull request has no changes left against \`${base}\`, so it left the line. Close it if it already landed.`
     : `Merge train: this pull request conflicts with \`${base}\` (or with the pull requests ahead of it), so it left the line. Rebase it onto \`origin/${base}\` (or merge \`origin/${base}\` into it), push, and add \`queue\` again once CI is green.`;
+// Merging the base into it again does not help: that merge is what the rebase skips.
+const pastConflictText = (base) =>
+  `Merge train: the train is on hold for CI Success red on \`${base}\` itself, and a \`queue:priority\` pull request goes ahead of the held one only alone, rebased onto \`${base}\`. Its commits do not rebase onto \`${base}\` (a conflict resolved in a merge of \`origin/${base}\` comes back once that merge is skipped), so it left the line and the next \`queue:priority\` pull request goes. Rebase it onto \`origin/${base}\` without the merge (\`git rebase origin/${base}\`), push, and once it is reviewed and CI is green add \`queue\` and \`queue:priority\` again.`;
 
 const missingText = (base) =>
   `Merge train: git could not fetch its head (GitHub has no \`refs/pull/<number>/head\` for it, and its branch is not in this repository or no longer holds that head), so it left the line and the rest of \`${base}\`'s line goes on without it. Push to its branch (or open it again from a new one), then add \`queue\` again once CI is green (the train takes \`queue:failed\` off).`;
@@ -1037,7 +1045,9 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       // Red on an old tip says nothing about the batch on the new one, and green on an old tip must not land.
       await retire(batch, `Merge train: \`${base}\` moved, so this batch is rebuilt on its new tip.`);
       inFlight = await board(members, next, { retried: state.retried });
-    } else if (ci === "failure" && (baseCi === "failure" || baseCi === "pending")) {
+    } else if (ci === "failure" && (baseCi === "pending" || (baseCi === "failure" && !members.some((p) => p?.priority)))) {
+      // A batch with a `queue:priority` member is not held for the base's red: that member is most likely the base's
+      // fix, and held it would wait for good (only one not in the held batch goes past it). It is split, as on a green base.
       held = baseCi === "failure" ? "red" : "still running";
       holdSince(state.baseSha, gateDoneAt(jobs, "CI Success"), gateDoneAt(baseJobs, "CI Success"));
       say(`HOLD #${batch.number}: CI Success on \`${base}\` itself is ${held}; nobody is blamed until it is green.`);
@@ -1098,9 +1108,24 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     return r;
   };
 
+  /** The ones that could not go ahead of a held one alone in this run: the next priority one gets its turn. */
+  const passed = new Set();
   /** Past a hold no batch can go (one per base): one that would go the batch way waits in line instead. */
   const pastBatchWay = (p, why) => {
+    passed.add(p.number);
     say(`::warning::#${p.number} cannot go ahead of the held one alone (${why}); it waits in line.`);
+    return null;
+  };
+  /**
+   * Past a hold, one whose commits do not rebase (a conflict resolved in a merge of the base) never goes alone, and
+   * the batch way that lands it otherwise waits for the hold: left in line, it was tried first on every run and the
+   * priority one behind it never went. It leaves the line as a conflict does, saying what lets it go alone.
+   */
+  const pastConflict = async (p) => {
+    passed.add(p.number);
+    say(`DROP #${p.number} (its commits do not rebase onto \`${base}\`, so it cannot go ahead of the held one alone)`);
+    done.dropped.push(p.number);
+    await leave(p, LABEL.conflict, pastConflictText(base));
     return null;
   };
 
@@ -1120,7 +1145,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       return (await board([p])) ?? false;
     }
     const built = await git.rebase(base, p, { force: rerun });
-    if (built.dropped === "conflict" && past) return pastBatchWay(p, `its commits do not rebase onto \`${base}\``);
+    if (built.dropped === "conflict" && past) return pastConflict(p);
     if (built.dropped === "conflict") {
       // A rebase replays the branch's own commits and skips its merges, so a conflict the author resolved in a merge of
       // the base comes back, and a change made or taken back in such a merge is lost or comes back. The batch's squash
@@ -1171,10 +1196,11 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     // Red on an old tip says nothing about the new one, and green on an old tip must not land.
     if (tip !== mark.baseSha) return goAlone(p, { retried: mark.retried, past });
     if (p.ci === "failure") {
-      // Past a hold, the base is red by definition: the fix it was meant to be is not one, so it is blamed as usual.
+      // Past a hold, the base is red by definition: the fix it was meant to be is not one, so it is blamed as usual. Nor
+      // is a `queue:priority` one held for the base's red: it is most likely the base's fix (as for a batch above).
       const baseJobs = past ? null : await gh.ciJobs(mark.baseSha, planned(null));
       const baseCi = baseJobs && ciState(baseJobs);
-      if (baseCi === "failure" || baseCi === "pending") {
+      if (baseCi === "pending" || (baseCi === "failure" && !p.priority)) {
         held = baseCi === "failure" ? "red" : "still running";
         holdSince(mark.baseSha, p.redAt, gateDoneAt(baseJobs, "CI Success"));
         say(`HOLD #${p.number}: CI Success on \`${base}\` itself is ${held}; nobody is blamed until it is green.`);
@@ -1233,8 +1259,15 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const parked = new Set(inFlight.members.map((p) => p?.number));
     const fits = (p) => p.priority && !parked.has(p.number) && canGoAlone(p) && !refused(p);
     const flying = line().find((p) => p.alone?.sha === p.sha && p.alone.past && fits(p));
-    const next = flying ? null : held === "red" && line().find((p) => fits(p) && !waiting(p));
-    past = (flying ? await flyAlone(flying, inFlight.number) : next ? await goAlone(next, { past: inFlight.number }) : null) || null;
+    past = flying ? await flyAlone(flying, inFlight.number) : null;
+    // One that cannot go (`passed`: refused alone, or out of the line for its commits) gives the next one its turn.
+    if (!past && (!flying || passed.has(flying.number)) && held === "red") {
+      for (const next of line().filter((p) => fits(p) && !waiting(p) && !passed.has(p.number))) {
+        past = await goAlone(next, { past: inFlight.number });
+        if (past || !passed.has(next.number)) break;
+      }
+    }
+    past ||= null;
   }
   /** The next batch waiting for company (`holdBatch`), or null. */
   let holding = null;

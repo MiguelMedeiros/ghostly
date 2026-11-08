@@ -12,8 +12,12 @@
     "message": "{{name}} : {{text}}",
     "messages": "{{count}} nouveaux messages",
     "messagesFrom": "{{count}} nouveaux messages de {{name}}",
+    "notSent": "Votre message « {{text}} » n’a pas été envoyé",
+    "notSentCount": "{{count}} messages non envoyés",
     "pinMoved": "Déplacée à la place {{place}} sur {{count}} discussions épinglées",
-    "rowMoved": "Maintenant à la place {{place}} sur {{count}}"
+    "rowMoved": "Maintenant à la place {{place}} sur {{count}}",
+    "waiting": "Votre message « {{text}} » attend que votre contact soit en ligne",
+    "waitingCount": "{{count}} messages en attente que votre contact soit en ligne"
   },
   "audio": {
     "cantPlay": "Cet appareil ne peut pas lire cet audio ({{format}}). Téléchargez-le pour l'écouter.",
@@ -495,6 +499,7 @@
     "limit": "Les messages vocaux durent au plus {{minutes}} minutes",
     "message": "Message vocal",
     "micDenied": "Pas d'accès au micro. Autorisez-le dans les réglages du navigateur ou du système.",
+    "micDeniedAndroid": "Pas d'accès au micro. Autorisez-le quand Android le demande, ou pour Ghostly dans les réglages d'Android.",
     "micUnavailable": "Aucun micro trouvé. Branchez-en un, ou fermez l'app qui l'utilise.",
     "micUnsupported": "Ce navigateur ne peut pas enregistrer de messages vocaux.",
     "pause": "Mettre le message vocal en pause",

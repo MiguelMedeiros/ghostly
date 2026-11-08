@@ -1,7 +1,7 @@
 import {
-  budgetRetryMs, emptyIdentityLedger, fromBase64Url, isDiscoveryBudgetError, identityRevocationValue, identityStatement, IdentityCheckUnavailable, IdentityExchange, IDENTITY_REVOCATION_LABEL, isIdentityBinding, newIdentityBinding,
-  receivedIdentityStatus, revokesIdentity, toBase64Url,
-  type IdentityBinding, type IdentityLedger, type IdentityScope, type ReceivedIdentity, type IdentityStatement, type LocalIdentityProof, type VerifiedIdentity,
+  budgetRetryMs, emptyIdentityLedger, fromBase64Url, isDiscoveryBudgetError, identityRevocationValue, identityStatement, IdentityCheckUnavailable, IdentityExchange, IDENTITY_MAX_VALIDITY, IDENTITY_REVOCATION_LABEL, isIdentityBinding, newIdentityBinding,
+  identityRefusal, receivedIdentityStatus, revokesIdentity, toBase64Url,
+  boundIdentityDisplay, type IdentityBinding, type IdentityLedger, type IdentityScope, type ReceivedIdentity, type IdentityStatement, type LocalIdentityProof, type SharedIdentity, type VerifiedIdentity,
 } from "@ghostly/core";
 import { STORES, store, transact, wrap } from "../shared/idb";
 import { openSecret, sealSecret, whenDataKeyDropped, type SealedSecret } from "./dataKey";
@@ -59,6 +59,12 @@ const REVOCATIONS_ROUND = "identityRevocationsRound";
 interface LookupRound { startedAt: number; done: string[] }
 /** Relays and the DHT forget a record within hours: republish revocations this often while the app runs. */
 const REPUBLISH_MS = 60 * 60_000;
+/**
+ * A revocation is kept (with its sealed seed) this long past its expiry by this device's clock, which may be the one that
+ * is wrong: the contacts decide expiry by theirs. Only a clock ahead by more than the longest a proof may last (400 days)
+ * drops one still standing for them. Republished only until its expiry, as before; a few hundred bytes each.
+ */
+const REVOCATION_KEPT_PAST_EXPIRY = IDENTITY_MAX_VALIDITY;
 /** How often the contacts' proofs are looked up for a revocation (and once shortly after start). */
 const REVOCATION_CHECK_MS = 12 * 60 * 60_000;
 /** A lookup that could not run (offline, no relay answered) is tried again after this, doubled each time, up to the 12 h. */
@@ -89,10 +95,18 @@ export const WITHDRAWN_REVOCATION_TRIES_MS = [20_000, 60_000, 180_000] as const;
  * listed key that is gone then stops reading verified.
  */
 export const AUTO_RECHECK_AFTER_S = 86_400;
-/** Due proofs are looked for this often (the first time a few minutes after the start), and only a few checked each time. */
+/**
+ * Due proofs are looked for this often (the first time a few minutes after the start). Each time checks enough of them
+ * to clear the ones due within `AUTO_RECHECK_SPREAD_TICKS` times (at least `AUTO_RECHECK_BATCH`), one every
+ * `AUTO_RECHECK_GAP_MS` at most, so every proof is checked about a day after its last check however many contacts.
+ */
 const AUTO_RECHECK_TICK_MS = 15 * 60_000;
 const AUTO_RECHECK_FIRST_MS = 3 * 60_000;
 const AUTO_RECHECK_BATCH = 3;
+const AUTO_RECHECK_SPREAD_TICKS = 4;
+const AUTO_RECHECK_GAP_MS = 4_000;
+/** The checks of one time fit before the next: 150 every 15 minutes, 14,400 a day. */
+const AUTO_RECHECK_MAX_BATCH = Math.floor(AUTO_RECHECK_TICK_MS * 2 / 3 / AUTO_RECHECK_GAP_MS);
 /** A check that could not reach the server leaves the proof as it was and is tried again after this, doubling, at most a day. */
 const AUTO_RECHECK_BACKOFF_MS = 2 * 60 * 60_000;
 /** A proof begun and not completed is dropped this long after, or when a fifth one begins (the CLI says the same). */
@@ -100,6 +114,16 @@ export const IDENTITY_DRAFT_TTL_MS = 30 * 60_000;
 export const IDENTITY_MAX_DRAFTS = 4;
 const MAX_PROOFS = 32;
 const now = () => Math.floor(Date.now() / 1000);
+
+/**
+ * A share of mine as every reader gets it (the app, the CLI, `getState`): its reason only in words this app writes
+ * (identityRefusal), else none. A ledger kept from before that check holds the contact's own words there.
+ */
+const ownRefusal = (s: SharedIdentity): SharedIdentity => {
+  if (s.error === undefined || identityRefusal(s.error) !== undefined) return s;
+  const { error: _contactWords, ...rest } = s;
+  return rest;
+};
 
 /**
  * Identity proofs, engine side: the profile's own proofs (made once, on the Identities page) and, per
@@ -130,6 +154,8 @@ export class IdentityProofs {
   private stops = 0;
   /** Ends the 12 h lookup's wait (between two reads, or for the budget) at once: `stop`. */
   private wakeLookup: (() => void) | undefined;
+  /** Ends the automatic re-check's wait between two checks at once: `stop`. */
+  private wakeRecheck: (() => void) | undefined;
   /** Revocations not published because the app was offline: published when the network comes back (`networkBack`). */
   private unpublished = new Set<string>();
   private running = false;
@@ -217,6 +243,7 @@ export class IdentityProofs {
     // The lookup under way ends here: what it read since its last write is kept for the next start.
     this.saveRound();
     this.wakeLookup?.();
+    this.wakeRecheck?.();
     this.unlisten?.();
     this.unlisten = undefined;
     this.forgetSeeds();
@@ -353,10 +380,10 @@ export class IdentityProofs {
       if (shared && shared.status !== "withdrawn") await this.exchange(linkId)?.withdraw(id, !!this.host.channel(linkId));
     }
     const revocation: Revocation = { id, key: proof.binding.key, seed: proof.seed, revokedAt: now(), expiresAt: Math.min(proof.binding.expiresAt, proof.verified.expiresAt ?? Infinity) };
+    // Kept whatever this clock says: the contacts decide expiry by theirs.
     const wasShared = this.everShared(proof);
-    const revoke = wasShared && revocation.expiresAt > now();
     await this.save((proofs, revocations) => proofs.some(p => identityStatement(p.binding).id === id)
-      ? [proofs.filter(p => identityStatement(p.binding).id !== id), revoke ? [...revocations, revocation] : revocations]
+      ? [proofs.filter(p => identityStatement(p.binding).id !== id), wasShared ? [...revocations, revocation] : revocations]
       : [proofs, revocations]);
     if (wasShared) void this.publishRevocation(revocation).catch(() => {});
     else { this.seeds.get(id)?.fill(0); this.seeds.delete(id); }
@@ -372,7 +399,7 @@ export class IdentityProofs {
     this.stop();
     const at = now();
     const last: Revocation[] = [
-      ...this.revocations.filter(r => r.expiresAt > at),
+      ...this.revocations,
       ...this.proofs.filter(p => this.everShared(p)).map(p => ({
         id: identityStatement(p.binding).id, key: p.binding.key, seed: p.seed, revokedAt: at, expiresAt: Math.min(p.binding.expiresAt, p.verified.expiresAt ?? Infinity),
       })),
@@ -393,12 +420,12 @@ export class IdentityProofs {
     await this.host.publish(await this.seedOf(r.id, r.seed), [{ label: IDENTITY_REVOCATION_LABEL, value: identityRevocationValue(r.id, r.revokedAt) }]);
   }
   private async republish(): Promise<void> {
-    const live = this.revocations.filter(r => r.expiresAt > now());
-    if (live.length !== this.revocations.length) {
-      for (const r of this.revocations) if (!live.includes(r)) { this.seeds.get(r.id)?.fill(0); this.seeds.delete(r.id); }
-      await this.save((proofs, revocations) => [proofs, revocations.filter(r => r.expiresAt > now())]);
+    const kept = (r: Revocation) => r.expiresAt + REVOCATION_KEPT_PAST_EXPIRY > now();
+    if (!this.revocations.every(kept)) {
+      for (const r of this.revocations) if (!kept(r)) { this.seeds.get(r.id)?.fill(0); this.seeds.delete(r.id); }
+      await this.save((proofs, revocations) => [proofs, revocations.filter(kept)]);
     }
-    for (const r of live) {
+    for (const r of this.revocations.filter(r => r.expiresAt > now())) {
       if (!this.running) return;
       await this.publishRevocation(r).catch(() => {});
     }
@@ -477,9 +504,9 @@ export class IdentityProofs {
     void transact([STORES.settings], stores => { stores[STORES.settings].put({ ...round, done: [...round.done] }, REVOCATIONS_ROUND); }).catch(() => {});
   }
   /**
-   * The contacts' proofs due for an automatic re-check (`AUTO_RECHECK_AFTER_S`), the longest unchecked first, a few at a
-   * time, one after the other. A proof whose record or key is gone shows unconfirmed with the reason, as after "Check
-   * again"; one whose server could not be reached (or a network that went away meanwhile) is left as it was and backs off.
+   * The contacts' proofs due for an automatic re-check (`AUTO_RECHECK_AFTER_S`), the longest unchecked first, as many
+   * at a time as keep up with them (`AUTO_RECHECK_SPREAD_TICKS`), one after the other a few seconds apart. A proof whose
+   * record or key is gone shows unconfirmed with the reason, as after "Check again"; one whose server could not be reached (or a network that went away meanwhile) is left as it was and backs off.
    */
   async recheckDue(): Promise<void> {
     if (!this.host.online()) return;
@@ -489,11 +516,16 @@ export class IdentityProofs {
       for (const r of this.host.ledger(linkId)?.received ?? []) {
         const after = this.providers().find(p => p.id === r.binding.provider)?.recheck?.afterSeconds;
         if (after === undefined || (r.status !== "verified" && r.status !== "unconfirmed") || !this.revocable(r)) continue;
-        if (t - r.checkedAt < Math.max(after, AUTO_RECHECK_AFTER_S) || (this.recheckBackoff.get(`${linkId}|${r.id}`)?.until ?? 0) > at) continue;
+        // A check made while the clock ran ahead is due now, not at that future date.
+        if ((r.checkedAt <= t && t - r.checkedAt < Math.max(after, AUTO_RECHECK_AFTER_S)) || (this.recheckBackoff.get(`${linkId}|${r.id}`)?.until ?? 0) > at) continue;
         due.push({ linkId, r });
       }
     }
-    for (const { linkId, r } of due.sort((a, b) => a.r.checkedAt - b.r.checkedAt).slice(0, AUTO_RECHECK_BATCH)) {
+    const batch = Math.min(AUTO_RECHECK_MAX_BATCH, Math.max(AUTO_RECHECK_BATCH, Math.ceil(due.length / AUTO_RECHECK_SPREAD_TICKS)));
+    let first = true;
+    for (const { linkId, r } of due.sort((a, b) => a.r.checkedAt - b.r.checkedAt).slice(0, batch)) {
+      if (!first && !await this.recheckPause(AUTO_RECHECK_GAP_MS)) return;
+      first = false;
       if (this.ended || !this.running || !this.host.online()) return;
       const key = `${linkId}|${r.id}`;
       try {
@@ -504,6 +536,14 @@ export class IdentityProofs {
         this.recheckBackoff.set(key, { failures, until: Date.now() + Math.min(AUTO_RECHECK_BACKOFF_MS * 2 ** (failures - 1), AUTO_RECHECK_AFTER_S * 1000) });
       }
     }
+  }
+  /** The automatic re-check's wait between two checks: false when `stop` ended it. */
+  private recheckPause(ms: number): Promise<boolean> {
+    return new Promise(resolve => {
+      const timer = setTimeout(() => { this.timers = this.timers.filter(t => t !== timer); this.wakeRecheck = undefined; resolve(true); }, ms);
+      this.timers.push(timer);
+      this.wakeRecheck = () => { clearTimeout(timer); this.wakeRecheck = undefined; resolve(false); };
+    });
   }
   /** The 12 h lookup's wait between two reads, or for the budget: false when `stop` ended it. */
   private lookupPause(ms: number): Promise<boolean> {
@@ -622,8 +662,10 @@ export class IdentityProofs {
     const r = this.host.ledger(linkId)?.received.find(x => x.id === id);
     const provider = r && this.providers().find(p => p.id === r.binding.provider);
     if (!r || !provider?.lookupDisplay) throw new Error("No public profile for this identity");
-    const display = await provider.lookupDisplay(r.verified.subject, { signal: AbortSignal.timeout(15_000) });
-    if (!display) throw new Error("No public profile found");
+    const found = await provider.lookupDisplay(r.verified.subject, { signal: AbortSignal.timeout(15_000) });
+    if (!found) throw new Error("No public profile found");
+    // Held to the rule a proof's own display is (no hidden or direction-changing characters in its name).
+    const display = boundIdentityDisplay(found);
     await this.host.updateLedger(linkId, l => ({ ...l, received: l.received.map(x => x.id === id && x.verified.subject === r.verified.subject ? { ...x, display } : x) }));
     this.host.emit();
   }
@@ -668,7 +710,7 @@ export class IdentityProofs {
     return {
       support: supported,
       contactProviders: supported ? this.exchanges.get(linkId)?.contactProviders?.slice() : undefined,
-      shared: ledger.shared,
+      shared: ledger.shared.map(ownRefusal),
       received: ledger.received.map(r => {
         const provider = this.providers().find(p => p.id === r.binding.provider);
         const status = receivedIdentityStatus(r, theirs, mine, t);
@@ -676,7 +718,7 @@ export class IdentityProofs {
         return { id: r.id, provider: r.binding.provider, subject: r.verified.subject, verified: r.verified, display: r.display,
           status, verifiedAt: r.verifiedAt, checkedAt: r.checkedAt,
           expiresAt: Math.min(r.binding.expiresAt, r.verified.expiresAt ?? Infinity), error: r.error,
-          recheckDue: !!provider?.recheck && t - r.checkedAt >= provider.recheck.afterSeconds,
+          recheckDue: !!provider?.recheck && (r.checkedAt > t || t - r.checkedAt >= provider.recheck.afterSeconds),
           ...(publicProfile ? { publicProfile } : {}) };
       }),
       error: this.errors.get(linkId),

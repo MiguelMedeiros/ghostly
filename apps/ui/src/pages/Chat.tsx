@@ -50,7 +50,8 @@ import { JumpToLatest } from "../components/chat/JumpToLatest";
 import { DaySections } from "../components/chat/DaySections";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useCallDevices } from "../hooks/useCallDevices";
-import { mediaDeniedText, preferredDevice } from "../lib/mediaDevices";
+import { preferredDevice } from "../lib/mediaDevices";
+import { CallMediaProblem } from "../components/CallMediaProblem";
 import { useSettings } from "../contexts/SettingsContext";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
@@ -136,15 +137,6 @@ import { problemText, type Problem, problemLine } from "../lib/problemText";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
 const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
-
-/** Why a call did not start or could not use the microphone or camera (`useWebRTC`'s `mediaProblem`): its title and next step. */
-const MEDIA_PROBLEM_TEXT = {
-  denied: ["calls.mediaDenied", "calls.mediaDeniedNext"],
-  unavailable: ["calls.mediaUnavailable", "calls.mediaUnavailableNext"],
-  relay: ["calls.relayNoAnswer", "calls.relayNoAnswerNext"],
-  relayOnly: ["calls.relayOnlyOff", "calls.relayOnlyOffNext"],
-  relayOnlyNow: ["calls.relayOnlyNow", "calls.relayOnlyNowNext"],
-} as const;
 
 /** The lines a call ends with that are said as it ends (`callEndSaid`); "no answer" has its own notice. */
 const CALL_END_LINES: ReadonlySet<CallEventType> = new Set(["call_ended", "call_missed", "call_cancelled", "call_rejected", "call_failed"]);
@@ -863,14 +855,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         </div>
       )}
       {/* A call could not use the microphone or camera (refused, or none there), or "Hide my IP from contacts" kept it
-          from starting (the TURN server did not answer, or this app's calls cannot keep to it): it says why, and how to fix it. */}
-      {webrtc.mediaProblem && (
-        <div role="alert" data-testid="call-media-problem" data-problem={webrtc.mediaProblem}
-          className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-center text-sm text-text-primary shadow-xl">
-          <span className="block font-medium">{t(MEDIA_PROBLEM_TEXT[webrtc.mediaProblem][0])}</span>
-          <span className="block text-text-secondary">{t(webrtc.mediaProblem === "denied" && mediaDeniedText() === "settings.media.deniedIos" ? "settings.media.deniedIos" : MEDIA_PROBLEM_TEXT[webrtc.mediaProblem][1])}</span>
-        </div>
-      )}
+          from starting (the TURN server did not answer, or this app's calls cannot keep to it): it says why, and how to fix it.
+          A call refused again while it shows is a new alert, said again. */}
+      {webrtc.mediaProblem && <CallMediaProblem key={webrtc.mediaProblemId} problem={webrtc.mediaProblem} />}
       {/* The system paused our microphone in a call (an iPhone's Home Screen app while the screen is locked): the
           contact hears nothing until Ghostly is back on screen, and the call is still on. */}
       {webrtc.micPaused && !webrtc.mediaProblem && (
@@ -882,13 +869,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       {/* Chat Header. On a phone held upright (`phoneHeader`) it is the back button, the avatar, the name with the room
           it needs, the connection, a voice call and ⋮, and one quiet line under the name; the video call, a bot's Tasks
           and the contact's identities are in the ⋮ menu. Wider (a phone on its side, a narrow window), every button is
-          in the row, a little narrower than on a desktop. On the narrowest phone (320px) the back button gives 8px to
-          the name, so "Cérebro (Mac)" and a bot's status under it still fit beside three buttons. */}
+          in the row, a little narrower than on a desktop. The back button is a 44px target on every phone, the narrowest
+          (320px) too. */}
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1 min-w-0">
           <button
             onClick={nav.up}
-            className={`md:hidden ${phoneHeader ? "w-11 max-[340px]:w-9" : "w-9"} h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0`}
+            className={`md:hidden ${phoneHeader ? "w-11" : "w-9"} h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0`}
             title={t("common.back")}
             data-testid="chat-back"
           >

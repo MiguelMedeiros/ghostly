@@ -12,8 +12,12 @@
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} mensajes nuevos",
     "messagesFrom": "{{count}} mensajes nuevos de {{name}}",
+    "notSent": "Tu mensaje «{{text}}» no se envió",
+    "notSentCount": "{{count}} mensajes no enviados",
     "pinMoved": "Movido al puesto {{place}} de {{count}} chats fijados",
-    "rowMoved": "Ahora en el puesto {{place}} de {{count}}"
+    "rowMoved": "Ahora en el puesto {{place}} de {{count}}",
+    "waiting": "Tu mensaje «{{text}}» está esperando a que tu contacto esté en línea",
+    "waitingCount": "{{count}} mensajes esperando a que tu contacto esté en línea"
   },
   "audio": {
     "cantPlay": "Este dispositivo no puede reproducir este audio ({{format}}). Descárgalo para escucharlo.",
@@ -494,6 +498,7 @@
     "limit": "Los mensajes de voz duran como máximo {{minutes}} minutos",
     "message": "Mensaje de voz",
     "micDenied": "Sin acceso al micrófono. Permítelo en los ajustes del navegador o del sistema.",
+    "micDeniedAndroid": "Sin acceso al micrófono. Permítelo cuando Android lo pida, o en los ajustes de Android para Ghostly.",
     "micUnavailable": "No hay micrófono. Conecta uno, o cierra la app que lo usa.",
     "micUnsupported": "Este navegador no puede grabar mensajes de voz.",
     "pause": "Pausar mensaje de voz",

@@ -964,11 +964,14 @@ export class CommunitySession {
    * it was in. What one who left wrote while in the group is taken and handed on, its goodbye included, up to what the
    * member who committed the leave had heard of it then (its `group-left` mark), never past it: the leaver still holds
    * those epochs' secrets, and anything it signs later is not heard (WISP 903 § Leaving and removal). No mark here
-   * (one not come yet, or a committer's app before it) and nothing of it is heard.
+   * (one not come yet, or a committer's app before it) and nothing of it is heard. A key let in only on a branch that
+   * lost is heard no more either, as one removed, once this member knows it lost.
    */
   private heardAfterOut(f: { s: string; e: number; h: string; n: number }): boolean {
     const i = this.outIndex(f.s);
-    if (i < 0) return true;
+    // Let in only on a branch that lost: in no roster anyone sees (`isRecentMember`), and heard no more, as one removed,
+    // whatever epoch of its branch it signs for (WISP 903 § A key no commit names).
+    if (i < 0) return rosterHas(this.roster, f.s) || this.isRecentMember(f.s) || !this.lostAt(f.s);
     const commit = this.state.chain[i];
     if (commit.k !== "leave") return false;
     const high = this.state.left?.[communityCommitHash(commit)]?.hi[seenKey(f.e, f.h)];
@@ -2569,9 +2572,13 @@ export class CommunitySession {
     if (!answered.take()) return;
     // Let in only on a branch that lost: the commits from where it parts up to the one that makes it lose, and nothing
     // else (no secret, no frame, no later link), as `farewell` tells one taken out. Its app then knows to ask again.
+    // A new link's commit is never among them: its `x` is the link. When it is what makes the branch lose, the answer
+    // stops before it, and the key is not told it lost.
     if (lost) {
       const at = this.mainIndex.get(frame.h);
-      const commits = this.state.chain.slice(at !== undefined ? at + 1 : lost.fork + 1, lost.end + 1);
+      let commits = this.state.chain.slice(at !== undefined ? at + 1 : lost.fork + 1, lost.end + 1);
+      const link = commits.findIndex(c => c.k === "link" && !!c.x);
+      if (link >= 0) commits = commits.slice(0, link);
       if (commits.length) this.answers.handOut(from, commits.map(commit => ({ t: "group-commit" as const, v: 2 as const, g: this.id, commit })));
       return;
     }

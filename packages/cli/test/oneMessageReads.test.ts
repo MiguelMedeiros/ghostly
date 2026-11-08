@@ -19,7 +19,7 @@ function fake() {
     getMessages: vi.fn(async (linkId: string) => rows.filter((m) => m.linkId === linkId)),
     groupMessages: vi.fn(async ({ groupId }: { groupId: string }) => rows.filter((m) => m.linkId === `group:${groupId}`)),
     getMessage: vi.fn(async (linkId: string, id: string) => rows.find((m) => m.linkId === linkId && m.id === id)),
-    deleteMessage: vi.fn(async () => {}),
+    deleteMessage: vi.fn(() => ({ everyone: false })),
     removeMessage: vi.fn(async ({ linkId }: { linkId: string }) => ({ error: null as string | null, ...(linkId.startsWith("group:") && { e: 1 }) })),
     removalPending: vi.fn(() => true),
     groupTaken: vi.fn(() => 0),
@@ -42,6 +42,13 @@ describe("delete", () => {
     await expect(callApi(ctx, "chat.delete", { chat: "Alice", message: "k:0:1" })).rejects.toMatchObject({ code: "not_found", message: 'No message "k:0:1" in this chat (ghostly chat history Alice)' });
     expect(node.deleteMessage).toHaveBeenCalledOnce();
     expect(whole()).toBe(0);
+  });
+
+  it("a waiting text of mine the outbox already handed to the link is deleted for everyone, and the answer says so", async () => {
+    const { ctx, node } = fake();
+    node.deleteMessage.mockReturnValueOnce({ everyone: true });
+    expect(await callApi(ctx, "chat.delete", { chat: "Alice", message: "me_1" })).toEqual({ chat: "chat-one", messageId: "me_1", deleted: "me_1", everyone: true });
+    expect(node.removeMessage).not.toHaveBeenCalled();
   });
 
   it("a group named without --everyone says it is a group and how its message is deleted, not \"No chat\"", async () => {

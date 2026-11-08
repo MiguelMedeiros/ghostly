@@ -41,5 +41,6 @@ describe("the saved messages' reads", () => {
     // A chat coming is read again too.
     act(() => engine.setState({ links: [...links, linkView({ id: "link-2", peerPubKeyZ32: "peerkeybob", peerNick: "Bob" })], groups: [g2] }));
     await waitFor(() => expect(engine.callsTo("savedMessages")).toHaveLength(before + 2));
-  });
+    // Eleven real settles are 3.3 s of the default 5 s.
+  }, 15_000);
 });

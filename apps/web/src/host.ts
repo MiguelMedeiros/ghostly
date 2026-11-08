@@ -12,7 +12,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { testSwitch } from "@ghostly/browser/shared/features";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { closeServiceView, parseServicesHost } from "./svc/protocol";
-import { hostErrorText, serviceFraming, setServiceViewCloser, setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
+import { SERVICE_LOCKED, hostErrorText, serviceFraming, serviceWindowsClosedSince, setServiceViewCloser, setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
 import { loadSettings } from "../../ui/src/lib/settings";
 import { activeProfileId } from "../../ui/src/lib/profiles";
 import { chatNamesForPeer } from "../../ui/src/lib/storage";
@@ -137,10 +137,14 @@ export const webHost = createInPageHost({
     if (!servicesHost || !node) throw new Error("Opening a contact's web app needs the Ghostly browser extension or desktop app.");
     const t = translatorFor(loadSettings().language);
     const title = engine.linkByPeer(peerPubKeyZ32)?.peerServices?.find((s) => s.id === serviceId)?.name ?? serviceId;
+    // The profile locking while it loads closes nothing yet: the app is never shown (`openServiceView` asks too).
+    const locked = serviceWindowsClosedSince();
     // Loaded when first used: nothing of it is in the app's start.
     const [{ openServiceView, serviceLabel }, { noteOpened }] = await Promise.all([import("./svc/opener"), import("./svc/forget")]);
+    if (locked()) throw new Error(SERVICE_LOCKED);
     // Noted first: what the app keeps on its origin goes with the chat, its data or its profile (`forgetServices`).
     noteOpened({ profile: activeProfileId(), tag, label: await serviceLabel(tag, peerPubKeyZ32, serviceId) });
+    if (locked()) throw new Error(SERVICE_LOCKED);
     // The contact is offline once their app no longer says what it shares (the chat's strip drops the app then): a
     // request is answered as unreachable at once, rather than waiting on a connection that is not coming.
     const offline = () => { const link = engine.linkByPeer(peerPubKeyZ32); return !link || link.peerServices === null; };

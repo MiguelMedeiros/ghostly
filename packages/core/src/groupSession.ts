@@ -90,6 +90,15 @@ export const GROUP_LIMITS = {
   saveWithinMs: 1000,
   /** New name records of one member taken in `syncWindowMs` (WISP 902 § Messages, "The name record"): one a rename. */
   namesPerMember: 4,
+  /**
+   * Messages of one member taken per `messageWindowMs`, and the bytes of their frames, past a burst of twice its whole
+   * log (`AuthorPace`); its edits the same, counted apart. As a community's (`COMMUNITY_LIMITS.messagesPerAuthor`): each
+   * one taken is a row in every member's app and a frame each hub passes on. The rest are not taken now and come again
+   * in a catch-up.
+   */
+  messagesPerAuthor: 30,
+  messageBytesPerAuthor: 128 * 1024,
+  messageWindowMs: 10_000,
 } as const;
 
 /** What every member should know about who can read what, in the words the apps show. */
@@ -305,6 +314,30 @@ export interface GroupSessionHooks {
  * answer: slices go one after another, each once my app handled the last (`CATCH_UP_PAUSE_MS` at most between them).
  */
 const ANSWER_WINDOW_MS = 5_000;
+/**
+ * One member's messages (or edits) taken: its whole log handed back at once twice over (`AUTHOR_BURST`: an edge opening
+ * hears it, with what the member says live beside it, and the edits its app says again), then
+ * `GROUP_LIMITS.messagesPerAuthor` and `messageBytesPerAuthor` per `messageWindowMs`, as a community's `MessagePace`.
+ * One not taken is neither seen nor kept nor passed on, so a sync still names it (`miss`) and a catch-up hands it again.
+ * What another member hands on in its answer to my sync is not counted: it took each at its author's pace already, and
+ * a catch-up holds many.
+ */
+const AUTHOR_BURST = { frames: 2 * GROUP_LIMITS.outlog, bytes: 2 * GROUP_LIMITS.outlogBytes };
+class AuthorPace {
+  private frames: number = AUTHOR_BURST.frames;
+  private bytes: number = AUTHOR_BURST.bytes;
+  private at: number | undefined;
+
+  take(bytes: number, now: number): boolean {
+    const elapsed = Math.max(0, now - (this.at ?? now)) / GROUP_LIMITS.messageWindowMs;
+    this.at = now;
+    this.frames = Math.min(AUTHOR_BURST.frames, this.frames + elapsed * GROUP_LIMITS.messagesPerAuthor);
+    this.bytes = Math.min(AUTHOR_BURST.bytes, this.bytes + elapsed * GROUP_LIMITS.messageBytesPerAuthor);
+    if (this.frames < 1 || this.bytes < bytes) return false;
+    this.frames -= 1; this.bytes -= bytes;
+    return true;
+  }
+}
 const MAX_TEXT_BOX = Math.ceil((GROUP_LIMITS.textBytes + 16) * 4 / 3) + 4;
 /** Sixteen mentions as JSON, each a key and two offsets, with room to spare, sealed. */
 const MAX_MENTIONS_BOX = Math.ceil((MENTION_LIMITS.count * 96 + 16) * 4 / 3) + 4;
@@ -492,6 +525,9 @@ export class GroupSession {
   private nameSaid: number | undefined;
   /** New name records taken per member, a few a minute (`GROUP_LIMITS.namesPerMember`). In memory only. */
   private namesTaken = new Map<string, RateWindow>();
+  /** Messages, and apart from them edits, taken per author (`AuthorPace`). In memory only. */
+  private messagePace = new Map<string, AuthorPace>();
+  private editPace = new Map<string, AuthorPace>();
   private queue = Promise.resolve();
   /** One metadata frame that names a commit or an epoch I do not have yet: tried again when the chain moves. */
   private pendingMeta: { from: string; frame: unknown } | undefined;
@@ -952,16 +988,29 @@ export class GroupSession {
     try { return (JSON.parse(plain) as { rm?: unknown } | null)?.rm === true; } catch { return false; }
   }
 
-  /** Another member's edit, kept to hand on: the latest per message; the oldest go once the log is full. False: one as new was kept. */
+  /**
+   * Another member's edit, kept to hand on: the latest per message. Full (in count or in bytes), the oldest of the author
+   * who holds the most of it goes (the one just kept's own on a tie): an author's edits of messages that are not there,
+   * which no keeper can tell (a hub cannot even open them), as many as it likes, push out only its own. False: one as
+   * new was kept, or this one went.
+   */
   private keepEdit(frame: GroupEditFrame): boolean {
     const same = (f: GroupEditFrame) => f.s === frame.s && f.e === frame.e && f.n === frame.n;
     const log = this.state.relayEdits ?? [];
     if (log.some(f => same(f) && f.v >= frame.v)) return false;
-    const next = [...log.filter(f => !same(f)), cleanEdit(frame)];
+    const kept = cleanEdit(frame);
+    const next = [...log.filter(f => !same(f)), kept];
     let bytes = next.reduce((sum, f) => sum + f.c.length, 0);
-    while (next.length > GROUP_LIMITS.relayEdits || bytes > GROUP_LIMITS.relayEditBytes) bytes -= next.shift()!.c.length;
+    while (next.length > GROUP_LIMITS.relayEdits || bytes > GROUP_LIMITS.relayEditBytes) {
+      const byCount = next.length > GROUP_LIMITS.relayEdits;
+      const held = new Map<string, number>();
+      for (const f of next) held.set(f.s, (held.get(f.s) ?? 0) + (byCount ? 1 : f.c.length));
+      let most = frame.s;
+      for (const [author, amount] of held) if (amount > held.get(most)!) most = author;
+      bytes -= next.splice(next.findIndex(f => f.s === most), 1)[0].c.length;
+    }
     this.state.relayEdits = next;
-    return true;
+    return next.includes(kept);
   }
 
   /** A frame of another member, kept to hand on; the oldest go once the log is full. */
@@ -1670,6 +1719,8 @@ export class GroupSession {
       if (this.provisional.has(own)) return;
       delete raw.m; delete raw.r; delete raw.f; delete raw.sc; delete raw.fl; delete raw.o; delete raw.xs;
     }
+    // At its author's pace, once it is known to be theirs, unless a member hands it on in its answer to my sync.
+    if (!(relayed && (answer || waited)) && !this.paced(this.messagePace, raw.s, frameBytes(raw))) return;
     // Said again under a later epoch (its author was behind, `resealBehind`): the message it first was, by that one's id.
     const first = raw.o === undefined ? null : readFirstPlace(raw.o, raw.e);
     if (raw.o !== undefined && !first) return;
@@ -1728,18 +1779,21 @@ export class GroupSession {
    * in, and a member away when it was said would keep the message for good. One for an epoch or a secret not here yet
    * waits, as a message does. Taken, it is kept to hand on in turn.
    */
-  private async receiveEdit(from: string, raw: unknown): Promise<void> {
+  private async receiveEdit(from: string, raw: unknown, waited = false): Promise<void> {
     if (!isEditFrame(raw) || raw.s === this.myKey || !rosterHas(this.roster, from)) return;
     const member = rosterHas(this.roster, raw.s);
     if (!verify(fromBase64Url(raw.sig), editSigned(raw), publicKeyFromZ32(raw.s))) return;
     if (raw.e > this.epoch) { this.parkEdit(from, raw); return; }
     const commit = this.state.chain[raw.e];
     if (!commit || !rosterHas(commit.m, raw.s)) return;
+    // At its author's pace (`AuthorPace`), as a message is; one I hold already (another hub's copy) costs nothing.
+    const held = (this.state.relayEdits ?? []).some(f => f.s === raw.s && f.e === raw.e && f.n === raw.n && f.v >= raw.v);
+    if (!held && !(raw.s !== from && (this.awaitsAnswer(from) || waited)) && !this.paced(this.editPace, raw.s, raw.c.length + 400)) return;
     // Of an epoch from before I was let in (a hub let in after the message): nothing for me to read, but the author's
     // signed word for the members who can, kept and passed on as is while the author is in the roster. Hubs change, and
     // most members of that epoch reach the author only through whoever is a hub now.
     if (!rosterHas(commit.m, this.myKey)) {
-      if (member && this.keepEdit(raw)) { await this.persist(); this.took(cleanEdit(raw)); }
+      if (member && this.keepEdit(raw)) { this.persistSoon(); this.took(cleanEdit(raw)); }
       return;
     }
     const secret = this.secret(raw.e);
@@ -1762,7 +1816,10 @@ export class GroupSession {
     const copy = this.kept().find(f => f.s === raw.s && f.e === raw.e && f.n === raw.n);
     const first = copy && readFirstPlace(copy.o, copy.e);
     await this.hooks.edit?.({ id: first ? groupMessageId(raw.s, first.e, first.n) : groupMessageId(raw.s, raw.e, raw.n), sender: raw.s, e: raw.v, ts: raw.ts, m: body.text, ...(k.length ? { k } : {}), ...(sc ? { sc } : {}), ...(rm ? { rm: true as const } : {}) });
-    if (this.keepEdit(raw)) { await this.persist(); this.took(cleanEdit(raw)); }
+    // Saved within the window, as a message is: a member's burst of edits (of messages that are not there, as many as it
+    // signs) was a whole record written for each. The app stored the edit above; lost with a save, the frame comes back
+    // in the next catch-up's answer from whoever kept it.
+    if (this.keepEdit(raw)) { this.persistSoon(); this.took(cleanEdit(raw)); }
   }
 
   private parkEdit(from: string, frame: GroupEditFrame): void {
@@ -1770,6 +1827,12 @@ export class GroupSession {
     this.waitingEdits = [...this.waitingEdits.filter(w => !(w.frame.s === frame.s && w.frame.e === frame.e && w.frame.n === frame.n && w.frame.v <= frame.v)), { from, frame }]
       .slice(-GROUP_LIMITS.outlog);
     this.ask(from);
+  }
+
+  private paced(paces: Map<string, AuthorPace>, author: string, bytes: number): boolean {
+    let pace = paces.get(author);
+    if (!pace) paces.set(author, pace = new AuthorPace());
+    return pace.take(bytes, this.now());
   }
 
   private wholeSigned(raw: GroupMessageFrame): boolean {
@@ -1889,7 +1952,7 @@ export class GroupSession {
     // Edits after the messages they change.
     const edits = this.waitingEdits.filter(w => w.frame.e <= this.epoch && !!this.state.secrets[w.frame.e]);
     this.waitingEdits = this.waitingEdits.filter(w => !edits.includes(w));
-    for (const { from, frame } of edits) await this.receiveEdit(from, frame);
+    for (const { from, frame } of edits) await this.receiveEdit(from, frame, true);
   }
 
   private async receiveCommit(from: string, frame: GroupCommitFrame): Promise<void> {

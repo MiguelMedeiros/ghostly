@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { schnorr } from "@noble/curves/secp256k1.js";
 import {
-  createIdentity, DEFAULT_RELAYS, DiscoveryBudgetError, domainWellKnownFile, emptyIdentityLedger, IdentityCheckUnavailable, identityFromSeed, identityRevocationValue, identityStatement, IDENTITY_REVOCATION_LABEL,
+  ATPROTO_PROOF_COLLECTION, atprotoProofRecord, createIdentity, DEFAULT_RELAYS, DiscoveryBudgetError, domainWellKnownFile, emptyIdentityLedger, IdentityCheckUnavailable, identityFromSeed, identityRevocationValue, identityStatement, IDENTITY_REVOCATION_LABEL,
   newIdentityBinding, RelayTransport, type IdentityDisplay, type IdentityLedger, type VerifiedIdentity,
 } from "@ghostly/core";
 import { STORES, clearProfileStores, store, transact, wrap } from "../src/shared/idb";
@@ -10,8 +10,10 @@ import { IdentityProofs, type IdentityLinkHost } from "../src/engine/identities"
 import { fakeKey, fakeKeySign, fakeKeySubject } from "../src/proofs/testing";
 import type { IdentityProofProvider } from "../src/proofs/contract";
 import { domain } from "../src/proofs/providers/domain";
+import { createAtprotoIdentityProvider } from "../src/proofs/providers/atproto";
 import { clearDomainCache } from "../src/proofs/domain";
 import { answerDoh, queryFromUrl, type Zone } from "./helpers/dohZone";
+import { testAtprotoNetwork } from "./helpers/atprotoNetwork";
 import { signNostr } from "./helpers/nostrSign";
 // covers: proofs.revoke, proofs.expiry, proofs.recheck, proofs.binding, profiles.public
 
@@ -268,13 +270,54 @@ describe("removing a proof and its revocation", () => {
     await vi.advanceTimersByTimeAsync(5_000);
     await vi.waitFor(() => expect(pkarr.get(binding.key)?.[0]).toMatchObject({ label: "_ghostly-revoked", value: expect.stringContaining(id) }));
 
-    // Thirty-one days on (the proof lived thirty), the next republish drops it.
+    // Thirty-one days on (the proof lived thirty), it is no longer published, but kept: this clock may be the one that is wrong.
     pkarr.clear();
     vi.setSystemTime(Date.now() + 31 * 86_400_000);
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(pkarr.size).toBe(0);
+    expect(await stored<{ id: string }[]>("identityRevocations")).toEqual([expect.objectContaining({ id })]);
+    // Past its expiry by more than the longest a proof may last, the next republish drops it.
+    vi.setSystemTime(Date.now() + 401 * 86_400_000);
     await vi.advanceTimersByTimeAsync(60 * 60_000);
     await vi.waitFor(async () => expect(await stored("identityRevocations")).toEqual([]));
     expect(pkarr.size).toBe(0);
     again.stop();
+  });
+
+  /**
+   * The revocation was dropped by this device's clock: one run with the clock 40 days ahead deleted it for good, and a
+   * removal made then kept none, so once the clock was put right nothing republished it and the contact, told by no
+   * withdraw (the chat deleted first), kept the proof verified until its real expiry.
+   */
+  for (const when of ["after the removal", "during the removal"] as const) it(`a clock once set ahead ${when} does not end the revocation: put right, it is republished and the contact sees it revoked`, async () => {
+    const { engines, state, pkarr, make, id, binding } = await shared();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const right = Date.now();
+    const ahead = () => vi.setSystemTime(right + 40 * 86_400_000);
+    state.deleted.a = true;
+    engines.a.forget("chat");
+    const run = async (ms: number) => { const a = make("a"); await a.load(); a.start(); await vi.advanceTimersByTimeAsync(ms); a.stop(); return a; };
+
+    if (when === "during the removal") ahead();
+    const removing = make("a");
+    await removing.load();
+    await removing.remove({ id });
+    if (when === "after the removal") { ahead(); await run(10_000); }
+    expect(await stored<{ id: string }[]>("identityRevocations")).toEqual([expect.objectContaining({ id })]);
+
+    // The clock put right, the relays forgot the record; the app runs again for two hours.
+    vi.setSystemTime(right + 60_000);
+    pkarr.clear();
+    const a = await run(2 * 60 * 60_000);
+    expect(pkarr.get(binding.key)?.[0]).toMatchObject({ label: "_ghostly-revoked", value: expect.stringContaining(id) });
+    await engines.b.checkRevocations();
+    expect(engines.b.linkView("chat", true)!.received[0].status).toBe("revoked");
+
+    // Clear all data with the clock ahead again still publishes it, once more.
+    ahead();
+    pkarr.clear();
+    await a.revokeAll();
+    expect([...pkarr.keys()]).toEqual([binding.key]);
   });
 
   it("revocations are looked up only online, for proofs standing or withdrawn, never for one revoked or expired", async () => {
@@ -926,6 +969,18 @@ describe("per chat", () => {
     expect(engines.b.linkView("chat", true)!.received[0].display).toEqual(found.display);
   });
 
+  it("a looked-up public name is stored without hidden or direction-changing characters, and none when nothing visible is left", async () => {
+    const { engines, ledgers, state } = await shared();
+    const id = engines.b.linkView("chat", true)!.received[0].id;
+    const found: { display?: IdentityDisplay } = { display: { name: "‮a​b@x.io ", source: "Test directory‏", fetchedAt: 1 } };
+    state.providers.b = [{ ...fakeKey, lookupDisplay: async () => found.display } as IdentityProofProvider];
+    await engines.b.lookupDisplay({ linkId: "chat", id });
+    expect(ledgers.b.received[0].display).toEqual({ name: "ab@x.io", source: "Test directory", fetchedAt: 1 });
+    found.display = { name: "‏​", source: "Test directory", fetchedAt: 2 };
+    await engines.b.lookupDisplay({ linkId: "chat", id });
+    expect(ledgers.b.received[0].display).toEqual({ source: "Test directory", fetchedAt: 2 });
+  });
+
   it("a proof received under the contact's previous key is shown as such, not verified", async () => {
     const { engines, state } = await shared();
     expect(engines.b.linkView("chat", true)!.received[0].status).toBe("verified");
@@ -956,6 +1011,29 @@ describe("per chat", () => {
     await vi.advanceTimersByTimeAsync(13 * 60 * 60_000);
     expect(verify).toHaveBeenCalledTimes(1);
     expect(engines.b.linkView("chat", true)!.received[0]).toMatchObject({ status: "unconfirmed", error: "The record is not published" });
+    engines.b.stop();
+  });
+
+  it("a contact's proof checked while this device's clock ran ahead is due again once the clock is put right, not at that future date", async () => {
+    const { engines, ledgers, state } = pair();
+    await clearStorage();
+    await engines.a.load(); await engines.b.load();
+    const proof = await prove(engines.a, 365);
+    const realNow = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(realNow + 60 * 86_400_000);
+    await engines.a.share({ linkId: "chat", id: proof.id });
+    await vi.waitFor(() => expect(ledgers.b.received[0]?.status).toBe("verified"));
+    // The clock is put right.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], now: realNow });
+    const verify = vi.fn(async () => { throw new Error("The record is not published"); });
+    state.providers.b = [{ ...fakeKey, recheck: { afterSeconds: 86_400 }, verify } as unknown as IdentityProofProvider];
+    expect(engines.b.linkView("chat", true)!.received[0].recheckDue).toBe(true);
+    engines.b.start();
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(engines.b.linkView("chat", true)!.received[0]).toMatchObject({ status: "unconfirmed", error: "The record is not published", recheckDue: false });
+    expect(ledgers.b.received[0].checkedAt).toBeLessThanOrEqual(Math.floor(Date.now() / 1000));
     engines.b.stop();
   });
 
@@ -1047,6 +1125,60 @@ describe("per chat", () => {
       zone.a = {};
       for (let day = 0; day < 3 && p.engines.b.linkView("chat", true)!.received[0].status === "verified"; day++) await vi.advanceTimersByTimeAsync(25 * 60 * 60_000);
       expect(p.engines.b.linkView("chat", true)!.received[0]).toMatchObject({ status: "unconfirmed", error: `${host} has no address` });
+      p.engines.b.stop();
+    } finally { vi.unstubAllGlobals(); clearDomainCache(); }
+  });
+
+  it("an AT Protocol proof of a did:web account whose domain stops existing reads unconfirmed at the next daily check; its server's name gone, or resolvers that fail, keep it verified", async () => {
+    // The contact's real AT Protocol provider over the in-memory network, behind the global fetch.
+    const net = testAtprotoNetwork();
+    const web = net.account("web");
+    net.accounts.delete(web.did);
+    const host = "alice.example.com";
+    web.did = `did:web:${host}`;
+    web.doc.id = web.did;
+    (web.doc.verificationMethod as { id: string }[])[0].id = "#atproto";
+    net.accounts.set(web.did, web);
+    net.zone.a![host] = ["203.0.113.11"];
+    const resolvers = { down: false };
+    vi.stubGlobal("fetch", async (url: string) => {
+      if (resolvers.down && new URL(url).hostname === "dns.quad9.net") throw new TypeError("Failed to fetch");
+      const r = await net.fetch(url);
+      return new Response(r.bytes, { status: r.status, headers: { "content-type": r.contentType } });
+    });
+    clearDomainCache();
+    try {
+      const atproto = createAtprotoIdentityProvider({ host: () => undefined });
+      const p = pair();
+      p.state.providers = { a: [atproto], b: [atproto] };
+      await clearStorage();
+      await p.engines.a.load(); await p.engines.b.load();
+      const { draftId, binding } = p.engines.a.begin({ provider: "atproto", subject: web.did });
+      const s = identityStatement(binding);
+      web.records.set(`${ATPROTO_PROOF_COLLECTION}/${binding.key}`, atprotoProofRecord(s, new Date(binding.issuedAt * 1000)));
+      const view = await p.engines.a.complete({ draftId, evidence: {} });
+      await p.engines.a.share({ linkId: "chat", id: view.id });
+      await vi.waitFor(() => expect(p.ledgers.b.received.find(r => r.id === view.id)?.status).toBe("verified"));
+
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      p.engines.b.start();
+      const status = () => p.engines.b.linkView("chat", true)!.received[0].status;
+      // The server the account's document names has no address: the operator's name, which may come back.
+      delete net.zone.a!["pds.example.com"];
+      const asked = net.asked.length;
+      await vi.advanceTimersByTimeAsync(25 * 60 * 60_000);
+      expect(net.asked.length, "checked").toBeGreaterThan(asked);
+      expect(status()).toBe("verified");
+      net.zone.a!["pds.example.com"] = ["203.0.113.10"];
+      // No resolver answers: the check could not run, and the proof stands.
+      resolvers.down = true;
+      await vi.advanceTimersByTimeAsync(25 * 60 * 60_000);
+      expect(status()).toBe("verified");
+      // The account's domain is gone: for a did:web account that is the identity, an answer about the proof.
+      resolvers.down = false;
+      delete net.zone.a![host];
+      for (let day = 0; day < 3 && status() === "verified"; day++) await vi.advanceTimersByTimeAsync(25 * 60 * 60_000);
+      expect(p.engines.b.linkView("chat", true)!.received[0]).toMatchObject({ status: "unconfirmed", error: `The account's DID no longer resolves: ${host} has no address` });
       p.engines.b.stop();
     } finally { vi.unstubAllGlobals(); clearDomainCache(); }
   });

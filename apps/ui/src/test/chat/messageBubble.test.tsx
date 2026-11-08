@@ -270,6 +270,51 @@ describe("MessageBubble: a picture link under each shell's img-src", () => {
     expect(image(container)).toBeNull();
   });
 
+  it.each([
+    ["a chat", {}],
+    ["a group", { linkId: "group:g1" }],
+  ])("in %s, a contact's picture shown once and edited to another address asks again before it is read", async (_, props) => {
+    const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(async () => answer(PNG_BYTES));
+    const { user, rerender } = bubble({ text: "https://img.example.org/cat.gif" }, props);
+    await user.click(screen.getByTestId("image-reveal"));
+    expect(await screen.findByTestId("picture-link")).toBeInTheDocument();
+    // Each edit to another address (another host, or the same host's other picture) is not what Show picture was for.
+    const edits = ["https://tracker.example.net/u/1.gif", "https://tracker.example.net/u/2.gif", "https://img.example.org/dog.gif"];
+    for (const [i, edited] of edits.entries()) {
+      rerender(<MessageBubble message={message({ text: edited, edit: { seq: i + 1, at: 1_700_000_000_000 + i, history: [] } })} peerPubKey="peer" {...props} />);
+      expect(screen.getByTestId("image-reveal")).toHaveTextContent(`Show picture · ${new URL(edited).host}`);
+      expect(screen.queryByTestId("picture-link")).not.toBeInTheDocument();
+      await act(async () => {});
+      expect(fetched).not.toHaveBeenCalledWith(edited, expect.anything());
+    }
+    expect(fetched).toHaveBeenCalledTimes(1);
+    // Asked for: that address is read.
+    await user.click(screen.getByTestId("image-reveal"));
+    expect(await screen.findByTestId("picture-link")).toBeInTheDocument();
+    expect(fetched).toHaveBeenLastCalledWith("https://img.example.org/dog.gif", expect.anything());
+  });
+
+  it("a picture that could not be read is shown once the message is edited to one that can", async () => {
+    const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => String(url).includes("gone") ? new Response("", { status: 404 }) : answer(PNG_BYTES));
+    const { user, rerender } = bubble({ text: "https://cdn.example.com/gone.png" });
+    await user.click(screen.getByTestId("image-reveal"));
+    expect(await screen.findByRole("link", { name: "https://cdn.example.com/gone.png" })).toBeInTheDocument();
+    rerender(<MessageBubble message={message({ text: "https://cdn.example.com/cat.png" })} peerPubKey="peer" />);
+    await user.click(screen.getByTestId("image-reveal"));
+    expect(await screen.findByTestId("picture-link")).toBeInTheDocument();
+    expect(fetched).toHaveBeenLastCalledWith("https://cdn.example.com/cat.png", expect.anything());
+  });
+
+  it("my forwarded copy of a picture link waits for a click, as the contact's did", async () => {
+    // What I forward is mine in the chat it went to, but I never asked to read it: its address may be a contact's.
+    const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(async () => answer(PNG_BYTES));
+    const { user } = bubble({ text: "https://tracker.example.net/u/1.gif", sender: "me", forwarded: 1 });
+    expect(screen.getByTestId("image-reveal")).toHaveTextContent("Show picture · tracker.example.net");
+    expect(fetched).not.toHaveBeenCalled();
+    await user.click(screen.getByTestId("image-reveal"));
+    expect(await screen.findByTestId("picture-link")).toBeInTheDocument();
+  });
+
   it("never asks an address on this machine or the local network", async () => {
     const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(async () => answer(PNG_BYTES));
     const url = "https://192.168.1.1/cat.png";
@@ -707,7 +752,7 @@ describe("MessageBubble: delivery", () => {
   it("⋮ → Cancel sending drops what waits for your contact, in the place of Delete and with no confirmation", async () => {
     const { user, engine } = bubble({ sender: "me", delivery: "waiting", deliveryError: "Longer than the 256 bytes the DHT carries: it is sent when you are live." });
     act(() => engine.update({ links: [linkView()] }));
-    engine.on("deleteMessage", () => undefined);
+    engine.on("deleteMessage", () => ({ everyone: false }));
     await user.click(screen.getByTestId("message-options"));
     expect(screen.queryByTestId("message-retry")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Cancel sending" }));

@@ -1,4 +1,4 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { GroupChat } from "../../pages/GroupChat";
@@ -77,6 +77,43 @@ describe("another group under this group's id", () => {
     expect(second).toHaveFocus();
     expect(change).not.toHaveBeenCalled();
     expect(screen.getAllByTestId("group-other")).toHaveLength(2);
+  });
+
+  // The band goes with the button pressed: the focus goes to the group's name, not to the page (the next Tab started
+  // from the top of it, and a screen reader said nothing).
+  it("Keep this one, pressed from the keyboard, leaves the focus on the group's name once the band goes", async () => {
+    const { user, engine } = open();
+    engine.on("keepGroup", () => { engine.update({ groups: [groupView()] }); });
+    screen.getByTestId("group-others-keep").focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.queryByTestId("group-others")).not.toBeInTheDocument());
+    expect(screen.getByTestId("group-name")).toHaveFocus();
+  });
+
+  it("a confirmed Switch leaves the focus on the group's name once the other takes its place", async () => {
+    const { user, engine } = open();
+    engine.on("switchGroup", () => {
+      engine.update({ groups: [groupView({ name: "Family", canSend: false, invitation: { linkId: "chat-ab", contact: "Alice", admin: "a", members: 3, accepted: false } })] });
+    });
+    within(screen.getAllByTestId("group-other")[0]).getByTestId("group-other-switch").focus();
+    await user.keyboard("{Enter}");
+    await user.tab();
+    expect(within(screen.getByRole("dialog")).getByRole("button", { name: "Switch" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.queryByTestId("group-others")).not.toBeInTheDocument());
+    expect(screen.getByTestId("group-name")).toHaveTextContent("Family");
+    expect(screen.getByTestId("group-name")).toHaveFocus();
+  });
+
+  it("a band that goes while the focus is elsewhere leaves the focus where it is", async () => {
+    const { user, engine } = open();
+    engine.on("keepGroup", () => undefined);
+    await user.click(screen.getByTestId("group-others-keep"));
+    const back = screen.getByTestId("chat-back");
+    back.focus();
+    act(() => { engine.update({ groups: [groupView()] }); });
+    await waitFor(() => expect(screen.queryByTestId("group-others")).not.toBeInTheDocument());
+    expect(back).toHaveFocus();
   });
 
   it("a switch the engine refuses says why on the page", async () => {

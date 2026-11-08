@@ -1,6 +1,7 @@
 import { screen, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
+import { sanitizeNick } from "@ghostly/core";
 import type { GroupMemberView, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
 import { authorName, formerName, memberName, sameNamed } from "../../lib/groups";
 import { GroupChat } from "../../pages/GroupChat";
@@ -58,6 +59,28 @@ describe("a group's members with one name", () => {
     expect(memberName(roster[1]!, undefined, same)).toBe("محمد \u2066(…adm1n0)\u2069");
     expect(memberName(roster[2]!, undefined, same)).toBe("محمد \u2066(…0th3r9)\u2069");
     expect(formerName({ profile: "community", members: roster }, GONE, "محمد")).toBe("محمد \u2066(…g0n3ab)\u2069");
+  });
+
+  it("are told apart whatever a name adds that draws nothing: a filler, a selector, a joiner, a blank", () => {
+    const unseen = [
+      "Anaㅤ", "Anaﾠ", "Anaᅟ", "Anaᅠ", "Ana͏", "Ana︀", "Ana\u{e0100}", "Ana᠋", "Ana឵",
+      "A‍na", "An‌a", "Ana⠀", "Ana️", "ㅤAna (…adm1n0)",
+    ];
+    for (const nick of unseen) {
+      // A name a receiver keeps as it came, and one the name step lets a person type.
+      expect(sanitizeNick(nick)).toBe(nick);
+      const roster = [member(ADMIN, "Ana", "admin"), member(OTHER, nick)];
+      expect([...sameNamed(roster)], nick).toEqual([ADMIN, OTHER]);
+      expect(authorName({ members: roster }, OTHER)).toBe(`${nick} \u2066(…0th3r9)\u2069`);
+      expect([...sameNamed([member(ME, undefined, "member", true), member(OTHER, nick)], "Ana")], nick).toEqual([ME, OTHER]);
+    }
+    // Names that read apart stay apart, and a name that needs its joiners shows them as it came.
+    expect(sameNamed([member(ADMIN, "Ana", "admin"), member(OTHER, "Anna")]).size).toBe(0);
+    expect(sameNamed([member(ADMIN, "क्षमा", "admin"), member(OTHER, "क्षमता")]).size).toBe(0);
+    expect(sameNamed([member(ADMIN, "می‌خواهم", "admin"), member(OTHER, "مریم")]).size).toBe(0);
+    const persian = [member(ADMIN, "می‌خواهم", "admin"), member(OTHER, "میخواهم")];
+    expect(memberName(persian[0]!, undefined, sameNamed(persian))).toBe("می‌خواهم \u2066(…adm1n0)\u2069");
+    expect(memberName(member(OTHER, "👩‍💻 Ana"), undefined, sameNamed([member(ADMIN, "Bob", "admin"), member(OTHER, "👩‍💻 Ana")]))).toBe("👩‍💻 Ana");
   });
 
   it("in a private group, a member removed and invited again is named as before, her old key's messages as her new key's", () => {

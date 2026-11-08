@@ -2358,6 +2358,50 @@ describe("a queue:priority pull request while CI Success on the base itself is r
     expect(said(repo, 14)).toMatch(/\*\*1st\*\*.*on hold/);
   });
 
+  it("splits a red batch that holds a priority pull request instead of holding it, so the fix lands and the line moves", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(13, { priority: true }); // the fix for dev, queued while #11 waited: it boards with it at once
+    await repo.run();
+    expect(repo.members()).toEqual([13, 11]);
+    repo.runs.set("dev0", red);
+    repo.settle([11]);
+    const r = await repo.run();
+    expect(r.log.join("\n")).not.toMatch(/HOLD/);
+    expect(repo.members()).toEqual([13]);
+    expect(said(repo, 13)).not.toMatch(/on hold/);
+    repo.settle([11]);
+    const done = await repo.run();
+    expect(done.merged).toEqual([13]);
+    expect(repo.members()).toEqual([11]);
+  });
+
+  it("gives a red lone priority pull request its second run while the base is red, as with a green base", async () => {
+    const repo = fakeRepo();
+    repo.add(13, { priority: true, behind: true });
+    await repo.run();
+    const first = repo.pulls.get(13)!.sha;
+    repo.runs.set("dev0", red);
+    repo.settle([13]); // a flake on its own run
+    const r = await repo.run();
+    expect(r.log.join("\n")).not.toMatch(/HOLD/);
+    expect(repo.pulls.get(13)!.sha).not.toBe(first);
+    expect(repo.alone(13)).toMatchObject({ retried: true });
+    repo.settle();
+    expect((await repo.run()).merged).toEqual([13]);
+  });
+
+  it("still holds a red batch with a priority pull request while CI on the base is still running", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(13, { priority: true });
+    await repo.run();
+    repo.runs.set("dev0", running);
+    repo.settle([11]);
+    expect((await repo.run()).log.join("\n")).toMatch(/HOLD #9000: .*itself is still running/);
+    expect(repo.members()).toEqual([13, 11]);
+  });
+
   it("lets one priority pull request go at a time", async () => {
     const repo = await heldBatch();
     repo.add(13, { priority: true, behind: true });
@@ -2369,6 +2413,65 @@ describe("a queue:priority pull request while CI Success on the base itself is r
     await repo.run();
     expect(repo.alone(14)).toBeNull();
     expect(repo.pushes).toHaveLength(1);
+  });
+
+  // Its branch merged origin/dev and resolved a conflict in that merge: its commits do not rebase onto dev, and past a
+  // hold no batch (whose squash merge would take its head as it is) can go.
+  const unrebasable = /commits do not rebase onto `dev`.*left the line.*`git rebase origin\/dev`/;
+
+  it("takes a priority pull request whose commits do not rebase out of the line, and the next priority one goes in the same run", async () => {
+    const repo = await heldBatch();
+    repo.add(13, { priority: true, behind: true });
+    repo.unrebasable.add(13);
+    repo.add(14, { priority: true }); // the real fix: green on its own full run, at dev's tip
+    const r = await repo.run();
+    expect(r.dropped).toEqual([13]);
+    expect(repo.pulls.get(13)!.labels).toEqual([LABEL.conflict]);
+    expect(said(repo, 13)).toMatch(unrebasable);
+    expect(r.merged).toEqual([14]);
+    expect(repo.landed).toEqual(["#14"]);
+    expect(r.inFlight).toBe(9000);
+    expect(repo.members()).toEqual([11, 12]);
+  });
+
+  it("flies the next priority pull request on a rebase once the first leaves the line", async () => {
+    const repo = await heldBatch();
+    repo.add(13, { priority: true, behind: true });
+    repo.unrebasable.add(13);
+    repo.add(14, { priority: true, behind: true });
+    const r = await repo.run();
+    expect(r.dropped).toEqual([13]);
+    expect(repo.alone(14)).toMatchObject({ baseSha: "dev0", past: 9000 });
+    repo.settle([11, 12]);
+    expect((await repo.run()).merged).toEqual([14]);
+  });
+
+  it("does not try a lone priority pull request whose commits do not rebase again on every run", async () => {
+    const repo = await heldBatch();
+    repo.add(13, { priority: true, behind: true });
+    repo.unrebasable.add(13);
+    const r = await repo.run();
+    expect(r.dropped).toEqual([13]);
+    expect(repo.pulls.get(13)!.labels).toEqual([LABEL.conflict]);
+    expect(said(repo, 13)).toMatch(unrebasable);
+    expect(r.inFlight).toBe(9000);
+    const again = await repo.run();
+    expect(again.log.join("\n")).not.toMatch(/#13/);
+    expect(again.inFlight).toBe(9000);
+    expect(repo.comments.get(13)!.filter((c) => unrebasable.test(c.body))).toHaveLength(1);
+  });
+
+  it("passes over a priority pull request whose merge alone is refused, in line, and the next priority one goes", async () => {
+    const repo = await heldBatch();
+    repo.add(13, { priority: true });
+    repo.add(14, { priority: true });
+    const squash = repo.gh.squash;
+    repo.gh.squash = async (n: number, sha: string, title: string, message: string) => (n === 13 ? { ok: false, status: 405, message: "HTTP 405 Squash merges are not allowed" } : squash(n, sha, title, message));
+    const r = await repo.run();
+    expect(r.log.join("\n")).toMatch(/#13 cannot go ahead of the held one alone \(HTTP 405 Squash merges are not allowed\)/);
+    expect(r.merged).toEqual([14]);
+    expect(r.dropped).toEqual([]);
+    expect(repo.pulls.get(13)!.labels).toEqual([LABEL.queue, LABEL.priority]);
   });
 
   it("boards nothing past the hold that lacks queue:priority, nor anything while CI on the base is still running", async () => {

@@ -12,8 +12,12 @@
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} new messages",
     "messagesFrom": "{{count}} new messages from {{name}}",
+    "notSent": "Your message “{{text}}” was not sent",
+    "notSentCount": "{{count}} messages not sent",
     "pinMoved": "Moved to place {{place}} of {{count}} pinned chats",
-    "rowMoved": "Moved to place {{place}} of {{count}}"
+    "rowMoved": "Moved to place {{place}} of {{count}}",
+    "waiting": "Your message “{{text}}” is waiting for your contact to be online",
+    "waitingCount": "{{count}} messages waiting for your contact to be online"
   },
   "audio": {
     "cantPlay": "This device can't play this audio ({{format}}). Download it to listen.",
@@ -494,6 +498,7 @@
     "limit": "Voice messages are at most {{minutes}} minutes",
     "message": "Voice message",
     "micDenied": "No access to the microphone. Allow it in your browser or system settings.",
+    "micDeniedAndroid": "No access to the microphone. Allow it when Android asks, or in Android's settings for Ghostly.",
     "micUnavailable": "No microphone found. Connect one, or close the app using it.",
     "micUnsupported": "This browser can't record voice messages.",
     "pause": "Pause voice message",

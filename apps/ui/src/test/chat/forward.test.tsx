@@ -11,6 +11,7 @@ import { saveSession } from "../../lib/storage";
 import type { ChatMessage, ChatSession } from "../../lib/types";
 import { engineState, fakeEngine, groupView, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { axeViolations } from "../axe";
 
 // covers: chat.forward
 
@@ -361,6 +362,9 @@ describe("the Forward to… picker", () => {
     const lines = within(screen.getByTestId("forward-error")).getAllByRole("listitem");
     expect(lines.map(line => line.querySelector("bdi")?.textContent)).toEqual(["Ana!", "Bo?"]);
     expect(lines[0]).toHaveTextContent("Ana! (أُرسل 1 من 2): ");
+    // Read out as an alert and still as a list of 2: the alert on the list itself took the list away from its lines.
+    expect(screen.getByTestId("forward-error")).toHaveAttribute("role", "alert");
+    expect(await axeViolations(screen.getByRole("dialog"))).toEqual([]);
     expect(isolated("forward-sent")).toEqual(["Friends"]);
     expect(screen.getByTestId("forward-sent")).toHaveTextContent(/^أُرسل إلى Friends$/);
     expect(isolated("forward-chosen")).toEqual(["Ana!", "Bo?"]);

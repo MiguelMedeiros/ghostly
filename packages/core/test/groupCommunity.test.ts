@@ -1165,11 +1165,45 @@ describe("a key let in only on a branch that lost", () => {
     alice.online = true;
     await net.meet(alice, bob);
     expect(bob.session.topHash).toBe(alice.session.topHash);
-    // Carol is told her admission lost (the link commit is what makes it lose) and asks again by the link she knew.
+    // The link commit is what makes her admission lose, and it carries the new link: no member sends it to her, so
+    // nothing she holds names the new link, and she is not told she lost.
     await net.meet(bob, carol);
-    expect(carol.session.status).toBe("lost");
+    await net.meet(alice, carol);
+    expect(JSON.stringify(carol.session.state)).not.toContain(entry);
+    expect(carol.session.state.chain.some(c => c.k === "link")).toBe(false);
+    expect(carol.session.status).toBe("active");
+    expect(carol.session.entryKey).toBe(old);
     expect(carol.session.lostEntryKey).toBe(old);
-    expect(carol.session.lostEntryKey).not.toBe(entry);
+  });
+
+  it("is heard no more once a member knows its admission lost, as one removed: neither shown nor handed on", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    await net.meet(alice, bob);
+    // Alice replaces the link while Bob, cut off, lets Carol in by the old one; Carol speaks on that branch.
+    bob.online = false;
+    await alice.session.replaceLink();
+    await net.settle();
+    bob.online = true; alice.online = false;
+    const carol = await net.admit(bob, "carol");
+    await say(net, carol, "before");
+    expect(net.texts(bob)).toEqual(["before"]);
+    alice.online = true;
+    await net.meet(alice, bob);
+    expect(bob.session.topHash).toBe(alice.session.topHash);
+    expect(bob.session.isRecentMember(carol.session.myKey)).toBe(false);
+    // Carol, not told yet (or an app that does not stop), writes again under her branch's epoch: Bob, who knows her
+    // admission lost, neither shows it nor hands it on.
+    const before = net.log.length;
+    await say(net, carol, "after");
+    expect(net.texts(bob)).toEqual(["before"]);
+    expect(net.texts(alice)).toEqual([]);
+    expect(net.log.slice(before).filter(f => f.from !== "carol" && f.t === "group-msg")).toEqual([]);
+    // What she said while her branch could still win is not handed on either, as for one removed.
+    alice.messages.length = 0;
+    await net.meet(alice, bob);
+    expect(net.texts(alice)).toEqual([]);
   });
 });
 

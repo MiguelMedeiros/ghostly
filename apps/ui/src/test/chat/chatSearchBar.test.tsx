@@ -87,6 +87,14 @@ describe("search inside a chat", () => {
     expect(field()).toBeInTheDocument();
   });
 
+  it("gives its buttons a thumb's 44 px on a phone", async () => {
+    openChat(true, short());
+    await screen.findByText(`Message ${COUNT - 1}`);
+    ctrlF();
+    // 40 × 40 px before; the measure is a browser's (e2e/web/phone-touch-targets.spec.ts).
+    for (const id of ["chat-search-info", "chat-search-older", "chat-search-newer", "chat-search-close"]) expect(screen.getByTestId(id), id).toHaveClass("max-md:w-11", "max-md:h-11");
+  });
+
   it("gives the focus back as it closes: to ⋮ when opened from its menu, to the composer after Ctrl+F there", async () => {
     const { user } = openChat(true, short());
     await screen.findByText(`Message ${COUNT - 1}`);

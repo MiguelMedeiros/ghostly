@@ -134,6 +134,12 @@ export interface BrowserHost {
    */
   readClipboardFiles?(): Promise<ClipboardFile[]>;
   /**
+   * Copies a secret (an invite, a device's link, a group's link, ecash) marked as sensitive: the Android app, whose
+   * system shows every copy in a preview and whose keyboards keep a history of them, but neither for a sensitive one.
+   * The page's own copy cannot mark it. Left out where the page's copy is the way.
+   */
+  copySecret?(text: string): Promise<void>;
+  /**
    * Where calls get their media, when not from the page's own WebRTC. Ghostly Desktop on Linux: WebKitGTK has
    * no WebRTC there, and GStreamer runs the calls. Left out where the page has it.
    */

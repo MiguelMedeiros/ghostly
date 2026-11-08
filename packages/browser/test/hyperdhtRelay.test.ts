@@ -838,6 +838,71 @@ it("holds a client's handshakes only while they wait on it, and its signatures o
   }
 }, 90_000);
 
+it("takes a client's first answer to a handshake, ignores one sent again in the same batch, and keeps serving every client", async () => {
+  const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
+  const { default: DHT } = await import("hyperdht");
+  const { default: RelayedDHT } = await import("@hyperswarm/dht-relay");
+  const { default: WebSocketStream } = await import("@hyperswarm/dht-relay/ws");
+  const own = await startRelay({ testnet: 3 });
+  // What would end the relay's process, as the dial's outcome.
+  const uncaught: unknown[] = [];
+  let crashed: (why: string) => void = () => {};
+  const crash = new Promise<string>(resolve => { crashed = resolve; });
+  const onUncaught = (error: unknown) => { uncaught.push(error); crashed(`uncaught ${String(error)}`); };
+  process.on("uncaughtException", onUncaught);
+  type Socket = { on(event: string, f: (...args: unknown[]) => void): void; once(event: string, f: () => void): void; destroy(): void };
+  type Server = { listen(keyPair: unknown): Promise<void>; address(): { port: number } | null; close(): Promise<void> };
+  type Client = { _protocol: Record<string, { send(m: unknown): void }>; createServer(options: unknown, onconnection: (socket: Socket) => void): Server; connect(publicKey: Uint8Array): Socket };
+  const sockets: WebSocket[] = [];
+  const client = async () => {
+    const socket = new WebSocket(own.url);
+    sockets.push(socket);
+    await new Promise(resolve => socket.addEventListener("open", resolve, { once: true }));
+    const stream = new WebSocketStream(true, socket) as { userData?: unknown };
+    // protomux keeps itself on a stream whose userData is null: the client corks its messages into one batch through it.
+    stream.userData = null;
+    const node = new RelayedDHT(stream, { custodial: false }) as unknown as Client;
+    return { node, mux: stream.userData as unknown as { cork(): void; uncork(): void } };
+  };
+  try {
+    const listener = await client();
+    const keyPair = DHT.keyPair();
+    let onReached: (value: string) => void = () => {};
+    const reached = new Promise<string>(resolve => { onReached = resolve; });
+    const server = listener.node.createServer({}, socket => { socket.on("error", () => {}); onReached("reached"); });
+    await server.listen(keyPair);
+    expect(server.address()?.port).toBeGreaterThan(0);
+    const dialler = await client();
+    const reply = dialler.node._protocol.noiseReply;
+    const send = reply.send.bind(reply);
+    let twice = false;
+    reply.send = message => {
+      if (twice) return send(message);
+      twice = true;
+      dialler.mux.cork(); send(message); send(message); dialler.mux.uncork();
+    };
+    const socket = dialler.node.connect(keyPair.publicKey);
+    socket.on("error", () => {});
+    const opened = new Promise(resolve => socket.once("open", () => resolve("open")));
+    const timeout = (ms: number) => new Promise(resolve => setTimeout(() => resolve("timeout"), ms));
+    await expect(Promise.race([opened, crash, timeout(20_000)])).resolves.toBe("open");
+    await expect(Promise.race([reached, timeout(5_000)])).resolves.toBe("reached");
+    expect(twice).toBe(true);
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(uncaught).toEqual([]);
+    // Nobody was dropped, and another client still listens.
+    expect(own.stats()).toMatchObject({ dropped: 0 });
+    const other = (await client()).node.createServer({}, () => {});
+    await other.listen(DHT.keyPair());
+    expect(other.address()?.port).toBeGreaterThan(0);
+    socket.destroy();
+  } finally {
+    process.off("uncaughtException", onUncaught);
+    for (const socket of sockets) socket.close();
+    await own.close();
+  }
+}, 60_000);
+
 it("keeps a client's other chats reachable, both ways, while one chat's contact dials it over and over", async () => {
   const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
   const { default: DHT } = await import("hyperdht");

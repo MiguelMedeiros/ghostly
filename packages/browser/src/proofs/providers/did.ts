@@ -204,7 +204,7 @@ export const did: IdentityProofProvider<DidEvidence> = {
   // A did:web or did:dht document can drop a key, or the file be deleted: contacts can check again.
   recheck: { afterSeconds: 86_400 },
   privacy: "did:key and did:jwk: nothing, checked on this device. did:web: the contact's app asks its DNS-over-HTTPS resolver for your domain and downloads your did.json, " +
-    "so your web server sees the contact's IP address. did:dht: a Pkarr relay learns which DID was looked up.",
+    "so your web server sees the contact's IP address. did:dht: one of the contact's Pkarr relays (their Network settings) learns which DID was looked up.",
   signers: [signer, fileSigner, serviceSigner],
   parseEvidence(raw) {
     const e = raw as Record<string, unknown>;

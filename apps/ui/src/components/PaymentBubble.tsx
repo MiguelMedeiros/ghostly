@@ -19,6 +19,7 @@ import { useAmountText } from "../hooks/useAmountText";
 import { problemLine, problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { focusLost, working } from "../lib/focus";
+import { useFocusKept } from "../hooks/useFocusKept";
 
 /** A mint as a person knows it: its own name, else its host (the full URL says nothing more to them). */
 const mintLabel = (m: { url: string; name: string }) => {
@@ -70,6 +71,10 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText, mine = fals
     shownLn.current = lnOpen;
     if (focusLost()) (lnOpen ? lnLine.current : reviewButton.current)?.focus({ preventScroll: true });
   }, [lnOpen]);
+  // Its review's Close and Take it back go with the bubble's own renders, which its message's row does not see: the keys
+  // go back to Review payment when it is there to press again, else to the bubble.
+  const rootRef = useRef<HTMLDivElement>(null);
+  useFocusKept(rootRef, () => (reviewButton.current?.disabled ? null : reviewButton.current));
 
   // Feedback for what happens while you watch: a payment landing, a request coming in, a confirmation.
   const state = payment?.state;
@@ -170,6 +175,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText, mine = fals
 
   return (
     <div
+      ref={rootRef}
       className={`min-w-[210px] max-md:min-w-[min(210px,68vw)] max-w-[min(300px,72vw)] px-1 py-0.5 rounded-md ${celebrate ? "animate-sats-shine" : ""} ${
         fresh && isRequest && !outgoing && payment.state === "pending" ? "animate-nudge" : ""
       }`}
