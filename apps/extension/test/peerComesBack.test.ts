@@ -229,6 +229,77 @@ describe("a peer that stopped for good is not taken for a running one", () => {
   });
 });
 
+describe("a peer whose start failed is not kept", () => {
+  const app = () => ({ id: world.chrome.runtime.id, url: world.chrome.runtime.getURL("app.html") });
+  /** The profile's database did not open as the peer started: the device is full. */
+  const full = () => {
+    const failing = Promise.reject(new DOMException("The quota has been exceeded.", "QuotaExceededError"));
+    failing.catch(() => {});
+    engineControl().ready = failing;
+  };
+  /** The page's "Try again" (`location.reload()`): it asks for the peer, then connects (host.ts `connect`). */
+  async function tryAgain(): Promise<void> {
+    expect(await world.chrome.runtime.sendMessage({ target: "background", type: "ensure-engine" })).toEqual({ ok: true });
+    world.connectFrom(app(), UI_PORT);
+    await settle();
+  }
+  /** A while after the failure, as the person frees some space. */
+  const later = () => vi.setSystemTime(Date.now() + 60_000);
+
+  async function failedAtBoot(): Promise<void> {
+    full();
+    world = await bootExtension();
+    await vi.waitFor(() => expect(engineControl().servers).toHaveLength(1));
+    world.connectFrom(app(), UI_PORT);
+    await settle();
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    return () => vi.useRealTimers();
+  });
+
+  it("Try again starts a new peer once space was freed, and the pages get it", async () => {
+    await failedAtBoot();
+    engineControl().ready = Promise.resolve();
+    later();
+    await tryAgain();
+    expect(documents()).toBe(2);
+    expect(engineControl().servers).toHaveLength(2);
+    const [failed, fresh] = engineControl().servers;
+    expect(failed.attached).toHaveLength(1);
+    expect(fresh.attached).toHaveLength(1);
+  });
+
+  it("a second failure is the same page again, and the start is tried once per ask, not in a loop", async () => {
+    await failedAtBoot();
+    later();
+    await tryAgain();
+    expect(documents()).toBe(2);
+    expect(engineControl().servers[1].attached).toHaveLength(1);
+    // The other tabs that were on the failed peer connect again as its document closes: they get this one.
+    await tryAgain();
+    await tryAgain();
+    expect(documents()).toBe(2);
+    expect(engineControl().servers[1].attached).toHaveLength(3);
+
+    later();
+    await tryAgain();
+    expect(documents()).toBe(3);
+  });
+
+  it("the minute check and the toolbar button try the start again", async () => {
+    await failedAtBoot();
+    later();
+    world.fireAlarm(PEER_CHECK);
+    await vi.waitFor(() => expect(engineControl().servers).toHaveLength(2));
+    later();
+    fire(world.chrome.action.onClicked);
+    await vi.waitFor(() => expect(engineControl().servers).toHaveLength(3));
+    expect(documents()).toBe(3);
+  });
+});
+
 describe("a peer that runs is left alone", () => {
   it("each start of the worker, and each check, finds it instead of making another", async () => {
     world = await bootExtension();
