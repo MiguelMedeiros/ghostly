@@ -62,6 +62,10 @@ export class PaymentCoordinator {
       const result = await this.adapter(saved.review.method).reconcile(saved.review,saved.prepared,()=>this.repository.put(saved));
       saved.review = {...saved.review,...result,state:result.failed ? "failed" : result.settled ? "settled" : result.pending ? "submitted" : "unknown",error:result.failed ? result.error : result.settled ? undefined : engineText("notYetConfirmed")};
     } catch { saved.review = {...saved.review,state:"unknown",error:engineText("couldNotVerify")}; }
+    // Ended meanwhile by a write outside this lock (Take it back, a contact's refusal): that stands, and this round's
+    // older copy does not overwrite it.
+    const latest = await this.repository.get(id);
+    if (latest && !["submitted","unknown"].includes(latest.review.state)) return latest.review;
     await this.repository.put(saved); this.changed(saved.review); return saved.review;
   }); }
   cancel(id: string): Promise<PaymentReview> { return this.once(id,async () => {
