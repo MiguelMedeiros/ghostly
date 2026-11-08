@@ -869,13 +869,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       {/* Chat Header. On a phone held upright (`phoneHeader`) it is the back button, the avatar, the name with the room
           it needs, the connection, a voice call and ⋮, and one quiet line under the name; the video call, a bot's Tasks
           and the contact's identities are in the ⋮ menu. Wider (a phone on its side, a narrow window), every button is
-          in the row, a little narrower than on a desktop. The back button is a 44px target on every phone, the narrowest
-          (320px) too. */}
+          in the row, a little narrower than on a desktop. On the narrowest phone (320px) the back button gives 8px to
+          the name, so "Cérebro (Mac)" and a bot's status under it still fit beside three buttons; its tap still lands on
+          44 × 44 px (`.tap-target`). */}
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1 min-w-0">
           <button
             onClick={nav.up}
-            className={`md:hidden ${phoneHeader ? "w-11" : "w-9"} h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0`}
+            className={`md:hidden ${phoneHeader ? "w-11 max-[340px]:w-9 tap-target" : "w-9"} h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0`}
             title={t("common.back")}
             data-testid="chat-back"
           >
