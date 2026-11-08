@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import type { CallState } from "../lib/types";
 import { CORNERS, useFloatingBox, type Corner } from "../hooks/useFloatingBox";
@@ -12,7 +12,7 @@ import { callLevels } from "../lib/voiceLevels";
 import { Menu, MenuItem } from "./Menu";
 import { initial } from "../lib/initial";
 import { errorText } from "../lib/errorText";
-import { callWindowShown } from "../lib/serviceWindows";
+import { callWindowShown, watchWindowFilled, windowFilledNow } from "../lib/serviceWindows";
 
 interface CallOverlayProps {
   callState: CallState;
@@ -142,6 +142,10 @@ export function CallOverlay({
   const opener = useRef<HTMLElement | null>(null);
   // Over a contact's app too (the web draws it over everything): it closes first, so Mute and End call are in reach.
   useEffect(callWindowShown, []);
+  // A video made to fill the window after it (Desktop on Linux) is drawn over everything: the small window stays over
+  // it, and so does the whole one its Back to full screen opens.
+  const overVideo = useSyncExternalStore(watchWindowFilled, windowFilledNow);
+  const stack = overVideo ? "z-[2147483001]" : "z-50";
   useTabTrap(box, !mini);
   useEffect(() => {
     const active = document.activeElement as HTMLElement | null;
@@ -243,8 +247,8 @@ export function CallOverlay({
       {...(mini ? {} : { role: "dialog", "aria-label": peerName, tabIndex: -1 })}
       className={
         mini
-          ? "call-mini floating fixed z-50 bg-chat-bg flex flex-col items-center justify-center rounded-xl border border-border shadow-2xl"
-          : "fixed inset-0 z-50 bg-chat-bg/95 max-md:bg-chat-bg flex flex-col items-center justify-center focus:outline-none"
+          ? `call-mini floating fixed ${stack} bg-chat-bg flex flex-col items-center justify-center rounded-xl border border-border shadow-2xl`
+          : `fixed inset-0 ${stack} bg-chat-bg/95 max-md:bg-chat-bg flex flex-col items-center justify-center focus:outline-none`
       }
     >
       {mini && <Grips handleProps={miniWindow.handleProps} />}
