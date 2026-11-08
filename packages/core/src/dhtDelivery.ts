@@ -237,6 +237,8 @@ export class DhtDelivery {
   private urgent = false;
   /** Reads left that are signaling: the contact is leaving DHT only, and the live link waits on them (`expect`). */
   private signalReads = 0;
+  /** The read as this side leaves DHT only, before the signaling ones (`setMode`): a plain one. */
+  private leavingRead = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
   /** The first control envelope of a start that waits (`firstControlAfterMs`). */
   private controlTimer: ReturnType<typeof setTimeout> | null = null;
@@ -255,6 +257,11 @@ export class DhtDelivery {
   private unsealedOut: boolean;
   /** Until when the relays' request budget holds publications back: what is due then goes at once. */
   private budgetUntil = 0;
+  /**
+   * This side left DHT only and no envelope saying so went out yet: the contact's live link waits on it (it holds this
+   * side's offer until it reads that), so it goes as signaling (`PkarrRequestOptions.signal`).
+   */
+  private leavingOut = false;
   /**
    * Until when it held this side's last read of the contact's mailbox back: the read goes again then, not at the next
    * poll. A chat in the background reads every 30 s, and one held back while its link was redialling read the contact
@@ -501,8 +508,17 @@ export class DhtDelivery {
       // signaling (`LEAVING_SIGNAL_READS`). As plain reads, an extension whose relay minute was spent read its contact's
       // mailbox once as it left, just before the contact's envelope saying it left too got there, and the next read
       // waited 41 s: it never dialled, and the matrix's chat stayed "On DHT · retrying live" for 45 s (E2E full, 2026-11-05).
+      // The read at the switch itself is a plain one: the contact seldom left in the same instant, and that read, as
+      // signaling, took one of the few requests past a spent minute that the dialling side's read for the answer needed
+      // (it read the answer 31 s late). Held back, it costs nothing, and the next read, signaling, comes at the fast pace.
       if (mode === "dht") this.signalReads = 0;
-      else if (this.state.peerMode === "dht") this.signalReads = LEAVING_SIGNAL_READS;
+      else if (this.state.peerMode === "dht") { this.signalReads = LEAVING_SIGNAL_READS; this.leavingRead = true; }
+      // The envelope saying it left goes as signaling, within the chat's allowance past the minute, so a hold that plain
+      // writes ran into before does not keep it. As a plain write, an extension back from Offline that had spent its
+      // minute held it 55 s: the contact held the offer until it read it, and the matrix's chat stayed "On DHT ·
+      // retrying live" for 45 s (E2E full, 2026-11-07 and 2026-11-08).
+      this.leavingOut = mode === "stream";
+      if (this.leavingOut) this.budgetUntil = 0;
       this.changed();
     });
     void this.tick();
@@ -784,7 +800,8 @@ export class DhtDelivery {
     // once refused, the keep-alives of 200 chats whose contacts were away held back every read on one relay, and most
     // of those contacts were not read once in 25 minutes (bug hunt, 2026-11-01).
     const away = !!this.options.credentials.peerKey && now - this.peerNewAt >= PRESENCE_WINDOW;
-    const options = keepAlive && (this.live || away) ? { background: true } : undefined;
+    // The envelope saying this side left DHT only is signaling (`leavingOut`), never upkeep.
+    const options = this.leavingOut ? { signal: true } : keepAlive && (this.live || away) ? { background: true } : undefined;
     // No relay takes it now: refused before it is signed and encrypted, its sequence set aside or a ratchet key taken
     // (`LinkSession.publishOnce`). With 500 contacts away, about 500 envelopes a minute were built for none that went.
     const held = this.options.transport.publishHeld?.(identity.pubKeyZ32, options);
@@ -818,6 +835,7 @@ export class DhtDelivery {
       throw error;
     }
     this.namedRev = body[8] ?? undefined;
+    if (options?.signal) this.leavingOut = false;
     if (identity === this.identity) this.unsealedOut = !this.options.credentials.peerKey;
     delete this.errors.publish; this.changed();
   }
@@ -1073,8 +1091,8 @@ export class DhtDelivery {
       // only, a drop or a text awaiting its receipt reads as signaling. The share also carries held items'
       // pointers, which a busy mailbox must not starve.
       const background = !this.urgent && this.pollMs >= STREAM_POLL_MS;
-      const signal = this.signalReads > 0;
-      this.urgent = false; if (signal) this.signalReads--;
+      const signal = this.signalReads > 0 && !this.leavingRead;
+      this.urgent = false; this.leavingRead = false; if (signal) this.signalReads--;
       // A read or a publication the relays' request budget held back is a wait, not an error: it goes when the budget frees.
       // One that started before the network came back failed for want of it (`networkBack`): the read after it says.
       // An inviter's first envelope, before anyone is pinned, goes before the read: the joiner dials only once it read it, and
