@@ -90,6 +90,7 @@ export function useInvitationAnswer(group: GroupView, onDeclined?: () => void, r
     return () => clearTimeout(timer);
   }, [refused]);
   const answer = async (method: "acceptGroupInvitation" | "declineGroupInvitation") => {
+    if (busy) return;
     setBusy(true);
     setRefused(null);
     const pressed = document.activeElement;
@@ -130,6 +131,12 @@ export function InvitationRefusal({ refused, className }: { refused: Problem; cl
   return <div onClick={e => e.stopPropagation()} className={className}><Notice problem={refused} testId="group-answer-refused" /></div>;
 }
 
+/**
+ * An answer button while an answer goes: busy, not disabled, which would drop a keyboard's focus to the page and leave
+ * it there on a refusal. `answer` takes no second press.
+ */
+const answering = (busy: boolean) => ({ "aria-disabled": busy || undefined, "aria-busy": busy || undefined });
+
 /** A chat list row's answer buttons: small on a desktop; a thumb's height on a phone, where the list is the home screen. */
 const ROW_BUTTON = "px-3 py-1 text-xs max-md:min-h-11 max-md:px-4";
 
@@ -138,25 +145,25 @@ export function InvitationButtons({ busy, answer, large = false }: Pick<ReturnTy
   const { t } = useI18n();
   const size = large ? "min-h-11 px-5 text-sm" : ROW_BUTTON;
   return <>
-    <button disabled={busy} data-testid="group-accept" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }}
-      className={`rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 ${size}`}>{t("chat.file.accept")}</button>
-    <button disabled={busy} data-testid="group-decline" onClick={e => { e.stopPropagation(); void answer("declineGroupInvitation"); }}
-      className={`rounded-lg text-text-secondary hover:bg-surface-hover disabled:opacity-40 ${size}`}>{t("chat.file.decline")}</button>
+    <button {...answering(busy)} data-testid="group-accept" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }}
+      className={`rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover aria-disabled:opacity-40 ${size}`}>{t("chat.file.accept")}</button>
+    <button {...answering(busy)} data-testid="group-decline" onClick={e => { e.stopPropagation(); void answer("declineGroupInvitation"); }}
+      className={`rounded-lg text-text-secondary hover:bg-surface-hover aria-disabled:opacity-40 ${size}`}>{t("chat.file.decline")}</button>
   </>;
 }
 
 /** A group link nobody answered for an hour: its row's action, Try again, knocks again (`acceptGroupInvitation`). */
 export function LinkTryAgain({ busy, answer }: Pick<ReturnType<typeof useInvitationAnswer>, "busy" | "answer">) {
   const { t } = useI18n();
-  return <button disabled={busy} data-testid="group-link-retry" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }}
-    className={`rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 ${ROW_BUTTON}`}>{t("group.join.tryAgain")}</button>;
+  return <button {...answering(busy)} data-testid="group-link-retry" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }}
+    className={`rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover aria-disabled:opacity-40 ${ROW_BUTTON}`}>{t("group.join.tryAgain")}</button>;
 }
 
 /** A taken-back invitation's only action: Delete (it says nothing to whoever took it back). */
 export function TakenBackDelete({ busy, answer, large = false }: Pick<ReturnType<typeof useInvitationAnswer>, "busy" | "answer"> & { large?: boolean }) {
   const { t } = useI18n();
-  return <button disabled={busy} data-testid="group-taken-back-delete" onClick={e => { e.stopPropagation(); void answer("declineGroupInvitation"); }}
-    className={`rounded-lg text-text-secondary hover:bg-surface-hover disabled:opacity-40 ${large ? "min-h-11 px-5 text-sm" : ROW_BUTTON}`}>{t("common.delete")}</button>;
+  return <button {...answering(busy)} data-testid="group-taken-back-delete" onClick={e => { e.stopPropagation(); void answer("declineGroupInvitation"); }}
+    className={`rounded-lg text-text-secondary hover:bg-surface-hover aria-disabled:opacity-40 ${large ? "min-h-11 px-5 text-sm" : ROW_BUTTON}`}>{t("common.delete")}</button>;
 }
 
 /**
