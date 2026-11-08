@@ -2247,12 +2247,15 @@ export class GhostlyNode implements EngineImplementation {
         if(!review || !["submitted","unknown"].includes(review.state)){open.delete(id);continue;}
         // Each through its own network's wallet, once that one is open.
         const network=walletNetworkOf(review.network);
+        // A Cashu payment at a mint that could not be loaded waits for that mint's next try, its own pace untouched: the
+        // failure would be its read's only answer, and its mint is then asked at a pace of its own, whatever is due.
+        const prepared=saved!.prepared as CashuPrepared;
+        if(review.method==="cashu" && !prepared.abandoned && !prepared.spentElsewhere && !this.wallet.mintDue(prepared.mint,Date.now()))continue;
         if((review.method==="arkade" && !this.arkWallets[network].adapter) || (review.method==="bark" && !this.barkWallets[network].adapter) || (review.method==="spark" && !this.sparkWallets[network].adapter) || (review.method==="usdt" && !this.usdtWallets[network].adapter) || (review.method==="bitcoin" && !this.bitcoins[network].sources.active) || (review.method==="fedimint" && !this.fedimintWallets[network].federation(review.provider)))continue;
         const after=await this.reconcilePayment({id:review.id}).catch(()=>review);
         // A token out and not taken yet: new for its first minute. A swap with no token yet (its mint gave no answer):
         // new while it may still land, so the mint's word that it never did is asked at once after that.
         if(review.method==="cashu" && ["submitted","unknown"].includes(after.state)){
-          const prepared=saved!.prepared as CashuPrepared;
           this.cashuPayAsk.missed(id,Date.now(),Date.now()<(prepared.token?(review.submittedAt ?? review.createdAt)+60_000:swapSettledAt(review,prepared)));
         }
       }
