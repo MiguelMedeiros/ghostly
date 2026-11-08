@@ -1336,6 +1336,27 @@ describe("with the apps flag on", () => {
     expect(document.body).not.toHaveFocus();
   });
 
+  it("a store's search says what it found once the typing settles: how many apps, or that none matches", async () => {
+    const apps = Array.from({ length: 60 }, (_, i) => ({ ref: `${KEY}/app${i}`, sequence: 1, digest: DIGEST, urls: [URL_], title: `App ${i}`, tagline: `Tagline ${i}` }));
+    fakeEngine.on("appList", () => []).on("appCheckUpdates", () => [])
+      .on("appStoreList", () => [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
+        name: "Big", kind: "indexed", sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1, apps, removed: [] }]);
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    const filter = await screen.findByTestId("app-store-filter");
+    const status = screen.getByTestId("app-store-found");
+    expect(status).toHaveAttribute("role", "status");
+    expect(status.textContent).toBe("");
+    await user.type(filter, "App 5");
+    expect(status.textContent).toBe("");
+    await waitFor(() => expect(status).toHaveTextContent(/^11 apps$/));
+    await user.type(filter, "9");
+    await waitFor(() => expect(status).toHaveTextContent(/^1 app$/));
+    await user.type(filter, "9");
+    await waitFor(() => expect(status).toHaveTextContent(/^No app in this store matches\.$/));
+    await user.clear(filter);
+    await waitFor(() => expect(status.textContent).toBe(""));
+  });
+
   it("a search goes away with its box: a store read again with 50 listings or fewer shows them all, and comes back with an empty box", async () => {
     let n = 60;
     const stores = (): AppStoreSummary[] => [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
