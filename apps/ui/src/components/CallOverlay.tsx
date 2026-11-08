@@ -206,8 +206,12 @@ export function CallOverlay({
       setDuration(0);
       return;
     }
+    // Counted on the monotonic clock from what had passed when the window started counting: the device's clock put
+    // forward or back mid-call moves the time of day, not the call's length. From the wall clock, an hour ahead read
+    // 1:00:06 six seconds in, and an hour back -1:-59:-54.
+    const from = performance.now() - Math.max(0, Date.now() - callStartedAt);
     const interval = setInterval(() => {
-      setDuration(Math.floor((Date.now() - callStartedAt) / 1000));
+      setDuration(Math.floor((performance.now() - from) / 1000));
     }, 1000);
     return () => clearInterval(interval);
   }, [callState, callStartedAt]);

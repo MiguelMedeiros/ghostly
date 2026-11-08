@@ -265,6 +265,9 @@ const ON_A_CALL: ReadonlySet<CallState> = new Set<CallState>(["offering", "answe
 /** Capture from exactly this device, or from the default (null). */
 const exactly = (deviceId: string | null): MediaTrackConstraints | true => (deviceId ? { deviceId: { exact: deviceId } } : true);
 
+/** Milliseconds since `tick` (a `performance.now()`), none without one: a call's length. */
+const lastedSince = (tick: number | null): number | undefined => (tick === null ? undefined : Math.round(performance.now() - tick));
+
 export function useWebRTC({
   incomingCallSignal,
   callHandledElsewhere,
@@ -312,8 +315,14 @@ export function useWebRTC({
   /** Whether the call negotiated a video lane we may send on, camera or screen. */
   const [videoLaneOpen, setVideoLaneOpen] = useState(false);
   const [callStartedAt, setCallStartedAt] = useState<number | null>(null);
-  /** When the call connected, for the length of a call that ends where no state is at hand (a connection that failed). */
+  /** When the call connected, by the device's clock (`callStartedAt`); also whether it has (a call that reconnects keeps it). */
   const callStartedAtRef = useRef<number | null>(null);
+  /**
+   * The same moment on the monotonic clock (`performance.now()`), for the call's length: the time it lasted, whatever the
+   * device's clock does meanwhile. From the wall clock, a phone fixing its time an hour ahead mid-call left "(1 h 0 min)"
+   * in the chat for a 7 s call, and a clock set back a negative length.
+   */
+  const callStartedTickRef = useRef<number | null>(null);
   /** Why the last attempt to share the screen failed, for a few seconds. */
   const [screenShareError, setScreenShareErrorState] = useState<string | null>(null);
   /** Our call rang out unanswered, for a few seconds (`NO_ANSWER_SHOWN_MS`). */
@@ -537,6 +546,7 @@ export function useWebRTC({
     setScreenShareError(null);
     setCallStartedAt(null);
     callStartedAtRef.current = null;
+    callStartedTickRef.current = null;
   }, [setPicture, setScreenShareError, clearRestartGrace, clearReconnect]);
 
   /** The lane is open once both sides have described it and our half may send. */
@@ -576,6 +586,7 @@ export function useWebRTC({
       // Once: the clock of a call that reconnects goes on from where it was.
       if (callStartedAtRef.current === null) {
         callStartedAtRef.current = Date.now();
+        callStartedTickRef.current = performance.now();
         setCallStartedAt(callStartedAtRef.current);
       }
       setFastPoll(false);
@@ -633,8 +644,7 @@ export function useWebRTC({
       // with its line and its length in the chat. One that never connected could not: the chat says so.
       const connected = callConnectedEventFiredRef.current;
       if (connected) {
-        const started = callStartedAtRef.current;
-        addCallEventMessage?.("call_ended", callHadVideoRef.current, started ? Date.now() - started : undefined);
+        addCallEventMessage?.("call_ended", callHadVideoRef.current, lastedSince(callStartedTickRef.current));
         callConnectedEventFiredRef.current = false;
       } else {
         addCallEventMessage?.("call_failed", callHadVideoRef.current);
@@ -1200,7 +1210,7 @@ export function useWebRTC({
       if (callStateRef.current !== "idle") {
         traceCallEnd(sendSignal ? (unreachable ? "unreachable" : "hang-up") : "ended", { state: callStateRef.current, connected: wasConnected });
       }
-      const duration = callStartedAt ? Date.now() - callStartedAt : undefined;
+      const duration = lastedSince(callStartedTickRef.current);
 
       if (sendSignal) {
         const signal: CallSignal = unreachable ? { t: "h", ts: Date.now(), r: "u" } : { t: "h", ts: Date.now() };
@@ -1228,7 +1238,7 @@ export function useWebRTC({
       callHadVideoRef.current = false;
       setFastPoll(false);
     },
-    [publishCallSignal, cleanupConnection, updateCallState, setFastPoll, addCallEventMessage, callStartedAt],
+    [publishCallSignal, cleanupConnection, updateCallState, setFastPoll, addCallEventMessage],
   );
 
   const rejectCall = useCallback(() => {
