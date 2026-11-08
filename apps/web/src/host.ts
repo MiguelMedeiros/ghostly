@@ -14,7 +14,8 @@ import type { EngineServer } from "@ghostly/browser/engine/server";
 import { closeServiceView, parseServicesHost } from "./svc/protocol";
 import { SERVICE_LOCKED, hostErrorText, serviceFraming, serviceWindowsClosedSince, setServiceViewCloser, setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
 import { loadSettings } from "../../ui/src/lib/settings";
-import { activeProfileId } from "../../ui/src/lib/profiles";
+import { activeProfileId, listProfiles } from "../../ui/src/lib/profiles";
+import { OPENED_KEY } from "../../ui/src/lib/openedServices";
 import { chatNamesForPeer } from "../../ui/src/lib/storage";
 import { translatorFor } from "../../ui/src/locales";
 
@@ -73,6 +74,25 @@ function servicesUnderTest(): boolean {
  * shares with this side, and the apps strip shows it. Sharing one stays with the extension and the desktop app.
  */
 const openServices = !!servicesHost && serviceWorkersHere() && servicesUnderTest();
+/**
+ * What the contacts' apps a deleted profile opened kept on their origins, where Delete profile could not reach them
+ * (offline, the services host down): cleared at each start and each return online (`forgetServicesOfGone`). Nothing
+ * of it loads while no app was ever noted.
+ */
+let forgettingGone = false;
+function forgetServicesOfDeleted(): void {
+  const host = servicesHost;
+  try {
+    if (!host || forgettingGone || !navigator.onLine || !localStorage.getItem(OPENED_KEY)) return;
+  } catch { return; }
+  forgettingGone = true;
+  void import("./svc/forget")
+    .then(({ forgetServicesOfGone }) => forgetServicesOfGone(host, listProfiles().map((p) => p.id)))
+    .catch(() => {})
+    .finally(() => { forgettingGone = false; });
+}
+forgetServicesOfDeleted();
+addEventListener("online", forgetServicesOfDeleted);
 let peer: EngineServer | null = null;
 // A contact's app closes when the profile locks, as Desktop's windows do: this page answers its requests.
 // A reload ends it with the page.
