@@ -300,10 +300,11 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     const app = screen.getByTestId("mini-app");
     expect(within(app).getByTestId("app-connection-options")).toHaveClass("h-11", "w-11");
     expect(within(app).getByTestId("mini-app-close")).toHaveClass("h-11", "w-11");
-    // Back as the chat header's Back right under it: 44 px on the narrowest phone too.
+    // Back as the chat header's Back right under it: 36 px wide only under 340 px (the name keeps its room), its tap
+    // still 44 × 44 px there (`.tap-target`).
     const back = within(app).getByTestId("mini-app-back");
-    expect(back).toHaveClass("h-11", "w-11");
-    expect(back.className).not.toMatch(/(^|\s|:)w-9(\s|$)/);
+    expect(back).toHaveClass("h-11", "w-11", "max-[340px]:w-9", "tap-target");
+    expect(back).not.toHaveClass("w-9");
   });
 
   it("a full-screen app on a phone is as any app there: over the chat, with Back", async () => {

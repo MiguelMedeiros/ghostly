@@ -127,7 +127,7 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
         {withBack && (
           <button ref={back} type="button" data-testid="mini-app-back" onClick={goBack}
             aria-label={t("apps.view.back")} title={t("apps.view.back")}
-            className={`${phoneHeader ? "w-11" : "w-9"} h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0`}>
+            className={`${phoneHeader ? "w-11 max-[340px]:w-9 tap-target" : "w-9"} h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0`}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="rtl:-scale-x-100"><path d="M15 19l-7-7 7-7" /></svg>
           </button>
         )}
