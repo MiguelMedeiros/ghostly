@@ -688,14 +688,14 @@ export function Settings() {
           {noticePermission === "denied" && systemSettings && (
             <Button data-testid="settings-notification-settings" onClick={() => void openNoticeSettings()}>{t("settings.noticesOpenSettings")}</Button>
           )}
-          <Switch testId="settings-system-notifications" label={t("settings.systemNotifications")} checked={systemOn} disabled={requestingNotice} onChange={() => void toggleNotices()} />
+          <Switch testId="settings-system-notifications" label={t("settings.systemNotifications")} checked={systemOn} busy={requestingNotice} onChange={() => void toggleNotices()} />
         </Row>
         {canWake && (
           <Row label={t("pwa.wake")} testId="settings-wake-row" info={t("pwa.wakeInfo")}
             hint={<span role="status" id={wakeHintId} data-testid="settings-wake-hint">{wakeError || (wakeNoPush ? t("pwa.wakeNoPushService") : wakeAway ? (wakeAwayDevice ? t("pwa.wakeAway", { device: wakeAwayDevice }) : t("pwa.wakeAwayUnnamed")) : t(wakeOn ? "pwa.wakeOnHint" : "pwa.wakeHint"))}</span>}>
-            {wakeOn && <Button data-testid="settings-wake-rotate" disabled={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeRotate")}</Button>}
-            {wakeNoPush && <Button data-testid="settings-wake-retry" disabled={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeTryAgain")}</Button>}
-            <Switch testId="settings-wake" label={t("pwa.wake")} checked={wakeOn} disabled={wakeBusy} unavailable={wakeNoPush} describedBy={wakeNoPush ? wakeHintId : undefined} onChange={(on) => void changeWake(on)} />
+            {wakeOn && <Button data-testid="settings-wake-rotate" loading={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeRotate")}</Button>}
+            {wakeNoPush && <Button data-testid="settings-wake-retry" loading={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeTryAgain")}</Button>}
+            <Switch testId="settings-wake" label={t("pwa.wake")} checked={wakeOn} busy={wakeBusy} unavailable={wakeNoPush} describedBy={wakeNoPush ? wakeHintId : undefined} onChange={(on) => void changeWake(on)} />
           </Row>
         )}
         {canWake && wakeOnline.shared && (
