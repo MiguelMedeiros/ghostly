@@ -36,10 +36,14 @@ const KEYS: Record<string, TranslationKey> = {
   storage: "apps.errors.storage",
 };
 
-/** A store's list held older or too large: said of the store's list, not of an app's version. */
+/**
+ * A store's list held older or too large: said of the store's list, not of an app's version. One dated further ahead
+ * than this device's clock allows names the clock, the one thing the person can fix.
+ */
 const STORE_KEYS: Record<string, TranslationKey> = {
   rollback: "apps.store.rollback",
   "too-large": "apps.store.tooLarge",
+  "expires-too-far": "apps.store.clockLate",
 };
 
 /** The longer story behind an ⓘ beside an error's line, for the errors that have one. */
