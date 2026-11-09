@@ -2001,7 +2001,9 @@ mod tests {
                    a=candidate:3 1 udp 16777215 198.51.100.9 50000 typ relay\r\n";
         let out = relay_candidates_only(sdp);
         assert!(
-            out.ends_with("a=mid:0\r\na=candidate:3 1 udp 16777215 198.51.100.9 50000 typ relay\r\n"),
+            out.ends_with(
+                "a=mid:0\r\na=candidate:3 1 udp 16777215 198.51.100.9 50000 typ relay\r\n"
+            ),
             "{out}"
         );
     }
@@ -2839,9 +2841,17 @@ mod tests {
             });
         let offer = a.offer(false).await.unwrap();
         let (opus, vp8) = offered_payload_types(&offer);
-        let b = Call::new(opus, vp8, true, Devices::default(), &[], false, Arc::new(|_| {}))
-            .await
-            .unwrap();
+        let b = Call::new(
+            opus,
+            vp8,
+            true,
+            Devices::default(),
+            &[],
+            false,
+            Arc::new(|_| {}),
+        )
+        .await
+        .unwrap();
         let answer = closed_video(&b.answer(&offer, false).await.unwrap());
         assert!(answer.contains("a=inactive"), "{answer}");
         let stats = || {
@@ -3180,9 +3190,17 @@ mod tests {
         .unwrap();
         let offer = a.offer(false).await.unwrap();
         let (opus, vp8) = offered_payload_types(&offer);
-        let b = Call::new(opus, vp8, true, Devices::default(), &[], false, Arc::new(|_| {}))
-            .await
-            .unwrap();
+        let b = Call::new(
+            opus,
+            vp8,
+            true,
+            Devices::default(),
+            &[],
+            false,
+            Arc::new(|_| {}),
+        )
+        .await
+        .unwrap();
         let answer = b.answer(&offer, false).await.unwrap();
         a.accept(&answer).await.unwrap();
         let stats = || {
