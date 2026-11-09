@@ -17,7 +17,7 @@ export const WAKE_LATE_MS = 30_000;
  * A wake republishes every chat with nothing published in the last seconds (on the CLI the DHT copy goes whatever the
  * relays' budgets say: 200 chats are 200 DHT puts and a ~76 ms turn). A network that flaps (Wi-Fi at the edge of range,
  * a VPN in a reconnect loop) changed the addresses every tick and woke the engine every 10 s for nothing new. A network
- * wake within this long of the previous wake is held and runs once when the gap is over, the latest change included; each
+ * wake within this long of the previous network wake is held and runs once when the gap is over, the latest change included; each
  * held one run doubles the gap, up to `WAKE_GAP_MAX_MS`, and a whole gap with no change brings it back. A network change
  * after a quiet spell, and a sleep, still wake at once.
  */
@@ -71,7 +71,8 @@ export function watchWake(onWake: (why: "sleep" | "network") => void, options: W
   /** A network change seen within the gap, not woken for yet. */
   let held = false;
   const wake = (why: "sleep" | "network", at: number) => {
-    wokeAt = at;
+    // Only a network wake starts the gap: back from sleep, Wi-Fi often rejoins a tick or two after the sleep wake.
+    if (why === "network") wokeAt = at;
     held = false;
     try { onWake(why); } catch { /* the engine's own wake logs its trouble */ }
   };
