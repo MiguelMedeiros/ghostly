@@ -78,10 +78,78 @@ pub async fn read_clipboard_text<R: tauri::Runtime>(
     bounded(text)
 }
 
-/// Copies a secret someone asked to copy (an invite, a device's link, a group's link, ecash), marked sensitive: Android
-/// 13 and up shows dots for it in the copy preview, and keyboards keep it out of their clipboard history. The WebView's
-/// own copy cannot mark it. Android only; the page copies elsewhere (`copySecret` in `apps/ui/src/lib/shareLink.ts`).
-/// Main window only, as the paste.
+/// Where a secret is copied to: the system clipboard, marked, in the app; a stand-in in tests (as [`ClipboardSource`]).
+#[derive(Clone)]
+#[cfg_attr(mobile, allow(dead_code))]
+pub struct SecretSink(Arc<dyn Fn(String) -> Result<(), String> + Send + Sync>);
+
+impl SecretSink {
+    /// Android and iOS: none (Android's sensitive copy is Kotlin's, in `copy_secret`).
+    #[cfg(mobile)]
+    pub fn system() -> Self {
+        Self(Arc::new(|_| {
+            Err("No sensitive copy on this platform".into())
+        }))
+    }
+
+    /// The text goes on the clipboard with each system's mark for a password: Windows keeps it out of its clipboard
+    /// history and its cloud clipboard, and tells other clipboard monitors to leave it; a Mac's clipboard managers
+    /// skip it (`org.nspasteboard.ConcealedType`); on Linux, Klipper and the managers that follow it do
+    /// (`x-kde-passwordManagerHint`). The WebView's copy can set none of them.
+    #[cfg(desktop)]
+    pub fn system() -> Self {
+        // X11 serves a copy only while one of the app's clipboards is open: closing arboard's last one takes the copy
+        // with it (a marked copy is never handed to a clipboard manager). One stays open.
+        #[cfg(target_os = "linux")]
+        let held: Mutex<Option<arboard::Clipboard>> = Mutex::new(None);
+        Self(Arc::new(move |text| {
+            #[cfg(target_os = "linux")]
+            let mut held = held.lock().map_err(|_| "Clipboard unavailable")?;
+            #[cfg(target_os = "linux")]
+            let clipboard = match held.as_mut() {
+                Some(clipboard) => clipboard,
+                None => held.insert(arboard::Clipboard::new().map_err(|e| e.to_string())?),
+            };
+            #[cfg(not(target_os = "linux"))]
+            let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+            marked(clipboard.set())
+                .text(text)
+                .map_err(|e| e.to_string())
+        }))
+    }
+
+    #[cfg(test)]
+    pub fn fixed(write: impl Fn(String) -> Result<(), String> + Send + Sync + 'static) -> Self {
+        Self(Arc::new(write))
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn marked(set: arboard::Set<'_>) -> arboard::Set<'_> {
+    use arboard::SetExtWindows;
+    // Monitoring for other apps that watch the clipboard; history and cloud for Windows' own (Win+V, synced devices).
+    set.exclude_from_monitoring()
+        .exclude_from_history()
+        .exclude_from_cloud()
+}
+
+#[cfg(target_os = "macos")]
+fn marked(set: arboard::Set<'_>) -> arboard::Set<'_> {
+    use arboard::SetExtApple;
+    set.exclude_from_history()
+}
+
+#[cfg(all(desktop, not(any(target_os = "windows", target_os = "macos"))))]
+fn marked(set: arboard::Set<'_>) -> arboard::Set<'_> {
+    use arboard::SetExtLinux;
+    set.exclude_from_history()
+}
+
+/// Copies a secret someone asked to copy (an invite, a device's link, a group's link, ecash), marked sensitive. Android
+/// 13 and up shows dots for it in the copy preview, and keyboards keep it out of their clipboard history; on Desktop
+/// the system's clipboard history, its cloud clipboard and clipboard managers leave it out ([`SecretSink::system`]).
+/// The WebView's own copy cannot mark it (`copySecret` in `apps/ui/src/lib/shareLink.ts`). Main window only, as the
+/// paste.
 #[tauri::command]
 pub async fn copy_secret<R: tauri::Runtime>(
     window: tauri::WebviewWindow<R>,
@@ -94,10 +162,22 @@ pub async fn copy_secret<R: tauri::Runtime>(
     {
         crate::android::copy_secret(text).await
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
     {
         drop(text);
         Err("No sensitive copy on this platform".into())
+    }
+    #[cfg(desktop)]
+    {
+        let sink = window
+            .try_state::<SecretSink>()
+            .ok_or("Clipboard unavailable")?
+            .inner()
+            .clone();
+        // X11 may wait on the clipboard: off the main thread, as the paste.
+        tauri::async_runtime::spawn_blocking(move || (sink.0)(text))
+            .await
+            .map_err(|e| e.to_string())?
     }
 }
 
@@ -623,6 +703,76 @@ mod tests {
             .build()
             .unwrap();
         assert_eq!(read(main), Err("Clipboard unavailable".into()));
+    }
+
+    fn copy(window: tauri::WebviewWindow<MockRuntime>, text: &str) -> Result<(), String> {
+        tauri::async_runtime::block_on(copy_secret(window, text.into()))
+    }
+
+    #[test]
+    fn a_secret_is_copied_natively_and_only_for_the_ghostly_window() {
+        let copied = Arc::new(Mutex::new(Vec::<String>::new()));
+        let kept = copied.clone();
+        let app = mock_builder()
+            .manage(SecretSink::fixed(move |text| {
+                kept.lock().unwrap().push(text);
+                Ok(())
+            }))
+            .build(tauri::generate_context!(test = true))
+            .expect("app");
+        for label in ["svc-1", "main-2", "Main"] {
+            let url = "ghostly-svc://atlas.peer/".parse().unwrap();
+            let window = WebviewWindowBuilder::new(&app, label, WebviewUrl::CustomProtocol(url))
+                .build()
+                .unwrap();
+            assert_eq!(
+                copy(window, "https://ghostly.tools/#ghostly1abc"),
+                Err("Not allowed from this window".into())
+            );
+        }
+        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        assert_eq!(copy(main, "https://ghostly.tools/#ghostly1abc"), Ok(()));
+        assert_eq!(
+            *copied.lock().unwrap(),
+            vec!["https://ghostly.tools/#ghostly1abc".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_failed_secret_copy_is_an_error() {
+        let app = mock_builder()
+            .manage(SecretSink::fixed(|_| Err("no display".into())))
+            .build(tauri::generate_context!(test = true))
+            .expect("app");
+        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        assert_eq!(copy(main, "cashuB…"), Err("no display".into()));
+    }
+
+    /// The real clipboard: a secret is offered with KDE's password hint beside the text, which Klipper and the
+    /// managers that follow it keep out of their history, and stays pasteable after the copy. Run alone, under an Xvfb
+    /// or a headless Sway of its own (`cargo test -- --ignored the_real_clipboard`).
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "takes the clipboard of the display it runs on"]
+    fn on_the_real_clipboard_a_secret_is_marked_for_clipboard_managers() {
+        // Kept, as the app keeps it: on X11 the copy goes with the sink's clipboard.
+        let sink = SecretSink::system();
+        (sink.0)("https://ghostly.tools/#ghostly1abc".into()).unwrap();
+        let targets = crate::copied_files::targets();
+        assert!(
+            targets
+                .iter()
+                .any(|target| target == "x-kde-passwordManagerHint"),
+            "no password hint among {targets:?}"
+        );
+        assert_eq!(
+            (ClipboardSource::system().0)(),
+            Ok("https://ghostly.tools/#ghostly1abc".into())
+        );
     }
 
     fn scratch() -> PathBuf {

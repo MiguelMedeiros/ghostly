@@ -25,8 +25,8 @@ export async function copyText(text: string): Promise<void> {
 }
 
 /**
- * Copies a secret (an invite, a device's link, a group's link, ecash): marked sensitive where the host can (the Android
- * app, whose copy preview then shows dots and whose keyboards keep no history of it), elsewhere as `copyText`. A
+ * Copies a secret (an invite, a device's link, a group's link, ecash): marked sensitive where the host can (the apps,
+ * whose clipboard histories and managers then keep no copy of it), elsewhere as `copyText`. A
  * refused sensitive copy throws: the caller shows the text to copy by hand rather than copy it unmarked.
  */
 export async function copySecret(text: string): Promise<void> {
