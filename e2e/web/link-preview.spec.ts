@@ -132,6 +132,14 @@ test("a place in a message shows a location card, and its map loads from OpenStr
   for (const tile of tiles) expect(tile).toMatch(/^https:\/\/tile\.openstreetmap\.org\/15\/\d+\/\d+\.png$/);
   await expect(card.getByTestId("location-open")).toHaveAttribute("href", /^https:\/\/(maps\.apple\.com|www\.openstreetmap\.org)\//);
 
+  // Show map from the keyboard: the button goes, and the focus moves to the map rather than to the page.
+  await say(alice, "and later at geo:0,0?q=38.6916,-9.2160(Torre%20de%20Bel%C3%A9m)");
+  const later = bubble(bob, "and later at").getByTestId("location-card");
+  await later.getByTestId("location-show-map").focus();
+  await bob.page.keyboard.press("Enter");
+  await expect(later.getByTestId("location-map")).toBeVisible();
+  await expect(later.getByRole("group", { name: "Torre de Belém" })).toBeFocused();
+
   // In Arabic the coordinates still read left to right: the minus is drawn before its number, not after it.
   await bob.page.evaluate(() => {
     const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");

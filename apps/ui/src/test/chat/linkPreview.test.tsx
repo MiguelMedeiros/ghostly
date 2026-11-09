@@ -172,6 +172,41 @@ describe("a location card", () => {
     expect(within(card).getByTestId("location-open").getAttribute("href")).toMatch(/^(https:\/\/maps\.apple\.com\/|geo:|https:\/\/www\.openstreetmap\.org\/)/);
   });
 
+  const torre = "meet me at geo:0,0?q=38.6916,-9.2160(Torre%20de%20Bel%C3%A9m)";
+
+  it("moves the focus to the map when Show map is used from the keyboard", async () => {
+    const { user } = renderApp(<MessageBubble message={{ id: "m6", text: torre, sender: "peer", timestamp: 1_700_000_000_000 }} />);
+    const button = screen.getByTestId("location-show-map");
+    button.focus();
+    await user.keyboard("{Enter}");
+    expect(document.activeElement).not.toBe(document.body);
+    const map = screen.getByRole("group", { name: "Torre de Belém" });
+    expect(map).toHaveFocus();
+    expect(map).toHaveAttribute("tabindex", "-1");
+    expect(within(map).getByTestId("location-map")).toBeInTheDocument();
+  });
+
+  it("keeps the focus on the map's place when its tiles fail to load", async () => {
+    const { user } = renderApp(<MessageBubble message={{ id: "m7", text: torre, sender: "peer", timestamp: 1_700_000_000_000 }} />);
+    screen.getByTestId("location-show-map").focus();
+    await user.keyboard("{Enter}");
+    fireEvent.error(screen.getByTestId("location-map").querySelector("img")!);
+    expect(screen.getByRole("status")).toHaveTextContent("The map could not load");
+    expect(document.activeElement).not.toBe(document.body);
+    expect(screen.getByRole("group", { name: "Torre de Belém" })).toHaveFocus();
+  });
+
+  it("takes no focus when Show map is tapped while the focus is elsewhere", () => {
+    renderApp(<MessageBubble message={{ id: "m8", text: torre, sender: "peer", timestamp: 1_700_000_000_000 }} />);
+    const outside = document.body.appendChild(document.createElement("button"));
+    try {
+      outside.focus();
+      fireEvent.click(screen.getByTestId("location-show-map"));
+      expect(screen.getByTestId("location-map")).toBeInTheDocument();
+      expect(outside).toHaveFocus();
+    } finally { outside.remove(); }
+  });
+
   it("names the map link's site cut at its start, as a preview's address", () => {
     vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)");
     renderApp(<MessageBubble message={{ id: "m9", text: "https://www.google.com/maps/place/@38.6916,-9.2160,17z", sender: "peer", timestamp: 1_700_000_000_000 }} />);
