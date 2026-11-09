@@ -15,8 +15,24 @@ describe("the profile's name", { timeout: 120_000 }, () => {
   it("is refused past 64 characters or with nothing that shows, by either command, and the name before stays", async () => {
     ok(await ghostly(["--home", dir, "profile", "set", "--name", "Bot"]));
     for (const [bad, rule] of [["x".repeat(300), "must be up to 64 characters on one line"], ["\u200b", "needs a character that shows (an empty one is no name)"]]) {
-      expect(error(await ghostly(["--home", dir, "profile", "set", "--name", bad]), "bad_request", 1).message, JSON.stringify(bad)).toBe(`name ${rule}`);
       expect(error(await ghostly(["--home", dir, "settings", "set", "nick", JSON.stringify(bad)]), "bad_request", 1).message, JSON.stringify(bad)).toBe(`nick ${rule}`);
+    }
+    expect(await name()).toBe("Bot");
+  });
+
+  // `profile set --name` checks the option before the profile opens, as `app init --title` does: a usage error (exit
+  // 2) that names --name and counts as the engine counts (code points, once cleaned). It was the engine's
+  // `bad_request` (exit 1), "name must be up to 64 characters on one line", though a line break is taken as a space.
+  it("refuses a --name past 64 characters or with nothing that shows as a usage error naming --name", async () => {
+    ok(await ghostly(["--home", dir, "profile", "set", "--name", "Bot"]));
+    for (const [bad, message] of [
+      ["x".repeat(65), "--name is up to 64 characters, not 65 characters"],
+      ["x".repeat(300), "--name is up to 64 characters, not 300 characters"],
+      [`${"x".repeat(63)}👻👻`, "--name is up to 64 characters, not 65 characters"],
+      [`${"x".repeat(32)}\n${"x".repeat(32)}`, "--name is up to 64 characters, not 65 characters"],
+      ["\u200b", "--name needs a character that shows (an empty one is no name)"],
+    ]) {
+      expect(error(await ghostly(["--home", dir, "profile", "set", "--name", bad]), "usage", 2).message, JSON.stringify(bad)).toBe(message);
     }
     expect(await name()).toBe("Bot");
   });
@@ -33,6 +49,9 @@ describe("the profile's name", { timeout: 120_000 }, () => {
     const long = `${"x".repeat(62)}👻👻`;
     expect(ok(await ghostly(["--home", dir, "settings", "set", "nick", ` ${long} `])).nick).toBe(long);
     expect(await name()).toBe(long);
+    expect(ok(await ghostly(["--home", dir, "profile", "set", "--name", long])).name).toBe(long);
+    // 65 code points as given, 64 once in NFC (e + a combining acute is é): taken, as the engine counts the stored name.
+    expect(ok(await ghostly(["--home", dir, "profile", "set", "--name", `${"x".repeat(63)}e\u0301`])).name).toBe(`${"x".repeat(63)}é`);
     expect(ok(await ghostly(["--home", dir, "profile", "set", "--name", "  Ghost bot "])).name).toBe("Ghost bot");
     // Empty: no name, as before.
     expect(ok(await ghostly(["--home", dir, "settings", "set", "nick", ""])).nick).toBe("");
