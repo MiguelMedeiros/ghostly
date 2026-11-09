@@ -14,10 +14,20 @@ export const WAKE_TICK_MS = 10_000;
 /** A tick this much later than due: the process was not running (sleep, a stopped process), not merely busy. */
 export const WAKE_LATE_MS = 30_000;
 
+/**
+ * The machine's own virtual bridges, for containers and VMs on it: Docker's (`docker0`, a compose network's `br-<id>`,
+ * `veth*`), libvirt's, CNI's, LXD's, VirtualBox's and VMware's host networks, macOS's `bridge100` (sharing, a VM), and
+ * Windows's WSL and Default Switch. A container network made or removed changes them with nothing changed for the
+ * internet, and a network wake makes every chat read and publish at once. A Hyper-V switch bound to the network card (`vEthernet
+ * (External)`) holds the machine's real address and stays.
+ */
+const LOCAL_BRIDGE = /^(docker\d*|br-[0-9a-f]+|veth.*|virbr\d+|cni\d+|flannel.*|cali.*|lxcbr\d+|lxdbr\d+|incusbr\d+|podman\d+|vboxnet\d+|vmnet\d+|bridge\d+|vEthernet \((WSL.*|Default Switch)\))$/;
+
 /** The machine's own non-internal addresses, sorted: a change means another network (Wi-Fi to cable, a new DHCP lease). */
 export function addressesKey(nets: ReturnType<typeof networkInterfaces> = networkInterfaces()): string {
   const out: string[] = [];
   for (const [name, list] of Object.entries(nets)) {
+    if (LOCAL_BRIDGE.test(name)) continue;
     for (const entry of list ?? []) {
       // Link-local IPv6 comes and goes with nothing changed for the internet; skip it with loopback.
       if (entry.internal || (entry.family === "IPv6" && entry.address.toLowerCase().startsWith("fe80"))) continue;
