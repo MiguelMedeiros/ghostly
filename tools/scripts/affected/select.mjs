@@ -462,8 +462,8 @@ export function throughCoreBarrel(changedCore, files) {
  * @param {Record<string, string>} input.e2eFiles  every .ts under e2e/ (path → text); specs are the *.spec.ts
  * @param {Record<string, string>} [input.codeFiles]  every TypeScript/JavaScript file of the workspaces (path →
  *   text), core's own included: with it, a change in packages/core/src reaches the tests of what imports it
- *   (throughCoreBarrel) instead of every test behind the barrel, and a change outside a project's `sources` reaches
- *   the project's tests that import it by relative path or package name (testsReaching)
+ *   (throughCoreBarrel) instead of every test behind the barrel, and a change outside a project's `sources` (or a
+ *   file deleted anywhere) reaches the project's tests that import it by relative path or package name (testsReaching)
  * @param {Record<string, [string, string][]>} [input.packages]  the workspaces' exports (workspaceExports), for the
  *   imports by package name; without it, @ghostly/core and @ghostly/browser's src
  */
@@ -487,8 +487,9 @@ export function plan({ changed: all, inventory, e2eFiles, codeFiles, packages })
     const direct = code.filter((c) => c.exists && match(p.sources, c.path) && !(codeFiles && coreChanged.includes(c.path))).map((c) => c.path);
     const viaCore = coreDependents.filter((f) => match(p.sources, f) && !direct.includes(f));
     // Outside `sources` vitest is not asked (it would transform every test to find none), so the tests that reach
-    // a change there by relative path are found here and handed over themselves.
-    const outside = [...code.map((c) => c.path), ...coreDependents].filter((f) => !match(p.sources, f));
+    // a change there by relative path are found here and handed over themselves. So are those importing a file
+    // deleted (or renamed away: the diff has no renames) inside `sources`: vitest is given only files that exist.
+    const outside = [...code.filter((c) => !c.exists || !match(p.sources, c.path)).map((c) => c.path), ...coreDependents.filter((f) => !match(p.sources, f))];
     const viaPath = outside.length && codeFiles ? testsReaching(outside, codeFiles, p.tests, packages).filter((f) => !direct.includes(f) && !viaCore.includes(f)) : [];
     // A deleted file counts too: the test that reads it fails.
     const read = Object.entries(p.reads ?? {})
