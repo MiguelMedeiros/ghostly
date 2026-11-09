@@ -209,6 +209,28 @@ describe("tests that import across workspaces", () => {
     expect(byName(p.unit).matrix.files).toEqual(["e2e/matrix/rails.test.ts"]);
   });
 
+  it("a file renamed or deleted inside a project's sources runs the tests that still import the old path", () => {
+    // test-affected.mjs diffs with --no-renames: a rename is the old path (deleted) and the new one. vitest is given
+    // only files that exist, so the tests importing the old path were never selected and failed first in the batch.
+    const files: Record<string, string> = {
+      "tools/scripts/tarball.mjs": `export function tarGz() {}`,
+      "tools/scripts/prepare-translation-runtime.mjs": `import { tarGz } from "./tarball.mjs";`,
+      "tools/scripts/test/tarGz.test.ts": `import { tarGz } from "../tar-gz.mjs";`,
+      "tools/scripts/test/translationRuntime.test.ts": `import { tarGz } from "../tar-gz.mjs";\nimport "../prepare-translation-runtime.mjs";`,
+      "tools/scripts/test/other.test.ts": `import { x } from "../other.mjs";`,
+    };
+    const rename = changed("-tools/scripts/tar-gz.mjs", "tools/scripts/tarball.mjs", "tools/scripts/prepare-translation-runtime.mjs");
+    const scripts = byName(plan({ changed: rename, inventory, e2eFiles, codeFiles: files }).unit).scripts;
+    expect(scripts.mode).toBe("related");
+    expect(scripts.files).toEqual([
+      "tools/scripts/tarball.mjs", "tools/scripts/prepare-translation-runtime.mjs",
+      "tools/scripts/test/tarGz.test.ts", "tools/scripts/test/translationRuntime.test.ts",
+    ]);
+    // A delete alone, too.
+    expect(byName(plan({ changed: changed("-tools/scripts/tar-gz.mjs"), inventory, e2eFiles, codeFiles: files }).unit).scripts.files)
+      .toEqual(["tools/scripts/test/tarGz.test.ts", "tools/scripts/test/translationRuntime.test.ts"]);
+  });
+
   it("keeps to the test files the project runs", () => {
     expect(testsReaching(["packages/browser/test/helpers/fake.ts"], codeFiles, ["packages/browser/test/**"])).toEqual([]);
     expect(testsReaching(["apps/ui/src/components/ChatConnection.tsx"], codeFiles, ["e2e/matrix/*"])).toEqual([]);
