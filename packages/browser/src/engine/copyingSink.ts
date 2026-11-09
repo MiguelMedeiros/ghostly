@@ -27,10 +27,11 @@ function withoutDetails(message: StoredMessage): StoredMessage {
  * (`keptPictures`); a new one, or one back after a state without it, goes. The same for each public profile's picture
  * (up to 32 KB): this profile's verified identities' and Nostr keys', and each contact's.
  *
- * So does each chat's and group's view: the engine builds them all again for each state, about one contact typing too,
- * and a group's carries its whole member list. One this client was sent last as it is now (its pictures left out the
- * same way) is left out, and the state names every chat's and group's id in order (`keptViews`): the page keeps the
- * rest, and an id no longer there is a chat or group gone.
+ * So does each chat's, group edge's and group's view: the engine builds them all again for each state, about one contact
+ * typing too; a group's carries its whole member list, and a private group has an edge per member, each a whole chat
+ * view with its transport log. One this client was sent last as it is now (its pictures left out the same way) is left
+ * out, and the state names every chat's, edge's and group's id in order (`keptViews`): the page keeps the rest, and an
+ * id no longer there is a chat, edge or group gone.
  *
  * A history's and a change's rows go without their details record (`withoutDetails`).
  */
@@ -78,7 +79,7 @@ export function copyingSink(post: (message: PostedEvent) => void): EngineClientS
       const keptViews: KeptViews = {};
       // The views in `list` this client was sent last as they are now, with the same pictures left out (`marks`): those
       // stay out, and `keptViews` lists every id in order. A list with an id twice goes whole.
-      const leaveOutSame = <T extends { id: string }>(list: T[], kind: "links" | "groups", marks: (id: string) => unknown): T[] => {
+      const leaveOutSame = <T extends { id: string }>(list: T[], kind: "links" | "edges" | "groups", marks: (id: string) => unknown): T[] => {
         if (!list) return list;
         const left = new Set<string>();
         for (const view of list) {
@@ -96,11 +97,13 @@ export function copyingSink(post: (message: PostedEvent) => void): EngineClientS
         return list.filter((view) => !left.has(view.id));
       };
       const postedLinks = leaveOut(links, "links", "peerAvatar")?.map(contactProfiles);
+      const postedEdges = edges && leaveOut(edges, "edges", "peerAvatar");
       const postedGroups = leaveOut(groups, "groups", "picture");
-      const keptLinks = new Set(kept.links), keptGroups = new Set(kept.groups);
+      const keptLinks = new Set(kept.links), keptEdges = new Set(kept.edges), keptGroups = new Set(kept.groups);
       const sentLinks = leaveOutSame(postedLinks, "links", (id) => [keptLinks.has(id), kept.received?.[id], kept.nostr?.[id]]);
+      const sentEdges = postedEdges && leaveOutSame(postedEdges, "edges", (id) => keptEdges.has(id));
       const sentGroups = leaveOutSame(postedGroups, "groups", (id) => keptGroups.has(id));
-      for (const list of ["links", "groups", "received", "nostr"] as const) {
+      for (const list of ["links", "edges", "groups", "received", "nostr"] as const) {
         const value = kept[list];
         if (Array.isArray(value) ? !value.length : value && !Object.keys(value).length) delete kept[list];
       }
@@ -110,7 +113,7 @@ export function copyingSink(post: (message: PostedEvent) => void): EngineClientS
         ...(nostr && { nostr: { ...nostr, own: leaveOutAt(nostr.own, "nostrOwn", nostrPicture, () => (kept.nostrOwn ??= [])) } }),
         settings: ownKept ? (({ avatar: _, ...without }) => without)(settings) : settings,
         links: sentLinks,
-        ...(edges && { edges: leaveOut(edges, "edges", "peerAvatar") }),
+        ...(edges && { edges: sentEdges }),
         groups: sentGroups,
         ...(sent && payments === sent.payments ? {} : { payments }),
         ...(sent && wallet === sent.wallet ? {} : { wallet }),
