@@ -91,6 +91,8 @@ export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: Ide
   }
   // Mine refused: only a refusal this app writes, never the contact's own words as this app's line (identityRefusal).
   const why = state !== "failed" ? undefined : mine ? identityRefusal(entry.error) : entry.error;
+  // The line is cut to one row: its tooltip reads it in full, in the same words (never the English it came from).
+  const reason = why && problemLine(why, t, "proof");
   // A mouse over the card: the deck's flourish, once (it ends at rest by itself). Never for a finger, nor with reduced motion.
   const flourish = (e: PointerEvent<HTMLButtonElement>) => {
     if (e.pointerType === "mouse" && !reducedMotion()) playSwitch({ glow: null, incoming: e.currentTarget, outgoing: null, dir: 1 });
@@ -108,7 +110,7 @@ export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: Ide
         <span id={`${id}-caption`} className="min-w-0 truncate" data-testid="identity-share-text">{mine ? t("identities.share.captionMine") : fillNames(t("identities.share.captionTheirs"), { contact })}</span>
         {time}
       </p>
-      {why && <p id={`${id}-reason`} className="m-0 max-w-full truncate text-[11px] text-danger-ink" data-testid="identity-share-reason" title={why}>{problemLine(why, t, "proof")}</p>}
+      {reason && <p id={`${id}-reason`} className="m-0 max-w-full truncate text-[11px] text-danger-ink" data-testid="identity-share-reason" title={reason}>{reason}</p>}
     </div>
   );
 }

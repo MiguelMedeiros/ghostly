@@ -6,7 +6,7 @@ import { ENGINE_ERRORS, engineText, type EngineErrorCode } from "@ghostly/core";
 import { ERROR_RULES, errorText, knownErrorParts, rawError } from "../../lib/errorText";
 import { english } from "../../lib/english";
 import { failedReason, failedStatus } from "../../lib/fileStatus";
-import { problemLine, problemText } from "../../lib/problemText";
+import { problemLine, problemText, sentences } from "../../lib/problemText";
 import { liveAttemptText } from "../../lib/transportEvents";
 import type { TranslationKey } from "../../contexts/I18nContext";
 import { translateWith } from "../../locales/translate";
@@ -33,6 +33,31 @@ const CODES = "packages/core/src/engineErrors.ts";
  * core identityProofs.ts onPresent), and the refusals a contact's app sends back for mine. Shown under the share in the
  * chat and on the back of the contact's card: they were English in every language.
  */
+/**
+ * A check that could not run (IdentityCheckUnavailable: a host, resolver or relay down or unreachable): it says nothing
+ * about the proof, so it never reads "This proof couldn't be verified" (agents#3781).
+ */
+const PROOF_UNAVAILABLE: readonly (readonly [string, string, string?])[] = [
+  ["github.com could not be reached: Failed to fetch", `${BROWSER}/proofs/sshForges.ts`, "`${host} could not be reached: ${"],
+  ["github.com answered HTTP 502", `${BROWSER}/proofs/sshForges.ts`, "`${host} answered HTTP ${response.status}`"],
+  ["Unexpected answer from github.com", `${BROWSER}/proofs/sshForges.ts`, "`Unexpected answer from ${host}`"],
+  ["The account's server (bsky.social) could not be reached", `${BROWSER}/proofs/providers/atproto.ts`, "`The account's server (${hostOf(doc.pds)}) could not be reached`"],
+  ["The account's server (bsky.social) did not send the record", `${BROWSER}/proofs/providers/atproto.ts`, "`The account's server (${hostOf(doc.pds)}) did not send the record`"],
+  ["The account's server bsky.social was not contacted: Failed to fetch", `${BROWSER}/proofs/atproto/resolve.ts`, "`The account's server ${host} was not contacted: ${"],
+  ["The homeserver homeserver.pubky.app answered 502", `${BROWSER}/proofs/pubky.ts`, "`The homeserver ${host} answered ${r.status}`"],
+  ["The homeserver homeserver.pubky.app could not be reached", `${BROWSER}/proofs/pubky.ts`, "`The homeserver ${host} could not be reached`"],
+  ["The homeserver homeserver.pubky.app was not contacted: Failed to fetch", `${BROWSER}/proofs/pubky.ts`, "`The homeserver ${host} was not contacted: ${"],
+  ["The homeserver homeserver.example answers on port 8443; only port 443 is contacted", `${BROWSER}/proofs/pubky.ts`, "`The homeserver ${host} answers on port ${port}; only port 443 is contacted`"],
+  ["example.org could not be reached. It must serve https://example.org/.well-known/did.json over HTTPS, without a redirect, with the header Access-Control-Allow-Origin: *", `${BROWSER}/proofs/did.ts`, "`${host} could not be reached. It must serve ${url} over HTTPS, without a redirect, with the header Access-Control-Allow-Origin: *`"],
+  ["example.org answered with a redirect; it must serve exactly https://example.org/.well-known/did.json", `${BROWSER}/proofs/did.ts`, "`${host} answered with a redirect; it must serve exactly ${url}`"],
+  ["example.org answered 503 for https://example.org/.well-known/did.json", `${BROWSER}/proofs/did.ts`, "`${host} answered ${response.status} for ${url}`"],
+  ["Cloudflare could not resolve _ghostly.example.org", `${BROWSER}/proofs/domain.ts`, "`${resolver.name} could not resolve ${name}`"],
+  ["Cloudflare sent an unusable answer", `${BROWSER}/proofs/domain.ts`, "`${resolver.name} sent an unusable answer`"],
+  ["Quad9 sent an answer that is too large", `${BROWSER}/proofs/domain.ts`, "`${resolver.name} sent an answer that is too large`"],
+  ["No Pkarr relay answered for this did:dht", `${CORE}/didDht.ts`],
+  ["No Pkarr relay to ask", `${CORE}/didDht.ts`],
+  ["Hide my IP from contacts is on: pds.example.org, a server your contact chose, was not contacted", `${BROWSER}/engine/identities.ts`, "`Hide my IP from contacts is on: ${refused}, a server your contact chose, was not contacted`"],
+];
 const PROOF_REASONS: readonly (readonly [string, string, string?])[] = [
   ["GitHub has no account octocat-old", `${BROWSER}/proofs/providers/ssh.ts`, "`${label} has no account ${login}`"],
   ["GitLab has no account someone", `${BROWSER}/proofs/providers/ssh.ts`, "`${label} has no account ${login}`"],
@@ -66,6 +91,7 @@ const PROOF_REASONS: readonly (readonly [string, string, string?])[] = [
   ["Your contact keeps too many identities from you already", `${CORE}/identityProofs.ts`],
   ["That identity is no longer in your profile", `${CORE}/identityProofs.ts`],
   ["Your contact could not verify it", `${CORE}/identityProofs.ts`],
+  ...PROOF_UNAVAILABLE,
 ];
 
 /** [message as thrown, the file that throws it, the part of the message written there as it is]. */
@@ -913,6 +939,16 @@ describe("errors in the app's language", () => {
     // A reason the rules do not know is a translated "could not verify", its English only behind the ⓘ.
     expect(problemText("The Nostr event id does not match its content", t, "proof")).toEqual({ tone: "error", title: t("errors.proof.checkFailed"), detail: "The Nostr event id does not match its content" });
     expect(problemLine("The Nostr event id does not match its content", t, "proof")).toBe(t("errors.proof.checkFailed"));
+  });
+
+  it.each(LANGUAGES)("a contact's proof check that could not run never reads as a bad proof in %s, and the host stays a value (agents#3781)", (language) => {
+    const t = translators[language];
+    const bad = PROOF_UNAVAILABLE.map(([raw]) => raw).filter((raw) => problemText(raw, t, "proof").title === t("errors.proof.checkFailed"));
+    expect(bad).toEqual([]);
+    expect(problemLine("github.com could not be reached: Failed to fetch", t, "proof")).toBe(sentences(t("errors.proof.hostUnreachable", { domain: "github.com" }), t("errors.proof.laterNext"), t));
+    expect(problemLine("The homeserver homeserver.pubky.app answered 502", t, "proof")).toBe(sentences(t("errors.proof.hostAnswered", { domain: "homeserver.pubky.app" }), t("errors.proof.laterNext"), t));
+    // The address the contact chose is behind the ⓘ only.
+    expect(problemLine("example.org answered 503 for https://example.org/.well-known/did.json", t, "proof")).not.toContain("https://");
   });
 
   it("each rule has a sample, so none stops matching unseen", () => {
