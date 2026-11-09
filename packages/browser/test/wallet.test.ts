@@ -176,10 +176,11 @@ describe("Lightning out: melts", () => {
     const { quote, mint: at } = await wallet.quoteInvoice(INVOICE);
     return wallet.payQuote(quote, at);
   };
-  /** Asks about the pending payments once no request of theirs can reach the mint any more. */
+  /** Asks about the pending payments once no request of theirs can reach the mint any more: that long really passed. */
   const pollWhenOverdue = async (wallet: CashuWallet) => {
+    const monotonic = vi.spyOn(performance, "now").mockReturnValue(performance.now() + CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS);
     vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS });
-    try { await wallet["pollMelts"](); } finally { vi.useRealTimers(); }
+    try { await wallet["pollMelts"](); } finally { vi.useRealTimers(); monotonic.mockRestore(); }
   };
 
   it("reserves the proofs of a pending payment, then drops them once the mint pays it", async () => {
@@ -247,6 +248,66 @@ describe("Lightning out: melts", () => {
     expect(await pay(wallet)).toBe(false);
     expect(balance()).toBe(8);
     expect(rows("melts")).toHaveLength(1);
+  });
+
+  it("keeps a payment whose answer was lost pending when the device clock steps forward, and books it paid when the mint pays it", async () => {
+    mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
+    mint.completeMelt.mockRejectedValue(new TypeError("Failed to fetch"));
+    mint.checkProofsStates.mockResolvedValue([{ state: "UNSPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }]);
+    const { wallet, events } = setup();
+    expect(await pay(wallet)).toBe(false);
+
+    // An hour on the device clock, a few ms in fact: the request may still reach the mint.
+    const start = performance.now();
+    const monotonic = vi.spyOn(performance, "now").mockReturnValue(start);
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 60 * 60_000 });
+    try {
+      await wallet["pollMelts"]();
+      expect(balance()).toBe(8);
+      expect(rows("melts")).toHaveLength(1);
+      expect(events.onMeltResolved).not.toHaveBeenCalled();
+
+      // It lands, and the mint pays the invoice with those proofs: the next round books it.
+      mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("PAID", []));
+      vi.setSystemTime(Date.now() + 30_000);
+      monotonic.mockReturnValue(start + 30_000);
+      await wallet["pollMelts"]();
+    } finally { vi.useRealTimers(); monotonic.mockRestore(); }
+    expect(rows<StoredProof>("proofs").map((p) => p.secret)).toEqual(["c"]);
+    expect(rows<WalletTx>("walletTx")).toMatchObject([{ kind: "lightning-out", amount: 90 }]);
+    expect(events.onMeltResolved).toHaveBeenCalledWith(expect.objectContaining({ quote: "m1" }), true);
+  });
+
+  it("settles a payment whose answer was lost once its window really passed, whatever the device clock says", async () => {
+    mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
+    mint.completeMelt.mockRejectedValue(new TypeError("Failed to fetch"));
+    mint.checkProofsStates.mockResolvedValue([{ state: "UNSPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }]);
+    const { wallet, events } = setup();
+    expect(await pay(wallet)).toBe(false);
+
+    // The clock set back an hour, and the window passed in fact: no request of it can land any more.
+    const monotonic = vi.spyOn(performance, "now").mockReturnValue(performance.now() + CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS);
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() - 60 * 60_000 });
+    try { await wallet["pollMelts"](); } finally { vi.useRealTimers(); monotonic.mockRestore(); }
+    expect(balance()).toBe(108);
+    expect(rows("melts")).toHaveLength(0);
+    expect(events.onMeltResolved).toHaveBeenCalledWith(expect.objectContaining({ quote: "m1" }), false);
+  });
+
+  it("gives a payment found after a restart with a time ahead of the clock its window again, not the time to that clock", async () => {
+    mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
+    mint.checkProofsStates.mockResolvedValue([{ state: "UNSPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }]);
+    // Written down by a run whose clock was a day ahead.
+    seed("proofs", [stored(8, "c"), { ...stored(64, "a"), reserved: true }, { ...stored(32, "b"), reserved: true }, { ...stored(4, "d"), reserved: true }]);
+    seed("melts", [{ quote: "m1", mint: MINT, request: INVOICE, amount: 90, secrets: ["a", "b", "d"], outlay: 100, outputs: [], createdAt: Date.now() + 86_400_000 } satisfies PendingMelt]);
+    const { wallet } = setup();
+    await wallet["pollMelts"]();
+    expect(rows("melts")).toHaveLength(1);
+
+    // The window passes, a day before that run's time: no request of it can land any more.
+    await pollWhenOverdue(wallet);
+    expect(balance()).toBe(108);
+    expect(rows("melts")).toHaveLength(0);
   });
 
   it("gives the sats back and says so when the mint refuses the payment", async () => {
