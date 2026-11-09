@@ -5,6 +5,7 @@ import {
   emptyIdentityLedger, IDENTITY_CHECK_UNAVAILABLE, IdentityCheckUnavailable, identityRefusal, identityStatement, identityStatementText, IdentityExchange, isIdentityBinding, newIdentityBinding,
   receivedIdentityStatus, revokesIdentity, identityRevocationValue, IDENTITY_REVOCATION_LABEL, signIdentityPresentation, verifyIdentityPresentation, IDENTITY_CHALLENGE_WINDOW,
   type IdentityBinding, type IdentityLedger, type IdentityStatement, type LocalIdentityProof, type VerifiedIdentity,
+  IDENTITY_REUSE_CHECK_S,
 } from "../src/identityProofs";
 // covers: proofs.binding, proofs.share, proofs.withdraw, proofs.revoke, proofs.expiry
 
@@ -550,9 +551,10 @@ describe("a share asked again after its result was lost", () => {
     await vi.waitFor(() => expect(w.ledger(bob, alice).received[0]?.status).toBe("verified"));
     await new Promise(r => setTimeout(r, 0));
     expect(w.ledger(alice, bob).shared[0].status).toBe("pending");
-    // Reconnect: the share still pending is asked again, and Bob checks it a second time.
+    // Reconnect past the hour a verified check is reused for (`IDENTITY_REUSE_CHECK_S`): the share still pending is asked
+    // again, and Bob checks it a second time.
     w.online.add(`${alice}>${bob}`);
-    w.advance(10);
+    w.advance(IDENTITY_REUSE_CHECK_S + 10);
     ab.ready();
     await vi.waitFor(() => expect(check).toBe(2));
     await vi.waitFor(() => expect(w.ledger(alice, bob).shared[0].status).not.toBe("pending"));
