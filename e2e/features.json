@@ -1285,7 +1285,7 @@
     "{**/*.test.ts,**/*.test.tsx,packages/*/test/**,apps/extension/test/**,apps/ui/src/test/**,apps/web/test/**,packages/sdk/examples/adapter/test/**}": [],
     "{**/.gitignore,.dockerignore,.env.example,infra/docker-compose.yml,apps/web/Dockerfile,apps/web/nginx*.conf}": [],
     "{.npmrc,packages/*/package.json,apps/extension/package.json,apps/web/package.json}": ["*"],
-    "{apps/desktop/**,native/transports/**,Cargo.toml,Cargo.lock}": [],
+    "{apps/desktop/**,native/transports/**,Cargo.toml,Cargo.lock,rust-toolchain.toml}": [],
     "{apps/ui/src/components/chat/ChatTargets.tsx,apps/ui/src/hooks/useChatTargets.tsx}": ["chat.forward","app.pwa.share-target"],
     "{apps/ui/src/components/chat/DeliveryStatus.tsx,apps/ui/src/lib/delivery.ts}": ["chat.waiting","chat.paired.receipts","chat.paired.offline-send","chat.dht.*","delivery.hold.*","app.theme.bubbles","app.menus"],
     "{apps/ui/src/components/chat/MessageButtons.tsx,apps/ui/src/lib/buttons.ts}": ["chat.buttons"],
