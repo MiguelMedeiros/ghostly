@@ -85,6 +85,11 @@ export const COMMUNITY_LIMITS = {
   pendingMs: 120_000,
   waiting: 64,
   waitingBytes: 1024 * 1024,
+  /**
+   * Of those, the ones signed by a key no commit I know names (a newcomer whose admission has not come yet, or a key
+   * anyone can make up): the newest only, they push out nobody else's, and they make no catch-up hurry.
+   */
+  waitingStrangers: 8,
   replay: 256,
   /** Commits in one welcome or chain piece. */
   chainPiece: 100,
@@ -695,7 +700,7 @@ export class CommunitySession {
   private mainIndex = new Map<string, number>();
   private pendingCommits = new Map<string, { from: string; commit: CommunityCommit; at: number }>();
   private pendingSecrets = new Map<string, { sealed: SealedSecret; at: number }>();
-  private waiting: { from: string; frame: CommunityMessageFrame }[] = [];
+  private waiting: { from: string; frame: CommunityMessageFrame; stranger: boolean }[] = [];
   private waitingBytes = 0;
   private asked = new Map<string, number>();
   /** Per member: until when what comes over its edge may be its answer to my sync (`ANSWER_WINDOW_MS`). In memory only. */
@@ -2418,7 +2423,8 @@ export class CommunitySession {
     // One I took already (from a second hub, or in a catch-up answer) is dropped before its signature is checked: it
     // would be dropped below whether the signature holds or not.
     if (this.isDuplicate(raw)) { this.handedInAnswer(from, raw, now); return false; }
-    // Signed by its author before anything else, so a frame no member wrote never takes a place among those waiting.
+    // Signed by its author before anything else, so a frame no member wrote takes no member's place among those waiting
+    // (`park`).
     if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return false;
     // Someone removed is heard no more, even for an epoch it was in (whose secret it still holds); one who left, for
     // what it wrote before its leave only (and for the epochs it was in: the roster check below).
@@ -2567,17 +2573,24 @@ export class CommunitySession {
   private park(from: string, frame: CommunityMessageFrame): void {
     if (frame.e > this.epoch + COMMUNITY_LIMITS.window) return;
     if (this.waiting.some(w => w.frame.s === frame.s && w.frame.e === frame.e && w.frame.h === frame.h && w.frame.n === frame.n)) return;
-    this.waiting.push({ from, frame });
+    // Its signature says only that its key wrote it, and anyone can make a key: one no commit I know names waits among
+    // `waitingStrangers` only (`COMMUNITY_LIMITS`), and goes before any member's.
+    const stranger = !rosterHas(this.roster, frame.s) && !this.isRecentMember(frame.s);
+    this.waiting.push({ from, frame, stranger });
     this.waitingBytes += frame.c.length;
-    while (this.waiting.length > COMMUNITY_LIMITS.waiting || this.waitingBytes > COMMUNITY_LIMITS.waitingBytes) this.waitingBytes -= this.waiting.shift()!.frame.c.length;
+    for (;;) {
+      const strangers = this.waiting.filter(w => w.stranger).length;
+      if (strangers <= COMMUNITY_LIMITS.waitingStrangers && this.waiting.length <= COMMUNITY_LIMITS.waiting && this.waitingBytes <= COMMUNITY_LIMITS.waitingBytes) break;
+      this.waitingBytes -= this.waiting.splice(strangers ? this.waiting.findIndex(w => w.stranger) : 0, 1)[0].frame.c.length;
+    }
     this.ask(from);
   }
 
-  /** Something is missing here: the current epoch's secret, or the epoch of frames waiting. */
+  /** Something is missing here: the current epoch's secret, or the epoch of a member's frames waiting. */
   get needsCatchUp(): boolean {
     if (!this.isMember) return false;
     this.dropStale(this.pendingCommits, this.hooks.clock?.() ?? Date.now());
-    return !this.state.secrets[this.topHash] || this.waiting.length > 0 || this.pendingCommits.size > 0;
+    return !this.state.secrets[this.topHash] || this.waiting.some(w => !w.stranger) || this.pendingCommits.size > 0;
   }
   /** Asks a member I have an edge to for what I lack (the engine calls it now and then while `needsCatchUp`). */
   catchUp(to: string): void { this.ask(to); }
