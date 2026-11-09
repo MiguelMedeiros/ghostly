@@ -12,6 +12,7 @@ import { nodeLocalFetch } from "../services";
 import { nodeFedimintSdk } from "./fedimint";
 import { installFileFetch } from "./fileFetch";
 import { nodeHoldFetch } from "./holdFetch";
+import { nodePublicRelay } from "./irohRelay";
 import { nodePushSend } from "./pushSend";
 import { openPersistentIndexedDb, type PersistentIndexedDb } from "./storage";
 import { RESTORED_MARK, type ProfilePaths } from "../profiles";
@@ -299,6 +300,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     irohWeb: true,
     // `GHOSTLY_IROH_RELAYS`: those relays only (the setting is not read).
     ...(pinnedIroh ? { irohRelays: pinnedIroh } : {}),
+    // A contact's Iroh relay is dialled only at a name whose every address is public now (./irohRelay.ts).
+    irohPublicRelay: nodePublicRelay(),
     // A CLI profile is one device's (WISP 06): no device state is kept for it.
     singleDevice: true,
     nativeTransports: { "hyperdht/1": (seedB64: string) => createHyperEndpoint(fromBase64Url(seedB64), network) },

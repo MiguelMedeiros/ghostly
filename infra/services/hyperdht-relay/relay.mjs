@@ -246,18 +246,42 @@ function clientDht(dht, limits, drop, gone, log, wrote) {
  * (all of it while a dial has not opened), in its UDX stream, and in the writes that UDX stream has handed to its native
  * side, each held until the far end acks it (udx-native's `_wreqs`; its buffers are not copied). That far end sets the
  * pace, and dht-relay 0.4.3 writes on whatever the stream says: unbounded, a far peer that stops acking has the relay
- * hold everything its client sends.
+ * hold everything its client sends. A stream is weighed after every write, so this costs the same however much it holds.
  */
 const unsent = stream => {
   let bytes = stream._writableState?.buffered ?? 0
   const raw = stream.rawStream
   if (!raw) return bytes
-  bytes += raw._writableState?.buffered ?? 0
-  for (const write of raw._wreqs ?? []) {
-    if (write.buffer) bytes += write.buffer.byteLength
-    else if (write.buffers) for (const buffer of write.buffers) bytes += buffer.byteLength
-  }
+  return bytes + (raw._writableState?.buffered ?? 0) + (raw._unacked ?? 0)
+}
+
+/**
+ * What each UDX stream has handed to its native side and not had acked yet (`_unacked`), counted as each write goes down
+ * and as its ack comes: going over its writes after each one cost the relay the square of them. UDX batches small writes
+ * while its far end does not ack, and 100,000 writes of 16 bytes had it look at 747 million buffers, the whole relay
+ * stalled for 0.4 s. udx-native hands its native side `_onack` as each stream is made, so the prototype's is replaced
+ * here, before the relay's node makes any. An ack frees exactly what its write held (its `buffer` or `buffers`, which
+ * udx-native drops then); a write the native side refuses (not connected) throws before it is counted.
+ */
+const UDXStream = createRequire(hyperdht.resolve('dht-rpc'))('udx-native/lib/stream.js')
+const writeBytes = write => {
+  if (write.buffer) return write.buffer.byteLength
+  let bytes = 0
+  if (write.buffers) for (const buffer of write.buffers) bytes += buffer.byteLength
   return bytes
+}
+const handDown = UDXStream.prototype._writev
+UDXStream.prototype._writev = function (buffers, cb) {
+  let bytes = 0
+  for (const buffer of buffers) bytes += buffer.byteLength
+  this._unacked = (this._unacked ?? 0) + bytes
+  try { return handDown.call(this, buffers, cb) } catch (error) { this._unacked -= bytes; throw error }
+}
+const acked = UDXStream.prototype._onack
+UDXStream.prototype._onack = function (id) {
+  const write = this._wreqs[id]
+  if (write) this._unacked = Math.max(0, (this._unacked ?? 0) - writeBytes(write))
+  return acked.call(this, id)
 }
 
 /**
