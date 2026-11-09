@@ -580,6 +580,16 @@ describe("opening an app from the Apps page", () => {
       expect(takeOpenRequest("link-1")).toBeUndefined();
     } finally { vi.useRealTimers(); }
   });
+
+  it("an open request is still dropped after a minute when the device's clock went back", () => {
+    vi.useFakeTimers();
+    try {
+      requestOpenInChat("link-1", { app: installed("chat") });
+      vi.setSystemTime(Date.now() - 60 * 60_000);
+      vi.advanceTimersByTime(2 * 60_000);
+      expect(takeOpenRequest("link-1")).toBeUndefined();
+    } finally { vi.useRealTimers(); }
+  });
 });
 
 describe("focus on the Apps page", () => {
