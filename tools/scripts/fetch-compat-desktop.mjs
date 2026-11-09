@@ -25,9 +25,12 @@
  *
  * Linux x64 only (the release's amd64 package). E2E_COMPAT_CACHE moves the cache. Prints the binary.
  * Ends with status 3 and the reason when no tool on this machine unpacks the package: the spec skips on it.
- * A request to GitHub is tried 3 times on a network error or a 5xx; after that, and on any other failure, it ends with
- * status 1 and one line saying why (the URL and the error's code).
+ * With a GitHub token (GH_TOKEN, GITHUB_TOKEN, else `gh auth token`) the files come through the API's asset endpoint,
+ * signed in; without one, from the public download URL. The token is never printed.
+ * A request to GitHub is tried 4 times on a network error or a 5xx, 2, 4 then 8 seconds apart; after that, and on any
+ * other failure, it ends with status 1 and one line saying why (the URL and the error's code).
  */
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -68,14 +71,14 @@ const networkReason = (error) => error?.cause?.code ?? error?.code ?? error?.cau
 
 /**
  * GETs a URL and reads its body with `read(response)`, trying again after a network error or a 5xx: a connect timeout
- * to github.com now and then must not fail the e2e. A 404 is an answer, not a blip: `read` gets it. Throws
- * RequestFailed after the last attempt.
+ * to github.com now and then must not fail the e2e. 4 attempts, 2, 4 then 8 seconds apart. A 404 is an answer, not a
+ * blip: `read` gets it. Throws RequestFailed after the last attempt. Neither says `headers`, which may hold a token.
  */
-export async function get(url, read, { attempts = 3, backoff = 2000, sleep = (ms) => new Promise((done) => setTimeout(done, ms)), log = () => {} } = {}) {
+export async function get(url, read, { headers, attempts = 4, backoff = 2000, sleep = (ms) => new Promise((done) => setTimeout(done, ms)), log = () => {} } = {}) {
   for (let attempt = 1; ; attempt++) {
     let reason;
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, headers ? { headers } : undefined);
       if (response.status < 500) {
         if (response.ok || response.status === 404) return await read(response);
         throw new RequestFailed(url, response.status);
@@ -87,26 +90,74 @@ export async function get(url, read, { attempts = 3, backoff = 2000, sleep = (ms
     }
     if (attempt >= attempts) throw new RequestFailed(url, `${reason} (${attempts} attempts)`);
     log(`GET ${url}: ${reason}, trying again`);
-    await sleep(backoff * attempt);
+    await sleep(backoff * 2 ** (attempt - 1));
   }
 }
 
-const releaseFile = (tag, name, read) =>
-  get(`https://github.com/MiguelMedeiros/ghostly/releases/download/${tag}/${name}`, read, { log: (line) => console.error(line) });
+/**
+ * The GitHub token to download with: GH_TOKEN, GITHUB_TOKEN, else what `gh auth token` prints (`gh()`); undefined
+ * where there is none.
+ */
+export function tokenOf(env = process.env, gh = () => {
+  const result = spawnSync("gh", ["auth", "token"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 });
+  return result.status === 0 ? result.stdout : undefined;
+}) {
+  return env.GH_TOKEN || env.GITHUB_TOKEN || gh()?.trim() || undefined;
+}
 
-const download = (tag, name) => releaseFile(tag, name, async (response) => {
-  if (!response.ok) throw new RequestFailed(response.url, response.status);
-  return Buffer.from(await response.arrayBuffer());
-});
+/**
+ * A release's files. With a token, through the API's asset endpoint, as `gh release download` does: anonymous downloads
+ * from release-assets.githubusercontent.com may get 504s for hours when GitHub sheds anonymous load, signed-in ones
+ * do not. Without one, the public download URL. `sums(tag)` is the release's SHA256SUMS.txt, or null where the release
+ * is not published (a draft, or still uploading); `download(tag, name)` is a file of it.
+ */
+export function releaseFiles({ token, log = () => {}, sleep } = {}) {
+  const read = (url, reader, headers) => get(url, reader, { headers, log, sleep });
+  const bytes = (url) => async (response) => {
+    if (!response.ok) throw new RequestFailed(url, response.status);
+    return Buffer.from(await response.arrayBuffer());
+  };
 
-/** A release's SHA256SUMS.txt, or null where the release is not published. */
-const publishedSums = (tag) => releaseFile(tag, "SHA256SUMS.txt", (response) => (response.status === 404 ? null : response.text()));
+  if (!token) {
+    const url = (tag, name) => `https://github.com/MiguelMedeiros/ghostly/releases/download/${tag}/${name}`;
+    return {
+      sums: (tag) => read(url(tag, "SHA256SUMS.txt"), (response) => (response.status === 404 ? null : response.text())),
+      download: (tag, name) => read(url(tag, name), bytes(url(tag, name))),
+    };
+  }
+
+  const api = "https://api.github.com/repos/MiguelMedeiros/ghostly";
+  const authorization = `Bearer ${token}`;
+  const json = { Accept: "application/vnd.github+json", Authorization: authorization, "X-GitHub-Api-Version": "2022-11-28" };
+  // The asset URLs of each release, read once: null where GitHub shows no release with that tag (a draft has none).
+  const releases = new Map();
+  const assets = (tag) => {
+    if (!releases.has(tag)) {
+      releases.set(tag, read(`${api}/releases/tags/${tag}`, async (response) =>
+        (response.status === 404 ? null : new Map((await response.json()).assets.map(({ name, url }) => [name, url]))), json));
+    }
+    return releases.get(tag);
+  };
+  // Fetch drops the Authorization header on the redirect to the file's own (signed) URL, on another host.
+  const asset = (url) => read(url, bytes(url), { Accept: "application/octet-stream", Authorization: authorization });
+  return {
+    async sums(tag) {
+      const url = (await assets(tag))?.get("SHA256SUMS.txt");
+      return url ? String(await asset(url)) : null;
+    },
+    async download(tag, name) {
+      const url = (await assets(tag))?.get(name);
+      if (!url) throw new Error(`The ${tag} release has no ${name}`);
+      return asset(url);
+    },
+  };
+}
 
 /** The release's package, as its SHA256SUMS.txt says it is. */
-async function checked(tag, sums) {
+async function checked(files, tag, sums) {
   const name = packageOf(tag);
   console.error(`Fetching ${name} from the ${tag} release`);
-  const [deb, list] = await Promise.all([download(tag, name), sums ?? download(tag, "SHA256SUMS.txt").then(String)]);
+  const [deb, list] = await Promise.all([files.download(tag, name), sums ?? files.download(tag, "SHA256SUMS.txt").then(String)]);
   const expected = sumOf(list, name);
   if (!expected) throw new Error(`${tag}'s SHA256SUMS.txt lists no ${name}`);
   const actual = createHash("sha256").update(deb).digest("hex");
@@ -117,9 +168,13 @@ async function checked(tag, sums) {
 async function main(args) {
   const option = (name, fallback) => { const i = args.indexOf(name); return i >= 0 && args[i + 1] ? args[i + 1] : fallback; };
   let tag = option("--tag", "v1.1.5");
+  const local = option("--deb");
+  const token = local ? undefined : tokenOf();
+  const files = releaseFiles({ token, log: (line) => console.error(line) });
+  if (token) console.error("A GitHub token is set: release files come through the GitHub API");
   let sums;
   if (tag === "newest") {
-    const found = await newestPublished(remoteReleases(), publishedSums, (line) => console.error(line));
+    const found = await newestPublished(remoteReleases(), files.sums, (line) => console.error(line));
     if (!found) throw new Error("No release on origin publishes its Linux package");
     ({ tag, sums } = found);
   }
@@ -128,7 +183,6 @@ async function main(args) {
   const root = join(cache, `desktop-${tag}`);
   const binary = join(root, "usr", "bin", "ghostly");
   const done = join(root, ".fetched");
-  const local = option("--deb");
 
   if (local || args.includes("--force") || !existsSync(done) || !existsSync(binary)) {
     try {
@@ -144,7 +198,7 @@ async function main(args) {
   async function fetchRelease() {
     if (process.platform !== "linux" || process.arch !== "x64") throw new Error(`The release's Desktop package is for Linux x64, not ${process.platform} ${process.arch}`);
     const name = packageOf(tag);
-    const deb = local ? readFileSync(local) : await checked(tag, sums);
+    const deb = local ? readFileSync(local) : await checked(files, tag, sums);
     const actual = createHash("sha256").update(deb).digest("hex");
 
     rmSync(root, { recursive: true, force: true });
