@@ -451,6 +451,44 @@ test("on a phone the chat's search bar takes taps on 44 px and keeps room for th
 });
 
 /**
+ * A chat's search bar on a 320 px phone once its count shows: "Nenhum resultado" beside the field and the four 44 px
+ * buttons left the field 12 px wide in Portuguese (it 18, fr 27, es 28, en 50). The count goes on a line of its own under
+ * the field, in every language, and the buttons keep their 44 px.
+ */
+test("on a 320 px phone the chat's search field keeps room for the words once the count shows, in every language", { tag: ["@feature:app.mobile-layout", "@feature:chat.search", "@feature:app.i18n"] }, async ({ peer }, testInfo) => {
+  test.setTimeout(4 * 60_000);
+  const [alice, bob] = await Promise.all([peer("search-count-alice", { mobile: true, viewport: { width: 320, height: 640 } }), peer("search-count-bob")]);
+  await link(alice, bob);
+  await connect(alice, bob);
+  await say(bob, "find this word");
+  await expect(chat(alice).getByText("find this word")).toBeVisible();
+  const { page } = alice;
+  const field = page.getByTestId("chat-search-input"), count = page.getByTestId("chat-search-count");
+  for (const language of ["en", "pt", "es", "fr", "it", "ar", "ja", "zh"] as const) {
+    await page.evaluate((language) => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+    }, language);
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("lang", new RegExp(`^${language}`));
+    await page.getByTestId("chat-options").click();
+    await page.getByTestId("chat-search-open").click();
+    await field.fill("zzqx nothing here");
+    await expect(count).toHaveText(/\S/);
+    await expect(page.getByTestId("chat-search-older")).toBeDisabled();
+    expect(await field.evaluate((el) => el.clientWidth), `${language}: the search field's width`).toBeGreaterThanOrEqual(120);
+    const fieldBox = (await field.boundingBox())!, countBox = (await count.boundingBox())!;
+    expect(countBox.y, `${language}: the count is under the field`).toBeGreaterThanOrEqual(fieldBox.y + fieldBox.height - 1);
+    const small = await smallTargets(page, 44, "[data-testid=chat-search] button");
+    expect(small.map((t) => `${t.name} ${t.width}×${t.height} (${t.stops})`), `${language}: search bar controls under 44 × 44 px`).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth), `${language}: nothing wider than the screen`).toBeLessThanOrEqual(320);
+    await page.screenshot({ path: testInfo.outputPath(`chat-search-count-${language}-320.png`) });
+    await page.getByTestId("chat-search-close").click();
+    await expect(page.getByTestId("chat-search")).toHaveCount(0);
+  }
+});
+
+/**
  * The screens a first visit opens, on a phone, control by control: every Settings section, the Profile and Services
  * pages, and the New wallet, Add identity and Join dialogs. A row's ⓘ took taps on 41 × 40 px, a dialog's Close on
  * 40 × 41, the colour swatches 32 × 32, Light / Dark / Auto and Compact / Comfortable were 32 px tall, the sound
