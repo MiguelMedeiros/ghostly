@@ -312,6 +312,8 @@ export function useWebRTC({
   const [picture, setPictureState] = useState<Picture | null>(null);
   /** What the peer says it is sending on it. */
   const [remotePicture, setRemotePicture] = useState<Picture | null>(null);
+  /** The contact's offer that rang last (`ringOffer`): what a ringing call is, whatever they send while it rings. */
+  const [rangOffer, setRangOffer] = useState<CallSignal | null>(null);
   /** Whether the call negotiated a video lane we may send on, camera or screen. */
   const [videoLaneOpen, setVideoLaneOpen] = useState(false);
   const [callStartedAt, setCallStartedAt] = useState<number | null>(null);
@@ -933,6 +935,7 @@ export function useWebRTC({
   const ringOffer = useCallback((signal: CallSignal) => {
     heldOfferRef.current = null;
     pendingOfferRef.current = signal;
+    setRangOffer(signal);
     const offerHasVideo = signalHasVideo(signal);
     callHadVideoRef.current = offerHasVideo;
     callConnectedEventFiredRef.current = false;
@@ -1642,6 +1645,11 @@ export function useWebRTC({
     remoteHasVideo: remotePicture !== null,
     /** The picture the peer is sending is its screen. */
     remoteIsScreenSharing: remotePicture === "screen",
+    /**
+     * The contact's offer that rings here, while it rings: what the ring shows (audio or video, its `ts`) and what an
+     * answer "as the call came" takes. Never the contact's latest signal: a picture change sent while it rings is not it.
+     */
+    ringingOffer: callState === "incoming" ? rangOffer : null,
     /**
      * The camera button: a camera or a screen can be turned on right now, even if the call started as audio; or the
      * camera that is on can be turned off, when the answer closed the lane (a contact that takes no picture) and only

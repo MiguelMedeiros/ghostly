@@ -65,7 +65,7 @@ import { CallButtons } from "../components/CallButtons";
 import { CallOverlay } from "../components/CallOverlay";
 import { IncomingCallNotification } from "../components/IncomingCallNotification";
 import { useIsLocked, useRingOnLockScreen } from "../contexts/LockScreenContext";
-import { handOverCall, takeHandedCall } from "../lib/lockedRing";
+import { handOverCall, ringingCall, takeHandedCall } from "../lib/lockedRing";
 import { contactStatus } from "../lib/contactStatus";
 import { othersName } from "../lib/groups";
 import { callEventText, callLineId, callsBlockedText, callsWaitForLive } from "../lib/callLines";
@@ -89,7 +89,7 @@ import {
 import { chatPath, inviteShareText } from "../lib/url";
 import { continueInNewChat } from "../lib/continueChat";
 import { engine } from "@ghostly/browser/platform/engine";
-import { fileMessageText, inviteQrSegments, isPlayableVideoType, PAIRED_CALL_CANDIDATES, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
+import { fileMessageText, inviteQrSegments, isPlayableVideoType, PAIRED_CALL_CANDIDATES, type VoiceMeta } from "@ghostly/core";
 import { videoMetaOf } from "../lib/videoPoster";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 import { servicesPlatform, type WalletNetwork } from "../lib/platform";
@@ -357,8 +357,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (callState === "idle" && before !== "idle") playSound("hangup");
   }, [callState, sessionId]);
   // Out of sight, a ringing call is a system notification too: one for every tab that rings it (its offer's time).
-  const incomingOfferTs = useMemo(() => (incomingCallSignal ? parseCallSignal(incomingCallSignal)?.ts : undefined), [incomingCallSignal]);
-  useIncomingCallNotice(callState === "incoming" && callRings(sessionId), sessionId, t("pwa.wakeCall"), incomingOfferTs);
+  // The call that rings is its offer's, not the contact's latest signal (lib/lockedRing.ts, `ringingCall`).
+  const ringing = ringingCall(webrtc.ringingOffer);
+  useIncomingCallNotice(callState === "incoming" && callRings(sessionId), sessionId, t("pwa.wakeCall"), ringing.ts);
   // The no-path note outlives this page (lib/callNoPath.ts): a chat off screen is let go once its call ends. It goes
   // when closed, or when the chat's next call starts.
   useEffect(() => { if (webrtc.noPath) setCallNoPath(sessionId, true); }, [webrtc.noPath, sessionId]);
@@ -367,10 +368,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
   useEffect(() => () => { onCallChange(sessionId, false); setChatOnCall(sessionId, false); }, [onCallChange, sessionId]);
 
-  const incomingHasVideo = (() => {
-    if (!incomingCallSignal) return false;
-    return signalHasVideo(parseCallSignal(incomingCallSignal));
-  })();
+  const incomingHasVideo = ringing.video;
 
   const paired = session?.profile === "paired-chat/1";
   // A chat made with a v0.4 code (WISP 402): kept working both ways, never created by this app.
@@ -755,14 +753,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     hasVideo: incomingHasVideo, onCall: webrtc.otherCallOn,
     answer: holdForUnlock
       // The offer goes back to the engine for the chat the unlocked app opens, which answers it at once (lib/lockedRing).
-      ? () => { if (chatLink?.id && incomingCallSignal) engine.keepCallOffer(chatLink.id, incomingCallSignal); handOverCall(sessionId, incomingCallSignal, incomingHasVideo); nav.conversation(chatPath(sessionId)); }
+      ? () => { if (chatLink?.id && ringing.signal) engine.keepCallOffer(chatLink.id, ringing.signal); handOverCall(sessionId, ringing.signal, incomingHasVideo); nav.conversation(chatPath(sessionId)); }
       : () => { webrtc.acceptCall(incomingHasVideo); if (!visible) nav.conversation(chatPath(sessionId)); },
     decline: webrtc.rejectCall,
   } : null);
   // A call answered from the lock screen before the first unlock, handed over to this chat: answered as it came.
   useEffect(() => {
     if (holdForUnlock || callState !== "incoming") return;
-    const video = takeHandedCall(sessionId, incomingCallSignal);
+    const video = takeHandedCall(sessionId, ringing.signal);
     if (video !== undefined) webrtc.acceptCall(video);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per ring, for the offer that rings; `webrtc` changes with every render
   }, [callState, sessionId, holdForUnlock]);
