@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { WAKE_LATE_MS, WAKE_TICK_MS, addressesKey, watchWake } from "../src/runtime/wakeWatch";
+import { WAKE_GAP_MAX_MS, WAKE_LATE_MS, WAKE_TICK_MS, addressesKey, watchWake } from "../src/runtime/wakeWatch";
 // covers: headless.daemon
 
 /**
@@ -56,12 +56,64 @@ describe("wake watch", () => {
     w.move("");
     await w.tick();
     expect(w.wakes).toEqual(["network"]);
+    // Back seconds later, and another change after it: one wake once the minute since the last one is over.
     w.move("en1/10.0.0.7");
     await w.tick();
-    expect(w.wakes).toEqual(["network", "network"]);
     w.move("en0/192.168.0.10");
     await w.tick();
-    expect(w.wakes).toEqual(["network", "network", "network"]);
+    expect(w.wakes).toEqual(["network"]);
+    for (let i = 0; i < 2; i++) await w.tick();
+    expect(w.wakes).toEqual(["network"]);
+    await w.tick();
+    expect(w.wakes).toEqual(["network", "network"]);
+    for (let i = 0; i < 20; i++) await w.tick();
+    expect(w.wakes).toEqual(["network", "network"]);
+    w.stop();
+  });
+
+  it("wakes at once for a change after a quiet minute", async () => {
+    const w = setup();
+    w.move("en1/10.0.0.7");
+    await w.tick();
+    for (let i = 0; i < 6; i++) await w.tick();
+    w.move("en0/192.168.0.10");
+    await w.tick();
+    expect(w.wakes).toEqual(["network", "network"]);
+    w.stop();
+  });
+
+  it("spaces the wakes of a network that flaps every tick, and wakes at once again after it settles", async () => {
+    const w = setup();
+    const at: number[] = [];
+    for (let i = 1; i <= 60; i++) {
+      w.move(i % 2 ? "en0/10.0.0.2" : "en0/10.0.0.3");
+      const before = w.wakes.length;
+      await w.tick();
+      if (w.wakes.length > before) at.push(i * WAKE_TICK_MS);
+    }
+    // Before: 60 wakes in these 10 minutes. The first at once, then 1, 2 and 4 minutes later.
+    expect(at).toEqual([10_000, 70_000, 190_000, 430_000]);
+    expect(new Set(w.wakes)).toEqual(new Set(["network"]));
+    // It stops flapping: the change still held wakes when its gap (8 minutes) is over, then a whole gap with no change.
+    for (let i = 0; i < 2 * WAKE_GAP_MAX_MS / WAKE_TICK_MS; i++) await w.tick();
+    expect(w.wakes).toHaveLength(5);
+    w.move("en1/192.168.1.4");
+    await w.tick();
+    expect(w.wakes).toHaveLength(6);
+    w.stop();
+  });
+
+  it("a sleep wakes at once, a network change just held or not", async () => {
+    const w = setup();
+    w.move("en1/10.0.0.7");
+    await w.tick();
+    w.move("en0/192.168.0.10");
+    await w.tick();
+    w.sleep(10 * 60_000);
+    await w.tick();
+    expect(w.wakes).toEqual(["network", "sleep"]);
+    for (let i = 0; i < 12; i++) await w.tick();
+    expect(w.wakes).toEqual(["network", "sleep"]);
     w.stop();
   });
 
