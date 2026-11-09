@@ -299,6 +299,11 @@ its `--timeout` (default 20 s) is ended with SIGTERM, and SIGKILL after as long 
 there is no second). A daemon kept by a service manager (systemd, launchd) is restarted with the manager instead: it
 starts its own again, and the one `restart` started would race it for the profile.
 
+A file `file send` cannot read is refused with its path: one this user may not read is `refused` (exit 1), and one
+that changes on disk while it is copied in (a log still written to, a file being saved: it grew, shrank or was written
+again) is `unavailable` (exit 1, `details.reason: file_changed`, `details.path`), with nothing kept. Send it again once
+nothing writes to it, or send a copy.
+
 ## Bots
 
 An echo bot in one command ([examples/echo-bot.sh](../packages/cli/examples/echo-bot.sh)):
