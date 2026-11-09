@@ -25,7 +25,7 @@ Or use the web app: open [app.ghostly.tools](https://app.ghostly.tools) in Chrom
 
 **From the release zip** (the newest version, or a browser without store access):
 
-1. Download [ghostly-browser-extension-1.10.4.zip](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.10.4/ghostly-browser-extension-1.10.4.zip) from the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest) and unzip it somewhere you will keep.
+1. Download [ghostly-browser-extension-1.10.5.zip](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.10.5/ghostly-browser-extension-1.10.5.zip) from the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest) and unzip it somewhere you will keep.
 2. Open `chrome://extensions` and turn on **Developer mode**.
 3. Click **Load unpacked** and pick the folder.
 
@@ -37,12 +37,12 @@ Download from the [latest release](https://github.com/MiguelMedeiros/ghostly/rel
 
 | Platform | File |
 |---|---|
-| macOS, Apple silicon | [Ghostly_1.10.4_aarch64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.10.4/Ghostly_1.10.4_aarch64.dmg) |
-| macOS, Intel | [Ghostly_1.10.4_x64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.10.4/Ghostly_1.10.4_x64.dmg) |
-| Windows x64, installer | [Ghostly_1.10.4_x64-setup.exe](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.10.4/Ghostly_1.10.4_x64-setup.exe) |
-| Windows x64, MSI | [Ghostly_1.10.4_x64_en-US.msi](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.10.4/Ghostly_1.10.4_x64_en-US.msi) |
-| Linux x64, AppImage | [Ghostly_1.10.4_amd64.AppImage](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.10.4/Ghostly_1.10.4_amd64.AppImage) |
-| Linux x64, Debian/Ubuntu | [Ghostly_1.10.4_amd64.deb](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.10.4/Ghostly_1.10.4_amd64.deb) |
+| macOS, Apple silicon | [Ghostly_1.10.5_aarch64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.10.5/Ghostly_1.10.5_aarch64.dmg) |
+| macOS, Intel | [Ghostly_1.10.5_x64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.10.5/Ghostly_1.10.5_x64.dmg) |
+| Windows x64, installer | [Ghostly_1.10.5_x64-setup.exe](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.10.5/Ghostly_1.10.5_x64-setup.exe) |
+| Windows x64, MSI | [Ghostly_1.10.5_x64_en-US.msi](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.10.5/Ghostly_1.10.5_x64_en-US.msi) |
+| Linux x64, AppImage | [Ghostly_1.10.5_amd64.AppImage](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.10.5/Ghostly_1.10.5_amd64.AppImage) |
+| Linux x64, Debian/Ubuntu | [Ghostly_1.10.5_amd64.deb](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.10.5/Ghostly_1.10.5_amd64.deb) |
 
 - **Updates.** The app offers a new release, downloads it, checks Ghostly's signature and restarts into it. On Linux that is the AppImage; a `.deb` install is sent to the download instead. The check runs only while **Settings → About → Check for updates automatically** is on, and nothing installs without your OK.
 - **Linux has no WebRTC in its WebView** (WebKitGTK ships without it). Chats connect over Iroh, HyperDHT or the DHT, and calls run in the app itself, with GStreamer: the `.deb` depends on its base and good plugins, and the AppImage carries them. On Fedora, openSUSE, Arch and other distributions without `.deb`, use the AppImage. If a plugin is missing, the call buttons name the package to install. Screen sharing is not available on Linux yet.
