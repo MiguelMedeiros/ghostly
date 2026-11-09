@@ -133,6 +133,19 @@ describe("group administration", () => {
     await expect(pictureFrom(join(fixtures, "nothing.jpg"))).rejects.toMatchObject({ code: "not_found" });
   });
 
+  it("says a picture that is not a JPEG is not one, and asks to resize only a JPEG past the bounds", async () => {
+    const png = await pictureFrom(join(fixtures, "avatar.png")).catch((error: Error) => error.message);
+    expect(png).toContain("avatar.png is not a JPEG: convert it to a JPEG of at most 512×512 px");
+    expect(png).not.toContain("resize");
+    const segment = (marker: number, body: number[]) => [0xff, marker, (body.length + 2) >> 8, (body.length + 2) & 0xff, ...body];
+    // 600×600: a JPEG, past the bounds.
+    const big = Buffer.from([0xff, 0xd8, ...segment(0xdb, [0, ...new Array(64).fill(1)]), ...segment(0xc0, [8, 2, 88, 2, 88, 1, 1, 0x11, 0]),
+      ...segment(0xc4, [0, ...new Array(16).fill(0)]), ...segment(0xda, [1, 1, 0, 0, 63, 0]), 0x12, 0x34, 0xff, 0xd9]);
+    const dir = folder();
+    writeFileSync(join(dir, "big.jpg"), big);
+    await expect(pictureFrom(join(dir, "big.jpg"))).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("resize it first") });
+  });
+
   it("takes a picture without the details saved in it, and refuses one they cannot be removed from", async () => {
     const SECRET = "GHOSTLY-SECRET-GPS 52.37N 4.89E";
     const ascii = (value: string) => [...value].map((c) => c.charCodeAt(0));
