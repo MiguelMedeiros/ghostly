@@ -70,6 +70,22 @@ describe("wallets", () => {
     expect(listed.offers.find((o) => o.type === "bark")).toMatchObject({ available: false, reason: expect.stringMatching(/browser/) });
   });
 
+  it("the Lightning card through the mints answers the Cashu balance, not its copy read up to 15 s before", async () => {
+    // Found in a bug hunt: right after `chat pay bob 100` or a `pay` through that card, `wallet list` answered the card's
+    // balance from before the payment (10000 next to Cashu's 9900) until its next 15 s read.
+    const { ctx, node } = fake();
+    const engine = node.getState;
+    node.getState = () => {
+      const s = engine();
+      s.wallet.wallets = [...s.wallet.wallets!, { id: "lightning:testnet:nwc1", type: "lightning", network: "testnet", config: {}, card: "nwc1", name: "Hub", receive: false }];
+      const networks = s.wallet.networks!;
+      networks.testnet = { ...networks.testnet, balance: 30, lightnings: [{ card: "cashu", providerId: "cashu-mint", balance: 42, status: "ready" }, { card: "nwc1", providerId: "nwc", balance: 500, status: "ready" }] } as typeof networks.testnet;
+      return s;
+    };
+    const listed = await callApi(ctx, "wallet.list", {}) as { wallets: { id: string; balance: number }[] };
+    expect(listed.wallets.map((w) => [w.id, w.balance])).toEqual([["cashu:testnet", 30], ["lightning:testnet:cashu", 30], ["lightning:testnet:nwc1", 500]]);
+  });
+
   it("refuse Bark before the engine, pass Fedimint's invite on, and draw a BDK phrase that is never answered", async () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "wallet.create", { type: "bark" })).rejects.toMatchObject({ code: "unavailable" });

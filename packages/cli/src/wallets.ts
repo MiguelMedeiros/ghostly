@@ -4,6 +4,7 @@ import type { WalletNetwork } from "@ghostly/core";
 import type { EngineState, NetworkWalletsView, PaymentView, WalletInstanceView, WalletOffer, WalletType } from "@ghostly/browser/shared/types";
 import { bool, chatOf, findOwnNamedChat, inviteTaken, node, num, oneOf, sentAt, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
+import { CASHU_MINT_SOURCE } from "@ghostly/browser/engine/paymentAdapters/providers/cashuMint";
 import { CliError, type ErrorCode } from "./errors";
 import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "./words";
 import { findSecret, secretWords } from "./secretGuard";
@@ -102,7 +103,9 @@ export function walletJson(instance: WalletInstanceView, s: EngineState) {
     case "cashu": balance = view?.balance ?? null; break;
     case "lightning": {
       const card = view?.lightnings?.find((c) => c.card === instance.card);
-      balance = card?.balance ?? null; status = card?.status ?? null; error = card?.error ?? null;
+      // Through the mints, the card pays from and into the Cashu balance, which the app's card shows (walletCardData):
+      // its own copy is read again only every 15 s, so after a payment it answered the balance from before it.
+      balance = (card?.providerId === CASHU_MINT_SOURCE ? view?.balance : card?.balance) ?? null; status = card?.status ?? null; error = card?.error ?? null;
       break;
     }
     case "arkade": balance = view?.ark?.balance ?? null; address = view?.ark?.address ?? null; error = view?.ark?.error ?? null; break;
