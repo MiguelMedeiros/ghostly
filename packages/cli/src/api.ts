@@ -27,6 +27,7 @@ import { CALL_METHODS } from "./calls/api";
 import { APP_SERVE_METHODS } from "./appServe";
 import { APP_CHAT_METHODS } from "./appChat";
 import { WALLET_METHODS } from "./wallets";
+import { checkOwnStatus, statusJson } from "./ownStatus";
 import { TRANSPORT_NAMES } from "./words";
 import { chatState } from "./waitNotice";
 import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, isLive, messageJson, type MessageJson } from "./views";
@@ -247,6 +248,26 @@ const METHODS: Record<string, Method> = {
       // A listen running the profile: `daemon stop` and `restart` end it too, as their answers say.
       ...(ctx.listen && { listen: true }),
     };
+  },
+
+  /**
+   * This profile's status (WISP 401 § Presence and status), said to every paired contact whose app offers `status/1`:
+   * at once on a live session, else on each chat's next one. A new one replaces the one before, whole.
+   */
+  async "status.get"(ctx) {
+    return statusJson(node(ctx).getOwnStatus().status);
+  },
+  async "status.set"(ctx, params) {
+    const until = params.until === undefined ? undefined : num(params, "until", 0, { min: 1, whole: true });
+    const status = checkOwnStatus({ text: str(params, "text"), emoji: str(params, "emoji"), availability: str(params, "availability"), until }, (field) => field, "bad_request");
+    // Every contact reads it, as the name they see.
+    guardText(status.text, bool(params, "force"), "status", "set it");
+    await node(ctx).setOwnStatus({ status });
+    return statusJson(node(ctx).getOwnStatus().status);
+  },
+  async "status.clear"(ctx) {
+    await node(ctx).clearOwnStatus();
+    return statusJson(node(ctx).getOwnStatus().status);
   },
 
   async "profile.get"(ctx) {
