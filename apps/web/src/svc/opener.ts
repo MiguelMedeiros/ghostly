@@ -10,8 +10,21 @@ import { appInput } from "../../../ui/src/lib/apps/open";
 
 const CLIPBOARD_GUARD: PageGuard = { script: CLIPBOARD_GUARD_SCRIPT, hash: CLIPBOARD_GUARD_HASH };
 
-/** How a request reaches the contact: the engine's `request` for that contact and service. */
+/**
+ * How a request reaches the contact: the engine's `request` for that contact and service. Each chunk of the answer's
+ * `body` is handed over to `serve`: one that spans a whole buffer of its own goes to the services worker as it is (its
+ * buffer moves there, and reads empty here after), any other is copied first.
+ */
 export type ServiceSend = (request: ClientRequest) => Promise<ClientResponse>;
+
+/**
+ * A chunk that is all of a plain buffer (the engine's `HttpClient` gives each one so, already copied out of the link's
+ * frame) is moved to the worker as it is. A view into a larger or shared buffer would move, or fail on, bytes that are
+ * not its own: that one is copied.
+ */
+function ownsBuffer(chunk: Uint8Array): chunk is Uint8Array<ArrayBuffer> {
+  return chunk.buffer instanceof ArrayBuffer && chunk.byteOffset === 0 && chunk.byteLength === chunk.buffer.byteLength;
+}
 
 /**
  * What the opener says when there is no answer: the profile's language, from the app. `hostError`: what it says for
@@ -182,7 +195,7 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     post({ type: "head", status: answer.status, headers: out });
     for await (const chunk of body) {
       if (stop.signal.aborted) break;
-      const bytes = chunk.slice();
+      const bytes = ownsBuffer(chunk) ? chunk : chunk.slice();
       post({ type: "chunk", bytes }, [bytes.buffer]);
     }
     post({ type: "end" });
