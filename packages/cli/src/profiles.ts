@@ -62,6 +62,20 @@ export function checkShownName(name: unknown, field = "name"): string {
   return shown;
 }
 
+/**
+ * `--name` of `profile create` and `profile set`, checked before the profile opens: `checkShownName`'s rule, counted as
+ * it counts (code points once cleaned, so a line break is a space and e + a combining accent is one), refused as a
+ * usage error (exit 2) that names the option, as `app init --title` is. It was the engine's `bad_request` (exit 1),
+ * "name must be up to 64 characters on one line", which named neither the option nor the length given.
+ */
+export function checkShownNameOption(name: string): string {
+  const shown = cleanName(name, Infinity) ?? "";
+  const length = [...shown].length;
+  if (length > MAX_NICK_LENGTH) throw new CliError("usage", `--name is up to ${MAX_NICK_LENGTH} characters, not ${length} characters`);
+  if (name.trim() && !shown) throw new CliError("usage", "--name needs a character that shows (an empty one is no name)");
+  return checkShownName(name);
+}
+
 export function currentProfile(home: string, option?: string): string {
   if (option === "") throw new CliError("usage", "--profile needs a profile name");
   if (option !== undefined) return checkProfileName(option);
