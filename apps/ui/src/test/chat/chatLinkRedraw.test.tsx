@@ -7,7 +7,7 @@ import { Chat } from "../../pages/Chat";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: chat.typing, chat.paired.status, chat.paired.storage
+// covers: chat.typing, chat.paired.status, chat.paired.storage, chat.status.shown
 
 /*
  * The open chat's link changes all the time in ways the page itself shows nothing of: each poll of the contact's
@@ -100,6 +100,23 @@ describe("the open chat on a change of its link that it does not show", () => {
     }
     await tick();
     expect(counts.rows).toBe(0);
+  });
+
+  it("shows the contact's presence and status in the header without drawing the page or its rows", async () => {
+    const { link } = await openChat();
+
+    reset();
+    link({ peerPresence: "active", peerStatus: { availability: "busy", emoji: "🌴", text: "On holiday" } });
+    expect(screen.getByTestId("chat-avatar-presence")).toHaveAttribute("data-tone", "busy");
+    expect(screen.getByTestId("chat-presence-presence")).toHaveTextContent("Online, busy");
+    expect(screen.getByTestId("chat-presence-status-text")).toHaveTextContent("On holiday");
+    for (let i = 0; i < 20; i++) link({ peerPresence: i % 2 ? "idle" : "active", peerStatus: { availability: "busy", emoji: "🌴", text: "On holiday" } });
+    // Gone: no dot, no status.
+    link({});
+    expect(screen.queryByTestId("chat-avatar-presence")).toBeNull();
+    expect(screen.queryByTestId("chat-presence")).toBeNull();
+    await tick();
+    expect(counts).toEqual({ page: 0, rows: 0 });
   });
 
   it("draws a message arriving as its own row only, none of the rows already there", async () => {

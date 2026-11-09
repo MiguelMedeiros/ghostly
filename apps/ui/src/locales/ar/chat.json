@@ -374,6 +374,21 @@
     "pin": "تثبيت",
     "unpin": "إلغاء التثبيت"
   },
+  "presence": {
+    "availability": {
+      "away": "بعيد",
+      "busy": "مشغول",
+      "dnd": "عدم الإزعاج"
+    },
+    "dot": {
+      "away": "متصل، بعيد",
+      "busy": "متصل، مشغول",
+      "dnd": "متصل، عدم الإزعاج",
+      "idle": "متصل، خامل",
+      "online": "متصل"
+    },
+    "status": "الحالة: {{status}}"
+  },
   "preview": {
     "arkAddress": "عنوان Ark",
     "bitcoinAddress": "₿ عنوان Bitcoin",

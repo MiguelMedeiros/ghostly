@@ -327,6 +327,21 @@
     "pin": "ピン留め",
     "unpin": "ピン留めを解除"
   },
+  "presence": {
+    "availability": {
+      "away": "離席中",
+      "busy": "取り込み中",
+      "dnd": "おやすみモード"
+    },
+    "dot": {
+      "away": "オンライン、離席中",
+      "busy": "オンライン、取り込み中",
+      "dnd": "オンライン、おやすみモード",
+      "idle": "オンライン、アイドル",
+      "online": "オンライン"
+    },
+    "status": "ステータス: {{status}}"
+  },
   "preview": {
     "arkAddress": "Ark アドレス",
     "bitcoinAddress": "₿ Bitcoin アドレス",

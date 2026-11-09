@@ -16,6 +16,7 @@ import { contactBadges } from "./contactBadges";
 import { ContactFacePicker } from "./ContactFacePicker";
 import { useContactFace } from "./contactFace";
 import { PeerAvatar } from "../Avatar";
+import { PeerPresenceLine } from "../PresenceMarks";
 import { AvatarOpener } from "../AvatarViewer";
 import { usePeerAvatar } from "../../hooks/useAvatars";
 import { IdCardFace, IdCardMark } from "./IdCardFace";
@@ -78,11 +79,13 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
         <div className="flex min-w-0 items-start gap-3">
           {/* Their picture as the chat shows it; with one, a click opens it large (AvatarViewer.tsx). */}
           <AvatarOpener src={photo} name={name} testId="chat-identities-avatar"
-            className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-surface-hover text-lg">
-            <PeerAvatar peerPubKey={peerKey} label={name} photo={face?.photo} />
+            className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-surface-hover text-lg [--ring:var(--theme-panel-header)]">
+            <PeerAvatar peerPubKey={peerKey} label={name} photo={face?.photo} testId="chat-identities-picture" presence />
           </AvatarOpener>
           <div className="min-w-0">
             <h2 id={titleId} className="contact-panel-title">{t("identities.contact.title", { name })}</h2>
+            {/* Whether they are online, in words (the dot is on their picture), and the status they set. */}
+            <PeerPresenceLine peerKey={peerKey} testId="chat-identities-presence" className="mt-0.5 text-[13px]" />
             <p className="contact-panel-lead">{t("identities.contact.lead")}</p>
           </div>
         </div>
