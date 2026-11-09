@@ -211,7 +211,7 @@ export interface StoredFile {
 }
 
 /** The fields of a stored file that change after it is stored: kept in `STORES.fileState`, read over the record's own. */
-type FileStateFields = Partial<Pick<StoredFile, "bytes" | "digest" | "transfer" | "wire3" | "group">>;
+type FileStateFields = Partial<Pick<StoredFile, "bytes" | "digest" | "transfer" | "wire3" | "group" | "leftOut">>;
 type FileState = { id: string } & FileStateFields;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
