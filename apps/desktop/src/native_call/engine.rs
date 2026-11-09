@@ -2153,7 +2153,8 @@ mod tests {
         }
         if let Some(lab) = &lab {
             let seen = |count: &std::sync::atomic::AtomicUsize| count.load(Ordering::Relaxed);
-            assert_eq!(seen(&lab.seen.allocations), 2);
+            // One per local socket ICE gathers on, each side.
+            assert!(seen(&lab.seen.allocations) >= 2);
             assert!(seen(&lab.seen.channel_data_out) > 20, "ChannelData sent on");
             assert!(seen(&lab.seen.relayed_in) > 20, "relayed back");
         }

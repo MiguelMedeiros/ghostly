@@ -376,7 +376,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const deliveryPeer = platform?.getPeer(session?.peerPubKeyB64 ?? "");
   const pairedReady = deliveryPeer?.pairing?.status === "ready";
   // A paired chat calls over its live session (`calls/1`); why it cannot right now, if it cannot. With Hide my IP on,
-  // media that cannot keep to the relay (the Linux Desktop's) makes no call at all, live or not: that first.
+  // media that cannot keep to the relay makes no call at all, live or not: that first.
   const callsBlocked = webrtc.relayOnlyCallsOff ? t("calls.relayOnlyOff")
     : paired ? callsBlockedText(t, deliveryPeer?.callsUnavailable) : null;
   // The one chat (WISP 400): live over layer 1, or not; what cannot go now waits (a clock beside its time) or is held.
