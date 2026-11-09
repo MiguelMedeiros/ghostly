@@ -1667,6 +1667,21 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 [data-message-bubble] .network-tag[data-network="testnet"]{color:color-mix(in oklab,var(--color-test-money) 50%,var(--color-text-primary))}
 .payment-back-network{margin-inline-start:8px;font-size:9px}
 
+/* A picture opened large (AvatarViewer.tsx) is a portal on the body, outside #root's side insets: a phone on its side
+   keeps the picture and its Close clear of the notch and the rounded corners, at the end the page's direction puts it. */
+.picture-viewer-area {
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+@media (width < 48rem) {
+  .picture-viewer-area { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+}
+.picture-viewer-close {
+  top: max(0.75rem, env(safe-area-inset-top));
+  right: max(0.75rem, env(safe-area-inset-right));
+}
+[dir="rtl"] .picture-viewer-close { right: auto; left: max(0.75rem, env(safe-area-inset-left)); }
+
 /* An app opened alone covers the whole screen: its bar keeps clear of a phone's status bar and notch (webOpener.ts). */
 .alone-bar {
   padding-top: max(0.5rem, env(safe-area-inset-top));
