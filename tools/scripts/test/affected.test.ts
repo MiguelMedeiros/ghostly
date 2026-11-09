@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { codeFiles as repoCode, knownFiles, workspacePackages } from "../affected/files.mjs";
-import { bundleReaches, checkPaths, featureGrep, globToRegExp, packageImports, plan, specsImporting, testsReaching, throughCoreBarrel, UNIT_PROJECTS, workspaceExports } from "../affected/select.mjs";
+import { bundleReaches, checkPaths, featureGrep, globToRegExp, namedPaths, packageImports, plan, specsImporting, testsReaching, throughCoreBarrel, UNIT_PROJECTS, workspaceExports } from "../affected/select.mjs";
 
 // A small repository: a few features, a paths map, specs tagged with them, and core modules behind a barrel.
 const inventory = {
@@ -581,6 +581,102 @@ describe("the rest", () => {
       }
     }
     expect([...missed]).toEqual([]);
+  });
+
+  it("a file a test of another project reads from disk by its name runs that test", () => {
+    // Only the scripts project had a `reads` list: a changed nginx-headers.conf, tauri.conf.json or docs/CLI.md ran
+    // none of the app's or the CLI's tests that read it, and they went red first in the train's batch.
+    const codeFiles = {
+      "apps/ui/src/test/security/csp.test.ts": `const read = (path: string) => readFileSync(join(import.meta.dirname, "../../../../..", path), "utf8");
+const web = () => read("apps/web/nginx-headers.conf");`,
+      "apps/ui/src/test/ui/ink.test.ts": `const SRC = join(fileURLToPath(import.meta.url), "../../..");\nconst CSS = readFileSync(join(SRC, "index.css"), "utf8");`,
+      "apps/ui/src/test/app/sounds.test.ts": `const main = readFileSync(join(import.meta.dirname, "..", "..", "..", "..", "web", "src", "main.tsx"), "utf8");`,
+      "apps/ui/src/test/pwa/icons.test.ts": "for (const icon of icons) read(`apps/web/public${icon.src}`);",
+      "apps/ui/src/test/chat/bubble.test.tsx": `import { Bubble } from "../../components/Bubble";\nvi.mock("../../lib/sounds");`,
+      "packages/cli/test/agentDocs.test.ts": `const ROOT = resolve(import.meta.dirname, "../../..");\nconst DOCS = ["packages/cli/SKILL.md", "docs/AI-AGENTS.md"];
+for (const doc of [...DOCS, "docs/CLI.md"]) readFileSync(resolve(ROOT, doc), "utf8");`,
+      "packages/cli/test/appInit.test.ts": `paths: { "@ghostlytools/sdk/app": [resolve(import.meta.dirname, "../../sdk/src/app.ts")] }`,
+      "packages/core/test/atproto.test.ts": "const fixture = (name: string) => readFileSync(new URL(`./fixtures/atproto/${name}`, import.meta.url));",
+      "apps/extension/test/locales.test.ts": `const LOCALES = join(import.meta.dirname, "..", "public", "_locales");`,
+    };
+    const run = (file: string) => Object.fromEntries(plan({ changed: changed(file), inventory, e2eFiles, codeFiles }).unit
+      .filter((u) => u.mode !== "skip").map((u) => [u.name, (u.files ?? []).filter((f: string) => f.includes(".test."))]));
+    expect(run("apps/web/nginx-headers.conf").ui).toEqual(["apps/ui/src/test/security/csp.test.ts"]);
+    expect(run("apps/ui/src/index.css").ui).toEqual(["apps/ui/src/test/ui/ink.test.ts"]);
+    expect(run("apps/web/src/main.tsx").ui).toEqual(["apps/ui/src/test/app/sounds.test.ts"]);
+    expect(run("apps/web/public/icon-512.png").ui).toEqual(["apps/ui/src/test/pwa/icons.test.ts"]);
+    expect(run("docs/CLI.md")).toEqual({ cli: ["packages/cli/test/agentDocs.test.ts"] });
+    expect(run("packages/cli/SKILL.md").cli).toEqual(["packages/cli/test/agentDocs.test.ts"]);
+    expect(run("-docs/AI-AGENTS.md").cli).toEqual(["packages/cli/test/agentDocs.test.ts"]);
+    expect(run("packages/sdk/src/app.ts").cli).toEqual(["packages/cli/test/appInit.test.ts"]);
+    expect(run("packages/core/test/fixtures/atproto/repo.car").core).toEqual(["packages/core/test/atproto.test.ts"]);
+    expect(run("apps/extension/public/_locales/de/messages.json").extension).toEqual(["apps/extension/test/locales.test.ts"]);
+    // What it imports is vitest's to follow, and a file no test names runs none of them.
+    expect(run("apps/ui/src/components/Bubble.tsx").ui).toEqual([]);
+    expect(run("apps/ui/src/lib/sounds.ts").ui).toEqual([]);
+    expect(run("docs/TESTING.md")).toEqual({});
+    expect(run("apps/web/nginx.conf").ui).toBeUndefined();
+  });
+
+  describe("the real repository", () => {
+    const root = join(import.meta.dirname, "..", "..", "..");
+    const projects = UNIT_PROJECTS.filter((p) => p.tests.length && !p.reads);
+    const tests: Record<string, string> = {};
+    const walk = (dir: string): void => {
+      for (const name of readdirSync(join(root, dir))) {
+        const path = `${dir}/${name}`;
+        if (name === "node_modules" || name === "dist") continue;
+        if (statSync(join(root, path)).isDirectory()) walk(path);
+        else if (/\.test\.[cm]?[jt]sx?$/.test(name) && projects.some((p) => p.tests.some((g) => globToRegExp(g).test(path)))) tests[path] = readFileSync(join(root, path), "utf8");
+      }
+    };
+    for (const dir of ["apps/ui/src", "apps/extension/test", "apps/mini", "packages", "e2e/matrix"]) walk(dir);
+
+    it("a config, crate, doc or skill the app's, the extension's or the CLI's tests read runs those tests", { timeout: 30_000 }, () => {
+      const cases: [string, string, string[]][] = [
+        ["apps/web/nginx-headers.conf", "ui", ["apps/ui/src/test/security/contentSecurityPolicy.test.ts"]],
+        ["apps/desktop/tauri.conf.json", "ui", ["apps/ui/src/test/security/contentSecurityPolicy.test.ts", "apps/ui/src/test/desktop/windowFirstMouse.test.ts", "apps/ui/src/test/chat/messageBubble.test.tsx"]],
+        ["apps/extension/public/manifest.json", "ui", ["apps/ui/src/test/security/contentSecurityPolicy.test.ts"]],
+        ["apps/desktop/src/hyperdht.rs", "ui", ["apps/ui/src/test/i18n/errorText.test.ts"]],
+        ["native/transports/src/iroh_transport.rs", "ui", ["apps/ui/src/test/i18n/errorText.test.ts"]],
+        ["apps/web/index.html", "ui", ["apps/ui/src/test/pwa/manifest.test.ts"]],
+        ["apps/website/lib/pageMeta.ts", "ui", ["apps/ui/src/test/pwa/manifest.test.ts"]],
+        ["packages/sdk/src/app.ts", "cli", ["packages/cli/test/appInit.test.ts"]],
+        ["docs/CLI.md", "cli", ["packages/cli/test/agentDocs.test.ts"]],
+        ["docs/AI-AGENTS.md", "cli", ["packages/cli/test/agentDocs.test.ts", "packages/cli/test/agentConduct.test.ts"]],
+        ["packages/cli/SKILL.md", "cli", ["packages/cli/test/agentDocs.test.ts", "packages/cli/test/agentConduct.test.ts"]],
+        ["apps/extension/public/_locales/en/messages.json", "extension", ["apps/extension/test/manifestLocales.test.ts"]],
+      ];
+      for (const [file, project, readers] of cases) {
+        const p = byName(plan({ changed: changed(file), inventory, e2eFiles, codeFiles: tests }).unit)[project];
+        expect(p.mode, file).toBe("related");
+        expect(p.files, file).toEqual(expect.arrayContaining(readers));
+      }
+      // A doc none of them reads still runs none of them.
+      const names = projects.map((p) => p.name);
+      const doc = plan({ changed: changed("docs/TESTING.md"), inventory, e2eFiles, codeFiles: tests }).unit;
+      expect(doc.filter((u) => names.includes(u.name)).every((u) => u.mode === "skip")).toBe(true);
+    });
+
+    it("every repository file a test reads by name runs that test", { timeout: 30_000 }, () => {
+      // `read("x")`, `readFileSync(join(ROOT, "x"))`, `join(import.meta.dirname, "../../..", "x")` and the like: each
+      // existing file such a call names must be among the paths plan() sees the test name (namedPaths).
+      const reads = /\b(?:read|json|source|root|readFileSync|readdirSync|existsSync|statSync)\(\s*(?:(?:join|resolve)\(\s*[\w.]+(?:\([^()]*\))?\s*,\s*)?((?:["'][^"'`$\n]+["']\s*,\s*)*["'][^"'`$\n]+["'])/g;
+      const missed: string[] = [];
+      for (const [test, text] of Object.entries(tests)) {
+        const dir = test.split("/").slice(0, -1).join("/");
+        const named = namedPaths(test, text);
+        for (const [, args] of text.matchAll(reads)) {
+          const name = [...args.matchAll(/["']([^"']+)["']/g)].map((m) => m[1]).join("/");
+          const file = [root, join(root, dir), join(root, test)].map((base) => join(base, name)).find((f) => f.startsWith(`${root}/`) && existsSync(f) && statSync(f).isFile());
+          if (!file) continue;
+          const path = file.slice(root.length + 1);
+          if (!named.some((n) => n.path === path || (n.dir && path.startsWith(`${n.path}/`)))) missed.push(`${test} reads ${path}`);
+        }
+      }
+      expect(Object.keys(tests).length).toBeGreaterThan(1000);
+      expect(missed).toEqual([]);
+    });
   });
 
   it("a file whose named paths CI's gates must cover runs the check of them, which reads it from disk", () => {
