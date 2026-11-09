@@ -151,6 +151,8 @@ test.describe("service worker", () => {
     await expect(ana.page.getByTestId("share-picker")).toBeVisible();
     await expect(ana.page.getByTestId("share-files")).toHaveText("ghost.txt");
     await expect(ana.page.getByTestId("share-text")).toHaveText("Look at this\nhttps://example.com/boo");
+    // The picker opened by itself: the share takes a press only once it has been said.
+    await expect(ana.page.getByTestId("share-next")).toContainText("ghost.txt");
     await ana.page.getByTestId("share-chat").click();
 
     await expect(ana.page).toHaveURL(/#\/chat\//);
@@ -187,6 +189,7 @@ test.describe("service worker", () => {
     }
     await expect(ana.page.getByTestId("share-dropped-title")).toHaveText("2 more shares couldn't be kept: 3 were already waiting.", { timeout: 15_000 });
     await expect(text(ana.page)).toHaveText("share number 1");
+    await expect(ana.page.getByTestId("share-next")).toContainText("share number 1");
     for (const n of [2, 3]) {
       await ana.page.getByTestId("share-cancel").click();
       await expect(text(ana.page)).toHaveText(`share number ${n}`);
@@ -214,6 +217,7 @@ test.describe("service worker", () => {
     await expect(text).toHaveText("share number 1");
 
     // Picked for a chat: the picker shows the one that waited behind it, and the last one picked opens its chat.
+    await expect(ana.page.getByTestId("share-next")).toContainText("share number 1");
     await ana.page.getByTestId("share-chat").click();
     await expect(text).toHaveText("share number 2");
     await expect(ana.page).toHaveURL(/#\/shared$/);
@@ -246,6 +250,7 @@ test.describe("service worker", () => {
       await expect(text).toHaveText("share number 1");
 
       // A chat picked with Enter: the focus goes to the page's heading, so Enter again picks nothing.
+      await expect(said).toContainText("share number 1");
       await ana.page.getByTestId("share-chat").focus();
       await ana.page.keyboard.press("Enter");
       await expect(text).toHaveText("share number 2");

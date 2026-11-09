@@ -39,10 +39,17 @@ export function SharePicker() {
   const preview = share ? sharePreview(share) : "";
   const filesName = (shown: IncomingShare) => shown.files.length === 1 ? shown.files[0]!.name || t("pwa.shareOneFile") : t("pwa.shareFiles", { count: String(shown.files.length) });
 
-  // The next share shown in place of the one just picked or put aside: said, and not acted on before it is.
+  // Each share shown (the first, and the next in place of the one just picked or put aside): said, and not acted on before it is.
   const [said, setSaid] = useState("");
   const shownAt = useRef(0);
   const settling = () => Date.now() - shownAt.current < SEARCH_STATUS_SETTLE_MS;
+  const say = (shown: IncomingShare) => isEmptyShare(shown) ? "" : [t("pwa.shareFrom"), shown.files.length ? filesName(shown) : "", sharePreview(shown)].filter(Boolean).join(" ");
+  // The first share shown is said and waits as long: the picker may have opened by itself (a share forwarded to this
+  // tab moves it here from any screen), under a press meant for the screen it replaced.
+  if (share && !shownAt.current) {
+    shownAt.current = Date.now();
+    setSaid(say(share));
+  }
   /**
    * Another share waited behind this one (the web app's, `receiveShare` with `queue`): the picker shows it now. The
    * focus leaves the button just pressed for the page's heading and the page is scrolled to the new share, which is
@@ -51,7 +58,7 @@ export function SharePicker() {
    */
   const showNext = (next: IncomingShare) => {
     shownAt.current = Date.now();
-    setSaid(isEmptyShare(next) ? "" : [t("pwa.shareFrom"), next.files.length ? filesName(next) : "", sharePreview(next)].filter(Boolean).join(" "));
+    setSaid(say(next));
     document.querySelector<HTMLElement>('[data-testid="share-picker"] h1')?.focus();
     document.querySelector<HTMLElement>('[data-testid="share-picker"] [data-page-body]')?.scrollTo?.({ top: 0 });
   };
