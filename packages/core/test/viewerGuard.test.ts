@@ -36,6 +36,8 @@ describe("the WebRTC guard of a contact's app (Hide my IP from contacts)", () =>
     expect(VIEWER_GUARD_SCRIPT.startsWith("(function noWebRtc(w) {")).toBe(true);
     // Desktop keeps a raw copy, and an HTML page reads it inline: nothing that would change on the way.
     expect(VIEWER_GUARD_SCRIPT).not.toMatch(/[\\`]|\$\{|<\/script/i);
+    // What a frame element hands out is guarded first, and the shadow trees the page makes are watched for `srcdoc`.
+    for (const name of ["contentWindow", "contentDocument", "getSVGDocument", "attachShadow", "HTMLObjectElement"]) expect(VIEWER_GUARD_SCRIPT).toContain(name);
     expect(VIEWER_GUARD_CSP).toBe("frame-src 'self'; object-src 'self'; require-trusted-types-for 'script'");
   });
 
@@ -98,6 +100,12 @@ describe("the WebRTC guard of a contact's app (Hide my IP from contacts)", () =>
     expect((await noScripts([["content-type", "text/html"], ["content-encoding", "gzip"]], "zipped")).policies).toContain("script-src 'none'");
     expect((await noScripts([["content-type", "text/html; charset=UTF-16LE"]], "<\0p\0")).policies).toContain("script-src 'none'");
     expect((await noScripts([["content-type", "text/html"]], new Uint8Array([0xff, 0xfe, 0x3c, 0]))).policies).toContain("script-src 'none'");
+    // Two types: a browser renders the last (an SVG, whose script would run with the guard's text beside it, not run).
+    expect(await noScripts([["content-type", "text/html"], ["Content-Type", "image/svg+xml"]], svg)).toEqual({ policies: [VIEWER_GUARD_CSP, "script-src 'none'"], text: svg });
+    expect(await noScripts([["content-type", "text/html, image/svg+xml"]], svg)).toEqual({ policies: [VIEWER_GUARD_CSP, "script-src 'none'"], text: svg });
+    expect((await noScripts([["content-type", "text/html"], ["content-type", "text/html"]], "<p>twice")).policies).toContain("script-src 'none'");
+    expect((await noScripts([["content-type", "text/html"], ["content-encoding", "identity"], ["content-encoding", "gzip"]], "zipped")).policies).toContain("script-src 'none'");
+    expect((await noScripts([["content-type", "text/html"], ["content-encoding", "identity, br"]], "zipped")).policies).toContain("script-src 'none'");
     // A script, a picture, a worker: not a page; only the policy goes along.
     expect(await noScripts([["content-type", "text/html"]], "<p>fetched"), ).toMatchObject({ text: `${TAG}<p>fetched` });
     expect(await noScripts([["content-type", "text/html"]], "<p>fetched", "empty")).toEqual({ policies: [VIEWER_GUARD_CSP], text: "<p>fetched" });

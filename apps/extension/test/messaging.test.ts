@@ -433,21 +433,6 @@ describe("viewer tabs", () => {
     });
   });
 
-  it("keeps a tab opened while Hide my IP from contacts is on off WebRTC: the guard runs in each of its frames first", async () => {
-    // covers: settings.network.relay-only
-    const { VIEWER_GUARD_SCRIPT } = await import("@ghostly/core");
-    const hidden = await openViewer(world, PEER, SERVICE, TAG, undefined, true);
-    const shown = await openViewer(world, PEER, SERVICE, OTHER_TAG);
-    const commands = (tabId: number) => world.callsTo("debugger.sendCommand").filter(([target]) => (target as { tabId: number }).tabId === tabId).map(([, method, params]) => [method, params]);
-    // Set before the tab goes to the app: every document of it from then on, frames too, runs it before its own code.
-    expect(commands(hidden)).toEqual([
-      ["Fetch.enable", { patterns: [{ urlPattern: "https://*.invalid/*", requestStage: "Request" }] }],
-      ["Page.enable", undefined],
-      ["Page.addScriptToEvaluateOnNewDocument", { source: VIEWER_GUARD_SCRIPT }],
-    ]);
-    expect(commands(shown).map(([method]) => method)).toEqual(["Fetch.enable", "Page.enable"]);
-  });
-
   it("joins a body DevTools hands over in several pieces", async () => {
     const tabId = await openViewer(world);
     const b64 = (s: string) => Buffer.from(s).toString("base64");

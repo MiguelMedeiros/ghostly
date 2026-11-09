@@ -1,4 +1,4 @@
-import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders, viewerServicePolicy, withViewerPolicy, VIEWER_GUARD_SCRIPT } from "@ghostly/core";
+import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders, viewerServicePolicy, withViewerPolicy } from "@ghostly/core";
 import type { EngineStatus, HttpRequestReply, RuntimeMessage, ViewerPage } from "./messages";
 import { fromOwnPage } from "./shared/sender";
 import { parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
@@ -337,7 +337,7 @@ const PROTOCOL_VERSION = "1.3";
 const RELAY_ONLY_REFUSED = "A contact's app does not open in the browser extension while Hide my IP from contacts is on";
 
 /** The DevTools commands a viewer tab needs. Nothing else is ever sent. */
-const VIEWER_COMMANDS = new Set(["Fetch.enable", "Page.enable", "Page.addScriptToEvaluateOnNewDocument", "Fetch.fulfillRequest", "Fetch.failRequest"]);
+const VIEWER_COMMANDS = new Set(["Fetch.enable", "Page.enable", "Fetch.fulfillRequest", "Fetch.failRequest"]);
 
 /**
  * Added to Ghostly's policy on every page a viewer serves: the app opens no window or tab of its own, which would run
@@ -498,9 +498,6 @@ async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string,
       patterns: [{ urlPattern: VIEWER_URL_PATTERN, requestStage: "Request" }],
     });
     await devtools(tab.id, "Page.enable");
-    // Hide my IP from contacts: no policy keeps the app off WebRTC. Chrome runs this first in each document of the
-    // tab from now on, every frame's included (`VIEWER_GUARD_SCRIPT`).
-    if (relayOnly) await devtools(tab.id, "Page.addScriptToEvaluateOnNewDocument", { source: VIEWER_GUARD_SCRIPT });
   } catch (error) {
     await chrome.tabs.remove(tab.id).catch(() => {});
     // `closeViewers` took the tab while DevTools attached to it.

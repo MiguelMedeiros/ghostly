@@ -53,8 +53,10 @@ const SERVICE_CSP_RELAY_ONLY: &str = "default-src 'self' data: blob: 'unsafe-inl
 /// `new RTCPeerConnection` with a STUN server the contact names shows that server this device's address
 /// (WebView2 and WKWebView have WebRTC; WebKitGTK only when built with it). This runs first in every frame
 /// of the window (`initialization_script_for_all_frames`): it deletes the WebRTC constructors, opens new
-/// windows with `noopener`, and runs again in each frame and `srcdoc` of a document as it is made. The same
-/// text as `VIEWER_GUARD_SCRIPT` in `packages/core/src/viewerGuard.ts`.
+/// windows with `noopener`, and guards a frame's window before the page holds it (what a frame element
+/// hands out, the frames of a document as one loads or the page changes, each `srcdoc`), for a frame the
+/// WebView did not run it in. The same text as `VIEWER_GUARD_SCRIPT` in `packages/core/src/viewerGuard.ts`,
+/// which says what a script in the page cannot do.
 const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
   "use strict";
   try {
@@ -81,27 +83,63 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
     w.Document.prototype.open = function () {
       return arguments.length > 2 ? w.open(arguments[0], arguments[1]) : apply(reopen, this, arguments);
     };
-    const { getAttribute, setAttribute, removeAttribute } = w.Element.prototype;
+    const describe = Object.getOwnPropertyDescriptor;
+    const define = Object.defineProperty;
+    const shut = (inner) => {
+      try { if (inner && inner !== w && ("RTCPeerConnection" in inner || "webkitRTCPeerConnection" in inner)) noWebRtc(inner); } catch (e) {}
+    };
+    const count = describe(w, "length").get;
+    const view = describe(w.Document.prototype, "defaultView").get;
+    const slice = String.prototype.slice;
+    const sweep = () => {
+      try { for (let i = apply(count, w, []); i-- > 0;) shut(w[i]); } catch (e) {}
+    };
+    for (const kind of ["HTMLIFrameElement", "HTMLFrameElement", "HTMLObjectElement", "HTMLEmbedElement"]) {
+      const proto = w[kind] && w[kind].prototype;
+      for (const name of ["contentWindow", "contentDocument", "getSVGDocument"]) {
+        const found = proto && describe(proto, name);
+        const key = found && found.get ? "get" : "value";
+        if (!found || typeof found[key] !== "function") continue;
+        const read = found[key];
+        found[key] = function () {
+          const got = apply(read, this, arguments);
+          try { shut(name === "contentWindow" ? got : apply(view, got, [])); } catch (e) {}
+          return got;
+        };
+        try { define(proto, name, found); } catch (e) {}
+      }
+    }
+    const { getAttribute, setAttribute, removeAttribute, attachShadow } = w.Element.prototype;
+    const size = describe(w.NodeList.prototype, "length").get;
     const first = (frame) => {
       const doc = apply(getAttribute, frame, ["srcdoc"]);
-      if (doc === null || doc.slice(0, own.length) === own) return;
+      if (doc === null || apply(slice, doc, [0, own.length]) === own) return;
       try { apply(setAttribute, frame, ["srcdoc", own + doc]); } catch (e) { apply(removeAttribute, frame, ["srcdoc"]); }
     };
-    new w.MutationObserver((records) => {
-      for (const record of records) {
-        if (record.type === "attributes") first(record.target);
-        else for (const node of record.addedNodes) {
-          if (node.nodeType !== 1) continue;
-          if (node.localName === "iframe") first(node);
-          if (node.firstElementChild) for (const frame of node.querySelectorAll("iframe[srcdoc]")) first(frame);
-        }
-      }
-    }).observe(w.document, { subtree: true, childList: true, attributes: true, attributeFilter: ["srcdoc"] });
-    w.document.addEventListener("load", (event) => {
-      let inner = null;
-      try { inner = event.target.contentWindow; } catch (e) {}
-      try { if (inner && ("RTCPeerConnection" in inner || "webkitRTCPeerConnection" in inner)) noWebRtc(inner); } catch (e) {}
-    }, true);
+    const Observer = w.MutationObserver;
+    const observe = Observer.prototype.observe;
+    const watch = (root, all) => {
+      const scan = () => {
+        try {
+          const frames = apply(all, root, ["iframe[srcdoc]"]);
+          for (let i = apply(size, frames, []); i-- > 0;) first(frames[i]);
+        } catch (e) {}
+        sweep();
+      };
+      apply(observe, new Observer(scan), [root, { subtree: true, childList: true, attributes: true, attributeFilter: ["srcdoc"] }]);
+      scan();
+      return root;
+    };
+    const inShadow = w.DocumentFragment.prototype.querySelectorAll;
+    if (attachShadow) {
+      w.Element.prototype.attachShadow = function () {
+        const root = apply(attachShadow, this, arguments);
+        try { watch(root, inShadow); } catch (e) {}
+        return root;
+      };
+    }
+    w.document.addEventListener("load", sweep, true);
+    watch(w.document, w.Document.prototype.querySelectorAll);
   } catch (e) {}
 })(window)"#;
 

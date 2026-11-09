@@ -2,17 +2,23 @@ import { concatBytes, utf8Encode } from "./bytes";
 import type { HeaderList } from "./frames";
 
 /**
- * Hide my IP from contacts and a contact's shared app: no policy keeps a page off WebRTC (CSP does not cover ICE, and
- * no permissions policy names it), and a `new RTCPeerConnection` with a STUN server the contact names shows that server
- * this device's address. While the setting is on, this script runs first in every realm of the app's page (the
- * extension's viewer tab and Desktop's window run it in every frame themselves; the web runner and `service open` put
- * it first in each HTML page, `guardViewerAnswer`). It:
+ * Hide my IP from contacts and a contact's shared app: no policy keeps a page off WebRTC (CSP does not cover ICE, its
+ * `webrtc 'block'` is not in Chromium or WebKit, and no permissions policy names it), and a `new RTCPeerConnection` with
+ * a STUN server the contact names shows that server this device's address. While the setting is on, this script runs
+ * first in the app's page: Desktop's window runs it in every frame itself, and the web runner puts it first in each
+ * HTML page (`guardViewerAnswer`). It:
  * - deletes the WebRTC constructors (every `RTC…` and `webkitRTC…` name), as Desktop's app runner does;
  * - opens every new window with `noopener`, so the page never holds a window it did not run in;
- * - runs again in each frame of its document as the frame loads: an empty frame's first load fires as it is put in the
- *   page, before the code that put it there goes on;
- * - puts itself first in each `srcdoc` frame, and, with `VIEWER_GUARD_CSP`, refuses `javascript:` URLs (its own
- *   Trusted Types default policy: one passes every other string on as it is).
+ * - runs in a frame's window before the page holds it: what a frame element hands out (`contentWindow`,
+ *   `contentDocument`, `getSVGDocument`) is guarded first, in a shadow tree too, and the frames of the document are
+ *   gone over as one loads (an empty frame's first load fires as it is put in the page) and as the page changes;
+ * - puts itself first in each `srcdoc` frame, in the shadow trees the page makes too, and, with `VIEWER_GUARD_CSP`,
+ *   refuses `javascript:` URLs (its own Trusted Types default policy: one passes every other string on as it is).
+ * It uses nothing the page can change after it ran (the page's own code runs later, in the same realm).
+ *
+ * What a script put in the page cannot do, so where the viewer does not run it per document this is not a guarantee:
+ * a frame's window read by its index (`window[0]`, never through the frame element) while the frame's page is still
+ * on its way, and a `srcdoc` frame inside a shadow tree written in the page's HTML, run before the guard is there.
  * No backslash, `${` or backtick in it: Desktop's copy (`SERVICE_GUARD`, apps/desktop/src/viewer.rs) is the same text.
  */
 export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
@@ -41,32 +47,68 @@ export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
     w.Document.prototype.open = function () {
       return arguments.length > 2 ? w.open(arguments[0], arguments[1]) : apply(reopen, this, arguments);
     };
-    const { getAttribute, setAttribute, removeAttribute } = w.Element.prototype;
+    const describe = Object.getOwnPropertyDescriptor;
+    const define = Object.defineProperty;
+    const shut = (inner) => {
+      try { if (inner && inner !== w && ("RTCPeerConnection" in inner || "webkitRTCPeerConnection" in inner)) noWebRtc(inner); } catch (e) {}
+    };
+    const count = describe(w, "length").get;
+    const view = describe(w.Document.prototype, "defaultView").get;
+    const slice = String.prototype.slice;
+    const sweep = () => {
+      try { for (let i = apply(count, w, []); i-- > 0;) shut(w[i]); } catch (e) {}
+    };
+    for (const kind of ["HTMLIFrameElement", "HTMLFrameElement", "HTMLObjectElement", "HTMLEmbedElement"]) {
+      const proto = w[kind] && w[kind].prototype;
+      for (const name of ["contentWindow", "contentDocument", "getSVGDocument"]) {
+        const found = proto && describe(proto, name);
+        const key = found && found.get ? "get" : "value";
+        if (!found || typeof found[key] !== "function") continue;
+        const read = found[key];
+        found[key] = function () {
+          const got = apply(read, this, arguments);
+          try { shut(name === "contentWindow" ? got : apply(view, got, [])); } catch (e) {}
+          return got;
+        };
+        try { define(proto, name, found); } catch (e) {}
+      }
+    }
+    const { getAttribute, setAttribute, removeAttribute, attachShadow } = w.Element.prototype;
+    const size = describe(w.NodeList.prototype, "length").get;
     const first = (frame) => {
       const doc = apply(getAttribute, frame, ["srcdoc"]);
-      if (doc === null || doc.slice(0, own.length) === own) return;
+      if (doc === null || apply(slice, doc, [0, own.length]) === own) return;
       try { apply(setAttribute, frame, ["srcdoc", own + doc]); } catch (e) { apply(removeAttribute, frame, ["srcdoc"]); }
     };
-    new w.MutationObserver((records) => {
-      for (const record of records) {
-        if (record.type === "attributes") first(record.target);
-        else for (const node of record.addedNodes) {
-          if (node.nodeType !== 1) continue;
-          if (node.localName === "iframe") first(node);
-          if (node.firstElementChild) for (const frame of node.querySelectorAll("iframe[srcdoc]")) first(frame);
-        }
-      }
-    }).observe(w.document, { subtree: true, childList: true, attributes: true, attributeFilter: ["srcdoc"] });
-    w.document.addEventListener("load", (event) => {
-      let inner = null;
-      try { inner = event.target.contentWindow; } catch (e) {}
-      try { if (inner && ("RTCPeerConnection" in inner || "webkitRTCPeerConnection" in inner)) noWebRtc(inner); } catch (e) {}
-    }, true);
+    const Observer = w.MutationObserver;
+    const observe = Observer.prototype.observe;
+    const watch = (root, all) => {
+      const scan = () => {
+        try {
+          const frames = apply(all, root, ["iframe[srcdoc]"]);
+          for (let i = apply(size, frames, []); i-- > 0;) first(frames[i]);
+        } catch (e) {}
+        sweep();
+      };
+      apply(observe, new Observer(scan), [root, { subtree: true, childList: true, attributes: true, attributeFilter: ["srcdoc"] }]);
+      scan();
+      return root;
+    };
+    const inShadow = w.DocumentFragment.prototype.querySelectorAll;
+    if (attachShadow) {
+      w.Element.prototype.attachShadow = function () {
+        const root = apply(attachShadow, this, arguments);
+        try { watch(root, inShadow); } catch (e) {}
+        return root;
+      };
+    }
+    w.document.addEventListener("load", sweep, true);
+    watch(w.document, w.Document.prototype.querySelectorAll);
   } catch (e) {}
 })(window)`;
 
 /** `VIEWER_GUARD_SCRIPT`'s hash, as a CSP source: a contact's own policy that would refuse it is given it (`allowingViewerGuard`). */
-export const VIEWER_GUARD_HASH = "'sha256-t2GKPZLdbwAQ3Qydx72W9xbSvWkZ37U4hC7AsPexDC0='";
+export const VIEWER_GUARD_HASH = "'sha256-JJJNeZ+FjP0YKC8KO9GDCklx4N232i8qFe6XowhxGH4='";
 
 /**
  * With the guard, where it is put in the page and not run by the viewer in every frame: frames only from the app's own
@@ -160,19 +202,21 @@ const LOOK_BYTES = 64 * 1024;
 
 /**
  * A contact's answer as a viewer serves it while Hide my IP from contacts is on, where the viewer cannot run the guard
- * in every frame itself (the web runner, `service open`): the contact's policies take the guard's hash
+ * in every frame itself (the web runner): the contact's policies take the guard's hash
  * (`allowingViewerGuard`) and `VIEWER_GUARD_CSP` goes along. A page (`destination`, null when the browser did not say)
- * that is HTML gets the guard first in it; one the guard cannot be put in (another type, a compressed or UTF-16 body)
- * runs no script at all. Anything that is not a page passes as it was. The caller adds Ghostly's own policy as before.
+ * that is HTML gets the guard first in it; one the guard cannot be put in (another type, more than one type, a
+ * compressed or UTF-16 body) runs no script at all. Anything that is not a page passes as it was. The caller adds Ghostly's own policy as before.
  */
 export async function guardViewerAnswer(headers: HeaderList, body: AsyncIterable<Uint8Array>, destination: string | null): Promise<{ headers: HeaderList; body: AsyncIterable<Uint8Array> }> {
   const out: HeaderList = headers.map(([name, value]) => [name, name.toLowerCase() === "content-security-policy" ? allowingViewerGuard(value) : value]);
   out.push(["content-security-policy", VIEWER_GUARD_CSP]);
   if (destination !== null && !DOCUMENT_DESTINATIONS.has(destination.toLowerCase())) return { headers: out, body };
-  const value = (name: string) => headers.find(([n]) => n.toLowerCase() === name)?.[1].toLowerCase().trim() ?? "";
-  const type = value("content-type");
+  const values = (name: string) => headers.filter(([n]) => n.toLowerCase() === name).map(([, value]) => value.toLowerCase().trim());
+  // One type, said once: of two (two headers, or a list in one) a browser reads the last, which may not be the one read here.
+  const types = values("content-type");
+  const type = types.length === 1 && !types[0].includes(",") ? types[0] : "";
   const html = type.split(";")[0].trim() === "text/html" && !/charset\s*=\s*"?utf-16/.test(type);
-  const encoded = !["", "identity"].includes(value("content-encoding"));
+  const encoded = values("content-encoding").some((encoding) => !["", "identity"].includes(encoding));
   const noScripts = () => ({ headers: [...out, ["content-security-policy", NO_SCRIPTS_CSP] as [string, string]], body });
   if (!html || encoded) return noScripts();
 
