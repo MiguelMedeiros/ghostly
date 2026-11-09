@@ -224,6 +224,64 @@ export function relativeImports(file, text) {
 }
 
 /**
+ * The workspace packages' entry points, from their package.json files (path → text): name → [subpath, file] pairs,
+ * each file relative to the repository root. "exports" as Node reads it (a string, a map of subpaths, conditions:
+ * `import`, then `default`), or "main" without it. A `*` in a subpath stands for the rest of the specifier.
+ *
+ * @param {Record<string, string>} manifests
+ * @returns {Record<string, [string, string][]>}
+ */
+export function workspaceExports(manifests) {
+  /** @type {Record<string, [string, string][]>} */
+  const out = {};
+  const target = (t) => (typeof t === "string" ? t : t && typeof t === "object" ? target(t.import ?? t.default) : null);
+  for (const [path, text] of Object.entries(manifests)) {
+    let pkg;
+    try { pkg = JSON.parse(text); } catch { continue; }
+    const entry = pkg?.exports ?? pkg?.main;
+    if (typeof pkg?.name !== "string" || entry === undefined) continue;
+    const dir = path.split("/").slice(0, -1).join("/");
+    const map = entry && typeof entry === "object" && Object.keys(entry).some((k) => k.startsWith(".")) ? entry : { ".": entry };
+    out[pkg.name] = Object.entries(map)
+      .map(([sub, t]) => [sub, target(t)])
+      .filter(([, t]) => typeof t === "string")
+      .map(([sub, t]) => [sub, [dir, t.replace(/^\.\//, "")].filter(Boolean).join("/")]);
+  }
+  return out;
+}
+
+/** What following package names meant before plan() was given the workspaces' exports: core's barrel, browser's src. */
+/** @type {Record<string, [string, string][]>} */
+const KNOWN_PACKAGES = { "@ghostly/core": [[".", "packages/core/src/index.ts"]], "@ghostly/browser": [["./*", "packages/browser/src/*.ts"]] };
+
+/**
+ * The workspace files a file imports by package name (`@ghostly/iroh-web`, `@ghostly/browser/engine/node`) or resolves
+ * that way (`require.resolve("@ghostly/iroh-web/wasm")`), as `packages` (workspaceExports) maps them: paths without
+ * extension, as relativeImports gives them. A name no workspace has (a dependency) is left out.
+ *
+ * @param {string} text
+ * @param {Record<string, [string, string][]>} [packages]
+ * @returns {string[]}
+ */
+export function packageImports(text, packages = KNOWN_PACKAGES) {
+  const out = [];
+  for (const m of text.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\.resolve\(\s*)["']([^"'./][^"']*)["']/g)) {
+    const spec = m[1];
+    const name = Object.keys(packages).filter((n) => spec === n || spec.startsWith(`${n}/`)).sort((a, b) => b.length - a.length)[0];
+    if (!name) continue;
+    const sub = `.${spec.slice(name.length)}`;
+    for (const [key, file] of packages[name]) {
+      const star = key.indexOf("*");
+      if (key === sub) { out.push(stripExt(file)); break; }
+      if (star < 0 || sub.length < key.length - 1 || !sub.startsWith(key.slice(0, star)) || !sub.endsWith(key.slice(star + 1))) continue;
+      out.push(stripExt(file.replace("*", stripExt(sub.slice(star, sub.length - (key.length - star - 1))))));
+      break;
+    }
+  }
+  return out;
+}
+
+/**
  * The e2e specs a changed e2e helper reaches, following relative imports inside e2e/.
  * `e2eFiles`: { path: text } of every TypeScript file under e2e/.
  */
@@ -254,19 +312,21 @@ export function specsImporting(changed, e2eFiles) {
 // ---------- tests that import across workspaces ----------
 
 /**
- * The test files that reach one of `changed` through relative imports, directly or through other files. It follows
- * relative paths only: a package name (`@ghostly/core`) is not followed, and core's barrel has throughCoreBarrel.
+ * The test files that reach one of `changed` through imports, directly or through other files: relative paths, and
+ * workspace package names (`@ghostly/iroh-web`, packageImports). `@ghostly/core`'s barrel is not followed: through it
+ * every test reaches every core module, and throughCoreBarrel reads it name by name instead.
  * `./x`, `./x.js` and `./x.ts` all name x.ts, and `./dir` names dir/index.ts; other extensions (`.json`) are kept.
  *
  * @param {string[]} changed  changed files (deleted ones too: their importers break)
  * @param {Record<string, string>} files  path → text of the files to follow
  * @param {string[]} tests  globs of the test files wanted
+ * @param {Record<string, [string, string][]>} [packages]  the workspaces' exports (workspaceExports)
  * @returns {string[]} those test files, sorted
  */
-export function testsReaching(changed, files, tests) {
+export function testsReaching(changed, files, tests, packages) {
   const importers = new Map();
   for (const [path, text] of Object.entries(files)) {
-    for (const dep of relativeImports(path, text)) {
+    for (const dep of [...relativeImports(path, text), ...packageImports(text, packages).filter((d) => d !== CORE_INDEX)]) {
       for (const key of [dep, `${dep}/index`]) {
         if (!importers.has(key)) importers.set(key, new Set());
         importers.get(key).add(path);
@@ -292,14 +352,15 @@ export function testsReaching(changed, files, tests) {
 
 /**
  * The modules a bundle is built from (paths without extension): `entry` and what it imports, by relative path or
- * through a workspace package (`@ghostly/core` is core's barrel, `@ghostly/browser/x` is packages/browser/src/x).
- * A module not in `files` (a .json, a deleted file) is kept but not followed.
+ * through a workspace package (packageImports: `@ghostly/core` is core's barrel, `@ghostly/browser/x` is
+ * packages/browser/src/x). A module not in `files` (a .json, a deleted file) is kept but not followed.
  *
  * @param {string} entry  the bundle's entry file
  * @param {Record<string, string>} files  path → text of the files to follow
+ * @param {Record<string, [string, string][]>} [packages]  the workspaces' exports (workspaceExports)
  * @returns {Set<string>}
  */
-export function bundleReaches(entry, files) {
+export function bundleReaches(entry, files, packages) {
   const byModule = new Map(Object.keys(files).map((p) => [stripExt(p), p]));
   const out = new Set();
   const queue = [stripExt(entry)];
@@ -310,10 +371,7 @@ export function bundleReaches(entry, files) {
     if (out.has(id)) continue;
     out.add(id);
     if (!path) continue;
-    queue.push(...relativeImports(path, files[path]));
-    for (const m of files[path].matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)["']@ghostly\/(core|browser\/([^"']+))["']/g)) {
-      queue.push(m[1] === "core" ? CORE_INDEX : stripExt(`packages/browser/src/${m[2]}`));
-    }
+    queue.push(...relativeImports(path, files[path]), ...packageImports(files[path], packages));
   }
   return out;
 }
@@ -405,9 +463,11 @@ export function throughCoreBarrel(changedCore, files) {
  * @param {Record<string, string>} [input.codeFiles]  every TypeScript/JavaScript file of the workspaces (path →
  *   text), core's own included: with it, a change in packages/core/src reaches the tests of what imports it
  *   (throughCoreBarrel) instead of every test behind the barrel, and a change outside a project's `sources` reaches
- *   the project's tests that import it by relative path (testsReaching)
+ *   the project's tests that import it by relative path or package name (testsReaching)
+ * @param {Record<string, [string, string][]>} [input.packages]  the workspaces' exports (workspaceExports), for the
+ *   imports by package name; without it, @ghostly/core and @ghostly/browser's src
  */
-export function plan({ changed: all, inventory, e2eFiles, codeFiles }) {
+export function plan({ changed: all, inventory, e2eFiles, codeFiles, packages }) {
   const scriptsOnly = all.filter((c) => c.scriptsOnly).map((c) => c.path);
   const changed = all.filter((c) => !c.scriptsOnly);
   const match = (globs, path) => globs.some((g) => globToRegExp(g).test(path));
@@ -429,14 +489,14 @@ export function plan({ changed: all, inventory, e2eFiles, codeFiles }) {
     // Outside `sources` vitest is not asked (it would transform every test to find none), so the tests that reach
     // a change there by relative path are found here and handed over themselves.
     const outside = [...code.map((c) => c.path), ...coreDependents].filter((f) => !match(p.sources, f));
-    const viaPath = outside.length && codeFiles ? testsReaching(outside, codeFiles, p.tests).filter((f) => !direct.includes(f) && !viaCore.includes(f)) : [];
+    const viaPath = outside.length && codeFiles ? testsReaching(outside, codeFiles, p.tests, packages).filter((f) => !direct.includes(f) && !viaCore.includes(f)) : [];
     // A deleted file counts too: the test that reads it fails.
     const read = Object.entries(p.reads ?? {})
       .filter(([glob]) => changed.some((c) => match([glob], c.path)))
       .flatMap(([, names]) => names.map((n) => `tools/scripts/test/${n}.test.ts`))
       .filter((f, i, all) => all.indexOf(f) === i && !direct.includes(f) && !viaPath.includes(f));
     const files = [...direct, ...viaCore, ...viaPath, ...read];
-    const reach = p.bundle && codeFiles ? bundleReaches(p.bundle.entry, codeFiles) : null;
+    const reach = p.bundle && codeFiles ? bundleReaches(p.bundle.entry, codeFiles, packages) : null;
     const bundled = p.bundle ? code.filter((c) => (reach ? reach.has(stripExt(c.path)) : match(p.bundle.sources, c.path))) : [];
     if (bundled.length && !files.includes(p.bundle.runner)) files.push(p.bundle.runner);
     if (!files.length) return { ...p, mode: "skip", reason: coreChanged.length && match(p.sources, coreChanged[0]) ? "nothing it tests imports the changed core code" : "nothing it imports changed" };
