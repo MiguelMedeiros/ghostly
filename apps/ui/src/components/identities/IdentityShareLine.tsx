@@ -1,4 +1,4 @@
-import { useId, type PointerEvent } from "react";
+import { useEffect, useId, useReducer, type PointerEvent } from "react";
 import type { IdentityTimelineEntry } from "@ghostly/core";
 import { IDENTITY_CHALLENGE_WINDOW, identityRefusal } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
@@ -55,6 +55,15 @@ export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: Ide
   const time = <time dateTime={new Date(entry.at).toISOString()} className="shrink-0 text-[10px] text-text-muted">{clockTime(entry.at, language)}</time>;
   // The identity as this app holds it now (mine: my proof, theirs: what the contact presented), else as the entry kept it.
   const state: ShareState = entry.kind === "stopped" ? (entry.reason === "revoked" ? "revoked" : "withdrawn") : shareState(entry, link);
+  // The contact's share still being checked turns Not checked when its window ends: nothing else draws the line again
+  // then. Once more after each wake while it still checks (a clock set back wakes it early).
+  const [wakes, wake] = useReducer((n: number) => n + 1, 0);
+  const expires = state === "verifying" && !mine ? entry.at + IDENTITY_CHALLENGE_WINDOW * 1000 : undefined;
+  useEffect(() => {
+    if (expires === undefined) return;
+    const timer = setTimeout(wake, Math.max(0, expires - Date.now()) + 1);
+    return () => clearTimeout(timer);
+  }, [expires, wakes]);
   const card = shareIdCard(entry, state, {
     proof,
     received: mine ? undefined : link?.identities?.received.find(r => r.id === entry.proof),
