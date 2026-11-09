@@ -627,6 +627,8 @@ export class Groups {
   private readonly framesKept = new Map<string, { id: string; bytes: number }[]>();
   /** Contacts (chat ids, kept in `StoredGroup.invited`) and entry sessions I invited to each group, until they answer. */
   private readonly invited = new Map<string, Set<string>>();
+  /** Per group id, the link open under way (`joinByLink`): one more for the same id waits for it. */
+  private readonly opening = new Map<string, Promise<unknown>>();
   /** Invitee side: when my accept of each invitation was last said, how many times since the inviter's chat came up, and whether it was down. */
   private readonly acceptSaid = new Map<string, { at: number; n: number; down?: boolean; unanswered?: boolean }>();
   private readonly lastRoster = new Map<string, Roster>();
@@ -1758,8 +1760,20 @@ export class Groups {
    * Joins through a group's link: a fresh member key, an entry session toward the link's entry
    * key, and knocks until the admin's app answers on it. Nothing is asked of the person again:
    * opening the link was the consent, and the welcome must come from the key the link named.
+   * Opened again while an open of the same group is under way (a link tapped twice), it waits for that one and then
+   * finds the join started: each open draws its own member key and entry session, and the one whose join lost stayed
+   * open until the app restarted.
    */
   async joinByLink(code: string): Promise<string> {
+    const g = (decodeCommunityLink(code) ?? decodeGroupEntryLink(code))?.g;
+    if (!g) return this.openLink(code);
+    const before = this.opening.get(g);
+    const run = (before ?? Promise.resolve()).catch(() => {}).then(() => this.openLink(code));
+    this.opening.set(g, run);
+    try { return await run; } finally { if (this.opening.get(g) === run) this.opening.delete(g); }
+  }
+
+  private async openLink(code: string): Promise<string> {
     if (decodeCommunityLink(code)) {
       // A private group's id is no community's: opening a link never forgets or leaves a group this profile has.
       if (this.stored.has(decodeCommunityLink(code)!.g)) throw new Error("This link names a private group of yours, not a community");
