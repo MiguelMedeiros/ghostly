@@ -28,6 +28,46 @@ const CORE = "packages/core/src";
 const ANDROID_APP = "apps/desktop/gen/android/app/src/main/java/tools/ghostly/app";
 /** The engine's known errors, written once with their codes (@ghostly/core ENGINE_ERRORS) and thrown from there. */
 const CODES = "packages/core/src/engineErrors.ts";
+/**
+ * Why a contact's proof failed this app's check, as its verify path throws it (proofs/verify.ts, the providers' verify(),
+ * core identityProofs.ts onPresent), and the refusals a contact's app sends back for mine. Shown under the share in the
+ * chat and on the back of the contact's card: they were English in every language.
+ */
+const PROOF_REASONS: readonly (readonly [string, string, string?])[] = [
+  ["GitHub has no account octocat-old", `${BROWSER}/proofs/providers/ssh.ts`, "`${label} has no account ${login}`"],
+  ["GitLab has no account someone", `${BROWSER}/proofs/providers/ssh.ts`, "`${label} has no account ${login}`"],
+  ["api.github.com is limiting lookups; check again later", `${BROWSER}/proofs/sshForges.ts`, "`${host} is limiting lookups; check again later`"],
+  ["example.com answered 404", `${BROWSER}/proofs/domain.ts`, "`${domain} answered ${response.status}`"],
+  ["example.com answered with a redirect; the file must be served at exactly https://example.com/.well-known/ghostly.json", `${BROWSER}/proofs/domain.ts`, "`${domain} answered with a redirect; the file must be served at exactly ${url}`"],
+  ["The record is no longer in the account's repository", `${BROWSER}/proofs/providers/atproto.ts`],
+  ["The account is no longer on its server", `${BROWSER}/proofs/providers/atproto.ts`],
+  ["The account's DID is not registered, or was deactivated", `${BROWSER}/proofs/atproto/resolve.ts`],
+  ["The account's DID no longer resolves: example.com has no address", `${BROWSER}/proofs/atproto/resolve.ts`, "`The account's DID no longer resolves: ${e.message}`"],
+  ["The account's DID could not be resolved", `${BROWSER}/proofs/atproto/resolve.ts`],
+  ["This DID is deactivated: its owner retired it", `${BROWSER}/proofs/did.ts`],
+  ["The proof file is not on the homeserver", `${BROWSER}/proofs/providers/pubky.ts`],
+  ["The file on the homeserver is not this proof", `${BROWSER}/proofs/providers/pubky.ts`],
+  ["This Pubky key has no records on the Pkarr relays", `${BROWSER}/proofs/pubky.ts`],
+  ["The homeserver of this Pubky key has no records on the Pkarr relays", `${BROWSER}/proofs/pubky.ts`],
+  ["This Pubky key names no homeserver", `${BROWSER}/proofs/pubky.ts`],
+  ["Signed by another Nostr key", `${BROWSER}/proofs/providers/nostr.ts`],
+  ["Signed by another SSH key", `${BROWSER}/proofs/providers/ssh.ts`],
+  ["Invalid Nostr signature", `${BROWSER}/proofs/providers/nostr.ts`],
+  ["The evidence is for another identity", `${BROWSER}/proofs/verify.ts`],
+  ["This app cannot verify this kind of identity", `${BROWSER}/proofs/verify.ts`],
+  ["The proof lasts longer than this kind of identity allows", `${BROWSER}/proofs/verify.ts`],
+  ["Offline: this identity cannot be checked now", `${BROWSER}/proofs/verify.ts`],
+  ["The proof is dated in the future", `${CORE}/identityProofs.ts`],
+  ["The proof key did not sign this conversation's challenge", `${CORE}/identityProofs.ts`],
+  ["Its owner revoked this proof", `${CORE}/identityProofs.ts`],
+  ["The proof has expired", `${CORE}/identityProofs.ts`],
+  ["Your contact's app cannot verify this kind of identity yet", `${CORE}/identityProofs.ts`],
+  ["Your contact's app could not check it. Try again later.", `${CORE}/identityProofs.ts`],
+  ["Your contact keeps too many identities from you already", `${CORE}/identityProofs.ts`],
+  ["That identity is no longer in your profile", `${CORE}/identityProofs.ts`],
+  ["Your contact could not verify it", `${CORE}/identityProofs.ts`],
+];
+
 /** [message as thrown, the file that throws it, the part of the message written there as it is]. */
 const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["The Ghostly peer did not start. Reopen the extension to retry.", "apps/extension/src/background.ts"],
@@ -509,6 +549,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["example.com has no address", `${BROWSER}/proofs/domain.ts`, "`${domain} has no address`"],
   ["example.com points to a private network address, so it was not contacted", `${BROWSER}/proofs/domain.ts`, "`${domain} points to a private network address, so it was not contacted`"],
   ["GitHub: octo-cat does not list the key that signed (SHA256:abc)", `${BROWSER}/proofs/providers/ssh.ts`, " does not list the key that signed ("],
+  ...PROOF_REASONS,
   // What the Add dialog's field refuses (agents#2222).
   ["Enter a domain name, like example.com", `${CORE}/domainProofs.ts`],
   ["Enter only the domain name, without a path or port", `${CORE}/domainProofs.ts`],
@@ -858,6 +899,20 @@ describe("errors in the app's language", () => {
       expect(knownErrorParts(raw, translators.pt)).toEqual({ title: "A fatura não bate com o valor que você escolheu", next: "Nada foi pago. Tente de novo ou pague de outro jeito.", detail: raw });
       expect(knownErrorParts(raw)).toEqual({ title: "The invoice does not match the amount you chose", next: "Nothing was paid. Try again, or pay another way.", detail: raw });
     }
+  });
+
+  it.each(["pt", "ar"] as const)("why a contact's proof failed this app's check reads in %s: every reason its verify paths throw, never the English", (language) => {
+    const t = translators[language];
+    // Every plain string thrown in the verify paths, besides the reasons above (template ones are there with values).
+    const files = ["verify.ts", "sshForges.ts", "pubky.ts", "domain.ts", "did.ts", "openpgp.ts", "atproto/resolve.ts", "oidc/verify.ts", "oidc/jwks.ts", ...["atproto", "bitcoin", "did", "domain", "nostr", "oidc", "openpgp", "pubky", "ssh"].map((p) => `providers/${p}.ts`)]
+      .map((file) => `${BROWSER}/proofs/${file}`).concat(`${CORE}/identityProofs.ts`);
+    const thrown = files.flatMap((file) => [...source(file).matchAll(/(?:throw new \w+|refuse)\((["'])((?:(?!\1)[^\\])+)\1\)/g)].map((m) => m[2]!));
+    expect(thrown.length).toBeGreaterThan(100);
+    const english = [...new Set([...PROOF_REASONS.map(([text]) => text), ...thrown])].filter((raw) => problemLine(raw, t, "proof").includes(raw));
+    expect(english).toEqual([]);
+    // A reason the rules do not know is a translated "could not verify", its English only behind the ⓘ.
+    expect(problemText("The Nostr event id does not match its content", t, "proof")).toEqual({ tone: "error", title: t("errors.proof.checkFailed"), detail: "The Nostr event id does not match its content" });
+    expect(problemLine("The Nostr event id does not match its content", t, "proof")).toBe(t("errors.proof.checkFailed"));
   });
 
   it("each rule has a sample, so none stops matching unseen", () => {

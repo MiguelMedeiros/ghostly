@@ -106,7 +106,8 @@ describe("ContactIdentitiesPanel", () => {
       expect(screen.queryByTestId("chat-identity-back")).not.toBeInTheDocument();
       const card = await turnOver(user, 0);
       expect(card).toHaveAttribute("data-status", "failed");
-      expect(within(card).getByTestId("chat-identity-received-status")).toHaveTextContent(/^Check failed: DNS lookup failed$/);
+      // A reason the app does not know reads as its own line, never as the check's English.
+      expect(within(card).getByTestId("chat-identity-received-status")).toHaveTextContent(/^Check failed: This proof couldn't be verified$/);
       expect(card).toHaveTextContent("DNS TXT record for example.org");
       expect(within(card).getByTestId("chat-identity-checked")).toHaveTextContent(/^On this device /);
       expect(card).toHaveTextContent("Valid until");
