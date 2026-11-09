@@ -106,9 +106,15 @@ describe("search inside a chat", () => {
     // measured by its own width (a container), so the count moves only where it is narrow; the measure is a browser's
     // (e2e/web/phone-touch-targets.spec.ts).
     expect(bar).toHaveClass("@container");
-    expect(line).toHaveClass("@max-[28rem]:flex-wrap");
-    expect(status).toHaveClass("@max-[28rem]:order-last", "@max-[28rem]:basis-full");
-    expect(line.querySelector("svg")).toHaveClass("@max-[20rem]:hidden");
+    // Only under md, where the buttons are 44 px: two panes (a phone on its side, 874 px, a chat pane about 450 px)
+    // keep one line with their 32 px buttons. Wrapped there, the taller bar hid the message found in the 162 px the
+    // keyboard leaves (e2e/web/phone-landscape.spec.ts).
+    expect(line).toHaveClass("max-md:@max-[28rem]:flex-wrap");
+    expect(status).toHaveClass("max-md:@max-[28rem]:order-last", "max-md:@max-[28rem]:basis-full", "max-md:@max-[28rem]:ps-5.5", "max-md:@max-[20rem]:ps-1.5");
+    expect(line.querySelector("svg")).toHaveClass("max-md:@max-[20rem]:hidden");
+    for (const element of [line, status, line.querySelector("svg")!]) {
+      for (const name of element.classList) if (name.startsWith("@max-")) expect.fail(`${name} applies in two panes too`);
+    }
     // Wider, nothing changes: the count stays between the field and the buttons, on the same line.
     expect(line).not.toHaveClass("flex-wrap");
     expect(status).not.toHaveClass("order-last");
