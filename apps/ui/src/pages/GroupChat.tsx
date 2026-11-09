@@ -474,6 +474,8 @@ export function GroupChat() {
   const [resetting, setResetting] = useState(false);
   /** Its "Make a new link?" question, asked as every other New link's is: the link shared so far stops letting anyone in. */
   const [askingReset, setAskingReset] = useState(false);
+  /** Cancel joining, on the joining card or the knocking-again notice: it stays when Try again goes, so the focus goes there. */
+  const cancelJoinRef = useRef<HTMLButtonElement>(null);
   // Its dialog waits for the link (a new group's, or one just turned on, comes with the state that follows), then stays
   // until it is closed: turned off in it, the link says so there, and one turned on again later opens nothing by itself.
   const [shareShown, setShareShown] = useState(false);
@@ -825,6 +827,11 @@ export function GroupChat() {
     setMenuOpen(false); setError(null);
     try { await action(); } catch (e) { setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("group.error.generic") }); }
   };
+  // Knocking again, Try again goes: the focus it had goes to Cancel joining beside it, not to the page.
+  const tryAgain = (pressed: HTMLElement) => void act(async () => {
+    await engine.call("acceptGroupInvitation", { groupId });
+    if (document.activeElement === pressed || document.activeElement === document.body) cancelJoinRef.current?.focus({ preventScroll: true });
+  });
 
   return (
     <CueChat.Provider value={groupChat(groupId)}>
@@ -923,10 +930,10 @@ export function GroupChat() {
         {knockingAgain ? <div className={`flex items-center justify-between gap-3${error ? " mt-2" : ""}`}>
           <p className="min-w-0"><span className="block font-medium text-text-primary">{joining.title}</span>{joining.body}
             {knockedLong && !linkUnanswered && <span data-testid="group-joining-stale" className="mt-1 block">{staleText}</span>}</p>
-          {linkUnanswered && <button data-testid="group-link-retry" onClick={() => void act(() => engine.call("acceptGroupInvitation", { groupId }))}
+          {linkUnanswered && <button data-testid="group-link-retry" onClick={e => tryAgain(e.currentTarget)}
             className="min-h-11 shrink-0 rounded-lg bg-accent px-3 text-xs font-semibold text-panel-header hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent">{t("group.join.tryAgain")}</button>}
           {/* The line goes with the knock it ends: the focus goes to the group's ⋮, which stays. */}
-          <button data-testid="group-rejoin-cancel" onClick={() => void act(async () => { await engine.call("declineGroupInvitation", { groupId }); optionsRef.current?.focus(); })}
+          <button ref={cancelJoinRef} data-testid="group-rejoin-cancel" onClick={() => void act(async () => { await engine.call("declineGroupInvitation", { groupId }); optionsRef.current?.focus(); })}
             className="min-h-11 shrink-0 rounded-lg px-3 text-xs text-text-secondary hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("group.join.cancel")}</button>
         </div>
         : !error && (group.profile === "community" && group.status === "removed" ? t("group.chat.removedCommunity") : outOfIt)}
@@ -963,9 +970,9 @@ export function GroupChat() {
           {waitingWith > 0 && (stage === "knocking" || stage === "knocked") && <p data-testid="group-joining-queue" className="mt-4 text-xs leading-relaxed text-text-muted">
             {waitingWith === 1 ? t("group.join.queueOne") : t("group.join.queueCount", { count: waitingWith })}</p>}
           {knockedLong && !linkUnanswered && <p data-testid="group-joining-stale" className="mt-4 text-xs leading-relaxed text-text-muted">{staleText}</p>}
-          {linkUnanswered && <button data-testid="group-link-retry" onClick={() => void act(() => engine.call("acceptGroupInvitation", { groupId }))}
+          {linkUnanswered && <button data-testid="group-link-retry" onClick={e => tryAgain(e.currentTarget)}
             className="mt-4 block w-full min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-panel-header hover:bg-accent-hover">{t("group.join.tryAgain")}</button>}
-          <button onClick={cancelJoin} data-testid="group-joining-cancel"
+          <button ref={cancelJoinRef} onClick={cancelJoin} data-testid="group-joining-cancel"
             className="mt-4 rounded px-2 py-1 text-xs text-text-muted hover:bg-danger/10 hover:text-danger max-md:min-h-11 max-md:px-3">{t("group.join.cancel")}</button>
         </div>
       </div> : <div className="relative flex-1 min-h-0 flex flex-col">
