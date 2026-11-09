@@ -232,6 +232,8 @@ export async function checkedBundle(source: string): Promise<{ bundle: AppBundle
 const nameFrom = (folder: string) => folder.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 /** An app's name as a title: `my-app` is `My app`. */
 const titleFrom = (name: string) => (name[0]!.toUpperCase() + name.slice(1)).replace(/-/g, " ");
+/** A path as one word of a POSIX shell line: as typed when it is plain, else single-quoted (`My App` is `'My App'`). */
+const shellWord = (word: string) => /^[\w@%+=:,./~-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
 
 /**
  * `app init <dir> [--name <name>] [--title <title>] [--force]`: a small working app in `<dir>` (made when missing),
@@ -273,9 +275,11 @@ export async function initApp(dirArg: string, what: { name?: string; title?: str
   }
   mkdirSync(dir, { recursive: true });
   for (const [path, text] of files) writeWhole(join(dir, path), new TextEncoder().encode(text));
+  // A line to paste: a folder with a space, a quote or a `$` stays one word, the folder given.
+  const typed = shellWord(dirArg);
   return {
     dir, name, title, files: files.map(([path]) => path), ...(held.length ? { replaced: held } : {}),
-    next: `ghostly app publish ${dirArg} --key <a key file outside ${dirArg}>`,
+    next: `ghostly app publish ${typed} --key <a key file outside ${typed}>`,
   };
 }
 
