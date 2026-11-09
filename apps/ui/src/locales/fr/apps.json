@@ -68,6 +68,7 @@
     "githubLink": "Cette page GitHub n'est pas une app. Collez le lien du dépôt ou celui du fichier de l'app.",
     "host": "Les apps viennent seulement de GitHub (raw.githubusercontent.com) ou de jsDelivr à un commit.",
     "hostProblem": "Le serveur a eu un problème (erreur {{status}}). Réessayez plus tard.",
+    "locked": "Le profil s'est verrouillé avant que l'app ne s'ouvre. Ouvrez-la à nouveau.",
     "needsFiles": "Ses fichiers ne sont pas encore sur cet appareil.",
     "network": "Impossible de joindre le serveur.",
     "notListed": "Cette boutique ne propose plus cette app.",

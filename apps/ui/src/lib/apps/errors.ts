@@ -2,6 +2,7 @@ import type { AppStoreSummary } from "@ghostly/browser/engine/apps";
 import type { Translate, TranslationKey } from "../../contexts/I18nContext";
 import { date } from "../identities";
 import { problemLine } from "../problemText";
+import { LOCKED } from "./open";
 
 /*
  * The apps calls' errors start with their code (`<code>: words`, engine/apps.ts and appFetch.ts). The ones a person can
@@ -92,6 +93,8 @@ export function appStoreProblemText(store: Pick<AppStoreSummary, "problem" | "pr
 }
 
 export function appErrorText(error: unknown, t: Translate): string {
+  // An Open the profile's lock overtook (open.ts): nothing failed, it opens again once unlocked.
+  if ((error instanceof Error ? error.message : error) === LOCKED) return t("apps.errors.locked");
   const code = appErrorCode(error);
   // The host's own trouble (an outage, a rate limit) is not a wrong link: trying again later may work.
   const status = code === "status" ? Number(/\b(\d{3})\b/.exec(error instanceof Error ? error.message : String(error))?.[1]) : 0;
