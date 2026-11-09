@@ -83,4 +83,29 @@ describe("wake watch", () => {
     });
     expect(key).toBe("en0/192.168.0.10");
   });
+
+  it("leaves out the machine's own virtual bridges: a container network made or removed is not another network", () => {
+    const v4 = (address: string) => [{ address, family: "IPv4" as const, internal: false, netmask: "255.255.0.0", mac: "02:42:ac:11:00:01", cidr: null }];
+    const key = addressesKey({
+      eno1: v4("192.168.0.10"),
+      tailscale0: v4("100.81.12.5"),
+      docker0: v4("172.17.0.1"),
+      "br-412c27c5fe1f": v4("172.20.0.1"),
+      virbr0: v4("192.168.122.1"),
+      cni0: v4("10.88.0.1"),
+      vboxnet0: v4("192.168.56.1"),
+      vmnet8: v4("172.16.5.1"),
+      bridge100: v4("192.168.64.1"),
+      "vEthernet (WSL)": v4("172.29.80.1"),
+      "vEthernet (Default Switch)": v4("172.30.16.1"),
+    });
+    expect(key).toBe("eno1/192.168.0.10,tailscale0/100.81.12.5");
+  });
+
+  it("a Hyper-V switch bound to the network card keeps its address in the key", () => {
+    const key = addressesKey({
+      "vEthernet (External)": [{ address: "192.168.0.20", family: "IPv4", internal: false, netmask: "255.255.255.0", mac: "00:15:5d:00:00:01", cidr: null }],
+    });
+    expect(key).toBe("vEthernet (External)/192.168.0.20");
+  });
 });
