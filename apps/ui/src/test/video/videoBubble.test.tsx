@@ -162,6 +162,40 @@ describe("a video in the chat", () => {
     vi.unstubAllGlobals();
   });
 
+  it("with no poster from its sender, one scrolled past before its turn to have one made reads nothing; back on screen, it gets one", async () => {
+    const seen: ((entries: { isIntersecting: boolean }[]) => void)[] = [];
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(callback: (entries: { isIntersecting: boolean }[]) => void) { seen.push(callback); }
+      observe() {}
+      disconnect() {}
+    });
+    // The first one's read is held until the others have left the screen.
+    const reads: string[] = [];
+    let first: (blob: Blob | null) => void = () => {};
+    getFile.mockImplementation((id: string) => {
+      reads.push(id);
+      return reads.length === 1 ? new Promise<Blob | null>((resolve) => { first = resolve; }) : Promise.resolve(null);
+    });
+    const files = [1, 2, 3].map(() => video({ video: { duration: 12_000, width: 1280, height: 720 } }));
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
+    renderApp(<div data-message-list>{files.map((file) => <VideoBubble key={file.id} file={file} sender="peer" peerName="Ana" />)}</div>);
+    act(() => { for (const callback of seen) callback([{ isIntersecting: true }]); });
+    await flush();
+    expect(reads).toEqual([files[0]!.id]);
+    // Flung past: the second and third leave the screen while the first is still being read.
+    act(() => { seen[1]!([{ isIntersecting: false }]); seen[2]!([{ isIntersecting: false }]); });
+    first(null);
+    await flush();
+    await flush();
+    expect(reads).toEqual([files[0]!.id]);
+    // Back on screen, the second one's poster is made after all.
+    act(() => seen[1]!([{ isIntersecting: true }]));
+    await flush();
+    await flush();
+    expect(reads).toEqual([files[0]!.id, files[1]!.id]);
+    vi.unstubAllGlobals();
+  });
+
   it("scrolled out of view it stops and lets go of its bytes; played again, it goes on from there", async () => {
     let seen: ((entries: { isIntersecting: boolean }[]) => void) | null = null;
     vi.stubGlobal("IntersectionObserver", class {
