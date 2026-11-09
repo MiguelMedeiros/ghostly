@@ -1344,6 +1344,65 @@ describe("a restored profile (installed list, no bundle)", () => {
     expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
   });
 
+  describe("Open that waits for its files decides with the stores as they are once the files are here", () => {
+    /** Holds the write of the fetched files until `release`; `started` settles once the fetch reached it. */
+    function holdWrite(store: unknown) {
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      let writing!: () => void;
+      const started = new Promise<void>((resolve) => { writing = resolve; });
+      const engine = store as { writeBundle: (...args: unknown[]) => Promise<unknown> };
+      const write = engine.writeBundle.bind(store);
+      const spy = vi.spyOn(engine, "writeBundle").mockImplementation(async (...args: unknown[]) => { writing(); await held; return write(...args); });
+      return { started, release, spy };
+    }
+    const removing = (v1: { ref: string; digest: string }) => storeFiles({ removed: [{ ref: v1.ref, digest: v1.digest, reason: "Malware", at: NOW_MS / 1000 }] });
+
+    it("a store added meanwhile that removes the version: refused, and Run anyway still runs it", async () => {
+      const { v1, store } = await restored();
+      const { started, release, spy } = holdWrite(store);
+      const entry = store.entry({ ref: v1.ref });
+      entry.catch(() => {});
+      await started;
+      await net.putStore(await removing(v1));
+      await store.addStore({ url: STORE_URL });
+      release();
+      await expect(entry).rejects.toThrow(/^removed: Removed by Test store: Malware/);
+      spy.mockRestore();
+      expect((await store.entry({ ref: v1.ref, runAnyway: true })).digest).toBe(v1.digest);
+    });
+
+    it("a store added meanwhile that carries the publisher's revocation: refused, Run anyway or not", async () => {
+      const { v1, store } = await restored();
+      const { started, release, spy } = holdWrite(store);
+      const entry = store.entry({ ref: v1.ref, runAnyway: true });
+      entry.catch(() => {});
+      await started;
+      await net.putStore(await storeFiles({ revoked: [await revocation(v1.ref, [v1.digest])] }));
+      await store.addStore({ url: STORE_URL });
+      release();
+      await expect(entry).rejects.toThrow(/^revoked/);
+      spy.mockRestore();
+    });
+
+    it("Open that joins the update check's fetch: the store added after that fetch began counts", async () => {
+      const { v1, store } = await restored();
+      const { started, release, spy } = holdWrite(store);
+      const check = store.checkUpdates();
+      await started;
+      await net.putStore(await removing(v1));
+      await store.addStore({ url: STORE_URL });
+      const entry = store.entry({ ref: v1.ref });
+      entry.catch(() => {});
+      for (let i = 0; i < 50; i++) await new Promise((resolve) => setImmediate(resolve));
+      release();
+      await expect(entry).rejects.toThrow(/^removed: /);
+      await check;
+      expect(spy, "one write").toHaveBeenCalledTimes(1);
+      spy.mockRestore();
+    });
+  });
+
   // Each case three times, with files of many pieces: a collision of the two writes depends on how their pieces interleave.
   describe.each([1, 2, 3])("two fetches of its files at once share one write (run %i)", () => {
     const large = () => restored(new Uint8Array(2_500_000));

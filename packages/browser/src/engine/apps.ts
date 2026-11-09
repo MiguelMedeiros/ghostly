@@ -2056,8 +2056,13 @@ export class Apps {
   async entry({ ref, runAnyway }: { ref: string; runAnyway?: boolean }): Promise<AppRunEntry> {
     let app = await this.installedOrFail(ref);
     let run = await this.runCheckOf(app, await this.stores());
-    // Opened with its files missing (a restored profile): fetched again by digest first, or not run.
-    if (run.status === "needs-files") { run = await this.fetchFiles({ ref }); app = await this.installedOrFail(ref); }
+    // Opened with its files missing (a restored profile): fetched again by digest first, or not run. Checked again once
+    // they are here, with the record and the stores as they are now: a store added during the fetch counts.
+    if (run.status === "needs-files") {
+      await this.fetchFiles({ ref });
+      app = await this.installedOrFail(ref);
+      run = await this.runCheckOf(app, await this.stores());
+    }
     if (run.status === "revoked") fail("revoked", "Its publisher revoked this version");
     if (run.status === "removed" && runAnyway !== true) fail("removed", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
     if (run.status === "needs-files") fail("needs-files", "This app's files are not on this device yet");
