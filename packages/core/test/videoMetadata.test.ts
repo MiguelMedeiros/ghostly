@@ -186,6 +186,37 @@ describe("withoutVideoMetadata", () => {
     }
   });
 
+  it("a 400 MiB free box or trailer goes as zeros without 400 MiB of zeros copied into the video sent", async () => {
+    const mp4 = withMovie(H264_MP4, [xyzUdta()]);
+    const size = 400 * 1024 * 1024;
+    // The source's 400 MiB made of one MiB of zeros by reference, as a file opened from disk holds none of its bytes.
+    const mib = new Blob([new Uint8Array(1024 * 1024)]);
+    const body = new Blob(Array.from({ length: size / mib.size }, () => mib));
+    const header = Buffer.alloc(8);
+    header.writeUInt32BE(8 + size, 0);
+    header.write("free", 4, "latin1");
+    const NativeBlob = Blob;
+    for (const [name, source] of [["free box", new Blob([mp4, header, body])], ["trailer", new Blob([mp4, header.subarray(0, 4), body])]] as const) {
+      // The bytes the strip hands a Blob to copy, as the Blob constructor copies every ArrayBufferView part.
+      let copied = 0;
+      vi.stubGlobal("Blob", class extends NativeBlob {
+        constructor(parts?: BlobPart[], options?: BlobPropertyBag) {
+          super(parts, options);
+          for (const part of parts ?? []) if (ArrayBuffer.isView(part)) copied += part.byteLength;
+        }
+      });
+      try {
+        const out = (await withoutVideoMetadata(source, "video/mp4"))!;
+        expect(out.size, name).toBe(source.size);
+        expect(copied, name).toBeLessThan(2 * 1024 * 1024);
+        expect(hasPlace(await bytesOf(out.slice(0, mp4.length + 8))), name).toBe(false);
+        expect((await bytesOf(out.slice(-1024 * 1024 - 5))).every((b) => b === 0), name).toBe(true);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    }
+  });
+
   it("any bytes after the last whole box (1 to 7 zeros, a phone's trailer) go as zeros, the size kept", async () => {
     const mp4 = withMovie(H264_MP4, [xyzUdta()]);
     const trailer = Buffer.from(`SEFT trailer ${PLACE}`, "latin1");
