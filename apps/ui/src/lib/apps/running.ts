@@ -27,6 +27,8 @@ export interface ChatApp {
   /** Where its manifest says it shows: `full` covers the whole chat, with Back to it, at every width. */
   view: "chat" | "full";
   running: RunningApp;
+  /** Opened with "Run anyway" (a version a store removed): Open again opens it the same way. */
+  runAnyway?: boolean;
   /** Stopped by the client, for this reason: the panel says why until the person closes it (WISP 1200 § Takedowns). */
   stopped?: AppTakedown;
   /** It lets the contact's app read a file now (WISP 1200 § A read lane to the contact): the header says so. */
