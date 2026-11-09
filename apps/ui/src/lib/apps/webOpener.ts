@@ -85,8 +85,9 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
       if (there && !there.stopped) there.running.stop();
       let running: RunningApp | null = null;
       let takenDown: AppTakedown | null = null;
+      const runAnyway = options?.runAnyway === true;
       const unregister = registerRunningApp({
-        ref, digest: entry.digest, runAnyway: options?.runAnyway === true,
+        ref, digest: entry.digest, runAnyway,
         takeDown: (takedown) => { takenDown = takedown; running?.stop(); },
         stop: () => running?.stop(),
       });
@@ -97,13 +98,13 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
           const mine = !running || chatApp(linkId)?.running === running;
           const why = takenDown ?? warnStop(entry.title, reason);
           // Taken down, or stopped on its own: the panel stays, shown, and says why until the person closes it.
-          if (mine && why) setChatApp(linkId, { ref, title: entry.title, shown: true, wide: chatApp(linkId)?.wide ?? false, view: entry.view ?? "chat", running: running!, stopped: why });
+          if (mine && why) setChatApp(linkId, { ref, title: entry.title, shown: true, wide: chatApp(linkId)?.wide ?? false, view: entry.view ?? "chat", running: running!, runAnyway, stopped: why });
           else if (mine) setChatApp(linkId, null);
           onStop?.(ref, reason);
         },
         onServing: (on) => { if (chatApp(linkId)?.running === running) updateChatApp(linkId, { serving: on }); },
       });
-      setChatApp(linkId, { ref, title: entry.title, shown: true, wide: false, view: entry.view ?? "chat", running });
+      setChatApp(linkId, { ref, title: entry.title, shown: true, wide: false, view: entry.view ?? "chat", running, runAnyway });
       return;
     }
 
