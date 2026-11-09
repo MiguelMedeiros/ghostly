@@ -46,6 +46,14 @@ export const WAKE_SESSION_CAPABILITY = "wake/1";
 export const PIN_CAPABILITY = "pin/1";
 
 /**
+ * Disappearing messages: `paired-timer` frames on this session and a message's `ttl`, 1:1 chats only (WISP 401 §
+ * Disappearing messages, `pairedTimer.ts`). Known, so `receive` reports its agreement, but not offered by any session
+ * yet: a contact that saw it would send its timer and count on this side to sweep, before this app keeps or confirms
+ * the setting.
+ */
+export const TIMER_CAPABILITY = "timer/1";
+
+/**
  * Status cards: this app shows a message's card (`sc`) and takes a card message's edits past the text's 100, which an
  * older app would drop (WISP 405 · Status Cards, `statusCards.ts`). A card itself needs nothing: older apps show its text.
  */
@@ -83,10 +91,10 @@ export const APP_RANGES_CAPABILITY = "app-ranges/1";
  * What only a device link offers (WISP 06, `deviceLink.ts`): the frames between a person's own devices. They are in
  * the type so a device link can announce them, and not in `KNOWN_SESSION_CAPABILITIES`: no chat knows them.
  */
-export type SessionCapability = DeviceCapability | typeof CALLS_CAPABILITY | typeof SERVICES_CAPABILITY | typeof FILES_CAPABILITY | typeof FILES_BINARY_CAPABILITY | typeof TYPING_CAPABILITY | typeof REACTIONS_CAPABILITY | typeof EDIT_CAPABILITY | typeof WAKE_SESSION_CAPABILITY | typeof PIN_CAPABILITY | typeof STATUS_CARD_CAPABILITY | typeof BUTTONS_CAPABILITY | typeof UPGRADE_CAPABILITY | typeof APPS_CAPABILITY | typeof APP_RANGES_CAPABILITY;
+export type SessionCapability = DeviceCapability | typeof CALLS_CAPABILITY | typeof SERVICES_CAPABILITY | typeof FILES_CAPABILITY | typeof FILES_BINARY_CAPABILITY | typeof TYPING_CAPABILITY | typeof REACTIONS_CAPABILITY | typeof EDIT_CAPABILITY | typeof WAKE_SESSION_CAPABILITY | typeof PIN_CAPABILITY | typeof TIMER_CAPABILITY | typeof STATUS_CARD_CAPABILITY | typeof BUTTONS_CAPABILITY | typeof UPGRADE_CAPABILITY | typeof APPS_CAPABILITY | typeof APP_RANGES_CAPABILITY;
 
 /** Every capability this app knows on a session: what `receive` reports changes of. */
-export const KNOWN_SESSION_CAPABILITIES: readonly SessionCapability[] = [CALLS_CAPABILITY, SERVICES_CAPABILITY, FILES_CAPABILITY, FILES_BINARY_CAPABILITY, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY, UPGRADE_CAPABILITY, APPS_CAPABILITY, APP_RANGES_CAPABILITY];
+export const KNOWN_SESSION_CAPABILITIES: readonly SessionCapability[] = [CALLS_CAPABILITY, SERVICES_CAPABILITY, FILES_CAPABILITY, FILES_BINARY_CAPABILITY, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, TIMER_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY, UPGRADE_CAPABILITY, APPS_CAPABILITY, APP_RANGES_CAPABILITY];
 
 export const SESSION_CAPABILITIES_FRAME = "paired-capabilities";
 
