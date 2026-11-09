@@ -505,6 +505,28 @@ describe("two call managers", { timeout: 60_000 }, () => {
     stack.deaf(false);
   });
 
+  // The watch's timer runs before the packets that came meanwhile are read: after a stall of the daemon's own (a loop
+  // held by other work, the process stopped or swapped out), the contact read as silent for as long, while it was not.
+  it("a stall of the daemon's own is not read as the contact's silence: the call stays on", async () => {
+    const { a, b } = pairOfManagers({ stall: { afterMs: 800, endMs: 3000 } });
+    b.calls.setAuto({ on: true, from: [], rate: 16000 });
+    const placed = await a.calls.start("chat-ab", {}) as { audio: { socket: string } };
+    const alice = await program(placed.audio.socket);
+    await Promise.all([a, b].map((side) => until(() => side.events.find((e) => e.type === "call.connected"))));
+    await new Promise((r) => setTimeout(r, 1200));
+
+    // The loop held past the watch's end: the contact's packets wait in the connection meanwhile.
+    const held = performance.now() + 3500;
+    while (performance.now() < held) { /* held */ }
+    await new Promise((r) => setTimeout(r, 1500));
+
+    expect(a.events.filter((e) => e.type === "call.stalled" || e.type === "call.ended")).toEqual([]);
+    expect(a.calls.get(undefined)).toMatchObject({ state: "connected", stalled: false });
+    await a.calls.hangup("chat-ab");
+    await alice.ended;
+    await until(() => b.events.find((e) => e.type === "call.ended"));
+  });
+
   // Its codecs' delete throwing (a broken Opus module: "memory access out of bounds") went up through the media's close
   // and stopped the call's end there: no hang-up to the contact, no call.ended, the connection left open.
   it("a call whose codecs throw as it ends still ends: the contact is told, call.ended goes out, the connection closes", async () => {

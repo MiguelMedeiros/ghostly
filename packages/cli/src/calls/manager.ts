@@ -652,11 +652,19 @@ export class CallManager {
   private watch(call: Call): void {
     const { afterMs, endMs } = this.host.stall ?? { afterMs: STALL_MS, endMs: STALL_END_MS };
     // On the audio's clock (`monotonic`): on the device's, a clock set ahead read as that long without a packet, and ended the call.
-    const since = monotonic();
+    const since = monotonic(), every = Math.min(1000, afterMs / 5);
+    // A tick that comes far past its interval comes after a stall of this side's own (its loop held by other work, the
+    // process stopped or swapped out), and before the packets the contact sent meanwhile are read: that time is not the
+    // contact's silence (`own`, until something is heard after it), and the call is judged on the next tick, once read.
+    let ticked = since, own = 0, ownUntil = 0;
     call.watcher = setInterval(() => {
       if (call.ended) return;
+      const now = monotonic(), gap = now - ticked;
+      ticked = now;
+      if (gap > 2 * every) { own += gap - every; ownUntil = now; return; }
       const heardAt = Math.max(since, call.media?.audio.heardAt ?? 0);
-      const silentMs = monotonic() - heardAt;
+      if (heardAt >= ownUntil) own = 0;
+      const silentMs = now - heardAt - own;
       const fields = { call: call.id, chat: call.chat, direction: call.direction };
       if (silentMs >= endMs) {
         process.stderr.write(`ghostly: call ${call.id}: nothing heard from the contact for ${Math.round(silentMs / 1000)} s\n`);
@@ -672,7 +680,7 @@ export class CallManager {
         process.stderr.write(`ghostly: call ${call.id}: resumed after ${gapMs} ms\n`);
         this.host.emit("call.resumed", `call.resumed:${call.id}:${call.stalls}`, { ...fields, silentMs: gapMs });
       }
-    }, Math.min(1000, afterMs / 5));
+    }, every);
     call.watcher.unref?.();
   }
 
