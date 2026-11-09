@@ -30,6 +30,8 @@ import { refusedRow } from "../shared/refusals";
 import { openRow, openRows, sealRow } from "./sealedRows";
 import type { PaymentView, PendingMelt, PendingSwap, StoredMessage, StoredPayment, StoredQuote } from "../shared/types";
 import { SwapUnsettledError, assertAmount, type CashuWallet } from "./wallet";
+import { AskBackoff } from "./askBackoff";
+import { INVOICE_PACE } from "./invoicePace";
 
 /**
  * Payments in a chat. The protocol only carries requests, ecash and receipts
@@ -326,6 +328,18 @@ const within = (now: number, at: number | undefined, ms: number): boolean => at 
  * goes again at every reconnect (`receiptOwed`): a week. After that, once per run of the app.
  */
 export const RECEIPT_FRESH_MS = 7 * 86_400_000;
+/**
+ * How often a wallet's own refresh asks about an open Ark request (at its server's indexer) or a contact's pending Ark
+ * or USDT receipt (at the server or the chain) that has no answer yet (`AskBackoff`): at the wallet's pace while the
+ * request is new (`INVOICE_PACE.fastForMs`) or the transaction is seen confirming, then twice as late after each ask
+ * with nothing, up to `RECEIPT_ASK_CAP_MS`. Asked at every refresh, 5 open Ark requests cost 30 indexer reads a
+ * minute and a receipt whose transaction never lands 3 RPC calls every 8 s, for as long as the app ran.
+ * A refresh that read new money asks about every one at once, as do a contact's receipt or check and a wallet's removal,
+ * so money that lands late, an expired request's included, is still seen.
+ */
+export const ARK_ASK_MS = 10_000;
+export const USDT_ASK_MS = 8_000;
+export const RECEIPT_ASK_CAP_MS = INVOICE_PACE.missedCapMs;
 
 export class PaymentDesk {
   private readonly payments = new PaymentBook();
@@ -341,6 +355,10 @@ export class PaymentDesk {
   private readonly cashuSent = new Set<string>();
   private checkingArk=false;
   private checkingUsdt=false;
+  /** Open Ark requests (by request id) and pending Ark receipts (by payment id) asked with nothing found yet. */
+  private readonly arkAsk=new AskBackoff(ARK_ASK_MS,RECEIPT_ASK_CAP_MS);
+  /** Pending USDT receipts (by payment id) whose transaction the chain does not show settled yet. */
+  private readonly usdtAsk=new AskBackoff(USDT_ASK_MS,RECEIPT_ASK_CAP_MS);
   private checkingBark=false;
   private checkingBitcoin=false;
   private readonly redeeming = new Map<string, Promise<void>>();
@@ -1414,21 +1432,31 @@ export class PaymentDesk {
     assertTokenUnits(unique);
     return unique;
   }
-  async reconcileUsdtReceipts() {
+  /**
+   * Each pending USDT receipt asked at the chain. `paced` (a wallet refresh that read nothing new): only the receipts
+   * whose turn came (`usdtAsk`); otherwise every one now.
+   */
+  async reconcileUsdtReceipts(paced=false) {
     if(this.checkingUsdt||!this.usdt)return;
     this.checkingUsdt=true;
     try {
+      const open=new Set<string>();
       for(const payment of this.payments.values()) {
         if(payment.kind!=='payment'||payment.direction!=='in'||payment.state!=='pending'||!payment.txid||payment.target?.method!=='usdt')continue;
+        open.add(payment.id);
         // Its own network's wallet reads the chain: the other's is not on it.
         const adapter=this.usdt[walletNetworkOf(payment.target.network)].adapter;if(!adapter)continue;
+        if(paced&&!this.usdtAsk.due(payment.id,Date.now()))continue;
         const result=await adapter.receipt(payment.txid,{...payment.target,amount:payment.amount}).catch(()=>null);
-        if(!result?.settled&&!result?.failed)continue;
+        // Seen and confirming: asked again at the wallet's pace. Not seen, or not readable: less and less often.
+        if(!result?.settled&&!result?.failed){this.usdtAsk.missed(payment.id,Date.now(),!!result?.pending);continue;}
+        this.usdtAsk.forget(payment.id);
         // Named for two requests of one amount (older ones, from before each asked its own): the first pays, never both.
         if(result.settled&&this.usdtTxUsed(payment.txid,payment.requestId)){await this.save({...payment,state:'failed',error:USDT_TX_USED});continue;}
         await this.save({...payment,state:result.settled?'settled':'failed',error:result.error});
         if(result.settled){const request=payment.requestId?this.payments.get(payment.requestId):undefined;if(request?.linkId===payment.linkId)await this.save({...request,state:'settled',txid:payment.txid});}
       }
+      this.usdtAsk.keepOnly(open);
     } finally {this.checkingUsdt=false;}
   }
   payment(id:string) { return this.payments.get(id); }
@@ -1509,30 +1537,45 @@ export class PaymentDesk {
   /**
    * An Ark request is paid when a virtual output of at least the amount reached the address made for it,
    * whoever sent it: with the contact's receipt (its txid, verified), or without one, through the indexer.
+   * `paced` (a wallet refresh that read nothing new): only the requests and receipts whose turn came (`arkAsk`);
+   * otherwise every one now.
    */
-  async reconcileArkReceipts():Promise<void> {
+  async reconcileArkReceipts(paced=false):Promise<void> {
     if(this.checkingArk || !this.ark || !distinct(this.ark).some(w=>w.adapter))return;
     this.checkingArk=true;
     try {
+      const open=new Set<string>();
+      // Money that paid one request pays no other: every request's txid, read once for the pass.
+      const claimers=new Map<string,number>();
+      for(const p of this.payments.values())if(p.target?.method==="arkade" && p.kind==="request" && p.txid)claimers.set(p.txid,(claimers.get(p.txid) ?? 0)+1);
+      let claimed=new Set(claimers.keys());
       for(const request of [...this.payments.values()]) {
         if(request.kind!=="request" || request.direction!=="out" || request.state!=="pending" || request.target?.method!=="arkade")continue;
+        open.add(request.id);
         const adapter=this.ark[walletNetworkOf(request.target.network)].adapter;
         if(!adapter || request.target.provider!==adapter.config.provider || request.target.network!==adapter.config.network)continue;
-        const claimed=new Set([...this.payments.values()].filter(p=>p.target?.method==="arkade" && p.kind==="request" && p.id!==request.id && p.txid).map(p=>p.txid!));
-        const txid=await adapter.received(request.target.address,request.amount,request.createdAt,claimed).catch(()=>undefined);
-        if(!txid)continue;
+        if(paced && !this.arkAsk.due(request.id,Date.now()))continue;
+        const own=request.txid && claimers.get(request.txid)===1 ? request.txid : undefined;
+        const txid=await adapter.received(request.target.address,request.amount,request.createdAt,own ? new Set([...claimed].filter(t=>t!==own)) : claimed).catch(()=>undefined);
+        if(!txid){this.arkAsk.missed(request.id,Date.now(),Date.now()<request.createdAt+INVOICE_PACE.fastForMs);continue;}
+        this.arkAsk.forget(request.id);
+        claimers.set(txid,(claimers.get(txid) ?? 0)+1);claimed=new Set([...claimed,txid]);
         await this.settleRequest(request,{txid});
         for(const payment of this.payments.values())if(payment.kind==="payment" && payment.direction==="in" && payment.requestId===request.id && payment.state==="pending")await this.save({...payment,state:"settled",txid});
       }
       for(const payment of this.payments.values()) {
         if(payment.kind!=="payment" || payment.direction!=="in" || payment.state!=="pending" || !payment.txid || payment.target?.method!=="arkade")continue;
+        open.add(payment.id);
         const adapter=this.ark[walletNetworkOf(payment.target.network)].adapter;
         if(!adapter || payment.target.provider!==adapter.config.provider || payment.target.network!==adapter.config.network)continue;
-        if(!await adapter.verifyReceipt(payment.txid,payment.target.address,payment.amount).catch(()=>false))continue;
+        if(paced && !this.arkAsk.due(payment.id,Date.now()))continue;
+        if(!await adapter.verifyReceipt(payment.txid,payment.target.address,payment.amount).catch(()=>false)){this.arkAsk.missed(payment.id,Date.now());continue;}
+        this.arkAsk.forget(payment.id);
         await this.save({...payment,state:"settled"});
         const request=payment.requestId ? this.payments.get(payment.requestId) : undefined;
         if(request?.linkId===payment.linkId && request.state==="pending")await this.settleRequest(request,{txid:payment.txid});
       }
+      this.arkAsk.keepOnly(open);
     } finally {this.checkingArk=false;}
   }
 
