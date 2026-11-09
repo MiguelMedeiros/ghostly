@@ -146,14 +146,20 @@ class FilesWorld {
 
   /** As the app's composer and the CLI do: the bytes kept under a local id with their digest, then the announcement. */
   async send(peer: Peer, groupId: string, bytes: Uint8Array, meta: Partial<GroupFileMeta> = {}, caption?: string): Promise<{ messageId: string; fileId: string; meta: GroupFileMeta }> {
+    const { fileId, file } = await this.stage(peer, groupId, bytes, meta);
+    const sent = await peer.groups.sendFile(groupId, caption ?? groupFileFallback(file), file, fileId);
+    expect(sent.error).toBeNull();
+    return { messageId: sent.messageId!, fileId, meta: file };
+  }
+
+  /** The bytes kept under a new local id with their digest, as before an announcement. */
+  async stage(peer: Peer, groupId: string, bytes: Uint8Array, meta: Partial<GroupFileMeta> = {}): Promise<{ fileId: string; file: GroupFileMeta }> {
     const store = this.files.get(peer)!.store, fileId = groupFileId(groupId, "out"), d = sha(bytes);
     const file: GroupFileMeta = { name: "notes.bin", mime: "application/octet-stream", size: bytes.length, d, ...meta };
     store.bytes.set(fileId, bytes);
     await store.put({ id: fileId, linkId: `group:${groupId}`, direction: "out", digest: d, createdAt: this.world.now,
       metadata: { name: file.name, size: file.size, mime: file.mime, timestamp: this.world.now, voice: file.voice } });
-    const sent = await peer.groups.sendFile(groupId, caption ?? groupFileFallback(file), file, fileId);
-    expect(sent.error).toBeNull();
-    return { messageId: sent.messageId!, fileId, meta: file };
+    return { fileId, file };
   }
 
   /** The engine sent a state: the brief views it carried go. */
@@ -206,6 +212,62 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     // Asked of the author, its offers naming the message; no chat of the edge took a byte.
     expect(t.seen.filter(s => s.frame.t === "group-want").map(s => s.to).sort()).toEqual(["alice", "alice"]);
     expect(t.seen.filter(s => s.frame.t === "pf-offer").every(s => s.from === "alice" && s.frame.gm === messageId)).toBe(true);
+  });
+
+  it("the same bytes sent twice at once are two files: each message has its own copy, on its author's device and the members'", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    const bytes = pattern(120_000, 21);
+    const [a, b] = await Promise.all([t.send(alice, id, bytes, { name: "a.bin" }), t.send(alice, id, bytes, { name: "b.bin" })]);
+    // Each message shows the copy kept for it, held here: not one the author would have to fetch.
+    for (const sent of [a, b]) expect(t.got(alice, id, sent.messageId)).toMatchObject({ message: { file: { id: sent.fileId } }, transfer: { state: "done", direction: "out" } });
+    await t.world.until(() => [a, b].every(sent => t.done(bob, id, sent.messageId) && t.done(carol, id, sent.messageId)), 4 * 60_000, 1000);
+    for (const member of [bob, carol]) for (const sent of [a, b]) expect(sha(t.got(member, id, sent.messageId).bytes!)).toBe(sent.meta.d);
+    // No copy is left over: each one kept is its message's.
+    const records = [...t.files.get(alice)!.store.records.values()].map(r => ({ id: r.id, message: r.group?.message }));
+    expect(records).toEqual(expect.arrayContaining([{ id: a.fileId, message: a.messageId }, { id: b.fileId, message: b.messageId }]));
+    expect(records).toHaveLength(2);
+  });
+
+  it("of the same bytes sent at once, one whose announcement fails takes no other's copy, and a copy whose send failed is passed over", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    const bytes = pattern(50_000, 22), store = t.files.get(alice)!.store;
+    // As the app and the CLI do: a send that did not go has its copy deleted.
+    const send = (fileId: string, file: GroupFileMeta, text: string) => alice.groups.sendFile(id, text, file, fileId)
+      .then(async sent => { if (sent.error) await store.remove(fileId); return sent; }, async (error: unknown) => { await store.remove(fileId); throw error; });
+    const staged = await Promise.all(["a.bin", "b.bin", "c.bin"].map(name => t.stage(alice, id, bytes, { name })));
+    // The second's text is empty: the group refuses it once the first is announced, before the third.
+    const results = await Promise.all(staged.map(({ fileId, file }, i) => send(fileId, file, i === 1 ? " " : groupFileFallback(file))));
+    expect(results.map(r => r.error)).toEqual([null, "Nothing to send", null]);
+    // A send whose session fails to keep it (it throws, no "not sent"), then the same bytes again.
+    const session = (alice.groups as unknown as { sessions: Map<string, { sendText: (...args: unknown[]) => Promise<unknown> }> }).sessions.get(id)!;
+    const sendText = session.sendText;
+    session.sendText = async () => { throw new Error("The disk is full"); };
+    const lost = await t.stage(alice, id, bytes, { name: "d.bin" });
+    await expect(send(lost.fileId, lost.file, "lost")).rejects.toThrow("The disk is full");
+    session.sendText = sendText;
+    const again = await t.stage(alice, id, bytes, { name: "e.bin" });
+    const last = await send(again.fileId, again.file, "again");
+    const sent = [{ ...staged[0], messageId: results[0].messageId! }, { ...staged[2], messageId: results[2].messageId! }, { ...again, messageId: last.messageId! }];
+    for (const { fileId, messageId } of sent) expect(t.got(alice, id, messageId)).toMatchObject({ message: { file: { id: fileId } }, transfer: { state: "done" }, bytes });
+    await t.world.until(() => sent.every(({ messageId }) => t.done(bob, id, messageId)), 4 * 60_000, 1000);
+    for (const { messageId } of sent) expect(sha(t.got(bob, id, messageId).bytes!)).toBe(sha(bytes));
+    expect([...store.records.keys()].sort()).toEqual(sent.map(s => s.fileId).sort());
+  });
+
+  it("the same bytes sent one after the other, and other bytes sent at once, are each their own message's file", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    const bytes = pattern(40_000, 23);
+    const first = await t.send(alice, id, bytes, { name: "a.bin" });
+    const second = await t.send(alice, id, bytes, { name: "a.bin" });
+    const others = await Promise.all([t.send(alice, id, pattern(30_000, 24)), t.send(alice, id, pattern(30_000, 25))]);
+    const sent = [first, second, ...others];
+    for (const { fileId, messageId } of sent) expect(t.got(alice, id, messageId)).toMatchObject({ message: { file: { id: fileId } }, transfer: { state: "done" } });
+    await t.world.until(() => sent.every(({ messageId }) => t.done(bob, id, messageId)), 4 * 60_000, 1000);
+    for (const { messageId, meta } of sent) expect(sha(t.got(bob, id, messageId).bytes!)).toBe(meta.d);
+    expect([...t.files.get(alice)!.store.records.values()].every(r => r.group)).toBe(true);
   });
 
   it("over edges that agreed files/4 the bytes go as binary messages, and each copy is checked against the author's digest", async () => {
@@ -2111,6 +2173,24 @@ describe("a file in a community", { timeout: 120_000 }, () => {
       expect(from.length).toBeGreaterThan(0);
       expect(from.every(name => hubs.some(h => h.name === name))).toBe(true);
     }
+  });
+
+  it("the same bytes a member sends twice at once are two files, each reaching everyone, and no copy is left over", async () => {
+    const t = new FilesWorld();
+    const admin = t.add("admin");
+    const id = await admin.groups.create("Open door");
+    const link = await admin.groups.enableLink(id);
+    const others = Array.from({ length: 3 }, (_, i) => t.add(`p${i}`));
+    for (const p of others) await p.groups.joinByLink(`https://app.ghostly.tools/#/join/${link}`);
+    await t.world.until(() => others.every(p => t.world.member(p, id)), 10 * 60_000);
+    await t.world.run(30_000);
+    const everyone = [admin, ...others], author = others.find(p => !p.groups.communities.isHub(id)) ?? others[0];
+    const bytes = pattern(120_000, 26);
+    const [a, b] = await Promise.all([t.send(author, id, bytes, { name: "a.bin" }), t.send(author, id, bytes, { name: "b.bin" })]);
+    for (const sent of [a, b]) expect(t.got(author, id, sent.messageId)).toMatchObject({ message: { file: { id: sent.fileId } }, transfer: { state: "done" } });
+    await t.world.until(() => everyone.every(p => t.done(p, id, a.messageId) && t.done(p, id, b.messageId)), 5 * 60_000);
+    for (const p of everyone) for (const sent of [a, b]) expect(sha(t.got(p, id, sent.messageId).bytes!)).toBe(sent.meta.d);
+    expect([...t.files.get(author)!.store.records.keys()].sort()).toEqual([a.fileId, b.fileId].sort());
   });
 
   it("each holder's group-have goes to the group but takes no place in what a member back from away gets", async () => {

@@ -341,8 +341,13 @@ export class GroupFileDesk {
    */
   private readonly askedOn = new Map<string, { id: string; want: Want }>();
   private readonly edgesById = new Map<string, Edge>();
-  /** My file about to be announced, by `<group>\n<digest>`: the message that announces it takes this local id. */
-  private readonly own = new Map<string, string>();
+  /**
+   * My files about to be announced, by `<group>\n<digest>`, in the order they were handed over: the message that
+   * announces one takes the first one's local id. A list, not one id: the same bytes sent twice at once (two picks, two
+   * CLI sends) are two files, each its own message's. A group's sends are announced one after another in the order they
+   * were made, so the first waiting is this message's (agents#3772).
+   */
+  private readonly own = new Map<string, { fileId: string; meta: GroupFileMeta }[]>();
   /** Announcements sent per group, and taken per member of a group (WISP 503 § Rules for both, Pace). */
   private readonly sentPace = new Map<string, RateWindow>();
   private readonly sentTaken = new Map<string, RateWindow>();
@@ -492,10 +497,33 @@ export class GroupFileDesk {
 
   /** My file, stored under `fileId` with the author's digest, is about to be announced in the group: its message takes it. */
   outgoing(groupId: string, fileId: string, meta: GroupFileMeta): void {
-    this.own.set(`${groupId}\n${meta.d}`, fileId);
+    const key = `${groupId}\n${meta.d}`;
+    this.own.set(key, [...this.own.get(key) ?? [], { fileId, meta }]);
   }
-  /** The announcement did not go: the file is not this group's after all. */
-  notSent(groupId: string, meta: GroupFileMeta): void { this.own.delete(`${groupId}\n${meta.d}`); }
+  /**
+   * The announcement did not go: the file is not this group's after all. `meta` is the one handed to `outgoing`, which
+   * tells it from another send of the same bytes still on its way (its caller deletes this one's local id).
+   */
+  notSent(groupId: string, meta: GroupFileMeta): void {
+    const key = `${groupId}\n${meta.d}`, waiting = this.own.get(key) ?? [];
+    const at = waiting.findIndex(entry => entry.meta === meta);
+    const left = waiting.filter((_, i) => i !== (at < 0 ? 0 : at));
+    if (left.length) this.own.set(key, left); else this.own.delete(key);
+  }
+
+  /**
+   * The local id of my file a message of mine announces, taken from those waiting: the first whose record is still
+   * here. One whose send failed past its caller's notice (its record deleted) is passed over, not given to this message.
+   */
+  private async takeOwn(groupId: string, digest: string): Promise<string | undefined> {
+    const key = `${groupId}\n${digest}`;
+    for (let waiting = this.own.get(key); waiting?.length; waiting = this.own.get(key)) {
+      const [{ fileId }, ...rest] = waiting;
+      if (rest.length) this.own.set(key, rest); else this.own.delete(key);
+      if (await this.deps.store.get(fileId).then(record => !!record, () => true)) return fileId;
+    }
+    return undefined;
+  }
 
   /**
    * A message of the group announces a file (mine, or a member's): the file its row shows. A member's is kept here
@@ -505,9 +533,9 @@ export class GroupFileDesk {
   async announced(groupId: string, m: { id: string; sender: string; epoch?: number; file: GroupFileMeta }, me: string): Promise<MessageFile | undefined> {
     const known = this.byMessage.get(`${groupId}\n${m.id}`);
     if (known) { this.arrivedAgain(groupId, m.id, m.epoch); return messageFile(this.kept.get(known)!); }
-    const ownId = m.sender === me ? this.own.get(`${groupId}\n${m.file.d}`) : undefined;
+    // Only a send of mine waits on the store here: any other message is known at once (below), before a copy of it comes.
+    const ownId = m.sender === me && this.own.has(`${groupId}\n${m.file.d}`) ? await this.takeOwn(groupId, m.file.d) : undefined;
     if (ownId) {
-      this.own.delete(`${groupId}\n${m.file.d}`);
       for (const pace of this.sentPaces(groupId)) pace.take();
       const kept: Kept = { id: ownId, groupId, message: m.id, author: me, meta: m.file, mine: true, auto: false, asked: false, held: true, holders: [], damaged: new Set() };
       this.add(kept);
