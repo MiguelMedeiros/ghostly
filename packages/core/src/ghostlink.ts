@@ -1639,14 +1639,19 @@ export class GhostLink {
    * room for the presence `peerMayHaveLeftDht` looks at, so the mailbox is read now and at the DHT pace for a while
    * here too. The offer is kept and answered, and the dial taken, once that read unblocks the stream. False when
    * something else blocks it (this side is DHT-only, the contact is not pinned, or the offer is not the contact's).
+   * A connection on a native endpoint (no `signal`) proves nothing yet: anyone who can dial the endpoint can open one,
+   * with any identities, and only the session it carries, which waits for this read, authenticates it. The reads it
+   * starts are held as a fresh link packet's are (`peerLinkPacket`); the connection is kept for them all the same.
    */
   private peerDialsFromDht(signal?: string): boolean {
     if (!this.dht || this.dht.peerMode !== "dht" || this.deliveryMode === "dht") return false;
     const credentials = this.options.pairing?.credentials;
     if (!credentials?.peerKey) return false;
     if (signal !== undefined && !verifyPairedSignal(signal, this.options.params.peerPubKeyZ32, this.myPubKeyZ32, credentials.peerKey, true)) return false;
-    traceLink(this.myPubKeyZ32, "peer-dials", { signal: signal !== undefined });
-    this.dht.expect(EXPECT_PEER_MS, true);
+    let read = true;
+    if (signal !== undefined) this.dht.expect(EXPECT_PEER_MS, true);
+    else read = this.dht.peerLinkPacket(EXPECT_PEER_MS);
+    traceLink(this.myPubKeyZ32, "peer-dials", { signal: signal !== undefined, ...(!read && { held: true }) });
     return true;
   }
 
