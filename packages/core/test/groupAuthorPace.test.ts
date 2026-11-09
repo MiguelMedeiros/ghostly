@@ -143,3 +143,61 @@ describe("one member's messages and edits at a pace", { timeout: 60_000 }, () =>
     expect(mesh.inbox.get(carol.myKey)!.find(m => m.text === "live")?.live).toBe(true);
   });
 });
+
+/**
+ * Alice, Bob and Carol all online the whole time; Alice sends a line at each of `at` (ms from the start), then one more a
+ * minute later, and every edge opens again a few times, half a minute apart, as the syncs of the members' apps do.
+ */
+async function online(at: number[]) {
+  const mesh = new Mesh();
+  const alice = mesh.add(GroupSession.create("Ghosts"), "Alice");
+  const bob = await admit(mesh, alice, "Bob"), carol = await admit(mesh, alice, "Carol");
+  const start = Date.now() + 60_000;
+  for (const [i, ms] of at.entries()) {
+    mesh.clock = start + ms;
+    await alice.sendText(`line ${i}`, mesh.clock); await mesh.settle();
+  }
+  const live = mesh.texts(bob).filter(t => t.startsWith("line ")).length;
+  mesh.clock = start + at[at.length - 1] + 60_000;
+  await alice.sendText("later", mesh.clock); await mesh.settle();
+  for (let round = 0; round < 4; round++) {
+    mesh.tick(30_000);
+    for (const [a, b] of [[alice, bob], [alice, carol], [bob, carol]] as const) await mesh.open(a, b);
+  }
+  const lines = [...at.map((_, i) => `line ${i}`), "later"];
+  const missing = (s: GroupSession) => lines.filter(t => !mesh.texts(s).includes(t));
+  return { live, bob: missing(bob), carol: missing(carol), owed: alice.state.owed?.length ?? 0, duplicates: [bob, carol].some(s => new Set(mesh.texts(s)).size !== mesh.texts(s).length) };
+}
+const burst = (n: number, gap: number) => Array.from({ length: n }, (_, i) => i * gap);
+/** Five forwards of thirty messages each (`FORWARD_MAX_MESSAGES`), `apart` ms between them. */
+const forwards = (gap: number, apart: number) => Array.from({ length: 150 }, (_, i) => Math.floor(i / 30) * apart + (i % 30) * gap);
+/** A bot sending every `every` ms for `ms`. */
+const bot = (every: number, ms: number) => Array.from({ length: Math.floor(ms / every) }, (_, i) => i * every);
+
+describe("one member's messages past its pace, every member online", { timeout: 120_000 }, () => {
+  it.each([
+    ["100 at once", burst(100, 0)], ["100, 10 ms apart", burst(100, 10)], ["100, 50 ms apart", burst(100, 50)],
+    ["130 at once", burst(130, 0)], ["130, 10 ms apart", burst(130, 10)], ["130, 50 ms apart", burst(130, 50)],
+    ["5 forwards of 30, 5 s apart", forwards(0, 5_000)], ["5 forwards of 30, 10 ms apart within, 5 s apart", forwards(10, 5_000)],
+    ["5 forwards of 30, 50 ms apart within, 5 s apart", forwards(50, 5_000)],
+    ["5 a second for a minute", bot(200, 60_000)], ["a line every 180 ms for a minute", bot(180, 60_000)],
+    ["a line every 220 ms for a minute", bot(220, 60_000)],
+  ])("%s: none lost for any member", async (_, at) => {
+    const end = await online(at);
+    // The pace still bounds what Alice costs each member live.
+    expect(end.live).toBeLessThan(at.length);
+    // And what Alice kept past her log for them is let go once both showed they hold it.
+    expect(end).toMatchObject({ bob: [], carol: [], owed: 0, duplicates: false });
+  });
+
+  it.each([
+    ["40 at once", burst(40, 0)], ["70 at once", burst(70, 0)], ["5 forwards of 30, 10 s apart", forwards(0, 10_000)],
+    ["2 a second for two minutes", bot(500, 120_000)],
+  ])("%s: none lost (controls)", async (_, at) => {
+    expect(await online(at)).toMatchObject({ bob: [], carol: [], owed: 0, duplicates: false });
+  });
+
+  it("a burst of 100 is taken live up to the burst a member allows, as before", async () => {
+    expect((await online(burst(100, 0))).live).toBe(2 * GROUP_LIMITS.outlog);
+  });
+});
