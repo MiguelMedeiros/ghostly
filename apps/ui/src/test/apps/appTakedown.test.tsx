@@ -36,9 +36,12 @@ vi.mock("../../lib/apps/broker", async (actual) => ({
 const REF = "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess";
 /** What the next open's entry waits for: an open that fails (offline) or that is held to look at it meanwhile. */
 let entryWaits: Promise<void> | null = null;
+/** What each open asked the engine: Run anyway or not. */
+const anyway: boolean[] = [];
 const host = {
   runnerUrl: "/app-frame.html",
-  entry: async () => {
+  entry: async (_ref: string, runAnyway: boolean) => {
+    anyway.push(runAnyway);
     if (entryWaits) await entryWaits;
     return { ref: REF, digest: "d", version: "1.2.0", title: "Chess", permissions: ["chat"], entry: "<!doctype html>" };
   },
@@ -54,6 +57,7 @@ const installed = (): InstalledAppView => ({
 let open: AppOpener;
 beforeEach(() => {
   started.length = 0;
+  anyway.length = 0;
   entryWaits = null;
   run = { status: "ok" };
   forgetInstalledApps();
@@ -227,6 +231,22 @@ describe("an app the watchdog stopped", () => {
     expect(chatApp("link-1")?.stopped).toBeUndefined();
     // Its button went with the stopped message: the focus is in the panel, not on the page.
     await waitFor(() => expect(app.contains(document.activeElement)).toBe(true));
+  });
+
+  it("in a chat: one a store removed, run anyway, opens again as it was run, and a removed check leaves it running", async () => {
+    setAppOpener(open);
+    const { user } = chatPanel();
+    const removed: InstalledAppView["run"] = { status: "removed", by: [{ store: "k", name: "Ghostly", reason: "Malware", at: 1 }] };
+    run = removed;
+    await act(() => open(REF, "link-1", { runAnyway: true }));
+    act(() => started[0]!.stop("unresponsive"));
+    const app = screen.getByTestId("mini-app");
+    await user.click(within(app).getByRole("button", { name: "Open again" }));
+    await waitFor(() => expect(started).toHaveLength(2));
+    expect(anyway).toEqual([true, true]);
+    await checked(removed);
+    expect(started[1]!.stop).not.toHaveBeenCalled();
+    expect(within(app).queryByTestId("mini-app-stopped")).not.toBeInTheDocument();
   });
 
   it("in a chat: Open again that fails says why under it, in the person's language, and the panel stays", async () => {
