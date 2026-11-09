@@ -56,7 +56,10 @@ export async function pictureFrom(path: string): Promise<string> {
   }
   const url = `data:image/jpeg;base64,${(parts ? Buffer.concat(parts) : bytes).toString("base64")}`;
   const checked = sanitizeAvatar(url);
-  if (!checked) throw new CliError("bad_request", `A picture is a JPEG of at most ${MAX_AVATAR_SIDE}×${MAX_AVATAR_SIDE} px and about ${Math.floor(MAX_AVATAR_LENGTH * 0.74 / 1000)} KB (128×128 is what the app sends): resize it first`);
+  const bounds = `a JPEG of at most ${MAX_AVATAR_SIDE}×${MAX_AVATAR_SIDE} px and about ${Math.floor(MAX_AVATAR_LENGTH * 0.74 / 1000)} KB (128×128 is what the app sends)`;
+  // A PNG, even 1×1, is not too big: resizing it would not help.
+  if (!checked && !(bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)) throw new CliError("bad_request", `${path} is not a JPEG: convert it to ${bounds}`);
+  if (!checked) throw new CliError("bad_request", `A picture is ${bounds}: resize it first`);
   return checked;
 }
 
