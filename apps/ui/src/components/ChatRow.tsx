@@ -1,5 +1,5 @@
 import { memo, useCallback, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import type { GroupView } from "@ghostly/browser/shared/types";
+import type { GroupMemberView, GroupView } from "@ghostly/browser/shared/types";
 import { PeerAvatar } from "./Avatar";
 import { GroupAvatar } from "./GroupAvatar";
 import { answerable, InvitationButtons, InvitationRefusal, LinkTryAgain, TakenBackDelete, invitationStatus, useInvitationAnswer } from "./GroupInvitation";
@@ -399,11 +399,17 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
 }, sameValue);
 
 /**
+ * A group as the chat list reads it (Sidebar): without who is typing, each member's presence and edge, and how a
+ * community is connected. They change all the time, and nothing in the list shows them.
+ */
+export type ListedGroup = Omit<GroupView, "members" | "typing" | "community"> & { members: Pick<GroupMemberView, "key" | "role" | "me" | "nick">[] };
+
+/**
  * A group (private or community), or an invitation to one, in the chat list. Drawn again only when what it shows
  * changes, as a chat's row (`ChatRow`): its time and when it was read are taken here, at each draw of the list.
  */
 export function GroupRow({ group, active, density, onOpen, drag }: {
-  group: GroupView; active: boolean; density: ChatListDensity; onOpen(): void;
+  group: ListedGroup; active: boolean; density: ChatListDensity; onOpen(): void;
   /** The row can be dragged onto a folder (hooks/useRowReorder.ts). */
   drag?: { props: Record<string, unknown>; dragging: boolean; drop?: "before" | "after" };
 }) {
@@ -426,7 +432,7 @@ export function GroupRow({ group, active, density, onOpen, drag }: {
 }
 
 const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen, time, readAt, reorders }: {
-  group: GroupView; active: boolean; density: ChatListDensity; onOpen(): void; time?: string; readAt: number; reorders: boolean;
+  group: ListedGroup; active: boolean; density: ChatListDensity; onOpen(): void; time?: string; readAt: number; reorders: boolean;
 }) {
   const { t } = useI18n();
   const muted = useChatMute(groupChat(group.id)) !== undefined;
